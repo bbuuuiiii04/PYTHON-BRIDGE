@@ -15,6 +15,43 @@ python3 -m rb_ss_bridge_v2.probe_live_bpm watch --deck 1 --type f32 --addr 0xADD
 
 The probe reuses `rb_memory.py` Mach/vmmap helpers, resolves current deck anchors, scans float32/float64 BPM or pitch-factor shaped values, and can watch candidate addresses during pitch changes. It has `snapshot`, `watch`, and `compare` subcommands.
 
+Dynamic validation command:
+
+```bash
+python3 -m rb_ss_bridge_v2.probe_live_bpm validate --deck 2 --expect-bpm 126 --expected-after 132.3 --bpm-min 121 --bpm-max 137 --include-rw-regions --duration 25 --hz 5
+```
+
+Current-session cache check:
+
+```bash
+python3 -m rb_ss_bridge_v2.probe_live_bpm cache-check --deck 2 --expect-bpm 132.3
+```
+
+Seed known process-local candidates into a validation run:
+
+```bash
+python3 -m rb_ss_bridge_v2.probe_live_bpm validate --deck 2 --expect-bpm 126 --expected-after 132.3 --addr 0x12d928388 --addr 0x12dba36ec --addr 0x12dba36f0 --watch-limit 8 --duration 25 --hz 5
+```
+
+`validate` performs the current dynamic detection pattern in one read-only flow:
+
+- scans for BPM-shaped candidates near `--expect-bpm`;
+- watches the top candidates while only the target deck pitch is moved;
+- optionally includes manual `--addr` seed candidates before scan-ranked candidates;
+- marks candidates as `pass`, `moved_unverified`, `moved_wrong_value`, `stale`, or `read_error`;
+- writes passed candidates to `~/.cache/rb_ss_bridge_v2/live_bpm_candidates.json` only when `--expected-after` is supplied and the final watched value is within tolerance;
+- leaves bridge runtime behavior unchanged.
+
+`cache-check` reuses only candidates cached for the current Rekordbox pid, base address, and deck. It is intended as a fast same-process sanity check before deciding whether another broad scan is needed.
+
+Pure validation logic has lightweight unit coverage:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+These tests cover verdict classification, render-cache ranking penalties, and current-session cache filtering. They do not attach to Rekordbox or prove any address live; live address proof still requires controlled `validate`/`watch` runs.
+
 Important: all absolute addresses below are session-local evidence. Do not integrate any hardcoded address or single fixed offset into the bridge.
 
 ## Acceptance Status
@@ -26,7 +63,8 @@ Current evidence proves that Rekordbox exposes live/displayed BPM-like float32 v
 Acceptance blockers:
 
 - Need a deterministic per-deck rediscovery strategy, not absolute addresses.
-- Need Deck 2 structural anchoring or a validated scan/ranking rule that separates live Deck 2 from duplicate stale/cache fields.
+- Need Deck 2 structural anchoring or a production-grade scan/ranking rule that separates live Deck 2 from duplicate stale/cache fields.
+- Need Deck 1 rediscovery and cache validation to match the Deck 2 evidence level.
 - Need proof that selected fields are available before SoundSwitch autoloop arm and do not arrive late like ENGINE STATE.
 
 ## Session 1 Evidence
@@ -226,14 +264,122 @@ Deck 2:
 - TimecodeLink later reported Deck B `BPM=132.3`.
 - Status: strong Session 5 Deck 2 temporal candidates with clean deck separation. This confirms the Session 3/4 pattern: one pitch-watch can split exact BPM duplicates into live and stale groups.
 
+Session 5 cache validation:
+
+- Seeded `validate` with known Session 5 Deck 2 live candidates and one stale duplicate.
+- A first run from about `132.0` to intended `140.0` correctly rejected the candidates as `moved_wrong_value` because the actual final value was `140.819992`, outside the requested target tolerance.
+- A second run with final target `140.82` passed and cached four live candidates:
+  - `0x12dba36ec`
+  - `0x12ddac77c`
+  - `0x12851064c`
+  - `0x12d928388`
+- Stale duplicate `0x12dba36f0` stayed `126.000000000` and was rejected as `stale`.
+- `cache-check --deck 2 --expect-bpm 140.82` read back all four cached current-session candidates and each matched the current live Deck B value.
+
+## Session 6 Evidence After Restart
+
+Rekordbox pid: `50777`
+Base: `0x104330000`
+
+Fresh anchors:
+
+- `container = 0x12ff42c00`
+- `dpu1 = 0x6000022298f0`
+- `inner1 = 0x600007115110`
+- `secondary1 = 0x10f113ca0`
+- `container_dpu2_slot = 0x600002a638e0`
+- `container_dpu2_inner = 0x108dfe5d0` (suspect path; not live BPM proof)
+
+Tracks:
+
+- Deck A: `Bulletproof x Control x I Cannot (Cazes VIP Edit)`, BPM `130.0`.
+- Deck B: `We Could Be Love (Odd Mob Extended Remix)`, BPM `130.0`, later `133.9`.
+
+Cache invalidation:
+
+- Before rediscovery, `cache-check --deck 2` returned zero current-session candidates because the previous cache entries were keyed to the old pid/base. This confirms stale per-process cache entries are not reused after restart.
+
+Deck 2 rediscovery:
+
+- Fresh scanner validation at Deck B `130.0` found many BPM-shaped candidates.
+- During a seeded validation move, three candidates moved with Deck B from `130.000000` to `133.899994`; five same-value duplicates stayed stale:
+  - moved: `0x12ff45e98`
+  - moved: `0x12ce8782c`
+  - moved: `0x128fec9fc`
+  - stale: `0x10f115cc8`
+  - stale: `0x12ce5f5ec`
+  - stale: `0x128feca00`
+  - stale: `0x1285b6cb0`
+  - stale: `0x1285b6cac`
+- A second validation with final target `133.9` passed and cached four current-session candidates:
+  - `0x12ff45e98`
+  - `0x12ce8782c`
+  - `0x128fec9fc`
+  - `0x12ff473e0`
+- `cache-check --deck 2 --expect-bpm 133.9` read back all four cached candidates and each matched the current Deck B value.
+- Status: restart rediscovery plus cache invalidation/promotion are validated for Deck 2.
+
+## Session 7 Deck 1 Parity Attempt
+
+Same Rekordbox process as Session 6:
+
+- pid/base: `50777` / `0x104330000`
+- Deck A: `Bulletproof x Control x I Cannot (Cazes VIP Edit)`, TimecodeLink `BPM=130.0`, later `133.9`.
+- Deck B: `We Could Be Love (Odd Mob Extended Remix)`, TimecodeLink `BPM=133.9`.
+
+Deck 1 validation scan at initial Deck A `130.0`:
+
+```bash
+python3 -m rb_ss_bridge_v2.probe_live_bpm validate --deck 1 --expect-bpm 130.0 --bpm-min 124 --bpm-max 136 --include-rw-regions --watch-limit 20 --duration 8 --hz 4 --max-hits-per-region 12
+```
+
+- Watched 20 candidates.
+- All 20 were `stale`.
+- TimecodeLink later showed Deck A did not move until after this watch window, so this run is not strong negative evidence by itself.
+
+Deck 1 validation after Deck A and Deck B were both beatmatched at `133.9`:
+
+```bash
+python3 -m rb_ss_bridge_v2.probe_live_bpm validate --deck 1 --expect-bpm 133.9 --bpm-min 126 --bpm-max 141 --include-rw-regions --watch-limit 28 --duration 20 --hz 5 --max-hits-per-region 16
+```
+
+- Four SQLite-region fields were marked `moved_unverified`, but they started at `0.0` and ended at unrelated values:
+  - `0x115bc8e18`: `0.000000 -> 134.396042`
+  - `0x115bcd90c`: `0.000000 -> 134.640625`
+  - `0x10c260e84`: `0.000000 -> 131.450760`
+  - `0x115bc8cb4`: `0.000000 -> 136.380676`
+- The strongest current-session Deck 2 cached candidates stayed fixed at `133.899994` during the Deck 1 run:
+  - `0x12ff45e98`
+  - `0x12ce8782c`
+  - `0x128fec9fc`
+- TimecodeLink still showed Deck A and Deck B both at `133.9` through the run, so no Deck 1 candidate could be promoted.
+
+Seeded follow-up on the four SQLite fields plus known Deck 2 candidates:
+
+```bash
+python3 -m rb_ss_bridge_v2.probe_live_bpm validate --deck 1 --expect-bpm 133.9 --addr 0x115bc8e18 --addr 0x115bcd90c --addr 0x10c260e84 --addr 0x115bc8cb4 --addr 0x10f115cc8 --addr 0x12ff45e98 --addr 0x12ce8782c --addr 0x128fec9fc --bpm-min 126 --bpm-max 141 --include-rw-regions --watch-limit 12 --duration 30 --hz 5 --max-hits-per-region 8
+```
+
+- The four SQLite fields decayed to `0.0`; reject as unrelated churn, not live BPM:
+  - `0x115bc8cb4`: `136.380676 -> 0.000000`
+  - `0x115bcd90c`: `134.640625 -> 0.000000`
+  - `0x115bc8e18`: `134.396042 -> 0.000000`
+  - `0x10c260e84`: `131.450760 -> 0.000000`
+- Known Deck 2 candidates and a same-value duplicate stayed fixed at `133.899994`.
+- `cache-check --deck 1 --expect-bpm 133.9` returned zero current-session cached candidates.
+- `cache-check --deck 2 --expect-bpm 133.9` still returned four current-session candidates matching Deck B.
+- Status: Deck 1 is still unsolved. Today produced no pass/cache evidence and no valid deck-separation pass.
+
 ## Working Conclusions
 
 - Rekordbox appears to keep live/displayed BPM as float32 values in readable memory.
-- Deck 1 has shown promising anchor-adjacent fields in Sessions 1-3, but Session 4 rejected the two known offsets by staying `0.0`; it needs rediscovery/ranking too.
-- Deck 2 live fields can be found by broad read/write scans and pitch-watch validation across repeated restarts, but they are not yet tied to a reliable structural anchor.
+- Deck 1 has shown promising anchor-adjacent fields in Sessions 1-3, but Session 4 rejected the two known offsets by staying `0.0`, and Session 7 did not produce a cacheable candidate.
+- Deck 2 live fields can be found by broad read/write scans and pitch-watch validation across repeated restarts. Current-session cache invalidation and promotion were validated in Sessions 5 and 6.
+- Deck 2 is not yet tied to a reliable structural anchor; the current usable approach is scan/watch/cache for the current Rekordbox pid/base.
 - Duplicate BPM values are common; exact match alone is not meaningful.
 - A usable bridge field must be selected by temporal behavior and deck separation, not by one-time value equality.
-- Five sessions are enough for restart evidence. More restarts are lower value than building a deterministic scanner/ranker and then validating it against one fresh restart.
+- Beatmatched decks are not an edge case for DJ use. Equal or near-equal Deck A/Deck B BPM must be treated as a required ownership test because most live workflows intentionally match deck BPMs, often after only a short unequal-BPM window while loading and pitching the incoming track.
+- Six sessions are enough for Deck 2 restart evidence. More Deck 2 restarts are lower value than Deck 1 parity testing and a guarded prototype design.
 
 ## Next Restart Procedure
 
