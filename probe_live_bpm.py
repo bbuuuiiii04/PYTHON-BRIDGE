@@ -15,12 +15,14 @@ Typical workflow:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import re
 import struct
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -79,6 +81,18 @@ class Hit:
     region: str
     nearest_anchor: str
     anchor_delta: int
+
+
+@dataclass(frozen=True)
+class WatchResult:
+    hit: Hit
+    samples: int
+    start: float
+    end: float
+    minimum: float
+    maximum: float
+    max_delta: float
+    verdict: str
 
 
 def _parse_int(text: str) -> int:
@@ -249,6 +263,14 @@ def _scan_region(
     return hits[:max_hits_per_region]
 
 
+def _read_float(task: int, addr: int, type_name: str) -> float:
+    if type_name == "f32":
+        return struct.unpack("<f", _read_bytes(task, addr, 4))[0]
+    if type_name == "f64":
+        return struct.unpack("<d", _read_bytes(task, addr, 8))[0]
+    raise ValueError(f"unsupported float type: {type_name}")
+
+
 def _attach() -> tuple[int, int, int, str]:
     pid = get_rb_pid()
     if pid is None:
@@ -310,23 +332,26 @@ def _print_anchors(task: int, anchors: list[Anchor]) -> None:
         print(f"  {anchor.name:24s} 0x{anchor.addr:016x}{suffix}")
 
 
-def snapshot(args: argparse.Namespace) -> None:
-    pid, base, task, vmmap_out = _attach()
-    print(f"Attached rekordbox pid={pid} base=0x{base:x}")
-
-    anchors = _resolve_anchors(task, base, args.deck, args.objc_window, not args.no_deck2_scan)
-    _print_anchors(task, anchors)
-
+def _extra_regions_from_args(vmmap_out: str, args: argparse.Namespace) -> list[Region]:
     extra_regions: list[Region] = []
-    if args.include_objc_regions:
+    if getattr(args, "include_objc_regions", False):
         for idx, (start, size) in enumerate(_objc_regions_from_vmmap(vmmap_out), start=1):
             if size <= args.max_objc_region:
                 extra_regions.append(Region(start, size, f"objc_region{idx}"))
-    if args.include_rw_regions:
+    if getattr(args, "include_rw_regions", False):
         extra_regions.extend(
             _rw_regions_from_vmmap(vmmap_out, args.max_rw_region, args.max_rw_total)
         )
+    return extra_regions
 
+
+def _collect_hits(
+    task: int,
+    vmmap_out: str,
+    anchors: list[Anchor],
+    args: argparse.Namespace,
+) -> list[Hit]:
+    extra_regions = _extra_regions_from_args(vmmap_out, args)
     regions = _readable_window_regions(task, anchors, args.window, extra_regions)
     all_hits: list[Hit] = []
     for region in regions:
@@ -347,6 +372,114 @@ def snapshot(args: argparse.Namespace) -> None:
         )
 
     all_hits.sort(key=lambda h: (h.score, 0 if h.role == "bpm" else 1, h.region, abs(h.anchor_delta)))
+    return all_hits
+
+
+def _dedupe_hits(hits: Iterable[Hit]) -> list[Hit]:
+    out: list[Hit] = []
+    seen: set[tuple[int, str]] = set()
+    for hit in hits:
+        key = (hit.addr, hit.type_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(hit)
+    return out
+
+
+def _validation_rank(hit: Hit) -> tuple[float, int, float, float]:
+    label = hit.region.lower()
+    penalty = 0.0
+    if "malloc_tiny" in label or "malloc_small" in label or "malloc_large" in label:
+        penalty -= 0.25
+    if "+/-" in label:
+        penalty -= 0.10
+    if (
+        "ioaccelerator" in label
+        or "coreanimation" in label
+        or "skywalk" in label
+        or "__auth_const" in label
+        or "__data_const" in label
+        or "mapped" in label
+    ):
+        penalty += 5.0
+    type_rank = 0 if hit.type_name == "f32" else 1
+    return (hit.score + penalty, type_rank, abs(hit.anchor_delta), hit.addr)
+
+
+def _select_validation_hits(hits: list[Hit], limit: int) -> list[Hit]:
+    ranked = sorted(hits, key=_validation_rank)
+    selected: list[Hit] = []
+    seen_addr: set[tuple[int, str]] = set()
+    region_counts: dict[str, int] = {}
+    max_per_region = max(2, min(6, limit // 3 or 2))
+
+    for hit in ranked:
+        key = (hit.addr, hit.type_name)
+        if key in seen_addr:
+            continue
+        if region_counts.get(hit.region, 0) >= max_per_region:
+            continue
+        selected.append(hit)
+        seen_addr.add(key)
+        region_counts[hit.region] = region_counts.get(hit.region, 0) + 1
+        if len(selected) >= limit:
+            return selected
+
+    for hit in ranked:
+        key = (hit.addr, hit.type_name)
+        if key in seen_addr:
+            continue
+        selected.append(hit)
+        seen_addr.add(key)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _seed_hits_from_addrs(
+    task: int,
+    anchors: list[Anchor],
+    addrs: list[str] | None,
+    type_name: str,
+) -> list[Hit]:
+    if not addrs:
+        return []
+    seeds: list[Hit] = []
+    seen: set[int] = set()
+    for addr_text in addrs:
+        addr = _parse_int(addr_text)
+        if addr in seen:
+            continue
+        seen.add(addr)
+        try:
+            value = _read_float(task, addr, type_name)
+        except OSError:
+            continue
+        nearest, delta = _nearest_anchor(addr, anchors)
+        seeds.append(
+            Hit(
+                addr=addr,
+                type_name=type_name,
+                value=value,
+                role="bpm",
+                score=0.0,
+                region="manual_seed",
+                nearest_anchor=nearest,
+                anchor_delta=delta,
+            )
+        )
+    return seeds
+
+
+def snapshot(args: argparse.Namespace) -> None:
+    pid, base, task, vmmap_out = _attach()
+    print(f"Attached rekordbox pid={pid} base=0x{base:x}")
+
+    anchors = _resolve_anchors(task, base, args.deck, args.objc_window, not args.no_deck2_scan)
+    _print_anchors(task, anchors)
+
+    all_hits = _collect_hits(task, vmmap_out, anchors, args)
     print(
         f"\nTop {min(args.limit, len(all_hits))} float candidates "
         f"(deck={args.deck}, expect_bpm={args.expect_bpm}, library_bpm={args.library_bpm}):"
@@ -396,6 +529,244 @@ def watch(args: argparse.Namespace) -> None:
         elapsed = time.monotonic() - now
         if elapsed < interval:
             time.sleep(interval - elapsed)
+
+
+def _verdict_for_samples(
+    values: list[float],
+    expected_after: float | None,
+    tolerance: float,
+    min_delta: float,
+) -> str:
+    if not values:
+        return "read_error"
+    max_delta = max(values) - min(values)
+    if max_delta < min_delta:
+        return "stale"
+    if expected_after is None:
+        return "moved_unverified"
+    if abs(values[-1] - expected_after) <= tolerance:
+        return "pass"
+    return "moved_wrong_value"
+
+
+def _watch_hits_for_validation(
+    task: int,
+    hits: list[Hit],
+    duration: float,
+    hz: float,
+    expected_after: float | None,
+    tolerance: float,
+    min_delta: float,
+) -> list[WatchResult]:
+    values_by_hit: dict[tuple[int, str], list[float]] = {(hit.addr, hit.type_name): [] for hit in hits}
+    interval = 1.0 / hz
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < duration:
+        now = time.monotonic()
+        for hit in hits:
+            try:
+                value = _read_float(task, hit.addr, hit.type_name)
+            except OSError:
+                continue
+            if math.isfinite(value):
+                values_by_hit[(hit.addr, hit.type_name)].append(value)
+        elapsed = time.monotonic() - now
+        if elapsed < interval:
+            time.sleep(interval - elapsed)
+
+    results: list[WatchResult] = []
+    for hit in hits:
+        values = values_by_hit[(hit.addr, hit.type_name)]
+        verdict = _verdict_for_samples(values, expected_after, tolerance, min_delta)
+        if values:
+            start = values[0]
+            end = values[-1]
+            minimum = min(values)
+            maximum = max(values)
+            max_delta = maximum - minimum
+        else:
+            start = end = minimum = maximum = max_delta = float("nan")
+        results.append(WatchResult(hit, len(values), start, end, minimum, maximum, max_delta, verdict))
+
+    verdict_order = {"pass": 0, "moved_unverified": 1, "moved_wrong_value": 2, "stale": 3, "read_error": 4}
+    results.sort(
+        key=lambda r: (
+            verdict_order.get(r.verdict, 99),
+            r.hit.score,
+            0 if r.hit.type_name == "f32" else 1,
+            -r.max_delta if math.isfinite(r.max_delta) else 0.0,
+            abs(r.hit.anchor_delta),
+        )
+    )
+    return results
+
+
+def _load_cache(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {"sessions": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"sessions": []}
+    if not isinstance(data, dict) or not isinstance(data.get("sessions"), list):
+        return {"sessions": []}
+    return data
+
+
+def _write_cache(
+    path: Path,
+    pid: int,
+    base: int,
+    deck: int,
+    expected_before: float | None,
+    expected_after: float,
+    results: list[WatchResult],
+) -> None:
+    passed = [result for result in results if result.verdict == "pass"]
+    if not passed:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = _load_cache(path)
+    sessions = data.setdefault("sessions", [])
+    assert isinstance(sessions, list)
+    sessions.append(
+        {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "pid": pid,
+            "base": f"0x{base:x}",
+            "deck": deck,
+            "expected_before": expected_before,
+            "expected_after": expected_after,
+            "candidates": [
+                {
+                    "addr": f"0x{result.hit.addr:x}",
+                    "type": result.hit.type_name,
+                    "start": result.start,
+                    "end": result.end,
+                    "max_delta": result.max_delta,
+                    "nearest_anchor": result.hit.nearest_anchor,
+                    "anchor_delta": result.hit.anchor_delta,
+                    "region": result.hit.region,
+                }
+                for result in passed
+            ],
+        }
+    )
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _cached_candidates_for_session(
+    cache: dict[str, object],
+    pid: int,
+    base: int,
+    deck: int,
+) -> list[dict[str, object]]:
+    sessions = cache.get("sessions")
+    if not isinstance(sessions, list):
+        return []
+    out: list[dict[str, object]] = []
+    for session in reversed(sessions):
+        if not isinstance(session, dict):
+            continue
+        if session.get("pid") != pid:
+            continue
+        if session.get("base") != f"0x{base:x}":
+            continue
+        if session.get("deck") != deck:
+            continue
+        candidates = session.get("candidates")
+        if isinstance(candidates, list):
+            out.extend(candidate for candidate in candidates if isinstance(candidate, dict))
+    return out
+
+
+def validate(args: argparse.Namespace) -> None:
+    pid, base, task, vmmap_out = _attach()
+    print(f"Attached rekordbox pid={pid} base=0x{base:x}")
+    anchors = _resolve_anchors(task, base, args.deck, args.objc_window, not args.no_deck2_scan)
+    _print_anchors(task, anchors)
+
+    hits = _dedupe_hits(_collect_hits(task, vmmap_out, anchors, args))
+    if args.type != "both":
+        hits = [hit for hit in hits if hit.type_name == args.type]
+
+    seeded_hits = _seed_hits_from_addrs(task, anchors, args.addr, args.seed_type)
+    selected_hits = _select_validation_hits(hits, max(0, args.watch_limit - len(seeded_hits)))
+    watch_hits = _dedupe_hits([*seeded_hits, *selected_hits])[: args.watch_limit]
+    if not watch_hits:
+        raise SystemExit("ERROR: no candidates found for validation")
+
+    print(
+        f"\nWatching {len(watch_hits)} candidates for {args.duration:.1f}s at {args.hz:.1f} Hz. "
+        "Move only the target deck pitch during this window."
+    )
+    print(
+        f"{'addr':18s} {'type':4s} {'start':>12s} {'end':>12s} {'min':>12s} "
+        f"{'max':>12s} {'delta':>12s} {'verdict':18s} anchor delta region"
+    )
+    print("-" * 132)
+    results = _watch_hits_for_validation(
+        task,
+        watch_hits,
+        args.duration,
+        args.hz,
+        args.expected_after,
+        args.tolerance,
+        args.min_delta,
+    )
+    for result in results:
+        sign = "+" if result.hit.anchor_delta >= 0 else "-"
+        print(
+            f"0x{result.hit.addr:016x} {result.hit.type_name:4s} "
+            f"{result.start:12.6f} {result.end:12.6f} {result.minimum:12.6f} "
+            f"{result.maximum:12.6f} {result.max_delta:12.6f} {result.verdict:18s} "
+            f"{result.hit.nearest_anchor} {sign}0x{abs(result.hit.anchor_delta):x} {result.hit.region}"
+        )
+
+    passed = [result for result in results if result.verdict == "pass"]
+    moved = [result for result in results if result.verdict == "moved_unverified"]
+    stale = [result for result in results if result.verdict == "stale"]
+    print(f"\nSummary: pass={len(passed)} moved_unverified={len(moved)} stale={len(stale)}")
+    if args.expected_after is None:
+        print("No --expected-after was provided, so moved candidates were not promoted or cached.")
+    else:
+        cache_path = Path(args.cache_file).expanduser()
+        _write_cache(cache_path, pid, base, args.deck, args.expect_bpm, args.expected_after, results)
+        if passed:
+            print(f"Cached {len(passed)} passed candidates to {cache_path}")
+        else:
+            print("No candidates passed; cache was not updated.")
+
+
+def cache_check(args: argparse.Namespace) -> None:
+    pid, base, task, _ = _attach()
+    cache_path = Path(args.cache_file).expanduser()
+    cache = _load_cache(cache_path)
+    candidates = _cached_candidates_for_session(cache, pid, base, args.deck)
+    print(f"Attached rekordbox pid={pid} base=0x{base:x}")
+    print(f"Cache: {cache_path}")
+    print(f"Current-session cached candidates for deck {args.deck}: {len(candidates)}")
+    if not candidates:
+        return
+
+    print(f"{'addr':18s} {'type':4s} {'value':>12s} {'status':14s} source_end source_delta")
+    print("-" * 92)
+    for candidate in candidates[: args.limit]:
+        addr_text = candidate.get("addr")
+        type_name = candidate.get("type")
+        if not isinstance(addr_text, str) or type_name not in ("f32", "f64"):
+            continue
+        try:
+            value = _read_float(task, _parse_int(addr_text), type_name)
+        except OSError:
+            print(f"{addr_text:18s} {type_name:4s} {'READ_ERROR':>12s} read_error     - -")
+            continue
+        status = "readable"
+        if args.expect_bpm is not None:
+            status = "matches" if abs(value - args.expect_bpm) <= args.tolerance else "mismatch"
+        source_end = candidate.get("end", "-")
+        source_delta = candidate.get("max_delta", "-")
+        print(f"{addr_text:18s} {type_name:4s} {value:12.6f} {status:14s} {source_end} {source_delta}")
 
 
 def compare(args: argparse.Namespace) -> None:
@@ -478,6 +849,52 @@ def main() -> None:
     wt.add_argument("--factor-min", type=float, default=0.50)
     wt.add_argument("--factor-max", type=float, default=2.00)
     wt.set_defaults(func=watch)
+
+    val = sub.add_parser("validate", help="Scan, watch, classify, and optionally cache live BPM candidates")
+    val.add_argument("--deck", type=int, choices=(1, 2), default=1)
+    val.add_argument("--expect-bpm", type=float, required=True, help="Current BPM before pitch movement")
+    val.add_argument("--expected-after", type=float, default=None, help="Expected BPM after pitch movement; enables pass/cache")
+    val.add_argument("--library-bpm", type=float, default=None)
+    val.add_argument("--window", type=lambda s: int(s, 0), default=0x10000)
+    val.add_argument("--objc-window", type=lambda s: int(s, 0), default=0x10000)
+    val.add_argument("--no-deck2-scan", action="store_true")
+    val.add_argument("--include-objc-regions", action="store_true")
+    val.add_argument("--max-objc-region", type=lambda s: int(s, 0), default=0x200000)
+    val.add_argument("--include-rw-regions", action="store_true")
+    val.add_argument("--max-rw-region", type=lambda s: int(s, 0), default=0x400000)
+    val.add_argument("--max-rw-total", type=lambda s: int(s, 0), default=0x10000000)
+    val.add_argument("--bpm-min", type=float, default=40.0)
+    val.add_argument("--bpm-max", type=float, default=240.0)
+    val.add_argument("--factor-min", type=float, default=0.50)
+    val.add_argument("--factor-max", type=float, default=2.00)
+    val.add_argument("--mode", choices=("both", "bpm", "factor"), default="bpm")
+    val.add_argument("--type", choices=("both", "f32", "f64"), default="f32")
+    val.add_argument("--addr", action="append", help="Manual candidate address to include in validation; repeatable")
+    val.add_argument("--seed-type", choices=("f32", "f64"), default="f32")
+    val.add_argument("--max-hits-per-region", type=int, default=20)
+    val.add_argument("--watch-limit", type=int, default=24)
+    val.add_argument("--duration", type=float, default=25.0)
+    val.add_argument("--hz", type=float, default=5.0)
+    val.add_argument("--min-delta", type=float, default=0.05)
+    val.add_argument("--tolerance", type=float, default=0.25)
+    val.add_argument(
+        "--cache-file",
+        default="~/.cache/rb_ss_bridge_v2/live_bpm_candidates.json",
+        help="Per-process validation cache path",
+    )
+    val.set_defaults(func=validate)
+
+    cc = sub.add_parser("cache-check", help="Read current-session validated candidate cache")
+    cc.add_argument("--deck", type=int, choices=(1, 2), default=1)
+    cc.add_argument("--expect-bpm", type=float, default=None)
+    cc.add_argument("--tolerance", type=float, default=0.25)
+    cc.add_argument("--limit", type=int, default=20)
+    cc.add_argument(
+        "--cache-file",
+        default="~/.cache/rb_ss_bridge_v2/live_bpm_candidates.json",
+        help="Per-process validation cache path",
+    )
+    cc.set_defaults(func=cache_check)
 
     cmp = sub.add_parser("compare", help="Compare two saved snapshot outputs")
     cmp.add_argument("before")
