@@ -392,14 +392,21 @@ class RBSession:
 
         May raise OSError — callers catch it.
         """
-        inner_u64 = _read_u64(self.task, inner + RB_INNER_LEN_OFF)
-        len_samples = inner_u64 >> 32
-        track_length_ms = int(len_samples * RB_SCALE) if len_samples > 0 else 0
-
         raw_pos = _read_i32(self.task, inner + RB_POS_OFF)
         elapsed_ms = max(0, int(raw_pos * RB_SCALE))
         if elapsed_ms > MEM_MAX_ELAPSED_MS:
             elapsed_ms = 0
+
+        inner_u64 = _read_u64(self.task, inner + RB_INNER_LEN_OFF)
+        len_samples = inner_u64 >> 32
+        track_length_ms = int(len_samples * RB_SCALE) if len_samples > 0 else 0
+        # Validated Deck-2 inners are discovered by the +0x0c position field.
+        # Their surrounding layout is not proven to match Deck 1; +0x08 has
+        # been observed to mirror live position, not track length. Keep Deck 2
+        # length unknown so filepath resolution uses ANLZ/title fallbacks
+        # instead of a bogus duration match.
+        if bridge_deck == 2:
+            track_length_ms = 0
 
         secondary = _read_u64(self.task, inner + RB_SEC_OFF)
         if secondary == 0:

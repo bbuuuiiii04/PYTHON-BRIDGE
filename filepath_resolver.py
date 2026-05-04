@@ -345,7 +345,13 @@ class FilepathResolver:
                 matched = files[0]
 
             if not matched:
-                log.debug("lsof deck %d: no match (target_ms=%d, files=%d)", deck, target_ms, len(files))
+                if target_ms == 0:
+                    log.debug(
+                        "lsof deck %d: track_length_ms=0 — title DB lookup is primary resolver",
+                        deck,
+                    )
+                else:
+                    log.debug("lsof deck %d: no match (target_ms=%d, files=%d)", deck, target_ms, len(files))
                 return
 
             # Guard: if memory track length changed while we ran, the match is stale

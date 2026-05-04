@@ -590,7 +590,7 @@ class StateManager:
         # at +0xC, but it's reachable via outer+0x78, not container+0x480 or DPU scan).
         if snap.elapsed_ms == 0:
             tl_ms, tl_at, tl_pitch = self._tl_tc.get(active, (0, 0.0, 1.0))
-            if tl_ms > 0 and tl_at > 0:
+            if tl_ms > 0 and tl_at > 0 and (now - tl_at) < 45.0:
                 age_ms = (now - tl_at) * 1000.0 * tl_pitch
                 raw_elapsed_ms = tl_ms + (age_ms if (mem_playing or d.playing) else 0.0)
 
@@ -791,4 +791,3 @@ class StateManager:
                      d.meta.filepath.split("/")[-1] if d.meta.filepath else "<empty>",
                      d.meta.bpm, pos_s,
                      ("scripted" if d.scripted_id else "autoloop") if d.playing else "stopped")
-

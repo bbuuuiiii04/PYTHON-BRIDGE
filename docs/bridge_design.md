@@ -245,6 +245,68 @@ inner1/inner2 are independent ObjC allocations with no fixed relative offset (ob
 
 `pos=no-snap` in status log = inner2 not yet resolved.
 
+### Live Deck-2 discovery evidence
+
+Session evidence from Rekordbox pid `83311`:
+
+```
+base      = 0x102a0c000
+container = 0x1596c9a00
+dpu1      = 0x60000386a060
+inner1    = 0x600006b28410
+```
+
+Container slots were rejected for Deck 2:
+
+```
+container+0x480 -> inner=0x1074da5d0 pos=1 flat
+container+0x488 -> inner=0x1074da5d0 pos=1 flat
+```
+
+The ObjC-zone scan around `inner1` found one strict Deck-2 candidate while Deck 2 was playing:
+
+```
+position field = 0x600006b284ec
+field offset   = inner1 + 0xdc
+inner2         = 0x600006b284e0
+inner2 offset  = inner1 + 0xd0
+run 1 rate     = 44097.8 samples/sec, neg_jumps=0
+run 2 rate     = 44088.8 samples/sec, neg_jumps=0
+```
+
+When Deck 2 was paused and the same scan was rerun, no strict moving candidate was found. This is the expected paused signature: the true Deck-2 position field goes flat, so movement-based discovery becomes inconclusive until playback resumes.
+
+Direct sampling of the discovered field confirmed the same behavior:
+
+```
+paused sample:  first=3543419 last=3543419 delta=0 over 3.31s
+playing sample: first=4035964 last=4180860 delta=144896 rate=44131.9 samples/sec neg_jumps=0
+cue sample:     first=2205    last=2205    delta=0 ms=50
+```
+
+Second-session evidence after restarting Rekordbox:
+
+```
+pid       = 88640
+base      = 0x100548000
+container = 0x10cd1e200
+dpu1      = 0x6000023d3410
+inner1    = 0x6000070e5520
+
+container+0x480 -> inner=0x1050165d0 pos=1 flat
+container+0x488 -> inner=0x1050165d0 pos=1 flat
+
+position field = 0x6000070e84ec
+field offset   = inner1 + 0x2fcc
+inner2         = 0x6000070e84e0
+inner2 offset  = inner1 + 0x2fc0
+scan rate      = 44102.4 samples/sec, neg_jumps=0
+playing sample = delta=143360 rate=44158.0 samples/sec neg_jumps=0
+paused sample  = first=2520286 last=2520286 delta=0
+```
+
+Do not hardcode `inner1 + 0xd0` or `inner1 + 0x2fc0`. Those offsets are session-local evidence only; prior sessions observed different offsets. The invariant is behavioral: find an i32 at candidate `inner + 0x0c` that advances at ~44.1 kHz while Deck 2 plays, has no large negative jumps, stays in range, and goes flat when Deck 2 pauses.
+
 ---
 
 ## Known failure modes
