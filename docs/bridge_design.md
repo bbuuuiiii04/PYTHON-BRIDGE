@@ -42,6 +42,11 @@ All DeckState writes happen in the **StateManager thread only** — no locks nee
 | OS2LConnection sender thread | TCP socket | send_queue |
 | OSC server thread | event_queue | UDP socket |
 
+`SoundSwitchDiscovery` must be retained for the bridge lifetime. It owns the
+Zeroconf browser used to discover `_os2l._tcp.local.` endpoints and update
+`OS2LConnection`; dropping it after startup can leave the bridge retrying only
+the localhost fallback port.
+
 StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC threads — safe because int reads are atomic under the GIL.
 
 ---
@@ -236,12 +241,38 @@ TL only — no memory corroboration. Handles startup case where bridge never saw
 
 ## Deck-2 position resolution (`rb_memory.py`)
 
-`container+0x480` (RB_DECK2_OFF) reaches a static/stub inner in DDJ-800 mode. Deck-2 inner pointer is found via two candidate paths, validated over a 4s window:
+`container+0x480` (RB_DECK2_OFF) reaches a static/stub inner in DDJ-800 mode. Deck-2 inner pointer is found via candidate paths, validated over a 4s window:
 
-1. **Outer struct fast path**: `container − OUTER_FAST_PATH_DELTA(0x270) + OUTER_INNER2_OFF(0x78)` — one read, no scan
-2. **ObjC zone scan**: `_scan_objc_zone(inner1, ±0x10000, dt=0.5s)` — two bulk mach reads 0.5s apart; finds any i32 advancing at ~44100 Hz near inner1
+1. **Existing provisional candidate**: sampled again on retry until strict movement validation promotes or rejects it
+2. **Outer struct fast path**: `container − OUTER_FAST_PATH_DELTA(0x270) + OUTER_INNER2_OFF(0x78)` — one read, no scan
+3. **ObjC zone scan**: `_scan_objc_zone(inner1, ±window, dt=0.5s)` — two bulk mach reads 0.5s apart; finds any i32 advancing at ~44100 Hz near inner1
+4. **Static elapsed scan**: if the moving zone scan finds no hits and StateManager has a fresh Deck-2 TL/MTC elapsed estimate, scan near `inner1` for one aligned ObjC candidate whose `+0x0c` i32 value is close to that elapsed. This stores only a provisional pointer. Ties within 250ms of the best match are treated as ambiguous and ignored.
+5. **Broad ObjC heap moving scan**: after repeated near-`inner1` failures while Deck 2 is playing or was recently seen playing, scan vmmap-derived ObjC/nano heap regions in bounded chunks for moving i32 fields near current TL/MTC elapsed. These become `D(heap)` candidates and still require strict 4s validation before commit.
 
-inner1/inner2 are independent ObjC allocations with no fixed relative offset (observed: +0x4e0, −0x7570, −0x6870 across sessions). Resolution is non-blocking relative to `StateManager`, but the RBMemoryReader thread can block for ~0.5s during the ObjC zone scan. It runs once on attach, retries every 30s. First attempt often inconclusive (deck not playing); MTC covers the gap.
+inner1/inner2 are independent ObjC allocations with no fixed relative offset (observed: +0x4e0, −0x7570, −0x6870 across sessions). Resolution is non-blocking relative to `StateManager`, but the RBMemoryReader thread can block for ~0.5s during the ObjC zone scan. It runs once on attach, retries every 30s while Deck 2 is idle, and widens the scan window across repeated unresolved attempts: ±0x10000, then ±0x20000, then ±0x40000. If TL reports Deck 2 playback while memory is unresolved, RBMemoryReader starts discovery immediately; while Deck 2 remains playing, unresolved retries use a 5s cadence. If a provisional candidate exists, retry cadence is also 5s so the remembered candidate can be promoted soon after Deck 2 starts playing. First attempt often inconclusive (deck not playing); MTC covers the gap.
+
+The broad ObjC heap fallback runs only on later unresolved attempts, only while Deck 2 is playing or was seen playing within the recent-play window, and only when a Deck-2 elapsed hint is available. The recent-play window tolerates brief TL play/load/pause toggles during a validation attempt; strict movement validation is still required before commit. The scan is bounded to 128 MB of readable ObjC chunks per attempt and uses the elapsed hint only as a filter/ranking input. It is not a commit path by itself:
+
+```
+RBMemoryReader: deck2 play trigger — starting resolution
+ObjC heap moving scan regions=N chunks=M bytes=B target=Tms: H hit(s)
+deck2 candidate D(heap): 0x...
+deck2 candidate 0x... PASS: rate=...
+deck2 inner committed: 0x...
+```
+
+Provisional Deck-2 candidates are not published to `PositionCache` and do not drive SoundSwitch timing. They only reduce rediscovery work after a paused/startup scan. A provisional candidate becomes usable only after the same strict movement validation passes:
+
+```
+deck2 provisional promoted: 0x...
+deck2 inner committed: 0x...
+```
+
+If it fails strict validation later, it is discarded:
+
+```
+deck2 provisional rejected: 0x...
+```
 
 `pos=no-snap` in status log = inner2 not yet resolved.
 

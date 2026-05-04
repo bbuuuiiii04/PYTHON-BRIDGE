@@ -21,7 +21,7 @@ import struct
 import subprocess
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from .config import (
     RB_SCALE, RB_GLOBAL_OFF, RB_DECK_OFFS,
@@ -153,7 +153,7 @@ def _scan_regions_from_vmmap(out: str) -> list[tuple[int, int]]:
     for line in out.splitlines():
         if "rw-" not in line:
             continue
-        m = re.match(r'\s*([0-9a-fA-F]+)-([0-9a-fA-F]+)', line)
+        m = re.search(r'\b([0-9a-fA-F]+)-([0-9a-fA-F]+)\b', line)
         if not m:
             continue
         start = int(m.group(1), 16)
@@ -162,6 +162,26 @@ def _scan_regions_from_vmmap(out: str) -> list[tuple[int, int]]:
         if not (_STD_HEAP_LO <= start < _STD_HEAP_HI):
             continue
         if size < 0x80 or size > 0x4000000:
+            continue
+        regions.append((start, size))
+    return regions
+
+
+def _objc_regions_from_vmmap(out: str) -> list[tuple[int, int]]:
+    """Extract readable ObjC/nano heap regions for broad Deck-2 fallback scans."""
+    regions: list[tuple[int, int]] = []
+    for line in out.splitlines():
+        if "rw-" not in line:
+            continue
+        m = re.search(r'\b([0-9a-fA-F]+)-([0-9a-fA-F]+)\b', line)
+        if not m:
+            continue
+        start = int(m.group(1), 16)
+        end   = int(m.group(2), 16)
+        if not (_OBJC_HEAP_LO <= start < _OBJC_HEAP_HI):
+            continue
+        size = end - start
+        if size < 0x1000:
             continue
         regions.append((start, size))
     return regions
@@ -196,6 +216,18 @@ _D2_RATE_HI        = 50_000   # samples/sec — upper bound
 _D2_NEG_JUMP_THR   = -1_000   # samples — delta below this = backwards jump / reset
 _D2_VALIDATE_DT    = 4.0      # seconds to sample each resolution attempt
 _D2_SAMPLE_HZ      = 30.0     # target sample rate during validation window
+_D2_STATIC_TOL_MS   = 1_500    # paused/startup target elapsed tolerance
+_D2_STATIC_GAP_MS   = 250      # require clear best-vs-runner-up separation
+_D2_SCAN_WINDOWS    = (0x10000, 0x20000, 0x40000)
+_D2_RETRY_IDLE_S    = 30.0
+_D2_RETRY_PLAYING_S = 5.0
+_D2_PROVISIONAL_RETRY_S = 5.0  # re-sample remembered candidate soon after play starts
+_D2_PLAY_RECENT_S = 8.0        # tolerate TL play/load/pause jitter during resolution
+_D2_HEAP_SCAN_MIN_ATTEMPT = 4
+_D2_HEAP_CHUNK_BYTES = 0x400000
+_D2_HEAP_MAX_BYTES = 0x8000000
+_D2_HEAP_TARGET_TOL_MS = 10_000
+_D2_HEAP_MAX_CANDIDATES = 8
 
 
 def _is_objc(ptr: int) -> bool:
@@ -276,6 +308,174 @@ def _scan_objc_zone(
     return [ptr for ptr, _ in results]
 
 
+def _scan_static_elapsed_candidates(
+    task: int,
+    inner1: int,
+    target_ms: int,
+    window: int,
+    tolerance_ms: int = _D2_STATIC_TOL_MS,
+) -> list[int]:
+    """Find paused Deck-2 candidates by matching current TL/MTC elapsed.
+
+    This is intentionally weaker than movement validation. It only produces a
+    provisional candidate for later strict promotion and should never be used as
+    a final proof of Deck-2 memory position.
+    """
+    if target_ms <= 0:
+        return []
+
+    scan_lo = inner1 - window
+    scan_hi = inner1 + window
+    size    = scan_hi - scan_lo
+
+    try:
+        chunk = _read_bytes(task, scan_lo, size)
+    except OSError:
+        return []
+
+    matches: list[tuple[int, int, int]] = []
+    n = len(chunk) // 4
+    for i in range(n):
+        raw = struct.unpack_from("<i", chunk, i * 4)[0]
+        if raw < 0:
+            continue
+        ms = int(raw * RB_SCALE)
+        if ms > MEM_MAX_ELAPSED_MS:
+            continue
+        delta_ms = abs(ms - target_ms)
+        if delta_ms > tolerance_ms:
+            continue
+        pos_addr = scan_lo + i * 4
+        inner_ptr = pos_addr - RB_POS_OFF
+        if inner_ptr & 0xF:
+            continue
+        if not _is_objc(inner_ptr):
+            continue
+        try:
+            secondary = _read_u64(task, inner_ptr + RB_SEC_OFF)
+        except OSError:
+            continue
+        if secondary and not _is_objc(secondary):
+            continue
+        matches.append((inner_ptr, delta_ms, ms))
+
+    matches.sort(key=lambda x: x[1])
+    log.info("ObjC static scan inner1±0x%x target=%dms: %d hit(s)",
+             window, target_ms, len(matches))
+    for ptr, delta_ms, ms in matches[:5]:
+        log.info("  static pos=inner1%+#x inner_ptr=inner1%+#x ms=%d delta=%d",
+                 ptr - inner1 + RB_POS_OFF, ptr - inner1, ms, delta_ms)
+
+    if not matches:
+        return []
+
+    best_delta = matches[0][1]
+    close = [m for m in matches if m[1] <= best_delta + _D2_STATIC_GAP_MS]
+    if len(close) > 1:
+        log.info("deck2 provisional static scan ambiguous: best_delta=%d close_hits=%d",
+                 best_delta, len(close))
+        return []
+
+    return [matches[0][0]]
+
+
+def _scan_objc_heap_moving(
+    task: int,
+    regions: list[tuple[int, int]],
+    target_ms: int,
+    dt: float = 0.5,
+) -> list[int]:
+    """Broad fallback scan over ObjC heap regions for moving Deck-2 fields.
+
+    This is used only after near-inner1 scans fail. The target elapsed is a
+    ranking/filter hint, not proof; candidates still need strict validation.
+    """
+    if target_ms <= 0 or not regions:
+        return []
+
+    hits: list[tuple[int, float, int]] = []
+    chunks0: list[tuple[int, bytes, float]] = []
+    bytes_queued = 0
+
+    for start, size in regions:
+        end = start + size
+        addr = start
+        while addr < end:
+            chunk_size = min(_D2_HEAP_CHUNK_BYTES, end - addr)
+            if bytes_queued >= _D2_HEAP_MAX_BYTES:
+                break
+            try:
+                chunk0 = _read_bytes(task, addr, chunk_size)
+                t0 = time.monotonic()
+            except OSError:
+                addr += chunk_size
+                continue
+            chunks0.append((addr, chunk0, t0))
+            bytes_queued += len(chunk0)
+            addr += chunk_size
+        if bytes_queued >= _D2_HEAP_MAX_BYTES:
+            break
+
+    if not chunks0:
+        log.info("ObjC heap moving scan: no readable chunks")
+        return []
+
+    time.sleep(dt)
+
+    for addr, chunk0, t0 in chunks0:
+        try:
+            chunk1 = _read_bytes(task, addr, len(chunk0))
+            t1 = time.monotonic()
+        except OSError:
+            continue
+        actual_dt = max(t1 - t0, 0.001)
+        n = min(len(chunk0), len(chunk1)) // 4
+        for i in range(n):
+            r0 = struct.unpack_from("<i", chunk0, i * 4)[0]
+            r1 = struct.unpack_from("<i", chunk1, i * 4)[0]
+            d = r1 - r0
+            if d <= 0:
+                continue
+            rate = d / actual_dt
+            if not (_D2_RATE_LO <= rate <= _D2_RATE_HI):
+                continue
+            ms = int(r1 * RB_SCALE)
+            if ms < 0 or ms > MEM_MAX_ELAPSED_MS:
+                continue
+            if abs(ms - target_ms) > _D2_HEAP_TARGET_TOL_MS:
+                continue
+            pos_addr = addr + i * 4
+            inner_ptr = pos_addr - RB_POS_OFF
+            if inner_ptr & 0xF:
+                continue
+            if not _is_objc(inner_ptr):
+                continue
+            try:
+                secondary = _read_u64(task, inner_ptr + RB_SEC_OFF)
+            except OSError:
+                continue
+            if secondary and not _is_objc(secondary):
+                continue
+            hits.append((inner_ptr, rate, abs(ms - target_ms)))
+
+    seen: set[int] = set()
+    deduped: list[tuple[int, float, int]] = []
+    for ptr, rate, delta_ms in sorted(hits, key=lambda x: (x[2], abs(x[1] - 44100))):
+        if ptr in seen:
+            continue
+        seen.add(ptr)
+        deduped.append((ptr, rate, delta_ms))
+        if len(deduped) >= _D2_HEAP_MAX_CANDIDATES:
+            break
+
+    log.info("ObjC heap moving scan regions=%d chunks=%d bytes=%d target=%dms: %d hit(s)",
+             len(regions), len(chunks0), bytes_queued, target_ms, len(deduped))
+    for ptr, rate, delta_ms in deduped[:5]:
+        log.info("  heap candidate inner=0x%x rate=%.1f target_delta=%d",
+                 ptr, rate, delta_ms)
+    return [ptr for ptr, _, _ in deduped]
+
+
 def _strict_eval_candidate(
     samples: list[tuple[float, int]],
     ptr: int,
@@ -348,6 +548,7 @@ class RBSession:
 
         # ── Deck 2 ──────────────────────────────────────────────────────────
         self._deck2_inner:      Optional[int] = None
+        self._deck2_provisional: Optional[int] = None
         self._deck2_fail_count: int = 0
 
         # Incremental validation state (populated by start_deck2_resolution,
@@ -429,15 +630,28 @@ class RBSession:
 
     # ── Deck 2 resolution ────────────────────────────────────────────────────
 
-    def start_deck2_resolution(self, scan_regions: list[tuple[int, int]]) -> bool:
+    def start_deck2_resolution(
+        self,
+        objc_regions: list[tuple[int, int]],
+        target_ms: Optional[int] = None,
+        scan_window: int = 0x10000,
+        attempt: int = 1,
+        deck2_playing: bool = False,
+    ) -> bool:
         """Find deck-2 inner candidates and open a 4-second sampling window.
 
         Candidate order:
+          P. previously discovered provisional candidate, if any
           B. (container − OUTER_FAST_PATH_DELTA)[+OUTER_INNER2_OFF] → ptr
              Quick structural check — no sleep, often wrong but cheap.
-          C. ObjC zone scan: two bulk reads of inner1±0x10000 separated by 0.5s.
+          C. ObjC zone scan: two bulk reads around inner1 separated by 0.5s.
              Primary method. Finds any field advancing at ~44100 Hz regardless of
              the inner1/inner2 relative offset (proven session-dependent).
+          S. paused/static scan: if target_ms is available, find one unique field
+             near current TL/MTC elapsed and hold it as provisional only.
+          D. ObjC heap moving scan: after repeated near-inner1 failures while
+             Deck 2 is playing, scan vmmap-derived ObjC heap regions for moving
+             fields near target_ms.
 
         Blocks ~0.5s for the zone scan. Returns True if candidates were found.
         Temporal validation (neg-jump detection) happens incrementally in
@@ -453,6 +667,9 @@ class RBSession:
                 seen.add(ptr)
                 log.info("deck2 candidate %s: 0x%x", label, ptr)
 
+        if self._deck2_provisional:
+            _add(self._deck2_provisional, "P(provisional)")
+
         # B: (container − 0x270)[+0x78] → ptr (quick, no sleep)
         try:
             container = self._get_container()
@@ -463,14 +680,43 @@ class RBSession:
             pass
 
         # C: ObjC zone scan — two reads 0.5s apart, finds position field directly.
-        # inner1/inner2 offset is session-dependent; this handles any offset in ±0x10000.
+        # inner1/inner2 offset is session-dependent; the caller can widen the
+        # scan after repeated failures without hardcoding a relative offset.
         if inner1:
-            zone_hits = _scan_objc_zone(self.task, inner1)
+            zone_hits = _scan_objc_zone(self.task, inner1, window=scan_window)
             for ptr in zone_hits:
                 if ptr != inner1 and ptr not in seen:
                     candidates.append(ptr)
                     seen.add(ptr)
                     log.info("deck2 candidate C(zone): 0x%x", ptr)
+
+            if target_ms is not None and not zone_hits and not self._deck2_provisional:
+                static_hits = _scan_static_elapsed_candidates(
+                    self.task, inner1, target_ms, window=scan_window
+                )
+                if len(static_hits) == 1:
+                    ptr = static_hits[0]
+                    if ptr != inner1 and ptr not in seen:
+                        self._deck2_provisional = ptr
+                        candidates.append(ptr)
+                        seen.add(ptr)
+                        log.info(
+                            "deck2 provisional set: 0x%x target_ms=%d awaiting movement validation",
+                            ptr, target_ms,
+                        )
+
+            if (
+                target_ms is not None
+                and not zone_hits
+                and attempt >= _D2_HEAP_SCAN_MIN_ATTEMPT
+                and deck2_playing
+            ):
+                heap_hits = _scan_objc_heap_moving(self.task, objc_regions, target_ms)
+                for ptr in heap_hits:
+                    if ptr != inner1 and ptr not in seen:
+                        candidates.append(ptr)
+                        seen.add(ptr)
+                        log.info("deck2 candidate D(heap): 0x%x", ptr)
 
         log.info("deck2 resolution: %d candidate(s) entering 4s validation window",
                  len(candidates))
@@ -518,11 +764,17 @@ class RBSession:
             result = _strict_eval_candidate(self._d2_samples.get(ptr, []), ptr)
             if result is True:
                 self._deck2_inner     = ptr
+                if self._deck2_provisional == ptr:
+                    log.info("deck2 provisional promoted: 0x%x", ptr)
+                self._deck2_provisional = None
                 self._deck2_fail_count = 0
                 log.info("deck2 inner committed: 0x%x", ptr)
                 committed = True
                 break
             if result is False:
+                if self._deck2_provisional == ptr:
+                    log.info("deck2 provisional rejected: 0x%x", ptr)
+                    self._deck2_provisional = None
                 all_inconclusive = False
 
         self._d2_pending.clear()
@@ -532,9 +784,9 @@ class RBSession:
 
         if not committed:
             if all_inconclusive:
-                log.info("deck2: validation inconclusive (deck paused?) — will retry in 30 s")
+                log.info("deck2: validation inconclusive (deck paused?) — will retry")
             else:
-                log.warning("deck2: all candidates failed strict validation — will retry in 30 s")
+                log.warning("deck2: all candidates failed strict validation — will retry")
 
     # ── Runtime reads ────────────────────────────────────────────────────────
 
@@ -609,18 +861,30 @@ class RBMemoryReader(threading.Thread):
     _ATTACH_RETRY_S  = 5.0
     _VMMAP_TIMEOUT_S = 15.0
 
-    def __init__(self, cache: PositionCache, drift_detector=None, event_queue=None) -> None:
+    def __init__(
+        self,
+        cache: PositionCache,
+        drift_detector=None,
+        event_queue=None,
+        deck_elapsed_hint: Optional[Callable[[int], Optional[int]]] = None,
+        deck_playing_hint: Optional[Callable[[int], bool]] = None,
+    ) -> None:
         super().__init__(name="rb-memory-reader", daemon=True)
         self._cache    = cache
         self._drift    = drift_detector    # optional DriftDetector
         self._eq       = event_queue       # FM-11: optional queue for RB_RESTARTED events
+        self._deck_elapsed_hint = deck_elapsed_hint
+        self._deck_playing_hint = deck_playing_hint
         self._stop     = threading.Event()
         self._session: Optional[RBSession] = None
         self._interval = 1.0 / MEM_POLL_HZ
         self._attach_time   = 0.0
         self._last_dpu_log  = 0.0
-        self._scan_regions: list[tuple[int, int]] = []   # cached from last vmmap run
+        self._objc_regions: list[tuple[int, int]] = []   # cached from last vmmap run
         self._d2_retry_at:  float = 0.0                  # rate-limit deck-2 resolution retries
+        self._d2_attempts:   int = 0
+        self._d2_was_playing: bool = False
+        self._d2_play_seen_at: float = 0.0
 
     def stop(self) -> None:
         self._stop.set()
@@ -666,21 +930,61 @@ class RBMemoryReader(threading.Thread):
 
         now_t = time.monotonic()
         s = self._session
+        deck2_playing = False
+        if self._deck_playing_hint is not None:
+            try:
+                deck2_playing = bool(self._deck_playing_hint(2))
+            except Exception:
+                deck2_playing = False
+        d2_play_started = deck2_playing and not self._d2_was_playing
+        self._d2_was_playing = deck2_playing
+        if deck2_playing:
+            self._d2_play_seen_at = now_t
+        deck2_recently_playing = (
+            self._d2_play_seen_at > 0.0
+            and now_t - self._d2_play_seen_at < _D2_PLAY_RECENT_S
+        )
 
         # Drive deck-2 resolution pipeline (non-blocking).
         if s._deck2_inner is None:
             if s._d2_pending:
                 # Mid-validation: take samples this tick.
                 s.poll_deck2_candidates(now_t)
-            elif now_t - self._d2_retry_at >= 30.0:
-                # No active window and retry interval elapsed — start a new attempt.
-                self._d2_retry_at = now_t
-                log.info("RBMemoryReader: starting deck-2 resolution")
-                s.start_deck2_resolution(self._scan_regions)
+            else:
+                if d2_play_started:
+                    log.info("RBMemoryReader: deck2 play trigger — starting resolution")
+                retry_s = (
+                    _D2_PROVISIONAL_RETRY_S if s._deck2_provisional
+                    else _D2_RETRY_PLAYING_S if deck2_playing
+                    else _D2_RETRY_IDLE_S
+                )
+                if d2_play_started or now_t - self._d2_retry_at >= retry_s:
+                    # No active window and retry interval elapsed — start a new attempt.
+                    self._d2_retry_at = now_t
+                    self._d2_attempts += 1
+                    scan_window = _D2_SCAN_WINDOWS[
+                        min(self._d2_attempts - 1, len(_D2_SCAN_WINDOWS) - 1)
+                    ]
+                    target_ms = None
+                    if self._deck_elapsed_hint is not None:
+                        try:
+                            target_ms = self._deck_elapsed_hint(2)
+                        except Exception:
+                            target_ms = None
+                    log.info("RBMemoryReader: starting deck-2 resolution attempt=%d window=0x%x target_ms=%s",
+                             self._d2_attempts, scan_window, target_ms if target_ms is not None else "none")
+                    s.start_deck2_resolution(
+                        self._objc_regions,
+                        target_ms=target_ms,
+                        scan_window=scan_window,
+                        attempt=self._d2_attempts,
+                        deck2_playing=deck2_recently_playing,
+                    )
         elif s._d2_pending:
             # Deck 2 got committed mid-window; discard leftover pending state.
             s._d2_pending.clear()
             s._d2_samples.clear()
+            self._d2_attempts = 0
 
         for deck in (1, 2):
             snap = s.read_deck(deck)
@@ -699,13 +1003,16 @@ class RBMemoryReader(threading.Thread):
         try:
             vmmap_out = _get_vmmap_output(pid)
             base      = _base_from_vmmap(vmmap_out)
-            self._scan_regions = _scan_regions_from_vmmap(vmmap_out)
+            self._objc_regions = _objc_regions_from_vmmap(vmmap_out)
             task = _task_for_pid(pid)
             self._session     = RBSession(pid, base, task)
             self._attach_time = time.monotonic()
             self._d2_retry_at = 0.0   # allow immediate deck-2 resolution on first tick
-            log.info("RBMemoryReader: attached pid=%d base=0x%x regions=%d",
-                     pid, base, len(self._scan_regions))
+            self._d2_attempts = 0
+            self._d2_was_playing = False
+            self._d2_play_seen_at = 0.0
+            log.info("RBMemoryReader: attached pid=%d base=0x%x objc_regions=%d",
+                     pid, base, len(self._objc_regions))
         except Exception as exc:
             log.warning("RBMemoryReader: attach failed pid=%d: %s — retry in %ds",
                         pid, exc, int(self._ATTACH_RETRY_S))

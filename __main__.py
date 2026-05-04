@@ -252,7 +252,8 @@ def main() -> None:
     output = OS2LOutput(conn)
 
     # DNS-SD discovery for SoundSwitch
-    SoundSwitchDiscovery(conn).start()
+    discovery = SoundSwitchDiscovery(conn)
+    discovery.start()
 
     # State manager (event loop + push loop)
     sm = StateManager(event_queue, pos_cache, output)
@@ -270,7 +271,13 @@ def main() -> None:
 
     # Memory reader (with drift detection + FM-11 RB_RESTARTED events)
     from .diagnostics import DriftDetector
-    mem_reader = RBMemoryReader(pos_cache, drift_detector=DriftDetector(), event_queue=event_queue)
+    mem_reader = RBMemoryReader(
+        pos_cache,
+        drift_detector=DriftDetector(),
+        event_queue=event_queue,
+        deck_elapsed_hint=sm.get_deck_elapsed_ms,
+        deck_playing_hint=sm.get_deck_playing,
+    )
 
     # Ableton Link reader (degrades gracefully if pylinklib unavailable)
     link = LinkReader()
@@ -301,6 +308,7 @@ def main() -> None:
         mem_reader.stop()
         link.stop()
         mtc.stop()
+        discovery.stop()
         conn.stop()
         sys.exit(0)
 

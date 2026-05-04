@@ -134,6 +134,32 @@ class StateManager:
         """Deck that most recently received a TRACK_LOADED event (1 or 2; 0 if none yet)."""
         return self._last_loaded_deck
 
+    def get_deck_elapsed_ms(self, deck: int) -> Optional[int]:
+        """Best current elapsed estimate for memory-side provisional discovery.
+
+        This is a read-only hint for RBMemoryReader. StateManager remains the
+        authority for TL/MTC synthesis; the memory reader only uses this value
+        to find paused Deck-2 candidates and still requires movement validation
+        before publishing memory snapshots.
+        """
+        if deck not in (1, 2):
+            return None
+        d = self._deck[deck]
+        tl_ms, tl_at, tl_pitch = self._tl_tc.get(deck, (0, 0.0, 1.0))
+        now = time.monotonic()
+        if tl_ms > 0 and 0.0 < now - tl_at < 45.0:
+            age_ms = (now - tl_at) * 1000.0 * tl_pitch
+            return int(tl_ms + (age_ms if d.playing else 0.0))
+        if d.elapsed_ms > 0:
+            return d.elapsed_ms
+        return None
+
+    def get_deck_playing(self, deck: int) -> bool:
+        """TL-authoritative play state hint for memory-side discovery scheduling."""
+        if deck not in (1, 2):
+            return False
+        return self._deck[deck].playing
+
     # ── Main loop ────────────────────────────────────────────────────────────
 
     def _run(self) -> None:

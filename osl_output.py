@@ -163,27 +163,44 @@ class SoundSwitchDiscovery:
 
     def __init__(self, conn: OS2LConnection) -> None:
         self._conn = conn
+        self._zc = None
+        self._browser = None
 
     def start(self) -> None:
         try:
             from zeroconf import ServiceBrowser, Zeroconf  # type: ignore
-            zc = Zeroconf()
-            ServiceBrowser(zc, "_os2l._tcp.local.", handlers=[self._on_service])
+            self._zc = Zeroconf()
+            self._browser = ServiceBrowser(self._zc, "_os2l._tcp.local.", handlers=[self._on_service])
             log.info("SoundSwitchDiscovery: DNS-SD browser started")
         except Exception as exc:
             log.warning("SoundSwitchDiscovery: could not start DNS-SD: %s — using fallback", exc)
 
+    def stop(self) -> None:
+        if self._zc is not None:
+            try:
+                self._zc.close()
+            except Exception:
+                pass
+            self._zc = None
+            self._browser = None
+
     def _on_service(self, zeroconf, service_type, name, state_change) -> None:  # type: ignore
         from zeroconf import ServiceStateChange  # type: ignore
-        if state_change is not ServiceStateChange.Added:
+        if state_change not in (ServiceStateChange.Added, ServiceStateChange.Updated):
             return
         try:
-            info = zeroconf.get_service_info(service_type, name)
-            if info:
-                host = socket.inet_ntoa(info.addresses[0])
-                port = info.port
-                log.info("SoundSwitchDiscovery: found %s at %s:%d", name, host, port)
-                self._conn.set_endpoint(host, port)
+            info = zeroconf.get_service_info(service_type, name, timeout=3000)
+            if not info:
+                log.info("SoundSwitchDiscovery: service info not ready for %s", name)
+                return
+            ipv4 = next((addr for addr in info.addresses if len(addr) == 4), None)
+            if not ipv4:
+                log.info("SoundSwitchDiscovery: no IPv4 address for %s", name)
+                return
+            host = socket.inet_ntoa(ipv4)
+            port = info.port
+            log.info("SoundSwitchDiscovery: found %s at %s:%d", name, host, port)
+            self._conn.set_endpoint(host, port)
         except Exception as exc:
             log.warning("SoundSwitchDiscovery: service info error: %s", exc)
 
