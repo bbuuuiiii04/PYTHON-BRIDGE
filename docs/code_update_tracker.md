@@ -28,6 +28,11 @@ During ANLZ resolution, FilepathResolver reads beatgrid markers from Rekordbox
 analysis files. It prefers non-empty PQT2 and falls back to PQTZ. Marker order,
 not the ANLZ beat field, defines the bridge's absolute beat convention.
 
+PQT2 is accepted only when adjacent marker spacing is plausible for beat
+markers. Sparse PQT2 tempo-anchor data is rejected so it cannot make autoloop
+beatpos advance near-zero over many seconds; the resolver then falls back to
+PQTZ or constant-BPM math.
+
 TrackMetadata now carries beatgrid_times_ms, beatgrid_bpms, and beatgrid_source.
 first_beat_ms is set to the first grid marker when a valid grid exists.
 
@@ -64,7 +69,8 @@ state_manager.py
   _push_tick()
 
 tests/test_filepath_resolver_beatgrid.py
-  PQT2/PQTZ preference and corrupt/missing fallback coverage.
+  PQT2/PQTZ preference, sparse PQT2 rejection, and corrupt/missing fallback
+  coverage.
 
 tests/test_live_bpm_service.py
   beatgrid interpolation, autoloop elapsed, beat boundary, phrase-lock, and
@@ -75,7 +81,7 @@ Validation:
 
 ```text
 python3 -m unittest discover -s rb_ss_bridge_v2/tests
-Ran 42 tests in 1.334s
+Ran 43 tests in 1.190s
 OK
 ```
 

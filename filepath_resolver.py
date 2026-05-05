@@ -36,6 +36,8 @@ _EMPTY_BEATGRID = {
     "beatgrid_bpms": [],
     "beatgrid_source": "",
 }
+_MIN_BEATGRID_INTERVAL_MS = 150.0
+_MAX_BEATGRID_INTERVAL_MS = 3000.0
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -135,6 +137,17 @@ def _grid_from_tag(tag, source: str) -> Optional[dict]:  # type: ignore[no-untyp
         if time_ms >= 0.0 and bpm > 0.0
     )
     if len(rows) < 2:
+        return None
+
+    intervals = [b[0] - a[0] for a, b in zip(rows, rows[1:])]
+    if (
+        any(interval <= 0.0 for interval in intervals)
+        or not intervals
+        or sorted(intervals)[len(intervals) // 2] < _MIN_BEATGRID_INTERVAL_MS
+        or sorted(intervals)[len(intervals) // 2] > _MAX_BEATGRID_INTERVAL_MS
+    ):
+        log.debug("ANLZ %s rejected implausible beatgrid intervals=%s",
+                  source, intervals[:8])
         return None
 
     return {

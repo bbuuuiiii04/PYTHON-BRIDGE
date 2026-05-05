@@ -67,6 +67,24 @@ class BeatgridResolverTests(unittest.TestCase):
         self.assertEqual(grid["beatgrid_source"], "PQTZ:ANLZ0000.DAT")
         self.assertEqual(grid["beatgrid_times_ms"], [1000.0, 1500.0])
 
+    def test_sparse_pqt2_tempo_anchors_do_not_override_pqtz(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dat = Path(td) / "ANLZ0000.DAT"
+            ext = Path(td) / "ANLZ0000.EXT"
+            dat.touch()
+            ext.touch()
+
+            def parse_file(path):
+                if Path(path).suffix == ".EXT":
+                    return FakeAnlz({"PQT2": [FakeTag([2.0, 260.0], [130.0, 131.0])]})
+                return FakeAnlz({"PQTZ": [FakeTag([1.0, 1.5, 2.0], [120.0, 121.0, 122.0])]})
+
+            with patch("pyrekordbox.anlz.AnlzFile.parse_file", side_effect=parse_file):
+                grid = _extract_beatgrid_from_anlz(str(dat))
+
+        self.assertEqual(grid["beatgrid_source"], "PQTZ:ANLZ0000.DAT")
+        self.assertEqual(grid["beatgrid_times_ms"], [1000.0, 1500.0, 2000.0])
+
     def test_missing_or_corrupt_anlz_returns_empty_grid(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             dat = Path(td) / "ANLZ0000.DAT"

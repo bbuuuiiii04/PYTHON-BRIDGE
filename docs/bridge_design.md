@@ -265,6 +265,8 @@ Current autoloop timing state:
 - When ANLZ beatgrid data is available, the bridge prefers non-empty `PQT2`
   over `PQTZ`, maps live `elapsed_ms` onto marker order, and uses that as the
   autoloop phase/position authority.
+- Sparse `PQT2` tempo-anchor data is rejected by marker-spacing sanity checks;
+  it falls back to `PQTZ` or constant-BPM math.
 - Autoloop `get_beatpos` sends absolute beat position from the beatgrid when
   valid, otherwise from existing constant-BPM math.
 - Autoloop `beat.pos` sends absolute beat count from the same source.
