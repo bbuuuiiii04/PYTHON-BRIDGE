@@ -92,17 +92,14 @@ Implemented behavior:
 ```text
 Master-switch autoloop arm remains immediate. After the immediate arm,
 StateManager marks OutputState.autoloop_arm_pending=True and waits for the next
-one-based 16-beat phrase start before sending BPM to SoundSwitch again.
+16-beat phrase boundary before sending BPM to SoundSwitch again.
 
-Phrase starts are (AUTOLOOP_ARM_PHRASE_BEATS * n) + 1. With
-AUTOLOOP_ARM_PHRASE_BEATS=16, the lock beats are 17, 33, 49, 65, ...
+Phrase boundaries are (AUTOLOOP_ARM_PHRASE_BEATS * n). With
+AUTOLOOP_ARM_PHRASE_BEATS=16, the lock beats are 16, 32, 48, 64, ...
 
 AUTOLOOP_ARM_PHRASE_BEATS is intentionally separate from AUTOLOOP_BEATS. If
 AUTOLOOP_BEATS is changed to an 8-beat loop length, arm phrase-lock still uses
-16-beat phrase starts.
-
-Beat 16 is the fourth beat of the fourth bar, not a new phrase. The new phrase
-begins at beat 17.
+16-beat phrase boundaries.
 
 Pending arm phrase-lock state clears on idle/stop, master change, active track
 load, and Rekordbox restart.
@@ -128,28 +125,28 @@ state_manager.py
   reset paths for master change, idle, stop, active track load, RB restart
 
 tests/test_live_bpm_service.py
-  unit coverage for one-based phrase targets, phrase-lock BPM send, and reset.
+  unit coverage for 16-beat boundary targets, phrase-lock BPM send, and reset.
 ```
 
 Simulation findings:
 
 ```text
 arm at beat 5.2:
-  target=17
-  no BPM at 16.9
-  BPM sent to decks 1,2,3,4 at 17.0
+  target=16
+  no BPM at 15.9
+  BPM sent to decks 1,2,3,4 at 16.0
 
 3:00 song at 138 BPM, arm at 2:10.130 / beat 299.3:
   total song beats ~= 414
-  target=305
-  no BPM at 304.9
-  BPM sent to decks 1,2,3,4 at 305.0
+  target=304
+  no BPM at 303.9
+  BPM sent to decks 1,2,3,4 at 304.0
 
 deck 1 -> deck 2 transition:
-  deck 1 pending target=305 before switch
+  deck 1 pending target=304 before switch
   master change clears pending target and autoloop arm deck
   deck 2 immediate arm sends deck loads to 2,1,3,4
-  deck 2 beat 172.4 targets 177 and sends BPM at 177.0
+  deck 2 beat 172.4 targets 176 and sends BPM at 176.0
 ```
 
 Validation so far:
@@ -172,17 +169,50 @@ Autoloop arm snapshots validated live BPM when available. If live BPM is absent,
 disabled, stale, unreadable, non-finite, or unvalidated, arm falls back to
 d.meta.bpm.
 
-V1 remains the default active-autoloop behavior: timing is frozen to the arm
-snapshot until disarm/rearm.
+Active-autoloop live BPM follow is enabled by default. During an active
+autoloop, if validated live BPM diverges from timing BPM, the bridge sends the
+new BPM to all four SoundSwitch deck slots in place and updates
+autoloop_arm_bpm/timing_bpm. Sends are rate-limited to avoid 200 Hz push-loop
+spam while tracking live pitch changes.
 
-V2 is enabled with RBSS_LIVE_BPM_FOLLOW=1. During an active autoloop, if
-validated live BPM diverges from timing BPM, the bridge tracks one pending
-update, waits for 1.5s stability, then sends BPM to all four SoundSwitch deck
-slots at the next absolute beat where beat % 8 == 1 and beat > 1.
+Live testing showed BPM apply alone made SoundSwitch progress move at the right
+speed but could leave phrase offset. The bridge now sets a one-shot
+autoloop_change_on_next_beat flag after LIVE-BPM-APPLY; the next autoloop beat
+uses absolute beat.pos with change=True once, then returns to steady
+change=False. This matches the VDJ capture pattern where change=True appears
+during tempo-change re-locks, not as a recurring 4-beat marker.
 
-SoundSwitch rearms autoloops when it receives BPM. The V2 BPM send is therefore
-an intentional controlled rearm at a phrase-safe beat, not a transparent
-mid-loop timing update.
+RBSS_LIVE_BPM_FOLLOW=0 disables active follow and keeps timing frozen to the arm
+snapshot until disarm/rearm. RBSS_LIVE_BPM_DISABLE=1 disables LiveBPMService
+entirely.
+
+Master-transition autoloop arms are default phrase-window behavior. Set
+RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0 to disable it. Only autoloop arms immediately
+after a master deck switch are affected. Normal track-start autoloop arms remain
+immediate. This reflects the live finding that normal starts are already in
+phrase, while transition arms can lock SoundSwitch to the wrong phrase offset.
+
+Live result: phrase-window delay by itself did not fix master-transition phrase
+offset. Delaying deck-load/autoloop activation to the next 16-beat phrase target
+is therefore not sufficient by itself. Keep this as negative evidence; the
+transition path must include the re-lock signal around activation rather than
+only delaying deck-load timing.
+
+Current default transition behavior: master-transition autoloop arms are
+phrase-window aware. If MASTER_CHANGED lands within the configured
+start-of-phrase grace window, the bridge snaps immediately: deck-load/loop/play
+fire now and a one-shot change=True beat is anchored to the previous 16-beat
+phrase boundary. If MASTER_CHANGED lands later in the phrase, the bridge waits
+for the next phrase target; when the delayed deck-load fires, it sets the same
+one-shot change=True re-lock at the actual delayed arm point. This keeps normal
+starts immediate, makes halfway-through-phrase transitions wait for the next
+phrase, and avoids repeating the failed delayed-arm-without-relock test.
+
+Live result after adding phrase-window re-lock: transition phrase targets
+appeared one beat late. The bridge now targets 16-beat boundaries
+`16, 32, 48, ...` instead of the previous `17, 33, 49, ...`. Outgoing
+autoloop beat.pos remains absolute and unshifted; the change is the delayed arm
+target, not a global beat-value offset.
 ```
 
 Files/functions changed:
@@ -196,7 +226,11 @@ state_manager.py
   StateManager.__init__(..., live_bpm=None, live_bpm_follow=None)
   _autoloop_arm_bpm()
   _maybe_apply_live_bpm_follow()
-  _next_live_bpm_follow_beat()
+  _apply_lighting() master-transition phrase-window arm/re-lock
+  _should_delay_autoloop_master_arm()
+  _is_near_autoloop_phrase_start()
+  _mark_autoloop_master_relock()
+  _send_autoloop_deck_load()
   _clear_live_bpm_follow()
   _live_bpm_status_text()
   _live_bpm_follow_status_text()
@@ -206,10 +240,11 @@ models.py
   OutputState.autoloop_arm_deck
   OutputState.last_autoloop_status_mono
   OutputState.pending_live_bpm
-  OutputState.pending_live_bpm_since
-  OutputState.pending_live_bpm_target_beat
-  OutputState.last_live_follow_pending_log_mono
   OutputState.last_live_follow_bpm
+  OutputState.last_live_follow_send_mono
+  OutputState.autoloop_change_on_next_beat
+  OutputState.autoloop_arm_after_master_change
+  OutputState.pending_autoloop_arm_meta
   OutputState.live_follow_generation
 
 __main__.py
@@ -226,7 +261,8 @@ Runtime flags:
 
 ```text
 RBSS_LIVE_BPM_DISABLE=1  disables LiveBPMService entirely.
-RBSS_LIVE_BPM_FOLLOW=1   enables V2 controlled phrase-boundary BPM/rearm.
+RBSS_LIVE_BPM_FOLLOW=0   disables default active-autoloop live BPM follow.
+RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0  disables default phrase-window master-transition autoloop arms.
 ```
 
 Validation so far:
@@ -236,9 +272,10 @@ python3 -m unittest discover -s rb_ss_bridge_v2/tests
 python3 -m compileall -q rb_ss_bridge_v2
 
 Live run confirmed:
-  [SS][LIVE-BPM-PENDING] deck=1 current=130.00 pending=134.30 target_beat=129
   [SS][LIVE-BPM-APPLY] deck=1 bpm=134.30 beat=129
+  next autoloop beat sends absolute beat.pos with change=True once
   [SS][AUTOLOOP-TICK] ... timing_bpm=134.30 arm_bpm=134.30 ...
+  SoundSwitch stayed in phrase during BPM changes after the one-shot re-lock.
 ```
 
 ### `rb_memory.py`, `state_manager.py`, `__main__.py`
@@ -726,15 +763,14 @@ Current diagnostic logging:
 ```text
 state_manager.py:
 - [SS][AUTOLOOP-ARM] logs deck, mirror, elapsed, source, timing_bpm, arm_bpm, meta_bpm, loop length, filepath, previous file.
-- [SS][AUTOLOOP-ARM-PENDING] logs the current absolute beat and the one-based phrase-lock target beat.
+- [SS][AUTOLOOP-ARM-PENDING] logs the current absolute beat and the phrase-lock target beat.
 - [SS][AUTOLOOP-ARM-LOCKED] logs the phrase-lock BPM send beat and BPM.
-- [SS][AUTOLOOP-TICK] logs periodic elapsed, absolute beat, timing_bpm, arm_bpm, meta_bpm, live_bpm, follow state, pending state, filepath.
-- [SS][LIVE-BPM-PENDING] logs first/rate-limited pending V2 BPM and target beat.
-- [SS][LIVE-BPM-APPLY] logs the phrase-boundary BPM send / controlled SoundSwitch rearm.
+- [SS][AUTOLOOP-TICK] logs periodic elapsed, absolute beat, timing_bpm, arm_bpm, meta_bpm, live_bpm, follow state, filepath.
+- [SS][LIVE-BPM-APPLY] logs default-on gated BPM transport updates.
 
 models.py:
 - OutputState.last_autoloop_status_mono rate-limits [SS][AUTOLOOP-TICK].
-- OutputState.last_live_follow_pending_log_mono rate-limits pending replacement logs while pitch is moving.
+- OutputState.last_live_follow_send_mono rate-limits active-autoloop BPM follow sends.
 
 osl_output.py:
 - [SS][deck-load] logs outgoing deck-load filepath, ssid state, bpm_out, meta_bpm, fallback_bpm, loop state, play state.
@@ -745,20 +781,20 @@ Observed result:
 ```text
 SoundSwitch autoloop progress bar no longer restarts every 4 beats with Test A+B active.
 Progress speed changes with BPM as expected.
-Autoloop arm phrase-lock targets one-based 16-beat phrase starts: 17, 33, 49, ...
-Simulated arm at beat 299.3 in a 3:00 138 BPM track targeted beat 305.
+Autoloop arm phrase-lock targets 16-beat boundaries: 16, 32, 48, ...
+Simulated arm at beat 299.3 in a 3:00 138 BPM track targeted beat 304.
 Simulated deck 1 -> deck 2 master change cleared deck 1 pending state and gave
 deck 2 its own target.
-V2 live BPM follow intentionally sends BPM at phrase-safe absolute beats because
-SoundSwitch rearms autoloop on BPM sends.
+Live BPM follow now sends gated transport BPM updates in place and does not
+touch autoloop arm/unarm or master-transition ordering.
 ```
 
 Follow-up:
 
 ```text
-Inspect first AUTOLOOP-ARM, deck-load, AUTOLOOP-TICK, LIVE-BPM-PENDING, and LIVE-BPM-APPLY after stop -> pitch change -> play.
+Inspect first AUTOLOOP-ARM, deck-load, AUTOLOOP-TICK, and LIVE-BPM-APPLY after stop -> pitch change -> play.
 Check whether beatpos_out starts phase-aligned with Rekordbox or offset.
-Test C is not applied: autoloop change=True every AUTOLOOP_BEATS or always false.
+Steady autoloop change markers are now false; preserve that unless a capture proves an activation-only re-anchor needs change=True.
 ```
 
 Separate resolver bug:

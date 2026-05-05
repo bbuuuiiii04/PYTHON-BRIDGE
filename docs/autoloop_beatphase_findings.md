@@ -41,16 +41,14 @@ Files changed:
 - `state_manager.py`: added autoloop/live-BPM diagnostics:
   - `[SS][AUTOLOOP-ARM]`
   - `[SS][AUTOLOOP-TICK]`
-  - `[SS][LIVE-BPM-PENDING]`
   - `[SS][LIVE-BPM-APPLY]`
 - `osl_output.py`: added `[SS][deck-load]` to log the actual outgoing BPM and
   loop/play state during `send_deck_load()`.
 
 These logs record arm-time BPM source, current timing BPM, metadata BPM,
-validated live BPM, follow state, pending target beat, and deck-load BPM.
-`AUTOLOOP-TICK` is rate-limited to periodic status. `LIVE-BPM-PENDING` is
-rate-limited while pitch is still moving. The old per-beat autoloop logging has
-been removed from normal INFO output.
+validated live BPM, follow state, and deck-load BPM. `AUTOLOOP-TICK` is
+rate-limited to periodic status. The old per-beat autoloop logging has been
+removed from normal INFO output.
 
 ## Test A Applied
 
@@ -251,17 +249,17 @@ Runtime behavior:
   - 3:00 track at 138 BPM, arm at beat `299.3` / `2:10.130`, targets `305`.
   - deck 1 pending phrase lock clears on master change to deck 2; deck 2 arms
     immediately and schedules its own target, e.g. beat `172.4` targets `177`.
-- V1 default freezes active autoloop timing to the arm snapshot.
-- V2, enabled with `RBSS_LIVE_BPM_FOLLOW=1`, watches live BPM during an active
-  autoloop. If it changes, stabilizes for 1.5s, and reaches a phrase-safe
-  absolute beat (`9, 17, 25, ...`), the bridge sends BPM to SoundSwitch.
-- Live testing showed SoundSwitch rearms autoloops on BPM sends. Therefore V2
-  intentionally treats the phrase-boundary BPM send as a controlled rearm.
+- Active autoloop live BPM follow is enabled by default and can be disabled
+  with `RBSS_LIVE_BPM_FOLLOW=0`.
+- During an active autoloop, validated live BPM changes are sent to SoundSwitch
+  with rate limiting and paired with a one-shot absolute beat `change=True`
+  re-lock.
+- Live testing showed SoundSwitch reacts to BPM sends; the current bridge uses
+  the one-shot beat re-lock as the controlled resync signal.
 
 Observed V2 acceptance:
 
 ```text
-[SS][LIVE-BPM-PENDING] deck=1 current=130.00 pending=134.30 target_beat=129
 [SS][LIVE-BPM-APPLY] deck=1 bpm=134.30 beat=129
 [SS][AUTOLOOP-TICK] ... timing_bpm=134.30 arm_bpm=134.30 ... pending_bpm=none
 ```

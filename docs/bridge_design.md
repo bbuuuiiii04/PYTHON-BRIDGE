@@ -66,7 +66,7 @@ StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC
 | Position (ms) | RB memory 60 Hz → MTC 25 fps → TL TC ~15s | Informational; priority in that order |
 | Memory play bit | RB memory | Corroboration only — never overrides TL |
 | BPM hint/fallback | ENGINE STATE every ~15s | Updates `d.meta.bpm`; static DB BPM until first update |
-| BPM live/displayed | LiveBPMService current-session memory validation | Used for autoloop arm snapshot when valid; V2 phrase-boundary follow when enabled |
+| BPM live/displayed | LiveBPMService current-session memory validation | Used for autoloop arm snapshot and default-on gated active follow when valid |
 
 **Critical rule**: TL log is truth. Memory confirms; it never overrides.
 - `d.playing` (from TL PLAY/PAUSE) is the authoritative play state.
@@ -185,58 +185,66 @@ At autoloop arm:
 4. The chosen value is stored in `OutputState.autoloop_arm_bpm`.
 5. The arm still fires immediately for workflow, then StateManager marks
    `autoloop_arm_pending=True` so the push loop can send a second BPM at the
-   next 16-beat phrase start.
+   next 16-beat phrase boundary.
 
 Autoloop arm phrase-lock:
 
-- Phrase starts are one-based absolute beats: `(AUTOLOOP_ARM_PHRASE_BEATS * n) + 1`.
-- With `AUTOLOOP_ARM_PHRASE_BEATS=16`, arm phrase-lock targets `17, 33, 49, ...`.
+- Phrase targets are absolute beat boundaries: `(AUTOLOOP_ARM_PHRASE_BEATS * n)`.
+- With `AUTOLOOP_ARM_PHRASE_BEATS=16`, arm phrase-lock targets `16, 32, 48, ...`.
 - This is intentionally separate from `AUTOLOOP_BEATS`, which controls the
   loop length sent at arm time.
-- Beat `16` is the fourth beat of the fourth bar; the next phrase begins at
-  beat `17`.
 - Example simulations:
-  - arm at beat `5.2` -> target `17`; no BPM at `16.9`; BPM at `17.0`.
-  - arm at beat `299.3` in a 3:00, 138 BPM track -> target `305`.
+  - arm at beat `5.2` -> target `16`; no BPM at `15.9`; BPM at `16.0`.
+  - arm at beat `299.3` in a 3:00, 138 BPM track -> target `304`.
   - deck 1 -> deck 2 transition clears deck 1 pending lock; deck 2 gets its
-    own immediate arm and own phrase target, e.g. beat `172.4` -> `177`.
+    own immediate arm and own phrase target, e.g. beat `172.4` -> `176`.
 - Pending arm phrase-lock is cleared on idle/stop, master change, active track
   load, and Rekordbox restart.
+- Master-transition phrase arm is enabled by default. Set
+  `RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0` to disable it.
+- Autoloop arms after a master deck switch are
+  phrase-window aware:
+  - if the switch lands near the start of a phrase, deck-load/loop/play fire
+    immediately and the bridge sends a one-shot `change=True` anchored to the
+    previous phrase boundary;
+  - if the switch lands later in the phrase, deck-load/loop/play wait until the
+    next 16-beat phrase target, then the next outgoing beat sends the one-shot
+    `change=True`.
+- Normal track-start autoloop arms remain immediate.
+- Delayed activation by itself was live-tested and did not fix the transition
+  phrase offset; delayed activation must be paired with the one-shot re-lock at
+  the actual arm point.
 
-V1 default behavior:
+VDJ-like live-follow behavior:
 
-- Active autoloop timing is frozen to the arm snapshot.
-- Later live BPM changes are logged as diagnostics but do not change
-  `timing_bpm` until disarm/rearm.
-- This is the default fail-closed behavior.
-
-V2 live-follow behavior:
-
-- Enabled only with `RBSS_LIVE_BPM_FOLLOW=1`.
+- Enabled by default; set `RBSS_LIVE_BPM_FOLLOW=0` to disable active follow.
 - During an already armed autoloop, the bridge watches validated `live_bpm`.
-- If live BPM diverges from `timing_bpm`, the bridge creates or replaces one
-  pending BPM update.
-- The pending value must remain stable for 1.5 seconds.
-- The bridge then schedules the BPM send at the next phrase-safe absolute beat:
-  `beat_number % 8 == 1` and `beat_number > 1`, for example `9, 17, 25, ...`.
-- SoundSwitch has been observed to rearm autoloops when it receives the BPM
-  update. This is intentional in V2: the phrase boundary is the controlled
-  musical point where that rearm is allowed to happen.
+- If live BPM diverges from `timing_bpm` by more than the unscripted BPM
+  threshold, the bridge sends the new BPM to all four SoundSwitch deck slots.
+- BPM follow sends are rate-limited to avoid push-loop spam while still tracking
+  pitch changes during playback.
 - After sending BPM to all four SoundSwitch deck slots, StateManager updates
-  `autoloop_arm_bpm` / `timing_bpm` to the new value and clears the pending
-  update.
+  `autoloop_arm_bpm` / `timing_bpm` to the new value.
+- The next autoloop beat after a live BPM apply sends absolute `beat.pos` with
+  `change=True` exactly once, then steady autoloop beats return to
+  `change=False`.
+- The same one-shot beat re-lock is used after master-transition autoloop arms.
+  The re-lock happens at the selected phrase-window arm point: immediate near
+  phrase start, delayed otherwise.
+- Live BPM follow never reloads the deck, toggles loop state, or changes master.
 
-V2 cancellation:
+Live-follow cancellation:
 
-- Pending live-follow state is cleared on idle/stop, deck switch, active track
-  load, Rekordbox restart, live BPM invalidation/stale read, and resume-settle
-  state.
+- Live-follow state is cleared on idle/stop, deck switch, active track load,
+  Rekordbox restart, live BPM invalidation/stale read, and resume-settle state.
 
 Kill switches:
 
 - `RBSS_LIVE_BPM_DISABLE=1` disables LiveBPMService entirely.
-- Leaving `RBSS_LIVE_BPM_FOLLOW` unset keeps V1 frozen timing for active
-  autoloops while still allowing arm-time live BPM snapshots when validated.
+- `RBSS_LIVE_BPM_FOLLOW=0` disables active-autoloop follow while still allowing
+  arm-time live BPM snapshots when validated.
+- `RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0` disables default phrase-window
+  master-transition autoloop activation.
 
 ---
 
@@ -250,7 +258,7 @@ VDJ mirrors active deck to SS decks 3 and 4. SS uses 3/4 internally for show tim
 | Phase 1 scripted load | arm.deck, arm.mirror, 3, 4 |
 | Autoloop arm | deck, mirror, 3, 4 |
 | Idle clear | 1, 2, 3, 4 |
-| BPM send | active, mirror, 3, 4 (arm/reset, and V2 phrase-boundary controlled rearm) |
+| BPM send | active, mirror, 3, 4 (arm/reset and gated active-autoloop live follow) |
 | Beat event | active, mirror, 3, 4 |
 | Elapsed + beatpos | active, mirror, 3, 4 |
 
@@ -271,16 +279,15 @@ Current autoloop timing state:
   valid, otherwise from existing constant-BPM math.
 - Autoloop `beat.pos` sends absolute beat count from the same source.
 - Autoloop beat-boundary detection and arm phrase-lock use that same absolute
-  beat position, preserving `(16 * n) + 1` phrase targets.
+  beat position, preserving `(16 * n)` phrase targets.
 - Scripted/non-autoloop beat timing still uses the old wrapped behavior.
 - BPM sends remain governed by arm/live-BPM logic; the beatgrid is not used as
   the outgoing BPM source.
-- `change=True` still fires every 4 beats.
+- Steady autoloop beat events send `change=False`, including 4-beat boundaries.
 - User observed SoundSwitch's autoloop progress bar no longer restarts every
   4 beats with absolute autoloop beat positions active.
 - Autoloop diagnostics are periodic, not per-beat: `[SS][AUTOLOOP-ARM]`,
-  `[SS][AUTOLOOP-TICK]`, `[SS][LIVE-BPM-PENDING]`, `[SS][LIVE-BPM-APPLY]`,
-  and `[SS][deck-load]`.
+  `[SS][AUTOLOOP-TICK]`, `[SS][LIVE-BPM-APPLY]`, and `[SS][deck-load]`.
 - See `docs/autoloop_beatphase_findings.md` for the evidence log.
 
 ---
@@ -462,7 +469,7 @@ Do not hardcode `inner1 + 0xd0` or `inner1 + 0x2fc0`. Those offsets are session-
 | DDJ-800 mode=4112 memory play bit | Memory says playing when paused | TL PAUSE event is authoritative; d.playing overrides |
 | MTC unavailable (mido/IAC) | Position fallback only has TL TC (~15s) | TL TC still sufficient; warning logged |
 | Live BPM unvalidated/disabled | Autoloop arm/follow uses `d.meta.bpm` fallback | Fail closed; no hardcoded addresses |
-| BPM changes during active autoloop | V1: timing stays frozen; V2: controlled SoundSwitch rearm at phrase boundary | `RBSS_LIVE_BPM_FOLLOW=1`, stable 1.5s, beat `9/17/25...` |
+| BPM changes during active autoloop | Default-on live follow sends gated BPM updates in place | `RBSS_LIVE_BPM_FOLLOW=0` disables active follow |
 
 ---
 
@@ -476,8 +483,7 @@ Do not hardcode `inner1 + 0xd0` or `inner1 + 0x2fc0`. Those offsets are session-
 - Do not send `soundswitch_id` on autoloop arms — empty ssid is what triggers SS autoloop mode
 - Do not remove TL TC synthesis from tl_tailer.py — it is the fallback when MTC is unavailable
 - Do not call `_do_stop` expecting it to clear SS — it only resets internal state; lighting machine clears SS
-- Do not send active-autoloop BPM immediately when live BPM changes. SoundSwitch
-  treats BPM sends as autoloop rearm triggers; V2 must wait for stabilization
-  and a phrase-safe absolute beat.
+- Do not route active-autoloop BPM changes through deck load, loop on/off, or
+  master-change paths. Live follow is transport-only and rate-limited.
 - Do not hardcode live BPM addresses or reuse absolute addresses across
   Rekordbox restarts. Live BPM is current-session validation only.

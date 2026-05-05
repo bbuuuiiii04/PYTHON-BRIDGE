@@ -3,7 +3,8 @@
 Date: 2026-05-04
 Repo: `bbuuuiiii04/PYTHON-BRIDGE`, package `rb_ss_bridge_v2`
 Scope: historical handoff plus final integration state. Runtime bridge behavior
-now includes LiveBPMService and optional V2 phrase-boundary follow.
+now includes LiveBPMService, default-on live BPM follow, and default-on
+phrase-window master-transition autoloop arms.
 
 ## End Goal
 
@@ -20,42 +21,40 @@ Final integration shape:
    pid/base/deck.
 4. Use validated live BPM for autoloop arm snapshots by default, with
    `RBSS_LIVE_BPM_DISABLE=1` as the emergency kill switch.
-5. Keep active autoloop timing frozen by default after arm.
-6. Enable V2 active-loop follow only with `RBSS_LIVE_BPM_FOLLOW=1`.
-7. Treat V2 BPM sends as controlled SoundSwitch autoloop rearms and schedule
-   them only after stabilization at phrase-safe absolute beats.
+5. Enable active-loop live BPM follow by default, with
+   `RBSS_LIVE_BPM_FOLLOW=0` as the kill switch.
+6. Pair active-loop BPM sends with a one-shot `change=True` beat re-lock.
+7. Keep master-transition autoloop arms phrase-window aware by default, with
+   `RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0` as the kill switch.
 
 ## Current Code Changes
 
 Runtime integration:
 
 - `live_bpm.py`: `LiveBPMService` read-only background service.
-- `state_manager.py`: arm-time live BPM snapshot and optional V2 live-follow.
+- `state_manager.py`: arm-time live BPM snapshot, default live-follow, and
+  default master-transition phrase-window arms.
 - `models.py`: autoloop/live-follow state in `OutputState`.
 - `__main__.py`: starts/stops `LiveBPMService`; color-codes live BPM/autoloop
   diagnostics.
 - `tests/test_live_bpm_service.py`: unit tests for candidate validation,
   fallback, arm snapshot, V2 pending/apply, and cancellation.
 
-V2 behavior:
+Current active-follow behavior:
 
 ```text
-RBSS_LIVE_BPM_FOLLOW=1
+RBSS_LIVE_BPM_FOLLOW=0 disables active follow
 ```
 
 - Detect live BPM divergence during active autoloop.
-- Replace one pending update while pitch is moving.
-- Require 1.5s stability.
-- Schedule the BPM send at the next absolute beat where `beat % 8 == 1` and
-  `beat > 1`.
-- Send BPM to decks 1, 2, 3, 4 at that beat.
-- SoundSwitch rearms autoloop on BPM send, so this is an intentional
-  phrase-aligned controlled rearm.
+- Send BPM to decks 1, 2, 3, 4 with rate limiting.
+- Set a one-shot autoloop beat `change=True` re-lock after apply.
+- SoundSwitch reacts to BPM sends, so the re-lock keeps the active autoloop
+  anchored after the timing update.
 
 Observed acceptance:
 
 ```text
-[SS][LIVE-BPM-PENDING] deck=1 current=130.00 pending=134.30 target_beat=129
 [SS][LIVE-BPM-APPLY] deck=1 bpm=134.30 beat=129
 [SS][AUTOLOOP-TICK] ... timing_bpm=134.30 arm_bpm=134.30 ... pending_bpm=none
 ```
@@ -397,12 +396,13 @@ Session 16 all-inclusive DJ workflow restart proof:
 - Equal-BPM and near-equal-BPM Deck A/Deck B states are required validation cases, not optional edge cases. In real DJ use the decks are often beatmatched, and the only clear ownership window may be brief while the incoming deck is being pitched into match.
 - Bridge integration now exists as a fail-closed default-enabled discovery path
   with `RBSS_LIVE_BPM_DISABLE=1` as the kill switch.
-- Active-loop live-follow remains opt-in with `RBSS_LIVE_BPM_FOLLOW=1`.
-- Default V1 policy snapshots BPM at arm time and keeps active-loop timing
-  unchanged until disarm/rearm.
-- V2 policy treats live-follow BPM sends as controlled SoundSwitch autoloop
-  rearms and schedules them only after stabilization at phrase-safe absolute
-  beats.
+- Active-loop live-follow is default-on and can be disabled with
+  `RBSS_LIVE_BPM_FOLLOW=0`.
+- Master-transition phrase-window autoloop arms are default-on and can be
+  disabled with `RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0`.
+- Current policy snapshots BPM at arm time, follows validated live BPM during
+  active autoloop, and pairs BPM applies/master-transition arms with one-shot
+  beat re-locks.
 
 ## Why Deck 1 Is Behind
 
@@ -412,12 +412,14 @@ Deck 2 was the original failure path and produced clearer live candidates. Deck 
 
 1. Continue validating the integrated guarded bridge path with real DJ workflows.
 2. Fail closed when no current-session cache candidate exists for pid/base/deck.
-3. Keep V1 active-autoloop timing frozen by default.
+3. Keep default active-autoloop live follow fail-closed when live BPM is
+   unvalidated.
 4. Preserve the read-only probe as the evidence generator; do not hardcode Session 8 or Session 9 addresses/offsets.
-5. Preserve `RBSS_LIVE_BPM_DISABLE=1` and `RBSS_LIVE_BPM_FOLLOW=1` semantics.
+5. Preserve `RBSS_LIVE_BPM_DISABLE=1`, `RBSS_LIVE_BPM_FOLLOW=0`, and
+   `RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0` kill-switch semantics.
 6. For live BPM consumption, use the latest validated memory BPM at autoloop arm
-   time. In V2, active-loop changes are allowed only as phrase-boundary
-   controlled rearms.
+   time. During active loops, apply validated live BPM with rate limiting and a
+   one-shot beat re-lock.
 7. Continue repeat testing with opposite pitch directions and incoming-track
    deck workflows.
 
@@ -446,9 +448,8 @@ python3 -m rb_ss_bridge_v2.probe_live_bpm cache-check --deck 2 --expect-bpm <dec
 - Near-BPM stale duplicates.
 - Candidates that move but land on the wrong final BPM.
 - Candidates that move briefly then freeze.
-- BPM changes after autoloop arm: V1 freezes to arm snapshot; V2 schedules a
-  controlled SoundSwitch rearm only after stabilization at a phrase-safe
-  absolute beat.
+- BPM changes after autoloop arm: active follow sends the validated BPM with a
+  one-shot beat re-lock.
 
 ## Commands Used For Verification
 
@@ -462,5 +463,5 @@ git -C rb_ss_bridge_v2 diff --check -- probe_live_bpm.py docs/live_bpm_findings.
 
 Bridge integration has been authorized and implemented. Preserve the safety
 boundary: no hardcoded live BPM addresses, no cross-session absolute-address
-reuse, fail closed on validation loss, and keep active-loop follow behind
-`RBSS_LIVE_BPM_FOLLOW=1`.
+reuse, fail closed on validation loss, and preserve `RBSS_LIVE_BPM_FOLLOW=0` as
+the active-loop follow kill switch.

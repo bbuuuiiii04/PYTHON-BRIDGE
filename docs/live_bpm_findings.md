@@ -16,11 +16,13 @@ Accepted for bridge integration behind fail-closed guards:
 - Validated values are keyed by current pid/base/deck and invalidate on restart.
 - Autoloop arm snapshots validated live BPM when available, otherwise falls back
   to `d.meta.bpm`.
-- V1 default freezes active autoloop timing to the arm snapshot.
-- V2, enabled with `RBSS_LIVE_BPM_FOLLOW=1`, waits for live BPM stabilization
-  and sends BPM at phrase-safe absolute beats (`9, 17, 25, ...`).
-- SoundSwitch rearms autoloops on BPM sends; V2 intentionally uses the phrase
-  boundary as the controlled rearm point.
+- Active autoloop live BPM follow is enabled by default and can be disabled
+  with `RBSS_LIVE_BPM_FOLLOW=0`.
+- When validated live BPM diverges from the current timing BPM, the bridge sends
+  BPM to all four SoundSwitch deck slots with rate limiting and pairs it with a
+  one-shot beat `change=True` re-lock.
+- SoundSwitch reacts to BPM sends; the one-shot re-lock is the current
+  controlled resync point.
 
 Disable runtime live BPM discovery with:
 

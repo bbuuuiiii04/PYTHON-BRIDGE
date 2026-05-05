@@ -79,7 +79,6 @@ Examples:
 [SS][AUTOLOOP-ARM-PENDING] yellow
 [SS][AUTOLOOP-ARM-LOCKED]  green
 [SS][AUTOLOOP-TICK]      cyan
-[SS][LIVE-BPM-PENDING]   yellow
 [SS][LIVE-BPM-APPLY]     green
 [LBPM][SCAN|CURRENT]     cyan
 [LBPM][ATTACH|VALIDATED] green
@@ -109,19 +108,22 @@ BPM names:
 - `grid`: autoloop phase source. `PQT2:...` or `PQTZ:...` means ANLZ beatgrid
   drove absolute beat position; `fallback` means constant-BPM math was used.
 
-V2 live BPM follow is enabled with `RBSS_LIVE_BPM_FOLLOW=1`. During an active
-autoloop, live BPM changes are logged as pending first:
+VDJ-like live BPM follow is enabled by default. Set `RBSS_LIVE_BPM_FOLLOW=0`
+to disable active follow. During an active autoloop, validated live BPM changes
+are sent in place and logged when applied:
 
 ```text
-[SS][LIVE-BPM-PENDING] deck=1 current=130.00 pending=134.30 target_beat=stabilizing
-[SS][LIVE-BPM-PENDING] deck=1 current=130.00 pending=134.30 target_beat=129
+[SS][LIVE-BPM-APPLY] deck=1 bpm=134.30 beat=129
 ```
 
-`target_beat=stabilizing` means the live BPM is still moving or has not been
-stable for 1.5s. Numeric `target_beat` means the bridge has scheduled the
-SoundSwitch BPM send for that absolute beat. Replacement pending logs are
-rate-limited while pitch is moving; the periodic `AUTOLOOP-TICK` line carries
-the latest pending value between those events.
+BPM apply logs are rate-limited to avoid push-loop spam while still tracking
+pitch changes during playback. The periodic `AUTOLOOP-TICK` line shows whether
+active follow is on or disabled.
+
+After LIVE-BPM-APPLY, the next autoloop beat event sends absolute `beat.pos`
+with `change=True` once, then returns to steady `change=False`. Live testing
+confirmed this one-shot beat re-lock kept SoundSwitch autoloops phrase-synced
+during BPM changes.
 
 Apply means the bridge sent BPM to SoundSwitch:
 
@@ -129,23 +131,49 @@ Apply means the bridge sent BPM to SoundSwitch:
 [SS][LIVE-BPM-APPLY] deck=1 bpm=134.30 beat=129
 ```
 
-SoundSwitch has been observed to rearm autoloops on BPM sends. Treat
-`LIVE-BPM-APPLY` as a phrase-aligned controlled autoloop rearm, not merely an
-internal bridge timing update.
+SoundSwitch has been observed to react to BPM sends and beat `change=True`
+re-locks. Treat `LIVE-BPM-APPLY` plus the next one-shot change beat as the
+validated active-autoloop tempo-change sync path.
 
-Autoloop arm phrase-lock is separate from V2 live BPM follow. Master-switch
-autoloop arm still fires immediately, then the push loop schedules one more BPM
-send at the next one-based 16-beat phrase start:
+Master-transition autoloop arms use the same next-beat re-lock signal without
+delaying deck load:
 
 ```text
-[SS][AUTOLOOP-ARM-PENDING] deck=1 current_beat=5.2 target_phrase_beat=17
-[SS][AUTOLOOP-ARM-LOCKED] deck=1 beat=17 bpm=120.50
+[SS][AUTOLOOP-MASTER-RELOCK] deck=2 source=auto-detect timing=immediate next_beat_change=true
 ```
 
-With `AUTOLOOP_ARM_PHRASE_BEATS=16`, phrase-lock targets are `(16 * n) + 1`:
-`17, 33, 49, ...`. This is separate from `AUTOLOOP_BEATS`, which controls loop
-length. Beat `16` is the fourth beat of the fourth bar; the new phrase starts
-at beat `17`.
+After this line, the first autoloop beat event sends absolute `beat.pos` with
+`change=True` once, then returns to steady `change=False`.
+
+Autoloop arm phrase-lock is separate from live BPM follow. Normal track-start
+autoloop arms fire immediately, then the push loop schedules one more BPM send
+at the next 16-beat phrase boundary:
+
+```text
+[SS][AUTOLOOP-ARM-PENDING] deck=1 current_beat=5.2 target_phrase_beat=16
+[SS][AUTOLOOP-ARM-LOCKED] deck=1 beat=16 bpm=120.50
+```
+
+Master-switch autoloop arms are phrase-window aware by default. Set
+`RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0` to disable this behavior. If the switch
+lands near the start of a phrase, the bridge arms immediately and logs
+`timing=immediate` with an anchored one-shot `change=True`. If it lands later in
+the phrase, the bridge delays SoundSwitch deck-load/autoloop activation until
+the next phrase target:
+
+```text
+[SS][AUTOLOOP-MASTER-ARM-PENDING] deck=2 mirror=1 current_beat=5.2 target_phrase_beat=16 ...
+[SS][AUTOLOOP-MASTER-ARM-LOCKED] deck=2 beat=16 bpm=120.50 ...
+[SS][AUTOLOOP-MASTER-RELOCK] deck=2 source=auto-detect timing=delayed next_beat_change=true
+```
+
+Live testing showed delayed activation did not fix the master-transition phrase
+offset by itself; the default behavior pairs phrase-window activation with the
+one-shot `change=True` re-lock at the selected arm point.
+
+With `AUTOLOOP_ARM_PHRASE_BEATS=16`, phrase-lock targets are `(16 * n)`:
+`16, 32, 48, ...`. This is separate from `AUTOLOOP_BEATS`, which controls loop
+length.
 
 ## Common Questions
 

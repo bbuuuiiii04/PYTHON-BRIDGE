@@ -49,9 +49,10 @@ _TC_LATENCY_WARN_MS = 250.0
 _AUTOLOOP_IDLE_DEBOUNCE_S = max(STOP_DEBOUNCE_S, 2.0)
 _AUTOLOOP_STATUS_LOG_S = 5.0
 LIVE_BPM_FOLLOW_ENV = "RBSS_LIVE_BPM_FOLLOW"
+AUTOLOOP_MASTER_PHRASE_ARM_ENV = "RBSS_AUTOLOOP_MASTER_PHRASE_ARM"
 _LIVE_BPM_FOLLOW_THRESHOLD = BPM_THRESHOLD_UNSCRIPTED
-_LIVE_BPM_FOLLOW_STABLE_S = 1.5
-_LIVE_BPM_PENDING_LOG_S = 1.0
+_LIVE_BPM_FOLLOW_SEND_INTERVAL_S = 0.10
+_AUTOLOOP_MASTER_PHRASE_START_GRACE_BEATS = 2.0
 
 
 # ── Beat position helper ──────────────────────────────────────────────────────
@@ -123,8 +124,11 @@ class StateManager:
         self._out   = output
         self._live_bpm = live_bpm
         self._live_bpm_follow = (
-            _os.environ.get(LIVE_BPM_FOLLOW_ENV) == "1"
+            _os.environ.get(LIVE_BPM_FOLLOW_ENV, "1") != "0"
             if live_bpm_follow is None else live_bpm_follow
+        )
+        self._autoloop_master_phrase_arm = (
+            _os.environ.get(AUTOLOOP_MASTER_PHRASE_ARM_ENV, "1") != "0"
         )
         self._stop  = threading.Event()
 
@@ -344,6 +348,8 @@ class StateManager:
             self._os.autoloop_arm_deck = 0
             self._clear_autoloop_arm_phrase_lock()
             self._clear_live_bpm_follow()
+            self._clear_autoloop_tempo_relock()
+            self._clear_pending_autoloop_master_phrase_arm()
             if self._live_bpm is not None:
                 try:
                     self._live_bpm.invalidate()
@@ -384,8 +390,12 @@ class StateManager:
         self._os.not_playing_since = 0.0
         self._os.autoloop_arm_bpm = 0.0
         self._os.autoloop_arm_deck = 0
+        self._os.autoloop_arm_after_master_change = True
+        self._os.autoloop_master_change_source = source
         self._clear_autoloop_arm_phrase_lock()
         self._clear_live_bpm_follow()
+        self._clear_autoloop_tempo_relock()
+        self._clear_pending_autoloop_master_phrase_arm()
 
     # ── Track load → lsof trigger ─────────────────────────────────────────────
 
@@ -397,6 +407,8 @@ class StateManager:
         if deck == self._os.active_deck:
             self._clear_autoloop_arm_phrase_lock()
             self._clear_live_bpm_follow()
+            self._clear_autoloop_tempo_relock()
+            self._clear_pending_autoloop_master_phrase_arm()
         d.tl_title = title
         self._last_loaded_deck = deck
         trace_id = str(ev.payload.get("__trace_id", ""))
@@ -631,6 +643,8 @@ class StateManager:
         self._os.last_arm_mono = time.monotonic()
 
         if mode == "scripted":
+            self._os.autoloop_arm_after_master_change = False
+            self._os.autoloop_master_change_source = ""
             # Arm the scripted show. _arm_scripted is internally debounced (2 s)
             # so rapid pause/resume doesn't cause a full re-arm sequence.
             self._arm_scripted(deck, d.scripted_id)
@@ -645,13 +659,22 @@ class StateManager:
             self._os.autoloop_arm_sync_beat = 0
             self._os.autoloop_arm_pending_since = time.monotonic()
             self._clear_live_bpm_follow()
+            self._clear_autoloop_tempo_relock()
+            self._clear_pending_autoloop_master_phrase_arm()
             self._os.last_live_follow_bpm = arm_bpm
+            self._os.last_live_follow_send_mono = 0.0
             self._os.live_follow_generation += 1
+            arm_after_master = self._os.autoloop_arm_after_master_change
+            arm_source = self._os.autoloop_master_change_source
+            self._os.autoloop_arm_after_master_change = False
+            self._os.autoloop_master_change_source = ""
             log.info("[SS][AUTOLOOP-ARM] deck=%d mirror=%d elapsed=%dms loop=%d "
                      "source=%s timing_bpm=%.2f arm_bpm=%.2f meta_bpm=%.2f "
+                     "after_master=%s master_source=%s "
                      "file=%s previous=%s",
                      deck, mirror, elapsed_ms, AUTOLOOP_BEATS,
                      bpm_source, arm_bpm, arm_bpm, d.meta.bpm,
+                     arm_after_master, arm_source or "<none>",
                      d.meta.filepath.split("/")[-1] if d.meta.filepath else "<none>",
                      self._os.last_armed_filepath.split("/")[-1]
                      if self._os.last_armed_filepath else "<none>")
@@ -670,24 +693,53 @@ class StateManager:
                     total_ms=d.meta.total_ms,
                 )
                 object.__setattr__(arm_meta, "elapsed_ms", elapsed_ms)
-                # VDJ: active deck + mirror 1/2 + decks 3 and 4 all get the same track
-                for dk in (deck, mirror, 3, 4):
-                    self._out.send_deck_load(dk, arm_meta, deck, play="on")
+                abs_beat = self._autoloop_abs_beat_for_elapsed(elapsed_ms, arm_bpm, arm_meta)
+                if self._should_delay_autoloop_master_arm(arm_after_master, abs_beat):
+                    target = self._next_autoloop_arm_phrase(abs_beat)
+                    self._os.autoloop_arm_sync_beat = target
+                    self._os.pending_autoloop_arm_meta = arm_meta
+                    self._os.pending_autoloop_arm_deck = deck
+                    self._os.pending_autoloop_arm_mirror = mirror
+                    self._os.pending_autoloop_arm_active = deck
+                    self._os.pending_autoloop_arm_source = arm_source or "master"
+                    log.info("[SS][AUTOLOOP-MASTER-ARM-PENDING] deck=%d mirror=%d "
+                             "current_beat=%.1f target_phrase_beat=%d file=%s source=%s",
+                             deck, mirror, abs_beat, target,
+                             d.meta.filepath.split("/")[-1], arm_source or "<none>")
+                else:
+                    if arm_after_master and self._autoloop_master_phrase_arm:
+                        self._send_autoloop_deck_load(deck, mirror, deck, arm_meta)
+                        self._send_autoloop_master_relock(
+                            deck, mirror, arm_bpm, abs_beat, arm_source, "immediate",
+                        )
+                    elif arm_after_master:
+                        self._mark_autoloop_master_relock(deck, arm_source, "immediate")
+                        self._send_autoloop_deck_load(deck, mirror, deck, arm_meta)
+                    else:
+                        self._send_autoloop_deck_load(deck, mirror, deck, arm_meta)
             else:
                 self._os.last_armed_filepath = ""
+                if arm_after_master:
+                    self._mark_autoloop_master_relock(deck, arm_source, "immediate-no-file")
                 for dk in (deck, mirror):
                     self._deck[dk].meta.first_beat_ms = 0.0
                 for dk in (deck, mirror, 3, 4):
                     self._out.send_loop_on(dk)
                     self._out._sub(f"deck {dk} play", "on", verbose=True)
+            self._os.autoloop_arm_after_master_change = False
+            self._os.autoloop_master_change_source = ""
 
         elif mode == "idle":
             self._pending_arm = None
             self._os.last_armed_filepath = ""
             self._os.autoloop_arm_bpm = 0.0
             self._os.autoloop_arm_deck = 0
+            self._os.autoloop_arm_after_master_change = False
+            self._os.autoloop_master_change_source = ""
             self._clear_autoloop_arm_phrase_lock()
             self._clear_live_bpm_follow()
+            self._clear_autoloop_tempo_relock()
+            self._clear_pending_autoloop_master_phrase_arm()
             self._os.live_follow_generation += 1
             for dn in range(1, 5):
                 self._out.send_deck_play(dn, "off")
@@ -935,8 +987,15 @@ class StateManager:
 
             if this_beat > last_beat:
                 beat_index = this_beat % 4
-                beat_out = this_beat if os.lighting_mode == "autoloop" else beat_index
-                change = (beat_index == 0)
+                if os.pending_autoloop_arm_meta is not None:
+                    self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos)
+                if os.lighting_mode == "autoloop":
+                    beat_out = this_beat
+                    change = os.autoloop_change_on_next_beat
+                    os.autoloop_change_on_next_beat = False
+                else:
+                    beat_out = beat_index
+                    change = (beat_index == 0)
                 os.last_beat_elapsed_ms = elapsed_ms
                 for dk in (active, mirror, 3, 4):
                     self._out.send_beat(dk, bpm, beat_out, change=change)
@@ -975,6 +1034,7 @@ class StateManager:
         os.autoloop_arm_deck      = 0
         self._clear_autoloop_arm_phrase_lock()
         self._clear_live_bpm_follow()
+        self._clear_autoloop_tempo_relock()
         os.live_follow_generation += 1
 
     def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
@@ -995,6 +1055,64 @@ class StateManager:
         self._os.last_sent_bpm        = 0.0
         self._os.last_beat_elapsed_ms = elapsed_ms
         self._log_status()
+
+    def _should_delay_autoloop_master_arm(self, arm_after_master: bool, abs_beat_pos: float) -> bool:
+        if not self._autoloop_master_phrase_arm or not arm_after_master:
+            return False
+        return not self._is_near_autoloop_phrase_start(abs_beat_pos)
+
+    def _is_near_autoloop_phrase_start(self, abs_beat_pos: float) -> bool:
+        phrase_offset = math.fmod(max(abs_beat_pos, 0.0), AUTOLOOP_ARM_PHRASE_BEATS)
+        if phrase_offset < 0:
+            phrase_offset += AUTOLOOP_ARM_PHRASE_BEATS
+        return phrase_offset <= _AUTOLOOP_MASTER_PHRASE_START_GRACE_BEATS
+
+    def _mark_autoloop_master_relock(self, deck: int, source: str, timing: str) -> None:
+        self._os.autoloop_change_on_next_beat = True
+        log.info("[SS][AUTOLOOP-MASTER-RELOCK] deck=%d source=%s timing=%s next_beat_change=true",
+                 deck, source or "<none>", timing)
+
+    def _send_autoloop_master_relock(
+        self,
+        deck: int,
+        mirror: int,
+        bpm: float,
+        abs_beat_pos: float,
+        source: str,
+        timing: str,
+    ) -> None:
+        anchor_beat = self._previous_autoloop_arm_phrase(abs_beat_pos)
+        for dk in (deck, mirror, 3, 4):
+            self._out.send_beat(dk, bpm, anchor_beat, change=True)
+        self._os.autoloop_change_on_next_beat = False
+        log.info("[SS][AUTOLOOP-MASTER-RELOCK] deck=%d source=%s timing=%s "
+                 "anchor_beat=%d current_beat=%.1f change=true",
+                 deck, source or "<none>", timing, anchor_beat, abs_beat_pos)
+
+    def _autoloop_abs_beat_for_elapsed(
+        self,
+        elapsed_ms: int,
+        bpm: float,
+        meta: TrackMetadata,
+    ) -> float:
+        grid_pos = _compute_beatgrid_position(elapsed_ms, meta.beatgrid_times_ms)
+        if grid_pos is not None:
+            return grid_pos[1]
+        if bpm <= 0:
+            return 0.0
+        beat_ms = 60_000.0 / bpm
+        return (elapsed_ms - meta.first_beat_ms) / beat_ms
+
+    def _send_autoloop_deck_load(
+        self,
+        deck: int,
+        mirror: int,
+        active: int,
+        arm_meta: TrackMetadata,
+    ) -> None:
+        # VDJ: active deck + mirror 1/2 + decks 3 and 4 all get the same track.
+        for dk in (deck, mirror, 3, 4):
+            self._out.send_deck_load(dk, arm_meta, active, play="on")
 
     def _maybe_apply_live_bpm_follow(
         self,
@@ -1025,40 +1143,19 @@ class StateManager:
             self._clear_live_bpm_follow()
             return timing_bpm
 
-        if (
-            os.pending_live_bpm <= 0
-            or abs(live_bpm - os.pending_live_bpm) > _LIVE_BPM_FOLLOW_THRESHOLD
-        ):
-            first_pending = os.pending_live_bpm <= 0
-            os.pending_live_bpm = live_bpm
-            os.pending_live_bpm_since = now
-            os.pending_live_bpm_target_beat = 0
-            if first_pending or now - os.last_live_follow_pending_log_mono >= _LIVE_BPM_PENDING_LOG_S:
-                os.last_live_follow_pending_log_mono = now
-                log.info("[SS][LIVE-BPM-PENDING] deck=%d current=%.2f pending=%.2f target_beat=stabilizing",
-                         deck, timing_bpm, live_bpm)
+        if now - os.last_live_follow_send_mono < _LIVE_BPM_FOLLOW_SEND_INTERVAL_S:
             return timing_bpm
 
-        if now - os.pending_live_bpm_since < _LIVE_BPM_FOLLOW_STABLE_S:
-            return timing_bpm
-
-        if os.pending_live_bpm_target_beat == 0:
-            os.pending_live_bpm_target_beat = self._next_live_bpm_follow_beat(abs_beat_pos)
-            log.info("[SS][LIVE-BPM-PENDING] deck=%d current=%.2f pending=%.2f target_beat=%d",
-                     deck, timing_bpm, os.pending_live_bpm, os.pending_live_bpm_target_beat)
-
-        current_beat = int(abs_beat_pos)
-        if current_beat < os.pending_live_bpm_target_beat:
-            return timing_bpm
-
-        new_bpm = os.pending_live_bpm
+        new_bpm = live_bpm
         for dk in (deck, mirror, 3, 4):
             self._out.send_bpm(dk, new_bpm)
         os.autoloop_arm_bpm = new_bpm
         os.last_live_follow_bpm = new_bpm
+        os.last_live_follow_send_mono = now
+        os.autoloop_change_on_next_beat = True
         os.last_sent_bpm = new_bpm
         log.info("[SS][LIVE-BPM-APPLY] deck=%d bpm=%.2f beat=%d",
-                 deck, new_bpm, current_beat)
+                 deck, new_bpm, int(abs_beat_pos))
         self._clear_live_bpm_follow()
         return new_bpm
 
@@ -1074,18 +1171,16 @@ class StateManager:
             return None
         return float(live)
 
-    def _next_live_bpm_follow_beat(self, abs_beat_pos: float) -> int:
-        beat = int(abs_beat_pos) + 1
-        while beat <= 1 or beat % 8 != 1:
+    def _next_autoloop_arm_phrase(self, abs_beat_pos: float) -> int:
+        """Calculate next phrase boundary for autoloop arm synchronization."""
+        beat = max(1, int(abs_beat_pos) + 1)
+        while beat % AUTOLOOP_ARM_PHRASE_BEATS != 0:
             beat += 1
         return beat
 
-    def _next_autoloop_arm_phrase(self, abs_beat_pos: float) -> int:
-        """Calculate next phrase boundary for autoloop arm synchronization."""
-        beat = max(0, int(abs_beat_pos)) + 1
-        while beat <= 1 or (beat - 1) % AUTOLOOP_ARM_PHRASE_BEATS != 0:
-            beat += 1
-        return beat
+    def _previous_autoloop_arm_phrase(self, abs_beat_pos: float) -> int:
+        beat = max(0, int(math.floor(abs_beat_pos)))
+        return (beat // AUTOLOOP_ARM_PHRASE_BEATS) * AUTOLOOP_ARM_PHRASE_BEATS
 
     def _maybe_lock_autoloop_arm(
         self,
@@ -1113,6 +1208,22 @@ class StateManager:
             return
 
         arm_bpm = os.autoloop_arm_bpm if os.autoloop_arm_bpm > 0 else bpm
+        pending_meta = os.pending_autoloop_arm_meta
+        if pending_meta is not None:
+            object.__setattr__(pending_meta, "elapsed_ms", self._deck[active].elapsed_ms)
+            self._send_autoloop_deck_load(
+                os.pending_autoloop_arm_deck or active,
+                os.pending_autoloop_arm_mirror or mirror,
+                os.pending_autoloop_arm_active or active,
+                pending_meta,
+            )
+            log.info("[SS][AUTOLOOP-MASTER-ARM-LOCKED] deck=%d beat=%d bpm=%.2f source=%s",
+                     active, current_beat, arm_bpm,
+                     os.pending_autoloop_arm_source or "<none>")
+            self._mark_autoloop_master_relock(
+                active, os.pending_autoloop_arm_source or "<none>", "delayed",
+            )
+            self._clear_pending_autoloop_master_phrase_arm()
         for dk in (active, mirror, 3, 4):
             self._out.send_bpm(dk, arm_bpm)
         os.last_sent_bpm = arm_bpm
@@ -1131,9 +1242,17 @@ class StateManager:
     def _clear_live_bpm_follow(self) -> None:
         os = self._os
         os.pending_live_bpm = 0.0
-        os.pending_live_bpm_since = 0.0
-        os.pending_live_bpm_target_beat = 0
-        os.last_live_follow_pending_log_mono = 0.0
+
+    def _clear_autoloop_tempo_relock(self) -> None:
+        self._os.autoloop_change_on_next_beat = False
+
+    def _clear_pending_autoloop_master_phrase_arm(self) -> None:
+        os = self._os
+        os.pending_autoloop_arm_meta = None
+        os.pending_autoloop_arm_deck = 0
+        os.pending_autoloop_arm_mirror = 0
+        os.pending_autoloop_arm_active = 0
+        os.pending_autoloop_arm_source = ""
 
     def _autoloop_arm_bpm(self, deck: int, fallback_bpm: float) -> tuple[float, str]:
         live = self._live_bpm_value(deck)
@@ -1162,13 +1281,7 @@ class StateManager:
         os = self._os
         if not self._live_bpm_follow:
             return "follow=off"
-        if os.pending_live_bpm > 0:
-            target = (
-                str(os.pending_live_bpm_target_beat)
-                if os.pending_live_bpm_target_beat > 0 else "stabilizing"
-            )
-            return f"follow=on pending_bpm={os.pending_live_bpm:.2f} target_beat={target}"
-        return "follow=on pending_bpm=none"
+        return "follow=on gated_bpm=active"
 
     # ── Instrumentation ───────────────────────────────────────────────────────
 

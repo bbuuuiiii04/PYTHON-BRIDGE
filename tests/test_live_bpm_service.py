@@ -136,6 +136,9 @@ class FakeOutput:
         self.beats: list[tuple[int, float, int, bool]] = []
         self.elapsed: list[tuple[int, int, float]] = []
         self.clears: list[int] = []
+        self.loop_ons: list[int] = []
+        self.loop_offs: list[int] = []
+        self.plays: list[tuple[int, str]] = []
 
     def _sub(self, *args, **kwargs):
         pass
@@ -144,13 +147,13 @@ class FakeOutput:
         self.loads.append((deck, meta, active, play))
 
     def send_loop_on(self, deck):
-        pass
+        self.loop_ons.append(deck)
 
     def send_loop_off(self, deck):
-        pass
+        self.loop_offs.append(deck)
 
     def send_deck_play(self, deck, state):
-        pass
+        self.plays.append((deck, state))
 
     def send_deck_clear(self, deck):
         self.clears.append(deck)
@@ -237,18 +240,191 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertEqual(sm._os.autoloop_arm_sync_beat, 0)
         self.assertGreater(sm._os.autoloop_arm_pending_since, 0.0)
 
+    def test_autoloop_master_phrase_arm_flag_does_not_delay_normal_arm(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            output = FakeOutput()
+            sm = StateManager(
+                queue.Queue(), PositionCache(), output,
+                live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+            )
+        deck = sm._deck[1]
+        deck.meta.filepath = "/tmp/normal.flac"
+        deck.meta.bpm = 120.0
+        deck.meta.first_beat_ms = 0.0
+
+        sm._apply_lighting(1, "autoloop", 1000, 120.0)
+
+        self.assertEqual(len(output.loads), 4)
+        self.assertIsNone(sm._os.pending_autoloop_arm_meta)
+
+    def test_autoloop_master_phrase_arm_defaults_on_and_delays_deck_load_to_target(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            output = FakeOutput()
+            sm = StateManager(
+                queue.Queue(), PositionCache(), output,
+                live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+            )
+        deck = sm._deck[2]
+        deck.playing = True
+        deck.meta.filepath = "/tmp/transition.flac"
+        deck.meta.bpm = 120.0
+        deck.meta.first_beat_ms = 0.0
+        deck.meta.beatgrid_times_ms = [float(i * 500) for i in range(40)]
+
+        sm._on_master_changed(2, "test-master")
+        sm._os.lighting_mode = "autoloop"
+        sm._apply_lighting(2, "autoloop", 2600, 120.0)
+
+        self.assertEqual(output.loads, [])
+        self.assertIsNotNone(sm._os.pending_autoloop_arm_meta)
+        self.assertTrue(sm._os.autoloop_arm_pending)
+        self.assertEqual(sm._os.autoloop_arm_sync_beat, 16)
+
+        sm._deck[2].elapsed_ms = 8500
+        sm._maybe_lock_autoloop_arm(2, 1, 120.0, 15.9)
+        self.assertEqual(output.loads, [])
+
+        sm._maybe_lock_autoloop_arm(2, 1, 120.0, 16.0)
+
+        self.assertEqual(len(output.loads), 4)
+        self.assertEqual(output.loads[0][0], 2)
+        self.assertEqual(output.loads[0][3], "on")
+        self.assertIsNone(sm._os.pending_autoloop_arm_meta)
+        self.assertFalse(sm._os.autoloop_arm_pending)
+        self.assertTrue(sm._os.autoloop_change_on_next_beat)
+        self.assertEqual(output.bpms[-4:], [(2, 120.0), (1, 120.0), (3, 120.0), (4, 120.0)])
+
+    def test_autoloop_master_phrase_arm_env_zero_disables_default_delay(self) -> None:
+        with patch.dict(os.environ, {"RBSS_AUTOLOOP_MASTER_PHRASE_ARM": "0"}, clear=True):
+            output = FakeOutput()
+            sm = StateManager(
+                queue.Queue(), PositionCache(), output,
+                live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+            )
+        deck = sm._deck[2]
+        deck.playing = True
+        deck.meta.filepath = "/tmp/transition.flac"
+        deck.meta.bpm = 120.0
+        deck.meta.first_beat_ms = 0.0
+        deck.meta.beatgrid_times_ms = [float(i * 500) for i in range(40)]
+
+        sm._on_master_changed(2, "test-master")
+        sm._apply_lighting(2, "autoloop", 2600, 120.0)
+
+        self.assertEqual(len(output.loads), 4)
+        self.assertIsNone(sm._os.pending_autoloop_arm_meta)
+        self.assertTrue(sm._os.autoloop_change_on_next_beat)
+
+    def test_autoloop_master_phrase_arm_snaps_when_near_phrase_start(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            output = FakeOutput()
+            sm = StateManager(
+                queue.Queue(), PositionCache(), output,
+                live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+            )
+        deck = sm._deck[2]
+        deck.playing = True
+        deck.meta.filepath = "/tmp/transition.flac"
+        deck.meta.bpm = 120.0
+        deck.meta.first_beat_ms = 0.0
+        deck.meta.beatgrid_times_ms = [float(i * 500) for i in range(40)]
+
+        sm._on_master_changed(2, "test-master")
+        sm._apply_lighting(2, "autoloop", 8100, 120.0)
+
+        self.assertEqual(len(output.loads), 4)
+        self.assertIsNone(sm._os.pending_autoloop_arm_meta)
+        self.assertEqual(output.beats, [
+            (2, 120.0, 16, True),
+            (1, 120.0, 16, True),
+            (3, 120.0, 16, True),
+            (4, 120.0, 16, True),
+        ])
+        self.assertFalse(sm._os.autoloop_change_on_next_beat)
+
+    def test_autoloop_master_phrase_arm_delays_when_mid_phrase(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            output = FakeOutput()
+            sm = StateManager(
+                queue.Queue(), PositionCache(), output,
+                live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+            )
+        deck = sm._deck[2]
+        deck.playing = True
+        deck.meta.filepath = "/tmp/transition.flac"
+        deck.meta.bpm = 120.0
+        deck.meta.first_beat_ms = 0.0
+        deck.meta.beatgrid_times_ms = [float(i * 500) for i in range(40)]
+
+        sm._on_master_changed(2, "test-master")
+        sm._apply_lighting(2, "autoloop", 12000, 120.0)
+
+        self.assertEqual(output.loads, [])
+        self.assertIsNotNone(sm._os.pending_autoloop_arm_meta)
+        self.assertEqual(sm._os.autoloop_arm_sync_beat, 32)
+        self.assertFalse(sm._os.autoloop_change_on_next_beat)
+
+    def test_master_transition_autoloop_arm_marks_next_beat_change_once(self) -> None:
+        cache = PositionCache()
+        output = FakeOutput()
+        with patch.dict(os.environ, {"RBSS_AUTOLOOP_MASTER_PHRASE_ARM": "0"}, clear=True):
+            sm = StateManager(
+                queue.Queue(), cache, output,
+                live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+            )
+        deck = sm._deck[2]
+        deck.playing = True
+        deck.meta.filepath = "/tmp/transition.flac"
+        deck.meta.bpm = 120.0
+        deck.meta.first_beat_ms = 0.0
+        deck.meta.beatgrid_times_ms = [float(i * 500) for i in range(12)]
+
+        sm._on_master_changed(2, "test-master")
+        sm._apply_lighting(2, "autoloop", 2500, 120.0)
+        sm._os.lighting_mode = "autoloop"
+        sm._os.lighting_desired = "autoloop"
+        sm._os.lighting_stable_since = 0.0
+        sm._os.was_playing = True
+        sm._os.last_sent_bpm = 120.0
+        sm._os.last_beat_elapsed_ms = 2500
+
+        self.assertEqual(len(output.loads), 4)
+        self.assertTrue(sm._os.autoloop_change_on_next_beat)
+
+        cache.update(PositionSnapshot(2, elapsed_ms=3000, playing=False, updated_at=time.monotonic()))
+        sm._push_tick()
+
+        self.assertIn((2, 120.0, 6, True), output.beats)
+        self.assertFalse(sm._os.autoloop_change_on_next_beat)
+
+        cache.update(PositionSnapshot(2, elapsed_ms=3500, playing=False, updated_at=time.monotonic()))
+        sm._push_tick()
+
+        self.assertIn((2, 120.0, 7, False), output.beats)
+
     def test_next_autoloop_arm_phrase_uses_16_beat_phrase_starts(self) -> None:
         sm = StateManager(
             queue.Queue(), PositionCache(), FakeOutput(),
             live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
         )
 
-        self.assertEqual(sm._next_autoloop_arm_phrase(0.2), 17)
-        self.assertEqual(sm._next_autoloop_arm_phrase(5.2), 17)
-        self.assertEqual(sm._next_autoloop_arm_phrase(15.9), 17)
-        self.assertEqual(sm._next_autoloop_arm_phrase(16.0), 17)
-        self.assertEqual(sm._next_autoloop_arm_phrase(17.0), 33)
-        self.assertEqual(sm._next_autoloop_arm_phrase(-0.5), 17)
+        self.assertEqual(sm._next_autoloop_arm_phrase(0.2), 16)
+        self.assertEqual(sm._next_autoloop_arm_phrase(5.2), 16)
+        self.assertEqual(sm._next_autoloop_arm_phrase(15.9), 16)
+        self.assertEqual(sm._next_autoloop_arm_phrase(16.0), 32)
+        self.assertEqual(sm._next_autoloop_arm_phrase(17.0), 32)
+        self.assertEqual(sm._next_autoloop_arm_phrase(-0.5), 16)
+
+    def test_previous_autoloop_arm_phrase_anchors_recent_phrase_start(self) -> None:
+        sm = StateManager(
+            queue.Queue(), PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+
+        self.assertEqual(sm._previous_autoloop_arm_phrase(0.2), 0)
+        self.assertEqual(sm._previous_autoloop_arm_phrase(16.2), 16)
+        self.assertEqual(sm._previous_autoloop_arm_phrase(17.9), 16)
+        self.assertEqual(sm._previous_autoloop_arm_phrase(32.0), 32)
 
     def test_autoloop_arm_phrase_lock_sends_arm_bpm_at_target(self) -> None:
         output = FakeOutput()
@@ -264,10 +440,10 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._maybe_lock_autoloop_arm(1, 2, 120.5, 5.2)
 
         self.assertTrue(sm._os.autoloop_arm_pending)
-        self.assertEqual(sm._os.autoloop_arm_sync_beat, 17)
+        self.assertEqual(sm._os.autoloop_arm_sync_beat, 16)
         self.assertEqual(output.bpms, [])
 
-        sm._maybe_lock_autoloop_arm(1, 2, 120.5, 17.0)
+        sm._maybe_lock_autoloop_arm(1, 2, 120.5, 16.0)
 
         self.assertFalse(sm._os.autoloop_arm_pending)
         self.assertEqual(sm._os.autoloop_arm_sync_beat, 0)
@@ -280,7 +456,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
             live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
         )
         sm._os.autoloop_arm_pending = True
-        sm._os.autoloop_arm_sync_beat = 17
+        sm._os.autoloop_arm_sync_beat = 16
         sm._os.autoloop_arm_pending_since = 100.0
 
         sm._on_master_changed(2, "test")
@@ -338,6 +514,33 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertEqual(output.elapsed[-1][2], 3.0)
 
     def test_autoloop_beat_boundary_uses_grid_absolute_index(self) -> None:
+        for beat in (2, 4, 8, 16):
+            with self.subTest(beat=beat):
+                cache = PositionCache()
+                output = FakeOutput()
+                sm = StateManager(
+                    queue.Queue(), cache, output,
+                    live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+                )
+                deck = sm._deck[1]
+                deck.playing = True
+                deck.meta.bpm = 120.0
+                deck.meta.beatgrid_times_ms = [float(i * 500) for i in range(beat + 2)]
+                sm._os.lighting_mode = "autoloop"
+                sm._os.autoloop_arm_deck = 1
+                sm._os.autoloop_arm_bpm = 120.0
+                sm._os.was_playing = True
+                sm._os.last_sent_bpm = 120.0
+                sm._os.last_beat_elapsed_ms = (beat - 1) * 500
+                cache.update(PositionSnapshot(
+                    1, elapsed_ms=beat * 500, playing=False, updated_at=time.monotonic(),
+                ))
+
+                sm._push_tick()
+
+                self.assertIn((1, 120.0, beat, False), output.beats)
+
+    def test_scripted_beat_boundary_keeps_wrapped_change_marker(self) -> None:
         cache = PositionCache()
         output = FakeOutput()
         sm = StateManager(
@@ -346,19 +549,18 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         )
         deck = sm._deck[1]
         deck.playing = True
+        deck.scripted_id = 123
         deck.meta.bpm = 120.0
-        deck.meta.beatgrid_times_ms = [1000.0, 1500.0, 2100.0, 2700.0]
-        sm._os.lighting_mode = "autoloop"
-        sm._os.autoloop_arm_deck = 1
-        sm._os.autoloop_arm_bpm = 120.0
+        deck.meta.first_beat_ms = 0.0
+        sm._os.lighting_mode = "scripted"
         sm._os.was_playing = True
         sm._os.last_sent_bpm = 120.0
         sm._os.last_beat_elapsed_ms = 1500
-        cache.update(PositionSnapshot(1, elapsed_ms=2100, playing=False, updated_at=time.monotonic()))
+        cache.update(PositionSnapshot(1, elapsed_ms=2000, playing=False, updated_at=time.monotonic()))
 
         sm._push_tick()
 
-        self.assertIn((1, 120.0, 2, False), output.beats)
+        self.assertIn((1, 120.0, 0, True), output.beats)
 
     def test_autoloop_phrase_lock_uses_grid_absolute_beatpos(self) -> None:
         cache = PositionCache()
@@ -375,7 +577,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.autoloop_arm_deck = 1
         sm._os.autoloop_arm_bpm = 120.0
         sm._os.autoloop_arm_pending = True
-        sm._os.autoloop_arm_sync_beat = 17
+        sm._os.autoloop_arm_sync_beat = 16
         sm._os.was_playing = True
         sm._os.last_sent_bpm = 120.0
         sm._os.last_beat_elapsed_ms = 4800
@@ -434,7 +636,27 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._deck[1].playing = True
         return sm, output
 
-    def test_live_bpm_follow_default_off_keeps_v1_timing(self) -> None:
+    def test_live_bpm_follow_defaults_on_without_env(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            sm, output = self._autoloop_sm(FakeLiveProvider(132.0), follow=None)
+
+            bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.5, 100.0)
+
+        self.assertEqual(bpm, 132.0)
+        self.assertEqual(output.bpms, [(1, 132.0), (2, 132.0), (3, 132.0), (4, 132.0)])
+        self.assertEqual(sm._os.autoloop_arm_bpm, 132.0)
+
+    def test_live_bpm_follow_env_zero_disables_default_follow(self) -> None:
+        with patch.dict(os.environ, {"RBSS_LIVE_BPM_FOLLOW": "0"}, clear=True):
+            sm, output = self._autoloop_sm(FakeLiveProvider(132.0), follow=None)
+
+            bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.5, 100.0)
+
+        self.assertEqual(bpm, 128.0)
+        self.assertEqual(output.bpms, [])
+        self.assertEqual(sm._os.pending_live_bpm, 0.0)
+
+    def test_live_bpm_follow_explicit_false_keeps_v1_timing(self) -> None:
         sm, output = self._autoloop_sm(FakeLiveProvider(132.0), follow=False)
 
         bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.5, 100.0)
@@ -443,35 +665,65 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertEqual(output.bpms, [])
         self.assertEqual(sm._os.pending_live_bpm, 0.0)
 
-    def test_live_bpm_follow_schedules_and_applies_at_phrase_beat(self) -> None:
+    def test_live_bpm_follow_applies_changed_bpm_without_rearming_autoloop(self) -> None:
         sm, output = self._autoloop_sm(FakeLiveProvider(132.0), follow=True)
 
-        self.assertEqual(sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0), 128.0)
-        self.assertEqual(sm._os.pending_live_bpm, 132.0)
-        self.assertEqual(sm._os.pending_live_bpm_target_beat, 0)
-        self.assertEqual(sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.4, 101.1), 128.0)
-        self.assertEqual(sm._os.pending_live_bpm_target_beat, 0)
-        self.assertEqual(sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.4, 101.6), 128.0)
-        self.assertEqual(sm._os.pending_live_bpm_target_beat, 9)
-
-        bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 9.0, 101.7)
+        bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
 
         self.assertEqual(bpm, 132.0)
         self.assertEqual(sm._os.autoloop_arm_bpm, 132.0)
+        self.assertTrue(sm._os.autoloop_change_on_next_beat)
         self.assertEqual(sm._os.pending_live_bpm, 0.0)
         self.assertEqual(output.bpms, [(1, 132.0), (2, 132.0), (3, 132.0), (4, 132.0)])
+        self.assertEqual(output.loads, [])
+        self.assertEqual(output.loop_ons, [])
+        self.assertEqual(output.loop_offs, [])
+        self.assertEqual(output.plays, [])
 
-    def test_live_bpm_follow_replaces_pending_value_before_boundary(self) -> None:
+    def test_live_bpm_follow_marks_next_autoloop_beat_change_once(self) -> None:
         live = FakeLiveProvider(132.0)
-        sm, _ = self._autoloop_sm(live, follow=True)
+        cache = PositionCache()
+        output = FakeOutput()
+        sm = StateManager(queue.Queue(), cache, output, live_bpm=live, live_bpm_follow=True)
+        deck = sm._deck[1]
+        deck.playing = True
+        deck.meta.bpm = 128.0
+        deck.meta.beatgrid_times_ms = [float(i * 500) for i in range(5)]
+        sm._os.lighting_mode = "autoloop"
+        sm._os.autoloop_arm_deck = 1
+        sm._os.autoloop_arm_bpm = 128.0
+        sm._os.last_sent_bpm = 128.0
+        sm._os.was_playing = True
+        sm._os.last_beat_elapsed_ms = 500
 
-        sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
+        self.assertEqual(sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 1.2, 100.0), 132.0)
+        self.assertTrue(sm._os.autoloop_change_on_next_beat)
+        live.bpm = None
+        cache.update(PositionSnapshot(1, elapsed_ms=1000, playing=False, updated_at=time.monotonic()))
+
+        sm._push_tick()
+
+        self.assertIn((1, 132.0, 2, True), output.beats)
+        self.assertFalse(sm._os.autoloop_change_on_next_beat)
+
+        cache.update(PositionSnapshot(1, elapsed_ms=1500, playing=False, updated_at=time.monotonic()))
+        sm._push_tick()
+
+        self.assertIn((1, 132.0, 3, False), output.beats)
+
+    def test_live_bpm_follow_rate_limits_and_sends_latest_value(self) -> None:
+        live = FakeLiveProvider(132.0)
+        sm, output = self._autoloop_sm(live, follow=True)
+
+        self.assertEqual(sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0), 132.0)
         live.bpm = 134.0
-        sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.4, 100.5)
+        self.assertEqual(sm._maybe_apply_live_bpm_follow(1, 2, 132.0, 8.4, 100.05), 132.0)
+        self.assertEqual(output.bpms, [(1, 132.0), (2, 132.0), (3, 132.0), (4, 132.0)])
 
-        self.assertEqual(sm._os.pending_live_bpm, 134.0)
-        self.assertEqual(sm._os.pending_live_bpm_target_beat, 0)
-        self.assertAlmostEqual(sm._os.pending_live_bpm_since, 100.5)
+        self.assertEqual(sm._maybe_apply_live_bpm_follow(1, 2, 132.0, 8.6, 100.11), 134.0)
+
+        self.assertEqual(output.bpms[-4:], [(1, 134.0), (2, 134.0), (3, 134.0), (4, 134.0)])
+        self.assertEqual(sm._os.autoloop_arm_bpm, 134.0)
 
     def test_live_bpm_follow_clears_pending_when_live_bpm_unvalidated(self) -> None:
         live = FakeLiveProvider(132.0)
@@ -482,6 +734,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.4, 100.5)
 
         self.assertEqual(sm._os.pending_live_bpm, 0.0)
+        self.assertEqual(sm._os.autoloop_arm_bpm, 132.0)
 
     def test_live_bpm_follow_waits_until_resume_settle_completed(self) -> None:
         sm, output = self._autoloop_sm(FakeLiveProvider(132.0), follow=True)
@@ -496,12 +749,14 @@ class StateManagerLiveBPMTests(unittest.TestCase):
     def test_live_bpm_follow_clears_pending_on_master_change(self) -> None:
         sm, _ = self._autoloop_sm(FakeLiveProvider(132.0), follow=True)
         sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
+        sm._os.autoloop_change_on_next_beat = True
 
         sm._on_master_changed(2, "test")
 
         self.assertEqual(sm._os.pending_live_bpm, 0.0)
         self.assertEqual(sm._os.autoloop_arm_bpm, 0.0)
         self.assertEqual(sm._os.autoloop_arm_deck, 0)
+        self.assertFalse(sm._os.autoloop_change_on_next_beat)
 
     def test_live_bpm_follow_clears_pending_on_active_track_load(self) -> None:
         sm, _ = self._autoloop_sm(FakeLiveProvider(132.0), follow=True)
@@ -527,13 +782,13 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertEqual(sm._os.autoloop_arm_deck, 0)
         self.assertIsNone(live.bpm)
 
-    def test_next_live_bpm_follow_beat_uses_9_17_25_pattern(self) -> None:
-        sm, _ = self._autoloop_sm(FakeLiveProvider(132.0), follow=True)
+    def test_live_bpm_follow_ignores_small_jitter(self) -> None:
+        sm, output = self._autoloop_sm(FakeLiveProvider(128.05), follow=True)
 
-        self.assertEqual(sm._next_live_bpm_follow_beat(1.0), 9)
-        self.assertEqual(sm._next_live_bpm_follow_beat(8.1), 9)
-        self.assertEqual(sm._next_live_bpm_follow_beat(9.0), 17)
-        self.assertEqual(sm._next_live_bpm_follow_beat(24.9), 25)
+        bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
+
+        self.assertEqual(bpm, 128.0)
+        self.assertEqual(output.bpms, [])
 
 
 if __name__ == "__main__":
