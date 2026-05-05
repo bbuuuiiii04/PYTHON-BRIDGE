@@ -21,6 +21,9 @@ class TrackMetadata:
     bpm: float = 0.0
     content_id: str = ""
     first_beat_ms: float = 0.0
+    beatgrid_times_ms: list[float] = field(default_factory=list)
+    beatgrid_bpms: list[float] = field(default_factory=list)
+    beatgrid_source: str = ""
     total_ms: float = 0.0
     cue_positions: list[int] = field(default_factory=list)
 
@@ -30,6 +33,9 @@ class TrackMetadata:
         self.bpm = 0.0
         self.content_id = ""
         self.first_beat_ms = 0.0
+        self.beatgrid_times_ms = []
+        self.beatgrid_bpms = []
+        self.beatgrid_source = ""
         self.total_ms = 0.0
         self.cue_positions = []
 
@@ -107,6 +113,9 @@ class OutputState:
     last_armed_filepath:   str   = ""     # filepath sent in last autoloop arm; re-arm if changed
     autoloop_arm_bpm:      float = 0.0    # BPM chosen when current autoloop armed
     autoloop_arm_deck:     int   = 0      # deck for autoloop_arm_bpm
+    autoloop_arm_pending:  bool  = False  # True after arm, waiting for phrase lock
+    autoloop_arm_sync_beat: int  = 0      # Target phrase boundary beat
+    autoloop_arm_pending_since: float = 0.0  # monotonic time when arm was triggered
     last_autoloop_status_mono: float = 0.0  # rate-limit autoloop status diagnostics
     pending_live_bpm: float = 0.0
     pending_live_bpm_since: float = 0.0

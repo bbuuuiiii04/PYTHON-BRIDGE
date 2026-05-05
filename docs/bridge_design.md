@@ -62,6 +62,7 @@ StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC
 | Track load | TL log `[EVENT] Deck X loaded` | **Authoritative** |
 | Scripted track ID | TL OSC `/bridge/track_loaded` | Authoritative — routed via TL log deck |
 | Track filepath / BPM / ssid | ANLZ DB, lsof + length match, title DB lookup | Informational |
+| Autoloop beat phase | ANLZ `PQT2`/`PQTZ` beatgrid when valid | Phase authority for autoloop only |
 | Position (ms) | RB memory 60 Hz → MTC 25 fps → TL TC ~15s | Informational; priority in that order |
 | Memory play bit | RB memory | Corroboration only — never overrides TL |
 | BPM hint/fallback | ENGINE STATE every ~15s | Updates `d.meta.bpm`; static DB BPM until first update |
@@ -182,6 +183,25 @@ At autoloop arm:
    sent to SoundSwitch uses that value.
 3. Otherwise `arm_bpm` falls back to `meta_bpm`.
 4. The chosen value is stored in `OutputState.autoloop_arm_bpm`.
+5. The arm still fires immediately for workflow, then StateManager marks
+   `autoloop_arm_pending=True` so the push loop can send a second BPM at the
+   next 16-beat phrase start.
+
+Autoloop arm phrase-lock:
+
+- Phrase starts are one-based absolute beats: `(AUTOLOOP_ARM_PHRASE_BEATS * n) + 1`.
+- With `AUTOLOOP_ARM_PHRASE_BEATS=16`, arm phrase-lock targets `17, 33, 49, ...`.
+- This is intentionally separate from `AUTOLOOP_BEATS`, which controls the
+  loop length sent at arm time.
+- Beat `16` is the fourth beat of the fourth bar; the next phrase begins at
+  beat `17`.
+- Example simulations:
+  - arm at beat `5.2` -> target `17`; no BPM at `16.9`; BPM at `17.0`.
+  - arm at beat `299.3` in a 3:00, 138 BPM track -> target `305`.
+  - deck 1 -> deck 2 transition clears deck 1 pending lock; deck 2 gets its
+    own immediate arm and own phrase target, e.g. beat `172.4` -> `177`.
+- Pending arm phrase-lock is cleared on idle/stop, master change, active track
+  load, and Rekordbox restart.
 
 V1 default behavior:
 
@@ -242,9 +262,17 @@ Current autoloop timing state:
 
 - VDJ/SoundSwitch capture showed continuous `get_beatpos` and continuous
   `beat.pos`; the old bridge sent both as modulo-4 bar phase.
-- Autoloop `get_beatpos` sends absolute beat position.
-- Autoloop `beat.pos` sends absolute beat count.
+- When ANLZ beatgrid data is available, the bridge prefers non-empty `PQT2`
+  over `PQTZ`, maps live `elapsed_ms` onto marker order, and uses that as the
+  autoloop phase/position authority.
+- Autoloop `get_beatpos` sends absolute beat position from the beatgrid when
+  valid, otherwise from existing constant-BPM math.
+- Autoloop `beat.pos` sends absolute beat count from the same source.
+- Autoloop beat-boundary detection and arm phrase-lock use that same absolute
+  beat position, preserving `(16 * n) + 1` phrase targets.
 - Scripted/non-autoloop beat timing still uses the old wrapped behavior.
+- BPM sends remain governed by arm/live-BPM logic; the beatgrid is not used as
+  the outgoing BPM source.
 - `change=True` still fires every 4 beats.
 - User observed SoundSwitch's autoloop progress bar no longer restarts every
   4 beats with absolute autoloop beat positions active.

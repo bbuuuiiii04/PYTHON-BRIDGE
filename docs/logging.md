@@ -76,6 +76,8 @@ Examples:
 
 ```text
 [SS][AUTOLOOP-ARM]       green
+[SS][AUTOLOOP-ARM-PENDING] yellow
+[SS][AUTOLOOP-ARM-LOCKED]  green
 [SS][AUTOLOOP-TICK]      cyan
 [SS][LIVE-BPM-PENDING]   yellow
 [SS][LIVE-BPM-APPLY]     green
@@ -93,7 +95,7 @@ Normal autoloop status is periodic, not per beat:
 
 ```text
 [SS][AUTOLOOP-TICK] deck=1 elapsed=... beat=...
-  timing_bpm=134.30 arm_bpm=134.30 meta_bpm=134.30
+  timing_bpm=134.30 arm_bpm=134.30 meta_bpm=134.30 grid=PQT2:ANLZ0000.EXT
   live_bpm=134.30 live_age_ms=... live_addr=0x.../f32
   follow=on pending_bpm=none file=...
 ```
@@ -104,6 +106,8 @@ BPM names:
 - `live_bpm`: validated Rekordbox displayed BPM from memory.
 - `arm_bpm`: BPM selected for the current autoloop timing epoch.
 - `timing_bpm`: BPM currently used for outgoing bridge beat timing.
+- `grid`: autoloop phase source. `PQT2:...` or `PQTZ:...` means ANLZ beatgrid
+  drove absolute beat position; `fallback` means constant-BPM math was used.
 
 V2 live BPM follow is enabled with `RBSS_LIVE_BPM_FOLLOW=1`. During an active
 autoloop, live BPM changes are logged as pending first:
@@ -128,6 +132,20 @@ Apply means the bridge sent BPM to SoundSwitch:
 SoundSwitch has been observed to rearm autoloops on BPM sends. Treat
 `LIVE-BPM-APPLY` as a phrase-aligned controlled autoloop rearm, not merely an
 internal bridge timing update.
+
+Autoloop arm phrase-lock is separate from V2 live BPM follow. Master-switch
+autoloop arm still fires immediately, then the push loop schedules one more BPM
+send at the next one-based 16-beat phrase start:
+
+```text
+[SS][AUTOLOOP-ARM-PENDING] deck=1 current_beat=5.2 target_phrase_beat=17
+[SS][AUTOLOOP-ARM-LOCKED] deck=1 beat=17 bpm=120.50
+```
+
+With `AUTOLOOP_ARM_PHRASE_BEATS=16`, phrase-lock targets are `(16 * n) + 1`:
+`17, 33, 49, ...`. This is separate from `AUTOLOOP_BEATS`, which controls loop
+length. Beat `16` is the fourth beat of the fourth bar; the new phrase starts
+at beat `17`.
 
 ## Common Questions
 

@@ -20,6 +20,7 @@ Section map:
 """
 from __future__ import annotations
 
+import bisect
 import logging
 import math
 import os as _os
@@ -29,7 +30,7 @@ import time
 from typing import Optional
 
 from .config import (
-    AUTOLOOP_BEATS, ARM_GUARD_S, STOP_DEBOUNCE_S,
+    AUTOLOOP_ARM_PHRASE_BEATS, AUTOLOOP_BEATS, ARM_GUARD_S, STOP_DEBOUNCE_S,
     PLAY_SETTLE_MS, TIMING_COMPENSATION_MS,
     BPM_THRESHOLD_SCRIPTED, BPM_THRESHOLD_UNSCRIPTED,
     MEM_STALE_S,
@@ -66,6 +67,38 @@ def _compute_beat_pos(elapsed_ms: float, bpm: float, first_beat_ms: float = 0.0)
     offset = elapsed_ms - first_beat_ms
     pos = math.fmod(offset / beat_ms, 4.0)
     return pos if pos >= 0 else pos + 4.0
+
+
+def _compute_beatgrid_position(
+    elapsed_ms: float,
+    beatgrid_times_ms: list[float],
+) -> Optional[tuple[float, float]]:
+    """Return (wrapped_0_to_4, absolute) beat position from ordered grid markers."""
+    if len(beatgrid_times_ms) < 2:
+        return None
+
+    times = beatgrid_times_ms
+    idx = bisect.bisect_right(times, elapsed_ms) - 1
+    if idx < 0:
+        interval = times[1] - times[0]
+        if interval <= 0:
+            return None
+        abs_pos = (elapsed_ms - times[0]) / interval
+    elif idx >= len(times) - 1:
+        interval = times[-1] - times[-2]
+        if interval <= 0:
+            return None
+        abs_pos = (len(times) - 1) + ((elapsed_ms - times[-1]) / interval)
+    else:
+        interval = times[idx + 1] - times[idx]
+        if interval <= 0:
+            return None
+        abs_pos = idx + ((elapsed_ms - times[idx]) / interval)
+
+    wrapped = math.fmod(abs_pos, 4.0)
+    if wrapped < 0:
+        wrapped += 4.0
+    return wrapped, abs_pos
 
 
 class StateManager:
@@ -309,6 +342,7 @@ class StateManager:
             self._os.lighting_stable_since = 0.0
             self._os.autoloop_arm_bpm = 0.0
             self._os.autoloop_arm_deck = 0
+            self._clear_autoloop_arm_phrase_lock()
             self._clear_live_bpm_follow()
             if self._live_bpm is not None:
                 try:
@@ -350,6 +384,7 @@ class StateManager:
         self._os.not_playing_since = 0.0
         self._os.autoloop_arm_bpm = 0.0
         self._os.autoloop_arm_deck = 0
+        self._clear_autoloop_arm_phrase_lock()
         self._clear_live_bpm_follow()
 
     # ── Track load → lsof trigger ─────────────────────────────────────────────
@@ -360,6 +395,7 @@ class StateManager:
         d.scripted_id = 0
         d.load_gen += 1
         if deck == self._os.active_deck:
+            self._clear_autoloop_arm_phrase_lock()
             self._clear_live_bpm_follow()
         d.tl_title = title
         self._last_loaded_deck = deck
@@ -408,6 +444,9 @@ class StateManager:
         meta.bpm            = payload["bpm"]
         meta.content_id     = payload["content_id"]
         meta.first_beat_ms  = payload["first_beat_ms"]
+        meta.beatgrid_times_ms = list(payload.get("beatgrid_times_ms", []))
+        meta.beatgrid_bpms = list(payload.get("beatgrid_bpms", []))
+        meta.beatgrid_source = payload.get("beatgrid_source", "")
         meta.soundswitch_id = payload["soundswitch_id"]
         meta.total_ms       = payload["total_ms"]
         if self._live_bpm is not None and meta.bpm > 0:
@@ -448,6 +487,9 @@ class StateManager:
         d.meta.filepath      = track["filepath"]
         d.meta.bpm           = track["bpm"]
         d.meta.first_beat_ms = track["first_beat_ms"]
+        d.meta.beatgrid_times_ms = []
+        d.meta.beatgrid_bpms = []
+        d.meta.beatgrid_source = ""
         d.meta.total_ms      = float(track.get("total_ms", 0))
         # FM-5: use ssid from registry (populated at startup by resolve_filepaths)
         # never do synchronous disk I/O here
@@ -480,6 +522,9 @@ class StateManager:
         arm_meta = TrackMetadata(
             filepath=d.meta.filepath, soundswitch_id=d.meta.soundswitch_id,
             bpm=d.meta.bpm, first_beat_ms=d.meta.first_beat_ms, total_ms=d.meta.total_ms,
+            beatgrid_times_ms=list(d.meta.beatgrid_times_ms),
+            beatgrid_bpms=list(d.meta.beatgrid_bpms),
+            beatgrid_source=d.meta.beatgrid_source,
         )
         object.__setattr__(arm_meta, "elapsed_ms", elapsed_ms)
 
@@ -596,6 +641,9 @@ class StateManager:
             arm_bpm, bpm_source = self._autoloop_arm_bpm(deck, d.meta.bpm)
             self._os.autoloop_arm_bpm = arm_bpm
             self._os.autoloop_arm_deck = deck
+            self._os.autoloop_arm_pending = True
+            self._os.autoloop_arm_sync_beat = 0
+            self._os.autoloop_arm_pending_since = time.monotonic()
             self._clear_live_bpm_follow()
             self._os.last_live_follow_bpm = arm_bpm
             self._os.live_follow_generation += 1
@@ -616,6 +664,9 @@ class StateManager:
                     soundswitch_id="",
                     bpm=arm_bpm,
                     first_beat_ms=d.meta.first_beat_ms,
+                    beatgrid_times_ms=list(d.meta.beatgrid_times_ms),
+                    beatgrid_bpms=list(d.meta.beatgrid_bpms),
+                    beatgrid_source=d.meta.beatgrid_source,
                     total_ms=d.meta.total_ms,
                 )
                 object.__setattr__(arm_meta, "elapsed_ms", elapsed_ms)
@@ -635,6 +686,7 @@ class StateManager:
             self._os.last_armed_filepath = ""
             self._os.autoloop_arm_bpm = 0.0
             self._os.autoloop_arm_deck = 0
+            self._clear_autoloop_arm_phrase_lock()
             self._clear_live_bpm_follow()
             self._os.live_follow_generation += 1
             for dn in range(1, 5):
@@ -756,8 +808,13 @@ class StateManager:
         beat_pos = _compute_beat_pos(elapsed_ms, bpm, d.meta.first_beat_ms) if bpm > 0 else 0.0
         beat_ms = 60_000.0 / bpm if bpm > 0 else 0.0
         abs_beat_pos = ((elapsed_ms - d.meta.first_beat_ms) / beat_ms) if beat_ms > 0 else 0.0
+        grid_pos = None
+        if os.lighting_mode == "autoloop":
+            grid_pos = _compute_beatgrid_position(elapsed_ms, d.meta.beatgrid_times_ms)
+            if grid_pos is not None:
+                beat_pos, abs_beat_pos = grid_pos
         bpm = self._maybe_apply_live_bpm_follow(active, mirror, bpm, abs_beat_pos, now)
-        if bpm > 0:
+        if bpm > 0 and grid_pos is None:
             beat_pos = _compute_beat_pos(elapsed_ms, bpm, d.meta.first_beat_ms)
             beat_ms = 60_000.0 / bpm
             abs_beat_pos = (elapsed_ms - d.meta.first_beat_ms) / beat_ms
@@ -774,6 +831,10 @@ class StateManager:
         # even if memory (unreliable on DDJ-800 mode=4112) still shows playing.
         confident_playing = d.playing
         self._update_lighting(active, d, confident_playing, elapsed_ms, bpm, now)
+        if os.lighting_mode == "autoloop" and grid_pos is None:
+            grid_pos = _compute_beatgrid_position(elapsed_ms, d.meta.beatgrid_times_ms)
+            if grid_pos is not None:
+                beat_pos, abs_beat_pos = grid_pos
 
         # Arm guard recomputed here so it reflects any arm fired by _update_lighting.
         arm_guard = (now - os.last_arm_mono) < ARM_GUARD_S
@@ -864,7 +925,13 @@ class StateManager:
         # Beat boundary detection: fire a beat event when elapsed crosses the next beat
         if bpm > 0:
             this_beat = int(abs_beat_pos)
-            last_beat = int((os.last_beat_elapsed_ms - d.meta.first_beat_ms) / beat_ms) if beat_ms > 0 else 0
+            if os.lighting_mode == "autoloop" and grid_pos is not None:
+                last_grid_pos = _compute_beatgrid_position(
+                    os.last_beat_elapsed_ms, d.meta.beatgrid_times_ms,
+                )
+                last_beat = int(last_grid_pos[1]) if last_grid_pos is not None else this_beat
+            else:
+                last_beat = int((os.last_beat_elapsed_ms - d.meta.first_beat_ms) / beat_ms) if beat_ms > 0 else 0
 
             if this_beat > last_beat:
                 beat_index = this_beat % 4
@@ -873,6 +940,7 @@ class StateManager:
                 os.last_beat_elapsed_ms = elapsed_ms
                 for dk in (active, mirror, 3, 4):
                     self._out.send_beat(dk, bpm, beat_out, change=change)
+                self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos)
 
         # Elapsed + beatpos — send at every push tick (SS needs continuous updates).
         # Test A: in autoloop only, send absolute beat position to match VDJ-like
@@ -881,10 +949,11 @@ class StateManager:
         if os.lighting_mode == "autoloop" and now - os.last_autoloop_status_mono >= _AUTOLOOP_STATUS_LOG_S:
             os.last_autoloop_status_mono = now
             live_status = self._live_bpm_status_text(active)
+            grid_status = d.meta.beatgrid_source if grid_pos is not None else "fallback"
             log.info("[SS][AUTOLOOP-TICK] deck=%d elapsed=%dms beat=%.2f "
-                     "timing_bpm=%.2f arm_bpm=%.2f meta_bpm=%.2f %s %s file=%s",
+                     "timing_bpm=%.2f arm_bpm=%.2f meta_bpm=%.2f grid=%s %s %s file=%s",
                      active, elapsed_ms, beatpos_out,
-                     bpm, os.autoloop_arm_bpm, d.meta.bpm, live_status,
+                     bpm, os.autoloop_arm_bpm, d.meta.bpm, grid_status, live_status,
                      self._live_bpm_follow_status_text(),
                      os.last_armed_filepath.split("/")[-1]
                      if os.last_armed_filepath else "<none>")
@@ -904,6 +973,7 @@ class StateManager:
         os.last_sent_bpm          = 0.0
         os.autoloop_arm_bpm       = 0.0
         os.autoloop_arm_deck      = 0
+        self._clear_autoloop_arm_phrase_lock()
         self._clear_live_bpm_follow()
         os.live_follow_generation += 1
 
@@ -1009,6 +1079,54 @@ class StateManager:
         while beat <= 1 or beat % 8 != 1:
             beat += 1
         return beat
+
+    def _next_autoloop_arm_phrase(self, abs_beat_pos: float) -> int:
+        """Calculate next phrase boundary for autoloop arm synchronization."""
+        beat = max(0, int(abs_beat_pos)) + 1
+        while beat <= 1 or (beat - 1) % AUTOLOOP_ARM_PHRASE_BEATS != 0:
+            beat += 1
+        return beat
+
+    def _maybe_lock_autoloop_arm(
+        self,
+        active: int,
+        mirror: int,
+        bpm: float,
+        abs_beat_pos: float,
+    ) -> None:
+        os = self._os
+        if (
+            os.lighting_mode != "autoloop"
+            or os.autoloop_arm_deck != active
+            or not os.autoloop_arm_pending
+            or bpm <= 0
+        ):
+            return
+
+        if os.autoloop_arm_sync_beat == 0:
+            os.autoloop_arm_sync_beat = self._next_autoloop_arm_phrase(abs_beat_pos)
+            log.info("[SS][AUTOLOOP-ARM-PENDING] deck=%d current_beat=%.1f target_phrase_beat=%d",
+                     active, abs_beat_pos, os.autoloop_arm_sync_beat)
+
+        current_beat = int(abs_beat_pos)
+        if current_beat < os.autoloop_arm_sync_beat:
+            return
+
+        arm_bpm = os.autoloop_arm_bpm if os.autoloop_arm_bpm > 0 else bpm
+        for dk in (active, mirror, 3, 4):
+            self._out.send_bpm(dk, arm_bpm)
+        os.last_sent_bpm = arm_bpm
+        os.autoloop_arm_pending = False
+        os.autoloop_arm_sync_beat = 0
+        os.autoloop_arm_pending_since = 0.0
+        log.info("[SS][AUTOLOOP-ARM-LOCKED] deck=%d beat=%d bpm=%.2f",
+                 active, current_beat, arm_bpm)
+
+    def _clear_autoloop_arm_phrase_lock(self) -> None:
+        os = self._os
+        os.autoloop_arm_pending = False
+        os.autoloop_arm_sync_beat = 0
+        os.autoloop_arm_pending_since = 0.0
 
     def _clear_live_bpm_follow(self) -> None:
         os = self._os

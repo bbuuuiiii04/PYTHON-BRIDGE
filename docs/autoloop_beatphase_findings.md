@@ -111,6 +111,32 @@ advance continuously. It is currently active. The current active state is
 Test A + Test B: absolute autoloop `get_beatpos` and absolute autoloop
 `beat.pos`, with `change=True` still every 4 beats.
 
+## Beatgrid-Driven Autoloop Phase
+
+The bridge now uses Rekordbox ANLZ beatgrid data as the autoloop phase authority
+when the loaded track resolves through ANLZ and has at least two valid markers.
+
+- `PQT2` is preferred when present and non-empty; otherwise the bridge uses
+  `PQTZ`.
+- Marker order defines the bridge's absolute beat convention; the ANLZ beat
+  field is not used for absolute numbering.
+- Autoloop `get_beatpos`, autoloop `beat.pos` boundary detection, and arm
+  phrase-lock use the same grid-derived absolute beat position.
+- Scripted/non-autoloop timing remains on the previous constant-BPM wrapped
+  behavior.
+- BPM sends remain governed by arm/live-BPM logic; beatgrid is phase authority,
+  not the outgoing BPM source.
+- Missing/corrupt ANLZ or fewer than two valid markers falls back to the
+  existing constant-BPM math.
+
+Unit validation:
+
+```text
+python3 -m unittest discover -s rb_ss_bridge_v2/tests
+Ran 42 tests in 1.334s
+OK
+```
+
 ## Next Tests
 
 1. Live laser validation of Test A.
@@ -212,6 +238,19 @@ Runtime behavior:
 
 - At autoloop arm, StateManager snapshots validated live BPM when available and
   otherwise falls back to `d.meta.bpm`.
+- Master-switch autoloop arm still fires immediately. After arm, StateManager
+  sets `autoloop_arm_pending=True` and schedules a second BPM send at the next
+  one-based 16-beat phrase start: `(AUTOLOOP_ARM_PHRASE_BEATS * n) + 1`, e.g.
+  `17, 33, 49, ...`.
+- Arm phrase-lock is intentionally separate from `AUTOLOOP_BEATS`; loop length
+  changes should not move phrase-lock to 8-beat targets.
+- Beat `16` is not a phrase start in the bridge's absolute beat convention; it
+  is the fourth beat of the fourth bar. The phrase starts at beat `17`.
+- Simulated checks with the actual StateManager helper path:
+  - arm at beat `5.2` targets `17`; no send at `16.9`; sends BPM at `17.0`.
+  - 3:00 track at 138 BPM, arm at beat `299.3` / `2:10.130`, targets `305`.
+  - deck 1 pending phrase lock clears on master change to deck 2; deck 2 arms
+    immediately and schedules its own target, e.g. beat `172.4` targets `177`.
 - V1 default freezes active autoloop timing to the arm snapshot.
 - V2, enabled with `RBSS_LIVE_BPM_FOLLOW=1`, watches live BPM during an active
   autoloop. If it changes, stabilizes for 1.5s, and reaches a phrase-safe

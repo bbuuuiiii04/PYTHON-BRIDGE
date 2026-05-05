@@ -15,9 +15,142 @@ Before any code edit:
 
 Markdown documentation edits are allowed when requested.
 
-## Current Uncommitted Code Changes For Review
+## Recent Code Changes For Review
 
-These code changes exist in the worktree and should be reviewed before commit:
+These code changes should be reviewed before release:
+
+### Rekordbox beatgrid-driven autoloop beat position
+
+Implemented behavior:
+
+```text
+During ANLZ resolution, FilepathResolver reads beatgrid markers from Rekordbox
+analysis files. It prefers non-empty PQT2 and falls back to PQTZ. Marker order,
+not the ANLZ beat field, defines the bridge's absolute beat convention.
+
+TrackMetadata now carries beatgrid_times_ms, beatgrid_bpms, and beatgrid_source.
+first_beat_ms is set to the first grid marker when a valid grid exists.
+
+Autoloop timing maps live elapsed_ms onto the beatgrid. get_beatpos, beat.pos
+boundary detection, and arm phrase-lock all use that same grid-derived absolute
+beat position. Scripted/non-autoloop timing remains on existing wrapped
+constant-BPM behavior.
+
+BPM sends are unchanged: arm_bpm/live-BPM logic remains the outgoing BPM source.
+The beatgrid is phase/position authority only.
+
+If ANLZ parsing fails or the grid has fewer than two valid markers, behavior
+falls back to existing constant-BPM math.
+```
+
+Files/functions changed:
+
+```text
+filepath_resolver.py
+  _extract_beatgrid_from_anlz()
+  _grid_from_tag()
+  _candidate_anlz_paths()
+  _db_lookup_by_anlz()
+
+models.py
+  TrackMetadata.beatgrid_times_ms
+  TrackMetadata.beatgrid_bpms
+  TrackMetadata.beatgrid_source
+
+state_manager.py
+  _compute_beatgrid_position()
+  _on_filepath_resolved()
+  _apply_lighting(..., mode="autoloop")
+  _push_tick()
+
+tests/test_filepath_resolver_beatgrid.py
+  PQT2/PQTZ preference and corrupt/missing fallback coverage.
+
+tests/test_live_bpm_service.py
+  beatgrid interpolation, autoloop elapsed, beat boundary, phrase-lock, and
+  scripted fallback coverage.
+```
+
+Validation:
+
+```text
+python3 -m unittest discover -s rb_ss_bridge_v2/tests
+Ran 42 tests in 1.334s
+OK
+```
+
+### Autoloop arm phrase-lock synchronization
+
+Implemented behavior:
+
+```text
+Master-switch autoloop arm remains immediate. After the immediate arm,
+StateManager marks OutputState.autoloop_arm_pending=True and waits for the next
+one-based 16-beat phrase start before sending BPM to SoundSwitch again.
+
+Phrase starts are (AUTOLOOP_ARM_PHRASE_BEATS * n) + 1. With
+AUTOLOOP_ARM_PHRASE_BEATS=16, the lock beats are 17, 33, 49, 65, ...
+
+AUTOLOOP_ARM_PHRASE_BEATS is intentionally separate from AUTOLOOP_BEATS. If
+AUTOLOOP_BEATS is changed to an 8-beat loop length, arm phrase-lock still uses
+16-beat phrase starts.
+
+Beat 16 is the fourth beat of the fourth bar, not a new phrase. The new phrase
+begins at beat 17.
+
+Pending arm phrase-lock state clears on idle/stop, master change, active track
+load, and Rekordbox restart.
+```
+
+Files/functions changed:
+
+```text
+models.py
+  OutputState.autoloop_arm_pending
+  OutputState.autoloop_arm_sync_beat
+  OutputState.autoloop_arm_pending_since
+
+config.py
+  AUTOLOOP_ARM_PHRASE_BEATS = 16
+
+state_manager.py
+  _next_autoloop_arm_phrase()
+  _maybe_lock_autoloop_arm()
+  _clear_autoloop_arm_phrase_lock()
+  _apply_lighting(..., mode="autoloop")
+  _push_tick()
+  reset paths for master change, idle, stop, active track load, RB restart
+
+tests/test_live_bpm_service.py
+  unit coverage for one-based phrase targets, phrase-lock BPM send, and reset.
+```
+
+Simulation findings:
+
+```text
+arm at beat 5.2:
+  target=17
+  no BPM at 16.9
+  BPM sent to decks 1,2,3,4 at 17.0
+
+3:00 song at 138 BPM, arm at 2:10.130 / beat 299.3:
+  total song beats ~= 414
+  target=305
+  no BPM at 304.9
+  BPM sent to decks 1,2,3,4 at 305.0
+
+deck 1 -> deck 2 transition:
+  deck 1 pending target=305 before switch
+  master change clears pending target and autoloop arm deck
+  deck 2 immediate arm sends deck loads to 2,1,3,4
+  deck 2 beat 172.4 targets 177 and sends BPM at 177.0
+```
+
+Validation so far:
+
+```text
+python3 -m unittest discover -s rb_ss_bridge_v2/tests
+```
 
 ### Live BPM service and V2 controlled autoloop rearm
 
@@ -587,6 +720,8 @@ Current diagnostic logging:
 ```text
 state_manager.py:
 - [SS][AUTOLOOP-ARM] logs deck, mirror, elapsed, source, timing_bpm, arm_bpm, meta_bpm, loop length, filepath, previous file.
+- [SS][AUTOLOOP-ARM-PENDING] logs the current absolute beat and the one-based phrase-lock target beat.
+- [SS][AUTOLOOP-ARM-LOCKED] logs the phrase-lock BPM send beat and BPM.
 - [SS][AUTOLOOP-TICK] logs periodic elapsed, absolute beat, timing_bpm, arm_bpm, meta_bpm, live_bpm, follow state, pending state, filepath.
 - [SS][LIVE-BPM-PENDING] logs first/rate-limited pending V2 BPM and target beat.
 - [SS][LIVE-BPM-APPLY] logs the phrase-boundary BPM send / controlled SoundSwitch rearm.
@@ -604,6 +739,10 @@ Observed result:
 ```text
 SoundSwitch autoloop progress bar no longer restarts every 4 beats with Test A+B active.
 Progress speed changes with BPM as expected.
+Autoloop arm phrase-lock targets one-based 16-beat phrase starts: 17, 33, 49, ...
+Simulated arm at beat 299.3 in a 3:00 138 BPM track targeted beat 305.
+Simulated deck 1 -> deck 2 master change cleared deck 1 pending state and gave
+deck 2 its own target.
 V2 live BPM follow intentionally sends BPM at phrase-safe absolute beats because
 SoundSwitch rearms autoloop on BPM sends.
 ```

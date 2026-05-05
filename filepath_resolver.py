@@ -21,6 +21,7 @@ import subprocess
 import threading
 import time
 import warnings
+from pathlib import Path
 from typing import Optional
 
 from .config import AUDIO_EXTS, LSOF_LEN_TOLERANCE_MS, LSOF_COOLDOWN_S
@@ -29,6 +30,12 @@ from .models import BridgeEvent, Ev, PositionSnapshot
 
 log = logging.getLogger("filepath_resolver")
 LOG = get_logging_manager()
+
+_EMPTY_BEATGRID = {
+    "beatgrid_times_ms": [],
+    "beatgrid_bpms": [],
+    "beatgrid_source": "",
+}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -97,6 +104,73 @@ def _read_soundswitch_id(filepath: str) -> str:
     return ""
 
 
+def _candidate_anlz_paths(anlz_path: str) -> list[Path]:
+    path = Path(anlz_path)
+    candidates = [path]
+    if path.suffix.upper() in (".DAT", ".EXT", ".2EX"):
+        for suffix in (".2EX", ".EXT", ".DAT"):
+            candidates.append(path.with_suffix(suffix))
+
+    seen: set[str] = set()
+    result = []
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen and candidate.exists():
+            seen.add(key)
+            result.append(candidate)
+    return result
+
+
+def _grid_from_tag(tag, source: str) -> Optional[dict]:  # type: ignore[no-untyped-def]
+    try:
+        times = [float(t) * 1000.0 for t in tag.get_times()]
+        bpms = [float(bpm) for bpm in tag.get_bpms()]
+    except Exception as exc:
+        log.debug("ANLZ %s beatgrid read failed: %s", source, exc)
+        return None
+
+    rows = sorted(
+        (time_ms, bpm)
+        for time_ms, bpm in zip(times, bpms)
+        if time_ms >= 0.0 and bpm > 0.0
+    )
+    if len(rows) < 2:
+        return None
+
+    return {
+        "beatgrid_times_ms": [time_ms for time_ms, _ in rows],
+        "beatgrid_bpms": [bpm for _, bpm in rows],
+        "beatgrid_source": source,
+    }
+
+
+def _extract_beatgrid_from_anlz(anlz_path: str) -> dict:
+    """Return beatgrid fields from ANLZ data, preferring PQT2 over PQTZ."""
+    try:
+        from pyrekordbox.anlz import AnlzFile  # type: ignore
+    except Exception as exc:
+        log.debug("ANLZ beatgrid unavailable: pyrekordbox import failed: %s", exc)
+        return dict(_EMPTY_BEATGRID)
+
+    parsed = []
+    for path in _candidate_anlz_paths(anlz_path):
+        try:
+            parsed.append((path, AnlzFile.parse_file(path)))
+        except Exception as exc:
+            log.debug("ANLZ beatgrid parse failed for %s: %s", path, exc)
+
+    for tag_type in ("PQT2", "PQTZ"):
+        for path, anlz in parsed:
+            for tag in anlz.getall_tags(tag_type):
+                grid = _grid_from_tag(tag, f"{tag_type}:{path.name}")
+                if grid:
+                    log.debug("ANLZ beatgrid %s markers=%d",
+                              grid["beatgrid_source"], len(grid["beatgrid_times_ms"]))
+                    return grid
+
+    return dict(_EMPTY_BEATGRID)
+
+
 def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
     """Look up track metadata using the ANLZ file path UUID.
 
@@ -108,6 +182,8 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
         log.debug("_db_lookup_by_anlz: cannot extract UUID from %s", anlz_path)
         return None
     anlz_uuid = m.group(1)
+    beatgrid = _extract_beatgrid_from_anlz(anlz_path)
+    first_beat_ms = beatgrid["beatgrid_times_ms"][0] if beatgrid["beatgrid_times_ms"] else 0.0
 
     db = None
     try:
@@ -126,7 +202,8 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                     'filepath':       fp,
                     'bpm':            bpm,
                     'content_id':     str(c.ID),
-                    'first_beat_ms':  0.0,
+                    'first_beat_ms':  first_beat_ms,
+                    **beatgrid,
                     'soundswitch_id': ssid,
                     'total_ms':       float((c.Length * 1000) if c.Length else 0),
                 }
@@ -275,6 +352,7 @@ class FilepathResolver:
                     "bpm":            bpm,
                     "content_id":     str(best.ID),
                     "first_beat_ms":  0.0,
+                    **_EMPTY_BEATGRID,
                     "soundswitch_id": ssid,
                     "total_ms":       total_ms,
                     "load_gen":       load_gen,
@@ -384,6 +462,7 @@ class FilepathResolver:
                     "bpm":             bpm,
                     "content_id":      content_id,
                     "first_beat_ms":   first_beat_ms,
+                    **_EMPTY_BEATGRID,
                     "soundswitch_id":  ssid,
                     "total_ms":        total_ms,
                     "load_gen":        load_gen,
