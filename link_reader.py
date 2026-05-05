@@ -92,6 +92,8 @@ class LinkReader:
 
         log.info("LinkReader: Ableton Link active — polling at 60 Hz")
         last_logged_bpm = 0.0
+        last_logged_at = 0.0
+        last_logged_peers = 0
 
         while not self._stop.is_set():
             t0 = time.monotonic()
@@ -104,15 +106,29 @@ class LinkReader:
                         self._bpm       = bpm
                         self._phase     = phase
                         self._available = bpm > 0
-                    if bpm > 0 and abs(bpm - last_logged_bpm) >= 0.1:
+                    now = time.monotonic()
+                    should_log = (
+                        bpm > 0
+                        and (
+                            last_logged_bpm == 0.0
+                            or peers != last_logged_peers
+                            or abs(bpm - last_logged_bpm) >= 0.5
+                            or now - last_logged_at >= 10.0
+                        )
+                    )
+                    if should_log:
                         log.info("Link BPM: %.2f (peers=%d)", bpm, peers)
                         last_logged_bpm = bpm
+                        last_logged_at = now
+                        last_logged_peers = peers
                 else:
                     with self._lock:
                         self._available = False
                     if last_logged_bpm != 0.0:
                         log.info("Link: no peers")
                         last_logged_bpm = 0.0
+                        last_logged_at = time.monotonic()
+                        last_logged_peers = 0
             except Exception as exc:
                 log.debug("LinkReader: poll error: %s", exc)
                 with self._lock:

@@ -299,11 +299,11 @@ def _scan_objc_zone(
         results.append((inner_ptr, rate))
 
     results.sort(key=lambda x: abs(x[1] - 44100))
-    log.info("ObjC zone scan inner1±0x%x (dt=%.2fs): %d hit(s)",
+    log.info("[RBMEM][SCAN] deck2 ObjC zone inner1±0x%x dt=%.2fs hits=%d",
              window, actual_dt, len(results))
     for ptr, rate in results[:5]:
         pos_off = ptr - inner1 + RB_POS_OFF
-        log.info("  pos=inner1%+#x  inner_ptr=inner1%+#x  rate=%.1f",
+        log.info("[RBMEM][CANDIDATE] deck2 zone pos=inner1%+#x inner=inner1%+#x rate=%.1f",
                  pos_off, ptr - inner1, rate)
     return [ptr for ptr, _ in results]
 
@@ -360,10 +360,10 @@ def _scan_static_elapsed_candidates(
         matches.append((inner_ptr, delta_ms, ms))
 
     matches.sort(key=lambda x: x[1])
-    log.info("ObjC static scan inner1±0x%x target=%dms: %d hit(s)",
+    log.info("[RBMEM][SCAN] deck2 static inner1±0x%x target=%dms hits=%d",
              window, target_ms, len(matches))
     for ptr, delta_ms, ms in matches[:5]:
-        log.info("  static pos=inner1%+#x inner_ptr=inner1%+#x ms=%d delta=%d",
+        log.info("[RBMEM][CANDIDATE] deck2 static pos=inner1%+#x inner=inner1%+#x ms=%d delta=%d",
                  ptr - inner1 + RB_POS_OFF, ptr - inner1, ms, delta_ms)
 
     if not matches:
@@ -372,7 +372,7 @@ def _scan_static_elapsed_candidates(
     best_delta = matches[0][1]
     close = [m for m in matches if m[1] <= best_delta + _D2_STATIC_GAP_MS]
     if len(close) > 1:
-        log.info("deck2 provisional static scan ambiguous: best_delta=%d close_hits=%d",
+        log.info("[RBMEM][INCONCLUSIVE] deck2 static scan ambiguous best_delta=%d close_hits=%d",
                  best_delta, len(close))
         return []
 
@@ -417,7 +417,7 @@ def _scan_objc_heap_moving(
             break
 
     if not chunks0:
-        log.info("ObjC heap moving scan: no readable chunks")
+        log.info("[RBMEM][INCONCLUSIVE] deck2 heap moving scan no readable chunks")
         return []
 
     time.sleep(dt)
@@ -468,10 +468,10 @@ def _scan_objc_heap_moving(
         if len(deduped) >= _D2_HEAP_MAX_CANDIDATES:
             break
 
-    log.info("ObjC heap moving scan regions=%d chunks=%d bytes=%d target=%dms: %d hit(s)",
+    log.info("[RBMEM][SCAN] deck2 heap moving regions=%d chunks=%d bytes=%d target=%dms hits=%d",
              len(regions), len(chunks0), bytes_queued, target_ms, len(deduped))
     for ptr, rate, delta_ms in deduped[:5]:
-        log.info("  heap candidate inner=0x%x rate=%.1f target_delta=%d",
+        log.info("[RBMEM][CANDIDATE] deck2 heap inner=0x%x rate=%.1f target_delta=%d",
                  ptr, rate, delta_ms)
     return [ptr for ptr, _, _ in deduped]
 
@@ -508,20 +508,20 @@ def _strict_eval_candidate(
     ms_end = max(0, int(raws[-1] * RB_SCALE))
 
     if neg_jumps > 0:
-        log.info("deck2 candidate 0x%x REJECT: neg_jumps=%d rate=%.0f ms=%d",
+        log.info("[RBMEM][REJECT] deck2 candidate=0x%x neg_jumps=%d rate=%.0f ms=%d",
                  ptr, neg_jumps, rate, ms_end)
         return False
 
     if not (_D2_RATE_LO <= rate <= _D2_RATE_HI):
-        log.info("deck2 candidate 0x%x REJECT: rate=%.0f (need %d–%d) ms=%d",
+        log.info("[RBMEM][REJECT] deck2 candidate=0x%x rate=%.0f need=%d-%d ms=%d",
                  ptr, rate, _D2_RATE_LO, _D2_RATE_HI, ms_end)
         return False
 
     if ms_end > MEM_MAX_ELAPSED_MS:
-        log.info("deck2 candidate 0x%x REJECT: ms=%d out of range", ptr, ms_end)
+        log.info("[RBMEM][REJECT] deck2 candidate=0x%x ms=%d out_of_range", ptr, ms_end)
         return False
 
-    log.info("deck2 candidate 0x%x PASS: rate=%.0f samples=%d ms=%d",
+    log.info("[RBMEM][VALIDATED] deck2 candidate=0x%x rate=%.0f samples=%d ms=%d",
              ptr, rate, len(samples), ms_end)
     return True
 
@@ -665,7 +665,7 @@ class RBSession:
             if ptr and ptr not in seen and _quick_plausible_inner(self.task, ptr):
                 candidates.append(ptr)
                 seen.add(ptr)
-                log.info("deck2 candidate %s: 0x%x", label, ptr)
+                log.info("[RBMEM][CANDIDATE] deck2 %s inner=0x%x", label, ptr)
 
         if self._deck2_provisional:
             _add(self._deck2_provisional, "P(provisional)")
@@ -688,7 +688,7 @@ class RBSession:
                 if ptr != inner1 and ptr not in seen:
                     candidates.append(ptr)
                     seen.add(ptr)
-                    log.info("deck2 candidate C(zone): 0x%x", ptr)
+                    log.info("[RBMEM][CANDIDATE] deck2 C(zone) inner=0x%x", ptr)
 
             if target_ms is not None and not zone_hits and not self._deck2_provisional:
                 static_hits = _scan_static_elapsed_candidates(
@@ -701,7 +701,7 @@ class RBSession:
                         candidates.append(ptr)
                         seen.add(ptr)
                         log.info(
-                            "deck2 provisional set: 0x%x target_ms=%d awaiting movement validation",
+                            "[RBMEM][PENDING] deck2 provisional=0x%x target_ms=%d awaiting movement validation",
                             ptr, target_ms,
                         )
 
@@ -716,9 +716,9 @@ class RBSession:
                     if ptr != inner1 and ptr not in seen:
                         candidates.append(ptr)
                         seen.add(ptr)
-                        log.info("deck2 candidate D(heap): 0x%x", ptr)
+                        log.info("[RBMEM][CANDIDATE] deck2 D(heap) inner=0x%x", ptr)
 
-        log.info("deck2 resolution: %d candidate(s) entering 4s validation window",
+        log.info("[RBMEM][SCAN] deck2 resolution candidates=%d window=4s",
                  len(candidates))
         if not candidates:
             return False
@@ -765,15 +765,15 @@ class RBSession:
             if result is True:
                 self._deck2_inner     = ptr
                 if self._deck2_provisional == ptr:
-                    log.info("deck2 provisional promoted: 0x%x", ptr)
+                    log.info("[RBMEM][VALIDATED] deck2 provisional promoted inner=0x%x", ptr)
                 self._deck2_provisional = None
                 self._deck2_fail_count = 0
-                log.info("deck2 inner committed: 0x%x", ptr)
+                log.info("[RBMEM][VALIDATED] deck2 inner committed=0x%x", ptr)
                 committed = True
                 break
             if result is False:
                 if self._deck2_provisional == ptr:
-                    log.info("deck2 provisional rejected: 0x%x", ptr)
+                    log.info("[RBMEM][REJECT] deck2 provisional rejected inner=0x%x", ptr)
                     self._deck2_provisional = None
                 all_inconclusive = False
 
@@ -784,9 +784,9 @@ class RBSession:
 
         if not committed:
             if all_inconclusive:
-                log.info("deck2: validation inconclusive (deck paused?) — will retry")
+                log.info("[RBMEM][INCONCLUSIVE] deck2 validation inconclusive deck_paused_maybe retrying")
             else:
-                log.warning("deck2: all candidates failed strict validation — will retry")
+                log.warning("[RBMEM][INVALID] deck2 all candidates failed strict validation; retrying")
 
     # ── Runtime reads ────────────────────────────────────────────────────────
 
@@ -817,7 +817,7 @@ class RBSession:
         except OSError:
             self._deck2_fail_count += 1
             if self._deck2_fail_count >= 3:
-                log.warning("deck2: %d consecutive read failures — invalidating",
+                log.warning("[RBMEM][INVALID] deck2 read_failures=%d invalidating",
                             self._deck2_fail_count)
                 self._deck2_inner      = None
                 self._deck2_fail_count = 0
@@ -893,7 +893,7 @@ class RBMemoryReader(threading.Thread):
         return self._session
 
     def run(self) -> None:
-        log.info("RBMemoryReader: starting at %d Hz", MEM_POLL_HZ)
+        log.info("[RBMEM][STATUS] reader starting hz=%d", MEM_POLL_HZ)
         while not self._stop.is_set():
             t0 = time.monotonic()
             self._tick()
@@ -910,7 +910,7 @@ class RBMemoryReader(threading.Thread):
             import os as _os
             _os.kill(self._session.pid, 0)
         except (OSError, ProcessLookupError):
-            log.warning("RBMemoryReader: RB pid %d gone — detaching", self._session.pid)
+            log.warning("[RBMEM][INVALID] rekordbox pid=%d gone; detaching", self._session.pid)
             old_pid = self._session.pid
             self._session = None
             self._cache.clear()
@@ -952,7 +952,7 @@ class RBMemoryReader(threading.Thread):
                 s.poll_deck2_candidates(now_t)
             else:
                 if d2_play_started:
-                    log.info("RBMemoryReader: deck2 play trigger — starting resolution")
+                    log.info("[RBMEM][SCAN] deck2 play trigger; starting resolution")
                 retry_s = (
                     _D2_PROVISIONAL_RETRY_S if s._deck2_provisional
                     else _D2_RETRY_PLAYING_S if deck2_playing
@@ -971,7 +971,7 @@ class RBMemoryReader(threading.Thread):
                             target_ms = self._deck_elapsed_hint(2)
                         except Exception:
                             target_ms = None
-                    log.info("RBMemoryReader: starting deck-2 resolution attempt=%d window=0x%x target_ms=%s",
+                    log.info("[RBMEM][SCAN] deck2 resolution attempt=%d window=0x%x target_ms=%s",
                              self._d2_attempts, scan_window, target_ms if target_ms is not None else "none")
                     s.start_deck2_resolution(
                         self._objc_regions,
@@ -1011,9 +1011,9 @@ class RBMemoryReader(threading.Thread):
             self._d2_attempts = 0
             self._d2_was_playing = False
             self._d2_play_seen_at = 0.0
-            log.info("RBMemoryReader: attached pid=%d base=0x%x objc_regions=%d",
+            log.info("[RBMEM][ATTACH] attached pid=%d base=0x%x objc_regions=%d",
                      pid, base, len(self._objc_regions))
         except Exception as exc:
-            log.warning("RBMemoryReader: attach failed pid=%d: %s — retry in %ds",
+            log.warning("[RBMEM][ERROR] attach failed pid=%d error=%s retry_s=%d",
                         pid, exc, int(self._ATTACH_RETRY_S))
             time.sleep(self._ATTACH_RETRY_S)

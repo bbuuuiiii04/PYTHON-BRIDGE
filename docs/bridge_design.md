@@ -20,6 +20,7 @@ No Frida. No injection. Position from direct RB memory reads via mach task API.
 |-----------|------|------|
 | `TLLogTailer` | `tl_tailer.py` | Tails TL log; emits MASTER_CHANGED, TRACK_LOADED, PLAY, PAUSE, ANLZ_PATH, BPM_UPDATE, TC_UPDATE |
 | `RBMemoryReader` | `rb_memory.py` | Reads RB process memory at 60 Hz; writes PositionCache |
+| `LiveBPMService` | `live_bpm.py` | Read-only background Rekordbox memory service; discovers, validates, and refreshes per-deck live BPM |
 | `MTCReader` | `mtc_reader.py` | Reads MTC quarter-frames + full-frame SysEx from IAC Bus 1 at ~25 fps; emits TC_UPDATE |
 | `FilepathResolver` | `filepath_resolver.py` | Resolves filepath metadata. With ANLZ: ANLZ DB lookup, then lsof fallback on miss. Without ANLZ: lsof and title DB lookup race in parallel; emits FILEPATH_RESOLVED |
 | `StateManager` | `state_manager.py` | Single event-loop + 200 Hz push loop thread; owns all DeckState; drives SS output |
@@ -36,6 +37,7 @@ All DeckState writes happen in the **StateManager thread only** — no locks nee
 |--------|--------|-------|
 | StateManager | DeckState, OutputState | PositionCache (short locked reads) |
 | RBMemoryReader | PositionCache (locked) | RB process memory |
+| LiveBPMService | internal validated BPM state (locked) | RB process memory |
 | TLLogTailer | event_queue | TL log file |
 | MTCReader | event_queue | IAC Bus 1 MIDI port |
 | FilepathResolver (daemon threads) | event_queue | lsof, DB, audio files |
@@ -62,12 +64,19 @@ StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC
 | Track filepath / BPM / ssid | ANLZ DB, lsof + length match, title DB lookup | Informational |
 | Position (ms) | RB memory 60 Hz → MTC 25 fps → TL TC ~15s | Informational; priority in that order |
 | Memory play bit | RB memory | Corroboration only — never overrides TL |
-| BPM (live pitch-adjusted) | ENGINE STATE every ~15s | Updates `d.meta.bpm`; static DB BPM until first update |
+| BPM hint/fallback | ENGINE STATE every ~15s | Updates `d.meta.bpm`; static DB BPM until first update |
+| BPM live/displayed | LiveBPMService current-session memory validation | Used for autoloop arm snapshot when valid; V2 phrase-boundary follow when enabled |
 
 **Critical rule**: TL log is truth. Memory confirms; it never overrides.
 - `d.playing` (from TL PLAY/PAUSE) is the authoritative play state.
 - `confident_playing = d.playing` in push loop — DDJ-800 mode=4112 makes memory play bit unreliable.
 - Stop detection, lighting mode, resume detection all key off `d.playing`.
+
+Live BPM is a separate read-only memory signal. It is never promoted from a
+static address match. A candidate is usable only after current-session
+pid/base/deck validation through observed BPM movement. If validation is absent,
+stale, non-finite, unreadable, or disabled, the bridge falls back to
+`d.meta.bpm`.
 
 ---
 
@@ -121,7 +130,7 @@ not d.playing                      →  desired = "idle"
 | From | To | SS action |
 |------|----|-----------|
 | any | scripted | `_arm_scripted(deck, scripted_id)` |
-| any | autoloop | clear filepaths on all 4, then `send_deck_load` with ssid="" + loop=on to all 4 |
+| any | autoloop | snapshot BPM, clear filepaths on all 4, then `send_deck_load` with ssid="" + loop=on to all 4 |
 | any | idle | `send_deck_play(off)` + `send_deck_clear` to all 4 decks |
 
 Transitions only fire on mode change. Exception: autoloop re-arms if `d.meta.filepath` changes after initial arm (`last_armed_filepath` check).
@@ -155,6 +164,62 @@ Elapsed is refreshed from PositionCache at phase 1 time. If snap is stale, uses 
 
 ---
 
+## Autoloop BPM policy
+
+Autoloop has four BPM concepts:
+
+| Name | Meaning |
+|------|---------|
+| `meta_bpm` | Current metadata/fallback BPM from library/ENGINE STATE (`d.meta.bpm`) |
+| `live_bpm` | Fresh validated Rekordbox displayed BPM from LiveBPMService |
+| `arm_bpm` | BPM chosen for the current SoundSwitch autoloop arm/timing epoch |
+| `timing_bpm` | BPM currently used by the bridge for outgoing beat/elapsed timing |
+
+At autoloop arm:
+
+1. StateManager asks LiveBPMService for the active deck's current BPM.
+2. If a validated live BPM exists, `arm_bpm` uses it and the deck-load metadata
+   sent to SoundSwitch uses that value.
+3. Otherwise `arm_bpm` falls back to `meta_bpm`.
+4. The chosen value is stored in `OutputState.autoloop_arm_bpm`.
+
+V1 default behavior:
+
+- Active autoloop timing is frozen to the arm snapshot.
+- Later live BPM changes are logged as diagnostics but do not change
+  `timing_bpm` until disarm/rearm.
+- This is the default fail-closed behavior.
+
+V2 live-follow behavior:
+
+- Enabled only with `RBSS_LIVE_BPM_FOLLOW=1`.
+- During an already armed autoloop, the bridge watches validated `live_bpm`.
+- If live BPM diverges from `timing_bpm`, the bridge creates or replaces one
+  pending BPM update.
+- The pending value must remain stable for 1.5 seconds.
+- The bridge then schedules the BPM send at the next phrase-safe absolute beat:
+  `beat_number % 8 == 1` and `beat_number > 1`, for example `9, 17, 25, ...`.
+- SoundSwitch has been observed to rearm autoloops when it receives the BPM
+  update. This is intentional in V2: the phrase boundary is the controlled
+  musical point where that rearm is allowed to happen.
+- After sending BPM to all four SoundSwitch deck slots, StateManager updates
+  `autoloop_arm_bpm` / `timing_bpm` to the new value and clears the pending
+  update.
+
+V2 cancellation:
+
+- Pending live-follow state is cleared on idle/stop, deck switch, active track
+  load, Rekordbox restart, live BPM invalidation/stale read, and resume-settle
+  state.
+
+Kill switches:
+
+- `RBSS_LIVE_BPM_DISABLE=1` disables LiveBPMService entirely.
+- Leaving `RBSS_LIVE_BPM_FOLLOW` unset keeps V1 frozen timing for active
+  autoloops while still allowing arm-time live BPM snapshots when validated.
+
+---
+
 ## 4-deck mirroring
 
 VDJ mirrors active deck to SS decks 3 and 4. SS uses 3/4 internally for show timing and beat sync.
@@ -165,13 +230,28 @@ VDJ mirrors active deck to SS decks 3 and 4. SS uses 3/4 internally for show tim
 | Phase 1 scripted load | arm.deck, arm.mirror, 3, 4 |
 | Autoloop arm | deck, mirror, 3, 4 |
 | Idle clear | 1, 2, 3, 4 |
-| BPM send | active, mirror, 3, 4 |
+| BPM send | active, mirror, 3, 4 (arm/reset, and V2 phrase-boundary controlled rearm) |
 | Beat event | active, mirror, 3, 4 |
 | Elapsed + beatpos | active, mirror, 3, 4 |
 
 `mirror = 3 - deck` (bridge deck 1 ↔ 2).
 
 For autoloop: `soundswitch_id=""` is always sent — this is what tells SS to treat the track as autoloop rather than a scripted show.
+
+Current autoloop timing state:
+
+- VDJ/SoundSwitch capture showed continuous `get_beatpos` and continuous
+  `beat.pos`; the old bridge sent both as modulo-4 bar phase.
+- Autoloop `get_beatpos` sends absolute beat position.
+- Autoloop `beat.pos` sends absolute beat count.
+- Scripted/non-autoloop beat timing still uses the old wrapped behavior.
+- `change=True` still fires every 4 beats.
+- User observed SoundSwitch's autoloop progress bar no longer restarts every
+  4 beats with absolute autoloop beat positions active.
+- Autoloop diagnostics are periodic, not per-beat: `[SS][AUTOLOOP-ARM]`,
+  `[SS][AUTOLOOP-TICK]`, `[SS][LIVE-BPM-PENDING]`, `[SS][LIVE-BPM-APPLY]`,
+  and `[SS][deck-load]`.
+- See `docs/autoloop_beatphase_findings.md` for the evidence log.
 
 ---
 
@@ -351,6 +431,8 @@ Do not hardcode `inner1 + 0xd0` or `inner1 + 0x2fc0`. Those offsets are session-
 | Deck switch before SCRIPTED_ARM | scripted_id on wrong deck | Transfer logic in _on_master_changed |
 | DDJ-800 mode=4112 memory play bit | Memory says playing when paused | TL PAUSE event is authoritative; d.playing overrides |
 | MTC unavailable (mido/IAC) | Position fallback only has TL TC (~15s) | TL TC still sufficient; warning logged |
+| Live BPM unvalidated/disabled | Autoloop arm/follow uses `d.meta.bpm` fallback | Fail closed; no hardcoded addresses |
+| BPM changes during active autoloop | V1: timing stays frozen; V2: controlled SoundSwitch rearm at phrase boundary | `RBSS_LIVE_BPM_FOLLOW=1`, stable 1.5s, beat `9/17/25...` |
 
 ---
 
@@ -364,3 +446,8 @@ Do not hardcode `inner1 + 0xd0` or `inner1 + 0x2fc0`. Those offsets are session-
 - Do not send `soundswitch_id` on autoloop arms — empty ssid is what triggers SS autoloop mode
 - Do not remove TL TC synthesis from tl_tailer.py — it is the fallback when MTC is unavailable
 - Do not call `_do_stop` expecting it to clear SS — it only resets internal state; lighting machine clears SS
+- Do not send active-autoloop BPM immediately when live BPM changes. SoundSwitch
+  treats BPM sends as autoloop rearm triggers; V2 must wait for stabilization
+  and a phrase-safe absolute beat.
+- Do not hardcode live BPM addresses or reuse absolute addresses across
+  Rekordbox restarts. Live BPM is current-session validation only.

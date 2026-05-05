@@ -20,8 +20,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .models import BridgeEvent, Ev
+from .logging_manager import get_logging_manager
 
 log = logging.getLogger("diagnostics")
+LOG = get_logging_manager()
 
 
 # ── Per-deck state transition logger ─────────────────────────────────────────
@@ -52,6 +54,7 @@ class TransitionLog:
         )
         with self._lock:
             self._events.append(ev)
+        LOG.stats.record_transition(deck, field)
         log.debug("transition deck=%d [%s] %r → %r  src=%s", deck, field, old, new, source)
 
     def dump(self) -> list[DeckTransition]:
@@ -171,7 +174,7 @@ def enable_debug() -> None:
     """Set all bridge loggers to DEBUG level."""
     for name in ("tl_tailer", "rb_memory", "filepath_resolver",
                  "scripted_tracks", "osl_output", "state_manager",
-                 "diagnostics", "bridge"):
+                 "diagnostics", "bridge", "logging_manager"):
         logging.getLogger(name).setLevel(logging.DEBUG)
     log.info("Verbose debug mode enabled")
 

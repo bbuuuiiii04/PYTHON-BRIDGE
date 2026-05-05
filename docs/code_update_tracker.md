@@ -19,6 +19,89 @@ Markdown documentation edits are allowed when requested.
 
 These code changes exist in the worktree and should be reviewed before commit:
 
+### Live BPM service and V2 controlled autoloop rearm
+
+Implemented behavior:
+
+```text
+LiveBPMService runs as a read-only background service. It attaches to the
+current Rekordbox pid/base, scans for per-deck BPM-shaped candidates using
+ENGINE STATE/library BPM only as hints, and promotes candidates only after
+observed current-session BPM movement.
+
+Autoloop arm snapshots validated live BPM when available. If live BPM is absent,
+disabled, stale, unreadable, non-finite, or unvalidated, arm falls back to
+d.meta.bpm.
+
+V1 remains the default active-autoloop behavior: timing is frozen to the arm
+snapshot until disarm/rearm.
+
+V2 is enabled with RBSS_LIVE_BPM_FOLLOW=1. During an active autoloop, if
+validated live BPM diverges from timing BPM, the bridge tracks one pending
+update, waits for 1.5s stability, then sends BPM to all four SoundSwitch deck
+slots at the next absolute beat where beat % 8 == 1 and beat > 1.
+
+SoundSwitch rearms autoloops when it receives BPM. The V2 BPM send is therefore
+an intentional controlled rearm at a phrase-safe beat, not a transparent
+mid-loop timing update.
+```
+
+Files/functions changed:
+
+```text
+live_bpm.py
+  LiveBPMService, LiveBPMReader, LiveBPMStatus, current-session candidate
+  validation and invalidation.
+
+state_manager.py
+  StateManager.__init__(..., live_bpm=None, live_bpm_follow=None)
+  _autoloop_arm_bpm()
+  _maybe_apply_live_bpm_follow()
+  _next_live_bpm_follow_beat()
+  _clear_live_bpm_follow()
+  _live_bpm_status_text()
+  _live_bpm_follow_status_text()
+
+models.py
+  OutputState.autoloop_arm_bpm
+  OutputState.autoloop_arm_deck
+  OutputState.last_autoloop_status_mono
+  OutputState.pending_live_bpm
+  OutputState.pending_live_bpm_since
+  OutputState.pending_live_bpm_target_beat
+  OutputState.last_live_follow_pending_log_mono
+  OutputState.last_live_follow_bpm
+  OutputState.live_follow_generation
+
+__main__.py
+  starts/stops LiveBPMService
+  RBSS_LIVE_BPM_DISABLE kill-switch warning
+  log color mapping for LBPM/RBMEM/autoloop tags
+
+tests/test_live_bpm_service.py
+  unit coverage for LiveBPMService validation/fallback and StateManager live BPM
+  arm/follow behavior.
+```
+
+Runtime flags:
+
+```text
+RBSS_LIVE_BPM_DISABLE=1  disables LiveBPMService entirely.
+RBSS_LIVE_BPM_FOLLOW=1   enables V2 controlled phrase-boundary BPM/rearm.
+```
+
+Validation so far:
+
+```text
+python3 -m unittest discover -s rb_ss_bridge_v2/tests
+python3 -m compileall -q rb_ss_bridge_v2
+
+Live run confirmed:
+  [SS][LIVE-BPM-PENDING] deck=1 current=130.00 pending=134.30 target_beat=129
+  [SS][LIVE-BPM-APPLY] deck=1 bpm=134.30 beat=129
+  [SS][AUTOLOOP-TICK] ... timing_bpm=134.30 arm_bpm=134.30 ...
+```
+
 ### `rb_memory.py`, `state_manager.py`, `__main__.py`
 
 Proposed/implemented behavior:
@@ -470,4 +553,73 @@ Conclusion:
 Deck 2 inner pointer is session-dependent.
 Do not hardcode inner1+0xd0 or inner1+0x2fc0.
 Runtime behavioral scan is required.
+```
+
+## Autoloop Beatphase Investigation - 2026-05-04
+
+Context:
+
+```text
+Unscripted SoundSwitch autoloop appeared to repeat/reset every 4 beats.
+AUTOLOOP_BEATS was already changed to 16, but that alone did not fix it.
+```
+
+Evidence:
+
+```text
+VDJ/SoundSwitch capture used continuous get_beatpos and continuous beat.pos.
+Bridge baseline used modulo-4 get_beatpos and modulo-4 beat.pos.
+Bridge baseline also sent change=True every 4 beats.
+Autoloop arms were not repeatedly firing during stable playback.
+```
+
+Current active autoloop timing behavior:
+
+```text
+Autoloop get_beatpos sends absolute beat position.
+Autoloop beat.pos sends absolute beat count.
+Scripted/non-autoloop behavior remains wrapped.
+change=True still fires every 4 beats.
+```
+
+Current diagnostic logging:
+
+```text
+state_manager.py:
+- [SS][AUTOLOOP-ARM] logs deck, mirror, elapsed, source, timing_bpm, arm_bpm, meta_bpm, loop length, filepath, previous file.
+- [SS][AUTOLOOP-TICK] logs periodic elapsed, absolute beat, timing_bpm, arm_bpm, meta_bpm, live_bpm, follow state, pending state, filepath.
+- [SS][LIVE-BPM-PENDING] logs first/rate-limited pending V2 BPM and target beat.
+- [SS][LIVE-BPM-APPLY] logs the phrase-boundary BPM send / controlled SoundSwitch rearm.
+
+models.py:
+- OutputState.last_autoloop_status_mono rate-limits [SS][AUTOLOOP-TICK].
+- OutputState.last_live_follow_pending_log_mono rate-limits pending replacement logs while pitch is moving.
+
+osl_output.py:
+- [SS][deck-load] logs outgoing deck-load filepath, ssid state, bpm_out, meta_bpm, fallback_bpm, loop state, play state.
+```
+
+Observed result:
+
+```text
+SoundSwitch autoloop progress bar no longer restarts every 4 beats with Test A+B active.
+Progress speed changes with BPM as expected.
+V2 live BPM follow intentionally sends BPM at phrase-safe absolute beats because
+SoundSwitch rearms autoloop on BPM sends.
+```
+
+Follow-up:
+
+```text
+Inspect first AUTOLOOP-ARM, deck-load, AUTOLOOP-TICK, LIVE-BPM-PENDING, and LIVE-BPM-APPLY after stop -> pitch change -> play.
+Check whether beatpos_out starts phase-aligned with Rekordbox or offset.
+Test C is not applied: autoloop change=True every AUTOLOOP_BEATS or always false.
+```
+
+Separate resolver bug:
+
+```text
+lsof can overwrite a correct title/ANLZ resolution with the wrong file.
+Example observed: intended track resolved at bpm=128, then lsof resolved Click Sound 01 Electronic.wav bpm=0 and autoloop armed the wrong file.
+Prevent lower-confidence/stale lsof results from replacing a better title/ANLZ result.
 ```

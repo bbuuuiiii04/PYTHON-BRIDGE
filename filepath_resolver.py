@@ -24,9 +24,11 @@ import warnings
 from typing import Optional
 
 from .config import AUDIO_EXTS, LSOF_LEN_TOLERANCE_MS, LSOF_COOLDOWN_S
+from .logging_manager import get_logging_manager
 from .models import BridgeEvent, Ev, PositionSnapshot
 
 log = logging.getLogger("filepath_resolver")
+LOG = get_logging_manager()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -184,34 +186,37 @@ class FilepathResolver:
         self._last_trigger: dict[int, float] = {1: 0.0, 2: 0.0}
         self._lock = threading.Lock()
 
-    def resolve_by_anlz(self, deck: int, load_gen: int, anlz_path: str) -> None:
+    def resolve_by_anlz(self, deck: int, load_gen: int, anlz_path: str, *, trace_id: str = "") -> None:
         """Resolve track via ANLZ path DB lookup. Falls back to lsof on failure."""
         threading.Thread(
             target=self._resolve_anlz_worker,
-            args=(deck, load_gen, anlz_path),
+            args=(deck, load_gen, anlz_path, trace_id),
             daemon=True,
             name=f"anlz-d{deck}",
         ).start()
 
-    def _resolve_anlz_worker(self, deck: int, load_gen: int, anlz_path: str) -> None:
+    def _resolve_anlz_worker(self, deck: int, load_gen: int, anlz_path: str, trace_id: str) -> None:
         try:
             result = _db_lookup_by_anlz(anlz_path)
             if result:
                 log.info("anlz deck %d: resolved → %s bpm=%.1f",
                          deck, os.path.basename(result['filepath']), result['bpm'])
+                payload = {**result, 'load_gen': load_gen}
+                if trace_id:
+                    payload["__trace_id"] = trace_id
                 self._queue.put_nowait(BridgeEvent(
                     kind=Ev.FILEPATH_RESOLVED,
                     deck=deck,
                     source='anlz',
-                    payload={**result, 'load_gen': load_gen},
+                    payload=payload,
                 ))
             else:
                 log.debug("anlz deck %d: DB miss — falling back to lsof", deck)
-                self.resolve_async(deck, load_gen)
+                self.resolve_async(deck, load_gen, trace_id=trace_id)
         except Exception:
             log.exception("_resolve_anlz_worker deck %d failed", deck)
 
-    def resolve_by_title(self, deck: int, load_gen: int, title: str) -> None:
+    def resolve_by_title(self, deck: int, load_gen: int, title: str, *, trace_id: str = "") -> None:
         """Fuzzy DB lookup by TL track title. Runs in a daemon thread.
 
         Used as fallback when ANLZ is unavailable and lsof can't match by
@@ -220,12 +225,12 @@ class FilepathResolver:
         """
         threading.Thread(
             target=self._resolve_title_worker,
-            args=(deck, load_gen, title),
+            args=(deck, load_gen, title, trace_id),
             daemon=True,
             name=f"title-d{deck}",
         ).start()
 
-    def _resolve_title_worker(self, deck: int, load_gen: int, title: str) -> None:
+    def _resolve_title_worker(self, deck: int, load_gen: int, title: str, trace_id: str) -> None:
         try:
             words = [w.lower() for w in re.split(r"[\s()\[\]\-]+", title) if len(w) > 2]
             if not words:
@@ -265,11 +270,7 @@ class FilepathResolver:
             total_ms = float((best.Length * 1000) if best.Length else 0)
             log.info("title deck %d: resolved → %s bpm=%.1f",
                      deck, os.path.basename(fp), bpm)
-            self._queue.put_nowait(BridgeEvent(
-                kind=Ev.FILEPATH_RESOLVED,
-                deck=deck,
-                source="title",
-                payload={
+            payload = {
                     "filepath":       fp,
                     "bpm":            bpm,
                     "content_id":     str(best.ID),
@@ -277,7 +278,14 @@ class FilepathResolver:
                     "soundswitch_id": ssid,
                     "total_ms":       total_ms,
                     "load_gen":       load_gen,
-                },
+            }
+            if trace_id:
+                payload["__trace_id"] = trace_id
+            self._queue.put_nowait(BridgeEvent(
+                kind=Ev.FILEPATH_RESOLVED,
+                deck=deck,
+                source="title",
+                payload=payload,
             ))
         except Exception:
             log.exception("_resolve_title_worker deck %d failed", deck)
@@ -287,6 +295,8 @@ class FilepathResolver:
         deck: int,
         load_gen: int,
         other_deck_path: str = "",
+        *,
+        trace_id: str = "",
     ) -> None:
         """Fire-and-forget lsof probe for deck. Respects LSOF_COOLDOWN_S."""
         now = time.monotonic()
@@ -300,18 +310,19 @@ class FilepathResolver:
                     remaining,
                     self.resolve_async,
                     args=(deck, load_gen, other_deck_path),
+                    kwargs={"trace_id": trace_id},
                 ).start()
                 return
             self._last_trigger[deck] = now
 
         threading.Thread(
             target=self._resolve,
-            args=(deck, load_gen, other_deck_path),
+            args=(deck, load_gen, other_deck_path, trace_id),
             daemon=True,
             name=f"lsof-d{deck}",
         ).start()
 
-    def _resolve(self, deck: int, load_gen: int, other_deck_path: str) -> None:
+    def _resolve(self, deck: int, load_gen: int, other_deck_path: str, trace_id: str) -> None:
         try:
             pid = _rb_pid()
             if not pid:
@@ -368,11 +379,7 @@ class FilepathResolver:
             ssid = _read_soundswitch_id(matched)
             total_ms = float(target_ms) if target_ms else 0.0
 
-            self._queue.put_nowait(BridgeEvent(
-                kind=Ev.FILEPATH_RESOLVED,
-                deck=deck,
-                source="lsof",
-                payload={
+            payload = {
                     "filepath":        matched,
                     "bpm":             bpm,
                     "content_id":      content_id,
@@ -380,7 +387,14 @@ class FilepathResolver:
                     "soundswitch_id":  ssid,
                     "total_ms":        total_ms,
                     "load_gen":        load_gen,
-                },
+            }
+            if trace_id:
+                payload["__trace_id"] = trace_id
+            self._queue.put_nowait(BridgeEvent(
+                kind=Ev.FILEPATH_RESOLVED,
+                deck=deck,
+                source="lsof",
+                payload=payload,
             ))
         except Exception:
             log.exception("FilepathResolver._resolve deck %d failed", deck)

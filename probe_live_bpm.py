@@ -93,6 +93,11 @@ class WatchResult:
     maximum: float
     max_delta: float
     verdict: str
+    started_at_zero: bool = False
+    ended_at_zero: bool = False
+    num_discontinuities: int = 0
+    timestamps: tuple[float, ...] = ()
+    values: tuple[float, ...] = ()
 
 
 def _parse_int(text: str) -> int:
@@ -269,6 +274,10 @@ def _read_float(task: int, addr: int, type_name: str) -> float:
     if type_name == "f64":
         return struct.unpack("<d", _read_bytes(task, addr, 8))[0]
     raise ValueError(f"unsupported float type: {type_name}")
+
+
+def _is_zeroish(value: float, tolerance: float = 1e-6) -> bool:
+    return math.isfinite(value) and abs(value) <= tolerance
 
 
 def _attach() -> tuple[int, int, int, str]:
@@ -542,11 +551,116 @@ def _verdict_for_samples(
     max_delta = max(values) - min(values)
     if max_delta < min_delta:
         return "stale"
+    if _is_zeroish(values[0]) and any(not _is_zeroish(value) for value in values[1:]):
+        return "zero_start_churn"
+    if _is_zeroish(values[-1]) and any(not _is_zeroish(value) for value in values[:-1]):
+        return "zero_end_decay"
     if expected_after is None:
         return "moved_unverified"
     if abs(values[-1] - expected_after) <= tolerance:
         return "pass"
     return "moved_wrong_value"
+
+
+def _count_discontinuities(values: list[float], threshold: float = 1.0) -> int:
+    return sum(
+        1
+        for before, after in zip(values, values[1:])
+        if abs(after - before) > threshold
+    )
+
+
+def _sample_hits(
+    task: int,
+    hits: list[Hit],
+    duration: float,
+    hz: float,
+) -> tuple[dict[tuple[int, str], list[float]], dict[tuple[int, str], list[float]]]:
+    values_by_hit: dict[tuple[int, str], list[float]] = {(hit.addr, hit.type_name): [] for hit in hits}
+    timestamps_by_hit: dict[tuple[int, str], list[float]] = {(hit.addr, hit.type_name): [] for hit in hits}
+    interval = 1.0 / hz
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < duration:
+        now = time.monotonic()
+        timestamp = now - t0
+        for hit in hits:
+            try:
+                value = _read_float(task, hit.addr, hit.type_name)
+            except OSError:
+                continue
+            if math.isfinite(value):
+                key = (hit.addr, hit.type_name)
+                values_by_hit[key].append(value)
+                timestamps_by_hit[key].append(timestamp)
+        elapsed = time.monotonic() - now
+        if elapsed < interval:
+            time.sleep(interval - elapsed)
+    return values_by_hit, timestamps_by_hit
+
+
+def _results_from_samples(
+    hits: list[Hit],
+    values_by_hit: dict[tuple[int, str], list[float]],
+    timestamps_by_hit: dict[tuple[int, str], list[float]],
+    expected_after: float | None,
+    tolerance: float,
+    min_delta: float,
+) -> list[WatchResult]:
+    results: list[WatchResult] = []
+    for hit in hits:
+        key = (hit.addr, hit.type_name)
+        values = values_by_hit.get(key, [])
+        verdict = _verdict_for_samples(values, expected_after, tolerance, min_delta)
+        if values:
+            start = values[0]
+            end = values[-1]
+            minimum = min(values)
+            maximum = max(values)
+            max_delta = maximum - minimum
+            started_at_zero = _is_zeroish(start)
+            ended_at_zero = _is_zeroish(end)
+            num_discontinuities = _count_discontinuities(values)
+        else:
+            start = end = minimum = maximum = max_delta = float("nan")
+            started_at_zero = ended_at_zero = False
+            num_discontinuities = 0
+        results.append(
+            WatchResult(
+                hit,
+                len(values),
+                start,
+                end,
+                minimum,
+                maximum,
+                max_delta,
+                verdict,
+                started_at_zero,
+                ended_at_zero,
+                num_discontinuities,
+                tuple(timestamps_by_hit.get(key, [])),
+                tuple(values),
+            )
+        )
+
+    verdict_order = {
+        "pass": 0,
+        "moved_unverified": 1,
+        "moved_wrong_value": 2,
+        "zero_start_churn": 3,
+        "zero_end_decay": 4,
+        "stale": 5,
+        "read_error": 6,
+    }
+    results.sort(
+        key=lambda r: (
+            verdict_order.get(r.verdict, 99),
+            r.hit.score,
+            0 if r.hit.type_name == "f32" else 1,
+            -r.max_delta if math.isfinite(r.max_delta) else 0.0,
+            abs(r.hit.anchor_delta),
+        )
+    )
+    return results
 
 
 def _watch_hits_for_validation(
@@ -558,47 +672,8 @@ def _watch_hits_for_validation(
     tolerance: float,
     min_delta: float,
 ) -> list[WatchResult]:
-    values_by_hit: dict[tuple[int, str], list[float]] = {(hit.addr, hit.type_name): [] for hit in hits}
-    interval = 1.0 / hz
-    t0 = time.monotonic()
-    while time.monotonic() - t0 < duration:
-        now = time.monotonic()
-        for hit in hits:
-            try:
-                value = _read_float(task, hit.addr, hit.type_name)
-            except OSError:
-                continue
-            if math.isfinite(value):
-                values_by_hit[(hit.addr, hit.type_name)].append(value)
-        elapsed = time.monotonic() - now
-        if elapsed < interval:
-            time.sleep(interval - elapsed)
-
-    results: list[WatchResult] = []
-    for hit in hits:
-        values = values_by_hit[(hit.addr, hit.type_name)]
-        verdict = _verdict_for_samples(values, expected_after, tolerance, min_delta)
-        if values:
-            start = values[0]
-            end = values[-1]
-            minimum = min(values)
-            maximum = max(values)
-            max_delta = maximum - minimum
-        else:
-            start = end = minimum = maximum = max_delta = float("nan")
-        results.append(WatchResult(hit, len(values), start, end, minimum, maximum, max_delta, verdict))
-
-    verdict_order = {"pass": 0, "moved_unverified": 1, "moved_wrong_value": 2, "stale": 3, "read_error": 4}
-    results.sort(
-        key=lambda r: (
-            verdict_order.get(r.verdict, 99),
-            r.hit.score,
-            0 if r.hit.type_name == "f32" else 1,
-            -r.max_delta if math.isfinite(r.max_delta) else 0.0,
-            abs(r.hit.anchor_delta),
-        )
-    )
-    return results
+    values_by_hit, timestamps_by_hit = _sample_hits(task, hits, duration, hz)
+    return _results_from_samples(hits, values_by_hit, timestamps_by_hit, expected_after, tolerance, min_delta)
 
 
 def _load_cache(path: Path) -> dict[str, object]:
@@ -680,6 +755,113 @@ def _cached_candidates_for_session(
     return out
 
 
+def _hits_from_cached_candidates(
+    task: int,
+    anchors: list[Anchor],
+    candidates: Iterable[dict[str, object]],
+) -> list[Hit]:
+    hits: list[Hit] = []
+    seen: set[tuple[int, str]] = set()
+    for candidate in candidates:
+        addr_text = candidate.get("addr")
+        type_name = candidate.get("type")
+        if not isinstance(addr_text, str) or type_name not in ("f32", "f64"):
+            continue
+        addr = _parse_int(addr_text)
+        key = (addr, type_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            value = _read_float(task, addr, type_name)
+        except OSError:
+            continue
+        nearest, delta = _nearest_anchor(addr, anchors)
+        hits.append(
+            Hit(
+                addr=addr,
+                type_name=type_name,
+                value=value,
+                role="bpm",
+                score=0.0,
+                region=str(candidate.get("region", "cache")),
+                nearest_anchor=nearest,
+                anchor_delta=delta,
+            )
+        )
+    return hits
+
+
+def _print_watch_results(title: str, results: list[WatchResult]) -> None:
+    if not results:
+        return
+    print(f"\n{title}")
+    print(
+        f"{'addr':18s} {'type':4s} {'start':>12s} {'end':>12s} {'min':>12s} "
+        f"{'max':>12s} {'delta':>12s} {'jumps':>5s} {'verdict':18s} anchor delta region"
+    )
+    print("-" * 140)
+    for result in results:
+        sign = "+" if result.hit.anchor_delta >= 0 else "-"
+        print(
+            f"0x{result.hit.addr:016x} {result.hit.type_name:4s} "
+            f"{result.start:12.6f} {result.end:12.6f} {result.minimum:12.6f} "
+            f"{result.maximum:12.6f} {result.max_delta:12.6f} {result.num_discontinuities:5d} "
+            f"{result.verdict:18s} {result.hit.nearest_anchor} {sign}0x{abs(result.hit.anchor_delta):x} "
+            f"{result.hit.region}"
+        )
+
+
+def _print_summary(prefix: str, results: list[WatchResult]) -> None:
+    counts: dict[str, int] = {}
+    for result in results:
+        counts[result.verdict] = counts.get(result.verdict, 0) + 1
+    ordered = [
+        "pass",
+        "moved_unverified",
+        "moved_wrong_value",
+        "zero_start_churn",
+        "zero_end_decay",
+        "stale",
+        "read_error",
+    ]
+    parts = [f"{name}={counts[name]}" for name in ordered if counts.get(name)]
+    print(f"\n{prefix}: " + (" ".join(parts) if parts else "none"))
+
+
+def _write_trace_file(path: Path, results_by_group: dict[str, tuple[int, list[WatchResult]]]) -> Path:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    trace_path = path.expanduser().parent / f"live_bpm_traces_{timestamp}.json"
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    entries: list[dict[str, object]] = []
+    for group, (deck, results) in results_by_group.items():
+        for result in results:
+            entries.append(
+                {
+                    "group": group,
+                    "addr": f"0x{result.hit.addr:x}",
+                    "type": result.hit.type_name,
+                    "deck": deck,
+                    "verdict": result.verdict,
+                    "start": result.start,
+                    "end": result.end,
+                    "min": result.minimum,
+                    "max": result.maximum,
+                    "max_delta": result.max_delta,
+                    "started_at_zero": result.started_at_zero,
+                    "ended_at_zero": result.ended_at_zero,
+                    "num_discontinuities": result.num_discontinuities,
+                    "nearest_anchor": result.hit.nearest_anchor,
+                    "anchor_delta": result.hit.anchor_delta,
+                    "region": result.hit.region,
+                    "timestamps": list(result.timestamps),
+                    "values": list(result.values),
+                }
+            )
+    trace_path.write_text(json.dumps(entries, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return trace_path
+
+
 def validate(args: argparse.Namespace) -> None:
     pid, base, task, vmmap_out = _attach()
     print(f"Attached rekordbox pid={pid} base=0x{base:x}")
@@ -696,37 +878,51 @@ def validate(args: argparse.Namespace) -> None:
     if not watch_hits:
         raise SystemExit("ERROR: no candidates found for validation")
 
+    monitor_hits: list[Hit] = []
+    monitor_deck = args.monitor_cache_deck or args.deck
+    if args.monitor_cache_deck is not None:
+        monitor_anchors = _resolve_anchors(task, base, args.monitor_cache_deck, args.objc_window, not args.no_deck2_scan)
+        cache_path = Path(args.cache_file).expanduser()
+        cache = _load_cache(cache_path)
+        candidates = _cached_candidates_for_session(cache, pid, base, args.monitor_cache_deck)
+        monitor_hits.extend(_hits_from_cached_candidates(task, monitor_anchors, candidates))
+    if args.monitor_addr:
+        monitor_anchors = _resolve_anchors(task, base, monitor_deck, args.objc_window, not args.no_deck2_scan)
+        monitor_hits.extend(_seed_hits_from_addrs(task, monitor_anchors, args.monitor_addr, args.monitor_type))
+    monitor_hits = _dedupe_hits(monitor_hits)
+
     print(
         f"\nWatching {len(watch_hits)} candidates for {args.duration:.1f}s at {args.hz:.1f} Hz. "
         "Move only the target deck pitch during this window."
     )
-    print(
-        f"{'addr':18s} {'type':4s} {'start':>12s} {'end':>12s} {'min':>12s} "
-        f"{'max':>12s} {'delta':>12s} {'verdict':18s} anchor delta region"
-    )
-    print("-" * 132)
-    results = _watch_hits_for_validation(
-        task,
+    if monitor_hits:
+        print(f"Also monitoring {len(monitor_hits)} read-only candidates for deck {monitor_deck}.")
+
+    all_watch_hits = _dedupe_hits([*watch_hits, *monitor_hits])
+    values_by_hit, timestamps_by_hit = _sample_hits(task, all_watch_hits, args.duration, args.hz)
+    results = _results_from_samples(
         watch_hits,
-        args.duration,
-        args.hz,
+        values_by_hit,
+        timestamps_by_hit,
         args.expected_after,
         args.tolerance,
         args.min_delta,
     )
-    for result in results:
-        sign = "+" if result.hit.anchor_delta >= 0 else "-"
-        print(
-            f"0x{result.hit.addr:016x} {result.hit.type_name:4s} "
-            f"{result.start:12.6f} {result.end:12.6f} {result.minimum:12.6f} "
-            f"{result.maximum:12.6f} {result.max_delta:12.6f} {result.verdict:18s} "
-            f"{result.hit.nearest_anchor} {sign}0x{abs(result.hit.anchor_delta):x} {result.hit.region}"
-        )
+    monitor_results = _results_from_samples(
+        monitor_hits,
+        values_by_hit,
+        timestamps_by_hit,
+        None,
+        args.tolerance,
+        args.min_delta,
+    )
+    _print_watch_results("Validation candidates", results)
+    _print_watch_results("Monitor candidates", monitor_results)
 
     passed = [result for result in results if result.verdict == "pass"]
-    moved = [result for result in results if result.verdict == "moved_unverified"]
-    stale = [result for result in results if result.verdict == "stale"]
-    print(f"\nSummary: pass={len(passed)} moved_unverified={len(moved)} stale={len(stale)}")
+    _print_summary("Summary", results)
+    if monitor_results:
+        _print_summary("Monitor summary", monitor_results)
     if args.expected_after is None:
         print("No --expected-after was provided, so moved candidates were not promoted or cached.")
     else:
@@ -736,6 +932,15 @@ def validate(args: argparse.Namespace) -> None:
             print(f"Cached {len(passed)} passed candidates to {cache_path}")
         else:
             print("No candidates passed; cache was not updated.")
+    if args.save_traces:
+        trace_path = _write_trace_file(
+            Path(args.cache_file),
+            {
+                "validation": (args.deck, results),
+                "monitor": (monitor_deck, monitor_results),
+            },
+        )
+        print(f"Saved traces to {trace_path}")
 
 
 def cache_check(args: argparse.Namespace) -> None:
@@ -767,6 +972,43 @@ def cache_check(args: argparse.Namespace) -> None:
         source_end = candidate.get("end", "-")
         source_delta = candidate.get("max_delta", "-")
         print(f"{addr_text:18s} {type_name:4s} {value:12.6f} {status:14s} {source_end} {source_delta}")
+
+
+def cache_monitor(args: argparse.Namespace) -> None:
+    pid, base, task, _ = _attach()
+    cache_path = Path(args.cache_file).expanduser()
+    cache = _load_cache(cache_path)
+    candidates = _cached_candidates_for_session(cache, pid, base, args.deck)
+    anchors = _resolve_anchors(task, base, args.deck, args.objc_window, not args.no_deck2_scan)
+    hits = _hits_from_cached_candidates(task, anchors, candidates)
+    print(f"Attached rekordbox pid={pid} base=0x{base:x}")
+    print(f"Cache: {cache_path}")
+    print(f"Current-session cached candidates for deck {args.deck}: {len(hits)}")
+    if not hits:
+        return
+
+    print(
+        f"\nMonitoring cached deck {args.deck} candidates for {args.duration:.1f}s at {args.hz:.1f} Hz. "
+        "Move only the other deck during this window for deck-separation checks."
+    )
+    values_by_hit, timestamps_by_hit = _sample_hits(task, hits[: args.limit], args.duration, args.hz)
+    results = _results_from_samples(
+        hits[: args.limit],
+        values_by_hit,
+        timestamps_by_hit,
+        None,
+        args.tolerance,
+        args.min_delta,
+    )
+    _print_watch_results("Cached monitor candidates", results)
+    _print_summary("Monitor summary", results)
+    if args.expect_bpm is not None:
+        mismatches = [
+            result
+            for result in results
+            if not math.isfinite(result.end) or abs(result.end - args.expect_bpm) > args.tolerance
+        ]
+        print(f"Expected BPM mismatches: {len(mismatches)}")
 
 
 def compare(args: argparse.Namespace) -> None:
@@ -877,6 +1119,10 @@ def main() -> None:
     val.add_argument("--hz", type=float, default=5.0)
     val.add_argument("--min-delta", type=float, default=0.05)
     val.add_argument("--tolerance", type=float, default=0.25)
+    val.add_argument("--save-traces", action="store_true", help="Write per-candidate sample traces to the cache directory")
+    val.add_argument("--monitor-cache-deck", type=int, choices=(1, 2), default=None, help="Also monitor current-session cached candidates for this deck")
+    val.add_argument("--monitor-addr", action="append", help="Manual read-only monitor address; repeatable")
+    val.add_argument("--monitor-type", choices=("f32", "f64"), default="f32")
     val.add_argument(
         "--cache-file",
         default="~/.cache/rb_ss_bridge_v2/live_bpm_candidates.json",
@@ -895,6 +1141,23 @@ def main() -> None:
         help="Per-process validation cache path",
     )
     cc.set_defaults(func=cache_check)
+
+    cm = sub.add_parser("cache-monitor", help="Watch current-session cached candidates without writing cache")
+    cm.add_argument("--deck", type=int, choices=(1, 2), default=1)
+    cm.add_argument("--expect-bpm", type=float, default=None)
+    cm.add_argument("--duration", type=float, default=20.0)
+    cm.add_argument("--hz", type=float, default=5.0)
+    cm.add_argument("--tolerance", type=float, default=0.25)
+    cm.add_argument("--min-delta", type=float, default=0.05)
+    cm.add_argument("--limit", type=int, default=20)
+    cm.add_argument("--objc-window", type=lambda s: int(s, 0), default=0x10000)
+    cm.add_argument("--no-deck2-scan", action="store_true")
+    cm.add_argument(
+        "--cache-file",
+        default="~/.cache/rb_ss_bridge_v2/live_bpm_candidates.json",
+        help="Per-process validation cache path",
+    )
+    cm.set_defaults(func=cache_monitor)
 
     cmp = sub.add_parser("compare", help="Compare two saved snapshot outputs")
     cmp.add_argument("before")

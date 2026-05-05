@@ -263,6 +263,14 @@ class OS2LOutput:
         self._sub(f"{dn} get_firstbeat", int(round(meta.first_beat_ms)), verbose=True)
 
         bpm_out = meta.bpm if meta.bpm > 0 else fallback_bpm
+        log.info("[SS][deck-load] deck=%d active=%d filepath=%s ssid=%s "
+                 "bpm_out=%.2f meta_bpm=%.2f fallback_bpm=%.2f include_loop=%s loop=%s play=%s",
+                 deck, active_deck,
+                 os.path.basename(meta.filepath) if meta.filepath else "<none>",
+                 "yes" if meta.soundswitch_id else "no",
+                 bpm_out, meta.bpm, fallback_bpm, include_loop,
+                 AUTOLOOP_BEATS if include_loop and not meta.soundswitch_id else "off",
+                 play)
         if bpm_out:
             self._sub(f"{dn} get_bpm", round(bpm_out, 2), verbose=True)
 

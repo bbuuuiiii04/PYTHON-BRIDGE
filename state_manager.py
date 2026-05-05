@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os as _os
 import queue
 import threading
 import time
@@ -37,8 +38,19 @@ from .models import ArmSequence, BridgeEvent, DeckState, Ev, OutputState, Positi
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
+from .logging_manager import get_logging_manager
 
 log = logging.getLogger("state_manager")
+LOG = get_logging_manager()
+
+_LATENCY_WARN_MS = 50.0
+_TC_LATENCY_WARN_MS = 250.0
+_AUTOLOOP_IDLE_DEBOUNCE_S = max(STOP_DEBOUNCE_S, 2.0)
+_AUTOLOOP_STATUS_LOG_S = 5.0
+LIVE_BPM_FOLLOW_ENV = "RBSS_LIVE_BPM_FOLLOW"
+_LIVE_BPM_FOLLOW_THRESHOLD = BPM_THRESHOLD_UNSCRIPTED
+_LIVE_BPM_FOLLOW_STABLE_S = 1.5
+_LIVE_BPM_PENDING_LOG_S = 1.0
 
 
 # ── Beat position helper ──────────────────────────────────────────────────────
@@ -70,10 +82,17 @@ class StateManager:
         event_queue:    queue.Queue[BridgeEvent],
         position_cache: PositionCache,
         output:         OS2LOutput,
+        live_bpm=None,
+        live_bpm_follow: Optional[bool] = None,
     ) -> None:
         self._eq    = event_queue
         self._cache = position_cache
         self._out   = output
+        self._live_bpm = live_bpm
+        self._live_bpm_follow = (
+            _os.environ.get(LIVE_BPM_FOLLOW_ENV) == "1"
+            if live_bpm_follow is None else live_bpm_follow
+        )
         self._stop  = threading.Event()
 
         # Per-deck state (written only by this thread after start())
@@ -112,6 +131,10 @@ class StateManager:
         # Tracks which deck most recently received a TRACK_LOADED event.
         # Updated by _on_track_loaded; read by OSC handler to route SCRIPTED_ARM.
         self._last_loaded_deck: int = 0
+
+        # Per deck trace/timing for TRACK_LOADED -> FILEPATH_RESOLVED.
+        self._load_trace: dict[int, str] = {}
+        self._load_mono: dict[int, float] = {}
 
     def set_initial_state(self, active_deck: int) -> None:
         """Apply startup state read from TL ENGINE STATE before event loop starts."""
@@ -180,22 +203,42 @@ class StateManager:
             except queue.Empty:
                 break
             try:
-                self._handle_event(ev)
+                payload = ev.payload or {}
+                anomaly = LOG.detect_anomaly(ev)
+                with LOG.event_scope(
+                    ev.kind,
+                    deck=ev.deck,
+                    source=ev.source,
+                    trace_id=str(payload.get("__trace_id", "")),
+                    anomaly=anomaly,
+                ):
+                    self._handle_event(ev)
+                    latency_ms, prev = LOG.finish_event(ev)
+                    warn_ms = _TC_LATENCY_WARN_MS if ev.kind == Ev.TC_UPDATE else _LATENCY_WARN_MS
+                    if latency_ms > warn_ms:
+                        log.warning("event latency %.1fms kind=%s", latency_ms, ev.kind)
+                    elif log.isEnabledFor(logging.DEBUG):
+                        if prev and prev.kind != ev.kind:
+                            delta_ms = (time.monotonic() - prev.mono) * 1000.0
+                            log.debug("event relation: %s deck%d %.1fms after %s deck%d",
+                                      ev.kind, ev.deck, delta_ms, prev.kind, prev.deck)
+                        log.debug("event processed %.1fms kind=%s", latency_ms, ev.kind)
             except Exception:
-                log.exception("StateManager: error handling %s", ev.kind)
+                LOG.log_error(log, "StateManager: error handling %s", ev.kind,
+                              payload=getattr(ev, "payload", {}), exc_info=True)
 
     # ── Event dispatch ────────────────────────────────────────────────────────
 
     def _handle_event(self, ev: BridgeEvent) -> None:
-        log.debug("event: kind=%s deck=%d src=%s payload=%s",
-                  ev.kind, ev.deck, ev.source, ev.payload)
+        payload = {k: v for k, v in ev.payload.items() if not k.startswith("__")}
+        log.debug("event received kind=%s src=%s payload=%s", ev.kind, ev.source, payload)
         d = ev.deck
 
         if ev.kind == Ev.MASTER_CHANGED:
             self._on_master_changed(d, ev.source)
 
         elif ev.kind == Ev.TRACK_LOADED:
-            self._on_track_loaded(d, ev.payload.get("title", ""))
+            self._on_track_loaded(d, ev.payload.get("title", ""), ev)
 
         elif ev.kind == Ev.PLAY:
             if not self._deck[d].playing:
@@ -226,6 +269,11 @@ class StateManager:
             # ENGINE STATE fires every ~15s with live pitch-adjusted BPM
             d = self._deck[ev.deck]
             new_bpm = ev.payload.get('bpm', 0.0)
+            if self._live_bpm is not None and new_bpm > 0:
+                try:
+                    self._live_bpm.update_hint(ev.deck, new_bpm, d.meta.bpm)
+                except Exception:
+                    log.debug("live BPM hint update failed", exc_info=True)
             if new_bpm > 0 and abs(new_bpm - d.meta.bpm) > 0.5:
                 log.debug("bpm_update deck %d: %.1f → %.1f", ev.deck, d.meta.bpm, new_bpm)
                 d.meta.bpm = new_bpm
@@ -259,6 +307,14 @@ class StateManager:
             self._os.lighting_mode    = "idle"
             self._os.lighting_desired = "idle"
             self._os.lighting_stable_since = 0.0
+            self._os.autoloop_arm_bpm = 0.0
+            self._os.autoloop_arm_deck = 0
+            self._clear_live_bpm_follow()
+            if self._live_bpm is not None:
+                try:
+                    self._live_bpm.invalidate()
+                except Exception:
+                    log.debug("live BPM invalidation failed", exc_info=True)
 
     # ── Deck switch ───────────────────────────────────────────────────────────
 
@@ -266,7 +322,8 @@ class StateManager:
         old_deck = self._os.active_deck
         if new_deck == old_deck:
             return
-        log.info("[D%d→D%d] deck switch  source=%s", old_deck, new_deck, source)
+        log.info("MASTER_CHANGED deck%d -> deck%d reason=%s", old_deck, new_deck, source)
+        LOG.stats.record_transition(new_deck, "master")
         # OSC race fix: TL's /bridge/active_deck can arrive after /bridge/track_loaded,
         # so SCRIPTED_ARM may land on the old active deck. If old deck wasn't playing
         # and new deck has no scripted_id, transfer it.
@@ -291,17 +348,27 @@ class StateManager:
         self._os.was_playing = False
         self._os.play_settle_after = 0.0
         self._os.not_playing_since = 0.0
+        self._os.autoloop_arm_bpm = 0.0
+        self._os.autoloop_arm_deck = 0
+        self._clear_live_bpm_follow()
 
     # ── Track load → lsof trigger ─────────────────────────────────────────────
 
-    def _on_track_loaded(self, deck: int, title: str) -> None:
+    def _on_track_loaded(self, deck: int, title: str, ev: BridgeEvent) -> None:
         d = self._deck[deck]
         d.meta.clear()
         d.scripted_id = 0
         d.load_gen += 1
+        if deck == self._os.active_deck:
+            self._clear_live_bpm_follow()
         d.tl_title = title
         self._last_loaded_deck = deck
-        log.info("[D%d] loaded: %s", deck, title or "<unknown>")
+        trace_id = str(ev.payload.get("__trace_id", ""))
+        if trace_id:
+            self._load_trace[deck] = trace_id
+        self._load_mono[deck] = time.monotonic()
+        log.info("TRACK_LOADED title=%s load_gen=%d", title or "<unknown>", d.load_gen)
+        LOG.stats.record_transition(deck, "track_loaded")
 
         if self._resolver is None:
             return
@@ -310,15 +377,15 @@ class StateManager:
         anlz_path = self._pending_anlz_path.pop(deck, None)
         if anlz_path:
             log.debug("track load: deck %d using ANLZ path for resolution", deck)
-            self._resolver.resolve_by_anlz(deck, d.load_gen, anlz_path)
+            self._resolver.resolve_by_anlz(deck, d.load_gen, anlz_path, trace_id=trace_id)
         else:
             other = 3 - deck
             other_path = self._deck[other].meta.filepath
             # Fire both: lsof (fast, uses track length) and title-based DB lookup
             # (reliable fallback when memory track_length=0 prevents lsof from matching)
-            self._resolver.resolve_async(deck, d.load_gen, other_path)
+            self._resolver.resolve_async(deck, d.load_gen, other_path, trace_id=trace_id)
             if title:
-                self._resolver.resolve_by_title(deck, d.load_gen, title)
+                self._resolver.resolve_by_title(deck, d.load_gen, title, trace_id=trace_id)
 
     def attach_resolver(self, resolver) -> None:  # type: ignore[type-arg]
         self._resolver = resolver
@@ -332,8 +399,8 @@ class StateManager:
         d = self._deck[deck]
         gen = payload.get("load_gen", -1)
         if gen != d.load_gen:
-            log.debug("lsof deck %d: stale result gen=%d current=%d — discarding",
-                      deck, gen, d.load_gen)
+            log.debug("FILEPATH_RESOLVED stale result gen=%d current=%d - discarding",
+                      gen, d.load_gen)
             return
 
         meta = d.meta
@@ -343,10 +410,19 @@ class StateManager:
         meta.first_beat_ms  = payload["first_beat_ms"]
         meta.soundswitch_id = payload["soundswitch_id"]
         meta.total_ms       = payload["total_ms"]
+        if self._live_bpm is not None and meta.bpm > 0:
+            try:
+                self._live_bpm.update_hint(deck, meta.bpm, meta.bpm)
+            except Exception:
+                log.debug("live BPM library hint update failed", exc_info=True)
 
-        log.info("[D%d] resolved: %s  bpm=%.1f  ssid=%s",
-                 deck, payload["filepath"].split("/")[-1], meta.bpm,
-                 "✓" if meta.soundswitch_id else "✗")
+        load_delta_ms = 0.0
+        if deck in self._load_mono:
+            load_delta_ms = (time.monotonic() - self._load_mono[deck]) * 1000.0
+        log.info("FILEPATH_RESOLVED path=%s bpm=%.1f ssid=%s latency=%.1fms",
+                 payload["filepath"].split("/")[-1], meta.bpm,
+                 "yes" if meta.soundswitch_id else "no", load_delta_ms)
+        LOG.stats.record_transition(deck, "filepath_resolved")
 
     # ── Scripted arm / clear ──────────────────────────────────────────────────
 
@@ -354,7 +430,7 @@ class StateManager:
         # FM-1: non-blocking two-phase arm — no time.sleep() in push loop thread
         track = st_lookup(track_id)
         if not track:
-            log.warning("[SS] arm scripted: unknown id=%d deck=%d", track_id, deck)
+            log.warning("SCRIPTED_ARM failed unknown_id=%d", track_id)
             return
 
         # Debounce concurrent arm calls
@@ -389,9 +465,10 @@ class StateManager:
 
         mirror = 3 - deck
 
-        log.info("[SS] arm scripted: id=%d  %s  deck=%d  elapsed=%dms",
+        log.info("SCRIPTED_ARM id=%d path=%s elapsed=%dms bpm=%.1f first_beat=%.1fms",
                  track_id, track["filepath"].split("/")[-1] if track["filepath"] else "?",
-                 deck, elapsed_ms)
+                 elapsed_ms, d.meta.bpm, d.meta.first_beat_ms)
+        LOG.stats.record_transition(deck, "scripted_arm")
 
         # Phase 0 (immediate): clear all 4 SS deck slots, stop playback + any autoloop
         for dk in (deck, mirror, 3, 4):
@@ -482,6 +559,8 @@ class StateManager:
 
         # Idle transitions are debounced to prevent flicker on transient pauses.
         debounce_s = STOP_DEBOUNCE_S if desired == "idle" else 0.0
+        if desired == "idle" and os.lighting_mode == "autoloop":
+            debounce_s = _AUTOLOOP_IDLE_DEBOUNCE_S
         if (now - os.lighting_stable_since) < debounce_s:
             return
 
@@ -514,6 +593,20 @@ class StateManager:
         elif mode == "autoloop":
             self._pending_arm = None
             self._os.push_reset_bpm = True
+            arm_bpm, bpm_source = self._autoloop_arm_bpm(deck, d.meta.bpm)
+            self._os.autoloop_arm_bpm = arm_bpm
+            self._os.autoloop_arm_deck = deck
+            self._clear_live_bpm_follow()
+            self._os.last_live_follow_bpm = arm_bpm
+            self._os.live_follow_generation += 1
+            log.info("[SS][AUTOLOOP-ARM] deck=%d mirror=%d elapsed=%dms loop=%d "
+                     "source=%s timing_bpm=%.2f arm_bpm=%.2f meta_bpm=%.2f "
+                     "file=%s previous=%s",
+                     deck, mirror, elapsed_ms, AUTOLOOP_BEATS,
+                     bpm_source, arm_bpm, arm_bpm, d.meta.bpm,
+                     d.meta.filepath.split("/")[-1] if d.meta.filepath else "<none>",
+                     self._os.last_armed_filepath.split("/")[-1]
+                     if self._os.last_armed_filepath else "<none>")
             for dk in (deck, mirror, 3, 4):
                 self._out._sub(f"deck {dk} get_filepath", "", verbose=True)
             if d.meta.filepath:
@@ -521,7 +614,7 @@ class StateManager:
                 arm_meta = TrackMetadata(
                     filepath=d.meta.filepath,
                     soundswitch_id="",
-                    bpm=d.meta.bpm,
+                    bpm=arm_bpm,
                     first_beat_ms=d.meta.first_beat_ms,
                     total_ms=d.meta.total_ms,
                 )
@@ -540,6 +633,10 @@ class StateManager:
         elif mode == "idle":
             self._pending_arm = None
             self._os.last_armed_filepath = ""
+            self._os.autoloop_arm_bpm = 0.0
+            self._os.autoloop_arm_deck = 0
+            self._clear_live_bpm_follow()
+            self._os.live_follow_generation += 1
             for dn in range(1, 5):
                 self._out.send_deck_play(dn, "off")
                 self._out._sub(f"deck {dn} loop", "off", verbose=True)
@@ -647,6 +744,8 @@ class StateManager:
 
         # ── BPM and beat position ─────────────────────────────────────────────
         bpm = d.meta.bpm
+        if os.lighting_mode == "autoloop" and os.autoloop_arm_deck == active and os.autoloop_arm_bpm > 0:
+            bpm = os.autoloop_arm_bpm
         if os.push_reset_bpm:
             os.last_sent_bpm = 0.0
             os.push_reset_bpm = False
@@ -655,6 +754,13 @@ class StateManager:
         # Ableton Link phase is not used: if Link session tempo doesn't reflect
         # real-time pitch adjustments, phase drifts from the actual beat too.
         beat_pos = _compute_beat_pos(elapsed_ms, bpm, d.meta.first_beat_ms) if bpm > 0 else 0.0
+        beat_ms = 60_000.0 / bpm if bpm > 0 else 0.0
+        abs_beat_pos = ((elapsed_ms - d.meta.first_beat_ms) / beat_ms) if beat_ms > 0 else 0.0
+        bpm = self._maybe_apply_live_bpm_follow(active, mirror, bpm, abs_beat_pos, now)
+        if bpm > 0:
+            beat_pos = _compute_beat_pos(elapsed_ms, bpm, d.meta.first_beat_ms)
+            beat_ms = 60_000.0 / bpm
+            abs_beat_pos = (elapsed_ms - d.meta.first_beat_ms) / beat_ms
 
         # ── Stop detection ────────────────────────────────────────────────────
         # TL PAUSE event sets d.playing=False; memory confirms it persists.
@@ -757,20 +863,33 @@ class StateManager:
 
         # Beat boundary detection: fire a beat event when elapsed crosses the next beat
         if bpm > 0:
-            beat_ms = 60_000.0 / bpm
-            beats_elapsed = (elapsed_ms - d.meta.first_beat_ms) / beat_ms
-            this_beat = int(beats_elapsed)
+            this_beat = int(abs_beat_pos)
             last_beat = int((os.last_beat_elapsed_ms - d.meta.first_beat_ms) / beat_ms) if beat_ms > 0 else 0
 
             if this_beat > last_beat:
                 beat_index = this_beat % 4
+                beat_out = this_beat if os.lighting_mode == "autoloop" else beat_index
+                change = (beat_index == 0)
                 os.last_beat_elapsed_ms = elapsed_ms
                 for dk in (active, mirror, 3, 4):
-                    self._out.send_beat(dk, bpm, beat_index, change=(beat_index == 0))
+                    self._out.send_beat(dk, bpm, beat_out, change=change)
 
-        # Elapsed + beatpos — send at every push tick (SS needs continuous updates)
+        # Elapsed + beatpos — send at every push tick (SS needs continuous updates).
+        # Test A: in autoloop only, send absolute beat position to match VDJ-like
+        # OS2L timing while leaving beat events unchanged for isolation.
+        beatpos_out = abs_beat_pos if os.lighting_mode == "autoloop" else beat_pos
+        if os.lighting_mode == "autoloop" and now - os.last_autoloop_status_mono >= _AUTOLOOP_STATUS_LOG_S:
+            os.last_autoloop_status_mono = now
+            live_status = self._live_bpm_status_text(active)
+            log.info("[SS][AUTOLOOP-TICK] deck=%d elapsed=%dms beat=%.2f "
+                     "timing_bpm=%.2f arm_bpm=%.2f meta_bpm=%.2f %s %s file=%s",
+                     active, elapsed_ms, beatpos_out,
+                     bpm, os.autoloop_arm_bpm, d.meta.bpm, live_status,
+                     self._live_bpm_follow_status_text(),
+                     os.last_armed_filepath.split("/")[-1]
+                     if os.last_armed_filepath else "<none>")
         for dk in (active, mirror, 3, 4):
-            self._out.send_elapsed(dk, elapsed_ms, beat_pos)
+            self._out.send_elapsed(dk, elapsed_ms, beatpos_out)
 
     # ── Stop / resume helpers ─────────────────────────────────────────────────
 
@@ -783,6 +902,10 @@ class StateManager:
         os.stop_elapsed_ms        = elapsed_ms
         os.not_playing_since      = 0.0
         os.last_sent_bpm          = 0.0
+        os.autoloop_arm_bpm       = 0.0
+        os.autoloop_arm_deck      = 0
+        self._clear_live_bpm_follow()
+        os.live_follow_generation += 1
 
     def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
         mirror = 3 - deck
@@ -802,6 +925,132 @@ class StateManager:
         self._os.last_sent_bpm        = 0.0
         self._os.last_beat_elapsed_ms = elapsed_ms
         self._log_status()
+
+    def _maybe_apply_live_bpm_follow(
+        self,
+        deck: int,
+        mirror: int,
+        timing_bpm: float,
+        abs_beat_pos: float,
+        now: float,
+    ) -> float:
+        os = self._os
+        if not self._live_bpm_follow or os.lighting_mode != "autoloop":
+            return timing_bpm
+        if os.autoloop_arm_deck != deck or os.autoloop_arm_bpm <= 0:
+            self._clear_live_bpm_follow()
+            return timing_bpm
+        if not os.was_playing:
+            return timing_bpm
+        if not self._deck[deck].playing:
+            self._clear_live_bpm_follow()
+            return timing_bpm
+
+        live_bpm = self._live_bpm_value(deck)
+        if live_bpm is None:
+            self._clear_live_bpm_follow()
+            return timing_bpm
+
+        if abs(live_bpm - timing_bpm) <= _LIVE_BPM_FOLLOW_THRESHOLD:
+            self._clear_live_bpm_follow()
+            return timing_bpm
+
+        if (
+            os.pending_live_bpm <= 0
+            or abs(live_bpm - os.pending_live_bpm) > _LIVE_BPM_FOLLOW_THRESHOLD
+        ):
+            first_pending = os.pending_live_bpm <= 0
+            os.pending_live_bpm = live_bpm
+            os.pending_live_bpm_since = now
+            os.pending_live_bpm_target_beat = 0
+            if first_pending or now - os.last_live_follow_pending_log_mono >= _LIVE_BPM_PENDING_LOG_S:
+                os.last_live_follow_pending_log_mono = now
+                log.info("[SS][LIVE-BPM-PENDING] deck=%d current=%.2f pending=%.2f target_beat=stabilizing",
+                         deck, timing_bpm, live_bpm)
+            return timing_bpm
+
+        if now - os.pending_live_bpm_since < _LIVE_BPM_FOLLOW_STABLE_S:
+            return timing_bpm
+
+        if os.pending_live_bpm_target_beat == 0:
+            os.pending_live_bpm_target_beat = self._next_live_bpm_follow_beat(abs_beat_pos)
+            log.info("[SS][LIVE-BPM-PENDING] deck=%d current=%.2f pending=%.2f target_beat=%d",
+                     deck, timing_bpm, os.pending_live_bpm, os.pending_live_bpm_target_beat)
+
+        current_beat = int(abs_beat_pos)
+        if current_beat < os.pending_live_bpm_target_beat:
+            return timing_bpm
+
+        new_bpm = os.pending_live_bpm
+        for dk in (deck, mirror, 3, 4):
+            self._out.send_bpm(dk, new_bpm)
+        os.autoloop_arm_bpm = new_bpm
+        os.last_live_follow_bpm = new_bpm
+        os.last_sent_bpm = new_bpm
+        log.info("[SS][LIVE-BPM-APPLY] deck=%d bpm=%.2f beat=%d",
+                 deck, new_bpm, current_beat)
+        self._clear_live_bpm_follow()
+        return new_bpm
+
+    def _live_bpm_value(self, deck: int) -> Optional[float]:
+        if self._live_bpm is None:
+            return None
+        try:
+            live = self._live_bpm.get_bpm(deck)
+        except Exception:
+            log.debug("live BPM read failed", exc_info=True)
+            return None
+        if live is None or not math.isfinite(live) or live <= 0:
+            return None
+        return float(live)
+
+    def _next_live_bpm_follow_beat(self, abs_beat_pos: float) -> int:
+        beat = int(abs_beat_pos) + 1
+        while beat <= 1 or beat % 8 != 1:
+            beat += 1
+        return beat
+
+    def _clear_live_bpm_follow(self) -> None:
+        os = self._os
+        os.pending_live_bpm = 0.0
+        os.pending_live_bpm_since = 0.0
+        os.pending_live_bpm_target_beat = 0
+        os.last_live_follow_pending_log_mono = 0.0
+
+    def _autoloop_arm_bpm(self, deck: int, fallback_bpm: float) -> tuple[float, str]:
+        live = self._live_bpm_value(deck)
+        if live is not None:
+            return live, "live"
+        return fallback_bpm, "fallback"
+
+    def _live_bpm_status_text(self, deck: int) -> str:
+        if self._live_bpm is None:
+            return "live_bpm=unavailable"
+        try:
+            status = self._live_bpm.get_status(deck)
+        except Exception:
+            log.debug("live BPM status read failed", exc_info=True)
+            status = None
+        if status is None:
+            return "live_bpm=unvalidated"
+        age_ms = (time.monotonic() - status.updated_at) * 1000.0
+        return (
+            f"live_bpm={status.bpm:.2f} "
+            f"live_age_ms={age_ms:.0f} "
+            f"live_addr=0x{status.addr:x}/{status.type_name}"
+        )
+
+    def _live_bpm_follow_status_text(self) -> str:
+        os = self._os
+        if not self._live_bpm_follow:
+            return "follow=off"
+        if os.pending_live_bpm > 0:
+            target = (
+                str(os.pending_live_bpm_target_beat)
+                if os.pending_live_bpm_target_beat > 0 else "stabilizing"
+            )
+            return f"follow=on pending_bpm={os.pending_live_bpm:.2f} target_beat={target}"
+        return "follow=on pending_bpm=none"
 
     # ── Instrumentation ───────────────────────────────────────────────────────
 

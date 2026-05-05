@@ -14,6 +14,7 @@ Run:
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import signal
 import sys
@@ -31,6 +32,8 @@ from .state_manager import StateManager
 from .tl_tailer import TLLogTailer, read_initial_state
 from .diagnostics import DriftDetector, enable_debug, is_debug
 from .link_reader import LinkReader
+from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService
+from .logging_manager import get_logging_manager
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -56,65 +59,126 @@ class _ColorFormatter(logging.Formatter):
 
     # First match wins
     _PATTERNS = [
-        # Stop / error
-        ("playback stopped",        _BRED),
-        ("clearing SS show",        _BRED),
-        ("forcing stop",            _BRED),
+        # Red: action needed now.
+        ("rb_restarted",            _BRED),
         ("rb restarted",            _BRED),
-        # Link / timecode
-        ("link bpm:",               _BCYAN),
-        ("link: no peers",          _YELLOW),
-        ("timecode deck",           _GREY),
-        ("scripted_tracks: registry", _GREY),
-        # Play / connected / resolved / autoloop
-        ("playing (from",           _BGREEN),
-        ("play=on",                 _BGREEN),
-        ("resume deck",             _BGREEN),
-        ("resuming",                _BGREEN),
-        ("resolved →",              _BGREEN),
-        ("filepath resolved",       _BGREEN),
-        ("attached pid",            _BGREEN),
-        ("connected to soundswitch",_BGREEN),
-        ("autoloop",                _BGREEN),
-        # Deck switch
+        ("memory stale",            _BRED),
+        ("forcing stop",            _BRED),
+        ("playback stopped",        _BRED),
+        ("→ idle",                  _BRED),
+        (" paused",                 _BRED),
+        (" stopped",                _BRED),
+        ("osc listener failed",     _BRED),
+        ("os2l send error",         _BRED),
+        ("clearing ss show",        _BRED),
+
+        # Orange/yellow: degraded, retrying, or needs follow-up but still running.
+        ("event latency",           _ORANGE),
+        ("attach failed",           _ORANGE),
+        ("queue full",              _ORANGE),
+        ("connect failed",          _ORANGE),
+        ("port error",              _ORANGE),
+        ("failed",                  _ORANGE),
+        ("retry",                   _ORANGE),
+        ("[lbpm][error]",           _ORANGE),
+        ("[lbpm][invalid]",         _ORANGE),
+        ("[rbmem][error]",          _ORANGE),
+        ("[rbmem][invalid]",        _ORANGE),
+        ("[rbmem][reject]",         _ORANGE),
+        ("fallback",                _YELLOW),
+        ("disabled",                _YELLOW),
+        ("not installed",           _YELLOW),
+        ("[ss][live-bpm-pending]",  _YELLOW),
+        ("[rbmem][pending]",        _YELLOW),
+        ("[rbmem][inconclusive]",   _YELLOW),
+        ("cooldown",                _YELLOW),
+        ("discarded",               _YELLOW),
+        ("no peers",                _YELLOW),
+
+        # Cyan: deck routing and master-deck decisions.
+        ("master_changed",          _BCYAN),
+        ("master changed",          _BCYAN),
         ("deck switch",             _BCYAN),
         ("auto-switch",             _BCYAN),
-        ("master changed",          _BCYAN),
-        ("unscripted switch",       _BCYAN),
-        # Scripted arm
-        ("arm_scripted",            _BMAGENTA),
-        ("arm scripted",            _BMAGENTA),
-        ("phase1",                  _BMAGENTA),
+        ("active_deck",             _BCYAN),
+        ("correcting: active deck", _BCYAN),
+
+        # Cyan: steady-state autoloop status, intentionally scan-friendly.
+        ("[ss][autoloop-tick]",     _BCYAN),
+        ("[lbpm][scan]",            _BCYAN),
+        ("[lbpm][current]",         _BCYAN),
+        ("[rbmem][scan]",           _BCYAN),
+        ("[rbmem][candidate]",      _BCYAN),
+        ("[rbmem][status]",         _BCYAN),
+
+        # Magenta: scripted show lifecycle.
         ("scripted_arm",            _BMAGENTA),
         ("scripted_clear",          _BMAGENTA),
+        ("scripted arm",            _BMAGENTA),
+        ("arm scripted",            _BMAGENTA),
         ("arm unscripted",          _BMAGENTA),
-        # Warnings / fallback
-        ("cooldown",                _YELLOW),
-        ("fallback",                _YELLOW),
-        ("stale",                   _YELLOW),
-        ("discarded",               _YELLOW),
-        ("retry",                   _YELLOW),
+        ("phase2",                  _BMAGENTA),
+        ("scripted cleared",        _BMAGENTA),
+
+        # Green: successful user-facing state.
+        ("track_loaded",            _BGREEN),
+        ("filepath_resolved",       _BGREEN),
+        ("filepath resolved",       _BGREEN),
+        ("resolved →",              _BGREEN),
+        ("resolved:",               _BGREEN),
+        ("► d",                     _BGREEN),
+        ("playing",                 _BGREEN),
+        ("resume",                  _BGREEN),
+        ("resuming",                _BGREEN),
+        ("attached pid",            _BGREEN),
+        ("connected to soundswitch",_BGREEN),
+        ("[ss][autoloop-arm]",      _BGREEN),
+        ("[ss][live-bpm-apply]",    _BGREEN),
+        ("[lbpm][attach]",          _BGREEN),
+        ("[lbpm][validated]",       _BGREEN),
+        ("[rbmem][attach]",         _BGREEN),
+        ("[rbmem][validated]",      _BGREEN),
+        ("autoloop",                _BGREEN),
+
+        # Grey: diagnostic/status noise.
+        ("link bpm:",               _GREY),
+        ("timecode deck",           _GREY),
+        ("mtc deck",                _GREY),
+        ("event processed",         _GREY),
+        ("event relation",          _GREY),
+        ("scripted_tracks: registry", _GREY),
     ]
 
     def format(self, record: logging.LogRecord) -> str:
-        text = super().format(record)
-        if record.levelno != logging.INFO:
-            color = self._LEVEL.get(record.levelno, self._WHITE)
+        msg, args = record.msg, record.args
+        prefix = LOG.indent(record)
+        if prefix:
+            record.msg = prefix + str(record.msg)
+        try:
+            text = super().format(record)
+        finally:
+            record.msg, record.args = msg, args
+        text += LOG.annotate(record)
+        msg = record.getMessage().lower()
+        color = self._WHITE
+        for pattern, c in self._PATTERNS:
+            if pattern in msg:
+                color = c
+                break
         else:
-            msg = record.getMessage().lower()
-            color = self._WHITE
-            for pattern, c in self._PATTERNS:
-                if pattern in msg:
-                    color = c
-                    break
+            color = self._LEVEL.get(record.levelno, self._WHITE)
         return f"{color}{text}{self._RESET}"
 
 
+LOG = get_logging_manager()
 logging.basicConfig(level=logging.INFO, datefmt="%H:%M:%S", stream=sys.stdout)
+LOG.configure(json_output=bool(os.environ.get("BRIDGE_LOG_JSON")), root_level=logging.INFO)
+LOG.reload_from_env()
 _handler = logging.root.handlers[0]
-_handler.setFormatter(_ColorFormatter(
-    "%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"
-))
+if not os.environ.get("BRIDGE_LOG_JSON"):
+    _handler.setFormatter(_ColorFormatter(
+        "%(asctime)s [%(levelname)-7s] %(message)s", datefmt="%H:%M:%S"
+    ))
 log = logging.getLogger("bridge")
 
 
@@ -127,7 +191,7 @@ def start_osc_listener(event_queue: queue.Queue[BridgeEvent], state_manager: Sta
         from pythonosc import osc_server                    # type: ignore
         from pythonosc.udp_client import SimpleUDPClient    # type: ignore
     except ImportError:
-        log.error("python-osc not installed — scripted arm triggers will not work")
+        LOG.log_error(log, "python-osc not installed - scripted arm triggers will not work")
         return
 
     disp = osc_dispatcher.Dispatcher()
@@ -187,7 +251,7 @@ def start_osc_listener(event_queue: queue.Queue[BridgeEvent], state_manager: Sta
     try:
         srv = osc_server.ThreadingOSCUDPServer(("0.0.0.0", OSC_LISTEN_PORT), disp)
     except OSError as exc:
-        log.error("OSC listener failed on port %d: %s", OSC_LISTEN_PORT, exc)
+        LOG.log_error(log, "OSC listener failed on port %d: %s", OSC_LISTEN_PORT, exc)
         return
 
     log.info("OSC listener on UDP :%d", OSC_LISTEN_PORT)
@@ -241,10 +305,15 @@ def main() -> None:
     resolve_filepaths()
 
     # Shared event queue
-    event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)
+    raw_event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)
+    event_queue = LOG.wrap_queue(raw_event_queue)
 
     # Position cache (RBMemoryReader → PositionCache → StateManager push loop)
     pos_cache = PositionCache()
+    live_bpm = LiveBPMService()
+    if live_bpm.disabled:
+        log.warning("Live BPM disabled by %s=1; autoloop will use ENGINE STATE/library BPM",
+                    LIVE_BPM_DISABLE_ENV)
 
     # OS2L output
     conn = OS2LConnection()
@@ -256,7 +325,7 @@ def main() -> None:
     discovery.start()
 
     # State manager (event loop + push loop)
-    sm = StateManager(event_queue, pos_cache, output)
+    sm = StateManager(event_queue, pos_cache, output, live_bpm=live_bpm)
 
     # Initialize master deck from last TL ENGINE STATE (fixes startup deck bug)
     init = read_initial_state(TL_LOG_PATH)
@@ -293,19 +362,23 @@ def main() -> None:
     # Start all components
     tailer.start()
     mem_reader.start()
+    live_bpm.start()
     sm_thread = sm.start()
 
     # OSC listener (scripted arm triggers)
     start_osc_listener(event_queue, sm)
 
     log.info("rb_ss_bridge_v2 running — Ctrl-C to stop")
+    LOG.start_control_watcher(log)
 
     # Graceful shutdown on SIGTERM / SIGINT
     def _shutdown(sig, frame):
         log.info("shutdown signal received")
+        LOG.stop_control_watcher()
         sm.stop()
         tailer.stop()
         mem_reader.stop()
+        live_bpm.stop()
         link.stop()
         mtc.stop()
         discovery.stop()
@@ -314,6 +387,14 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT,  _shutdown)
+
+    def _reload_logging(sig, frame):
+        LOG.reload_from_env()
+        LOG.log_stats(log)
+        log.info("logging runtime filters reloaded from BRIDGE_LOG_*")
+
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, _reload_logging)
 
     # Block main thread
     sm_thread.join()

@@ -105,6 +105,15 @@ class OutputState:
     lighting_desired:      str   = "idle"  # desired mode, tracked for debounce
     lighting_stable_since: float = 0.0    # monotonic time when lighting_desired last changed
     last_armed_filepath:   str   = ""     # filepath sent in last autoloop arm; re-arm if changed
+    autoloop_arm_bpm:      float = 0.0    # BPM chosen when current autoloop armed
+    autoloop_arm_deck:     int   = 0      # deck for autoloop_arm_bpm
+    last_autoloop_status_mono: float = 0.0  # rate-limit autoloop status diagnostics
+    pending_live_bpm: float = 0.0
+    pending_live_bpm_since: float = 0.0
+    pending_live_bpm_target_beat: int = 0
+    last_live_follow_pending_log_mono: float = 0.0
+    last_live_follow_bpm: float = 0.0
+    live_follow_generation: int = 0
 
 
 @dataclass
