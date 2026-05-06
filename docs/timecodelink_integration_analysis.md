@@ -9,8 +9,10 @@
 - TimecodeLink 0.0.24+042 (`/Applications/TimecodeLink.app`)
 - rb_ss_bridge_v2 (`~/rb_ss_bridge_v2`) — bridge already attaches to RB via `task_for_pid`/`mach_vm_read_overwrite`
 
-**Hard constraints honored throughout this session:**
-no binary modification, no code injection (no `DYLD_INSERT_LIBRARIES`, no Frida attach to RB), no SIP/library-validation/hardened-runtime changes, no DRM bypass, no kext, no source-code edits to rb_ss_bridge_v2. Read-only static analysis (`otool`, `nm`, `strings`, `codesign`, `plutil`) plus passive observation of TL's own log file plus dynamic call-stack sampling of the running TL process via `sample(1)` and `vmmap(1)`. The analyst's shell sandbox blocked `task_for_pid` and `sudo`; the user ran the equivalent commands in their own Terminal and pasted output back.
+**Hard constraints honored in the original 2026-05-06 RE session:**
+no binary modification, no code injection (no `DYLD_INSERT_LIBRARIES`, no Frida attach to RB), no SIP/library-validation/hardened-runtime changes, no DRM bypass, no kext, no source-code edits to rb_ss_bridge_v2 *during that session*. Read-only static analysis (`otool`, `nm`, `strings`, `codesign`, `plutil`) plus passive observation of TL's own log file plus dynamic call-stack sampling of the running TL process via `sample(1)` and `vmmap(1)`. The analyst's shell sandbox blocked `task_for_pid` and `sudo`; the user ran the equivalent commands in their own Terminal and pasted output back.
+
+**Follow-on:** `rb_offsets.py`, `rb_state_reader.py`, and companion tests/YAML were added in a later bridge commit implementing §9–10. §10.2 documents the **actual** Python behaviour (which may refine prose elsewhere in this report).
 
 ---
 
@@ -501,9 +503,9 @@ This is the actionable section.
 
 | Signal                              | Direct-tap feasibility                                 | Notes                                                                                                                                                                       |
 | ----------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `track_loaded` (deck → bool)        | **High** — same Mach mechanism the bridge already uses | Need offset for "deck N current track handle" / "loaded flag". This is per-version data the bridge would need to carry, just like TL does.                                  |
-| Play / Pause per deck               | **High** — already trivial; one byte                   | Possibly already resolvable if `RB_PLAY_OFF` (already in the bridge's `config.py`) is the right field.                                                                      |
-| `bpm_update` (effective, post-sync) | **Already done**                                       | This is exactly what `live_bpm.py` does. **The bridge's signal is strictly better than TL's** — same source field, but at 30 Hz internally vs TL's 15 s log throttle.       |
+| `track_loaded` (deck → title)       | **Shipped in `RBStateReader`**                         | Per-deck **500-byte track-info** chain (`track_info_per_deck`) → UTF-8 decode up to NUL; **`TRACK_LOADED` fires only when the string changes and is non-empty** (no emit on clear-to-empty). Same spirit as TL diffing track identity across polls (§3.1). |
+| Play / Pause per deck               | **Shipped in `RBStateReader`**                         | TL does **not** read a dedicated “playing” boolean from RB for this path (§7.6). **`RBStateReader` mirrors TL:** `is_playing = (live_pos_now != live_pos_prev)` on the **`live_pos_per_deck` → `readInt64`** chain. This is **orthogonal** to `rb_memory.py`'s `secondary+RB_PLAY_OFF` sign bit (still used for `PositionSnapshot.playing` corroboration). |
+| `bpm_update` (effective, post-sync) | **`RBStateReader` + `live_bpm.py`**                    | **`RBStateReader`** reads TL's **fixed per-version float chain** at poll rate when offsets exist (`_BPM_EMIT_THRESHOLD = 0.05`, finite values in `(0, 1000)` only). **`live_bpm.py`** remains the bridge’s pattern-scan + **session-validated** path. For autoloop arm/follow policy see `docs/bridge_design.md`. |
 | `master_change`                     | **High** — one byte at a global offset                 | Need the "current master deck index" offset; the `0xFF`-as-sentinel pattern matches a single uint8 read.                                                                    |
 | ENGINE STATE 15 s snapshot          | **Already done**                                       | Bridge reads the underlying values directly via `rb_memory.py`; the 15 s log block is just a digest.                                                                        |
 | Beat grid / cue points / waveform   | **Medium** — read ANLZ files directly                  | Same files TL parses. Pioneer ANLZ is public via crate-digger. **No new infrastructure needed.** Useful only if the bridge wants beat-grid bars or cue-point times.         |
@@ -512,13 +514,12 @@ This is the actionable section.
 
 ### 5.2 Signals where TL has something the bridge does not
 
-**Concretely: master deck index, "deck N is on-air", and the per-deck loaded-track identifier.** Each of these is a single-field read at a stable offset for the supported RB version. The bridge's existing `rb_memory.py` infrastructure is sufficient — just add the offsets to `config.RB_*_OFF`.
+**Updated for shipped `RBStateReader`:** master-deck index, per-deck track title (track load), live BPM float, and TL-style play/pause from position diff are **in `rb_offsets.py` + `rb_state_reader.py`** for Rekordbox **7.2.8 / 7.2.10 / 7.2.11 / 7.2.13 / 7.2.14** (ARM64 table embed). Remaining gaps:
 
-Particular call-outs:
-
-- **Master deck index.** `Rekordbox master deck changed: -1 -> 255` is the most useful TL signal the bridge currently doesn't get directly. TL reads it as a single byte. Bridge could read it the same way, with a one-line addition to `rb_memory.py`'s polling loop.
-- **On-air state.** TL's `[ON-AIR]` flag in ENGINE STATE shows TL knows the per-deck on-air bit. Bridge does not currently consume this directly.
-- **Effective layer-rate / TC speed.** This is internal to TL (§3.6). Not available from RB; not replaceable.
+- **ANLZ path → `ANLZ_PATH` event.** The offset table includes **`anlz_path_per_deck`** (TL `+0x90`-class chain). **`RBStateReader._tick_deck` does not read it yet** — so `FilepathResolver` still relies on `TLLogTailer` for ANLZ-before-load correlation unless that chain is wired to emit `Ev.ANLZ_PATH`.
+- **On-air / `onAirLevel`.** TL `DeckState+0xa0` (§9.1). Not surfaced by `RBStateReader`.
+- **ENGINE STATE block / per-layer TC lines.** TL-generated log digest (§3.5–3.6). **`RBStateReader` does not emit `TC_UPDATE`.** Bridge still uses `MTCReader` + TL ENGINE STATE for TC fallbacks.
+- **Effective layer-rate / TC speed** as TL logs it. Internal to TL; not replaceable from RB memory alone.
 
 ### 5.3 Signals where the bridge already has something TL does not
 
@@ -526,19 +527,15 @@ Particular call-outs:
 - **Position / time-elapsed within track.** The bridge's `rb_memory.py` PositionCache reads a position field at high cadence. TL's log only shows seconds-resolution time-elapsed in ENGINE STATE every 15 s. (TL likely has the same data internally for its MTC clock; it just doesn't log it.)
 - **Pitched playback rate.** TL's logged `pitch=+0.0%` is the un-synced pitch fader; it does not reflect actual playback rate when sync is engaged. The bridge can compute true playback-rate deviation from `live_bpm / track_bpm`.
 
-### 5.4 Recommended posture (this is reconnaissance, not a patch — no source changes this session)
+### 5.4 Recommended posture
 
-This analyst's read is that TL provides little that the bridge cannot replicate using mechanisms it already has, **except** for three offset-table entries that don't require any new infrastructure:
+**Shipped:** option **(a)** — the bridge embeds TL's macOS ARM64 `offsets-macos` extract in `rb_offsets.py` and implements **`RBStateReader`** as outlined in §9–10.
 
-- master deck index
-- per-deck on-air bit
-- per-deck loaded-track identifier (so the bridge can detect track changes without depending on TL's log)
+**Before promoting direct-read events to sole authority:** run **`TLLogTailer` and `RBStateReader` in parallel** (`docs/bridge_design.md`, §10.3–10.5), record per-source timing deltas, then add **explicit arbitration** if TL is ever gated off — **`StateManager` today applies `PLAY` / `PAUSE` the same way for every `event.source`**, so enabling both producers without merging guarantees **duplicate or competing transitions**.
 
-The remaining TL log signals are either already covered by the bridge's direct path (BPM, position, play-state) or generated by TL itself (MTC, layer routing).
+**Fragility:** the embedded table inherits **exact version-string keys** (`load_offsets_for_version(rb_version)` is a plain map lookup; no normalization such as `7.2.11.0342 → 7.2.11`) and **per-release offset drift** when Rekordbox bumps binaries. `live_bpm.py`-style discovery remains the bridge's strategy when offsets are absent.
 
-The trade-off is that **adopting TL's offsets means inheriting TL's per-version fragility**. The bridge's `live_bpm.py` mitigates this with pattern-scan validation; the same pattern-scan approach could be extended to find the master-deck-index field (look for a `uint8` that flips between 0/1/2/3/0xFF in lock-step with master-button presses) without ever hardcoding an offset.
-
-**Key open decision for the next session** (out of scope here): does the bridge want to (a) ship a small offset table next to TL's, (b) extend `live_bpm.py`-style pattern scanning to cover the additional fields, or (c) keep TL as an intermediary for the three signals that aren't easily pattern-scannable. None of those require this session to recommend a code change — that's the next session's job.
+**Pattern-scan alternative** (§10.1a option C) for master `uint8` and other fields is still valid when TL has not published a row for a new RB build.
 
 ---
 
@@ -846,7 +843,7 @@ This is Deliverable 2 from the brief, framed against the bridge's current `model
 | `StateManager._active_deck` (set by `MASTER_CHANGED` events) | (not in DeckState — global) | direct: TL chain `OffsetVersion+0x20.chain → +0x38` returns a `uint8_t` |
 | (no equivalent)                                              | `DeckState.isOnAir`/`onAirLevel` (`+0xa0`) | direct: derived in TL from `trackInfoOk`; for the bridge, this is an additional signal worth wiring |
 
-### 9.2 Python translation (proposed for a future `rb_state_reader.py`)
+### 9.2 Python translation — shipped as `rb_offsets.py`; `RBDeckState` still illustrative
 
 ```python
 # Mirrors TL's DeckState slot — read-only output of one extractDeck() call.
@@ -878,16 +875,18 @@ class RBOffsetVersion:
     bpm_per_deck:          tuple[ChainEntry, ...] # → float live BPM per deck
     live_pos_per_deck:     tuple[ChainEntry, ...] # → int64 live play position in samples per deck
     track_info_per_deck:   tuple[ChainEntry, ...] # → 500-byte packed string per deck
-    anlz_path_per_deck:    tuple[ChainEntry, ...] # → filesystem path per deck
+    anlz_path_per_deck:    tuple[ChainEntry, ...] # → filesystem path per deck (table present; RBStateReader does not read this chain yet — no ANLZ_PATH emits)
 ```
 
-The `ChainEntry` class is the bridge equivalent of TL's `(QList<u64> hops, u64 finalOff)`. A reader implemented against this surface can resolve any one field with the same single-thread `mach_vm_read_overwrite` calls (`len(hops)+1` of them) the bridge already issues today — see §10.
+**Implementation status:** `RBStateReader` consumes **`master_deck`**, **`bpm_per_deck`**, **`live_pos_per_deck`**, and **`track_info_per_deck`**. It does **not** yet follow **`anlz_path_per_deck`**.
+
+The `ChainEntry` class is the bridge equivalent of TL's `(QList<u64> hops, u64 finalOff)`. A reader implemented against this surface can resolve any one field with the same single-thread `mach_vm_read_overwrite` pattern TL uses (`len(hops)` pointer steps + final read) — see §10.2 for what is wired today.
 
 ---
 
 ## 10. Migration path — replacing `TLLogTailer` with a direct `RBStateReader`
 
-This is Deliverable 4 from the brief. The recommendation is **incremental and reversible**: the bridge's existing TL-log path stays in place as a fallback; the new direct-read path is added behind a kill switch matching the existing `RBSS_LIVE_BPM_DISABLE` pattern.
+This is Deliverable 4 from the brief. The recommendation remains **incremental and reversible**: keep **`TLLogTailer`** as fallback until parallel validation passes (`docs/bridge_design.md`). Kill-switch for the reader: set env **`RBSS_RB_STATE_DISABLE`** (any value) — **`run()` returns immediately** with no attach. (`RBSS_LIVE_BPM_DISABLE` is the analogous pattern for `LiveBPMService`.)
 
 ### 10.1 Acquisition — preferred option D: extract from TL's qrc resource
 
@@ -948,131 +947,65 @@ The full extracted YAML for all 5 supported versions (7.2.8 / 7.2.10 / 7.2.11 / 
 
 **Option C:** independent rediscovery via `live_bpm.py`-style pattern-scan + movement validation. Slowest, but TL-independent — and the only path forward when RB ships a version TL hasn't yet released offsets for. The master-deck byte is the easiest target (single `uint8_t` flipping `0/1/2/3/0xFF` on master-button presses).
 
-### 10.2 Implementation (shipped this session)
+### 10.2 Implementation — **`rb_state_reader.py`** (authoritative description)
 
-`rb_state_reader.py` and `rb_offsets.py` are now in the repo, with 24 unit tests under `tests/test_rb_state_reader.py` and `tests/test_rb_offsets.py`. The tests use a fake `mach_vm_read_overwrite` backend (`FakeMem`) so all chain-following / play-pause-inference logic is exercised without an actual RB attach.
+`rb_offsets.py` + `rb_state_reader.py` are in the repo, with unit tests under `tests/test_rb_offsets.py` and `tests/test_rb_state_reader.py` (fake `mach_vm_read_overwrite` harness).
 
-The shipped `RBStateReader`:
+**Bootstrap**
 
-- Polls at `MEM_POLL_HZ // 2` (default 30 Hz) — same cadence TL uses.
-- Mirrors TL's event vocabulary: `MASTER_CHANGED`, `TRACK_LOADED`, `BPM_UPDATE`, `PLAY`, `PAUSE`, all stamped `source='rb_state'`.
-- Uses TL's exact play-state derivation (`isPlaying = (live_pos_now != live_pos_prev)`).
-- Fail-closed on three layers: env switch (`RBSS_RB_STATE_DISABLE`), unsupported RB version (returns no-op thread), and per-tick read errors (logs and continues without enqueuing).
-- Reuses `rb_memory._read_bytes`, `_task_for_pid`, `_base_from_vmmap`, `get_rb_pid` so all Mach syscall plumbing matches `RBMemoryReader` byte-for-byte.
+- **`make_rb_state_reader(event_queue, rb_version, **kwargs)`** calls **`load_offsets_for_version(rb_version)`**; if `None`, constructs **`RBStateReader(..., offsets=None)`** whose **`run()` exits immediately** (no-op thread).
+- **`RBStateReader` constructor** accepts optional injected **`rb_pid`**, **`base_addr`**, **`poll_hz`**, **`clock`**, **`sleeper`** (tests use fakes).
 
-Reference (committed) — same semantics as the previous skeleton, but now real:
+**Attach**
 
-```python
-# rb_ss_bridge_v2/rb_state_reader.py  (sketch — not yet written)
-"""Direct Rekordbox state reader, TL-equivalent.
+- Resolves pid via **`get_rb_pid()`** (`pgrep -x rekordbox`) unless overridden.
+- Task port **`_task_for_pid`**; text base **`_base_from_vmmap(_get_vmmap_output(pid))`** — same helpers as **`rb_memory.py`**.
 
-Reads master-deck index, per-deck live BPM, and per-deck track-info string at
-the same cadence TL polls (~30 Hz default). Fail-closed: emits no events until
-the offset table has been validated for the current pid/base session.
-"""
-from __future__ import annotations
-import threading, time, queue, logging
-from .config  import MEM_POLL_HZ
-from .models  import BridgeEvent, Ev
-from .rb_memory import _task_for_pid, _read_bytes, get_rb_pid
+**Poll loop**
 
-log = logging.getLogger("rb_state")
+- Default period **`1.0 / max(1, MEM_POLL_HZ // 2)`** — with **`MEM_POLL_HZ = 60` → 30 Hz**, matching TL engine cadence.
+- Schedule: target **`next_tick`** in monotonic time; **resync** when a tick overruns (no spin).
+- **`OSError`** on **`_tick`**: logged at **`debug`** — loop continues.
+- Any other **`Exception`** on **`_tick`**: **`log.exception`** + **1 s sleep**, **`next_tick` resync** to **`_clock()`**.
 
-_RB_STATE_DISABLE_ENV = "RBSS_RB_STATE_DISABLE"
+**`_tick` semantics (align with TL §7.2–7.6)**
 
-class RBStateReader(threading.Thread):
-    """Daemon thread; emits MASTER_CHANGED, TRACK_LOADED, BPM_UPDATE
-    on diff, exactly mirroring tl_tailer.TLLogTailer's event vocabulary.
+1. **Master** — **`_follow_u8`** on **`offs.master_deck`**. When the byte **changes**, **`_last_master`** is set to the **new raw byte** (including **`0xFF`**); **`MASTER_CHANGED`** is enqueued **only if** **`0 <= master_raw < deck_count`**, **`deck = (master_raw % 2) + 1`**. Sentinels outside **`0..deck_count-1`** therefore **update baseline only**, no **`MASTER_CHANGED`**.
+2. **Per deck `d` in `range(deck_count)`** — **`_tick_deck`** order is **track → BPM → position**:
+   - **Track** — read up to **500** bytes UTF-8 at **`track_info_per_deck[d]`**; **`TRACK_LOADED`** if string **changed** and **`title` is truthy** (empty strings suppress emit).
+   - **BPM** — **`readFloat` chain**; accept only **`0 < v < 1000`** finite; emit **`BPM_UPDATE`** if **`abs(bpm - last) > 0.05`** for that deck.
+   - **Play/pause** — **`readInt64`** at **`live_pos_per_deck[d]`**. If **`None`**, **skip PLAY/PAUSE for this deck this tick** (track + BPM already handled). **`PLAY`/`PAUSE`**: **`is_playing = (pos != prev)`** after **two successful samples**; **`prev is None`** skips inference (first poll). **Known gap:** a **`None`** position read **does not update** `_last_pos_samples[d]` — the **next** good read may **compare against a stale `prev`** and spuriously edge; future hardening should freeze or invalidate baseline on failed reads.
 
-    Falls back silently when offsets are unknown for the current RB version.
-    """
-    def __init__(self, event_queue: queue.Queue[BridgeEvent],
-                 offsets: "RBOffsetVersion | None") -> None:
-        super().__init__(name="rb-state-reader", daemon=True)
-        self._q       = event_queue
-        self._offs    = offsets
-        self._stop    = threading.Event()
-        self._period  = 1.0 / max(1, MEM_POLL_HZ // 2)   # 30 Hz default
-        # Last-seen state (for diffs)
-        self._last_master:  int | None = None
-        self._last_loaded:  dict[int, str] = {}
-        self._last_bpm:     dict[int, float] = {}
+**Not implemented in `_tick_deck` (table has chains, code does not consume yet)**
 
-    def stop(self) -> None: self._stop.set()
+- **`anlz_path_per_deck`** — no **`ANLZ_PATH`** events.
 
-    def run(self) -> None:
-        if self._offs is None:
-            log.info("RBStateReader disabled — no offsets for current RB version")
-            return
-        try:
-            pid  = get_rb_pid()
-            task = _task_for_pid(pid)
-            base = self._resolve_text_base(pid)
-        except Exception:
-            log.exception("RBStateReader: attach failed; bridge falls back to TLLogTailer")
-            return
-        next_tick = time.monotonic()
-        while not self._stop.is_set():
-            try:
-                self._tick(task, base)
-            except Exception:
-                log.exception("RBStateReader: tick failed; sleeping 1 s")
-                time.sleep(1.0)
-                continue
-            next_tick += self._period
-            sleep = next_tick - time.monotonic()
-            if sleep > 0: time.sleep(sleep)
-            else:         next_tick = time.monotonic()    # missed deadline; resync
+**Differences vs TL `RekordboxPlugin::poll` (§7.5)**
 
-    # ── single-poll body ─────────────────────────────────────────────────────
-    def _tick(self, task: int, base: int) -> None:
-        master = self._follow(task, base, self._offs.master_deck, size=1)
-        if master is not None and master != self._last_master:
-            if 0 <= master < self._offs.deck_count:
-                self._q.put_nowait(BridgeEvent(
-                    kind=Ev.MASTER_CHANGED,
-                    deck=((master) % 2) + 1,    # bridge_deck mapping (see tl_tailer)
-                    source='rb_state'))
-            self._last_master = master
-        for d in range(self._offs.deck_count):
-            bpm = self._follow_float(task, base, self._offs.bpm_per_deck[d])
-            if bpm and abs(bpm - self._last_bpm.get(d, 0.0)) > 0.05:
-                self._q.put_nowait(BridgeEvent(
-                    kind=Ev.BPM_UPDATE, deck=(d % 2) + 1,
-                    payload={'bpm': bpm}, source='rb_state'))
-                self._last_bpm[d] = bpm
-            info = self._follow_string(task, base, self._offs.track_info_per_deck[d], n=500)
-            if info and info != self._last_loaded.get(d, ""):
-                self._q.put_nowait(BridgeEvent(
-                    kind=Ev.TRACK_LOADED, deck=(d % 2) + 1,
-                    payload={'title': info}, source='rb_state'))
-                self._last_loaded[d] = info
+- **No `kill(pid, 0)`** liveness at poll entry.
+- **No automatic reattach** on RB restart (contrast **`RBMemoryReader._tick`** pid check + **`RB_RESTARTED`** event).
 
-    # ── chain primitives (each is len(chain.hops)+1 mach_vm_read calls) ─────
-    def _follow(self, task: int, base: int, ch, *, size: int) -> int | None:
-        addr = base
-        for hop in ch.hops:
-            data = _read_bytes(task, addr + hop, 8)
-            addr = int.from_bytes(data, 'little')
-            if addr == 0: return None
-        return int.from_bytes(_read_bytes(task, addr + ch.final_off, size), 'little')
-    # _follow_float / _follow_string analogous (struct.unpack 'f' / decode utf-8)
+**Queue**
 
-    def _resolve_text_base(self, pid: int) -> int:
-        # Identical to live_bpm._base_from_vmmap — already in the bridge.
-        from .probe_live_bpm import _base_from_vmmap, _get_vmmap_output
-        return _base_from_vmmap(_get_vmmap_output(pid))
-```
+- **`put_nowait`**; on **`queue.Full`**, **drop** and **warning** (same policy as **`TLLogTailer`**).
+
+**Source tag**
+
+- All emits use **`source='rb_state'`** for downstream filtering / logging.
 
 ### 10.3 StateManager wiring
 
-The new reader is **additive**. `StateManager` already consumes `MASTER_CHANGED`, `TRACK_LOADED`, `BPM_UPDATE` regardless of `event.source`. Adding the new source requires:
+The new reader is **additive**. `StateManager` already consumes `MASTER_CHANGED`, `TRACK_LOADED`, `BPM_UPDATE`, `PLAY`, and `PAUSE` **without inspecting `event.source`** — so **two producers on the same queue duplicate or fight** unless one path is gated.
 
-1. Construct `RBStateReader(event_queue, offsets=load_offsets_for_version(rb_version))` in `__main__.py` alongside the existing `TLLogTailer`.
-2. Run **both** in parallel during the rollout window. Compare event timing per-deck; the existing `code_update_tracker.md` instrumentation pattern can log `[source=tl_log vs source=rb_state]` arrival deltas to validate parity.
-3. Once verified, gate `TLLogTailer` behind a `RBSS_USE_TL_LOG=1` env switch (default off) — `TLLogTailer` then becomes a fallback when `RBSS_RB_STATE_DISABLE=1` or when the RB version has no offsets.
+**Current repo state:** **`__main__.py` starts `TLLogTailer` + `RBMemoryReader` + … but does not construct `RBStateReader` yet** — integration is still manual / experimental.
 
-The 200 Hz `StateManager` push loop remains untouched. The new reader respects the bridge's threading invariant: it never writes to `DeckState` directly, only enqueues `BridgeEvent`. Memory access is on its own thread and is allowed to block briefly on `mach_vm_read_overwrite` (same as `RBMemoryReader` and `LiveBPMService` already do) without affecting `StateManager`.
+**Rollout steps (recommended):**
+
+1. Obtain Rekordbox **short version string** (must match map keys **`7.2.8` … `7.2.14`** today — see §5.4) and call **`make_rb_state_reader(event_queue, rb_version)`** (or **`RBStateReader(event_queue, load_offsets_for_version(...))`**) alongside **`TLLogTailer`**.
+2. Run **both** during validation; log **`[source=tl_log]` vs `[source=rb_state]`** arrival deltas (e.g. `code_update_tracker.md` pattern).
+3. **`RBSS_USE_TL_LOG`** (or equivalent) to prefer TL vs memory — **not implemented** in `__main__.py` as of this doc revision; treat as a **future** env gate once parity is proven.
+
+The 200 Hz `StateManager` push loop remains untouched. The reader respects the threading invariant: **no direct `DeckState` writes** — only **`BridgeEvent`** enqueue. Mach I/O runs on the reader daemon thread (same class of blocking as `RBMemoryReader` / `LiveBPMService`).
 
 ### 10.4 What stays, what goes
 
@@ -1080,11 +1013,11 @@ The 200 Hz `StateManager` push loop remains untouched. The new reader respects t
 | -------------------------------- | ------------------------------------------------------------------------------------------- |
 | TL on-disk patcher (RB re-sign)  | **Required** — still the only path to `get-task-allow` on RB. No replacement proposed.      |
 | TL runtime process               | **Optional** — only needed for MTC on IAC Bus 1 and Ableton Link output. Memory-tap data is now redundant. |
-| `TLLogTailer` (ENGINE STATE etc) | **Fallback** — kept in place; auto-disabled when `RBStateReader` is healthy.                |
-| `MTCReader` (IAC Bus 1)          | **Unchanged** — still the position fallback when RB memory is unresolved (Deck-2 mode 4112).|
-| `RBMemoryReader` (60 Hz)         | **Unchanged** — position is the bridge's strongest signal already.                          |
-| `LiveBPMService`                 | **Subsumable** — its scan/validate logic is exactly what's needed to discover the BPM-per-deck chain when offsets are unavailable. Code-share or merge with `RBStateReader` once both exist. |
-| `FilepathResolver` (ANLZ + lsof) | **Unchanged** — augmented (not replaced) by the `+0x90` ANLZ-path chain, which is structurally cleaner but version-fragile in the same way TL is. |
+| `TLLogTailer` (ENGINE STATE, ANLZ correlation, …) | **Authoritative today** (see `docs/bridge_design.md`). **`RBStateReader` is not started from `__main__.py` yet.** Optional TL env gate after validation (`RBSS_USE_TL_LOG` or equivalent) — **not implemented** in code at this doc revision. |
+| `MTCReader` (IAC Bus 1)          | **Unchanged** — TC fallback when RB memory / TL TC gaps apply. |
+| `RBMemoryReader` (60 Hz)         | **Unchanged** — `PositionCache` / elapsed for push loop. |
+| `LiveBPMService`                 | **Parallel** to **`RBStateReader` BPM chain**: pattern-scan + session validation vs **fixed-offset float** when table matches. |
+| `FilepathResolver` (ANLZ + lsof) | **Unchanged**; **`anlz_path_per_deck` exists in `RBOffsetVersion` but `RBStateReader` does not emit `ANLZ_PATH` yet** — TL correlation path still required for ANLZ-before-load ordering unless wired. |
 
 ### 10.5 Stop-conditions for adopting the new path
 
@@ -1119,4 +1052,6 @@ The migration should be paused (not rolled back) if **any** of the following occ
 | **Deliverable 4** — migration path                                                   | ✅ §10 — full per-version offset table extracted from TL's qrc resource; `rb_offsets.py` + `rb_state_reader.py` shipped this session with 24 unit tests. Adoption gated on parallel-run validation per §10.5. |
 
 
-Session complete. No source code in `rb_ss_bridge_v2` was modified. The analysis preserves the bridge's invariants: no Frida server, no injection into RB runtime, SIP enabled, all instrumentation static (`otool`/`nm`/`strings`) or passive runtime observation (`sample(1)` against TL only). The 200 Hz `StateManager` thread is untouched by any proposal in §10.
+**Implementation note:** The original 2026-05-06 RE session produced this document **without** modifying Python; a **follow-on commit** added `rb_offsets.py`, `rb_state_reader.py`, tests, and embedded offset YAML companions. The **methodology** above remains: static `otool`/`nm`/`strings` + passive TL log + `sample(1)` on TL only — **no** Frida attach to Rekordbox, **no** SIP changes.
+
+The 200 Hz `StateManager` thread behaviour is unchanged by the reader module itself until **`__main__.py`** wires it in.
