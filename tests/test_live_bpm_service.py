@@ -30,6 +30,7 @@ class FakeLiveBPMReader:
         self.values: list[float | Exception] = []
         self.scan_calls = 0
         self.attach_calls = 0
+        self.on_scan = None
 
     def attach(self):
         self.attach_calls += 1
@@ -37,6 +38,8 @@ class FakeLiveBPMReader:
 
     def scan_candidates(self, session, deck, expect_bpm, library_bpm, limit):
         self.scan_calls += 1
+        if self.on_scan is not None:
+            self.on_scan()
         return [self.candidate]
 
     def read_candidate(self, session, candidate):
@@ -49,6 +52,96 @@ class FakeLiveBPMReader:
 
 
 class LiveBPMServiceTests(unittest.TestCase):
+    def test_hint_updates_during_sampling_do_not_drop_or_block_promotion(self) -> None:
+        reader = FakeLiveBPMReader()
+        # Two samples: start at 120.0, then move to 122.0.
+        reader.values = [120.0, 122.0]
+        service = LiveBPMService(reader=reader, disabled=False)
+
+        # Start discovery at 120.0.
+        service.update_hint(1, 120.0, 120.0)
+        service.tick()  # attach + scan install
+
+        # Take first sample at 120.0.
+        with service._lock:
+            service._deck[1].next_sample_at = 0.0
+        service.tick()
+
+        # Multiple valid hint updates within the same sampling epoch.
+        # This must NOT be treated as semantic drift by itself.
+        service.update_hint(1, 121.0, 120.0)
+        service.update_hint(1, 122.0, 120.0)
+
+        # Next tick: take second sample (122.0) and validate against latest hint.
+        with service._lock:
+            service._deck[1].next_sample_at = 0.0
+
+        with self.assertLogs("live_bpm", level="INFO") as logs:
+            service.tick()
+
+        self.assertTrue(any("[LBPM][VALIDATED]" in line for line in logs.output))
+        self.assertFalse(any("[LBPM][DROP]" in line for line in logs.output))
+        self.assertEqual(service.get_bpm(1), 122.0)
+
+    def test_drops_scan_results_if_session_gen_changes_mid_scan(self) -> None:
+        reader = FakeLiveBPMReader()
+        service = LiveBPMService(reader=reader, disabled=False)
+
+        # First tick attaches and resets epochs.
+        service.tick()
+
+        service.update_hint(1, 120.0, 120.0)
+
+        # Ensure scan is eligible.
+        with service._lock:
+            service._deck[1].last_scan_at = 0.0
+
+        def invalidate_mid_scan() -> None:
+            service.invalidate()
+
+        reader.on_scan = invalidate_mid_scan
+
+        with self.assertLogs("live_bpm", level="INFO") as logs:
+            service.tick()
+
+        self.assertTrue(any("drop_scan reason=session_gen_mismatch" in line for line in logs.output))
+        with service._lock:
+            self.assertEqual(service._deck[1].candidates, [])
+
+    def test_drops_validation_commit_if_epoch_changes_mid_validate(self) -> None:
+        reader = FakeLiveBPMReader()
+        # Provide values that would otherwise pass when hint moves.
+        reader.values = [120.0, 122.0]
+        service = LiveBPMService(reader=reader, disabled=False)
+
+        service.update_hint(1, 120.0, 120.0)
+        service.tick()  # attach + scan install
+        service.tick()  # take first sample(s)
+
+        # Force next tick to validate by making the hint "moved" and expediting timing.
+        time.sleep(0.22)
+        service.update_hint(1, 122.0, 120.0)
+
+        # Simulate epoch change between unlocked computation and commit by
+        # forcing a discovery reset inside the validation function's commit window.
+        # We do this by patching _results_from_samples to reset discovery before returning.
+        import rb_ss_bridge_v2.live_bpm as live_bpm_mod
+
+        original = live_bpm_mod._results_from_samples
+
+        def wrapped(*args, **kwargs):
+            results = original(*args, **kwargs)
+            with service._lock:
+                service._reset_discovery(service._deck[1], keep_validated=True)
+            return results
+
+        with patch.object(live_bpm_mod, "_results_from_samples", wraps=wrapped):
+            with self.assertLogs("live_bpm", level="INFO") as logs:
+                service.tick()
+
+        self.assertTrue(any("drop_validate reason=epoch_mismatch" in line for line in logs.output))
+        self.assertIsNone(service.get_bpm(1))
+
     def test_promotes_candidate_that_moves_to_current_hint(self) -> None:
         reader = FakeLiveBPMReader()
         reader.values = [120.0, 122.0]
@@ -831,6 +924,36 @@ class StateManagerLiveBPMTests(unittest.TestCase):
                 sm._push_tick()
 
                 self.assertIn((1, 120.0, beat, False), output.beats)
+
+    def test_autoloop_tick_logs_only_on_32_beat_phrase_boundary(self) -> None:
+        cache = PositionCache()
+        output = FakeOutput()
+        sm = StateManager(
+            queue.Queue(), cache, output,
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        deck = sm._deck[1]
+        deck.playing = True
+        deck.meta.bpm = 120.0
+        deck.meta.first_beat_ms = 0.0
+        sm._os.lighting_mode = "autoloop"
+        sm._os.autoloop_arm_deck = 1
+        sm._os.autoloop_arm_bpm = 120.0
+        sm._os.was_playing = True
+        sm._os.last_sent_bpm = 120.0
+        sm._os.last_beat_elapsed_ms = 15000
+        sm._last_pos_log[1] = time.monotonic()
+
+        cache.update(PositionSnapshot(1, elapsed_ms=15500, playing=False, updated_at=time.monotonic()))
+        with self.assertNoLogs("state_manager", level="INFO"):
+            sm._push_tick()
+
+        cache.update(PositionSnapshot(1, elapsed_ms=16000, playing=False, updated_at=time.monotonic()))
+        with self.assertLogs("state_manager", level="INFO") as logs:
+            sm._push_tick()
+
+        self.assertTrue(any("[SS][AUTOLOOP-TICK]" in line for line in logs.output))
+        self.assertIn((1, 120.0, 32, False), output.beats)
 
     def test_scripted_beat_boundary_keeps_wrapped_change_marker(self) -> None:
         cache = PositionCache()

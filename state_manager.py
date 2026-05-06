@@ -47,7 +47,6 @@ LOG = get_logging_manager()
 _LATENCY_WARN_MS = 50.0
 _TC_LATENCY_WARN_MS = 250.0
 _AUTOLOOP_IDLE_DEBOUNCE_S = max(STOP_DEBOUNCE_S, 2.0)
-_AUTOLOOP_STATUS_LOG_S = 5.0
 LIVE_BPM_FOLLOW_ENV = "RBSS_LIVE_BPM_FOLLOW"
 AUTOLOOP_MASTER_PHRASE_ARM_ENV = "RBSS_AUTOLOOP_MASTER_PHRASE_ARM"
 _LIVE_BPM_FOLLOW_THRESHOLD = BPM_THRESHOLD_UNSCRIPTED
@@ -168,9 +167,6 @@ class StateManager:
         # FM-3: initialize resolver and pending arm before any events arrive
         self._resolver = None
         self._pending_arm: Optional[ArmSequence] = None
-
-        # Ableton Link reader (optional — None if aalink unavailable)
-        self._link = None
 
         # Rate-limited position logging (once every 5 s per deck)
         self._last_pos_log: dict[int, float] = {1: 0.0, 2: 0.0}
@@ -368,6 +364,7 @@ class StateManager:
             self._os.lighting_stable_since = 0.0
             self._os.autoloop_arm_bpm = 0.0
             self._os.autoloop_arm_deck = 0
+            self._os.last_autoloop_status_phrase_beat = 0
             self._clear_autoloop_arm_phrase_lock()
             self._clear_live_bpm_follow()
             self._clear_autoloop_tempo_relock()
@@ -412,6 +409,7 @@ class StateManager:
         self._os.not_playing_since = 0.0
         self._os.autoloop_arm_bpm = 0.0
         self._os.autoloop_arm_deck = 0
+        self._os.last_autoloop_status_phrase_beat = 0
         self._os.autoloop_arm_after_master_change = True
         self._os.autoloop_master_change_source = source
         self._clear_autoloop_arm_phrase_lock()
@@ -459,9 +457,6 @@ class StateManager:
 
     def attach_resolver(self, resolver) -> None:  # type: ignore[type-arg]
         self._resolver = resolver
-
-    def attach_link(self, link) -> None:
-        self._link = link
 
     # ── Filepath resolved ─────────────────────────────────────────────────────
 
@@ -680,6 +675,7 @@ class StateManager:
             self._os.autoloop_arm_pending = True
             self._os.autoloop_arm_sync_beat = 0
             self._os.autoloop_arm_pending_since = time.monotonic()
+            self._os.last_autoloop_status_phrase_beat = 0
             self._clear_live_bpm_follow()
             self._clear_autoloop_tempo_relock()
             self._clear_autoloop_tempo_anchor()
@@ -789,6 +785,7 @@ class StateManager:
             self._os.last_armed_filepath = ""
             self._os.autoloop_arm_bpm = 0.0
             self._os.autoloop_arm_deck = 0
+            self._os.last_autoloop_status_phrase_beat = 0
             self._os.autoloop_arm_after_master_change = False
             self._os.autoloop_master_change_source = ""
             self._clear_autoloop_arm_phrase_lock()
@@ -911,8 +908,6 @@ class StateManager:
             os.push_reset_bpm = False
 
         # Beat position: computed from ENGINE STATE BPM (pitch-adjusted every ~15s).
-        # Ableton Link phase is not used: if Link session tempo doesn't reflect
-        # real-time pitch adjustments, phase drifts from the actual beat too.
         beat_pos = _compute_beat_pos(elapsed_ms, bpm, d.meta.first_beat_ms) if bpm > 0 else 0.0
         beat_ms = 60_000.0 / bpm if bpm > 0 else 0.0
         abs_beat_pos = (
@@ -1039,6 +1034,7 @@ class StateManager:
                 os.last_sent_bpm = bpm
 
         # Beat boundary detection: fire a beat event when elapsed crosses the next beat
+        beatpos_out = abs_beat_pos if os.lighting_mode == "autoloop" else beat_pos
         if bpm > 0:
             this_beat = int(abs_beat_pos)
             if os.lighting_mode == "autoloop" and grid_pos is not None:
@@ -1084,22 +1080,22 @@ class StateManager:
                 for dk in (active, mirror, 3, 4):
                     self._out.send_beat(dk, bpm, beat_out, change=change)
                 self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos, elapsed_ms)
+                if os.lighting_mode == "autoloop":
+                    phrase_beat = (this_beat // AUTOLOOP_ARM_PHRASE_BEATS) * AUTOLOOP_ARM_PHRASE_BEATS
+                    if (
+                        phrase_beat > 0
+                        and phrase_beat > last_beat
+                        and phrase_beat != os.last_autoloop_status_phrase_beat
+                    ):
+                        os.last_autoloop_status_phrase_beat = phrase_beat
+                        grid_status = d.meta.beatgrid_source if grid_pos is not None else "fallback"
+                        self._log_autoloop_tick(
+                            active, elapsed_ms, beatpos_out, bpm, d.meta.bpm, grid_status
+                        )
 
         # Elapsed + beatpos — send at every push tick (SS needs continuous updates).
         # Test A: in autoloop only, send absolute beat position to match VDJ-like
         # OS2L timing while leaving beat events unchanged for isolation.
-        beatpos_out = abs_beat_pos if os.lighting_mode == "autoloop" else beat_pos
-        if os.lighting_mode == "autoloop" and now - os.last_autoloop_status_mono >= _AUTOLOOP_STATUS_LOG_S:
-            os.last_autoloop_status_mono = now
-            live_status = self._live_bpm_status_text(active)
-            grid_status = d.meta.beatgrid_source if grid_pos is not None else "fallback"
-            log.info("[SS][AUTOLOOP-TICK] deck=%d elapsed=%dms beat=%.2f "
-                     "timing_bpm=%.2f arm_bpm=%.2f meta_bpm=%.2f grid=%s %s %s file=%s",
-                     active, elapsed_ms, beatpos_out,
-                     bpm, os.autoloop_arm_bpm, d.meta.bpm, grid_status, live_status,
-                     self._live_bpm_follow_status_text(),
-                     os.last_armed_filepath.split("/")[-1]
-                     if os.last_armed_filepath else "<none>")
         for dk in (active, mirror, 3, 4):
             self._out.send_elapsed(dk, elapsed_ms, beatpos_out)
 
@@ -1116,6 +1112,7 @@ class StateManager:
         os.last_sent_bpm          = 0.0
         os.autoloop_arm_bpm       = 0.0
         os.autoloop_arm_deck      = 0
+        os.last_autoloop_status_phrase_beat = 0
         self._clear_autoloop_arm_phrase_lock()
         self._clear_live_bpm_follow()
         self._clear_autoloop_tempo_relock()
@@ -1139,7 +1136,27 @@ class StateManager:
         self._os.was_playing          = True
         self._os.last_sent_bpm        = 0.0
         self._os.last_beat_elapsed_ms = elapsed_ms
+        self._os.last_autoloop_status_phrase_beat = 0
         self._log_status()
+
+    def _log_autoloop_tick(
+        self,
+        active: int,
+        elapsed_ms: int,
+        beatpos_out: float,
+        timing_bpm: float,
+        meta_bpm: float,
+        grid_status: str,
+    ) -> None:
+        os = self._os
+        live_status = self._live_bpm_status_text(active)
+        log.info("[SS][AUTOLOOP-TICK] deck=%d elapsed=%dms beat=%.2f "
+                 "timing_bpm=%.2f arm_bpm=%.2f meta_bpm=%.2f grid=%s %s %s file=%s",
+                 active, elapsed_ms, beatpos_out,
+                 timing_bpm, os.autoloop_arm_bpm, meta_bpm, grid_status, live_status,
+                 self._live_bpm_follow_status_text(),
+                 os.last_armed_filepath.split("/")[-1]
+                 if os.last_armed_filepath else "<none>")
 
     def _should_delay_autoloop_master_arm(self, arm_after_master: bool, abs_beat_pos: float) -> bool:
         if not self._autoloop_master_phrase_arm or not arm_after_master:

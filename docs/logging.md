@@ -64,10 +64,10 @@ Terminal colors follow this convention:
 
 | Color | Meaning |
 |-------|---------|
-| green | Lifecycle applied / successful action |
+| green | Lifecycle applied / successful action / locked timing |
 | cyan | Periodic status / routing / currently active state |
-| yellow | Pending / fallback / degraded-but-working |
-| orange | Retry / suspicious / recoverable failure |
+| yellow | Pending / fallback / corrective action / degraded-but-working |
+| orange | Late / retry / suspicious / recoverable failure |
 | red | Stop / stale / crash-risk / action needed |
 | magenta | Scripted-show lifecycle |
 | grey | Debug noise |
@@ -78,6 +78,9 @@ Examples:
 [SS][AUTOLOOP-ARM]       green
 [SS][AUTOLOOP-ARM-PENDING] yellow
 [SS][AUTOLOOP-ARM-LOCKED]  green
+[SS][AUTOLOOP-MASTER-CLEAR] yellow
+[SS][AUTOLOOP-MASTER-CORRECTION-PENDING] yellow
+[SS][AUTOLOOP-MASTER-ARM-LATE-CORRECTION] orange
 [SS][AUTOLOOP-TICK]      cyan
 [SS][LIVE-BPM-APPLY]     green
 [LBPM][SCAN|CURRENT]     cyan
@@ -88,9 +91,14 @@ Examples:
 [RBMEM][REJECT|INVALID]  orange
 ```
 
+Normal INFO output keeps `[LBPM][SCAN]`, `[LBPM][CURRENT]`,
+`[RBMEM][SCAN]`, and `[RBMEM][CANDIDATE]` visible because they show whether
+decks still need live-BPM or memory validation.
+
 ## Autoloop And Live BPM Diagnostics
 
-Normal autoloop status is periodic, not per beat:
+Normal autoloop status logs at 32-beat phrase boundaries, not every beat and
+not on a wall-clock timer:
 
 ```text
 [SS][AUTOLOOP-TICK] deck=1 elapsed=... beat=...
@@ -117,8 +125,8 @@ are sent in place and logged when applied:
 ```
 
 BPM apply logs are rate-limited to avoid push-loop spam while still tracking
-pitch changes during playback. The periodic `AUTOLOOP-TICK` line shows whether
-active follow is on or disabled.
+pitch changes during playback. The phrase-boundary `AUTOLOOP-TICK` line shows
+whether active follow is on or disabled.
 
 After LIVE-BPM-APPLY, the next autoloop beat event sends absolute `beat.pos`
 with `change=True` once, then returns to steady `change=False`. Live testing

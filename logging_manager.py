@@ -419,14 +419,14 @@ class LoggingManager:
         for name in ("tl_tailer", "rb_memory", "filepath_resolver",
                      "scripted_tracks", "osl_output", "state_manager",
                      "diagnostics", "bridge", "logging_manager",
-                     "mtc_reader", "link_reader"):
+                     "mtc_reader"):
             logging.getLogger(name).setLevel(logging.DEBUG)
 
     def disable_debug(self) -> None:
         for name in ("tl_tailer", "rb_memory", "filepath_resolver",
                      "scripted_tracks", "osl_output", "state_manager",
                      "diagnostics", "bridge", "logging_manager",
-                     "mtc_reader", "link_reader"):
+                     "mtc_reader"):
             logging.getLogger(name).setLevel(logging.INFO)
 
     def start_control_watcher(self, logger: logging.Logger, interval_s: float = 1.0) -> None:

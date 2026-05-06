@@ -25,7 +25,6 @@ No Frida. No injection. Position from direct RB memory reads via mach task API.
 | `FilepathResolver` | `filepath_resolver.py` | Resolves filepath metadata. With ANLZ: ANLZ DB lookup, then lsof fallback on miss. Without ANLZ: lsof and title DB lookup race in parallel; emits FILEPATH_RESOLVED |
 | `StateManager` | `state_manager.py` | Single event-loop + 200 Hz push loop thread; owns all DeckState; drives SS output |
 | `OS2LConnection` | `osl_output.py` | Persistent TCP to SS; dedicated sender thread + auto-reconnect; DNS-SD discovery |
-| `LinkReader` | `link_reader.py` | Ableton Link BPM/phase reader; informational only (not used for show timing) |
 
 ---
 

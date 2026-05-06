@@ -39,12 +39,6 @@ This records the practical logging updates made for `rb_ss_bridge_v2`.
 
 - `tc_update` latency warnings now trigger at `250ms`.
 - Other event latency warnings now trigger at `50ms`.
-- Link BPM logs are rate-limited:
-  - first BPM/peer observation
-  - peer count changes
-  - BPM changes by at least `0.5`
-  - otherwise at most once every `10s`
-
 ## ADHD-Friendly Color System
 
 The color formatter is now attention-based:
@@ -59,7 +53,10 @@ The color formatter is now attention-based:
 - Green: successful user-facing state, including `TRACK_LOADED`,
   `FILEPATH_RESOLVED`, playing/resume, attached, connected, autoloop, and active
   deck status lines beginning with `► D`.
-- Grey: diagnostic/status noise such as Link BPM, timecode/MTC, event processed
+- Yellow: pending autoloop arms, corrective rearm scheduling, fallbacks, and
+  degraded-but-working states.
+- Orange: late autoloop arms, phrase misses, retries, and recoverable failures.
+- Grey: diagnostic/status noise such as timecode/MTC, event processed
   lines, event relation lines, and scripted registry logs.
 
 ## Practical Debug Use
@@ -88,4 +85,3 @@ Turn full debug back off:
 
 For show operation, prefer targeted debug over global debug so the INFO screen
 stays readable.
-

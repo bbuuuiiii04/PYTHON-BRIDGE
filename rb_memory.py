@@ -264,6 +264,7 @@ def _scan_objc_zone(
     scan_hi = inner1 + window
     size    = scan_hi - scan_lo
 
+    t_scan0 = time.monotonic()
     try:
         chunk0 = _read_bytes(task, scan_lo, size)
         t0     = time.monotonic()
@@ -279,6 +280,7 @@ def _scan_objc_zone(
         return []
 
     actual_dt = max(t1 - t0, 0.001)
+    scan_ms = (time.monotonic() - t_scan0) * 1000.0
     results: list[tuple[int, float]] = []
     n = len(chunk0) // 4
 
@@ -299,8 +301,8 @@ def _scan_objc_zone(
         results.append((inner_ptr, rate))
 
     results.sort(key=lambda x: abs(x[1] - 44100))
-    log.info("[RBMEM][SCAN] deck2 ObjC zone inner1±0x%x dt=%.2fs hits=%d",
-             window, actual_dt, len(results))
+    log.info("[RBMEM][SCAN] deck2 ObjC zone inner1±0x%x dt=%.2fs bytes=%d scan_ms=%.1f hits=%d",
+             window, actual_dt, size * 2, scan_ms, len(results))
     for ptr, rate in results[:5]:
         pos_off = ptr - inner1 + RB_POS_OFF
         log.info("[RBMEM][CANDIDATE] deck2 zone pos=inner1%+#x inner=inner1%+#x rate=%.1f",
@@ -393,6 +395,7 @@ def _scan_objc_heap_moving(
     if target_ms <= 0 or not regions:
         return []
 
+    t_scan0 = time.monotonic()
     hits: list[tuple[int, float, int]] = []
     chunks0: list[tuple[int, bytes, float]] = []
     bytes_queued = 0
@@ -470,6 +473,8 @@ def _scan_objc_heap_moving(
 
     log.info("[RBMEM][SCAN] deck2 heap moving regions=%d chunks=%d bytes=%d target=%dms hits=%d",
              len(regions), len(chunks0), bytes_queued, target_ms, len(deduped))
+    scan_ms = (time.monotonic() - t_scan0) * 1000.0
+    log.info("[RBMEM][SCAN] deck2 heap moving scan_ms=%.1f bytes=%d hits=%d", scan_ms, bytes_queued, len(deduped))
     for ptr, rate, delta_ms in deduped[:5]:
         log.info("[RBMEM][CANDIDATE] deck2 heap inner=0x%x rate=%.1f target_delta=%d",
                  ptr, rate, delta_ms)
@@ -660,6 +665,9 @@ class RBSession:
         inner1 = self._get_inner1()
         candidates: list[int] = []
         seen: set[int] = set()
+        stage_ms: dict[str, float] = {"B": 0.0, "C": 0.0, "S": 0.0, "D": 0.0}
+        stage_counts: dict[str, int] = {"P": 0, "B": 0, "C": 0, "S": 0, "D": 0}
+        t_attempt0 = time.monotonic()
 
         def _add(ptr: int, label: str) -> None:
             if ptr and ptr not in seen and _quick_plausible_inner(self.task, ptr):
@@ -668,38 +676,48 @@ class RBSession:
                 log.info("[RBMEM][CANDIDATE] deck2 %s inner=0x%x", label, ptr)
 
         if self._deck2_provisional:
+            stage_counts["P"] += 1
             _add(self._deck2_provisional, "P(provisional)")
 
         # B: (container − 0x270)[+0x78] → ptr (quick, no sleep)
+        t0 = time.monotonic()
         try:
             container = self._get_container()
             ptr_b     = _read_u64(self.task, container - OUTER_FAST_PATH_DELTA + OUTER_INNER2_OFF)
             if ptr_b != inner1:
+                stage_counts["B"] += 1
                 _add(ptr_b, "B(container-0x%x+0x%x)" % (OUTER_FAST_PATH_DELTA, OUTER_INNER2_OFF))
         except OSError:
             pass
+        stage_ms["B"] = (time.monotonic() - t0) * 1000.0
 
         # C: ObjC zone scan — two reads 0.5s apart, finds position field directly.
         # inner1/inner2 offset is session-dependent; the caller can widen the
         # scan after repeated failures without hardcoding a relative offset.
         if inner1:
+            t0 = time.monotonic()
             zone_hits = _scan_objc_zone(self.task, inner1, window=scan_window)
+            stage_ms["C"] = (time.monotonic() - t0) * 1000.0
             for ptr in zone_hits:
                 if ptr != inner1 and ptr not in seen:
                     candidates.append(ptr)
                     seen.add(ptr)
+                    stage_counts["C"] += 1
                     log.info("[RBMEM][CANDIDATE] deck2 C(zone) inner=0x%x", ptr)
 
             if target_ms is not None and not zone_hits and not self._deck2_provisional:
+                t0 = time.monotonic()
                 static_hits = _scan_static_elapsed_candidates(
                     self.task, inner1, target_ms, window=scan_window
                 )
+                stage_ms["S"] = (time.monotonic() - t0) * 1000.0
                 if len(static_hits) == 1:
                     ptr = static_hits[0]
                     if ptr != inner1 and ptr not in seen:
                         self._deck2_provisional = ptr
                         candidates.append(ptr)
                         seen.add(ptr)
+                        stage_counts["S"] += 1
                         log.info(
                             "[RBMEM][PENDING] deck2 provisional=0x%x target_ms=%d awaiting movement validation",
                             ptr, target_ms,
@@ -711,15 +729,37 @@ class RBSession:
                 and attempt >= _D2_HEAP_SCAN_MIN_ATTEMPT
                 and deck2_playing
             ):
+                t0 = time.monotonic()
                 heap_hits = _scan_objc_heap_moving(self.task, objc_regions, target_ms)
+                stage_ms["D"] = (time.monotonic() - t0) * 1000.0
                 for ptr in heap_hits:
                     if ptr != inner1 and ptr not in seen:
                         candidates.append(ptr)
                         seen.add(ptr)
+                        stage_counts["D"] += 1
                         log.info("[RBMEM][CANDIDATE] deck2 D(heap) inner=0x%x", ptr)
 
-        log.info("[RBMEM][SCAN] deck2 resolution candidates=%d window=4s",
-                 len(candidates))
+        attempt_ms = (time.monotonic() - t_attempt0) * 1000.0
+        log.info(
+            "[RBMEM][D2ATTEMPT] attempt=%d window=0x%x target_ms=%s playing_recent=%s "
+            "candidates=%d P=%d B=%d C=%d S=%d D=%d stage_ms(B=%.1f C=%.1f S=%.1f D=%.1f) attempt_ms=%.1f",
+            attempt,
+            scan_window,
+            target_ms if target_ms is not None else "none",
+            deck2_playing,
+            len(candidates),
+            stage_counts["P"],
+            stage_counts["B"],
+            stage_counts["C"],
+            stage_counts["S"],
+            stage_counts["D"],
+            stage_ms["B"],
+            stage_ms["C"],
+            stage_ms["S"],
+            stage_ms["D"],
+            attempt_ms,
+        )
+        log.info("[RBMEM][SCAN] deck2 resolution candidates=%d window=4s", len(candidates))
         if not candidates:
             return False
 
@@ -885,6 +925,9 @@ class RBMemoryReader(threading.Thread):
         self._d2_attempts:   int = 0
         self._d2_was_playing: bool = False
         self._d2_play_seen_at: float = 0.0
+        # Measurement-only: time to committed deck-2 inner.
+        self._d2_unresolved_since: float = 0.0
+        self._d2_last_committed_inner: Optional[int] = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -930,6 +973,8 @@ class RBMemoryReader(threading.Thread):
 
         now_t = time.monotonic()
         s = self._session
+        if s is not None and s._deck2_inner is None and self._d2_unresolved_since <= 0.0:
+            self._d2_unresolved_since = now_t
         deck2_playing = False
         if self._deck_playing_hint is not None:
             try:
@@ -973,6 +1018,14 @@ class RBMemoryReader(threading.Thread):
                             target_ms = None
                     log.info("[RBMEM][SCAN] deck2 resolution attempt=%d window=0x%x target_ms=%s",
                              self._d2_attempts, scan_window, target_ms if target_ms is not None else "none")
+                    log.info(
+                        "[RBMEM][D2STATE] attempt=%d playing=%s recently_playing=%s paused=%s provisional=%s",
+                        self._d2_attempts,
+                        deck2_playing,
+                        deck2_recently_playing,
+                        (not deck2_playing and not deck2_recently_playing),
+                        bool(s._deck2_provisional),
+                    )
                     s.start_deck2_resolution(
                         self._objc_regions,
                         target_ms=target_ms,
@@ -985,6 +1038,17 @@ class RBMemoryReader(threading.Thread):
             s._d2_pending.clear()
             s._d2_samples.clear()
             self._d2_attempts = 0
+        if s._deck2_inner is not None and s._deck2_inner != self._d2_last_committed_inner:
+            self._d2_last_committed_inner = s._deck2_inner
+            if self._d2_unresolved_since > 0.0:
+                ttc_ms = (now_t - self._d2_unresolved_since) * 1000.0
+                log.info(
+                    "[RBMEM][D2COMMIT] inner=0x%x ttc_ms=%.0f attempts=%d",
+                    s._deck2_inner,
+                    ttc_ms,
+                    self._d2_attempts,
+                )
+            self._d2_unresolved_since = 0.0
 
         for deck in (1, 2):
             snap = s.read_deck(deck)
@@ -1001,18 +1065,30 @@ class RBMemoryReader(threading.Thread):
             time.sleep(self._ATTACH_RETRY_S)
             return
         try:
+            t0 = time.monotonic()
             vmmap_out = _get_vmmap_output(pid)
+            vmmap_ms = (time.monotonic() - t0) * 1000.0
             base      = _base_from_vmmap(vmmap_out)
             self._objc_regions = _objc_regions_from_vmmap(vmmap_out)
+            t1 = time.monotonic()
             task = _task_for_pid(pid)
+            task_ms = (time.monotonic() - t1) * 1000.0
             self._session     = RBSession(pid, base, task)
             self._attach_time = time.monotonic()
             self._d2_retry_at = 0.0   # allow immediate deck-2 resolution on first tick
             self._d2_attempts = 0
             self._d2_was_playing = False
             self._d2_play_seen_at = 0.0
-            log.info("[RBMEM][ATTACH] attached pid=%d base=0x%x objc_regions=%d",
-                     pid, base, len(self._objc_regions))
+            self._d2_unresolved_since = 0.0
+            self._d2_last_committed_inner = None
+            log.info(
+                "[RBMEM][ATTACH] attached pid=%d base=0x%x objc_regions=%d vmmap_ms=%.1f task_ms=%.1f",
+                pid,
+                base,
+                len(self._objc_regions),
+                vmmap_ms,
+                task_ms,
+            )
         except Exception as exc:
             log.warning("[RBMEM][ERROR] attach failed pid=%d error=%s retry_s=%d",
                         pid, exc, int(self._ATTACH_RETRY_S))

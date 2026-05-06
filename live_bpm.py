@@ -173,6 +173,19 @@ class _DeckDiscovery:
     hint_bpm: float = 0.0
     library_bpm: float = 0.0
     hint_updated_at: float = 0.0
+    # Epoch counters used to drop stale scan/validation commits.
+    # These must not affect validation semantics; they only prevent committing work
+    # computed under an older session/discovery snapshot.
+    hint_epoch: int = 0
+    discovery_gen: int = 0
+    validation_epoch_id: int = 0
+    candidates_session_gen: int = 0
+    candidates_hint_epoch: int = 0
+    # Measurement-only fields (do not affect behavior).
+    first_valid_hint_at: float = 0.0
+    first_valid_hint_epoch: int = 0
+    sample_moved_hint_at: float = 0.0
+    sample_hint_epoch_start: int = 0
     candidates: list[LiveBPMCandidate] = field(default_factory=list)
     values: dict[tuple[int, str], list[float]] = field(default_factory=dict)
     timestamps: dict[tuple[int, str], list[float]] = field(default_factory=dict)
@@ -235,6 +248,14 @@ class LiveBPMService(threading.Thread):
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._session: Optional[LiveBPMSession] = None
+        # Monotonically increasing session generation. Incremented whenever the
+        # attached pid/base session is invalidated or replaced. Used to prevent
+        # stale scan/validation work (performed outside the lock) from committing.
+        self._session_gen: int = 0
+        # Measurement-only counters.
+        self._drop_scan_total: int = 0
+        self._drop_validate_total: int = 0
+        self._drop_reason_counts: dict[str, int] = {}
         self._last_session_check_at = 0.0
         self._deck: dict[int, _DeckDiscovery] = {1: _DeckDiscovery(), 2: _DeckDiscovery()}
 
@@ -246,7 +267,11 @@ class LiveBPMService(threading.Thread):
             return
         with self._lock:
             state = self._deck[deck]
+            state.hint_epoch += 1
             state.hint_bpm = float(bpm)
+            if state.first_valid_hint_at <= 0.0:
+                state.first_valid_hint_at = time.monotonic()
+                state.first_valid_hint_epoch = state.hint_epoch
             if _valid_bpm(float(library_bpm)):
                 state.library_bpm = float(library_bpm)
             elif state.library_bpm <= 0:
@@ -288,6 +313,7 @@ class LiveBPMService(threading.Thread):
 
     def invalidate(self) -> None:
         with self._lock:
+            self._session_gen += 1
             self._session = None
             for state in self._deck.values():
                 self._reset_discovery(state)
@@ -340,6 +366,7 @@ class LiveBPMService(threading.Thread):
                 self.invalidate()
                 current = None
         attached = self._reader.attach()
+        # attach() may run vmmap and take seconds; measure wall time outside lock.
         self._last_session_check_at = time.monotonic()
         if attached is None:
             if current is not None:
@@ -349,6 +376,7 @@ class LiveBPMService(threading.Thread):
         if current is None or attached.pid != current.pid or attached.base != current.base:
             log.info("[LBPM][ATTACH] attached pid=%d base=0x%x", attached.pid, attached.base)
             with self._lock:
+                self._session_gen += 1
                 self._session = attached
                 for state in self._deck.values():
                     self._reset_discovery(state)
@@ -364,6 +392,8 @@ class LiveBPMService(threading.Thread):
             hint = state.hint_bpm
             library_bpm = state.library_bpm
             validated = state.validated
+            session_gen = self._session_gen
+            discovery_gen = state.discovery_gen
 
         if validated is not None:
             self._refresh_validated(session, deck, validated)
@@ -381,12 +411,73 @@ class LiveBPMService(threading.Thread):
                 scan_needed = False
 
         if scan_needed:
+            t_scan0 = time.monotonic()
             candidates = self._reader.scan_candidates(
                 session, deck, hint, library_bpm, self._scan_limit
             )
+            scan_ms = (time.monotonic() - t_scan0) * 1000.0
             candidates = list(_dedupe_candidates(candidates))
             with self._lock:
                 state = self._deck[deck]
+                current_session = self._session
+                if (
+                    current_session is None
+                    or current_session.pid != session.pid
+                    or current_session.base != session.base
+                    or self._session_gen != session_gen
+                ):
+                    self._drop_scan_total += 1
+                    self._drop_reason_counts["scan_session_gen_mismatch"] = (
+                        self._drop_reason_counts.get("scan_session_gen_mismatch", 0) + 1
+                    )
+                    cur_pid = current_session.pid if current_session else 0
+                    cur_base = current_session.base if current_session else 0
+                    log.info(
+                        "[LBPM][DROP] deck%d drop_scan reason=session_gen_mismatch "
+                        "scan(pid=%d base=0x%x gen=%d) cur(pid=%d base=0x%x gen=%d)",
+                        deck,
+                        session.pid,
+                        session.base,
+                        session_gen,
+                        cur_pid,
+                        cur_base,
+                        self._session_gen,
+                    )
+                    return
+                if state.discovery_gen != discovery_gen:
+                    self._drop_scan_total += 1
+                    self._drop_reason_counts["scan_discovery_gen_mismatch"] = (
+                        self._drop_reason_counts.get("scan_discovery_gen_mismatch", 0) + 1
+                    )
+                    log.info(
+                        "[LBPM][DROP] deck%d drop_scan reason=discovery_gen_mismatch "
+                        "scan_gen=%d cur_gen=%d",
+                        deck,
+                        discovery_gen,
+                        state.discovery_gen,
+                    )
+                    return
+                if state.validated is not None:
+                    self._drop_scan_total += 1
+                    self._drop_reason_counts["scan_already_validated"] = (
+                        self._drop_reason_counts.get("scan_already_validated", 0) + 1
+                    )
+                    log.info("[LBPM][DROP] deck%d drop_scan reason=already_validated", deck)
+                    return
+                if state.candidates:
+                    self._drop_scan_total += 1
+                    self._drop_reason_counts["scan_candidates_already_installed"] = (
+                        self._drop_reason_counts.get("scan_candidates_already_installed", 0) + 1
+                    )
+                    log.info("[LBPM][DROP] deck%d drop_scan reason=candidates_already_installed", deck)
+                    return
+
+                state.discovery_gen += 1
+                state.validation_epoch_id += 1
+                state.candidates_session_gen = session_gen
+                state.candidates_hint_epoch = state.hint_epoch
+                state.sample_moved_hint_at = 0.0
+                state.sample_hint_epoch_start = state.hint_epoch
                 state.candidates = candidates
                 state.values = {candidate.key: [] for candidate in candidates}
                 state.timestamps = {candidate.key: [] for candidate in candidates}
@@ -394,7 +485,14 @@ class LiveBPMService(threading.Thread):
                 state.sample_start_hint = hint
                 state.next_sample_at = now
             if candidates:
-                log.info("[LBPM][SCAN] deck%d watching %d BPM candidate(s)", deck, len(candidates))
+                log.info(
+                    "[LBPM][SCAN] deck%d watching=%d scan_ms=%.1f drops_scan=%d drops_validate=%d",
+                    deck,
+                    len(candidates),
+                    scan_ms,
+                    self._drop_scan_total,
+                    self._drop_validate_total,
+                )
             return
 
         self._sample_and_maybe_validate(session, deck, now)
@@ -447,12 +545,19 @@ class LiveBPMService(threading.Thread):
     def _sample_and_maybe_validate(self, session: LiveBPMSession, deck: int, now: float) -> None:
         with self._lock:
             state = self._deck[deck]
+            val_session_gen = self._session_gen
+            val_discovery_gen = state.discovery_gen
+            val_validation_epoch_id = state.validation_epoch_id
+            val_candidates_session_gen = state.candidates_session_gen
+            val_candidates_hint_epoch = state.candidates_hint_epoch
             candidates = list(state.candidates)
             if not candidates or now < state.next_sample_at:
                 return
             hint = state.hint_bpm
             sample_start_hint = state.sample_start_hint
             sample_start_at = state.sample_start_at
+            val_sample_start_at = sample_start_at
+            val_sample_start_hint = sample_start_hint
             state.next_sample_at = now + (1.0 / LIVE_BPM_VALIDATE_HZ)
 
         for candidate in candidates:
@@ -469,6 +574,11 @@ class LiveBPMService(threading.Thread):
                     state.timestamps[candidate.key].append(now - sample_start_at)
 
         moved_hint = abs(hint - sample_start_hint) >= LIVE_BPM_VALIDATE_DELTA
+        if moved_hint:
+            with self._lock:
+                state = self._deck[deck]
+                if state.sample_moved_hint_at <= 0.0 and state.sample_start_at > 0.0:
+                    state.sample_moved_hint_at = now
         expired = now - sample_start_at >= LIVE_BPM_VALIDATE_MAX_S
         if not moved_hint and not expired:
             return
@@ -490,6 +600,72 @@ class LiveBPMService(threading.Thread):
         passed = [result for result in results if result.verdict == "pass"]
         with self._lock:
             state = self._deck[deck]
+            current_session = self._session
+            if (
+                current_session is None
+                or current_session.pid != session.pid
+                or current_session.base != session.base
+                or self._session_gen != val_session_gen
+            ):
+                self._drop_validate_total += 1
+                self._drop_reason_counts["validate_session_gen_mismatch"] = (
+                    self._drop_reason_counts.get("validate_session_gen_mismatch", 0) + 1
+                )
+                cur_pid = current_session.pid if current_session else 0
+                cur_base = current_session.base if current_session else 0
+                log.info(
+                    "[LBPM][DROP] deck%d drop_validate reason=session_gen_mismatch "
+                    "val(pid=%d base=0x%x gen=%d) cur(pid=%d base=0x%x gen=%d)",
+                    deck,
+                    session.pid,
+                    session.base,
+                    val_session_gen,
+                    cur_pid,
+                    cur_base,
+                    self._session_gen,
+                )
+                self._reset_discovery(state, keep_validated=True)
+                return
+            if (
+                state.discovery_gen != val_discovery_gen
+                or state.validation_epoch_id != val_validation_epoch_id
+                or state.candidates_session_gen != val_candidates_session_gen
+                or state.sample_start_at != val_sample_start_at
+                or state.sample_start_hint != val_sample_start_hint
+            ):
+                self._drop_validate_total += 1
+                self._drop_reason_counts["validate_epoch_mismatch"] = (
+                    self._drop_reason_counts.get("validate_epoch_mismatch", 0) + 1
+                )
+                log.info(
+                    "[LBPM][DROP] deck%d drop_validate reason=epoch_mismatch "
+                    "discovery_gen=%d->%d validation_epoch=%d->%d",
+                    deck,
+                    val_discovery_gen,
+                    state.discovery_gen,
+                    val_validation_epoch_id,
+                    state.validation_epoch_id,
+                )
+                self._reset_discovery(state, keep_validated=True)
+                return
+            # Cautious hint semantic guard: only drop when the candidate epoch hint identity
+            # changed (candidates_hint_epoch mismatch). Do not require hint_epoch to stay fixed
+            # during sampling; hint movement is expected and required for promotion.
+            if state.candidates_hint_epoch != val_candidates_hint_epoch:
+                self._drop_validate_total += 1
+                self._drop_reason_counts["validate_hint_epoch_drift"] = (
+                    self._drop_reason_counts.get("validate_hint_epoch_drift", 0) + 1
+                )
+                log.info(
+                    "[LBPM][DROP] deck%d drop_validate reason=hint_epoch_drift "
+                    "candidates_hint_epoch=%d->%d cur_hint_epoch=%d",
+                    deck,
+                    val_candidates_hint_epoch,
+                    state.candidates_hint_epoch,
+                    state.hint_epoch,
+                )
+                self._reset_discovery(state, keep_validated=True)
+                return
             if passed:
                 winner = passed[0]
                 candidate = LiveBPMCandidate(
@@ -507,18 +683,45 @@ class LiveBPMService(threading.Thread):
                     last_logged_bpm=winner.end,
                     last_logged_at=now,
                 )
+                validate_reason = "hint_moved" if moved_hint else "expired"
+                wait_for_moved_ms = 0.0
+                if state.sample_moved_hint_at > 0.0 and state.sample_start_at > 0.0:
+                    wait_for_moved_ms = (state.sample_moved_hint_at - state.sample_start_at) * 1000.0
+                ttfv_ms = 0.0
+                if state.first_valid_hint_at > 0.0:
+                    ttfv_ms = (now - state.first_valid_hint_at) * 1000.0
                 self._reset_discovery(state, keep_validated=True)
                 log.info(
-                    "[LBPM][VALIDATED] deck%d addr=0x%x type=%s bpm=%.3f",
+                    "[LBPM][VALIDATED] deck%d addr=0x%x type=%s bpm=%.3f "
+                    "ttfv_ms=%.0f validate=%s waited_moved_ms=%.0f drops_scan=%d drops_validate=%d",
                     deck,
                     candidate.addr,
                     candidate.type_name,
                     winner.end,
+                    ttfv_ms,
+                    validate_reason,
+                    wait_for_moved_ms,
+                    self._drop_scan_total,
+                    self._drop_validate_total,
                 )
             else:
+                # Measurement-only: log whether we validated due to moved hint or expiry.
+                validate_reason = "hint_moved" if moved_hint else "expired"
+                wait_for_moved_ms = 0.0
+                if state.sample_moved_hint_at > 0.0 and state.sample_start_at > 0.0:
+                    wait_for_moved_ms = (state.sample_moved_hint_at - state.sample_start_at) * 1000.0
+                log.info(
+                    "[LBPM][VALIDATE] deck%d result=none reason=%s watched=%d age_ms=%.0f waited_moved_ms=%.0f",
+                    deck,
+                    validate_reason,
+                    len(state.candidates),
+                    (now - state.sample_start_at) * 1000.0 if state.sample_start_at > 0 else 0.0,
+                    wait_for_moved_ms,
+                )
                 self._reset_discovery(state, keep_validated=True)
 
     def _reset_discovery(self, state: _DeckDiscovery, keep_validated: bool = False) -> None:
+        state.discovery_gen += 1
         state.candidates = []
         state.values = {}
         state.timestamps = {}
@@ -526,6 +729,10 @@ class LiveBPMService(threading.Thread):
         state.sample_start_hint = state.hint_bpm
         state.next_sample_at = 0.0
         state.last_scan_at = 0.0
+        state.candidates_session_gen = 0
+        state.candidates_hint_epoch = state.hint_epoch
+        state.sample_moved_hint_at = 0.0
+        state.sample_hint_epoch_start = 0
         if not keep_validated:
             state.validated = None
 

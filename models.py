@@ -118,7 +118,7 @@ class OutputState:
     autoloop_arm_target_elapsed_ms: int = 0
     autoloop_arm_target_source: str = ""
     autoloop_arm_pending_since: float = 0.0  # monotonic time when arm was triggered
-    last_autoloop_status_mono: float = 0.0  # rate-limit autoloop status diagnostics
+    last_autoloop_status_phrase_beat: int = 0  # last 32-beat phrase logged
     pending_live_bpm: float = 0.0
     last_live_follow_bpm: float = 0.0
     last_live_follow_send_mono: float = 0.0

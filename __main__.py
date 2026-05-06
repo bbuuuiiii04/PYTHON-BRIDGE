@@ -33,7 +33,6 @@ from .scripted_tracks import preload_from_tl, resolve_filepaths
 from .state_manager import StateManager
 from .tl_tailer import TLLogTailer, read_initial_state
 from .diagnostics import DriftDetector, enable_debug, is_debug
-from .link_reader import LinkReader
 from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService
 from .logging_manager import get_logging_manager
 
@@ -74,7 +73,7 @@ class _ColorFormatter(logging.Formatter):
         ("os2l send error",         _BRED),
         ("clearing ss show",        _BRED),
 
-        # Orange/yellow: degraded, retrying, or needs follow-up but still running.
+        # Orange: degraded, late, retrying, or needs follow-up but still running.
         ("event latency",           _ORANGE),
         ("attach failed",           _ORANGE),
         ("queue full",              _ORANGE),
@@ -87,10 +86,20 @@ class _ColorFormatter(logging.Formatter):
         ("[rbmem][error]",          _ORANGE),
         ("[rbmem][invalid]",        _ORANGE),
         ("[rbmem][reject]",         _ORANGE),
+        ("[ss][autoloop-master-arm-grace-late]", _ORANGE),
+        ("[ss][autoloop-master-arm-late-correction]", _ORANGE),
+        ("[ss][autoloop-phrase-miss]", _ORANGE),
+
+        # Yellow: pending, fallback, corrective, or degraded-but-working.
         ("fallback",                _YELLOW),
         ("disabled",                _YELLOW),
         ("not installed",           _YELLOW),
         ("[ss][live-bpm-pending]",  _YELLOW),
+        ("[ss][autoloop-master-clear]", _YELLOW),
+        ("[ss][autoloop-master-correction-clear]", _YELLOW),
+        ("[ss][autoloop-master-arm-pending]", _YELLOW),
+        ("[ss][autoloop-master-correction-pending]", _YELLOW),
+        ("[ss][autoloop-arm-pending]", _YELLOW),
         ("[rbmem][pending]",        _YELLOW),
         ("[rbmem][inconclusive]",   _YELLOW),
         ("cooldown",                _YELLOW),
@@ -105,7 +114,7 @@ class _ColorFormatter(logging.Formatter):
         ("active_deck",             _BCYAN),
         ("correcting: active deck", _BCYAN),
 
-        # Cyan: steady-state autoloop status, intentionally scan-friendly.
+        # Cyan: steady-state status, intentionally scan-friendly.
         ("[ss][autoloop-tick]",     _BCYAN),
         ("[lbpm][scan]",            _BCYAN),
         ("[lbpm][current]",         _BCYAN),
@@ -134,6 +143,8 @@ class _ColorFormatter(logging.Formatter):
         ("resuming",                _BGREEN),
         ("attached pid",            _BGREEN),
         ("connected to soundswitch",_BGREEN),
+        ("[ss][autoloop-master-arm-locked]", _BGREEN),
+        ("[ss][autoloop-arm-locked]", _BGREEN),
         ("[ss][autoloop-arm]",      _BGREEN),
         ("[ss][live-bpm-apply]",    _BGREEN),
         ("[lbpm][attach]",          _BGREEN),
@@ -143,7 +154,6 @@ class _ColorFormatter(logging.Formatter):
         ("autoloop",                _BGREEN),
 
         # Grey: diagnostic/status noise.
-        ("link bpm:",               _GREY),
         ("timecode deck",           _GREY),
         ("mtc deck",                _GREY),
         ("event processed",         _GREY),
@@ -435,11 +445,6 @@ def main() -> None:
         deck_playing_hint=sm.get_deck_playing,
     )
 
-    # Ableton Link reader (degrades gracefully if pylinklib unavailable)
-    link = LinkReader()
-    link.start()
-    sm.attach_link(link)
-
     # MTC reader — ~25 fps position fallback from RB via IAC Bus 1.
     # Posts TC_UPDATE events for the active deck; state_manager ignores them
     # once PositionCache has a live memory snapshot for that deck.
@@ -467,7 +472,6 @@ def main() -> None:
         tailer.stop()
         mem_reader.stop()
         live_bpm.stop()
-        link.stop()
         mtc.stop()
         injector.stop()
         discovery.stop()
