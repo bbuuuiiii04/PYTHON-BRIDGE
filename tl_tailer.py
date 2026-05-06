@@ -15,6 +15,7 @@ import re
 import threading
 import time
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -36,7 +37,7 @@ _RE_ANLZ_DECK = re.compile(r'Deck (\d+) ANLZ loaded: (\d+) beats')
 # ENGINE STATE: master + per-deck BPM + per-layer TC (fires every ~15 s)
 _RE_ES_MASTER = re.compile(r'Master: Layer ([A-D])')
 _RE_ES_DECK   = re.compile(
-    r'Deck ([A-D]): "[^"]+" @ \d+:\d+ BPM=([\d.]+) pitch=[^ ]+ \[(PLAYING|PAUSED)\]'
+    r'Deck ([A-D]): "([^"]*)" @ [^ ]+ BPM=([\d.]+) pitch=([+-]?[\d.]+)% \[(PLAYING|PAUSED)\]'
 )
 # "Layer A: Deck A, TC=00:00:42:15, 100.0% [ACTIVE]"
 _RE_ES_LAYER_TC = re.compile(
@@ -100,6 +101,74 @@ def parse_line(line: str) -> Optional[BridgeEvent]:
 # ── Startup state reader ──────────────────────────────────────────────────────
 
 _RE_CONFIG_MASTER = re.compile(r'master_layer:\s*(\d+)')
+_RE_LOG_TIMESTAMP = re.compile(r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]')
+_INITIAL_ENGINE_STATE_MAX_AGE_S = 60.0
+
+
+def _latest_engine_state_from_tail(log_path: Path) -> tuple[str, Optional[datetime], float]:
+    try:
+        with open(log_path, 'rb') as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - 32768))
+            tail = fh.read().decode('utf-8', errors='replace')
+    except Exception as exc:
+        log.debug("read_initial_state: log tail read failed: %s", exc)
+        return "", None, float("inf")
+
+    last = tail.rfind('=== ENGINE STATE ===')
+    if last == -1:
+        return "", None, float("inf")
+
+    line_start = tail.rfind("\n", 0, last) + 1
+    marker_line = tail[line_start:tail.find("\n", last)]
+    timestamp = None
+    age_s = float("inf")
+    m_ts = _RE_LOG_TIMESTAMP.search(marker_line)
+    if m_ts:
+        try:
+            timestamp = datetime.strptime(m_ts.group(1), "%Y-%m-%d %H:%M:%S")
+            age_s = (datetime.now() - timestamp).total_seconds()
+            if age_s < 0:
+                age_s = 0.0
+        except ValueError:
+            log.debug("read_initial_state: invalid ENGINE STATE timestamp: %s", m_ts.group(1))
+
+    end = tail.find('====================', last + 20)
+    if end == -1:
+        return "", timestamp, age_s
+    return tail[last:end], timestamp, age_s
+
+
+def _parse_engine_state_decks(block: str) -> dict[int, dict]:
+    decks: dict[int, dict] = {}
+    for m in _RE_ES_DECK.finditer(block):
+        idx = _LETTER_TO_IDX.get(m.group(1), 1)
+        deck = _bridge_deck(idx)
+        title = m.group(2).strip()
+        if not title:
+            continue
+        decks[deck] = {
+            "title": title,
+            "bpm": float(m.group(3)),
+            "pitch_factor": 1.0 + (float(m.group(4)) / 100.0),
+            "playing": m.group(5) == "PLAYING",
+        }
+
+    for m in _RE_ES_LAYER_TC.finditer(block):
+        deck_letter = m.group(2)
+        idx = _LETTER_TO_IDX.get(deck_letter, 1)
+        deck = _bridge_deck(idx)
+        if deck not in decks:
+            continue
+        h   = int(m.group(3))
+        mn  = int(m.group(4))
+        s   = int(m.group(5))
+        ff  = int(m.group(6))
+        elapsed_ms = (h * 3600 + mn * 60 + s) * 1000 + int(ff * 1000.0 / 30)
+        decks[deck]["elapsed_ms"] = elapsed_ms
+        decks[deck]["pitch_factor"] = float(m.group(7)) / 100.0
+
+    return decks
 
 
 def read_initial_state(log_path: Path) -> dict:
@@ -110,9 +179,13 @@ def read_initial_state(log_path: Path) -> dict:
       2. Last ENGINE STATE block in the log (fallback)
       3. Default to deck 1
 
-    Returns dict with active_deck: int (1 or 2).
+    Returns dict with active_deck: int (1 or 2), plus fresh startup deck state
+    reconstructed from the latest ENGINE STATE block when available.
     """
     config_path = log_path.parent / "config.yaml"
+    engine_block, _engine_ts, engine_age_s = _latest_engine_state_from_tail(log_path)
+    active_deck = 1
+    active_source = "default"
 
     # Primary: config.yaml — TL persists master_layer here across restarts
     try:
@@ -121,35 +194,39 @@ def read_initial_state(log_path: Path) -> dict:
         if m:
             raw = int(m.group(1))   # 0-indexed layer number
             active_deck = _bridge_deck(raw + 1)
+            active_source = f"master_layer={raw} from config.yaml"
             log.info("read_initial_state: active_deck=%d (master_layer=%d from config.yaml)",
                      active_deck, raw)
-            return {'active_deck': active_deck}
     except Exception as exc:
         log.debug("read_initial_state: config.yaml read failed: %s", exc)
 
     # Fallback: last ENGINE STATE block in the log
-    try:
-        with open(log_path, 'rb') as fh:
-            fh.seek(0, 2)
-            fh.seek(max(0, fh.tell() - 32768))
-            tail = fh.read().decode('utf-8', errors='replace')
-        last = tail.rfind('=== ENGINE STATE ===')
-        if last != -1:
-            end = tail.find('====================', last + 20)
-            if end != -1:
-                block = tail[last:end]
-                m = _RE_ES_MASTER.search(block)
-                if m:
-                    idx = _LETTER_TO_IDX.get(m.group(1), 1)
-                    active_deck = _bridge_deck(idx)
-                    log.info("read_initial_state: active_deck=%d (Layer %s from ENGINE STATE)",
-                             active_deck, m.group(1))
-                    return {'active_deck': active_deck}
-    except Exception as exc:
-        log.debug("read_initial_state: log fallback failed: %s", exc)
+    if active_source == "default" and engine_block:
+        m = _RE_ES_MASTER.search(engine_block)
+        if m:
+            idx = _LETTER_TO_IDX.get(m.group(1), 1)
+            active_deck = _bridge_deck(idx)
+            active_source = f"Layer {m.group(1)} from ENGINE STATE"
+            log.info("read_initial_state: active_deck=%d (Layer %s from ENGINE STATE)",
+                     active_deck, m.group(1))
 
-    log.info("read_initial_state: defaulting to deck 1")
-    return {'active_deck': 1}
+    decks = {}
+    if engine_block and engine_age_s <= _INITIAL_ENGINE_STATE_MAX_AGE_S:
+        decks = _parse_engine_state_decks(engine_block)
+        if decks:
+            log.info("read_initial_state: found %d startup loaded deck(s) from ENGINE STATE age=%.1fs",
+                     len(decks), engine_age_s)
+    elif engine_block:
+        log.info("read_initial_state: skipping startup deck preload; ENGINE STATE age=%.1fs",
+                 engine_age_s)
+
+    if active_source == "default":
+        log.info("read_initial_state: defaulting to deck 1")
+    return {
+        'active_deck': active_deck,
+        'decks': decks,
+        'engine_state_age_s': engine_age_s,
+    }
 
 
 # ── Log tailer ────────────────────────────────────────────────────────────────
@@ -289,7 +366,7 @@ class TLLogTailer(threading.Thread):
 
         for m in _RE_ES_DECK.finditer(block):
             letter  = m.group(1)
-            bpm     = float(m.group(2))
+            bpm     = float(m.group(3))
             idx     = _LETTER_TO_IDX.get(letter, 1)
             deck    = _bridge_deck(idx)
             if bpm > 0:

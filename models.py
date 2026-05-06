@@ -115,11 +115,16 @@ class OutputState:
     autoloop_arm_deck:     int   = 0      # deck for autoloop_arm_bpm
     autoloop_arm_pending:  bool  = False  # True after arm, waiting for phrase lock
     autoloop_arm_sync_beat: int  = 0      # Target phrase boundary beat
+    autoloop_arm_target_elapsed_ms: int = 0
+    autoloop_arm_target_source: str = ""
     autoloop_arm_pending_since: float = 0.0  # monotonic time when arm was triggered
     last_autoloop_status_mono: float = 0.0  # rate-limit autoloop status diagnostics
     pending_live_bpm: float = 0.0
     last_live_follow_bpm: float = 0.0
     last_live_follow_send_mono: float = 0.0
+    autoloop_anchor_elapsed_ms: int = 0
+    autoloop_anchor_abs_beat: float = 0.0
+    autoloop_anchor_bpm: float = 0.0
     autoloop_change_on_next_beat: bool = False
     autoloop_arm_after_master_change: bool = False
     autoloop_master_change_source: str = ""
@@ -128,6 +133,7 @@ class OutputState:
     pending_autoloop_arm_mirror: int = 0
     pending_autoloop_arm_active: int = 0
     pending_autoloop_arm_source: str = ""
+    pending_autoloop_arm_reason: str = ""
     live_follow_generation: int = 0
 
 

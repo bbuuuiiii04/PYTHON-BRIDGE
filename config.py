@@ -5,7 +5,7 @@ from pathlib import Path
 OS2L_FALLBACK_HOST = "127.0.0.1"
 OS2L_FALLBACK_PORT = 58716
 AUTOLOOP_BEATS = 8
-AUTOLOOP_ARM_PHRASE_BEATS = 16
+AUTOLOOP_ARM_PHRASE_BEATS = 32
 
 # ── TimecodeLink ─────────────────────────────────────────────────────────────
 TL_LOG_PATH = Path(

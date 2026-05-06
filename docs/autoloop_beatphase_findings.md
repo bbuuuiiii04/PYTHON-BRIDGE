@@ -5,6 +5,107 @@ Date: 2026-05-04
 Scope: historical investigation and final notes for unscripted/autoloop OS2L
 timing behavior in `rb_ss_bridge_v2`.
 
+## 2026-05-06 SoundSwitch Activation/Rearm Findings
+
+Scope: controlled live validation with SoundSwitch visible while sending OS2L
+through the bridge's active SoundSwitch connection. These findings supersede
+the earlier bridge-side "relock" hypothesis for master-transition autoloops.
+
+### What SoundSwitch Needs To Arm Autoloop
+
+Proven activation path:
+
+- `clear` cuts the active SoundSwitch autoloop.
+- A following `get_filepath` starts/rearms the SoundSwitch autoloop.
+- The production-safe package is still the full deck-load arm sequence:
+  `SOUNDSWITCH_ID`, `get_firstbeat`, `get_bpm`, title/artist, `loop=on`,
+  `get_loop`, `get_filepath`, elapsed time, and `play=on`.
+- In live isolation, `get_filepath` was the smallest proven trigger after a
+  clear: clear first, then filepath restarted autoloop.
+
+Not proven or rejected as standalone arm/rearm triggers:
+
+- `beat(..., change=True)` alone did not visibly rephase/rearm autoloop.
+- BPM resend alone did not prove rearm.
+- `loop=on` / `get_loop` alone did not restart after clear.
+- Null `SOUNDSWITCH_ID` alone did not restart after clear.
+- `get_filepath` while an autoloop was already running did not visibly retrigger
+  a fresh phrase.
+- One-shot beatpos/time jumps did not visibly relock.
+
+### Beatpos And Seeking
+
+SoundSwitch watches transport strongly enough that sustained beatpos/time
+streams can move or tug the visible autoloop progress bar.
+
+Live results:
+
+- Real Rekordbox backward seek can make SoundSwitch recover natural autoloop
+  phrasing.
+- A single fake transport jump through the bridge did nothing visible.
+- A sustained fake transport stream tugged/moved the progress bar.
+- Phrase-aligned fake transport streams, stronger discontinuity streams, and
+  short seek-like pulses only bumped/tugged the progress bar.
+- Those fake beatpos/time paths did not reliably restart or reselect the laser
+  autoloop phrase, and one long tug could pull an already aligned autoloop out
+  of phrase.
+
+Conclusion: continuous real transport should remain accurate, but production
+master-transition rearm must not rely on beatpos spoofing or `change=True`
+relock. Beatpos is transport/progress information, not a reliable laser phrase
+rearm trigger.
+
+### Master-Transition Rearm Semantics
+
+The bridge cannot see the physical fader. Its transition signal is
+`MASTER_CHANGED` / auto-switch.
+
+Desired production behavior:
+
+- On master-transition autoloop activation, immediately clear all four
+  SoundSwitch deck slots to cut the previous autoloop.
+- Arm the new autoloop by sending filepath/deck-load on a 32-beat phrase
+  boundary.
+- Phrase targets are now every 32 beats: `32, 64, 96, ...`.
+- `AUTOLOOP_BEATS` remains the loop length sent to SoundSwitch; phrase targeting
+  is controlled separately by `AUTOLOOP_ARM_PHRASE_BEATS`.
+
+Timing policy:
+
+- Phrase-start grace: if `MASTER_CHANGED` lands within 0.5 beat after a
+  32-beat boundary, arm immediately.
+- Late tolerance: if that immediate grace arm is more than 125 ms after the
+  phrase boundary, still arm immediately, then schedule a corrective rearm at
+  the next 32-beat phrase.
+- Minimum runway: if a scheduled target is less than 1000 ms away, still attempt
+  that target, then schedule a corrective rearm at the next 32-beat phrase.
+- Late scheduled target: if the bridge reaches a scheduled target more than
+  125 ms late, still arm immediately, then schedule a corrective rearm 32 beats
+  later.
+- Corrective rearms are real rearms: clear SoundSwitch again, then send the
+  filepath/deck-load package at the correction phrase target.
+
+Musical examples:
+
+- If master changes one bar before a phrase, clear immediately, then arm on the
+  upcoming 32-beat phrase.
+- If master changes one bar after a phrase, clear immediately, then wait for the
+  next 32-beat phrase unless a future policy chooses an immediate imperfect arm
+  plus correction for this case.
+- If master changes inside the 0.5-beat phrase-start grace, arm immediately; if
+  it was more than 125 ms late, also schedule the next 32-beat correction.
+
+### Current Implementation Notes
+
+- Production master-transition rearm uses clear plus filepath/deck-load, not
+  `AUTOLOOP-MASTER-RELOCK`.
+- The old master-transition `change=True` relock helpers were removed from the
+  active code path.
+- Active live-BPM follow may still use a one-shot `change=True` beat when BPM is
+  applied; that is separate from master-transition autoloop rearm.
+- Validation helper `os2l_injector.py` was useful for controlled live tests but
+  is debug tooling unless intentionally kept as a gated bridge feature.
+
 ## Baseline Finding
 
 `AUTOLOOP_BEATS` is currently `16`, and the autoloop arm path sends that loop

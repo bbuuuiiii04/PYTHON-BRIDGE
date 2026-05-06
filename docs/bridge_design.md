@@ -185,35 +185,37 @@ At autoloop arm:
 4. The chosen value is stored in `OutputState.autoloop_arm_bpm`.
 5. The arm still fires immediately for workflow, then StateManager marks
    `autoloop_arm_pending=True` so the push loop can send a second BPM at the
-   next 16-beat phrase boundary.
+   next 32-beat phrase boundary.
 
 Autoloop arm phrase-lock:
 
 - Phrase targets are absolute beat boundaries: `(AUTOLOOP_ARM_PHRASE_BEATS * n)`.
-- With `AUTOLOOP_ARM_PHRASE_BEATS=16`, arm phrase-lock targets `16, 32, 48, ...`.
+- With `AUTOLOOP_ARM_PHRASE_BEATS=32`, arm phrase-lock targets `32, 64, 96, ...`.
 - This is intentionally separate from `AUTOLOOP_BEATS`, which controls the
   loop length sent at arm time.
 - Example simulations:
-  - arm at beat `5.2` -> target `16`; no BPM at `15.9`; BPM at `16.0`.
-  - arm at beat `299.3` in a 3:00, 138 BPM track -> target `304`.
+  - arm at beat `5.2` -> target `32`; no BPM at `31.9`; BPM at `32.0`.
+  - arm at beat `299.3` in a 3:00, 138 BPM track -> target `320`.
   - deck 1 -> deck 2 transition clears deck 1 pending lock; deck 2 gets its
-    own immediate arm and own phrase target, e.g. beat `172.4` -> `176`.
+    own immediate arm and own phrase target, e.g. beat `172.4` -> `192`.
 - Pending arm phrase-lock is cleared on idle/stop, master change, active track
   load, and Rekordbox restart.
 - Master-transition phrase arm is enabled by default. Set
   `RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0` to disable it.
-- Autoloop arms after a master deck switch are
-  phrase-window aware:
+- Autoloop arms after a master deck switch are phrase-window aware:
+  - the bridge first clears all four SoundSwitch deck slots so the old autoloop
+    is cut;
   - if the switch lands near the start of a phrase, deck-load/loop/play fire
-    immediately and the bridge sends a one-shot `change=True` anchored to the
-    previous phrase boundary;
+    immediately;
   - if the switch lands later in the phrase, deck-load/loop/play wait until the
-    next 16-beat phrase target, then the next outgoing beat sends the one-shot
-    `change=True`.
+    next 32-beat phrase target.
+- If a master-transition rearm is late, short on runway, or only accepted by the
+  phrase-start grace window after the tolerance, it still arms immediately and
+  schedules a corrective clear plus filepath/deck-load on the next 32-beat
+  phrase target.
 - Normal track-start autoloop arms remain immediate.
-- Delayed activation by itself was live-tested and did not fix the transition
-  phrase offset; delayed activation must be paired with the one-shot re-lock at
-  the actual arm point.
+- Beatpos/`change=True` tugging was live-tested and only moved the progress bar;
+  production master-transition rearm uses clear plus filepath/deck-load instead.
 
 VDJ-like live-follow behavior:
 
@@ -227,10 +229,7 @@ VDJ-like live-follow behavior:
   `autoloop_arm_bpm` / `timing_bpm` to the new value.
 - The next autoloop beat after a live BPM apply sends absolute `beat.pos` with
   `change=True` exactly once, then steady autoloop beats return to
-  `change=False`.
-- The same one-shot beat re-lock is used after master-transition autoloop arms.
-  The re-lock happens at the selected phrase-window arm point: immediate near
-  phrase start, delayed otherwise.
+  `change=False`. This is not used for master-transition rearm.
 - Live BPM follow never reloads the deck, toggles loop state, or changes master.
 
 Live-follow cancellation:

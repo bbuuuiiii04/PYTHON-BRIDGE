@@ -135,44 +135,36 @@ SoundSwitch has been observed to react to BPM sends and beat `change=True`
 re-locks. Treat `LIVE-BPM-APPLY` plus the next one-shot change beat as the
 validated active-autoloop tempo-change sync path.
 
-Master-transition autoloop arms use the same next-beat re-lock signal without
-delaying deck load:
-
-```text
-[SS][AUTOLOOP-MASTER-RELOCK] deck=2 source=auto-detect timing=immediate next_beat_change=true
-```
-
-After this line, the first autoloop beat event sends absolute `beat.pos` with
-`change=True` once, then returns to steady `change=False`.
+Master-transition autoloop arms do not use this beat re-lock path; they clear
+SoundSwitch and re-send the filepath/deck-load package on the selected phrase.
 
 Autoloop arm phrase-lock is separate from live BPM follow. Normal track-start
 autoloop arms fire immediately, then the push loop schedules one more BPM send
-at the next 16-beat phrase boundary:
+at the next 32-beat phrase boundary:
 
 ```text
-[SS][AUTOLOOP-ARM-PENDING] deck=1 current_beat=5.2 target_phrase_beat=16
-[SS][AUTOLOOP-ARM-LOCKED] deck=1 beat=16 bpm=120.50
+[SS][AUTOLOOP-ARM-PENDING] deck=1 current_beat=5.2 target_beat=32 ...
+[SS][AUTOLOOP-ARM-LOCKED] deck=1 target_beat=32 ... bpm=120.50
 ```
 
 Master-switch autoloop arms are phrase-window aware by default. Set
 `RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0` to disable this behavior. If the switch
-lands near the start of a phrase, the bridge arms immediately and logs
-`timing=immediate` with an anchored one-shot `change=True`. If it lands later in
-the phrase, the bridge delays SoundSwitch deck-load/autoloop activation until
-the next phrase target:
+lands near the start of a phrase, the bridge clears SoundSwitch and arms
+immediately. If it lands later in the phrase, the bridge clears SoundSwitch and
+delays deck-load/autoloop activation until the next phrase target:
 
 ```text
-[SS][AUTOLOOP-MASTER-ARM-PENDING] deck=2 mirror=1 current_beat=5.2 target_phrase_beat=16 ...
-[SS][AUTOLOOP-MASTER-ARM-LOCKED] deck=2 beat=16 bpm=120.50 ...
-[SS][AUTOLOOP-MASTER-RELOCK] deck=2 source=auto-detect timing=delayed next_beat_change=true
+[SS][AUTOLOOP-MASTER-CLEAR] deck=2 mirror=1 source=auto-detect
+[SS][AUTOLOOP-MASTER-ARM-PENDING] deck=2 mirror=1 current_beat=5.2 target_beat=32 ...
+[SS][AUTOLOOP-MASTER-ARM-LOCKED] deck=2 target_beat=32 target_elapsed_ms=16000 actual_elapsed_ms=16000 ...
 ```
 
-Live testing showed delayed activation did not fix the master-transition phrase
-offset by itself; the default behavior pairs phrase-window activation with the
-one-shot `change=True` re-lock at the selected arm point.
+Live testing showed beatpos/`change=True` tugging moves the progress bar but
+does not reliably restart the laser phrase. Master-transition rearm therefore
+uses clear plus filepath/deck-load on the selected phrase target.
 
-With `AUTOLOOP_ARM_PHRASE_BEATS=16`, phrase-lock targets are `(16 * n)`:
-`16, 32, 48, ...`. This is separate from `AUTOLOOP_BEATS`, which controls loop
+With `AUTOLOOP_ARM_PHRASE_BEATS=32`, phrase-lock targets are `(32 * n)`:
+`32, 64, 96, ...`. This is separate from `AUTOLOOP_BEATS`, which controls loop
 length.
 
 ## Common Questions

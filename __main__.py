@@ -20,12 +20,14 @@ import signal
 import sys
 import time
 import threading
+import fcntl
 
 from .config import OSC_LISTEN_PORT, TL_LOG_PATH, TL_PLAYLIST_PATH
 from .filepath_resolver import FilepathResolver
 from .models import BridgeEvent, Ev
 from .mtc_reader import MTCReader
 from .osl_output import OS2LConnection, OS2LOutput, SoundSwitchDiscovery
+from .os2l_injector import OS2LInjector
 from .rb_memory import PositionCache, RBMemoryReader
 from .scripted_tracks import preload_from_tl, resolve_filepaths
 from .state_manager import StateManager
@@ -181,6 +183,24 @@ if not os.environ.get("BRIDGE_LOG_JSON"):
     ))
 log = logging.getLogger("bridge")
 
+_LOCK_FD = None
+_LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
+
+
+def _acquire_single_instance_lock() -> bool:
+    """Return False when another bridge process already owns the runtime lock."""
+    global _LOCK_FD
+    fd = os.open(_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return False
+    os.ftruncate(fd, 0)
+    os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+    _LOCK_FD = fd
+    return True
+
 
 # ── OSC listener (scripted arm triggers from TL) ──────────────────────────────
 
@@ -292,9 +312,74 @@ def _auto_populate(track_id: int, active_deck: int, eq: queue.Queue) -> None:
     ))
 
 
+def _seed_initial_decks(eq: queue.Queue[BridgeEvent], init: dict) -> None:
+    """Replay fresh ENGINE STATE deck identity through the normal event path."""
+    decks = init.get("decks") or {}
+    if not decks:
+        return
+
+    seeded = 0
+    for deck in sorted(decks):
+        info = decks[deck]
+        title = str(info.get("title", ""))
+        if not title:
+            continue
+
+        events = [
+            BridgeEvent(
+                kind=Ev.TRACK_LOADED,
+                deck=deck,
+                payload={"title": title},
+                source="initial_engine_state",
+            ),
+        ]
+        bpm = float(info.get("bpm", 0.0) or 0.0)
+        if bpm > 0:
+            events.append(BridgeEvent(
+                kind=Ev.BPM_UPDATE,
+                deck=deck,
+                payload={"bpm": bpm},
+                source="initial_engine_state",
+            ))
+        elapsed_ms = int(info.get("elapsed_ms", 0) or 0)
+        if elapsed_ms > 0:
+            events.append(BridgeEvent(
+                kind=Ev.TC_UPDATE,
+                deck=deck,
+                payload={
+                    "elapsed_ms": elapsed_ms,
+                    "pitch_factor": float(info.get("pitch_factor", 1.0) or 1.0),
+                },
+                source="initial_engine_state",
+            ))
+        if bool(info.get("playing", False)):
+            events.append(BridgeEvent(
+                kind=Ev.PLAY,
+                deck=deck,
+                source="initial_engine_state",
+            ))
+
+        try:
+            for ev in events:
+                eq.put_nowait(ev)
+            seeded += 1
+            log.info("startup preload: deck=%d title=%s bpm=%.1f playing=%s",
+                     deck, title, bpm, bool(info.get("playing", False)))
+        except queue.Full:
+            log.warning("startup preload: event queue full; deck=%d title=%s skipped",
+                        deck, title)
+
+    if seeded:
+        log.info("startup preload: enqueued %d loaded deck(s) from ENGINE STATE", seeded)
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    if not _acquire_single_instance_lock():
+        log.error("another rb_ss_bridge_v2 process is already running; exiting")
+        return
+
     if is_debug() or "--debug" in sys.argv:
         enable_debug()
 
@@ -319,6 +404,7 @@ def main() -> None:
     conn = OS2LConnection()
     conn.start()
     output = OS2LOutput(conn)
+    injector = OS2LInjector(conn)
 
     # DNS-SD discovery for SoundSwitch
     discovery = SoundSwitchDiscovery(conn)
@@ -334,6 +420,7 @@ def main() -> None:
     # Filepath resolver (triggered by TRACK_LOADED, pushes FILEPATH_RESOLVED)
     resolver = FilepathResolver(event_queue, pos_cache)
     sm.attach_resolver(resolver)
+    _seed_initial_decks(event_queue, init)
 
     # TL log tailer
     tailer = TLLogTailer(TL_LOG_PATH, event_queue)
@@ -363,6 +450,7 @@ def main() -> None:
     tailer.start()
     mem_reader.start()
     live_bpm.start()
+    injector.start()
     sm_thread = sm.start()
 
     # OSC listener (scripted arm triggers)
@@ -381,6 +469,7 @@ def main() -> None:
         live_bpm.stop()
         link.stop()
         mtc.stop()
+        injector.stop()
         discovery.stop()
         conn.stop()
         sys.exit(0)

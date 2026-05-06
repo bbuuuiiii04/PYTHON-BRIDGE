@@ -42,7 +42,7 @@ LIVE_BPM_SCAN_RETRY_S = 10.0
 LIVE_BPM_SESSION_CHECK_S = 5.0
 LIVE_BPM_READ_FAILURES = 3
 LIVE_BPM_STALE_S = 3.0
-LIVE_BPM_LOG_DELTA = 0.02
+LIVE_BPM_LOG_DELTA = 0.10
 LIVE_BPM_LOG_INTERVAL_S = 1.0
 
 
@@ -421,7 +421,7 @@ class LiveBPMService(threading.Thread):
                 current.updated_at = now
                 current.failure_count = 0
                 should_log = (
-                    abs(current.latest_bpm - current.last_logged_bpm) >= LIVE_BPM_LOG_DELTA
+                    abs(current.latest_bpm - current.last_logged_bpm) > LIVE_BPM_LOG_DELTA
                     and now - current.last_logged_at >= LIVE_BPM_LOG_INTERVAL_S
                 )
                 if should_log:
