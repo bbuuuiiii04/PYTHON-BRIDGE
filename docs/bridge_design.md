@@ -72,6 +72,29 @@ StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC
 - `confident_playing = d.playing` in push loop — DDJ-800 mode=4112 makes memory play bit unreliable.
 - Stop detection, lighting mode, resume detection all key off `d.playing`.
 
+**Audit note (2026-05-06):** `docs/timecodelink_integration_analysis.md` §7–10 documents the
+exact RB memory layout TL reads (master-deck `uint8_t`, per-deck live BPM `float`,
+per-deck **live position samples → `isPlaying` via diff** + `elapsedSec` via `samples/44100`,
+per-deck trackInfo string, ANLZ filename) and the per-version `OffsetVersion`
+chain structure. The full per-version offset table for **all 5 supported RB
+versions (7.2.8 / 7.2.10 / 7.2.11 / 7.2.13 / 7.2.14)** has been extracted
+verbatim from TL's compiled-in Qt resource and is shipped alongside the bridge
+in `rb_offsets.py` (and as raw text under `docs/offsets-macos.yaml`).
+A working `RBStateReader` (`rb_state_reader.py`) — daemon thread, fail-closed,
+no-op on unsupported RB versions — is implemented and unit-tested (24 tests,
+backed by a fake-mach-read harness in `tests/test_rb_state_reader.py` /
+`tests/test_rb_offsets.py`).
+
+The audit confirmed (analysis §8 + disassembly of `RekordboxPlugin::start` /
+`tryConnect`) that TL's licensing (in-house, libsodium-Ed25519) is fully
+decoupled from the memory tap, so no DRM boundary blocks the direct-read
+implementation.
+
+Until `RBStateReader` is wired into `__main__.py` and observed in parallel
+against `TLLogTailer` for at least one full session per RB version, **TL log
+remains authoritative for play / pause / master / track-load events**; the new
+reader is OFF by default. Adoption gating in analysis §10.5.
+
 Live BPM is a separate read-only memory signal. It is never promoted from a
 static address match. A candidate is usable only after current-session
 pid/base/deck validation through observed BPM movement. If validation is absent,
