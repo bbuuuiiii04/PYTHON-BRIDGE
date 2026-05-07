@@ -203,9 +203,15 @@ class LoggingEventQueue:
     _TS_KEY = "__enqueue_mono"
     _TRACE_KEY = "__trace_id"
 
-    def __init__(self, inner: queue.Queue, manager: "LoggingManager") -> None:
+    def __init__(
+        self,
+        inner: queue.Queue,
+        manager: "LoggingManager",
+        enqueue_callback: Optional[Callable[[Any], None]] = None,
+    ) -> None:
         self._inner = inner
         self._manager = manager
+        self._enqueue_callback = enqueue_callback
 
     def put_nowait(self, ev: Any) -> None:
         payload = getattr(ev, "payload", None)
@@ -217,6 +223,13 @@ class LoggingEventQueue:
         payload[self._TS_KEY] = time.monotonic()
         self._manager.stats.record_enqueue(ev, trace_id)
         self._inner.put_nowait(ev)
+        if self._enqueue_callback is not None:
+            try:
+                self._enqueue_callback(ev)
+            except Exception:
+                logging.getLogger("logging_manager").debug(
+                    "enqueue callback failed", exc_info=True
+                )
 
     def get_nowait(self) -> Any:
         return self._inner.get_nowait()
@@ -276,8 +289,12 @@ class LoggingManager:
             if not any(isinstance(f, RuntimeLogFilter) for f in handler.filters):
                 handler.addFilter(RuntimeLogFilter(self))
 
-    def wrap_queue(self, inner: queue.Queue) -> LoggingEventQueue:
-        return LoggingEventQueue(inner, self)
+    def wrap_queue(
+        self,
+        inner: queue.Queue,
+        enqueue_callback: Optional[Callable[[Any], None]] = None,
+    ) -> LoggingEventQueue:
+        return LoggingEventQueue(inner, self, enqueue_callback=enqueue_callback)
 
     @contextlib.contextmanager
     def event_scope(

@@ -20,7 +20,8 @@ No Frida. No injection. Position from direct RB memory reads via mach task API.
 |-----------|------|------|
 | `TLLogTailer` | `tl_tailer.py` | Tails TL log; emits MASTER_CHANGED, TRACK_LOADED, PLAY, PAUSE, ANLZ_PATH, BPM_UPDATE, TC_UPDATE |
 | `RBMemoryReader` | `rb_memory.py` | Reads RB process memory at 60 Hz; writes PositionCache |
-| `LiveBPMService` | `live_bpm.py` | Read-only background Rekordbox memory service; discovers, validates, and refreshes per-deck live BPM |
+| `LiveBPMService` | `live_bpm.py` | Read-only background Rekordbox memory service; uses fixed offset-table BPM chains when supported, otherwise discovers, validates, and refreshes per-deck live BPM |
+| Direct master startup probe | `rb_state_reader.py` | One-shot fixed offset-table master byte read for startup visibility/corroboration only; does not enqueue events |
 | `MTCReader` | `mtc_reader.py` | Reads MTC quarter-frames + full-frame SysEx from IAC Bus 1 at ~25 fps; emits TC_UPDATE |
 | `FilepathResolver` | `filepath_resolver.py` | Resolves filepath metadata. With ANLZ: ANLZ DB lookup, then lsof fallback on miss. Without ANLZ: lsof and title DB lookup race in parallel; emits FILEPATH_RESOLVED |
 | `StateManager` | `state_manager.py` | Single event-loop + 200 Hz push loop thread; owns all DeckState; drives SS output |
@@ -58,6 +59,7 @@ StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC
 |--------|--------|-----------|
 | Play / pause | TL log `[EVENT] Deck X playing/paused` | **Authoritative** |
 | Master deck | TL log `Rekordbox master deck changed` + ENGINE STATE every ~15s | **Authoritative** |
+| Direct master status | `rb_offsets.py` `master_deck` chain via one-shot startup probe | Observational only; logs availability/corroboration and does not change active deck |
 | Track load | TL log `[EVENT] Deck X loaded` | **Authoritative** |
 | Scripted track ID | TL OSC `/bridge/track_loaded` | Authoritative — routed via TL log deck |
 | Track filepath / BPM / ssid | ANLZ DB, lsof + length match, title DB lookup | Informational |
@@ -65,7 +67,7 @@ StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC
 | Position (ms) | RB memory 60 Hz → MTC 25 fps → TL TC ~15s | Informational; priority in that order |
 | Memory play bit | RB memory | Corroboration only — never overrides TL |
 | BPM hint/fallback | ENGINE STATE every ~15s | Updates `d.meta.bpm`; static DB BPM until first update |
-| BPM live/displayed | LiveBPMService current-session memory validation | Used for autoloop arm snapshot and default-on gated active follow when valid |
+| BPM live/displayed | LiveBPMService fixed offset-table chain or current-session discovery validation | Used for autoloop arm snapshot and default-on gated active follow when valid |
 
 **Critical rule**: TL log is truth. Memory confirms; it never overrides.
 - `d.playing` (from TL PLAY/PAUSE) is the authoritative play state.
@@ -90,16 +92,30 @@ The audit confirmed (analysis §8 + disassembly of `RekordboxPlugin::start` /
 decoupled from the memory tap, so no DRM boundary blocks the direct-read
 implementation.
 
-Until `RBStateReader` is wired into `__main__.py` and observed in parallel
-against `TLLogTailer` for at least one full session per RB version, **TL log
-remains authoritative for play / pause / master / track-load events**; the new
-reader is OFF by default. Adoption gating in analysis §10.5.
+`RBStateReader` can run in explicit shadow mode for parity checks, but it does
+not feed the authoritative `StateManager` queue. Until direct-read events are
+observed in parallel against `TLLogTailer` for at least one full session per RB
+version and an arbitration path is added, **TL log remains authoritative for
+play / pause / master / track-load events**. Adoption gating in analysis §10.5.
 
-Live BPM is a separate read-only memory signal. It is never promoted from a
-static address match. A candidate is usable only after current-session
-pid/base/deck validation through observed BPM movement. If validation is absent,
-stale, non-finite, unreadable, or disabled, the bridge falls back to
-`d.meta.bpm`.
+The master-specific convergence step is a one-shot startup status probe. On
+supported Rekordbox versions, `read_direct_master_status()` follows the same
+`master_deck` byte chain used by `RBStateReader`, logs `[RBMASTER][DIRECT]`
+availability, and logs `[RBMASTER][SOURCE]` with `current=tl_log`, direct deck,
+TL startup deck, and corroboration state. It does not enqueue
+`MASTER_CHANGED`, does not call `StateManager.set_initial_state`, and fails
+closed to TL-only status when the RB version is unsupported, attach fails, or
+the chain is unreadable.
+
+Live BPM is a separate read-only memory signal. On supported Rekordbox versions,
+LiveBPMService follows the same per-version BPM chain shipped in `rb_offsets.py`
+as soon as it has attached to the Rekordbox pid/base; this direct path does not
+wait for ENGINE STATE because the versioned chain itself supplies the deck-owned
+field. If that chain is unreadable, unsupported, stale, or non-finite, it fails
+closed and uses the older discovery path once hints are available. Discovery
+candidates are still never promoted from a static address match: they require
+current-session pid/base/deck validation through observed BPM movement. If no
+fresh live BPM is available, the bridge falls back to `d.meta.bpm`.
 
 ---
 
@@ -242,7 +258,14 @@ Autoloop arm phrase-lock:
 VDJ-like live-follow behavior:
 
 - Enabled by default; set `RBSS_LIVE_BPM_FOLLOW=0` to disable active follow.
-- During an already armed autoloop, the bridge watches validated `live_bpm`.
+- During an already armed autoloop, the bridge watches fresh `live_bpm` from the
+  offset-table chain when available, otherwise from the validated discovery path.
+- Runtime status text labels the source as `live_source=offset_table`,
+  `live_source=discovery`, or `live_source=fallback_meta`.
+- Live BPM source transitions are logged as `[LBPM][SOURCE]`; direct offset-table
+  acceptance/rejection is logged as `[LBPM][DIRECT]`. Set
+  `RBSS_LIVE_BPM_DIAGNOSTICS=1` for compact `[LBPM][SUMMARY]` lines during live
+  validation runs.
 - If live BPM diverges from `timing_bpm` by more than the unscripted BPM
   threshold, the bridge sends the new BPM to all four SoundSwitch deck slots.
 - BPM follow sends are rate-limited to avoid push-loop spam while still tracking
@@ -264,6 +287,8 @@ Kill switches:
 - `RBSS_LIVE_BPM_DISABLE=1` disables LiveBPMService entirely.
 - `RBSS_LIVE_BPM_FOLLOW=0` disables active-autoloop follow while still allowing
   arm-time live BPM snapshots when validated.
+- `RBSS_LIVE_BPM_DIAGNOSTICS=1` adds compact LiveBPM source summaries for
+  proving whether offset-table BPM became active before ENGINE STATE hints.
 - `RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0` disables default phrase-window
   master-transition autoloop activation.
 
@@ -489,7 +514,7 @@ Do not hardcode `inner1 + 0xd0` or `inner1 + 0x2fc0`. Those offsets are session-
 | Deck switch before SCRIPTED_ARM | scripted_id on wrong deck | Transfer logic in _on_master_changed |
 | DDJ-800 mode=4112 memory play bit | Memory says playing when paused | TL PAUSE event is authoritative; d.playing overrides |
 | MTC unavailable (mido/IAC) | Position fallback only has TL TC (~15s) | TL TC still sufficient; warning logged |
-| Live BPM unvalidated/disabled | Autoloop arm/follow uses `d.meta.bpm` fallback | Fail closed; no hardcoded addresses |
+| Live BPM unavailable/disabled | Autoloop arm/follow uses `d.meta.bpm` fallback | Fail closed; fixed chains require supported RB version; discovery still validates |
 | BPM changes during active autoloop | Default-on live follow sends gated BPM updates in place | `RBSS_LIVE_BPM_FOLLOW=0` disables active follow |
 
 ---
@@ -506,5 +531,6 @@ Do not hardcode `inner1 + 0xd0` or `inner1 + 0x2fc0`. Those offsets are session-
 - Do not call `_do_stop` expecting it to clear SS — it only resets internal state; lighting machine clears SS
 - Do not route active-autoloop BPM changes through deck load, loop on/off, or
   master-change paths. Live follow is transport-only and rate-limited.
-- Do not hardcode live BPM addresses or reuse absolute addresses across
-  Rekordbox restarts. Live BPM is current-session validation only.
+- Do not hardcode live BPM absolute addresses or reuse absolute addresses across
+  Rekordbox restarts. Offset-table BPM is version-specific chain resolution;
+  discovery BPM remains current-session validation only.

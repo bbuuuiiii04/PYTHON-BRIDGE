@@ -29,6 +29,15 @@ from .mtc_reader import MTCReader
 from .osl_output import OS2LConnection, OS2LOutput, SoundSwitchDiscovery
 from .os2l_injector import OS2LInjector
 from .rb_memory import PositionCache, RBMemoryReader
+from .rb_state_reader import (
+    DirectMasterObservation,
+    DirectMasterStatus,
+    make_rb_state_reader,
+    direct_master_observation_summary_fields,
+    direct_master_summary_fields,
+    observe_direct_master_startup,
+)
+from .rb_state_shadow import RBStateParityMonitor, SHADOW_ENV, read_rekordbox_version
 from .scripted_tracks import preload_from_tl, resolve_filepaths
 from .state_manager import StateManager
 from .tl_tailer import TLLogTailer, read_initial_state
@@ -383,6 +392,42 @@ def _seed_initial_decks(eq: queue.Queue[BridgeEvent], init: dict) -> None:
         log.info("startup preload: enqueued %d loaded deck(s) from ENGINE STATE", seeded)
 
 
+def _log_direct_master_startup_status(rb_version: str, tl_startup_deck: int) -> None:
+    """Log direct master availability without changing startup authority."""
+    observation = observe_direct_master_startup(rb_version)
+    _log_direct_master_observation_summary(observation, tl_startup_deck)
+
+
+def _log_direct_master_summary(status: DirectMasterStatus, tl_startup_deck: int) -> None:
+    fields = direct_master_summary_fields(status, tl_startup_deck)
+    log.info("[RBMASTER][SOURCE] current=tl_log direct_probe_attempted=%s "
+             "supported_version=%s readable=%s version=%s direct_source=%s "
+             "direct_master=%s direct_raw=%s tl_startup_master=%s corroboration=%s "
+             "fail_closed_reason=%s",
+             fields["direct_probe_attempted"], fields["supported_version"],
+             fields["readable"], fields["version"], fields["direct_source"],
+             fields["direct_master"], fields["direct_raw"], fields["tl_startup_master"],
+             fields["corroboration"], fields["fail_closed_reason"])
+
+
+def _log_direct_master_observation_summary(
+    observation: DirectMasterObservation,
+    tl_startup_deck: int,
+) -> None:
+    fields = direct_master_observation_summary_fields(observation, tl_startup_deck)
+    log.info("[RBMASTER][SOURCE] current=tl_log direct_probe_attempted=%s "
+             "supported_version=%s readable=%s version=%s direct_source=%s "
+             "initial_direct_master=%s initial_raw=%s direct_master=%s direct_raw=%s "
+             "tl_startup_master=%s corroboration=%s attempts=%s outcome=%s "
+             "fail_closed_reason=%s",
+             fields["direct_probe_attempted"], fields["supported_version"],
+             fields["readable"], fields["version"], fields["direct_source"],
+             fields["initial_direct_master"], fields["initial_raw"],
+             fields["direct_master"], fields["direct_raw"], fields["tl_startup_master"],
+             fields["corroboration"], fields["attempts"], fields["outcome"],
+             fields["fail_closed_reason"])
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -399,9 +444,20 @@ def main() -> None:
     preload_from_tl(str(TL_PLAYLIST_PATH))
     resolve_filepaths()
 
-    # Shared event queue
+    # Shared authoritative event queue. Optional rb_state shadow mode gets a
+    # separate queue so direct-read events cannot drive DeckState or lighting.
     raw_event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)
-    event_queue = LOG.wrap_queue(raw_event_queue)
+    rb_state_shadow = os.environ.get(SHADOW_ENV) == "1"
+    rb_shadow_queue: queue.Queue[BridgeEvent] | None = None
+    rb_parity: RBStateParityMonitor | None = None
+    rb_state_reader = None
+    if rb_state_shadow:
+        rb_shadow_queue = queue.Queue(maxsize=512)
+        rb_parity = RBStateParityMonitor(rb_shadow_queue)
+        event_queue = LOG.wrap_queue(raw_event_queue, enqueue_callback=rb_parity.observe_tl)
+        log.info("RBStateReader shadow mode enabled via %s=1", SHADOW_ENV)
+    else:
+        event_queue = LOG.wrap_queue(raw_event_queue)
 
     # Position cache (RBMemoryReader → PositionCache → StateManager push loop)
     pos_cache = PositionCache()
@@ -426,6 +482,21 @@ def main() -> None:
     # Initialize master deck from last TL ENGINE STATE (fixes startup deck bug)
     init = read_initial_state(TL_LOG_PATH)
     sm.set_initial_state(init['active_deck'])
+    rb_version_for_direct_master = read_rekordbox_version()
+    if rb_version_for_direct_master:
+        _log_direct_master_startup_status(rb_version_for_direct_master, init['active_deck'])
+    else:
+        _log_direct_master_summary(
+            DirectMasterStatus(
+                attempted=False,
+                supported=False,
+                available=False,
+                readable=False,
+                source="tl_log",
+                reason="version_lookup_failed",
+            ),
+            init['active_deck'],
+        )
 
     # Filepath resolver (triggered by TRACK_LOADED, pushes FILEPATH_RESOLVED)
     resolver = FilepathResolver(event_queue, pos_cache)
@@ -434,6 +505,17 @@ def main() -> None:
 
     # TL log tailer
     tailer = TLLogTailer(TL_LOG_PATH, event_queue)
+
+    if rb_state_shadow and rb_shadow_queue is not None:
+        rb_version = read_rekordbox_version()
+        if not rb_version:
+            log.warning("RBStateReader shadow mode not started: Rekordbox version lookup failed")
+        else:
+            rb_state_reader = make_rb_state_reader(rb_shadow_queue, rb_version)
+            if getattr(rb_state_reader, "_offs", None) is None:
+                log.warning("RBStateReader shadow mode not started: unsupported Rekordbox version %s",
+                            rb_version)
+                rb_state_reader = None
 
     # Memory reader (with drift detection + FM-11 RB_RESTARTED events)
     from .diagnostics import DriftDetector
@@ -452,7 +534,11 @@ def main() -> None:
     mtc.start()
 
     # Start all components
+    if rb_parity is not None:
+        rb_parity.start()
     tailer.start()
+    if rb_state_reader is not None:
+        rb_state_reader.start()
     mem_reader.start()
     live_bpm.start()
     injector.start()
@@ -470,6 +556,10 @@ def main() -> None:
         LOG.stop_control_watcher()
         sm.stop()
         tailer.stop()
+        if rb_state_reader is not None:
+            rb_state_reader.stop()
+        if rb_parity is not None:
+            rb_parity.stop()
         mem_reader.stop()
         live_bpm.stop()
         mtc.stop()

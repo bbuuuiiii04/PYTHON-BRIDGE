@@ -955,6 +955,7 @@ The full extracted YAML for all 5 supported versions (7.2.8 / 7.2.10 / 7.2.11 / 
 
 - **`make_rb_state_reader(event_queue, rb_version, **kwargs)`** calls **`load_offsets_for_version(rb_version)`**; if `None`, constructs **`RBStateReader(..., offsets=None)`** whose **`run()` exits immediately** (no-op thread).
 - **`RBStateReader` constructor** accepts optional injected **`rb_pid`**, **`base_addr`**, **`poll_hz`**, **`clock`**, **`sleeper`** (tests use fakes).
+- **`read_direct_master_status(rb_version, **kwargs)`** is the first master-specific convergence hook. It performs a one-shot read of **`offs.master_deck`** for startup visibility/status only. Unsupported versions, attach failures, and unreadable chains return unavailable status and leave **TL log / ENGINE STATE** authority unchanged.
 
 **Attach**
 
@@ -997,7 +998,7 @@ The full extracted YAML for all 5 supported versions (7.2.8 / 7.2.10 / 7.2.11 / 
 
 The new reader is **additive**. `StateManager` already consumes `MASTER_CHANGED`, `TRACK_LOADED`, `BPM_UPDATE`, `PLAY`, and `PAUSE` **without inspecting `event.source`** — so **two producers on the same queue duplicate or fight** unless one path is gated.
 
-**Current repo state:** **`__main__.py` starts `TLLogTailer` + `RBMemoryReader` + … but does not construct `RBStateReader` yet** — integration is still manual / experimental.
+**Current repo state:** **`__main__.py` starts `TLLogTailer` + `RBMemoryReader` + … and can start `RBStateReader` only in explicit shadow mode. It also runs the direct master startup probe when the Rekordbox version can be read.** The probe logs `[RBMASTER][DIRECT]` and `[RBMASTER][SOURCE]` but does not enqueue `MASTER_CHANGED`, does not mutate `StateManager`, and keeps `current=tl_log`.
 
 **Rollout steps (recommended):**
 
@@ -1013,10 +1014,11 @@ The 200 Hz `StateManager` push loop remains untouched. The reader respects the t
 | -------------------------------- | ------------------------------------------------------------------------------------------- |
 | TL on-disk patcher (RB re-sign)  | **Required** — still the only path to `get-task-allow` on RB. No replacement proposed.      |
 | TL runtime process               | **Optional** — only needed for MTC on IAC Bus 1 and Ableton Link output. Memory-tap data is now redundant. |
-| `TLLogTailer` (ENGINE STATE, ANLZ correlation, …) | **Authoritative today** (see `docs/bridge_design.md`). **`RBStateReader` is not started from `__main__.py` yet.** Optional TL env gate after validation (`RBSS_USE_TL_LOG` or equivalent) — **not implemented** in code at this doc revision. |
+| `TLLogTailer` (ENGINE STATE, ANLZ correlation, …) | **Authoritative today** (see `docs/bridge_design.md`). `RBStateReader` can run in explicit shadow mode for parity only; it does not feed `StateManager`. Optional TL env gate after validation (`RBSS_USE_TL_LOG` or equivalent) — **not implemented** in code at this doc revision. |
 | `MTCReader` (IAC Bus 1)          | **Unchanged** — TC fallback when RB memory / TL TC gaps apply. |
 | `RBMemoryReader` (60 Hz)         | **Unchanged** — `PositionCache` / elapsed for push loop. |
-| `LiveBPMService`                 | **Parallel** to **`RBStateReader` BPM chain**: pattern-scan + session validation vs **fixed-offset float** when table matches. |
+| `LiveBPMService`                 | **First direct convergence point**: uses the per-version fixed-offset BPM chain as soon as the RB pid/base is attached, without waiting for ENGINE STATE; falls back to pattern-scan + session validation when unsupported or unreadable. Runtime logs label `offset_table`, `discovery`, and `fallback_meta` source states. |
+| Direct master startup probe      | **Second direct convergence point**: one-shot fixed-chain `master_deck` read for startup visibility/corroboration. It labels direct availability but preserves TL authority. |
 | `FilepathResolver` (ANLZ + lsof) | **Unchanged**; **`anlz_path_per_deck` exists in `RBOffsetVersion` but `RBStateReader` does not emit `ANLZ_PATH` yet** — TL correlation path still required for ANLZ-before-load ordering unless wired. |
 
 ### 10.5 Stop-conditions for adopting the new path

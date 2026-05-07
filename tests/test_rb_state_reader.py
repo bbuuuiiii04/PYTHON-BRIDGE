@@ -147,6 +147,22 @@ class TickEventTests(unittest.TestCase):
         self.assertEqual(loaded[0].source, "rb_state")
         self.assertGreater(endpoint, 0)
 
+    def test_track_loaded_extracts_title_from_packed_track_info(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        blob = (
+            "k Title: We Could Be Love (Odd Mob Extended Remix)\n"
+            "Artist: Hayden James & AR/CO\n"
+            "Album: "
+        )
+        self.mem.install_chain(
+            self.base, self.offs.track_info_per_deck[0],
+            payload=blob.encode("utf-8") + b"\x00",
+        )
+        self.reader._tick(0xCAFE, self.base)
+        loaded = [e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0].payload["title"], "We Could Be Love (Odd Mob Extended Remix)")
+
     def test_track_unchanged_does_not_re_emit(self) -> None:
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
         self.mem.install_chain(
@@ -181,30 +197,98 @@ class TickEventTests(unittest.TestCase):
         self.assertEqual(bpms, [])
 
     # ── play / pause inferred from position ─────────────────────────────────
+    def _prime_stopped_play_state(self, endpoint: int, pos: int = 1000) -> None:
+        # Warmup ticks plus two stable observations initialize "stopped"
+        # internally without emitting a startup PAUSE.
+        for _ in range(5):
+            self.mem.update_leaf(endpoint, pos.to_bytes(8, "little"))
+            self.reader._tick(0xCAFE, self.base)
+        transitions = [
+            e for e in _drain(self.q)
+            if e.kind in (Ev.PLAY, Ev.PAUSE)
+        ]
+        self.assertEqual(transitions, [])
+
     def test_play_pause_inferred_from_position_movement(self) -> None:
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
         endpoint = self.mem.install_chain(
             self.base, self.offs.live_pos_per_deck[0],
             payload=(1000).to_bytes(8, "little"))
 
-        # Tick 1: first observation, no inference possible
+        self._prime_stopped_play_state(endpoint)
+        for pos in (45100, 90200):
+            self.mem.update_leaf(endpoint, pos.to_bytes(8, "little"))
+            self.reader._tick(0xCAFE, self.base)
         self.reader._tick(0xCAFE, self.base)
-        # Tick 2: position advanced → playing
-        self.mem.update_leaf(endpoint, (45100).to_bytes(8, "little"))
         self.reader._tick(0xCAFE, self.base)
-        # Tick 3: position unchanged → paused
-        self.reader._tick(0xCAFE, self.base)
-        # Tick 4: position unchanged → no event (state unchanged)
-        self.reader._tick(0xCAFE, self.base)
-        # Tick 5: position advances again → playing
-        self.mem.update_leaf(endpoint, (90200).to_bytes(8, "little"))
-        self.reader._tick(0xCAFE, self.base)
+        for pos in (135300, 180400):
+            self.mem.update_leaf(endpoint, pos.to_bytes(8, "little"))
+            self.reader._tick(0xCAFE, self.base)
 
         transitions = [
             (e.kind, e.deck) for e in _drain(self.q)
             if e.kind in (Ev.PLAY, Ev.PAUSE)
         ]
         self.assertEqual(transitions, [(Ev.PLAY, 1), (Ev.PAUSE, 1), (Ev.PLAY, 1)])
+
+    def test_position_warmup_suppresses_startup_flips(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[0],
+            payload=(1000).to_bytes(8, "little"))
+        for pos in (1000, 45100, 90200):
+            self.mem.update_leaf(endpoint, pos.to_bytes(8, "little"))
+            self.reader._tick(0xCAFE, self.base)
+        transitions = [
+            e for e in _drain(self.q)
+            if e.kind in (Ev.PLAY, Ev.PAUSE)
+        ]
+        self.assertEqual(transitions, [])
+
+    def test_missing_position_read_resets_baseline_before_recovery(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[0],
+            payload=(1000).to_bytes(8, "little"))
+        self._prime_stopped_play_state(endpoint)
+
+        self.mem.leaf.pop(endpoint)
+        self.reader._tick(0xCAFE, self.base)
+
+        self.mem.update_leaf(endpoint, (999999).to_bytes(8, "little"))
+        for _ in range(5):
+            self.reader._tick(0xCAFE, self.base)
+        transitions = [
+            e for e in _drain(self.q)
+            if e.kind in (Ev.PLAY, Ev.PAUSE)
+        ]
+        self.assertEqual(transitions, [])
+
+    def test_recovery_requires_consecutive_evidence_before_play(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[0],
+            payload=(1000).to_bytes(8, "little"))
+        self._prime_stopped_play_state(endpoint)
+
+        self.mem.leaf.pop(endpoint)
+        self.reader._tick(0xCAFE, self.base)
+        self.mem.update_leaf(endpoint, (50000).to_bytes(8, "little"))
+        for _ in range(5):
+            self.reader._tick(0xCAFE, self.base)
+        self.mem.update_leaf(endpoint, (90000).to_bytes(8, "little"))
+        self.reader._tick(0xCAFE, self.base)
+        self.assertEqual(
+            [e for e in _drain(self.q) if e.kind in (Ev.PLAY, Ev.PAUSE)],
+            [],
+        )
+        self.mem.update_leaf(endpoint, (130000).to_bytes(8, "little"))
+        self.reader._tick(0xCAFE, self.base)
+        transitions = [
+            (e.kind, e.deck) for e in _drain(self.q)
+            if e.kind in (Ev.PLAY, Ev.PAUSE)
+        ]
+        self.assertEqual(transitions, [(Ev.PLAY, 1)])
 
     # ── chain failure ───────────────────────────────────────────────────────
     def test_unknown_chain_address_does_not_raise(self) -> None:
@@ -247,6 +331,349 @@ class FactoryTests(unittest.TestCase):
             self.assertTrue(q.empty())
         finally:
             os.environ.pop(mod._RB_STATE_DISABLE_ENV, None)
+
+
+class DirectMasterStatusTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.mem = FakeMem()
+        self.offs = _make_offsets()
+        self.base = 0x100000000
+        self._patches = [
+            mock.patch.object(mod, "_read_bytes", side_effect=self.mem.read_bytes),
+            mock.patch.object(mod, "_task_for_pid", return_value=0xCAFE),
+            mock.patch.object(mod, "get_rb_pid", return_value=12345),
+            mock.patch.object(mod, "_get_vmmap_output", return_value=""),
+            mock.patch.object(mod, "_base_from_vmmap", return_value=self.base),
+        ]
+        for p in self._patches:
+            p.start()
+        self.addCleanup(self._stop_patches)
+
+    def _stop_patches(self) -> None:
+        for p in self._patches:
+            p.stop()
+
+    def test_supported_version_direct_master_status_reads_bridge_deck(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x01")
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            with self.assertLogs("rb_state", level="INFO") as logs:
+                status = mod.read_direct_master_status("7.2.11", rb_pid=12345, base_addr=self.base)
+
+        self.assertTrue(status.attempted)
+        self.assertTrue(status.supported)
+        self.assertTrue(status.available)
+        self.assertTrue(status.readable)
+        self.assertEqual(status.source, mod.RB_MASTER_DIRECT_SOURCE)
+        self.assertEqual(status.reason, "ok")
+        self.assertEqual(status.rb_raw, 1)
+        self.assertEqual(status.bridge_deck, 2)
+        self.assertEqual(status.pid, 12345)
+        self.assertEqual(status.base, self.base)
+        self.assertTrue(any(
+            "[RBMASTER][DIRECT]" in line
+            and "attempted=1" in line
+            and "supported_version=1" in line
+            and "readable=1" in line
+            and "direct_master=deck2" in line
+            for line in logs.output
+        ))
+
+    def test_direct_master_status_no_master_sentinel_is_available_but_no_deck(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            status = mod.read_direct_master_status("7.2.11", rb_pid=12345, base_addr=self.base)
+
+        self.assertTrue(status.attempted)
+        self.assertTrue(status.supported)
+        self.assertTrue(status.available)
+        self.assertTrue(status.readable)
+        self.assertEqual(status.source, mod.RB_MASTER_DIRECT_SOURCE)
+        self.assertEqual(status.reason, "no_master")
+        self.assertEqual(status.rb_raw, 255)
+        self.assertIsNone(status.bridge_deck)
+
+    def test_unsupported_version_direct_master_status_fails_closed(self) -> None:
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=None):
+            with self.assertLogs("rb_state", level="INFO") as logs:
+                status = mod.read_direct_master_status("unsupported", rb_pid=12345, base_addr=self.base)
+
+        self.assertTrue(status.attempted)
+        self.assertFalse(status.supported)
+        self.assertFalse(status.available)
+        self.assertFalse(status.readable)
+        self.assertEqual(status.source, mod.RB_MASTER_TL_SOURCE)
+        self.assertEqual(status.reason, "unsupported_version")
+        self.assertIsNone(status.bridge_deck)
+        self.assertTrue(any(
+            "[RBMASTER][DIRECT]" in line
+            and "attempted=1" in line
+            and "supported_version=0" in line
+            and "readable=0" in line
+            and "fail_closed_reason=unsupported_version" in line
+            for line in logs.output
+        ))
+
+    def test_unreadable_direct_master_status_fails_closed(self) -> None:
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            with self.assertLogs("rb_state", level="INFO") as logs:
+                status = mod.read_direct_master_status("7.2.11", rb_pid=12345, base_addr=self.base)
+
+        self.assertTrue(status.attempted)
+        self.assertTrue(status.supported)
+        self.assertFalse(status.available)
+        self.assertFalse(status.readable)
+        self.assertEqual(status.source, mod.RB_MASTER_TL_SOURCE)
+        self.assertEqual(status.reason, "unreadable")
+        self.assertIsNone(status.bridge_deck)
+        self.assertTrue(any(
+            "[RBMASTER][DIRECT]" in line
+            and "supported_version=1" in line
+            and "readable=0" in line
+            and "fail_closed_reason=unreadable" in line
+            for line in logs.output
+        ))
+
+    def test_direct_master_summary_fields_agree(self) -> None:
+        status = mod.DirectMasterStatus(
+            attempted=True,
+            supported=True,
+            available=True,
+            readable=True,
+            source=mod.RB_MASTER_DIRECT_SOURCE,
+            reason="ok",
+            rb_version="7.2.11",
+            rb_raw=0,
+            bridge_deck=1,
+        )
+
+        fields = mod.direct_master_summary_fields(status, 1)
+
+        self.assertEqual(fields["direct_probe_attempted"], "1")
+        self.assertEqual(fields["supported_version"], "1")
+        self.assertEqual(fields["readable"], "1")
+        self.assertEqual(fields["direct_master"], "deck1")
+        self.assertEqual(fields["direct_raw"], "0")
+        self.assertEqual(fields["tl_startup_master"], "deck1")
+        self.assertEqual(fields["corroboration"], "agree")
+        self.assertEqual(fields["fail_closed_reason"], "-")
+
+    def test_direct_master_summary_fields_disagree(self) -> None:
+        status = mod.DirectMasterStatus(
+            attempted=True,
+            supported=True,
+            available=True,
+            readable=True,
+            source=mod.RB_MASTER_DIRECT_SOURCE,
+            reason="ok",
+            rb_version="7.2.11",
+            rb_raw=1,
+            bridge_deck=2,
+        )
+
+        fields = mod.direct_master_summary_fields(status, 1)
+
+        self.assertEqual(fields["direct_master"], "deck2")
+        self.assertEqual(fields["tl_startup_master"], "deck1")
+        self.assertEqual(fields["corroboration"], "disagree")
+
+    def test_direct_master_summary_fields_fail_closed(self) -> None:
+        status = mod.DirectMasterStatus(
+            attempted=True,
+            supported=False,
+            available=False,
+            readable=False,
+            source=mod.RB_MASTER_TL_SOURCE,
+            reason="unsupported_version",
+            rb_version="unsupported",
+        )
+
+        fields = mod.direct_master_summary_fields(status, 1)
+
+        self.assertEqual(fields["direct_probe_attempted"], "1")
+        self.assertEqual(fields["supported_version"], "0")
+        self.assertEqual(fields["readable"], "0")
+        self.assertEqual(fields["direct_master"], "unavailable")
+        self.assertEqual(fields["corroboration"], "no_direct")
+        self.assertEqual(fields["fail_closed_reason"], "unsupported_version")
+
+    def test_direct_master_summary_fields_version_lookup_not_attempted(self) -> None:
+        status = mod.DirectMasterStatus(
+            attempted=False,
+            supported=False,
+            available=False,
+            readable=False,
+            source=mod.RB_MASTER_TL_SOURCE,
+            reason="version_lookup_failed",
+        )
+
+        fields = mod.direct_master_summary_fields(status, 0)
+
+        self.assertEqual(fields["direct_probe_attempted"], "0")
+        self.assertEqual(fields["tl_startup_master"], "none")
+        self.assertEqual(fields["corroboration"], "no_direct")
+
+    def test_startup_observation_settles_after_initial_no_master(self) -> None:
+        endpoint = self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        now = [0.0]
+
+        def sleeper(seconds: float) -> None:
+            now[0] += seconds
+            self.mem.update_leaf(endpoint, b"\x00")
+
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            with self.assertLogs("rb_state", level="INFO") as logs:
+                observation = mod.observe_direct_master_startup(
+                    "7.2.11",
+                    rb_pid=12345,
+                    base_addr=self.base,
+                    settle_s=1.0,
+                    interval_s=0.25,
+                    clock=lambda: now[0],
+                    sleeper=sleeper,
+                )
+
+        self.assertEqual(observation.initial.reason, "no_master")
+        self.assertEqual(observation.initial.rb_raw, 255)
+        self.assertEqual(observation.final.bridge_deck, 1)
+        self.assertEqual(observation.final.reason, "ok")
+        self.assertEqual(observation.attempts, 2)
+        self.assertEqual(observation.outcome, "settled")
+        self.assertTrue(any(
+            "[RBMASTER][DIRECT]" in line
+            and "phase=initial" in line
+            and "raw=255" in line
+            and "direct_master=none" in line
+            for line in logs.output
+        ))
+        self.assertTrue(any(
+            "[RBMASTER][DIRECT]" in line
+            and "phase=settled" in line
+            and "attempts=2" in line
+            and "direct_master=deck1" in line
+            for line in logs.output
+        ))
+
+    def test_startup_observation_no_master_persists_until_expiry(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        now = [0.0]
+
+        def sleeper(seconds: float) -> None:
+            now[0] += seconds
+
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            with self.assertLogs("rb_state", level="INFO") as logs:
+                observation = mod.observe_direct_master_startup(
+                    "7.2.11",
+                    rb_pid=12345,
+                    base_addr=self.base,
+                    settle_s=0.5,
+                    interval_s=0.25,
+                    clock=lambda: now[0],
+                    sleeper=sleeper,
+                )
+
+        self.assertEqual(observation.initial.reason, "no_master")
+        self.assertEqual(observation.final.reason, "no_master")
+        self.assertIsNone(observation.final.bridge_deck)
+        self.assertEqual(observation.outcome, "no_master_persisted")
+        self.assertGreaterEqual(observation.attempts, 2)
+        self.assertTrue(any(
+            "[RBMASTER][DIRECT]" in line
+            and "phase=expired" in line
+            and "direct_master=none" in line
+            and "reason=no_master" in line
+            for line in logs.output
+        ))
+
+    def test_startup_observation_unreadable_fails_closed(self) -> None:
+        now = [0.0]
+
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            with self.assertLogs("rb_state", level="INFO") as logs:
+                observation = mod.observe_direct_master_startup(
+                    "7.2.11",
+                    rb_pid=12345,
+                    base_addr=self.base,
+                    settle_s=1.0,
+                    interval_s=0.25,
+                    clock=lambda: now[0],
+                    sleeper=lambda seconds: None,
+                )
+
+        self.assertFalse(observation.final.readable)
+        self.assertEqual(observation.final.reason, "unreadable")
+        self.assertEqual(observation.outcome, "fail_closed")
+        self.assertEqual(observation.attempts, 1)
+        self.assertTrue(any(
+            "[RBMASTER][DIRECT]" in line
+            and "phase=expired" in line
+            and "readable=0" in line
+            and "fail_closed_reason=unreadable" in line
+            for line in logs.output
+        ))
+
+    def test_startup_observation_unsupported_version_fails_closed(self) -> None:
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=None):
+            observation = mod.observe_direct_master_startup("unsupported")
+
+        self.assertFalse(observation.final.supported)
+        self.assertFalse(observation.final.readable)
+        self.assertEqual(observation.final.reason, "unsupported_version")
+        self.assertEqual(observation.outcome, "fail_closed")
+        self.assertEqual(observation.attempts, 1)
+
+    def test_direct_master_observation_summary_fields(self) -> None:
+        initial = mod.DirectMasterStatus(
+            attempted=True,
+            supported=True,
+            available=True,
+            readable=True,
+            source=mod.RB_MASTER_DIRECT_SOURCE,
+            reason="no_master",
+            rb_version="7.2.11",
+            rb_raw=255,
+            bridge_deck=None,
+        )
+        final = mod.DirectMasterStatus(
+            attempted=True,
+            supported=True,
+            available=True,
+            readable=True,
+            source=mod.RB_MASTER_DIRECT_SOURCE,
+            reason="ok",
+            rb_version="7.2.11",
+            rb_raw=0,
+            bridge_deck=1,
+        )
+        observation = mod.DirectMasterObservation(
+            initial=initial,
+            final=final,
+            attempts=2,
+            outcome="settled",
+        )
+
+        fields = mod.direct_master_observation_summary_fields(observation, 1)
+
+        self.assertEqual(fields["initial_direct_master"], "none")
+        self.assertEqual(fields["initial_raw"], "255")
+        self.assertEqual(fields["direct_master"], "deck1")
+        self.assertEqual(fields["corroboration"], "agree")
+        self.assertEqual(fields["attempts"], "2")
+        self.assertEqual(fields["outcome"], "settled")
+
+
+class TrackInfoParserTests(unittest.TestCase):
+    def test_extract_track_title_from_plain_title(self) -> None:
+        self.assertEqual(mod.extract_track_title("Plain Title"), "Plain Title")
+
+    def test_extract_track_title_from_labeled_blob(self) -> None:
+        self.assertEqual(
+            mod.extract_track_title("k Title: Percolator (Cazes Edit)\nArtist: Green Velvet"),
+            "Percolator (Cazes Edit)",
+        )
+
+    def test_extract_track_title_empty_on_blank(self) -> None:
+        self.assertEqual(mod.extract_track_title(""), "")
 
 
 if __name__ == "__main__":

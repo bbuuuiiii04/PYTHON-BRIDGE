@@ -1,5 +1,6 @@
 import os
 import queue
+import struct
 import sys
 import time
 import unittest
@@ -9,12 +10,18 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.live_bpm import (
+    LIVE_BPM_DIAGNOSTICS_ENV,
+    LIVE_BPM_DIRECT_SOURCE,
+    LIVE_BPM_DISCOVERY_SOURCE,
+    LIVE_BPM_FALLBACK_SOURCE,
     LiveBPMCandidate,
     LiveBPMSession,
     LiveBPMService,
+    MachLiveBPMReader,
     _Validated,
 )
 from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot, TrackMetadata
+from rb_ss_bridge_v2.rb_offsets import ChainEntry, RBOffsetVersion
 from rb_ss_bridge_v2.rb_memory import PositionCache
 from rb_ss_bridge_v2.state_manager import (
     StateManager,
@@ -51,7 +58,212 @@ class FakeLiveBPMReader:
         return value
 
 
+class FakeDirectLiveBPMReader(FakeLiveBPMReader):
+    def __init__(self) -> None:
+        super().__init__()
+        self.candidate = LiveBPMCandidate(
+            0x3000,
+            "f32",
+            "offset_table",
+            "rb_offsets:test:deck1",
+            0,
+            LIVE_BPM_DIRECT_SOURCE,
+        )
+
+    def direct_candidate(self, session, deck):
+        return self.candidate
+
+
+class FakeUnsupportedDirectLiveBPMReader(FakeLiveBPMReader):
+    def __init__(self) -> None:
+        super().__init__()
+        self.direct_calls = 0
+
+    def direct_candidate(self, session, deck):
+        self.direct_calls += 1
+        return None
+
+
 class LiveBPMServiceTests(unittest.TestCase):
+    def test_promotes_direct_offset_candidate_without_hint_or_movement_validation(self) -> None:
+        reader = FakeDirectLiveBPMReader()
+        reader.values = [124.0]
+        service = LiveBPMService(reader=reader, disabled=False)
+
+        with self.assertLogs("live_bpm", level="INFO") as logs:
+            service.tick()
+
+        self.assertEqual(service.get_bpm(1), 124.0)
+        status = service.get_status(1)
+        self.assertIsNotNone(status)
+        self.assertEqual(status.addr, 0x3000)
+        self.assertEqual(status.source, LIVE_BPM_DIRECT_SOURCE)
+        self.assertTrue(
+            any("[LBPM][DIRECT] deck1 first_read_attempt=1 source=offset_table" in line for line in logs.output)
+        )
+        self.assertTrue(any("[LBPM][DIRECT] deck1" in line and "accepted=1" in line for line in logs.output))
+        self.assertTrue(
+            any(
+                "[LBPM][SOURCE] deck1" in line
+                and f"source={LIVE_BPM_DIRECT_SOURCE}" in line
+                and "reason=direct_accept" in line
+                and "direct_before_hint=1" in line
+                for line in logs.output
+            )
+        )
+        summary = service.get_summary(1)
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary.current_source, LIVE_BPM_DIRECT_SOURCE)
+        self.assertEqual(summary.first_source, LIVE_BPM_DIRECT_SOURCE)
+        self.assertEqual(summary.direct_accepted_count, 1)
+        self.assertEqual(summary.direct_rejected_count, 0)
+        self.assertEqual(summary.last_accepted_bpm, 124.0)
+        self.assertTrue(summary.direct_before_hint)
+
+    def test_diagnostics_mode_logs_summary_on_first_direct_source(self) -> None:
+        reader = FakeDirectLiveBPMReader()
+        reader.values = [126.0]
+
+        with patch.dict(os.environ, {LIVE_BPM_DIAGNOSTICS_ENV: "1"}):
+            service = LiveBPMService(reader=reader, disabled=False)
+            with self.assertLogs("live_bpm", level="INFO") as logs:
+                service.tick()
+
+        self.assertTrue(
+            any(
+                "[LBPM][SUMMARY] deck1" in line
+                and f"source={LIVE_BPM_DIRECT_SOURCE}" in line
+                and "first_source=offset_table" in line
+                and "direct_ok=1" in line
+                and "direct_before_hint=1" in line
+                for line in logs.output
+            )
+        )
+
+    def test_direct_offset_candidate_still_fails_closed_on_invalid_read(self) -> None:
+        reader = FakeDirectLiveBPMReader()
+        reader.values = [float("nan")]
+        service = LiveBPMService(reader=reader, disabled=False)
+
+        with self.assertLogs("live_bpm", level="INFO") as logs:
+            service.tick()
+
+        self.assertIsNone(service.get_bpm(1))
+        self.assertTrue(
+            any("[LBPM][DIRECT] deck1 first_read_attempt=1 source=offset_table" in line for line in logs.output)
+        )
+        self.assertTrue(any("rejected reason=invalid_value" in line for line in logs.output))
+        self.assertTrue(
+            any(
+                "[LBPM][SOURCE] deck1" in line
+                and f"source={LIVE_BPM_FALLBACK_SOURCE}" in line
+                and "reason=attach" in line
+                for line in logs.output
+            )
+        )
+        summary = service.get_summary(1)
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary.current_source, LIVE_BPM_FALLBACK_SOURCE)
+        self.assertEqual(summary.first_source, "")
+        self.assertEqual(summary.direct_accepted_count, 0)
+        self.assertEqual(summary.direct_rejected_count, 1)
+
+    def test_direct_offset_candidate_still_fails_closed_on_unreadable_value(self) -> None:
+        reader = FakeDirectLiveBPMReader()
+        reader.values = [OSError("gone")]
+        service = LiveBPMService(reader=reader, disabled=False)
+
+        with self.assertLogs("live_bpm", level="INFO") as logs:
+            service.tick()
+
+        self.assertIsNone(service.get_bpm(1))
+        self.assertTrue(any("rejected reason=value_unreadable" in line for line in logs.output))
+        summary = service.get_summary(1)
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary.current_source, LIVE_BPM_FALLBACK_SOURCE)
+        self.assertEqual(summary.direct_rejected_count, 1)
+
+    def test_unsupported_direct_path_still_falls_back_to_discovery_validation(self) -> None:
+        reader = FakeUnsupportedDirectLiveBPMReader()
+        reader.values = [120.0, 122.0]
+        service = LiveBPMService(reader=reader, disabled=False)
+
+        service.update_hint(1, 120.0, 120.0)
+        service.tick()
+        service.tick()
+        time.sleep(0.22)
+        service.update_hint(1, 122.0, 120.0)
+        service.tick()
+
+        self.assertGreater(reader.direct_calls, 0)
+        self.assertEqual(service.get_bpm(1), 122.0)
+        status = service.get_status(1)
+        self.assertIsNotNone(status)
+        self.assertEqual(status.source, LIVE_BPM_DISCOVERY_SOURCE)
+        summary = service.get_summary(1)
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary.current_source, LIVE_BPM_DISCOVERY_SOURCE)
+        self.assertEqual(summary.first_source, LIVE_BPM_DISCOVERY_SOURCE)
+        self.assertEqual(summary.direct_accepted_count, 0)
+
+    def test_summary_lines_report_fallback_and_source_counts(self) -> None:
+        reader = FakeUnsupportedDirectLiveBPMReader()
+        service = LiveBPMService(reader=reader, disabled=False)
+
+        service.tick()
+
+        lines = service.summary_lines()
+        self.assertTrue(
+            any(
+                "[LBPM][SUMMARY] deck1" in line
+                and f"source={LIVE_BPM_FALLBACK_SOURCE}" in line
+                and "first_source=<none>" in line
+                and "direct_ok=0" in line
+                and "direct_reject=0" in line
+                for line in lines
+            )
+        )
+
+    def test_mach_reader_uses_offset_table_bpm_candidate_before_scan(self) -> None:
+        import rb_ss_bridge_v2.live_bpm as live_bpm_mod
+        import rb_ss_bridge_v2.probe_live_bpm as probe_live_bpm_mod
+
+        base = 0x1000
+        ptr = 0x2000
+        endpoint = ptr + 0x188
+        offsets = RBOffsetVersion(
+            version="test",
+            deck_count=4,
+            master_deck=ChainEntry((0x20,), 0x0),
+            bpm_per_deck=(
+                ChainEntry((0x10,), 0x188),
+                ChainEntry((0x18,), 0x188),
+                ChainEntry((0x20,), 0x188),
+                ChainEntry((0x28,), 0x188),
+            ),
+            live_pos_per_deck=tuple(ChainEntry((0x30 + i,), 0) for i in range(4)),
+            track_info_per_deck=tuple(ChainEntry((0x40 + i,), 0) for i in range(4)),
+            anlz_path_per_deck=tuple(ChainEntry((0x50 + i,), 0) for i in range(4)),
+        )
+
+        def fake_read_bytes(task, addr, size):
+            if addr == base + 0x10 and size == 8:
+                return ptr.to_bytes(8, "little")
+            if addr == endpoint and size == 4:
+                return struct.pack("<f", 126.5)
+            raise OSError(f"no fake mapping at 0x{addr:x}")
+
+        reader = MachLiveBPMReader(rb_version="test")
+        session = LiveBPMSession(pid=os.getpid(), base=base, task=1, vmmap_out="")
+        with patch.object(live_bpm_mod, "load_offsets_for_version", return_value=offsets), \
+             patch.object(live_bpm_mod, "_read_bytes", side_effect=fake_read_bytes), \
+             patch.object(probe_live_bpm_mod, "_read_bytes", side_effect=fake_read_bytes):
+            candidates = reader.scan_candidates(session, 1, 126.5, 126.5, 24)
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].source, LIVE_BPM_DIRECT_SOURCE)
+        self.assertEqual(candidates[0].addr, endpoint)
+
     def test_hint_updates_during_sampling_do_not_drop_or_block_promotion(self) -> None:
         reader = FakeLiveBPMReader()
         # Two samples: start at 120.0, then move to 122.0.
@@ -1016,12 +1228,14 @@ class StateManagerLiveBPMTests(unittest.TestCase):
                 "updated_at": time.monotonic(),
                 "addr": 0x2000,
                 "type_name": "f32",
+                "source": LIVE_BPM_DIRECT_SOURCE,
             },
         )()
 
         text = sm._live_bpm_status_text(1)
 
         self.assertIn("live_bpm=124.50", text)
+        self.assertIn(f"live_source={LIVE_BPM_DIRECT_SOURCE}", text)
         self.assertIn("live_addr=0x2000/f32", text)
 
     def test_autoloop_idle_transition_ignores_short_pause_blip(self) -> None:

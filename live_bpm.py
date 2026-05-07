@@ -1,17 +1,21 @@
 """Runtime live-BPM discovery and readout.
 
-The service is deliberately fail-closed: it never publishes a BPM until a
-candidate has moved during the current rekordbox pid/base session and landed
-near the current ENGINE STATE hint.
+The service is deliberately fail-closed: discovery candidates are not
+published until they move in the current rekordbox pid/base session. Fixed
+offset-table candidates are published only when the running Rekordbox version
+is supported and the direct chain reads a fresh, plausible BPM.
 """
 from __future__ import annotations
 
 import logging
 import math
 import os
+import plistlib
+import struct
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Iterable, Optional, Protocol
 
@@ -27,7 +31,8 @@ from .probe_live_bpm import (
     _select_validation_hits,
     _task_for_pid,
 )
-from .rb_memory import get_rb_pid
+from .rb_memory import _read_bytes, get_rb_pid
+from .rb_offsets import ChainEntry, RBOffsetVersion, load_offsets_for_version
 
 log = logging.getLogger("live_bpm")
 
@@ -44,6 +49,10 @@ LIVE_BPM_READ_FAILURES = 3
 LIVE_BPM_STALE_S = 3.0
 LIVE_BPM_LOG_DELTA = 0.10
 LIVE_BPM_LOG_INTERVAL_S = 1.0
+LIVE_BPM_DIRECT_SOURCE = "offset_table"
+LIVE_BPM_DISCOVERY_SOURCE = "discovery"
+LIVE_BPM_FALLBACK_SOURCE = "fallback_meta"
+LIVE_BPM_DIAGNOSTICS_ENV = "RBSS_LIVE_BPM_DIAGNOSTICS"
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,7 @@ class LiveBPMCandidate:
     region: str = ""
     nearest_anchor: str = ""
     anchor_delta: int = 0
+    source: str = LIVE_BPM_DISCOVERY_SOURCE
 
     @property
     def key(self) -> tuple[int, str]:
@@ -89,8 +99,21 @@ class LiveBPMStatus:
     base: int
     addr: int
     type_name: str
+    source: str
     updated_at: float
     valid: bool
+
+
+@dataclass(frozen=True)
+class LiveBPMDeckSummary:
+    deck: int
+    current_source: str
+    first_source: str
+    direct_accepted_count: int
+    direct_rejected_count: int
+    fallback_count: int
+    last_accepted_bpm: float
+    direct_before_hint: bool
 
 
 class LiveBPMReader(Protocol):
@@ -114,6 +137,18 @@ class LiveBPMReader(Protocol):
 class MachLiveBPMReader:
     """Read-only Mach-backed candidate scanner/reader."""
 
+    def __init__(
+        self,
+        *,
+        rb_version: Optional[str] = None,
+        app_paths: tuple[Path, ...] | None = None,
+    ) -> None:
+        self._rb_version = rb_version
+        self._app_paths = app_paths
+        self._offsets: Optional[RBOffsetVersion] = None
+        self._offsets_loaded = False
+        self._direct_log_seen: set[tuple[int, int, int, str]] = set()
+
     def attach(self) -> Optional[LiveBPMSession]:
         pid = get_rb_pid()
         if pid is None:
@@ -131,6 +166,10 @@ class MachLiveBPMReader:
         library_bpm: float,
         limit: int,
     ) -> list[LiveBPMCandidate]:
+        direct = self.direct_candidate(session, deck)
+        if direct is not None:
+            return [direct]
+
         anchors = _resolve_anchors(session.task, session.base, deck, 0x10000, deck == 2)
         args = SimpleNamespace(
             window=0x10000,
@@ -156,6 +195,75 @@ class MachLiveBPMReader:
 
     def read_candidate(self, session: LiveBPMSession, candidate: LiveBPMCandidate) -> float:
         return _read_float(session.task, candidate.addr, candidate.type_name)
+
+    def direct_candidate(
+        self,
+        session: LiveBPMSession,
+        deck: int,
+    ) -> Optional[LiveBPMCandidate]:
+        candidate, reason = self._offset_candidate(session, deck)
+        if candidate is not None:
+            return candidate
+        self._log_direct_fallback(session, deck, reason)
+        return None
+
+    def _offset_candidate(
+        self,
+        session: LiveBPMSession,
+        deck: int,
+    ) -> tuple[Optional[LiveBPMCandidate], str]:
+        offsets = self._load_offsets()
+        if offsets is None or not 1 <= deck <= min(2, offsets.deck_count):
+            return None, "unsupported_version"
+        ch = offsets.bpm_per_deck[deck - 1]
+        addr = _follow_addr(session.task, session.base, ch)
+        if addr is None:
+            return None, "chain_unreadable"
+        try:
+            value = _read_float(session.task, addr, "f32")
+        except OSError:
+            return None, "value_unreadable"
+        if not _valid_bpm(value):
+            return None, "invalid_value"
+        return (
+            LiveBPMCandidate(
+                addr=addr,
+                type_name="f32",
+                region=LIVE_BPM_DIRECT_SOURCE,
+                nearest_anchor=f"rb_offsets:{offsets.version}:deck{deck}",
+                anchor_delta=0,
+                source=LIVE_BPM_DIRECT_SOURCE,
+            ),
+            "available",
+        )
+
+    def _load_offsets(self) -> Optional[RBOffsetVersion]:
+        if self._offsets_loaded:
+            return self._offsets
+        self._offsets_loaded = True
+        version = self._rb_version if self._rb_version is not None else read_rekordbox_version(self._app_paths)
+        if not version:
+            log.info("[LBPM][DIRECT] Rekordbox version lookup failed; using discovery fallback")
+            self._offsets = None
+            return None
+        self._offsets = load_offsets_for_version(version)
+        if self._offsets is None:
+            log.info("[LBPM][DIRECT] unsupported Rekordbox version %s; using discovery fallback", version)
+        else:
+            log.info("[LBPM][DIRECT] offset-table BPM enabled version=%s", self._offsets.version)
+        return self._offsets
+
+    def _log_direct_fallback(
+        self,
+        session: LiveBPMSession,
+        deck: int,
+        reason: str,
+    ) -> None:
+        key = (session.pid, session.base, deck, reason)
+        if key in self._direct_log_seen:
+            return
+        self._direct_log_seen.add(key)
+        log.info("[LBPM][DIRECT] deck%d unavailable reason=%s fallback=discovery", deck, reason)
 
 
 @dataclass
@@ -194,6 +302,14 @@ class _DeckDiscovery:
     next_sample_at: float = 0.0
     last_scan_at: float = 0.0
     validated: Optional[_Validated] = None
+    current_source: str = ""
+    first_source: str = ""
+    direct_accepted_count: int = 0
+    direct_rejected_count: int = 0
+    fallback_count: int = 0
+    last_accepted_bpm: float = 0.0
+    direct_before_hint: bool = False
+    summary_logged: bool = False
 
 
 def _candidate_from_hit(hit: Hit) -> LiveBPMCandidate:
@@ -203,6 +319,7 @@ def _candidate_from_hit(hit: Hit) -> LiveBPMCandidate:
         region=hit.region,
         nearest_anchor=hit.nearest_anchor,
         anchor_delta=hit.anchor_delta,
+        source=LIVE_BPM_DISCOVERY_SOURCE,
     )
 
 
@@ -223,12 +340,60 @@ def _valid_bpm(value: float) -> bool:
     return math.isfinite(value) and LIVE_BPM_MIN <= value <= LIVE_BPM_MAX
 
 
+def _follow_addr(task: int, base: int, ch: ChainEntry) -> Optional[int]:
+    addr = base
+    for hop in ch.hops:
+        try:
+            ptr_bytes = _read_bytes(task, addr + hop, 8)
+        except OSError:
+            return None
+        addr = struct.unpack_from("<Q", ptr_bytes)[0]
+        if addr == 0:
+            return None
+    return addr + ch.final_off
+
+
+def read_rekordbox_version(app_paths: tuple[Path, ...] | None = None) -> str:
+    paths = app_paths or (
+        Path("/Applications/rekordbox 7/rekordbox.app"),
+        Path("/Applications/rekordbox 6/rekordbox.app"),
+        Path("/Applications/rekordbox/rekordbox.app"),
+    )
+    for app_path in paths:
+        info_path = app_path / "Contents" / "Info.plist"
+        try:
+            with open(info_path, "rb") as fh:
+                info = plistlib.load(fh)
+        except OSError:
+            continue
+        raw = str(
+            info.get("CFBundleShortVersionString")
+            or info.get("CFBundleVersion")
+            or ""
+        )
+        version = _normalize_rb_version(raw)
+        if version:
+            return version
+    return ""
+
+
+def _normalize_rb_version(version: str) -> str:
+    parts = str(version or "").strip().split(".")
+    if len(parts) < 3:
+        return ""
+    short = ".".join(parts[:3])
+    if all(part.isdigit() for part in short.split(".")):
+        return short
+    return ""
+
+
 class LiveBPMService(threading.Thread):
     """Background live BPM discovery.
 
-    ENGINE STATE BPM is a hint only. A candidate is promoted only after its
-    observed memory value moves in this process session and finishes near the
-    latest hint. Static matches remain unvalidated and are never returned.
+    ENGINE STATE BPM is a hint only. Offset-table candidates are promoted after
+    a supported-version chain read succeeds. Discovery candidates are promoted
+    only after their observed memory value moves in this process session and
+    finishes near the latest hint; static discovery matches remain unvalidated.
     """
 
     def __init__(
@@ -242,6 +407,7 @@ class LiveBPMService(threading.Thread):
         self.disabled = (
             os.environ.get(LIVE_BPM_DISABLE_ENV) == "1" if disabled is None else disabled
         )
+        self._diagnostics = os.environ.get(LIVE_BPM_DIAGNOSTICS_ENV) == "1"
         self._reader = reader or MachLiveBPMReader()
         self._poll_interval = poll_interval
         self._scan_limit = scan_limit
@@ -256,11 +422,15 @@ class LiveBPMService(threading.Thread):
         self._drop_scan_total: int = 0
         self._drop_validate_total: int = 0
         self._drop_reason_counts: dict[str, int] = {}
+        self._direct_attempt_log_seen: set[tuple[int, int, int]] = set()
+        self._direct_reject_log_seen: set[tuple[int, int, int, str]] = set()
         self._last_session_check_at = 0.0
         self._deck: dict[int, _DeckDiscovery] = {1: _DeckDiscovery(), 2: _DeckDiscovery()}
 
     def stop(self) -> None:
         self._stop_event.set()
+        if self._diagnostics:
+            self.log_summary()
 
     def update_hint(self, deck: int, bpm: float, library_bpm: float = 0.0) -> None:
         if self.disabled or deck not in self._deck or not _valid_bpm(float(bpm)):
@@ -307,17 +477,36 @@ class LiveBPMService(threading.Thread):
                 base=session.base,
                 addr=validated.candidate.addr,
                 type_name=validated.candidate.type_name,
+                source=validated.candidate.source,
                 updated_at=validated.updated_at,
                 valid=True,
+            )
+
+    def get_summary(self, deck: int) -> Optional[LiveBPMDeckSummary]:
+        if self.disabled or deck not in self._deck:
+            return None
+        with self._lock:
+            state = self._deck[deck]
+            source = state.current_source or LIVE_BPM_FALLBACK_SOURCE
+            return LiveBPMDeckSummary(
+                deck=deck,
+                current_source=source,
+                first_source=state.first_source,
+                direct_accepted_count=state.direct_accepted_count,
+                direct_rejected_count=state.direct_rejected_count,
+                fallback_count=state.fallback_count,
+                last_accepted_bpm=state.last_accepted_bpm,
+                direct_before_hint=state.direct_before_hint,
             )
 
     def invalidate(self) -> None:
         with self._lock:
             self._session_gen += 1
             self._session = None
-            for state in self._deck.values():
+            for deck, state in self._deck.items():
                 self._reset_discovery(state)
                 state.validated = None
+                self._set_source_locked(deck, state, LIVE_BPM_FALLBACK_SOURCE, "invalidate")
 
     def run(self) -> None:
         if self.disabled:
@@ -339,6 +528,36 @@ class LiveBPMService(threading.Thread):
             return
         for deck in (1, 2):
             self._tick_deck(session, deck, time.monotonic())
+
+    def log_summary(self) -> None:
+        for line in self.summary_lines():
+            log.info(line)
+
+    def summary_lines(self) -> list[str]:
+        out: list[str] = []
+        with self._lock:
+            items = [
+                (deck, state.current_source or LIVE_BPM_FALLBACK_SOURCE, state.first_source,
+                 state.direct_accepted_count, state.direct_rejected_count, state.fallback_count,
+                 state.last_accepted_bpm, state.direct_before_hint)
+                for deck, state in sorted(self._deck.items())
+            ]
+        for deck, source, first, direct_ok, direct_reject, fallback_count, last_bpm, before_hint in items:
+            out.append(
+                "[LBPM][SUMMARY] deck%d source=%s first_source=%s direct_ok=%d "
+                "direct_reject=%d fallback=%d last_bpm=%.3f direct_before_hint=%s"
+                % (
+                    deck,
+                    source,
+                    first or "<none>",
+                    direct_ok,
+                    direct_reject,
+                    fallback_count,
+                    last_bpm,
+                    "1" if before_hint else "0",
+                )
+            )
+        return out
 
     def _ensure_session(self) -> Optional[LiveBPMSession]:
         with self._lock:
@@ -378,9 +597,10 @@ class LiveBPMService(threading.Thread):
             with self._lock:
                 self._session_gen += 1
                 self._session = attached
-                for state in self._deck.values():
+                for deck, state in self._deck.items():
                     self._reset_discovery(state)
                     state.validated = None
+                    self._set_source_locked(deck, state, LIVE_BPM_FALLBACK_SOURCE, "attach")
         else:
             with self._lock:
                 self._session = attached
@@ -399,7 +619,13 @@ class LiveBPMService(threading.Thread):
             self._refresh_validated(session, deck, validated)
             return
 
+        if self._try_direct_candidate(session, deck, session_gen, discovery_gen, now):
+            return
+
         if not _valid_bpm(hint):
+            with self._lock:
+                state = self._deck[deck]
+                self._set_source_locked(deck, state, LIVE_BPM_FALLBACK_SOURCE, "no_hint")
             return
 
         with self._lock:
@@ -417,6 +643,17 @@ class LiveBPMService(threading.Thread):
             )
             scan_ms = (time.monotonic() - t_scan0) * 1000.0
             candidates = list(_dedupe_candidates(candidates))
+            direct_candidate = _first_direct_candidate(candidates)
+            if direct_candidate is not None:
+                self._promote_direct_candidate(
+                    session,
+                    deck,
+                    direct_candidate,
+                    session_gen,
+                    discovery_gen,
+                    scan_ms,
+                )
+                return
             with self._lock:
                 state = self._deck[deck]
                 current_session = self._session
@@ -525,13 +762,14 @@ class LiveBPMService(threading.Thread):
                 if should_log:
                     log.info(
                         "[LBPM][CURRENT] deck%d current=%.3f previous=%.3f "
-                        "delta=%+.3f addr=0x%x type=%s",
+                        "delta=%+.3f addr=0x%x type=%s source=%s",
                         deck,
                         current.latest_bpm,
                         previous,
                         current.latest_bpm - previous,
                         current.candidate.addr,
                         current.candidate.type_name,
+                        current.candidate.source,
                     )
                     current.last_logged_bpm = current.latest_bpm
                     current.last_logged_at = now
@@ -541,6 +779,160 @@ class LiveBPMService(threading.Thread):
                     log.warning("[LBPM][INVALID] deck%d invalidated after read failures", deck)
                     state.validated = None
                     self._reset_discovery(state)
+                    self._set_source_locked(deck, state, LIVE_BPM_FALLBACK_SOURCE, "read_failures")
+
+    def _try_direct_candidate(
+        self,
+        session: LiveBPMSession,
+        deck: int,
+        session_gen: int,
+        discovery_gen: int,
+        now: float,
+    ) -> bool:
+        direct_reader = getattr(self._reader, "direct_candidate", None)
+        if direct_reader is None:
+            return False
+        attempt_key = (session.pid, session.base, deck)
+        if attempt_key not in self._direct_attempt_log_seen:
+            self._direct_attempt_log_seen.add(attempt_key)
+            log.info("[LBPM][DIRECT] deck%d first_read_attempt=1 source=%s", deck, LIVE_BPM_DIRECT_SOURCE)
+        try:
+            candidate = direct_reader(session, deck)
+        except Exception:
+            log.debug("direct live BPM candidate read failed", exc_info=True)
+            return False
+        if candidate is None:
+            return False
+        return self._promote_direct_candidate(
+            session,
+            deck,
+            candidate,
+            session_gen,
+            discovery_gen,
+            (time.monotonic() - now) * 1000.0,
+        )
+
+    def _promote_direct_candidate(
+        self,
+        session: LiveBPMSession,
+        deck: int,
+        candidate: LiveBPMCandidate,
+        session_gen: int,
+        discovery_gen: int,
+        scan_ms: float,
+    ) -> bool:
+        try:
+            value = self._reader.read_candidate(session, candidate)
+        except OSError:
+            self._log_direct_reject(session, deck, "value_unreadable")
+            return False
+        if not _valid_bpm(value):
+            self._log_direct_reject(session, deck, "invalid_value")
+            return False
+        now = time.monotonic()
+        with self._lock:
+            state = self._deck[deck]
+            current_session = self._session
+            if (
+                current_session is None
+                or current_session.pid != session.pid
+                or current_session.base != session.base
+                or self._session_gen != session_gen
+            ):
+                self._drop_scan_total += 1
+                self._drop_reason_counts["direct_session_gen_mismatch"] = (
+                    self._drop_reason_counts.get("direct_session_gen_mismatch", 0) + 1
+                )
+                return False
+            if state.discovery_gen != discovery_gen:
+                self._drop_scan_total += 1
+                self._drop_reason_counts["direct_discovery_gen_mismatch"] = (
+                    self._drop_reason_counts.get("direct_discovery_gen_mismatch", 0) + 1
+                )
+                return False
+            if state.validated is not None:
+                return True
+            state.validated = _Validated(
+                candidate,
+                float(value),
+                now,
+                last_logged_bpm=float(value),
+                last_logged_at=now,
+            )
+            self._reset_discovery(state, keep_validated=True)
+            state.direct_accepted_count += 1
+            state.last_accepted_bpm = float(value)
+            if not _valid_bpm(state.hint_bpm):
+                state.direct_before_hint = True
+            self._set_source_locked(deck, state, LIVE_BPM_DIRECT_SOURCE, "direct_accept", value)
+            ttfv_ms = 0.0
+            if state.first_valid_hint_at > 0.0:
+                ttfv_ms = (now - state.first_valid_hint_at) * 1000.0
+        log.info(
+            "[LBPM][DIRECT] deck%d addr=0x%x bpm=%.3f version_anchor=%s "
+            "direct_ms=%.1f ttfv_ms=%.0f accepted=1",
+            deck,
+            candidate.addr,
+            value,
+            candidate.nearest_anchor or "<none>",
+            scan_ms,
+            ttfv_ms,
+        )
+        return True
+
+    def _log_direct_reject(self, session: LiveBPMSession, deck: int, reason: str) -> None:
+        with self._lock:
+            state = self._deck.get(deck)
+            if state is not None:
+                state.direct_rejected_count += 1
+                self._set_source_locked(deck, state, LIVE_BPM_FALLBACK_SOURCE, f"direct_reject:{reason}")
+        key = (session.pid, session.base, deck, reason)
+        if key in self._direct_reject_log_seen:
+            return
+        self._direct_reject_log_seen.add(key)
+        log.info("[LBPM][DIRECT] deck%d rejected reason=%s fallback=discovery", deck, reason)
+
+    def _set_source_locked(
+        self,
+        deck: int,
+        state: _DeckDiscovery,
+        source: str,
+        reason: str,
+        bpm: float = 0.0,
+    ) -> None:
+        previous = state.current_source
+        if not state.first_source and source != LIVE_BPM_FALLBACK_SOURCE:
+            state.first_source = source
+        if source == LIVE_BPM_FALLBACK_SOURCE and previous != LIVE_BPM_FALLBACK_SOURCE:
+            state.fallback_count += 1
+        if previous == source:
+            return
+        state.current_source = source
+        log.info(
+            "[LBPM][SOURCE] deck%d source=%s previous=%s reason=%s bpm=%.3f "
+            "first_source=%s direct_before_hint=%s",
+            deck,
+            source,
+            previous or "<none>",
+            reason,
+            bpm,
+            state.first_source or "<none>",
+            "1" if state.direct_before_hint else "0",
+        )
+        if self._diagnostics and source != LIVE_BPM_FALLBACK_SOURCE and not state.summary_logged:
+            state.summary_logged = True
+            log.info(
+                "[LBPM][SUMMARY] deck%d source=%s first_source=%s direct_ok=%d "
+                "direct_reject=%d fallback=%d last_bpm=%.3f direct_before_hint=%s",
+                deck,
+                state.current_source or LIVE_BPM_FALLBACK_SOURCE,
+                state.first_source or "<none>",
+                state.direct_accepted_count,
+                state.direct_rejected_count,
+                state.fallback_count,
+                state.last_accepted_bpm,
+                "1" if state.direct_before_hint else "0",
+            )
 
     def _sample_and_maybe_validate(self, session: LiveBPMSession, deck: int, now: float) -> None:
         with self._lock:
@@ -683,6 +1075,8 @@ class LiveBPMService(threading.Thread):
                     last_logged_bpm=winner.end,
                     last_logged_at=now,
                 )
+                state.last_accepted_bpm = float(winner.end)
+                self._set_source_locked(deck, state, LIVE_BPM_DISCOVERY_SOURCE, "discovery_validated", winner.end)
                 validate_reason = "hint_moved" if moved_hint else "expired"
                 wait_for_moved_ms = 0.0
                 if state.sample_moved_hint_at > 0.0 and state.sample_start_at > 0.0:
@@ -692,11 +1086,12 @@ class LiveBPMService(threading.Thread):
                     ttfv_ms = (now - state.first_valid_hint_at) * 1000.0
                 self._reset_discovery(state, keep_validated=True)
                 log.info(
-                    "[LBPM][VALIDATED] deck%d addr=0x%x type=%s bpm=%.3f "
+                    "[LBPM][VALIDATED] deck%d addr=0x%x type=%s source=%s bpm=%.3f "
                     "ttfv_ms=%.0f validate=%s waited_moved_ms=%.0f drops_scan=%d drops_validate=%d",
                     deck,
                     candidate.addr,
                     candidate.type_name,
+                    candidate.source,
                     winner.end,
                     ttfv_ms,
                     validate_reason,
@@ -755,3 +1150,10 @@ def _dedupe_candidates(candidates: Iterable[LiveBPMCandidate]) -> Iterable[LiveB
             continue
         seen.add(candidate.key)
         yield candidate
+
+
+def _first_direct_candidate(candidates: Iterable[LiveBPMCandidate]) -> Optional[LiveBPMCandidate]:
+    for candidate in candidates:
+        if candidate.source == LIVE_BPM_DIRECT_SOURCE:
+            return candidate
+    return None

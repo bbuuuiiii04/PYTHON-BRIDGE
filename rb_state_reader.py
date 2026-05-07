@@ -1,10 +1,12 @@
 """
-Direct Rekordbox state reader — TimecodeLink-equivalent.
+Direct Rekordbox state reader — experimental TimecodeLink corroboration.
 
 Polls Rekordbox memory at ~30 Hz and emits the same ``BridgeEvent`` kinds the
 ``TLLogTailer`` does today (``MASTER_CHANGED``, ``TRACK_LOADED``, ``PLAY``,
-``PAUSE``, ``BPM_UPDATE``). Eliminates the dependency on TL's log file as the
-authoritative event source.
+``PAUSE``, ``BPM_UPDATE``). This reader is for shadow validation and parity
+analysis until live sessions prove it can match TL safely. TL remains the
+authoritative source for DeckState, lighting, and routing unless a later,
+explicit promotion changes that contract.
 
 Architecture
 ------------
@@ -16,9 +18,9 @@ Architecture
 * Fail-closed: if the running RB version has no offsets in the table, or the
   RB pid / base address cannot be resolved, the thread logs once and exits.
   ``StateManager`` continues running on ``TLLogTailer`` alone.
-* Diff against last-seen state to suppress duplicate events. Each emit
-  carries ``source='rb_state'`` so the StateManager and consumers can
-  differentiate from ``source='tl_log'``.
+* Diff against last-seen state to suppress duplicate events. Each emit carries
+  ``source='rb_state'`` so shadow-mode wiring can keep these events out of the
+  authoritative StateManager path.
 
 Play / pause derivation
 -----------------------
@@ -36,9 +38,11 @@ from __future__ import annotations
 import logging
 import os
 import queue
+import re
 import struct
 import threading
 import time
+from dataclasses import dataclass
 from typing import Optional
 
 from .config import MEM_POLL_HZ
@@ -55,6 +59,8 @@ from .rb_offsets import ChainEntry, RBOffsetVersion, load_offsets_for_version
 log = logging.getLogger("rb_state")
 
 _RB_STATE_DISABLE_ENV = "RBSS_RB_STATE_DISABLE"
+RB_MASTER_DIRECT_SOURCE = "offset_table"
+RB_MASTER_TL_SOURCE = "tl_log"
 
 # RB deck index (0..3) → bridge deck (1 or 2). Same mapping as tl_tailer.
 def _bridge_deck(rb_idx: int) -> int:
@@ -64,6 +70,20 @@ def _bridge_deck(rb_idx: int) -> int:
 # Whether the same BPM should be re-emitted (matches tl_tailer / state_manager
 # tolerance).
 _BPM_EMIT_THRESHOLD = 0.05
+_PLAY_WARMUP_POLLS = 3
+_PLAY_EVIDENCE_POLLS = 2
+_TRACK_INFO_FIELD_RE = re.compile(r"(?:^|\n)\s*(?:[A-Za-z]\s+)?Title:\s*(.*?)(?:\r?\n|$)")
+
+
+def extract_track_title(track_info: object) -> str:
+    """Extract TL-comparable title text from RB's packed track-info buffer."""
+    text = str(track_info or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+    m = _TRACK_INFO_FIELD_RE.search(text)
+    if m:
+        return m.group(1).strip()
+    return text
 
 
 class RBStateReader(threading.Thread):
@@ -104,6 +124,9 @@ class RBStateReader(threading.Thread):
         self._last_bpm: dict[int, float] = {}
         self._last_pos_samples: dict[int, int] = {}
         self._last_playing: dict[int, bool] = {}
+        self._valid_pos_polls: dict[int, int] = {}
+        self._pending_playing: dict[int, bool] = {}
+        self._pending_playing_count: dict[int, int] = {}
 
     def stop(self) -> None:
         self._stop.set()
@@ -181,16 +204,19 @@ class RBStateReader(threading.Thread):
 
         # Track-info string — same chain TL uses for [EVENT] Deck X loaded:.
         # RB stores 500-byte buffer; TL parses "Title - Artist".
-        title = self._follow_string(task, base, offs.track_info_per_deck[d], 500)
-        if title is not None and title != self._last_track.get(d):
-            self._last_track[d] = title
-            if title:
+        track_info = self._follow_string(task, base, offs.track_info_per_deck[d], 500)
+        if track_info is not None:
+            title = extract_track_title(track_info)
+            if title and title != self._last_track.get(d):
+                self._last_track[d] = title
                 self._enqueue(BridgeEvent(
                     kind=Ev.TRACK_LOADED,
                     deck=bridge,
                     payload={'title': title},
                     source='rb_state',
                 ))
+            elif not title:
+                self._last_track.pop(d, None)
 
         # Live BPM (post-sync, post-tempo).
         bpm = self._follow_float(task, base, offs.bpm_per_deck[d])
@@ -208,14 +234,35 @@ class RBStateReader(threading.Thread):
         # Play / pause inference: position field movement between polls.
         pos = self._follow_i64(task, base, offs.live_pos_per_deck[d])
         if pos is None:
+            self._reset_play_inference(d)
             return
         prev = self._last_pos_samples.get(d)
         self._last_pos_samples[d] = pos
+        self._valid_pos_polls[d] = self._valid_pos_polls.get(d, 0) + 1
         if prev is None:
             # First poll: cannot infer movement yet.
             return
+        if self._valid_pos_polls[d] <= _PLAY_WARMUP_POLLS:
+            self._pending_playing.pop(d, None)
+            self._pending_playing_count.pop(d, None)
+            return
+
         is_playing = pos != prev
         was_playing = self._last_playing.get(d)
+        pending = self._pending_playing.get(d)
+        if pending == is_playing:
+            self._pending_playing_count[d] = self._pending_playing_count.get(d, 0) + 1
+        else:
+            self._pending_playing[d] = is_playing
+            self._pending_playing_count[d] = 1
+
+        if self._pending_playing_count[d] < _PLAY_EVIDENCE_POLLS:
+            return
+        self._pending_playing_count[d] = 0
+
+        if was_playing is None:
+            self._last_playing[d] = is_playing
+            return
         if was_playing != is_playing:
             self._last_playing[d] = is_playing
             self._enqueue(BridgeEvent(
@@ -223,6 +270,12 @@ class RBStateReader(threading.Thread):
                 deck=bridge,
                 source='rb_state',
             ))
+
+    def _reset_play_inference(self, d: int) -> None:
+        self._last_pos_samples.pop(d, None)
+        self._valid_pos_polls[d] = 0
+        self._pending_playing.pop(d, None)
+        self._pending_playing_count.pop(d, None)
 
     # ── Queue helper ─────────────────────────────────────────────────────────
     def _enqueue(self, ev: BridgeEvent) -> None:
@@ -296,6 +349,322 @@ class RBStateReader(threading.Thread):
             return data.decode("utf-8")
         except UnicodeDecodeError:
             return data.decode("utf-8", errors="replace")
+
+
+@dataclass(frozen=True)
+class DirectMasterStatus:
+    """One-shot direct master-deck read status.
+
+    This is intentionally observational. It does not enqueue events and does
+    not change StateManager authority; callers can use it for startup visibility
+    and future arbitration readiness.
+    """
+
+    attempted: bool
+    supported: bool
+    available: bool
+    readable: bool
+    source: str
+    reason: str
+    rb_version: str = ""
+    rb_raw: Optional[int] = None
+    bridge_deck: Optional[int] = None
+    pid: Optional[int] = None
+    base: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class DirectMasterObservation:
+    """Bounded startup observation result for direct master corroboration."""
+
+    initial: DirectMasterStatus
+    final: DirectMasterStatus
+    attempts: int
+    outcome: str
+
+
+def read_direct_master_status(
+    rb_version: str,
+    *,
+    rb_pid: Optional[int] = None,
+    base_addr: Optional[int] = None,
+) -> DirectMasterStatus:
+    """Read the current RB master byte once through the offset table.
+
+    Fail-closed semantics:
+      * unsupported RB version -> unavailable
+      * attach failure -> unavailable
+      * unreadable/null chain -> unavailable
+      * 0xFF/no-master sentinel -> readable but no bridge deck
+
+    The returned status is for logging/status only. It must not be used to
+    mutate StateManager without an explicit master-only arbitration step.
+    """
+    offs = load_offsets_for_version(rb_version)
+    if offs is None:
+        log.info("[RBMASTER][DIRECT] attempted=1 supported_version=0 readable=0 "
+                 "version=%s direct_master=unavailable fail_closed_reason=unsupported_version "
+                 "authority=tl_log",
+                 rb_version or "<unknown>")
+        return DirectMasterStatus(
+            attempted=True,
+            supported=False,
+            available=False,
+            readable=False,
+            source=RB_MASTER_TL_SOURCE,
+            reason="unsupported_version",
+            rb_version=rb_version,
+        )
+
+    reader = RBStateReader(queue.Queue(maxsize=1), offs, rb_pid=rb_pid, base_addr=base_addr)
+    try:
+        task, base = reader._attach()
+    except Exception as exc:
+        log.info("[RBMASTER][DIRECT] attempted=1 supported_version=1 readable=0 "
+                 "version=%s direct_master=unavailable fail_closed_reason=attach_failed "
+                 "detail=%s authority=tl_log",
+                 offs.version,
+                 exc)
+        return DirectMasterStatus(
+            attempted=True,
+            supported=True,
+            available=False,
+            readable=False,
+            source=RB_MASTER_TL_SOURCE,
+            reason="attach_failed",
+            rb_version=offs.version,
+        )
+
+    master_raw = reader._follow_u8(task, base, offs.master_deck)
+    if master_raw is None:
+        log.info("[RBMASTER][DIRECT] attempted=1 supported_version=1 readable=0 "
+                 "version=%s direct_master=unavailable fail_closed_reason=unreadable "
+                 "authority=tl_log",
+                 offs.version)
+        return DirectMasterStatus(
+            attempted=True,
+            supported=True,
+            available=False,
+            readable=False,
+            source=RB_MASTER_TL_SOURCE,
+            reason="unreadable",
+            rb_version=offs.version,
+            pid=reader._rb_pid,
+            base=base,
+        )
+
+    bridge_deck = _bridge_deck(master_raw) if 0 <= master_raw < offs.deck_count else None
+    reason = "ok" if bridge_deck is not None else "no_master"
+    log.info("[RBMASTER][DIRECT] attempted=1 supported_version=1 readable=1 "
+             "version=%s raw=%d direct_master=%s reason=%s source=%s authority=tl_log",
+             offs.version, master_raw, direct_master_label(bridge_deck), reason,
+             RB_MASTER_DIRECT_SOURCE)
+    return DirectMasterStatus(
+        attempted=True,
+        supported=True,
+        available=True,
+        readable=True,
+        source=RB_MASTER_DIRECT_SOURCE,
+        reason=reason,
+        rb_version=offs.version,
+        rb_raw=master_raw,
+        bridge_deck=bridge_deck,
+        pid=reader._rb_pid,
+        base=base,
+    )
+
+
+def observe_direct_master_startup(
+    rb_version: str,
+    *,
+    settle_s: float = 3.0,
+    interval_s: float = 0.25,
+    rb_pid: Optional[int] = None,
+    base_addr: Optional[int] = None,
+    clock=time.monotonic,
+    sleeper=time.sleep,
+) -> DirectMasterObservation:
+    """Observe direct master briefly at startup until a real deck appears.
+
+    This is observational only. It attaches once, polls the versioned master
+    byte for a short bounded window, and returns the first non-sentinel master
+    if it appears. TL/ENGINE STATE remains authoritative regardless of outcome.
+    """
+    offs = load_offsets_for_version(rb_version)
+    if offs is None:
+        status = DirectMasterStatus(
+            attempted=True,
+            supported=False,
+            available=False,
+            readable=False,
+            source=RB_MASTER_TL_SOURCE,
+            reason="unsupported_version",
+            rb_version=rb_version,
+        )
+        log.info("[RBMASTER][DIRECT] phase=initial attempted=1 supported_version=0 "
+                 "readable=0 version=%s direct_master=unavailable "
+                 "fail_closed_reason=unsupported_version authority=tl_log",
+                 rb_version or "<unknown>")
+        return DirectMasterObservation(status, status, 1, "fail_closed")
+
+    reader = RBStateReader(queue.Queue(maxsize=1), offs, rb_pid=rb_pid, base_addr=base_addr)
+    try:
+        task, base = reader._attach()
+    except Exception as exc:
+        status = DirectMasterStatus(
+            attempted=True,
+            supported=True,
+            available=False,
+            readable=False,
+            source=RB_MASTER_TL_SOURCE,
+            reason="attach_failed",
+            rb_version=offs.version,
+        )
+        log.info("[RBMASTER][DIRECT] phase=initial attempted=1 supported_version=1 "
+                 "readable=0 version=%s direct_master=unavailable "
+                 "fail_closed_reason=attach_failed detail=%s authority=tl_log",
+                 offs.version, exc)
+        return DirectMasterObservation(status, status, 1, "fail_closed")
+
+    deadline = clock() + max(0.0, settle_s)
+    attempts = 0
+    initial: Optional[DirectMasterStatus] = None
+    last: Optional[DirectMasterStatus] = None
+
+    while True:
+        attempts += 1
+        status = _read_direct_master_from_attached(reader, task, base, offs)
+        last = status
+        if initial is None:
+            initial = status
+            log.info("[RBMASTER][DIRECT] phase=initial attempted=1 supported_version=1 "
+                     "readable=%s version=%s raw=%s direct_master=%s reason=%s "
+                     "authority=tl_log",
+                     "1" if status.readable else "0",
+                     status.rb_version,
+                     status.rb_raw if status.rb_raw is not None else "-",
+                     direct_master_label(status.bridge_deck) if status.readable else "unavailable",
+                     status.reason)
+        if status.bridge_deck in (1, 2):
+            phase = "settled" if attempts > 1 else "initial"
+            log.info("[RBMASTER][DIRECT] phase=%s attempts=%d supported_version=1 "
+                     "readable=1 version=%s raw=%d direct_master=%s reason=ok "
+                     "authority=tl_log",
+                     phase, attempts, status.rb_version, status.rb_raw or 0,
+                     direct_master_label(status.bridge_deck))
+            return DirectMasterObservation(initial, status, attempts, "settled")
+        if not status.readable:
+            log.info("[RBMASTER][DIRECT] phase=expired attempts=%d supported_version=1 "
+                     "readable=0 version=%s direct_master=unavailable "
+                     "fail_closed_reason=%s authority=tl_log",
+                     attempts, status.rb_version, status.reason)
+            return DirectMasterObservation(initial, status, attempts, "fail_closed")
+        now = clock()
+        if now >= deadline:
+            log.info("[RBMASTER][DIRECT] phase=expired attempts=%d supported_version=1 "
+                     "readable=1 version=%s raw=%s direct_master=%s reason=%s "
+                     "authority=tl_log",
+                     attempts, status.rb_version,
+                     status.rb_raw if status.rb_raw is not None else "-",
+                     direct_master_label(status.bridge_deck), status.reason)
+            return DirectMasterObservation(initial, status, attempts, "no_master_persisted")
+        sleeper(min(interval_s, max(0.0, deadline - now)))
+
+
+def _read_direct_master_from_attached(
+    reader: RBStateReader,
+    task: int,
+    base: int,
+    offs: RBOffsetVersion,
+) -> DirectMasterStatus:
+    master_raw = reader._follow_u8(task, base, offs.master_deck)
+    if master_raw is None:
+        return DirectMasterStatus(
+            attempted=True,
+            supported=True,
+            available=False,
+            readable=False,
+            source=RB_MASTER_TL_SOURCE,
+            reason="unreadable",
+            rb_version=offs.version,
+            pid=reader._rb_pid,
+            base=base,
+        )
+    bridge_deck = _bridge_deck(master_raw) if 0 <= master_raw < offs.deck_count else None
+    return DirectMasterStatus(
+        attempted=True,
+        supported=True,
+        available=True,
+        readable=True,
+        source=RB_MASTER_DIRECT_SOURCE,
+        reason="ok" if bridge_deck is not None else "no_master",
+        rb_version=offs.version,
+        rb_raw=master_raw,
+        bridge_deck=bridge_deck,
+        pid=reader._rb_pid,
+        base=base,
+    )
+
+
+def direct_master_label(deck: Optional[int]) -> str:
+    """Return compact log text for a bridge master deck value."""
+    if deck in (1, 2):
+        return f"deck{deck}"
+    if deck in (None, 0):
+        return "none"
+    return "unavailable"
+
+
+def direct_master_corroboration(status: DirectMasterStatus, tl_startup_deck: int) -> str:
+    """Classify direct master vs TL startup state for one-shot validation logs."""
+    if not status.available or not status.readable:
+        return "no_direct"
+    if status.bridge_deck is None:
+        return "no_master"
+    if tl_startup_deck not in (1, 2):
+        return "no_tl"
+    if status.bridge_deck == tl_startup_deck:
+        return "agree"
+    return "disagree"
+
+
+def direct_master_summary_fields(status: DirectMasterStatus, tl_startup_deck: int) -> dict[str, str]:
+    """Return stable, compact fields for direct-master live validation."""
+    fail_closed_reason = "" if status.available and status.readable else status.reason
+    return {
+        "direct_probe_attempted": "1" if status.attempted else "0",
+        "supported_version": "1" if status.supported else "0",
+        "readable": "1" if status.readable else "0",
+        "version": status.rb_version or "<unknown>",
+        "direct_source": status.source,
+        "direct_master": (
+            direct_master_label(status.bridge_deck)
+            if status.available and status.readable
+            else "unavailable"
+        ),
+        "direct_raw": str(status.rb_raw) if status.rb_raw is not None else "-",
+        "tl_startup_master": direct_master_label(tl_startup_deck),
+        "corroboration": direct_master_corroboration(status, tl_startup_deck),
+        "fail_closed_reason": fail_closed_reason or "-",
+    }
+
+
+def direct_master_observation_summary_fields(
+    observation: DirectMasterObservation,
+    tl_startup_deck: int,
+) -> dict[str, str]:
+    fields = direct_master_summary_fields(observation.final, tl_startup_deck)
+    fields["attempts"] = str(observation.attempts)
+    fields["outcome"] = observation.outcome
+    fields["initial_direct_master"] = (
+        direct_master_label(observation.initial.bridge_deck)
+        if observation.initial.readable else "unavailable"
+    )
+    fields["initial_raw"] = (
+        str(observation.initial.rb_raw)
+        if observation.initial.rb_raw is not None else "-"
+    )
+    return fields
 
 
 # ── Convenience constructor ──────────────────────────────────────────────────

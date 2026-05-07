@@ -1525,10 +1525,12 @@ class StateManager:
             log.debug("live BPM status read failed", exc_info=True)
             status = None
         if status is None:
-            return "live_bpm=unvalidated"
+            return "live_bpm=fallback_meta live_source=fallback_meta"
         age_ms = (time.monotonic() - status.updated_at) * 1000.0
+        source = getattr(status, "source", "unknown")
         return (
             f"live_bpm={status.bpm:.2f} "
+            f"live_source={source} "
             f"live_age_ms={age_ms:.0f} "
             f"live_addr=0x{status.addr:x}/{status.type_name}"
         )
