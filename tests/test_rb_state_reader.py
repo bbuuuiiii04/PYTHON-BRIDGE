@@ -300,6 +300,41 @@ class TickEventTests(unittest.TestCase):
             [],
         )
 
+    def test_authoritative_kinds_route_only_enabled_event(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.ANLZ_PATH},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x01")
+        self.mem.install_chain(
+            self.base,
+            self.offs.track_info_per_deck[0],
+            payload=b"Direct Title\x00",
+        )
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.anlz_path_per_deck[0],
+            payload=(0).to_bytes(8, "little"),
+        )
+        path_addr = 0xABCDEF00
+        self.mem.update_leaf(endpoint, path_addr.to_bytes(8, "little"))
+        self.mem.leaf[path_addr] = b"/tmp/ANLZ0000.DAT\x00"
+
+        reader._tick(0xCAFE, self.base)
+
+        self.assertEqual(_drain(self.q), [])
+        events = _drain(auth_q)
+        self.assertEqual([e.kind for e in events], [Ev.ANLZ_PATH])
+        self.assertEqual(events[0].source, "rb_state")
+        self.assertEqual(events[0].payload["anlz_path"], "/tmp/ANLZ0000.DAT")
+
 
 # ── Constructor / no-op behaviour ────────────────────────────────────────────
 

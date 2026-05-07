@@ -15,6 +15,7 @@ import re
 import threading
 import time
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -22,6 +23,7 @@ from typing import Optional
 from .models import BridgeEvent, Ev
 
 log = logging.getLogger("tl_tailer")
+ANLZ_DIRECT_ENV = "RBSS_ANLZ_DIRECT"
 
 # ── Regexes ──────────────────────────────────────────────────────────────────
 
@@ -332,13 +334,14 @@ class TLLogTailer(threading.Thread):
             deck_idx = int(m.group(1))   # 0-indexed
             beats    = int(m.group(2))
             if beats == self._last_anlz_beats and self._last_anlz_path:
-                bridge_deck = _bridge_deck(deck_idx + 1)
-                self._enqueue(BridgeEvent(
-                    kind=Ev.ANLZ_PATH,
-                    deck=bridge_deck,
-                    payload={'anlz_path': self._last_anlz_path},
-                    source='tl_log',
-                ))
+                if os.environ.get(ANLZ_DIRECT_ENV) != "1":
+                    bridge_deck = _bridge_deck(deck_idx + 1)
+                    self._enqueue(BridgeEvent(
+                        kind=Ev.ANLZ_PATH,
+                        deck=bridge_deck,
+                        payload={'anlz_path': self._last_anlz_path},
+                        source='tl_log',
+                    ))
                 self._last_anlz_beats = 0
                 self._last_anlz_path  = ""
             return

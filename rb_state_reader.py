@@ -45,9 +45,10 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .config import MEM_POLL_HZ
+from .config import MEM_POLL_HZ, RB_SCALE
 from .models import BridgeEvent, Ev
 from .rb_memory import (
+    PositionCache,
     _base_from_vmmap,
     _get_vmmap_output,
     _read_bytes,
@@ -75,6 +76,8 @@ def _bridge_deck(rb_idx: int) -> int:
 # tolerance).
 _BPM_EMIT_THRESHOLD = 0.05
 _PLAY_WARMUP_POLLS = 3
+_LIVEPOS_LOG_INTERVAL_S = 5.0
+_LIVEPOS_RESET_SAMPLES = 10_000   # below this after being above → track reset
 _PLAY_EVIDENCE_POLLS = 2
 _TRACK_INFO_FIELD_RE = re.compile(r"(?:^|\n)\s*(?:[A-Za-z]\s+)?Title:\s*(.*?)(?:\r?\n|$)")
 
@@ -105,14 +108,23 @@ class RBStateReader(threading.Thread):
         event_queue: queue.Queue,
         offsets: Optional[RBOffsetVersion],
         *,
+        authoritative_queue: Optional[queue.Queue] = None,
+        authoritative_kinds: Optional[set[str] | frozenset[str]] = None,
+        drop_unrouted_events: bool = False,
+        shadow_logs_enabled: bool = True,
         rb_pid: Optional[int] = None,
         base_addr: Optional[int] = None,
         poll_hz: Optional[int] = None,
+        position_cache: Optional[PositionCache] = None,
         clock=time.monotonic,
         sleeper=time.sleep,
     ) -> None:
         super().__init__(name="rb-state-reader", daemon=True)
         self._q = event_queue
+        self._authoritative_q = authoritative_queue
+        self._authoritative_kinds = frozenset(authoritative_kinds or ())
+        self._drop_unrouted_events = drop_unrouted_events
+        self._shadow_logs_enabled = shadow_logs_enabled
         self._offs = offsets
         self._stop = threading.Event()
         hz = poll_hz if poll_hz is not None else max(1, MEM_POLL_HZ // 2)
@@ -121,6 +133,7 @@ class RBStateReader(threading.Thread):
         self._base = base_addr
         self._clock = clock
         self._sleeper = sleeper
+        self._pos_cache = position_cache
 
         # Per-deck last-seen state for diffing
         self._last_master: Optional[int] = None
@@ -131,6 +144,8 @@ class RBStateReader(threading.Thread):
         self._valid_pos_polls: dict[int, int] = {}
         self._pending_playing: dict[int, bool] = {}
         self._pending_playing_count: dict[int, int] = {}
+        self._last_anlz: dict[int, str] = {}
+        self._last_livepos_log: dict[int, float] = {}
 
     def stop(self) -> None:
         self._stop.set()
@@ -213,6 +228,8 @@ class RBStateReader(threading.Thread):
             title = extract_track_title(track_info)
             if title and title != self._last_track.get(d):
                 self._last_track[d] = title
+                if self._shadow_logs_enabled:
+                    log.info("[TITLE][DIRECT] deck=%d title=%r", bridge, title)  # A5 shadow log
                 self._enqueue(BridgeEvent(
                     kind=Ev.TRACK_LOADED,
                     deck=bridge,
@@ -235,6 +252,24 @@ class RBStateReader(threading.Thread):
                     source='rb_state',
                 ))
 
+        # ANLZ path — shadow parity evidence only.
+        # Chain format: readPointer + readString (pointer at chain endpoint,
+        # string at that pointer). Routed to shadow queue; does not reach the
+        # authoritative StateManager path unless RBSS_RB_STATE_SHADOW=1 is set.
+        anlz = self._follow_pointer_string(task, base, offs.anlz_path_per_deck[d])
+        prev_anlz = self._last_anlz.get(d)
+        if anlz != prev_anlz:
+            self._last_anlz[d] = anlz or ""
+            if anlz:
+                if self._shadow_logs_enabled or Ev.ANLZ_PATH in self._authoritative_kinds:
+                    log.info("[ANLZ][DIRECT] deck=%d path=%s", bridge, anlz)
+                self._enqueue(BridgeEvent(
+                    kind=Ev.ANLZ_PATH,
+                    deck=bridge,
+                    payload={'anlz_path': anlz},
+                    source='rb_state',
+                ))
+
         # Play / pause inference: position field movement between polls.
         pos = self._follow_i64(task, base, offs.live_pos_per_deck[d])
         if pos is None:
@@ -243,6 +278,30 @@ class RBStateReader(threading.Thread):
         prev = self._last_pos_samples.get(d)
         self._last_pos_samples[d] = pos
         self._valid_pos_polls[d] = self._valid_pos_polls.get(d, 0) + 1
+
+        # LIVEPOS shadow log — A3 evidence.
+        # Log every _LIVEPOS_LOG_INTERVAL_S or on apparent track reset.
+        # Compares chain-derived elapsed_ms against PositionCache for parity.
+        _now = self._clock()
+        _reset = (prev is not None
+                  and prev > _LIVEPOS_RESET_SAMPLES
+                  and 0 <= pos < _LIVEPOS_RESET_SAMPLES)
+        if _reset or (_now - self._last_livepos_log.get(d, 0.0)) >= _LIVEPOS_LOG_INTERVAL_S:
+            self._last_livepos_log[d] = _now
+            _elapsed_ms = int(pos * RB_SCALE) if pos >= 0 else -1
+            _snap = self._pos_cache.get(bridge) if self._pos_cache is not None else None
+            _cache_ms = _snap.elapsed_ms if _snap is not None else None
+            _delta_ms = (_elapsed_ms - _cache_ms) if (_elapsed_ms >= 0 and _cache_ms is not None) else None
+            if self._shadow_logs_enabled:
+                log.info(
+                    "[LIVEPOS][DIRECT] deck=%d samples=%d elapsed_ms=%d "
+                    "cache_ms=%s delta_ms=%s%s",
+                    bridge, pos, _elapsed_ms,
+                    str(_cache_ms) if _cache_ms is not None else "none",
+                    ("%+d" % _delta_ms) if _delta_ms is not None else "none",
+                    " [reset]" if _reset else "",
+                )
+
         if prev is None:
             # First poll: cannot infer movement yet.
             return
@@ -283,8 +342,14 @@ class RBStateReader(threading.Thread):
 
     # ── Queue helper ─────────────────────────────────────────────────────────
     def _enqueue(self, ev: BridgeEvent) -> None:
+        if ev.kind in self._authoritative_kinds:
+            target = self._authoritative_q or self._q
+        elif self._drop_unrouted_events:
+            return
+        else:
+            target = self._q
         try:
-            self._q.put_nowait(ev)
+            target.put_nowait(ev)
         except queue.Full:
             # Same policy as tl_tailer: drop on overflow rather than block.
             log.warning("RBStateReader: queue full; dropping %s", ev.kind)
@@ -344,6 +409,36 @@ class RBStateReader(threading.Thread):
             return None
         try:
             data = _read_bytes(task, addr, n)
+        except OSError:
+            return None
+        nul = data.find(b'\x00')
+        if nul >= 0:
+            data = data[:nul]
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode("utf-8", errors="replace")
+
+    def _follow_pointer_string(self, task: int, base: int, ch: ChainEntry,
+                               max_len: int = 512) -> Optional[str]:
+        """Walk the chain, read the pointer stored at the endpoint, read the string there.
+
+        ANLZ chains use this format: the final address holds a u64 pointer to
+        the NUL-terminated path string, rather than the string bytes directly.
+        Returns None on null pointer, unreadable chain, or decode failure.
+        """
+        addr = self._follow_addr(task, base, ch)
+        if addr is None:
+            return None
+        try:
+            ptr_bytes = _read_bytes(task, addr, 8)
+        except OSError:
+            return None
+        str_ptr = struct.unpack_from("<Q", ptr_bytes)[0]
+        if str_ptr == 0:
+            return None
+        try:
+            data = _read_bytes(task, str_ptr, max_len)
         except OSError:
             return None
         nul = data.find(b'\x00')

@@ -191,11 +191,11 @@ class StateManager:
         self._load_trace: dict[int, str] = {}
         self._load_mono: dict[int, float] = {}
 
-    def set_initial_state(self, active_deck: int) -> None:
+    def set_initial_state(self, active_deck: int, source: str = "TL ENGINE STATE") -> None:
         """Apply startup state read from TL ENGINE STATE before event loop starts."""
         if active_deck in (1, 2):
             self._os.active_deck = active_deck
-            log.info("StateManager: initial active_deck=%d (from TL ENGINE STATE)", active_deck)
+            log.info("StateManager: initial active_deck=%d (from %s)", active_deck, source)
 
     def start(self) -> threading.Thread:
         t = threading.Thread(target=self._run, name="state-manager", daemon=True)
@@ -490,6 +490,20 @@ class StateManager:
         log.info("FILEPATH_RESOLVED path=%s bpm=%.1f ssid=%s latency=%.1fms",
                  payload["filepath"].split("/")[-1], meta.bpm,
                  "yes" if meta.soundswitch_id else "no", load_delta_ms)
+        if _os.environ.get("RBSS_RB_STATE_SHADOW") == "1":  # A6 shadow log
+            from .scripted_tracks import SCRIPTED_TRACKS
+            ssid = meta.soundswitch_id
+            if ssid:
+                scripted_id = next(
+                    (tid for tid, t in SCRIPTED_TRACKS.items() if t.get("ssid") == ssid),
+                    None,
+                )
+                log.info("[SCRIPTED][DIRECT] deck=%d scripted_id=%s ssid=%.8s latency_ms=%.1f",
+                         deck, scripted_id if scripted_id is not None else "none",
+                         ssid, load_delta_ms)
+            else:
+                log.info("[SCRIPTED][DIRECT] deck=%d scripted=no ssid=none latency_ms=%.1f",
+                         deck, load_delta_ms)
         LOG.stats.record_transition(deck, "filepath_resolved")
 
     # ── Scripted arm / clear ──────────────────────────────────────────────────

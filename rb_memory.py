@@ -16,6 +16,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import logging
+import os
 import re
 import struct
 import subprocess
@@ -33,8 +34,10 @@ from .config import (
     MEM_POLL_HZ, MEM_MAX_ELAPSED_MS,
 )
 from .models import PositionSnapshot
+from .rb_offsets import ChainEntry, RBOffsetVersion, load_offsets_for_version
 
 log = logging.getLogger("rb_memory")
+POS_CHAIN_DIRECT_ENV = "RBSS_POS_CHAIN_DIRECT"
 
 # ── mach syscall bindings ────────────────────────────────────────────────────
 
@@ -228,6 +231,8 @@ _D2_HEAP_CHUNK_BYTES = 0x400000
 _D2_HEAP_MAX_BYTES = 0x8000000
 _D2_HEAP_TARGET_TOL_MS = 10_000
 _D2_HEAP_MAX_CANDIDATES = 8
+_CHAIN_BACKWARD_THR_SAMPLES = 10_000
+_CHAIN_RESET_SAMPLES = 10_000
 
 
 def _is_objc(ptr: int) -> bool:
@@ -541,10 +546,11 @@ class RBSession:
             Validation is non-blocking — samples accumulate across poll ticks.
     """
 
-    def __init__(self, pid: int, base: int, task: int):
+    def __init__(self, pid: int, base: int, task: int, offsets: Optional[RBOffsetVersion] = None):
         self.pid  = pid
         self.base = base
         self.task = task
+        self.offsets = offsets
 
         # ── Deck 1 ──────────────────────────────────────────────────────────
         self._container: Optional[int] = None
@@ -562,6 +568,13 @@ class RBSession:
         self._d2_samples:     dict[int, list[tuple[float, int]]] = {} # ptr → [(t, raw)]
         self._d2_eval_after:  float = 0.0   # monotonic time when sampling window closes
         self._d2_sample_next: float = 0.0   # next time to take a sample
+
+        # Offset-table live-position chain state. This is enabled only by
+        # RBSS_POS_CHAIN_DIRECT=1 and feeds PositionCache alongside the ObjC
+        # scanner, with chain values taking priority when valid.
+        self._chain_last_raw: dict[int, int] = {}
+        self._chain_valid_count: dict[int, int] = {}
+        self._chain_unreadable_logged: set[int] = set()
 
     # ── Container / DPU1 / inner1 ────────────────────────────────────────────
 
@@ -630,6 +643,82 @@ class RBSession:
             playing=(play_i32 < 0),
             track_length_ms=track_length_ms,
             ddj_mode=(ddj_byte != 0),
+            updated_at=time.monotonic(),
+        )
+
+    # ── Offset-table live-position chain ────────────────────────────────────
+
+    def _follow_chain_addr(self, ch: ChainEntry) -> Optional[int]:
+        addr = self.base
+        for hop in ch.hops:
+            try:
+                addr = _read_u64(self.task, addr + hop)
+            except OSError:
+                return None
+            if addr == 0:
+                return None
+        return addr + ch.final_off
+
+    def _read_chain_i64(self, ch: ChainEntry) -> Optional[int]:
+        addr = self._follow_chain_addr(ch)
+        if addr is None:
+            return None
+        try:
+            return struct.unpack_from("<q", _read_bytes(self.task, addr, 8))[0]
+        except OSError:
+            return None
+
+    def read_live_pos_chain(
+        self,
+        bridge_deck: int,
+        previous: Optional[PositionSnapshot] = None,
+    ) -> Optional[PositionSnapshot]:
+        """Read a validated live_pos_per_deck chain as a PositionSnapshot."""
+        if self.offsets is None:
+            return None
+        rb_idx = bridge_deck - 1
+        if rb_idx < 0 or rb_idx >= len(self.offsets.live_pos_per_deck):
+            return None
+
+        raw = self._read_chain_i64(self.offsets.live_pos_per_deck[rb_idx])
+        if raw is None:
+            if bridge_deck not in self._chain_unreadable_logged:
+                self._chain_unreadable_logged.add(bridge_deck)
+                log.info("[RBMEM][CHAIN] deck=%d unreadable; using ObjC scan fallback", bridge_deck)
+            return None
+        self._chain_unreadable_logged.discard(bridge_deck)
+        if raw < 0:
+            log.info("[RBMEM][INVALID] deck=%d chain negative raw=%d", bridge_deck, raw)
+            return None
+
+        prev_raw = self._chain_last_raw.get(bridge_deck)
+        if prev_raw is not None and raw < prev_raw:
+            delta = raw - prev_raw
+            if delta < -_CHAIN_BACKWARD_THR_SAMPLES and raw >= _CHAIN_RESET_SAMPLES:
+                log.info("[RBMEM][INVALID] deck=%d chain backward_jump samples=%d prev=%d raw=%d",
+                         bridge_deck, delta, prev_raw, raw)
+                return None
+
+        playing = bool(previous.playing) if previous is not None else False
+        if prev_raw is not None:
+            playing = raw != prev_raw
+        self._chain_last_raw[bridge_deck] = raw
+        self._chain_valid_count[bridge_deck] = self._chain_valid_count.get(bridge_deck, 0) + 1
+
+        elapsed_ms = int(raw * RB_SCALE)
+        if elapsed_ms > MEM_MAX_ELAPSED_MS:
+            log.info("[RBMEM][INVALID] deck=%d chain elapsed_ms=%d out_of_range",
+                     bridge_deck, elapsed_ms)
+            return None
+
+        track_length_ms = previous.track_length_ms if previous is not None else 0
+        ddj_mode = previous.ddj_mode if previous is not None else False
+        return PositionSnapshot(
+            deck=bridge_deck,
+            elapsed_ms=max(0, elapsed_ms),
+            playing=playing,
+            track_length_ms=track_length_ms,
+            ddj_mode=ddj_mode,
             updated_at=time.monotonic(),
         )
 
@@ -908,6 +997,7 @@ class RBMemoryReader(threading.Thread):
         event_queue=None,
         deck_elapsed_hint: Optional[Callable[[int], Optional[int]]] = None,
         deck_playing_hint: Optional[Callable[[int], bool]] = None,
+        rb_version: str = "",
     ) -> None:
         super().__init__(name="rb-memory-reader", daemon=True)
         self._cache    = cache
@@ -915,6 +1005,8 @@ class RBMemoryReader(threading.Thread):
         self._eq       = event_queue       # FM-11: optional queue for RB_RESTARTED events
         self._deck_elapsed_hint = deck_elapsed_hint
         self._deck_playing_hint = deck_playing_hint
+        self._pos_chain_direct = os.environ.get(POS_CHAIN_DIRECT_ENV) == "1"
+        self._offsets = load_offsets_for_version(rb_version) if self._pos_chain_direct and rb_version else None
         self._stop     = threading.Event()
         self._session: Optional[RBSession] = None
         self._interval = 1.0 / MEM_POLL_HZ
@@ -937,6 +1029,13 @@ class RBMemoryReader(threading.Thread):
 
     def run(self) -> None:
         log.info("[RBMEM][STATUS] reader starting hz=%d", MEM_POLL_HZ)
+        if self._pos_chain_direct:
+            if self._offsets is None:
+                log.warning("[RBMEM][CHAIN] enabled via %s=1 but offset table unavailable; using ObjC scan only",
+                            POS_CHAIN_DIRECT_ENV)
+            else:
+                log.info("[RBMEM][CHAIN] enabled via %s=1 version=%s",
+                         POS_CHAIN_DIRECT_ENV, self._offsets.version)
         while not self._stop.is_set():
             t0 = time.monotonic()
             self._tick()
@@ -1058,6 +1157,15 @@ class RBMemoryReader(threading.Thread):
                     warn = self._drift.update(deck, snap.elapsed_ms, snap.playing)
                     if warn:
                         log.warning("drift: %s", warn)
+            if self._pos_chain_direct and self._offsets is not None:
+                previous = self._cache.get(deck)
+                chain_snap = s.read_live_pos_chain(deck, previous)
+                if chain_snap is not None:
+                    self._cache.update(chain_snap)
+                    if self._drift is not None:
+                        warn = self._drift.update(deck, chain_snap.elapsed_ms, chain_snap.playing)
+                        if warn:
+                            log.warning("drift: %s", warn)
 
     def _try_attach(self) -> None:
         pid = get_rb_pid()
@@ -1073,7 +1181,7 @@ class RBMemoryReader(threading.Thread):
             t1 = time.monotonic()
             task = _task_for_pid(pid)
             task_ms = (time.monotonic() - t1) * 1000.0
-            self._session     = RBSession(pid, base, task)
+            self._session     = RBSession(pid, base, task, offsets=self._offsets)
             self._attach_time = time.monotonic()
             self._d2_retry_at = 0.0   # allow immediate deck-2 resolution on first tick
             self._d2_attempts = 0

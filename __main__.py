@@ -36,13 +36,15 @@ from .rb_state_reader import (
     TLMasterSnapshot,
     make_rb_state_reader,
     direct_master_observation_summary_fields,
+    direct_master_label,
     direct_master_summary_fields,
     observe_direct_master_startup,
+    read_direct_master_status,
 )
 from .rb_state_shadow import RBStateParityMonitor, SHADOW_ENV, read_rekordbox_version
 from .scripted_tracks import preload_from_tl, resolve_filepaths
 from .state_manager import StateManager
-from .tl_tailer import TLLogTailer, read_initial_state
+from .tl_tailer import ANLZ_DIRECT_ENV, TLLogTailer, read_initial_state
 from .diagnostics import DriftDetector, enable_debug, is_debug
 from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService
 from .logging_manager import get_logging_manager
@@ -203,6 +205,7 @@ if not os.environ.get("BRIDGE_LOG_JSON"):
         "%(asctime)s [%(levelname)-7s] %(message)s", datefmt="%H:%M:%S"
     ))
 log = logging.getLogger("bridge")
+MASTER_SEED_DIRECT_ENV = "RBSS_MASTER_SEED_DIRECT"
 
 _LOCK_FD = None
 _LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
@@ -273,6 +276,7 @@ def start_osc_listener(event_queue: queue.Queue[BridgeEvent], state_manager: Sta
                     name="auto-populate",
                 ).start()
                 return
+            log.info("[SCRIPTED][TL-OSC] deck=%d scripted_id=%d", target, track_id)  # A6 shadow log
             event_queue.put_nowait(BridgeEvent(
                 kind=Ev.SCRIPTED_ARM,
                 deck=target,
@@ -430,6 +434,55 @@ def _log_direct_master_observation_summary(
              fields["fail_closed_reason"])
 
 
+def _direct_master_startup_seed(rb_version: str, tl_deck: int) -> tuple[int, str]:
+    """Return startup active deck and seed source, failing closed to TL."""
+    if os.environ.get(MASTER_SEED_DIRECT_ENV) != "1":
+        return tl_deck, "TL ENGINE STATE"
+
+    if not rb_version:
+        log.info("[MASTER-SEED] direct=none tl=%s using=tl reason=version_lookup_failed",
+                 direct_master_label(tl_deck))
+        return tl_deck, "TL ENGINE STATE"
+
+    first = read_direct_master_status(rb_version)
+    if not first.supported:
+        log.info("[MASTER-SEED] direct=none tl=%s using=tl reason=unsupported_version",
+                 direct_master_label(tl_deck))
+        return tl_deck, "TL ENGINE STATE"
+    if not first.readable:
+        log.info("[MASTER-SEED] direct=none tl=%s using=tl reason=%s",
+                 direct_master_label(tl_deck), first.reason or "unreadable")
+        return tl_deck, "TL ENGINE STATE"
+    if first.bridge_deck not in (1, 2):
+        log.info("[MASTER-SEED] direct=%s tl=%s using=tl reason=%s",
+                 direct_master_label(first.bridge_deck), direct_master_label(tl_deck),
+                 first.reason or "none")
+        return tl_deck, "TL ENGINE STATE"
+
+    time.sleep(0.5)
+    second = read_direct_master_status(
+        rb_version,
+        rb_pid=first.pid,
+        base_addr=first.base,
+    )
+    if (
+        not second.readable
+        or second.bridge_deck not in (1, 2)
+        or second.bridge_deck != first.bridge_deck
+        or second.rb_raw != first.rb_raw
+    ):
+        reason = second.reason if not second.readable else "unstable"
+        log.info("[MASTER-SEED] direct=%s tl=%s using=tl reason=%s",
+                 direct_master_label(second.bridge_deck),
+                 direct_master_label(tl_deck),
+                 reason or "unstable")
+        return tl_deck, "TL ENGINE STATE"
+
+    log.info("[MASTER-SEED] direct=%s tl=%s using=direct",
+             direct_master_label(first.bridge_deck), direct_master_label(tl_deck))
+    return int(first.bridge_deck), "direct master seed"
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -450,6 +503,7 @@ def main() -> None:
     # separate queue so direct-read events cannot drive DeckState or lighting.
     raw_event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)
     rb_state_shadow = os.environ.get(SHADOW_ENV) == "1"
+    anlz_direct = os.environ.get(ANLZ_DIRECT_ENV) == "1"
     rb_shadow_queue: queue.Queue[BridgeEvent] | None = None
     rb_parity: RBStateParityMonitor | None = None
     rb_state_reader = None
@@ -490,9 +544,13 @@ def main() -> None:
 
     # Initialize master deck from last TL ENGINE STATE (fixes startup deck bug)
     init = read_initial_state(TL_LOG_PATH)
-    sm.set_initial_state(init['active_deck'])
-    tl_master_snapshot.set_initial(init['active_deck'])
     rb_version_for_direct_master = read_rekordbox_version()
+    initial_active_deck, initial_active_source = _direct_master_startup_seed(
+        rb_version_for_direct_master,
+        init['active_deck'],
+    )
+    sm.set_initial_state(initial_active_deck, source=initial_active_source)
+    tl_master_snapshot.set_initial(init['active_deck'])
     if rb_version_for_direct_master:
         _log_direct_master_startup_status(rb_version_for_direct_master, init['active_deck'])
         rb_master_runtime_observer = DirectMasterRuntimeObserver(
@@ -520,16 +578,27 @@ def main() -> None:
     # TL log tailer
     tailer = TLLogTailer(TL_LOG_PATH, event_queue)
 
-    if rb_state_shadow and rb_shadow_queue is not None:
+    if rb_state_shadow or anlz_direct:
         rb_version = read_rekordbox_version()
         if not rb_version:
-            log.warning("RBStateReader shadow mode not started: Rekordbox version lookup failed")
+            log.warning("RBStateReader not started: Rekordbox version lookup failed")
         else:
-            rb_state_reader = make_rb_state_reader(rb_shadow_queue, rb_version)
+            rb_event_queue = rb_shadow_queue if rb_shadow_queue is not None else queue.Queue(maxsize=1)
+            authoritative_kinds = {Ev.ANLZ_PATH} if anlz_direct else set()
+            rb_state_reader = make_rb_state_reader(
+                rb_event_queue,
+                rb_version,
+                authoritative_queue=event_queue,
+                authoritative_kinds=authoritative_kinds,
+                drop_unrouted_events=not rb_state_shadow,
+                shadow_logs_enabled=rb_state_shadow,
+                position_cache=pos_cache,
+            )
             if getattr(rb_state_reader, "_offs", None) is None:
-                log.warning("RBStateReader shadow mode not started: unsupported Rekordbox version %s",
-                            rb_version)
+                log.warning("RBStateReader not started: unsupported Rekordbox version %s", rb_version)
                 rb_state_reader = None
+            elif anlz_direct:
+                log.info("RBStateReader ANLZ direct enabled via %s=1", ANLZ_DIRECT_ENV)
 
     # Memory reader (with drift detection + FM-11 RB_RESTARTED events)
     from .diagnostics import DriftDetector
@@ -539,6 +608,7 @@ def main() -> None:
         event_queue=event_queue,
         deck_elapsed_hint=sm.get_deck_elapsed_ms,
         deck_playing_hint=sm.get_deck_playing,
+        rb_version=rb_version_for_direct_master,
     )
 
     # MTC reader — ~25 fps position fallback from RB via IAC Bus 1.
