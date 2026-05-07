@@ -804,3 +804,83 @@ lsof can overwrite a correct title/ANLZ resolution with the wrong file.
 Example observed: intended track resolved at bpm=128, then lsof resolved Click Sound 01 Electronic.wav bpm=0 and autoloop armed the wrong file.
 Prevent lower-confidence/stale lsof results from replacing a better title/ANLZ result.
 ```
+
+## Direct Master Runtime Validation And TL-Retirement Planning - 2026-05-06
+
+Current status:
+
+```text
+Direct master remains observational/shadow-only.
+TL remains authoritative for master, play/pause, track load, timing fallback,
+scripted routing, ANLZ correlation, and startup ENGINE STATE reconstruction.
+No direct authority promotion has been made.
+LiveBPMService is already the first and most mature direct-first TL-reduction
+path: offset-table BPM is used when valid, with discovery and metadata/ENGINE
+STATE fallback when unavailable.
+```
+
+Implemented validation support:
+
+```text
+rb_state_reader.py:
+- startup direct-master probe and settle observation
+- bounded runtime direct-master observer
+- TL-only TLMasterSnapshot comparison source
+- runtime summary fields:
+  outcome
+  final_direct_master
+  final_tl_master
+  transition_count
+  mismatches
+  first_valid_elapsed_s
+  comparison_source=tl_master_snapshot
+  authority=tl_log
+
+tests/test_rb_state_reader.py:
+- focused coverage for runtime summary fields and direct-vs-TL outcomes
+```
+
+Live evidence summary:
+
+```text
+Clean deck1 stable windows:
+- outcome=became_valid_and_matched_tl
+- final_direct_master=deck1
+- final_tl_master=deck1
+- transition_count=1
+- mismatches=0
+
+Deck2 startup cases:
+- direct read deck2 while TL snapshot initially reported deck1
+- TL/ENGINE later updated to deck2
+- final direct/TL matched deck2
+- interpretation: direct Rekordbox master may surface current master earlier
+  than the TL-only snapshot becomes fresh at startup
+
+Single intentional master switch:
+- transition_count=2
+- final direct/TL matched deck2
+- not flapped
+```
+
+Repo-local continuity files:
+
+```text
+docs/direct_master_runtime_validation.md
+docs/direct_master_runtime_runbook.md
+docs/direct_master_runtime_results_template.md
+docs/tl_retirement_process_log.md
+```
+
+Near-term decision:
+
+```text
+Hold TL authority.
+Do not promote runtime master authority.
+The only plausible authority-adjacent next step is a future master startup-seed
+experiment design, if explicitly authorized, with strict fail-closed behavior.
+Do not generalize LiveBPM readiness to master, play/pause, track-load,
+scripted-routing, ANLZ, or TL-TC retirement.
+Play/pause, track load, scripted routing, ANLZ, TL TC fallback, and rb_memory.py
+remain out of scope for retirement.
+```

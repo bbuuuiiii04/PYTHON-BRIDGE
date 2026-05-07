@@ -398,6 +398,7 @@ class DirectMasterRuntimeObservation:
     outcome: str
     mismatches: int = 0
     tl_master_at_first_valid: Optional[int] = None
+    final_tl_master: Optional[int] = None
     first_valid_elapsed_s: Optional[float] = None
     transition_count: int = 0
     comparison_source: str = "tl_master_snapshot"
@@ -657,8 +658,17 @@ def observe_direct_master_runtime(
     snapshot supplied by ``tl_master_getter``. This never emits bridge events
     and never mutates StateManager.
     """
+
+    def current_tl_master() -> Optional[int]:
+        try:
+            tl_master = int(tl_master_getter())
+        except Exception:
+            return None
+        return tl_master if tl_master in (1, 2) else None
+
     offs = load_offsets_for_version(rb_version)
     if offs is None:
+        final_tl_master = current_tl_master()
         status = DirectMasterStatus(
             attempted=True,
             supported=False,
@@ -674,13 +684,17 @@ def observe_direct_master_runtime(
                  rb_version or "<unknown>", window_s, interval_s, comparison_source)
         log.info("[RBMASTER][RUNTIME] phase=summary attempts=1 outcome=read_failed "
                  "supported_version=0 readable=0 direct_master=unavailable "
-                 "fail_closed_reason=unsupported_version authority=tl_log")
+                 "final_tl_master=%s transition_count=0 mismatches=0 "
+                 "comparison_source=%s fail_closed_reason=unsupported_version "
+                 "authority=tl_log",
+                 direct_master_label(final_tl_master), comparison_source)
         return DirectMasterRuntimeObservation(
             initial=None,
             final=status,
             first_valid=None,
             attempts=1,
             outcome="read_failed",
+            final_tl_master=final_tl_master,
             comparison_source=comparison_source,
         )
 
@@ -698,6 +712,7 @@ def observe_direct_master_runtime(
     try:
         task, base = reader._attach()
     except Exception as exc:
+        final_tl_master = current_tl_master()
         status = DirectMasterStatus(
             attempted=True,
             supported=True,
@@ -709,14 +724,18 @@ def observe_direct_master_runtime(
         )
         log.info("[RBMASTER][RUNTIME] phase=summary attempts=1 outcome=read_failed "
                  "supported_version=1 readable=0 version=%s direct_master=unavailable "
-                 "fail_closed_reason=attach_failed detail=%s authority=tl_log",
-                 offs.version, exc)
+                 "final_tl_master=%s transition_count=0 mismatches=0 "
+                 "comparison_source=%s fail_closed_reason=attach_failed detail=%s "
+                 "authority=tl_log",
+                 offs.version, direct_master_label(final_tl_master),
+                 comparison_source, exc)
         return DirectMasterRuntimeObservation(
             initial=None,
             final=status,
             first_valid=None,
             attempts=1,
             outcome="read_failed",
+            final_tl_master=final_tl_master,
             comparison_source=comparison_source,
         )
 
@@ -748,10 +767,14 @@ def observe_direct_master_runtime(
                      direct_master_label(status.bridge_deck) if status.readable else "unavailable",
                      status.reason)
         if not status.readable:
+            final_tl_master = current_tl_master()
             log.info("[RBMASTER][RUNTIME] phase=summary attempts=%d outcome=read_failed "
                      "supported_version=1 readable=0 version=%s direct_master=unavailable "
-                     "fail_closed_reason=%s authority=tl_log",
-                     attempts, status.rb_version, status.reason)
+                     "final_tl_master=%s transition_count=%d mismatches=%d "
+                     "comparison_source=%s fail_closed_reason=%s authority=tl_log",
+                     attempts, status.rb_version,
+                     direct_master_label(final_tl_master), transition_count,
+                     mismatches, comparison_source, status.reason)
             return DirectMasterRuntimeObservation(
                 initial=initial,
                 final=status,
@@ -759,6 +782,8 @@ def observe_direct_master_runtime(
                 attempts=attempts,
                 outcome="read_failed",
                 mismatches=mismatches,
+                final_tl_master=final_tl_master,
+                transition_count=transition_count,
                 comparison_source=comparison_source,
             )
         if status.bridge_deck is None:
@@ -766,11 +791,7 @@ def observe_direct_master_runtime(
             if first_valid is not None:
                 flapped = True
         else:
-            try:
-                tl_master = int(tl_master_getter())
-            except Exception:
-                tl_master = 0
-            tl_master_valid = tl_master if tl_master in (1, 2) else None
+            tl_master_valid = current_tl_master()
             if first_valid is None:
                 first_valid = status
                 tl_at_first_valid = tl_master_valid
@@ -804,6 +825,7 @@ def observe_direct_master_runtime(
 
         now = clock()
         if now >= deadline:
+            final_tl_master = current_tl_master()
             if first_valid is None:
                 outcome = "never_became_valid"
             elif flapped:
@@ -816,13 +838,15 @@ def observe_direct_master_runtime(
                 outcome = "became_valid_and_matched_tl"
             log.info("[RBMASTER][RUNTIME] phase=summary attempts=%d outcome=%s "
                      "supported_version=1 readable=1 version=%s first_valid_master=%s "
-                     "final_direct_master=%s final_raw=%s tl_master_at_first_valid=%s "
-                     "first_valid_elapsed_s=%s transition_count=%d mismatches=%d "
+                     "final_direct_master=%s final_raw=%s final_tl_master=%s "
+                     "tl_master_at_first_valid=%s first_valid_elapsed_s=%s "
+                     "transition_count=%d mismatches=%d "
                      "comparison_source=%s authority=tl_log",
                      attempts, outcome, status.rb_version,
                      direct_master_label(first_valid.bridge_deck) if first_valid else "none",
                      direct_master_label(status.bridge_deck),
                      status.rb_raw if status.rb_raw is not None else "-",
+                     direct_master_label(final_tl_master),
                      direct_master_label(tl_at_first_valid),
                      "%.2f" % first_valid_elapsed_s if first_valid_elapsed_s is not None else "-",
                      transition_count,
@@ -836,6 +860,7 @@ def observe_direct_master_runtime(
                 outcome=outcome,
                 mismatches=mismatches,
                 tl_master_at_first_valid=tl_at_first_valid,
+                final_tl_master=final_tl_master,
                 first_valid_elapsed_s=first_valid_elapsed_s,
                 transition_count=transition_count,
                 comparison_source=comparison_source,

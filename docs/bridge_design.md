@@ -21,7 +21,7 @@ No Frida. No injection. Position from direct RB memory reads via mach task API.
 | `TLLogTailer` | `tl_tailer.py` | Tails TL log; emits MASTER_CHANGED, TRACK_LOADED, PLAY, PAUSE, ANLZ_PATH, BPM_UPDATE, TC_UPDATE |
 | `RBMemoryReader` | `rb_memory.py` | Reads RB process memory at 60 Hz; writes PositionCache |
 | `LiveBPMService` | `live_bpm.py` | Read-only background Rekordbox memory service; uses fixed offset-table BPM chains when supported, otherwise discovers, validates, and refreshes per-deck live BPM |
-| Direct master startup probe | `rb_state_reader.py` | One-shot fixed offset-table master byte read for startup visibility/corroboration only; does not enqueue events |
+| Direct master observers | `rb_state_reader.py` | Startup and bounded-runtime fixed offset-table master byte reads for visibility/corroboration only; do not enqueue events |
 | `MTCReader` | `mtc_reader.py` | Reads MTC quarter-frames + full-frame SysEx from IAC Bus 1 at ~25 fps; emits TC_UPDATE |
 | `FilepathResolver` | `filepath_resolver.py` | Resolves filepath metadata. With ANLZ: ANLZ DB lookup, then lsof fallback on miss. Without ANLZ: lsof and title DB lookup race in parallel; emits FILEPATH_RESOLVED |
 | `StateManager` | `state_manager.py` | Single event-loop + 200 Hz push loop thread; owns all DeckState; drives SS output |
@@ -59,7 +59,7 @@ StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC
 |--------|--------|-----------|
 | Play / pause | TL log `[EVENT] Deck X playing/paused` | **Authoritative** |
 | Master deck | TL log `Rekordbox master deck changed` + ENGINE STATE every ~15s | **Authoritative** |
-| Direct master status | `rb_offsets.py` `master_deck` chain via one-shot startup probe | Observational only; logs availability/corroboration and does not change active deck |
+| Direct master status | `rb_offsets.py` `master_deck` chain via startup probe + bounded runtime observer | Observational only; logs availability/corroboration and does not change active deck |
 | Track load | TL log `[EVENT] Deck X loaded` | **Authoritative** |
 | Scripted track ID | TL OSC `/bridge/track_loaded` | Authoritative — routed via TL log deck |
 | Track filepath / BPM / ssid | ANLZ DB, lsof + length match, title DB lookup | Informational |
@@ -98,14 +98,31 @@ observed in parallel against `TLLogTailer` for at least one full session per RB
 version and an arbitration path is added, **TL log remains authoritative for
 play / pause / master / track-load events**. Adoption gating in analysis §10.5.
 
-The master-specific convergence step is a one-shot startup status probe. On
-supported Rekordbox versions, `read_direct_master_status()` follows the same
-`master_deck` byte chain used by `RBStateReader`, logs `[RBMASTER][DIRECT]`
-availability, and logs `[RBMASTER][SOURCE]` with `current=tl_log`, direct deck,
-TL startup deck, and corroboration state. It does not enqueue
+The master-specific convergence path is observational only. On supported
+Rekordbox versions, `read_direct_master_status()` and the startup settle probe
+follow the same `master_deck` byte chain used by `RBStateReader`, log
+`[RBMASTER][DIRECT]` availability, and log `[RBMASTER][SOURCE]` with
+`current=tl_log`, direct deck, TL startup deck, and corroboration state.
+
+A bounded runtime observer then starts after startup wiring settles. It polls
+the direct master byte at low rate for a short fixed window and compares it
+against `TLMasterSnapshot`, a TL-only snapshot that accepts only
+`tl_log`, `engine_state`, and `initial_engine_state` `MASTER_CHANGED` events.
+Runtime summaries log `outcome`, `final_direct_master`, `final_tl_master`,
+`transition_count`, `mismatches`, `first_valid_elapsed_s`,
+`comparison_source=tl_master_snapshot`, and `authority=tl_log`.
+
+Current live evidence is encouraging for direct master readability and
+stability, and suggests direct Rekordbox master may surface current startup
+master before the TL-only snapshot becomes fresh in some deck-2 cases. This is
+not authority promotion. The direct master path still does not enqueue
 `MASTER_CHANGED`, does not call `StateManager.set_initial_state`, and fails
-closed to TL-only status when the RB version is unsupported, attach fails, or
-the chain is unreadable.
+closed to TL-only status when the RB version is unsupported, attach fails, the
+chain is unreadable, or direct master is not valid.
+
+The current TL-retirement evidence and next-step log lives in
+`docs/tl_retirement_process_log.md`. Future agents should update that file
+after every new live run, user correction, or TL-retirement decision.
 
 Live BPM is a separate read-only memory signal. On supported Rekordbox versions,
 LiveBPMService follows the same per-version BPM chain shipped in `rb_offsets.py`

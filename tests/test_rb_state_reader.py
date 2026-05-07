@@ -689,6 +689,7 @@ class DirectMasterStatusTests(unittest.TestCase):
         self.assertEqual(observation.first_valid.bridge_deck, 1)
         self.assertEqual(observation.outcome, "became_valid_and_matched_tl")
         self.assertEqual(observation.tl_master_at_first_valid, 1)
+        self.assertEqual(observation.final_tl_master, 1)
         self.assertEqual(observation.mismatches, 0)
         self.assertEqual(observation.attempts, 2)
         self.assertTrue(any(
@@ -702,6 +703,13 @@ class DirectMasterStatusTests(unittest.TestCase):
             "[RBMASTER][RUNTIME]" in line
             and "phase=summary" in line
             and "outcome=became_valid_and_matched_tl" in line
+            and "final_direct_master=deck1" in line
+            and "final_tl_master=deck1" in line
+            and "tl_master_at_first_valid=deck1" in line
+            and "first_valid_elapsed_s=0.25" in line
+            and "transition_count=1" in line
+            and "mismatches=0" in line
+            and "comparison_source=tl_master_snapshot" in line
             for line in logs.output
         ))
 
@@ -713,22 +721,36 @@ class DirectMasterStatusTests(unittest.TestCase):
             now[0] += seconds
 
         with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
-            observation = mod.observe_direct_master_runtime(
-                "7.2.11",
-                lambda: 1,
-                rb_pid=12345,
-                base_addr=self.base,
-                start_delay_s=0.0,
-                window_s=0.50,
-                interval_s=0.25,
-                clock=lambda: now[0],
-                sleeper=sleeper,
-            )
+            with self.assertLogs("rb_state", level="INFO") as logs:
+                observation = mod.observe_direct_master_runtime(
+                    "7.2.11",
+                    lambda: 1,
+                    rb_pid=12345,
+                    base_addr=self.base,
+                    start_delay_s=0.0,
+                    window_s=0.50,
+                    interval_s=0.25,
+                    clock=lambda: now[0],
+                    sleeper=sleeper,
+                )
 
         self.assertEqual(observation.outcome, "never_became_valid")
         self.assertIsNone(observation.first_valid)
         self.assertEqual(observation.final.reason, "no_master")
+        self.assertEqual(observation.final_tl_master, 1)
         self.assertGreaterEqual(observation.attempts, 2)
+        self.assertTrue(any(
+            "[RBMASTER][RUNTIME]" in line
+            and "phase=summary" in line
+            and "outcome=never_became_valid" in line
+            and "final_direct_master=none" in line
+            and "final_tl_master=deck1" in line
+            and "tl_master_at_first_valid=none" in line
+            and "first_valid_elapsed_s=-" in line
+            and "transition_count=0" in line
+            and "mismatches=0" in line
+            for line in logs.output
+        ))
 
     def test_runtime_observation_classifies_mismatch_vs_tl(self) -> None:
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x01")
@@ -758,6 +780,7 @@ class DirectMasterStatusTests(unittest.TestCase):
         assert observation.first_valid is not None
         self.assertEqual(observation.first_valid.bridge_deck, 2)
         self.assertEqual(observation.tl_master_at_first_valid, 1)
+        self.assertEqual(observation.final_tl_master, 1)
         self.assertGreater(observation.mismatches, 0)
         self.assertTrue(any(
             "[RBMASTER][RUNTIME]" in line
@@ -769,12 +792,26 @@ class DirectMasterStatusTests(unittest.TestCase):
 
     def test_runtime_observation_unsupported_version_fails_closed(self) -> None:
         with mock.patch.object(mod, "load_offsets_for_version", return_value=None):
-            observation = mod.observe_direct_master_runtime("unsupported", lambda: 1)
+            with self.assertLogs("rb_state", level="INFO") as logs:
+                observation = mod.observe_direct_master_runtime("unsupported", lambda: 1)
 
         self.assertEqual(observation.outcome, "read_failed")
         self.assertFalse(observation.final.supported)
         self.assertFalse(observation.final.readable)
         self.assertIsNone(observation.first_valid)
+        self.assertEqual(observation.final_tl_master, 1)
+        self.assertTrue(any(
+            "[RBMASTER][RUNTIME]" in line
+            and "phase=summary" in line
+            and "outcome=read_failed" in line
+            and "direct_master=unavailable" in line
+            and "final_tl_master=deck1" in line
+            and "transition_count=0" in line
+            and "mismatches=0" in line
+            and "comparison_source=tl_master_snapshot" in line
+            and "fail_closed_reason=unsupported_version" in line
+            for line in logs.output
+        ))
 
     def test_runtime_observation_unreadable_fails_closed(self) -> None:
         now = [0.0]
@@ -819,6 +856,7 @@ class DirectMasterStatusTests(unittest.TestCase):
 
         self.assertEqual(observation.outcome, "became_valid_without_tl_available")
         self.assertIsNone(observation.tl_master_at_first_valid)
+        self.assertIsNone(observation.final_tl_master)
         self.assertEqual(observation.mismatches, 0)
 
     def test_tl_master_snapshot_tracks_only_tl_master_sources(self) -> None:
@@ -863,6 +901,7 @@ class DirectMasterStatusTests(unittest.TestCase):
 
         self.assertEqual(observation.outcome, "became_valid_and_matched_tl")
         self.assertEqual(observation.transition_count, 2)
+        self.assertEqual(observation.final_tl_master, 2)
         self.assertEqual(observation.mismatches, 0)
 
     def test_runtime_observation_flap_requires_repeated_valid_instability(self) -> None:
