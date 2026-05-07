@@ -1194,7 +1194,9 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertTrue(any("scripted_id=901" in line for line in logs.output))
         self.assertEqual(sm._deck[1].scripted_id, 901)
 
-    def test_scripted_direct_arms_unmatched_ssid_track_by_unique_filepath(self) -> None:
+    def test_scripted_direct_arms_unregistered_ssid_directly(self) -> None:
+        # ssid present but not in registry → synthetic arm (filepath fallback no longer reachable
+        # when ssid is non-empty)
         q: queue.Queue = queue.Queue()
         sm = StateManager(
             q, PositionCache(), FakeOutput(),
@@ -1209,6 +1211,9 @@ class StateManagerLiveBPMTests(unittest.TestCase):
             "first_beat_ms": 0.0,
             "soundswitch_id": "new-ssid",
             "total_ms": 180000,
+            "beatgrid_times_ms": [],
+            "beatgrid_bpms": [],
+            "beatgrid_source": "",
         }
 
         with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
@@ -1220,11 +1225,12 @@ class StateManagerLiveBPMTests(unittest.TestCase):
                 with self.assertLogs("state_manager", level="INFO") as logs:
                     sm._on_filepath_resolved(1, payload)
                 self.assertEqual(q.qsize(), 1)
-                sm._drain_events()
+                ev = q.get_nowait()
 
-        self.assertTrue(any("scripted_id=902" in line for line in logs.output))
+        synthetic_id = (hash("new-ssid") & 0x7FFFFFFF) or 1
+        self.assertEqual(ev.payload["scripted_id"], synthetic_id)
+        self.assertTrue(any("source=direct" in line for line in logs.output))
         self.assertFalse(any("WARNING" in line for line in logs.output))
-        self.assertEqual(sm._deck[1].scripted_id, 902)
 
     def test_scripted_direct_does_not_arm_ambiguous_filepath_match(self) -> None:
         q: queue.Queue = queue.Queue()
@@ -1279,12 +1285,124 @@ class StateManagerLiveBPMTests(unittest.TestCase):
             "total_ms": 180000,
         }
 
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "0"}, clear=True):
             with patch.dict(sm_mod.SCRIPTED_TRACKS, {900: {"ssid": "ssid-scripted"}}, clear=True):
                 sm._on_filepath_resolved(1, payload)
 
         self.assertTrue(q.empty())
         self.assertEqual(sm._deck[1].scripted_id, 0)
+
+    def test_scripted_direct_arms_ssid_not_in_registry(self) -> None:
+        q: queue.Queue = queue.Queue()
+        sm = StateManager(
+            q, PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].load_gen = 11
+        payload = {
+            "load_gen": 11,
+            "filepath": "/tmp/unknown-ssid.wav",
+            "bpm": 130.0,
+            "content_id": "content",
+            "first_beat_ms": 0.0,
+            "soundswitch_id": "unknown-ssid-xyz",
+            "total_ms": 200000,
+            "beatgrid_times_ms": [],
+            "beatgrid_bpms": [],
+            "beatgrid_source": "",
+        }
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            with patch.dict(sm_mod.SCRIPTED_TRACKS, {}, clear=True):
+                with self.assertLogs("state_manager", level="INFO") as logs:
+                    sm._on_filepath_resolved(1, payload)
+
+        self.assertEqual(q.qsize(), 1)
+        ev = q.get_nowait()
+        self.assertEqual(ev.kind, sm_mod.Ev.SCRIPTED_ARM)
+        scripted_id = ev.payload["scripted_id"]
+        self.assertNotEqual(scripted_id, 0)
+        self.assertTrue(any("source=direct" in line for line in logs.output))
+
+    def test_scripted_direct_ssid_not_in_registry_arm_scripted_executes(self) -> None:
+        q: queue.Queue = queue.Queue()
+        sm = StateManager(
+            q, PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].load_gen = 12
+        sm._deck[1].meta.soundswitch_id = "unknown-ssid-abc"
+        sm._deck[1].meta.filepath = "/tmp/unknown-ssid-abc.wav"
+        sm._deck[1].meta.bpm = 128.0
+        sm._deck[1].meta.first_beat_ms = 0.0
+        sm._deck[1].meta.total_ms = 180000.0
+        sm._deck[1].meta.beatgrid_times_ms = [0.0, 468.75]
+        sm._deck[1].meta.beatgrid_bpms = [128.0, 128.0]
+        sm._deck[1].meta.beatgrid_source = "rekordbox"
+
+        synthetic_id = (hash("unknown-ssid-abc") & 0x7FFFFFFF) or 1
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            with patch.dict(sm_mod.SCRIPTED_TRACKS, {}, clear=True):
+                sm._arm_scripted(1, synthetic_id)
+
+        self.assertEqual(sm._deck[1].meta.soundswitch_id, "unknown-ssid-abc")
+        self.assertEqual(sm._deck[1].meta.beatgrid_times_ms, [0.0, 468.75])
+
+    def test_scripted_direct_registry_hit_still_uses_registry_id(self) -> None:
+        q: queue.Queue = queue.Queue()
+        sm = StateManager(
+            q, PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].load_gen = 13
+        payload = {
+            "load_gen": 13,
+            "filepath": "/tmp/known-ssid.wav",
+            "bpm": 128.0,
+            "content_id": "content",
+            "first_beat_ms": 0.0,
+            "soundswitch_id": "known-ssid",
+            "total_ms": 180000,
+            "beatgrid_times_ms": [],
+            "beatgrid_bpms": [],
+            "beatgrid_source": "",
+        }
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            with patch.dict(sm_mod.SCRIPTED_TRACKS, {900: {"ssid": "known-ssid"}}, clear=True):
+                sm._on_filepath_resolved(1, payload)
+
+        self.assertEqual(q.qsize(), 1)
+        ev = q.get_nowait()
+        self.assertEqual(ev.payload["scripted_id"], 900)
+
+    def test_scripted_direct_synthetic_id_debounce(self) -> None:
+        q: queue.Queue = queue.Queue()
+        sm = StateManager(
+            q, PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].meta.soundswitch_id = "debounce-ssid"
+        sm._deck[1].meta.filepath = "/tmp/debounce.wav"
+        sm._deck[1].meta.bpm = 128.0
+        sm._deck[1].meta.first_beat_ms = 0.0
+        sm._deck[1].meta.total_ms = 180000.0
+        sm._deck[1].meta.beatgrid_times_ms = []
+        sm._deck[1].meta.beatgrid_bpms = []
+        sm._deck[1].meta.beatgrid_source = ""
+
+        synthetic_id = (hash("debounce-ssid") & 0x7FFFFFFF) or 1
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            with patch.dict(sm_mod.SCRIPTED_TRACKS, {}, clear=True):
+                sm._arm_scripted(1, synthetic_id)
+                first_arm_time = sm._arm_times.get((synthetic_id, 1), 0.0)
+                sm._arm_scripted(1, synthetic_id)
+                second_arm_time = sm._arm_times.get((synthetic_id, 1), 0.0)
+
+        self.assertNotEqual(first_arm_time, 0.0)
+        self.assertEqual(first_arm_time, second_arm_time)
 
     def test_master_change_transfer_runs_only_for_tl_osc_scripted_path(self) -> None:
         sm = StateManager(
@@ -1295,7 +1413,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._deck[1].scripted_id = 77
         sm._deck[1].playing = False
 
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "0"}, clear=True):
             sm._on_master_changed(2, "osc")
 
         self.assertEqual(sm._deck[1].scripted_id, 0)

@@ -389,7 +389,7 @@ class StateManager:
         old_d = self._deck[old_deck]
         new_d = self._deck[new_deck]
         if (
-            _os.environ.get("RBSS_SCRIPTED_DIRECT") != "1"
+            _os.environ.get("RBSS_SCRIPTED_DIRECT") == "0"
             and old_d.scripted_id > 0
             and new_d.scripted_id == 0
             and not old_d.playing
@@ -509,16 +509,20 @@ class StateManager:
                 log.info("[SCRIPTED][DIRECT] deck=%d scripted=no ssid=none latency_ms=%.1f",
                          deck, load_delta_ms)
         LOG.stats.record_transition(deck, "filepath_resolved")
-        if _os.environ.get("RBSS_SCRIPTED_DIRECT") == "1":
+        if _os.environ.get("RBSS_SCRIPTED_DIRECT") != "0":
             ssid = meta.soundswitch_id
             filepath = meta.filepath
             scripted_id = None
             matched_by_filepath = False
+            ssid_direct = False
             if ssid:
                 scripted_id = next(
                     (tid for tid, t in SCRIPTED_TRACKS.items() if t.get("ssid") == ssid),
                     None,
                 )
+                if scripted_id is None:
+                    scripted_id = (hash(ssid) & 0x7FFFFFFF) or 1
+                    ssid_direct = True
             if scripted_id is None and filepath:
                 filepath_matches = [
                     tid for tid, t in SCRIPTED_TRACKS.items()
@@ -537,9 +541,10 @@ class StateManager:
                         load_delta_ms,
                     )
             if scripted_id is not None:
+                source = "direct" if ssid_direct else "registry"
                 log_fn = log.warning if matched_by_filepath and not ssid else log.info
-                log_fn("[SCRIPTED][DIRECT] deck=%d scripted_id=%d ssid=%.8s latency_ms=%.1f",
-                       deck, scripted_id, ssid, load_delta_ms)
+                log_fn("[SCRIPTED][DIRECT] deck=%d scripted_id=%d ssid=%.8s source=%s latency_ms=%.1f",
+                       deck, scripted_id, ssid, source, load_delta_ms)
                 try:
                     self._eq.put_nowait(BridgeEvent(
                         kind=Ev.SCRIPTED_ARM,
@@ -551,18 +556,6 @@ class StateManager:
                     log.warning("[SCRIPTED][DIRECT] queue full; SCRIPTED_ARM dropped deck=%d",
                                 deck)
             else:
-                if ssid:
-                    log.info(
-                        "[SCRIPTED][DIRECT] deck=%d scripted=no ssid=%.8s filepath=%s "
-                        "latency_ms=%.1f",
-                        deck,
-                        ssid,
-                        _os.path.basename(filepath) if filepath else "none",
-                        load_delta_ms,
-                    )
-                else:
-                    log.info("[SCRIPTED][DIRECT] deck=%d scripted=no ssid=none latency_ms=%.1f",
-                             deck, load_delta_ms)
                 try:
                     self._eq.put_nowait(BridgeEvent(
                         kind=Ev.SCRIPTED_CLEAR,
@@ -579,8 +572,21 @@ class StateManager:
         # FM-1: non-blocking two-phase arm — no time.sleep() in push loop thread
         track = st_lookup(track_id)
         if not track:
-            log.warning("SCRIPTED_ARM failed unknown_id=%d", track_id)
-            return
+            d = self._deck[deck]
+            if _os.environ.get("RBSS_SCRIPTED_DIRECT") != "0" and d.meta.soundswitch_id:
+                track = {
+                    "filepath":          d.meta.filepath,
+                    "bpm":               d.meta.bpm,
+                    "first_beat_ms":     d.meta.first_beat_ms,
+                    "total_ms":          d.meta.total_ms,
+                    "ssid":              d.meta.soundswitch_id,
+                    "beatgrid_times_ms": list(d.meta.beatgrid_times_ms),
+                    "beatgrid_bpms":     list(d.meta.beatgrid_bpms),
+                    "beatgrid_source":   d.meta.beatgrid_source,
+                }
+            else:
+                log.warning("SCRIPTED_ARM failed unknown_id=%d", track_id)
+                return
 
         # Debounce concurrent arm calls
         key = (track_id, deck)
@@ -594,13 +600,13 @@ class StateManager:
         # Apply track data to DeckState
         d = self._deck[deck]
         d.scripted_id        = track_id
-        d.meta.filepath      = track["filepath"]
-        d.meta.bpm           = track["bpm"]
-        d.meta.first_beat_ms = track["first_beat_ms"]
-        d.meta.beatgrid_times_ms = []
-        d.meta.beatgrid_bpms = []
-        d.meta.beatgrid_source = ""
-        d.meta.total_ms      = float(track.get("total_ms", 0))
+        d.meta.filepath          = track["filepath"]
+        d.meta.bpm               = track["bpm"]
+        d.meta.first_beat_ms     = track["first_beat_ms"]
+        d.meta.beatgrid_times_ms = list(track.get("beatgrid_times_ms") or [])
+        d.meta.beatgrid_bpms     = list(track.get("beatgrid_bpms") or [])
+        d.meta.beatgrid_source   = track.get("beatgrid_source", "")
+        d.meta.total_ms          = float(track.get("total_ms", 0))
         # FM-5: use ssid from registry (populated at startup by resolve_filepaths)
         # never do synchronous disk I/O here
         if not d.meta.soundswitch_id:

@@ -310,8 +310,8 @@ def _scan_objc_zone(
              window, actual_dt, size * 2, scan_ms, len(results))
     for ptr, rate in results[:5]:
         pos_off = ptr - inner1 + RB_POS_OFF
-        log.info("[RBMEM][CANDIDATE] deck2 zone pos=inner1%+#x inner=inner1%+#x rate=%.1f",
-                 pos_off, ptr - inner1, rate)
+        log.debug("[RBMEM][CANDIDATE] deck2 zone pos=inner1%+#x inner=inner1%+#x rate=%.1f",
+                  pos_off, ptr - inner1, rate)
     return [ptr for ptr, _ in results]
 
 
@@ -370,8 +370,8 @@ def _scan_static_elapsed_candidates(
     log.info("[RBMEM][SCAN] deck2 static inner1±0x%x target=%dms hits=%d",
              window, target_ms, len(matches))
     for ptr, delta_ms, ms in matches[:5]:
-        log.info("[RBMEM][CANDIDATE] deck2 static pos=inner1%+#x inner=inner1%+#x ms=%d delta=%d",
-                 ptr - inner1 + RB_POS_OFF, ptr - inner1, ms, delta_ms)
+        log.debug("[RBMEM][CANDIDATE] deck2 static pos=inner1%+#x inner=inner1%+#x ms=%d delta=%d",
+                  ptr - inner1 + RB_POS_OFF, ptr - inner1, ms, delta_ms)
 
     if not matches:
         return []
@@ -476,13 +476,12 @@ def _scan_objc_heap_moving(
         if len(deduped) >= _D2_HEAP_MAX_CANDIDATES:
             break
 
-    log.info("[RBMEM][SCAN] deck2 heap moving regions=%d chunks=%d bytes=%d target=%dms hits=%d",
-             len(regions), len(chunks0), bytes_queued, target_ms, len(deduped))
     scan_ms = (time.monotonic() - t_scan0) * 1000.0
-    log.info("[RBMEM][SCAN] deck2 heap moving scan_ms=%.1f bytes=%d hits=%d", scan_ms, bytes_queued, len(deduped))
+    log.info("[RBMEM][SCAN] deck2 heap moving regions=%d chunks=%d bytes=%d target=%dms hits=%d scan_ms=%.1f",
+             len(regions), len(chunks0), bytes_queued, target_ms, len(deduped), scan_ms)
     for ptr, rate, delta_ms in deduped[:5]:
-        log.info("[RBMEM][CANDIDATE] deck2 heap inner=0x%x rate=%.1f target_delta=%d",
-                 ptr, rate, delta_ms)
+        log.debug("[RBMEM][CANDIDATE] deck2 heap inner=0x%x rate=%.1f target_delta=%d",
+                  ptr, rate, delta_ms)
     return [ptr for ptr, _, _ in deduped]
 
 
@@ -518,17 +517,17 @@ def _strict_eval_candidate(
     ms_end = max(0, int(raws[-1] * RB_SCALE))
 
     if neg_jumps > 0:
-        log.info("[RBMEM][REJECT] deck2 candidate=0x%x neg_jumps=%d rate=%.0f ms=%d",
-                 ptr, neg_jumps, rate, ms_end)
+        log.debug("[RBMEM][REJECT] deck2 candidate=0x%x neg_jumps=%d rate=%.0f ms=%d",
+                  ptr, neg_jumps, rate, ms_end)
         return False
 
     if not (_D2_RATE_LO <= rate <= _D2_RATE_HI):
-        log.info("[RBMEM][REJECT] deck2 candidate=0x%x rate=%.0f need=%d-%d ms=%d",
-                 ptr, rate, _D2_RATE_LO, _D2_RATE_HI, ms_end)
+        log.debug("[RBMEM][REJECT] deck2 candidate=0x%x rate=%.0f need=%d-%d ms=%d",
+                  ptr, rate, _D2_RATE_LO, _D2_RATE_HI, ms_end)
         return False
 
     if ms_end > MEM_MAX_ELAPSED_MS:
-        log.info("[RBMEM][REJECT] deck2 candidate=0x%x ms=%d out_of_range", ptr, ms_end)
+        log.debug("[RBMEM][REJECT] deck2 candidate=0x%x ms=%d out_of_range", ptr, ms_end)
         return False
 
     log.info("[RBMEM][VALIDATED] deck2 candidate=0x%x rate=%.0f samples=%d ms=%d",
@@ -695,8 +694,9 @@ class RBSession:
         if prev_raw is not None and raw < prev_raw:
             delta = raw - prev_raw
             if delta < -_CHAIN_BACKWARD_THR_SAMPLES and raw >= _CHAIN_RESET_SAMPLES:
-                log.info("[RBMEM][INVALID] deck=%d chain backward_jump samples=%d prev=%d raw=%d",
-                         bridge_deck, delta, prev_raw, raw)
+                log.debug("[RBMEM] deck=%d chain backward_jump samples=%d prev=%d raw=%d (rewind)",
+                          bridge_deck, delta, prev_raw, raw)
+                self._chain_last_raw[bridge_deck] = raw  # reset baseline so chain recovers after rewind
                 return None
 
         elapsed_ms = int(raw * RB_SCALE)
@@ -762,7 +762,7 @@ class RBSession:
             if ptr and ptr not in seen and _quick_plausible_inner(self.task, ptr):
                 candidates.append(ptr)
                 seen.add(ptr)
-                log.info("[RBMEM][CANDIDATE] deck2 %s inner=0x%x", label, ptr)
+                log.debug("[RBMEM][CANDIDATE] deck2 %s inner=0x%x", label, ptr)
 
         if self._deck2_provisional:
             stage_counts["P"] += 1
@@ -792,7 +792,7 @@ class RBSession:
                     candidates.append(ptr)
                     seen.add(ptr)
                     stage_counts["C"] += 1
-                    log.info("[RBMEM][CANDIDATE] deck2 C(zone) inner=0x%x", ptr)
+                    log.debug("[RBMEM][CANDIDATE] deck2 C(zone) inner=0x%x", ptr)
 
             if target_ms is not None and not zone_hits and not self._deck2_provisional:
                 t0 = time.monotonic()
@@ -826,7 +826,7 @@ class RBSession:
                         candidates.append(ptr)
                         seen.add(ptr)
                         stage_counts["D"] += 1
-                        log.info("[RBMEM][CANDIDATE] deck2 D(heap) inner=0x%x", ptr)
+                        log.debug("[RBMEM][CANDIDATE] deck2 D(heap) inner=0x%x", ptr)
 
         attempt_ms = (time.monotonic() - t_attempt0) * 1000.0
         log.info(
@@ -902,7 +902,7 @@ class RBSession:
                 break
             if result is False:
                 if self._deck2_provisional == ptr:
-                    log.info("[RBMEM][REJECT] deck2 provisional rejected inner=0x%x", ptr)
+                    log.debug("[RBMEM][REJECT] deck2 provisional rejected inner=0x%x", ptr)
                     self._deck2_provisional = None
                 all_inconclusive = False
 
@@ -913,9 +913,9 @@ class RBSession:
 
         if not committed:
             if all_inconclusive:
-                log.info("[RBMEM][INCONCLUSIVE] deck2 validation inconclusive deck_paused_maybe retrying")
+                log.debug("[RBMEM][INCONCLUSIVE] deck2 all candidates inconclusive (deck likely paused)")
             else:
-                log.warning("[RBMEM][INVALID] deck2 all candidates failed strict validation; retrying")
+                log.info("[RBMEM][INVALID] deck=2 all candidates failed strict validation; retrying")
 
     # ── Runtime reads ────────────────────────────────────────────────────────
 
@@ -1115,15 +1115,12 @@ class RBMemoryReader(threading.Thread):
                             target_ms = self._deck_elapsed_hint(2)
                         except Exception:
                             target_ms = None
-                    log.info("[RBMEM][SCAN] deck2 resolution attempt=%d window=0x%x target_ms=%s",
-                             self._d2_attempts, scan_window, target_ms if target_ms is not None else "none")
                     log.info(
-                        "[RBMEM][D2STATE] attempt=%d playing=%s recently_playing=%s paused=%s provisional=%s",
-                        self._d2_attempts,
-                        deck2_playing,
-                        deck2_recently_playing,
-                        (not deck2_playing and not deck2_recently_playing),
-                        bool(s._deck2_provisional),
+                        "[RBMEM][SCAN] deck2 attempt=%d window=0x%x target_ms=%s "
+                        "playing=%s recently_playing=%s provisional=%s",
+                        self._d2_attempts, scan_window,
+                        target_ms if target_ms is not None else "none",
+                        deck2_playing, deck2_recently_playing, bool(s._deck2_provisional),
                     )
                     s.start_deck2_resolution(
                         self._objc_regions,
@@ -1156,7 +1153,7 @@ class RBMemoryReader(threading.Thread):
                 if self._drift is not None:
                     warn = self._drift.update(deck, snap.elapsed_ms, snap.playing)
                     if warn:
-                        log.warning("drift: %s", warn)
+                        log.warning("drift deck=%d: %s", deck, warn)
             if self._pos_chain_direct and self._offsets is not None:
                 previous = self._cache.get(deck)
                 chain_snap = s.read_live_pos_chain(deck, previous)
@@ -1165,7 +1162,7 @@ class RBMemoryReader(threading.Thread):
                     if self._drift is not None:
                         warn = self._drift.update(deck, chain_snap.elapsed_ms, chain_snap.playing)
                         if warn:
-                            log.warning("drift: %s", warn)
+                            log.warning("drift deck=%d: %s", deck, warn)
 
     def _try_attach(self) -> None:
         pid = get_rb_pid()

@@ -190,7 +190,7 @@ class TLInitialStateTests(unittest.TestCase):
         handlers, modules, fake_thread = self._install_fake_pythonosc()
         with unittest.mock.patch.dict(sys.modules, modules):
             with unittest.mock.patch.object(bridge_main.threading, "Thread", fake_thread):
-                with unittest.mock.patch.dict(os.environ, {}, clear=True):
+                with unittest.mock.patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "0"}, clear=True):
                     bridge_main.start_osc_listener(q, FakeStateManager())
 
                     from rb_ss_bridge_v2 import scripted_tracks

@@ -279,7 +279,7 @@ def start_osc_listener(
             track_id = int(float(args[0]))
         except (TypeError, ValueError):
             return
-        if os.environ.get(SCRIPTED_DIRECT_ENV) == "1":
+        if os.environ.get(SCRIPTED_DIRECT_ENV) != "0":
             return
         # Use the deck that most recently received a TRACK_LOADED event from the TL log.
         # This is more reliable than get_active_deck() when loading on the non-master deck,
@@ -322,9 +322,9 @@ def start_osc_listener(
         return
 
     log.info("OSC listener on UDP :%d", OSC_LISTEN_PORT)
-    if os.environ.get(SCRIPTED_DIRECT_ENV) == "1":
-        log.info("scripted arm direct enabled via %s=1 - _track_loaded bypassed",
-                 SCRIPTED_DIRECT_ENV)
+    if os.environ.get(SCRIPTED_DIRECT_ENV) != "0":
+        log.info("scripted arm direct enabled (TL OSC _track_loaded bypassed); "
+                 "set %s=0 to re-enable legacy path", SCRIPTED_DIRECT_ENV)
     threading.Thread(target=srv.serve_forever, name="osc-server", daemon=True).start()
 
     # Re-register with TL so it re-announces current state
