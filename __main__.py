@@ -2,8 +2,8 @@
 rb_ss_bridge_v2 — entry point and wiring.
 
 Replaces Frida hooks with:
-  - TL log parsing  (master change, play/pause, track load)
-  - Direct RB memory (position at 60 Hz)
+  - Direct RB memory (master change, play/pause, track load, position)
+  - TL log parsing  (fallback state, MTC provider, startup ENGINE STATE)
   - lsof / DB        (filepath identification on track load)
 
 OSC is kept for scripted show triggers (TL playlist.yaml osc_triggers).
@@ -21,6 +21,7 @@ import sys
 import time
 import threading
 import fcntl
+from typing import Callable, Optional
 
 from .config import OSC_LISTEN_PORT, TL_LOG_PATH, TL_PLAYLIST_PATH
 from .filepath_resolver import FilepathResolver
@@ -30,23 +31,22 @@ from .osl_output import OS2LConnection, OS2LOutput, SoundSwitchDiscovery
 from .os2l_injector import OS2LInjector
 from .rb_memory import PositionCache, RBMemoryReader
 from .rb_state_reader import (
-    DirectMasterObservation,
-    DirectMasterRuntimeObserver,
-    DirectMasterStatus,
-    TLMasterSnapshot,
     make_rb_state_reader,
-    direct_master_observation_summary_fields,
     direct_master_label,
-    direct_master_summary_fields,
-    observe_direct_master_startup,
     read_direct_master_status,
 )
-from .rb_state_shadow import RBStateParityMonitor, SHADOW_ENV, read_rekordbox_version
 from .scripted_tracks import preload_from_tl, resolve_filepaths
 from .state_manager import StateManager
-from .tl_tailer import ANLZ_DIRECT_ENV, PLAY_DIRECT_ENV, TLLogTailer, read_initial_state
+from .tl_tailer import (
+    ANLZ_DIRECT_ENV,
+    MASTER_DIRECT_ENV,
+    PLAY_DIRECT_ENV,
+    TRACK_LOAD_DIRECT_ENV,
+    TLLogTailer,
+    read_initial_state,
+)
 from .diagnostics import DriftDetector, enable_debug, is_debug
-from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService
+from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService, read_rekordbox_version
 from .logging_manager import get_logging_manager
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -115,6 +115,7 @@ class _ColorFormatter(logging.Formatter):
         ("[ss][autoloop-arm-pending]", _YELLOW),
         ("[rbmem][pending]",        _YELLOW),
         ("[rbmem][inconclusive]",   _YELLOW),
+        ("shutdown signal",         _YELLOW),
         ("cooldown",                _YELLOW),
         ("discarded",               _YELLOW),
         ("no peers",                _YELLOW),
@@ -126,6 +127,8 @@ class _ColorFormatter(logging.Formatter):
         ("auto-switch",             _BCYAN),
         ("active_deck",             _BCYAN),
         ("correcting: active deck", _BCYAN),
+        ("[master-seed]",           _BCYAN),
+        ("[rbmaster]",              _BCYAN),
 
         # Cyan: steady-state status, intentionally scan-friendly.
         ("[ss][autoloop-tick]",     _BCYAN),
@@ -143,8 +146,13 @@ class _ColorFormatter(logging.Formatter):
         ("arm unscripted",          _BMAGENTA),
         ("phase2",                  _BMAGENTA),
         ("scripted cleared",        _BMAGENTA),
+        ("[scripted][direct]",      _BMAGENTA),
 
         # Green: successful user-facing state.
+        ("rb_ss_bridge_v2 starting", _BGREEN),
+        ("rb_ss_bridge_v2 running", _BGREEN),
+        ("startup preload",         _BGREEN),
+        ("osc listener on",         _BGREEN),
         ("track_loaded",            _BGREEN),
         ("filepath_resolved",       _BGREEN),
         ("filepath resolved",       _BGREEN),
@@ -206,6 +214,7 @@ if not os.environ.get("BRIDGE_LOG_JSON"):
     ))
 log = logging.getLogger("bridge")
 MASTER_SEED_DIRECT_ENV = "RBSS_MASTER_SEED_DIRECT"
+SCRIPTED_DIRECT_ENV = "RBSS_SCRIPTED_DIRECT"
 
 _LOCK_FD = None
 _LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
@@ -228,7 +237,12 @@ def _acquire_single_instance_lock() -> bool:
 
 # ── OSC listener (scripted arm triggers from TL) ──────────────────────────────
 
-def start_osc_listener(event_queue: queue.Queue[BridgeEvent], state_manager: StateManager) -> None:
+def start_osc_listener(
+    event_queue: queue.Queue[BridgeEvent],
+    state_manager: StateManager,
+    *,
+    master_direct_ready: Optional[Callable[[], bool]] = None,
+) -> None:
     """Listen on UDP for /bridge/active_deck and /bridge/track_loaded from TL."""
     try:
         from pythonosc import dispatcher as osc_dispatcher  # type: ignore
@@ -247,6 +261,12 @@ def start_osc_listener(event_queue: queue.Queue[BridgeEvent], state_manager: Sta
             deck = int(float(args[0]))
         except (TypeError, ValueError):
             return
+        if master_direct_ready is not None:
+            try:
+                if master_direct_ready():
+                    return
+            except Exception:
+                pass
         bridge_deck = ((deck - 1) % 2) + 1 if deck > 0 else 1
         event_queue.put_nowait(BridgeEvent(
             kind=Ev.MASTER_CHANGED, deck=bridge_deck, source="osc",
@@ -258,6 +278,8 @@ def start_osc_listener(event_queue: queue.Queue[BridgeEvent], state_manager: Sta
         try:
             track_id = int(float(args[0]))
         except (TypeError, ValueError):
+            return
+        if os.environ.get(SCRIPTED_DIRECT_ENV) == "1":
             return
         # Use the deck that most recently received a TRACK_LOADED event from the TL log.
         # This is more reliable than get_active_deck() when loading on the non-master deck,
@@ -300,6 +322,9 @@ def start_osc_listener(event_queue: queue.Queue[BridgeEvent], state_manager: Sta
         return
 
     log.info("OSC listener on UDP :%d", OSC_LISTEN_PORT)
+    if os.environ.get(SCRIPTED_DIRECT_ENV) == "1":
+        log.info("scripted arm direct enabled via %s=1 - _track_loaded bypassed",
+                 SCRIPTED_DIRECT_ENV)
     threading.Thread(target=srv.serve_forever, name="osc-server", daemon=True).start()
 
     # Re-register with TL so it re-announces current state
@@ -398,42 +423,6 @@ def _seed_initial_decks(eq: queue.Queue[BridgeEvent], init: dict) -> None:
         log.info("startup preload: enqueued %d loaded deck(s) from ENGINE STATE", seeded)
 
 
-def _log_direct_master_startup_status(rb_version: str, tl_startup_deck: int) -> None:
-    """Log direct master availability without changing startup authority."""
-    observation = observe_direct_master_startup(rb_version)
-    _log_direct_master_observation_summary(observation, tl_startup_deck)
-
-
-def _log_direct_master_summary(status: DirectMasterStatus, tl_startup_deck: int) -> None:
-    fields = direct_master_summary_fields(status, tl_startup_deck)
-    log.info("[RBMASTER][SOURCE] current=tl_log direct_probe_attempted=%s "
-             "supported_version=%s readable=%s version=%s direct_source=%s "
-             "direct_master=%s direct_raw=%s tl_startup_master=%s corroboration=%s "
-             "fail_closed_reason=%s",
-             fields["direct_probe_attempted"], fields["supported_version"],
-             fields["readable"], fields["version"], fields["direct_source"],
-             fields["direct_master"], fields["direct_raw"], fields["tl_startup_master"],
-             fields["corroboration"], fields["fail_closed_reason"])
-
-
-def _log_direct_master_observation_summary(
-    observation: DirectMasterObservation,
-    tl_startup_deck: int,
-) -> None:
-    fields = direct_master_observation_summary_fields(observation, tl_startup_deck)
-    log.info("[RBMASTER][SOURCE] current=tl_log direct_probe_attempted=%s "
-             "supported_version=%s readable=%s version=%s direct_source=%s "
-             "initial_direct_master=%s initial_raw=%s direct_master=%s direct_raw=%s "
-             "tl_startup_master=%s corroboration=%s attempts=%s outcome=%s "
-             "fail_closed_reason=%s",
-             fields["direct_probe_attempted"], fields["supported_version"],
-             fields["readable"], fields["version"], fields["direct_source"],
-             fields["initial_direct_master"], fields["initial_raw"],
-             fields["direct_master"], fields["direct_raw"], fields["tl_startup_master"],
-             fields["corroboration"], fields["attempts"], fields["outcome"],
-             fields["fail_closed_reason"])
-
-
 def _direct_master_startup_seed(rb_version: str, tl_deck: int) -> tuple[int, str]:
     """Return startup active deck and seed source, failing closed to TL."""
     if os.environ.get(MASTER_SEED_DIRECT_ENV) != "1":
@@ -499,33 +488,29 @@ def main() -> None:
     preload_from_tl(str(TL_PLAYLIST_PATH))
     resolve_filepaths()
 
-    # Shared authoritative event queue. Optional rb_state shadow mode gets a
-    # separate queue so direct-read events cannot drive DeckState or lighting.
+    # Shared authoritative event queue.
     raw_event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)
-    rb_state_shadow = os.environ.get(SHADOW_ENV) == "1"
     anlz_direct = os.environ.get(ANLZ_DIRECT_ENV) == "1"
     play_direct = os.environ.get(PLAY_DIRECT_ENV) == "1"
-    rb_shadow_queue: queue.Queue[BridgeEvent] | None = None
-    rb_parity: RBStateParityMonitor | None = None
+    track_load_direct = os.environ.get(TRACK_LOAD_DIRECT_ENV) == "1"
+    master_direct = os.environ.get(MASTER_DIRECT_ENV) == "1"
+    if track_load_direct and not anlz_direct:
+        log.warning(
+            "RBStateReader TRACK_LOADED direct requires %s=1; ignoring %s=1",
+            ANLZ_DIRECT_ENV,
+            TRACK_LOAD_DIRECT_ENV,
+        )
+        track_load_direct = False
     rb_state_reader = None
-    rb_master_runtime_observer = None
     anlz_direct_ready_decks: set[int] = set()
     anlz_direct_ready_lock = threading.Lock()
     play_direct_ready_decks: set[int] = set()
     play_direct_ready_lock = threading.Lock()
-    tl_master_snapshot = TLMasterSnapshot()
-    def _observe_authoritative_enqueue(ev):
-        tl_master_snapshot.observe_event(ev)
-        if rb_parity is not None:
-            rb_parity.observe_tl(ev)
-
-    if rb_state_shadow:
-        rb_shadow_queue = queue.Queue(maxsize=512)
-        rb_parity = RBStateParityMonitor(rb_shadow_queue)
-        event_queue = LOG.wrap_queue(raw_event_queue, enqueue_callback=_observe_authoritative_enqueue)
-        log.info("RBStateReader shadow mode enabled via %s=1", SHADOW_ENV)
-    else:
-        event_queue = LOG.wrap_queue(raw_event_queue, enqueue_callback=_observe_authoritative_enqueue)
+    track_load_direct_ready_decks: set[int] = set()
+    track_load_direct_ready_lock = threading.Lock()
+    master_direct_ready_flag: bool = False
+    master_direct_ready_lock = threading.Lock()
+    event_queue = LOG.wrap_queue(raw_event_queue)
 
     # Position cache (RBMemoryReader → PositionCache → StateManager push loop)
     pos_cache = PositionCache()
@@ -555,25 +540,10 @@ def main() -> None:
         init['active_deck'],
     )
     sm.set_initial_state(initial_active_deck, source=initial_active_source)
-    tl_master_snapshot.set_initial(init['active_deck'])
-    if rb_version_for_direct_master:
-        _log_direct_master_startup_status(rb_version_for_direct_master, init['active_deck'])
-        rb_master_runtime_observer = DirectMasterRuntimeObserver(
-            rb_version_for_direct_master,
-            tl_master_snapshot.get_master,
-        )
-    else:
-        _log_direct_master_summary(
-            DirectMasterStatus(
-                attempted=False,
-                supported=False,
-                available=False,
-                readable=False,
-                source="tl_log",
-                reason="version_lookup_failed",
-            ),
-            init['active_deck'],
-        )
+    log.info("[MASTER-INIT] version=%s seed_source=%s deck=%d",
+             rb_version_for_direct_master or "unknown",
+             initial_active_source.replace(" ", "_"),
+             initial_active_deck)
 
     # Filepath resolver (triggered by TRACK_LOADED, pushes FILEPATH_RESOLVED)
     resolver = FilepathResolver(event_queue, pos_cache)
@@ -607,34 +577,66 @@ def main() -> None:
         with play_direct_ready_lock:
             return deck in play_direct_ready_decks
 
+    def _set_track_load_direct_ready(deck: int, ready: bool) -> None:
+        if deck not in (1, 2):
+            return
+        with track_load_direct_ready_lock:
+            if ready:
+                track_load_direct_ready_decks.add(deck)
+            else:
+                track_load_direct_ready_decks.discard(deck)
+
+    def _is_track_load_direct_ready(deck: int) -> bool:
+        with track_load_direct_ready_lock:
+            return deck in track_load_direct_ready_decks
+
+    def _set_master_direct_ready(ready: bool) -> None:
+        nonlocal master_direct_ready_flag
+        with master_direct_ready_lock:
+            master_direct_ready_flag = ready
+
+    def _is_master_direct_ready() -> bool:
+        with master_direct_ready_lock:
+            return master_direct_ready_flag
+
     tailer = TLLogTailer(
         TL_LOG_PATH,
         event_queue,
         anlz_direct_ready=_is_anlz_direct_ready if anlz_direct else None,
+        master_direct_ready=_is_master_direct_ready if master_direct else None,
         play_direct_ready=_is_play_direct_ready if play_direct else None,
+        track_load_direct_ready=_is_track_load_direct_ready if track_load_direct else None,
     )
 
-    if rb_state_shadow or anlz_direct or play_direct:
+    if anlz_direct or play_direct or track_load_direct or master_direct:
         rb_version = read_rekordbox_version()
         if not rb_version:
             log.warning("RBStateReader not started: Rekordbox version lookup failed")
         else:
-            rb_event_queue = rb_shadow_queue if rb_shadow_queue is not None else queue.Queue(maxsize=1)
+            rb_event_queue = queue.Queue(maxsize=1)
             authoritative_kinds = set()
             if anlz_direct:
                 authoritative_kinds.add(Ev.ANLZ_PATH)
             if play_direct:
                 authoritative_kinds.update({Ev.PLAY, Ev.PAUSE})
+            if track_load_direct:
+                authoritative_kinds.add(Ev.TRACK_LOADED)
+            if master_direct:
+                authoritative_kinds.add(Ev.MASTER_CHANGED)
             rb_state_reader = make_rb_state_reader(
                 rb_event_queue,
                 rb_version,
                 authoritative_queue=event_queue,
                 authoritative_kinds=authoritative_kinds,
-                drop_unrouted_events=not rb_state_shadow,
-                shadow_logs_enabled=rb_state_shadow,
+                drop_unrouted_events=True,
+                shadow_logs_enabled=False,
                 position_cache=pos_cache,
                 anlz_available_callback=_set_anlz_direct_ready if anlz_direct else None,
                 transport_available_callback=_set_play_direct_ready if play_direct else None,
+                track_load_available_callback=(
+                    _set_track_load_direct_ready if track_load_direct else None
+                ),
+                master_available_callback=_set_master_direct_ready if master_direct else None,
             )
             if getattr(rb_state_reader, "_offs", None) is None:
                 log.warning("RBStateReader not started: unsupported Rekordbox version %s", rb_version)
@@ -644,9 +646,15 @@ def main() -> None:
                     log.info("RBStateReader ANLZ direct enabled via %s=1", ANLZ_DIRECT_ENV)
                 if play_direct:
                     log.info("RBStateReader PLAY/PAUSE direct enabled via %s=1", PLAY_DIRECT_ENV)
+                if track_load_direct:
+                    log.info(
+                        "RBStateReader TRACK_LOADED direct enabled via %s=1",
+                        TRACK_LOAD_DIRECT_ENV,
+                    )
+                if master_direct:
+                    log.info("RBStateReader MASTER direct enabled via %s=1", MASTER_DIRECT_ENV)
 
     # Memory reader (with drift detection + FM-11 RB_RESTARTED events)
-    from .diagnostics import DriftDetector
     mem_reader = RBMemoryReader(
         pos_cache,
         drift_detector=DriftDetector(),
@@ -663,20 +671,20 @@ def main() -> None:
     mtc.start()
 
     # Start all components
-    if rb_parity is not None:
-        rb_parity.start()
     tailer.start()
     if rb_state_reader is not None:
         rb_state_reader.start()
-    if rb_master_runtime_observer is not None:
-        rb_master_runtime_observer.start()
     mem_reader.start()
     live_bpm.start()
     injector.start()
     sm_thread = sm.start()
 
     # OSC listener (scripted arm triggers)
-    start_osc_listener(event_queue, sm)
+    start_osc_listener(
+        event_queue,
+        sm,
+        master_direct_ready=_is_master_direct_ready if master_direct else None,
+    )
 
     log.info("rb_ss_bridge_v2 running — Ctrl-C to stop")
     LOG.start_control_watcher(log)
@@ -689,8 +697,6 @@ def main() -> None:
         tailer.stop()
         if rb_state_reader is not None:
             rb_state_reader.stop()
-        if rb_parity is not None:
-            rb_parity.stop()
         mem_reader.stop()
         live_bpm.stop()
         mtc.stop()

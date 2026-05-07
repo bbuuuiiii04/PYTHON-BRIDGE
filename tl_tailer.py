@@ -24,7 +24,9 @@ from .models import BridgeEvent, Ev
 
 log = logging.getLogger("tl_tailer")
 ANLZ_DIRECT_ENV = "RBSS_ANLZ_DIRECT"
+MASTER_DIRECT_ENV = "RBSS_MASTER_DIRECT"
 PLAY_DIRECT_ENV = "RBSS_PLAY_DIRECT"
+TRACK_LOAD_DIRECT_ENV = "RBSS_TRACK_LOAD_DIRECT"
 
 # ── Regexes ──────────────────────────────────────────────────────────────────
 
@@ -253,14 +255,18 @@ class TLLogTailer(threading.Thread):
         event_queue: queue.Queue[BridgeEvent],
         *,
         anlz_direct_ready: Optional[Callable[[int], bool]] = None,
+        master_direct_ready: Optional[Callable[[], bool]] = None,
         play_direct_ready: Optional[Callable[[int], bool]] = None,
+        track_load_direct_ready: Optional[Callable[[int], bool]] = None,
     ):
         super().__init__(name="tl-log-tailer", daemon=True)
         self._path  = log_path
         self._queue = event_queue
         self._stop  = threading.Event()
         self._anlz_direct_ready = anlz_direct_ready
+        self._master_direct_ready = master_direct_ready
         self._play_direct_ready = play_direct_ready
+        self._track_load_direct_ready = track_load_direct_ready
 
         # ANLZ stateful correlation
         self._last_anlz_beats: int = 0
@@ -327,6 +333,18 @@ class TLLogTailer(threading.Thread):
         except Exception:
             return False
 
+    def _track_load_direct_bypass_enabled(self, deck: int) -> bool:
+        if os.environ.get(TRACK_LOAD_DIRECT_ENV) != "1":
+            return False
+        if os.environ.get(ANLZ_DIRECT_ENV) != "1":
+            return False
+        if self._track_load_direct_ready is None:
+            return True
+        try:
+            return bool(self._track_load_direct_ready(deck))
+        except Exception:
+            return False
+
     def _anlz_direct_bypass_enabled(self, deck: int) -> bool:
         if os.environ.get(ANLZ_DIRECT_ENV) != "1":
             return False
@@ -334,6 +352,16 @@ class TLLogTailer(threading.Thread):
             return True
         try:
             return bool(self._anlz_direct_ready(deck))
+        except Exception:
+            return False
+
+    def _master_direct_bypass_enabled(self) -> bool:
+        if os.environ.get(MASTER_DIRECT_ENV) != "1":
+            return False
+        if self._master_direct_ready is None:
+            return True
+        try:
+            return bool(self._master_direct_ready())
         except Exception:
             return False
 
@@ -379,7 +407,11 @@ class TLLogTailer(threading.Thread):
         # ── Stateless events ──────────────────────────────────────────────────
         ev = parse_line(line)
         if ev is not None:
+            if ev.kind == Ev.MASTER_CHANGED and self._master_direct_bypass_enabled():
+                return
             if ev.kind in (Ev.PLAY, Ev.PAUSE) and self._play_direct_bypass_enabled(ev.deck):
+                return
+            if ev.kind == Ev.TRACK_LOADED and self._track_load_direct_bypass_enabled(ev.deck):
                 return
             self._enqueue(ev)
 
@@ -387,17 +419,17 @@ class TLLogTailer(threading.Thread):
         """Parse accumulated ENGINE STATE lines and emit MASTER_CHANGED + BPM_UPDATE events."""
         block = "\n".join(self._es_lines)
 
-        # Master deck — always emit so StateManager stays in sync even when TL
-        # doesn't fire an explicit 'Rekordbox master deck changed' line.
+        # Master deck fallback for periods where direct master is not ready.
         m = _RE_ES_MASTER.search(block)
         if m:
             idx  = _LETTER_TO_IDX.get(m.group(1), 1)
             deck = _bridge_deck(idx)
-            self._enqueue(BridgeEvent(
-                kind=Ev.MASTER_CHANGED,
-                deck=deck,
-                source='engine_state',
-            ))
+            if not self._master_direct_bypass_enabled():
+                self._enqueue(BridgeEvent(
+                    kind=Ev.MASTER_CHANGED,
+                    deck=deck,
+                    source='engine_state',
+                ))
 
         for m in _RE_ES_DECK.finditer(block):
             letter  = m.group(1)

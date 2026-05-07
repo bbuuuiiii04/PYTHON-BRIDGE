@@ -388,7 +388,12 @@ class StateManager:
         # and new deck has no scripted_id, transfer it.
         old_d = self._deck[old_deck]
         new_d = self._deck[new_deck]
-        if old_d.scripted_id > 0 and new_d.scripted_id == 0 and not old_d.playing:
+        if (
+            _os.environ.get("RBSS_SCRIPTED_DIRECT") != "1"
+            and old_d.scripted_id > 0
+            and new_d.scripted_id == 0
+            and not old_d.playing
+        ):
             log.debug("[D%d→D%d] transferring scripted_id=%d (OSC/switch race)",
                       old_deck, new_deck, old_d.scripted_id)
             new_d.scripted_id = old_d.scripted_id
@@ -491,7 +496,6 @@ class StateManager:
                  payload["filepath"].split("/")[-1], meta.bpm,
                  "yes" if meta.soundswitch_id else "no", load_delta_ms)
         if _os.environ.get("RBSS_RB_STATE_SHADOW") == "1":  # A6 shadow log
-            from .scripted_tracks import SCRIPTED_TRACKS
             ssid = meta.soundswitch_id
             if ssid:
                 scripted_id = next(
@@ -505,6 +509,69 @@ class StateManager:
                 log.info("[SCRIPTED][DIRECT] deck=%d scripted=no ssid=none latency_ms=%.1f",
                          deck, load_delta_ms)
         LOG.stats.record_transition(deck, "filepath_resolved")
+        if _os.environ.get("RBSS_SCRIPTED_DIRECT") == "1":
+            ssid = meta.soundswitch_id
+            filepath = meta.filepath
+            scripted_id = None
+            matched_by_filepath = False
+            if ssid:
+                scripted_id = next(
+                    (tid for tid, t in SCRIPTED_TRACKS.items() if t.get("ssid") == ssid),
+                    None,
+                )
+            if scripted_id is None and filepath:
+                filepath_matches = [
+                    tid for tid, t in SCRIPTED_TRACKS.items()
+                    if t.get("filepath") == filepath
+                ]
+                if len(filepath_matches) == 1:
+                    scripted_id = filepath_matches[0]
+                    matched_by_filepath = True
+                elif len(filepath_matches) > 1:
+                    log.info(
+                        "[SCRIPTED][DIRECT] deck=%d scripted=no filepath=%s "
+                        "ambiguous_matches=%d latency_ms=%.1f",
+                        deck,
+                        _os.path.basename(filepath),
+                        len(filepath_matches),
+                        load_delta_ms,
+                    )
+            if scripted_id is not None:
+                log_fn = log.warning if matched_by_filepath and not ssid else log.info
+                log_fn("[SCRIPTED][DIRECT] deck=%d scripted_id=%d ssid=%.8s latency_ms=%.1f",
+                       deck, scripted_id, ssid, load_delta_ms)
+                try:
+                    self._eq.put_nowait(BridgeEvent(
+                        kind=Ev.SCRIPTED_ARM,
+                        deck=deck,
+                        payload={"scripted_id": scripted_id},
+                        source="filepath_resolved",
+                    ))
+                except queue.Full:
+                    log.warning("[SCRIPTED][DIRECT] queue full; SCRIPTED_ARM dropped deck=%d",
+                                deck)
+            else:
+                if ssid:
+                    log.info(
+                        "[SCRIPTED][DIRECT] deck=%d scripted=no ssid=%.8s filepath=%s "
+                        "latency_ms=%.1f",
+                        deck,
+                        ssid,
+                        _os.path.basename(filepath) if filepath else "none",
+                        load_delta_ms,
+                    )
+                else:
+                    log.info("[SCRIPTED][DIRECT] deck=%d scripted=no ssid=none latency_ms=%.1f",
+                             deck, load_delta_ms)
+                try:
+                    self._eq.put_nowait(BridgeEvent(
+                        kind=Ev.SCRIPTED_CLEAR,
+                        deck=deck,
+                        source="filepath_resolved",
+                    ))
+                except queue.Full:
+                    log.warning("[SCRIPTED][DIRECT] queue full; SCRIPTED_CLEAR dropped deck=%d",
+                                deck)
 
     # ── Scripted arm / clear ──────────────────────────────────────────────────
 

@@ -118,6 +118,8 @@ class RBStateReader(threading.Thread):
         position_cache: Optional[PositionCache] = None,
         anlz_available_callback: Optional[Callable[[int, bool], None]] = None,
         transport_available_callback: Optional[Callable[[int, bool], None]] = None,
+        track_load_available_callback: Optional[Callable[[int, bool], None]] = None,
+        master_available_callback: Optional[Callable[[bool], None]] = None,
         clock=time.monotonic,
         sleeper=time.sleep,
     ) -> None:
@@ -142,6 +144,12 @@ class RBStateReader(threading.Thread):
         self._transport_available_callback = transport_available_callback
         self._transport_available_by_deck: dict[int, bool] = {}
         self._transport_readable_this_tick: set[int] = set()
+        self._track_load_available_callback = track_load_available_callback
+        self._track_load_available_by_deck: dict[int, bool] = {}
+        self._title_readable_this_tick: set[int] = set()
+        self._master_available_callback = master_available_callback
+        self._master_available: bool = False
+        self._master_readable_this_tick: bool = False
 
         # Per-deck last-seen state for diffing
         self._last_master: Optional[int] = None
@@ -159,6 +167,8 @@ class RBStateReader(threading.Thread):
         self._stop.set()
         self._set_all_anlz_unavailable()
         self._set_all_transport_unavailable()
+        self._set_all_track_load_unavailable()
+        self._set_all_master_unavailable()
 
     # ── Thread entry ─────────────────────────────────────────────────────────
     def run(self) -> None:
@@ -166,11 +176,15 @@ class RBStateReader(threading.Thread):
             log.info("RBStateReader disabled via %s", _RB_STATE_DISABLE_ENV)
             self._set_all_anlz_unavailable()
             self._set_all_transport_unavailable()
+            self._set_all_track_load_unavailable()
+            self._set_all_master_unavailable()
             return
         if self._offs is None:
             log.info("RBStateReader: no offsets for current RB version; not starting")
             self._set_all_anlz_unavailable()
             self._set_all_transport_unavailable()
+            self._set_all_track_load_unavailable()
+            self._set_all_master_unavailable()
             return
         try:
             task, base = self._attach()
@@ -178,6 +192,8 @@ class RBStateReader(threading.Thread):
             log.exception("RBStateReader: attach failed; falling back to TLLogTailer only")
             self._set_all_anlz_unavailable()
             self._set_all_transport_unavailable()
+            self._set_all_track_load_unavailable()
+            self._set_all_master_unavailable()
             return
         log.info("RBStateReader: attached pid=%s base=0x%x version=%s",
                  self._rb_pid, base, self._offs.version)
@@ -204,6 +220,8 @@ class RBStateReader(threading.Thread):
                 next_tick = self._clock()
         self._set_all_anlz_unavailable()
         self._set_all_transport_unavailable()
+        self._set_all_track_load_unavailable()
+        self._set_all_master_unavailable()
 
     # ── Attach helpers ───────────────────────────────────────────────────────
     def _attach(self) -> tuple[int, int]:
@@ -222,8 +240,12 @@ class RBStateReader(threading.Thread):
         assert offs is not None, "guarded in run()"
         self._anlz_readable_this_tick = set()
         self._transport_readable_this_tick = set()
+        self._title_readable_this_tick = set()
+        self._master_readable_this_tick = False
 
         master_raw = self._follow_u8(task, base, offs.master_deck)
+        if master_raw is not None:
+            self._master_readable_this_tick = True
         if master_raw is not None and master_raw != self._last_master:
             self._last_master = master_raw
             if 0 <= master_raw < offs.deck_count:
@@ -237,20 +259,43 @@ class RBStateReader(threading.Thread):
             self._tick_deck(task, base, d)
         self._update_anlz_available()
         self._update_transport_available()
+        self._update_track_load_available()
+        self._update_master_available()
 
     def _tick_deck(self, task: int, base: int, d: int) -> None:
         offs = self._offs
         assert offs is not None
         bridge = _bridge_deck(d)
 
+        # ANLZ path must be observed before TRACK_LOADED so StateManager
+        # consumes the fresh path for the same load generation.
+        anlz = self._follow_pointer_string(task, base, offs.anlz_path_per_deck[d])
+        prev_anlz = self._last_anlz.get(d)
+        if anlz != prev_anlz:
+            self._last_anlz[d] = anlz or ""
+            if anlz:
+                self._anlz_readable_this_tick.add(bridge)
+                if self._shadow_logs_enabled or Ev.ANLZ_PATH in self._authoritative_kinds:
+                    log.info("[ANLZ][DIRECT] deck=%d path=%s", bridge, anlz)
+                self._enqueue(BridgeEvent(
+                    kind=Ev.ANLZ_PATH,
+                    deck=bridge,
+                    payload={'anlz_path': anlz},
+                    source='rb_state',
+                ))
+        elif anlz:
+            self._anlz_readable_this_tick.add(bridge)
+
         # Track-info string — same chain TL uses for [EVENT] Deck X loaded:.
         # RB stores 500-byte buffer; TL parses "Title - Artist".
         track_info = self._follow_string(task, base, offs.track_info_per_deck[d], 500)
         if track_info is not None:
+            if track_info:
+                self._title_readable_this_tick.add(bridge)
             title = extract_track_title(track_info)
             if title and title != self._last_track.get(d):
                 self._last_track[d] = title
-                if self._shadow_logs_enabled:
+                if self._shadow_logs_enabled or Ev.TRACK_LOADED in self._authoritative_kinds:
                     log.info("[TITLE][DIRECT] deck=%d title=%r", bridge, title)  # A5 shadow log
                 self._enqueue(BridgeEvent(
                     kind=Ev.TRACK_LOADED,
@@ -273,27 +318,6 @@ class RBStateReader(threading.Thread):
                     payload={'bpm': bpm},
                     source='rb_state',
                 ))
-
-        # ANLZ path — shadow parity evidence only.
-        # Chain format: readPointer + readString (pointer at chain endpoint,
-        # string at that pointer). Routed to shadow queue; does not reach the
-        # authoritative StateManager path unless RBSS_RB_STATE_SHADOW=1 is set.
-        anlz = self._follow_pointer_string(task, base, offs.anlz_path_per_deck[d])
-        prev_anlz = self._last_anlz.get(d)
-        if anlz != prev_anlz:
-            self._last_anlz[d] = anlz or ""
-            if anlz:
-                self._anlz_readable_this_tick.add(bridge)
-                if self._shadow_logs_enabled or Ev.ANLZ_PATH in self._authoritative_kinds:
-                    log.info("[ANLZ][DIRECT] deck=%d path=%s", bridge, anlz)
-                self._enqueue(BridgeEvent(
-                    kind=Ev.ANLZ_PATH,
-                    deck=bridge,
-                    payload={'anlz_path': anlz},
-                    source='rb_state',
-                ))
-        elif anlz:
-            self._anlz_readable_this_tick.add(bridge)
 
         # Play / pause inference: position field movement between polls.
         pos = self._follow_i64(task, base, offs.live_pos_per_deck[d])
@@ -417,6 +441,53 @@ class RBStateReader(threading.Thread):
             self._transport_available_callback(deck, available)
         except Exception:
             log.debug("RBStateReader transport availability callback failed", exc_info=True)
+
+    def _update_track_load_available(self) -> None:
+        if Ev.TRACK_LOADED not in self._authoritative_kinds:
+            return
+        for bridge in (1, 2):
+            self._set_track_load_available(bridge, bridge in self._title_readable_this_tick)
+
+    def _set_all_track_load_unavailable(self) -> None:
+        for bridge in (1, 2):
+            self._set_track_load_available(bridge, False)
+
+    def _set_track_load_available(self, deck: int, available: bool) -> None:
+        if self._track_load_available_by_deck.get(deck, False) == available:
+            return
+        self._track_load_available_by_deck[deck] = available
+        if self._track_load_available_callback is None:
+            return
+        try:
+            self._track_load_available_callback(deck, available)
+        except Exception:
+            log.debug("RBStateReader track_load availability callback failed", exc_info=True)
+
+    def _update_master_available(self) -> None:
+        if Ev.MASTER_CHANGED not in self._authoritative_kinds:
+            return
+        offs = self._offs
+        ready = (
+            offs is not None
+            and self._master_readable_this_tick
+            and self._last_master is not None
+            and 0 <= self._last_master < offs.deck_count
+        )
+        self._set_master_available(ready)
+
+    def _set_all_master_unavailable(self) -> None:
+        self._set_master_available(False)
+
+    def _set_master_available(self, available: bool) -> None:
+        if self._master_available == available:
+            return
+        self._master_available = available
+        if self._master_available_callback is None:
+            return
+        try:
+            self._master_available_callback(available)
+        except Exception:
+            log.debug("RBStateReader master availability callback failed", exc_info=True)
 
     # ── Queue helper ─────────────────────────────────────────────────────────
     def _enqueue(self, ev: BridgeEvent) -> None:

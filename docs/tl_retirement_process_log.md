@@ -34,12 +34,14 @@ implement a B item without a kill-switch. Never skip the prerequisite sequence
 - TL remains authoritative unless a later explicit, narrow migration changes
   one signal with fail-closed behavior.
 - No direct master authority has been promoted.
-- No play/pause, track-load, timing, scripted-routing, ANLZ, or TL TC authority
-  has been promoted.
+- Guarded direct authority has been promoted for B1 ANLZ, B2 position chain,
+  B3 play/pause, B4 track-load, and B5 scripted arm/clear. Runtime master and
+  TL TC fallback remain TL-authoritative.
 
 ## Current Repo State
 
-- `TLLogTailer` remains authoritative for TL log and ENGINE STATE events.
+- `TLLogTailer` remains authoritative for TL log and ENGINE STATE events except
+  for the narrow guarded B1/B3/B4 bypasses described below.
 - `LiveBPMService` is the strongest direct-first subsystem and already uses
   offset-table BPM when valid.
 - Direct master support exists as:
@@ -49,7 +51,8 @@ implement a B item without a kill-switch. Never skip the prerequisite sequence
   - TL-only `TLMasterSnapshot` comparison source
 - Direct master logs remain observational and use `authority=tl_log`.
 - Direct master runtime comparison uses `comparison_source=tl_master_snapshot`.
-- `rb_memory.py` remains unchanged in this process.
+- `RBMemoryReader` can use the guarded B2 direct position chain; ObjC discovery
+  remains fallback/validation.
 - Lighting/output behavior remains unchanged.
 
 ## Direct BPM Status
@@ -781,11 +784,73 @@ TL (usually 0–48ms ahead), produces fuller/more accurate titles (TL truncates
 long names), handles hot-swap and startup correctly. B4 (track load/title
 retirement) is supported.
 
-**B4 — AWAITING AUTHORIZATION** (2026-05-07): wire `Ev.TRACK_LOADED` from
-RBStateReader to the authoritative queue, add `RBSS_TRACK_LOAD_DIRECT=1`
-kill-switch. FilepathResolver will receive full (non-truncated) titles from
-rb_state vs the 50-char TL truncation. Prerequisites: B1, B2, B3 must land
-first.
+**B4 — IMPLEMENTED / AWAITING LIVE VALIDATION** (2026-05-07): wired
+`Ev.TRACK_LOADED` from `RBStateReader` to the authoritative queue behind
+`RBSS_TRACK_LOAD_DIRECT=1`.
+
+Implemented behavior:
+
+- `tl_tailer.py`: added `TRACK_LOAD_DIRECT_ENV` and a
+  `track_load_direct_ready(deck)` readiness gate. TL `TRACK_LOADED` is bypassed
+  only when `RBSS_TRACK_LOAD_DIRECT=1`, `RBSS_ANLZ_DIRECT=1`, and direct title
+  memory is ready for that bridge deck. Without B1 ANLZ direct, B4 fails closed
+  and TL load events remain authoritative.
+- `rb_state_reader.py`: added track-load availability tracking and direct
+  `TRACK_LOADED` routing through `authoritative_kinds`. Direct title readiness
+  requires a non-empty readable title buffer.
+- `rb_state_reader.py`: reordered `_tick_deck()` so direct ANLZ reads/enqueues
+  before direct track-info / `TRACK_LOADED` reads in the same tick. This is a
+  critical ordering invariant because `StateManager._on_track_loaded()` pops
+  `_pending_anlz_path[deck]` when the load event arrives.
+- `__main__.py`: added `RBSS_TRACK_LOAD_DIRECT` startup flag, ready-state
+  callback pair, `Ev.TRACK_LOADED` promotion, and startup log. The flag is
+  ignored with a warning unless `RBSS_ANLZ_DIRECT=1` is also set.
+- `scripts/ss_bridge_watcher.sh` and the live `/Users/bbui/ss_bridge_watcher.sh`
+  now launch with `RBSS_TRACK_LOAD_DIRECT=1` alongside the existing B1/B2/C1/B3
+  env vars.
+
+Review follow-up from Claude Code:
+
+- Fixed the deployed-watcher gap: the live `/Users/bbui/ss_bridge_watcher.sh`
+  was updated, not just the repo copy.
+- Converted the B4-without-B1 risk from silent filepath-resolution degradation
+  into fail-closed TL fallback.
+- Tightened `_title_readable_this_tick` so empty title buffers do not mark a
+  deck ready.
+
+Unit validation:
+
+- `python3 -m unittest tests.test_tl_tailer tests.test_rb_state_reader`
+  → 63 tests passed.
+- `python3 -m unittest discover -s tests`
+  → 197 tests passed.
+
+**B4 — LIVE VALIDATION CONFIRMED** (2026-05-07):
+
+Run conditions:
+- `RBSS_ANLZ_DIRECT=1 RBSS_POS_CHAIN_DIRECT=1 RBSS_MASTER_SEED_DIRECT=1 RBSS_PLAY_DIRECT=1 RBSS_TRACK_LOAD_DIRECT=1`
+- `RBSS_LIVE_BPM_FOLLOW=1`
+- RB version 7.2.11; no deck loaded at bridge start; rapid-fire load sequence
+  across both decks immediately after startup
+
+Scenarios covered and results:
+
+- 10 total TRACK_LOADED events (5 per deck, load_gen 1–5): all `src=rb_state` ✓
+- Zero `src=tl_log` TRACK_LOADED events on either deck ✓
+- ANLZ ordering invariant held on all 10 loads: every load in the log shows
+  `[ANLZ][DIRECT]` → `[TITLE][DIRECT]` → `TRACK_LOADED` in strict order ✓
+- Full non-truncated titles confirmed (e.g. "How Deep Is Your Love Vs. Glue
+  (G-Fire Mashup) (Clean) 9A 130", "Charli xcx - 365 (Whethan Turn)") ✓
+- `FILEPATH_RESOLVED [src=anlz]` followed every load on both decks;
+  trace IDs matched TRACK_LOADED → FILEPATH_RESOLVED on all 10 loads ✓
+- FILEPATH_RESOLVED latencies: 304–416ms ✓
+- Auto-switch (D1→D2, D2→D1) and master changes unaffected ✓
+- C1 fail-closed confirmed: `direct=none tl=deck1 using=tl reason=no_master`
+  (no deck loaded at startup) ✓
+
+Conclusion: B4 is confirmed working. Direct TRACK_LOADED is the authoritative
+source for both decks. TL bypass is complete and fail-closed. B5 authorization
+is the next step.
 
 ---
 
@@ -856,11 +921,117 @@ unscripted tracks, always routes to the correct deck (4/4), fires within
 in this single session. B5 (scripted routing retirement) is supported, and the
 direct path is more reliable than TL OSC for deck routing.
 
-**B5 — AWAITING AUTHORIZATION** (2026-05-07): retire TL OSC `/bridge/track_loaded`
-scripted arm. Replace with FILEPATH_RESOLVED → ssid lookup → SCRIPTED_TRACKS →
-SCRIPTED_ARM. Gate arm on `deck == master OR deck just became master`. Add
-`RBSS_SCRIPTED_DIRECT=1` kill-switch. Prerequisites: B1, B2, B3, B4 must land
-first. Highest-risk retirement item — last in sequence.
+**B5 — IMPLEMENTED / AWAITING LIVE VALIDATION** (2026-05-07): retired TL OSC
+`/bridge/track_loaded` scripted arm behind `RBSS_SCRIPTED_DIRECT=1`.
+
+Implemented behavior:
+
+- `__main__.py`: added `SCRIPTED_DIRECT_ENV = "RBSS_SCRIPTED_DIRECT"`.
+- `__main__.py`: `_track_loaded()` now returns after parsing the track id when
+  `RBSS_SCRIPTED_DIRECT=1`, so TL OSC no longer enqueues `SCRIPTED_ARM` /
+  `SCRIPTED_CLEAR`. `_active_deck()` is untouched, so TL OSC master routing
+  remains active.
+- `__main__.py`: startup log confirms direct mode:
+  `scripted arm direct enabled via RBSS_SCRIPTED_DIRECT=1 - _track_loaded bypassed`.
+- `state_manager.py`: `_on_filepath_resolved()` now performs the A6-proven
+  `soundswitch_id` → `SCRIPTED_TRACKS` lookup when `RBSS_SCRIPTED_DIRECT=1`.
+  If ssid is empty or unmatched, it falls back to a unique filepath match in
+  `SCRIPTED_TRACKS`; this preserves scripted tracks whose SoundSwitch id tag is
+  absent and lets SoundSwitch match the show by filepath. It then enqueues
+  `Ev.SCRIPTED_ARM` or `Ev.SCRIPTED_CLEAR` with `source="filepath_resolved"`
+  onto the same event queue. The event is drained on the next iteration of the
+  same `_drain_events()` cycle.
+- `state_manager.py`: the legacy OSC/switch-race scripted-id transfer in
+  `_on_master_changed()` is disabled while `RBSS_SCRIPTED_DIRECT=1`, because
+  direct FILEPATH_RESOLVED deck identity is already correct and copying from
+  the old deck can arm a stale show on an unscripted incoming deck.
+- `scripts/ss_bridge_watcher.sh` and live `/Users/bbui/ss_bridge_watcher.sh`
+  now launch with `RBSS_SCRIPTED_DIRECT=1` alongside B1-B4 direct flags.
+
+Unit validation:
+
+- `python3 -m unittest tests.test_tl_tailer tests.test_live_bpm_service`
+  → 86 tests passed.
+- Claude review follow-up added filepath-fallback coverage for empty ssid,
+  unmatched ssid, and ambiguous filepath matches.
+- Log-level policy: ssid-present misses and ambiguous filepath matches stay at
+  INFO. The only non-queue WARNING in the direct lookup path is a successful
+  unique filepath fallback when ssid is empty.
+
+Live validation — 2026-05-07:
+
+Run conditions:
+
+- `RBSS_SCRIPTED_DIRECT=1 RBSS_TRACK_LOAD_DIRECT=1 RBSS_ANLZ_DIRECT=1`
+  (plus `RBSS_LIVE_BPM_FOLLOW=1 RBSS_POS_CHAIN_DIRECT=1 RBSS_MASTER_SEED_DIRECT=1
+  RBSS_PLAY_DIRECT=1`)
+- RB version 7.2.11, bridge started via manual session terminal
+
+Observed:
+
+- Startup bypass confirmed:
+  `04:19:50 scripted arm direct enabled via RBSS_SCRIPTED_DIRECT=1 - _track_loaded bypassed`
+
+- Scripted track load, deck=1 (Kesha - Blow, id=15):
+  `TRACK_LOADED title=Kesha - Blow ... [deck=1 src=rb_state tr:a4f9a7]`
+  `FILEPATH_RESOLVED path=Kesha - Blow ....wav bpm=130.0 ssid=yes [deck=1 src=anlz tr:a4f9a7]`
+  `[SCRIPTED][DIRECT] deck=1 scripted_id=15 ssid={F1E0AB4 latency_ms=431.8 [deck=1 src=anlz tr:a4f9a7]`
+  `SCRIPTED_ARM id=15 path=Kesha - Blow ....wav elapsed=48ms bpm=130.0`
+  Source is `rb_state`, not `tl_log`. Arm fires 48ms after FILEPATH_RESOLVED.
+  No `_track_loaded` OSC arm path in the log.
+
+- Scripted track load, deck=2 (Opalite, id=14):
+  `[SCRIPTED][DIRECT] deck=2 scripted_id=14 ssid={74044FA latency_ms=466.7 [deck=2 src=anlz tr:156d8f]`
+  `MASTER_CHANGED deck1 -> deck2 reason=tl_log`
+  `SCRIPTED_ARM id=14 path=Taylor Swift - Opalite ....mp3 elapsed=14823ms bpm=130.0`
+  Arm deferred correctly until deck became master. `/bridge/active_deck` path functional.
+
+- Second scripted load, deck=1 (Lowkey, id=5):
+  `[SCRIPTED][DIRECT] deck=1 scripted_id=5 ssid={E36664D latency_ms=786.4 [deck=1 src=anlz tr:78f143]`
+  `MASTER_CHANGED deck2 -> deck1 reason=tl_log`
+  `SCRIPTED_ARM id=5 path=Scilo - Lowkey (Original Mix).wav elapsed=3662ms bpm=130.0`
+  Correct deck, correct id.
+
+- Auto-switch master recovery:
+  `MASTER_CHANGED deck2 -> deck1 reason=pause auto-switch`
+  `SCRIPTED_ARM id=5 path=Scilo - Lowkey (Original Mix).wav elapsed=48825ms bpm=130.0`
+  Re-arms scripted deck on auto-switch ✓. Old `_on_master_changed` scripted-id
+  transfer from the outgoing deck did not fire — direct deck identity used throughout.
+
+- Unscripted track, deck=2 (OMG.wav):
+  `FILEPATH_RESOLVED path=OMG.wav bpm=127.0 ssid=no [deck=2 src=anlz tr:5d40c9]`
+  `[SCRIPTED][DIRECT] deck=2 scripted=no ssid=none latency_ms=659.0 [deck=2 src=anlz tr:5d40c9]`
+  `[D2] scripted cleared [deck=2 src=filepath_resolved tr:5d40c9]`
+  `MASTER_CHANGED deck1 -> deck2 reason=tl_log`
+  `[SS]  → autoloop  deck=2  elapsed=4656ms`
+  SCRIPTED_CLEAR fires at FILEPATH_RESOLVED. Master change goes to autoloop,
+  not scripted arm. No spurious SCRIPTED_ARM.
+
+- Filepath fallback edge case: not exercised this session. No WARNING-level
+  filepath fallback events fired. All scripted matches resolved via ssid.
+
+Known anomaly (non-blocking):
+
+  The `[SCRIPTED][DIRECT]` log line shows truncated ssid values: `ssid={F1E0AB4`
+  with no closing `}`. Appears to be a format string issue — the `}` is consumed
+  as a format placeholder. Arming behavior is correct in all cases; this is a
+  cosmetic log defect only.
+
+Judgment: CONFIRMED. B5 is live-safe.
+
+- Deck correctness: all arms matched the loaded track's deck ✓
+- Direct source correctness: all TRACK_LOADED from `rb_state`, FILEPATH_RESOLVED
+  from `anlz` ✓
+- Scripted behavior: `SCRIPTED_ARM` on ssid=yes, correct id and deck ✓
+- Unscripted behavior: `SCRIPTED_CLEAR` on ssid=no, no spurious arm ✓
+- `/bridge/active_deck` functional: `MASTER_CHANGED` via tl_log path active ✓
+- No filepath fallback or WARNING path fired ✓
+
+Open items:
+
+- Restart with `RBSS_SCRIPTED_DIRECT` unset to confirm legacy TL OSC scripted
+  routing still works (skipped; low priority since legacy path is unchanged).
+- Fix the `ssid={...` truncation in the `[SCRIPTED][DIRECT]` log format string.
 
 ---
 
@@ -992,9 +1163,92 @@ User decision on 2026-05-07: flag these as untested and skip them for now.
 
 Do not:
 
-- promote RBStateReader events to the authoritative queue (not justified yet)
 - remove TLLogTailer or MTCReader (prerequisites not met)
 - add broad source arbitration to StateManager (not a current design target)
+- retire scripted routing until B5 is explicitly authorized
+
+**B6 — IMPLEMENTED / AWAITING LIVE VALIDATION** (2026-05-07): retired TL OSC
+`/bridge/active_deck` as the runtime master-change relay behind
+`RBSS_MASTER_DIRECT=1`.
+
+Implemented behavior:
+
+- `__main__.py`: added `MASTER_DIRECT_ENV = "RBSS_MASTER_DIRECT"`.
+- When `RBSS_MASTER_DIRECT=1`, the main `RBStateReader` starts if needed and
+  routes `Ev.MASTER_CHANGED` with `source='rb_state'` to the authoritative
+  queue.
+- `RBStateReader` now exposes a single direct-master readiness callback.
+  Readiness is true only when the most recent tick read the master byte and the
+  raw value is a valid Rekordbox deck index for the current offset table.
+- `0xFF` sentinel remains a no-event direct-master baseline update, and now
+  marks direct master not ready so OSC can fall back.
+- OSC `/bridge/active_deck` returns without enqueueing only while
+  `RBSS_MASTER_DIRECT=1` and direct master is currently ready. If the direct
+  chain is unreadable, missing, sentinel, or not yet warmed up, OSC remains the
+  fail-closed fallback.
+- TL log `MASTER_CHANGED` from ordinary TL log lines and ENGINE STATE master
+  blocks is bypassed only while `RBSS_MASTER_DIRECT=1` and direct master is
+  currently ready. If direct master is not ready, TL master remains the
+  fail-closed fallback. ENGINE STATE BPM and TC fallback events still flow.
+- `DirectMasterRuntimeObserver` remains shadow-only and uses its independent
+  ephemeral reader for comparison against `TLMasterSnapshot`.
+
+Live validation — 2026-05-07:
+
+Run conditions:
+
+- Full B1–B6 flag set:
+  `RBSS_LIVE_BPM_FOLLOW=1 RBSS_ANLZ_DIRECT=1 RBSS_POS_CHAIN_DIRECT=1
+  RBSS_MASTER_SEED_DIRECT=1 RBSS_MASTER_DIRECT=1 RBSS_PLAY_DIRECT=1
+  RBSS_TRACK_LOAD_DIRECT=1 RBSS_SCRIPTED_DIRECT=1`
+- RB version 7.2.11, manual terminal session
+
+Observed:
+
+- Startup confirmation:
+  `04:51:38 RBStateReader MASTER direct enabled via RBSS_MASTER_DIRECT=1`
+  All B1–B6 direct flags confirmed active in a single session.
+
+- 0xFF readiness gate (no deck loaded):
+  `[RBMASTER][DIRECT] raw=255 direct_master=none reason=no_master authority=tl_log`
+  `[MASTER-SEED] direct=none tl=deck2 using=tl reason=no_master`
+  `StateManager: initial active_deck=2 (from TL ENGINE STATE)`
+  Runtime summary: `outcome=never_became_valid final_raw=255 transition_count=0 mismatches=0`
+  Sentinel correctly suppressed event and fail-closed to TL seed ✓
+
+- First transition before ready (fail-closed):
+  `MASTER_CHANGED deck2 -> deck1 reason=auto-detect [deck=1 src=auto-detect tr:c45c80]`
+  Direct reader not yet ready (raw still 0xFF); auto-detect fallback fired as expected ✓
+
+- Direct master takes over — 5 consecutive transitions:
+  `04:52:20 MASTER_CHANGED deck1 -> deck2 reason=rb_state [deck=2 src=rb_state tr:5b9ed0]`
+  `04:52:24 MASTER_CHANGED deck2 -> deck1 reason=rb_state [deck=1 src=rb_state tr:1a151d]`
+  `04:52:28 MASTER_CHANGED deck1 -> deck2 reason=rb_state [deck=2 src=rb_state tr:d42fa0]`
+  `04:52:30 MASTER_CHANGED deck2 -> deck1 reason=rb_state [deck=1 src=rb_state tr:d501c0]`
+  `04:52:34 MASTER_CHANGED deck1 -> deck2 reason=rb_state [deck=2 src=rb_state tr:bf95c4]`
+  All 5/5 transitions: correct deck, correct source ✓
+
+- TL log suppression:
+  Zero `reason=tl_log` MASTER_CHANGED events after readiness established.
+  No duplicate events per transition. `_master_direct_bypass_enabled()` working ✓
+
+- SoundSwitch propagation:
+  All 5 autoloop arms confirm `master_source=rb_state` ✓
+
+- B5 interop: all unscripted loads correctly ran `[SCRIPTED][DIRECT] scripted=no`
+  and `scripted cleared` with no interference from B6 ✓
+
+- Restart without RBSS_MASTER_DIRECT: not exercised in this session (low priority;
+  OSC path is unchanged).
+
+Judgment: CONFIRMED. B6 is live-safe.
+
+- Deck correctness: 5/5 ✓
+- Direct source correctness: `rb_state` after readiness, `auto-detect` before ✓
+- 0xFF suppression: no spurious event, fail-closed to TL ✓
+- TL log suppression: no duplicates ✓
+- SoundSwitch master_source correct ✓
+- B5 interop: unaffected ✓
 
 ## Update Rule For Future Agents
 

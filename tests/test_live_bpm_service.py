@@ -23,6 +23,7 @@ from rb_ss_bridge_v2.live_bpm import (
 from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot, TrackMetadata
 from rb_ss_bridge_v2.rb_offsets import ChainEntry, RBOffsetVersion
 from rb_ss_bridge_v2.rb_memory import PositionCache
+from rb_ss_bridge_v2 import state_manager as sm_mod
 from rb_ss_bridge_v2.state_manager import (
     StateManager,
     _beatgrid_elapsed_for_abs_beat,
@@ -1109,6 +1110,210 @@ class StateManagerLiveBPMTests(unittest.TestCase):
 
         self.assertTrue(output.elapsed)
         self.assertEqual(output.elapsed[-1][2], 3.0)
+
+    def test_scripted_direct_arms_from_filepath_resolved_same_drain_cycle(self) -> None:
+        q: queue.Queue = queue.Queue()
+        sm = StateManager(
+            q, PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].load_gen = 7
+        payload = {
+            "load_gen": 7,
+            "filepath": "/tmp/scripted.wav",
+            "bpm": 128.0,
+            "content_id": "content",
+            "first_beat_ms": 0.0,
+            "soundswitch_id": "ssid-scripted",
+            "total_ms": 180000,
+        }
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            with patch.dict(sm_mod.SCRIPTED_TRACKS, {900: {"ssid": "ssid-scripted"}}, clear=True):
+                sm._on_filepath_resolved(1, payload)
+                self.assertEqual(q.qsize(), 1)
+                sm._drain_events()
+
+        self.assertEqual(sm._deck[1].scripted_id, 900)
+
+    def test_scripted_direct_clears_unscripted_from_filepath_resolved(self) -> None:
+        q: queue.Queue = queue.Queue()
+        sm = StateManager(
+            q, PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].load_gen = 3
+        sm._deck[1].scripted_id = 42
+        sm._deck[1].meta.soundswitch_id = "old"
+        payload = {
+            "load_gen": 3,
+            "filepath": "/tmp/unscripted.wav",
+            "bpm": 124.0,
+            "content_id": "content",
+            "first_beat_ms": 0.0,
+            "soundswitch_id": "",
+            "total_ms": 180000,
+        }
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            sm._on_filepath_resolved(1, payload)
+            self.assertEqual(q.qsize(), 1)
+            sm._drain_events()
+
+        self.assertEqual(sm._deck[1].scripted_id, 0)
+        self.assertEqual(sm._deck[1].meta.soundswitch_id, "")
+
+    def test_scripted_direct_arms_empty_ssid_track_by_unique_filepath(self) -> None:
+        q: queue.Queue = queue.Queue()
+        sm = StateManager(
+            q, PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].load_gen = 8
+        payload = {
+            "load_gen": 8,
+            "filepath": "/tmp/empty-ssid-scripted.wav",
+            "bpm": 128.0,
+            "content_id": "content",
+            "first_beat_ms": 0.0,
+            "soundswitch_id": "",
+            "total_ms": 180000,
+        }
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            with patch.dict(
+                sm_mod.SCRIPTED_TRACKS,
+                {901: {"ssid": "", "filepath": "/tmp/empty-ssid-scripted.wav"}},
+                clear=True,
+            ):
+                with self.assertLogs("state_manager", level="WARNING") as logs:
+                    sm._on_filepath_resolved(1, payload)
+                self.assertEqual(q.qsize(), 1)
+                sm._drain_events()
+
+        self.assertTrue(any("scripted_id=901" in line for line in logs.output))
+        self.assertEqual(sm._deck[1].scripted_id, 901)
+
+    def test_scripted_direct_arms_unmatched_ssid_track_by_unique_filepath(self) -> None:
+        q: queue.Queue = queue.Queue()
+        sm = StateManager(
+            q, PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].load_gen = 9
+        payload = {
+            "load_gen": 9,
+            "filepath": "/tmp/path-fallback-scripted.wav",
+            "bpm": 128.0,
+            "content_id": "content",
+            "first_beat_ms": 0.0,
+            "soundswitch_id": "new-ssid",
+            "total_ms": 180000,
+        }
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            with patch.dict(
+                sm_mod.SCRIPTED_TRACKS,
+                {902: {"ssid": "old-ssid", "filepath": "/tmp/path-fallback-scripted.wav"}},
+                clear=True,
+            ):
+                with self.assertLogs("state_manager", level="INFO") as logs:
+                    sm._on_filepath_resolved(1, payload)
+                self.assertEqual(q.qsize(), 1)
+                sm._drain_events()
+
+        self.assertTrue(any("scripted_id=902" in line for line in logs.output))
+        self.assertFalse(any("WARNING" in line for line in logs.output))
+        self.assertEqual(sm._deck[1].scripted_id, 902)
+
+    def test_scripted_direct_does_not_arm_ambiguous_filepath_match(self) -> None:
+        q: queue.Queue = queue.Queue()
+        sm = StateManager(
+            q, PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].load_gen = 10
+        sm._deck[1].scripted_id = 42
+        payload = {
+            "load_gen": 10,
+            "filepath": "/tmp/ambiguous.wav",
+            "bpm": 128.0,
+            "content_id": "content",
+            "first_beat_ms": 0.0,
+            "soundswitch_id": "",
+            "total_ms": 180000,
+        }
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            with patch.dict(
+                sm_mod.SCRIPTED_TRACKS,
+                {
+                    903: {"ssid": "", "filepath": "/tmp/ambiguous.wav"},
+                    904: {"ssid": "", "filepath": "/tmp/ambiguous.wav"},
+                },
+                clear=True,
+            ):
+                with self.assertLogs("state_manager", level="INFO") as logs:
+                    sm._on_filepath_resolved(1, payload)
+                self.assertEqual(q.qsize(), 1)
+                sm._drain_events()
+
+        self.assertTrue(any("ambiguous_matches=2" in line for line in logs.output))
+        self.assertFalse(any("WARNING" in line for line in logs.output))
+        self.assertEqual(sm._deck[1].scripted_id, 0)
+
+    def test_scripted_direct_disabled_does_not_enqueue_from_filepath_resolved(self) -> None:
+        q: queue.Queue = queue.Queue()
+        sm = StateManager(
+            q, PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].load_gen = 5
+        payload = {
+            "load_gen": 5,
+            "filepath": "/tmp/scripted.wav",
+            "bpm": 128.0,
+            "content_id": "content",
+            "first_beat_ms": 0.0,
+            "soundswitch_id": "ssid-scripted",
+            "total_ms": 180000,
+        }
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(sm_mod.SCRIPTED_TRACKS, {900: {"ssid": "ssid-scripted"}}, clear=True):
+                sm._on_filepath_resolved(1, payload)
+
+        self.assertTrue(q.empty())
+        self.assertEqual(sm._deck[1].scripted_id, 0)
+
+    def test_master_change_transfer_runs_only_for_tl_osc_scripted_path(self) -> None:
+        sm = StateManager(
+            queue.Queue(), PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._os.active_deck = 1
+        sm._deck[1].scripted_id = 77
+        sm._deck[1].playing = False
+
+        with patch.dict(os.environ, {}, clear=True):
+            sm._on_master_changed(2, "osc")
+
+        self.assertEqual(sm._deck[1].scripted_id, 0)
+        self.assertEqual(sm._deck[2].scripted_id, 77)
+
+        sm = StateManager(
+            queue.Queue(), PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._os.active_deck = 1
+        sm._deck[1].scripted_id = 77
+        sm._deck[1].playing = False
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            sm._on_master_changed(2, "osc")
+
+        self.assertEqual(sm._deck[1].scripted_id, 77)
+        self.assertEqual(sm._deck[2].scripted_id, 0)
 
     def test_autoloop_beat_boundary_uses_grid_absolute_index(self) -> None:
         for beat in (2, 4, 8, 16):

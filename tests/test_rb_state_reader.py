@@ -132,6 +132,92 @@ class TickEventTests(unittest.TestCase):
         masters = [e for e in _drain(self.q) if e.kind == Ev.MASTER_CHANGED]
         self.assertEqual(len(masters), 1)
 
+    def test_master_direct_routes_to_authoritative_queue(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.MASTER_CHANGED},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x01")
+
+        reader._tick(0xCAFE, self.base)
+
+        self.assertEqual(_drain(self.q), [])
+        ev = auth_q.get_nowait()
+        self.assertEqual(ev.kind, Ev.MASTER_CHANGED)
+        self.assertEqual(ev.deck, 2)
+        self.assertEqual(ev.source, "rb_state")
+
+    def test_master_availability_callback_fires_true_on_valid_master(self) -> None:
+        states: list[bool] = []
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_kinds={Ev.MASTER_CHANGED},
+            rb_pid=12345,
+            base_addr=self.base,
+            master_available_callback=states.append,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x00")
+
+        reader._tick(0xCAFE, self.base)
+
+        self.assertIn(True, states)
+
+    def test_master_availability_callback_fires_false_on_sentinel(self) -> None:
+        states: list[bool] = []
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_kinds={Ev.MASTER_CHANGED},
+            rb_pid=12345,
+            base_addr=self.base,
+            master_available_callback=states.append,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x00")
+        reader._tick(0xCAFE, self.base)
+        states.clear()
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+
+        reader._tick(0xCAFE, self.base)
+
+        self.assertIn(False, states)
+
+    def test_master_availability_no_callback_without_authoritative_kind(self) -> None:
+        states: list[bool] = []
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            rb_pid=12345,
+            base_addr=self.base,
+            master_available_callback=states.append,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x00")
+
+        reader._tick(0xCAFE, self.base)
+
+        self.assertEqual(states, [])
+
+    def test_sentinel_updates_baseline_emits_no_master_event(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        self.reader._tick(0xCAFE, self.base)
+
+        masters = [e for e in _drain(self.q) if e.kind == Ev.MASTER_CHANGED]
+        self.assertEqual(masters, [])
+        self.assertEqual(self.reader._last_master, 0xFF)
+
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x01")
+        self.reader._tick(0xCAFE, self.base)
+        masters = [e for e in _drain(self.q) if e.kind == Ev.MASTER_CHANGED]
+        self.assertEqual(len(masters), 1)
+        self.assertEqual(masters[0].deck, 2)
+
     # ── track loaded ────────────────────────────────────────────────────────
     def test_track_loaded_emits_with_title(self) -> None:
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
@@ -335,6 +421,68 @@ class TickEventTests(unittest.TestCase):
         self.assertEqual(events[0].source, "rb_state")
         self.assertEqual(events[0].payload["anlz_path"], "/tmp/ANLZ0000.DAT")
 
+    def test_authoritative_track_loaded_routes_only_load_events(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.TRACK_LOADED},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x01")
+        self.mem.install_chain(
+            self.base,
+            self.offs.track_info_per_deck[0],
+            payload=b"Direct Loaded Title\x00",
+        )
+
+        reader._tick(0xCAFE, self.base)
+
+        self.assertEqual(_drain(self.q), [])
+        events = _drain(auth_q)
+        self.assertEqual([(e.kind, e.deck, e.source) for e in events], [
+            (Ev.TRACK_LOADED, 1, "rb_state"),
+        ])
+        self.assertEqual(events[0].payload["title"], "Direct Loaded Title")
+
+    def test_authoritative_anlz_precedes_track_loaded_in_same_tick(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.ANLZ_PATH, Ev.TRACK_LOADED},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.anlz_path_per_deck[0],
+            payload=(0).to_bytes(8, "little"),
+        )
+        path_addr = 0xABCDEF00
+        self.mem.update_leaf(endpoint, path_addr.to_bytes(8, "little"))
+        self.mem.leaf[path_addr] = b"/tmp/FRESH_ANLZ.DAT\x00"
+        self.mem.install_chain(
+            self.base,
+            self.offs.track_info_per_deck[0],
+            payload=b"Fresh Direct Title\x00",
+        )
+
+        reader._tick(0xCAFE, self.base)
+
+        events = _drain(auth_q)
+        self.assertEqual([e.kind for e in events], [Ev.ANLZ_PATH, Ev.TRACK_LOADED])
+        self.assertEqual(events[0].payload["anlz_path"], "/tmp/FRESH_ANLZ.DAT")
+        self.assertEqual(events[1].payload["title"], "Fresh Direct Title")
+
     def test_anlz_availability_sets_and_clears_with_direct_readability(self) -> None:
         states: list[tuple[int, bool]] = []
         reader = mod.RBStateReader(
@@ -363,6 +511,50 @@ class TickEventTests(unittest.TestCase):
         self.mem.update_leaf(endpoint, (0).to_bytes(8, "little"))
         reader._tick(0xCAFE, self.base)
         self.assertEqual(states, [(1, True), (1, False)])
+
+    def test_track_load_availability_sets_and_clears_with_direct_readability(self) -> None:
+        states: list[tuple[int, bool]] = []
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_kinds={Ev.TRACK_LOADED},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+            track_load_available_callback=lambda deck, ready: states.append((deck, ready)),
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.track_info_per_deck[0],
+            payload=b"Readable Title\x00",
+        )
+
+        reader._tick(0xCAFE, self.base)
+        self.assertEqual(states, [(1, True)])
+
+        self.mem.leaf.pop(endpoint)
+        reader._tick(0xCAFE, self.base)
+        self.assertEqual(states, [(1, True), (1, False)])
+
+    def test_track_load_availability_ignores_empty_title_buffer(self) -> None:
+        states: list[tuple[int, bool]] = []
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_kinds={Ev.TRACK_LOADED},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+            track_load_available_callback=lambda deck, ready: states.append((deck, ready)),
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+
+        reader._tick(0xCAFE, self.base)
+
+        self.assertEqual(states, [])
 
     def test_authoritative_play_pause_routes_only_transport_events(self) -> None:
         auth_q: queue.Queue = queue.Queue()

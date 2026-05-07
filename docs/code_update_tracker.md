@@ -1,6 +1,6 @@
 # Code Update Tracker For Claude Code
 
-Updated: 2026-05-04
+Updated: 2026-05-07
 
 ## Collaboration Rule
 
@@ -18,6 +18,146 @@ Markdown documentation edits are allowed when requested.
 ## Recent Code Changes For Review
 
 These code changes should be reviewed before release:
+
+### B5 SCRIPTED_ARM direct retirement
+
+Implemented behavior:
+
+```text
+RBSS_SCRIPTED_DIRECT=1 bypasses the TL OSC /bridge/track_loaded scripted-arm
+path after parsing the track id. /bridge/active_deck is untouched and still
+drives master-change routing.
+
+StateManager._on_filepath_resolved() now promotes the A6 shadow lookup:
+soundswitch_id is matched against SCRIPTED_TRACKS and enqueues either
+Ev.SCRIPTED_ARM or Ev.SCRIPTED_CLEAR with source="filepath_resolved". The event
+is put back on the same queue while StateManager is draining events, so it is
+processed on the next drain-loop iteration.
+
+If soundswitch_id is empty or unmatched, the direct path falls back to a unique
+SCRIPTED_TRACKS filepath match. Ambiguous filepath matches do not arm and log a
+scan-level INFO line before SCRIPTED_CLEAR. The only non-queue warning in this
+lookup path is a successful unique filepath fallback when soundswitch_id is
+empty. This preserves scripted tracks with missing SoundSwitch id tags, where
+SoundSwitch can still match the show by filepath.
+
+The legacy OSC/switch race transfer in _on_master_changed() is disabled while
+RBSS_SCRIPTED_DIRECT=1. Direct FILEPATH_RESOLVED deck identity is already
+correct; copying scripted_id from the old deck can arm a stale show on an
+unscripted incoming deck.
+
+The repo watcher script and the live /Users/bbui/ss_bridge_watcher.sh both set
+RBSS_SCRIPTED_DIRECT=1 alongside B1-B4 direct flags.
+```
+
+Files/functions changed:
+
+```text
+__main__.py
+  SCRIPTED_DIRECT_ENV
+  start_osc_listener()
+  _track_loaded() guarded bypass
+
+state_manager.py
+  _on_filepath_resolved() direct SCRIPTED_ARM / SCRIPTED_CLEAR enqueue
+  _on_master_changed() transfer gate under RBSS_SCRIPTED_DIRECT
+
+scripts/ss_bridge_watcher.sh
+/Users/bbui/ss_bridge_watcher.sh
+  RBSS_SCRIPTED_DIRECT=1 in both launch paths
+
+tests/test_tl_tailer.py
+  OSC /bridge/track_loaded bypass and legacy fallback coverage
+
+tests/test_live_bpm_service.py
+  StateManager direct arm, direct clear, disabled fallback, and transfer gate
+  Empty-ssid filepath fallback, unmatched-ssid filepath fallback, and ambiguous
+  filepath rejection
+```
+
+Validation:
+
+```text
+python3 -m unittest tests.test_tl_tailer tests.test_live_bpm_service
+Ran 86 tests
+OK
+```
+
+### B4 TRACK_LOADED direct retirement
+
+Implemented behavior:
+
+```text
+RBSS_TRACK_LOAD_DIRECT=1 promotes Ev.TRACK_LOADED from RBStateReader to the
+authoritative StateManager queue. TLLogTailer remains running and is bypassed
+only after direct title memory is ready for that bridge deck.
+
+B4 depends on B1 ANLZ direct. If RBSS_TRACK_LOAD_DIRECT=1 is set without
+RBSS_ANLZ_DIRECT=1, the bridge ignores B4 and leaves TL TRACK_LOADED
+authoritative. This prevents direct TRACK_LOADED from arriving before TL
+ANLZ_PATH and causing StateManager._on_track_loaded() to consume a stale or
+missing pending ANLZ path.
+
+RBStateReader._tick_deck() now reads/enqueues ANLZ_PATH before track-info /
+TRACK_LOADED in the same tick. This ordering is a critical invariant.
+
+Track-load direct readiness requires a non-empty readable title buffer. Empty
+buffers do not mark a deck ready and therefore do not cause TL TRACK_LOADED
+bypass.
+
+The repo watcher script and the live /Users/bbui/ss_bridge_watcher.sh both set
+RBSS_TRACK_LOAD_DIRECT=1 alongside RBSS_ANLZ_DIRECT=1, RBSS_PLAY_DIRECT=1,
+RBSS_POS_CHAIN_DIRECT=1, and RBSS_MASTER_SEED_DIRECT=1.
+```
+
+Files/functions changed:
+
+```text
+tl_tailer.py
+  TRACK_LOAD_DIRECT_ENV
+  TLLogTailer.__init__(track_load_direct_ready=...)
+  _track_load_direct_bypass_enabled()
+  _process_line() TRACK_LOADED bypass
+
+rb_state_reader.py
+  RBStateReader.__init__(track_load_available_callback=...)
+  _tick()
+  _tick_deck() ANLZ-before-title ordering
+  _update_track_load_available()
+  _set_all_track_load_unavailable()
+  _set_track_load_available()
+
+__main__.py
+  TRACK_LOAD_DIRECT_ENV import
+  track_load_direct flag and ANLZ dependency guard
+  _set_track_load_direct_ready()
+  _is_track_load_direct_ready()
+  Ev.TRACK_LOADED authoritative_kinds promotion
+  track_load_available_callback wiring
+
+scripts/ss_bridge_watcher.sh
+/Users/bbui/ss_bridge_watcher.sh
+  RBSS_TRACK_LOAD_DIRECT=1 in both launch paths
+
+tests/test_tl_tailer.py
+  TL TRACK_LOADED bypass, callback fallback, and B4-without-B1 fallback
+
+tests/test_rb_state_reader.py
+  direct TRACK_LOADED routing, ANLZ-before-TRACK_LOADED ordering, direct
+  readiness set/clear, and empty-title readiness suppression
+```
+
+Validation:
+
+```text
+python3 -m unittest tests.test_tl_tailer tests.test_rb_state_reader
+Ran 63 tests
+OK
+
+python3 -m unittest discover -s tests
+Ran 197 tests
+OK
+```
 
 ### Rekordbox beatgrid-driven autoloop beat position
 
@@ -811,9 +951,10 @@ Current status:
 
 ```text
 Direct master remains observational/shadow-only.
-TL remains authoritative for master, play/pause, track load, timing fallback,
-scripted routing, ANLZ correlation, and startup ENGINE STATE reconstruction.
-No direct authority promotion has been made.
+Runtime master, TL TC fallback, and startup ENGINE STATE reconstruction remain
+TL-authoritative. Guarded direct authority has since landed for ANLZ (B1),
+position chain (B2), play/pause (B3), track load (B4), and scripted arm/clear
+(B5); see the newer sections above.
 LiveBPMService is already the first and most mature direct-first TL-reduction
 path: offset-table BPM is used when valid, with discovery and metadata/ENGINE
 STATE fallback when unavailable.
@@ -875,12 +1016,10 @@ docs/tl_retirement_process_log.md
 Near-term decision:
 
 ```text
-Hold TL authority.
-Do not promote runtime master authority.
+Hold runtime master TL authority.
 The only plausible authority-adjacent next step is a future master startup-seed
 experiment design, if explicitly authorized, with strict fail-closed behavior.
-Do not generalize LiveBPM readiness to master, play/pause, track-load,
-scripted-routing, ANLZ, or TL-TC retirement.
-Play/pause, track load, scripted routing, ANLZ, TL TC fallback, and rb_memory.py
-remain out of scope for retirement.
+Do not generalize LiveBPM readiness to master or TL-TC retirement. TL TC
+fallback and runtime master remain out of scope for retirement until separately
+authorized.
 ```

@@ -4,6 +4,15 @@ This guide is for live validation of the bounded runtime direct-master observer.
 The observer is a shadow-only readiness check for Rekordbox's direct
 `master_deck` byte path. It does not promote direct master authority.
 
+As of B6, live direct master authority can also be enabled separately with
+`RBSS_MASTER_DIRECT=1`. That authority path runs through the main
+`RBStateReader._tick()` instance, routes `MASTER_CHANGED source='rb_state'` to
+the authoritative queue, and bypasses TL OSC `/bridge/active_deck` plus TL log
+and ENGINE STATE `MASTER_CHANGED` only while the direct master byte is readable
+and valid. ENGINE STATE BPM and TC fallback events still flow. The bounded
+runtime observer described here remains shadow-only and is still only a
+comparison tool.
+
 ## Scope
 
 The runtime observer:

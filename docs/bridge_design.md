@@ -58,7 +58,7 @@ StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC
 | Signal | Source | Authority |
 |--------|--------|-----------|
 | Play / pause | TL log `[EVENT] Deck X playing/paused`; direct `RBStateReader` only with `RBSS_PLAY_DIRECT=1` | **Authoritative**, source selected by kill switch |
-| Master deck | TL log `Rekordbox master deck changed` + ENGINE STATE every ~15s | **Authoritative** |
+| Master deck | TL log `Rekordbox master deck changed` + ENGINE STATE every ~15s; direct `RBStateReader` only with `RBSS_MASTER_DIRECT=1` | **Authoritative**, source selected by kill switch |
 | Direct master status | `rb_offsets.py` `master_deck` chain via startup probe + bounded runtime observer | Observational only; logs availability/corroboration and does not change active deck |
 | Track load | TL log `[EVENT] Deck X loaded` | **Authoritative** |
 | Scripted track ID | TL OSC `/bridge/track_loaded` | Authoritative — routed via TL log deck |
@@ -93,6 +93,36 @@ Guarded TL-retirement exceptions:
   for a bridge deck after direct transport has attached, read live position, and
   warmed up a baseline for that deck; otherwise TL remains the fail-closed
   fallback. Startup ENGINE preload remains unchanged.
+- `RBSS_TRACK_LOAD_DIRECT=1`: direct `Ev.TRACK_LOADED` from `RBStateReader` is
+  routed to the authoritative queue, using the full direct Rekordbox title
+  string rather than TL's truncated log title. This switch is intentionally
+  dependent on `RBSS_ANLZ_DIRECT=1`; if ANLZ direct is not enabled, B4 is
+  ignored and TL `TRACK_LOADED` remains authoritative so `ANLZ_PATH` still
+  reaches `StateManager` before the matching load. TL log track-load output is
+  bypassed only for a bridge deck while direct title memory is currently
+  readable and non-empty for that deck; otherwise TL remains the fail-closed
+  fallback.
+
+Direct `RBStateReader._tick_deck()` ordering is part of the contract when B1
+and B4 are co-enabled: direct ANLZ is read and enqueued before direct
+`TRACK_LOADED` in the same tick. `StateManager._on_track_loaded()` consumes the
+pending ANLZ path for that deck, so reversing this order can attach the previous
+ANLZ path to the next load.
+- `RBSS_SCRIPTED_DIRECT=1`: TL OSC `/bridge/track_loaded` is bypassed for
+  scripted arm/clear routing. `StateManager._on_filepath_resolved()` uses the
+  resolved SoundSwitch id and correct deck identity to enqueue `Ev.SCRIPTED_ARM`
+  or `Ev.SCRIPTED_CLEAR`. TL OSC `/bridge/active_deck` is not bypassed.
+- `RBSS_MASTER_DIRECT=1`: direct `Ev.MASTER_CHANGED` from `RBStateReader` is
+  routed to the authoritative queue. TL OSC `/bridge/active_deck` is bypassed
+  only when direct master is enabled and the master byte has been readable and
+  valid in the most recent tick; otherwise TL OSC remains the fail-closed
+  fallback. TL log `MASTER_CHANGED` (`tl_log` source from log lines and
+  `engine_state` source from ENGINE STATE blocks) is bypassed while direct
+  master is currently ready; if direct master is not ready, TL master remains
+  the fail-closed fallback. ENGINE STATE BPM and TC fallback events are not
+  bypassed. `0xFF` sentinel updates the direct baseline but does not mark direct
+  master ready and does not emit `MASTER_CHANGED`. `RBSS_MASTER_SEED_DIRECT`
+  remains startup-only and separate.
 
 **Audit note (2026-05-06):** `docs/timecodelink_integration_analysis.md` §7–10 documents the
 exact RB memory layout TL reads (master-deck `uint8_t`, per-deck live BPM `float`,
@@ -112,11 +142,10 @@ The audit confirmed (analysis §8 + disassembly of `RekordboxPlugin::start` /
 decoupled from the memory tap, so no DRM boundary blocks the direct-read
 implementation.
 
-`RBStateReader` can run in explicit shadow mode for parity checks, but it does
-not feed the authoritative `StateManager` queue. Until direct-read events are
-observed in parallel against `TLLogTailer` for at least one full session per RB
-version and an arbitration path is added, **TL log remains authoritative for
-play / pause / master / track-load events**. Adoption gating in analysis §10.5.
+`RBStateReader` can run in explicit shadow mode for parity checks. Outside the
+guarded exceptions above, it does not feed the authoritative `StateManager`
+queue. TL TC fallback remains active for position safety.
+Adoption gating in analysis §10.5.
 
 The master-specific convergence path is observational only. On supported
 Rekordbox versions, `read_direct_master_status()` and the startup settle probe
@@ -377,7 +406,22 @@ Current autoloop timing state:
 
 ## SCRIPTED_ARM routing
 
-TL OSC `/bridge/track_loaded` fires with a track ID but NO deck info.
+With `RBSS_SCRIPTED_DIRECT=1`, scripted routing is driven by the direct
+`TRACK_LOADED` → `FILEPATH_RESOLVED` path. `StateManager._on_filepath_resolved`
+looks up `meta.soundswitch_id` in `SCRIPTED_TRACKS`; if the ssid is absent or
+unmatched, it falls back to a unique `meta.filepath` match. This preserves
+scripted tracks whose SoundSwitch tag is missing and lets SoundSwitch match by
+filepath. It then enqueues `SCRIPTED_ARM` or `SCRIPTED_CLEAR` back onto the same
+event queue. Because `FILEPATH_RESOLVED` carries the deck from the original
+`TRACK_LOADED`, deck identity is authoritative and does not depend on TL OSC
+ordering.
+
+When `RBSS_SCRIPTED_DIRECT=1`, the TL OSC `/bridge/track_loaded` handler returns
+after parsing the track id and does not enqueue scripted events. TL OSC
+`/bridge/active_deck` remains active and still routes master changes.
+
+When `RBSS_SCRIPTED_DIRECT` is unset, the legacy TL OSC path is still used:
+`/bridge/track_loaded` fires with a track ID but NO deck info.
 
 **Correct**: use `get_last_loaded_deck()` — the deck that most recently received TRACK_LOADED from the TL log (which carries explicit deck A/B/C/D). This is always set before the OSC fires.
 
@@ -401,7 +445,13 @@ On every `_on_master_changed`, reset ALL of:
 5. `last_arm_mono = now` — arm guard window starts
 6. `push_reset_bpm = True`
 
-**OSC/switch race**: if old deck has `scripted_id > 0`, new deck has `scripted_id == 0`, and old deck is not playing → transfer `scripted_id` to new deck. Handles SCRIPTED_ARM landing on old master before MASTER_CHANGED processed.
+**OSC/switch race**: when `RBSS_SCRIPTED_DIRECT` is unset, if old deck has
+`scripted_id > 0`, new deck has `scripted_id == 0`, and old deck is not playing
+→ transfer `scripted_id` to new deck. Handles legacy TL OSC `SCRIPTED_ARM`
+landing on old master before `MASTER_CHANGED` is processed. This transfer is
+disabled under `RBSS_SCRIPTED_DIRECT=1` because direct FILEPATH_RESOLVED events
+already carry the correct deck and copying from the old deck can arm the wrong
+show.
 
 ---
 
