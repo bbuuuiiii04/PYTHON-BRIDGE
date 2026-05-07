@@ -31,7 +31,9 @@ from .os2l_injector import OS2LInjector
 from .rb_memory import PositionCache, RBMemoryReader
 from .rb_state_reader import (
     DirectMasterObservation,
+    DirectMasterRuntimeObserver,
     DirectMasterStatus,
+    TLMasterSnapshot,
     make_rb_state_reader,
     direct_master_observation_summary_fields,
     direct_master_summary_fields,
@@ -451,13 +453,20 @@ def main() -> None:
     rb_shadow_queue: queue.Queue[BridgeEvent] | None = None
     rb_parity: RBStateParityMonitor | None = None
     rb_state_reader = None
+    rb_master_runtime_observer = None
+    tl_master_snapshot = TLMasterSnapshot()
+    def _observe_authoritative_enqueue(ev):
+        tl_master_snapshot.observe_event(ev)
+        if rb_parity is not None:
+            rb_parity.observe_tl(ev)
+
     if rb_state_shadow:
         rb_shadow_queue = queue.Queue(maxsize=512)
         rb_parity = RBStateParityMonitor(rb_shadow_queue)
-        event_queue = LOG.wrap_queue(raw_event_queue, enqueue_callback=rb_parity.observe_tl)
+        event_queue = LOG.wrap_queue(raw_event_queue, enqueue_callback=_observe_authoritative_enqueue)
         log.info("RBStateReader shadow mode enabled via %s=1", SHADOW_ENV)
     else:
-        event_queue = LOG.wrap_queue(raw_event_queue)
+        event_queue = LOG.wrap_queue(raw_event_queue, enqueue_callback=_observe_authoritative_enqueue)
 
     # Position cache (RBMemoryReader → PositionCache → StateManager push loop)
     pos_cache = PositionCache()
@@ -482,9 +491,14 @@ def main() -> None:
     # Initialize master deck from last TL ENGINE STATE (fixes startup deck bug)
     init = read_initial_state(TL_LOG_PATH)
     sm.set_initial_state(init['active_deck'])
+    tl_master_snapshot.set_initial(init['active_deck'])
     rb_version_for_direct_master = read_rekordbox_version()
     if rb_version_for_direct_master:
         _log_direct_master_startup_status(rb_version_for_direct_master, init['active_deck'])
+        rb_master_runtime_observer = DirectMasterRuntimeObserver(
+            rb_version_for_direct_master,
+            tl_master_snapshot.get_master,
+        )
     else:
         _log_direct_master_summary(
             DirectMasterStatus(
@@ -539,6 +553,8 @@ def main() -> None:
     tailer.start()
     if rb_state_reader is not None:
         rb_state_reader.start()
+    if rb_master_runtime_observer is not None:
+        rb_master_runtime_observer.start()
     mem_reader.start()
     live_bpm.start()
     injector.start()

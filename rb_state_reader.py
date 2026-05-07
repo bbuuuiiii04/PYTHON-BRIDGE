@@ -43,7 +43,7 @@ import struct
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from .config import MEM_POLL_HZ
 from .models import BridgeEvent, Ev
@@ -61,6 +61,10 @@ log = logging.getLogger("rb_state")
 _RB_STATE_DISABLE_ENV = "RBSS_RB_STATE_DISABLE"
 RB_MASTER_DIRECT_SOURCE = "offset_table"
 RB_MASTER_TL_SOURCE = "tl_log"
+TL_MASTER_SOURCES = frozenset({"tl_log", "engine_state", "initial_engine_state"})
+DIRECT_MASTER_RUNTIME_START_DELAY_S = 3.0
+DIRECT_MASTER_RUNTIME_WINDOW_S = 15.0
+DIRECT_MASTER_RUNTIME_INTERVAL_S = 0.50
 
 # RB deck index (0..3) → bridge deck (1 or 2). Same mapping as tl_tailer.
 def _bridge_deck(rb_idx: int) -> int:
@@ -383,6 +387,68 @@ class DirectMasterObservation:
     outcome: str
 
 
+@dataclass(frozen=True)
+class DirectMasterRuntimeObservation:
+    """Bounded runtime direct-master corroboration result."""
+
+    initial: Optional[DirectMasterStatus]
+    final: DirectMasterStatus
+    first_valid: Optional[DirectMasterStatus]
+    attempts: int
+    outcome: str
+    mismatches: int = 0
+    tl_master_at_first_valid: Optional[int] = None
+    first_valid_elapsed_s: Optional[float] = None
+    transition_count: int = 0
+    comparison_source: str = "tl_master_snapshot"
+
+
+class TLMasterSnapshot:
+    """Thread-safe read-only snapshot of TL-derived master events.
+
+    This deliberately ignores bridge fallback master changes such as
+    ``auto-detect`` and OSC-triggered events. The runtime direct-master observer
+    uses this as its comparison source so it corroborates against TL/ENGINE
+    STATE, not against bridge-local correction state.
+    """
+
+    def __init__(self, initial_deck: int = 0, initial_source: str = "") -> None:
+        self._lock = threading.Lock()
+        self._deck = initial_deck if initial_deck in (1, 2) else 0
+        self._source = initial_source if self._deck else ""
+        self._updates = 1 if self._deck else 0
+
+    def set_initial(self, deck: int, source: str = "initial_engine_state") -> None:
+        if deck not in (1, 2):
+            return
+        with self._lock:
+            self._deck = deck
+            self._source = source
+            self._updates += 1
+
+    def observe_event(self, ev: BridgeEvent) -> None:
+        if ev.kind != Ev.MASTER_CHANGED or ev.source not in TL_MASTER_SOURCES:
+            return
+        if ev.deck not in (1, 2):
+            return
+        with self._lock:
+            self._deck = ev.deck
+            self._source = ev.source
+            self._updates += 1
+
+    def get_master(self) -> int:
+        with self._lock:
+            return self._deck
+
+    def source(self) -> str:
+        with self._lock:
+            return self._source
+
+    def updates(self) -> int:
+        with self._lock:
+            return self._updates
+
+
 def read_direct_master_status(
     rb_version: str,
     *,
@@ -571,6 +637,245 @@ def observe_direct_master_startup(
         sleeper(min(interval_s, max(0.0, deadline - now)))
 
 
+def observe_direct_master_runtime(
+    rb_version: str,
+    tl_master_getter: Callable[[], int],
+    *,
+    start_delay_s: float = DIRECT_MASTER_RUNTIME_START_DELAY_S,
+    window_s: float = DIRECT_MASTER_RUNTIME_WINDOW_S,
+    interval_s: float = DIRECT_MASTER_RUNTIME_INTERVAL_S,
+    comparison_source: str = "tl_master_snapshot",
+    rb_pid: Optional[int] = None,
+    base_addr: Optional[int] = None,
+    clock=time.monotonic,
+    sleeper=time.sleep,
+) -> DirectMasterRuntimeObservation:
+    """Bounded post-startup direct-master observation.
+
+    Reads the versioned master byte at low rate for a short window and compares
+    the first valid direct master against the current TL-authoritative master
+    snapshot supplied by ``tl_master_getter``. This never emits bridge events
+    and never mutates StateManager.
+    """
+    offs = load_offsets_for_version(rb_version)
+    if offs is None:
+        status = DirectMasterStatus(
+            attempted=True,
+            supported=False,
+            available=False,
+            readable=False,
+            source=RB_MASTER_TL_SOURCE,
+            reason="unsupported_version",
+            rb_version=rb_version,
+        )
+        log.info("[RBMASTER][RUNTIME] phase=start supported_version=0 version=%s "
+                 "window_s=%.1f interval_s=%.2f comparison_source=%s "
+                 "fail_closed_reason=unsupported_version authority=tl_log",
+                 rb_version or "<unknown>", window_s, interval_s, comparison_source)
+        log.info("[RBMASTER][RUNTIME] phase=summary attempts=1 outcome=read_failed "
+                 "supported_version=0 readable=0 direct_master=unavailable "
+                 "fail_closed_reason=unsupported_version authority=tl_log")
+        return DirectMasterRuntimeObservation(
+            initial=None,
+            final=status,
+            first_valid=None,
+            attempts=1,
+            outcome="read_failed",
+            comparison_source=comparison_source,
+        )
+
+    if start_delay_s > 0:
+        log.info("[RBMASTER][RUNTIME] phase=start delay_s=%.1f window_s=%.1f "
+                 "interval_s=%.2f version=%s comparison_source=%s authority=tl_log",
+                 start_delay_s, window_s, interval_s, offs.version, comparison_source)
+        sleeper(start_delay_s)
+    else:
+        log.info("[RBMASTER][RUNTIME] phase=start delay_s=0.0 window_s=%.1f "
+                 "interval_s=%.2f version=%s comparison_source=%s authority=tl_log",
+                 window_s, interval_s, offs.version, comparison_source)
+
+    reader = RBStateReader(queue.Queue(maxsize=1), offs, rb_pid=rb_pid, base_addr=base_addr)
+    try:
+        task, base = reader._attach()
+    except Exception as exc:
+        status = DirectMasterStatus(
+            attempted=True,
+            supported=True,
+            available=False,
+            readable=False,
+            source=RB_MASTER_TL_SOURCE,
+            reason="attach_failed",
+            rb_version=offs.version,
+        )
+        log.info("[RBMASTER][RUNTIME] phase=summary attempts=1 outcome=read_failed "
+                 "supported_version=1 readable=0 version=%s direct_master=unavailable "
+                 "fail_closed_reason=attach_failed detail=%s authority=tl_log",
+                 offs.version, exc)
+        return DirectMasterRuntimeObservation(
+            initial=None,
+            final=status,
+            first_valid=None,
+            attempts=1,
+            outcome="read_failed",
+            comparison_source=comparison_source,
+        )
+
+    start_mono = clock()
+    deadline = start_mono + max(0.0, window_s)
+    attempts = 0
+    initial: Optional[DirectMasterStatus] = None
+    final: Optional[DirectMasterStatus] = None
+    first_valid: Optional[DirectMasterStatus] = None
+    tl_at_first_valid: Optional[int] = None
+    mismatches = 0
+    saw_no_master = False
+    flapped = False
+    last_valid_direct: Optional[int] = None
+    mismatch_logged = False
+    first_valid_elapsed_s: Optional[float] = None
+    transition_count = 0
+
+    while True:
+        attempts += 1
+        status = _read_direct_master_from_attached(reader, task, base, offs)
+        final = status
+        if initial is None:
+            initial = status
+            log.info("[RBMASTER][RUNTIME] phase=initial readable=%s version=%s "
+                     "raw=%s direct_master=%s reason=%s authority=tl_log",
+                     "1" if status.readable else "0", status.rb_version,
+                     status.rb_raw if status.rb_raw is not None else "-",
+                     direct_master_label(status.bridge_deck) if status.readable else "unavailable",
+                     status.reason)
+        if not status.readable:
+            log.info("[RBMASTER][RUNTIME] phase=summary attempts=%d outcome=read_failed "
+                     "supported_version=1 readable=0 version=%s direct_master=unavailable "
+                     "fail_closed_reason=%s authority=tl_log",
+                     attempts, status.rb_version, status.reason)
+            return DirectMasterRuntimeObservation(
+                initial=initial,
+                final=status,
+                first_valid=None,
+                attempts=attempts,
+                outcome="read_failed",
+                mismatches=mismatches,
+                comparison_source=comparison_source,
+            )
+        if status.bridge_deck is None:
+            saw_no_master = True
+            if first_valid is not None:
+                flapped = True
+        else:
+            try:
+                tl_master = int(tl_master_getter())
+            except Exception:
+                tl_master = 0
+            tl_master_valid = tl_master if tl_master in (1, 2) else None
+            if first_valid is None:
+                first_valid = status
+                tl_at_first_valid = tl_master_valid
+                first_valid_elapsed_s = max(0.0, clock() - start_mono)
+                transition = (
+                    f"no_master->{direct_master_label(status.bridge_deck)}"
+                    if saw_no_master else f"unknown->{direct_master_label(status.bridge_deck)}"
+                )
+                log.info("[RBMASTER][RUNTIME] phase=first_valid attempts=%d transition=%s "
+                         "elapsed_s=%.2f raw=%d direct_master=%s tl_master=%s "
+                         "comparison_source=%s corroboration=%s authority=tl_log",
+                         attempts, transition, first_valid_elapsed_s, status.rb_raw or 0,
+                         direct_master_label(status.bridge_deck),
+                         direct_master_label(tl_master_valid),
+                         comparison_source,
+                         runtime_direct_master_corroboration(status.bridge_deck, tl_master_valid))
+                transition_count = 1
+            if last_valid_direct is not None and status.bridge_deck != last_valid_direct:
+                transition_count += 1
+                if transition_count > 2:
+                    flapped = True
+            last_valid_direct = status.bridge_deck
+            if tl_master_valid is not None and status.bridge_deck != tl_master_valid:
+                mismatches += 1
+                if not mismatch_logged:
+                    mismatch_logged = True
+                    log.warning("[RBMASTER][RUNTIME] phase=mismatch attempts=%d "
+                                "direct_master=%s tl_master=%s authority=tl_log",
+                                attempts, direct_master_label(status.bridge_deck),
+                                direct_master_label(tl_master_valid))
+
+        now = clock()
+        if now >= deadline:
+            if first_valid is None:
+                outcome = "never_became_valid"
+            elif flapped:
+                outcome = "flapped"
+            elif tl_at_first_valid is None:
+                outcome = "became_valid_without_tl_available"
+            elif mismatches:
+                outcome = "became_valid_but_mismatched_tl"
+            else:
+                outcome = "became_valid_and_matched_tl"
+            log.info("[RBMASTER][RUNTIME] phase=summary attempts=%d outcome=%s "
+                     "supported_version=1 readable=1 version=%s first_valid_master=%s "
+                     "final_direct_master=%s final_raw=%s tl_master_at_first_valid=%s "
+                     "first_valid_elapsed_s=%s transition_count=%d mismatches=%d "
+                     "comparison_source=%s authority=tl_log",
+                     attempts, outcome, status.rb_version,
+                     direct_master_label(first_valid.bridge_deck) if first_valid else "none",
+                     direct_master_label(status.bridge_deck),
+                     status.rb_raw if status.rb_raw is not None else "-",
+                     direct_master_label(tl_at_first_valid),
+                     "%.2f" % first_valid_elapsed_s if first_valid_elapsed_s is not None else "-",
+                     transition_count,
+                     mismatches,
+                     comparison_source)
+            return DirectMasterRuntimeObservation(
+                initial=initial,
+                final=status,
+                first_valid=first_valid,
+                attempts=attempts,
+                outcome=outcome,
+                mismatches=mismatches,
+                tl_master_at_first_valid=tl_at_first_valid,
+                first_valid_elapsed_s=first_valid_elapsed_s,
+                transition_count=transition_count,
+                comparison_source=comparison_source,
+            )
+        sleeper(min(interval_s, max(0.0, deadline - now)))
+
+
+class DirectMasterRuntimeObserver(threading.Thread):
+    """Daemon wrapper for bounded runtime direct-master observation."""
+
+    def __init__(
+        self,
+        rb_version: str,
+        tl_master_getter: Callable[[], int],
+        *,
+        start_delay_s: float = 3.0,
+        window_s: float = 15.0,
+        interval_s: float = 0.50,
+        comparison_source: str = "tl_master_snapshot",
+    ) -> None:
+        super().__init__(name="rb-master-runtime-observer", daemon=True)
+        self._rb_version = rb_version
+        self._tl_master_getter = tl_master_getter
+        self._start_delay_s = start_delay_s
+        self._window_s = window_s
+        self._interval_s = interval_s
+        self._comparison_source = comparison_source
+        self.result: Optional[DirectMasterRuntimeObservation] = None
+
+    def run(self) -> None:
+        self.result = observe_direct_master_runtime(
+            self._rb_version,
+            self._tl_master_getter,
+            start_delay_s=self._start_delay_s,
+            window_s=self._window_s,
+            interval_s=self._interval_s,
+            comparison_source=self._comparison_source,
+        )
+
+
 def _read_direct_master_from_attached(
     reader: RBStateReader,
     task: int,
@@ -624,6 +929,19 @@ def direct_master_corroboration(status: DirectMasterStatus, tl_startup_deck: int
     if tl_startup_deck not in (1, 2):
         return "no_tl"
     if status.bridge_deck == tl_startup_deck:
+        return "agree"
+    return "disagree"
+
+
+def runtime_direct_master_corroboration(
+    direct_master: Optional[int],
+    tl_master: Optional[int],
+) -> str:
+    if direct_master not in (1, 2):
+        return "no_master"
+    if tl_master not in (1, 2):
+        return "no_tl"
+    if direct_master == tl_master:
         return "agree"
     return "disagree"
 

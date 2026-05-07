@@ -12,7 +12,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2 import rb_state_reader as mod
-from rb_ss_bridge_v2.models import Ev
+from rb_ss_bridge_v2.models import BridgeEvent, Ev
 from rb_ss_bridge_v2.rb_offsets import ChainEntry, RBOffsetVersion
 
 
@@ -660,6 +660,245 @@ class DirectMasterStatusTests(unittest.TestCase):
         self.assertEqual(fields["corroboration"], "agree")
         self.assertEqual(fields["attempts"], "2")
         self.assertEqual(fields["outcome"], "settled")
+
+    def test_runtime_observation_detects_first_valid_after_no_master(self) -> None:
+        endpoint = self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        now = [0.0]
+
+        def sleeper(seconds: float) -> None:
+            now[0] += seconds
+            self.mem.update_leaf(endpoint, b"\x00")
+
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            with self.assertLogs("rb_state", level="INFO") as logs:
+                observation = mod.observe_direct_master_runtime(
+                    "7.2.11",
+                    lambda: 1,
+                    rb_pid=12345,
+                    base_addr=self.base,
+                    start_delay_s=0.0,
+                    window_s=0.25,
+                    interval_s=0.25,
+                    clock=lambda: now[0],
+                    sleeper=sleeper,
+                )
+
+        self.assertEqual(observation.initial.reason, "no_master")
+        self.assertIsNotNone(observation.first_valid)
+        assert observation.first_valid is not None
+        self.assertEqual(observation.first_valid.bridge_deck, 1)
+        self.assertEqual(observation.outcome, "became_valid_and_matched_tl")
+        self.assertEqual(observation.tl_master_at_first_valid, 1)
+        self.assertEqual(observation.mismatches, 0)
+        self.assertEqual(observation.attempts, 2)
+        self.assertTrue(any(
+            "[RBMASTER][RUNTIME]" in line
+            and "phase=first_valid" in line
+            and "transition=no_master->deck1" in line
+            and "corroboration=agree" in line
+            for line in logs.output
+        ))
+        self.assertTrue(any(
+            "[RBMASTER][RUNTIME]" in line
+            and "phase=summary" in line
+            and "outcome=became_valid_and_matched_tl" in line
+            for line in logs.output
+        ))
+
+    def test_runtime_observation_no_master_persists_across_window(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        now = [0.0]
+
+        def sleeper(seconds: float) -> None:
+            now[0] += seconds
+
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            observation = mod.observe_direct_master_runtime(
+                "7.2.11",
+                lambda: 1,
+                rb_pid=12345,
+                base_addr=self.base,
+                start_delay_s=0.0,
+                window_s=0.50,
+                interval_s=0.25,
+                clock=lambda: now[0],
+                sleeper=sleeper,
+            )
+
+        self.assertEqual(observation.outcome, "never_became_valid")
+        self.assertIsNone(observation.first_valid)
+        self.assertEqual(observation.final.reason, "no_master")
+        self.assertGreaterEqual(observation.attempts, 2)
+
+    def test_runtime_observation_classifies_mismatch_vs_tl(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x01")
+        now = [0.0]
+        tl_master = {"deck": 1}
+
+        def sleeper(seconds: float) -> None:
+            now[0] += seconds
+
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            with self.assertLogs("rb_state", level="INFO") as logs:
+                observation = mod.observe_direct_master_runtime(
+                    "7.2.11",
+                    lambda: tl_master["deck"],
+                    rb_pid=12345,
+                    base_addr=self.base,
+                    start_delay_s=0.0,
+                    window_s=0.25,
+                    interval_s=0.25,
+                    clock=lambda: now[0],
+                    sleeper=sleeper,
+                )
+
+        self.assertEqual(tl_master["deck"], 1)
+        self.assertEqual(observation.outcome, "became_valid_but_mismatched_tl")
+        self.assertIsNotNone(observation.first_valid)
+        assert observation.first_valid is not None
+        self.assertEqual(observation.first_valid.bridge_deck, 2)
+        self.assertEqual(observation.tl_master_at_first_valid, 1)
+        self.assertGreater(observation.mismatches, 0)
+        self.assertTrue(any(
+            "[RBMASTER][RUNTIME]" in line
+            and "phase=mismatch" in line
+            and "direct_master=deck2" in line
+            and "tl_master=deck1" in line
+            for line in logs.output
+        ))
+
+    def test_runtime_observation_unsupported_version_fails_closed(self) -> None:
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=None):
+            observation = mod.observe_direct_master_runtime("unsupported", lambda: 1)
+
+        self.assertEqual(observation.outcome, "read_failed")
+        self.assertFalse(observation.final.supported)
+        self.assertFalse(observation.final.readable)
+        self.assertIsNone(observation.first_valid)
+
+    def test_runtime_observation_unreadable_fails_closed(self) -> None:
+        now = [0.0]
+
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            observation = mod.observe_direct_master_runtime(
+                "7.2.11",
+                lambda: 1,
+                rb_pid=12345,
+                base_addr=self.base,
+                start_delay_s=0.0,
+                window_s=1.0,
+                interval_s=0.25,
+                clock=lambda: now[0],
+                sleeper=lambda seconds: None,
+            )
+
+        self.assertEqual(observation.outcome, "read_failed")
+        self.assertFalse(observation.final.readable)
+        self.assertEqual(observation.final.reason, "unreadable")
+        self.assertIsNone(observation.first_valid)
+
+    def test_runtime_observation_without_tl_available(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x00")
+        now = [0.0]
+
+        def sleeper(seconds: float) -> None:
+            now[0] += seconds
+
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            observation = mod.observe_direct_master_runtime(
+                "7.2.11",
+                lambda: 0,
+                rb_pid=12345,
+                base_addr=self.base,
+                start_delay_s=0.0,
+                window_s=0.25,
+                interval_s=0.25,
+                clock=lambda: now[0],
+                sleeper=sleeper,
+            )
+
+        self.assertEqual(observation.outcome, "became_valid_without_tl_available")
+        self.assertIsNone(observation.tl_master_at_first_valid)
+        self.assertEqual(observation.mismatches, 0)
+
+    def test_tl_master_snapshot_tracks_only_tl_master_sources(self) -> None:
+        snapshot = mod.TLMasterSnapshot()
+        snapshot.set_initial(1)
+        snapshot.observe_event(BridgeEvent(Ev.MASTER_CHANGED, 2, source="auto-detect"))
+        snapshot.observe_event(BridgeEvent(Ev.MASTER_CHANGED, 2, source="osc"))
+        self.assertEqual(snapshot.get_master(), 1)
+
+        snapshot.observe_event(BridgeEvent(Ev.MASTER_CHANGED, 2, source="tl_log"))
+        self.assertEqual(snapshot.get_master(), 2)
+        self.assertEqual(snapshot.source(), "tl_log")
+
+        snapshot.observe_event(BridgeEvent(Ev.MASTER_CHANGED, 1, source="engine_state"))
+        self.assertEqual(snapshot.get_master(), 1)
+        self.assertEqual(snapshot.source(), "engine_state")
+
+    def test_runtime_observation_single_legitimate_transition_is_not_flap(self) -> None:
+        endpoint = self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x00")
+        now = [0.0]
+
+        def sleeper(seconds: float) -> None:
+            now[0] += seconds
+            if now[0] >= 0.25:
+                self.mem.update_leaf(endpoint, b"\x01")
+
+        def tl_master() -> int:
+            return 2 if now[0] >= 0.25 else 1
+
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            observation = mod.observe_direct_master_runtime(
+                "7.2.11",
+                tl_master,
+                rb_pid=12345,
+                base_addr=self.base,
+                start_delay_s=0.0,
+                window_s=0.50,
+                interval_s=0.25,
+                clock=lambda: now[0],
+                sleeper=sleeper,
+            )
+
+        self.assertEqual(observation.outcome, "became_valid_and_matched_tl")
+        self.assertEqual(observation.transition_count, 2)
+        self.assertEqual(observation.mismatches, 0)
+
+    def test_runtime_observation_flap_requires_repeated_valid_instability(self) -> None:
+        endpoint = self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x00")
+        now = [0.0]
+
+        def sleeper(seconds: float) -> None:
+            now[0] += seconds
+            if now[0] >= 0.50:
+                self.mem.update_leaf(endpoint, b"\x00")
+            elif now[0] >= 0.25:
+                self.mem.update_leaf(endpoint, b"\x01")
+
+        def tl_master() -> int:
+            if now[0] >= 0.50:
+                return 1
+            if now[0] >= 0.25:
+                return 2
+            return 1
+
+        with mock.patch.object(mod, "load_offsets_for_version", return_value=self.offs):
+            observation = mod.observe_direct_master_runtime(
+                "7.2.11",
+                tl_master,
+                rb_pid=12345,
+                base_addr=self.base,
+                start_delay_s=0.0,
+                window_s=0.50,
+                interval_s=0.25,
+                clock=lambda: now[0],
+                sleeper=sleeper,
+            )
+
+        self.assertEqual(observation.outcome, "flapped")
+        self.assertEqual(observation.transition_count, 3)
+        self.assertEqual(observation.mismatches, 0)
 
 
 class TrackInfoParserTests(unittest.TestCase):
