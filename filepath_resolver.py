@@ -27,6 +27,7 @@ from typing import Optional
 from .config import AUDIO_EXTS, LSOF_LEN_TOLERANCE_MS, LSOF_COOLDOWN_S
 from .logging_manager import get_logging_manager
 from .models import BridgeEvent, Ev, PositionSnapshot
+from . import bridge_fmt as bf
 
 log = logging.getLogger("filepath_resolver")
 LOG = get_logging_manager()
@@ -289,8 +290,8 @@ class FilepathResolver:
         try:
             result = _db_lookup_by_anlz(anlz_path)
             if result:
-                log.info("anlz deck %d: resolved → %s bpm=%.1f",
-                         deck, os.path.basename(result['filepath']), result['bpm'])
+                log.info("[FRES] resolve  deck=%d  src=anlz  file=%s  bpm=%.1f",
+                         deck, bf.short(result['filepath']), result['bpm'])
                 payload = {**result, 'load_gen': load_gen}
                 if trace_id:
                     payload["__trace_id"] = trace_id
@@ -301,7 +302,7 @@ class FilepathResolver:
                     payload=payload,
                 ))
             else:
-                log.debug("anlz deck %d: DB miss — falling back to lsof", deck)
+                log.debug("[FRES] resolve-miss  deck=%d  src=anlz  action=fallback-lsof", deck)
                 self.resolve_async(deck, load_gen, trace_id=trace_id)
         except Exception:
             log.exception("_resolve_anlz_worker deck %d failed", deck)
@@ -358,8 +359,8 @@ class FilepathResolver:
             bpm  = (best.BPM / 100.0) if best.BPM else 0.0
             ssid = _read_soundswitch_id(fp) if fp else ""
             total_ms = float((best.Length * 1000) if best.Length else 0)
-            log.info("title deck %d: resolved → %s bpm=%.1f",
-                     deck, os.path.basename(fp), bpm)
+            log.info("[FRES] resolve  deck=%d  src=title  file=%s  bpm=%.1f",
+                     deck, bf.short(fp), bpm)
             payload = {
                     "filepath":       fp,
                     "bpm":            bpm,
@@ -427,7 +428,7 @@ class FilepathResolver:
                 time.sleep(0.5)
                 files = _lsof_audio_files(pid)
             if not files:
-                log.warning("lsof deck %d: still 0 audio files after retry — giving up", deck)
+                log.warning("[FRES] resolve-fail  deck=%d  src=lsof  reason=no-audio-files", deck)
                 return
 
             # Use track length from memory cache (replaces Frida frida_dpu_lengths)
@@ -460,11 +461,11 @@ class FilepathResolver:
             snap2 = self._cache.get(deck)
             new_len = snap2.track_length_ms if snap2 else 0
             if target_ms > 0 and new_len > 0 and abs(new_len - target_ms) > LSOF_LEN_TOLERANCE_MS:
-                log.info("lsof deck %d: discarded — length changed %d→%d ms while running",
+                log.info("[FRES] resolve-stale  deck=%d  reason=length-changed  %dms→%dms",
                          deck, target_ms, new_len)
                 return
 
-            log.info("lsof deck %d: matched → %s", deck, os.path.basename(matched))
+            log.info("[FRES] match  deck=%d  src=lsof  file=%s", deck, bf.short(matched))
 
             content_id, bpm, first_beat_ms = _db_lookup(matched)
             ssid = _read_soundswitch_id(matched)

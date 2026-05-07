@@ -1,8 +1,10 @@
 #!/bin/bash
 # ss_bridge_watcher.sh
 # Manual launcher for rb_ss_bridge_v2.
-# Watches for Rekordbox, SoundSwitch, and TimecodeLink. When they are present,
-# starts or adopts one bridge process and opens one dedicated Terminal monitor.
+# Watches for Rekordbox and SoundSwitch. When they are present, starts or adopts
+# one bridge process and opens one dedicated Terminal monitor.
+# TimecodeLink is optional - bridge uses direct Rekordbox memory paths (B1-B6)
+# as primary signals; TL fallbacks activate automatically if TL starts later.
 
 BRIDGE_DIR="/Users/bbui"
 LOG_FILE="/tmp/bridge.log"
@@ -18,7 +20,7 @@ WARNED_MULTIPLE=0
 MONITOR_OPENED=0
 
 ss_running() {
-    pgrep -x "SoundSwitch" > /dev/null 2>&1 && pgrep -x "TimecodeLink" > /dev/null 2>&1
+    pgrep -x "SoundSwitch" > /dev/null 2>&1
 }
 
 rb_running() {

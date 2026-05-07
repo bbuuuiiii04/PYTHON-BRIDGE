@@ -40,6 +40,7 @@ from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
 from .logging_manager import get_logging_manager
+from . import bridge_fmt as bf
 
 log = logging.getLogger("state_manager")
 LOG = get_logging_manager()
@@ -195,7 +196,7 @@ class StateManager:
         """Apply startup state read from TL ENGINE STATE before event loop starts."""
         if active_deck in (1, 2):
             self._os.active_deck = active_deck
-            log.info("StateManager: initial active_deck=%d (from %s)", active_deck, source)
+            log.info("[SM] init  deck=%d  src=%s", active_deck, source)
 
     def start(self) -> threading.Thread:
         t = threading.Thread(target=self._run, name="state-manager", daemon=True)
@@ -241,7 +242,7 @@ class StateManager:
     # ── Main loop ────────────────────────────────────────────────────────────
 
     def _run(self) -> None:
-        log.info("StateManager: starting")
+        log.info("[SM] starting")
         while not self._stop.is_set():
             t0 = time.monotonic()
             self._drain_events()
@@ -271,7 +272,7 @@ class StateManager:
                     latency_ms, prev = LOG.finish_event(ev)
                     warn_ms = _TC_LATENCY_WARN_MS if ev.kind == Ev.TC_UPDATE else _LATENCY_WARN_MS
                     if latency_ms > warn_ms:
-                        log.warning("event latency %.1fms kind=%s", latency_ms, ev.kind)
+                        log.warning("[SM] event-late  kind=%s  latency_ms=%d", ev.kind, int(latency_ms))
                     elif log.isEnabledFor(logging.DEBUG):
                         if prev and prev.kind != ev.kind:
                             delta_ms = (time.monotonic() - prev.mono) * 1000.0
@@ -297,12 +298,12 @@ class StateManager:
 
         elif ev.kind == Ev.PLAY:
             if not self._deck[d].playing:
-                log.info("[D%d] playing", d)
+                log.info("[SM] play  deck=%d  src=%s", d, ev.source)
             self._deck[d].playing = True
 
         elif ev.kind == Ev.PAUSE:
             if self._deck[d].playing:
-                log.info("[D%d] paused", d)
+                log.info("[SM] pause  deck=%d  src=%s", d, ev.source)
             self._deck[d].playing = False
             if d == self._os.active_deck:
                 self._os.play_settle_after = 0.0
@@ -349,7 +350,7 @@ class StateManager:
 
         elif ev.kind == Ev.RB_RESTARTED:
             # FM-11: force stop immediately — don't wait for stale detection
-            log.info("[RB] restarted (pid=%d) — forcing stop", ev.payload.get("pid", 0))
+            log.info("[SM] rb-restart  pid=%d  action=stop", ev.payload.get("pid", 0))
             self._pending_arm = None
             for d in self._deck.values():
                 d.playing = False
@@ -381,7 +382,7 @@ class StateManager:
         old_deck = self._os.active_deck
         if new_deck == old_deck:
             return
-        log.info("MASTER_CHANGED deck%d -> deck%d reason=%s", old_deck, new_deck, source)
+        log.info("[SM] switch  %d→%d  src=%s", old_deck, new_deck, source)
         LOG.stats.record_transition(new_deck, "master")
         # OSC race fix: TL's /bridge/active_deck can arrive after /bridge/track_loaded,
         # so SCRIPTED_ARM may land on the old active deck. If old deck wasn't playing
@@ -394,7 +395,7 @@ class StateManager:
             and new_d.scripted_id == 0
             and not old_d.playing
         ):
-            log.debug("[D%d→D%d] transferring scripted_id=%d (OSC/switch race)",
+            log.debug("[SM] scripted-transfer  %d→%d  id=%d  reason=osc-race",
                       old_deck, new_deck, old_d.scripted_id)
             new_d.scripted_id = old_d.scripted_id
             old_d.scripted_id = 0
@@ -440,7 +441,8 @@ class StateManager:
         if trace_id:
             self._load_trace[deck] = trace_id
         self._load_mono[deck] = time.monotonic()
-        log.info("TRACK_LOADED title=%s load_gen=%d", title or "<unknown>", d.load_gen)
+        log.info("[SM] load  deck=%d  title=%s  gen=%d  src=%s",
+                 deck, title or "<unknown>", d.load_gen, ev.source)
         LOG.stats.record_transition(deck, "track_loaded")
 
         if self._resolver is None:
@@ -469,8 +471,7 @@ class StateManager:
         d = self._deck[deck]
         gen = payload.get("load_gen", -1)
         if gen != d.load_gen:
-            log.debug("FILEPATH_RESOLVED stale result gen=%d current=%d - discarding",
-                      gen, d.load_gen)
+            log.debug("[SM] resolve-stale  deck=%d  gen=%d  current=%d", deck, gen, d.load_gen)
             return
 
         meta = d.meta
@@ -492,9 +493,9 @@ class StateManager:
         load_delta_ms = 0.0
         if deck in self._load_mono:
             load_delta_ms = (time.monotonic() - self._load_mono[deck]) * 1000.0
-        log.info("FILEPATH_RESOLVED path=%s bpm=%.1f ssid=%s latency=%.1fms",
-                 payload["filepath"].split("/")[-1], meta.bpm,
-                 "yes" if meta.soundswitch_id else "no", load_delta_ms)
+        log.info("[SM] resolve  deck=%d  file=%s  bpm=%.1f  ssid=%s  latency_ms=%d",
+                 deck, bf.short(payload["filepath"]), meta.bpm,
+                 "yes" if meta.soundswitch_id else "no", int(load_delta_ms))
         if _os.environ.get("RBSS_RB_STATE_SHADOW") == "1":  # A6 shadow log
             ssid = meta.soundswitch_id
             if ssid:
@@ -502,12 +503,12 @@ class StateManager:
                     (tid for tid, t in SCRIPTED_TRACKS.items() if t.get("ssid") == ssid),
                     None,
                 )
-                log.info("[SCRIPTED][DIRECT] deck=%d scripted_id=%s ssid=%.8s latency_ms=%.1f",
+                log.info("[SM][SHADOW] scripted-match  deck=%d  id=%s  latency_ms=%d",
                          deck, scripted_id if scripted_id is not None else "none",
-                         ssid, load_delta_ms)
+                         int(load_delta_ms))
             else:
-                log.info("[SCRIPTED][DIRECT] deck=%d scripted=no ssid=none latency_ms=%.1f",
-                         deck, load_delta_ms)
+                log.info("[SM][SHADOW] scripted-clear  deck=%d  reason=no-ssid  latency_ms=%d",
+                         deck, int(load_delta_ms))
         LOG.stats.record_transition(deck, "filepath_resolved")
         if _os.environ.get("RBSS_SCRIPTED_DIRECT") != "0":
             ssid = meta.soundswitch_id
@@ -533,18 +534,14 @@ class StateManager:
                     matched_by_filepath = True
                 elif len(filepath_matches) > 1:
                     log.info(
-                        "[SCRIPTED][DIRECT] deck=%d scripted=no filepath=%s "
-                        "ambiguous_matches=%d latency_ms=%.1f",
-                        deck,
-                        _os.path.basename(filepath),
-                        len(filepath_matches),
-                        load_delta_ms,
+                        "[SM] scripted-clear  deck=%d  reason=ambiguous  matches=%d  latency_ms=%d",
+                        deck, len(filepath_matches), int(load_delta_ms),
                     )
             if scripted_id is not None:
                 source = "direct" if ssid_direct else "registry"
                 log_fn = log.warning if matched_by_filepath and not ssid else log.info
-                log_fn("[SCRIPTED][DIRECT] deck=%d scripted_id=%d ssid=%.8s source=%s latency_ms=%.1f",
-                       deck, scripted_id, ssid, source, load_delta_ms)
+                log_fn("[SM] scripted-match  deck=%d  id=%d  src=%s  latency_ms=%d",
+                       deck, scripted_id, source, int(load_delta_ms))
                 try:
                     self._eq.put_nowait(BridgeEvent(
                         kind=Ev.SCRIPTED_ARM,
@@ -553,8 +550,7 @@ class StateManager:
                         source="filepath_resolved",
                     ))
                 except queue.Full:
-                    log.warning("[SCRIPTED][DIRECT] queue full; SCRIPTED_ARM dropped deck=%d",
-                                deck)
+                    log.warning("[SM] queue-full  event=scripted-arm  deck=%d", deck)
             else:
                 try:
                     self._eq.put_nowait(BridgeEvent(
@@ -563,8 +559,7 @@ class StateManager:
                         source="filepath_resolved",
                     ))
                 except queue.Full:
-                    log.warning("[SCRIPTED][DIRECT] queue full; SCRIPTED_CLEAR dropped deck=%d",
-                                deck)
+                    log.warning("[SM] queue-full  event=scripted-clear  deck=%d", deck)
 
     # ── Scripted arm / clear ──────────────────────────────────────────────────
 
@@ -585,14 +580,15 @@ class StateManager:
                     "beatgrid_source":   d.meta.beatgrid_source,
                 }
             else:
-                log.warning("SCRIPTED_ARM failed unknown_id=%d", track_id)
+                log.warning("[SM] arm-fail  deck=%d  id=%d  reason=unregistered", deck, track_id)
                 return
 
         # Debounce concurrent arm calls
         key = (track_id, deck)
         now = time.monotonic()
         if now - self._arm_times.get(key, 0.0) < 2.0:
-            log.debug("[SS] arm scripted debounced: id=%d deck=%d", track_id, deck)
+            log.debug("[SM] arm-debounce  deck=%d  id=%d  age=%.1fs",
+                      deck, track_id, now - self._arm_times.get(key, 0.0))
             return
         self._arm_times[key] = now
         self._os.last_arm_mono = now
@@ -623,9 +619,9 @@ class StateManager:
 
         mirror = 3 - deck
 
-        log.info("SCRIPTED_ARM id=%d path=%s elapsed=%dms bpm=%.1f first_beat=%.1fms",
-                 track_id, track["filepath"].split("/")[-1] if track["filepath"] else "?",
-                 elapsed_ms, d.meta.bpm, d.meta.first_beat_ms)
+        log.info("[SM] arm-scripted  deck=%d  id=%d  elapsed=%s  bpm=%.1f  file=%s",
+                 deck, track_id, bf.elapsed(elapsed_ms), d.meta.bpm,
+                 bf.short(track.get("filepath", "")))
         LOG.stats.record_transition(deck, "scripted_arm")
 
         # Phase 0 (immediate): clear all 4 SS deck slots, stop playback + any autoloop
@@ -660,10 +656,10 @@ class StateManager:
         if arm is None or time.monotonic() < arm.fire_at:
             return
         self._pending_arm = None
-        log.info("[SS] arm scripted phase2: id=%d  deck=%d", arm.track_id, arm.deck)
         # Refresh elapsed in case position advanced since phase 0
         snap = self._cache.get(arm.deck)
         elapsed_ms = (snap.elapsed_ms if snap and not snap.is_stale() else arm.elapsed_ms) + TIMING_COMPENSATION_MS
+        log.info("[SM] arm-phase2  deck=%d  id=%d  elapsed=%s", arm.deck, arm.track_id, bf.elapsed(elapsed_ms))
         arm_meta = arm.arm_meta
         object.__setattr__(arm_meta, "elapsed_ms", elapsed_ms)
         # Use current active_deck, not the snapshot — deck may have switched in 100ms
@@ -679,7 +675,7 @@ class StateManager:
     def _arm_unscripted(self, deck: int) -> None:
         """TL value=1: clear scripted state. Lighting machine re-evaluates next tick."""
         d = self._deck[deck]
-        log.info("[D%d] scripted cleared", deck)
+        log.info("[SM] clear-scripted  deck=%d", deck)
         d.scripted_id = 0
         d.meta.soundswitch_id = ""
 
@@ -728,12 +724,12 @@ class StateManager:
         if desired == os.lighting_mode:
             # No mode change, but re-arm autoloop if filepath arrived after the initial arm.
             if desired == "autoloop" and d.meta.filepath and d.meta.filepath != os.last_armed_filepath:
-                log.info("[SS] autoloop re-arm: %s", d.meta.filepath.split("/")[-1])
+                log.info("[SM] rearm-autoloop  deck=%d  file=%s", deck, bf.short(d.meta.filepath))
                 self._apply_lighting(deck, "autoloop", elapsed_ms, bpm)
             return
 
-        log.info("[SS] %s → %s  deck=%d  elapsed=%dms",
-                 os.lighting_mode, desired, deck, elapsed_ms)
+        log.info("[SM] mode  deck=%d  %s→%s  elapsed=%s",
+                 deck, os.lighting_mode or "none", desired, bf.elapsed(elapsed_ms))
         os.lighting_mode = desired
         self._apply_lighting(deck, desired, elapsed_ms, bpm)
 
@@ -774,22 +770,18 @@ class StateManager:
             arm_source = self._os.autoloop_master_change_source
             self._os.autoloop_arm_after_master_change = False
             self._os.autoloop_master_change_source = ""
-            log.info("[SS][AUTOLOOP-ARM] deck=%d mirror=%d elapsed=%dms loop=%d "
-                     "source=%s timing_bpm=%.2f arm_bpm=%.2f meta_bpm=%.2f "
-                     "after_master=%s master_source=%s "
-                     "file=%s previous=%s",
-                     deck, mirror, elapsed_ms, AUTOLOOP_BEATS,
-                     bpm_source, arm_bpm, arm_bpm, d.meta.bpm,
-                     arm_after_master, arm_source or "<none>",
-                     d.meta.filepath.split("/")[-1] if d.meta.filepath else "<none>",
-                     self._os.last_armed_filepath.split("/")[-1]
-                     if self._os.last_armed_filepath else "<none>")
+            log.info("[SM] arm-autoloop  deck=%d  elapsed=%s  bpm=%.1f  src=%s  file=%s",
+                     deck, bf.elapsed(elapsed_ms), arm_bpm, bpm_source, bf.short(d.meta.filepath))
+            log.debug("[SM] arm-autoloop  deck=%d  mirror=%d  loop=%d  meta_bpm=%.2f"
+                      "  after_master=%s  master_src=%s  prev=%s",
+                      deck, mirror, AUTOLOOP_BEATS, d.meta.bpm,
+                      arm_after_master, arm_source or "<none>",
+                      bf.short(self._os.last_armed_filepath))
             if arm_after_master and self._autoloop_master_phrase_arm:
                 for dk in (deck, mirror, 3, 4):
                     self._out.send_deck_clear(dk)
                     self._out.send_loop_off(dk)
-                log.info("[SS][AUTOLOOP-MASTER-CLEAR] deck=%d mirror=%d source=%s",
-                         deck, mirror, arm_source or "<none>")
+                log.info("[SM] clear-autoloop  deck=%d  src=%s", deck, arm_source or "<none>")
             else:
                 for dk in (deck, mirror, 3, 4):
                     self._out._sub(f"deck {dk} get_filepath", "", verbose=True)
@@ -825,15 +817,13 @@ class StateManager:
                     self._os.pending_autoloop_arm_active = deck
                     self._os.pending_autoloop_arm_source = arm_source or "master"
                     self._os.pending_autoloop_arm_reason = pending_reason
-                    log.info("[SS][AUTOLOOP-MASTER-ARM-PENDING] deck=%d mirror=%d "
-                             "current_beat=%.1f current_elapsed_ms=%d "
-                             "target_beat=%d target_elapsed_ms=%d until_ms=%d "
-                             "grid_source=%s file=%s source=%s reason=%s",
-                             deck, mirror, abs_beat, elapsed_ms,
-                             target, target_elapsed_ms,
-                             target_elapsed_ms - elapsed_ms, target_source,
-                             d.meta.filepath.split("/")[-1], arm_source or "<none>",
-                             pending_reason)
+                    log.info("[SM] arm-pending  deck=%d  beat=%.1f→%d  until=%dms  file=%s",
+                             deck, abs_beat, target,
+                             target_elapsed_ms - elapsed_ms, bf.short(d.meta.filepath))
+                    log.debug("[SM] arm-pending  deck=%d  target_elapsed=%dms  grid=%s"
+                              "  src=%s  reason=%s",
+                              deck, target_elapsed_ms, target_source,
+                              arm_source or "<none>", pending_reason)
                 else:
                     self._send_autoloop_deck_load(deck, mirror, deck, arm_meta)
                     if arm_after_master and self._autoloop_master_phrase_arm:
@@ -847,14 +837,10 @@ class StateManager:
                                 deck, mirror, deck, arm_meta, arm_bpm, elapsed_ms,
                                 phrase_beat, arm_source or "master", "phrase-grace-late",
                             )
-                            log.warning("[SS][AUTOLOOP-MASTER-ARM-GRACE-LATE] deck=%d "
-                                        "phrase_beat=%d phrase_elapsed_ms=%d "
-                                        "current_elapsed_ms=%d lateness_ms=%d "
-                                        "tolerance_ms=%d grid_source=%s",
-                                        deck, phrase_beat, phrase_elapsed_ms,
-                                        elapsed_ms, lateness_ms,
-                                        _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS,
-                                        phrase_source)
+                            log.warning("[SM] arm-grace-late  deck=%d  beat=%d"
+                                        "  late=%dms  tolerance=%dms",
+                                        deck, phrase_beat, lateness_ms,
+                                        _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS)
             else:
                 self._os.last_armed_filepath = ""
                 for dk in (deck, mirror):
@@ -923,7 +909,7 @@ class StateManager:
         # and arm transitions are not blocked by a temporarily unreadable DPU.
         if snap is None or snap.is_stale(MEM_STALE_S):
             if os.was_playing:
-                log.warning("[D%d] memory stale — forcing stop", active)
+                log.warning("[SM] stop-stale  deck=%d", active)
                 self._pending_arm = None
                 self._do_stop(active, os.last_beat_elapsed_ms)
                 return
@@ -935,15 +921,15 @@ class StateManager:
             arm_guard = (now - os.last_arm_mono) < ARM_GUARD_S
             if not d.playing and not arm_guard:
                 if self._deck[mirror].playing:
-                    log.info("[D%d→D%d] auto-switch (D%d idle, D%d playing)",
-                             active, mirror, active, mirror)
+                    log.info("[SM] switch  %d→%d  src=auto  reason=idle+mirror-playing",
+                             active, mirror)
                     os.last_arm_mono = now
                     try:
                         self._eq.put_nowait(BridgeEvent(
                             kind=Ev.MASTER_CHANGED, deck=mirror, source="auto-detect",
                         ))
                     except queue.Full:
-                        log.warning("[D%d→D%d] auto-switch dropped: queue full",
+                        log.warning("[SM] queue-full  event=switch  deck=%d→%d  src=auto",
                                     active, mirror)
             return
 
@@ -967,24 +953,23 @@ class StateManager:
         # ── Rate-limited timecode log (once per 5 s, both decks) ────────────────
         if now - self._last_pos_log[active] >= 5.0:
             self._last_pos_log[active] = now
-            tm, ts = divmod(elapsed_ms // 1000, 60)
-            tms    = elapsed_ms % 1000
-            log.info("[D%d] %d:%02d.%03d  bpm=%.1f  %s%s",
-                     active, tm, ts, tms, d.meta.bpm,
-                     d.meta.filepath.split("/")[-1] if d.meta.filepath else "<no track>",
-                     "  scripted" if d.scripted_id else "")
+            _live_a = self._live_bpm_value(active)
+            _live_a_s = f"  live_bpm={_live_a:.1f}" if _live_a is not None else ""
+            log.info("[SM] pos  deck=%d  %s  bpm=%.1f%s  mode=%s  file=%s",
+                     active, bf.elapsed(elapsed_ms), d.meta.bpm, _live_a_s,
+                     "scripted" if d.scripted_id else "autoloop",
+                     bf.short(d.meta.filepath))
 
         mirror_snap = self._cache.get(mirror)
         if mirror_snap and now - self._last_pos_log[mirror] >= 5.0:
             self._last_pos_log[mirror] = now
             dm = self._deck[mirror]
-            me = mirror_snap.elapsed_ms
-            mm, ms2 = divmod(me // 1000, 60)
-            mms    = me % 1000
-            log.info("[D%d] %d:%02d.%03d  bpm=%.1f  %s%s",
-                     mirror, mm, ms2, mms, dm.meta.bpm,
-                     dm.meta.filepath.split("/")[-1] if dm.meta.filepath else "<no track>",
-                     "  scripted" if dm.scripted_id else "")
+            _live_m = self._live_bpm_value(mirror)
+            _live_m_s = f"  live_bpm={_live_m:.1f}" if _live_m is not None else ""
+            log.info("[SM] pos  deck=%d  %s  bpm=%.1f%s  mode=%s  file=%s",
+                     mirror, bf.elapsed(mirror_snap.elapsed_ms), dm.meta.bpm, _live_m_s,
+                     "scripted" if dm.scripted_id else "autoloop",
+                     bf.short(dm.meta.filepath))
 
         # ── BPM and beat position ─────────────────────────────────────────────
         bpm = d.meta.bpm
@@ -1055,7 +1040,8 @@ class StateManager:
 
         if stop_confirmed and os.was_playing:
             if other_playing and not arm_guard:
-                log.info("[D%d→D%d] auto-switch (D%d stopped)", active, mirror, active)
+                log.info("[SM] switch  %d→%d  src=auto  reason=stopped+mirror-playing",
+                         active, mirror)
                 os.not_playing_since = 0.0
                 os.last_arm_mono = now
                 # FM-2: post to queue so _on_master_changed runs in event-loop thread
@@ -1066,7 +1052,8 @@ class StateManager:
                         source="pause auto-switch",
                     ))
                 except queue.Full:
-                    log.warning("[D%d→D%d] auto-switch dropped: event queue full", active, mirror)
+                    log.warning("[SM] queue-full  event=switch  deck=%d→%d  src=auto",
+                                active, mirror)
             else:
                 self._do_stop(active, elapsed_ms)
             return
@@ -1077,14 +1064,16 @@ class StateManager:
         # deck-change log line).
         if not os.was_playing and not d.playing and not arm_guard:
             if self._deck[mirror].playing:
-                log.info("[D%d→D%d] auto-switch (D%d idle, D%d playing)", active, mirror, active, mirror)
+                log.info("[SM] switch  %d→%d  src=auto  reason=idle+mirror-playing",
+                         active, mirror)
                 os.last_arm_mono = now
                 try:
                     self._eq.put_nowait(BridgeEvent(
                         kind=Ev.MASTER_CHANGED, deck=mirror, source="auto-detect",
                     ))
                 except queue.Full:
-                    log.warning("[D%d→D%d] auto-switch dropped: event queue full", active, mirror)
+                    log.warning("[SM] queue-full  event=switch  deck=%d→%d  src=auto",
+                                active, mirror)
 
         # ── Resume detection (was stopped, now playing) ───────────────────────
         # TL authoritative: d.playing=True means TL confirmed playback.
@@ -1092,7 +1081,7 @@ class StateManager:
         if not os.was_playing and real_play:
             if os.play_settle_after == 0.0:
                 os.play_settle_after = now + PLAY_SETTLE_MS / 1000.0
-                log.info("[D%d] resuming — settle window %.0f ms", active, PLAY_SETTLE_MS)
+                log.debug("[SM] resume-settle  deck=%d  window=%dms", active, PLAY_SETTLE_MS)
             elif now >= os.play_settle_after:
                 os.play_settle_after = 0.0
                 self._do_resume(active, elapsed_ms, bpm)
@@ -1155,7 +1144,7 @@ class StateManager:
                         os.last_sent_bpm = pending_live_bpm
                         os.pending_live_bpm = 0.0
                         change = True
-                        log.info("[SS][LIVE-BPM-APPLY] deck=%d bpm=%.2f beat=%d",
+                        log.info("[SM] bpm-apply  deck=%d  bpm=%.2f  beat=%d",
                                  active, pending_live_bpm, this_beat)
                     else:
                         change = os.autoloop_change_on_next_beat
@@ -1189,7 +1178,7 @@ class StateManager:
     # ── Stop / resume helpers ─────────────────────────────────────────────────
 
     def _do_stop(self, deck: int, elapsed_ms: int) -> None:
-        log.info("[D%d] stopped", deck)
+        log.info("[SM] stop  deck=%d  elapsed=%s", deck, bf.elapsed(elapsed_ms))
         os = self._os
         self._deck[deck].playing  = False
         os.was_playing            = False
@@ -1210,12 +1199,12 @@ class StateManager:
         mirror = 3 - deck
         d = self._deck[deck]
         m = self._deck[mirror]
-        log.info("[D%d] resume  elapsed=%dms  bpm=%.1f  %s",
-                 deck, elapsed_ms, bpm, d.meta.filepath.split("/")[-1] if d.meta.filepath else "<no track>")
+        log.info("[SM] resume  deck=%d  elapsed=%s  bpm=%.1f  file=%s",
+                 deck, bf.elapsed(elapsed_ms), bpm, bf.short(d.meta.filepath))
 
         # Deck mismatch correction: if active deck is empty but other has track, swap
         if not d.meta.filepath and m.meta.filepath:
-            log.info("[D%d→D%d] correcting: active deck empty, D%d has track", deck, mirror, mirror)
+            log.info("[SM] switch  %d→%d  src=auto  reason=empty-deck", deck, mirror)
             self._os.active_deck = mirror
             deck, mirror = mirror, deck
             d, m = m, d
@@ -1237,13 +1226,12 @@ class StateManager:
     ) -> None:
         os = self._os
         live_status = self._live_bpm_status_text(active)
-        log.info("[SS][AUTOLOOP-TICK] deck=%d elapsed=%dms beat=%.2f "
-                 "timing_bpm=%.2f arm_bpm=%.2f meta_bpm=%.2f grid=%s %s %s file=%s",
-                 active, elapsed_ms, beatpos_out,
-                 timing_bpm, os.autoloop_arm_bpm, meta_bpm, grid_status, live_status,
-                 self._live_bpm_follow_status_text(),
-                 os.last_armed_filepath.split("/")[-1]
-                 if os.last_armed_filepath else "<none>")
+        log.info("[SM] autoloop-tick  deck=%d  elapsed=%s  beat=%.2f"
+                  "  bpm=%.2f  arm_bpm=%.2f  meta_bpm=%.2f  grid=%s  %s  %s  file=%s",
+                  active, bf.elapsed(elapsed_ms), beatpos_out,
+                  timing_bpm, os.autoloop_arm_bpm, meta_bpm, grid_status, live_status,
+                  self._live_bpm_follow_status_text(),
+                  bf.short(os.last_armed_filepath))
 
     def _should_delay_autoloop_master_arm(self, arm_after_master: bool, abs_beat_pos: float) -> bool:
         if not self._autoloop_master_phrase_arm or not arm_after_master:
@@ -1383,13 +1371,11 @@ class StateManager:
         os.pending_autoloop_arm_active = active
         os.pending_autoloop_arm_source = source
         os.pending_autoloop_arm_reason = f"correction-{reason}"
-        log.info("[SS][AUTOLOOP-MASTER-CORRECTION-PENDING] deck=%d mirror=%d "
-                 "reason=%s target_beat=%d target_elapsed_ms=%d until_ms=%d "
-                 "grid_source=%s source=%s file=%s",
-                 deck, mirror, reason, target, target_elapsed_ms,
-                 target_elapsed_ms - current_elapsed_ms, target_source,
-                 source or "<none>",
-                 correction_meta.filepath.split("/")[-1] if correction_meta.filepath else "<none>")
+        log.info("[SM] arm-correction-pending  deck=%d  beat=%d  until=%dms"
+                 "  reason=%s  grid=%s  src=%s  file=%s",
+                 deck, target, target_elapsed_ms - current_elapsed_ms,
+                 reason, target_source, source or "<none>",
+                 bf.short(correction_meta.filepath))
 
     def _maybe_apply_live_bpm_follow(
         self,
@@ -1485,11 +1471,8 @@ class StateManager:
                     self._deck[active].meta,
                 )
             )
-            log.info("[SS][AUTOLOOP-ARM-PENDING] deck=%d current_beat=%.1f "
-                     "current_elapsed_ms=%d target_beat=%d target_elapsed_ms=%d "
-                     "until_ms=%d grid_source=%s",
-                     active, abs_beat_pos, elapsed_ms, os.autoloop_arm_sync_beat,
-                     os.autoloop_arm_target_elapsed_ms,
+            log.info("[SM] arm-pending  deck=%d  beat=%.1f→%d  until=%dms  grid=%s",
+                     active, abs_beat_pos, os.autoloop_arm_sync_beat,
                      os.autoloop_arm_target_elapsed_ms - elapsed_ms,
                      os.autoloop_arm_target_source or "fallback")
 
@@ -1517,9 +1500,8 @@ class StateManager:
                 for dk in (active, mirror, 3, 4):
                     self._out.send_deck_clear(dk)
                     self._out.send_loop_off(dk)
-                log.info("[SS][AUTOLOOP-MASTER-CORRECTION-CLEAR] deck=%d mirror=%d "
-                         "target_beat=%d reason=%s",
-                         active, mirror, target_beat, pending_reason)
+                log.info("[SM] arm-correction-clear  deck=%d  beat=%d  reason=%s",
+                         active, target_beat, pending_reason)
             self._send_autoloop_deck_load(
                 os.pending_autoloop_arm_deck or active,
                 os.pending_autoloop_arm_mirror or mirror,
@@ -1527,14 +1509,10 @@ class StateManager:
                 pending_meta,
             )
             os.autoloop_change_on_next_beat = False
-            log.info("[SS][AUTOLOOP-MASTER-ARM-LOCKED] deck=%d target_beat=%d "
-                     "target_elapsed_ms=%d actual_elapsed_ms=%d lateness_ms=%d "
-                     "tolerance_ms=%d grid_source=%s current_beat=%.1f "
-                     "bpm=%.2f source=%s reason=%s correction=%s",
-                     active, target_beat, target_elapsed_ms, elapsed_ms, lateness_ms,
-                     _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS, target_source,
-                     abs_beat_pos, arm_bpm, pending_source, pending_reason,
-                     needs_correction)
+            log.info("[SM] arm-locked  deck=%d  beat=%d  late=%dms"
+                     "  bpm=%.2f  reason=%s  correction=%s  src=%s",
+                     active, target_beat, lateness_ms,
+                     arm_bpm, pending_reason, needs_correction, pending_source)
             self._clear_pending_autoloop_master_phrase_arm()
             if needs_correction:
                 reason = "late" if lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS else "short-runway"
@@ -1544,21 +1522,15 @@ class StateManager:
                 )
                 scheduled_correction = True
                 if lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS:
-                    log.warning("[SS][AUTOLOOP-MASTER-ARM-LATE-CORRECTION] deck=%d "
-                                "target_beat=%d target_elapsed_ms=%d "
-                                "current_elapsed_ms=%d lateness_ms=%d "
-                                "tolerance_ms=%d current_beat=%.1f grid_source=%s",
-                                active, target_beat, target_elapsed_ms, elapsed_ms,
-                                lateness_ms, _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS,
-                                abs_beat_pos, target_source)
+                    log.warning("[SM] arm-late  deck=%d  beat=%d  late=%dms"
+                                "  tolerance=%dms  grid=%s",
+                                active, target_beat, lateness_ms,
+                                _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS, target_source)
         elif lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS:
-            log.warning("[SS][AUTOLOOP-PHRASE-MISS] deck=%d target_beat=%d "
-                        "target_elapsed_ms=%d current_elapsed_ms=%d "
-                        "lateness_ms=%d tolerance_ms=%d current_beat=%.1f "
-                        "grid_source=%s",
-                        active, target_beat, target_elapsed_ms, elapsed_ms,
-                        lateness_ms, _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS,
-                        abs_beat_pos, target_source)
+            log.warning("[SM] arm-phrase-miss  deck=%d  beat=%d  late=%dms"
+                        "  tolerance=%dms  grid=%s",
+                        active, target_beat, lateness_ms,
+                        _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS, target_source)
         for dk in (active, mirror, 3, 4):
             self._out.send_bpm(dk, arm_bpm)
         os.last_sent_bpm = arm_bpm
@@ -1568,10 +1540,8 @@ class StateManager:
             os.autoloop_arm_target_elapsed_ms = 0
             os.autoloop_arm_target_source = ""
             os.autoloop_arm_pending_since = 0.0
-        log.info("[SS][AUTOLOOP-ARM-LOCKED] deck=%d target_beat=%d "
-                 "send_elapsed_ms=%d lateness_ms=%d tolerance_ms=%d bpm=%.2f",
-                 active, target_beat, elapsed_ms, lateness_ms,
-                 _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS, arm_bpm)
+        log.info("[SM] arm-locked-final  deck=%d  beat=%d  late=%dms  bpm=%.2f",
+                 active, target_beat, lateness_ms, arm_bpm)
 
     def _clear_autoloop_arm_phrase_lock(self) -> None:
         os = self._os
@@ -1638,9 +1608,7 @@ class StateManager:
             d = self._deck[dk]
             mark = "►" if dk == active else " "
             snap = self._cache.get(dk)
-            pos_s = f"{snap.elapsed_ms}ms" if snap else "no-snap"
-            log.info("%s D%d  %s  bpm=%.1f  pos=%s  %s",
-                     mark, dk,
-                     d.meta.filepath.split("/")[-1] if d.meta.filepath else "<empty>",
-                     d.meta.bpm, pos_s,
+            pos_s = bf.elapsed(snap.elapsed_ms) if snap else "no-snap"
+            log.info("%s [SM] status  deck=%d  file=%s  bpm=%.1f  pos=%s  mode=%s",
+                     mark, dk, bf.short(d.meta.filepath), d.meta.bpm, pos_s,
                      ("scripted" if d.scripted_id else "autoloop") if d.playing else "stopped")

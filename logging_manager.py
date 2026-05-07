@@ -241,6 +241,35 @@ class LoggingEventQueue:
         return self._inner.qsize()
 
 
+# ── Subsystem tag → module name mapping (for BRIDGE_LOG_DIAG shorthand) ───────
+
+_DIAG_MODULES: dict[str, str] = {
+    "sm":   "state_manager",
+    "mem":  "rb_memory",
+    "tl":   "tl_tailer",
+    "fres": "filepath_resolver",
+    "lbpm": "live_bpm",
+    "os2l": "osl_output",
+    "mtc":  "mtc_reader",
+    "rsr":  "rb_state_reader",
+    "main": "bridge",
+}
+
+
+class _BridgeFormatter(logging.Formatter):
+    """Human-readable formatter with millisecond-accurate timestamps.
+
+    Output: HH:MM:SS.mmm [LEVEL  ] message
+    Millisecond precision is essential for timing-sensitive debugging.
+    """
+
+    def formatTime(self, record: logging.LogRecord, datefmt: Optional[str] = None) -> str:
+        import time as _time
+        ct = self.converter(record.created)
+        s = _time.strftime("%H:%M:%S", ct)
+        return f"{s}.{int(record.msecs):03d}"
+
+
 class LoggingManager:
     """Practical bridge logging facade."""
 
@@ -280,9 +309,8 @@ class LoggingManager:
         if json_output:
             formatter = JsonFormatter()
         else:
-            formatter = logging.Formatter(
+            formatter = _BridgeFormatter(
                 "%(asctime)s [%(levelname)-7s] %(message)s",
-                datefmt="%H:%M:%S",
             )
         for handler in root.handlers:
             handler.setFormatter(formatter)
@@ -406,6 +434,12 @@ class LoggingManager:
             level = getattr(logging, level_name.upper(), None)
             if name and isinstance(level, int):
                 self.set_level(name, level)
+        # BRIDGE_LOG_DIAG=sm,mem,fres  — enable DEBUG for named subsystems.
+        # Use tag shorthands from _DIAG_MODULES or full module names directly.
+        diag_raw = os.environ.get("BRIDGE_LOG_DIAG", "")
+        for tag in (t.strip() for t in diag_raw.split(",") if t.strip()):
+            module_name = _DIAG_MODULES.get(tag, tag)
+            self.set_level(module_name, logging.DEBUG)
         self.reload_from_file(self._control_path)
 
     def reload_from_file(self, path: str) -> None:
@@ -432,19 +466,27 @@ class LoggingManager:
             if isinstance(level, int):
                 self.set_level(str(name), level)
 
-    def enable_debug(self) -> None:
-        for name in ("tl_tailer", "rb_memory", "filepath_resolver",
-                     "scripted_tracks", "osl_output", "state_manager",
-                     "diagnostics", "bridge", "logging_manager",
-                     "mtc_reader"):
-            logging.getLogger(name).setLevel(logging.DEBUG)
+    def enable_debug(self, *subsystems: str) -> None:
+        """Enable DEBUG for all subsystems, or for named tag shorthands only.
+
+        e.g. enable_debug("sm", "fres") sets DEBUG for state_manager + filepath_resolver.
+        No arguments = DEBUG for all known modules.
+        """
+        if subsystems:
+            for tag in subsystems:
+                module_name = _DIAG_MODULES.get(tag, tag)
+                logging.getLogger(module_name).setLevel(logging.DEBUG)
+        else:
+            for name in _DIAG_MODULES.values():
+                logging.getLogger(name).setLevel(logging.DEBUG)
+            for extra in ("scripted_tracks", "diagnostics", "logging_manager"):
+                logging.getLogger(extra).setLevel(logging.DEBUG)
 
     def disable_debug(self) -> None:
-        for name in ("tl_tailer", "rb_memory", "filepath_resolver",
-                     "scripted_tracks", "osl_output", "state_manager",
-                     "diagnostics", "bridge", "logging_manager",
-                     "mtc_reader"):
+        for name in _DIAG_MODULES.values():
             logging.getLogger(name).setLevel(logging.INFO)
+        for extra in ("scripted_tracks", "diagnostics", "logging_manager"):
+            logging.getLogger(extra).setLevel(logging.INFO)
 
     def start_control_watcher(self, logger: logging.Logger, interval_s: float = 1.0) -> None:
         if self._watch_thread is not None:

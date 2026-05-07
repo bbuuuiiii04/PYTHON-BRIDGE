@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .models import BridgeEvent, Ev
+from . import bridge_fmt as bf
 
 log = logging.getLogger("tl_tailer")
 ANLZ_DIRECT_ENV = "RBSS_ANLZ_DIRECT"
@@ -200,7 +201,7 @@ def read_initial_state(log_path: Path) -> dict:
             raw = int(m.group(1))   # 0-indexed layer number
             active_deck = _bridge_deck(raw + 1)
             active_source = f"master_layer={raw} from config.yaml"
-            log.info("read_initial_state: active_deck=%d (master_layer=%d from config.yaml)",
+            log.info("[TL] init  deck=%d  src=master_layer=%d+config.yaml",
                      active_deck, raw)
     except Exception as exc:
         log.debug("read_initial_state: config.yaml read failed: %s", exc)
@@ -212,21 +213,19 @@ def read_initial_state(log_path: Path) -> dict:
             idx = _LETTER_TO_IDX.get(m.group(1), 1)
             active_deck = _bridge_deck(idx)
             active_source = f"Layer {m.group(1)} from ENGINE STATE"
-            log.info("read_initial_state: active_deck=%d (Layer %s from ENGINE STATE)",
+            log.info("[TL] init  deck=%d  src=engine-state+layer-%s",
                      active_deck, m.group(1))
 
     decks = {}
     if engine_block and engine_age_s <= _INITIAL_ENGINE_STATE_MAX_AGE_S:
         decks = _parse_engine_state_decks(engine_block)
         if decks:
-            log.info("read_initial_state: found %d startup loaded deck(s) from ENGINE STATE age=%.1fs",
-                     len(decks), engine_age_s)
+            log.info("[TL] init-decks  count=%d  engine-age=%.1fs", len(decks), engine_age_s)
     elif engine_block:
-        log.info("read_initial_state: skipping startup deck preload; ENGINE STATE age=%.1fs",
-                 engine_age_s)
+        log.info("[TL] init-decks-skip  reason=engine-stale  age=%.1fs", engine_age_s)
 
     if active_source == "default":
-        log.info("read_initial_state: defaulting to deck 1")
+        log.info("[TL] init  deck=1  src=default")
     return {
         'active_deck': active_deck,
         'decks': decks,
@@ -280,7 +279,7 @@ class TLLogTailer(threading.Thread):
         self._stop.set()
 
     def run(self) -> None:
-        log.info("TLLogTailer: watching %s", self._path)
+        log.info("[TL] watching  path=%s", self._path)
         while not self._stop.is_set():
             try:
                 self._tail_once()
@@ -309,10 +308,10 @@ class TLLogTailer(threading.Thread):
                     try:
                         new_inode = self._path.stat().st_ino
                     except FileNotFoundError:
-                        log.warning("TLLogTailer: log removed — waiting")
+                        log.warning("[TL] log-removed  action=waiting")
                         return
                     if new_inode != inode:
-                        log.info("TLLogTailer: log rotated (%d→%d) — reopening",
+                        log.info("[TL] log-rotated  %d→%d  action=reopen",
                                  inode, new_inode)
                         return
                     time.sleep(self._IDLE_POLL_S)
@@ -321,7 +320,7 @@ class TLLogTailer(threading.Thread):
         try:
             self._queue.put_nowait(ev)
         except queue.Full:
-            log.warning("TLLogTailer: queue full — dropping %s", ev.kind)
+            log.warning("[TL] queue-full  event=%s", ev.kind)
 
     def _play_direct_bypass_enabled(self, deck: int) -> bool:
         if os.environ.get(PLAY_DIRECT_ENV) != "1":
@@ -459,10 +458,8 @@ class TLLogTailer(threading.Thread):
                 continue
             idx  = _LETTER_TO_IDX.get(deck_letter, 1)
             deck = _bridge_deck(idx)
-            mm2, ss2 = divmod(elapsed_ms // 1000, 60)
-            ms2 = elapsed_ms % 1000
-            log.info("timecode deck %d (layer %s): %d:%02d.%03d  pitch=%.1f%%",
-                     deck, m.group(1), mm2, ss2, ms2, pitch_factor * 100.0)
+            log.info("[TL] tc  deck=%d  layer=%s  pos=%s  pitch=%.1f%%",
+                     deck, m.group(1), bf.elapsed(elapsed_ms), pitch_factor * 100.0)
             self._enqueue(BridgeEvent(
                 kind=Ev.TC_UPDATE,
                 deck=deck,
@@ -470,4 +467,4 @@ class TLLogTailer(threading.Thread):
                 source='engine_state',
             ))
 
-        log.debug("TLLogTailer: flushed ENGINE STATE (%d lines)", len(self._es_lines))
+        log.debug("[TL] engine-state  lines=%d", len(self._es_lines))

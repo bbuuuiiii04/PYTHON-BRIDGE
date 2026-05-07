@@ -71,26 +71,26 @@ class _ColorFormatter(logging.Formatter):
         logging.CRITICAL: _BRED,
     }
 
-    # First match wins
+    # First match wins. Patterns are checked against lowercased message text.
     _PATTERNS = [
-        # Red: action needed now.
-        ("rb_restarted",            _BRED),
-        ("rb restarted",            _BRED),
-        ("memory stale",            _BRED),
-        ("forcing stop",            _BRED),
-        ("playback stopped",        _BRED),
-        ("→ idle",                  _BRED),
-        (" paused",                 _BRED),
-        (" stopped",                _BRED),
+        # Red: requires attention / playback stopped.
+        ("rb-restart",              _BRED),
+        ("stop-stale",              _BRED),
+        ("[sm] stop ",              _BRED),
+        ("[sm] pause",              _BRED),
         ("osc listener failed",     _BRED),
-        ("os2l send error",         _BRED),
-        ("clearing ss show",        _BRED),
+        ("[os2l] send-error",       _BRED),
+        ("→idle",                   _BRED),
 
-        # Orange: degraded, late, retrying, or needs follow-up but still running.
-        ("event latency",           _ORANGE),
+        # Orange: degraded, late, or retrying — still running but needs watch.
+        ("[sm] event-late",         _ORANGE),
+        ("[sm] arm-grace-late",     _ORANGE),
+        ("[sm] arm-late",           _ORANGE),
+        ("[sm] arm-phrase-miss",    _ORANGE),
+        ("queue-full",              _ORANGE),
+        ("connect-fail",            _ORANGE),
+        ("resolve-fail",            _ORANGE),
         ("attach failed",           _ORANGE),
-        ("queue full",              _ORANGE),
-        ("connect failed",          _ORANGE),
         ("port error",              _ORANGE),
         ("failed",                  _ORANGE),
         ("retry",                   _ORANGE),
@@ -99,39 +99,31 @@ class _ColorFormatter(logging.Formatter):
         ("[rbmem][error]",          _ORANGE),
         ("[rbmem][invalid]",        _ORANGE),
         ("[rbmem][reject]",         _ORANGE),
-        ("[ss][autoloop-master-arm-grace-late]", _ORANGE),
-        ("[ss][autoloop-master-arm-late-correction]", _ORANGE),
-        ("[ss][autoloop-phrase-miss]", _ORANGE),
 
-        # Yellow: pending, fallback, corrective, or degraded-but-working.
+        # Yellow: pending, fallback, or degraded-but-working.
+        ("[sm] arm-pending",        _YELLOW),
+        ("[sm] arm-correction-pending", _YELLOW),
+        ("[sm] arm-correction-clear", _YELLOW),
+        ("[sm] clear-autoloop",     _YELLOW),
         ("fallback",                _YELLOW),
         ("disabled",                _YELLOW),
         ("not installed",           _YELLOW),
-        ("[ss][live-bpm-pending]",  _YELLOW),
-        ("[ss][autoloop-master-clear]", _YELLOW),
-        ("[ss][autoloop-master-correction-clear]", _YELLOW),
-        ("[ss][autoloop-master-arm-pending]", _YELLOW),
-        ("[ss][autoloop-master-correction-pending]", _YELLOW),
-        ("[ss][autoloop-arm-pending]", _YELLOW),
         ("[rbmem][pending]",        _YELLOW),
         ("[rbmem][inconclusive]",   _YELLOW),
         ("shutdown signal",         _YELLOW),
         ("cooldown",                _YELLOW),
-        ("discarded",               _YELLOW),
+        ("resolve-stale",           _YELLOW),
         ("no peers",                _YELLOW),
 
         # Cyan: deck routing and master-deck decisions.
+        ("[sm] switch",             _BCYAN),
+        ("[sm] status",             _BCYAN),
         ("master_changed",          _BCYAN),
         ("master changed",          _BCYAN),
-        ("deck switch",             _BCYAN),
-        ("auto-switch",             _BCYAN),
-        ("active_deck",             _BCYAN),
-        ("correcting: active deck", _BCYAN),
         ("[master-seed]",           _BCYAN),
         ("[rbmaster]",              _BCYAN),
 
-        # Cyan: steady-state status, intentionally scan-friendly.
-        ("[ss][autoloop-tick]",     _BCYAN),
+        # Cyan: steady-state scan-friendly status.
         ("[lbpm][scan]",            _BCYAN),
         ("[lbpm][current]",         _BCYAN),
         ("[rbmem][scan]",           _BCYAN),
@@ -139,48 +131,49 @@ class _ColorFormatter(logging.Formatter):
         ("[rbmem][status]",         _BCYAN),
 
         # Magenta: scripted show lifecycle.
+        ("[sm] arm-scripted",       _BMAGENTA),
+        ("[sm] arm-phase2",         _BMAGENTA),
+        ("[sm] clear-scripted",     _BMAGENTA),
+        ("[sm][shadow]",            _BMAGENTA),
+        ("[main][shadow]",          _BMAGENTA),
         ("scripted_arm",            _BMAGENTA),
         ("scripted_clear",          _BMAGENTA),
-        ("scripted arm",            _BMAGENTA),
-        ("arm scripted",            _BMAGENTA),
-        ("arm unscripted",          _BMAGENTA),
-        ("phase2",                  _BMAGENTA),
-        ("scripted cleared",        _BMAGENTA),
-        ("[scripted][direct]",      _BMAGENTA),
 
         # Green: successful user-facing state.
         ("rb_ss_bridge_v2 starting", _BGREEN),
         ("rb_ss_bridge_v2 running", _BGREEN),
-        ("startup preload",         _BGREEN),
+        ("[main] startup",          _BGREEN),
         ("osc listener on",         _BGREEN),
-        ("track_loaded",            _BGREEN),
-        ("filepath_resolved",       _BGREEN),
-        ("filepath resolved",       _BGREEN),
-        ("resolved →",              _BGREEN),
-        ("resolved:",               _BGREEN),
-        ("► d",                     _BGREEN),
-        ("playing",                 _BGREEN),
-        ("resume",                  _BGREEN),
-        ("resuming",                _BGREEN),
+        ("[sm] load",               _BGREEN),
+        ("[sm] resolve",            _BGREEN),
+        ("[fres] resolve",          _BGREEN),
+        ("[fres] match",            _BGREEN),
+        ("[sm] play",               _BGREEN),
+        ("[sm] resume",             _BGREEN),
+        ("[sm] arm-autoloop",       _BGREEN),
+        ("[sm] rearm-autoloop",     _BGREEN),
+        ("[sm] arm-locked",         _BGREEN),
+        ("[sm] bpm-apply",          _BGREEN),
+        ("[os2l] connected",        _BGREEN),
+        ("► ",                      _BGREEN),
         ("attached pid",            _BGREEN),
-        ("connected to soundswitch",_BGREEN),
-        ("[ss][autoloop-master-arm-locked]", _BGREEN),
-        ("[ss][autoloop-arm-locked]", _BGREEN),
-        ("[ss][autoloop-arm]",      _BGREEN),
-        ("[ss][live-bpm-apply]",    _BGREEN),
         ("[lbpm][attach]",          _BGREEN),
         ("[lbpm][validated]",       _BGREEN),
         ("[rbmem][attach]",         _BGREEN),
         ("[rbmem][validated]",      _BGREEN),
-        ("autoloop",                _BGREEN),
 
-        # Grey: diagnostic/status noise.
-        ("timecode deck",           _GREY),
-        ("mtc deck",                _GREY),
+        # Grey: high-frequency diagnostic noise.
+        ("[tl] tc",                 _GREY),
+        ("[mtc]",                   _GREY),
         ("event processed",         _GREY),
-        ("event relation",          _GREY),
         ("scripted_tracks: registry", _GREY),
     ]
+
+    def formatTime(self, record: logging.LogRecord, datefmt=None) -> str:
+        import time as _time
+        ct = self.converter(record.created)
+        s = _time.strftime("%H:%M:%S", ct)
+        return f"{s}.{int(record.msecs):03d}"
 
     def format(self, record: logging.LogRecord) -> str:
         msg, args = record.msg, record.args
@@ -298,7 +291,7 @@ def start_osc_listener(
                     name="auto-populate",
                 ).start()
                 return
-            log.info("[SCRIPTED][TL-OSC] deck=%d scripted_id=%d", target, track_id)  # A6 shadow log
+            log.info("[MAIN][SHADOW] scripted-tl-osc  deck=%d  id=%d", target, track_id)  # A6 shadow log
             event_queue.put_nowait(BridgeEvent(
                 kind=Ev.SCRIPTED_ARM,
                 deck=target,
@@ -321,10 +314,10 @@ def start_osc_listener(
         LOG.log_error(log, "OSC listener failed on port %d: %s", OSC_LISTEN_PORT, exc)
         return
 
-    log.info("OSC listener on UDP :%d", OSC_LISTEN_PORT)
+    log.info("[MAIN] osc-listen  port=%d", OSC_LISTEN_PORT)
     if os.environ.get(SCRIPTED_DIRECT_ENV) != "0":
-        log.info("scripted arm direct enabled (TL OSC _track_loaded bypassed); "
-                 "set %s=0 to re-enable legacy path", SCRIPTED_DIRECT_ENV)
+        log.info("[MAIN] rsr-direct  scripted=on  (%s=0 to re-enable tl-osc path)",
+                 SCRIPTED_DIRECT_ENV)
     threading.Thread(target=srv.serve_forever, name="osc-server", daemon=True).start()
 
     # Re-register with TL so it re-announces current state
@@ -342,7 +335,7 @@ def _auto_populate(track_id: int, active_deck: int, eq: queue.Queue) -> None:
     """Query RB DB for an unknown track_id and register it, then fire SCRIPTED_ARM."""
     import os
     import warnings
-    log.info("auto-populate: unknown scripted id=%d — querying DB", track_id)
+    log.info("[MAIN] auto-populate  id=%d  action=db-query", track_id)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -355,7 +348,7 @@ def _auto_populate(track_id: int, active_deck: int, eq: queue.Queue) -> None:
         register(track_id, {"name": f"auto-{track_id}", "filepath": "",
                              "bpm": 0.0, "total_ms": 0, "first_beat_ms": 0.0})
     except Exception as exc:
-        log.warning("auto-populate: DB failed: %s", exc)
+        log.warning("[MAIN] auto-populate-fail  id=%d  err=%s", track_id, exc)
     eq.put_nowait(BridgeEvent(
         kind=Ev.SCRIPTED_ARM, deck=active_deck,
         payload={"scripted_id": track_id}, source="osc",
@@ -413,14 +406,14 @@ def _seed_initial_decks(eq: queue.Queue[BridgeEvent], init: dict) -> None:
             for ev in events:
                 eq.put_nowait(ev)
             seeded += 1
-            log.info("startup preload: deck=%d title=%s bpm=%.1f playing=%s",
+            log.info("[MAIN] startup-deck  deck=%d  title=%s  bpm=%.1f  playing=%s",
                      deck, title, bpm, bool(info.get("playing", False)))
         except queue.Full:
-            log.warning("startup preload: event queue full; deck=%d title=%s skipped",
+            log.warning("[MAIN] queue-full  event=startup-deck  deck=%d  title=%s",
                         deck, title)
 
     if seeded:
-        log.info("startup preload: enqueued %d loaded deck(s) from ENGINE STATE", seeded)
+        log.info("[MAIN] startup-preload  count=%d", seeded)
 
 
 def _direct_master_startup_seed(rb_version: str, tl_deck: int) -> tuple[int, str]:
@@ -495,11 +488,7 @@ def main() -> None:
     track_load_direct = os.environ.get(TRACK_LOAD_DIRECT_ENV) == "1"
     master_direct = os.environ.get(MASTER_DIRECT_ENV) == "1"
     if track_load_direct and not anlz_direct:
-        log.warning(
-            "RBStateReader TRACK_LOADED direct requires %s=1; ignoring %s=1",
-            ANLZ_DIRECT_ENV,
-            TRACK_LOAD_DIRECT_ENV,
-        )
+        log.warning("[MAIN] rsr-config  track-load-direct requires anlz-direct; ignoring")
         track_load_direct = False
     rb_state_reader = None
     anlz_direct_ready_decks: set[int] = set()
@@ -516,7 +505,7 @@ def main() -> None:
     pos_cache = PositionCache()
     live_bpm = LiveBPMService()
     if live_bpm.disabled:
-        log.warning("Live BPM disabled by %s=1; autoloop will use ENGINE STATE/library BPM",
+        log.warning("[MAIN] live-bpm-disabled  reason=%s=1  fallback=engine-state-bpm",
                     LIVE_BPM_DISABLE_ENV)
 
     # OS2L output
@@ -611,7 +600,7 @@ def main() -> None:
     if anlz_direct or play_direct or track_load_direct or master_direct:
         rb_version = read_rekordbox_version()
         if not rb_version:
-            log.warning("RBStateReader not started: Rekordbox version lookup failed")
+            log.warning("[MAIN] rsr-skip  reason=version-lookup-failed")
         else:
             rb_event_queue = queue.Queue(maxsize=1)
             authoritative_kinds = set()
@@ -639,20 +628,15 @@ def main() -> None:
                 master_available_callback=_set_master_direct_ready if master_direct else None,
             )
             if getattr(rb_state_reader, "_offs", None) is None:
-                log.warning("RBStateReader not started: unsupported Rekordbox version %s", rb_version)
+                log.warning("[MAIN] rsr-skip  reason=unsupported-version  version=%s", rb_version)
                 rb_state_reader = None
             else:
-                if anlz_direct:
-                    log.info("RBStateReader ANLZ direct enabled via %s=1", ANLZ_DIRECT_ENV)
-                if play_direct:
-                    log.info("RBStateReader PLAY/PAUSE direct enabled via %s=1", PLAY_DIRECT_ENV)
-                if track_load_direct:
-                    log.info(
-                        "RBStateReader TRACK_LOADED direct enabled via %s=1",
-                        TRACK_LOAD_DIRECT_ENV,
-                    )
-                if master_direct:
-                    log.info("RBStateReader MASTER direct enabled via %s=1", MASTER_DIRECT_ENV)
+                active_flags = []
+                if anlz_direct:      active_flags.append("anlz")
+                if play_direct:      active_flags.append("play")
+                if track_load_direct: active_flags.append("track-load")
+                if master_direct:    active_flags.append("master")
+                log.info("[MAIN] rsr-direct  flags=%s", "+".join(active_flags))
 
     # Memory reader (with drift detection + FM-11 RB_RESTARTED events)
     mem_reader = RBMemoryReader(
@@ -691,7 +675,7 @@ def main() -> None:
 
     # Graceful shutdown on SIGTERM / SIGINT
     def _shutdown(sig, frame):
-        log.info("shutdown signal received")
+        log.info("[MAIN] shutdown  sig=%d", sig)
         LOG.stop_control_watcher()
         sm.stop()
         tailer.stop()
@@ -711,7 +695,7 @@ def main() -> None:
     def _reload_logging(sig, frame):
         LOG.reload_from_env()
         LOG.log_stats(log)
-        log.info("logging runtime filters reloaded from BRIDGE_LOG_*")
+        log.info("[MAIN] log-reload  src=BRIDGE_LOG_*")
 
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, _reload_logging)

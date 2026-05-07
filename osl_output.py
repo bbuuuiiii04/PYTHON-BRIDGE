@@ -23,6 +23,7 @@ from .config import (
     AUTOLOOP_BEATS, TIMING_COMPENSATION_MS,
 )
 from .models import TrackMetadata
+from . import bridge_fmt as bf
 
 log = logging.getLogger("osl_output")
 
@@ -98,7 +99,7 @@ class OS2LConnection:
         try:
             self._send_q.put_nowait(payload)
         except queue.Full:
-            log.warning("OS2L send queue full — dropping message")
+            log.warning("[OS2L] queue-full  action=drop")
 
     def _sender_loop(self) -> None:
         while not self._stop.is_set():
@@ -115,7 +116,7 @@ class OS2LConnection:
             try:
                 sock.sendall(msg)
             except OSError as exc:
-                log.warning("OS2L send error: %s — reconnecting", exc)
+                log.warning("[OS2L] send-error  err=%s  action=reconnect", exc)
                 self.disconnect()
 
     def _reconnect_loop(self) -> None:
@@ -136,13 +137,13 @@ class OS2LConnection:
                 with self._lock:
                     self._sock = sock
                     self._connected = True
-                log.info("OS2L: connected to SoundSwitch at %s:%d", host, port)
+                log.info("[OS2L] connected  %s:%d", host, port)
                 self.send(_HANDSHAKE)
                 if not self.fast_reconnect:
                     self._send_init_defaults()
                 self.fast_reconnect = False
             except (OSError, ConnectionRefusedError) as exc:
-                log.info("OS2L: connect failed %s:%d (%s) — retry in 3 s", host, port, exc)
+                log.info("[OS2L] connect-fail  %s:%d  err=%s  retry=3s", host, port, exc)
                 time.sleep(3)
 
     def _send_init_defaults(self) -> None:
@@ -171,9 +172,9 @@ class SoundSwitchDiscovery:
             from zeroconf import ServiceBrowser, Zeroconf  # type: ignore
             self._zc = Zeroconf()
             self._browser = ServiceBrowser(self._zc, "_os2l._tcp.local.", handlers=[self._on_service])
-            log.info("SoundSwitchDiscovery: DNS-SD browser started")
+            log.info("[OS2L] dns-sd  started")
         except Exception as exc:
-            log.warning("SoundSwitchDiscovery: could not start DNS-SD: %s — using fallback", exc)
+            log.warning("[OS2L] dns-sd-fail  err=%s  action=fallback", exc)
 
     def stop(self) -> None:
         if self._zc is not None:
@@ -191,18 +192,18 @@ class SoundSwitchDiscovery:
         try:
             info = zeroconf.get_service_info(service_type, name, timeout=3000)
             if not info:
-                log.info("SoundSwitchDiscovery: service info not ready for %s", name)
+                log.info("[OS2L] dns-sd  info-not-ready  name=%s", name)
                 return
             ipv4 = next((addr for addr in info.addresses if len(addr) == 4), None)
             if not ipv4:
-                log.info("SoundSwitchDiscovery: no IPv4 address for %s", name)
+                log.info("[OS2L] dns-sd  no-ipv4  name=%s", name)
                 return
             host = socket.inet_ntoa(ipv4)
             port = info.port
-            log.info("SoundSwitchDiscovery: found %s at %s:%d", name, host, port)
+            log.info("[OS2L] dns-sd  found  name=%s  host=%s:%d", name, host, port)
             self._conn.set_endpoint(host, port)
         except Exception as exc:
-            log.warning("SoundSwitchDiscovery: service info error: %s", exc)
+            log.warning("[OS2L] dns-sd-error  err=%s", exc)
 
 
 # ── Higher-level output helpers ───────────────────────────────────────────────
@@ -263,12 +264,12 @@ class OS2LOutput:
         self._sub(f"{dn} get_firstbeat", int(round(meta.first_beat_ms)), verbose=True)
 
         bpm_out = meta.bpm if meta.bpm > 0 else fallback_bpm
-        log.info("[SS][deck-load] deck=%d active=%d filepath=%s ssid=%s "
-                 "bpm_out=%.2f meta_bpm=%.2f fallback_bpm=%.2f include_loop=%s loop=%s play=%s",
+        log.info("[OS2L] deck-load  deck=%d  active=%d  file=%s  ssid=%s"
+                 "  bpm=%.2f  loop=%s  play=%s",
                  deck, active_deck,
-                 os.path.basename(meta.filepath) if meta.filepath else "<none>",
+                 bf.short(meta.filepath),
                  "yes" if meta.soundswitch_id else "no",
-                 bpm_out, meta.bpm, fallback_bpm, include_loop,
+                 bpm_out,
                  AUTOLOOP_BEATS if include_loop and not meta.soundswitch_id else "off",
                  play)
         if bpm_out:
