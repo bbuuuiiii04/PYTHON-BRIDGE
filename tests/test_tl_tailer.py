@@ -12,7 +12,7 @@ from rb_ss_bridge_v2 import __main__ as bridge_main
 from rb_ss_bridge_v2.__main__ import _acquire_single_instance_lock, _seed_initial_decks
 from rb_ss_bridge_v2.models import Ev
 from rb_ss_bridge_v2.rb_state_reader import DirectMasterStatus, RB_MASTER_DIRECT_SOURCE
-from rb_ss_bridge_v2.tl_tailer import ANLZ_DIRECT_ENV, TLLogTailer, read_initial_state
+from rb_ss_bridge_v2.tl_tailer import ANLZ_DIRECT_ENV, PLAY_DIRECT_ENV, TLLogTailer, read_initial_state
 
 
 def _engine_state_log(ts: datetime) -> str:
@@ -124,6 +124,64 @@ class TLInitialStateTests(unittest.TestCase):
             tailer._process_line("Deck 0 ANLZ loaded: 123 beats")
         self.assertTrue(q.empty())
 
+    def test_tl_anlz_path_falls_back_until_direct_is_ready(self) -> None:
+        q: queue.Queue = queue.Queue()
+        direct_ready = False
+        tailer = TLLogTailer(
+            Path("/tmp/no-such-log"),
+            q,
+            anlz_direct_ready=lambda deck: direct_ready,
+        )
+
+        with unittest.mock.patch.dict(os.environ, {ANLZ_DIRECT_ENV: "1"}, clear=True):
+            tailer._process_line('AnlzParser: parsed 123 beats from "/tmp/ANLZ0000.DAT"')
+            tailer._process_line("Deck 0 ANLZ loaded: 123 beats")
+        ev = q.get_nowait()
+        self.assertEqual(ev.kind, Ev.ANLZ_PATH)
+        self.assertEqual(ev.source, "tl_log")
+
+        direct_ready = True
+        with unittest.mock.patch.dict(os.environ, {ANLZ_DIRECT_ENV: "1"}, clear=True):
+            tailer._process_line('AnlzParser: parsed 123 beats from "/tmp/ANLZ0001.DAT"')
+            tailer._process_line("Deck 0 ANLZ loaded: 123 beats")
+        self.assertTrue(q.empty())
+
+    def test_tl_play_pause_bypassed_when_direct_enabled(self) -> None:
+        q: queue.Queue = queue.Queue()
+        tailer = TLLogTailer(Path("/tmp/no-such-log"), q)
+
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            tailer._process_line('[2026-05-07] [info] [EVENT] Deck B playing')
+            tailer._process_line('[2026-05-07] [info] [EVENT] Deck B paused')
+        self.assertEqual([q.get_nowait().kind, q.get_nowait().kind], [Ev.PLAY, Ev.PAUSE])
+
+        q = queue.Queue()
+        tailer = TLLogTailer(Path("/tmp/no-such-log"), q)
+        with unittest.mock.patch.dict(os.environ, {PLAY_DIRECT_ENV: "1"}, clear=True):
+            tailer._process_line('[2026-05-07] [info] [EVENT] Deck B playing')
+            tailer._process_line('[2026-05-07] [info] [EVENT] Deck B paused')
+        self.assertTrue(q.empty())
+
+    def test_tl_play_pause_falls_back_until_direct_is_ready(self) -> None:
+        q: queue.Queue = queue.Queue()
+        direct_ready = False
+        tailer = TLLogTailer(
+            Path("/tmp/no-such-log"),
+            q,
+            play_direct_ready=lambda deck: direct_ready,
+        )
+
+        with unittest.mock.patch.dict(os.environ, {PLAY_DIRECT_ENV: "1"}, clear=True):
+            tailer._process_line('[2026-05-07] [info] [EVENT] Deck B playing')
+        ev = q.get_nowait()
+        self.assertEqual(ev.kind, Ev.PLAY)
+        self.assertEqual(ev.source, "tl_log")
+
+        direct_ready = True
+        with unittest.mock.patch.dict(os.environ, {PLAY_DIRECT_ENV: "1"}, clear=True):
+            tailer._process_line('[2026-05-07] [info] [EVENT] Deck B paused')
+        self.assertTrue(q.empty())
+
     def test_direct_master_startup_seed_uses_stable_direct_deck(self) -> None:
         statuses = [
             DirectMasterStatus(
@@ -159,6 +217,14 @@ class TLInitialStateTests(unittest.TestCase):
                     deck, source = bridge_main._direct_master_startup_seed("7.2.11", 1)
         self.assertEqual(deck, 2)
         self.assertEqual(source, "direct master seed")
+
+    def test_direct_master_startup_seed_disabled_does_not_read_direct(self) -> None:
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            with unittest.mock.patch.object(bridge_main, "read_direct_master_status") as read_direct:
+                deck, source = bridge_main._direct_master_startup_seed("7.2.11", 2)
+        self.assertEqual(deck, 2)
+        self.assertEqual(source, "TL ENGINE STATE")
+        read_direct.assert_not_called()
 
     def test_direct_master_startup_seed_falls_back_on_unstable_direct_deck(self) -> None:
         statuses = [

@@ -122,6 +122,24 @@ class LivePosChainTests(unittest.TestCase):
         assert snap is not None
         self.assertEqual(snap.elapsed_ms, int(1_000 * mod.RB_SCALE))
 
+    def test_out_of_range_read_does_not_poison_next_valid_read(self) -> None:
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.live_pos_per_deck[0],
+            struct.pack("<q", 100_000),
+        )
+        first = self.session.read_live_pos_chain(1, None)
+        self.assertIsNotNone(first)
+
+        self.mem.leaf[endpoint] = struct.pack("<q", int((mod.MEM_MAX_ELAPSED_MS + 1000) / mod.RB_SCALE))
+        self.assertIsNone(self.session.read_live_pos_chain(1, first))
+
+        self.mem.leaf[endpoint] = struct.pack("<q", 150_000)
+        snap = self.session.read_live_pos_chain(1, first)
+        self.assertIsNotNone(snap)
+        assert snap is not None
+        self.assertEqual(snap.elapsed_ms, int(150_000 * mod.RB_SCALE))
+
 
 if __name__ == "__main__":
     unittest.main()

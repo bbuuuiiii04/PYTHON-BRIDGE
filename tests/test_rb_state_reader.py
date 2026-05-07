@@ -335,6 +335,101 @@ class TickEventTests(unittest.TestCase):
         self.assertEqual(events[0].source, "rb_state")
         self.assertEqual(events[0].payload["anlz_path"], "/tmp/ANLZ0000.DAT")
 
+    def test_anlz_availability_sets_and_clears_with_direct_readability(self) -> None:
+        states: list[tuple[int, bool]] = []
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_kinds={Ev.ANLZ_PATH},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+            anlz_available_callback=lambda deck, ready: states.append((deck, ready)),
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.anlz_path_per_deck[0],
+            payload=(0).to_bytes(8, "little"),
+        )
+        path_addr = 0xABCDEF00
+        self.mem.update_leaf(endpoint, path_addr.to_bytes(8, "little"))
+        self.mem.leaf[path_addr] = b"/tmp/ANLZ0000.DAT\x00"
+
+        reader._tick(0xCAFE, self.base)
+        self.assertEqual(states, [(1, True)])
+
+        self.mem.update_leaf(endpoint, (0).to_bytes(8, "little"))
+        reader._tick(0xCAFE, self.base)
+        self.assertEqual(states, [(1, True), (1, False)])
+
+    def test_authoritative_play_pause_routes_only_transport_events(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.PLAY, Ev.PAUSE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x01")
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.live_pos_per_deck[0],
+            payload=(1000).to_bytes(8, "little"),
+        )
+
+        # Warm up a stopped baseline without forwarding startup state.
+        for _ in range(5):
+            self.mem.update_leaf(endpoint, (1000).to_bytes(8, "little"))
+            reader._tick(0xCAFE, self.base)
+        self.assertEqual(_drain(self.q), [])
+        self.assertEqual(_drain(auth_q), [])
+
+        for pos in (45_100, 90_200):
+            self.mem.update_leaf(endpoint, pos.to_bytes(8, "little"))
+            reader._tick(0xCAFE, self.base)
+        self.assertEqual(_drain(self.q), [])
+        events = _drain(auth_q)
+        self.assertEqual([(e.kind, e.deck, e.source) for e in events], [(Ev.PLAY, 1, "rb_state")])
+
+    def test_transport_availability_requires_baseline_and_clears_on_unreadable(self) -> None:
+        states: list[tuple[int, bool]] = []
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_kinds={Ev.PLAY, Ev.PAUSE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+            transport_available_callback=lambda deck, ready: states.append((deck, ready)),
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.live_pos_per_deck[0],
+            payload=(1000).to_bytes(8, "little"),
+        )
+
+        for _ in range(4):
+            reader._tick(0xCAFE, self.base)
+        self.assertEqual(states, [])
+
+        for _ in range(4):
+            reader._tick(0xCAFE, self.base)
+            if states:
+                break
+        self.assertEqual(states, [(1, True)])
+
+        del self.mem.leaf[endpoint]
+        reader._tick(0xCAFE, self.base)
+        self.assertEqual(states, [(1, True), (1, False)])
+
 
 # ── Constructor / no-op behaviour ────────────────────────────────────────────
 

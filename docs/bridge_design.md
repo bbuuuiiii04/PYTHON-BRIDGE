@@ -57,7 +57,7 @@ StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC
 
 | Signal | Source | Authority |
 |--------|--------|-----------|
-| Play / pause | TL log `[EVENT] Deck X playing/paused` | **Authoritative** |
+| Play / pause | TL log `[EVENT] Deck X playing/paused`; direct `RBStateReader` only with `RBSS_PLAY_DIRECT=1` | **Authoritative**, source selected by kill switch |
 | Master deck | TL log `Rekordbox master deck changed` + ENGINE STATE every ~15s | **Authoritative** |
 | Direct master status | `rb_offsets.py` `master_deck` chain via startup probe + bounded runtime observer | Observational only; logs availability/corroboration and does not change active deck |
 | Track load | TL log `[EVENT] Deck X loaded` | **Authoritative** |
@@ -69,10 +69,30 @@ StateManager calls `get_active_deck()` and `get_last_loaded_deck()` from OSC/MTC
 | BPM hint/fallback | ENGINE STATE every ~15s | Updates `d.meta.bpm`; static DB BPM until first update |
 | BPM live/displayed | LiveBPMService fixed offset-table chain or current-session discovery validation | Used for autoloop arm snapshot and default-on gated active follow when valid |
 
-**Critical rule**: TL log is truth. Memory confirms; it never overrides.
-- `d.playing` (from TL PLAY/PAUSE) is the authoritative play state.
+**Critical rule**: TL log is truth by default. Direct memory overrides only for
+the explicit guarded retirement items listed below.
+- `d.playing` is the authoritative play state as set by the selected
+  play/pause source: TL by default, direct only with `RBSS_PLAY_DIRECT=1`.
 - `confident_playing = d.playing` in push loop — DDJ-800 mode=4112 makes memory play bit unreliable.
 - Stop detection, lighting mode, resume detection all key off `d.playing`.
+
+Guarded TL-retirement exceptions:
+
+- `RBSS_ANLZ_DIRECT=1`: direct `Ev.ANLZ_PATH` from `RBStateReader` is routed to
+  the authoritative queue. TL ANLZ correlation output is bypassed only for a
+  bridge deck while direct ANLZ is currently readable for that deck; otherwise
+  TL remains the fail-closed fallback.
+- `RBSS_POS_CHAIN_DIRECT=1`: `RBMemoryReader` uses versioned
+  `live_pos_per_deck` chains to feed `PositionCache`; ObjC scan still runs as
+  fallback/validation. Chain reads update their previous-raw validation anchor
+  only after negative, backward-jump, and elapsed-range validation passes.
+- `RBSS_MASTER_SEED_DIRECT=1`: startup-only direct master seed can override the
+  initial TL active deck after two stable reads; runtime master remains TL.
+- `RBSS_PLAY_DIRECT=1`: direct `Ev.PLAY`/`Ev.PAUSE` from `RBStateReader` is
+  routed to the authoritative queue. TL log play/pause output is bypassed only
+  for a bridge deck after direct transport has attached, read live position, and
+  warmed up a baseline for that deck; otherwise TL remains the fail-closed
+  fallback. Startup ENGINE preload remains unchanged.
 
 **Audit note (2026-05-06):** `docs/timecodelink_integration_analysis.md` §7–10 documents the
 exact RB memory layout TL reads (master-deck `uint8_t`, per-deck live BPM `float`,

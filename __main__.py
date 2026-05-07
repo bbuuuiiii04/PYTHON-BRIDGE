@@ -44,7 +44,7 @@ from .rb_state_reader import (
 from .rb_state_shadow import RBStateParityMonitor, SHADOW_ENV, read_rekordbox_version
 from .scripted_tracks import preload_from_tl, resolve_filepaths
 from .state_manager import StateManager
-from .tl_tailer import ANLZ_DIRECT_ENV, TLLogTailer, read_initial_state
+from .tl_tailer import ANLZ_DIRECT_ENV, PLAY_DIRECT_ENV, TLLogTailer, read_initial_state
 from .diagnostics import DriftDetector, enable_debug, is_debug
 from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService
 from .logging_manager import get_logging_manager
@@ -504,10 +504,15 @@ def main() -> None:
     raw_event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)
     rb_state_shadow = os.environ.get(SHADOW_ENV) == "1"
     anlz_direct = os.environ.get(ANLZ_DIRECT_ENV) == "1"
+    play_direct = os.environ.get(PLAY_DIRECT_ENV) == "1"
     rb_shadow_queue: queue.Queue[BridgeEvent] | None = None
     rb_parity: RBStateParityMonitor | None = None
     rb_state_reader = None
     rb_master_runtime_observer = None
+    anlz_direct_ready_decks: set[int] = set()
+    anlz_direct_ready_lock = threading.Lock()
+    play_direct_ready_decks: set[int] = set()
+    play_direct_ready_lock = threading.Lock()
     tl_master_snapshot = TLMasterSnapshot()
     def _observe_authoritative_enqueue(ev):
         tl_master_snapshot.observe_event(ev)
@@ -576,15 +581,50 @@ def main() -> None:
     _seed_initial_decks(event_queue, init)
 
     # TL log tailer
-    tailer = TLLogTailer(TL_LOG_PATH, event_queue)
+    def _set_anlz_direct_ready(deck: int, ready: bool) -> None:
+        if deck not in (1, 2):
+            return
+        with anlz_direct_ready_lock:
+            if ready:
+                anlz_direct_ready_decks.add(deck)
+            else:
+                anlz_direct_ready_decks.discard(deck)
 
-    if rb_state_shadow or anlz_direct:
+    def _is_anlz_direct_ready(deck: int) -> bool:
+        with anlz_direct_ready_lock:
+            return deck in anlz_direct_ready_decks
+
+    def _set_play_direct_ready(deck: int, ready: bool) -> None:
+        if deck not in (1, 2):
+            return
+        with play_direct_ready_lock:
+            if ready:
+                play_direct_ready_decks.add(deck)
+            else:
+                play_direct_ready_decks.discard(deck)
+
+    def _is_play_direct_ready(deck: int) -> bool:
+        with play_direct_ready_lock:
+            return deck in play_direct_ready_decks
+
+    tailer = TLLogTailer(
+        TL_LOG_PATH,
+        event_queue,
+        anlz_direct_ready=_is_anlz_direct_ready if anlz_direct else None,
+        play_direct_ready=_is_play_direct_ready if play_direct else None,
+    )
+
+    if rb_state_shadow or anlz_direct or play_direct:
         rb_version = read_rekordbox_version()
         if not rb_version:
             log.warning("RBStateReader not started: Rekordbox version lookup failed")
         else:
             rb_event_queue = rb_shadow_queue if rb_shadow_queue is not None else queue.Queue(maxsize=1)
-            authoritative_kinds = {Ev.ANLZ_PATH} if anlz_direct else set()
+            authoritative_kinds = set()
+            if anlz_direct:
+                authoritative_kinds.add(Ev.ANLZ_PATH)
+            if play_direct:
+                authoritative_kinds.update({Ev.PLAY, Ev.PAUSE})
             rb_state_reader = make_rb_state_reader(
                 rb_event_queue,
                 rb_version,
@@ -593,12 +633,17 @@ def main() -> None:
                 drop_unrouted_events=not rb_state_shadow,
                 shadow_logs_enabled=rb_state_shadow,
                 position_cache=pos_cache,
+                anlz_available_callback=_set_anlz_direct_ready if anlz_direct else None,
+                transport_available_callback=_set_play_direct_ready if play_direct else None,
             )
             if getattr(rb_state_reader, "_offs", None) is None:
                 log.warning("RBStateReader not started: unsupported Rekordbox version %s", rb_version)
                 rb_state_reader = None
-            elif anlz_direct:
-                log.info("RBStateReader ANLZ direct enabled via %s=1", ANLZ_DIRECT_ENV)
+            else:
+                if anlz_direct:
+                    log.info("RBStateReader ANLZ direct enabled via %s=1", ANLZ_DIRECT_ENV)
+                if play_direct:
+                    log.info("RBStateReader PLAY/PAUSE direct enabled via %s=1", PLAY_DIRECT_ENV)
 
     # Memory reader (with drift detection + FM-11 RB_RESTARTED events)
     from .diagnostics import DriftDetector

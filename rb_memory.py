@@ -699,17 +699,17 @@ class RBSession:
                          bridge_deck, delta, prev_raw, raw)
                 return None
 
-        playing = bool(previous.playing) if previous is not None else False
-        if prev_raw is not None:
-            playing = raw != prev_raw
-        self._chain_last_raw[bridge_deck] = raw
-        self._chain_valid_count[bridge_deck] = self._chain_valid_count.get(bridge_deck, 0) + 1
-
         elapsed_ms = int(raw * RB_SCALE)
         if elapsed_ms > MEM_MAX_ELAPSED_MS:
             log.info("[RBMEM][INVALID] deck=%d chain elapsed_ms=%d out_of_range",
                      bridge_deck, elapsed_ms)
             return None
+
+        playing = bool(previous.playing) if previous is not None else False
+        if prev_raw is not None:
+            playing = raw != prev_raw
+        self._chain_last_raw[bridge_deck] = raw
+        self._chain_valid_count[bridge_deck] = self._chain_valid_count.get(bridge_deck, 0) + 1
 
         track_length_ms = previous.track_length_ms if previous is not None else 0
         ddj_mode = previous.ddj_mode if previous is not None else False

@@ -18,12 +18,13 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from .models import BridgeEvent, Ev
 
 log = logging.getLogger("tl_tailer")
 ANLZ_DIRECT_ENV = "RBSS_ANLZ_DIRECT"
+PLAY_DIRECT_ENV = "RBSS_PLAY_DIRECT"
 
 # ── Regexes ──────────────────────────────────────────────────────────────────
 
@@ -246,11 +247,20 @@ class TLLogTailer(threading.Thread):
 
     _IDLE_POLL_S = 0.05
 
-    def __init__(self, log_path: Path, event_queue: queue.Queue[BridgeEvent]):
+    def __init__(
+        self,
+        log_path: Path,
+        event_queue: queue.Queue[BridgeEvent],
+        *,
+        anlz_direct_ready: Optional[Callable[[int], bool]] = None,
+        play_direct_ready: Optional[Callable[[int], bool]] = None,
+    ):
         super().__init__(name="tl-log-tailer", daemon=True)
         self._path  = log_path
         self._queue = event_queue
         self._stop  = threading.Event()
+        self._anlz_direct_ready = anlz_direct_ready
+        self._play_direct_ready = play_direct_ready
 
         # ANLZ stateful correlation
         self._last_anlz_beats: int = 0
@@ -307,6 +317,26 @@ class TLLogTailer(threading.Thread):
         except queue.Full:
             log.warning("TLLogTailer: queue full — dropping %s", ev.kind)
 
+    def _play_direct_bypass_enabled(self, deck: int) -> bool:
+        if os.environ.get(PLAY_DIRECT_ENV) != "1":
+            return False
+        if self._play_direct_ready is None:
+            return True
+        try:
+            return bool(self._play_direct_ready(deck))
+        except Exception:
+            return False
+
+    def _anlz_direct_bypass_enabled(self, deck: int) -> bool:
+        if os.environ.get(ANLZ_DIRECT_ENV) != "1":
+            return False
+        if self._anlz_direct_ready is None:
+            return True
+        try:
+            return bool(self._anlz_direct_ready(deck))
+        except Exception:
+            return False
+
     def _process_line(self, line: str) -> None:
         # ── ENGINE STATE accumulator ──────────────────────────────────────────
         if '=== ENGINE STATE ===' in line:
@@ -334,8 +364,8 @@ class TLLogTailer(threading.Thread):
             deck_idx = int(m.group(1))   # 0-indexed
             beats    = int(m.group(2))
             if beats == self._last_anlz_beats and self._last_anlz_path:
-                if os.environ.get(ANLZ_DIRECT_ENV) != "1":
-                    bridge_deck = _bridge_deck(deck_idx + 1)
+                bridge_deck = _bridge_deck(deck_idx + 1)
+                if not self._anlz_direct_bypass_enabled(bridge_deck):
                     self._enqueue(BridgeEvent(
                         kind=Ev.ANLZ_PATH,
                         deck=bridge_deck,
@@ -349,6 +379,8 @@ class TLLogTailer(threading.Thread):
         # ── Stateless events ──────────────────────────────────────────────────
         ev = parse_line(line)
         if ev is not None:
+            if ev.kind in (Ev.PLAY, Ev.PAUSE) and self._play_direct_bypass_enabled(ev.deck):
+                return
             self._enqueue(ev)
 
     def _flush_engine_state(self) -> None:

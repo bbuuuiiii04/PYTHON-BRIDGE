@@ -680,6 +680,44 @@ non-master deck during extreme rapid cue; master-only lighting authority means
 they are irrelevant to the authoritative path. Prerequisites: B1, B2 must land
 first.
 
+**B3 — IMPLEMENTED / AWAITING LIVE VALIDATION** (2026-05-07): added
+`RBSS_PLAY_DIRECT=1`. When enabled, `RBStateReader` routes only `Ev.PLAY` and
+`Ev.PAUSE` to the authoritative queue; unrelated direct events still remain
+shadow-only or dropped unless their own kill switch is enabled. `TLLogTailer`
+still runs and parses the log, but TL log `PLAY`/`PAUSE` output is bypassed only
+after `RBStateReader` has attached and warmed up a direct transport baseline for
+that bridge deck. If the direct path is unavailable or loses readability, TL
+play/pause remains the fail-closed fallback. Startup ENGINE preload remains
+unchanged so an already-playing deck can still seed state before direct polling
+warms up. Focused unit tests cover direct transport routing, TL play/pause
+bypass, and fallback before direct readiness.
+
+**B3 — LIVE VALIDATION CONFIRMED** (2026-05-07):
+
+Run conditions:
+- `RBSS_ANLZ_DIRECT=1 RBSS_POS_CHAIN_DIRECT=1 RBSS_MASTER_SEED_DIRECT=1 RBSS_PLAY_DIRECT=1`
+- `RBSS_LIVE_BPM_FOLLOW=1`
+- RB version 7.2.11; deck 1 playing at start; deck 2 loaded mid-session
+- Startup message confirmed: `RBStateReader PLAY/PAUSE direct enabled via RBSS_PLAY_DIRECT=1`
+
+Scenarios covered and results:
+
+- Deck 1 simple play/pause (master), ~12 cycles: all `src=rb_state` ✓
+- Deck 2 play/pause (non-master), ~10 cycles: all `src=rb_state` ✓
+- Rapid cue on deck 2 (bursts at 02:29:41–44): all `src=rb_state` ✓
+- Rapid cue on deck 1 (non-master after switch, 02:30:05–09): all `src=rb_state` ✓
+- Master switch deck1→deck2: `MASTER_CHANGED reason=tl_log` — correct, master authority unchanged ✓
+- Master switch deck2→deck1: `MASTER_CHANGED reason=tl_log` — correct ✓
+- Non-master deck pause: `src=rb_state` ✓
+- Pause auto-switch: D1 paused (rb_state) → `[D1→D2] auto-switch (D1 stopped)` fired correctly ✓
+
+Zero TL play/pause events leaked through on either deck across all scenarios.
+Auto-switch (which depends on correct PAUSE detection from rb_state) fired correctly.
+
+Conclusion: B3 is confirmed working. Direct play/pause is the authoritative source
+for both decks. TL bypass is complete and fail-closed (TL still runs as fallback
+if RBStateReader loses readability). B4 authorization is the next step.
+
 ---
 
 4. track load/title shadow parity (A5): CONFIRMED
@@ -842,11 +880,15 @@ Implemented behavior:
   authoritative queue. For this step, only `Ev.ANLZ_PATH` is promoted. Other
   direct events stay shadow-only or are dropped when shadow mode is off.
 - B1: `TLLogTailer` still parses ANLZ correlation state, but does not enqueue
-  TL `Ev.ANLZ_PATH` while `RBSS_ANLZ_DIRECT=1`.
+  TL `Ev.ANLZ_PATH` while `RBSS_ANLZ_DIRECT=1` only after direct ANLZ is
+  currently readable for that bridge deck. Before direct readiness, TL ANLZ
+  remains the fail-closed fallback.
 - B2: `RBMemoryReader` follows the versioned `live_pos_per_deck` chain on each
   poll when `RBSS_POS_CHAIN_DIRECT=1`, validates raw values, and updates
   `PositionCache` with chain snapshots. Existing ObjC Deck-2 resolution still
-  runs in the background as fallback/validation.
+  runs in the background as fallback/validation. Rejected out-of-range chain
+  values do not update the previous-raw validation anchor, so one bad read
+  cannot poison later valid reads.
 - C1: startup master seed does two direct reads about 500ms apart and uses the
   direct deck only when both reads are readable, supported, valid, and stable.
   Runtime master authority remains TL/ENGINE.
