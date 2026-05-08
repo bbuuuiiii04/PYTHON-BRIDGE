@@ -2,8 +2,7 @@
 Scripted track registry and TL playlist.yaml preloader.
 
 SCRIPTED_TRACKS maps TL playlist.yaml value → track info dict.
-Keys 2, 3, 12 are hardcoded (see MEMORY.md for rationale).
-Keys 4+ are auto-registered by preload_from_tl() at startup.
+Entries are auto-registered by preload_from_tl() at startup.
 
 Thread safety: register() is called only at startup (single-threaded context).
                lookup() is read-only after startup. No lock needed.
@@ -20,30 +19,7 @@ log = logging.getLogger("scripted_tracks")
 
 # ── Registry ─────────────────────────────────────────────────────────────────
 
-SCRIPTED_TRACKS: dict[int, dict] = {
-    2: {
-        "name":          "Mean Girls rmx - FINAL V4.wav",
-        "filepath":      "",   # populated by _resolve_filepath()
-        "bpm":           0.0,
-        "total_ms":      0,
-        "first_beat_ms": 0.0,
-    },
-    3: {
-        "name":          "fkdaspekr x Kernkraft 400 (DYNASTY Remake).wav",
-        "filepath":      "",
-        "bpm":           0.0,
-        "total_ms":      0,
-        "first_beat_ms": 0.0,
-    },
-    # Key 12 hardcoded: preload_from_tl intermittently misses it (DB concurrency with RB)
-    12: {
-        "name":          "Niggas In Paris X Core X OK!OK!OK! (AWON Edit)",
-        "filepath":      "",
-        "bpm":           150.0,
-        "total_ms":      169_000,
-        "first_beat_ms": 0.0,
-    },
-}
+SCRIPTED_TRACKS: dict[int, dict] = {}
 
 
 def lookup(track_id: int) -> Optional[dict]:
@@ -53,14 +29,14 @@ def lookup(track_id: int) -> Optional[dict]:
 def register(track_id: int, info: dict) -> None:
     if track_id not in SCRIPTED_TRACKS:
         SCRIPTED_TRACKS[track_id] = info
-        log.info("scripted_tracks: registered id=%d name=%s", track_id, info.get("name", "?"))
+        log.debug("scripted_tracks: registered id=%d name=%s", track_id, info.get("name", "?"))
 
 
 # ── Startup preload ───────────────────────────────────────────────────────────
 
 def _log_registry() -> None:
     ids = sorted(SCRIPTED_TRACKS)
-    log.info("scripted_tracks: registry = %s (%d tracks)", ids, len(ids))
+    log.info("scripted_tracks: registry  count=%d  ids=%s", len(ids), ids)
 
 
 def preload_from_tl(tl_playlist_path: str) -> None:
@@ -99,7 +75,7 @@ def preload_from_tl(tl_playlist_path: str) -> None:
         return
 
     if not to_find:
-        log.info("preload_from_tl: all TL tracks already registered")
+        log.info("preload_from_tl: no new TL tracks  registry_count=%d", len(SCRIPTED_TRACKS))
         return
 
     log.info("preload_from_tl: looking up %d track(s) in RB DB", len(to_find))
@@ -122,6 +98,8 @@ def preload_from_tl(tl_playlist_path: str) -> None:
             except Exception:
                 pass
 
+    added = 0
+    missing: list[tuple[int, str]] = []
     for tl_val, tl_name in to_find:
         if not tl_name:
             continue
@@ -139,7 +117,7 @@ def preload_from_tl(tl_playlist_path: str) -> None:
                 break
 
         if best is None:
-            log.warning("preload_from_tl: no DB match for '%s' (id=%d)", tl_name, tl_val)
+            missing.append((tl_val, tl_name))
             continue
 
         fp = best.FolderPath or ""
@@ -159,16 +137,26 @@ def preload_from_tl(tl_playlist_path: str) -> None:
             "first_beat_ms": 0.0,
             "ssid":          ssid,
         })
-        log.info("preload_from_tl: id=%d '%s' bpm=%.1f", tl_val, tl_name,
-                 SCRIPTED_TRACKS[tl_val]["bpm"])
+        added += 1
 
+    if missing:
+        log.warning(
+            "preload_from_tl: missing_db_matches  count=%d  ids=%s",
+            len(missing),
+            [tid for tid, _ in missing],
+        )
+    log.info(
+        "preload_from_tl: complete  added=%d  missing=%d  registry_count=%d",
+        added,
+        len(missing),
+        len(SCRIPTED_TRACKS),
+    )
     _log_registry()
 
 
 def resolve_filepaths(db_path: Optional[str] = None) -> None:
-    """Fill in missing 'filepath' fields for hardcoded entries by fuzzy DB search.
+    """Fill in missing 'filepath' fields for preloaded entries by fuzzy DB search.
 
-    Entries 2 and 3 have known names but empty filepath — resolve once at startup.
     Safe to call even if DB is unavailable.
     """
     needs = {tid: t for tid, t in SCRIPTED_TRACKS.items() if not t.get("filepath")}

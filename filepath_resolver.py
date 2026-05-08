@@ -40,12 +40,36 @@ _EMPTY_BEATGRID = {
 _MIN_BEATGRID_INTERVAL_MS = 150.0
 _MAX_BEATGRID_INTERVAL_MS = 3000.0
 _SS_PRELOAD_CACHE: dict[str, str] = {}
+_SS_SCRIPTED_ID_CACHE: set[str] = set()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def seed_soundswitch_id_cache(mapping: dict[str, str]) -> None:
     _SS_PRELOAD_CACHE.update(mapping)
+
+
+def _normalize_soundswitch_id(ssid: str) -> str:
+    ssid = (ssid or "").strip().upper()
+    if not ssid:
+        return ""
+    if not ssid.startswith("{"):
+        ssid = "{" + ssid
+    if not ssid.endswith("}"):
+        ssid = ssid + "}"
+    return ssid
+
+
+def seed_soundswitch_scripted_id_cache(ids: set[str] | list[str] | tuple[str, ...]) -> None:
+    _SS_SCRIPTED_ID_CACHE.update(
+        normalized for ssid in ids
+        if (normalized := _normalize_soundswitch_id(ssid))
+    )
+
+
+def has_soundswitch_scripted_id(ssid: str) -> bool:
+    normalized = _normalize_soundswitch_id(ssid)
+    return bool(normalized and normalized in _SS_SCRIPTED_ID_CACHE)
 
 
 def _rb_pid() -> Optional[str]:
@@ -101,6 +125,13 @@ def _read_soundswitch_id(filepath: str) -> str:
             for tag in audio.tags.getall("TXXX"):
                 if tag.desc.lower() == "soundswitch_id":
                     return str(tag.text[0]) if tag.text else ""
+        if audio and audio.tags and hasattr(audio.tags, "get"):
+            for key in ("soundswitch_id", "SOUNDSWITCH_ID"):
+                value = audio.tags.get(key)
+                if value:
+                    if isinstance(value, (list, tuple)):
+                        return str(value[0]) if value else ""
+                    return str(value)
     except Exception:
         pass
     # Fallback: raw ID3 scan for formats mutagen.File doesn't auto-detect.

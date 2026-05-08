@@ -41,6 +41,7 @@ from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
 from .logging_manager import get_logging_manager
+from .filepath_resolver import has_soundswitch_scripted_id
 from . import bridge_fmt as bf
 
 log = logging.getLogger("state_manager")
@@ -54,6 +55,7 @@ AUTOLOOP_MASTER_PHRASE_ARM_ENV = "RBSS_AUTOLOOP_MASTER_PHRASE_ARM"
 SMART_DROP_ENV = "RBSS_SMART_DROP"
 PHRASE_ANCHOR_ENV = "RBSS_PHRASE_ANCHOR"
 SMART_REARM_EXPERIMENT_ENV = "RBSS_SMART_REARM_EXPERIMENT"
+SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
 _LIVE_BPM_FOLLOW_THRESHOLD = BPM_THRESHOLD_UNSCRIPTED
 _LIVE_BPM_FOLLOW_SEND_INTERVAL_S = 0.10
 _AUTOLOOP_MASTER_PHRASE_START_GRACE_BEATS = 0.5
@@ -581,7 +583,11 @@ class StateManager:
                     (tid for tid, t in SCRIPTED_TRACKS.items() if t.get("ssid") == ssid),
                     None,
                 )
-                if scripted_id is None:
+                if (
+                    scripted_id is None
+                    and _os.environ.get(SCRIPTED_SHOWFILE_DIRECT_ENV, "0") == "1"
+                    and has_soundswitch_scripted_id(ssid)
+                ):
                     scripted_id = (hash(ssid) & 0x7FFFFFFF) or 1
                     ssid_direct = True
             if scripted_id is None and filepath:

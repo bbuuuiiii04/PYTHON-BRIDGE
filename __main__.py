@@ -24,7 +24,11 @@ import fcntl
 from typing import Callable, Optional
 
 from .config import OSC_LISTEN_PORT, TL_LOG_PATH, TL_PLAYLIST_PATH
-from .filepath_resolver import FilepathResolver
+from .filepath_resolver import (
+    FilepathResolver,
+    seed_soundswitch_id_cache,
+    seed_soundswitch_scripted_id_cache,
+)
 from .models import BridgeEvent, Ev
 from .mtc_reader import MTCReader
 from .osl_output import OS2LConnection, OS2LOutput, SoundSwitchDiscovery
@@ -36,6 +40,7 @@ from .rb_state_reader import (
     read_direct_master_status,
 )
 from .scripted_tracks import preload_from_tl, resolve_filepaths
+from .ss_library_scanner import start_ss_library_scan
 from .state_manager import (
     AUTOLOOP_MASTER_PHRASE_ARM_ENV,
     LIVE_BPM_FOLLOW_ENV,
@@ -145,6 +150,9 @@ class _ColorFormatter(logging.Formatter):
         ("[main][shadow]",          _BMAGENTA),
         ("scripted_arm",            _BMAGENTA),
         ("scripted_clear",          _BMAGENTA),
+        ("[ss-scan] complete",      _BMAGENTA),
+        ("[ss-scan] candidate",     _GREY),
+        ("[ss-scan]",               _GREY),
 
         # Green: successful user-facing state.
         ("rb_ss_bridge_v2 starting", _BGREEN),
@@ -497,6 +505,10 @@ def main() -> None:
     # Startup: pre-register scripted tracks from TL playlist.yaml + resolve filepaths
     preload_from_tl(str(TL_PLAYLIST_PATH))
     resolve_filepaths()
+    start_ss_library_scan(
+        callback=seed_soundswitch_id_cache,
+        scripted_id_callback=seed_soundswitch_scripted_id_cache,
+    )
 
     # Shared authoritative event queue.
     raw_event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)

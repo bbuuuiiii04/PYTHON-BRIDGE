@@ -416,6 +416,17 @@ event queue. Because `FILEPATH_RESOLVED` carries the deck from the original
 `TRACK_LOADED`, deck identity is authoritative and does not depend on TL OSC
 ordering.
 
+Startup also scans SoundSwitch's project data in the background. The scan warms
+the `filepath -> SOUNDSWITCH_ID` cache and reports a compact `[SS-SCAN] complete`
+summary. Per-file `[SS-SCAN] candidate` entries are debug-only by default and
+can be enabled with `RBSS_SS_SCAN_LOG_CANDIDATES=1`. A candidate is inventory
+evidence only: `SOUNDSWITCH_ID` alone is not a scripted-show signal, and
+show-file direct arming is disabled by default with
+`RBSS_SCRIPTED_SHOWFILE_DIRECT=0`. In the validated default mode, a false
+candidate resolves, emits `SCRIPTED_CLEAR`, and rearms autoloop with `ssid=no`;
+a true TL-registered scripted track resolves through `source=registry` and arms
+with `ssid=yes`.
+
 When `RBSS_SCRIPTED_DIRECT=1`, the TL OSC `/bridge/track_loaded` handler returns
 after parsing the track id and does not enqueue scripted events. TL OSC
 `/bridge/active_deck` remains active and still routes master changes.
