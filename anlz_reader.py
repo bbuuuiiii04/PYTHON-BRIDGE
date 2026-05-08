@@ -74,8 +74,9 @@ def read_anlz_drops(anlz_path: str) -> TrackAnlzData:
 
 
 def _extract_pssi_drop_beats(parsed: list[tuple[Path, Any]]) -> list[int]:
-    drops: set[int] = set()
-    for _path, anlz in parsed:
+    ordered = sorted(parsed, key=lambda item: _candidate_priority(item[0]))
+    for _path, anlz in ordered:
+        drops: set[int] = set()
         for tag in _safe_getall_tags(anlz, "PSSI"):
             content = getattr(tag, "content", None)
             entries = getattr(content, "entries", None)
@@ -92,7 +93,20 @@ def _extract_pssi_drop_beats(parsed: list[tuple[Path, Any]]) -> list[int]:
                 bridge_beat = max(0, pssi_beat - 1)
                 if kind == 5 and bridge_beat > 0:
                     drops.add(bridge_beat)
-    return sorted(drops)
+        if drops:
+            return sorted(drops)
+    return []
+
+
+def _candidate_priority(path: Path) -> int:
+    suffix = path.suffix.upper()
+    if suffix == ".EXT":
+        return 0
+    if suffix == ".2EX":
+        return 1
+    if suffix == ".DAT":
+        return 2
+    return 3
 
 
 def _extract_waveform_drop_beats(parsed: list[tuple[Path, Any]]) -> list[int]:
@@ -212,7 +226,7 @@ def _detect_drop_beats(
                     drop_beat = drop_bar * 4
                     if (
                         drop_beat >= IGNORE_INTRO_BARS * 4
-                        and drop_beat <= (total_bars - IGNORE_OUTRO_BARS) * 4
+                        and drop_beat < (total_bars - IGNORE_OUTRO_BARS) * 4
                         and drop_beat - last_accepted >= COOLDOWN_BARS * 4
                     ):
                         drops.append(drop_beat)

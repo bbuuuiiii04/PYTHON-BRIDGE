@@ -39,6 +39,9 @@ from .scripted_tracks import preload_from_tl, resolve_filepaths
 from .state_manager import (
     AUTOLOOP_MASTER_PHRASE_ARM_ENV,
     LIVE_BPM_FOLLOW_ENV,
+    PHRASE_ANCHOR_ENV,
+    SMART_DROP_ENV,
+    SMART_REARM_EXPERIMENT_ENV,
     StateManager,
 )
 from .tl_tailer import (
@@ -700,7 +703,8 @@ def main() -> None:
     log.info(
         "[MAIN] running  state=on  active_deck=%d  seed=%s  rb_version=%s"
         "  tl=optional  rsr=%s  direct=%s  live_bpm=%s  follow=%s"
-        "  phrase_arm=%s  scripted_direct=%s  osc=%d  log_control=%s",
+        "  phrase_arm=%s  smart_rearm=%s  smart_drop=%s  phrase_anchor=%s"
+        "  scripted_direct=%s  osc=%d  log_control=%s",
         initial_active_deck,
         initial_active_source.replace(" ", "_"),
         rb_version_for_direct_master or "unknown",
@@ -709,6 +713,15 @@ def main() -> None:
         _onoff(not live_bpm.disabled),
         _onoff(_env_enabled(LIVE_BPM_FOLLOW_ENV, "1")),
         _onoff(_env_enabled(AUTOLOOP_MASTER_PHRASE_ARM_ENV, "1")),
+        _onoff(_env_enabled(SMART_REARM_EXPERIMENT_ENV, "0")),
+        _onoff(
+            _env_enabled(SMART_REARM_EXPERIMENT_ENV, "0")
+            and _env_enabled(SMART_DROP_ENV, "1")
+        ),
+        _onoff(
+            _env_enabled(SMART_REARM_EXPERIMENT_ENV, "0")
+            and _env_enabled(PHRASE_ANCHOR_ENV, "1")
+        ),
         _onoff(_env_enabled(SCRIPTED_DIRECT_ENV, "1")),
         OSC_LISTEN_PORT,
         os.environ.get("BRIDGE_LOG_CONTROL", "/tmp/rb_ss_bridge_v2_logging.json"),

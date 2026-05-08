@@ -1,13 +1,17 @@
 import sys
+import os
+import queue
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2.models import DeckState, OutputState  # noqa: E402
+from rb_ss_bridge_v2.models import BridgeEvent, DeckState, Ev, OutputState, TrackMetadata  # noqa: E402
+from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
+    StateManager,
     _phrase_anchor_tick,
     _send_direct_autoloop_rearm,
     _smart_drop_tick,
@@ -34,10 +38,118 @@ def _sm(drops=None, filepath="/music/drop.mp3"):
     return sm
 
 
+def _manager(env=None):
+    env = env or {}
+    with patch.dict(os.environ, env, clear=False):
+        return StateManager(queue.Queue(), PositionCache(), Mock())
+
+
+def _arm_drop_cut(sm):
+    sm._os.drop_cut_armed = True
+    sm._os.drop_rearm_beat = 64
+    sm._os.phrase_anchor_last_beat = 64
+
+
+class SmartRearmFlagTests(unittest.TestCase):
+    def test_global_switch_off_disables_both(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "0",
+            "RBSS_SMART_DROP": "1",
+            "RBSS_PHRASE_ANCHOR": "1",
+        })
+        self.assertFalse(sm._smart_rearm_experiment)
+        self.assertFalse(sm._smart_drop_enabled)
+        self.assertFalse(sm._phrase_anchor_enabled)
+
+    def test_global_switch_on_enables_defaults(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SMART_DROP": "1",
+            "RBSS_PHRASE_ANCHOR": "1",
+        })
+        self.assertTrue(sm._smart_rearm_experiment)
+        self.assertTrue(sm._smart_drop_enabled)
+        self.assertTrue(sm._phrase_anchor_enabled)
+
+    def test_experiment_off_skips_anlz_worker(self) -> None:
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "0"})
+        resolver = Mock()
+        sm.attach_resolver(resolver)
+        sm._pending_anlz_path[1] = "/tmp/ANLZ0000.EXT"
+        with patch("rb_ss_bridge_v2.state_manager.threading.Thread") as thread:
+            sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
+        resolver.resolve_by_anlz.assert_called_once()
+        thread.assert_not_called()
+
+    def test_smart_drop_kill_switch_disables_cut(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SMART_DROP": "0",
+            "RBSS_PHRASE_ANCHOR": "1",
+        })
+        self.assertFalse(sm._smart_drop_enabled)
+        self.assertTrue(sm._phrase_anchor_enabled)
+
+    def test_phrase_anchor_kill_switch_disables_anchor(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SMART_DROP": "1",
+            "RBSS_PHRASE_ANCHOR": "0",
+        })
+        self.assertTrue(sm._smart_drop_enabled)
+        self.assertFalse(sm._phrase_anchor_enabled)
+
+
+class SmartRearmResetTests(unittest.TestCase):
+    def test_drop_cut_cleared_on_idle_transition(self) -> None:
+        sm = _manager()
+        _arm_drop_cut(sm)
+        sm._apply_lighting(1, "idle", 0, 130.0)
+        self.assertFalse(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 0)
+        self.assertEqual(sm._os.phrase_anchor_last_beat, -1)
+
+    def test_drop_cut_cleared_on_scripted_transition(self) -> None:
+        sm = _manager()
+        sm._deck[1].scripted_id = 12
+        _arm_drop_cut(sm)
+        sm._apply_lighting(1, "scripted", 0, 150.0)
+        self.assertFalse(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 0)
+
+    def test_drop_cut_cleared_on_active_track_load(self) -> None:
+        sm = _manager()
+        _arm_drop_cut(sm)
+        sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
+        self.assertFalse(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 0)
+
+    def test_drop_cut_cleared_on_master_change(self) -> None:
+        sm = _manager()
+        _arm_drop_cut(sm)
+        sm._on_master_changed(2, "test")
+        self.assertFalse(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 0)
+
+    def test_drop_cut_cleared_on_rb_restart(self) -> None:
+        sm = _manager()
+        _arm_drop_cut(sm)
+        sm._handle_event(BridgeEvent(Ev.RB_RESTARTED, 0, {"pid": 123}))
+        self.assertFalse(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 0)
+
+
 class SmartDropTests(unittest.TestCase):
     def test_smart_drop_skipped_while_transition_arm_pending(self) -> None:
         sm = _sm([64])
         sm._os.autoloop_arm_pending = True
+        _smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000)
+        sm._out.send_deck_clear.assert_not_called()
+        self.assertFalse(sm._os.drop_cut_armed)
+
+    def test_smart_drop_skipped_while_pending_arm_meta_set(self) -> None:
+        sm = _sm([64])
+        sm._os.pending_autoloop_arm_meta = TrackMetadata(filepath="/music/pending.mp3")
         _smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000)
         sm._out.send_deck_clear.assert_not_called()
         self.assertFalse(sm._os.drop_cut_armed)
@@ -64,6 +176,16 @@ class SmartDropTests(unittest.TestCase):
         sm._send_autoloop_deck_load.assert_called_once()
         self.assertFalse(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 0)
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
+
+    def test_smart_drop_rearm_blocks_same_beat_phrase_anchor_double_rearm(self) -> None:
+        sm = _sm([64])
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 64
+        sm._os.phrase_anchor_last_beat = 0
+        _smart_drop_tick(sm, 1, 2, 130.0, 64, 32_005)
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_005, 64.0)
+        sm._send_autoloop_deck_load.assert_called_once()
 
     def test_past_drops_scanned_but_ignored(self) -> None:
         sm = _sm([32, 64, 128])
@@ -78,6 +200,13 @@ class SmartDropTests(unittest.TestCase):
         arm_meta = sm._send_autoloop_deck_load.call_args.args[3]
         self.assertEqual(arm_meta.bpm, 130.5)
 
+    def test_rearm_falls_back_to_push_bpm_when_arm_bpm_zero(self) -> None:
+        sm = _sm([64])
+        sm._os.autoloop_arm_bpm = 0.0
+        _send_direct_autoloop_rearm(sm, 1, 2, 131.0, 32_005, "test", target_beat=64)
+        arm_meta = sm._send_autoloop_deck_load.call_args.args[3]
+        self.assertEqual(arm_meta.bpm, 131.0)
+
     def test_rearm_uses_target_elapsed_for_drop_beat(self) -> None:
         sm = _sm([64])
         _send_direct_autoloop_rearm(sm, 1, 2, 131.0, 32_125, "test", target_beat=64)
@@ -89,6 +218,13 @@ class PhraseAnchorTests(unittest.TestCase):
     def test_phrase_anchor_skipped_while_transition_arm_pending(self) -> None:
         sm = _sm()
         sm._os.autoloop_arm_pending = True
+        sm._os.phrase_anchor_last_beat = 0
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_000, 64.0)
+        sm._send_autoloop_deck_load.assert_not_called()
+
+    def test_phrase_anchor_skipped_while_pending_arm_meta_set(self) -> None:
+        sm = _sm()
+        sm._os.pending_autoloop_arm_meta = TrackMetadata(filepath="/music/pending.mp3")
         sm._os.phrase_anchor_last_beat = 0
         _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_000, 64.0)
         sm._send_autoloop_deck_load.assert_not_called()
@@ -128,6 +264,13 @@ class PhraseAnchorTests(unittest.TestCase):
     def test_phrase_anchor_init_sentinel(self) -> None:
         sm = _sm()
         _phrase_anchor_tick(sm, 1, 2, 130.0, 75, 37_500, 75.0)
+        sm._send_autoloop_deck_load.assert_not_called()
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
+
+    def test_phrase_anchor_skips_stale_missed_anchor(self) -> None:
+        sm = _sm()
+        sm._os.phrase_anchor_last_beat = 0
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 120, 60_000, 120.0)
         sm._send_autoloop_deck_load.assert_not_called()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
 

@@ -98,6 +98,15 @@ class AnlzDropDetectTests(unittest.TestCase):
         )
         self.assertEqual(drops, [])
 
+    def test_first_outro_bar_boundary_filtered(self) -> None:
+        bars = [25] * 29 + [4] * 3 + [26] * 8
+        drops = _detect_drop_beats(
+            _bar_heights(bars),
+            waveform_duration_ms=40 * 4 * 500,
+            beatgrid_times_ms=_beatgrid_ms(41 * 4),
+        )
+        self.assertEqual(drops, [])
+
     def test_cooldown_deduplication(self) -> None:
         bars = [25] * 8 + [4] * 8 + [26] * 8 + [4] * 4 + [27] * 32
         drops = _detect_drop_beats(
@@ -167,6 +176,36 @@ class AnlzExtractionTests(unittest.TestCase):
         pssi_drops = _extract_pssi_drop_beats(parsed)
         self.assertEqual(pssi_drops, [256, 512])
         self.assertNotEqual(_extract_waveform_drop_beats(parsed), pssi_drops)
+
+    def test_pssi_empty_falls_back_to_waveform(self) -> None:
+        parsed = [
+            (Path("ANLZ0000.EXT"), FakeAnlz({
+                "PSSI": [FakeTag([])],
+                "PWV3": [FakeTag(_bar_heights([25] * 8 + [4] * 8 + [26] * 24))],
+                "PQT2": [FakeTag(times_s=[i * 0.5 for i in range(41 * 4)])],
+            })),
+        ]
+        self.assertEqual(_extract_pssi_drop_beats(parsed), [])
+        self.assertEqual(_extract_waveform_drop_beats(parsed), [64])
+
+    def test_validated_a2_pssi_fixture(self) -> None:
+        parsed = [
+            (Path("ANLZ0000.EXT"), FakeAnlz({
+                "PSSI": [FakeTag([FakeEntry(5, 257), FakeEntry(5, 513)])],
+            })),
+        ]
+        self.assertEqual(_extract_pssi_drop_beats(parsed), [256, 512])
+
+    def test_candidate_ordering_prefers_ext_pssi(self) -> None:
+        parsed = [
+            (Path("ANLZ0000.DAT"), FakeAnlz({
+                "PSSI": [FakeTag([FakeEntry(5, 129)])],
+            })),
+            (Path("ANLZ0000.EXT"), FakeAnlz({
+                "PSSI": [FakeTag([FakeEntry(5, 257)])],
+            })),
+        ]
+        self.assertEqual(_extract_pssi_drop_beats(parsed), [256])
 
     def test_validated_chiken_soup_pssi_fixture(self) -> None:
         parsed = [
@@ -243,6 +282,15 @@ class AnlzExtractionTests(unittest.TestCase):
         with patch.dict(sys.modules, {"pyrekordbox.anlz": None}):
             result = read_anlz_drops("/tmp/does-not-exist/ANLZ0000.DAT")
         self.assertEqual(result, TrackAnlzData([]))
+
+    def test_all_failures_return_dataclass_not_none(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dat = Path(td) / "ANLZ0000.DAT"
+            dat.touch()
+            with patch("pyrekordbox.anlz.AnlzFile.parse_file", side_effect=RuntimeError("boom")):
+                result = read_anlz_drops(str(dat))
+        self.assertIsInstance(result, TrackAnlzData)
+        self.assertEqual(result.drop_beat_indices, [])
 
 
 if __name__ == "__main__":

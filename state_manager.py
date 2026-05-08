@@ -34,6 +34,7 @@ from .config import (
     PLAY_SETTLE_MS, TIMING_COMPENSATION_MS,
     BPM_THRESHOLD_SCRIPTED, BPM_THRESHOLD_UNSCRIPTED,
     MEM_STALE_S, SMART_DROP_LOOKAHEAD_BEATS, PHRASE_ANCHOR_BEATS,
+    PHRASE_ANCHOR_SNAP_WINDOW,
 )
 from .models import ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot, TrackMetadata
 from .osl_output import OS2LOutput
@@ -1761,6 +1762,9 @@ def _smart_drop_tick(
                 sm, active, mirror, bpm, elapsed_ms, "smart-drop",
                 target_beat=os.drop_rearm_beat,
             ):
+                os.phrase_anchor_last_beat = (
+                    os.drop_rearm_beat // PHRASE_ANCHOR_BEATS
+                ) * PHRASE_ANCHOR_BEATS
                 os.drop_cut_armed = False
                 os.drop_rearm_beat = 0
         return
@@ -1807,10 +1811,17 @@ def _phrase_anchor_tick(
         return
 
     next_anchor = os.phrase_anchor_last_beat + PHRASE_ANCHOR_BEATS
-    snap_window = 8
+    if this_beat > next_anchor + PHRASE_ANCHOR_SNAP_WINDOW:
+        os.phrase_anchor_last_beat = (
+            this_beat // PHRASE_ANCHOR_BEATS
+        ) * PHRASE_ANCHOR_BEATS
+        return
     snap_candidates = [
         drop_beat for drop_beat in d.meta.anlz_drops
-        if drop_beat >= this_beat and abs(drop_beat - next_anchor) <= snap_window
+        if (
+            drop_beat >= this_beat
+            and abs(drop_beat - next_anchor) <= PHRASE_ANCHOR_SNAP_WINDOW
+        )
     ]
     if snap_candidates:
         next_anchor = min(snap_candidates, key=lambda b: abs(b - next_anchor))

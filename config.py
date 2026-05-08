@@ -8,6 +8,7 @@ AUTOLOOP_BEATS = 8
 AUTOLOOP_ARM_PHRASE_BEATS = 32
 SMART_DROP_LOOKAHEAD_BEATS = 4
 PHRASE_ANCHOR_BEATS = 64
+PHRASE_ANCHOR_SNAP_WINDOW = 8
 
 # ── TimecodeLink ─────────────────────────────────────────────────────────────
 TL_LOG_PATH = Path(
