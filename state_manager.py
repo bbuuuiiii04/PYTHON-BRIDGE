@@ -1218,17 +1218,23 @@ class StateManager:
                 else:
                     beat_out = beat_index
                     change = (beat_index == 0)
+                # smart-drop / phrase-anchor BEFORE send_beat so deck-load goes
+                # out before the activation beat event reaches SoundSwitch.
+                if os.lighting_mode == "autoloop":
+                    if self._smart_drop_enabled and d.meta.anlz_drops:
+                        if _smart_drop_tick(self, active, mirror, bpm, this_beat, elapsed_ms):
+                            change = True
+                    if self._phrase_anchor_enabled:
+                        if _phrase_anchor_tick(
+                            self, active, mirror, bpm, this_beat, elapsed_ms, abs_beat_pos
+                        ):
+                            change = True
+
                 os.last_beat_elapsed_ms = elapsed_ms
                 for dk in (active, mirror, 3, 4):
                     self._out.send_beat(dk, bpm, beat_out, change=change)
                 self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos, elapsed_ms)
                 if os.lighting_mode == "autoloop":
-                    if self._smart_drop_enabled and d.meta.anlz_drops:
-                        _smart_drop_tick(self, active, mirror, bpm, this_beat, elapsed_ms)
-                    if self._phrase_anchor_enabled:
-                        _phrase_anchor_tick(
-                            self, active, mirror, bpm, this_beat, elapsed_ms, abs_beat_pos
-                        )
                     phrase_beat = (this_beat // AUTOLOOP_ARM_PHRASE_BEATS) * AUTOLOOP_ARM_PHRASE_BEATS
                     if (
                         phrase_beat > 0
@@ -1731,7 +1737,13 @@ def _send_direct_autoloop_rearm(
     object.__setattr__(arm_meta, "elapsed_ms", target_elapsed_ms)
     sm._os.last_arm_mono = time.monotonic()
     sm._os.last_armed_filepath = d.meta.filepath
+    for dk in (active, mirror, 3, 4):
+        sm._out.send_deck_clear(dk)
+        sm._out.send_loop_off(dk)
     sm._send_autoloop_deck_load(active, mirror, active, arm_meta)
+    for dk in (active, mirror, 3, 4):
+        sm._out.send_bpm(dk, arm_bpm)
+    sm._os.last_sent_bpm = arm_bpm
     log.info("[SM] autoloop-rearm  deck=%d  reason=%s  beat=%s  elapsed=%s"
              "  target_elapsed=%s  late=%dms  grid=%s  bpm=%.1f  file=%s",
              active, reason, target_beat if target_beat is not None else "-",
@@ -1747,13 +1759,17 @@ def _smart_drop_tick(
     bpm: float,
     this_beat: int,
     elapsed_ms: int,
-) -> None:
-    """Fire smart-drop cut before a detected drop, then rearm on the drop beat."""
+) -> bool:
+    """Fire smart-drop cut before a detected drop, then rearm on the drop beat.
+
+    Returns True if a rearm fired (caller should set change=True on the beat
+    event), False otherwise (including the cut branch).
+    """
     os = sm._os
     d = sm._deck[active]
 
     if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
-        return
+        return False
 
     if os.drop_cut_armed:
         if this_beat >= os.drop_rearm_beat:
@@ -1765,7 +1781,8 @@ def _smart_drop_tick(
                 os.phrase_anchor_last_beat = os.drop_rearm_beat
                 os.drop_cut_armed = False
                 os.drop_rearm_beat = 0
-        return
+                return True
+        return False
 
     for drop_beat in d.meta.anlz_drops:
         cutoff = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
@@ -1781,6 +1798,7 @@ def _smart_drop_tick(
         os.drop_cut_armed = True
         os.drop_rearm_beat = drop_beat
         break
+    return False
 
 
 def _phrase_anchor_tick(
@@ -1791,27 +1809,31 @@ def _phrase_anchor_tick(
     this_beat: int,
     elapsed_ms: int,
     abs_beat_pos: float,
-) -> None:
-    """Rearm autoloop every PHRASE_ANCHOR_BEATS to correct phrasing drift."""
+) -> bool:
+    """Rearm autoloop every PHRASE_ANCHOR_BEATS to correct phrasing drift.
+
+    Returns True if a rearm fired (caller should set change=True on the beat
+    event), False otherwise.
+    """
     os = sm._os
     d = sm._deck[active]
 
     if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
-        return
+        return False
 
     if os.phrase_anchor_last_beat < 0:
         os.phrase_anchor_last_beat = (
             int(abs_beat_pos) // PHRASE_ANCHOR_BEATS
         ) * PHRASE_ANCHOR_BEATS
-        return
+        return False
 
     if os.drop_cut_armed:
-        return
+        return False
 
     next_anchor = os.phrase_anchor_last_beat + PHRASE_ANCHOR_BEATS
     if this_beat > next_anchor + PHRASE_ANCHOR_SNAP_WINDOW:
         os.phrase_anchor_last_beat = this_beat
-        return
+        return False
     snap_candidates = [
         drop_beat for drop_beat in d.meta.anlz_drops
         if (
@@ -1822,6 +1844,16 @@ def _phrase_anchor_tick(
     if snap_candidates:
         next_anchor = min(snap_candidates, key=lambda b: abs(b - next_anchor))
 
+    # Pre-clear: 1 beat before anchor so SS renders the cleared state
+    # before the reload arrives on the anchor beat.
+    if this_beat == next_anchor - 1:
+        log.info("[SM] phrase-anchor-clear  deck=%d  beat=%d  anchor=%d",
+                 active, this_beat, next_anchor)
+        for dk in (active, mirror, 3, 4):
+            sm._out.send_deck_clear(dk)
+            sm._out.send_loop_off(dk)
+        return False
+
     if this_beat >= next_anchor:
         log.info("[SM] phrase-anchor  deck=%d  beat=%d  anchor=%d",
                  active, this_beat, next_anchor)
@@ -1830,3 +1862,5 @@ def _phrase_anchor_tick(
             target_beat=next_anchor,
         ):
             os.phrase_anchor_last_beat = next_anchor
+            return True
+    return False

@@ -39,9 +39,14 @@ _EMPTY_BEATGRID = {
 }
 _MIN_BEATGRID_INTERVAL_MS = 150.0
 _MAX_BEATGRID_INTERVAL_MS = 3000.0
+_SS_PRELOAD_CACHE: dict[str, str] = {}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def seed_soundswitch_id_cache(mapping: dict[str, str]) -> None:
+    _SS_PRELOAD_CACHE.update(mapping)
+
 
 def _rb_pid() -> Optional[str]:
     out = subprocess.run(
@@ -85,6 +90,8 @@ def _duration_ms(filepath: str) -> Optional[float]:
 
 
 def _read_soundswitch_id(filepath: str) -> str:
+    if filepath in _SS_PRELOAD_CACHE:
+        return _SS_PRELOAD_CACHE[filepath]
     # mutagen.File auto-detects format — required for WAV (ID3 stored in RIFF chunk,
     # not a bare ID3 header, so mutagen.id3.ID3 raises ID3NoHeaderError on .wav files).
     try:

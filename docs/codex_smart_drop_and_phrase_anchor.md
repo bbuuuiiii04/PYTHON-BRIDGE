@@ -944,6 +944,36 @@ Mock `StateManager` internals. Test against the module-level functions directly.
 
 ---
 
+## 9. Post-implementation Notes (Session 37 — Live Validation)
+
+**Status**: ✅ Live-validated 2026-05-08. Phrase anchor confirmed working with lights.
+
+### Critical SS re-anchor finding
+
+SoundSwitch ignores a `send_deck_clear` + `send_deck_load` pair when both are enqueued in the same push tick. SS's recv queue processes them atomically — the cleared state is never rendered, and the reload is treated as a no-op for the currently-playing track.
+
+**Fix**: `_phrase_anchor_tick` sends the clear (`send_deck_clear + send_loop_off` to all 4 decks) at `this_beat == next_anchor - 1` (1 beat before the anchor) and returns early. The full reload fires on the anchor beat as normal. The ~460ms gap at typical BPM gives SS time to render the cleared state before the reload arrives.
+
+Log evidence of working sequence:
+```
+[SM] phrase-anchor-clear  deck=1  beat=63  anchor=64
+[SM] phrase-anchor        deck=1  beat=64  anchor=64
+[SM] autoloop-rearm       deck=1  reason=phrase-anchor  beat=64  ...
+```
+
+### Additional session fixes
+
+- **Push loop ordering**: `_smart_drop_tick` / `_phrase_anchor_tick` now execute BEFORE `send_beat` in the beat-boundary block. Deck-load must precede the activation beat event — this matches the arm-lock pattern SS requires.
+- **`change=True` on rearm beat**: both tick functions return `bool`; push loop sets `change=True` for the beat event when either fires a rearm. This resets SS's internal beat counter.
+- **`_send_direct_autoloop_rearm` BPM finalization**: after `_send_autoloop_deck_load`, sends `send_bpm` to all 4 decks and updates `last_sent_bpm`, matching the `_maybe_lock_autoloop_arm` finalization sequence.
+- **Smart drop disabled in production** (`RBSS_SMART_DROP=0` in watcher). Only phrase anchor is live.
+
+### Rule for future SS re-anchor work
+
+Any clear+reload pattern for a currently-playing SS track MUST separate the clear and reload by at least 1 beat (one beat boundary tick). Same-tick clear+reload will silently fail.
+
+---
+
 ## 8. What NOT to do
 
 - Do not modify `filepath_resolver.py`

@@ -303,6 +303,20 @@ class PhraseAnchorTests(unittest.TestCase):
         sm._send_autoloop_deck_load.assert_called_once()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 184)
 
+    def test_phrase_anchor_pre_clear_fires_one_beat_before(self) -> None:
+        # phrase_anchor_last_beat=0, no drops → next_anchor=64.
+        # At beat 63 (next_anchor - 1): clear fires 4 times, loop_off 4 times,
+        # no deck load, returns False.
+        sm = _sm()
+        sm._os.phrase_anchor_last_beat = 0
+        result = _phrase_anchor_tick(sm, 1, 2, 130.0, 63, 31_500, 63.0)
+        self.assertFalse(result)
+        self.assertEqual(sm._out.send_deck_clear.call_count, 4)
+        self.assertEqual(sm._out.send_loop_off.call_count, 4)
+        sm._send_autoloop_deck_load.assert_not_called()
+        # phrase_anchor_last_beat must NOT advance — anchor hasn't fired yet.
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
