@@ -1762,9 +1762,7 @@ def _smart_drop_tick(
                 sm, active, mirror, bpm, elapsed_ms, "smart-drop",
                 target_beat=os.drop_rearm_beat,
             ):
-                os.phrase_anchor_last_beat = (
-                    os.drop_rearm_beat // PHRASE_ANCHOR_BEATS
-                ) * PHRASE_ANCHOR_BEATS
+                os.phrase_anchor_last_beat = os.drop_rearm_beat
                 os.drop_cut_armed = False
                 os.drop_rearm_beat = 0
         return
@@ -1812,9 +1810,7 @@ def _phrase_anchor_tick(
 
     next_anchor = os.phrase_anchor_last_beat + PHRASE_ANCHOR_BEATS
     if this_beat > next_anchor + PHRASE_ANCHOR_SNAP_WINDOW:
-        os.phrase_anchor_last_beat = (
-            this_beat // PHRASE_ANCHOR_BEATS
-        ) * PHRASE_ANCHOR_BEATS
+        os.phrase_anchor_last_beat = this_beat
         return
     snap_candidates = [
         drop_beat for drop_beat in d.meta.anlz_drops

@@ -187,6 +187,16 @@ class SmartDropTests(unittest.TestCase):
         _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_005, 64.0)
         sm._send_autoloop_deck_load.assert_called_once()
 
+    def test_smart_drop_rearm_at_60_delays_next_phrase_anchor(self) -> None:
+        sm = _sm([60])
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 60
+        sm._os.phrase_anchor_last_beat = 0
+        _smart_drop_tick(sm, 1, 2, 130.0, 60, 30_005)
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 60)
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_000, 64.0)
+        sm._send_autoloop_deck_load.assert_called_once()
+
     def test_past_drops_scanned_but_ignored(self) -> None:
         sm = _sm([32, 64, 128])
         _smart_drop_tick(sm, 1, 2, 130.0, 124, 62_000)
@@ -268,11 +278,30 @@ class PhraseAnchorTests(unittest.TestCase):
         self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
 
     def test_phrase_anchor_skips_stale_missed_anchor(self) -> None:
+        # Recovery rebases from this_beat=120, so next anchor is 120+64=184.
         sm = _sm()
         sm._os.phrase_anchor_last_beat = 0
         _phrase_anchor_tick(sm, 1, 2, 130.0, 120, 60_000, 120.0)
         sm._send_autoloop_deck_load.assert_not_called()
-        self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 120)
+
+    def test_phrase_anchor_does_not_fire_at_128_after_stale_recovery(self) -> None:
+        # After recovery at beat 120, next anchor is 184 — not 128.
+        sm = _sm()
+        sm._os.phrase_anchor_last_beat = 0
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 120, 60_000, 120.0)
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 120)
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 128, 64_000, 128.0)
+        sm._send_autoloop_deck_load.assert_not_called()
+
+    def test_phrase_anchor_fires_at_184_after_stale_recovery(self) -> None:
+        # After recovery at beat 120, anchor fires at 120+64=184.
+        sm = _sm()
+        sm._os.phrase_anchor_last_beat = 0
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 120, 60_000, 120.0)
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 184, 92_000, 184.0)
+        sm._send_autoloop_deck_load.assert_called_once()
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 184)
 
 
 if __name__ == "__main__":
