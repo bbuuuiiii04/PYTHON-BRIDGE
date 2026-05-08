@@ -33,7 +33,7 @@ from .config import (
     AUTOLOOP_ARM_PHRASE_BEATS, AUTOLOOP_BEATS, ARM_GUARD_S, STOP_DEBOUNCE_S,
     PLAY_SETTLE_MS, TIMING_COMPENSATION_MS,
     BPM_THRESHOLD_SCRIPTED, BPM_THRESHOLD_UNSCRIPTED,
-    MEM_STALE_S,
+    MEM_STALE_S, SMART_DROP_LOOKAHEAD_BEATS, PHRASE_ANCHOR_BEATS,
 )
 from .models import ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot, TrackMetadata
 from .osl_output import OS2LOutput
@@ -50,6 +50,9 @@ _TC_LATENCY_WARN_MS = 250.0
 _AUTOLOOP_IDLE_DEBOUNCE_S = max(STOP_DEBOUNCE_S, 2.0)
 LIVE_BPM_FOLLOW_ENV = "RBSS_LIVE_BPM_FOLLOW"
 AUTOLOOP_MASTER_PHRASE_ARM_ENV = "RBSS_AUTOLOOP_MASTER_PHRASE_ARM"
+SMART_DROP_ENV = "RBSS_SMART_DROP"
+PHRASE_ANCHOR_ENV = "RBSS_PHRASE_ANCHOR"
+SMART_REARM_EXPERIMENT_ENV = "RBSS_SMART_REARM_EXPERIMENT"
 _LIVE_BPM_FOLLOW_THRESHOLD = BPM_THRESHOLD_UNSCRIPTED
 _LIVE_BPM_FOLLOW_SEND_INTERVAL_S = 0.10
 _AUTOLOOP_MASTER_PHRASE_START_GRACE_BEATS = 0.5
@@ -151,6 +154,17 @@ class StateManager:
         )
         self._autoloop_master_phrase_arm = (
             _os.environ.get(AUTOLOOP_MASTER_PHRASE_ARM_ENV, "1") != "0"
+        )
+        self._smart_rearm_experiment = (
+            _os.environ.get(SMART_REARM_EXPERIMENT_ENV, "0") == "1"
+        )
+        self._smart_drop_enabled = (
+            self._smart_rearm_experiment
+            and _os.environ.get(SMART_DROP_ENV, "1") != "0"
+        )
+        self._phrase_anchor_enabled = (
+            self._smart_rearm_experiment
+            and _os.environ.get(PHRASE_ANCHOR_ENV, "1") != "0"
         )
         self._stop  = threading.Event()
 
@@ -315,6 +329,18 @@ class StateManager:
             # Store ANLZ path; consumed by next TRACK_LOADED for this deck
             self._pending_anlz_path[ev.deck] = ev.payload.get('anlz_path', '')
 
+        elif ev.kind == Ev.ANLZ_DATA:
+            d_obj = self._deck.get(ev.deck)
+            if d_obj is not None:
+                gen = ev.payload.get("load_gen", -1)
+                if gen == d_obj.load_gen:
+                    d_obj.meta.anlz_drops = list(ev.payload.get("drop_beat_indices", []))
+                    log.info("[SM] anlz-drops  deck=%d  drops=%s",
+                             ev.deck, d_obj.meta.anlz_drops or "none")
+                else:
+                    log.debug("[SM] anlz-drops-stale  deck=%d  gen=%d  current=%d",
+                              ev.deck, gen, d_obj.load_gen)
+
         elif ev.kind == Ev.TC_UPDATE:
             tc_ms = ev.payload.get('elapsed_ms', 0)
             if tc_ms > 0:
@@ -366,6 +392,7 @@ class StateManager:
             self._os.autoloop_arm_bpm = 0.0
             self._os.autoloop_arm_deck = 0
             self._os.last_autoloop_status_phrase_beat = 0
+            self._clear_smart_rearm_state()
             self._clear_autoloop_arm_phrase_lock()
             self._clear_live_bpm_follow()
             self._clear_autoloop_tempo_relock()
@@ -418,6 +445,7 @@ class StateManager:
         self._os.last_autoloop_status_phrase_beat = 0
         self._os.autoloop_arm_after_master_change = True
         self._os.autoloop_master_change_source = source
+        self._clear_smart_rearm_state()
         self._clear_autoloop_arm_phrase_lock()
         self._clear_live_bpm_follow()
         self._clear_autoloop_tempo_relock()
@@ -431,6 +459,7 @@ class StateManager:
         d.scripted_id = 0
         d.load_gen += 1
         if deck == self._os.active_deck:
+            self._clear_smart_rearm_state()
             self._clear_autoloop_arm_phrase_lock()
             self._clear_live_bpm_follow()
             self._clear_autoloop_tempo_relock()
@@ -453,6 +482,36 @@ class StateManager:
         if anlz_path:
             log.debug("track load: deck %d using ANLZ path for resolution", deck)
             self._resolver.resolve_by_anlz(deck, d.load_gen, anlz_path, trace_id=trace_id)
+            if self._smart_rearm_experiment:
+                eq = self._eq
+                load_gen = d.load_gen
+
+                def _anlz_worker(path: str, bridge_deck: int, gen: int) -> None:
+                    try:
+                        from .anlz_reader import read_anlz_drops
+                        result = read_anlz_drops(path)
+                    except Exception:
+                        log.debug("[SM] anlz-worker-error", exc_info=True)
+                        return
+                    try:
+                        eq.put_nowait(BridgeEvent(
+                            kind=Ev.ANLZ_DATA,
+                            deck=bridge_deck,
+                            payload={
+                                "drop_beat_indices": result.drop_beat_indices,
+                                "load_gen": gen,
+                            },
+                            source="anlz",
+                        ))
+                    except queue.Full:
+                        log.warning("[SM] queue-full  event=anlz-data  deck=%d", bridge_deck)
+
+                threading.Thread(
+                    target=_anlz_worker,
+                    args=(anlz_path, deck, load_gen),
+                    daemon=True,
+                    name=f"anlz-drop-{deck}",
+                ).start()
         else:
             other = 3 - deck
             other_path = self._deck[other].meta.filepath
@@ -495,7 +554,7 @@ class StateManager:
             load_delta_ms = (time.monotonic() - self._load_mono[deck]) * 1000.0
         log.info("[SM] resolve  deck=%d  file=%s  bpm=%.1f  ssid=%s  latency_ms=%d",
                  deck, bf.short(payload["filepath"]), meta.bpm,
-                 "yes" if meta.soundswitch_id else "no", int(load_delta_ms))
+                 meta.soundswitch_id or "none", int(load_delta_ms))
         if _os.environ.get("RBSS_RB_STATE_SHADOW") == "1":  # A6 shadow log
             ssid = meta.soundswitch_id
             if ssid:
@@ -503,9 +562,9 @@ class StateManager:
                     (tid for tid, t in SCRIPTED_TRACKS.items() if t.get("ssid") == ssid),
                     None,
                 )
-                log.info("[SM][SHADOW] scripted-match  deck=%d  id=%s  latency_ms=%d",
+                log.info("[SM][SHADOW] scripted-match  deck=%d  id=%s  ssid=%s  latency_ms=%d",
                          deck, scripted_id if scripted_id is not None else "none",
-                         int(load_delta_ms))
+                         ssid, int(load_delta_ms))
             else:
                 log.info("[SM][SHADOW] scripted-clear  deck=%d  reason=no-ssid  latency_ms=%d",
                          deck, int(load_delta_ms))
@@ -534,14 +593,16 @@ class StateManager:
                     matched_by_filepath = True
                 elif len(filepath_matches) > 1:
                     log.info(
-                        "[SM] scripted-clear  deck=%d  reason=ambiguous  matches=%d  latency_ms=%d",
+                        "[SM] scripted-clear  deck=%d  reason=ambiguous"
+                        "  ambiguous_matches=%d  latency_ms=%d",
                         deck, len(filepath_matches), int(load_delta_ms),
                     )
             if scripted_id is not None:
                 source = "direct" if ssid_direct else "registry"
                 log_fn = log.warning if matched_by_filepath and not ssid else log.info
-                log_fn("[SM] scripted-match  deck=%d  id=%d  src=%s  latency_ms=%d",
-                       deck, scripted_id, source, int(load_delta_ms))
+                log_fn("[SM] scripted-match  deck=%d  scripted_id=%d"
+                       "  ssid=%s  source=%s  latency_ms=%d",
+                       deck, scripted_id, ssid or "none", source, int(load_delta_ms))
                 try:
                     self._eq.put_nowait(BridgeEvent(
                         kind=Ev.SCRIPTED_ARM,
@@ -743,6 +804,7 @@ class StateManager:
         self._os.last_arm_mono = time.monotonic()
 
         if mode == "scripted":
+            self._clear_smart_rearm_state()
             self._os.autoloop_arm_after_master_change = False
             self._os.autoloop_master_change_source = ""
             # Arm the scripted show. _arm_scripted is internally debounced (2 s)
@@ -750,6 +812,7 @@ class StateManager:
             self._arm_scripted(deck, d.scripted_id)
 
         elif mode == "autoloop":
+            self._clear_smart_rearm_state()
             self._pending_arm = None
             self._os.push_reset_bpm = True
             arm_bpm, bpm_source = self._autoloop_arm_bpm(deck, d.meta.bpm)
@@ -837,7 +900,8 @@ class StateManager:
                                 deck, mirror, deck, arm_meta, arm_bpm, elapsed_ms,
                                 phrase_beat, arm_source or "master", "phrase-grace-late",
                             )
-                            log.warning("[SM] arm-grace-late  deck=%d  beat=%d"
+                            log.warning("[SS][AUTOLOOP-MASTER-ARM-GRACE-LATE]"
+                                        " [SM] arm-grace-late  deck=%d  beat=%d"
                                         "  late=%dms  tolerance=%dms",
                                         deck, phrase_beat, lateness_ms,
                                         _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS)
@@ -854,6 +918,7 @@ class StateManager:
             self._os.autoloop_master_change_source = ""
 
         elif mode == "idle":
+            self._clear_smart_rearm_state()
             self._pending_arm = None
             self._os.last_armed_filepath = ""
             self._os.autoloop_arm_bpm = 0.0
@@ -1157,6 +1222,12 @@ class StateManager:
                     self._out.send_beat(dk, bpm, beat_out, change=change)
                 self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos, elapsed_ms)
                 if os.lighting_mode == "autoloop":
+                    if self._smart_drop_enabled and d.meta.anlz_drops:
+                        _smart_drop_tick(self, active, mirror, bpm, this_beat, elapsed_ms)
+                    if self._phrase_anchor_enabled:
+                        _phrase_anchor_tick(
+                            self, active, mirror, bpm, this_beat, elapsed_ms, abs_beat_pos
+                        )
                     phrase_beat = (this_beat // AUTOLOOP_ARM_PHRASE_BEATS) * AUTOLOOP_ARM_PHRASE_BEATS
                     if (
                         phrase_beat > 0
@@ -1189,6 +1260,7 @@ class StateManager:
         os.autoloop_arm_bpm       = 0.0
         os.autoloop_arm_deck      = 0
         os.last_autoloop_status_phrase_beat = 0
+        self._clear_smart_rearm_state()
         self._clear_autoloop_arm_phrase_lock()
         self._clear_live_bpm_follow()
         self._clear_autoloop_tempo_relock()
@@ -1226,7 +1298,7 @@ class StateManager:
     ) -> None:
         os = self._os
         live_status = self._live_bpm_status_text(active)
-        log.info("[SM] autoloop-tick  deck=%d  elapsed=%s  beat=%.2f"
+        log.info("[SS][AUTOLOOP-TICK] [SM] autoloop-tick  deck=%d  elapsed=%s  beat=%.2f"
                   "  bpm=%.2f  arm_bpm=%.2f  meta_bpm=%.2f  grid=%s  %s  %s  file=%s",
                   active, bf.elapsed(elapsed_ms), beatpos_out,
                   timing_bpm, os.autoloop_arm_bpm, meta_bpm, grid_status, live_status,
@@ -1522,12 +1594,14 @@ class StateManager:
                 )
                 scheduled_correction = True
                 if lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS:
-                    log.warning("[SM] arm-late  deck=%d  beat=%d  late=%dms"
+                    log.warning("[SS][AUTOLOOP-MASTER-ARM-LATE-CORRECTION]"
+                                " [SM] arm-late  deck=%d  beat=%d  late=%dms"
                                 "  tolerance=%dms  grid=%s",
                                 active, target_beat, lateness_ms,
                                 _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS, target_source)
         elif lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS:
-            log.warning("[SM] arm-phrase-miss  deck=%d  beat=%d  late=%dms"
+            log.warning("[SS][AUTOLOOP-PHRASE-MISS]"
+                        " [SM] arm-phrase-miss  deck=%d  beat=%d  late=%dms"
                         "  tolerance=%dms  grid=%s",
                         active, target_beat, lateness_ms,
                         _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS, target_source)
@@ -1566,6 +1640,12 @@ class StateManager:
         os.pending_autoloop_arm_active = 0
         os.pending_autoloop_arm_source = ""
         os.pending_autoloop_arm_reason = ""
+
+    def _clear_smart_rearm_state(self) -> None:
+        os = self._os
+        os.drop_cut_armed = False
+        os.drop_rearm_beat = 0
+        os.phrase_anchor_last_beat = -1
 
     def _autoloop_arm_bpm(self, deck: int, fallback_bpm: float) -> tuple[float, str]:
         live = self._live_bpm_value(deck)
@@ -1612,3 +1692,134 @@ class StateManager:
             log.info("%s [SM] status  deck=%d  file=%s  bpm=%.1f  pos=%s  mode=%s",
                      mark, dk, bf.short(d.meta.filepath), d.meta.bpm, pos_s,
                      ("scripted" if d.scripted_id else "autoloop") if d.playing else "stopped")
+
+
+def _send_direct_autoloop_rearm(
+    sm: "StateManager",
+    active: int,
+    mirror: int,
+    bpm: float,
+    elapsed_ms: int,
+    reason: str,
+    target_beat: Optional[int] = None,
+) -> bool:
+    d = sm._deck[active]
+    if not d.meta.filepath:
+        return False
+
+    arm_bpm = sm._os.autoloop_arm_bpm if sm._os.autoloop_arm_bpm > 0 else bpm
+    arm_meta = TrackMetadata(
+        filepath=d.meta.filepath,
+        soundswitch_id="",
+        bpm=arm_bpm,
+        first_beat_ms=d.meta.first_beat_ms,
+        beatgrid_times_ms=list(d.meta.beatgrid_times_ms),
+        beatgrid_bpms=list(d.meta.beatgrid_bpms),
+        beatgrid_source=d.meta.beatgrid_source,
+        total_ms=d.meta.total_ms,
+    )
+    target_elapsed_ms = elapsed_ms
+    target_source = "current"
+    lateness_ms = 0
+    if target_beat is not None:
+        target_elapsed_ms, target_source = sm._autoloop_target_elapsed_for_beat(
+            target_beat, elapsed_ms, arm_bpm, arm_meta,
+        )
+        lateness_ms = max(0, elapsed_ms - target_elapsed_ms)
+
+    object.__setattr__(arm_meta, "elapsed_ms", target_elapsed_ms)
+    sm._os.last_arm_mono = time.monotonic()
+    sm._os.last_armed_filepath = d.meta.filepath
+    sm._send_autoloop_deck_load(active, mirror, active, arm_meta)
+    log.info("[SM] autoloop-rearm  deck=%d  reason=%s  beat=%s  elapsed=%s"
+             "  target_elapsed=%s  late=%dms  grid=%s  bpm=%.1f  file=%s",
+             active, reason, target_beat if target_beat is not None else "-",
+             bf.elapsed(elapsed_ms), bf.elapsed(target_elapsed_ms),
+             lateness_ms, target_source, arm_bpm, bf.short(d.meta.filepath))
+    return True
+
+
+def _smart_drop_tick(
+    sm: "StateManager",
+    active: int,
+    mirror: int,
+    bpm: float,
+    this_beat: int,
+    elapsed_ms: int,
+) -> None:
+    """Fire smart-drop cut before a detected drop, then rearm on the drop beat."""
+    os = sm._os
+    d = sm._deck[active]
+
+    if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
+        return
+
+    if os.drop_cut_armed:
+        if this_beat >= os.drop_rearm_beat:
+            log.info("[SM] smart-drop-rearm  deck=%d  beat=%d", active, this_beat)
+            if _send_direct_autoloop_rearm(
+                sm, active, mirror, bpm, elapsed_ms, "smart-drop",
+                target_beat=os.drop_rearm_beat,
+            ):
+                os.drop_cut_armed = False
+                os.drop_rearm_beat = 0
+        return
+
+    for drop_beat in d.meta.anlz_drops:
+        cutoff = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
+        if this_beat < cutoff:
+            break
+        if this_beat >= drop_beat:
+            continue
+        log.info("[SM] smart-drop-cut  deck=%d  beat=%d  drop_at=%d",
+                 active, this_beat, drop_beat)
+        for dk in (active, mirror, 3, 4):
+            sm._out.send_deck_clear(dk)
+            sm._out.send_loop_off(dk)
+        os.drop_cut_armed = True
+        os.drop_rearm_beat = drop_beat
+        break
+
+
+def _phrase_anchor_tick(
+    sm: "StateManager",
+    active: int,
+    mirror: int,
+    bpm: float,
+    this_beat: int,
+    elapsed_ms: int,
+    abs_beat_pos: float,
+) -> None:
+    """Rearm autoloop every PHRASE_ANCHOR_BEATS to correct phrasing drift."""
+    os = sm._os
+    d = sm._deck[active]
+
+    if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
+        return
+
+    if os.phrase_anchor_last_beat < 0:
+        os.phrase_anchor_last_beat = (
+            int(abs_beat_pos) // PHRASE_ANCHOR_BEATS
+        ) * PHRASE_ANCHOR_BEATS
+        return
+
+    if os.drop_cut_armed:
+        return
+
+    next_anchor = os.phrase_anchor_last_beat + PHRASE_ANCHOR_BEATS
+    snap_window = 8
+    snap_candidates = [
+        drop_beat for drop_beat in d.meta.anlz_drops
+        if drop_beat >= this_beat and abs(drop_beat - next_anchor) <= snap_window
+    ]
+    if snap_candidates:
+        next_anchor = min(snap_candidates, key=lambda b: abs(b - next_anchor))
+
+    if this_beat >= next_anchor:
+        log.info("[SM] phrase-anchor  deck=%d  beat=%d  anchor=%d",
+                 active, this_beat, next_anchor)
+        if _send_direct_autoloop_rearm(
+            sm, active, mirror, bpm, elapsed_ms, "phrase-anchor",
+            target_beat=next_anchor,
+        ):
+            os.phrase_anchor_last_beat = next_anchor

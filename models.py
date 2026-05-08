@@ -26,6 +26,7 @@ class TrackMetadata:
     beatgrid_source: str = ""
     total_ms: float = 0.0
     cue_positions: list[int] = field(default_factory=list)
+    anlz_drops: list[int] = field(default_factory=list)
 
     def clear(self) -> None:
         self.filepath = ""
@@ -38,6 +39,7 @@ class TrackMetadata:
         self.beatgrid_source = ""
         self.total_ms = 0.0
         self.cue_positions = []
+        self.anlz_drops = []
 
     def is_empty(self) -> bool:
         return not self.filepath
@@ -135,6 +137,9 @@ class OutputState:
     pending_autoloop_arm_source: str = ""
     pending_autoloop_arm_reason: str = ""
     live_follow_generation: int = 0
+    drop_cut_armed: bool = False
+    drop_rearm_beat: int = 0
+    phrase_anchor_last_beat: int = -1
 
 
 @dataclass
@@ -164,6 +169,7 @@ class Ev:
     FILEPATH_RESOLVED = "filepath_resolved" # deck, payload={filepath, bpm, content_id,
                                             #   first_beat_ms, soundswitch_id, total_ms, load_gen}
     ANLZ_PATH         = "anlz_path"         # deck, payload={anlz_path: str} — fires before TRACK_LOADED
+    ANLZ_DATA         = "anlz_data"         # deck, payload={drop_beat_indices: list[int], load_gen: int}
     BPM_UPDATE        = "bpm_update"        # deck, payload={bpm: float} — from ENGINE STATE every ~15s
     TC_UPDATE         = "tc_update"         # deck, payload={elapsed_ms: int} — from ENGINE STATE TC
     SCRIPTED_ARM      = "scripted_arm"      # deck, payload={scripted_id: int}

@@ -6,6 +6,8 @@ OS2L_FALLBACK_HOST = "127.0.0.1"
 OS2L_FALLBACK_PORT = 58716
 AUTOLOOP_BEATS = 8
 AUTOLOOP_ARM_PHRASE_BEATS = 32
+SMART_DROP_LOOKAHEAD_BEATS = 4
+PHRASE_ANCHOR_BEATS = 64
 
 # ── TimecodeLink ─────────────────────────────────────────────────────────────
 TL_LOG_PATH = Path(

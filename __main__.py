@@ -36,7 +36,11 @@ from .rb_state_reader import (
     read_direct_master_status,
 )
 from .scripted_tracks import preload_from_tl, resolve_filepaths
-from .state_manager import StateManager
+from .state_manager import (
+    AUTOLOOP_MASTER_PHRASE_ARM_ENV,
+    LIVE_BPM_FOLLOW_ENV,
+    StateManager,
+)
 from .tl_tailer import (
     ANLZ_DIRECT_ENV,
     MASTER_DIRECT_ENV,
@@ -143,6 +147,8 @@ class _ColorFormatter(logging.Formatter):
         ("rb_ss_bridge_v2 starting", _BGREEN),
         ("rb_ss_bridge_v2 running", _BGREEN),
         ("[main] startup",          _BGREEN),
+        ("[main] starting",         _BGREEN),
+        ("[main] running",          _BGREEN),
         ("osc listener on",         _BGREEN),
         ("[sm] load",               _BGREEN),
         ("[sm] resolve",            _BGREEN),
@@ -208,6 +214,14 @@ if not os.environ.get("BRIDGE_LOG_JSON"):
 log = logging.getLogger("bridge")
 MASTER_SEED_DIRECT_ENV = "RBSS_MASTER_SEED_DIRECT"
 SCRIPTED_DIRECT_ENV = "RBSS_SCRIPTED_DIRECT"
+
+
+def _env_enabled(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default) != "0"
+
+
+def _onoff(value: bool) -> str:
+    return "on" if value else "off"
 
 _LOCK_FD = None
 _LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
@@ -475,7 +489,7 @@ def main() -> None:
     if is_debug() or "--debug" in sys.argv:
         enable_debug()
 
-    log.info("rb_ss_bridge_v2 starting")
+    log.info("[MAIN] starting")
 
     # Startup: pre-register scripted tracks from TL playlist.yaml + resolve filepaths
     preload_from_tl(str(TL_PLAYLIST_PATH))
@@ -632,10 +646,14 @@ def main() -> None:
                 rb_state_reader = None
             else:
                 active_flags = []
-                if anlz_direct:      active_flags.append("anlz")
-                if play_direct:      active_flags.append("play")
-                if track_load_direct: active_flags.append("track-load")
-                if master_direct:    active_flags.append("master")
+                if anlz_direct:
+                    active_flags.append("anlz")
+                if play_direct:
+                    active_flags.append("play")
+                if track_load_direct:
+                    active_flags.append("track-load")
+                if master_direct:
+                    active_flags.append("master")
                 log.info("[MAIN] rsr-direct  flags=%s", "+".join(active_flags))
 
     # Memory reader (with drift detection + FM-11 RB_RESTARTED events)
@@ -670,7 +688,31 @@ def main() -> None:
         master_direct_ready=_is_master_direct_ready if master_direct else None,
     )
 
-    log.info("rb_ss_bridge_v2 running — Ctrl-C to stop")
+    direct_flags = []
+    if anlz_direct:
+        direct_flags.append("anlz")
+    if play_direct:
+        direct_flags.append("play")
+    if track_load_direct:
+        direct_flags.append("track-load")
+    if master_direct:
+        direct_flags.append("master")
+    log.info(
+        "[MAIN] running  state=on  active_deck=%d  seed=%s  rb_version=%s"
+        "  tl=optional  rsr=%s  direct=%s  live_bpm=%s  follow=%s"
+        "  phrase_arm=%s  scripted_direct=%s  osc=%d  log_control=%s",
+        initial_active_deck,
+        initial_active_source.replace(" ", "_"),
+        rb_version_for_direct_master or "unknown",
+        _onoff(rb_state_reader is not None),
+        "+".join(direct_flags) if direct_flags else "none",
+        _onoff(not live_bpm.disabled),
+        _onoff(_env_enabled(LIVE_BPM_FOLLOW_ENV, "1")),
+        _onoff(_env_enabled(AUTOLOOP_MASTER_PHRASE_ARM_ENV, "1")),
+        _onoff(_env_enabled(SCRIPTED_DIRECT_ENV, "1")),
+        OSC_LISTEN_PORT,
+        os.environ.get("BRIDGE_LOG_CONTROL", "/tmp/rb_ss_bridge_v2_logging.json"),
+    )
     LOG.start_control_watcher(log)
 
     # Graceful shutdown on SIGTERM / SIGINT
