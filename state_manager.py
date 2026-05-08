@@ -209,6 +209,11 @@ class StateManager:
         self._load_trace: dict[int, str] = {}
         self._load_mono: dict[int, float] = {}
 
+        # Published from the StateManager thread; read by status writer threads.
+        self._snapshot_lock = threading.Lock()
+        self._published_snapshot: dict = {}
+        self._publish_snapshot()
+
     def set_initial_state(self, active_deck: int, source: str = "TL ENGINE STATE") -> None:
         """Apply startup state read from TL ENGINE STATE before event loop starts."""
         if active_deck in (1, 2):
@@ -256,6 +261,21 @@ class StateManager:
             return False
         return self._deck[deck].playing
 
+    def snapshot(self) -> dict:
+        """Return the latest published state copy.
+
+        DeckState and OutputState stay owned by the StateManager thread. This
+        method only returns a copy published by that thread.
+        """
+        with self._snapshot_lock:
+            return {
+                **self._published_snapshot,
+                "deck": {
+                    str(deck): dict(values)
+                    for deck, values in self._published_snapshot.get("deck", {}).items()
+                },
+            }
+
     # ── Main loop ────────────────────────────────────────────────────────────
 
     def _run(self) -> None:
@@ -264,9 +284,51 @@ class StateManager:
             t0 = time.monotonic()
             self._drain_events()
             self._push_tick()
+            self._publish_snapshot()
             remaining = self._TICK_INTERVAL - (time.monotonic() - t0)
             if remaining > 0:
                 time.sleep(remaining)
+
+    def _publish_snapshot(self) -> None:
+        os = self._os
+        deck = {}
+        for num, state in self._deck.items():
+            deck[str(num)] = {
+                "playing": state.playing,
+                "filepath": state.meta.filepath,
+                "scripted_id": state.scripted_id,
+                "elapsed_ms": state.elapsed_ms,
+                "bpm": state.meta.bpm,
+                "soundswitch_id": state.meta.soundswitch_id,
+                "load_gen": state.load_gen,
+            }
+        snapshot = {
+            "active_deck": os.active_deck,
+            "lighting_mode": os.lighting_mode,
+            "lighting_desired": os.lighting_desired,
+            "was_playing": os.was_playing,
+            "autoloop_arm_pending": os.autoloop_arm_pending,
+            "autoloop_arm_bpm": os.autoloop_arm_bpm,
+            "autoloop_arm_deck": os.autoloop_arm_deck,
+            "autoloop_arm_sync_beat": os.autoloop_arm_sync_beat,
+            "autoloop_arm_target_elapsed_ms": os.autoloop_arm_target_elapsed_ms,
+            "autoloop_arm_target_source": os.autoloop_arm_target_source,
+            "pending_live_bpm": os.pending_live_bpm,
+            "drop_cut_armed": os.drop_cut_armed,
+            "pending_scripted_arm": (
+                None
+                if self._pending_arm is None
+                else {
+                    "deck": self._pending_arm.deck,
+                    "track_id": self._pending_arm.track_id,
+                    "fire_at": self._pending_arm.fire_at,
+                    "phase": "phase2_pending",
+                }
+            ),
+            "deck": deck,
+        }
+        with self._snapshot_lock:
+            self._published_snapshot = snapshot
 
     def _drain_events(self) -> None:
         """Consume all pending events without blocking."""

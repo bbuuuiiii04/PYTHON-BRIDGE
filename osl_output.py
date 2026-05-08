@@ -24,6 +24,7 @@ from .config import (
 )
 from .models import TrackMetadata
 from . import bridge_fmt as bf
+from .os2l_mirror import OS2LMirror
 
 log = logging.getLogger("osl_output")
 
@@ -63,9 +64,33 @@ class OS2LConnection:
         self._sock: Optional[socket.socket] = None
         self._connected = False
         self._lock = threading.Lock()
-        self._send_q: queue.Queue[Optional[bytes]] = queue.Queue(maxsize=500)
+        self._send_q: queue.Queue[Optional[tuple[bytes, dict]]] = queue.Queue(maxsize=500)
         self._stop = threading.Event()
         self.fast_reconnect = False   # skip init defaults on reconnect
+        self._drop_count = 0
+        self._no_socket_drop_count = 0
+        self._send_error_count = 0
+        self._sent_count = 0
+        self._mirror: Optional[OS2LMirror] = None
+
+    def set_mirror(self, mirror: OS2LMirror) -> None:
+        self._mirror = mirror
+
+    def status(self) -> dict:
+        with self._lock:
+            connected = self._connected
+            host = self.host
+            port = self.port
+        return {
+            "connected": connected,
+            "endpoint": f"{host}:{port}",
+            "queue_size": self._send_q.qsize(),
+            "queue_max": self._send_q.maxsize,
+            "queue_full_drops": self._drop_count,
+            "no_socket_drops": self._no_socket_drop_count,
+            "send_errors": self._send_error_count,
+            "sent_count": self._sent_count,
+        }
 
     def set_endpoint(self, host: str, port: int) -> None:
         with self._lock:
@@ -97,8 +122,13 @@ class OS2LConnection:
         if verbose:
             log.debug("OS2L → %s", json.dumps(obj))
         try:
-            self._send_q.put_nowait(payload)
+            self._send_q.put_nowait((payload, dict(obj)))
+            if self._mirror is not None:
+                self._mirror.record(obj, "queued")
         except queue.Full:
+            self._drop_count += 1
+            if self._mirror is not None:
+                self._mirror.record(obj, "queue_full_drop")
             log.warning("[OS2L] queue-full  action=drop")
 
     def _sender_loop(self) -> None:
@@ -107,15 +137,26 @@ class OS2LConnection:
                 msg = self._send_q.get(timeout=1)
             except queue.Empty:
                 continue
-            if msg is None:
+            item = msg
+            if item is None:
                 break
+            msg, obj = item
             with self._lock:
                 sock = self._sock if self._connected else None
             if sock is None:
+                self._no_socket_drop_count += 1
+                if self._mirror is not None:
+                    self._mirror.record(obj, "no_socket_drop")
                 continue
             try:
                 sock.sendall(msg)
+                self._sent_count += 1
+                if self._mirror is not None:
+                    self._mirror.record(obj, "sent_live")
             except OSError as exc:
+                self._send_error_count += 1
+                if self._mirror is not None:
+                    self._mirror.record(obj, "send_error")
                 log.warning("[OS2L] send-error  err=%s  action=reconnect", exc)
                 self.disconnect()
 

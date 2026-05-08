@@ -33,6 +33,7 @@ from .models import BridgeEvent, Ev
 from .mtc_reader import MTCReader
 from .osl_output import OS2LConnection, OS2LOutput, SoundSwitchDiscovery
 from .os2l_injector import OS2LInjector
+from .os2l_mirror import OS2LMirror
 from .rb_memory import PositionCache, RBMemoryReader
 from .rb_state_reader import (
     make_rb_state_reader,
@@ -60,6 +61,8 @@ from .tl_tailer import (
 from .diagnostics import DriftDetector, enable_debug, is_debug
 from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService, read_rekordbox_version
 from .logging_manager import get_logging_manager
+from .runtime_status import CommandReader, StatusWriter
+from .validation_runner import ValidationRunner
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -539,6 +542,8 @@ def main() -> None:
 
     # OS2L output
     conn = OS2LConnection()
+    mirror = OS2LMirror()
+    conn.set_mirror(mirror)
     conn.start()
     output = OS2LOutput(conn)
     injector = OS2LInjector(conn)
@@ -549,6 +554,17 @@ def main() -> None:
 
     # State manager (event loop + push loop)
     sm = StateManager(event_queue, pos_cache, output, live_bpm=live_bpm)
+    validation_runner = ValidationRunner(conn, pos_cache, live_bpm, sm)
+    command_reader = CommandReader(mirror, validation_runner)
+    status_writer = StatusWriter(
+        sm,
+        live_bpm,
+        pos_cache,
+        conn,
+        mirror,
+        validation_runner,
+        command_reader,
+    )
 
     # Initialize master deck from last TL ENGINE STATE (fixes startup deck bug)
     init = read_initial_state(TL_LOG_PATH)
@@ -695,6 +711,8 @@ def main() -> None:
     live_bpm.start()
     injector.start()
     sm_thread = sm.start()
+    command_reader.start()
+    status_writer.start()
 
     # OSC listener (scripted arm triggers)
     start_osc_listener(
@@ -744,6 +762,8 @@ def main() -> None:
     def _shutdown(sig, frame):
         log.info("[MAIN] shutdown  sig=%d", sig)
         LOG.stop_control_watcher()
+        status_writer.stop()
+        command_reader.stop()
         sm.stop()
         tailer.stop()
         if rb_state_reader is not None:
