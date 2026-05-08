@@ -191,6 +191,7 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
             _join(_seg("  └  ", color=_cs()), _seg("—", color=_cs())),
             _seg("  Checks  —", color=_cs()),
             _seg("  Mirror  —", color=_cs()),
+            _join(_seg("  Smart Drop  ", color=_cs()), _seg("—", color=_cs())),
         ]
 
     sm = status.get("state_manager", {})
@@ -201,6 +202,7 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
     active = str(sm.get("active_deck", "?"))
     mode = sm.get("lighting_mode", "idle")
     decks = sm.get("deck", {})
+    smart_drop_on = bool(sm.get("smart_drop_enabled"))
 
     # Row 0: bridge header
     armed = commands.get("armed")
@@ -284,7 +286,13 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
         _seg(f"   {mirror.get('rate_per_s', 0)}/s   {outcome}", color=_cs()),
     )
 
-    return [bridge_row, ss_row] + deck_rows + [checks_row, mirror_row]
+    # Row 8: smart drop
+    smart_row = _join(
+        _seg("  Smart Drop  ", color=_cs()),
+        _seg("On" if smart_drop_on else "Off", color=_cg() if smart_drop_on else _cs()),
+    )
+
+    return [bridge_row, ss_row] + deck_rows + [checks_row, mirror_row, smart_row]
 
 
 def _short_outcome(outcome: str) -> str:
@@ -306,13 +314,14 @@ class BridgeMenuBar(NSObject):
         self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self.menu = NSMenu.alloc().init()
         self.status_rows = []
-        for _ in range(8):
+        for _ in range(9):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
             item.setEnabled_(False)
             self.menu.addItem_(item)
             self.status_rows.append(item)
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.toggle_item = self._add_action("", "toggleBridge:")
+        self.smart_drop_item = self._add_action("Smart Drop", "toggleSmartDrop:")
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.arm_item = self._add_action("Arm Live", "armLive:")
         self.validation_item = self._add_action("Run Health Check", "runValidation:")
@@ -361,6 +370,8 @@ class BridgeMenuBar(NSObject):
         self.arm_item.setTitle_("Disarm Live" if commands.get("armed") else "Arm Live")
         capturing = self._snapshot.get("mirror", {}).get("capturing")
         self.capture_item.setTitle_("Stop Capture" if capturing else "Capture")
+        smart_drop_on = bool(self._snapshot.get("state_manager", {}).get("smart_drop_enabled"))
+        self.smart_drop_item.setTitle_("Smart Drop: On" if smart_drop_on else "Smart Drop: Off")
         self._adapt_timer(status)
 
     def _adapt_timer(self, status: str) -> None:
@@ -431,6 +442,10 @@ class BridgeMenuBar(NSObject):
             append_command({"cmd": "stop_capture"})
         else:
             append_command({"cmd": "start_capture", "name": "menu_capture"})
+        self.refresh_(None)
+
+    def toggleSmartDrop_(self, _sender):
+        append_command({"cmd": "toggle_smart_drop"})
         self.refresh_(None)
 
     def quit_(self, _sender):

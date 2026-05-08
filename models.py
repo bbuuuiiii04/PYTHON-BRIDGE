@@ -27,6 +27,7 @@ class TrackMetadata:
     total_ms: float = 0.0
     cue_positions: list[int] = field(default_factory=list)
     anlz_drops: list[int] = field(default_factory=list)
+    smart_drops: list[int] = field(default_factory=list)
 
     def clear(self) -> None:
         self.filepath = ""
@@ -40,6 +41,7 @@ class TrackMetadata:
         self.total_ms = 0.0
         self.cue_positions = []
         self.anlz_drops = []
+        self.smart_drops = []
 
     def is_empty(self) -> bool:
         return not self.filepath
@@ -175,6 +177,7 @@ class Ev:
     SCRIPTED_ARM      = "scripted_arm"      # deck, payload={scripted_id: int}
     SCRIPTED_CLEAR    = "scripted_clear"    # deck  (TL value=1 / default)
     RB_RESTARTED      = "rb_restarted"      # global, payload={pid: int}
+    SMART_DROP_TOGGLE = "smart_drop_toggle" # global runtime toggle from menu/command channel
     LIGHTING_SCRIPTED_ON = "lighting_scripted_on"  # master deck: scripted track playing
     LIGHTING_AUTOLOOP_ON = "lighting_autoloop_on"  # master deck: unscripted track playing
     LIGHTING_OFF         = "lighting_off"          # master deck: not playing

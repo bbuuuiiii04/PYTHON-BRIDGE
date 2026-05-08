@@ -33,8 +33,8 @@ from .config import (
     AUTOLOOP_ARM_PHRASE_BEATS, AUTOLOOP_BEATS, ARM_GUARD_S, STOP_DEBOUNCE_S,
     PLAY_SETTLE_MS, TIMING_COMPENSATION_MS,
     BPM_THRESHOLD_SCRIPTED, BPM_THRESHOLD_UNSCRIPTED,
-    MEM_STALE_S, SMART_DROP_LOOKAHEAD_BEATS, PHRASE_ANCHOR_BEATS,
-    PHRASE_ANCHOR_SNAP_WINDOW,
+    MEM_STALE_S, SMART_DROP_LOOKAHEAD_BEATS, SMART_DROP_IGNORE_INTRO_BEATS,
+    SMART_DROP_IGNORE_OUTRO_BEATS, PHRASE_ANCHOR_BEATS,
 )
 from .models import ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot, TrackMetadata
 from .osl_output import OS2LOutput
@@ -315,6 +315,7 @@ class StateManager:
             "autoloop_arm_target_source": os.autoloop_arm_target_source,
             "pending_live_bpm": os.pending_live_bpm,
             "drop_cut_armed": os.drop_cut_armed,
+            "smart_drop_enabled": self._smart_drop_enabled,
             "pending_scripted_arm": (
                 None
                 if self._pending_arm is None
@@ -399,9 +400,17 @@ class StateManager:
             if d_obj is not None:
                 gen = ev.payload.get("load_gen", -1)
                 if gen == d_obj.load_gen:
-                    d_obj.meta.anlz_drops = list(ev.payload.get("drop_beat_indices", []))
-                    log.info("[SM] anlz-drops  deck=%d  drops=%s",
-                             ev.deck, d_obj.meta.anlz_drops or "none")
+                    raw_drops = list(ev.payload.get("drop_beat_indices", []))
+                    total_beats = len(d_obj.meta.beatgrid_times_ms)
+                    d_obj.meta.anlz_drops = raw_drops
+                    d_obj.meta.smart_drops = _select_smart_drops(
+                        raw_drops,
+                        total_beats=total_beats,
+                    )
+                    log.info("[SM] smart-drop-select  deck=%d  raw=%s  selected=%s",
+                             ev.deck,
+                             d_obj.meta.anlz_drops or "none",
+                             d_obj.meta.smart_drops or "none")
                 else:
                     log.debug("[SM] anlz-drops-stale  deck=%d  gen=%d  current=%d",
                               ev.deck, gen, d_obj.load_gen)
@@ -467,6 +476,9 @@ class StateManager:
                     self._live_bpm.invalidate()
                 except Exception:
                     log.debug("live BPM invalidation failed", exc_info=True)
+
+        elif ev.kind == Ev.SMART_DROP_TOGGLE:
+            self.toggle_smart_drop()
 
     # ── Deck switch ───────────────────────────────────────────────────────────
 
@@ -1289,7 +1301,7 @@ class StateManager:
                 # smart-drop / phrase-anchor BEFORE send_beat so deck-load goes
                 # out before the activation beat event reaches SoundSwitch.
                 if os.lighting_mode == "autoloop":
-                    if self._smart_drop_enabled and d.meta.anlz_drops:
+                    if self._smart_drop_enabled and d.meta.smart_drops:
                         if _smart_drop_tick(self, active, mirror, bpm, this_beat, elapsed_ms):
                             change = True
                     if self._phrase_anchor_enabled:
@@ -1722,6 +1734,18 @@ class StateManager:
         os.drop_rearm_beat = 0
         os.phrase_anchor_last_beat = -1
 
+    def toggle_smart_drop(self) -> None:
+        """Toggle smart drop on/off at runtime. Must run in StateManager thread."""
+        if not self._smart_rearm_experiment:
+            self._smart_drop_enabled = False
+            self._clear_smart_rearm_state()
+            log.info("[SM] smart-drop-toggle  enabled=False  reason=experiment-off")
+            return
+        self._smart_drop_enabled = not self._smart_drop_enabled
+        if not self._smart_drop_enabled:
+            self._clear_smart_rearm_state()
+        log.info("[SM] smart-drop-toggle  enabled=%s", self._smart_drop_enabled)
+
     def _autoloop_arm_bpm(self, deck: int, fallback_bpm: float) -> tuple[float, str]:
         live = self._live_bpm_value(deck)
         if live is not None:
@@ -1852,7 +1876,7 @@ def _smart_drop_tick(
                 return True
         return False
 
-    for drop_beat in d.meta.anlz_drops:
+    for drop_beat in d.meta.smart_drops:
         cutoff = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
         if this_beat < cutoff:
             break
@@ -1867,6 +1891,19 @@ def _smart_drop_tick(
         os.drop_rearm_beat = drop_beat
         break
     return False
+
+
+def _select_smart_drops(raw_drops: list[int], *, total_beats: int = 0) -> list[int]:
+    """Return Smart Drop candidates after conservative intro/outro filtering."""
+    selected: list[int] = []
+    outro_start = total_beats - SMART_DROP_IGNORE_OUTRO_BEATS if total_beats > 0 else 0
+    for drop_beat in sorted(set(raw_drops)):
+        if drop_beat < SMART_DROP_IGNORE_INTRO_BEATS:
+            continue
+        if outro_start > 0 and drop_beat >= outro_start:
+            continue
+        selected.append(drop_beat)
+    return selected
 
 
 def _phrase_anchor_tick(
@@ -1884,9 +1921,11 @@ def _phrase_anchor_tick(
     event), False otherwise.
     """
     os = sm._os
-    d = sm._deck[active]
 
     if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
+        return False
+
+    if os.drop_cut_armed:
         return False
 
     if os.phrase_anchor_last_beat < 0:
@@ -1895,22 +1934,10 @@ def _phrase_anchor_tick(
         ) * PHRASE_ANCHOR_BEATS
         return False
 
-    if os.drop_cut_armed:
-        return False
-
     next_anchor = os.phrase_anchor_last_beat + PHRASE_ANCHOR_BEATS
-    if this_beat > next_anchor + PHRASE_ANCHOR_SNAP_WINDOW:
+    if this_beat > next_anchor + 8:
         os.phrase_anchor_last_beat = this_beat
         return False
-    snap_candidates = [
-        drop_beat for drop_beat in d.meta.anlz_drops
-        if (
-            drop_beat >= this_beat
-            and abs(drop_beat - next_anchor) <= PHRASE_ANCHOR_SNAP_WINDOW
-        )
-    ]
-    if snap_candidates:
-        next_anchor = min(snap_candidates, key=lambda b: abs(b - next_anchor))
 
     # Pre-clear: 1 beat before anchor so SS renders the cleared state
     # before the reload arrives on the anchor beat.

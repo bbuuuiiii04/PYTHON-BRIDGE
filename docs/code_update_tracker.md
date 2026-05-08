@@ -947,10 +947,10 @@ Prevent lower-confidence/stale lsof results from replacing a better title/ANLZ r
 
 ## Direct Master Runtime Validation And TL-Retirement Planning - 2026-05-06
 
-Current status:
+Historical status at the time of this section:
 
 ```text
-Direct master remains observational/shadow-only.
+Direct master was still observational at this point in the log.
 Runtime master, TL TC fallback, and startup ENGINE STATE reconstruction remain
 TL-authoritative. Guarded direct authority has since landed for ANLZ (B1),
 position chain (B2), play/pause (B3), track load (B4), and scripted arm/clear
@@ -958,6 +958,17 @@ position chain (B2), play/pause (B3), track load (B4), and scripted arm/clear
 LiveBPMService is already the first and most mature direct-first TL-reduction
 path: offset-table BPM is used when valid, with discovery and metadata/ENGINE
 STATE fallback when unavailable.
+```
+
+Superseded by later B6 work:
+
+```text
+As of the 2026-05-07 B6 implementation and live validation,
+RBSS_MASTER_DIRECT=1 can route runtime MASTER_CHANGED source='rb_state' through
+the main RBStateReader path while direct master is currently readable and valid.
+The bounded DirectMasterRuntimeObserver remains shadow-only; runtime direct
+master authority is the separate guarded B6 path. See
+docs/tl_retirement_process_log.md.
 ```
 
 Implemented validation support:
@@ -1013,13 +1024,21 @@ docs/direct_master_runtime_results_template.md
 docs/tl_retirement_process_log.md
 ```
 
-Near-term decision:
+Historical near-term decision:
 
 ```text
 Hold runtime master TL authority.
-The only plausible authority-adjacent next step is a future master startup-seed
+At the time, the only plausible authority-adjacent next step was a future master startup-seed
 experiment design, if explicitly authorized, with strict fail-closed behavior.
 Do not generalize LiveBPM readiness to master or TL-TC retirement. TL TC
 fallback and runtime master remain out of scope for retirement until separately
 authorized.
+```
+
+Current decision after B6:
+
+```text
+Runtime master has a guarded direct-authority path behind RBSS_MASTER_DIRECT=1.
+TL remains fail-closed fallback whenever direct master is unsupported,
+unreadable, not yet warmed up, or reporting the no-master sentinel.
 ```

@@ -48,6 +48,14 @@ class RuntimeCommandTests(unittest.TestCase):
 
         mirror.toggle.assert_called_once()
 
+    def test_toggle_smart_drop_delegates_to_callback(self) -> None:
+        callback = Mock()
+        reader = CommandReader(Mock(), Mock(), smart_drop_toggle_callback=callback)
+
+        reader.handle_command(json.loads('{"cmd": "toggle_smart_drop"}'))
+
+        callback.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

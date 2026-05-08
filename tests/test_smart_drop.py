@@ -14,6 +14,7 @@ from rb_ss_bridge_v2.state_manager import (  # noqa: E402
     StateManager,
     _phrase_anchor_tick,
     _send_direct_autoloop_rearm,
+    _select_smart_drops,
     _smart_drop_tick,
 )
 
@@ -26,6 +27,7 @@ def _sm(drops=None, filepath="/music/drop.mp3"):
     deck.meta.first_beat_ms = 0.0
     deck.meta.beatgrid_times_ms = [i * 500.0 for i in range(160)]
     deck.meta.anlz_drops = list(drops or [])
+    deck.meta.smart_drops = list(drops or [])
     sm = SimpleNamespace(
         _os=OutputState(lighting_mode="autoloop"),
         _deck={1: deck, 2: DeckState(number=2)},
@@ -99,6 +101,34 @@ class SmartRearmFlagTests(unittest.TestCase):
         self.assertTrue(sm._smart_drop_enabled)
         self.assertFalse(sm._phrase_anchor_enabled)
 
+    def test_toggle_smart_drop_flips_runtime_state(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SMART_DROP": "0",
+        })
+        self.assertFalse(sm._smart_drop_enabled)
+        sm.toggle_smart_drop()
+        self.assertTrue(sm._smart_drop_enabled)
+
+    def test_toggle_smart_drop_off_clears_pending_cut(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SMART_DROP": "1",
+        })
+        _arm_drop_cut(sm)
+        sm.toggle_smart_drop()
+        self.assertFalse(sm._smart_drop_enabled)
+        self.assertFalse(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 0)
+
+    def test_toggle_smart_drop_ignored_when_experiment_off(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "0",
+            "RBSS_SMART_DROP": "0",
+        })
+        sm.toggle_smart_drop()
+        self.assertFalse(sm._smart_drop_enabled)
+
 
 class SmartRearmResetTests(unittest.TestCase):
     def test_drop_cut_cleared_on_idle_transition(self) -> None:
@@ -140,6 +170,82 @@ class SmartRearmResetTests(unittest.TestCase):
 
 
 class SmartDropTests(unittest.TestCase):
+    def test_selector_preserves_middle_drops_without_clustering(self) -> None:
+        selected = _select_smart_drops(
+            [64, 80, 96, 196, 372, 404],
+            total_beats=597,
+        )
+        self.assertEqual(selected, [64, 80, 96, 196, 372, 404])
+
+    def test_selector_filters_intro_drops(self) -> None:
+        selected = _select_smart_drops([8, 16, 32, 64], total_beats=160)
+        self.assertEqual(selected, [32, 64])
+
+    def test_selector_filters_outro_when_total_beats_known(self) -> None:
+        selected = _select_smart_drops([64, 560, 580], total_beats=597)
+        self.assertEqual(selected, [64, 560])
+
+    def test_selector_skips_outro_filter_without_total_beats(self) -> None:
+        selected = _select_smart_drops([64, 580], total_beats=0)
+        self.assertEqual(selected, [64, 580])
+
+    def test_selector_sorts_and_dedupes(self) -> None:
+        selected = _select_smart_drops([96, 64, 64, 80], total_beats=160)
+        self.assertEqual(selected, [64, 80, 96])
+
+    def test_anlz_data_stores_raw_and_selected_drops(self) -> None:
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
+        sm._deck[1].load_gen = 7
+        sm._deck[1].meta.beatgrid_times_ms = [i * 500.0 for i in range(100)]
+
+        sm._handle_event(BridgeEvent(
+            Ev.ANLZ_DATA,
+            1,
+            {"drop_beat_indices": [8, 32, 64, 96], "load_gen": 7},
+        ))
+
+        self.assertEqual(sm._deck[1].meta.anlz_drops, [8, 32, 64, 96])
+        self.assertEqual(sm._deck[1].meta.smart_drops, [32, 64])
+
+    def test_stale_anlz_data_does_not_mutate_drop_lists(self) -> None:
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
+        sm._deck[1].load_gen = 7
+        sm._deck[1].meta.anlz_drops = [64]
+        sm._deck[1].meta.smart_drops = [64]
+
+        sm._handle_event(BridgeEvent(
+            Ev.ANLZ_DATA,
+            1,
+            {"drop_beat_indices": [96], "load_gen": 6},
+        ))
+
+        self.assertEqual(sm._deck[1].meta.anlz_drops, [64])
+        self.assertEqual(sm._deck[1].meta.smart_drops, [64])
+
+    def test_track_metadata_clear_clears_raw_and_selected_drops(self) -> None:
+        meta = TrackMetadata(anlz_drops=[64], smart_drops=[64])
+        meta.clear()
+        self.assertEqual(meta.anlz_drops, [])
+        self.assertEqual(meta.smart_drops, [])
+
+    def test_runtime_uses_selected_drops_not_raw_anlz_drops(self) -> None:
+        sm = _sm([64])
+        sm._deck[1].meta.smart_drops = [96]
+        _smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000)
+        sm._out.send_deck_clear.assert_not_called()
+        self.assertFalse(sm._os.drop_cut_armed)
+
+        _smart_drop_tick(sm, 1, 2, 130.0, 92, 46_000)
+        self.assertTrue(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 96)
+
+    def test_intro_filtered_raw_drop_does_not_fire(self) -> None:
+        sm = _sm([16])
+        sm._deck[1].meta.smart_drops = []
+        _smart_drop_tick(sm, 1, 2, 130.0, 12, 6_000)
+        sm._out.send_deck_clear.assert_not_called()
+        self.assertFalse(sm._os.drop_cut_armed)
+
     def test_smart_drop_skipped_while_transition_arm_pending(self) -> None:
         sm = _sm([64])
         sm._os.autoloop_arm_pending = True
@@ -252,8 +358,10 @@ class PhraseAnchorTests(unittest.TestCase):
         _phrase_anchor_tick(sm, 1, 2, 130.0, 58, 29_000, 58.0)
         sm._send_autoloop_deck_load.assert_not_called()
         _phrase_anchor_tick(sm, 1, 2, 130.0, 60, 30_000, 60.0)
+        sm._send_autoloop_deck_load.assert_not_called()
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_000, 64.0)
         sm._send_autoloop_deck_load.assert_called_once()
-        self.assertEqual(sm._os.phrase_anchor_last_beat, 60)
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
 
     def test_phrase_anchor_does_not_snap_to_past_drop(self) -> None:
         sm = _sm([55])

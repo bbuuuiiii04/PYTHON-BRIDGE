@@ -4,7 +4,8 @@ Purpose: continuously track the current evidence, decisions, and next steps for
 phased TimecodeLink reduction in `rb_ss_bridge_v2`.
 
 This is a repo-local continuity file for future agents. It does not change
-runtime behavior and does not promote any authority source.
+runtime behavior by itself; it records which authority migrations have already
+been implemented and validated.
 
 ## Terminology
 
@@ -24,24 +25,25 @@ Currently only C1 (direct master startup seed, fail-closed to TL).
 
 **The rule:** Never implement a B item before its A item is confirmed. Never
 implement a B item without a kill-switch. Never skip the prerequisite sequence
-(B1 → B2 → B3 → B4 → B5).
+(B1 → B2 → B3 → B4 → B5 → B6).
 
 ## Current Ground Rules
 
 - TL retirement is signal-by-signal, not a single switch.
 - Evidence gathering (A items) must stay separate from retirement (B items).
-- `StateManager` does not currently arbitrate by event source.
-- TL remains authoritative unless a later explicit, narrow migration changes
-  one signal with fail-closed behavior.
-- No direct master authority has been promoted.
+- `StateManager` still does not provide broad source arbitration; routing must
+  stay narrow and source-specific before events reach `StateManager`.
+- TL remains authoritative unless an explicit, narrow migration changes one
+  signal with fail-closed behavior.
 - Guarded direct authority has been promoted for B1 ANLZ, B2 position chain,
-  B3 play/pause, B4 track-load, and B5 scripted arm/clear. Runtime master and
-  TL TC fallback remain TL-authoritative.
+  B3 play/pause, B4 track-load, B5 scripted arm/clear, and B6 runtime master.
+  TL TC fallback remains TL-authoritative.
 
 ## Current Repo State
 
-- `TLLogTailer` remains authoritative for TL log and ENGINE STATE events except
-  for the narrow guarded B1/B3/B4 bypasses described below.
+- `TLLogTailer` remains active for fallback and safety. It is bypassed only for
+  the narrow guarded B1/B3/B4/B6 event classes while the matching direct source
+  is currently ready.
 - `LiveBPMService` is the strongest direct-first subsystem and already uses
   offset-table BPM when valid.
 - Direct master support exists as:
@@ -49,11 +51,16 @@ implement a B item without a kill-switch. Never skip the prerequisite sequence
   - startup settle/retry observation
   - bounded runtime observer
   - TL-only `TLMasterSnapshot` comparison source
-- Direct master logs remain observational and use `authority=tl_log`.
-- Direct master runtime comparison uses `comparison_source=tl_master_snapshot`.
+  - guarded runtime authority through `RBSS_MASTER_DIRECT=1`
+- The bounded direct-master runtime observer remains observational and uses
+  `comparison_source=tl_master_snapshot` / `authority=tl_log`.
+- The main `RBStateReader` path can authoritatively route `MASTER_CHANGED
+  source='rb_state'` when `RBSS_MASTER_DIRECT=1` and direct master is currently
+  readable and valid. If direct master is not ready, TL remains the fail-closed
+  fallback.
 - `RBMemoryReader` can use the guarded B2 direct position chain; ObjC discovery
   remains fallback/validation.
-- Lighting/output behavior remains unchanged.
+- Lighting/output behavior follows the selected authoritative event sources.
 
 ## Direct BPM Status
 
@@ -1167,7 +1174,7 @@ Do not:
 - add broad source arbitration to StateManager (not a current design target)
 - retire scripted routing until B5 is explicitly authorized
 
-**B6 — IMPLEMENTED / AWAITING LIVE VALIDATION** (2026-05-07): retired TL OSC
+**B6 — IMPLEMENTED / LIVE VALIDATED** (2026-05-07): retired TL OSC
 `/bridge/active_deck` as the runtime master-change relay behind
 `RBSS_MASTER_DIRECT=1`.
 

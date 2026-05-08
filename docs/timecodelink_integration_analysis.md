@@ -955,8 +955,8 @@ The full extracted YAML for all 5 supported versions (7.2.8 / 7.2.10 / 7.2.11 / 
 
 - **`make_rb_state_reader(event_queue, rb_version, **kwargs)`** calls **`load_offsets_for_version(rb_version)`**; if `None`, constructs **`RBStateReader(..., offsets=None)`** whose **`run()` exits immediately** (no-op thread).
 - **`RBStateReader` constructor** accepts optional injected **`rb_pid`**, **`base_addr`**, **`poll_hz`**, **`clock`**, **`sleeper`** (tests use fakes).
-- **`read_direct_master_status(rb_version, **kwargs)`** is the first master-specific convergence hook. It performs a one-shot read of **`offs.master_deck`** for startup visibility/status only. Unsupported versions, attach failures, and unreadable chains return unavailable status and leave **TL log / ENGINE STATE** authority unchanged.
-- A bounded direct-master runtime observer now runs after startup/attach for live validation only. It compares the direct master byte against `TLMasterSnapshot`, which tracks only TL-derived master sources (`tl_log`, `engine_state`, `initial_engine_state`) and ignores bridge-local fallback sources. Runtime summaries include `outcome`, `final_direct_master`, `final_tl_master`, `transition_count`, `mismatches`, `first_valid_elapsed_s`, `comparison_source=tl_master_snapshot`, and `authority=tl_log`. It does not enqueue `MASTER_CHANGED` and does not mutate `StateManager`.
+- **`read_direct_master_status(rb_version, **kwargs)`** is the first master-specific convergence hook. It performs a one-shot read of **`offs.master_deck`** for startup visibility/status. Unsupported versions, attach failures, and unreadable chains return unavailable status and leave **TL log / ENGINE STATE** authority unchanged. With **`RBSS_MASTER_SEED_DIRECT=1`**, two stable valid reads can seed the startup active deck.
+- A bounded direct-master runtime observer now runs after startup/attach for live validation only. It compares the direct master byte against `TLMasterSnapshot`, which tracks only TL-derived master sources (`tl_log`, `engine_state`, `initial_engine_state`) and ignores bridge-local fallback sources. Runtime summaries include `outcome`, `final_direct_master`, `final_tl_master`, `transition_count`, `mismatches`, `first_valid_elapsed_s`, `comparison_source=tl_master_snapshot`, and `authority=tl_log`. The observer itself does not enqueue `MASTER_CHANGED` and does not mutate `StateManager`; guarded runtime master authority is a separate main-`RBStateReader` path behind **`RBSS_MASTER_DIRECT=1`**.
 
 **Attach**
 
@@ -999,15 +999,16 @@ The full extracted YAML for all 5 supported versions (7.2.8 / 7.2.10 / 7.2.11 / 
 
 The new reader is **additive**. `StateManager` already consumes `MASTER_CHANGED`, `TRACK_LOADED`, `BPM_UPDATE`, `PLAY`, and `PAUSE` **without inspecting `event.source`** — so **two producers on the same queue duplicate or fight** unless one path is gated.
 
-**Current repo state:** **`__main__.py` starts `TLLogTailer` + `RBMemoryReader` + … and can start `RBStateReader` only in explicit shadow mode. It also runs direct master startup observation and a bounded runtime observer when the Rekordbox version can be read.** These paths log `[RBMASTER][DIRECT]`, `[RBMASTER][SOURCE]`, and `[RBMASTER][RUNTIME]` evidence but do not enqueue `MASTER_CHANGED`, do not mutate `StateManager`, and keep `current=tl_log` / `authority=tl_log`.
+**Current repo state:** **`__main__.py` starts `TLLogTailer` + `RBMemoryReader` + … and starts `RBStateReader` when one or more guarded direct flags are enabled.** The guarded B1-B6 direct paths can route selected event kinds to the authoritative queue through `authoritative_kinds`. In particular, **`RBSS_MASTER_DIRECT=1`** routes direct `MASTER_CHANGED source='rb_state'` through the main `RBStateReader` and bypasses TL OSC/log/ENGINE master events only while the direct master byte is readable and valid. If direct master is not ready, TL remains the fail-closed fallback. The bounded direct-master runtime observer remains separate and observational only.
 
-The current TL-retirement process log is `docs/tl_retirement_process_log.md`. It records the live direct-master evidence, the current conclusion that direct master is promising but shadow-only, and the near-term plan: hold TL authority, consider only a future master startup-seed experiment if explicitly authorized, and keep runtime authority/play-pause/track/timing/scripted/ANLZ/TL-TC dependencies on TL for now.
+The current TL-retirement process log is `docs/tl_retirement_process_log.md`. It records that B1-B6 are implemented, launcher defaults can run with the B1-B6 direct flag set, and B6 runtime direct master authority was live-validated on 2026-05-07. TL still remains in the bridge for fail-closed fallback, ENGINE STATE BPM/TC fallback, MTC-related safety, and any signal whose direct path is not currently ready.
 
 **Rollout steps (recommended):**
 
-1. Obtain Rekordbox **short version string** (must match map keys **`7.2.8` … `7.2.14`** today — see §5.4) and call **`make_rb_state_reader(event_queue, rb_version)`** (or **`RBStateReader(event_queue, load_offsets_for_version(...))`**) alongside **`TLLogTailer`**.
-2. Run **both** during validation; log **`[source=tl_log]` vs `[source=rb_state]`** arrival deltas (e.g. `code_update_tracker.md` pattern).
-3. **`RBSS_USE_TL_LOG`** (or equivalent) to prefer TL vs memory — **not implemented** in `__main__.py` as of this doc revision; treat as a **future** env gate once parity is proven.
+1. Keep new direct-signal adoption behind explicit env flags and per-signal readiness callbacks.
+2. Route only the event kinds enabled by the active direct flags through `authoritative_kinds`.
+3. Preserve TL fail-closed behavior until the corresponding direct signal is currently readable and valid for that deck/signal.
+4. Treat any broad `RBSS_USE_TL_LOG`-style global switch as obsolete for this repo; current migration is signal-by-signal.
 
 The 200 Hz `StateManager` push loop remains untouched. The reader respects the threading invariant: **no direct `DeckState` writes** — only **`BridgeEvent`** enqueue. Mach I/O runs on the reader daemon thread (same class of blocking as `RBMemoryReader` / `LiveBPMService`).
 
@@ -1017,12 +1018,12 @@ The 200 Hz `StateManager` push loop remains untouched. The reader respects the t
 | -------------------------------- | ------------------------------------------------------------------------------------------- |
 | TL on-disk patcher (RB re-sign)  | **Required** — still the only path to `get-task-allow` on RB. No replacement proposed.      |
 | TL runtime process               | **Optional** — only needed for MTC on IAC Bus 1 and Ableton Link output. Memory-tap data is now redundant. |
-| `TLLogTailer` (ENGINE STATE, ANLZ correlation, …) | **Authoritative today** (see `docs/bridge_design.md`). `RBStateReader` can run in explicit shadow mode for parity only; it does not feed `StateManager`. Optional TL env gate after validation (`RBSS_USE_TL_LOG` or equivalent) — **not implemented** in code at this doc revision. |
+| `TLLogTailer` (ENGINE STATE, ANLZ correlation, …) | **Still required as fallback/safety**, but no longer universally authoritative under direct flags. B1/B3/B4/B6 bypass selected TL events only while the matching direct source is currently ready; ENGINE STATE BPM and TC fallback still flow. |
 | `MTCReader` (IAC Bus 1)          | **Unchanged** — TC fallback when RB memory / TL TC gaps apply. |
 | `RBMemoryReader` (60 Hz)         | **Unchanged** — `PositionCache` / elapsed for push loop. |
 | `LiveBPMService`                 | **First direct convergence point**: uses the per-version fixed-offset BPM chain as soon as the RB pid/base is attached, without waiting for ENGINE STATE; falls back to pattern-scan + session validation when unsupported or unreadable. Runtime logs label `offset_table`, `discovery`, and `fallback_meta` source states. |
-| Direct master startup/runtime observers | **Second direct convergence point**: fixed-chain `master_deck` reads for startup visibility/corroboration and bounded runtime live validation. They label direct availability and direct-vs-TL snapshot agreement but preserve TL authority. |
-| `FilepathResolver` (ANLZ + lsof) | **Unchanged**; **`anlz_path_per_deck` exists in `RBOffsetVersion` but `RBStateReader` does not emit `ANLZ_PATH` yet** — TL correlation path still required for ANLZ-before-load ordering unless wired. |
+| Direct master startup/runtime paths | **Second direct convergence point**: startup seed/status and bounded runtime observer remain separate from guarded runtime authority. With `RBSS_MASTER_DIRECT=1`, the main `RBStateReader` can authoritatively emit `MASTER_CHANGED` while ready; otherwise TL falls back. |
+| `FilepathResolver` (ANLZ + lsof) | **Still required** for metadata and fallback. `RBStateReader` can emit direct `ANLZ_PATH` under B1, and direct `_tick_deck()` preserves ANLZ-before-TRACK_LOADED ordering when B1 and B4 are co-enabled. |
 
 ### 10.5 Stop-conditions for adopting the new path
 

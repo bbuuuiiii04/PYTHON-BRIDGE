@@ -555,7 +555,22 @@ def main() -> None:
     # State manager (event loop + push loop)
     sm = StateManager(event_queue, pos_cache, output, live_bpm=live_bpm)
     validation_runner = ValidationRunner(conn, pos_cache, live_bpm, sm)
-    command_reader = CommandReader(mirror, validation_runner)
+
+    def _toggle_smart_drop() -> None:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.SMART_DROP_TOGGLE,
+                deck=0,
+                source="runtime_command",
+            ))
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=smart-drop-toggle")
+
+    command_reader = CommandReader(
+        mirror,
+        validation_runner,
+        smart_drop_toggle_callback=_toggle_smart_drop,
+    )
     status_writer = StatusWriter(
         sm,
         live_bpm,
