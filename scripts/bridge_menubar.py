@@ -28,7 +28,7 @@ from Foundation import NSAttributedString, NSMutableAttributedString, NSObject, 
 
 
 WATCHER = "/Users/bbui/ss_bridge_watcher.sh"
-MENUBAR_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*[[:space:]]+/Users/bbui/bridge_menubar\.py$"
+MENUBAR_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*[[:space:]]+/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar\.py$"
 BRIDGE_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*([[:space:]]+-u)?[[:space:]]+-m[[:space:]]+rb_ss_bridge_v2$"
 WATCHER_PATTERN = r"^(/bin/bash|bash)[[:space:]]+/Users/bbui/ss_bridge_watcher\.sh$"
 MONITOR_PATTERN = r"RBSS_BRIDGE_MONITOR|^tail -n 100 -F /tmp/bridge\.log$"
@@ -191,7 +191,7 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
             _join(_seg("  └  ", color=_cs()), _seg("—", color=_cs())),
             _seg("  Checks  —", color=_cs()),
             _seg("  Mirror  —", color=_cs()),
-            _join(_seg("  Smart Drop  ", color=_cs()), _seg("—", color=_cs())),
+            _join(_seg("  Smart Phrasing  ", color=_cs()), _seg("—", color=_cs())),
         ]
 
     sm = status.get("state_manager", {})
@@ -203,6 +203,7 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
     mode = sm.get("lighting_mode", "idle")
     decks = sm.get("deck", {})
     smart_drop_on = bool(sm.get("smart_drop_enabled"))
+    smart_breakdown_on = bool(sm.get("smart_breakdown_enabled"))
 
     # Row 0: bridge header
     armed = commands.get("armed")
@@ -286,10 +287,17 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
         _seg(f"   {mirror.get('rate_per_s', 0)}/s   {outcome}", color=_cs()),
     )
 
-    # Row 8: smart drop
+    # Row 8: smart phrasing
+    sd_txt = "On" if smart_drop_on else "Off"
+    sd_col = _cg() if smart_drop_on else _cs()
+    sb_txt = "On" if smart_breakdown_on else "Off"
+    sb_col = _cg() if smart_breakdown_on else _cs()
+    
     smart_row = _join(
-        _seg("  Smart Drop  ", color=_cs()),
-        _seg("On" if smart_drop_on else "Off", color=_cg() if smart_drop_on else _cs()),
+        _seg("  Smart Phrasing  ", color=_cs()),
+        _seg(f"Drops: {sd_txt}", color=sd_col),
+        _seg("  |  ", color=_cs()),
+        _seg(f"Breakdowns: {sb_txt}", color=sb_col),
     )
 
     return [bridge_row, ss_row] + deck_rows + [checks_row, mirror_row, smart_row]
@@ -321,7 +329,19 @@ class BridgeMenuBar(NSObject):
             self.status_rows.append(item)
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.toggle_item = self._add_action("", "toggleBridge:")
-        self.smart_drop_item = self._add_action("Smart Drop", "toggleSmartDrop:")
+        
+        self.smart_phrasing_menu = NSMenu.alloc().init()
+        self.smart_phrasing_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Phrasing", None, "")
+        self.smart_phrasing_item.setSubmenu_(self.smart_phrasing_menu)
+        self.menu.addItem_(self.smart_phrasing_item)
+        
+        self.smart_drop_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Drops", "toggleSmartDrop:", "")
+        self.smart_drop_item.setTarget_(self)
+        self.smart_phrasing_menu.addItem_(self.smart_drop_item)
+        
+        self.smart_breakdown_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Breakdowns", "toggleSmartBreakdown:", "")
+        self.smart_breakdown_item.setTarget_(self)
+        self.smart_phrasing_menu.addItem_(self.smart_breakdown_item)
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.arm_item = self._add_action("Arm Live", "armLive:")
         self.validation_item = self._add_action("Run Health Check", "runValidation:")
@@ -371,7 +391,9 @@ class BridgeMenuBar(NSObject):
         capturing = self._snapshot.get("mirror", {}).get("capturing")
         self.capture_item.setTitle_("Stop Capture" if capturing else "Capture")
         smart_drop_on = bool(self._snapshot.get("state_manager", {}).get("smart_drop_enabled"))
-        self.smart_drop_item.setTitle_("Smart Drop: On" if smart_drop_on else "Smart Drop: Off")
+        self.smart_drop_item.setTitle_("Smart Drops: On" if smart_drop_on else "Smart Drops: Off")
+        smart_breakdown_on = bool(self._snapshot.get("state_manager", {}).get("smart_breakdown_enabled"))
+        self.smart_breakdown_item.setTitle_("Smart Breakdowns: On" if smart_breakdown_on else "Smart Breakdowns: Off")
         self._adapt_timer(status)
 
     def _adapt_timer(self, status: str) -> None:
@@ -446,6 +468,10 @@ class BridgeMenuBar(NSObject):
 
     def toggleSmartDrop_(self, _sender):
         append_command({"cmd": "toggle_smart_drop"})
+        self.refresh_(None)
+
+    def toggleSmartBreakdown_(self, _sender):
+        append_command({"cmd": "toggle_smart_breakdown"})
         self.refresh_(None)
 
     def quit_(self, _sender):

@@ -32,6 +32,7 @@ RBSS_SCRIPTED_DIRECT=1
 RBSS_SCRIPTED_SHOWFILE_DIRECT=1
 RBSS_SMART_REARM_EXPERIMENT=1
 RBSS_SMART_DROP=0
+RBSS_SMART_BREAKDOWN=1
 ```
 
 These defaults exist in both `scripts/ss_bridge_watcher.sh` and the live
@@ -425,6 +426,21 @@ Phrase Anchor:
   ANLZ drops; exact drop handling belongs to Smart Drop.
 - Sends pre-clear one beat before the anchor, then direct rearm on the anchor.
 - Uses `_send_direct_autoloop_rearm()`, not `_apply_lighting("autoloop")`.
+
+Smart Breakdown:
+
+- Automatically handles lighting transitions during breakdown sections using ANLZ
+  `breakdown_beat_indices` and `buildup_beat_indices`.
+- When a smart breakdown beat is reached, it clears all SoundSwitch slots and
+  disables loops to create a blackout/breakdown state.
+- It automatically restores the autoloop state when a "restore beat" is reached.
+- The restore beat is the next available buildup or smart drop after the
+  breakdown; if none are found, it uses `SMART_BREAKDOWN_DEFAULT_DURATION_BEATS=64`.
+- Smart Breakdown can be toggled at runtime from the menu bar.
+- It respects its own intro/outro ignore windows (`SMART_BREAKDOWN_IGNORE_INTRO_BEATS=32`,
+  `SMART_BREAKDOWN_IGNORE_OUTRO_BEATS=32`) to avoid triggering during the start
+  or end of a track.
+- It is only active when `RBSS_SMART_REARM_EXPERIMENT=1` and `RBSS_SMART_BREAKDOWN=1`.
 
 ## Four-Deck Mirroring
 

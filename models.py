@@ -39,6 +39,10 @@ class TrackMetadata:
     cue_positions: list[int] = field(default_factory=list)
     anlz_drops: list[int] = field(default_factory=list)
     smart_drops: list[int] = field(default_factory=list)
+    anlz_breakdowns: list[int] = field(default_factory=list)
+    smart_breakdowns: list[int] = field(default_factory=list)
+    anlz_buildups: list[int] = field(default_factory=list)
+    anlz_mood: int = 0
     smart_drop_energy_shadow: list[SmartDropEnergyShadow] = field(default_factory=list)
 
     def clear(self) -> None:
@@ -54,6 +58,10 @@ class TrackMetadata:
         self.cue_positions = []
         self.anlz_drops = []
         self.smart_drops = []
+        self.anlz_breakdowns = []
+        self.smart_breakdowns = []
+        self.anlz_buildups = []
+        self.anlz_mood = 0
         self.smart_drop_energy_shadow = []
 
     def is_empty(self) -> bool:
@@ -154,6 +162,8 @@ class OutputState:
     live_follow_generation: int = 0
     drop_cut_armed: bool = False
     drop_rearm_beat: int = 0
+    breakdown_active: bool = False
+    breakdown_restore_beat: int = 0
     phrase_anchor_last_beat: int = -1
 
 
@@ -191,6 +201,7 @@ class Ev:
     SCRIPTED_CLEAR    = "scripted_clear"    # deck  (TL value=1 / default)
     RB_RESTARTED      = "rb_restarted"      # global, payload={pid: int}
     SMART_DROP_TOGGLE = "smart_drop_toggle" # global runtime toggle from menu/command channel
+    SMART_BREAKDOWN_TOGGLE = "smart_breakdown_toggle"
     LIGHTING_SCRIPTED_ON = "lighting_scripted_on"  # master deck: scripted track playing
     LIGHTING_AUTOLOOP_ON = "lighting_autoloop_on"  # master deck: unscripted track playing
     LIGHTING_OFF         = "lighting_off"          # master deck: not playing

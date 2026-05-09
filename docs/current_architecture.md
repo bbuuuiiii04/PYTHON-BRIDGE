@@ -26,6 +26,7 @@ RBSS_SCRIPTED_DIRECT=1
 RBSS_SCRIPTED_SHOWFILE_DIRECT=1
 RBSS_SMART_REARM_EXPERIMENT=1
 RBSS_SMART_DROP=0
+RBSS_SMART_BREAKDOWN=1
 ```
 
 These defaults are present in both `scripts/ss_bridge_watcher.sh` and the live

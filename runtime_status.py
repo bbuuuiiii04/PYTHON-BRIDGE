@@ -64,11 +64,18 @@ class StatusWriter(threading.Thread):
 
 
 class CommandReader(threading.Thread):
-    def __init__(self, mirror, validation_runner, smart_drop_toggle_callback=None) -> None:
+    def __init__(
+        self,
+        mirror,
+        validation_runner,
+        smart_drop_toggle_callback: Optional[Callable[[], None]] = None,
+        smart_breakdown_toggle_callback: Optional[Callable[[], None]] = None,
+    ) -> None:
         super().__init__(name="runtime-command-reader", daemon=True)
         self._mirror = mirror
         self._validation_runner = validation_runner
         self._smart_drop_toggle_callback = smart_drop_toggle_callback
+        self._smart_breakdown_toggle_callback = smart_breakdown_toggle_callback
         self._stop_event = threading.Event()
         self._arm_expires = 0.0
         self._last_command = ""
@@ -140,6 +147,10 @@ class CommandReader(threading.Thread):
             if self._smart_drop_toggle_callback:
                 self._smart_drop_toggle_callback()
             return
+        if cmd == "toggle_smart_breakdown":
+            if self._smart_breakdown_toggle_callback:
+                self._smart_breakdown_toggle_callback()
+            return
         raise ValueError(f"unknown command: {cmd}")
 
     def _run_validation_async(self) -> None:
@@ -172,6 +183,7 @@ def parse_command(line: str) -> dict[str, Any]:
         "stop_capture",
         "run_validation",
         "toggle_smart_drop",
+        "toggle_smart_breakdown",
     }
     if cmd not in allowed:
         raise ValueError(f"unknown command: {cmd}")

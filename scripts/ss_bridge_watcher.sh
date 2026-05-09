@@ -63,6 +63,7 @@ start_bridge() {
             RBSS_SCRIPTED_SHOWFILE_DIRECT=1 \
             RBSS_SMART_REARM_EXPERIMENT=1 \
             RBSS_SMART_DROP=0 \
+            RBSS_SMART_BREAKDOWN=0 \
             "$PYTHON" -m rb_ss_bridge_v2
     ) > "$LOG_FILE" 2>&1 &
     BRIDGE_PID=$!
@@ -78,7 +79,7 @@ start_manual_terminal_bridge() {
     osascript <<'EOF'
 tell application "Terminal"
     activate
-    do script "bash -lc 'printf \"\\033]0;RBSS_BRIDGE_MONITOR\\007\"; echo \"━━━ Bridge Manual Session ━━━\"; cd /Users/bbui || exit 1; env RBSS_LIVE_BPM_FOLLOW=1 RBSS_ANLZ_DIRECT=1 RBSS_POS_CHAIN_DIRECT=1 RBSS_MASTER_SEED_DIRECT=1 RBSS_MASTER_DIRECT=1 RBSS_PLAY_DIRECT=1 RBSS_TRACK_LOAD_DIRECT=1 RBSS_SCRIPTED_DIRECT=1 RBSS_SCRIPTED_SHOWFILE_DIRECT=1 RBSS_SMART_REARM_EXPERIMENT=1 RBSS_SMART_DROP=0 /opt/homebrew/bin/python3 -u -m rb_ss_bridge_v2 2>&1 | tee /tmp/bridge.log' RBSS_BRIDGE_MONITOR"
+    do script "bash -lc 'printf \"\\033]0;RBSS_BRIDGE_MONITOR\\007\"; echo \"━━━ Bridge Manual Session ━━━\"; cd /Users/bbui || exit 1; env RBSS_LIVE_BPM_FOLLOW=1 RBSS_ANLZ_DIRECT=1 RBSS_POS_CHAIN_DIRECT=1 RBSS_MASTER_SEED_DIRECT=1 RBSS_MASTER_DIRECT=1 RBSS_PLAY_DIRECT=1 RBSS_TRACK_LOAD_DIRECT=1 RBSS_SCRIPTED_DIRECT=1 RBSS_SCRIPTED_SHOWFILE_DIRECT=1 RBSS_SMART_REARM_EXPERIMENT=1 RBSS_SMART_DROP=0 RBSS_SMART_BREAKDOWN=0 /opt/homebrew/bin/python3 -u -m rb_ss_bridge_v2 2>&1 | tee /tmp/bridge.log' RBSS_BRIDGE_MONITOR"
     set custom title of selected tab of front window to "RBSS_BRIDGE_MONITOR"
 end tell
 EOF

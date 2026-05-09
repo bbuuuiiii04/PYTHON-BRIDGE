@@ -24,6 +24,11 @@ class RuntimeCommandTests(unittest.TestCase):
         self.assertNotIn("expires_at", command)
         self.assertEqual(command["ttl_s"], 10)
 
+    def test_parse_command_accepts_smart_breakdown_toggle(self) -> None:
+        command = parse_command('{"cmd": "toggle_smart_breakdown"}')
+
+        self.assertEqual(command["cmd"], "toggle_smart_breakdown")
+
     def test_arm_ttl_is_clamped_by_bridge(self) -> None:
         reader = CommandReader(Mock(), Mock())
 
@@ -53,6 +58,14 @@ class RuntimeCommandTests(unittest.TestCase):
         reader = CommandReader(Mock(), Mock(), smart_drop_toggle_callback=callback)
 
         reader.handle_command(json.loads('{"cmd": "toggle_smart_drop"}'))
+
+        callback.assert_called_once()
+
+    def test_toggle_smart_breakdown_delegates_to_callback(self) -> None:
+        callback = Mock()
+        reader = CommandReader(Mock(), Mock(), smart_breakdown_toggle_callback=callback)
+
+        reader.handle_command(json.loads('{"cmd": "toggle_smart_breakdown"}'))
 
         callback.assert_called_once()
 

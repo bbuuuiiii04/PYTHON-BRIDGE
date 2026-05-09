@@ -566,10 +566,22 @@ def main() -> None:
         except queue.Full:
             log.warning("[MAIN] queue-full  event=smart-drop-toggle")
 
+    def _toggle_smart_breakdown() -> None:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.SMART_BREAKDOWN_TOGGLE,
+                deck=0,
+                source="runtime_command",
+                payload={},
+            ))
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=smart-breakdown-toggle")
+
     command_reader = CommandReader(
         mirror,
         validation_runner,
         smart_drop_toggle_callback=_toggle_smart_drop,
+        smart_breakdown_toggle_callback=_toggle_smart_breakdown,
     )
     status_writer = StatusWriter(
         sm,

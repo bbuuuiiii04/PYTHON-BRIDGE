@@ -36,6 +36,8 @@ from .config import (
     BPM_THRESHOLD_SCRIPTED, BPM_THRESHOLD_UNSCRIPTED,
     MEM_STALE_S, SMART_DROP_LOOKAHEAD_BEATS, SMART_DROP_IGNORE_INTRO_BEATS,
     SMART_DROP_IGNORE_OUTRO_BEATS, PHRASE_ANCHOR_BEATS,
+    SMART_BREAKDOWN_WINDOW_BEATS, SMART_BREAKDOWN_DEFAULT_DURATION_BEATS,
+    SMART_BREAKDOWN_IGNORE_INTRO_BEATS, SMART_BREAKDOWN_IGNORE_OUTRO_BEATS,
 )
 from .models import (
     ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot,
@@ -57,6 +59,7 @@ _AUTOLOOP_IDLE_DEBOUNCE_S = max(STOP_DEBOUNCE_S, 2.0)
 LIVE_BPM_FOLLOW_ENV = "RBSS_LIVE_BPM_FOLLOW"
 AUTOLOOP_MASTER_PHRASE_ARM_ENV = "RBSS_AUTOLOOP_MASTER_PHRASE_ARM"
 SMART_DROP_ENV = "RBSS_SMART_DROP"
+SMART_BREAKDOWN_ENV = "RBSS_SMART_BREAKDOWN"
 PHRASE_ANCHOR_ENV = "RBSS_PHRASE_ANCHOR"
 SMART_REARM_EXPERIMENT_ENV = "RBSS_SMART_REARM_EXPERIMENT"
 SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
@@ -246,6 +249,10 @@ class StateManager:
         self._smart_drop_enabled = (
             self._smart_rearm_experiment
             and _os.environ.get(SMART_DROP_ENV, "1") != "0"
+        )
+        self._smart_breakdown_enabled = (
+            self._smart_rearm_experiment
+            and _os.environ.get(SMART_BREAKDOWN_ENV, "1") != "0"
         )
         self._phrase_anchor_enabled = (
             self._smart_rearm_experiment
@@ -438,7 +445,9 @@ class StateManager:
             "autoloop_arm_target_source": os.autoloop_arm_target_source,
             "pending_live_bpm": os.pending_live_bpm,
             "drop_cut_armed": os.drop_cut_armed,
+            "scripted_id": self._os.scripted_id if hasattr(self._os, "scripted_id") else 0, # compatibility fallback
             "smart_drop_enabled": self._smart_drop_enabled,
+            "smart_breakdown_enabled": self._smart_breakdown_enabled,
             "pending_scripted_arm": (
                 None
                 if self._pending_arm is None
@@ -524,12 +533,25 @@ class StateManager:
                 gen = ev.payload.get("load_gen", -1)
                 if gen == d_obj.load_gen:
                     raw_drops = list(ev.payload.get("drop_beat_indices", []))
+                    raw_breakdowns = list(ev.payload.get("breakdown_beat_indices", []))
+                    raw_buildups = list(ev.payload.get("buildup_beat_indices", []))
                     total_beats = len(d_obj.meta.beatgrid_times_ms)
+                    
                     d_obj.meta.anlz_drops = raw_drops
                     d_obj.meta.smart_drops = _select_smart_drops(
                         raw_drops,
                         total_beats=total_beats,
                     )
+                    
+                    d_obj.meta.anlz_breakdowns = raw_breakdowns
+                    d_obj.meta.smart_breakdowns = _select_smart_breakdowns(
+                        raw_breakdowns,
+                        total_beats=total_beats,
+                    )
+                    
+                    d_obj.meta.anlz_buildups = raw_buildups
+                    d_obj.meta.anlz_mood = ev.payload.get("mood", 0)
+                    
                     selected_set = set(d_obj.meta.smart_drops)
                     shadow = [
                         item for item in ev.payload.get("energy_shadow", [])
@@ -537,10 +559,13 @@ class StateManager:
                         and item.anlz_beat in selected_set
                     ]
                     d_obj.meta.smart_drop_energy_shadow = shadow
-                    log.info("[SM] smart-drop-select  deck=%d  raw=%s  selected=%s",
+                    log.info("[SM] smart-transition-select  deck=%d  drops=%d  smart_drops=%d  bd=%d  smart_bd=%d  up=%d",
                              ev.deck,
-                             d_obj.meta.anlz_drops or "none",
-                             d_obj.meta.smart_drops or "none")
+                             len(d_obj.meta.anlz_drops),
+                             len(d_obj.meta.smart_drops),
+                             len(d_obj.meta.anlz_breakdowns),
+                             len(d_obj.meta.smart_breakdowns),
+                             len(d_obj.meta.anlz_buildups))
                     for item in shadow:
                         log.info(
                             "[SM] smart-drop-energy-shadow  deck=%d  "
@@ -621,6 +646,9 @@ class StateManager:
 
         elif ev.kind == Ev.SMART_DROP_TOGGLE:
             self.toggle_smart_drop()
+            
+        elif ev.kind == Ev.SMART_BREAKDOWN_TOGGLE:
+            self.toggle_smart_breakdown()
 
     # ── Deck switch ───────────────────────────────────────────────────────────
 
@@ -718,6 +746,9 @@ class StateManager:
                             deck=bridge_deck,
                             payload={
                                 "drop_beat_indices": result.drop_beat_indices,
+                                "breakdown_beat_indices": result.breakdown_beat_indices,
+                                "buildup_beat_indices": result.buildup_beat_indices,
+                                "mood": result.mood,
                                 "energy_shadow": result.energy_shadow,
                                 "load_gen": gen,
                             },
@@ -1447,6 +1478,9 @@ class StateManager:
                     if self._smart_drop_enabled and d.meta.smart_drops:
                         if _smart_drop_tick(self, active, mirror, bpm, this_beat, elapsed_ms):
                             change = True
+                    if self._smart_breakdown_enabled and d.meta.smart_breakdowns:
+                        if _smart_breakdown_tick(self, active, mirror, bpm, this_beat, elapsed_ms):
+                            change = True
                     if self._phrase_anchor_enabled:
                         if _phrase_anchor_tick(
                             self, active, mirror, bpm, this_beat, elapsed_ms, abs_beat_pos
@@ -1875,6 +1909,8 @@ class StateManager:
         os = self._os
         os.drop_cut_armed = False
         os.drop_rearm_beat = 0
+        os.breakdown_active = False
+        os.breakdown_restore_beat = 0
         os.phrase_anchor_last_beat = -1
 
     def toggle_smart_drop(self) -> None:
@@ -1888,6 +1924,18 @@ class StateManager:
         if not self._smart_drop_enabled:
             self._clear_smart_rearm_state()
         log.info("[SM] smart-drop-toggle  enabled=%s", self._smart_drop_enabled)
+
+    def toggle_smart_breakdown(self) -> None:
+        """Toggle smart breakdown on/off at runtime. Must run in StateManager thread."""
+        if not self._smart_rearm_experiment:
+            self._smart_breakdown_enabled = False
+            self._clear_smart_rearm_state()
+            log.info("[SM] smart-breakdown-toggle  enabled=False  reason=experiment-off")
+            return
+        self._smart_breakdown_enabled = not self._smart_breakdown_enabled
+        if not self._smart_breakdown_enabled:
+            self._clear_smart_rearm_state()
+        log.info("[SM] smart-breakdown-toggle  enabled=%s", self._smart_breakdown_enabled)
 
     def _autoloop_arm_bpm(self, deck: int, fallback_bpm: float) -> tuple[float, str]:
         live = self._live_bpm_value(deck)
@@ -2006,6 +2054,9 @@ def _smart_drop_tick(
     if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
         return False
 
+    if os.breakdown_active:
+        return False
+
     if os.drop_cut_armed:
         if this_beat >= os.drop_rearm_beat:
             log.info("[SM] smart-drop-rearm  deck=%d  beat=%d", active, this_beat)
@@ -2025,6 +2076,8 @@ def _smart_drop_tick(
             break
         if this_beat >= drop_beat:
             continue
+        if any(this_beat <= bd_beat < drop_beat for bd_beat in d.meta.smart_breakdowns):
+            continue
         log.info("[SM] smart-drop-cut  deck=%d  beat=%d  drop_at=%d",
                  active, this_beat, drop_beat)
         for dk in (active, mirror, 3, 4):
@@ -2036,18 +2089,88 @@ def _smart_drop_tick(
     return False
 
 
-def _select_smart_drops(raw_drops: list[int], *, total_beats: int = 0) -> list[int]:
+def _select_smart_drops(
+    raw_drops: list[int],
+    *,
+    total_beats: int = 0,
+    ignore_intro_beats: int = SMART_DROP_IGNORE_INTRO_BEATS,
+    ignore_outro_beats: int = SMART_DROP_IGNORE_OUTRO_BEATS,
+) -> list[int]:
     """Return Smart Drop candidates after conservative intro/outro filtering."""
     selected: list[int] = []
-    outro_start = total_beats - SMART_DROP_IGNORE_OUTRO_BEATS if total_beats > 0 else 0
+    outro_start = total_beats - ignore_outro_beats if total_beats > 0 else 0
     for drop_beat in sorted(set(raw_drops)):
-        if drop_beat < SMART_DROP_IGNORE_INTRO_BEATS:
+        if drop_beat < ignore_intro_beats:
             continue
         if outro_start > 0 and drop_beat >= outro_start:
             continue
         selected.append(drop_beat)
     return selected
 
+def _select_smart_breakdowns(
+    raw_breakdowns: list[int],
+    *,
+    total_beats: int = 0,
+) -> list[int]:
+    return _select_smart_drops(
+        raw_breakdowns,
+        total_beats=total_beats,
+        ignore_intro_beats=SMART_BREAKDOWN_IGNORE_INTRO_BEATS,
+        ignore_outro_beats=SMART_BREAKDOWN_IGNORE_OUTRO_BEATS,
+    )
+
+def _find_restore_beat(d: DeckState, breakdown_beat: int) -> int:
+    candidates = []
+    candidates.extend([b for b in d.meta.anlz_buildups if b > breakdown_beat])
+    candidates.extend([b for b in d.meta.smart_drops if b > breakdown_beat])
+    if candidates:
+        return min(candidates)
+    return breakdown_beat + SMART_BREAKDOWN_DEFAULT_DURATION_BEATS
+
+def _smart_breakdown_tick(
+    sm: "StateManager",
+    active: int,
+    mirror: int,
+    bpm: float,
+    this_beat: int,
+    elapsed_ms: int,
+) -> bool:
+    os = sm._os
+    d = sm._deck[active]
+
+    if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
+        return False
+
+    if os.drop_cut_armed:
+        return False
+        
+    if os.breakdown_active:
+        if this_beat >= os.breakdown_restore_beat:
+            log.info("[SM] smart-breakdown-restore  deck=%d  beat=%d", active, this_beat)
+            if _send_direct_autoloop_rearm(
+                sm, active, mirror, bpm, elapsed_ms, "smart-breakdown",
+                target_beat=os.breakdown_restore_beat,
+            ):
+                os.phrase_anchor_last_beat = os.breakdown_restore_beat
+                os.breakdown_active = False
+                os.breakdown_restore_beat = 0
+                return True
+        return False
+        
+    for bd_beat in d.meta.smart_breakdowns:
+        if this_beat < bd_beat:
+            break
+        if this_beat >= bd_beat + SMART_BREAKDOWN_WINDOW_BEATS + 1:
+            continue
+        if this_beat == bd_beat:
+            log.info("[SM] smart-breakdown-cut  deck=%d  beat=%d", active, this_beat)
+            for dk in (active, mirror, 3, 4):
+                sm._out.send_deck_clear(dk)
+                sm._out.send_loop_off(dk)
+            os.breakdown_active = True
+            os.breakdown_restore_beat = _find_restore_beat(d, bd_beat)
+            break
+    return False
 
 def _phrase_anchor_tick(
     sm: "StateManager",
@@ -2069,6 +2192,9 @@ def _phrase_anchor_tick(
         return False
 
     if os.drop_cut_armed:
+        return False
+
+    if os.breakdown_active:
         return False
 
     if os.phrase_anchor_last_beat < 0:

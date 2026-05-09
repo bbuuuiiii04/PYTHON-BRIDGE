@@ -8,13 +8,14 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
+    _compute_bar_energies,
     TrackAnlzData,
     _calculate_smart_drop_energy_shadow,
     _detect_drop_beats,
     _extract_beatgrid_times,
-    _extract_pssi_drop_beats,
+    _extract_pssi_phrases,
     _extract_smart_drop_energy_shadow,
-    _extract_waveform_drop_beats,
+    _extract_waveform_phrases,
     _extract_waveform,
     read_anlz_drops,
 )
@@ -28,7 +29,7 @@ class FakeEntry:
 
 class FakeTag:
     def __init__(self, entries=None, times_s=None):
-        self.content = SimpleNamespace(entries=entries) if entries is not None else None
+        self.content = SimpleNamespace(entries=entries, mood=1) if entries is not None else None
         self._times_s = times_s or []
 
     def get_times(self):
@@ -58,10 +59,17 @@ def _beat_heights(values: dict[int, int], total_beats: int = 120, default: int =
     return [values.get(beat, default) for beat in range(total_beats)]
 
 
+
+
+def _detect_drop_beats_helper(heights, waveform_duration_ms, beatgrid_times_ms):
+    energies = _compute_bar_energies(heights, waveform_duration_ms, beatgrid_times_ms)
+    track_max = float(max(energies)) if energies else 0.0
+    return _detect_drop_beats(energies, track_max)
+
 class AnlzDropDetectTests(unittest.TestCase):
     def test_no_drops_flat_energy(self) -> None:
         bars = [20] * 40
-        drops = _detect_drop_beats(
+        drops = _detect_drop_beats_helper(
             _bar_heights(bars),
             waveform_duration_ms=40 * 4 * 500,
             beatgrid_times_ms=_beatgrid_ms(41 * 4),
@@ -70,7 +78,7 @@ class AnlzDropDetectTests(unittest.TestCase):
 
     def test_single_drop_detected(self) -> None:
         bars = [25] * 8 + [4] * 8 + [26] * 24
-        drops = _detect_drop_beats(
+        drops = _detect_drop_beats_helper(
             _bar_heights(bars),
             waveform_duration_ms=40 * 4 * 500,
             beatgrid_times_ms=_beatgrid_ms(41 * 4),
@@ -79,7 +87,7 @@ class AnlzDropDetectTests(unittest.TestCase):
 
     def test_three_bar_pre_drop_valley_detected(self) -> None:
         bars = [25] * 12 + [1, 1, 4] + [26] * 25
-        drops = _detect_drop_beats(
+        drops = _detect_drop_beats_helper(
             _bar_heights(bars),
             waveform_duration_ms=40 * 4 * 500,
             beatgrid_times_ms=_beatgrid_ms(41 * 4),
@@ -88,7 +96,7 @@ class AnlzDropDetectTests(unittest.TestCase):
 
     def test_intro_filtered(self) -> None:
         bars = [25] + [4] * 4 + [26] * 35
-        drops = _detect_drop_beats(
+        drops = _detect_drop_beats_helper(
             _bar_heights(bars),
             waveform_duration_ms=40 * 4 * 500,
             beatgrid_times_ms=_beatgrid_ms(41 * 4),
@@ -97,7 +105,7 @@ class AnlzDropDetectTests(unittest.TestCase):
 
     def test_outro_filtered(self) -> None:
         bars = [25] * 31 + [4] * 4 + [26] * 5
-        drops = _detect_drop_beats(
+        drops = _detect_drop_beats_helper(
             _bar_heights(bars),
             waveform_duration_ms=40 * 4 * 500,
             beatgrid_times_ms=_beatgrid_ms(41 * 4),
@@ -106,7 +114,7 @@ class AnlzDropDetectTests(unittest.TestCase):
 
     def test_first_outro_bar_boundary_filtered(self) -> None:
         bars = [25] * 29 + [4] * 3 + [26] * 8
-        drops = _detect_drop_beats(
+        drops = _detect_drop_beats_helper(
             _bar_heights(bars),
             waveform_duration_ms=40 * 4 * 500,
             beatgrid_times_ms=_beatgrid_ms(41 * 4),
@@ -115,7 +123,7 @@ class AnlzDropDetectTests(unittest.TestCase):
 
     def test_cooldown_deduplication(self) -> None:
         bars = [25] * 8 + [4] * 8 + [26] * 8 + [4] * 4 + [27] * 32
-        drops = _detect_drop_beats(
+        drops = _detect_drop_beats_helper(
             _bar_heights(bars),
             waveform_duration_ms=len(bars) * 4 * 500,
             beatgrid_times_ms=_beatgrid_ms((len(bars) + 1) * 4),
@@ -124,7 +132,7 @@ class AnlzDropDetectTests(unittest.TestCase):
 
     def test_medium_buildup_after_breakdown_is_not_drop(self) -> None:
         bars = [25] * 8 + [4] * 4 + [12, 14, 16, 18, 19, 20] + [27] * 22
-        drops = _detect_drop_beats(
+        drops = _detect_drop_beats_helper(
             _bar_heights(bars),
             waveform_duration_ms=len(bars) * 4 * 500,
             beatgrid_times_ms=_beatgrid_ms((len(bars) + 1) * 4),
@@ -134,7 +142,7 @@ class AnlzDropDetectTests(unittest.TestCase):
     def test_buildup_hit_shifts_to_following_drop(self) -> None:
         bars = [25] * 20 + [1, 0, 6, 8, 9, 10, 6, 8, 9, 10, 10]
         bars += [26, 23, 26, 28, 25] + [1, 2, 6] + [28, 28, 26, 27] + [28] * 12
-        drops = _detect_drop_beats(
+        drops = _detect_drop_beats_helper(
             _bar_heights(bars),
             waveform_duration_ms=len(bars) * 4 * 500,
             beatgrid_times_ms=_beatgrid_ms((len(bars) + 1) * 4),
@@ -212,7 +220,25 @@ class AnlzExtractionTests(unittest.TestCase):
                 "PSSI": [FakeTag([FakeEntry(5, 161), FakeEntry(5, 417)])],
             })),
         ]
-        self.assertEqual(_extract_pssi_drop_beats(parsed), [160, 416])
+        self.assertEqual(_extract_pssi_phrases(parsed)[1], [160, 416])
+
+    def test_pssi_mood1_extracts_breakdowns_and_buildups(self) -> None:
+        parsed = [
+            (Path("ANLZ0000.EXT"), FakeAnlz({
+                "PSSI": [FakeTag([
+                    FakeEntry(5, 161),
+                    FakeEntry(3, 65),
+                    FakeEntry(2, 97),
+                ])],
+            })),
+        ]
+
+        mood, drops, breakdowns, buildups = _extract_pssi_phrases(parsed)
+
+        self.assertEqual(mood, 1)
+        self.assertEqual(drops, [160])
+        self.assertEqual(breakdowns, [64])
+        self.assertEqual(buildups, [96])
 
     def test_pssi_ignores_non_drop_kinds(self) -> None:
         parsed = [
@@ -220,7 +246,7 @@ class AnlzExtractionTests(unittest.TestCase):
                 "PSSI": [FakeTag([FakeEntry(4, 161), FakeEntry(6, 417)])],
             })),
         ]
-        self.assertEqual(_extract_pssi_drop_beats(parsed), [])
+        self.assertEqual(_extract_pssi_phrases(parsed)[1], [])
 
     def test_pssi_sorts_and_dedupes(self) -> None:
         parsed = [
@@ -228,7 +254,7 @@ class AnlzExtractionTests(unittest.TestCase):
                 "PSSI": [FakeTag([FakeEntry(5, 417), FakeEntry(5, 161), FakeEntry(5, 161)])],
             })),
         ]
-        self.assertEqual(_extract_pssi_drop_beats(parsed), [160, 416])
+        self.assertEqual(_extract_pssi_phrases(parsed)[1], [160, 416])
 
     def test_pssi_primary_skips_waveform_fallback_when_present(self) -> None:
         parsed = [
@@ -238,9 +264,9 @@ class AnlzExtractionTests(unittest.TestCase):
                 "PQT2": [FakeTag(times_s=[i * 0.5 for i in range(200)])],
             })),
         ]
-        pssi_drops = _extract_pssi_drop_beats(parsed)
+        pssi_drops = _extract_pssi_phrases(parsed)[1]
         self.assertEqual(pssi_drops, [256, 512])
-        self.assertNotEqual(_extract_waveform_drop_beats(parsed), pssi_drops)
+        self.assertNotEqual(_extract_waveform_phrases(parsed)[0], pssi_drops)
 
     def test_pssi_empty_falls_back_to_waveform(self) -> None:
         parsed = [
@@ -250,8 +276,8 @@ class AnlzExtractionTests(unittest.TestCase):
                 "PQT2": [FakeTag(times_s=[i * 0.5 for i in range(41 * 4)])],
             })),
         ]
-        self.assertEqual(_extract_pssi_drop_beats(parsed), [])
-        self.assertEqual(_extract_waveform_drop_beats(parsed), [64])
+        self.assertEqual(_extract_pssi_phrases(parsed)[1], [])
+        self.assertEqual(_extract_waveform_phrases(parsed)[0], [64])
 
     def test_validated_a2_pssi_fixture(self) -> None:
         parsed = [
@@ -259,7 +285,7 @@ class AnlzExtractionTests(unittest.TestCase):
                 "PSSI": [FakeTag([FakeEntry(5, 257), FakeEntry(5, 513)])],
             })),
         ]
-        self.assertEqual(_extract_pssi_drop_beats(parsed), [256, 512])
+        self.assertEqual(_extract_pssi_phrases(parsed)[1], [256, 512])
 
     def test_candidate_ordering_prefers_ext_pssi(self) -> None:
         parsed = [
@@ -270,7 +296,7 @@ class AnlzExtractionTests(unittest.TestCase):
                 "PSSI": [FakeTag([FakeEntry(5, 257)])],
             })),
         ]
-        self.assertEqual(_extract_pssi_drop_beats(parsed), [256])
+        self.assertEqual(_extract_pssi_phrases(parsed)[1], [256])
 
     def test_validated_chiken_soup_pssi_fixture(self) -> None:
         parsed = [
@@ -278,7 +304,7 @@ class AnlzExtractionTests(unittest.TestCase):
                 "PSSI": [FakeTag([FakeEntry(5, 161), FakeEntry(5, 417)])],
             })),
         ]
-        self.assertEqual(_extract_pssi_drop_beats(parsed), [160, 416])
+        self.assertEqual(_extract_pssi_phrases(parsed)[1], [160, 416])
 
     def test_validated_blaame_pssi_fixture(self) -> None:
         parsed = [
@@ -286,7 +312,7 @@ class AnlzExtractionTests(unittest.TestCase):
                 "PSSI": [FakeTag([FakeEntry(5, 193), FakeEntry(5, 481)])],
             })),
         ]
-        self.assertEqual(_extract_pssi_drop_beats(parsed), [192, 480])
+        self.assertEqual(_extract_pssi_phrases(parsed)[1], [192, 480])
 
     def test_waveform_accessor_content_entries(self) -> None:
         parsed = [(Path("ANLZ0000.EXT"), FakeAnlz({"PWV3": [FakeTag([224, 162, 31])] }))]

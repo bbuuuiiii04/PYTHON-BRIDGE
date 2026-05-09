@@ -39,6 +39,9 @@ _PWV3_MS_PER_ENTRY_FALLBACK = 6.7
 @dataclass
 class TrackAnlzData:
     drop_beat_indices: list[int]
+    breakdown_beat_indices: list[int] = field(default_factory=list)
+    buildup_beat_indices: list[int] = field(default_factory=list)
+    mood: int = 0
     energy_shadow: list[SmartDropEnergyShadow] = field(default_factory=list)
 
 
@@ -91,16 +94,22 @@ def read_anlz_drops(anlz_path: str) -> TrackAnlzData:
         if not parsed:
             return TrackAnlzData([])
 
-        pssi_drops = _extract_pssi_drop_beats(parsed)
-        if pssi_drops:
+        mood, pssi_drops, pssi_breakdowns, pssi_buildups = _extract_pssi_phrases(parsed)
+        if pssi_drops or pssi_breakdowns:
             return TrackAnlzData(
                 pssi_drops,
+                pssi_breakdowns,
+                pssi_buildups,
+                mood,
                 _extract_smart_drop_energy_shadow(parsed, pssi_drops),
             )
 
-        waveform_drops = _extract_waveform_drop_beats(parsed)
+        waveform_drops, waveform_breakdowns = _extract_waveform_phrases(parsed)
         return TrackAnlzData(
             waveform_drops,
+            waveform_breakdowns,
+            [],
+            0,
             _extract_smart_drop_energy_shadow(parsed, waveform_drops),
         )
     except Exception:
@@ -108,12 +117,16 @@ def read_anlz_drops(anlz_path: str) -> TrackAnlzData:
         return TrackAnlzData([])
 
 
-def _extract_pssi_drop_beats(parsed: list[tuple[Path, Any]]) -> list[int]:
+def _extract_pssi_phrases(parsed: list[tuple[Path, Any]]) -> tuple[int, list[int], list[int], list[int]]:
     ordered = sorted(parsed, key=lambda item: _candidate_priority(item[0]))
     for _path, anlz in ordered:
+        mood = 0
         drops: set[int] = set()
+        breakdowns: set[int] = set()
+        buildups: set[int] = set()
         for tag in _safe_getall_tags(anlz, "PSSI"):
             content = getattr(tag, "content", None)
+            mood = int(getattr(content, "mood", 0))
             entries = getattr(content, "entries", None)
             if entries is None and isinstance(content, dict):
                 entries = content.get("entries")
@@ -126,11 +139,25 @@ def _extract_pssi_drop_beats(parsed: list[tuple[Path, Any]]) -> list[int]:
                 except Exception:
                     continue
                 bridge_beat = max(0, pssi_beat - 1)
-                if kind == 5 and bridge_beat > 0:
-                    drops.add(bridge_beat)
-        if drops:
-            return sorted(drops)
-    return []
+                if bridge_beat <= 0:
+                    continue
+                
+                if mood == 1:
+                    if kind == 5:
+                        drops.add(bridge_beat)
+                    elif kind == 3:
+                        breakdowns.add(bridge_beat)
+                    elif kind == 2:
+                        buildups.add(bridge_beat)
+                elif mood in (2, 3):
+                    if kind == 9:
+                        drops.add(bridge_beat)
+                    elif kind == 8:
+                        breakdowns.add(bridge_beat)
+                        
+        if drops or breakdowns:
+            return mood, sorted(drops), sorted(breakdowns), sorted(buildups)
+    return 0, [], [], []
 
 
 def _candidate_priority(path: Path) -> int:
@@ -144,11 +171,11 @@ def _candidate_priority(path: Path) -> int:
     return 3
 
 
-def _extract_waveform_drop_beats(parsed: list[tuple[Path, Any]]) -> list[int]:
+def _extract_waveform_phrases(parsed: list[tuple[Path, Any]]) -> tuple[list[int], list[int]]:
     try:
         waveform = _extract_waveform(parsed)
         if waveform is None:
-            return []
+            return [], []
         heights, waveform_source = waveform
 
         beatgrid_times_ms = _extract_beatgrid_times(parsed)
@@ -159,10 +186,21 @@ def _extract_waveform_drop_beats(parsed: list[tuple[Path, Any]]) -> list[int]:
         else:
             waveform_duration_ms = 0.0
 
-        return _detect_drop_beats(heights, waveform_duration_ms, beatgrid_times_ms)
+        bar_energies = _compute_bar_energies(heights, waveform_duration_ms, beatgrid_times_ms)
+        if not bar_energies:
+            return [], []
+            
+        track_max = max(bar_energies)
+        if track_max <= 0:
+            return [], []
+            
+        return (
+            _detect_drop_beats(bar_energies, track_max),
+            _detect_breakdown_beats(bar_energies, track_max)
+        )
     except Exception:
-        log.debug("ANLZ waveform drop extract failed", exc_info=True)
-        return []
+        log.debug("ANLZ waveform phrase extract failed", exc_info=True)
+        return [], []
 
 
 def _extract_smart_drop_energy_shadow(
@@ -309,53 +347,54 @@ def _candidate_anlz_paths(anlz_path: str) -> list[Path]:
     return result
 
 
-def _detect_drop_beats(
+def _compute_bar_energies(
     heights: list[int],
     waveform_duration_ms: float,
     beatgrid_times_ms: list[float],
+) -> list[float]:
+    if not heights or waveform_duration_ms <= 0 or len(beatgrid_times_ms) < 8:
+        return []
+
+    times = [float(t) for t in beatgrid_times_ms if float(t) >= 0.0]
+    if len(times) < 8:
+        return []
+
+    total_bars = (len(times) - 1) // 4
+    if total_bars <= IGNORE_INTRO_BARS + IGNORE_OUTRO_BARS:
+        return []
+
+    ms_per_entry = waveform_duration_ms / len(heights)
+    if ms_per_entry <= 0:
+        return []
+
+    use_mean = len(heights) < total_bars
+    bar_energies: list[float] = []
+    for bar in range(total_bars):
+        start_ms = times[bar * 4]
+        end_ms = times[(bar + 1) * 4]
+        if end_ms <= start_ms:
+            return []
+        start_idx = _clamp_index(int(start_ms / ms_per_entry), len(heights))
+        end_idx = _clamp_index(int(end_ms / ms_per_entry), len(heights))
+        if end_idx <= start_idx:
+            end_idx = min(len(heights), start_idx + 1)
+        window = heights[start_idx:end_idx]
+        if not window:
+            bar_energies.append(0.0)
+        elif use_mean:
+            bar_energies.append(sum(window) / len(window))
+        else:
+            bar_energies.append(float(max(window)))
+
+    return bar_energies
+
+def _detect_drop_beats(
+    bar_energies: list[float],
+    track_max: float,
 ) -> list[int]:
-    """Pure drop detection from pre-extracted heights and beat grid."""
+    """Pure drop detection from pre-extracted bar energies."""
     try:
-        if not heights or waveform_duration_ms <= 0 or len(beatgrid_times_ms) < 8:
-            return []
-
-        times = [float(t) for t in beatgrid_times_ms if float(t) >= 0.0]
-        if len(times) < 8:
-            return []
-
-        total_bars = (len(times) - 1) // 4
-        if total_bars <= IGNORE_INTRO_BARS + IGNORE_OUTRO_BARS:
-            return []
-
-        ms_per_entry = waveform_duration_ms / len(heights)
-        if ms_per_entry <= 0:
-            return []
-
-        use_mean = len(heights) < total_bars
-        bar_energies: list[float] = []
-        for bar in range(total_bars):
-            start_ms = times[bar * 4]
-            end_ms = times[(bar + 1) * 4]
-            if end_ms <= start_ms:
-                return []
-            start_idx = _clamp_index(int(start_ms / ms_per_entry), len(heights))
-            end_idx = _clamp_index(int(end_ms / ms_per_entry), len(heights))
-            if end_idx <= start_idx:
-                end_idx = min(len(heights), start_idx + 1)
-            window = heights[start_idx:end_idx]
-            if not window:
-                bar_energies.append(0.0)
-            elif use_mean:
-                bar_energies.append(sum(window) / len(window))
-            else:
-                bar_energies.append(float(max(window)))
-
-        if not bar_energies:
-            return []
-        track_max = max(bar_energies)
-        if track_max <= 0:
-            return []
-
+        total_bars = len(bar_energies)
         low_cutoff = BREAKDOWN_THRESHOLD * track_max
         high_cutoff = DROP_THRESHOLD * track_max
         drops: list[int] = []
@@ -396,6 +435,49 @@ def _detect_drop_beats(
                 break
 
         return sorted(drops)
+    except Exception:
+        log.debug("ANLZ drop detect failed", exc_info=True)
+        return []
+
+def _detect_breakdown_beats(
+    bar_energies: list[float],
+    track_max: float,
+) -> list[int]:
+    """Detect high->low energy transitions (breakdowns)."""
+    try:
+        total_bars = len(bar_energies)
+        low_cutoff = BREAKDOWN_THRESHOLD * track_max
+        high_cutoff = DROP_THRESHOLD * track_max
+        breakdowns: list[int] = []
+        
+        i = 0
+        while i < len(bar_energies):
+            if bar_energies[i] < high_cutoff:
+                i += 1
+                continue
+                
+            high_end = i
+            while high_end < len(bar_energies) and bar_energies[high_end] >= low_cutoff:
+                high_end += 1
+                
+            if high_end >= len(bar_energies):
+                break
+                
+            low_start = high_end
+            low_end = low_start
+            while low_end < len(bar_energies) and bar_energies[low_end] < low_cutoff:
+                low_end += 1
+                
+            if low_end - low_start >= MIN_LOW_BARS:
+                breakdown_beat = low_start * 4
+                if (
+                    breakdown_beat >= IGNORE_INTRO_BARS * 4
+                    and breakdown_beat < (total_bars - IGNORE_OUTRO_BARS) * 4
+                ):
+                    breakdowns.append(breakdown_beat)
+            i = low_end
+            
+        return sorted(breakdowns)
     except Exception:
         log.debug("ANLZ drop detect failed", exc_info=True)
         return []

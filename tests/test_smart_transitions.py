@@ -18,6 +18,7 @@ from rb_ss_bridge_v2.state_manager import (  # noqa: E402
     _send_direct_autoloop_rearm,
     _select_smart_drops,
     _smart_drop_tick,
+    _smart_breakdown_tick,
 )
 
 
@@ -102,6 +103,13 @@ class SmartRearmFlagTests(unittest.TestCase):
         })
         self.assertTrue(sm._smart_drop_enabled)
         self.assertFalse(sm._phrase_anchor_enabled)
+
+    def test_smart_breakdown_kill_switch_disables_breakdown(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SMART_BREAKDOWN": "0",
+        })
+        self.assertFalse(sm._smart_breakdown_enabled)
 
     def test_toggle_smart_drop_flips_runtime_state(self) -> None:
         sm = _manager({
@@ -245,6 +253,28 @@ class SmartDropTests(unittest.TestCase):
         self.assertIn("suggested_elapsed=0:20.000", output)
         self.assertNotIn("suggested=40", output)
 
+    def test_anlz_data_accepts_breakdowns_and_buildups(self) -> None:
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
+        sm._deck[1].load_gen = 7
+        sm._deck[1].meta.beatgrid_times_ms = [i * 500.0 for i in range(320)]
+
+        sm._handle_event(BridgeEvent(
+            Ev.ANLZ_DATA,
+            1,
+            {
+                "drop_beat_indices": [32, 160, 192, 328],
+                "breakdown_beat_indices": [64, 224],
+                "buildup_beat_indices": [96, 112, 144, 232],
+                "mood": 1,
+                "load_gen": 7,
+            },
+        ))
+
+        self.assertEqual(sm._deck[1].meta.anlz_breakdowns, [64, 224])
+        self.assertEqual(sm._deck[1].meta.smart_breakdowns, [64, 224])
+        self.assertEqual(sm._deck[1].meta.anlz_buildups, [96, 112, 144, 232])
+        self.assertEqual(sm._deck[1].meta.anlz_mood, 1)
+
     def test_stale_anlz_data_does_not_mutate_drop_lists(self) -> None:
         sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
         sm._deck[1].load_gen = 7
@@ -309,6 +339,14 @@ class SmartDropTests(unittest.TestCase):
         sm = _sm([64])
         sm._os.pending_autoloop_arm_meta = TrackMetadata(filepath="/music/pending.mp3")
         _smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000)
+        sm._out.send_deck_clear.assert_not_called()
+        self.assertFalse(sm._os.drop_cut_armed)
+
+    def test_smart_drop_skipped_while_breakdown_active(self) -> None:
+        sm = _sm([68])
+        sm._os.breakdown_active = True
+        sm._os.breakdown_restore_beat = 96
+        _smart_drop_tick(sm, 1, 2, 130.0, 64, 32_000)
         sm._out.send_deck_clear.assert_not_called()
         self.assertFalse(sm._os.drop_cut_armed)
 
@@ -431,6 +469,14 @@ class PhraseAnchorTests(unittest.TestCase):
         _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_000, 64.0)
         sm._send_autoloop_deck_load.assert_not_called()
 
+    def test_phrase_anchor_blocked_by_breakdown_active(self) -> None:
+        sm = _sm()
+        sm._os.phrase_anchor_last_beat = 0
+        sm._os.breakdown_active = True
+        sm._os.breakdown_restore_beat = 96
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_000, 64.0)
+        sm._send_autoloop_deck_load.assert_not_called()
+
     def test_phrase_anchor_init_sentinel(self) -> None:
         sm = _sm()
         _phrase_anchor_tick(sm, 1, 2, 130.0, 75, 37_500, 75.0)
@@ -480,3 +526,44 @@ class PhraseAnchorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SmartBreakdownTests(unittest.TestCase):
+    def test_breakdown_marker_prevents_smart_drop_precut(self):
+        sm = _sm()
+        sm._deck[1].meta.smart_drops = [96]
+        sm._deck[1].meta.smart_breakdowns = [92]
+        sm._smart_breakdown_enabled = True
+
+        _smart_drop_tick(sm, 1, 2, 130.0, 88, 44_000)
+        self.assertFalse(sm._os.drop_cut_armed)
+        self.assertEqual(sm._out.send_deck_clear.call_count, 0)
+
+        _smart_breakdown_tick(sm, 1, 2, 130.0, 92, 46_000)
+        self.assertTrue(sm._os.breakdown_active)
+        self.assertEqual(sm._os.breakdown_restore_beat, 96)
+
+    def test_breakdown_cuts_and_restores(self):
+        sm = _sm()
+        sm._deck[1].meta.smart_breakdowns = [32]
+        sm._deck[1].meta.smart_drops = [64]
+        sm._smart_breakdown_enabled = True
+        
+        # Tick before breakdown
+        _smart_breakdown_tick(sm, 1, 2, 130.0, 30, 15_000)
+        self.assertFalse(sm._os.breakdown_active)
+        
+        # Tick on breakdown beat
+        _smart_breakdown_tick(sm, 1, 2, 130.0, 32, 16_000)
+        self.assertTrue(sm._os.breakdown_active)
+        self.assertEqual(sm._os.breakdown_restore_beat, 64)
+        self.assertEqual(sm._out.send_deck_clear.call_count, 4)
+        self.assertEqual(sm._out.send_loop_off.call_count, 4)
+        
+        # Tick inside breakdown
+        _smart_breakdown_tick(sm, 1, 2, 130.0, 40, 20_000)
+        self.assertTrue(sm._os.breakdown_active)
+        
+        # Tick on restore beat
+        _smart_breakdown_tick(sm, 1, 2, 130.0, 64, 32_000)
+        self.assertFalse(sm._os.breakdown_active)
+        sm._send_autoloop_deck_load.assert_called_once()
