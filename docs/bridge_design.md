@@ -31,7 +31,7 @@ RBSS_TRACK_LOAD_DIRECT=1
 RBSS_SCRIPTED_DIRECT=1
 RBSS_SCRIPTED_SHOWFILE_DIRECT=1
 RBSS_SMART_REARM_EXPERIMENT=1
-RBSS_SMART_DROP=0
+RBSS_SMART_DROP=1
 RBSS_SMART_BREAKDOWN=1
 ```
 
@@ -390,7 +390,7 @@ Master-transition autoloop arms are phrase-window aware when
 `AUTOLOOP_BEATS` controls the loop length sent to SoundSwitch. It is separate
 from the 32-beat phrase-lock target.
 
-## Smart Rearm, Smart Drop, Phrase Anchor
+## Smart Rearm, Smart Drop, Phrase Anchor, Smart Breakdown
 
 The Smart Rearm experiment is enabled only when `RBSS_SMART_REARM_EXPERIMENT=1`.
 Launcher defaults enable the experiment but explicitly set `RBSS_SMART_DROP=0`.
@@ -418,6 +418,7 @@ Smart Drop:
 - When toggled off, pending Smart Drop cut/rearm state is cleared.
 - The runtime toggle cannot enable Smart Drop if the global Smart Rearm
   experiment is off.
+- Launcher defaults set `RBSS_SMART_DROP=1`.
 
 Phrase Anchor:
 
