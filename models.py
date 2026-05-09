@@ -212,3 +212,4 @@ class Ev:
     LASER_BLACKOUT             = "laser_blackout"             # latch emergency blackout
     LASER_CLEAR_BLACKOUT       = "laser_clear_blackout"       # clear emergency blackout
     LASER_CLEAR_SCENE_OVERRIDE = "laser_clear_scene_override" # clear manual scene only
+    LASER_SET_PERSONALITY      = "laser_set_personality"      # payload={personality: str}

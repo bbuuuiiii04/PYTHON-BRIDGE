@@ -362,7 +362,7 @@ class StatusShapeTests(unittest.TestCase):
         ld = _director()
         s = ld.status()
         for key in ("available", "enabled", "dry_run", "current_scene",
-                    "last_reason", "manual_override", "emergency", "last_error"):
+                    "last_reason", "manual_override", "emergency", "last_error", "personality"):
             self.assertIn(key, s, msg=f"missing key: {key}")
 
     def test_status_available_true(self) -> None:
@@ -402,13 +402,14 @@ class EvLaserConstantsTests(unittest.TestCase):
             "LASER_BLACKOUT",
             "LASER_CLEAR_BLACKOUT",
             "LASER_CLEAR_SCENE_OVERRIDE",
+            "LASER_SET_PERSONALITY",
         ):
             self.assertTrue(hasattr(Ev, attr), msg=f"Ev missing: {attr}")
 
     def test_laser_ev_values_are_strings(self) -> None:
         for attr in ("LASER_TOGGLE", "LASER_SET_ENABLED", "LASER_SCENE",
                      "LASER_BLACKOUT", "LASER_CLEAR_BLACKOUT",
-                     "LASER_CLEAR_SCENE_OVERRIDE"):
+                     "LASER_CLEAR_SCENE_OVERRIDE", "LASER_SET_PERSONALITY"):
             self.assertIsInstance(getattr(Ev, attr), str)
 
 
@@ -518,6 +519,22 @@ class StateManagerLaserIntegrationTests(unittest.TestCase):
                      Ev.LASER_CLEAR_SCENE_OVERRIDE):
             sm._handle_event(BridgeEvent(kind=kind, deck=0))  # must not raise
 
+    def test_laser_set_personality_event_updates_status(self) -> None:
+        from rb_ss_bridge_v2.models import BridgeEvent
+        ld = _director()
+        sm = _make_sm(laser_director=ld)
+        sm._handle_event(BridgeEvent(
+            kind=Ev.LASER_SET_PERSONALITY, deck=0, payload={"personality": "dubstep"}
+        ))
+        self.assertEqual(ld.status()["personality"], "dubstep")
+
+    def test_laser_set_personality_event_ignored_when_no_director(self) -> None:
+        from rb_ss_bridge_v2.models import BridgeEvent
+        sm = _make_sm()
+        sm._handle_event(BridgeEvent(
+            kind=Ev.LASER_SET_PERSONALITY, deck=0, payload={"personality": "dubstep"}
+        ))
+
     def test_existing_smart_drop_toggle_still_works(self) -> None:
         """SMART_DROP_TOGGLE must still reach toggle_smart_drop() without raising.
 
@@ -605,6 +622,11 @@ class StateManagerLaserIntegrationTests(unittest.TestCase):
         self.assertFalse(ld.is_enabled())
         ld.set_enabled(True)
         self.assertTrue(ld.is_enabled())
+
+    def test_set_personality_updates_status(self) -> None:
+        ld = _director(enabled=True)
+        ld.set_personality("dubstep")
+        self.assertEqual(ld.status()["personality"], "dubstep")
 
 
 # ---------------------------------------------------------------------------
