@@ -43,6 +43,7 @@ from .models import (
     ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot,
     SmartDropEnergyShadow, TrackMetadata,
 )
+from .laser_models import LaserContext
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
@@ -231,11 +232,18 @@ class StateManager:
         output:         OS2LOutput,
         live_bpm=None,
         live_bpm_follow: Optional[bool] = None,
+        laser_director=None,
+        os2l_connected_provider=None,
     ) -> None:
         self._eq    = event_queue
         self._cache = position_cache
         self._out   = output
         self._live_bpm = live_bpm
+        # Optional Laser Director — None means disabled/not configured.
+        # Mutated only from this thread after start().
+        self._laser_director = laser_director
+        # Constant-time connectivity check; must not build a dict or call status().
+        self._os2l_connected_provider = os2l_connected_provider
         self._live_bpm_follow = (
             _os.environ.get(LIVE_BPM_FOLLOW_ENV, "1") != "0"
             if live_bpm_follow is None else live_bpm_follow
@@ -646,9 +654,26 @@ class StateManager:
 
         elif ev.kind == Ev.SMART_DROP_TOGGLE:
             self.toggle_smart_drop()
-            
+
         elif ev.kind == Ev.SMART_BREAKDOWN_TOGGLE:
             self.toggle_smart_breakdown()
+
+        elif self._laser_director is not None:
+            if ev.kind == Ev.LASER_TOGGLE:
+                self._laser_director.toggle_enabled()
+            elif ev.kind == Ev.LASER_SET_ENABLED:
+                self._laser_director.set_enabled(bool(ev.payload.get("enabled", False)))
+            elif ev.kind == Ev.LASER_SCENE:
+                scene = str(ev.payload.get("scene", ""))
+                ttl_s = float(ev.payload.get("ttl_s", 4.0))
+                if scene:
+                    self._laser_director.set_manual_override(scene, ttl_s)
+            elif ev.kind == Ev.LASER_BLACKOUT:
+                self._laser_director.set_emergency_blackout(True)
+            elif ev.kind == Ev.LASER_CLEAR_BLACKOUT:
+                self._laser_director.clear_emergency_blackout()
+            elif ev.kind == Ev.LASER_CLEAR_SCENE_OVERRIDE:
+                self._laser_director.clear_manual_override()
 
     # ── Deck switch ───────────────────────────────────────────────────────────
 
@@ -1232,6 +1257,11 @@ class StateManager:
                 log.warning("[SM] stop-stale  deck=%d", active)
                 self._pending_arm = None
                 self._do_stop(active, os.last_beat_elapsed_ms)
+                if self._laser_director is not None:
+                    _lctx = self._build_laser_context(
+                        active, d, os.last_beat_elapsed_ms, d.meta.bpm, 0.0, 0.0, snap, now,
+                    )
+                    self._laser_director.tick(_lctx, now=now)
                 return
             # Not playing — run lighting machine and auto-detect with TL state only.
             bpm = d.meta.bpm
@@ -1251,6 +1281,11 @@ class StateManager:
                     except queue.Full:
                         log.warning("[SM] queue-full  event=switch  deck=%d→%d  src=auto",
                                     active, mirror)
+            if self._laser_director is not None:
+                _lctx = self._build_laser_context(
+                    active, d, elapsed_ms, bpm, 0.0, 0.0, snap, now,
+                )
+                self._laser_director.tick(_lctx, now=now)
             return
 
         # Interpolate position: memory updates at 60 Hz; push loop at 200 Hz
@@ -1408,6 +1443,11 @@ class StateManager:
             return   # don't emit beats until flash-arm fires
 
         if not os.was_playing:
+            if self._laser_director is not None:
+                _lctx = self._build_laser_context(
+                    active, d, elapsed_ms, bpm, beat_pos, abs_beat_pos, snap, now,
+                )
+                self._laser_director.tick(_lctx, now=now)
             return
 
         # ── Emit elapsed + beat ───────────────────────────────────────────────
@@ -1504,11 +1544,50 @@ class StateManager:
                             active, elapsed_ms, beatpos_out, bpm, d.meta.bpm, grid_status
                         )
 
+        # Laser Director tick — dry-run only in Phase 1.
+        # Must not block, send MIDI, call OS2LOutput, or mutate DeckState/OutputState.
+        if self._laser_director is not None:
+            ctx = self._build_laser_context(active, d, elapsed_ms, bpm, beat_pos, abs_beat_pos, snap, now)
+            self._laser_director.tick(ctx, now=now)
+
         # Elapsed + beatpos — send at every push tick (SS needs continuous updates).
         # Test A: in autoloop only, send absolute beat position to match VDJ-like
         # OS2L timing while leaving beat events unchanged for isolation.
         for dk in (active, mirror, 3, 4):
             self._out.send_elapsed(dk, elapsed_ms, beatpos_out)
+
+    def _build_laser_context(
+        self,
+        active: int,
+        d,
+        elapsed_ms: int,
+        bpm: float,
+        beat_pos: float,
+        abs_beat_pos: float,
+        snap,
+        now: float,
+    ):
+        """Build a frozen LaserContext from already-computed push-tick locals.
+
+        Must not call conn.status(), read files, build dicts, scan MIDI ports,
+        or perform any I/O. All values come from pre-computed local variables.
+        """
+        os2l_connected = (
+            self._os2l_connected_provider()
+            if self._os2l_connected_provider is not None
+            else False
+        )
+        return LaserContext(
+            active_deck=active,
+            playing=d.playing,
+            elapsed_ms=elapsed_ms,
+            bpm=bpm,
+            beatpos=beat_pos,
+            abs_beat=abs_beat_pos,
+            position_stale=(snap is None or snap.is_stale(MEM_STALE_S)),
+            lighting_mode=self._os.lighting_mode,
+            os2l_connected=os2l_connected,
+        )
 
     # ── Stop / resume helpers ─────────────────────────────────────────────────
 
