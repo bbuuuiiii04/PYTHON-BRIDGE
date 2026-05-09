@@ -89,6 +89,7 @@ class ValidationRunner:
         self._check_autoloop(add)
         self._check_scripted(add)
         add("os2l_queue", *self._check_queue())
+        self._check_laser(add)
 
         result = ValidationResult("done", time.time(), checks[-1].name if checks else "done", checks)
         with self._lock:
@@ -210,6 +211,20 @@ class ValidationRunner:
         if maxsize and size >= maxsize * 0.8:
             return STATUS_WARN, f"queue high {size}/{maxsize} drops={drops}"
         return STATUS_PASS, f"queue {size}/{maxsize} drops={drops}"
+
+    def _check_laser(self, add) -> None:
+        """Placeholder laser checks — all not_applicable until LaserDirector is wired in."""
+        _laser_checks = (
+            "laser_config",
+            "laser_safe_scene",
+            "laser_emergency_scene",
+            "laser_personality_refs",
+            "laser_midi_dependency",
+            "laser_midi_port",
+            "laser_midi_queue",
+        )
+        for name in _laser_checks:
+            add(name, STATUS_NA, "not_configured")
 
 
 def _pgrep_count(pattern: str) -> int:

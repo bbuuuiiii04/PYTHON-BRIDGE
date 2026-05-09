@@ -2,19 +2,39 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
 MAX_ARM_TTL_S = 30.0
+log = logging.getLogger("runtime_status")
+
+
+_DEFAULT_LASER_STATUS: dict[str, Any] = {
+    "available": False,
+    "enabled": False,
+    "reason": "not_configured",
+}
 
 
 class StatusWriter(threading.Thread):
-    def __init__(self, sm, live_bpm, pos_cache, conn, mirror, validation_runner, command_reader) -> None:
+    def __init__(
+        self,
+        sm,
+        live_bpm,
+        pos_cache,
+        conn,
+        mirror,
+        validation_runner,
+        command_reader,
+        *,
+        laser_status_provider: Optional[Callable[[], dict]] = None,
+    ) -> None:
         super().__init__(name="runtime-status", daemon=True)
         self._sm = sm
         self._live_bpm = live_bpm
@@ -23,6 +43,7 @@ class StatusWriter(threading.Thread):
         self._mirror = mirror
         self._validation_runner = validation_runner
         self._command_reader = command_reader
+        self._laser_status_provider = laser_status_provider
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
@@ -49,6 +70,11 @@ class StatusWriter(threading.Thread):
                 "live_bpm": _live_bpm_status(live),
                 "live_bpm_summary": _obj_dict(summary),
             }
+        laser = (
+            dict(_DEFAULT_LASER_STATUS)
+            if self._laser_status_provider is None
+            else self._safe_laser_status()
+        )
         return {
             "schema": 1,
             "written_at": time.time(),
@@ -59,8 +85,19 @@ class StatusWriter(threading.Thread):
             "mirror": self._mirror.get_summary(),
             "validation": self._validation_runner.last_result().to_dict(),
             "commands": self._command_reader.status(),
+            "laser_director": laser,
             "recent_errors": [],
         }
+
+    def _safe_laser_status(self) -> dict[str, Any]:
+        try:
+            return self._laser_status_provider()
+        except Exception as exc:
+            log.warning("[STATUS] laser_status_provider_failed err=%s", exc)
+            fallback = dict(_DEFAULT_LASER_STATUS)
+            fallback["reason"] = "provider_error"
+            fallback["last_error"] = f"{type(exc).__name__}: {exc}"
+            return fallback
 
 
 class CommandReader(threading.Thread):
@@ -145,11 +182,17 @@ class CommandReader(threading.Thread):
             return
         if cmd == "toggle_smart_drop":
             if self._smart_drop_toggle_callback:
-                self._smart_drop_toggle_callback()
+                ok, detail = _invoke_callback(self._smart_drop_toggle_callback)
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"toggle_smart_drop callback failed: {detail}"
             return
         if cmd == "toggle_smart_breakdown":
             if self._smart_breakdown_toggle_callback:
-                self._smart_breakdown_toggle_callback()
+                ok, detail = _invoke_callback(self._smart_breakdown_toggle_callback)
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"toggle_smart_breakdown callback failed: {detail}"
             return
         raise ValueError(f"unknown command: {cmd}")
 
@@ -191,6 +234,21 @@ def parse_command(line: str) -> dict[str, Any]:
         obj = dict(obj)
         obj.pop("expires_at", None)
     return obj
+
+
+def _invoke_callback(cb: Callable[[], Any]) -> tuple[bool, str]:
+    """Call *cb* and return (ok, detail).
+
+    Used by CommandReader so every callback slot gets consistent failure
+    reporting without repeating try/except at each call site.
+    """
+    try:
+        result = cb()
+        if result is False:
+            return False, "callback returned False"
+        return True, ""
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
 
 
 def atomic_write_json(path: str, data: dict[str, Any]) -> None:
