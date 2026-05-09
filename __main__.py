@@ -61,6 +61,8 @@ from .tl_tailer import (
 from .diagnostics import DriftDetector, enable_debug, is_debug
 from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService, read_rekordbox_version
 from .logging_manager import get_logging_manager
+from .laser_config import LaserConfigResult, load_laser_director_config
+from .laser_director import LaserDirector
 from .runtime_status import CommandReader, StatusWriter
 from .validation_runner import ValidationRunner
 
@@ -236,6 +238,42 @@ def _env_enabled(name: str, default: str = "0") -> bool:
 
 def _onoff(value: bool) -> str:
     return "on" if value else "off"
+
+
+def _build_laser_startup_wiring(
+    cfg_result: LaserConfigResult,
+) -> tuple[Optional[LaserDirector], Optional[Callable[[], dict]]]:
+    """Build optional LaserDirector and status provider from startup config result."""
+    if not cfg_result.available or cfg_result.config is None:
+        if cfg_result.reason == "invalid_config":
+            errors = [str(err) for err in cfg_result.errors]
+
+            def _invalid_status() -> dict:
+                return {
+                    "available": False,
+                    "enabled": False,
+                    "reason": "invalid_config",
+                    "errors": errors,
+                }
+
+            return None, _invalid_status
+        return None, None
+
+    cfg = cfg_result.config
+    default_scene = cfg.startup_scene
+    if cfg.default_personality:
+        personality = cfg.personalities.get(cfg.default_personality)
+        if personality is not None:
+            default_scene = personality.default_scene
+
+    laser_director = LaserDirector(
+        dry_run=cfg.dry_run,
+        enabled=cfg.enabled,
+        safe_scene=cfg.fallback_scene,
+        default_scene=default_scene,
+        emergency_scene=cfg.emergency_scene,
+    )
+    return laser_director, laser_director.status
 
 _LOCK_FD = None
 _LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
@@ -504,6 +542,18 @@ def main() -> None:
         enable_debug()
 
     log.info("[MAIN] starting")
+    laser_cfg_result = load_laser_director_config()
+    laser_director, laser_status_provider = _build_laser_startup_wiring(laser_cfg_result)
+    log.info(
+        "[MAIN] laser-config  reason=%s  available=%s  enabled=%s",
+        laser_cfg_result.reason,
+        laser_cfg_result.available,
+        (
+            laser_cfg_result.config.enabled
+            if laser_cfg_result.config is not None
+            else False
+        ),
+    )
 
     # Startup: pre-register scripted tracks from TL playlist.yaml + resolve filepaths
     preload_from_tl(str(TL_PLAYLIST_PATH))
@@ -553,8 +603,20 @@ def main() -> None:
     discovery.start()
 
     # State manager (event loop + push loop)
-    sm = StateManager(event_queue, pos_cache, output, live_bpm=live_bpm)
-    validation_runner = ValidationRunner(conn, pos_cache, live_bpm, sm)
+    sm = StateManager(
+        event_queue,
+        pos_cache,
+        output,
+        live_bpm=live_bpm,
+        laser_director=laser_director,
+    )
+    validation_runner = ValidationRunner(
+        conn,
+        pos_cache,
+        live_bpm,
+        sm,
+        laser_config_result=laser_cfg_result,
+    )
 
     def _toggle_smart_drop() -> None:
         try:
@@ -685,6 +747,7 @@ def main() -> None:
         mirror,
         validation_runner,
         command_reader,
+        laser_status_provider=laser_status_provider,
     )
 
     # Initialize master deck from last TL ENGINE STATE (fixes startup deck bug)
