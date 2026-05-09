@@ -76,6 +76,11 @@ class OS2LConnection:
     def set_mirror(self, mirror: OS2LMirror) -> None:
         self._mirror = mirror
 
+    def is_connected(self) -> bool:
+        """Constant-time connectivity check safe to call from hot paths."""
+        with self._lock:
+            return self._connected
+
     def status(self) -> dict:
         with self._lock:
             connected = self._connected
