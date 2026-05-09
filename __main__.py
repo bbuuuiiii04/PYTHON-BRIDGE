@@ -577,11 +577,105 @@ def main() -> None:
         except queue.Full:
             log.warning("[MAIN] queue-full  event=smart-breakdown-toggle")
 
+    def _toggle_laser_director() -> bool:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LASER_TOGGLE,
+                deck=0,
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=laser-toggle")
+            return False
+
+    def _set_laser_director(enabled: bool) -> bool:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LASER_SET_ENABLED,
+                deck=0,
+                payload={"enabled": bool(enabled)},
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=laser-set-enabled")
+            return False
+
+    def _laser_blackout() -> bool:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LASER_BLACKOUT,
+                deck=0,
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=laser-blackout")
+            return False
+
+    def _laser_clear_blackout() -> bool:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LASER_CLEAR_BLACKOUT,
+                deck=0,
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=laser-clear-blackout")
+            return False
+
+    def _laser_scene(scene: str, ttl_s: float) -> bool:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LASER_SCENE,
+                deck=0,
+                payload={"scene": scene, "ttl_s": ttl_s},
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=laser-scene")
+            return False
+
+    def _laser_clear_scene_override() -> bool:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LASER_CLEAR_SCENE_OVERRIDE,
+                deck=0,
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=laser-clear-scene-override")
+            return False
+
+    def _laser_set_personality(personality: str) -> bool:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LASER_SET_PERSONALITY,
+                deck=0,
+                payload={"personality": personality},
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=laser-set-personality")
+            return False
+
     command_reader = CommandReader(
         mirror,
         validation_runner,
         smart_drop_toggle_callback=_toggle_smart_drop,
         smart_breakdown_toggle_callback=_toggle_smart_breakdown,
+        laser_toggle_callback=_toggle_laser_director,
+        laser_set_enabled_callback=_set_laser_director,
+        laser_blackout_callback=_laser_blackout,
+        laser_clear_blackout_callback=_laser_clear_blackout,
+        laser_scene_callback=_laser_scene,
+        laser_clear_scene_override_callback=_laser_clear_scene_override,
+        laser_set_personality_callback=_laser_set_personality,
     )
     status_writer = StatusWriter(
         sm,

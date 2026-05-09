@@ -81,6 +81,7 @@ class LaserDirector:
         self._current_scene: str = ""
         self._last_reason: str = ""
         self._last_error: str = ""
+        self._personality: str = ""
 
     # ── Policy commands (called from StateManager._handle_event) ─────────────
 
@@ -112,6 +113,9 @@ class LaserDirector:
         """Clear emergency blackout and the manual override (per safety spec)."""
         self._emergency = False
         self.clear_manual_override()
+
+    def set_personality(self, personality: str) -> None:
+        self._personality = personality
 
     # ── Tick (called from StateManager._push_tick) ────────────────────────────
 
@@ -212,4 +216,5 @@ class LaserDirector:
             "manual_override": self._manual_override_scene,
             "emergency": self._emergency,
             "last_error": self._last_error,
+            "personality": self._personality,
         }

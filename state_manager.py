@@ -674,6 +674,8 @@ class StateManager:
                 self._laser_director.clear_emergency_blackout()
             elif ev.kind == Ev.LASER_CLEAR_SCENE_OVERRIDE:
                 self._laser_director.clear_manual_override()
+            elif ev.kind == Ev.LASER_SET_PERSONALITY:
+                self._laser_director.set_personality(str(ev.payload.get("personality", "")))
 
     # ── Deck switch ───────────────────────────────────────────────────────────
 

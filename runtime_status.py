@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -107,12 +108,26 @@ class CommandReader(threading.Thread):
         validation_runner,
         smart_drop_toggle_callback: Optional[Callable[[], None]] = None,
         smart_breakdown_toggle_callback: Optional[Callable[[], None]] = None,
+        laser_toggle_callback: Optional[Callable[[], Any]] = None,
+        laser_set_enabled_callback: Optional[Callable[[bool], Any]] = None,
+        laser_blackout_callback: Optional[Callable[[], Any]] = None,
+        laser_clear_blackout_callback: Optional[Callable[[], Any]] = None,
+        laser_scene_callback: Optional[Callable[[str, float], Any]] = None,
+        laser_clear_scene_override_callback: Optional[Callable[[], Any]] = None,
+        laser_set_personality_callback: Optional[Callable[[str], Any]] = None,
     ) -> None:
         super().__init__(name="runtime-command-reader", daemon=True)
         self._mirror = mirror
         self._validation_runner = validation_runner
         self._smart_drop_toggle_callback = smart_drop_toggle_callback
         self._smart_breakdown_toggle_callback = smart_breakdown_toggle_callback
+        self._laser_toggle_callback = laser_toggle_callback
+        self._laser_set_enabled_callback = laser_set_enabled_callback
+        self._laser_blackout_callback = laser_blackout_callback
+        self._laser_clear_blackout_callback = laser_clear_blackout_callback
+        self._laser_scene_callback = laser_scene_callback
+        self._laser_clear_scene_override_callback = laser_clear_scene_override_callback
+        self._laser_set_personality_callback = laser_set_personality_callback
         self._stop_event = threading.Event()
         self._arm_expires = 0.0
         self._last_command = ""
@@ -194,6 +209,59 @@ class CommandReader(threading.Thread):
                     with self._lock:
                         self._last_error = f"toggle_smart_breakdown callback failed: {detail}"
             return
+        if cmd == "toggle_laser_director":
+            if self._laser_toggle_callback:
+                ok, detail = _invoke_callback(self._laser_toggle_callback)
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"toggle_laser_director callback failed: {detail}"
+            return
+        if cmd == "set_laser_director":
+            if self._laser_set_enabled_callback:
+                enabled = bool(command["enabled"])
+                ok, detail = _invoke_callback(lambda: self._laser_set_enabled_callback(enabled))
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"set_laser_director callback failed: {detail}"
+            return
+        if cmd == "laser_blackout":
+            if self._laser_blackout_callback:
+                ok, detail = _invoke_callback(self._laser_blackout_callback)
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"laser_blackout callback failed: {detail}"
+            return
+        if cmd == "laser_clear_blackout":
+            if self._laser_clear_blackout_callback:
+                ok, detail = _invoke_callback(self._laser_clear_blackout_callback)
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"laser_clear_blackout callback failed: {detail}"
+            return
+        if cmd == "laser_scene":
+            if self._laser_scene_callback:
+                scene = str(command["scene"])
+                ttl_s = float(command["ttl_s"])
+                ok, detail = _invoke_callback(lambda: self._laser_scene_callback(scene, ttl_s))
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"laser_scene callback failed: {detail}"
+            return
+        if cmd == "laser_clear_scene_override":
+            if self._laser_clear_scene_override_callback:
+                ok, detail = _invoke_callback(self._laser_clear_scene_override_callback)
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"laser_clear_scene_override callback failed: {detail}"
+            return
+        if cmd == "laser_set_personality":
+            if self._laser_set_personality_callback:
+                personality = str(command["personality"])
+                ok, detail = _invoke_callback(lambda: self._laser_set_personality_callback(personality))
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"laser_set_personality callback failed: {detail}"
+            return
         raise ValueError(f"unknown command: {cmd}")
 
     def _run_validation_async(self) -> None:
@@ -227,9 +295,37 @@ def parse_command(line: str) -> dict[str, Any]:
         "run_validation",
         "toggle_smart_drop",
         "toggle_smart_breakdown",
+        "toggle_laser_director",
+        "set_laser_director",
+        "laser_blackout",
+        "laser_clear_blackout",
+        "laser_scene",
+        "laser_clear_scene_override",
+        "laser_set_personality",
     }
     if cmd not in allowed:
         raise ValueError(f"unknown command: {cmd}")
+    if cmd == "set_laser_director":
+        if "enabled" not in obj:
+            raise ValueError("set_laser_director requires enabled")
+        if not isinstance(obj["enabled"], bool):
+            raise ValueError("set_laser_director enabled must be boolean")
+    if cmd == "laser_scene":
+        scene = obj.get("scene")
+        if not isinstance(scene, str) or not scene:
+            raise ValueError("laser_scene requires non-empty scene")
+        ttl_s = obj.get("ttl_s", 4.0)
+        if isinstance(ttl_s, bool) or not isinstance(ttl_s, (int, float)):
+            raise ValueError("laser_scene ttl_s must be numeric")
+        ttl_s = float(ttl_s)
+        if not math.isfinite(ttl_s):
+            raise ValueError("laser_scene ttl_s must be finite")
+        obj = dict(obj)
+        obj["ttl_s"] = min(30.0, max(0.0, ttl_s))
+    if cmd == "laser_set_personality":
+        personality = obj.get("personality")
+        if not isinstance(personality, str) or not personality:
+            raise ValueError("laser_set_personality requires non-empty personality")
     if "expires_at" in obj:
         obj = dict(obj)
         obj.pop("expires_at", None)
