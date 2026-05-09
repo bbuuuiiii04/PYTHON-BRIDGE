@@ -1,5 +1,7 @@
 # Live BPM Memory Handoff
 
+Status: HISTORICAL
+
 Date: 2026-05-04
 Repo: `bbuuuiiii04/PYTHON-BRIDGE`, package `rb_ss_bridge_v2`
 Scope: historical handoff plus final integration state. Runtime bridge behavior
@@ -109,7 +111,7 @@ The tests do not attach to Rekordbox and do not prove any address live.
 
 ## Key Evidence
 
-Full details are in `docs/live_bpm_findings.md`.
+Full details are in `docs/validation/live_bpm_findings.md`.
 
 Deck 2 is strongly validated:
 
@@ -456,7 +458,7 @@ python3 -m rb_ss_bridge_v2.probe_live_bpm cache-check --deck 2 --expect-bpm <dec
 ```bash
 python3 -m unittest discover -s tests
 python3 -m py_compile rb_ss_bridge_v2/probe_live_bpm.py rb_ss_bridge_v2/tests/test_probe_live_bpm.py
-git -C rb_ss_bridge_v2 diff --check -- probe_live_bpm.py docs/live_bpm_findings.md docs/live_bpm_handoff.md tests/test_probe_live_bpm.py
+git -C rb_ss_bridge_v2 diff --check -- probe_live_bpm.py docs/validation/live_bpm_findings.md docs/history/live_bpm_handoff.md tests/test_probe_live_bpm.py
 ```
 
 ## Current Implementation Boundary

@@ -36,7 +36,10 @@ from .config import (
     MEM_STALE_S, SMART_DROP_LOOKAHEAD_BEATS, SMART_DROP_IGNORE_INTRO_BEATS,
     SMART_DROP_IGNORE_OUTRO_BEATS, PHRASE_ANCHOR_BEATS,
 )
-from .models import ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot, TrackMetadata
+from .models import (
+    ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot,
+    SmartDropEnergyShadow, TrackMetadata,
+)
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
@@ -407,10 +410,29 @@ class StateManager:
                         raw_drops,
                         total_beats=total_beats,
                     )
+                    selected_set = set(d_obj.meta.smart_drops)
+                    shadow = [
+                        item for item in ev.payload.get("energy_shadow", [])
+                        if isinstance(item, SmartDropEnergyShadow)
+                        and item.anlz_beat in selected_set
+                    ]
+                    d_obj.meta.smart_drop_energy_shadow = shadow
                     log.info("[SM] smart-drop-select  deck=%d  raw=%s  selected=%s",
                              ev.deck,
                              d_obj.meta.anlz_drops or "none",
                              d_obj.meta.smart_drops or "none")
+                    for item in shadow:
+                        log.info(
+                            "[SM] smart-drop-energy-shadow  deck=%d  "
+                            "anlz_elapsed=%s  suggested_elapsed=%s  "
+                            "lift_anlz=%.2f  lift_suggested=%.2f  confidence=%.2f",
+                            ev.deck,
+                            bf.elapsed(item.anlz_elapsed_ms),
+                            bf.elapsed(item.suggested_elapsed_ms),
+                            item.lift_at_anlz,
+                            item.lift_at_suggested,
+                            item.confidence,
+                        )
                 else:
                     log.debug("[SM] anlz-drops-stale  deck=%d  gen=%d  current=%d",
                               ev.deck, gen, d_obj.load_gen)
@@ -576,6 +598,7 @@ class StateManager:
                             deck=bridge_deck,
                             payload={
                                 "drop_beat_indices": result.drop_beat_indices,
+                                "energy_shadow": result.energy_shadow,
                                 "load_gen": gen,
                             },
                             source="anlz",

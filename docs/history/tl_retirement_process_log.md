@@ -1,5 +1,7 @@
 # TimecodeLink Retirement Process Log
 
+Status: HISTORICAL
+
 Purpose: continuously track the current evidence, decisions, and next steps for
 phased TimecodeLink reduction in `rb_ss_bridge_v2`.
 
@@ -80,8 +82,8 @@ Current behavior:
 
 Evidence and handoff docs:
 
-- `docs/live_bpm_findings.md`
-- `docs/live_bpm_handoff.md`
+- `docs/validation/live_bpm_findings.md`
+- `docs/history/live_bpm_handoff.md`
 - `docs/bridge_design.md` Live BPM section
 
 Current TL-retirement interpretation:
@@ -351,7 +353,7 @@ Important distinction:
 
 Already covered:
 
-- `docs/timecodelink_integration_analysis.md` shows TL reads per-deck live
+- `docs/history/timecodelink_integration_analysis.md` shows TL reads per-deck live
   position through `OffsetVersion+0x60` chains
 - TL infers play/pause from whether the live position field changed between
   polls, not from a dedicated play boolean

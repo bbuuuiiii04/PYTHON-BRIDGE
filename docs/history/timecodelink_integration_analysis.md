@@ -1,5 +1,7 @@
 # TimecodeLink ↔ Rekordbox Integration: Reverse-Engineering Report
 
+Status: HISTORICAL
+
 **Session date:** 2026-05-06
 **Analyst:** macOS RE analyst (read-only, observation-only methodology)
 **Subject machine:** Apple Silicon (T8112), macOS Sequoia 15.3.1 (Darwin 24.3.0)
@@ -1001,7 +1003,7 @@ The new reader is **additive**. `StateManager` already consumes `MASTER_CHANGED`
 
 **Current repo state:** **`__main__.py` starts `TLLogTailer` + `RBMemoryReader` + … and starts `RBStateReader` when one or more guarded direct flags are enabled.** The guarded B1-B6 direct paths can route selected event kinds to the authoritative queue through `authoritative_kinds`. In particular, **`RBSS_MASTER_DIRECT=1`** routes direct `MASTER_CHANGED source='rb_state'` through the main `RBStateReader` and bypasses TL OSC/log/ENGINE master events only while the direct master byte is readable and valid. If direct master is not ready, TL remains the fail-closed fallback. The bounded direct-master runtime observer remains separate and observational only.
 
-The current TL-retirement process log is `docs/tl_retirement_process_log.md`. It records that B1-B6 are implemented, launcher defaults can run with the B1-B6 direct flag set, and B6 runtime direct master authority was live-validated on 2026-05-07. TL still remains in the bridge for fail-closed fallback, ENGINE STATE BPM/TC fallback, MTC-related safety, and any signal whose direct path is not currently ready.
+The current TL-retirement process log is `docs/history/tl_retirement_process_log.md`. It records that B1-B6 are implemented, launcher defaults can run with the B1-B6 direct flag set, and B6 runtime direct master authority was live-validated on 2026-05-07. TL still remains in the bridge for fail-closed fallback, ENGINE STATE BPM/TC fallback, MTC-related safety, and any signal whose direct path is not currently ready.
 
 **Rollout steps (recommended):**
 

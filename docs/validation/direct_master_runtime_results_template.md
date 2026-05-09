@@ -1,5 +1,7 @@
 # Direct Master Runtime Results Template
 
+Status: VALIDATION REFERENCE
+
 Use one copy of this template per live run.
 
 ## Run Metadata

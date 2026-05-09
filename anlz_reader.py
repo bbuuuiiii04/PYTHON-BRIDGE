@@ -12,10 +12,12 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 from pathlib import Path
 from typing import Any, Optional
+
+from .models import SmartDropEnergyShadow
 
 log = logging.getLogger("anlz_reader")
 
@@ -37,6 +39,33 @@ _PWV3_MS_PER_ENTRY_FALLBACK = 6.7
 @dataclass
 class TrackAnlzData:
     drop_beat_indices: list[int]
+    energy_shadow: list[SmartDropEnergyShadow] = field(default_factory=list)
+
+
+def read_smart_drop_energy_shadow(
+    anlz_path: str,
+    selected_drops: list[int],
+) -> list[SmartDropEnergyShadow]:
+    """Return waveform-energy suggestions near ANLZ drops without moving targets."""
+    if not selected_drops:
+        return []
+    try:
+        from pyrekordbox.anlz import AnlzFile  # type: ignore
+    except Exception as exc:
+        log.debug("ANLZ energy shadow unavailable: pyrekordbox import failed: %s", exc)
+        return []
+
+    try:
+        parsed = []
+        for path in _candidate_anlz_paths(anlz_path):
+            try:
+                parsed.append((path, AnlzFile.parse_file(path)))
+            except Exception as exc:
+                log.debug("ANLZ energy shadow parse failed for %s: %s", path, exc)
+        return _extract_smart_drop_energy_shadow(parsed, selected_drops)
+    except Exception:
+        log.debug("ANLZ energy shadow read failed", exc_info=True)
+        return []
 
 
 def read_anlz_drops(anlz_path: str) -> TrackAnlzData:
@@ -64,10 +93,16 @@ def read_anlz_drops(anlz_path: str) -> TrackAnlzData:
 
         pssi_drops = _extract_pssi_drop_beats(parsed)
         if pssi_drops:
-            return TrackAnlzData(pssi_drops)
+            return TrackAnlzData(
+                pssi_drops,
+                _extract_smart_drop_energy_shadow(parsed, pssi_drops),
+            )
 
         waveform_drops = _extract_waveform_drop_beats(parsed)
-        return TrackAnlzData(waveform_drops)
+        return TrackAnlzData(
+            waveform_drops,
+            _extract_smart_drop_energy_shadow(parsed, waveform_drops),
+        )
     except Exception:
         log.debug("ANLZ drop read failed", exc_info=True)
         return TrackAnlzData([])
@@ -128,6 +163,129 @@ def _extract_waveform_drop_beats(parsed: list[tuple[Path, Any]]) -> list[int]:
     except Exception:
         log.debug("ANLZ waveform drop extract failed", exc_info=True)
         return []
+
+
+def _extract_smart_drop_energy_shadow(
+    parsed: list[tuple[Path, Any]],
+    selected_drops: list[int],
+) -> list[SmartDropEnergyShadow]:
+    try:
+        waveform = _extract_waveform(parsed)
+        if waveform is None:
+            return []
+        heights, _waveform_source = waveform
+        beatgrid_times_ms = _extract_beatgrid_times(parsed)
+        if len(beatgrid_times_ms) < 8:
+            return []
+        waveform_duration_ms = _duration_from_beatgrid(beatgrid_times_ms)
+        return _calculate_smart_drop_energy_shadow(
+            heights,
+            waveform_duration_ms,
+            beatgrid_times_ms,
+            selected_drops,
+        )
+    except Exception:
+        log.debug("ANLZ energy shadow extract failed", exc_info=True)
+        return []
+
+
+def _calculate_smart_drop_energy_shadow(
+    heights: list[int],
+    waveform_duration_ms: float,
+    beatgrid_times_ms: list[float],
+    selected_drops: list[int],
+) -> list[SmartDropEnergyShadow]:
+    if not heights or waveform_duration_ms <= 0 or len(beatgrid_times_ms) < 8:
+        return []
+
+    ms_per_entry = waveform_duration_ms / len(heights)
+    if ms_per_entry <= 0:
+        return []
+
+    shadows: list[SmartDropEnergyShadow] = []
+    for drop_beat in sorted(set(int(beat) for beat in selected_drops)):
+        lift_at_anlz = _energy_lift_for_beat(
+            heights,
+            ms_per_entry,
+            beatgrid_times_ms,
+            drop_beat,
+        )
+        if lift_at_anlz is None:
+            continue
+
+        best_beat = drop_beat
+        best_lift = lift_at_anlz
+        for candidate_beat in range(drop_beat + 1, drop_beat + 9):
+            candidate_lift = _energy_lift_for_beat(
+                heights,
+                ms_per_entry,
+                beatgrid_times_ms,
+                candidate_beat,
+            )
+            if candidate_lift is None:
+                continue
+            if candidate_lift > best_lift:
+                best_beat = candidate_beat
+                best_lift = candidate_lift
+
+        shadows.append(SmartDropEnergyShadow(
+            anlz_beat=drop_beat,
+            suggested_beat=best_beat,
+            anlz_elapsed_ms=int(round(beatgrid_times_ms[drop_beat])),
+            suggested_elapsed_ms=int(round(beatgrid_times_ms[best_beat])),
+            lift_at_anlz=lift_at_anlz,
+            lift_at_suggested=best_lift,
+            confidence=best_lift - lift_at_anlz,
+        ))
+    return shadows
+
+
+def _energy_lift_for_beat(
+    heights: list[int],
+    ms_per_entry: float,
+    beatgrid_times_ms: list[float],
+    beat: int,
+) -> Optional[float]:
+    before = _average_waveform_energy_for_beats(
+        heights,
+        ms_per_entry,
+        beatgrid_times_ms,
+        beat - 16,
+        beat,
+    )
+    after = _average_waveform_energy_for_beats(
+        heights,
+        ms_per_entry,
+        beatgrid_times_ms,
+        beat,
+        beat + 16,
+    )
+    if before is None or after is None:
+        return None
+    return after - before
+
+
+def _average_waveform_energy_for_beats(
+    heights: list[int],
+    ms_per_entry: float,
+    beatgrid_times_ms: list[float],
+    start_beat: int,
+    end_beat: int,
+) -> Optional[float]:
+    if start_beat < 0 or end_beat <= start_beat or end_beat >= len(beatgrid_times_ms):
+        return None
+    start_ms = beatgrid_times_ms[start_beat]
+    end_ms = beatgrid_times_ms[end_beat]
+    if end_ms <= start_ms:
+        return None
+    start_idx = _clamp_index(int(start_ms / ms_per_entry), len(heights))
+    end_idx = _clamp_index(int(end_ms / ms_per_entry), len(heights))
+    if end_idx <= start_idx:
+        end_idx = min(len(heights), start_idx + 1)
+    window = heights[start_idx:end_idx]
+    if not window:
+        return None
+    return sum(window) / len(window)
 
 
 def _candidate_anlz_paths(anlz_path: str) -> list[Path]:

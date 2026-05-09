@@ -15,6 +15,17 @@ from typing import Any, Optional
 
 
 @dataclass
+class SmartDropEnergyShadow:
+    anlz_beat: int
+    suggested_beat: int
+    anlz_elapsed_ms: int
+    suggested_elapsed_ms: int
+    lift_at_anlz: float
+    lift_at_suggested: float
+    confidence: float
+
+
+@dataclass
 class TrackMetadata:
     filepath: str = ""
     soundswitch_id: str = ""
@@ -28,6 +39,7 @@ class TrackMetadata:
     cue_positions: list[int] = field(default_factory=list)
     anlz_drops: list[int] = field(default_factory=list)
     smart_drops: list[int] = field(default_factory=list)
+    smart_drop_energy_shadow: list[SmartDropEnergyShadow] = field(default_factory=list)
 
     def clear(self) -> None:
         self.filepath = ""
@@ -42,6 +54,7 @@ class TrackMetadata:
         self.cue_positions = []
         self.anlz_drops = []
         self.smart_drops = []
+        self.smart_drop_energy_shadow = []
 
     def is_empty(self) -> bool:
         return not self.filepath

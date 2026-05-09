@@ -41,12 +41,11 @@ RB_DPU_VTABLE_OFF  = 0x4ace898
 # Max bytes to scan forward from DPU1 when locating DPU2. Seen strides: 0x70 (session 2), 0x150 (session 3).
 RB_DPU_SCAN_WINDOW = 0x400
 
-# ── Outer struct (direct deck-position chain) ────────────────────────────────
-# Discovered via structural heap scan (Codex probe, confirmed live).
-# outer + OUTER_INNER1_OFF → inner1 → [+RB_POS_OFF] = deck 1 samples
-# outer + OUTER_INNER2_OFF → inner2 → [+RB_POS_OFF] = deck 2 samples
-# The correct deck-2 inner is reached ONLY via this outer chain.
-# container+0x480 and the Phase-3 DPU slot scan reach a static/stub object.
+# ── Legacy outer-struct hints for Deck-2 discovery ───────────────────────────
+# These constants are retained only as discovery hints for rb_memory.py. The
+# paired outer model was not reliable enough to publish directly: candidates
+# must still pass behavioral validation before reaching PositionCache.
+# container+0x480 and some DPU slot paths can reach static/stub objects.
 OUTER_INNER1_OFF      = 0x08   # outer[+this] → inner1 ptr (ObjC heap)
 OUTER_INNER2_OFF      = 0x78   # outer[+this] → inner2 ptr (ObjC heap)
 # Fast-path hint: in one confirmed session, container − outer = 0x270.

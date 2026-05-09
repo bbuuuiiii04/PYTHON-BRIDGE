@@ -1,5 +1,7 @@
 # Logging Implementation Handoff
 
+Status: HISTORICAL
+
 This records the practical logging updates made for `rb_ss_bridge_v2`.
 
 ## Implemented

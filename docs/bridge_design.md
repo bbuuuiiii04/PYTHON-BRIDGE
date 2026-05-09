@@ -6,6 +6,8 @@ originSessionId: 88cd1a53-8b87-4b05-b106-26c1fb0a5730
 ---
 # rb_ss_bridge_v2 — Design Reference
 
+Status: CURRENT AUTHORITATIVE
+
 Last reconciled against the current checkout on 2026-05-08.
 
 ## Purpose
@@ -198,7 +200,7 @@ sentinel, missing, or not warmed up, TL/OSC remain the fail-closed fallback.
 ENGINE STATE BPM and TC fallback events still flow.
 
 B6 was live-validated on 2026-05-07 under the full B1-B6 flag set. The evidence
-is in `docs/tl_retirement_process_log.md`.
+is preserved in `docs/history/tl_retirement_process_log.md`.
 
 ### Direct Master Observer Is Separate
 
@@ -397,11 +399,17 @@ Smart Drop:
 
 - Preserves raw ANLZ drop beat indices in `TrackMetadata.anlz_drops`.
 - Computes `TrackMetadata.smart_drops` once when `ANLZ_DATA` is accepted.
+- Stores `TrackMetadata.smart_drop_energy_shadow` as log-only evidence for
+  nearby waveform-energy suggestions. Shadow rows carry elapsed milliseconds
+  from the ANLZ beatgrid so logs can report timestamps even before filepath
+  resolution populates track metadata.
 - Phase 1 selection only sorts/dedupes and filters obvious intro/outro drops:
   drops before beat 32 are ignored, and drops in the final 32 beats are ignored
   only when beatgrid length is available.
 - No clustering, cooldown, or energy-based timing shift is applied in Phase 1.
 - Runtime Smart Drop acts on `smart_drops`, not raw `anlz_drops`.
+- Phase 2 energy shadow does not move runtime targets; `_smart_drop_tick()`
+  still uses `smart_drops` only.
 - Four beats before a future drop, clears and loop-offs active, mirror, 3, and 4.
 - On the drop beat, sends direct autoloop rearm before the beat event so
   SoundSwitch sees the reload before activation.
@@ -502,9 +510,10 @@ Runtime logs are intentionally summary-centric. Important operator lines:
   `[SM] arm-pending`, `[SM] autoloop-rearm`: StateManager decisions.
 - `[SS][AUTOLOOP-TICK]`: 32-beat phrase boundary status only, not per-beat spam.
 
-Use `docs/tl_retirement_process_log.md` for direct/TL retirement evidence and
-`docs/direct_master_runtime_validation.md` for bounded direct-master observer
-validation. Update those after new live runs or decisions.
+Use `docs/history/tl_retirement_process_log.md` for direct/TL retirement
+evidence and `docs/validation/direct_master_runtime_validation.md` for bounded
+direct-master observer validation. Update those after new live runs or
+decisions.
 
 ## Failure Modes And Mitigations
 

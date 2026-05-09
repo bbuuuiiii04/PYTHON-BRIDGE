@@ -1,5 +1,7 @@
 # Direct Master Runtime Runbook
 
+Status: VALIDATION REFERENCE
+
 Use this runbook to collect repeatable live evidence from the bounded
 runtime direct-master observer. This is evidence capture only; it does not
 justify master authority promotion by itself.

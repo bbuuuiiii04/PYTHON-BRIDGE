@@ -1,5 +1,7 @@
 # Bridge Operator Dashboard v1
 
+Status: HISTORICAL
+
 ## Scope
 
 V1 adds a local, read-mostly observability/control layer for `rb_ss_bridge_v2`.

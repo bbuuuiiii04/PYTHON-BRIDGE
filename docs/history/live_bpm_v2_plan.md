@@ -1,5 +1,7 @@
 # Live BPM V2 Controlled Rearm
 
+Status: DEPRECATED
+
 Scope: dynamic live BPM follow for an already armed SoundSwitch autoloop. Live
 testing showed that SoundSwitch rearms autoloops when the bridge sends a BPM
 update. Current runtime behavior enables active live follow by default, sends

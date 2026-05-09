@@ -1,5 +1,7 @@
 # Direct Master Runtime Validation
 
+Status: VALIDATION REFERENCE
+
 This guide is for live validation of the bounded runtime direct-master observer.
 The observer is a shadow-only readiness check for Rekordbox's direct
 `master_deck` byte path. It does not promote direct master authority.

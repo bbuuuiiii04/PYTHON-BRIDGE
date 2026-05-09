@@ -1,5 +1,7 @@
 # rb_ss_bridge_v2 logging
 
+Status: CURRENT SUPPORTING
+
 The bridge keeps normal logs readable by default:
 
 ```text

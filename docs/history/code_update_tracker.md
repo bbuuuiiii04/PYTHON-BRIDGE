@@ -1,5 +1,7 @@
 # Code Update Tracker For Claude Code
 
+Status: HISTORICAL
+
 Updated: 2026-05-07
 
 ## Collaboration Rule
@@ -968,7 +970,7 @@ RBSS_MASTER_DIRECT=1 can route runtime MASTER_CHANGED source='rb_state' through
 the main RBStateReader path while direct master is currently readable and valid.
 The bounded DirectMasterRuntimeObserver remains shadow-only; runtime direct
 master authority is the separate guarded B6 path. See
-docs/tl_retirement_process_log.md.
+docs/history/tl_retirement_process_log.md.
 ```
 
 Implemented validation support:
@@ -1018,10 +1020,10 @@ Single intentional master switch:
 Repo-local continuity files:
 
 ```text
-docs/direct_master_runtime_validation.md
-docs/direct_master_runtime_runbook.md
-docs/direct_master_runtime_results_template.md
-docs/tl_retirement_process_log.md
+docs/validation/direct_master_runtime_validation.md
+docs/validation/direct_master_runtime_runbook.md
+docs/validation/direct_master_runtime_results_template.md
+docs/history/tl_retirement_process_log.md
 ```
 
 Historical near-term decision:

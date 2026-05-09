@@ -9,9 +9,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
     TrackAnlzData,
+    _calculate_smart_drop_energy_shadow,
     _detect_drop_beats,
     _extract_beatgrid_times,
     _extract_pssi_drop_beats,
+    _extract_smart_drop_energy_shadow,
     _extract_waveform_drop_beats,
     _extract_waveform,
     read_anlz_drops,
@@ -50,6 +52,10 @@ def _bar_heights(bars: list[int], entries_per_bar: int = 4) -> list[int]:
     for energy in bars:
         heights.extend([energy] * entries_per_bar)
     return heights
+
+
+def _beat_heights(values: dict[int, int], total_beats: int = 120, default: int = 10) -> list[int]:
+    return [values.get(beat, default) for beat in range(total_beats)]
 
 
 class AnlzDropDetectTests(unittest.TestCase):
@@ -138,6 +144,65 @@ class AnlzDropDetectTests(unittest.TestCase):
     def test_missing_file_returns_empty(self) -> None:
         result = read_anlz_drops("/tmp/does-not-exist/ANLZ0000.DAT")
         self.assertEqual(result, TrackAnlzData([]))
+
+
+class SmartDropEnergyShadowTests(unittest.TestCase):
+    def test_shadow_keeps_anlz_when_anlz_has_strongest_lift(self) -> None:
+        heights = _beat_heights(
+            {
+                **{beat: 2 for beat in range(48, 64)},
+                **{beat: 20 for beat in range(64, 88)},
+            }
+        )
+        shadows = _calculate_smart_drop_energy_shadow(
+            heights,
+            waveform_duration_ms=len(heights) * 500,
+            beatgrid_times_ms=_beatgrid_ms(len(heights) + 1),
+            selected_drops=[64],
+        )
+        self.assertEqual(len(shadows), 1)
+        self.assertEqual(shadows[0].anlz_beat, 64)
+        self.assertEqual(shadows[0].suggested_beat, 64)
+        self.assertGreater(shadows[0].lift_at_anlz, 0.0)
+        self.assertEqual(shadows[0].confidence, 0.0)
+
+    def test_shadow_can_suggest_eight_beats_later_without_moving_runtime(self) -> None:
+        heights = _beat_heights(
+            {
+                **{beat: 20 for beat in range(48, 64)},
+                **{beat: 2 for beat in range(64, 72)},
+                **{beat: 30 for beat in range(72, 96)},
+            }
+        )
+        shadows = _calculate_smart_drop_energy_shadow(
+            heights,
+            waveform_duration_ms=len(heights) * 500,
+            beatgrid_times_ms=_beatgrid_ms(len(heights) + 1),
+            selected_drops=[64],
+        )
+        self.assertEqual(len(shadows), 1)
+        self.assertEqual(shadows[0].anlz_beat, 64)
+        self.assertEqual(shadows[0].suggested_beat, 72)
+        self.assertGreater(shadows[0].lift_at_suggested, shadows[0].lift_at_anlz)
+        self.assertGreater(shadows[0].confidence, 0.0)
+
+    def test_shadow_returns_empty_without_waveform_or_sufficient_grid(self) -> None:
+        self.assertEqual(
+            _calculate_smart_drop_energy_shadow(
+                [],
+                waveform_duration_ms=0,
+                beatgrid_times_ms=_beatgrid_ms(120),
+                selected_drops=[64],
+            ),
+            [],
+        )
+        parsed = [
+            (Path("ANLZ0000.EXT"), FakeAnlz({
+                "PWV3": [FakeTag([10] * 120)],
+                "PQT2": [FakeTag(times_s=[i * 0.5 for i in range(7)])],
+            })),
+        ]
+        self.assertEqual(_extract_smart_drop_energy_shadow(parsed, [64]), [])
 
 
 class AnlzExtractionTests(unittest.TestCase):

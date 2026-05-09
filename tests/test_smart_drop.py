@@ -8,7 +8,9 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2.models import BridgeEvent, DeckState, Ev, OutputState, TrackMetadata  # noqa: E402
+from rb_ss_bridge_v2.models import (  # noqa: E402
+    BridgeEvent, DeckState, Ev, OutputState, SmartDropEnergyShadow, TrackMetadata,
+)
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
     StateManager,
@@ -193,25 +195,64 @@ class SmartDropTests(unittest.TestCase):
         selected = _select_smart_drops([96, 64, 64, 80], total_beats=160)
         self.assertEqual(selected, [64, 80, 96])
 
-    def test_anlz_data_stores_raw_and_selected_drops(self) -> None:
+    def test_anlz_data_stores_raw_selected_and_energy_shadow(self) -> None:
         sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
         sm._deck[1].load_gen = 7
         sm._deck[1].meta.beatgrid_times_ms = [i * 500.0 for i in range(100)]
+        shadow = [
+            SmartDropEnergyShadow(8, 12, 4_000, 6_000, 0.1, 0.3, 0.2),
+            SmartDropEnergyShadow(32, 40, 16_000, 20_000, 0.2, 0.4, 0.2),
+            SmartDropEnergyShadow(64, 64, 32_000, 32_000, 0.5, 0.5, 0.0),
+            SmartDropEnergyShadow(96, 100, 48_000, 50_000, 0.1, 0.6, 0.5),
+        ]
 
         sm._handle_event(BridgeEvent(
             Ev.ANLZ_DATA,
             1,
-            {"drop_beat_indices": [8, 32, 64, 96], "load_gen": 7},
+            {
+                "drop_beat_indices": [8, 32, 64, 96],
+                "energy_shadow": shadow,
+                "load_gen": 7,
+            },
         ))
 
         self.assertEqual(sm._deck[1].meta.anlz_drops, [8, 32, 64, 96])
         self.assertEqual(sm._deck[1].meta.smart_drops, [32, 64])
+        self.assertEqual(
+            [item.anlz_beat for item in sm._deck[1].meta.smart_drop_energy_shadow],
+            [32, 64],
+        )
+
+    def test_energy_shadow_log_uses_elapsed_timestamps(self) -> None:
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
+        sm._deck[1].load_gen = 7
+
+        with self.assertLogs("state_manager", level="INFO") as captured:
+            sm._handle_event(BridgeEvent(
+                Ev.ANLZ_DATA,
+                1,
+                {
+                    "drop_beat_indices": [32],
+                    "energy_shadow": [SmartDropEnergyShadow(
+                        32, 40, 16_000, 20_000, 0.2, 0.4, 0.2
+                    )],
+                    "load_gen": 7,
+                },
+            ))
+
+        output = "\n".join(captured.output)
+        self.assertIn("anlz_elapsed=0:16.000", output)
+        self.assertIn("suggested_elapsed=0:20.000", output)
+        self.assertNotIn("suggested=40", output)
 
     def test_stale_anlz_data_does_not_mutate_drop_lists(self) -> None:
         sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
         sm._deck[1].load_gen = 7
         sm._deck[1].meta.anlz_drops = [64]
         sm._deck[1].meta.smart_drops = [64]
+        sm._deck[1].meta.smart_drop_energy_shadow = [
+            SmartDropEnergyShadow(64, 64, 32_000, 32_000, 0.5, 0.5, 0.0)
+        ]
 
         sm._handle_event(BridgeEvent(
             Ev.ANLZ_DATA,
@@ -221,12 +262,23 @@ class SmartDropTests(unittest.TestCase):
 
         self.assertEqual(sm._deck[1].meta.anlz_drops, [64])
         self.assertEqual(sm._deck[1].meta.smart_drops, [64])
+        self.assertEqual(
+            [item.anlz_beat for item in sm._deck[1].meta.smart_drop_energy_shadow],
+            [64],
+        )
 
-    def test_track_metadata_clear_clears_raw_and_selected_drops(self) -> None:
-        meta = TrackMetadata(anlz_drops=[64], smart_drops=[64])
+    def test_track_metadata_clear_clears_raw_selected_and_shadow_drops(self) -> None:
+        meta = TrackMetadata(
+            anlz_drops=[64],
+            smart_drops=[64],
+            smart_drop_energy_shadow=[
+                SmartDropEnergyShadow(64, 64, 32_000, 32_000, 0.5, 0.5, 0.0)
+            ],
+        )
         meta.clear()
         self.assertEqual(meta.anlz_drops, [])
         self.assertEqual(meta.smart_drops, [])
+        self.assertEqual(meta.smart_drop_energy_shadow, [])
 
     def test_runtime_uses_selected_drops_not_raw_anlz_drops(self) -> None:
         sm = _sm([64])

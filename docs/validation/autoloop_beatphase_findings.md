@@ -1,5 +1,7 @@
 # Autoloop Beatphase Findings
 
+Status: VALIDATION REFERENCE
+
 Date: 2026-05-04
 
 Scope: historical investigation and final notes for unscripted/autoloop OS2L

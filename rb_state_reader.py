@@ -1,12 +1,13 @@
 """
-Direct Rekordbox state reader — experimental TimecodeLink corroboration.
+Direct Rekordbox state reader.
 
 Polls Rekordbox memory at ~30 Hz and emits the same ``BridgeEvent`` kinds the
 ``TLLogTailer`` does today (``MASTER_CHANGED``, ``TRACK_LOADED``, ``PLAY``,
-``PAUSE``, ``BPM_UPDATE``). This reader is for shadow validation and parity
-analysis until live sessions prove it can match TL safely. TL remains the
-authoritative source for DeckState, lighting, and routing unless a later,
-explicit promotion changes that contract.
+``PAUSE``, ``BPM_UPDATE``). In current runtime wiring, ``__main__.py`` can route
+selected event kinds from this reader into the authoritative StateManager queue
+behind per-signal env flags and readiness callbacks. Unrouted events can still
+be used for shadow validation, and TL remains the fail-closed fallback whenever
+the matching direct path is disabled or not currently ready.
 
 Architecture
 ------------
@@ -19,8 +20,8 @@ Architecture
   RB pid / base address cannot be resolved, the thread logs once and exits.
   ``StateManager`` continues running on ``TLLogTailer`` alone.
 * Diff against last-seen state to suppress duplicate events. Each emit carries
-  ``source='rb_state'`` so shadow-mode wiring can keep these events out of the
-  authoritative StateManager path.
+  ``source='rb_state'`` so downstream logs and fallback gates can distinguish
+  direct memory events from TL/ENGINE/OSC events.
 
 Play / pause derivation
 -----------------------

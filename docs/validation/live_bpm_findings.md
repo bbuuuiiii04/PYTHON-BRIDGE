@@ -1,5 +1,7 @@
 # Live BPM Memory Findings
 
+Status: VALIDATION REFERENCE
+
 Date: 2026-05-04
 Target: Rekordbox 7.2.11 on macOS, DDJ-800, rb_ss_bridge_v2
 Scope: historical read-only memory investigation plus integration notes. The
