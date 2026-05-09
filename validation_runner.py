@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from .laser_config import LaserConfigResult
 from .scripted_tracks import SCRIPTED_TRACKS
 
 
@@ -64,6 +65,7 @@ class ValidationRunner:
         scripted_registry=None,
         bridge_pattern: str = "rb_ss_bridge_v2",
         rb_pattern: str = "rekordbox",
+        laser_config_result: Optional[LaserConfigResult] = None,
     ) -> None:
         self._conn = conn
         self._pos_cache = pos_cache
@@ -72,6 +74,7 @@ class ValidationRunner:
         self._scripted_registry = scripted_registry if scripted_registry is not None else SCRIPTED_TRACKS
         self._bridge_pattern = bridge_pattern
         self._rb_pattern = rb_pattern
+        self._laser_config_result = laser_config_result
         self._lock = threading.Lock()
         self._last = ValidationResult("idle", 0.0, "idle", [])
 
@@ -213,7 +216,6 @@ class ValidationRunner:
         return STATUS_PASS, f"queue {size}/{maxsize} drops={drops}"
 
     def _check_laser(self, add) -> None:
-        """Placeholder laser checks — all not_applicable until LaserDirector is wired in."""
         _laser_checks = (
             "laser_config",
             "laser_safe_scene",
@@ -223,8 +225,29 @@ class ValidationRunner:
             "laser_midi_port",
             "laser_midi_queue",
         )
-        for name in _laser_checks:
-            add(name, STATUS_NA, "not_configured")
+        result = self._laser_config_result
+        if result is None or result.reason == "not_configured":
+            for name in _laser_checks:
+                add(name, STATUS_NA, "not_configured")
+            return
+        if result.reason == "invalid_config":
+            joined_errors = "; ".join(result.errors) if result.errors else "invalid_config"
+            add("laser_config", STATUS_FAIL, joined_errors)
+            for name in _laser_checks[1:]:
+                add(name, STATUS_NA, "invalid_config")
+            return
+        if result.config is None:
+            for name in _laser_checks:
+                add(name, STATUS_NA, "not_configured")
+            return
+        if not result.config.enabled:
+            for name in _laser_checks:
+                add(name, STATUS_NA, "disabled")
+            return
+
+        add("laser_config", STATUS_PASS, f"configured dry_run={result.config.dry_run}")
+        for name in _laser_checks[1:]:
+            add(name, STATUS_NA, "not_wired_yet")
 
 
 def _pgrep_count(pattern: str) -> int:
