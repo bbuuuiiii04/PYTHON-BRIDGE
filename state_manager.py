@@ -27,6 +27,7 @@ import os as _os
 import queue
 import threading
 import time
+from collections import deque
 from typing import Optional
 
 from .config import (
@@ -64,6 +65,84 @@ _LIVE_BPM_FOLLOW_SEND_INTERVAL_S = 0.10
 _AUTOLOOP_MASTER_PHRASE_START_GRACE_BEATS = 0.5
 _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS = 125
 _AUTOLOOP_PHRASE_MIN_RUNWAY_MS = 1000
+STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
+_SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
+_PROFILE_SUMMARY_INTERVAL_S = 10.0
+_PROFILE_WINDOW = 2048
+
+
+class _RollingDurations:
+    """Bounded duration samples in milliseconds."""
+
+    def __init__(self, maxlen: int = _PROFILE_WINDOW) -> None:
+        self._values: deque[float] = deque(maxlen=maxlen)
+
+    def add(self, value_ms: float) -> None:
+        self._values.append(value_ms)
+
+    def summary(self) -> str:
+        if not self._values:
+            return "avg=0.000 p95=0.000 p99=0.000 max=0.000"
+        values = sorted(self._values)
+        count = len(values)
+        avg = sum(values) / count
+        p95 = values[min(count - 1, int(count * 0.95))]
+        p99 = values[min(count - 1, int(count * 0.99))]
+        return "avg=%.3f p95=%.3f p99=%.3f max=%.3f" % (
+            avg, p95, p99, values[-1],
+        )
+
+
+class _StateManagerProfiler:
+    """Optional low-rate aggregate profiler for the 200 Hz StateManager loop."""
+
+    def __init__(self, interval_s: float = _PROFILE_SUMMARY_INTERVAL_S) -> None:
+        self._interval_s = interval_s
+        self._last_summary_at = time.monotonic()
+        self._tick = _RollingDurations()
+        self._drain = _RollingDurations()
+        self._push = _RollingDurations()
+        self._snapshot = _RollingDurations()
+        self._overrun_count = 0
+        self._worst_overrun_ms = 0.0
+        self._max_queue_depth = 0
+
+    def record(
+        self,
+        *,
+        tick_ms: float,
+        drain_ms: float,
+        push_ms: float,
+        snapshot_ms: Optional[float],
+        overrun_ms: float,
+        queue_depth: int,
+    ) -> None:
+        self._tick.add(tick_ms)
+        self._drain.add(drain_ms)
+        self._push.add(push_ms)
+        if snapshot_ms is not None:
+            self._snapshot.add(snapshot_ms)
+        if overrun_ms > 0:
+            self._overrun_count += 1
+            self._worst_overrun_ms = max(self._worst_overrun_ms, overrun_ms)
+        if queue_depth > self._max_queue_depth:
+            self._max_queue_depth = queue_depth
+
+    def maybe_log(self, now: float) -> None:
+        if now - self._last_summary_at < self._interval_s:
+            return
+        self._last_summary_at = now
+        log.info(
+            "[SM][PROFILE] tick_ms(%s) drain_ms(%s) push_ms(%s) "
+            "snapshot_ms(%s) overruns=%d worst_overrun_ms=%.3f max_queue_depth=%d",
+            self._tick.summary(),
+            self._drain.summary(),
+            self._push.summary(),
+            self._snapshot.summary(),
+            self._overrun_count,
+            self._worst_overrun_ms,
+            self._max_queue_depth,
+        )
 
 
 # ── Beat position helper ──────────────────────────────────────────────────────
@@ -216,6 +295,13 @@ class StateManager:
         self._snapshot_lock = threading.Lock()
         self._published_snapshot: dict = {}
         self._publish_snapshot()
+        self._snapshot_publish_interval_s = _SNAPSHOT_PUBLISH_INTERVAL_S
+        self._next_snapshot_publish_at = time.monotonic() + self._snapshot_publish_interval_s
+        self._profiler = (
+            _StateManagerProfiler()
+            if _os.environ.get(STATE_MANAGER_PROFILE_ENV, "0") != "0"
+            else None
+        )
 
     def set_initial_state(self, active_deck: int, source: str = "TL ENGINE STATE") -> None:
         """Apply startup state read from TL ENGINE STATE before event loop starts."""
@@ -285,12 +371,46 @@ class StateManager:
         log.info("[SM] starting")
         while not self._stop.is_set():
             t0 = time.monotonic()
-            self._drain_events()
-            self._push_tick()
-            self._publish_snapshot()
-            remaining = self._TICK_INTERVAL - (time.monotonic() - t0)
+            profiler = self._profiler
+            if profiler is None:
+                self._drain_events()
+                self._push_tick()
+                self._maybe_publish_snapshot(time.monotonic())
+                remaining = self._TICK_INTERVAL - (time.monotonic() - t0)
+            else:
+                queue_depth = self._queue_depth()
+                self._drain_events()
+                t1 = time.monotonic()
+                self._push_tick()
+                t2 = time.monotonic()
+                did_publish = self._maybe_publish_snapshot(t2)
+                t3 = time.monotonic()
+                elapsed_s = t3 - t0
+                remaining = self._TICK_INTERVAL - elapsed_s
+                profiler.record(
+                    tick_ms=elapsed_s * 1000.0,
+                    drain_ms=(t1 - t0) * 1000.0,
+                    push_ms=(t2 - t1) * 1000.0,
+                    snapshot_ms=((t3 - t2) * 1000.0 if did_publish else None),
+                    overrun_ms=max(0.0, -remaining * 1000.0),
+                    queue_depth=queue_depth,
+                )
+                profiler.maybe_log(t3)
             if remaining > 0:
                 time.sleep(remaining)
+
+    def _queue_depth(self) -> int:
+        try:
+            return int(self._eq.qsize())
+        except Exception:
+            return 0
+
+    def _maybe_publish_snapshot(self, now: float) -> bool:
+        if now < self._next_snapshot_publish_at:
+            return False
+        self._publish_snapshot()
+        self._next_snapshot_publish_at = now + self._snapshot_publish_interval_s
+        return True
 
     def _publish_snapshot(self) -> None:
         os = self._os
