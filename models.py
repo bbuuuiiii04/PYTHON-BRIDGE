@@ -205,3 +205,10 @@ class Ev:
     LIGHTING_SCRIPTED_ON = "lighting_scripted_on"  # master deck: scripted track playing
     LIGHTING_AUTOLOOP_ON = "lighting_autoloop_on"  # master deck: unscripted track playing
     LIGHTING_OFF         = "lighting_off"          # master deck: not playing
+    # Laser Director events — all global (deck=0)
+    LASER_TOGGLE               = "laser_toggle"               # toggle enabled state
+    LASER_SET_ENABLED          = "laser_set_enabled"          # payload={enabled: bool}
+    LASER_SCENE                = "laser_scene"                # payload={scene: str, ttl_s: float}
+    LASER_BLACKOUT             = "laser_blackout"             # latch emergency blackout
+    LASER_CLEAR_BLACKOUT       = "laser_clear_blackout"       # clear emergency blackout
+    LASER_CLEAR_SCENE_OVERRIDE = "laser_clear_scene_override" # clear manual scene only
