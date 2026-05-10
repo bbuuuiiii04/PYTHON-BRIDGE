@@ -325,7 +325,7 @@ Status shape:
   "enabled": true,
   "dry_run": true,
   "connected": false,
-  "port": "IAC Driver Bus 2",
+  "port": "IAC Driver Bus 1",
   "queue_size": 0,
   "queue_max": 256,
   "sent_count": 0,
@@ -568,7 +568,7 @@ If available:
   "cooldowns": {},
   "midi": {
     "connected": false,
-    "port": "IAC Driver Bus 2",
+    "port": "IAC Driver Bus 1",
     "queue_size": 0,
     "sent_count": 0,
     "drop_count": 0
@@ -639,7 +639,7 @@ Do not implement genre-tag resolution in MVP because current `TrackMetadata` doe
 ## 19. SoundSwitch Setup Workflow
 
 1. Enable IAC Driver on macOS.
-2. Create a dedicated IAC bus, for example `IAC Driver Bus 2`.
+2. Create or select a dedicated IAC bus, for example `IAC Driver Bus 1`.
 3. Configure SoundSwitch to listen to that MIDI input.
 4. Map MIDI notes to static looks/autoloops.
 5. Mirror those mappings in `config/laser_director.json`.
@@ -647,18 +647,20 @@ Do not implement genre-tag resolution in MVP because current `TrackMetadata` doe
 7. Use bridge logs/status JSON to confirm scene decisions.
 8. Keep `dry_run=true` until command, status, and validation behavior are verified.
 
+Examples only — actual scene names are arbitrary config keys.
+
 Example mapping table:
 
 | Scene | MIDI | SoundSwitch Mapping |
 |---|---:|---|
 | `safe_static` | note 36 | Laser static safe look |
-| `low_sweep` | note 37 | Laser low movement autoloop |
-| `build_tunnel` | note 38 | Laser buildup tunnel autoloop |
-| `pre_drop_blackout` | note 39 | Laser blackout/static tension look |
-| `drop_hit` | note 40 | Laser drop impact look |
-| `drop_sustain` | note 41 | Laser aggressive/wide autoloop |
-| `breakdown_blackout` | note 42 | Laser breakdown blackout |
-| `transition_wash` | note 43 | Safe transition look |
+| `house_phrase_1` | note 37 | House phrase autoloop |
+| `house_buildup_1` | note 38 | House buildup autoloop |
+| `house_pre_drop_1` | note 39 | House pre-drop tension/static look |
+| `house_drop_1` | note 40 | House drop impact look |
+| `house_drop_sustain_1` | note 41 | House drop sustain autoloop |
+| `house_breakdown_1` | note 42 | House breakdown autoloop |
+| `transition_safe_1` | note 43 | Safe transition look |
 | `emergency_blackout` | note 44 | Emergency laser blackout |
 
 ---
@@ -670,13 +672,13 @@ Use summary-centric logs. Avoid per-tick spam.
 Recommended log lines:
 
 ```text
-[LASER] enabled  dry_run=true  midi_port="IAC Driver Bus 2"  scenes=9  personalities=2
+[LASER] enabled  dry_run=true  midi_port="IAC Driver Bus 1"  scenes=9  personalities=2
 [LASER] scene  safe_static→build_tunnel  reason=phrase_boundary_32  beat=96  deck=1
 [LASER] scene  build_tunnel→drop_hit  reason=drop  beat=128  deck=1
 [LASER] blocked  scene=drop_hit  reason=cooldown  fallback=drop_sustain  remaining_beats=32
 [LASER] safe  scene=safe_static  reason=position_stale
 [LASER] midi-send  scene=drop_hit  note=40  channel=1
-[LASER] midi-unavailable  port="IAC Driver Bus 2"  action=degrade
+[LASER] midi-unavailable  port="IAC Driver Bus 1"  action=degrade
 ```
 
 Never log every tick. Scene/blocked/safe logs should be emitted on state transitions or rate-limited summaries only.
