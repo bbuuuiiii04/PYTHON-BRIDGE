@@ -325,6 +325,34 @@ def _validate_personality(
         elif ref not in scene_keys:
             errors.append(f"{prefix}: '{role}' references unknown scene '{ref}'")
 
+    phrase_interval_beats = data.get("phrase_interval_beats", 32)
+    if (
+        not isinstance(phrase_interval_beats, int)
+        or isinstance(phrase_interval_beats, bool)
+        or phrase_interval_beats < 1
+    ):
+        errors.append(
+            f"{prefix}: 'phrase_interval_beats' must be a positive integer"
+        )
+
+    minimum_scene_hold_beats = data.get("minimum_scene_hold_beats", 0)
+    if (
+        not isinstance(minimum_scene_hold_beats, int)
+        or isinstance(minimum_scene_hold_beats, bool)
+        or minimum_scene_hold_beats < 0
+    ):
+        errors.append(
+            f"{prefix}: 'minimum_scene_hold_beats' must be a non-negative integer"
+        )
+
+    normal_changes_only_on_phrase_boundary = data.get(
+        "normal_changes_only_on_phrase_boundary", False
+    )
+    if not isinstance(normal_changes_only_on_phrase_boundary, bool):
+        errors.append(
+            f"{prefix}: 'normal_changes_only_on_phrase_boundary' must be a boolean"
+        )
+
     return errors
 
 
@@ -389,4 +417,8 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
         transition_scene=str(data.get("transition_scene", "")),
         allow_high_impact=bool(data.get("allow_high_impact", False)),
         phrase_interval_beats=int(data.get("phrase_interval_beats", 32)),
+        minimum_scene_hold_beats=int(data.get("minimum_scene_hold_beats", 0)),
+        normal_changes_only_on_phrase_boundary=bool(
+            data.get("normal_changes_only_on_phrase_boundary", False)
+        ),
     )

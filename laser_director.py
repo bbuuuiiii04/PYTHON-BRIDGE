@@ -34,7 +34,7 @@ import logging
 import time
 from typing import Optional
 
-from .laser_models import LaserContext, LaserSceneDecision
+from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
 
 log = logging.getLogger("laser_director")
 
@@ -67,12 +67,22 @@ class LaserDirector:
         safe_scene: str = _DEFAULT_SAFE_SCENE,
         default_scene: str = _DEFAULT_DEFAULT_SCENE,
         emergency_scene: str = _DEFAULT_EMERGENCY_SCENE,
+        phrase_scene: str = "",
+        phrase_interval_beats: int = 32,
+        minimum_scene_hold_beats: int = 0,
+        normal_changes_only_on_phrase_boundary: bool = False,
     ) -> None:
         self._dry_run = dry_run
         self._enabled = enabled
         self._safe_scene = safe_scene
         self._default_scene = default_scene
         self._emergency_scene = emergency_scene
+        self._phrase_scene = phrase_scene
+        self._phrase_interval_beats = max(1, int(phrase_interval_beats))
+        self._minimum_scene_hold_beats = max(0, int(minimum_scene_hold_beats))
+        self._normal_changes_only_on_phrase_boundary = bool(
+            normal_changes_only_on_phrase_boundary
+        )
 
         # Mutable policy state — written only from the StateManager thread.
         self._emergency: bool = False
@@ -82,6 +92,8 @@ class LaserDirector:
         self._last_reason: str = ""
         self._last_error: str = ""
         self._personality: str = ""
+        self._last_phrase_number: Optional[int] = None
+        self._last_scene_change_abs_beat: float = 0.0
 
     # ── Policy commands (called from StateManager._handle_event) ─────────────
 
@@ -117,6 +129,17 @@ class LaserDirector:
     def set_personality(self, personality: str) -> None:
         self._personality = personality
 
+    def set_personality_config(self, personality: LaserPersonality) -> None:
+        """Load phrase-policy settings from a validated personality."""
+        self._phrase_scene = personality.phrase_scene
+        self._phrase_interval_beats = max(1, int(personality.phrase_interval_beats))
+        self._minimum_scene_hold_beats = max(
+            0, int(personality.minimum_scene_hold_beats)
+        )
+        self._normal_changes_only_on_phrase_boundary = bool(
+            personality.normal_changes_only_on_phrase_boundary
+        )
+
     # ── Tick (called from StateManager._push_tick) ────────────────────────────
 
     def tick(self, ctx: LaserContext, *, now: float) -> None:
@@ -144,6 +167,13 @@ class LaserDirector:
                 decision.reason,
                 self._dry_run,
             )
+
+        if (
+            decision.scene != self._current_scene
+            and decision.reason in ("default", "default_init", "phrase_boundary")
+            and self._is_normal_auto_scene(decision.scene)
+        ):
+            self._last_scene_change_abs_beat = max(ctx.abs_beat, 0.0)
 
         self._current_scene = decision.scene
         self._last_reason = decision.reason
@@ -174,6 +204,7 @@ class LaserDirector:
 
         # Priority 3: Not playing.
         if not ctx.playing:
+            self._last_phrase_number = None
             return LaserSceneDecision(
                 scene=self._safe_scene,
                 reason="not_playing",
@@ -183,6 +214,7 @@ class LaserDirector:
 
         # Priority 4: Stale position.
         if ctx.position_stale:
+            self._last_phrase_number = None
             return LaserSceneDecision(
                 scene=self._safe_scene,
                 reason="position_stale",
@@ -190,11 +222,88 @@ class LaserDirector:
                 source="policy",
             )
 
-        # Priority 5: Default (playing with fresh position).
+        abs_beat = max(ctx.abs_beat, 0.0)
+        phrase_number = int(abs_beat // self._phrase_interval_beats)
+        effective_phrase_scene = self._effective_phrase_scene()
+
+        # First normal playing tick initializes phrase tracking; do not fire phrase scene.
+        if self._last_phrase_number is None:
+            self._last_phrase_number = phrase_number
+            return self._gate_normal_change(
+                ctx=ctx,
+                candidate_scene=self._default_scene,
+                candidate_reason="default_init",
+                priority=6,
+            )
+
+        phrase_changed = phrase_number != self._last_phrase_number
+        self._last_phrase_number = phrase_number
+
+        # Priority 5: Phrase boundary.
+        if phrase_changed:
+            return self._gate_normal_change(
+                ctx=ctx,
+                candidate_scene=effective_phrase_scene,
+                candidate_reason="phrase_boundary",
+                priority=5,
+            )
+
+        if self._normal_changes_only_on_phrase_boundary:
+            if self._is_normal_auto_scene(self._current_scene):
+                return LaserSceneDecision(
+                    scene=self._current_scene,
+                    reason="phrase_hold",
+                    priority=6,
+                    source="policy",
+                )
+            return self._gate_normal_change(
+                ctx=ctx,
+                candidate_scene=self._default_scene,
+                candidate_reason="default",
+                priority=6,
+            )
+
+        # Priority 6: Default (playing with fresh position).
+        return self._gate_normal_change(
+            ctx=ctx,
+            candidate_scene=self._default_scene,
+            candidate_reason="default",
+            priority=6,
+        )
+
+    def _effective_phrase_scene(self) -> str:
+        return self._phrase_scene or self._default_scene
+
+    def _is_normal_auto_scene(self, scene: str) -> bool:
+        return scene in (self._default_scene, self._effective_phrase_scene())
+
+    def _gate_normal_change(
+        self,
+        *,
+        ctx: LaserContext,
+        candidate_scene: str,
+        candidate_reason: str,
+        priority: int,
+    ) -> LaserSceneDecision:
+        if (
+            candidate_scene != self._current_scene
+            and self._is_normal_auto_scene(candidate_scene)
+            and self._is_normal_auto_scene(self._current_scene)
+            and self._minimum_scene_hold_beats > 0
+        ):
+            held_for_beats = max(ctx.abs_beat, 0.0) - self._last_scene_change_abs_beat
+            if held_for_beats < self._minimum_scene_hold_beats:
+                return LaserSceneDecision(
+                    scene=self._current_scene,
+                    reason="hold_minimum_scene",
+                    priority=priority,
+                    source="policy",
+                )
+
         return LaserSceneDecision(
-            scene=self._default_scene,
-            reason="default",
-            priority=5,
+            scene=candidate_scene,
+            reason=candidate_reason,
+            priority=priority,
             source="policy",
         )
 
@@ -217,4 +326,8 @@ class LaserDirector:
             "emergency": self._emergency,
             "last_error": self._last_error,
             "personality": self._personality,
+            "phrase_scene": self._phrase_scene,
+            "phrase_interval_beats": self._phrase_interval_beats,
+            "minimum_scene_hold_beats": self._minimum_scene_hold_beats,
+            "normal_changes_only_on_phrase_boundary": self._normal_changes_only_on_phrase_boundary,
         }

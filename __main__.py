@@ -273,6 +273,10 @@ def _build_laser_startup_wiring(
         default_scene=default_scene,
         emergency_scene=cfg.emergency_scene,
     )
+    if cfg.default_personality:
+        personality = cfg.personalities.get(cfg.default_personality)
+        if personality is not None:
+            laser_director.set_personality_config(personality)
     return laser_director, laser_director.status
 
 _LOCK_FD = None
