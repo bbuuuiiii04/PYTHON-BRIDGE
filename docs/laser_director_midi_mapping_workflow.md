@@ -31,6 +31,21 @@ a new MIDI note. The wizard automatically adds that mapping to the role bank.
 
 At any wizard prompt, press Escape or type `back` to go back.
 
+## Wizard Setting Runtime Contract
+
+Only settings with runtime effect are exposed in normal wizard setup.
+
+| Wizard Label | Config Key | Model Field | Runtime Consumer | Proof Test |
+| --- | --- | --- | --- | --- |
+| Personality + role mapping | `personalities.<p>.*_scene` + role bank keys | `LaserPersonality` role fields + banks | `LaserSceneExecutor._bank_for_role()` and role selection path | `tests/test_laser_map_wizard.py::test_second_mapping_auto_appends_bank_keeps_primary` |
+| MIDI note | `scenes.<scene>.midi.note` | `LaserMidiMessage.note` | `MidiOutput._send_trigger()` | `tests/test_laser_map_wizard.py::test_verify_runtime_contract_passes_for_wizard_config` |
+| Trigger behavior | `scenes.<scene>.midi.behavior` | `LaserMidiMessage.behavior` | `LaserSceneExecutor._materialize_midi()` + `MidiOutput._send_trigger()` | `tests/test_laser_executor.py::test_hold_beats_materializes_with_context_bpm` |
+| Role cooldown | `scenes.<scene>.cooldown_beats` (normalized per role bank) | `LaserScene.cooldown_beats` | `LaserSceneExecutor._is_role_cooldown_blocked()` | `tests/test_laser_executor.py::test_role_cooldown_blocks_then_allows_after_beats` |
+| Role bank rotation | `personalities.<p>.phrase_bank` etc | `LaserPersonality.*_bank` | `LaserSceneExecutor._choose_bank_scene_locked()` | `tests/test_laser_executor.py::test_drop_bank_rotates_each_crossing` |
+
+Internal-only fields such as `safety_class` stay hidden from normal setup and are
+available only in **Advanced Safety Metadata**.
+
 ## Timing / Cooldowns
 
 The wizard includes a visible **Edit Timing & Cooldowns** menu.
@@ -45,6 +60,14 @@ The wizard includes a visible **Edit Timing & Cooldowns** menu.
 The normal wizard flow does not ask for laser classification. Safety metadata
 (`safety_class`) is assigned automatically from role defaults and kept internal.
 An optional **Advanced Safety Metadata** menu is available for expert edits.
+
+Role cooldown is a runtime-enforced setting. A role cooldown change updates all
+mappings in that role bank and is enforced in `LaserSceneExecutor` using
+`ctx.abs_beat` (not wall-clock time).
+
+The wizard includes **Verify mappings actually work**, which loads saved config,
+runs a dry runtime simulation through `LaserSceneExecutor`, and reports PASS/FAIL
+for role mapping outputs and cooldown enforcement.
 
 ## Core idea
 

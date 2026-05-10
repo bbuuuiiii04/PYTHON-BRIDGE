@@ -67,6 +67,7 @@ def _ctx(
     scripted_id: int = 0,
     autoloop_ready: bool = True,
     autoloop_tick_just_fired: bool = False,
+    abs_beat: float = 64.0,
 ) -> LaserContext:
     return LaserContext(
         active_deck=1,
@@ -74,7 +75,7 @@ def _ctx(
         elapsed_ms=1000,
         bpm=128.0,
         beatpos=0.0,
-        abs_beat=64.0,
+        abs_beat=abs_beat,
         position_stale=position_stale,
         lighting_mode=lighting_mode,
         os2l_connected=True,
@@ -136,6 +137,39 @@ def _config(*, dry_run: bool = True) -> LaserConfig:
         emergency_scene="safe",
         fallback_scene="safe",
     )
+
+
+def _config_with_role_cooldowns(*, dry_run: bool = True) -> LaserConfig:
+    cfg = _config(dry_run=dry_run)
+    cfg.scenes["phrase_a"] = LaserScene(
+        name="phrase_a",
+        scene_type="autoloop",
+        safety_class="safe",
+        midi=cfg.scenes["phrase_a"].midi,
+        cooldown_beats=16.0,
+    )
+    cfg.scenes["phrase_b"] = LaserScene(
+        name="phrase_b",
+        scene_type="autoloop",
+        safety_class="safe",
+        midi=cfg.scenes["phrase_b"].midi,
+        cooldown_beats=16.0,
+    )
+    cfg.scenes["buildup_a"] = LaserScene(
+        name="buildup_a",
+        scene_type="autoloop",
+        safety_class="safe",
+        midi=cfg.scenes["buildup_a"].midi,
+        cooldown_beats=8.0,
+    )
+    cfg.scenes["drop_a"] = LaserScene(
+        name="drop_a",
+        scene_type="autoloop",
+        safety_class="safe",
+        midi=cfg.scenes["drop_a"].midi,
+        cooldown_beats=32.0,
+    )
+    return cfg
 
 
 class LaserSceneExecutorTests(unittest.TestCase):
@@ -292,6 +326,78 @@ class LaserSceneExecutorTests(unittest.TestCase):
         rendered = midi.calls[0][0]
         self.assertEqual(rendered.behavior, "hold_ms")
         self.assertEqual(rendered.hold_ms, 1875)
+
+    def test_role_cooldown_blocks_then_allows_after_beats(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx(abs_beat=100.0))
+        ex.on_decision(_decision("phrase_a", "phrase_boundary", "phrase"), _ctx(abs_beat=108.0, autoloop_tick_just_fired=True))
+        self.assertEqual(len(midi.calls), 1)
+        self.assertEqual(ex.status()["last_error"], "role_cooldown_blocked")
+        ex.on_decision(_decision("phrase_a", "phrase_boundary", "phrase"), _ctx(abs_beat=116.1, autoloop_tick_just_fired=True))
+        self.assertEqual(len(midi.calls), 2)
+
+    def test_buildup_and_drop_cooldown_block_retrigger(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), _ctx(abs_beat=200.0))
+        ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), _ctx(abs_beat=205.0))
+        self.assertEqual(len(midi.calls), 1)
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=300.0))
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=320.0))
+        self.assertEqual(len(midi.calls), 2)
+        self.assertEqual(ex.status()["last_error"], "role_cooldown_blocked")
+
+    def test_cooldown_block_does_not_advance_role_cursor(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=400.0))
+        cursor_after_first = ex.status()["role_cursors"]["drop"]
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=401.0))
+        cursor_after_block = ex.status()["role_cursors"]["drop"]
+        self.assertEqual(cursor_after_block, cursor_after_first)
+
+    def test_role_cooldown_uses_abs_beat_not_wall_clock(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx(abs_beat=700.0))
+        ex.on_decision(_decision("phrase_a", "phrase_boundary", "phrase"), _ctx(abs_beat=700.0, autoloop_tick_just_fired=True))
+        self.assertEqual(len(midi.calls), 1)
+        self.assertEqual(ex.status()["last_error"], "role_cooldown_blocked")
+
+    def test_emergency_and_manual_bypass_role_cooldown(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=500.0))
+        ex.on_decision(
+            LaserSceneDecision(scene="drop_a", reason="manual_override", priority=1, source="manual", role="manual"),
+            _ctx(abs_beat=501.0),
+        )
+        ex.on_decision(
+            LaserSceneDecision(scene="drop_a", reason="emergency", priority=1, source="emergency", role="emergency"),
+            _ctx(abs_beat=502.0),
+        )
+        self.assertEqual(len(midi.calls), 3)
 
 
 if __name__ == "__main__":

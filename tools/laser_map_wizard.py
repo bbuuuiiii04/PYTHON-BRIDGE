@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..laser_config import load_laser_director_config
-from ..laser_models import LaserMidiMessage
+from ..laser_executor import LaserSceneExecutor
+from ..laser_models import LaserContext, LaserMidiMessage, LaserSceneDecision
 from ..midi_output import MidiOutput
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -227,6 +228,31 @@ def _ensure_scene_baselines(config: dict[str, Any]) -> None:
 
 
 def _ensure_house_personality(config: dict[str, Any]) -> None:
+    scenes = config.setdefault("scenes", {})
+    defaults = [
+        ("house_groove_1", "groove", 37),
+        ("house_buildup_1", "buildup", 38),
+        ("house_drop_1", "drop", 40),
+        ("house_post_drop_1", "post_drop", 41),
+        ("house_breakdown_1", "breakdown", 42),
+    ]
+    for scene_name, role, note in defaults:
+        role_defaults = _ROLE_DEFAULTS[role]
+        scenes.setdefault(
+            scene_name,
+            {
+                "scene_type": role_defaults["scene_type"],
+                "safety_class": role_defaults["safety_class"],
+                "fallback_scene": role_defaults["fallback_resolver"]({}),
+                "cooldown_beats": role_defaults["cooldown_beats"],
+                "immediate": role_defaults["immediate"],
+                "midi": _build_midi_payload(
+                    note,
+                    behavior=role_defaults["behavior"],
+                    hold_beats=float(role_defaults.get("hold_beats", 0.0)),
+                ),
+            },
+        )
     personalities = config.setdefault("personalities", {})
     if _DEFAULT_PERSONALITY in personalities:
         return
@@ -245,7 +271,7 @@ def _ensure_house_personality(config: dict[str, Any]) -> None:
         "drop_bank": ["house_drop_1"],
         "post_drop_bank": ["house_post_drop_1"],
         "breakdown_bank": ["house_breakdown_1"],
-        "allow_high_impact": False,
+        "allow_high_impact": True,
         "phrase_interval_beats": 32,
         "minimum_scene_hold_beats": 8,
         "buildup_lookahead_beats": 32,
@@ -1264,6 +1290,116 @@ def _advanced_safety_menu(config: dict[str, Any]) -> bool:
     return True
 
 
+class _DryCheckMidiOutput:
+    def __init__(self) -> None:
+        self.calls: list[tuple[LaserMidiMessage, str]] = []
+
+    def trigger(self, msg: LaserMidiMessage, priority: str = "normal") -> bool:
+        self.calls.append((msg, priority))
+        return True
+
+    def status(self) -> dict:
+        return {"dry_run": True, "trigger_count": len(self.calls)}
+
+
+def _verify_ctx(abs_beat: float, *, autoloop_tick_just_fired: bool = False) -> LaserContext:
+    return LaserContext(
+        active_deck=1,
+        playing=True,
+        elapsed_ms=1000,
+        bpm=128.0,
+        beatpos=0.0,
+        abs_beat=abs_beat,
+        position_stale=False,
+        lighting_mode="autoloop",
+        os2l_connected=True,
+        active_track_loaded=True,
+        autoloop_ready=True,
+        autoloop_tick_just_fired=autoloop_tick_just_fired,
+        scripted_id=0,
+    )
+
+
+def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[tuple[str, bool, str]]:
+    result = load_laser_director_config(str(config_path))
+    checks: list[tuple[str, bool, str]] = []
+    if not result.available or result.config is None:
+        reason = result.reason if result.reason else "config unavailable"
+        checks.append(("config load", False, reason))
+        return checks
+    cfg = result.config
+    personality = cfg.personalities.get(cfg.default_personality or "")
+    if personality is None:
+        checks.append(("default personality", False, "missing default personality"))
+        return checks
+
+    midi = _DryCheckMidiOutput()
+    ex = LaserSceneExecutor(config=cfg, midi_output=midi, personality=personality)
+    role_specs = [
+        ("groove", personality.phrase_scene, "default_init"),
+        ("buildup", personality.buildup_scene, "buildup_to_drop_window"),
+        ("drop", personality.drop_scene, "drop_crossing"),
+        ("post_drop", personality.post_drop_scene, "post_drop_hold"),
+        ("breakdown", personality.breakdown_scene, "breakdown_hold"),
+    ]
+    beat = 100.0
+    for role, scene_name, reason in role_specs:
+        scene = cfg.scenes.get(scene_name)
+        if scene is None:
+            checks.append((f"{role}", False, f"missing scene '{scene_name}'"))
+            beat += 64.0
+            continue
+        before = len(midi.calls)
+        ex.on_decision(
+            LaserSceneDecision(scene=scene_name, reason=reason, priority=10, source="policy", role="phrase" if role == "groove" else role),
+            _verify_ctx(beat, autoloop_tick_just_fired=(role == "groove")),
+        )
+        after = len(midi.calls)
+        if after != before + 1:
+            checks.append((f"{role}", False, "no midi trigger"))
+            beat += 64.0
+            continue
+        sent, _ = midi.calls[-1]
+        expect_note = scene.midi.note
+        if int(sent.note) != int(expect_note):
+            checks.append((f"{role}", False, f"expected note {expect_note}, got {sent.note}"))
+            beat += 64.0
+            continue
+        if scene.midi.behavior == "hold_beats":
+            ok = sent.behavior == "hold_ms" and int(sent.hold_ms) > 0
+            checks.append((f"{role}", ok, f"note {sent.note} hold conversion"))
+        else:
+            checks.append((f"{role}", True, f"note {sent.note} {_describe_behavior({'behavior': sent.behavior, 'hold_ms': sent.hold_ms, 'hold_beats': sent.hold_beats})}"))
+        beat += 64.0
+
+    cooldown_scene = cfg.scenes.get(personality.phrase_scene)
+    if cooldown_scene is None or cooldown_scene.cooldown_beats <= 0:
+        checks.append(("cooldown enforcement", False, "NOT IMPLEMENTED"))
+        return checks
+    midi2 = _DryCheckMidiOutput()
+    ex2 = LaserSceneExecutor(config=cfg, midi_output=midi2, personality=personality)
+    ex2.on_decision(
+        LaserSceneDecision(scene=personality.phrase_scene, reason="default_init", priority=10, source="policy", role="phrase"),
+        _verify_ctx(500.0, autoloop_tick_just_fired=True),
+    )
+    ex2.on_decision(
+        LaserSceneDecision(scene=personality.phrase_scene, reason="phrase_boundary", priority=10, source="policy", role="phrase"),
+        _verify_ctx(500.0 + max(0.0, cooldown_scene.cooldown_beats - 1.0), autoloop_tick_just_fired=True),
+    )
+    blocked = len(midi2.calls) == 1 and ex2.status().get("last_error") == "role_cooldown_blocked"
+    checks.append(("cooldown enforcement", blocked, "role_cooldown_blocked" if blocked else "cooldown not enforced"))
+    return checks
+
+
+def _verify_mappings_menu(config_path: Path) -> None:
+    print(_c("\nVerify mappings actually work", _CYAN))
+    checks = verify_mappings_runtime(config_path)
+    for label, ok, detail in checks:
+        state = "PASS" if ok else "FAIL"
+        color = _GREEN if ok else _RED
+        print(_c(f"{label}: {state}", color) + f"  {detail}")
+
+
 def get_main_menu_options() -> list[str]:
     return [
         "Show current mappings",
@@ -1271,6 +1407,7 @@ def get_main_menu_options() -> list[str]:
         "Edit existing mapping",
         "Timing / Cooldowns",
         "Advanced Safety Metadata",
+        "Verify mappings actually work",
         "Validate mappings",
         "Test a MIDI note",
         "Set MIDI output port",
@@ -1431,6 +1568,9 @@ def run_wizard(config_path: Path = _DEFAULT_CONFIG_PATH) -> int:
             dirty = _advanced_safety_menu(config) or dirty
             continue
         if choice == "6":
+            _verify_mappings_menu(config_path)
+            continue
+        if choice == "7":
             errors, warnings = validate_config_data(config)
             if not errors and not warnings:
                 print(_c("Validation passed.", _GREEN))
@@ -1440,28 +1580,28 @@ def run_wizard(config_path: Path = _DEFAULT_CONFIG_PATH) -> int:
             for err in errors:
                 print(_c(f"Error: {err}", _RED))
             continue
-        if choice == "7":
+        if choice == "8":
             try:
                 _test_note(config)
             except BackRequested:
                 continue
             continue
-        if choice == "8":
+        if choice == "9":
             try:
                 _set_port(config)
                 dirty = True
             except BackRequested:
                 continue
             continue
-        if choice == "9":
+        if choice == "10":
             _toggle_dry_run(config)
             dirty = True
             continue
-        if choice == "10":
+        if choice == "11":
             if _save_and_exit(config, config_path):
                 return 0
             continue
-        if choice == "11" or choice == "0":
+        if choice == "12" or choice == "0":
             print(_c("Exit without saving.", _YELLOW))
             return 0
         print(_c("Unknown menu option.", _RED))

@@ -8,6 +8,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from rb_ss_bridge_v2.laser_config import load_laser_director_config  # noqa: E402
+from rb_ss_bridge_v2.laser_executor import LaserSceneExecutor  # noqa: E402
+from rb_ss_bridge_v2.laser_models import LaserContext, LaserSceneDecision  # noqa: E402
 from rb_ss_bridge_v2.tools.laser_map_wizard import (  # noqa: E402
     apply_mapping,
     detect_mixed_role_cooldowns,
@@ -20,12 +23,25 @@ from rb_ss_bridge_v2.tools.laser_map_wizard import (  # noqa: E402
     save_config_atomically,
     suggest_personality,
     suggest_role,
+    verify_mappings_runtime,
     update_personality_timing,
     update_scene_safety_class,
     update_scene_cooldown,
     update_role_bank_cooldown,
     _warn_duplicate_note,
 )
+
+
+class _FakeMidi:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def trigger(self, msg, priority="normal"):
+        self.calls.append((msg, priority))
+        return True
+
+    def status(self):
+        return {"trigger_count": len(self.calls)}
 
 
 class LaserMapWizardTests(unittest.TestCase):
@@ -164,6 +180,7 @@ class LaserMapWizardTests(unittest.TestCase):
         self.assertIn("Timing / Cooldowns", options)
         self.assertIn("Advanced Safety Metadata", options)
         self.assertNotIn("Edit one scene cooldown", options)
+        self.assertIn("Verify mappings actually work", options)
 
     def test_edit_personality_timing_updates_fields(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
@@ -256,6 +273,68 @@ class LaserMapWizardTests(unittest.TestCase):
         self.assertIn("hold 4 beats", summary)
         self.assertNotIn("Gentle movement", summary)
         self.assertNotIn("High impact", summary)
+
+    def test_verify_runtime_contract_passes_for_wizard_config(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            cfg = load_or_create_config(path)
+            apply_mapping(cfg, personality="house", role="groove", note=37)
+            apply_mapping(cfg, personality="house", role="drop", note=40)
+            save_config_atomically(cfg, path)
+            checks = verify_mappings_runtime(path)
+        failed = [item for item in checks if not item[1]]
+        self.assertEqual(failed, [], msg=str(checks))
+
+    def test_wizard_created_bank_drives_executor_rotation(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            cfg = load_or_create_config(path)
+            apply_mapping(cfg, personality="house", role="groove", note=37)
+            apply_mapping(cfg, personality="house", role="groove", note=45)
+            save_config_atomically(cfg, path)
+            loaded = load_laser_director_config(str(path))
+            self.assertTrue(loaded.available, msg=loaded.errors)
+            personality = loaded.config.personalities[loaded.config.default_personality]
+            midi = _FakeMidi()
+            ex = LaserSceneExecutor(config=loaded.config, midi_output=midi, personality=personality)
+            ctx = LaserContext(
+                active_deck=1,
+                playing=True,
+                elapsed_ms=1000,
+                bpm=128.0,
+                beatpos=0.0,
+                abs_beat=100.0,
+                position_stale=False,
+                lighting_mode="autoloop",
+                os2l_connected=True,
+                active_track_loaded=True,
+                autoloop_ready=True,
+                autoloop_tick_just_fired=True,
+                scripted_id=0,
+            )
+            ex.on_decision(
+                LaserSceneDecision(
+                    scene=personality.phrase_scene,
+                    reason="default_init",
+                    priority=10,
+                    source="policy",
+                    role="phrase",
+                ),
+                ctx,
+            )
+            ctx2 = LaserContext(**{**ctx.__dict__, "abs_beat": 200.0, "autoloop_tick_just_fired": True})
+            ex.on_decision(
+                LaserSceneDecision(
+                    scene=personality.phrase_scene,
+                    reason="phrase_boundary",
+                    priority=10,
+                    source="policy",
+                    role="phrase",
+                ),
+                ctx2,
+            )
+            self.assertEqual(len(midi.calls), 2)
+            self.assertNotEqual(midi.calls[0][0].note, midi.calls[1][0].note)
 
     def test_advanced_safety_edit_updates_value(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))

@@ -48,6 +48,7 @@ class LaserSceneExecutor:
         self._same_scene_skip_count = 0
         self._role_cursors = {role: 0 for role in _AUTO_ROLES}
         self._role_active_scene = {role: "" for role in _AUTO_ROLES}
+        self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
 
     def set_personality(self, personality: Optional[LaserPersonality]) -> None:
         """Switch executor personality and reset role-bank execution state."""
@@ -59,6 +60,7 @@ class LaserSceneExecutor:
             self._last_error = ""
             self._role_cursors = {role: 0 for role in _AUTO_ROLES}
             self._role_active_scene = {role: "" for role in _AUTO_ROLES}
+            self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
 
     def on_decision(self, decision: Optional[LaserSceneDecision], ctx: LaserContext) -> None:
         """Consume one decision and trigger MIDI when all gates pass."""
@@ -78,6 +80,7 @@ class LaserSceneExecutor:
         if role == "idle" or not decision.scene:
             return
 
+        cursor_before, active_before = self._role_state_snapshot(role)
         selected_scene = self._select_scene(decision, ctx, role_changed)
         if not selected_scene:
             return
@@ -101,8 +104,13 @@ class LaserSceneExecutor:
             self._record_gate("high_impact_blocked")
             return
 
+        if self._is_role_cooldown_blocked(role, scene_def.cooldown_beats, ctx.abs_beat):
+            self._restore_role_state(role, cursor_before, active_before)
+            self._record_gate("role_cooldown_blocked")
+            return
+
         with self._lock:
-            if selected_scene == self._last_triggered_scene:
+            if role not in ("manual", "emergency") and selected_scene == self._last_triggered_scene:
                 self._same_scene_skip_count += 1
                 return
 
@@ -117,11 +125,14 @@ class LaserSceneExecutor:
             self._last_triggered_scene = selected_scene
             self._last_trigger_at = time.monotonic()
             self._last_error = ""
+            if role in self._role_last_trigger_beat:
+                self._role_last_trigger_beat[role] = float(ctx.abs_beat)
 
     def status(self) -> dict:
         with self._lock:
             role_cursors = dict(self._role_cursors)
             active_scenes = dict(self._role_active_scene)
+            last_trigger_beats = dict(self._role_last_trigger_beat)
             return {
                 "dry_run": self._config.dry_run,
                 "last_role": self._last_role,
@@ -135,6 +146,7 @@ class LaserSceneExecutor:
                 "same_scene_skip_count": self._same_scene_skip_count,
                 "role_cursors": role_cursors,
                 "role_active_scenes": active_scenes,
+                "role_last_trigger_beat": last_trigger_beats,
                 "midi": self._midi_output.status(),
             }
 
@@ -208,6 +220,39 @@ class LaserSceneExecutor:
         with self._lock:
             self._gated_count += 1
             self._last_error = reason
+
+    def _is_role_cooldown_blocked(
+        self,
+        role: str,
+        cooldown_beats: float,
+        abs_beat: float,
+    ) -> bool:
+        if role not in _AUTO_ROLES:
+            return False
+        cooldown = float(cooldown_beats)
+        if cooldown <= 0:
+            return False
+        with self._lock:
+            last_beat = float(self._role_last_trigger_beat.get(role, -1.0))
+        if last_beat < 0:
+            return False
+        return (float(abs_beat) - last_beat) < cooldown
+
+    def _role_state_snapshot(self, role: str) -> tuple[int, str]:
+        if role not in _AUTO_ROLES:
+            return (0, "")
+        with self._lock:
+            return (
+                int(self._role_cursors.get(role, 0)),
+                str(self._role_active_scene.get(role, "")),
+            )
+
+    def _restore_role_state(self, role: str, cursor: int, active_scene: str) -> None:
+        if role not in _AUTO_ROLES:
+            return
+        with self._lock:
+            self._role_cursors[role] = int(cursor)
+            self._role_active_scene[role] = active_scene
 
     def _priority_for_role(self, role: str) -> str:
         if role in ("emergency", "manual", "drop"):
