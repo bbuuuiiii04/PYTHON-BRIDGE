@@ -14,6 +14,7 @@ from rb_ss_bridge_v2.laser_executor import LaserSceneExecutor  # noqa: E402
 from rb_ss_bridge_v2.laser_models import LaserContext, LaserSceneDecision  # noqa: E402
 from rb_ss_bridge_v2.tools.laser_map_wizard import (  # noqa: E402
     apply_mapping,
+    validate_config_data,
     detect_mixed_role_cooldowns,
     find_duplicate_notes,
     get_main_menu_options,
@@ -53,9 +54,20 @@ class LaserMapWizardTests(unittest.TestCase):
             path = Path(td) / "laser_director.json"
             cfg = load_or_create_config(path)
             self.assertTrue(cfg["dry_run"])
+            self.assertEqual(cfg["smart_drop_mode"], "blackout_mask")
             self.assertEqual(cfg["default_personality"], "house")
             self.assertIn("safe_static", cfg["scenes"])
             self.assertIn("emergency_blackout", cfg["scenes"])
+
+    def test_validate_warns_when_blackout_mode_missing_manual_commands(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        apply_mapping(cfg, personality="house", role="drop", note=40)
+        cfg["smart_drop_mode"] = "blackout_mask"
+        cfg.pop("manual_commands", None)
+        errors, warnings = validate_config_data(cfg)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("blackout_on" in warning for warning in warnings))
+        self.assertTrue(any("blackout_off" in warning for warning in warnings))
 
     def test_first_mapping_sets_primary_and_phrase_bank(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))

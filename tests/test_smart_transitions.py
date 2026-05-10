@@ -141,6 +141,14 @@ class SmartRearmFlagTests(unittest.TestCase):
 
 
 class SmartRearmResetTests(unittest.TestCase):
+    def test_clear_smart_rearm_state_clears_pending_blackout_window(self) -> None:
+        sm = _manager()
+        sm._laser_executor = Mock()
+        sm._clear_smart_rearm_state()
+        sm._laser_executor.clear_pending_blackout.assert_called_once_with(
+            reason="smart_rearm_state_cleared"
+        )
+
     def test_drop_cut_cleared_on_idle_transition(self) -> None:
         sm = _manager()
         _arm_drop_cut(sm)
@@ -313,32 +321,32 @@ class SmartDropTests(unittest.TestCase):
     def test_runtime_uses_selected_drops_not_raw_anlz_drops(self) -> None:
         sm = _sm([64])
         sm._deck[1].meta.smart_drops = [96]
-        _smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000), 0)
         sm._out.send_deck_clear.assert_not_called()
         self.assertFalse(sm._os.drop_cut_armed)
 
-        _smart_drop_tick(sm, 1, 2, 130.0, 92, 46_000)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 92, 46_000), 1)
         self.assertTrue(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 96)
 
     def test_intro_filtered_raw_drop_does_not_fire(self) -> None:
         sm = _sm([16])
         sm._deck[1].meta.smart_drops = []
-        _smart_drop_tick(sm, 1, 2, 130.0, 12, 6_000)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 12, 6_000), 0)
         sm._out.send_deck_clear.assert_not_called()
         self.assertFalse(sm._os.drop_cut_armed)
 
     def test_smart_drop_skipped_while_transition_arm_pending(self) -> None:
         sm = _sm([64])
         sm._os.autoloop_arm_pending = True
-        _smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000), 0)
         sm._out.send_deck_clear.assert_not_called()
         self.assertFalse(sm._os.drop_cut_armed)
 
     def test_smart_drop_skipped_while_pending_arm_meta_set(self) -> None:
         sm = _sm([64])
         sm._os.pending_autoloop_arm_meta = TrackMetadata(filepath="/music/pending.mp3")
-        _smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000), 0)
         sm._out.send_deck_clear.assert_not_called()
         self.assertFalse(sm._os.drop_cut_armed)
 
@@ -346,58 +354,76 @@ class SmartDropTests(unittest.TestCase):
         sm = _sm([68])
         sm._os.breakdown_active = True
         sm._os.breakdown_restore_beat = 96
-        _smart_drop_tick(sm, 1, 2, 130.0, 64, 32_000)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 64, 32_000), 0)
         sm._out.send_deck_clear.assert_not_called()
         self.assertFalse(sm._os.drop_cut_armed)
 
-    def test_cut_fires_4_beats_before_drop(self) -> None:
+    def test_pre_drop_blackout_arms_4_beats_before_drop_without_os2l_cut(self) -> None:
         sm = _sm([64])
-        _smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000)
-        self.assertEqual(sm._out.send_deck_clear.call_count, 4)
-        self.assertEqual(sm._out.send_loop_off.call_count, 4)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 60, 30_000), 1)
+        self.assertEqual(sm._out.send_deck_clear.call_count, 0)
+        self.assertEqual(sm._out.send_loop_off.call_count, 0)
         self.assertTrue(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 64)
 
     def test_cut_does_not_fire_before_window(self) -> None:
         sm = _sm([64])
-        _smart_drop_tick(sm, 1, 2, 130.0, 55, 27_500)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 55, 27_500), 0)
         sm._out.send_deck_clear.assert_not_called()
         self.assertFalse(sm._os.drop_cut_armed)
 
-    def test_rearm_fires_on_drop_beat(self) -> None:
+    def test_drop_crossing_returns_signal_without_direct_rearm(self) -> None:
         sm = _sm([64])
         sm._os.drop_cut_armed = True
         sm._os.drop_rearm_beat = 64
-        _smart_drop_tick(sm, 1, 2, 130.0, 64, 32_005)
-        sm._send_autoloop_deck_load.assert_called_once()
-        self.assertFalse(sm._os.drop_cut_armed)
-        self.assertEqual(sm._os.drop_rearm_beat, 0)
-        self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 64, 32_005), 2)
+        sm._send_autoloop_deck_load.assert_not_called()
+        self.assertTrue(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 64)
+        self.assertEqual(sm._os.phrase_anchor_last_beat, -1)
 
-    def test_smart_drop_rearm_blocks_same_beat_phrase_anchor_double_rearm(self) -> None:
+    def test_smart_drop_crossing_blocks_same_beat_phrase_anchor_rearm(self) -> None:
         sm = _sm([64])
         sm._os.drop_cut_armed = True
         sm._os.drop_rearm_beat = 64
         sm._os.phrase_anchor_last_beat = 0
-        _smart_drop_tick(sm, 1, 2, 130.0, 64, 32_005)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 64, 32_005), 2)
         _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_005, 64.0)
-        sm._send_autoloop_deck_load.assert_called_once()
+        sm._send_autoloop_deck_load.assert_not_called()
 
-    def test_smart_drop_rearm_at_60_delays_next_phrase_anchor(self) -> None:
+    def test_smart_drop_crossing_does_not_update_phrase_anchor_directly(self) -> None:
         sm = _sm([60])
         sm._os.drop_cut_armed = True
         sm._os.drop_rearm_beat = 60
         sm._os.phrase_anchor_last_beat = 0
-        _smart_drop_tick(sm, 1, 2, 130.0, 60, 30_005)
-        self.assertEqual(sm._os.phrase_anchor_last_beat, 60)
-        _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_000, 64.0)
-        sm._send_autoloop_deck_load.assert_called_once()
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 60, 30_005), 2)
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 0)
+        sm._send_autoloop_deck_load.assert_not_called()
 
     def test_past_drops_scanned_but_ignored(self) -> None:
         sm = _sm([32, 64, 128])
-        _smart_drop_tick(sm, 1, 2, 130.0, 124, 62_000)
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 124, 62_000), 1)
         self.assertTrue(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 128)
+
+    def test_legacy_mode_uses_cut_and_rearm_when_explicitly_selected(self) -> None:
+        sm = _sm([64])
+        signal = _smart_drop_tick(
+            sm, 1, 2, 130.0, 60, 30_000, blackout_mode=False
+        )
+        self.assertEqual(signal, 1)
+        self.assertEqual(sm._out.send_deck_clear.call_count, 4)
+        self.assertEqual(sm._out.send_loop_off.call_count, 4)
+        self.assertTrue(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 64)
+
+        signal = _smart_drop_tick(
+            sm, 1, 2, 130.0, 64, 32_005, blackout_mode=False
+        )
+        self.assertEqual(signal, 2)
+        sm._send_autoloop_deck_load.assert_called_once()
+        self.assertFalse(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 0)
 
     def test_rearm_uses_autoloop_arm_bpm(self) -> None:
         sm = _sm([64])

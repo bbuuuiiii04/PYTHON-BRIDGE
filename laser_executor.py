@@ -50,6 +50,7 @@ class LaserSceneExecutor:
         self._role_cursors = {role: 0 for role in _AUTO_ROLES}
         self._role_active_scene = {role: "" for role in _AUTO_ROLES}
         self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
+        self._blackout_pending_for_drop_window = False
 
     def set_personality(self, personality: Optional[LaserPersonality]) -> None:
         """Switch executor personality and reset role-bank execution state."""
@@ -62,11 +63,21 @@ class LaserSceneExecutor:
             self._role_cursors = {role: 0 for role in _AUTO_ROLES}
             self._role_active_scene = {role: "" for role in _AUTO_ROLES}
             self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
+            self._blackout_pending_for_drop_window = False
+
+    def smart_drop_blackout_enabled(self) -> bool:
+        """Return whether Smart Drop should use blackout-mask timing."""
+        return str(getattr(self._config, "smart_drop_mode", "blackout_mask")) == "blackout_mask"
+
+    def clear_pending_blackout(self, *, reason: str = "smart_drop_reset") -> None:
+        """Clear a pending Smart Drop blackout window, if any."""
+        self._resolve_pending_blackout(reason=reason)
 
     def on_decision(self, decision: Optional[LaserSceneDecision], ctx: LaserContext) -> None:
         """Consume one decision and trigger MIDI when all gates pass."""
         if decision is None:
             return
+        is_drop_crossing = decision.reason == "drop_crossing"
 
         role = decision.role or "idle"
         with self._lock:
@@ -79,15 +90,21 @@ class LaserSceneExecutor:
             self._last_reason = decision.reason
 
         if role == "idle" or not decision.scene:
+            if is_drop_crossing:
+                self._resolve_pending_blackout(reason="drop_crossing_idle")
             return
 
         cursor_before, active_before = self._role_state_snapshot(role)
         selected_scene = self._select_scene(decision, ctx, role_changed)
         if not selected_scene:
+            if is_drop_crossing:
+                self._resolve_pending_blackout(reason="drop_crossing_no_scene")
             return
 
         if role in _AUTO_ROLES and not self._passes_automatic_gates(ctx):
             self._record_gate("auto_gate_blocked")
+            if is_drop_crossing:
+                self._resolve_pending_blackout(reason="drop_crossing_auto_gate_blocked")
             return
 
         scene_def = self._config.scenes.get(selected_scene)
@@ -96,6 +113,8 @@ class LaserSceneExecutor:
                 self._missing_scene_count += 1
                 self._gated_count += 1
                 self._last_error = f"missing_scene_mapping:{selected_scene}"
+            if is_drop_crossing:
+                self._resolve_pending_blackout(reason="drop_crossing_missing_scene_mapping")
             return
 
         allow_high_impact = bool(
@@ -103,6 +122,8 @@ class LaserSceneExecutor:
         )
         if role != "emergency" and scene_def.safety_class == "high_impact" and not allow_high_impact:
             self._record_gate("high_impact_blocked")
+            if is_drop_crossing:
+                self._resolve_pending_blackout(reason="drop_crossing_high_impact_blocked")
             return
 
         if self._is_role_cooldown_blocked(
@@ -113,12 +134,19 @@ class LaserSceneExecutor:
         ):
             self._restore_role_state(role, cursor_before, active_before)
             self._record_gate("role_cooldown_blocked")
+            if is_drop_crossing:
+                self._resolve_pending_blackout(reason="drop_crossing_role_cooldown_blocked")
             return
 
+        same_scene_skip = False
         with self._lock:
             if role not in ("manual", "emergency") and selected_scene == self._last_triggered_scene:
                 self._same_scene_skip_count += 1
-                return
+                same_scene_skip = True
+        if same_scene_skip:
+            if is_drop_crossing:
+                self._resolve_pending_blackout(reason="drop_crossing_same_scene_skip")
+            return
 
         priority = self._priority_for_role(role)
         midi_message = self._materialize_midi(
@@ -128,7 +156,12 @@ class LaserSceneExecutor:
         )
         if not self._midi_output.trigger(midi_message, priority=priority):
             self._record_gate("midi_trigger_rejected")
+            if is_drop_crossing:
+                self._resolve_pending_blackout(reason="drop_crossing_midi_trigger_rejected")
             return
+
+        if is_drop_crossing:
+            self._resolve_pending_blackout(reason="drop_crossing_success")
 
         with self._lock:
             self._triggered_count += 1
@@ -137,6 +170,37 @@ class LaserSceneExecutor:
             self._last_error = ""
             if role in self._role_last_trigger_beat:
                 self._role_last_trigger_beat[role] = float(ctx.abs_beat)
+
+    def trigger_blackout_on(self, ctx: LaserContext) -> None:
+        """Send manual blackout-on MIDI command for Smart Drop pre-window."""
+        del ctx  # context reserved for future diagnostics.
+        if not self.smart_drop_blackout_enabled():
+            return
+        with self._lock:
+            if self._blackout_pending_for_drop_window:
+                return
+        msg = self._config.manual_blackout_on
+        if msg is None:
+            return
+        if self._midi_output.trigger(msg, priority="high"):
+            with self._lock:
+                self._blackout_pending_for_drop_window = True
+            return
+        self._record_gate("manual_blackout_on_rejected")
+
+    def _resolve_pending_blackout(self, *, reason: str) -> None:
+        """Send blackout-off exactly once for each armed blackout window."""
+        with self._lock:
+            pending = self._blackout_pending_for_drop_window
+            if pending:
+                self._blackout_pending_for_drop_window = False
+        if not pending:
+            return
+        msg = self._config.manual_blackout_off
+        if msg is None:
+            return
+        if not self._midi_output.trigger(msg, priority="high"):
+            self._record_gate("manual_blackout_off_rejected")
 
     def status(self) -> dict:
         with self._lock:
@@ -154,6 +218,7 @@ class LaserSceneExecutor:
                 "gated_count": self._gated_count,
                 "missing_scene_count": self._missing_scene_count,
                 "same_scene_skip_count": self._same_scene_skip_count,
+                "blackout_pending_for_drop_window": self._blackout_pending_for_drop_window,
                 "role_cursors": role_cursors,
                 "role_active_scenes": active_scenes,
                 "role_last_trigger_beat": last_trigger_beats,

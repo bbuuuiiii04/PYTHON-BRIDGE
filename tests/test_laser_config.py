@@ -244,6 +244,108 @@ class DryRunDefaultTests(unittest.TestCase):
         self.assertFalse(result.config.dry_run)
 
 
+class SmartDropModeTests(unittest.TestCase):
+    def test_smart_drop_mode_defaults_to_blackout_mask(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg.pop("smart_drop_mode", None)
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.config.smart_drop_mode, "blackout_mask")
+
+    def test_smart_drop_mode_legacy_rearm_is_valid(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "legacy_rearm"
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.config.smart_drop_mode, "legacy_rearm")
+
+    def test_invalid_smart_drop_mode_fails_validation(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "invalid_mode"
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(result.available)
+        self.assertEqual(result.reason, "invalid_config")
+        self.assertTrue(any("smart_drop_mode" in e for e in result.errors))
+
+
+class ManualBlackoutPairValidationTests(unittest.TestCase):
+    def test_blackout_mode_requires_blackout_command_pair(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "blackout_mask"
+        cfg["manual_commands"] = {
+            "blackout_on": {
+                "kind": "note_on",
+                "behavior": "note_on",
+                "channel": 1,
+                "note": 90,
+                "velocity": 127,
+            },
+        }
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(result.available)
+        self.assertTrue(any("manual_commands.blackout_on" in e for e in result.errors))
+
+    def test_blackout_mode_requires_blackout_off_when_blackout_on_missing(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "blackout_mask"
+        cfg["manual_commands"] = {
+            "blackout_off": {
+                "kind": "note_off",
+                "behavior": "note_off",
+                "channel": 1,
+                "note": 90,
+                "velocity": 0,
+            },
+        }
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(result.available)
+        self.assertTrue(any("manual_commands.blackout_on" in e for e in result.errors))
+
+    def test_blackout_mode_allows_blackout_command_pair(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "blackout_mask"
+        cfg["manual_commands"] = {
+            "blackout_on": {
+                "kind": "note_on",
+                "behavior": "note_on",
+                "channel": 1,
+                "note": 91,
+                "velocity": 127,
+            },
+            "blackout_off": {
+                "kind": "note_off",
+                "behavior": "note_off",
+                "channel": 1,
+                "note": 91,
+                "velocity": 0,
+            },
+        }
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+
+    def test_legacy_mode_does_not_require_manual_blackout_commands(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "legacy_rearm"
+        cfg["manual_commands"] = {
+            "blackout_on": {
+                "kind": "note_on",
+                "behavior": "note_on",
+                "channel": 1,
+                "note": 91,
+                "velocity": 127,
+            },
+        }
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+
+
 # ---------------------------------------------------------------------------
 # RBSS_LASER_CONFIG env var override
 # ---------------------------------------------------------------------------

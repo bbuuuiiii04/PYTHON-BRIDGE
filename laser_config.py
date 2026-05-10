@@ -39,6 +39,7 @@ _VALID_SAFETY_CLASSES = frozenset({
     "high_impact", "strobe", "blackout",
 })
 _VALID_SCENE_TYPES = frozenset({"static", "autoloop", "utility"})
+_VALID_SMART_DROP_MODES = frozenset({"blackout_mask", "legacy_rearm"})
 
 _DURATION_MIN = 10
 _DURATION_MAX = 250
@@ -85,6 +86,7 @@ class LaserConfig:
     """
     enabled: bool
     dry_run: bool
+    smart_drop_mode: str
     midi_output_port: str
     scenes: dict[str, LaserScene]
     personalities: dict[str, LaserPersonality]
@@ -94,6 +96,8 @@ class LaserConfig:
     stale_scene: str
     emergency_scene: str
     fallback_scene: str
+    manual_blackout_on: Optional[LaserMidiMessage] = None
+    manual_blackout_off: Optional[LaserMidiMessage] = None
 
 
 @dataclass(frozen=True)
@@ -201,6 +205,16 @@ def _validate(data: dict[str, Any]) -> list[str]:
         errors.append("'dry_run' must be a boolean")
         dry_run = True
 
+    smart_drop_mode = data.get("smart_drop_mode", "blackout_mask")
+    if not isinstance(smart_drop_mode, str):
+        errors.append("'smart_drop_mode' must be a string")
+        smart_drop_mode = "blackout_mask"
+    elif smart_drop_mode not in _VALID_SMART_DROP_MODES:
+        errors.append(
+            f"'smart_drop_mode' must be one of {sorted(_VALID_SMART_DROP_MODES)}, got {smart_drop_mode!r}"
+        )
+        smart_drop_mode = "blackout_mask"
+
     # midi_output_port required when live MIDI is active
     midi_port = data.get("midi_output_port", "")
     if not isinstance(midi_port, str):
@@ -250,6 +264,48 @@ def _validate(data: dict[str, Any]) -> list[str]:
                 errors.append(
                     f"'default_personality' references unknown personality '{default_p}'"
                 )
+
+    errors.extend(_validate_manual_commands(data, smart_drop_mode=smart_drop_mode))
+    return errors
+
+
+def _validate_manual_commands(data: dict[str, Any], *, smart_drop_mode: str) -> list[str]:
+    errors: list[str] = []
+    manual_commands = data.get("manual_commands")
+
+    if manual_commands is None:
+        if "manual_blackout_on" in data or "manual_blackout_off" in data:
+            manual_commands = {
+                "blackout_on": data.get("manual_blackout_on"),
+                "blackout_off": data.get("manual_blackout_off"),
+            }
+        else:
+            return errors
+
+    if not isinstance(manual_commands, dict):
+        errors.append("'manual_commands' must be an object")
+        return errors
+
+    blackout_on = manual_commands.get("blackout_on")
+    if blackout_on is not None:
+        if not isinstance(blackout_on, dict):
+            errors.append("'manual_commands.blackout_on' must be an object")
+        else:
+            errors.extend(_validate_midi("manual_commands.blackout_on", blackout_on))
+
+    blackout_off = manual_commands.get("blackout_off")
+    if blackout_off is not None:
+        if not isinstance(blackout_off, dict):
+            errors.append("'manual_commands.blackout_off' must be an object")
+        else:
+            errors.extend(_validate_midi("manual_commands.blackout_off", blackout_off))
+
+    has_blackout_on = isinstance(blackout_on, dict)
+    has_blackout_off = isinstance(blackout_off, dict)
+    if smart_drop_mode == "blackout_mask" and has_blackout_on != has_blackout_off:
+        errors.append(
+            "'manual_commands.blackout_on' and 'manual_commands.blackout_off' must both be configured when smart_drop_mode='blackout_mask'"
+        )
 
     return errors
 
@@ -479,10 +535,12 @@ def _build_config(data: dict[str, Any]) -> LaserConfig:
     personalities: dict[str, LaserPersonality] = {}
     for p_name, p_data in data.get("personalities", {}).items():
         personalities[p_name] = _build_personality(p_name, p_data)
+    manual_blackout_on, manual_blackout_off = _build_manual_commands(data)
 
     return LaserConfig(
         enabled=bool(data.get("enabled", False)),
         dry_run=bool(data.get("dry_run", True)),
+        smart_drop_mode=str(data.get("smart_drop_mode", "blackout_mask")),
         midi_output_port=str(data.get("midi_output_port", "")),
         scenes=scenes,
         personalities=personalities,
@@ -492,6 +550,53 @@ def _build_config(data: dict[str, Any]) -> LaserConfig:
         stale_scene=str(data.get("stale_scene", "")),
         emergency_scene=str(data.get("emergency_scene", "")),
         fallback_scene=str(data.get("fallback_scene", "")),
+        manual_blackout_on=manual_blackout_on,
+        manual_blackout_off=manual_blackout_off,
+    )
+
+
+def _build_manual_commands(
+    data: dict[str, Any],
+) -> tuple[Optional[LaserMidiMessage], Optional[LaserMidiMessage]]:
+    manual_commands = data.get("manual_commands")
+    if isinstance(manual_commands, dict):
+        return (
+            _build_midi_message(manual_commands.get("blackout_on")),
+            _build_midi_message(manual_commands.get("blackout_off")),
+        )
+    if "manual_blackout_on" in data or "manual_blackout_off" in data:
+        return (
+            _build_midi_message(data.get("manual_blackout_on")),
+            _build_midi_message(data.get("manual_blackout_off")),
+        )
+    return (None, None)
+
+
+def _build_midi_message(raw: Any) -> Optional[LaserMidiMessage]:
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("kind", "note_pulse"))
+    behavior = raw.get("behavior")
+    if not isinstance(behavior, str) or not behavior:
+        if kind == "note_pulse":
+            behavior = "pulse"
+        elif kind == "note_on":
+            behavior = "note_on"
+        elif kind == "note_off":
+            behavior = "note_off"
+        else:
+            behavior = "pulse"
+    return LaserMidiMessage(
+        kind=kind,
+        channel=int(raw.get("channel", 1)),
+        note=int(raw.get("note", 0)),
+        velocity=int(raw.get("velocity", 127)),
+        cc=int(raw.get("cc", 0)),
+        value=int(raw.get("value", 0)),
+        duration_ms=int(raw.get("duration_ms", 80)),
+        behavior=behavior,
+        hold_ms=int(raw.get("hold_ms", 0)),
+        hold_beats=float(raw.get("hold_beats", 0.0)),
     )
 
 

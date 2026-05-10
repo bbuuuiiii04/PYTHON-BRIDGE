@@ -2,6 +2,7 @@
   "_comment": "Laser Director example config. Copy to laser_director.json and edit. Disabled by default.",
   "enabled": false,
   "dry_run": true,
+  "smart_drop_mode": "blackout_mask",
   "midi_output_port": "IAC Driver Bus 1",
 
   "startup_scene":   "safe_static",
@@ -163,7 +164,7 @@
       "buildup_approach_beats": 8,
       "buildup_hold_beats": 8,
       "pre_drop_lookahead_beats": 4,
-      "_comment_pre_drop_deprecated": "pre_drop_scene is intentionally inactive in Laser Director policy; Smart Drop handles final pre-drop autoloop cut/rearm.",
+      "_comment_pre_drop_deprecated": "pre_drop_scene is intentionally inactive in Laser Director policy; Smart Drop uses blackout_mask or legacy_rearm based on smart_drop_mode.",
       "_comment_scene_banks": "Optional role banks rotate deterministically (round-robin) on role entry/eligible trigger only.",
       "_comment_live_midi_safe_first": "For first live tests keep mappings safe/gentle and leave dry_run=true until validated.",
       "_comment_deprecated_timing_fields": "buildup_approach_beats, buildup_hold_beats, and pre_drop_lookahead_beats are retained for backward compatibility and status only.",

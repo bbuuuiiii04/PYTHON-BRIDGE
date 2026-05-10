@@ -125,6 +125,7 @@ class LaserContext:
     current_phrase_is_up: bool = False
     current_phrase_is_chorus: bool = False
     scripted_id: int = 0
+    smart_drop_blackout_active: bool = False
 
 
 @dataclass(frozen=True)

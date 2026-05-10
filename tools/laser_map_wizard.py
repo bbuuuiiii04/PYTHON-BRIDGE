@@ -302,6 +302,7 @@ def _ensure_house_personality(config: dict[str, Any]) -> None:
 def _ensure_core_fields(config: dict[str, Any]) -> None:
     config.setdefault("enabled", False)
     config.setdefault("dry_run", True)
+    config.setdefault("smart_drop_mode", "blackout_mask")
     config.setdefault("midi_output_port", _DEFAULT_PORT)
     config.setdefault("startup_scene", "safe_static")
     config.setdefault("stop_scene", "safe_static")
@@ -633,6 +634,40 @@ def validate_config_data(config: dict[str, Any]) -> tuple[list[str], list[str]]:
                 warnings.append(
                     f"personality '{pname}' drop scene is high_impact while allow_high_impact=false"
                 )
+    manual_commands = config.get("manual_commands", {})
+    blackout_on = (
+        manual_commands.get("blackout_on")
+        if isinstance(manual_commands, dict)
+        else config.get("manual_blackout_on")
+    )
+    blackout_off = (
+        manual_commands.get("blackout_off")
+        if isinstance(manual_commands, dict)
+        else config.get("manual_blackout_off")
+    )
+    has_drop_mapping = False
+    for pdata in personalities.values():
+        if not isinstance(pdata, dict):
+            continue
+        drop_scene = pdata.get("drop_scene")
+        if isinstance(drop_scene, str) and drop_scene:
+            has_drop_mapping = True
+            break
+    smart_drop_mode = str(config.get("smart_drop_mode", "blackout_mask")).strip().lower()
+    if smart_drop_mode == "blackout_mask" and has_drop_mapping:
+        if not isinstance(blackout_on, dict):
+            warnings.append(
+                "manual_commands.blackout_on is not configured; blackout_mask mode cannot arm blackout MIDI"
+            )
+        if not isinstance(blackout_off, dict):
+            warnings.append(
+                "manual_commands.blackout_off is not configured; blackout_mask mode cannot clear blackout MIDI"
+            )
+    elif smart_drop_mode == "legacy_rearm":
+        if isinstance(blackout_on, dict) or isinstance(blackout_off, dict):
+            warnings.append(
+                "manual blackout commands are configured but smart_drop_mode=legacy_rearm; blackout commands are unused"
+            )
     return errors, warnings
 
 

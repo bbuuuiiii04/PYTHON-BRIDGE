@@ -327,6 +327,7 @@ MIDI dependency is an explicit Phase 0 decision. Recommended path: `mido` plus `
 Required validation:
 
 - `enabled` and `dry_run` must be booleans; `dry_run` defaults to `true`.
+- `smart_drop_mode` must be `"blackout_mask"` or `"legacy_rearm"` and defaults to `"blackout_mask"`.
 - `midi_output_port` must be a non-empty string when live MIDI is enabled.
 - Every scene must define a valid MIDI mapping.
 - `note_pulse.duration_ms` must be clamped to a safe bounded range, recommended `10 <= duration_ms <= 250`.
@@ -430,7 +431,19 @@ Timing gates:
 - Multiple Smart Drop anchors inside one CHORUS section must not cause repeated
   buildup triggers.
 - `pre_drop_scene` is intentionally inactive in policy. Smart Drop already
-  handles final pre-drop autoloop cut/rearm behavior.
+  handles final pre-drop blackout behavior.
+- Smart Drop pre-window behavior in `smart_drop_mode="blackout_mask"` is:
+  - arm blackout state once in `StateManager` (no direct OS2L cut/rearm),
+  - send manual blackout MIDI through `LaserSceneExecutor` only,
+  - keep `drop_crossing` based on beat crossing semantics, independent of blackout flag.
+- `smart_drop_mode="legacy_rearm"` keeps the old Smart Drop cut/rearm path.
+- `dry_run` does not change Smart Drop algorithm; it only controls live MIDI emission.
+- Drop-crossing MIDI ordering must be deterministic in a single push:
+  1) pre-window manual blackout-on,
+  2) drop scene MIDI on crossing,
+  3) manual blackout-off MIDI.
+- blackout-off must be emitted exactly once when a blackout window resolves, including
+  successful drop, blocked/rejected drop, stop, track/deck change, and other Smart Drop resets.
 
 Cooldown state is updated only after `MidiOutput.trigger()` accepts the message. If a desired scene is blocked by cooldown or safety, choose the configured fallback scene and record the blocked reason in status/logs.
 

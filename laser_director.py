@@ -121,6 +121,7 @@ class LaserDirector:
         self._post_drop_start_abs_beat: float = -1.0
         self._last_smart_abs_beat: Optional[float] = None
         self._phrase_trigger_pending: bool = False
+        self._smart_drop_blackout_active: bool = False
 
     # ── Policy commands (called from StateManager._handle_event) ─────────────
 
@@ -196,6 +197,7 @@ class LaserDirector:
         if not self._enabled:
             return None
 
+        self._smart_drop_blackout_active = bool(ctx.smart_drop_blackout_active)
         decision = self._decide(ctx, now=now)
 
         scene_changed = decision.scene != self._current_scene
@@ -336,42 +338,25 @@ class LaserDirector:
                 role="breakdown",
             )
 
-        # Priority 9: Drop crossing (once per target beat), aligned to real
-        # autoloop tick/rearm edges to avoid pre-rearm MIDI triggers.
+        # Priority 9: Drop crossing (once per target beat).
         if previous_abs_beat is not None and self._drop_scene:
             for drop_beat in sorted(set(ctx.smart_drops)):
                 if (
                     previous_abs_beat < drop_beat <= abs_beat
                     and self._laser_drop_fired_beat != int(drop_beat)
                 ):
-                    self._pending_drop_crossing_beat = int(drop_beat)
+                    self._laser_drop_fired_beat = int(drop_beat)
+                    self._pending_drop_crossing_beat = None
                     self._drop_rearm_edge_seen_for_pending = False
-                    break
-
-            pending_drop = self._pending_drop_crossing_beat
-            if pending_drop is not None and ctx.autoloop_tick_just_fired:
-                # Rearm/tick edge observed; allow firing on the following push tick.
-                self._drop_rearm_edge_seen_for_pending = True
-            if (
-                pending_drop is not None
-                and self._drop_rearm_edge_seen_for_pending
-                and not ctx.autoloop_tick_just_fired
-                and ctx.autoloop_ready
-                and float(pending_drop) <= abs_beat
-                and self._laser_drop_fired_beat != int(pending_drop)
-            ):
-                self._laser_drop_fired_beat = int(pending_drop)
-                self._pending_drop_crossing_beat = None
-                self._drop_rearm_edge_seen_for_pending = False
-                self._post_drop_start_abs_beat = abs_beat
-                self._last_smart_abs_beat = abs_beat
-                return LaserSceneDecision(
-                    scene=self._drop_scene,
-                    reason="drop_crossing",
-                    priority=9,
-                    source="policy",
-                    role="drop",
-                )
+                    self._post_drop_start_abs_beat = abs_beat
+                    self._last_smart_abs_beat = abs_beat
+                    return LaserSceneDecision(
+                        scene=self._drop_scene,
+                        reason="drop_crossing",
+                        priority=9,
+                        source="policy",
+                        role="drop",
+                    )
 
         # Priority 10: Post-drop hold (using existing minimum_scene_hold_beats).
         if (
@@ -498,6 +483,7 @@ class LaserDirector:
         self._drop_rearm_edge_seen_for_pending = False
         self._post_drop_start_abs_beat = -1.0
         self._last_smart_abs_beat = None
+        self._smart_drop_blackout_active = False
         self._phrase_trigger_pending = False
 
     def _beats_to_next_drop(self, abs_beat: float, smart_drops: tuple[int, ...]) -> float:
@@ -603,6 +589,7 @@ class LaserDirector:
             "laser_drop_fired_beat": self._laser_drop_fired_beat,
             "pending_drop_crossing_beat": self._pending_drop_crossing_beat,
             "drop_rearm_edge_seen_for_pending": self._drop_rearm_edge_seen_for_pending,
+            "smart_drop_blackout_active": self._smart_drop_blackout_active,
             "phrase_trigger_pending": self._phrase_trigger_pending,
             "last_trigger_abs_beat": self._last_trigger_abs_beat,
         }
