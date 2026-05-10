@@ -248,6 +248,8 @@ class LaserContext:
     smart_drops: tuple[int, ...]
     smart_breakdowns: tuple[int, ...]
     anlz_buildups: tuple[int, ...]
+    current_phrase_is_up: bool
+    current_phrase_is_chorus: bool
     next_drop_beat: int | None
     beats_to_next_drop: float | None
     in_breakdown: bool
@@ -285,6 +287,12 @@ master_recently_changed = now - os.last_arm_mono < ARM_GUARD_S and bool(os.autol
 smart_drops = tuple(active_deck.meta.smart_drops)
 smart_breakdowns = tuple(active_deck.meta.smart_breakdowns)
 anlz_buildups = tuple(active_deck.meta.anlz_buildups)
+current_phrase_is_up/current_phrase_is_chorus are derived from the latest
+semantic marker at or before `abs_beat` across:
+  - UP markers: `active_deck.meta.anlz_buildups`
+  - CHORUS markers: `active_deck.meta.anlz_drops`
+  - LOW markers: `active_deck.meta.anlz_breakdowns`
+If latest marker is LOW (or no marker exists), both booleans are false.
 ```
 
 `_build_laser_context()` must not call `conn.status()` or any method that builds dictionaries, performs I/O, scans MIDI ports, reads files, or can grow in cost. If OS2L connectivity is needed in `_push_tick`, use a cached boolean or a dedicated constant-time `is_connected()` method.
@@ -411,11 +419,16 @@ Timing gates:
 - Normal scene changes respect `minimum_scene_hold_beats`.
 - Normal scene changes occur only at configured phrase boundaries when `normal_changes_only_on_phrase_boundary=true`.
 - Drop scenes may be immediate only when configured and position is fresh.
-- Rekordbox ANLZ UP markers are observation/status hints only; they do not trigger
-  `buildup_scene`.
-- `buildup_scene` is anchored to the next curated Smart Drop and is active when
-  `0 < beats_to_next_drop <= buildup_lookahead_beats` (default 32), unless a
-  higher-priority gate wins.
+- `buildup_scene` is anchored to the next curated Smart Drop and is active only
+  when all are true:
+  - `0 < beats_to_next_drop <= buildup_lookahead_beats` (default 32)
+  - current phrase context is UP (`current_phrase_is_up`)
+  - current phrase context is not CHORUS (`not current_phrase_is_chorus`)
+  unless a higher-priority gate wins.
+- `anlz_buildups` contributes to phrase context derivation in `StateManager`;
+  `LaserDirector` must not use raw `anlz_buildups` as a direct trigger.
+- Multiple Smart Drop anchors inside one CHORUS section must not cause repeated
+  buildup triggers.
 - `pre_drop_scene` is intentionally inactive in policy. Smart Drop already
   handles final pre-drop autoloop cut/rearm behavior.
 

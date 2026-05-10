@@ -114,6 +114,8 @@ class LaserContext:
     breakdown_active: bool = False
     smart_drops: tuple[int, ...] = field(default_factory=tuple)
     anlz_buildups: tuple[int, ...] = field(default_factory=tuple)
+    current_phrase_is_up: bool = False
+    current_phrase_is_chorus: bool = False
     scripted_id: int = 0
 
 

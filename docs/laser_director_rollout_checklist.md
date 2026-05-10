@@ -29,10 +29,13 @@ Use this with the canonical design in `docs/laser_director_design.md` and the So
 8. Verify scripted context (`lighting_mode=scripted` or `scripted_id>0`) returns idle/no-output (`scene=""`, `reason="scripted"`).
 9. Verify same-scene reason changes are debug/status-only and do not appear as INFO scene transitions.
 10. Validate Smart Drop/Smart Breakdown behavior remains unchanged.
-11. Verify buildup countdown behavior is Smart-Drop-driven:
+11. Verify buildup countdown behavior is Smart-Drop-driven and phrase-gated:
    - no future Smart Drop => no buildup scene
-   - next Smart Drop > 32 beats away => no buildup scene
-   - next Smart Drop within 32 beats => buildup scene until drop crossing (unless higher-priority gate wins)
+   - next Smart Drop > lookahead => no buildup scene
+   - latest marker CHORUS => no buildup scene
+   - latest marker LOW or no marker => no buildup scene
+   - latest marker UP + next Smart Drop within lookahead => buildup scene until drop crossing (unless higher-priority gate wins)
+   - multiple Smart Drop anchors inside one CHORUS => zero buildup triggers
    - no automatic `pre_drop_scene` selection
 12. Validate OS2L behavior remains unchanged throughout rollout.
 13. Test only safe mappings first (`safe_static`, gentle phrase movement).

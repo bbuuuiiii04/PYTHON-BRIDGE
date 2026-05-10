@@ -379,6 +379,8 @@ class LaserDirector:
         if (
             self._buildup_scene
             and not in_post_drop_hold
+            and ctx.current_phrase_is_up
+            and not ctx.current_phrase_is_chorus
             and self._buildup_lookahead_beats > 0
             and 0 < beats_to_next_drop <= self._buildup_lookahead_beats
         ):

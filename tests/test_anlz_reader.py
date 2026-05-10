@@ -240,6 +240,24 @@ class AnlzExtractionTests(unittest.TestCase):
         self.assertEqual(breakdowns, [64])
         self.assertEqual(buildups, [96])
 
+    def test_pssi_mood23_extracts_confirmed_buildups_breakdowns_and_drops(self) -> None:
+        tag = FakeTag([
+            FakeEntry(4, 65),
+            FakeEntry(5, 81),
+            FakeEntry(8, 97),
+            FakeEntry(9, 129),
+            FakeEntry(10, 161),
+        ])
+        tag.content.mood = 2
+        parsed = [(Path("ANLZ0000.EXT"), FakeAnlz({"PSSI": [tag]}))]
+
+        mood, drops, breakdowns, buildups = _extract_pssi_phrases(parsed)
+
+        self.assertEqual(mood, 2)
+        self.assertEqual(drops, [128])
+        self.assertEqual(breakdowns, [96])
+        self.assertEqual(buildups, [64, 80])
+
     def test_pssi_ignores_non_drop_kinds(self) -> None:
         parsed = [
             (Path("ANLZ0000.EXT"), FakeAnlz({

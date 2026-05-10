@@ -154,7 +154,9 @@ def _extract_pssi_phrases(parsed: list[tuple[Path, Any]]) -> tuple[int, list[int
                         drops.add(bridge_beat)
                     elif kind == 8:
                         breakdowns.add(bridge_beat)
-                        
+                    elif kind in (4, 5):
+                        buildups.add(bridge_beat)
+
         if drops or breakdowns:
             return mood, sorted(drops), sorted(breakdowns), sorted(buildups)
     return 0, [], [], []
