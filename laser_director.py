@@ -352,11 +352,17 @@ class LaserDirector:
                 source="policy",
             )
 
+        in_post_drop_hold = (
+            self._post_drop_start_abs_beat >= 0.0
+            and self._minimum_scene_hold_beats > 0
+            and (abs_beat - self._post_drop_start_abs_beat) < self._minimum_scene_hold_beats
+        )
+
         # Priority 11: Existing ANLZ buildup observation, but only when it leads
         # into a future Smart Drop and not during active post-drop hold.
         if (
             self._buildup_scene
-            and self._post_drop_start_abs_beat < 0.0
+            and not in_post_drop_hold
             and self._in_buildup_window(abs_beat, ctx.anlz_buildups, ctx.smart_drops)
         ):
             self._last_smart_abs_beat = abs_beat

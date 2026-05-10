@@ -502,6 +502,42 @@ class PhraseSceneTests(unittest.TestCase):
         self.assertEqual(ld.status()["last_reason"], "phrase_boundary")
         self.assertFalse(ld.status()["phrase_trigger_pending"])
 
+    def test_not_playing_clears_phrase_trigger_pending(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(abs_beat=31.0), now=_now())
+        ld.tick(_ctx(abs_beat=32.0, autoloop_tick_just_fired=False), now=_now())
+        self.assertTrue(ld.status()["phrase_trigger_pending"])
+        ld.tick(_ctx(playing=False, abs_beat=32.2), now=_now())
+        self.assertFalse(ld.status()["phrase_trigger_pending"])
+        self.assertEqual(ld.status()["last_reason"], "not_playing")
+
+    def test_autoloop_not_ready_clears_phrase_trigger_pending(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(abs_beat=31.0), now=_now())
+        ld.tick(_ctx(abs_beat=32.0, autoloop_tick_just_fired=False), now=_now())
+        self.assertTrue(ld.status()["phrase_trigger_pending"])
+        ld.tick(_ctx(abs_beat=32.2, autoloop_ready=False), now=_now())
+        self.assertFalse(ld.status()["phrase_trigger_pending"])
+        self.assertEqual(ld.status()["last_reason"], "autoloop_not_ready")
+
+    def test_scripted_clears_phrase_trigger_pending(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(abs_beat=31.0), now=_now())
+        ld.tick(_ctx(abs_beat=32.0, autoloop_tick_just_fired=False), now=_now())
+        self.assertTrue(ld.status()["phrase_trigger_pending"])
+        ld.tick(_ctx(abs_beat=32.2, scripted_id=7), now=_now())
+        self.assertFalse(ld.status()["phrase_trigger_pending"])
+        self.assertEqual(ld.status()["last_reason"], "scripted")
+
+    def test_position_stale_clears_phrase_trigger_pending(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(abs_beat=31.0), now=_now())
+        ld.tick(_ctx(abs_beat=32.0, autoloop_tick_just_fired=False), now=_now())
+        self.assertTrue(ld.status()["phrase_trigger_pending"])
+        ld.tick(_ctx(abs_beat=32.2, position_stale=True), now=_now())
+        self.assertFalse(ld.status()["phrase_trigger_pending"])
+        self.assertEqual(ld.status()["last_reason"], "position_stale")
+
     def test_phrase_scene_name_can_be_arbitrary(self) -> None:
         ld = _director(default_scene="d", phrase_scene="my_custom_phrase_42", phrase_interval_beats=16)
         ld.tick(_ctx(playing=True, position_stale=False, abs_beat=15.0), now=_now())
@@ -805,6 +841,26 @@ class SmartObservationTests(unittest.TestCase):
         ld.tick(_ctx(abs_beat=65.2, smart_drops=(64,), anlz_buildups=(65,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "post")
         self.assertEqual(ld.status()["last_reason"], "post_drop_hold")
+
+    def test_buildup_can_trigger_after_post_drop_hold_expires(self) -> None:
+        ld = _director(
+            default_scene="d",
+            drop_scene="drop",
+            post_drop_scene="post",
+            buildup_scene="up",
+            minimum_scene_hold_beats=3,
+            buildup_approach_beats=2,
+            buildup_hold_beats=8,
+        )
+        ld.tick(_ctx(abs_beat=63.0, smart_drops=(64, 72), anlz_buildups=(70,)), now=_now())
+        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64, 72), anlz_buildups=(70,)), now=_now())
+        ld.tick(_ctx(abs_beat=65.0, smart_drops=(64, 72), anlz_buildups=(70,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "post")
+        ld.tick(_ctx(abs_beat=67.5, smart_drops=(64, 72), anlz_buildups=(70,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        ld.tick(_ctx(abs_beat=68.5, smart_drops=(64, 72), anlz_buildups=(70,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "up")
+        self.assertEqual(ld.status()["last_reason"], "buildup_window")
 
     def test_zero_minimum_hold_disables_post_drop_hold(self) -> None:
         ld = _director(
