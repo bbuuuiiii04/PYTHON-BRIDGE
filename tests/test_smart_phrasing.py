@@ -1,7 +1,11 @@
+import sys
 import unittest
 from dataclasses import replace
+from pathlib import Path
 
-from smart_phrasing import (
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
     PhraseLabel,
     PhraseSegment,
     BeatSegment,
