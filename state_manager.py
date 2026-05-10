@@ -686,10 +686,8 @@ class StateManager:
                     personality_cfg = provider(personality_name)
                     if personality_cfg is not None:
                         self._laser_director.set_personality_config(personality_cfg)
-                    if self._laser_executor is not None:
-                        self._laser_executor.set_personality(personality_cfg)
-                elif self._laser_executor is not None:
-                    self._laser_executor.set_personality(None)
+                        if self._laser_executor is not None:
+                            self._laser_executor.set_personality(personality_cfg)
 
     # ── Deck switch ───────────────────────────────────────────────────────────
 

@@ -94,7 +94,7 @@ class LaserSceneExecutor:
         allow_high_impact = bool(
             self._personality.allow_high_impact if self._personality is not None else False
         )
-        if scene_def.safety_class == "high_impact" and not allow_high_impact:
+        if role != "emergency" and scene_def.safety_class == "high_impact" and not allow_high_impact:
             self._record_gate("high_impact_blocked")
             return
 
@@ -102,13 +102,6 @@ class LaserSceneExecutor:
             if selected_scene == self._last_triggered_scene:
                 self._same_scene_skip_count += 1
                 return
-
-        midi_status = self._midi_output.status()
-        if not self._config.dry_run and (
-            midi_status.get("degraded", False) or not midi_status.get("running", False)
-        ):
-            self._record_gate("midi_degraded")
-            return
 
         priority = self._priority_for_role(role)
         if not self._midi_output.trigger(scene_def.midi, priority=priority):

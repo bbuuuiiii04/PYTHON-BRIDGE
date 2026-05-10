@@ -14,8 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.__main__ import _build_laser_startup_wiring  # noqa: E402
 from rb_ss_bridge_v2.laser_config import LaserConfig, LaserConfigResult  # noqa: E402
 from rb_ss_bridge_v2.laser_models import LaserMidiMessage, LaserPersonality, LaserScene  # noqa: E402
-from rb_ss_bridge_v2.laser_models import LaserContext  # noqa: E402
+from rb_ss_bridge_v2.laser_models import LaserContext, LaserSceneDecision  # noqa: E402
+from rb_ss_bridge_v2.models import BridgeEvent, Ev  # noqa: E402
 from rb_ss_bridge_v2.runtime_status import StatusWriter  # noqa: E402
+from rb_ss_bridge_v2.state_manager import StateManager  # noqa: E402
 from rb_ss_bridge_v2.validation_runner import (  # noqa: E402
     STATUS_FAIL,
     STATUS_NA,
@@ -293,6 +295,75 @@ class RuntimeStatusLaserWiringTests(unittest.TestCase):
             snapshot["laser_director"],
             {"available": False, "enabled": False, "reason": "not_configured"},
         )
+
+
+class LaserPersonalityUnknownNameTests(unittest.TestCase):
+    def test_unknown_personality_does_not_wipe_executor_personality(self) -> None:
+        cfg = _config(enabled=True, dry_run=True, with_personality=True)
+        bundle = _build_laser_startup_wiring(LaserConfigResult(available=True, reason="ok", config=cfg))
+        assert bundle.laser_director is not None
+        assert bundle.laser_executor is not None
+        assert bundle.personality_provider is not None
+        midi_output = bundle.midi_output
+        try:
+            sm = StateManager(
+                queue.Queue(maxsize=8),
+                Mock(),
+                Mock(),
+                live_bpm=Mock(),
+                laser_director=bundle.laser_director,
+                laser_executor=bundle.laser_executor,
+                laser_personality_provider=bundle.personality_provider,
+            )
+            before = bundle.laser_executor.status()
+            self.assertTrue(before["role_cursors"])
+            self.assertEqual(before["role_cursors"]["drop"], 0)
+
+            bundle.laser_executor.on_decision(
+                LaserSceneDecision(
+                    scene="default_scene_cfg",
+                    reason="drop_crossing",
+                    priority=9,
+                    source="policy",
+                    role="drop",
+                ),
+                _ctx(),
+            )
+            bundle.laser_executor.on_decision(
+                LaserSceneDecision(
+                    scene="default_scene_cfg",
+                    reason="post_drop_hold",
+                    priority=10,
+                    source="policy",
+                    role="post_drop",
+                ),
+                _ctx(),
+            )
+            bundle.laser_executor.on_decision(
+                LaserSceneDecision(
+                    scene="default_scene_cfg",
+                    reason="drop_crossing",
+                    priority=9,
+                    source="policy",
+                    role="drop",
+                ),
+                _ctx(),
+            )
+            before = bundle.laser_executor.status()
+            self.assertGreater(before["role_cursors"]["drop"], 0)
+            sm._handle_event(
+                BridgeEvent(
+                    kind=Ev.LASER_SET_PERSONALITY,
+                    deck=0,
+                    payload={"personality": "missing_name"},
+                    source="test",
+                )
+            )
+            after = bundle.laser_executor.status()
+            self.assertEqual(after["role_cursors"]["drop"], before["role_cursors"]["drop"])
+        finally:
+            if midi_output is not None:
+                midi_output.stop()
 
 
 if __name__ == "__main__":

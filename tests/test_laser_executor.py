@@ -182,11 +182,13 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertEqual(status["missing_scene_count"], 1)
         self.assertIn("missing_scene_mapping", status["last_error"])
 
-    def test_degraded_live_midi_does_not_trigger(self) -> None:
-        midi = _FakeMidiOutput(dry_run=False, degraded=True)
+    def test_trigger_false_is_handled_safely(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        midi.trigger_result = False
         ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
         ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
-        self.assertEqual(len(midi.calls), 0)
+        self.assertEqual(len(midi.calls), 1)
+        self.assertEqual(ex.status()["last_error"], "midi_trigger_rejected")
 
     def test_same_scene_reason_only_update_does_not_retrigger(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
@@ -240,6 +242,23 @@ class LaserSceneExecutorTests(unittest.TestCase):
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
         self.assertEqual(len(midi.calls), 0)
         self.assertEqual(ex.status()["last_error"], "high_impact_blocked")
+
+    def test_emergency_bypasses_high_impact_block(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        personality = _personality(allow_high_impact=False)
+        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=personality)
+        ex.on_decision(
+            LaserSceneDecision(
+                scene="drop_a",
+                reason="emergency",
+                priority=1,
+                source="emergency",
+                role="emergency",
+            ),
+            _ctx(playing=False, autoloop_ready=False),
+        )
+        self.assertEqual(len(midi.calls), 1)
+        self.assertEqual(midi.calls[0][1], "high")
 
     def test_personality_reset_clears_bank_state(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
