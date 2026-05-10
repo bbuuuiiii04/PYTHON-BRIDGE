@@ -27,3 +27,26 @@ python3 -m rb_ss_bridge_v2
 
 The local launcher scripts currently default to guarded direct B1-B6 paths with
 TimecodeLink and MTC retained as fallbacks.
+
+## Watcher Laser Director Config
+
+The watcher launcher `scripts/ss_bridge_watcher.sh` now sets
+`RBSS_LASER_CONFIG` automatically to:
+
+`$REPO_ROOT/config/laser_director.json`
+
+When that local file is missing, the watcher copies
+`config/laser_director.example.json` to `config/laser_director.json` before
+launching the bridge, then enforces:
+
+- `enabled=true`
+- `dry_run=true`
+
+`config/laser_director.json` is local-only and ignored by git.
+`config/laser_director.example.json` remains the tracked template.
+
+Verify Laser Director status after launch:
+
+```bash
+cat /tmp/rb_ss_bridge_v2_status.json | jq .laser_director
+```
