@@ -1,6 +1,7 @@
 import sys
 import os
 import queue
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,7 +10,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.models import (  # noqa: E402
-    BridgeEvent, DeckState, Ev, OutputState, SmartDropEnergyShadow, TrackMetadata,
+    BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot, SmartDropEnergyShadow, TrackMetadata,
 )
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
@@ -156,6 +157,30 @@ class SmartRearmResetTests(unittest.TestCase):
         self.assertFalse(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 0)
         self.assertEqual(sm._os.phrase_anchor_last_beat, -1)
+
+    def test_executor_runtime_state_resets_on_master_change(self) -> None:
+        sm = _manager()
+        sm._laser_executor = Mock()
+        sm._on_master_changed(2, "test")
+        sm._laser_executor.reset_runtime_state.assert_called_once_with(
+            reason="master_changed"
+        )
+
+    def test_executor_runtime_state_resets_on_active_track_loaded(self) -> None:
+        sm = _manager()
+        sm._laser_executor = Mock()
+        sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
+        sm._laser_executor.reset_runtime_state.assert_called_once_with(
+            reason="active_track_loaded"
+        )
+
+    def test_executor_runtime_state_resets_on_stop(self) -> None:
+        sm = _manager()
+        sm._laser_executor = Mock()
+        sm._do_stop(1, 1000)
+        sm._laser_executor.reset_runtime_state.assert_called_once_with(
+            reason="stop"
+        )
 
     def test_drop_cut_cleared_on_scripted_transition(self) -> None:
         sm = _manager()
@@ -444,6 +469,74 @@ class SmartDropTests(unittest.TestCase):
         _send_direct_autoloop_rearm(sm, 1, 2, 131.0, 32_125, "test", target_beat=64)
         arm_meta = sm._send_autoloop_deck_load.call_args.args[3]
         self.assertEqual(arm_meta.elapsed_ms, 32_000)
+
+
+class SmartDropBlackoutFallbackTests(unittest.TestCase):
+    def _prepare_manager(self):
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SMART_DROP": "1",
+        })
+        deck = sm._deck[1]
+        deck.playing = True
+        deck.meta.filepath = "/music/drop.mp3"
+        deck.meta.bpm = 120.0
+        deck.meta.first_beat_ms = 0.0
+        deck.meta.smart_drops = [2]
+        sm._os.active_deck = 1
+        sm._os.lighting_mode = "autoloop"
+        sm._os.lighting_desired = "autoloop"
+        sm._os.was_playing = True
+        sm._os.last_sent_bpm = 120.0
+        sm._os.last_beat_elapsed_ms = 0
+        sm._os.last_armed_filepath = deck.meta.filepath
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 2
+        sm._cache.update(
+            PositionSnapshot(1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
+        )
+        sm._laser_executor = Mock()
+        sm._laser_executor.smart_drop_blackout_enabled.return_value = True
+        return sm
+
+    def test_crossing_clears_pending_blackout_when_laser_director_missing(self) -> None:
+        sm = self._prepare_manager()
+        sm._laser_director = None
+        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+            sm._push_tick()
+        sm._laser_executor.clear_pending_blackout.assert_called_once_with(
+            reason="smart_drop_crossing_without_drop_decision"
+        )
+        self.assertFalse(sm._os.drop_cut_armed)
+
+    def test_crossing_clears_pending_blackout_when_decision_is_none(self) -> None:
+        sm = self._prepare_manager()
+        sm._laser_director = Mock()
+        sm._laser_director.tick.return_value = None
+        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+            sm._push_tick()
+        sm._laser_executor.clear_pending_blackout.assert_called_once_with(
+            reason="smart_drop_crossing_without_drop_decision"
+        )
+        self.assertFalse(sm._os.drop_cut_armed)
+
+    def test_crossing_clears_pending_blackout_when_non_drop_decision_wins(self) -> None:
+        sm = self._prepare_manager()
+        sm._laser_director = Mock()
+        sm._laser_director.tick.return_value = SimpleNamespace(reason="manual_override")
+        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+            sm._push_tick()
+        sm._laser_executor.clear_pending_blackout.assert_called_once_with(
+            reason="smart_drop_crossing_without_drop_decision"
+        )
+
+    def test_crossing_does_not_double_clear_when_drop_decision_emitted(self) -> None:
+        sm = self._prepare_manager()
+        sm._laser_director = Mock()
+        sm._laser_director.tick.return_value = SimpleNamespace(reason="drop_crossing")
+        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+            sm._push_tick()
+        sm._laser_executor.clear_pending_blackout.assert_not_called()
 
 
 class PhraseAnchorTests(unittest.TestCase):

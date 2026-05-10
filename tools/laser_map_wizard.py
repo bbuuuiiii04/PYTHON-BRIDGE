@@ -655,13 +655,25 @@ def validate_config_data(config: dict[str, Any]) -> tuple[list[str], list[str]]:
             break
     smart_drop_mode = str(config.get("smart_drop_mode", "blackout_mask")).strip().lower()
     if smart_drop_mode == "blackout_mask" and has_drop_mapping:
-        if not isinstance(blackout_on, dict):
+        has_blackout_on = isinstance(blackout_on, dict)
+        has_blackout_off = isinstance(blackout_off, dict)
+        if not has_blackout_on:
             warnings.append(
                 "manual_commands.blackout_on is not configured; blackout_mask mode cannot arm blackout MIDI"
             )
-        if not isinstance(blackout_off, dict):
+        if not has_blackout_off:
             warnings.append(
                 "manual_commands.blackout_off is not configured; blackout_mask mode cannot clear blackout MIDI"
+            )
+        if not has_blackout_on and not has_blackout_off:
+            warnings.append(
+                "Smart Drop mode is blackout_mask but blackout commands are missing; transitions will run without blackout masking"
+            )
+        if bool(config.get("enabled")) and not bool(config.get("dry_run", True)) and (
+            not has_blackout_on or not has_blackout_off
+        ):
+            warnings.append(
+                "LIVE WARNING: enabled=true and dry_run=false with incomplete blackout commands in blackout_mask mode"
             )
     elif smart_drop_mode == "legacy_rearm":
         if isinstance(blackout_on, dict) or isinstance(blackout_off, dict):
@@ -1476,6 +1488,15 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[tu
         checks.append(("config load", False, reason))
         return checks
     cfg = result.config
+    if str(getattr(cfg, "smart_drop_mode", "blackout_mask")) == "blackout_mask":
+        has_blackout_pair = cfg.manual_blackout_on is not None and cfg.manual_blackout_off is not None
+        checks.append(
+            (
+                "smart_drop_blackout_commands",
+                has_blackout_pair,
+                "ready" if has_blackout_pair else "missing blackout_on/blackout_off for blackout_mask mode",
+            )
+        )
     personality = cfg.personalities.get(cfg.default_personality or "")
     if personality is None:
         checks.append(("default personality", False, "missing default personality"))

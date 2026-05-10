@@ -56,14 +56,7 @@ class LaserSceneExecutor:
         """Switch executor personality and reset role-bank execution state."""
         with self._lock:
             self._personality = personality
-            self._last_role = "idle"
-            self._last_reason = ""
-            self._last_triggered_scene = ""
-            self._last_error = ""
-            self._role_cursors = {role: 0 for role in _AUTO_ROLES}
-            self._role_active_scene = {role: "" for role in _AUTO_ROLES}
-            self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
-            self._blackout_pending_for_drop_window = False
+        self.reset_runtime_state(reason="set_personality")
 
     def smart_drop_blackout_enabled(self) -> bool:
         """Return whether Smart Drop should use blackout-mask timing."""
@@ -71,6 +64,18 @@ class LaserSceneExecutor:
 
     def clear_pending_blackout(self, *, reason: str = "smart_drop_reset") -> None:
         """Clear a pending Smart Drop blackout window, if any."""
+        self._resolve_pending_blackout(reason=reason)
+
+    def reset_runtime_state(self, *, reason: str = "runtime_reset") -> None:
+        """Reset role cooldown/bank state across track/deck lifecycle changes."""
+        with self._lock:
+            self._last_role = "idle"
+            self._last_reason = ""
+            self._last_triggered_scene = ""
+            self._last_error = ""
+            self._role_cursors = {role: 0 for role in _AUTO_ROLES}
+            self._role_active_scene = {role: "" for role in _AUTO_ROLES}
+            self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
         self._resolve_pending_blackout(reason=reason)
 
     def on_decision(self, decision: Optional[LaserSceneDecision], ctx: LaserContext) -> None:
@@ -140,7 +145,11 @@ class LaserSceneExecutor:
 
         same_scene_skip = False
         with self._lock:
-            if role not in ("manual", "emergency") and selected_scene == self._last_triggered_scene:
+            if (
+                role not in ("manual", "emergency")
+                and not is_drop_crossing
+                and selected_scene == self._last_triggered_scene
+            ):
                 self._same_scene_skip_count += 1
                 same_scene_skip = True
         if same_scene_skip:
@@ -209,6 +218,11 @@ class LaserSceneExecutor:
             last_trigger_beats = dict(self._role_last_trigger_beat)
             return {
                 "dry_run": self._config.dry_run,
+                "smart_drop_mode": str(getattr(self._config, "smart_drop_mode", "blackout_mask")),
+                "manual_blackout_commands_configured": (
+                    self._config.manual_blackout_on is not None
+                    and self._config.manual_blackout_off is not None
+                ),
                 "last_role": self._last_role,
                 "last_reason": self._last_reason,
                 "last_scene": self._last_triggered_scene,

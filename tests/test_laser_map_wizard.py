@@ -68,6 +68,28 @@ class LaserMapWizardTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertTrue(any("blackout_on" in warning for warning in warnings))
         self.assertTrue(any("blackout_off" in warning for warning in warnings))
+        self.assertTrue(any("transitions will run without blackout masking" in warning for warning in warnings))
+
+    def test_validate_blackout_mode_with_pair_has_no_blackout_missing_warning(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        apply_mapping(cfg, personality="house", role="drop", note=40)
+        cfg["smart_drop_mode"] = "blackout_mask"
+        cfg["manual_commands"] = {
+            "blackout_on": {"kind": "note_on", "behavior": "note_on", "channel": 1, "note": 90, "velocity": 127},
+            "blackout_off": {"kind": "note_off", "behavior": "note_off", "channel": 1, "note": 90, "velocity": 0},
+        }
+        errors, warnings = validate_config_data(cfg)
+        self.assertEqual(errors, [])
+        self.assertFalse(any("blackout_mask mode cannot" in warning for warning in warnings))
+
+    def test_validate_legacy_mode_does_not_require_blackout_commands(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        apply_mapping(cfg, personality="house", role="drop", note=40)
+        cfg["smart_drop_mode"] = "legacy_rearm"
+        cfg.pop("manual_commands", None)
+        errors, warnings = validate_config_data(cfg)
+        self.assertEqual(errors, [])
+        self.assertFalse(any("blackout_mask" in warning for warning in warnings))
 
     def test_first_mapping_sets_primary_and_phrase_bank(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
@@ -360,10 +382,27 @@ class LaserMapWizardTests(unittest.TestCase):
             cfg = load_or_create_config(path)
             apply_mapping(cfg, personality="house", role="groove", note=37)
             apply_mapping(cfg, personality="house", role="drop", note=40)
+            cfg["manual_commands"] = {
+                "blackout_on": {"kind": "note_on", "behavior": "note_on", "channel": 1, "note": 90, "velocity": 127},
+                "blackout_off": {"kind": "note_off", "behavior": "note_off", "channel": 1, "note": 90, "velocity": 0},
+            }
             save_config_atomically(cfg, path)
             checks = verify_mappings_runtime(path)
         failed = [item for item in checks if not item[1]]
         self.assertEqual(failed, [], msg=str(checks))
+
+    def test_verify_runtime_reports_missing_blackout_commands_in_blackout_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            cfg = load_or_create_config(path)
+            apply_mapping(cfg, personality="house", role="drop", note=40)
+            cfg["smart_drop_mode"] = "blackout_mask"
+            cfg.pop("manual_commands", None)
+            save_config_atomically(cfg, path)
+            checks = verify_mappings_runtime(path)
+        blackout_checks = [item for item in checks if item[0] == "smart_drop_blackout_commands"]
+        self.assertEqual(len(blackout_checks), 1)
+        self.assertFalse(blackout_checks[0][1])
 
     def test_wizard_created_bank_drives_executor_rotation(self) -> None:
         with tempfile.TemporaryDirectory() as td:

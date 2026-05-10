@@ -134,6 +134,27 @@ def _drop_mode_personality(*, allow_high_impact: bool = True) -> LaserPersonalit
     )
 
 
+def _single_drop_scene_personality(*, allow_high_impact: bool = True) -> LaserPersonality:
+    return LaserPersonality(
+        name="house",
+        safe_scene="safe",
+        default_scene="phrase_a",
+        phrase_scene="phrase_a",
+        buildup_scene="buildup_a",
+        pre_drop_scene="",
+        drop_scene="drop_a",
+        post_drop_scene="post_a",
+        breakdown_scene="break_a",
+        transition_scene="safe",
+        phrase_bank=("phrase_a",),
+        buildup_bank=("buildup_a",),
+        drop_bank=("drop_a",),
+        post_drop_bank=("post_a",),
+        breakdown_bank=("break_a",),
+        allow_high_impact=allow_high_impact,
+    )
+
+
 def _config(
     *,
     dry_run: bool = True,
@@ -449,6 +470,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertEqual(midi.calls[0][0].note, 91)
         self.assertEqual(midi.calls[0][1], "high")
         self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
+        self.assertFalse(ex.status()["manual_blackout_commands_configured"])
 
     def test_trigger_blackout_on_skips_in_legacy_mode(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
@@ -482,6 +504,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         ex.trigger_blackout_on(_ctx())
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=251.0))
         self.assertEqual(len(midi.calls), 1)
+        self.assertFalse(ex.status()["manual_blackout_commands_configured"])
 
     def test_drop_crossing_high_impact_block_clears_pending_blackout(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
@@ -567,7 +590,29 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertEqual([call[0].note for call in midi.calls], [91, 90])
         self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
 
-    def test_drop_crossing_same_scene_skip_clears_pending_blackout(self) -> None:
+    def test_reset_runtime_state_clears_role_and_blackout_state(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(kind="note_on", behavior="note_on", channel=1, note=91, velocity=127)
+        blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
+        ex = LaserSceneExecutor(
+            config=_config(
+                dry_run=False,
+                manual_blackout_on=blackout_on,
+                manual_blackout_off=blackout_off,
+            ),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=300.0))
+        ex.trigger_blackout_on(_ctx(abs_beat=301.0))
+        ex.reset_runtime_state(reason="test_reset")
+        status = ex.status()
+        self.assertEqual(status["last_scene"], "")
+        self.assertEqual(status["last_role"], "idle")
+        self.assertFalse(status["blackout_pending_for_drop_window"])
+        self.assertEqual([call[0].note for call in midi.calls], [41, 91, 90])
+
+    def test_drop_crossing_same_scene_still_clears_pending_blackout(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
         blackout_on = LaserMidiMessage(kind="note_on", behavior="note_on", channel=1, note=91, velocity=127)
         blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
@@ -583,7 +628,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=500.0))
         ex.trigger_blackout_on(_ctx(abs_beat=501.0))
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=501.1))
-        self.assertEqual([call[0].note for call in midi.calls], [41, 91, 90])
+        self.assertEqual([call[0].note for call in midi.calls], [41, 91, 41, 90])
         self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
 
     def test_role_cooldown_blocks_then_allows_after_beats(self) -> None:
@@ -629,6 +674,30 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertEqual(midi.calls[1][0].note, 41)
         self.assertEqual(ex.status()["last_scene"], "drop_a")
         self.assertEqual(ex.status()["last_error"], "")
+
+    def test_later_drop_crossing_with_same_scene_is_not_same_scene_skipped(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        cfg = _config_with_role_cooldowns(dry_run=False)
+        cfg.scenes["drop_a"] = LaserScene(
+            name="drop_a",
+            scene_type="autoloop",
+            safety_class="safe",
+            midi=cfg.scenes["drop_a"].midi,
+            cooldown_beats=8.0,
+        )
+        ex = LaserSceneExecutor(
+            config=cfg,
+            midi_output=midi,
+            personality=_single_drop_scene_personality(),
+        )
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=64.0))
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=65.0))
+        self.assertEqual(ex.status()["last_error"], "role_cooldown_blocked")
+        self.assertEqual(len(midi.calls), 1)
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=96.0))
+        self.assertEqual(len(midi.calls), 2)
+        self.assertEqual(midi.calls[0][0].note, 41)
+        self.assertEqual(midi.calls[1][0].note, 41)
 
     def test_drop_retrigger_blocked_then_later_drop_can_fire(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)

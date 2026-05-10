@@ -497,6 +497,7 @@ class StateManager:
             "autoloop_arm_target_source": os.autoloop_arm_target_source,
             "pending_live_bpm": os.pending_live_bpm,
             "drop_cut_armed": os.drop_cut_armed,
+            "smart_drop_transition_window_active": os.drop_cut_armed,
             "smart_drop_blackout_active": os.drop_cut_armed,
             "scripted_id": self._os.scripted_id if hasattr(self._os, "scripted_id") else 0, # compatibility fallback
             "smart_drop_enabled": self._smart_drop_enabled,
@@ -777,6 +778,8 @@ class StateManager:
         self._clear_live_bpm_follow()
         self._clear_autoloop_tempo_relock()
         self._clear_pending_autoloop_master_phrase_arm()
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="master_changed")
 
     # ── Track load → lsof trigger ─────────────────────────────────────────────
 
@@ -791,6 +794,8 @@ class StateManager:
             self._clear_live_bpm_follow()
             self._clear_autoloop_tempo_relock()
             self._clear_pending_autoloop_master_phrase_arm()
+            if self._laser_executor is not None:
+                self._laser_executor.reset_runtime_state(reason="active_track_loaded")
         d.tl_title = title
         self._last_loaded_deck = deck
         trace_id = str(ev.payload.get("__trace_id", ""))
@@ -1630,6 +1635,7 @@ class StateManager:
 
         # Laser Director tick — dry-run only in Phase 1.
         # Must not block, send MIDI, call OS2LOutput, or mutate DeckState/OutputState.
+        drop_crossing_decision_emitted = False
         if self._laser_director is not None:
             ctx = self._build_laser_context(
                 active,
@@ -1649,12 +1655,22 @@ class StateManager:
             ):
                 self._laser_executor.trigger_blackout_on(ctx)
             decision = self._laser_director.tick(ctx, now=now)
+            drop_crossing_decision_emitted = bool(
+                decision is not None and decision.reason == "drop_crossing"
+            )
             if self._laser_executor is not None:
                 self._laser_executor.on_decision(decision, ctx)
-            if smart_drop_signal == _SMART_DROP_SIGNAL_CROSSING and smart_drop_blackout_mode:
-                os.phrase_anchor_last_beat = max(os.phrase_anchor_last_beat, os.drop_rearm_beat)
-                os.drop_cut_armed = False
-                os.drop_rearm_beat = 0
+        if smart_drop_signal == _SMART_DROP_SIGNAL_CROSSING and smart_drop_blackout_mode:
+            if (
+                self._laser_executor is not None
+                and not drop_crossing_decision_emitted
+            ):
+                self._laser_executor.clear_pending_blackout(
+                    reason="smart_drop_crossing_without_drop_decision"
+                )
+            os.phrase_anchor_last_beat = max(os.phrase_anchor_last_beat, os.drop_rearm_beat)
+            os.drop_cut_armed = False
+            os.drop_rearm_beat = 0
 
         # Elapsed + beatpos — send at every push tick (SS needs continuous updates).
         # Test A: in autoloop only, send absolute beat position to match VDJ-like
@@ -1740,6 +1756,8 @@ class StateManager:
         self._clear_autoloop_tempo_relock()
         self._clear_autoloop_tempo_anchor()
         os.live_follow_generation += 1
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="stop")
 
     def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
         mirror = 3 - deck
