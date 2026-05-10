@@ -74,6 +74,29 @@ class StateManagerSnapshotTests(unittest.TestCase):
         self.assertEqual(current["deck"]["1"]["filepath"], "/music/changed.mp3")
         self.assertGreater(sm._next_snapshot_publish_at, deadline)
 
+    def test_snapshot_safe_when_laser_executor_is_none(self) -> None:
+        """_publish_snapshot should not crash if _laser_executor is None."""
+        sm = StateManager(queue.Queue(), PositionCache(), Mock())
+        sm._laser_executor = None
+        sm._os.drop_cut_armed = True
+        # Must not raise.
+        sm._publish_snapshot()
+        snap = sm.snapshot()
+        # transition-window reflects drop_cut_armed.
+        self.assertTrue(snap["smart_drop_transition_window_active"])
+        # blackout-active is False when no executor is present.
+        self.assertFalse(snap["smart_drop_blackout_active"])
+
+    def test_snapshot_safe_when_laser_executor_is_none_not_armed(self) -> None:
+        """Snapshot distinguishes non-armed state from absent executor."""
+        sm = StateManager(queue.Queue(), PositionCache(), Mock())
+        sm._laser_executor = None
+        sm._os.drop_cut_armed = False
+        sm._publish_snapshot()
+        snap = sm.snapshot()
+        self.assertFalse(snap["smart_drop_transition_window_active"])
+        self.assertFalse(snap["smart_drop_blackout_active"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -379,6 +379,75 @@ class MidiOutputTests(unittest.TestCase):
         elapsed = time.monotonic() - t0
         self.assertLess(elapsed, 1.0)
 
+    def test_process_due_note_offs_continues_after_single_failure(self) -> None:
+        """One failed note-off should not prevent other due note-offs from being
+        processed out of the scheduled heap.
+
+        With ``continue`` instead of ``return``, the loop drains all due entries
+        even when earlier sends fail. The port closes on error (by design), so
+        subsequent _send_note_off calls are no-ops, but they are still attempted
+        and the scheduled-offs heap is fully drained for this iteration.
+        """
+        port = _FailingNoteOffPort(fail_note_off_count=1)
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                # Schedule two held notes that will become due quickly.
+                msg1 = LaserMidiMessage(
+                    kind="note_on",
+                    behavior="hold_ms",
+                    channel=1,
+                    note=70,
+                    velocity=120,
+                    hold_ms=40,
+                )
+                msg2 = LaserMidiMessage(
+                    kind="note_on",
+                    behavior="hold_ms",
+                    channel=1,
+                    note=71,
+                    velocity=120,
+                    hold_ms=40,
+                )
+                self.assertTrue(out.trigger(msg1))
+                self.assertTrue(
+                    _wait_until(
+                        lambda: any(
+                            m.type == "note_on" and m.kwargs.get("note") == 70
+                            for _, m in port.messages
+                        ),
+                        timeout_s=0.3,
+                    )
+                )
+                self.assertTrue(out.trigger(msg2))
+                self.assertTrue(
+                    _wait_until(
+                        lambda: any(
+                            m.type == "note_on" and m.kwargs.get("note") == 71
+                            for _, m in port.messages
+                        ),
+                        timeout_s=0.3,
+                    )
+                )
+                # Wait for the first note-off to fail and record an error.
+                self.assertTrue(
+                    _wait_until(
+                        lambda: out.status()["send_error_count"] >= 1,
+                        timeout_s=0.6,
+                    ),
+                    msg="First note-off should have failed and recorded an error",
+                )
+                # Verify the send error was recorded.
+                status = out.status()
+                self.assertGreaterEqual(status["send_error_count"], 1)
+                self.assertIn("note_off failed", status["last_error"])
+                # The sender loop must remain alive (thread still running).
+                self.assertTrue(status["running"])
+            finally:
+                out.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

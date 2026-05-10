@@ -588,6 +588,72 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         _, ctx = sm._laser_executor.on_decision.call_args.args
         self.assertTrue(ctx.smart_drop_blackout_arm)
 
+    def test_blackout_arm_persists_across_ticks_while_drop_cut_armed(self) -> None:
+        """The arm signal must persist on every tick between arm and crossing.
+
+        If the initial BLACKOUT_ARMED tick is gated (e.g. director returns idle),
+        subsequent ticks must still carry smart_drop_blackout_arm=True so that
+        the first tick where on_decision passes all gates will fire
+        trigger_blackout_on(). This is safe because trigger_blackout_on() has
+        an internal idempotency guard.
+        """
+        sm = self._prepare_manager()
+        # Set up: arm is active, drop at beat 6, current position ~beat 2-3.
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 6
+        sm._deck[1].meta.smart_drops = [6]
+        sm._laser_director = Mock()
+        sm._laser_director.is_enabled.return_value = True
+
+        # Tick 1: director returns idle (simulates gate failure — e.g. autoloop not ready).
+        sm._laser_director.tick.return_value = SimpleNamespace(
+            scene="",
+            reason="autoloop_not_ready",
+            role="idle",
+        )
+        sm._push_tick()
+        _, ctx1 = sm._laser_executor.on_decision.call_args.args
+        # Key assertion: arm signal is True even though _smart_drop_tick
+        # returned SIGNAL_NONE (the arm already happened on a previous tick).
+        self.assertTrue(ctx1.smart_drop_blackout_arm)
+
+        # Tick 2: director now returns buildup (gates pass this time).
+        sm._laser_director.tick.return_value = SimpleNamespace(
+            scene="house_buildup_1",
+            reason="buildup_to_drop_window",
+            role="buildup",
+        )
+        # Advance beat slightly so a new beat fires.
+        sm._cache.update(
+            PositionSnapshot(1, elapsed_ms=1500, playing=True, updated_at=time.monotonic())
+        )
+        sm._push_tick()
+        _, ctx2 = sm._laser_executor.on_decision.call_args.args
+        # Arm signal is STILL True — the executor can now fire trigger_blackout_on().
+        self.assertTrue(ctx2.smart_drop_blackout_arm)
+
+        # Verify drop_cut_armed is still set (crossing hasn't happened).
+        self.assertTrue(sm._os.drop_cut_armed)
+
+    def test_blackout_arm_clears_on_crossing_tick(self) -> None:
+        """On the crossing tick, smart_drop_blackout_arm must be False
+        (the crossing resolves the blackout, not the arm signal)."""
+        sm = self._prepare_manager()
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 2
+        sm._deck[1].meta.smart_drops = [2]
+        sm._laser_director = Mock()
+        sm._laser_director.is_enabled.return_value = True
+        sm._laser_director.tick.return_value = SimpleNamespace(
+            scene="house_drop_1",
+            reason="drop_crossing",
+            role="drop",
+        )
+        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+            sm._push_tick()
+        _, ctx = sm._laser_executor.on_decision.call_args.args
+        self.assertFalse(ctx.smart_drop_blackout_arm)
+
     def test_laser_set_enabled_false_clears_pending_blackout_once(self) -> None:
         sm = self._prepare_manager()
         sm._laser_director = Mock()

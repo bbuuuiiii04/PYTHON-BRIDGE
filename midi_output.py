@@ -363,7 +363,7 @@ class MidiOutput:
                 self._send_note_off(channel=channel, note=note)
             except Exception as exc:
                 self._record_send_error(exc)
-                return
+                continue
 
     def _next_wait_timeout(self) -> float:
         with self._lock:
@@ -393,7 +393,8 @@ class MidiOutput:
                 self._send_note_off(channel=channel, note=note)
             except Exception as exc:
                 self._record_send_error(exc)
-        # Panic/stop cleanup should not leave stale held-note tracking entries.
+        # Defensive final cleanup: _send_note_off normally removes these keys,
+        # but stop/panic paths must clear local tracking even if a note-off send fails.
         with self._lock:
             for key in held:
                 self._active_held_notes.pop(key, None)

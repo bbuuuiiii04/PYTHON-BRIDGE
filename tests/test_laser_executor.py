@@ -897,6 +897,134 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         self.assertEqual(len(midi.calls), 3)
 
+    def test_dry_run_blackout_arm_resolve_same_logic_as_live(self) -> None:
+        """dry_run=True follows the same blackout arm/resolve logic as live;
+        only MIDI output is suppressed at the transport layer."""
+        blackout_on = LaserMidiMessage(
+            kind="note_on", behavior="note_on", channel=1, note=89, velocity=127,
+        )
+        blackout_off = LaserMidiMessage(
+            kind="note_off", behavior="note_off", channel=1, note=90, velocity=0,
+        )
+        # --- dry-run executor ---
+        midi_dry = _FakeMidiOutput(dry_run=True)
+        ex_dry = LaserSceneExecutor(
+            config=_config(
+                dry_run=True,
+                smart_drop_mode="blackout_mask",
+                manual_blackout_on=blackout_on,
+                manual_blackout_off=blackout_off,
+            ),
+            midi_output=midi_dry,
+            personality=_personality(),
+        )
+        # --- live executor ---
+        midi_live = _FakeMidiOutput(dry_run=False)
+        ex_live = LaserSceneExecutor(
+            config=_config(
+                dry_run=False,
+                smart_drop_mode="blackout_mask",
+                manual_blackout_on=blackout_on,
+                manual_blackout_off=blackout_off,
+            ),
+            midi_output=midi_live,
+            personality=_personality(),
+        )
+        # Arm blackout in both.
+        ctx_arm = _ctx(abs_beat=319.0)
+        ex_dry.trigger_blackout_on(ctx_arm)
+        ex_live.trigger_blackout_on(ctx_arm)
+        # Blackout pending must be identical in both modes.
+        self.assertTrue(ex_dry.status()["blackout_pending_for_drop_window"])
+        self.assertTrue(ex_live.status()["blackout_pending_for_drop_window"])
+        # Drop crossing resolves blackout in both.
+        ctx_drop = _ctx(abs_beat=320.0)
+        ex_dry.on_decision(_decision("drop_a", "drop_crossing", "drop"), ctx_drop)
+        ex_live.on_decision(_decision("drop_a", "drop_crossing", "drop"), ctx_drop)
+        # Pending cleared in both.
+        self.assertFalse(ex_dry.status()["blackout_pending_for_drop_window"])
+        self.assertFalse(ex_live.status()["blackout_pending_for_drop_window"])
+        # Both produced the same MIDI call sequence (blackout_on, drop, blackout_off).
+        dry_notes = [call[0].note for call in midi_dry.calls]
+        live_notes = [call[0].note for call in midi_live.calls]
+        self.assertEqual(dry_notes, live_notes)
+        self.assertEqual(dry_notes, [89, 41, 90])
+        # dry_run does not change smart_drop_mode.
+        self.assertTrue(ex_dry.smart_drop_blackout_enabled())
+        self.assertEqual(
+            ex_dry.status()["smart_drop_mode"],
+            ex_live.status()["smart_drop_mode"],
+        )
+
+    def test_first_drop_at_beat_zero_is_not_cooldown_blocked(self) -> None:
+        """The very first drop should trigger even if abs_beat is 0.0."""
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _decision("drop_a", "drop_crossing", "drop"),
+            _ctx(abs_beat=0.0),
+        )
+        self.assertEqual(len(midi.calls), 1)
+        self.assertEqual(midi.calls[0][0].note, 41)
+        self.assertNotEqual(ex.status()["last_error"], "role_cooldown_blocked")
+        self.assertEqual(ex.status()["last_error"], "")
+
+    def test_materialize_midi_hold_beats_with_zero_bpm_uses_minimum(self) -> None:
+        """hold_beats with BPM 0 should fall back to _MIN_HOLD_MS, not divide by zero."""
+        midi = _FakeMidiOutput(dry_run=False)
+        cfg = _config(dry_run=False)
+        scenes = dict(cfg.scenes)
+        scenes["drop_a"] = LaserScene(
+            name="drop_a",
+            scene_type="static",
+            safety_class="high_impact",
+            midi=LaserMidiMessage(
+                kind="note_on",
+                behavior="hold_beats",
+                channel=1,
+                note=41,
+                velocity=127,
+                hold_beats=4,
+            ),
+        )
+        cfg = replace(cfg, scenes=scenes)
+        ex = LaserSceneExecutor(config=cfg, midi_output=midi, personality=_personality())
+        # BPM=0 — executor must not raise and must use safe minimum.
+        ex.on_decision(
+            _decision("drop_a", "drop_crossing", "drop"),
+            _ctx(abs_beat=64.0),
+        )
+        # Force bpm=0 by building ctx directly.
+        ex.reset_runtime_state(reason="test")
+        zero_bpm_ctx = LaserContext(
+            active_deck=1,
+            playing=True,
+            elapsed_ms=1000,
+            bpm=0.0,
+            beatpos=0.0,
+            abs_beat=128.0,
+            position_stale=False,
+            lighting_mode="autoloop",
+            os2l_connected=True,
+            active_track_loaded=True,
+            autoloop_ready=True,
+            scripted_id=0,
+        )
+        ex.on_decision(
+            _decision("drop_a", "drop_crossing", "drop"),
+            zero_bpm_ctx,
+        )
+        self.assertGreaterEqual(len(midi.calls), 2)
+        rendered = midi.calls[-1][0]
+        self.assertEqual(rendered.behavior, "hold_ms")
+        # _MIN_HOLD_MS is 10 in laser_executor.py.
+        self.assertEqual(rendered.hold_ms, 10)
+        self.assertGreater(rendered.hold_ms, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

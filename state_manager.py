@@ -1660,7 +1660,13 @@ class StateManager:
         # Must not block, send MIDI, call OS2LOutput, or mutate DeckState/OutputState.
         drop_crossing_decision_emitted = False
         smart_drop_blackout_arm = bool(
-            smart_drop_signal == _SMART_DROP_SIGNAL_BLACKOUT_ARMED
+            (
+                smart_drop_signal == _SMART_DROP_SIGNAL_BLACKOUT_ARMED
+                or (
+                    self._os.drop_cut_armed
+                    and smart_drop_signal != _SMART_DROP_SIGNAL_CROSSING
+                )
+            )
             and smart_drop_blackout_mode
         )
         if self._laser_director is not None:
