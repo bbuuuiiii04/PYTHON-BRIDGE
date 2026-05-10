@@ -77,6 +77,11 @@ class LaserPersonality:
     post_drop_scene: str
     breakdown_scene: str
     transition_scene: str
+    phrase_bank: tuple[str, ...] = field(default_factory=tuple)
+    buildup_bank: tuple[str, ...] = field(default_factory=tuple)
+    drop_bank: tuple[str, ...] = field(default_factory=tuple)
+    post_drop_bank: tuple[str, ...] = field(default_factory=tuple)
+    breakdown_bank: tuple[str, ...] = field(default_factory=tuple)
     allow_high_impact: bool = False
     phrase_interval_beats: int = 32
     minimum_scene_hold_beats: int = 0
@@ -118,6 +123,7 @@ class LaserSceneDecision:
 
     ``scene``    — the chosen scene name (an arbitrary operator-defined string).
     ``reason``   — short human-readable label for why this scene was chosen.
+    ``role``     — stable policy role used by scene-bank/executor logic.
     ``priority`` — numeric priority level (lower = higher priority).
     ``source``   — originating policy branch ("emergency", "manual", "policy").
     """
@@ -125,3 +131,4 @@ class LaserSceneDecision:
     reason: str
     priority: int
     source: str
+    role: str = "idle"

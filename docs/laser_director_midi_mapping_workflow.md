@@ -218,6 +218,23 @@ note_off channel 1 note 40
 
 The note pulse should be sent by the MIDI output thread, not by `StateManager._push_tick`.
 
+## Scene banks (role-level round-robin)
+
+Personalities may optionally provide role banks that reference existing scene keys:
+
+```text
+phrase_bank, buildup_bank, drop_bank, post_drop_bank, breakdown_bank
+```
+
+Rules:
+
+- banks are optional
+- missing/empty bank falls back to single-scene role field
+- bank picks are deterministic round-robin (never random)
+- banks rotate on role-entry/eligible trigger only, not every tick
+- phrase MIDI waits for phrase/autoloop boundary eligibility and does not fire
+  immediately when post-drop expires mid-cycle
+
 ## MIDI note/channel assumptions
 
 Standard MIDI supports:
@@ -365,6 +382,19 @@ When implementing Laser Director MIDI support:
 11. Do not call MIDI APIs from `StateManager._push_tick`.
 12. Do not call `conn.status()` from `StateManager._push_tick`.
 
+## Live dependency expectation
+
+For live mode (`dry_run=false`), the bridge expects Python MIDI dependencies:
+
+```text
+mido
+python-rtmidi
+```
+
+`MidiOutput` uses `mido` with the configured output port (for example
+`IAC Driver Bus 1`). If dependencies or ports are missing, `MidiOutput` must
+degrade safely while OS2L and the rest of bridge runtime continue.
+
 ## Debugging expectations
 
 During development, the operator may test MIDI manually with the local web pad.
@@ -411,6 +441,7 @@ The production path should be:
 
 ```text
 LaserDirector
+  -> LaserSceneExecutor
   -> MidiOutput
   -> IAC Driver Bus 1
   -> SoundSwitch MIDI mapping

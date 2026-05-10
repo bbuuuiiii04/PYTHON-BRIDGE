@@ -52,6 +52,13 @@ _PERSONALITY_REQUIRED_ROLE_FIELDS = (
     "breakdown_scene",
     "transition_scene",
 )
+_PERSONALITY_BANK_FIELDS = (
+    "phrase_bank",
+    "buildup_bank",
+    "drop_bank",
+    "post_drop_bank",
+    "breakdown_bank",
+)
 _LIFECYCLE_SCENE_FIELDS = (
     "startup_scene",
     "stop_scene",
@@ -401,6 +408,24 @@ def _validate_personality(
             f"{prefix}: 'pre_drop_lookahead_beats' must be a non-negative integer"
         )
 
+    for bank_field in _PERSONALITY_BANK_FIELDS:
+        bank_raw = data.get(bank_field)
+        if bank_raw is None:
+            continue
+        if not isinstance(bank_raw, list):
+            errors.append(f"{prefix}: '{bank_field}' must be a list of scene names")
+            continue
+        for index, scene_name in enumerate(bank_raw):
+            if not isinstance(scene_name, str) or not scene_name:
+                errors.append(
+                    f"{prefix}: '{bank_field}[{index}]' must be a non-empty string"
+                )
+                continue
+            if scene_name not in scene_keys:
+                errors.append(
+                    f"{prefix}: '{bank_field}' references unknown scene '{scene_name}'"
+                )
+
     return errors
 
 
@@ -463,6 +488,15 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
         post_drop_scene=str(data.get("post_drop_scene", "")),
         breakdown_scene=str(data.get("breakdown_scene", "")),
         transition_scene=str(data.get("transition_scene", "")),
+        phrase_bank=tuple(str(scene) for scene in data.get("phrase_bank", []) or ()),
+        buildup_bank=tuple(str(scene) for scene in data.get("buildup_bank", []) or ()),
+        drop_bank=tuple(str(scene) for scene in data.get("drop_bank", []) or ()),
+        post_drop_bank=tuple(
+            str(scene) for scene in data.get("post_drop_bank", []) or ()
+        ),
+        breakdown_bank=tuple(
+            str(scene) for scene in data.get("breakdown_bank", []) or ()
+        ),
         allow_high_impact=bool(data.get("allow_high_impact", False)),
         phrase_interval_beats=int(data.get("phrase_interval_beats", 32)),
         minimum_scene_hold_beats=int(data.get("minimum_scene_hold_beats", 0)),
