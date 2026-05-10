@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -28,6 +29,8 @@ from rb_ss_bridge_v2.tools.laser_map_wizard import (  # noqa: E402
     update_scene_safety_class,
     update_scene_cooldown,
     update_role_bank_cooldown,
+    _pick_normal_behavior,
+    _visible_roles,
     _warn_duplicate_note,
 )
 
@@ -104,6 +107,26 @@ class LaserMapWizardTests(unittest.TestCase):
         self.assertEqual(house["drop_style"], "drop_mode")
         self.assertEqual(house["post_drop_scene"], drop_scene)
         self.assertEqual(house["post_drop_bank"], [drop_scene])
+
+    def test_drop_mode_hides_post_drop_role(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        self.assertEqual(_visible_roles(cfg, "house"), ("groove", "buildup", "drop", "breakdown"))
+
+    def test_drop_mode_has_only_one_operator_facing_drop_note(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        apply_mapping(cfg, personality="house", role="drop", note=40)
+        summary = render_personality_summary(cfg, "house")
+        self.assertIn("drop", summary)
+        self.assertIn("note 40", summary)
+        self.assertNotIn("post_drop", summary)
+        self.assertIn("Post-drop: uses the same drop autoloop mapping", summary)
+
+    def test_drop_mode_alias_does_not_warn_duplicate_note(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        apply_mapping(cfg, personality="house", role="drop", note=40)
+        duplicates = find_duplicate_notes(cfg)
+        notes = [note for note, _ in duplicates]
+        self.assertNotIn(40, notes)
 
     def test_emphasized_drop_supports_separate_post_drop_mapping(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
@@ -311,6 +334,13 @@ class LaserMapWizardTests(unittest.TestCase):
         summary = render_personality_summary(cfg, "house")
         self.assertIn("Drop style: Emphasized drop", summary)
         self.assertIn("post_drop", summary)
+
+    def test_normal_behavior_input_defaults_to_pulse(self) -> None:
+        with patch("builtins.input", return_value="hold_beats"):
+            behavior, hold_ms, hold_beats = _pick_normal_behavior()
+        self.assertEqual(behavior, "pulse")
+        self.assertEqual(hold_ms, 0)
+        self.assertEqual(hold_beats, 0.0)
 
     def test_verify_runtime_contract_passes_for_wizard_config(self) -> None:
         with tempfile.TemporaryDirectory() as td:

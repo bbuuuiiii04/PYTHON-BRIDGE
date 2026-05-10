@@ -21,6 +21,7 @@ _AUTO_ROLES = ("phrase", "buildup", "drop", "post_drop", "breakdown")
 _PHRASE_TRIGGER_REASONS = frozenset({"default_init", "phrase_boundary"})
 _MIN_HOLD_MS = 10
 _MAX_HOLD_MS = 30000
+_DROP_CROSSING_MIN_PULSE_MS = 120
 
 
 class LaserSceneExecutor:
@@ -104,7 +105,12 @@ class LaserSceneExecutor:
             self._record_gate("high_impact_blocked")
             return
 
-        if self._is_role_cooldown_blocked(role, scene_def.cooldown_beats, ctx.abs_beat):
+        if self._is_role_cooldown_blocked(
+            role,
+            scene_def.cooldown_beats,
+            ctx.abs_beat,
+            role_changed=role_changed,
+        ):
             self._restore_role_state(role, cursor_before, active_before)
             self._record_gate("role_cooldown_blocked")
             return
@@ -115,7 +121,11 @@ class LaserSceneExecutor:
                 return
 
         priority = self._priority_for_role(role)
-        midi_message = self._materialize_midi(scene_def.midi, ctx)
+        midi_message = self._materialize_midi(
+            scene_def.midi,
+            ctx,
+            reason=decision.reason,
+        )
         if not self._midi_output.trigger(midi_message, priority=priority):
             self._record_gate("midi_trigger_rejected")
             return
@@ -226,8 +236,14 @@ class LaserSceneExecutor:
         role: str,
         cooldown_beats: float,
         abs_beat: float,
+        *,
+        role_changed: bool,
     ) -> bool:
         if role not in _AUTO_ROLES:
+            return False
+        # Cooldown is for repeated retriggers of the same role window.
+        # First entry into a newly selected role stays eligible.
+        if role_changed:
             return False
         cooldown = float(cooldown_beats)
         if cooldown <= 0:
@@ -259,14 +275,18 @@ class LaserSceneExecutor:
             return "high"
         return "normal"
 
-    def _materialize_midi(self, msg, ctx: LaserContext):
+    def _materialize_midi(self, msg, ctx: LaserContext, *, reason: str):
         behavior = (msg.behavior or "").strip().lower()
-        if behavior != "hold_beats":
-            return msg
-        bpm = float(ctx.bpm) if ctx.bpm else 0.0
-        if bpm <= 0:
-            hold_ms = _MIN_HOLD_MS
-        else:
-            hold_ms = int(round((60000.0 * float(msg.hold_beats)) / bpm))
-        hold_ms = max(_MIN_HOLD_MS, min(_MAX_HOLD_MS, hold_ms))
-        return replace(msg, behavior="hold_ms", hold_ms=hold_ms)
+        if behavior == "hold_beats":
+            bpm = float(ctx.bpm) if ctx.bpm else 0.0
+            if bpm <= 0:
+                hold_ms = _MIN_HOLD_MS
+            else:
+                hold_ms = int(round((60000.0 * float(msg.hold_beats)) / bpm))
+            hold_ms = max(_MIN_HOLD_MS, min(_MAX_HOLD_MS, hold_ms))
+            return replace(msg, behavior="hold_ms", hold_ms=hold_ms)
+        if behavior == "pulse" and reason == "drop_crossing":
+            duration_ms = int(getattr(msg, "duration_ms", 0))
+            if duration_ms < _DROP_CROSSING_MIN_PULSE_MS:
+                return replace(msg, duration_ms=_DROP_CROSSING_MIN_PULSE_MS)
+        return msg

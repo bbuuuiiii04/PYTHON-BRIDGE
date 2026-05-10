@@ -111,6 +111,27 @@ def _personality(*, allow_high_impact: bool = True) -> LaserPersonality:
     )
 
 
+def _drop_mode_personality(*, allow_high_impact: bool = True) -> LaserPersonality:
+    return LaserPersonality(
+        name="house",
+        safe_scene="safe",
+        default_scene="phrase_a",
+        phrase_scene="phrase_a",
+        buildup_scene="buildup_a",
+        pre_drop_scene="",
+        drop_scene="drop_a",
+        post_drop_scene="drop_a",
+        breakdown_scene="break_a",
+        transition_scene="safe",
+        phrase_bank=("phrase_a", "phrase_b"),
+        buildup_bank=("buildup_a", "buildup_b"),
+        drop_bank=("drop_a", "drop_b"),
+        post_drop_bank=("drop_a",),
+        breakdown_bank=("break_a",),
+        allow_high_impact=allow_high_impact,
+    )
+
+
 def _config(*, dry_run: bool = True) -> LaserConfig:
     scenes = {
         "safe": _scene("safe", note=36),
@@ -327,6 +348,15 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertEqual(rendered.behavior, "hold_ms")
         self.assertEqual(rendered.hold_ms, 1875)
 
+    def test_drop_crossing_enforces_minimum_pulse_duration(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=250.0))
+        self.assertEqual(len(midi.calls), 1)
+        rendered = midi.calls[0][0]
+        self.assertEqual(rendered.behavior, "pulse")
+        self.assertGreaterEqual(rendered.duration_ms, 120)
+
     def test_role_cooldown_blocks_then_allows_after_beats(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
@@ -355,6 +385,78 @@ class LaserSceneExecutorTests(unittest.TestCase):
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=320.0))
         self.assertEqual(len(midi.calls), 2)
         self.assertEqual(ex.status()["last_error"], "role_cooldown_blocked")
+
+    def test_drop_crossing_not_blocked_on_role_transition(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), _ctx(abs_beat=100.0))
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=101.0))
+        self.assertEqual(len(midi.calls), 2)
+        self.assertEqual(midi.calls[0][0].note, 39)
+        self.assertEqual(midi.calls[1][0].note, 41)
+        self.assertEqual(ex.status()["last_scene"], "drop_a")
+        self.assertEqual(ex.status()["last_error"], "")
+
+    def test_drop_retrigger_blocked_then_later_drop_can_fire(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=300.0))
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=301.0))
+        self.assertEqual(len(midi.calls), 1)
+        self.assertEqual(ex.status()["last_error"], "role_cooldown_blocked")
+        ex.on_decision(_decision("post_a", "post_drop_hold", "post_drop"), _ctx(abs_beat=302.0))
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=333.0))
+        self.assertEqual(len(midi.calls), 3)
+        self.assertEqual(midi.calls[-1][0].note, 42)
+        self.assertEqual(ex.status()["last_error"], "")
+
+    def test_drop_mode_post_drop_reuses_drop_note(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_drop_mode_personality(),
+        )
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=400.0))
+        ex.on_decision(_decision("drop_a", "post_drop_hold", "post_drop"), _ctx(abs_beat=401.0))
+        self.assertEqual(len(midi.calls), 1)
+        self.assertEqual(midi.calls[0][0].note, 41)
+        self.assertEqual(ex.status()["last_scene"], "drop_a")
+
+    def test_emphasized_drop_can_use_separate_post_drop_note(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=500.0))
+        ex.on_decision(_decision("post_a", "post_drop_hold", "post_drop"), _ctx(abs_beat=501.0))
+        self.assertEqual(len(midi.calls), 2)
+        self.assertEqual(midi.calls[0][0].note, 41)
+        self.assertEqual(midi.calls[1][0].note, 43)
+
+    def test_drop_crossing_updates_last_scene_when_preceded_by_buildup(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), _ctx(abs_beat=600.0))
+        self.assertEqual(ex.status()["last_scene"], "buildup_a")
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=601.0))
+        status = ex.status()
+        self.assertEqual(status["last_scene"], "drop_a")
+        self.assertNotEqual(status["last_error"], "role_cooldown_blocked")
 
     def test_cooldown_block_does_not_advance_role_cursor(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)

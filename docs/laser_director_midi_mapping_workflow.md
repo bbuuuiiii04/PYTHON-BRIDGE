@@ -16,7 +16,9 @@ Use the bridge menu bar wizard instead of hand-editing `laser_director.json`.
 3. Map a SoundSwitch cue/autoloop to a MIDI note.
 4. Open menu bar -> Map Lasers.
 5. Choose personality: house or default (default aliases to house).
-6. Choose role: groove, buildup, drop, post_drop, breakdown.
+6. Choose role:
+   - Drop mode: groove, buildup, drop, breakdown
+   - Emphasized drop: groove, buildup, drop, post_drop, breakdown
 7. Enter MIDI note 0–127.
 8. Review warnings and save.
 9. Restart bridge if prompted.
@@ -46,9 +48,9 @@ Only settings with runtime effect are exposed in normal wizard setup.
 Internal-only fields such as `safety_class` stay hidden from normal setup and are
 available only in **Advanced Safety Metadata**.
 
-Default operator mappings are SoundSwitch autoloops triggered by MIDI pulse.
-Hold behavior is advanced and should only be used when a SoundSwitch control
-requires hold-to-play MIDI input.
+Default operator mappings are SoundSwitch autoloops triggered by MIDI pulse,
+including `drop` and `post_drop`. Hold behavior is advanced-only and should
+only be used when a SoundSwitch control requires hold-to-play MIDI input.
 
 ## Timing / Cooldowns
 
@@ -59,7 +61,7 @@ The wizard includes a visible **Edit Timing & Cooldowns** menu.
 - Buildup lookahead: how many beats before a Smart Drop buildup is allowed.
 - Role cooldown: how soon the same exact role look can be triggered again.
   Changing a role cooldown updates every mapping in that role's bank.
-- Hold behavior: pulse / hold_beats / hold_ms / note_on / note_off.
+- Hold behavior (advanced): pulse / hold_beats / hold_ms / note_on / note_off.
 
 The normal wizard flow does not ask for laser classification. Safety metadata
 (`safety_class`) is assigned automatically from role defaults and kept internal.
@@ -70,7 +72,8 @@ mappings in that role bank and is enforced in `LaserSceneExecutor` using
 `ctx.abs_beat` (not wall-clock time).
 
 Drop style options:
-- **Drop mode** (default): one drop autoloop mapping; post-drop reuses drop mapping.
+- **Drop mode** (default): one drop autoloop mapping; post-drop reuses drop mapping and
+  is hidden from normal role selection.
 - **Emphasized drop**: separate drop and post-drop autoloop mappings.
 
 The wizard includes **Verify mappings actually work**, which loads saved config,

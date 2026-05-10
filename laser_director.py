@@ -116,6 +116,8 @@ class LaserDirector:
         self._last_scene_change_abs_beat: float = 0.0
         self._last_trigger_abs_beat: float = 0.0
         self._laser_drop_fired_beat: Optional[int] = None
+        self._pending_drop_crossing_beat: Optional[int] = None
+        self._drop_rearm_edge_seen_for_pending: bool = False
         self._post_drop_start_abs_beat: float = -1.0
         self._last_smart_abs_beat: Optional[float] = None
         self._phrase_trigger_pending: bool = False
@@ -334,23 +336,42 @@ class LaserDirector:
                 role="breakdown",
             )
 
-        # Priority 9: Drop crossing (once per target beat).
+        # Priority 9: Drop crossing (once per target beat), aligned to real
+        # autoloop tick/rearm edges to avoid pre-rearm MIDI triggers.
         if previous_abs_beat is not None and self._drop_scene:
             for drop_beat in sorted(set(ctx.smart_drops)):
                 if (
                     previous_abs_beat < drop_beat <= abs_beat
                     and self._laser_drop_fired_beat != int(drop_beat)
                 ):
-                    self._laser_drop_fired_beat = int(drop_beat)
-                    self._post_drop_start_abs_beat = abs_beat
-                    self._last_smart_abs_beat = abs_beat
-                    return LaserSceneDecision(
-                        scene=self._drop_scene,
-                        reason="drop_crossing",
-                        priority=9,
-                        source="policy",
-                        role="drop",
-                    )
+                    self._pending_drop_crossing_beat = int(drop_beat)
+                    self._drop_rearm_edge_seen_for_pending = False
+                    break
+
+            pending_drop = self._pending_drop_crossing_beat
+            if pending_drop is not None and ctx.autoloop_tick_just_fired:
+                # Rearm/tick edge observed; allow firing on the following push tick.
+                self._drop_rearm_edge_seen_for_pending = True
+            if (
+                pending_drop is not None
+                and self._drop_rearm_edge_seen_for_pending
+                and not ctx.autoloop_tick_just_fired
+                and ctx.autoloop_ready
+                and float(pending_drop) <= abs_beat
+                and self._laser_drop_fired_beat != int(pending_drop)
+            ):
+                self._laser_drop_fired_beat = int(pending_drop)
+                self._pending_drop_crossing_beat = None
+                self._drop_rearm_edge_seen_for_pending = False
+                self._post_drop_start_abs_beat = abs_beat
+                self._last_smart_abs_beat = abs_beat
+                return LaserSceneDecision(
+                    scene=self._drop_scene,
+                    reason="drop_crossing",
+                    priority=9,
+                    source="policy",
+                    role="drop",
+                )
 
         # Priority 10: Post-drop hold (using existing minimum_scene_hold_beats).
         if (
@@ -473,6 +494,8 @@ class LaserDirector:
 
     def _reset_smart_observation_state(self) -> None:
         self._laser_drop_fired_beat = None
+        self._pending_drop_crossing_beat = None
+        self._drop_rearm_edge_seen_for_pending = False
         self._post_drop_start_abs_beat = -1.0
         self._last_smart_abs_beat = None
         self._phrase_trigger_pending = False
@@ -578,6 +601,8 @@ class LaserDirector:
             "buildup_max_drop_distance_beats": self._buildup_max_drop_distance_beats,
             "pre_drop_lookahead_beats": self._pre_drop_lookahead_beats,
             "laser_drop_fired_beat": self._laser_drop_fired_beat,
+            "pending_drop_crossing_beat": self._pending_drop_crossing_beat,
+            "drop_rearm_edge_seen_for_pending": self._drop_rearm_edge_seen_for_pending,
             "phrase_trigger_pending": self._phrase_trigger_pending,
             "last_trigger_abs_beat": self._last_trigger_abs_beat,
         }

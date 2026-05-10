@@ -280,13 +280,13 @@ def _ensure_house_personality(config: dict[str, Any]) -> None:
         "buildup_scene": "house_buildup_1",
         "pre_drop_scene": "",
         "drop_scene": "house_drop_1",
-        "post_drop_scene": "house_post_drop_1",
+        "post_drop_scene": "house_drop_1",
         "breakdown_scene": "house_breakdown_1",
         "transition_scene": "safe_static",
         "phrase_bank": ["house_groove_1"],
         "buildup_bank": ["house_buildup_1"],
         "drop_bank": ["house_drop_1"],
-        "post_drop_bank": ["house_post_drop_1"],
+        "post_drop_bank": ["house_drop_1"],
         "breakdown_bank": ["house_breakdown_1"],
         "allow_high_impact": True,
         "drop_style": _DROP_STYLE_DROP_MODE,
@@ -331,6 +331,7 @@ def find_duplicate_notes(config: dict[str, Any]) -> list[tuple[int, list[tuple[s
     for pname, pdata in personalities.items():
         if not isinstance(pdata, dict):
             continue
+        drop_scene = pdata.get("drop_scene")
         for role, (scene_field, bank_field) in _ROLE_FIELD_MAP.items():
             scene_names: list[str] = []
             single = pdata.get(scene_field)
@@ -342,6 +343,16 @@ def find_duplicate_notes(config: dict[str, Any]) -> list[tuple[int, list[tuple[s
                     if isinstance(scene, str) and scene and scene not in scene_names:
                         scene_names.append(scene)
             for scene_name in scene_names:
+                # In Drop mode, post_drop intentionally aliases drop for runtime compatibility.
+                # Do not emit duplicate-note warnings for that internal alias.
+                if (
+                    role == "post_drop"
+                    and _get_drop_style(config, pname) == _DROP_STYLE_DROP_MODE
+                    and isinstance(drop_scene, str)
+                    and drop_scene
+                    and scene_name == drop_scene
+                ):
+                    continue
                 scene = scenes.get(scene_name, {})
                 midi = scene.get("midi", {})
                 note = midi.get("note")
@@ -496,6 +507,19 @@ def apply_mapping(
         bank = []
         pdata[bank_field] = bank
 
+    # If user switched to Emphasized drop, the first explicit post_drop mapping
+    # should replace the Drop-mode alias instead of appending behind it.
+    if (
+        role == "post_drop"
+        and drop_style == _DROP_STYLE_EMPHASIZED
+        and isinstance(pdata.get("drop_scene"), str)
+        and pdata.get("post_drop_scene") == pdata.get("drop_scene")
+    ):
+        drop_scene_name = str(pdata.get("drop_scene"))
+        pdata["post_drop_scene"] = ""
+        bank = [name for name in bank if name != drop_scene_name]
+        pdata[bank_field] = bank
+
     primary_scene = pdata.get(scene_field)
     has_primary = isinstance(primary_scene, str) and primary_scene in scenes
     existing_scene_for_note = _find_scene_for_note(
@@ -648,8 +672,8 @@ def _print_header() -> None:
     print("  groove     - normal playing / phrase groove")
     print("  buildup    - UP section before a Smart Drop")
     print("  drop       - exact drop hit")
-    print("  post_drop  - sustained look after drop hit")
     print("  breakdown  - low-energy/breakdown section")
+    print(_c("  post_drop  - shown only in Emphasized drop style", _GRAY))
     print(_c("\nMIDI notes: 0-127", _CYAN))
     print(_c("\nA bank is multiple scenes for one role. Banks rotate round-robin.", _GRAY))
     print(_c("Adding another note to the same role automatically adds it to that role's bank.\n", _GRAY))
@@ -874,6 +898,12 @@ def _pick_normal_behavior() -> tuple[str, int, float]:
     if entered and entered != "pulse":
         print(_c("Normal setup uses pulse for SoundSwitch autoloops. Falling back to pulse.", _YELLOW))
     return ("pulse", 0, 0.0)
+
+
+def _pick_advanced_behavior(role: str, scene_type: str) -> tuple[str, int, float]:
+    print(_c("\nAdvanced behavior settings", _CYAN))
+    print(_c("Use pulse for normal SoundSwitch autoloops.", _GRAY))
+    return _pick_behavior(role, scene_type)
 
 
 def _edit_personality_timing(config: dict[str, Any], personality: str) -> bool:
@@ -1289,7 +1319,7 @@ def _edit_existing_mapping_flow(config: dict[str, Any]) -> bool:
         print(_c(f"\nEdit mapping: {scene_name}", _CYAN))
         print(f"  note={midi.get('note', '?')}  behavior={_describe_behavior(midi)}")
         print("  1. Change MIDI note")
-        print("  2. Change behavior / hold length")
+        print("  2. Advanced: Change behavior / hold length")
         print("  3. Remove mapping from bank")
         print("  4. Set as primary")
         print("  0. Back")
@@ -1307,7 +1337,10 @@ def _edit_existing_mapping_flow(config: dict[str, Any]) -> bool:
             return True
         if choice == "2":
             try:
-                behavior, hold_ms, hold_beats = _pick_behavior(role, str(scene.get("scene_type", "autoloop")))
+                behavior, hold_ms, hold_beats = _pick_advanced_behavior(
+                    role,
+                    str(scene.get("scene_type", "autoloop")),
+                )
             except BackRequested:
                 continue
             midi.update(
