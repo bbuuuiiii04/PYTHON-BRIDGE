@@ -33,14 +33,20 @@ _REPO_ROOT = Path(__file__).resolve().parent
 _DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "laser_director.json"
 
 _VALID_KINDS = frozenset({"note_pulse", "note_on", "note_off", "cc"})
+_VALID_BEHAVIORS = frozenset({"pulse", "hold_ms", "hold_beats", "note_on", "note_off"})
 _VALID_SAFETY_CLASSES = frozenset({
     "safe", "movement_low", "movement_medium", "movement_high",
     "high_impact", "strobe", "blackout",
 })
 _VALID_SCENE_TYPES = frozenset({"static", "autoloop", "utility"})
+_VALID_SMART_DROP_MODES = frozenset({"blackout_mask", "legacy_rearm"})
 
 _DURATION_MIN = 10
 _DURATION_MAX = 250
+_HOLD_MS_MIN = 10
+_HOLD_MS_MAX = 30000
+_HOLD_BEATS_MIN = 0.25
+_HOLD_BEATS_MAX = 128.0
 
 _PERSONALITY_REQUIRED_ROLE_FIELDS = (
     "safe_scene",
@@ -80,6 +86,7 @@ class LaserConfig:
     """
     enabled: bool
     dry_run: bool
+    smart_drop_mode: str
     midi_output_port: str
     scenes: dict[str, LaserScene]
     personalities: dict[str, LaserPersonality]
@@ -89,6 +96,8 @@ class LaserConfig:
     stale_scene: str
     emergency_scene: str
     fallback_scene: str
+    manual_blackout_on: Optional[LaserMidiMessage] = None
+    manual_blackout_off: Optional[LaserMidiMessage] = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +159,15 @@ def load_laser_director_config(
         )
 
     config = _build_config(data)
+    if (
+        config.smart_drop_mode == "blackout_mask"
+        and config.manual_blackout_on is None
+        and config.manual_blackout_off is None
+    ):
+        log.warning(
+            "smart_drop_mode='blackout_mask' but manual_commands.blackout_on/off are not configured; "
+            "Smart Drop transitions will not be masked."
+        )
     log.info(
         "[laser_config] loaded  enabled=%s  dry_run=%s  scenes=%d  personalities=%d",
         config.enabled,
@@ -195,6 +213,16 @@ def _validate(data: dict[str, Any]) -> list[str]:
     if not isinstance(dry_run, bool):
         errors.append("'dry_run' must be a boolean")
         dry_run = True
+
+    smart_drop_mode = data.get("smart_drop_mode", "blackout_mask")
+    if not isinstance(smart_drop_mode, str):
+        errors.append("'smart_drop_mode' must be a string")
+        smart_drop_mode = "blackout_mask"
+    elif smart_drop_mode not in _VALID_SMART_DROP_MODES:
+        errors.append(
+            f"'smart_drop_mode' must be one of {sorted(_VALID_SMART_DROP_MODES)}, got {smart_drop_mode!r}"
+        )
+        smart_drop_mode = "blackout_mask"
 
     # midi_output_port required when live MIDI is active
     midi_port = data.get("midi_output_port", "")
@@ -246,6 +274,48 @@ def _validate(data: dict[str, Any]) -> list[str]:
                     f"'default_personality' references unknown personality '{default_p}'"
                 )
 
+    errors.extend(_validate_manual_commands(data, smart_drop_mode=smart_drop_mode))
+    return errors
+
+
+def _validate_manual_commands(data: dict[str, Any], *, smart_drop_mode: str) -> list[str]:
+    errors: list[str] = []
+    manual_commands = data.get("manual_commands")
+
+    if manual_commands is None:
+        if "manual_blackout_on" in data or "manual_blackout_off" in data:
+            manual_commands = {
+                "blackout_on": data.get("manual_blackout_on"),
+                "blackout_off": data.get("manual_blackout_off"),
+            }
+        else:
+            return errors
+
+    if not isinstance(manual_commands, dict):
+        errors.append("'manual_commands' must be an object")
+        return errors
+
+    blackout_on = manual_commands.get("blackout_on")
+    if blackout_on is not None:
+        if not isinstance(blackout_on, dict):
+            errors.append("'manual_commands.blackout_on' must be an object")
+        else:
+            errors.extend(_validate_midi("manual_commands.blackout_on", blackout_on))
+
+    blackout_off = manual_commands.get("blackout_off")
+    if blackout_off is not None:
+        if not isinstance(blackout_off, dict):
+            errors.append("'manual_commands.blackout_off' must be an object")
+        else:
+            errors.extend(_validate_midi("manual_commands.blackout_off", blackout_off))
+
+    has_blackout_on = isinstance(blackout_on, dict)
+    has_blackout_off = isinstance(blackout_off, dict)
+    if smart_drop_mode == "blackout_mask" and has_blackout_on != has_blackout_off:
+        errors.append(
+            "'manual_commands.blackout_on' and 'manual_commands.blackout_off' must both be configured when smart_drop_mode='blackout_mask'"
+        )
+
     return errors
 
 
@@ -282,6 +352,12 @@ def _validate_midi(prefix: str, midi: dict[str, Any]) -> list[str]:
     if kind not in _VALID_KINDS:
         errors.append(f"{prefix}: midi 'kind' must be one of {sorted(_VALID_KINDS)}, got {kind!r}")
 
+    behavior = midi.get("behavior")
+    if behavior is not None and behavior not in _VALID_BEHAVIORS:
+        errors.append(
+            f"{prefix}: midi 'behavior' must be one of {sorted(_VALID_BEHAVIORS)}, got {behavior!r}"
+        )
+
     channel = midi.get("channel", 1)
     if not isinstance(channel, int) or not (1 <= channel <= 16):
         errors.append(f"{prefix}: midi 'channel' must be an integer 1–16, got {channel!r}")
@@ -308,6 +384,36 @@ def _validate_midi(prefix: str, midi: dict[str, Any]) -> list[str]:
             errors.append(
                 f"{prefix}: midi 'duration_ms' must be an integer {_DURATION_MIN}–{_DURATION_MAX}, "
                 f"got {duration_ms!r}"
+            )
+
+    if behavior == "pulse":
+        duration_ms = midi.get("duration_ms", 80)
+        if not isinstance(duration_ms, int) or not (_DURATION_MIN <= duration_ms <= _DURATION_MAX):
+            errors.append(
+                f"{prefix}: midi 'duration_ms' must be an integer {_DURATION_MIN}–{_DURATION_MAX} "
+                f"for behavior='pulse', got {duration_ms!r}"
+            )
+    elif behavior == "hold_ms":
+        hold_ms = midi.get("hold_ms")
+        if (
+            not isinstance(hold_ms, int)
+            or isinstance(hold_ms, bool)
+            or not (_HOLD_MS_MIN <= hold_ms <= _HOLD_MS_MAX)
+        ):
+            errors.append(
+                f"{prefix}: midi 'hold_ms' must be an integer {_HOLD_MS_MIN}–{_HOLD_MS_MAX} "
+                f"for behavior='hold_ms', got {hold_ms!r}"
+            )
+    elif behavior == "hold_beats":
+        hold_beats = midi.get("hold_beats")
+        if (
+            not isinstance(hold_beats, (int, float))
+            or isinstance(hold_beats, bool)
+            or not (_HOLD_BEATS_MIN <= float(hold_beats) <= _HOLD_BEATS_MAX)
+        ):
+            errors.append(
+                f"{prefix}: midi 'hold_beats' must be a number {_HOLD_BEATS_MIN}–{_HOLD_BEATS_MAX} "
+                f"for behavior='hold_beats', got {hold_beats!r}"
             )
 
     return errors
@@ -438,10 +544,12 @@ def _build_config(data: dict[str, Any]) -> LaserConfig:
     personalities: dict[str, LaserPersonality] = {}
     for p_name, p_data in data.get("personalities", {}).items():
         personalities[p_name] = _build_personality(p_name, p_data)
+    manual_blackout_on, manual_blackout_off = _build_manual_commands(data)
 
     return LaserConfig(
         enabled=bool(data.get("enabled", False)),
         dry_run=bool(data.get("dry_run", True)),
+        smart_drop_mode=str(data.get("smart_drop_mode", "blackout_mask")),
         midi_output_port=str(data.get("midi_output_port", "")),
         scenes=scenes,
         personalities=personalities,
@@ -451,19 +559,62 @@ def _build_config(data: dict[str, Any]) -> LaserConfig:
         stale_scene=str(data.get("stale_scene", "")),
         emergency_scene=str(data.get("emergency_scene", "")),
         fallback_scene=str(data.get("fallback_scene", "")),
+        manual_blackout_on=manual_blackout_on,
+        manual_blackout_off=manual_blackout_off,
+    )
+
+
+def _build_manual_commands(
+    data: dict[str, Any],
+) -> tuple[Optional[LaserMidiMessage], Optional[LaserMidiMessage]]:
+    manual_commands = data.get("manual_commands")
+    if isinstance(manual_commands, dict):
+        return (
+            _build_midi_message(manual_commands.get("blackout_on")),
+            _build_midi_message(manual_commands.get("blackout_off")),
+        )
+    if "manual_blackout_on" in data or "manual_blackout_off" in data:
+        return (
+            _build_midi_message(data.get("manual_blackout_on")),
+            _build_midi_message(data.get("manual_blackout_off")),
+        )
+    return (None, None)
+
+
+def _build_midi_message(raw: Any) -> Optional[LaserMidiMessage]:
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("kind", "note_pulse"))
+    behavior = _infer_behavior(kind, raw.get("behavior"))
+    return LaserMidiMessage(
+        kind=kind,
+        channel=int(raw.get("channel", 1)),
+        note=int(raw.get("note", 0)),
+        velocity=int(raw.get("velocity", 127)),
+        cc=int(raw.get("cc", 0)),
+        value=int(raw.get("value", 0)),
+        duration_ms=int(raw.get("duration_ms", 80)),
+        behavior=behavior,
+        hold_ms=int(raw.get("hold_ms", 0)),
+        hold_beats=float(raw.get("hold_beats", 0.0)),
     )
 
 
 def _build_scene(name: str, data: dict[str, Any]) -> LaserScene:
     midi_raw = data.get("midi", {})
+    kind = str(midi_raw.get("kind", "note_pulse"))
+    behavior = _infer_behavior(kind, midi_raw.get("behavior"))
     midi = LaserMidiMessage(
-        kind=str(midi_raw.get("kind", "note_pulse")),
+        kind=kind,
         channel=int(midi_raw.get("channel", 1)),
         note=int(midi_raw.get("note", 0)),
         velocity=int(midi_raw.get("velocity", 127)),
         cc=int(midi_raw.get("cc", 0)),
         value=int(midi_raw.get("value", 0)),
         duration_ms=int(midi_raw.get("duration_ms", 80)),
+        behavior=behavior,
+        hold_ms=int(midi_raw.get("hold_ms", 0)),
+        hold_beats=float(midi_raw.get("hold_beats", 0.0)),
     )
     return LaserScene(
         name=name,
@@ -508,3 +659,15 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
         buildup_hold_beats=int(data.get("buildup_hold_beats", 8)),
         pre_drop_lookahead_beats=int(data.get("pre_drop_lookahead_beats", 4)),
     )
+
+
+def _infer_behavior(kind: str, behavior: object) -> str:
+    if isinstance(behavior, str) and behavior:
+        return behavior
+    if kind == "note_pulse":
+        return "pulse"
+    if kind == "note_on":
+        return "note_on"
+    if kind == "note_off":
+        return "note_off"
+    return "pulse"

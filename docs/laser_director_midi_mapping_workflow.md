@@ -6,6 +6,82 @@ Audience: Coding agents, maintainers, and operators.
 
 This document explains how SoundSwitch MIDI mapping is being prepared manually before Laser Director implementation.
 
+## No manual JSON editing workflow
+
+Use the bridge menu bar wizard instead of hand-editing `laser_director.json`.
+
+```text
+1. Open SoundSwitch.
+2. Put SoundSwitch into MIDI mapping mode.
+3. Map a SoundSwitch cue/autoloop to a MIDI note.
+4. Open menu bar -> Map Lasers.
+5. Choose personality: house or default (default aliases to house).
+6. Choose role:
+   - Drop mode: groove, buildup, drop, breakdown
+   - Emphasized drop: groove, buildup, drop, post_drop, breakdown
+7. Enter MIDI note 0–127.
+8. Review warnings and save.
+9. Restart bridge if prompted.
+10. Keep dry_run=true until ready for live MIDI.
+11. Set `smart_drop_mode` explicitly (`blackout_mask` or `legacy_rearm`) as needed.
+```
+
+Banks are multiple MIDI mappings for the same role. The bridge rotates banks
+round-robin (example: house groove notes 37, 45, 46).
+
+To add multiple looks for one role, map the same personality + role again with
+a new MIDI note. The wizard automatically adds that mapping to the role bank.
+
+At any wizard prompt, press Escape or type `back` to go back.
+
+## Wizard Setting Runtime Contract
+
+Only settings with runtime effect are exposed in normal wizard setup.
+
+| Wizard Label | Config Key | Model Field | Runtime Consumer | Proof Test |
+| --- | --- | --- | --- | --- |
+| Personality + role mapping | `personalities.<p>.*_scene` + role bank keys | `LaserPersonality` role fields + banks | `LaserSceneExecutor._bank_for_role()` and role selection path | `tests/test_laser_map_wizard.py::test_second_mapping_auto_appends_bank_keeps_primary` |
+| MIDI note | `scenes.<scene>.midi.note` | `LaserMidiMessage.note` | `MidiOutput._send_trigger()` | `tests/test_laser_map_wizard.py::test_verify_runtime_contract_passes_for_wizard_config` |
+| Trigger behavior | `scenes.<scene>.midi.behavior` | `LaserMidiMessage.behavior` | `LaserSceneExecutor._materialize_midi()` + `MidiOutput._send_trigger()` | `tests/test_laser_executor.py::test_hold_beats_materializes_with_context_bpm` |
+| Role cooldown | `scenes.<scene>.cooldown_beats` (normalized per role bank) | `LaserScene.cooldown_beats` | `LaserSceneExecutor._is_role_cooldown_blocked()` | `tests/test_laser_executor.py::test_role_cooldown_blocks_then_allows_after_beats` |
+| Role bank rotation | `personalities.<p>.phrase_bank` etc | `LaserPersonality.*_bank` | `LaserSceneExecutor._choose_bank_scene_locked()` | `tests/test_laser_executor.py::test_drop_bank_rotates_each_crossing` |
+| Smart Drop manual blackout | `manual_commands.blackout_on` + `manual_commands.blackout_off` | `LaserConfig.manual_blackout_on` + `LaserConfig.manual_blackout_off` | `LaserSceneExecutor.trigger_blackout_on()` + drop-crossing unblack path | `tests/test_laser_executor.py::test_drop_crossing_emits_drop_then_manual_unblack` |
+
+Internal-only fields such as `safety_class` stay hidden from normal setup and are
+available only in **Advanced Safety Metadata**.
+
+Default operator mappings are SoundSwitch autoloops triggered by MIDI pulse,
+including `drop` and `post_drop`. Hold behavior is advanced-only and should
+only be used when a SoundSwitch control requires hold-to-play MIDI input.
+
+## Timing / Cooldowns
+
+The wizard includes a visible **Edit Timing & Cooldowns** menu.
+
+- Groove phrase length: how often normal groove changes can happen.
+- Minimum scene hold: how long a scene must stay before normal changes replace it.
+- Buildup lookahead: how many beats before a Smart Drop buildup is allowed.
+- Role cooldown: how soon the same exact role look can be triggered again.
+  Changing a role cooldown updates every mapping in that role's bank.
+- Hold behavior (advanced): pulse / hold_beats / hold_ms / note_on / note_off.
+
+The normal wizard flow does not ask for laser classification. Safety metadata
+(`safety_class`) is assigned automatically from role defaults and kept internal.
+An optional **Advanced Safety Metadata** menu is available for expert edits.
+
+Role cooldown is a runtime-enforced setting. A role cooldown change updates all
+mappings in that role bank and is enforced in `LaserSceneExecutor` using
+`ctx.abs_beat` (not wall-clock time).
+
+Drop style options:
+- **Drop mode** (default): one drop autoloop mapping; post-drop reuses drop mapping and
+  is hidden from normal role selection.
+- **Emphasized drop**: separate drop and post-drop autoloop mappings.
+
+The wizard includes **Verify mappings actually work**, which loads saved config,
+runs a dry runtime simulation through `LaserSceneExecutor`, and reports PASS/FAIL
+for role mapping outputs and cooldown enforcement.
+
 ## Core idea
 
 SoundSwitch does not know about Python scene names directly.
@@ -120,9 +196,27 @@ emergency_scene -> emergency_blackout
 
 Note: `pre_drop_scene` may remain in config for backward compatibility, but
 automatic Laser Director policy intentionally does not select it. Smart Drop
-already performs the final pre-drop autoloop cut/rearm workflow, and the
+now performs a pre-drop blackout arm + drop-crossing unblack workflow, and the
 buildup look should persist through the Smart-Drop countdown until drop
 crossing.
+
+### Smart Drop blackout manual commands
+
+Smart Drop blackout does not use scene-mapped blackout for its pre-drop timing
+path. Configure dedicated manual commands:
+
+```json
+"manual_commands": {
+  "blackout_on": { "kind": "note_on", "behavior": "note_on", "channel": 1, "note": 90, "velocity": 127 },
+  "blackout_off": { "kind": "note_off", "behavior": "note_off", "channel": 1, "note": 90, "velocity": 0 }
+}
+```
+
+Runtime ordering guarantee:
+
+- pre-drop window: Smart Drop arms and executor sends `blackout_on` once
+- drop crossing tick: executor enqueues drop MIDI first, then `blackout_off` in the same push
+- if drop trigger is blocked/rejected, or Smart Drop state is reset (stop/no-track/deck change), executor still clears pending blackout once
 
 ## Manual SoundSwitch mapping method
 
@@ -378,6 +472,8 @@ When implementing Laser Director MIDI support:
 7. Use non-blocking enqueue from policy code.
 8. Use a bounded MIDI queue.
 9. Support dry-run mode.
+9a. `dry_run` must not switch Smart Drop algorithms.
+9b. Smart Drop algorithm is controlled by `smart_drop_mode`.
 10. Missing MIDI dependency or missing MIDI port must degrade Laser Director only; OS2L must continue.
 11. Do not call MIDI APIs from `StateManager._push_tick`.
 12. Do not call `conn.status()` from `StateManager._push_tick`.

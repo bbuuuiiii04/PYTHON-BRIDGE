@@ -62,6 +62,7 @@ def _config(*, enabled: bool, dry_run: bool = True, with_personality: bool = Tru
     return LaserConfig(
         enabled=enabled,
         dry_run=dry_run,
+        smart_drop_mode="blackout_mask",
         midi_output_port="IAC Driver Bus 1",
         scenes=scenes,
         personalities=personalities,

@@ -73,6 +73,9 @@ STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 _PROFILE_SUMMARY_INTERVAL_S = 10.0
 _PROFILE_WINDOW = 2048
+_SMART_DROP_SIGNAL_NONE = 0
+_SMART_DROP_SIGNAL_BLACKOUT_ARMED = 1
+_SMART_DROP_SIGNAL_CROSSING = 2
 
 
 class _RollingDurations:
@@ -470,6 +473,14 @@ class StateManager:
 
     def _publish_snapshot(self) -> None:
         os = self._os
+        executor_blackout_pending = False
+        if self._laser_executor is not None:
+            try:
+                executor_blackout_pending = bool(
+                    self._laser_executor.status().get("blackout_pending_for_drop_window", False)
+                )
+            except Exception:
+                executor_blackout_pending = False
         deck = {}
         for num, state in self._deck.items():
             deck[str(num)] = {
@@ -494,6 +505,9 @@ class StateManager:
             "autoloop_arm_target_source": os.autoloop_arm_target_source,
             "pending_live_bpm": os.pending_live_bpm,
             "drop_cut_armed": os.drop_cut_armed,
+            "smart_drop_transition_window_active": os.drop_cut_armed,
+            # Backward-compatible field name, now reflecting executor blackout MIDI state.
+            "smart_drop_blackout_active": executor_blackout_pending,
             "scripted_id": self._os.scripted_id if hasattr(self._os, "scripted_id") else 0, # compatibility fallback
             "smart_drop_enabled": self._smart_drop_enabled,
             "smart_breakdown_enabled": self._smart_breakdown_enabled,
@@ -701,9 +715,23 @@ class StateManager:
 
         elif self._laser_director is not None:
             if ev.kind == Ev.LASER_TOGGLE:
+                was_enabled = self._laser_director.is_enabled()
                 self._laser_director.toggle_enabled()
+                if (
+                    was_enabled
+                    and not self._laser_director.is_enabled()
+                    and self._laser_executor is not None
+                ):
+                    self._laser_executor.clear_pending_blackout(
+                        reason="laser_director_disabled"
+                    )
             elif ev.kind == Ev.LASER_SET_ENABLED:
-                self._laser_director.set_enabled(bool(ev.payload.get("enabled", False)))
+                enabled = bool(ev.payload.get("enabled", False))
+                self._laser_director.set_enabled(enabled)
+                if not enabled and self._laser_executor is not None:
+                    self._laser_executor.clear_pending_blackout(
+                        reason="laser_director_disabled"
+                    )
             elif ev.kind == Ev.LASER_SCENE:
                 scene = str(ev.payload.get("scene", ""))
                 ttl_s = float(ev.payload.get("ttl_s", 4.0))
@@ -773,6 +801,8 @@ class StateManager:
         self._clear_live_bpm_follow()
         self._clear_autoloop_tempo_relock()
         self._clear_pending_autoloop_master_phrase_arm()
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="master_changed")
 
     # ── Track load → lsof trigger ─────────────────────────────────────────────
 
@@ -787,6 +817,8 @@ class StateManager:
             self._clear_live_bpm_follow()
             self._clear_autoloop_tempo_relock()
             self._clear_pending_autoloop_master_phrase_arm()
+            if self._laser_executor is not None:
+                self._laser_executor.reset_runtime_state(reason="active_track_loaded")
         d.tl_title = title
         self._last_loaded_deck = deck
         trace_id = str(ev.payload.get("__trace_id", ""))
@@ -1529,6 +1561,11 @@ class StateManager:
         # Beat boundary detection: fire a beat event when elapsed crosses the next beat
         beatpos_out = abs_beat_pos if os.lighting_mode == "autoloop" else beat_pos
         autoloop_tick_just_fired = False
+        smart_drop_signal = _SMART_DROP_SIGNAL_NONE
+        smart_drop_blackout_mode = bool(
+            self._laser_executor is not None
+            and self._laser_executor.smart_drop_blackout_enabled()
+        )
         if bpm > 0:
             this_beat = int(abs_beat_pos)
             if os.lighting_mode == "autoloop" and grid_pos is not None:
@@ -1574,9 +1611,19 @@ class StateManager:
                 # out before the activation beat event reaches SoundSwitch.
                 if os.lighting_mode == "autoloop":
                     if self._smart_drop_enabled and d.meta.smart_drops:
-                        if _smart_drop_tick(self, active, mirror, bpm, this_beat, elapsed_ms):
+                        smart_drop_signal = _smart_drop_tick(
+                            self,
+                            active,
+                            mirror,
+                            bpm,
+                            this_beat,
+                            elapsed_ms,
+                            blackout_mode=smart_drop_blackout_mode,
+                        )
+                        if smart_drop_signal == _SMART_DROP_SIGNAL_CROSSING:
                             change = True
-                            autoloop_tick_just_fired = True
+                            if not smart_drop_blackout_mode:
+                                autoloop_tick_just_fired = True
                     if self._smart_breakdown_enabled and d.meta.smart_breakdowns:
                         if _smart_breakdown_tick(self, active, mirror, bpm, this_beat, elapsed_ms):
                             change = True
@@ -1611,6 +1658,11 @@ class StateManager:
 
         # Laser Director tick — dry-run only in Phase 1.
         # Must not block, send MIDI, call OS2LOutput, or mutate DeckState/OutputState.
+        drop_crossing_decision_emitted = False
+        smart_drop_blackout_arm = bool(
+            smart_drop_signal == _SMART_DROP_SIGNAL_BLACKOUT_ARMED
+            and smart_drop_blackout_mode
+        )
         if self._laser_director is not None:
             ctx = self._build_laser_context(
                 active,
@@ -1622,10 +1674,38 @@ class StateManager:
                 snap,
                 now,
                 autoloop_tick_just_fired=autoloop_tick_just_fired,
+                smart_drop_blackout_arm=smart_drop_blackout_arm,
             )
+            laser_director_enabled = self._laser_director.is_enabled()
+            if (
+                smart_drop_blackout_arm
+                and not laser_director_enabled
+                and self._laser_executor is not None
+            ):
+                self._laser_executor.clear_pending_blackout(
+                    reason="laser_director_disabled"
+                )
             decision = self._laser_director.tick(ctx, now=now)
+            drop_crossing_decision_emitted = bool(
+                decision is not None and decision.reason == "drop_crossing"
+            )
             if self._laser_executor is not None:
                 self._laser_executor.on_decision(decision, ctx)
+        if smart_drop_signal == _SMART_DROP_SIGNAL_CROSSING and smart_drop_blackout_mode:
+            # Ordering requirement: in blackout mode keep os.drop_cut_armed true
+            # through phrase-anchor processing so _phrase_anchor_tick suppresses
+            # same-beat phrase-anchor rearm. Do crossing cleanup only here,
+            # after phrase-anchor processing has already run for this tick.
+            if (
+                self._laser_executor is not None
+                and not drop_crossing_decision_emitted
+            ):
+                self._laser_executor.clear_pending_blackout(
+                    reason="smart_drop_crossing_without_drop_decision"
+                )
+            os.phrase_anchor_last_beat = max(os.phrase_anchor_last_beat, os.drop_rearm_beat)
+            os.drop_cut_armed = False
+            os.drop_rearm_beat = 0
 
         # Elapsed + beatpos — send at every push tick (SS needs continuous updates).
         # Test A: in autoloop only, send absolute beat position to match VDJ-like
@@ -1644,6 +1724,7 @@ class StateManager:
         snap,
         now: float,
         autoloop_tick_just_fired: bool = False,
+        smart_drop_blackout_arm: bool = False,
     ):
         """Build a frozen LaserContext from already-computed push-tick locals.
 
@@ -1688,6 +1769,8 @@ class StateManager:
             current_phrase_is_up=current_phrase_is_up,
             current_phrase_is_chorus=current_phrase_is_chorus,
             scripted_id=d.scripted_id,
+            smart_drop_blackout_active=self._os.drop_cut_armed,
+            smart_drop_blackout_arm=smart_drop_blackout_arm,
         )
 
     # ── Stop / resume helpers ─────────────────────────────────────────────────
@@ -1710,6 +1793,8 @@ class StateManager:
         self._clear_autoloop_tempo_relock()
         self._clear_autoloop_tempo_anchor()
         os.live_follow_generation += 1
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="stop")
 
     def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
         mirror = 3 - deck
@@ -2087,6 +2172,8 @@ class StateManager:
 
     def _clear_smart_rearm_state(self) -> None:
         os = self._os
+        if self._laser_executor is not None:
+            self._laser_executor.clear_pending_blackout(reason="smart_rearm_state_cleared")
         os.drop_cut_armed = False
         os.drop_rearm_beat = 0
         os.breakdown_active = False
@@ -2222,23 +2309,34 @@ def _smart_drop_tick(
     bpm: float,
     this_beat: int,
     elapsed_ms: int,
-) -> bool:
+    blackout_mode: bool = True,
+) -> int:
     """Fire smart-drop cut before a detected drop, then rearm on the drop beat.
 
-    Returns True if a rearm fired (caller should set change=True on the beat
-    event), False otherwise (including the cut branch).
+    Returns:
+      0 when no smart-drop transition happened,
+      1 when entering the pre-drop blackout window (armed),
+      2 when drop crossing is reached (drop should fire now).
     """
     os = sm._os
     d = sm._deck[active]
 
     if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
-        return False
+        return _SMART_DROP_SIGNAL_NONE
 
     if os.breakdown_active:
-        return False
+        return _SMART_DROP_SIGNAL_NONE
 
     if os.drop_cut_armed:
         if this_beat >= os.drop_rearm_beat:
+            if blackout_mode:
+                log.info(
+                    "[SM] smart-drop-crossing  deck=%d  beat=%d  drop_at=%d",
+                    active,
+                    this_beat,
+                    os.drop_rearm_beat,
+                )
+                return _SMART_DROP_SIGNAL_CROSSING
             log.info("[SM] smart-drop-rearm  deck=%d  beat=%d", active, this_beat)
             if _send_direct_autoloop_rearm(
                 sm, active, mirror, bpm, elapsed_ms, "smart-drop",
@@ -2247,8 +2345,8 @@ def _smart_drop_tick(
                 os.phrase_anchor_last_beat = os.drop_rearm_beat
                 os.drop_cut_armed = False
                 os.drop_rearm_beat = 0
-                return True
-        return False
+                return _SMART_DROP_SIGNAL_CROSSING
+        return _SMART_DROP_SIGNAL_NONE
 
     for drop_beat in d.meta.smart_drops:
         cutoff = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
@@ -2258,15 +2356,22 @@ def _smart_drop_tick(
             continue
         if any(this_beat <= bd_beat < drop_beat for bd_beat in d.meta.smart_breakdowns):
             continue
-        log.info("[SM] smart-drop-cut  deck=%d  beat=%d  drop_at=%d",
-                 active, this_beat, drop_beat)
-        for dk in (active, mirror, 3, 4):
-            sm._out.send_deck_clear(dk)
-            sm._out.send_loop_off(dk)
+        if blackout_mode:
+            log.info(
+                "[SM] smart-drop-blackout-arm  deck=%d  beat=%d  drop_at=%d",
+                active,
+                this_beat,
+                drop_beat,
+            )
+        else:
+            log.info("[SM] smart-drop-cut  deck=%d  beat=%d  drop_at=%d", active, this_beat, drop_beat)
+            for dk in (active, mirror, 3, 4):
+                sm._out.send_deck_clear(dk)
+                sm._out.send_loop_off(dk)
         os.drop_cut_armed = True
         os.drop_rearm_beat = drop_beat
-        break
-    return False
+        return _SMART_DROP_SIGNAL_BLACKOUT_ARMED
+    return _SMART_DROP_SIGNAL_NONE
 
 
 def _select_smart_drops(

@@ -47,6 +47,18 @@ class _FailingPort:
         return None
 
 
+class _FailingNoteOffPort(_RecordingPort):
+    def __init__(self, *, fail_note_off_count: int) -> None:
+        super().__init__()
+        self._remaining_failures = fail_note_off_count
+
+    def send(self, message) -> None:
+        if getattr(message, "type", "") == "note_off" and self._remaining_failures > 0:
+            self._remaining_failures -= 1
+            raise OSError("note_off failed")
+        super().send(message)
+
+
 def _fake_mido_module(port):
     class _FakeMessage:
         def __init__(self, msg_type, **kwargs):
@@ -148,6 +160,7 @@ class MidiOutputTests(unittest.TestCase):
             "sent_count",
             "panic_count",
             "last_error",
+            "active_held_notes",
         }
         self.assertEqual(keys, expected)
 
@@ -191,6 +204,169 @@ class MidiOutputTests(unittest.TestCase):
                 status = out.status()
                 self.assertEqual(status["drop_count"], 1)
                 self.assertEqual(status["rejected_count"], 1)
+            finally:
+                out.stop()
+
+    def test_hold_ms_sends_note_on_then_note_off_later(self) -> None:
+        port = _RecordingPort()
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                msg = LaserMidiMessage(
+                    kind="note_on",
+                    behavior="hold_ms",
+                    channel=1,
+                    note=62,
+                    velocity=120,
+                    hold_ms=120,
+                )
+                self.assertTrue(out.trigger(msg))
+                self.assertTrue(
+                    _wait_until(
+                        lambda: any(m.type == "note_on" for _, m in port.messages),
+                        timeout_s=0.3,
+                    )
+                )
+                self.assertTrue(
+                    _wait_until(
+                        lambda: any(m.type == "note_off" for _, m in port.messages),
+                        timeout_s=0.6,
+                    )
+                )
+            finally:
+                out.stop()
+
+    def test_panic_during_due_note_off_is_safe_and_bounded(self) -> None:
+        port = _RecordingPort()
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                msg = LaserMidiMessage(
+                    kind="note_on",
+                    behavior="hold_ms",
+                    channel=1,
+                    note=65,
+                    velocity=120,
+                    hold_ms=100,
+                )
+                self.assertTrue(out.trigger(msg))
+                self.assertTrue(
+                    _wait_until(
+                        lambda: any(m.type == "note_on" for _, m in port.messages),
+                        timeout_s=0.3,
+                    )
+                )
+                time.sleep(0.08)
+                out.panic()
+                self.assertTrue(_wait_until(lambda: out.status()["active_held_notes"] == [], timeout_s=0.5))
+            finally:
+                out.stop()
+        note_off_count = sum(1 for _, msg in port.messages if msg.type == "note_off" and msg.kwargs.get("note") == 65)
+        self.assertLessEqual(note_off_count, 2)
+
+    def test_stop_during_due_note_off_is_safe_and_clears_active(self) -> None:
+        port = _RecordingPort()
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            msg = LaserMidiMessage(
+                kind="note_on",
+                behavior="hold_ms",
+                channel=1,
+                note=66,
+                velocity=120,
+                hold_ms=120,
+            )
+            self.assertTrue(out.trigger(msg))
+            self.assertTrue(
+                _wait_until(
+                    lambda: any(m.type == "note_on" for _, m in port.messages),
+                    timeout_s=0.3,
+                )
+            )
+            time.sleep(0.09)
+            out.stop()
+            self.assertEqual(out.status()["active_held_notes"], [])
+        note_off_count = sum(1 for _, msg in port.messages if msg.type == "note_off" and msg.kwargs.get("note") == 66)
+        self.assertLessEqual(note_off_count, 2)
+
+    def test_note_off_failure_keeps_note_recoverable_until_panic(self) -> None:
+        port = _FailingNoteOffPort(fail_note_off_count=1)
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                msg = LaserMidiMessage(
+                    kind="note_on",
+                    behavior="hold_ms",
+                    channel=1,
+                    note=67,
+                    velocity=120,
+                    hold_ms=60,
+                )
+                self.assertTrue(out.trigger(msg))
+                self.assertTrue(_wait_until(lambda: out.status()["send_error_count"] >= 1, timeout_s=0.5))
+                self.assertTrue(out.status()["active_held_notes"])
+                out.panic()
+                self.assertTrue(_wait_until(lambda: out.status()["active_held_notes"] == [], timeout_s=0.5))
+                self.assertTrue(out.status()["degraded"])
+            finally:
+                out.stop()
+
+    def test_stop_releases_held_notes(self) -> None:
+        port = _RecordingPort()
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            msg = LaserMidiMessage(
+                kind="note_on",
+                behavior="hold_ms",
+                channel=1,
+                note=63,
+                velocity=120,
+                hold_ms=2000,
+            )
+            self.assertTrue(out.trigger(msg))
+            self.assertTrue(
+                _wait_until(
+                    lambda: any(m.type == "note_on" for _, m in port.messages),
+                    timeout_s=0.3,
+                )
+            )
+            out.stop()
+        self.assertTrue(any(m.type == "note_off" for _, m in port.messages))
+
+    def test_held_notes_do_not_block_later_messages(self) -> None:
+        port = _RecordingPort()
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                hold = LaserMidiMessage(
+                    kind="note_on",
+                    behavior="hold_ms",
+                    channel=1,
+                    note=64,
+                    velocity=120,
+                    hold_ms=1500,
+                )
+                cc = LaserMidiMessage(kind="cc", channel=1, cc=10, value=64)
+                self.assertTrue(out.trigger(hold))
+                self.assertTrue(out.trigger(cc, priority="high"))
+                self.assertTrue(
+                    _wait_until(
+                        lambda: any(m.type == "control_change" for _, m in port.messages),
+                        timeout_s=0.35,
+                    )
+                )
             finally:
                 out.stop()
 

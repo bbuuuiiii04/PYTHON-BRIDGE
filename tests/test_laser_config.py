@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.laser_config import (  # noqa: E402
     LaserConfig,
     LaserConfigResult,
+    _infer_behavior,
     load_laser_director_config,
 )
 from rb_ss_bridge_v2.laser_models import (  # noqa: E402
@@ -242,6 +243,172 @@ class DryRunDefaultTests(unittest.TestCase):
         result = load_laser_director_config(path)
         self.assertTrue(result.available)
         self.assertFalse(result.config.dry_run)
+
+
+class SmartDropModeTests(unittest.TestCase):
+    def test_smart_drop_mode_defaults_to_blackout_mask(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg.pop("smart_drop_mode", None)
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.config.smart_drop_mode, "blackout_mask")
+
+    def test_smart_drop_mode_legacy_rearm_is_valid(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "legacy_rearm"
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.config.smart_drop_mode, "legacy_rearm")
+
+    def test_invalid_smart_drop_mode_fails_validation(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "invalid_mode"
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(result.available)
+        self.assertEqual(result.reason, "invalid_config")
+        self.assertTrue(any("smart_drop_mode" in e for e in result.errors))
+
+
+class ManualBlackoutPairValidationTests(unittest.TestCase):
+    def test_blackout_mode_requires_blackout_command_pair(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "blackout_mask"
+        cfg["manual_commands"] = {
+            "blackout_on": {
+                "kind": "note_on",
+                "behavior": "note_on",
+                "channel": 1,
+                "note": 90,
+                "velocity": 127,
+            },
+        }
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(result.available)
+        self.assertTrue(any("manual_commands.blackout_on" in e for e in result.errors))
+
+    def test_blackout_mode_requires_blackout_off_when_blackout_on_missing(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "blackout_mask"
+        cfg["manual_commands"] = {
+            "blackout_off": {
+                "kind": "note_off",
+                "behavior": "note_off",
+                "channel": 1,
+                "note": 90,
+                "velocity": 0,
+            },
+        }
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(result.available)
+        self.assertTrue(any("manual_commands.blackout_on" in e for e in result.errors))
+
+    def test_blackout_mode_allows_blackout_command_pair(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "blackout_mask"
+        cfg["manual_commands"] = {
+            "blackout_on": {
+                "kind": "note_on",
+                "behavior": "note_on",
+                "channel": 1,
+                "note": 91,
+                "velocity": 127,
+            },
+            "blackout_off": {
+                "kind": "note_off",
+                "behavior": "note_off",
+                "channel": 1,
+                "note": 91,
+                "velocity": 0,
+            },
+        }
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+
+    def test_legacy_mode_does_not_require_manual_blackout_commands(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "legacy_rearm"
+        cfg["manual_commands"] = {
+            "blackout_on": {
+                "kind": "note_on",
+                "behavior": "note_on",
+                "channel": 1,
+                "note": 91,
+                "velocity": 127,
+            },
+        }
+        result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+
+
+class ManualBlackoutWarningTests(unittest.TestCase):
+    def test_blackout_mode_without_manual_commands_logs_warning(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "blackout_mask"
+        cfg.pop("manual_commands", None)
+        with self.assertLogs("laser_config", level="WARNING") as captured:
+            result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+        output = "\n".join(captured.output)
+        self.assertIn("smart_drop_mode='blackout_mask'", output)
+        self.assertIn("will not be masked", output)
+
+    def test_blackout_mode_with_manual_pair_logs_no_missing_warning(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "blackout_mask"
+        cfg["manual_commands"] = {
+            "blackout_on": {
+                "kind": "note_on",
+                "behavior": "note_on",
+                "channel": 1,
+                "note": 90,
+                "velocity": 127,
+            },
+            "blackout_off": {
+                "kind": "note_off",
+                "behavior": "note_off",
+                "channel": 1,
+                "note": 90,
+                "velocity": 0,
+            },
+        }
+        with self.assertNoLogs("laser_config", level="WARNING"):
+            result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+
+    def test_legacy_mode_without_manual_commands_logs_no_blackout_warning(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["smart_drop_mode"] = "legacy_rearm"
+        cfg.pop("manual_commands", None)
+        with self.assertNoLogs("laser_config", level="WARNING"):
+            result = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(result.available, msg=result.errors)
+
+
+class MidiBehaviorInferenceTests(unittest.TestCase):
+    def test_explicit_behavior_wins(self) -> None:
+        self.assertEqual(_infer_behavior("note_on", "hold_ms"), "hold_ms")
+
+    def test_note_pulse_defaults_to_pulse(self) -> None:
+        self.assertEqual(_infer_behavior("note_pulse", None), "pulse")
+
+    def test_note_on_defaults_to_note_on(self) -> None:
+        self.assertEqual(_infer_behavior("note_on", ""), "note_on")
+
+    def test_note_off_defaults_to_note_off(self) -> None:
+        self.assertEqual(_infer_behavior("note_off", None), "note_off")
+
+    def test_unknown_kind_defaults_to_pulse(self) -> None:
+        self.assertEqual(_infer_behavior("unknown_kind", None), "pulse")
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +635,38 @@ class InvalidDurationTests(unittest.TestCase):
         cfg["scenes"]["safe_static"]["midi"]["duration_ms"] = 9999
         r = load_laser_director_config(_write_config(cfg))
         self.assertTrue(r.available)
+
+    def test_behavior_hold_ms_requires_valid_range(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        midi = cfg["scenes"]["safe_static"]["midi"]
+        midi["behavior"] = "hold_ms"
+        midi["kind"] = "note_on"
+        midi["hold_ms"] = 30001
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("hold_ms" in e for e in r.errors))
+
+    def test_behavior_hold_beats_requires_valid_range(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        midi = cfg["scenes"]["safe_static"]["midi"]
+        midi["behavior"] = "hold_beats"
+        midi["kind"] = "note_on"
+        midi["hold_beats"] = 0.1
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("hold_beats" in e for e in r.errors))
+
+    def test_behavior_hold_beats_valid(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        midi = cfg["scenes"]["safe_static"]["midi"]
+        midi["behavior"] = "hold_beats"
+        midi["kind"] = "note_on"
+        midi["hold_beats"] = 4
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(r.available, msg=r.errors)
 
 
 # ---------------------------------------------------------------------------
@@ -976,6 +1175,7 @@ class LaserModelsTests(unittest.TestCase):
         self.assertEqual(msg.note, 0)
         self.assertEqual(msg.velocity, 127)
         self.assertEqual(msg.duration_ms, 80)
+        self.assertEqual(msg.behavior, "pulse")
 
     def test_laser_scene_defaults(self) -> None:
         scene = LaserScene(

@@ -116,9 +116,12 @@ class LaserDirector:
         self._last_scene_change_abs_beat: float = 0.0
         self._last_trigger_abs_beat: float = 0.0
         self._laser_drop_fired_beat: Optional[int] = None
+        self._pending_drop_crossing_beat: Optional[int] = None
+        self._drop_rearm_edge_seen_for_pending: bool = False
         self._post_drop_start_abs_beat: float = -1.0
         self._last_smart_abs_beat: Optional[float] = None
         self._phrase_trigger_pending: bool = False
+        self._smart_drop_blackout_active: bool = False
 
     # ── Policy commands (called from StateManager._handle_event) ─────────────
 
@@ -194,6 +197,7 @@ class LaserDirector:
         if not self._enabled:
             return None
 
+        self._smart_drop_blackout_active = bool(ctx.smart_drop_blackout_active)
         decision = self._decide(ctx, now=now)
 
         scene_changed = decision.scene != self._current_scene
@@ -342,6 +346,8 @@ class LaserDirector:
                     and self._laser_drop_fired_beat != int(drop_beat)
                 ):
                     self._laser_drop_fired_beat = int(drop_beat)
+                    self._pending_drop_crossing_beat = None
+                    self._drop_rearm_edge_seen_for_pending = False
                     self._post_drop_start_abs_beat = abs_beat
                     self._last_smart_abs_beat = abs_beat
                     return LaserSceneDecision(
@@ -473,8 +479,11 @@ class LaserDirector:
 
     def _reset_smart_observation_state(self) -> None:
         self._laser_drop_fired_beat = None
+        self._pending_drop_crossing_beat = None
+        self._drop_rearm_edge_seen_for_pending = False
         self._post_drop_start_abs_beat = -1.0
         self._last_smart_abs_beat = None
+        self._smart_drop_blackout_active = False
         self._phrase_trigger_pending = False
 
     def _beats_to_next_drop(self, abs_beat: float, smart_drops: tuple[int, ...]) -> float:
@@ -578,6 +587,9 @@ class LaserDirector:
             "buildup_max_drop_distance_beats": self._buildup_max_drop_distance_beats,
             "pre_drop_lookahead_beats": self._pre_drop_lookahead_beats,
             "laser_drop_fired_beat": self._laser_drop_fired_beat,
+            "pending_drop_crossing_beat": self._pending_drop_crossing_beat,
+            "drop_rearm_edge_seen_for_pending": self._drop_rearm_edge_seen_for_pending,
+            "smart_drop_blackout_active": self._smart_drop_blackout_active,
             "phrase_trigger_pending": self._phrase_trigger_pending,
             "last_trigger_abs_beat": self._last_trigger_abs_beat,
         }

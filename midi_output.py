@@ -9,6 +9,7 @@ Design constraints:
 from __future__ import annotations
 
 import importlib
+import heapq
 import logging
 import queue
 import threading
@@ -22,6 +23,8 @@ log = logging.getLogger("midi_output")
 
 _DURATION_MIN_MS = 10
 _DURATION_MAX_MS = 250
+_HOLD_MIN_MS = 10
+_HOLD_MAX_MS = 30000
 
 _PRIORITY_MAP = {
     "high": 0,
@@ -74,6 +77,8 @@ class MidiOutput:
         self._send_error_count = 0
         self._sent_count = 0
         self._panic_count = 0
+        self._scheduled_offs: list[tuple[float, int, int, int]] = []
+        self._active_held_notes: dict[tuple[int, int], float] = {}
 
     def start(self) -> None:
         """Start sender loop. Idempotent."""
@@ -104,6 +109,7 @@ class MidiOutput:
             thread.join(timeout=0.5)
         with self._lock:
             self._sender_thread = None
+        self._clear_held_notes(send_note_off=not self._dry_run)
         self._close_port()
 
     def trigger(self, msg: LaserMidiMessage, priority: str = "normal") -> bool:
@@ -161,6 +167,14 @@ class MidiOutput:
                 "sent_count": self._sent_count,
                 "panic_count": self._panic_count,
                 "last_error": self._last_error,
+                "active_held_notes": [
+                    {
+                        "channel": channel,
+                        "note": note,
+                        "off_at": off_at,
+                    }
+                    for (channel, note), off_at in sorted(self._active_held_notes.items())
+                ],
             }
 
     def _prepare_live_output(self) -> None:
@@ -203,18 +217,22 @@ class MidiOutput:
 
     def _sender_loop(self) -> None:
         while not self._stop_event.is_set():
+            self._process_due_note_offs()
+            timeout = self._next_wait_timeout()
             try:
-                _, _, cmd = self._queue.get(timeout=0.05)
+                _, _, cmd = self._queue.get(timeout=timeout)
             except queue.Empty:
                 continue
 
             if cmd.kind == _CMD_STOP:
                 break
             if cmd.kind == _CMD_PANIC:
+                self._clear_held_notes(send_note_off=True)
                 self._send_panic_all_notes_off()
                 continue
             if cmd.kind == _CMD_TRIGGER and cmd.message is not None:
                 self._send_trigger(cmd.message)
+        self._clear_held_notes(send_note_off=not self._dry_run)
 
     def _send_trigger(self, msg: LaserMidiMessage) -> None:
         if self._dry_run:
@@ -231,21 +249,44 @@ class MidiOutput:
             return
 
         channel = max(0, min(15, int(msg.channel) - 1))
+        note = int(msg.note)
         try:
-            if msg.kind == "note_pulse":
+            if msg.kind == "cc":
+                outport.send(
+                    mido.Message(
+                        "control_change",
+                        channel=channel,
+                        control=int(msg.cc),
+                        value=int(msg.value),
+                    )
+                )
+                with self._lock:
+                    self._sent_count += 1
+                return
+            behavior = (msg.behavior or "").strip().lower()
+            if not behavior:
+                if msg.kind == "note_pulse":
+                    behavior = "pulse"
+                elif msg.kind == "note_on":
+                    behavior = "note_on"
+                elif msg.kind == "note_off":
+                    behavior = "note_off"
+
+            if behavior == "pulse" or msg.kind == "note_pulse":
                 duration_ms = max(_DURATION_MIN_MS, min(_DURATION_MAX_MS, int(msg.duration_ms)))
-                outport.send(mido.Message("note_on", channel=channel, note=int(msg.note), velocity=int(msg.velocity)))
-                self._panic_event.wait(timeout=duration_ms / 1000.0)
-                outport.send(mido.Message("note_off", channel=channel, note=int(msg.note), velocity=0))
-            elif msg.kind == "note_on":
-                outport.send(mido.Message("note_on", channel=channel, note=int(msg.note), velocity=int(msg.velocity)))
-            elif msg.kind == "note_off":
-                outport.send(mido.Message("note_off", channel=channel, note=int(msg.note), velocity=0))
-            elif msg.kind == "cc":
-                outport.send(mido.Message("control_change", channel=channel, control=int(msg.cc), value=int(msg.value)))
+                self._send_note_on(channel=channel, note=note, velocity=int(msg.velocity))
+                self._schedule_note_off(channel=channel, note=note, hold_ms=duration_ms)
+            elif behavior == "hold_ms":
+                hold_ms = max(_HOLD_MIN_MS, min(_HOLD_MAX_MS, int(msg.hold_ms)))
+                self._send_note_on(channel=channel, note=note, velocity=int(msg.velocity))
+                self._schedule_note_off(channel=channel, note=note, hold_ms=hold_ms)
+            elif behavior == "note_on" or msg.kind == "note_on":
+                self._send_note_on(channel=channel, note=note, velocity=int(msg.velocity))
+            elif behavior == "note_off" or msg.kind == "note_off":
+                self._send_note_off(channel=channel, note=note)
             else:
                 # Unknown message kinds are treated as send errors.
-                raise ValueError(f"unsupported midi kind: {msg.kind!r}")
+                raise ValueError(f"unsupported midi behavior={behavior!r} kind={msg.kind!r}")
             with self._lock:
                 self._sent_count += 1
         except Exception as exc:
@@ -270,6 +311,92 @@ class MidiOutput:
             self._record_send_error(exc)
         finally:
             self._panic_event.clear()
+            self._clear_scheduled_note_offs()
+
+    def _send_note_on(self, *, channel: int, note: int, velocity: int) -> None:
+        with self._lock:
+            outport = self._outport
+            mido = self._mido
+        if outport is None or mido is None:
+            return
+        key = (channel, note)
+        if self._is_note_held(key):
+            self._send_note_off(channel=channel, note=note)
+        outport.send(mido.Message("note_on", channel=channel, note=note, velocity=velocity))
+
+    def _send_note_off(self, *, channel: int, note: int) -> None:
+        with self._lock:
+            outport = self._outport
+            mido = self._mido
+        if outport is None or mido is None:
+            return
+        outport.send(mido.Message("note_off", channel=channel, note=note, velocity=0))
+        with self._lock:
+            self._active_held_notes.pop((channel, note), None)
+
+    def _schedule_note_off(self, *, channel: int, note: int, hold_ms: int) -> None:
+        off_at = time.monotonic() + max(0.0, hold_ms / 1000.0)
+        key = (channel, note)
+        with self._lock:
+            self._active_held_notes[key] = off_at
+            heapq.heappush(
+                self._scheduled_offs,
+                (off_at, channel, note, int(off_at * 1000)),
+            )
+
+    def _process_due_note_offs(self) -> None:
+        while True:
+            with self._lock:
+                if not self._scheduled_offs:
+                    return
+                off_at, channel, note, _ = self._scheduled_offs[0]
+                if off_at > time.monotonic():
+                    return
+                heapq.heappop(self._scheduled_offs)
+
+            key = (channel, note)
+            with self._lock:
+                active_off_at = self._active_held_notes.get(key)
+            if active_off_at is None or abs(active_off_at - off_at) > 1e-6:
+                continue
+            try:
+                self._send_note_off(channel=channel, note=note)
+            except Exception as exc:
+                self._record_send_error(exc)
+                return
+
+    def _next_wait_timeout(self) -> float:
+        with self._lock:
+            if not self._scheduled_offs:
+                return 0.05
+            next_off = self._scheduled_offs[0][0]
+        return max(0.0, min(0.05, next_off - time.monotonic()))
+
+    def _is_note_held(self, key: tuple[int, int]) -> bool:
+        with self._lock:
+            return key in self._active_held_notes
+
+    def _clear_scheduled_note_offs(self) -> None:
+        with self._lock:
+            self._scheduled_offs.clear()
+
+    def _clear_held_notes(self, *, send_note_off: bool) -> None:
+        with self._lock:
+            held = list(self._active_held_notes.keys())
+            if not send_note_off:
+                self._active_held_notes.clear()
+        self._clear_scheduled_note_offs()
+        if not send_note_off:
+            return
+        for channel, note in held:
+            try:
+                self._send_note_off(channel=channel, note=note)
+            except Exception as exc:
+                self._record_send_error(exc)
+        # Panic/stop cleanup should not leave stale held-note tracking entries.
+        with self._lock:
+            for key in held:
+                self._active_held_notes.pop(key, None)
 
     def _record_rejection(self) -> None:
         with self._lock:
