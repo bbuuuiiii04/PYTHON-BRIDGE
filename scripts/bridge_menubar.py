@@ -26,6 +26,8 @@ from AppKit import (
 )
 from Foundation import NSAttributedString, NSMutableAttributedString, NSObject, NSTimer
 
+from command_builders import build_laser_wizard_command
+
 
 WATCHER = "/Users/bbui/ss_bridge_watcher.sh"
 MENUBAR_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*[[:space:]]+/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar\.py$"
@@ -36,7 +38,7 @@ MANUAL_LAUNCHCTL_LABEL = "rbss_bridge_manual"
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
 ARM_TTL_S = 30
-LASER_WIZARD_CMD = "cd /Users/bbui/rb_ss_bridge_v2 && python3 -m rb_ss_bridge_v2.tools.laser_map_wizard"
+LASER_WIZARD_CMD = build_laser_wizard_command(Path(__file__))
 
 ICON_DIR = Path("/Users/bbui")
 ICONS = {
