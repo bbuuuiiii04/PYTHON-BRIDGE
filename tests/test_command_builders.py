@@ -16,8 +16,7 @@ class CommandBuilderTests(unittest.TestCase):
     def test_wizard_command_uses_repo_parent_for_module_launch(self) -> None:
         script_path = Path("/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar.py")
         command = build_laser_wizard_command(script_path)
-        self.assertIn("cd /Users/bbui", command)
-        self.assertNotIn("cd /Users/bbui/rb_ss_bridge_v2 &&", command)
+        self.assertTrue(command.startswith("cd /Users/bbui && python3 -m"))
 
     def test_wizard_command_contains_module_launch(self) -> None:
         script_path = Path("/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar.py")

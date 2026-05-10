@@ -98,6 +98,7 @@ _RED = "\033[91m"
 _CYAN = "\033[96m"
 _MAGENTA = "\033[95m"
 _GRAY = "\033[90m"
+_BACK_TOKENS = {"\x1b", "esc", "back", "b", "cancel"}
 
 
 @dataclass(frozen=True)
@@ -107,8 +108,28 @@ class ValidationResult:
     suggestion: str = ""
 
 
+class BackRequested(Exception):
+    pass
+
+
 def _c(text: str, color: str) -> str:
     return f"{color}{text}{_RESET}"
+
+
+def is_back_command(value: str) -> bool:
+    return (value or "").strip().lower() in _BACK_TOKENS
+
+
+def _input(prompt: str) -> str:
+    return input(_c(prompt, _CYAN)).strip()
+
+
+def _input_with_back(prompt: str) -> str:
+    helper = _c("(Press Escape or type 'back' to go back)", _GRAY)
+    entered = _input(f"{prompt} {helper}")
+    if is_back_command(entered):
+        raise BackRequested()
+    return entered
 
 
 def suggest_personality(name: str) -> str:
@@ -299,6 +320,35 @@ def _next_scene_name(config: dict[str, Any], personality: str, role: str) -> str
         i += 1
 
 
+def _find_scene_for_note(
+    *,
+    config: dict[str, Any],
+    personality: str,
+    role: str,
+    note: int,
+) -> str:
+    pdata = config.get("personalities", {}).get(personality, {})
+    if not isinstance(pdata, dict):
+        return ""
+    scenes = config.get("scenes", {})
+    scene_field, bank_field = _ROLE_FIELD_MAP[role]
+    candidates: list[str] = []
+    single = pdata.get(scene_field)
+    if isinstance(single, str) and single:
+        candidates.append(single)
+    bank = pdata.get(bank_field) or []
+    if isinstance(bank, list):
+        for name in bank:
+            if isinstance(name, str) and name and name not in candidates:
+                candidates.append(name)
+    for name in candidates:
+        scene = scenes.get(name, {})
+        midi = scene.get("midi", {})
+        if isinstance(midi.get("note"), int) and int(midi["note"]) == int(note):
+            return name
+    return ""
+
+
 def _build_midi_payload(
     note: int,
     *,
@@ -370,6 +420,7 @@ def apply_mapping(
     channel: int = 1,
     velocity: int = 127,
     add_to_bank: bool = False,
+    replace_primary: bool = False,
     behavior: Optional[str] = None,
     hold_ms: Optional[int] = None,
     hold_beats: Optional[float] = None,
@@ -397,23 +448,27 @@ def apply_mapping(
         bank = []
         pdata[bank_field] = bank
 
-    scene_name = ""
-    if add_to_bank:
+    primary_scene = pdata.get(scene_field)
+    has_primary = isinstance(primary_scene, str) and primary_scene in scenes
+    existing_scene_for_note = _find_scene_for_note(
+        config=config,
+        personality=personality,
+        role=role,
+        note=int(note),
+    )
+    if existing_scene_for_note:
+        scene_name = existing_scene_for_note
+    elif add_to_bank or (has_primary and not replace_primary):
         scene_name = _next_scene_name(config, personality, role)
-        bank.append(scene_name)
+        if scene_name not in bank:
+            bank.append(scene_name)
+    elif has_primary and replace_primary:
+        scene_name = str(primary_scene)
     else:
-        existing = pdata.get(scene_field)
-        if isinstance(existing, str) and existing in scenes:
-            scene_name = existing
-        elif bank:
-            first = bank[0]
-            if isinstance(first, str) and first in scenes:
-                scene_name = first
-        if not scene_name:
-            scene_name = _next_scene_name(config, personality, role)
-            pdata[scene_field] = scene_name
-            if scene_name not in bank:
-                bank.insert(0, scene_name)
+        scene_name = _next_scene_name(config, personality, role)
+        pdata[scene_field] = scene_name
+        if scene_name not in bank:
+            bank.insert(0, scene_name)
 
     fallback_scene = defaults["fallback_resolver"](pdata)
     scene = scenes.get(scene_name, {})
@@ -451,11 +506,16 @@ def apply_mapping(
     )
     scenes[scene_name] = scene
     if role == "groove":
-        pdata["phrase_scene"] = scene_name
+        if replace_primary or not pdata.get("phrase_scene"):
+            pdata["phrase_scene"] = scene_name
         if not pdata.get("default_scene"):
-            pdata["default_scene"] = scene_name
+            pdata["default_scene"] = pdata.get("phrase_scene") or scene_name
     else:
-        pdata[scene_field] = scene_name
+        if replace_primary or not pdata.get(scene_field):
+            pdata[scene_field] = scene_name
+    primary_name = pdata.get(scene_field if role != "groove" else "phrase_scene")
+    if isinstance(primary_name, str) and primary_name and primary_name not in bank:
+        bank.insert(0, primary_name)
     return scene_name
 
 
@@ -519,10 +579,6 @@ def save_config_atomically(
     return backup_path
 
 
-def _input(prompt: str) -> str:
-    return input(_c(prompt, _CYAN)).strip()
-
-
 def _print_header() -> None:
     print(_c("\nLASER MIDI MAPPING WIZARD\n", _CYAN))
     print("Step 1: In SoundSwitch, map your Static Look or Autoloop to a MIDI note.")
@@ -538,32 +594,69 @@ def _print_header() -> None:
     print("  post_drop  - sustained look after drop hit")
     print("  breakdown  - low-energy/breakdown section")
     print(_c("\nMIDI notes: 0-127", _CYAN))
-    print(_c("\nA bank is multiple scenes for one role. Banks rotate round-robin.\n", _GRAY))
+    print(_c("\nA bank is multiple scenes for one role. Banks rotate round-robin.", _GRAY))
+    print(_c("Adding another note to the same role automatically adds it to that role's bank.\n", _GRAY))
 
 
-def _display_personality(config: dict[str, Any], personality: str) -> None:
+def _describe_behavior(midi: dict[str, Any]) -> str:
+    behavior = str(midi.get("behavior", "pulse"))
+    if behavior == "hold_beats":
+        beats = midi.get("hold_beats", 0)
+        return f"hold {beats:g} beats"
+    if behavior == "hold_ms":
+        return f"hold {int(midi.get('hold_ms', 0))} ms"
+    if behavior == "note_on":
+        return "note_on only"
+    if behavior == "note_off":
+        return "note_off only"
+    return "pulse"
+
+
+def render_personality_summary(config: dict[str, Any], personality: str) -> str:
     personality = canonical_personality(personality)
     pdata = config.get("personalities", {}).get(personality, {})
     scenes = config.get("scenes", {})
     title = f"{personality} (default)" if personality == _DEFAULT_PERSONALITY else personality
-    print(_c(f"\nPersonality: {title}", _MAGENTA))
+    lines: list[str] = [f"Personality: {title}"]
     for role in _ROLE_CHOICES:
         scene_field, bank_field = _ROLE_FIELD_MAP[role]
         bank = pdata.get(bank_field) or []
-        print(_c(f"\n{role} bank:", _CYAN))
+        lines.append(f"\n{role} bank:")
         if not bank:
             single = pdata.get(scene_field)
             if isinstance(single, str) and single:
                 bank = [single]
         if not bank:
-            print(_c("  (empty)", _GRAY))
+            lines.append("  (empty)")
             continue
         for idx, scene_name in enumerate(bank, start=1):
             scene = scenes.get(scene_name, {})
             midi = scene.get("midi", {})
             note = midi.get("note", "?")
+            cooldown = scene.get("cooldown_beats", _ROLE_DEFAULTS[role]["cooldown_beats"])
+            behavior_desc = _describe_behavior(midi)
             groove_tag = " (groove)" if role == "groove" and "phrase" in scene_name else ""
-            print(f"  {idx}. {scene_name:22s} note {note}{groove_tag}")
+            lines.append(
+                f"  {idx}. {scene_name:22s} note {note:<3} cooldown {cooldown:<5} {behavior_desc}{groove_tag}"
+            )
+    lines.append("\nTiming:")
+    lines.append(f"  Groove phrase length: {pdata.get('phrase_interval_beats', 32)} beats")
+    lines.append(f"  Minimum scene hold: {pdata.get('minimum_scene_hold_beats', 8)} beats")
+    lines.append(f"  Buildup lookahead: {pdata.get('buildup_lookahead_beats', 32)} beats")
+    return "\n".join(lines)
+
+
+def _display_personality(config: dict[str, Any], personality: str) -> None:
+    text = render_personality_summary(config, personality)
+    for line in text.splitlines():
+        if line.startswith("Personality:"):
+            print(_c(f"\n{line}", _MAGENTA))
+        elif line.endswith("bank:") or line == "Timing:":
+            print(_c(line, _CYAN))
+        elif line == "  (empty)":
+            print(_c(line, _GRAY))
+        else:
+            print(line)
 
 
 def _show_mappings(config: dict[str, Any]) -> None:
@@ -573,7 +666,7 @@ def _show_mappings(config: dict[str, Any]) -> None:
 def _pick_personality(config: dict[str, Any]) -> str:
     personalities = config.get("personalities", {})
     while True:
-        entered = _input("Personality [house/default]: ")
+        entered = _input_with_back("Personality [house/default]:")
         result = validate_personality(entered, personalities)
         if result.valid:
             return result.value
@@ -583,12 +676,12 @@ def _pick_personality(config: dict[str, Any]) -> str:
             print("1. Use suggestion")
             print(f"2. Create new personality '{result.value}'")
             print("3. Re-enter")
-            choice = _input("> ")
+            choice = _input_with_back(">")
             if choice == "1":
                 return result.suggestion
             if choice == "2":
-                confirm = _input(
-                    f"Create new personality '{result.value}'? type YES to confirm: "
+                confirm = _input_with_back(
+                    f"Create new personality '{result.value}'? type YES to confirm:"
                 )
                 if confirm == "YES":
                     return result.value
@@ -598,7 +691,7 @@ def _pick_personality(config: dict[str, Any]) -> str:
 
 def _pick_role() -> str:
     while True:
-        entered = _input("Role [groove/buildup/drop/post_drop/breakdown]: ")
+        entered = _input_with_back("Role [groove/buildup/drop/post_drop/breakdown]:")
         result = validate_role(entered)
         if result.valid:
             return result.value
@@ -609,24 +702,34 @@ def _pick_role() -> str:
 
 def _pick_note() -> int:
     while True:
-        entered = _input("MIDI note (0-127): ")
+        entered = _input_with_back("MIDI note (0-127):")
         try:
             return parse_midi_note(entered)
         except ValueError as exc:
             print(_c(str(exc), _RED))
 
 
-def _warn_duplicate(config: dict[str, Any], note: int, target: tuple[str, str]) -> bool:
-    duplicates = find_duplicate_notes(config)
-    for dup_note, refs in duplicates:
-        if dup_note != note:
-            continue
+def _warn_duplicate_note(
+    config: dict[str, Any],
+    note: int,
+    target: tuple[str, str],
+    *,
+    confirm_response: Optional[str] = None,
+) -> bool:
+    refs: list[tuple[str, str, str]] = []
+    for dup_note, dup_refs in find_duplicate_notes(config):
+        if dup_note == note:
+            refs = dup_refs
+            break
+    if refs:
         role_target = f"{target[0]} {target[1]}"
         print(_c(f"Warning: note {note} is already mapped:", _YELLOW))
         for p, role, scene in refs:
             print(f"  {p} {role} -> {scene}")
         print(f"You are trying to map:\n  {role_target}")
-        return _input("Continue? y/N: ").lower() == "y"
+        if confirm_response is None:
+            confirm_response = _input("Continue? y/N:")
+        return (confirm_response or "").strip().lower() == "y"
     return True
 
 
@@ -643,7 +746,7 @@ def _pick_behavior(role: str, scene_type: str) -> tuple[str, int, float]:
     print("  4. Note on only - advanced/manual")
     print("  5. Note off only - advanced/manual")
     print(_c("If the look requires a held button, choose Hold.", _GRAY))
-    choice = _input(f"Select [default={default_behavior}]: ")
+    choice = _input_with_back(f"Select [default={default_behavior}]:")
     mapping = {
         "1": "pulse",
         "2": "hold_beats",
@@ -655,39 +758,274 @@ def _pick_behavior(role: str, scene_type: str) -> tuple[str, int, float]:
     hold_ms = 0
     hold_beats = 0.0
     if behavior == "hold_beats":
-        entered = _input("Hold beats [default 4]: ") or "4"
+        entered = _input_with_back("Hold beats [default 4]:") or "4"
         hold_beats = max(0.25, min(128.0, float(entered)))
     if behavior == "hold_ms":
-        entered = _input("Hold milliseconds [default 500]: ") or "500"
+        entered = _input_with_back("Hold milliseconds [default 500]:") or "500"
         hold_ms = max(10, min(30000, int(entered)))
     return behavior, hold_ms, hold_beats
 
 
-def _edit_timing(config: dict[str, Any], personality: str) -> None:
+def _edit_personality_timing(config: dict[str, Any], personality: str) -> bool:
     pdata = config["personalities"][personality]
-    print(_c("\nAdvanced Timing / Cooldowns", _CYAN))
+    print(_c("\nTiming / Cooldowns", _CYAN))
     print(_c("Groove phrase length = how often groove changes can happen.", _GRAY))
     print(_c("Minimum scene hold = how long scenes stay before normal changes.", _GRAY))
     print(_c("Buildup lookahead = beats before a Smart Drop buildup is allowed.", _GRAY))
-    phrase = _input(
-        f"Groove phrase length ({pdata.get('phrase_interval_beats', 32)}): "
-    )
-    hold = _input(
-        f"Minimum scene hold ({pdata.get('minimum_scene_hold_beats', 8)}): "
-    )
-    lookahead = _input(
-        f"Buildup lookahead ({pdata.get('buildup_lookahead_beats', 32)}): "
-    )
+    phrase = _input_with_back(f"Groove phrase length ({pdata.get('phrase_interval_beats', 32)}):")
+    hold = _input_with_back(f"Minimum scene hold ({pdata.get('minimum_scene_hold_beats', 8)}):")
+    lookahead = _input_with_back(f"Buildup lookahead ({pdata.get('buildup_lookahead_beats', 32)}):")
+    changed = False
     if phrase:
-        pdata["phrase_interval_beats"] = max(1, int(phrase))
+        update_personality_timing(
+            config,
+            personality=personality,
+            phrase_interval_beats=max(1, int(phrase)),
+        )
+        changed = True
     if hold:
-        pdata["minimum_scene_hold_beats"] = max(0, int(hold))
+        update_personality_timing(
+            config,
+            personality=personality,
+            minimum_scene_hold_beats=max(0, int(hold)),
+        )
+        changed = True
     if lookahead:
-        pdata["buildup_lookahead_beats"] = max(1, int(lookahead))
+        update_personality_timing(
+            config,
+            personality=personality,
+            buildup_lookahead_beats=max(1, int(lookahead)),
+        )
+        changed = True
+    return changed
+
+
+def _scene_names_for_role(config: dict[str, Any], personality: str, role: str) -> list[str]:
+    pdata = config.get("personalities", {}).get(personality, {})
+    if not isinstance(pdata, dict):
+        return []
+    scene_field, bank_field = _ROLE_FIELD_MAP[role]
+    names: list[str] = []
+    primary = pdata.get(scene_field)
+    if isinstance(primary, str) and primary:
+        names.append(primary)
+    bank = pdata.get(bank_field) or []
+    if isinstance(bank, list):
+        for name in bank:
+            if isinstance(name, str) and name and name not in names:
+                names.append(name)
+    return names
+
+
+def _primary_scene_for_role(config: dict[str, Any], personality: str, role: str) -> str:
+    pdata = config.get("personalities", {}).get(personality, {})
+    if not isinstance(pdata, dict):
+        return ""
+    scene_field, _ = _ROLE_FIELD_MAP[role]
+    primary = pdata.get(scene_field)
+    if isinstance(primary, str):
+        return primary
+    return ""
+
+
+def update_scene_cooldown(
+    config: dict[str, Any],
+    *,
+    scene_name: str,
+    cooldown_beats: float,
+) -> None:
+    if cooldown_beats < 0:
+        raise ValueError("cooldown_beats must be non-negative.")
+    scenes = config.setdefault("scenes", {})
+    if scene_name not in scenes:
+        raise ValueError(f"unknown scene: {scene_name}")
+    scenes[scene_name]["cooldown_beats"] = float(cooldown_beats)
+
+
+def update_personality_timing(
+    config: dict[str, Any],
+    *,
+    personality: str,
+    phrase_interval_beats: Optional[int] = None,
+    minimum_scene_hold_beats: Optional[int] = None,
+    buildup_lookahead_beats: Optional[int] = None,
+) -> None:
+    pdata = config.setdefault("personalities", {}).setdefault(personality, {})
+    if phrase_interval_beats is not None:
+        if phrase_interval_beats < 1:
+            raise ValueError("phrase_interval_beats must be positive.")
+        pdata["phrase_interval_beats"] = int(phrase_interval_beats)
+    if minimum_scene_hold_beats is not None:
+        if minimum_scene_hold_beats < 0:
+            raise ValueError("minimum_scene_hold_beats must be non-negative.")
+        pdata["minimum_scene_hold_beats"] = int(minimum_scene_hold_beats)
+    if buildup_lookahead_beats is not None:
+        if buildup_lookahead_beats < 1:
+            raise ValueError("buildup_lookahead_beats must be positive.")
+        pdata["buildup_lookahead_beats"] = int(buildup_lookahead_beats)
+
+
+def update_role_bank_cooldown(
+    config: dict[str, Any],
+    *,
+    personality: str,
+    role: str,
+    cooldown_beats: float,
+) -> None:
+    if role not in _ROLE_CHOICES:
+        raise ValueError(f"unknown role: {role}")
+    if cooldown_beats < 0:
+        raise ValueError("cooldown_beats must be non-negative.")
+    for scene_name in _scene_names_for_role(config, personality, role):
+        update_scene_cooldown(config, scene_name=scene_name, cooldown_beats=cooldown_beats)
+
+
+def update_personality_cooldown(
+    config: dict[str, Any],
+    *,
+    personality: str,
+    cooldown_beats: float,
+) -> None:
+    for role in _ROLE_CHOICES:
+        update_role_bank_cooldown(
+            config,
+            personality=personality,
+            role=role,
+            cooldown_beats=cooldown_beats,
+        )
+
+
+def _pick_scene_from_personality(config: dict[str, Any], personality: str) -> str:
+    scenes = config.get("scenes", {})
+    options: list[str] = []
+    for role in _ROLE_CHOICES:
+        for scene_name in _scene_names_for_role(config, personality, role):
+            if scene_name not in options:
+                options.append(scene_name)
+    if not options:
+        raise BackRequested()
+    print(_c("\nSelect scene:", _CYAN))
+    for idx, scene_name in enumerate(options, start=1):
+        midi = scenes.get(scene_name, {}).get("midi", {})
+        print(f"  {idx}. {scene_name} (note {midi.get('note', '?')})")
+    while True:
+        entered = _input_with_back("Scene number:")
+        try:
+            i = int(entered)
+        except ValueError:
+            print(_c("Enter a valid number.", _RED))
+            continue
+        if 1 <= i <= len(options):
+            return options[i - 1]
+        print(_c("Out of range.", _RED))
+
+
+def _pick_float_non_negative(prompt: str) -> float:
+    while True:
+        entered = _input_with_back(prompt)
+        try:
+            value = float(entered)
+        except ValueError:
+            print(_c("Enter a number.", _RED))
+            continue
+        if value < 0:
+            print(_c("Value must be non-negative.", _RED))
+            continue
+        return value
+
+
+def _edit_timing_menu(config: dict[str, Any], personality: str) -> bool:
+    changed = False
+    while True:
+        print(_c("\nEdit Timing & Cooldowns", _CYAN))
+        print("  1. Edit global personality timing")
+        print("  2. Edit one scene cooldown")
+        print("  3. Edit cooldown for an entire role bank")
+        print("  4. Advanced: edit cooldown for all scenes in personality")
+        print("  5. Edit hold behavior for one scene")
+        print("  0. Back")
+        try:
+            choice = _input_with_back(">")
+        except BackRequested:
+            return changed
+        if choice == "1":
+            try:
+                changed = _edit_personality_timing(config, personality) or changed
+            except BackRequested:
+                continue
+            continue
+        if choice == "2":
+            try:
+                scene_name = _pick_scene_from_personality(config, personality)
+                cooldown = _pick_float_non_negative("Scene cooldown beats:")
+                update_scene_cooldown(config, scene_name=scene_name, cooldown_beats=cooldown)
+                print(_c(f"Updated cooldown for {scene_name} -> {cooldown}", _GREEN))
+                changed = True
+            except BackRequested:
+                continue
+            continue
+        if choice == "3":
+            try:
+                role = _pick_role()
+                cooldown = _pick_float_non_negative(f"Cooldown beats for {role} bank:")
+                update_role_bank_cooldown(
+                    config,
+                    personality=personality,
+                    role=role,
+                    cooldown_beats=cooldown,
+                )
+                print(_c(f"Updated {role} bank cooldown -> {cooldown}", _GREEN))
+                changed = True
+            except BackRequested:
+                continue
+            continue
+        if choice == "4":
+            try:
+                cooldown = _pick_float_non_negative("Cooldown beats for all scenes in personality:")
+                update_personality_cooldown(
+                    config,
+                    personality=personality,
+                    cooldown_beats=cooldown,
+                )
+                print(_c(f"Updated all personality cooldowns -> {cooldown}", _GREEN))
+                changed = True
+            except BackRequested:
+                continue
+            continue
+        if choice == "5":
+            try:
+                scene_name = _pick_scene_from_personality(config, personality)
+                scene = config.get("scenes", {}).get(scene_name, {})
+                role = next(
+                    (r for r in _ROLE_CHOICES if scene_name in _scene_names_for_role(config, personality, r)),
+                    "groove",
+                )
+                behavior, hold_ms, hold_beats = _pick_behavior(role, str(scene.get("scene_type", "autoloop")))
+                midi = scene.setdefault("midi", {})
+                midi.update(
+                    _build_midi_payload(
+                        int(midi.get("note", 0)),
+                        channel=int(midi.get("channel", 1)),
+                        velocity=int(midi.get("velocity", 127)),
+                        behavior=behavior,
+                        hold_ms=hold_ms,
+                        hold_beats=hold_beats,
+                    )
+                )
+                print(_c(f"Updated hold behavior for {scene_name}.", _GREEN))
+                changed = True
+            except BackRequested:
+                continue
+            continue
+        if choice == "0":
+            return changed
+        print(_c("Unknown menu option.", _RED))
 
 
 def _set_port(config: dict[str, Any]) -> None:
-    port = _input(f"MIDI output port [{config.get('midi_output_port', _DEFAULT_PORT)}]: ")
+    port = _input_with_back(
+        f"MIDI output port [{config.get('midi_output_port', _DEFAULT_PORT)}]:"
+    )
     if port:
         config["midi_output_port"] = port
         print(_c("MIDI output port updated.", _GREEN))
@@ -701,10 +1039,10 @@ def _toggle_dry_run(config: dict[str, Any]) -> None:
 
 def _test_note(config: dict[str, Any]) -> None:
     print(_c("\nTEST NOTE (manual only)", _YELLOW))
-    if _input("Send a test note now? y/N: ").lower() != "y":
+    if _input_with_back("Send a test note now? y/N:").lower() != "y":
         return
     note = _pick_note()
-    channel = _parse_channel(_input("Channel [1]: ") or "1")
+    channel = _parse_channel(_input_with_back("Channel [1]:") or "1")
     out = MidiOutput(port_name=config.get("midi_output_port", _DEFAULT_PORT), dry_run=False)
     out.start()
     try:
@@ -728,28 +1066,12 @@ def _test_note(config: dict[str, Any]) -> None:
 
 
 def _final_preview(config: dict[str, Any], personality: str) -> None:
-    scenes = config.get("scenes", {})
-    pdata = config.get("personalities", {}).get(personality, {})
-    title = f"{personality} (default)" if personality == _DEFAULT_PERSONALITY else personality
-    print(_c(f"\n{title}", _MAGENTA))
-    for role in _ROLE_CHOICES:
-        scene_field, _ = _ROLE_FIELD_MAP[role]
-        scene_name = pdata.get(scene_field, "")
-        scene = scenes.get(scene_name, {})
-        midi = scene.get("midi", {})
-        note = midi.get("note", "?")
-        safety = _SAFETY_KEY_TO_LABEL.get(scene.get("safety_class", "safe"), scene.get("safety_class", "safe"))
-        cooldown = scene.get("cooldown_beats", 0)
-        print(f"  {role:10s} note {note:<4} {safety:18s} cooldown {cooldown}")
-    print(_c("\nTiming:", _CYAN))
-    print(f"  groove phrase length: {pdata.get('phrase_interval_beats', 32)} beats")
-    print(f"  minimum scene hold: {pdata.get('minimum_scene_hold_beats', 8)} beats")
-    print(f"  buildup lookahead: {pdata.get('buildup_lookahead_beats', 32)} beats")
+    _display_personality(config, personality)
 
 
 def _save_and_exit(config: dict[str, Any], path: Path) -> bool:
     _final_preview(config, _DEFAULT_PERSONALITY)
-    if _input("Save changes? y/N: ").lower() != "y":
+    if _input("Save changes? y/N:").lower() != "y":
         return False
     backup = save_config_atomically(config, path=path)
     errors, warnings = validate_config_data(config)
@@ -766,6 +1088,100 @@ def _save_and_exit(config: dict[str, Any], path: Path) -> bool:
     return True
 
 
+def get_main_menu_options() -> list[str]:
+    return [
+        "Show current mappings",
+        "Add or update mapping",
+        "Validate mappings",
+        "Test a MIDI note",
+        "Set MIDI output port",
+        "Toggle dry_run",
+        "Edit Timing & Cooldowns",
+        "Save and exit",
+        "Exit without saving",
+    ]
+
+
+def _handle_map_flow(config: dict[str, Any], *, replace_primary: bool = False) -> bool:
+    personality = ""
+    role = ""
+    note = 0
+    behavior = "pulse"
+    hold_ms = 0
+    hold_beats = 0.0
+    step = "personality"
+    while True:
+        try:
+            if step == "personality":
+                personality = _pick_personality(config)
+                step = "role"
+                continue
+            if step == "role":
+                role = _pick_role()
+                step = "note"
+                continue
+            if step == "note":
+                note = _pick_note()
+                step = "behavior"
+                continue
+            if step == "behavior":
+                scene_type = _ROLE_DEFAULTS[role]["scene_type"]
+                behavior, hold_ms, hold_beats = _pick_behavior(role, scene_type)
+                step = "mode"
+                continue
+            if step == "mode":
+                _ensure_personality_exists(config, personality)
+                effective_replace_primary = replace_primary
+                existing_for_note = _find_scene_for_note(
+                    config=config,
+                    personality=personality,
+                    role=role,
+                    note=note,
+                )
+                if not existing_for_note and _primary_scene_for_role(config, personality, role):
+                    print(_c("\nThis role already has a primary scene.", _CYAN))
+                    print("  1. Add this mapping to bank (default)")
+                    print("  2. Replace primary scene")
+                    print("  3. Cancel")
+                    mode = _input_with_back("Choice [1]:")
+                    if mode == "2":
+                        effective_replace_primary = True
+                    elif mode == "3":
+                        return False
+                    else:
+                        effective_replace_primary = False
+                draft = json.loads(json.dumps(config))
+                scene_name = apply_mapping(
+                    draft,
+                    personality=personality,
+                    role=role,
+                    note=note,
+                    replace_primary=effective_replace_primary,
+                    behavior=behavior,
+                    hold_ms=hold_ms or None,
+                    hold_beats=hold_beats or None,
+                )
+                if not _warn_duplicate_note(draft, note, (personality, role)):
+                    return False
+                config.clear()
+                config.update(draft)
+                print(_c(f"Updated {personality}:{role} -> {scene_name} (note {note})", _GREEN))
+                print(_c("Tip: mapping the same personality + role again auto-adds to that bank.", _GRAY))
+                print(_c("Banks rotate round-robin during performance.", _GRAY))
+                return True
+        except BackRequested:
+            if step == "personality":
+                return False
+            if step == "role":
+                step = "personality"
+            elif step == "note":
+                step = "role"
+            elif step == "behavior":
+                step = "note"
+            elif step == "mode":
+                step = "behavior"
+
+
 def run_wizard(config_path: Path = _DEFAULT_CONFIG_PATH) -> int:
     try:
         config = load_or_create_config(config_path)
@@ -774,44 +1190,27 @@ def run_wizard(config_path: Path = _DEFAULT_CONFIG_PATH) -> int:
         return 2
 
     _print_header()
+    dirty = False
     while True:
         print(_c("\nMain Menu", _CYAN))
-        print("  1. Show current mappings")
-        print("  2. Add or update mapping")
-        print("  3. Add mapping to bank")
-        print("  4. Validate mappings")
-        print("  5. Test a MIDI note")
-        print("  6. Set MIDI output port")
-        print("  7. Toggle dry_run")
-        print("  8. Advanced Timing / Cooldowns")
-        print("  9. Save and exit")
+        options = get_main_menu_options()
+        for idx, option in enumerate(options, start=1):
+            print(f"  {idx}. {option}")
         print("  0. Exit without saving")
-        choice = _input("> ")
+        print(_c("Press Escape or type 'back' to go back.", _GRAY))
+        choice = _input(">")
+        if is_back_command(choice):
+            if dirty and _input("Unsaved changes. Exit without saving? y/N:").lower() != "y":
+                continue
+            print(_c("Exit without saving.", _YELLOW))
+            return 0
         if choice == "1":
             _show_mappings(config)
             continue
-        if choice in {"2", "3"}:
-            personality = _pick_personality(config)
-            role = _pick_role()
-            note = _pick_note()
-            _ensure_personality_exists(config, personality)
-            scene_type = _ROLE_DEFAULTS[role]["scene_type"]
-            behavior, hold_ms, hold_beats = _pick_behavior(role, scene_type)
-            if not _warn_duplicate(config, note, (personality, role)):
-                continue
-            scene_name = apply_mapping(
-                config,
-                personality=personality,
-                role=role,
-                note=note,
-                add_to_bank=(choice == "3"),
-                behavior=behavior,
-                hold_ms=hold_ms or None,
-                hold_beats=hold_beats or None,
-            )
-            print(_c(f"Updated {personality}:{role} -> {scene_name} (note {note})", _GREEN))
+        if choice == "2":
+            dirty = _handle_map_flow(config, replace_primary=False) or dirty
             continue
-        if choice == "4":
+        if choice == "3":
             errors, warnings = validate_config_data(config)
             if not errors and not warnings:
                 print(_c("Validation passed.", _GREEN))
@@ -821,22 +1220,34 @@ def run_wizard(config_path: Path = _DEFAULT_CONFIG_PATH) -> int:
             for err in errors:
                 print(_c(f"Error: {err}", _RED))
             continue
+        if choice == "4":
+            try:
+                _test_note(config)
+            except BackRequested:
+                continue
+            continue
         if choice == "5":
-            _test_note(config)
+            try:
+                _set_port(config)
+                dirty = True
+            except BackRequested:
+                continue
             continue
         if choice == "6":
-            _set_port(config)
+            _toggle_dry_run(config)
+            dirty = True
             continue
         if choice == "7":
-            _toggle_dry_run(config)
+            try:
+                dirty = _edit_timing_menu(config, _DEFAULT_PERSONALITY) or dirty
+            except BackRequested:
+                continue
             continue
         if choice == "8":
-            _edit_timing(config, _DEFAULT_PERSONALITY)
+            if _save_and_exit(config, config_path):
+                return 0
             continue
-        if choice == "9":
-            _save_and_exit(config, config_path)
-            return 0
-        if choice == "0":
+        if choice == "9" or choice == "0":
             print(_c("Exit without saving.", _YELLOW))
             return 0
         print(_c("Unknown menu option.", _RED))

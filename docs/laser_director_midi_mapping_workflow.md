@@ -26,6 +26,21 @@ Use the bridge menu bar wizard instead of hand-editing `laser_director.json`.
 Banks are multiple MIDI mappings for the same role. The bridge rotates banks
 round-robin (example: house groove notes 37, 45, 46).
 
+To add multiple looks for one role, map the same personality + role again with
+a new MIDI note. The wizard automatically adds that mapping to the role bank.
+
+At any wizard prompt, press Escape or type `back` to go back.
+
+## Timing / Cooldowns
+
+The wizard includes a visible **Edit Timing & Cooldowns** menu.
+
+- Groove phrase length: how often normal groove changes can happen.
+- Minimum scene hold: how long a scene must stay before normal changes replace it.
+- Buildup lookahead: how many beats before a Smart Drop buildup is allowed.
+- Scene cooldown: how soon the same exact scene can be triggered again.
+- Hold behavior: pulse / hold_beats / hold_ms / note_on / note_off.
+
 ## Core idea
 
 SoundSwitch does not know about Python scene names directly.

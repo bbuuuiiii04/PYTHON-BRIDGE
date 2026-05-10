@@ -9,14 +9,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.tools.laser_map_wizard import (  # noqa: E402
-    add_mapping_to_bank,
     apply_mapping,
     find_duplicate_notes,
+    get_main_menu_options,
+    is_back_command,
     load_or_create_config,
     parse_midi_note,
+    render_personality_summary,
     save_config_atomically,
     suggest_personality,
     suggest_role,
+    update_personality_timing,
+    update_scene_cooldown,
+    update_role_bank_cooldown,
+    _warn_duplicate_note,
 )
 
 
@@ -30,7 +36,7 @@ class LaserMapWizardTests(unittest.TestCase):
             self.assertIn("safe_static", cfg["scenes"])
             self.assertIn("emergency_blackout", cfg["scenes"])
 
-    def test_map_house_groove_updates_phrase_fields(self) -> None:
+    def test_first_mapping_sets_primary_and_phrase_bank(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
         scene = apply_mapping(cfg, personality="house", role="groove", note=37)
         house = cfg["personalities"]["house"]
@@ -39,17 +45,30 @@ class LaserMapWizardTests(unittest.TestCase):
         self.assertIn(scene, house["phrase_bank"])
         self.assertEqual(cfg["scenes"][scene]["midi"]["note"], 37)
 
-    def test_map_roles_update_expected_fields(self) -> None:
+    def test_second_mapping_auto_appends_bank_keeps_primary(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
-        b = apply_mapping(cfg, personality="house", role="buildup", note=38)
-        d = apply_mapping(cfg, personality="house", role="drop", note=40)
-        p = apply_mapping(cfg, personality="house", role="post_drop", note=41)
-        k = apply_mapping(cfg, personality="house", role="breakdown", note=42)
+        first = apply_mapping(cfg, personality="house", role="groove", note=37)
+        second = apply_mapping(cfg, personality="house", role="groove", note=45)
         house = cfg["personalities"]["house"]
-        self.assertEqual(house["buildup_scene"], b)
-        self.assertEqual(house["drop_scene"], d)
-        self.assertEqual(house["post_drop_scene"], p)
-        self.assertEqual(house["breakdown_scene"], k)
+        self.assertEqual(house["phrase_scene"], first)
+        self.assertEqual(house["phrase_bank"], [first, second])
+        self.assertNotEqual(first, second)
+
+    def test_auto_bank_for_all_roles(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        apply_mapping(cfg, personality="house", role="buildup", note=38)
+        apply_mapping(cfg, personality="house", role="buildup", note=47)
+        apply_mapping(cfg, personality="house", role="drop", note=40)
+        apply_mapping(cfg, personality="house", role="drop", note=48)
+        apply_mapping(cfg, personality="house", role="post_drop", note=41)
+        apply_mapping(cfg, personality="house", role="post_drop", note=49)
+        apply_mapping(cfg, personality="house", role="breakdown", note=42)
+        apply_mapping(cfg, personality="house", role="breakdown", note=50)
+        house = cfg["personalities"]["house"]
+        self.assertEqual(len(house["buildup_bank"]), 2)
+        self.assertEqual(len(house["drop_bank"]), 2)
+        self.assertEqual(len(house["post_drop_bank"]), 2)
+        self.assertEqual(len(house["breakdown_bank"]), 2)
 
     def test_drop_defaults_to_hold_for_beats(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
@@ -76,14 +95,19 @@ class LaserMapWizardTests(unittest.TestCase):
         duplicates = find_duplicate_notes(cfg)
         self.assertTrue(any(note == 40 for note, _ in duplicates))
 
-    def test_add_bank_appends_new_scene(self) -> None:
+    def test_duplicate_note_warning_defaults_to_no(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        apply_mapping(cfg, personality="house", role="groove", note=37)
+        apply_mapping(cfg, personality="house", role="drop", note=37)
+        self.assertFalse(_warn_duplicate_note(cfg, 37, ("house", "drop"), confirm_response=""))
+
+    def test_duplicate_bank_entries_are_not_added(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
         first = apply_mapping(cfg, personality="house", role="groove", note=37)
-        second = add_mapping_to_bank(cfg, personality="house", role="groove", note=45)
+        again = apply_mapping(cfg, personality="house", role="groove", note=37)
         bank = cfg["personalities"]["house"]["phrase_bank"]
-        self.assertIn(first, bank)
-        self.assertIn(second, bank)
-        self.assertEqual(len(set(bank)), len(bank))
+        self.assertEqual(first, again)
+        self.assertEqual(bank.count(first), 1)
 
     def test_existing_custom_scenes_preserved(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
@@ -115,6 +139,61 @@ class LaserMapWizardTests(unittest.TestCase):
             self.assertIsNotNone(backup)
             self.assertTrue(backup.exists())
             self.assertTrue(path.exists())
+
+    def test_back_commands_supported(self) -> None:
+        for token in ("esc", "back", "b", "cancel", "\x1b"):
+            self.assertTrue(is_back_command(token))
+
+    def test_timing_menu_reachable_from_main_menu(self) -> None:
+        self.assertIn("Edit Timing & Cooldowns", get_main_menu_options())
+
+    def test_edit_personality_timing_updates_fields(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        update_personality_timing(
+            cfg,
+            personality="house",
+            phrase_interval_beats=48,
+            minimum_scene_hold_beats=10,
+            buildup_lookahead_beats=24,
+        )
+        house = cfg["personalities"]["house"]
+        self.assertEqual(house["phrase_interval_beats"], 48)
+        self.assertEqual(house["minimum_scene_hold_beats"], 10)
+        self.assertEqual(house["buildup_lookahead_beats"], 24)
+
+    def test_edit_scene_cooldown_updates_field(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        scene = apply_mapping(cfg, personality="house", role="groove", note=37)
+        update_scene_cooldown(cfg, scene_name=scene, cooldown_beats=12.5)
+        self.assertEqual(cfg["scenes"][scene]["cooldown_beats"], 12.5)
+
+    def test_invalid_cooldown_values_fail(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        scene = apply_mapping(cfg, personality="house", role="groove", note=37)
+        with self.assertRaises(ValueError):
+            update_scene_cooldown(cfg, scene_name=scene, cooldown_beats=-1)
+
+    def test_role_bank_cooldown_update(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        apply_mapping(cfg, personality="house", role="groove", note=37)
+        apply_mapping(cfg, personality="house", role="groove", note=45)
+        update_role_bank_cooldown(
+            cfg,
+            personality="house",
+            role="groove",
+            cooldown_beats=18,
+        )
+        for scene in cfg["personalities"]["house"]["phrase_bank"]:
+            self.assertEqual(cfg["scenes"][scene]["cooldown_beats"], 18.0)
+
+    def test_summary_displays_cooldown_and_behavior(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        apply_mapping(cfg, personality="house", role="groove", note=37)
+        apply_mapping(cfg, personality="house", role="drop", note=40)
+        summary = render_personality_summary(cfg, "house")
+        self.assertIn("cooldown", summary)
+        self.assertIn("pulse", summary)
+        self.assertIn("hold", summary)
 
 
 if __name__ == "__main__":
