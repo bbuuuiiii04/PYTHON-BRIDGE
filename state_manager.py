@@ -216,6 +216,43 @@ def _beatgrid_elapsed_for_abs_beat(
     return int(round(elapsed_ms)), "grid-extrapolated"
 
 
+def _latest_marker_beat_at_or_before(abs_beat: float, beats: list[int]) -> Optional[int]:
+    latest: Optional[int] = None
+    for marker in beats:
+        if marker <= abs_beat and (latest is None or marker > latest):
+            latest = marker
+    return latest
+
+
+def _current_phrase_context(
+    *,
+    abs_beat: float,
+    up_markers: list[int],
+    chorus_markers: list[int],
+    low_markers: list[int],
+) -> tuple[bool, bool]:
+    up = _latest_marker_beat_at_or_before(abs_beat, up_markers)
+    chorus = _latest_marker_beat_at_or_before(abs_beat, chorus_markers)
+    low = _latest_marker_beat_at_or_before(abs_beat, low_markers)
+
+    candidates: list[tuple[int, int, str]] = []
+    if up is not None:
+        candidates.append((up, 1, "up"))
+    if chorus is not None:
+        candidates.append((chorus, 2, "chorus"))
+    if low is not None:
+        candidates.append((low, 3, "low"))
+    if not candidates:
+        return False, False
+
+    _beat, _priority, marker_type = max(candidates, key=lambda item: (item[0], item[1]))
+    if marker_type == "up":
+        return True, False
+    if marker_type == "chorus":
+        return False, True
+    return False, False
+
+
 class StateManager:
     """Central state machine.
 
@@ -1626,6 +1663,12 @@ class StateManager:
             and bool(self._os.last_armed_filepath)
             and self._os.last_armed_filepath == d.meta.filepath
         )
+        current_phrase_is_up, current_phrase_is_chorus = _current_phrase_context(
+            abs_beat=abs_beat_pos,
+            up_markers=d.meta.anlz_buildups,
+            chorus_markers=d.meta.anlz_drops,
+            low_markers=d.meta.anlz_breakdowns,
+        )
         return LaserContext(
             active_deck=active,
             playing=d.playing,
@@ -1642,6 +1685,8 @@ class StateManager:
             breakdown_active=self._os.breakdown_active,
             smart_drops=tuple(d.meta.smart_drops),
             anlz_buildups=tuple(d.meta.anlz_buildups),
+            current_phrase_is_up=current_phrase_is_up,
+            current_phrase_is_chorus=current_phrase_is_chorus,
             scripted_id=d.scripted_id,
         )
 
