@@ -49,6 +49,9 @@ from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
 from .logging_manager import get_logging_manager
 from .filepath_resolver import has_soundswitch_scripted_id
+from .smart_phrasing import (
+    SmartPhrasingEngine, SmartPhrasingSnapshot, PhraseSegment,
+)
 from . import bridge_fmt as bf
 
 log = logging.getLogger("state_manager")
@@ -256,6 +259,86 @@ def _current_phrase_context(
     return False, False
 
 
+def _build_phase2_phrase_segments(
+    anlz_buildups: list[int],
+    anlz_drops: list[int],
+    anlz_breakdowns: list[int],
+    smart_drops: list[int],
+    total_beats: int,
+) -> tuple[PhraseSegment, ...]:
+    """Phase 2 shadow: infer PhraseSegment ranges from ordered ANLZ markers.
+
+    Maps: anlz_buildups → "up", anlz_drops → "chorus", anlz_breakdowns → "low".
+    Each marker's end_beat = next marker's start_beat.
+    Final marker uses *total_beats* (from beatgrid length) if available,
+    otherwise it is skipped — Phase 2 does not invent arbitrary durations.
+
+    When no explicit anlz_buildups exist but smart_drops are present, infers
+    conservative 32-beat "up" segments before each Smart Drop.  This is a
+    Phase 2 shadow fallback based on the project rule that true musical
+    buildups typically happen during the 32 beats before a Smart Drop.
+
+    Pure computation — no I/O, no config reads, no file parsing.
+    """
+    markers: list[tuple[int, str]] = []
+    for beat in anlz_buildups:
+        markers.append((beat, "up"))
+    for beat in anlz_drops:
+        markers.append((beat, "chorus"))
+    for beat in anlz_breakdowns:
+        markers.append((beat, "low"))
+
+    # Phase 2 shadow fallback: infer 32-beat "up" segments before Smart Drops
+    # when no explicit buildup markers exist from ANLZ analysis.
+    if not anlz_buildups and smart_drops:
+        existing_beats = {m[0] for m in markers}
+        for drop_beat in smart_drops:
+            up_beat = max(0, drop_beat - 32)
+            if up_beat >= 0 and up_beat not in existing_beats:
+                markers.append((up_beat, "up"))
+                existing_beats.add(up_beat)
+
+    if not markers:
+        return ()
+
+    # Same-beat tiebreak: match _current_phrase_context priority
+    # (low=3 > chorus=2 > up=1 → low wins at same beat).
+    _priority = {"low": 0, "chorus": 1, "up": 2}
+    markers.sort(key=lambda m: (m[0], _priority.get(m[1], 3)))
+
+    # Deduplicate: keep highest-priority label at each beat (first after sort).
+    deduped: list[tuple[int, str]] = []
+    for beat, label in markers:
+        if deduped and deduped[-1][0] == beat:
+            continue
+        deduped.append((beat, label))
+
+    # Build segments from consecutive markers.
+    segments: list[PhraseSegment] = []
+    for i in range(len(deduped) - 1):
+        start_beat, label = deduped[i]
+        end_beat = deduped[i + 1][0]
+        if end_beat > start_beat:
+            segments.append(PhraseSegment(
+                start_beat=float(start_beat),
+                end_beat=float(end_beat),
+                label=label,
+            ))
+
+    # Final marker: use total_beats if available; otherwise skip.
+    # Phase 2 does not invent a final segment duration.
+    if deduped and total_beats > 0:
+        last_beat, last_label = deduped[-1]
+        if total_beats > last_beat:
+            segments.append(PhraseSegment(
+                start_beat=float(last_beat),
+                end_beat=float(total_beats),
+                label=last_label,
+            ))
+
+    return tuple(segments)
+
+
 class StateManager:
     """Central state machine.
 
@@ -361,6 +444,15 @@ class StateManager:
             if _os.environ.get(STATE_MANAGER_PROFILE_ENV, "0") != "0"
             else None
         )
+
+        # ── Phase 2 shadow: SmartPhrasingEngine (Issue #33) ──────────────
+        # One engine instance, updated each tick inside _build_laser_context.
+        # Timing constants cached here to avoid config reads inside _push_tick.
+        self._smart_phrasing_engine = SmartPhrasingEngine()
+        self._sp_phrase_lookahead: float = 32.0   # project rule: buildup = 32 beats before Smart Drop
+        self._sp_drop_window: float = float(SMART_DROP_LOOKAHEAD_BEATS)
+        self._sp_post_drop: float = 8.0           # conservative default; not consumed until Phase 3
+        self._sp_transition_window: float = float(SMART_DROP_LOOKAHEAD_BEATS)
 
     def set_initial_state(self, active_deck: int, source: str = "TL ENGINE STATE") -> None:
         """Apply startup state read from TL ENGINE STATE before event loop starts."""
@@ -1756,6 +1848,33 @@ class StateManager:
             chorus_markers=d.meta.anlz_drops,
             low_markers=d.meta.anlz_breakdowns,
         )
+
+        # ── Phase 2 shadow: SmartPhrasingEngine update (Issue #33) ────────
+        # Build snapshot from already-loaded DeckState.meta.  No I/O, no
+        # config reads, no file parsing.  Result is passive data only.
+        _sp_snapshot = SmartPhrasingSnapshot(
+            deck_id=str(active),
+            track_id=d.meta.content_id or None,
+            is_playing=d.playing,
+            abs_beat=abs_beat_pos if bpm > 0 else None,
+            phrase_segments=_build_phase2_phrase_segments(
+                anlz_buildups=d.meta.anlz_buildups,
+                anlz_drops=d.meta.anlz_drops,
+                anlz_breakdowns=d.meta.anlz_breakdowns,
+                smart_drops=d.meta.smart_drops,
+                total_beats=len(d.meta.beatgrid_times_ms),
+            ),
+            smart_drop_beats=tuple(float(x) for x in d.meta.smart_drops),
+            # Phase 2 shadow: breakdown_segments left empty because ANLZ
+            # breakdown data is start-marker-only with no reliable end-beat.
+            breakdown_segments=(),
+            phrase_lookahead_beats=self._sp_phrase_lookahead,
+            drop_window_beats=self._sp_drop_window,
+            post_drop_beats=self._sp_post_drop,
+            transition_window_beats=self._sp_transition_window,
+        )
+        _sp_result = self._smart_phrasing_engine.update(_sp_snapshot)
+
         return LaserContext(
             active_deck=active,
             playing=d.playing,
@@ -1777,6 +1896,7 @@ class StateManager:
             scripted_id=d.scripted_id,
             smart_drop_blackout_active=self._os.drop_cut_armed,
             smart_drop_blackout_arm=smart_drop_blackout_arm,
+            smart_phrasing=_sp_result.state,
         )
 
     # ── Stop / resume helpers ─────────────────────────────────────────────────

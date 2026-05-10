@@ -15,6 +15,9 @@ Tick-boundary types (built inside StateManager._push_tick):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
+
+from .smart_phrasing import SmartPhrasingState
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,10 @@ class LaserContext:
     scripted_id: int = 0
     smart_drop_blackout_active: bool = False
     smart_drop_blackout_arm: bool = False
+    # Phase 2 shadow integration (Issue #33): populated by StateManager from
+    # SmartPhrasingEngine.update() each tick.  Passive data only — not consumed
+    # by LaserDirector or LaserSceneExecutor until Phase 3.
+    smart_phrasing: Optional[SmartPhrasingState] = None
 
 
 @dataclass(frozen=True)
