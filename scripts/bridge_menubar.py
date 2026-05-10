@@ -36,6 +36,7 @@ MANUAL_LAUNCHCTL_LABEL = "rbss_bridge_manual"
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
 ARM_TTL_S = 30
+LASER_WIZARD_CMD = "cd /Users/bbui/rb_ss_bridge_v2 && python3 -m rb_ss_bridge_v2.tools.laser_map_wizard"
 
 ICON_DIR = Path("/Users/bbui")
 ICONS = {
@@ -173,6 +174,15 @@ def append_command(command: dict) -> None:
         os.chmod(COMMANDS_PATH, 0o600)
     except OSError:
         pass
+
+
+def open_terminal_command(command: str, title: str = "RBSS_LASER_WIZARD") -> None:
+    safe_cmd = command.replace("\\", "\\\\").replace('"', '\\"')
+    script = (
+        'tell application "Terminal" to activate\n'
+        f'tell application "Terminal" to do script "{safe_cmd}"'
+    )
+    subprocess.run(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
@@ -347,6 +357,7 @@ class BridgeMenuBar(NSObject):
         self.validation_item = self._add_action("Run Health Check", "runValidation:")
         self.mirror_item = self._add_action("Mirror", "toggleMirror:")
         self.capture_item = self._add_action("Capture", "toggleCapture:")
+        self.map_lasers_item = self._add_action("Map Lasers", "mapLasers:")
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.quit_item = self._add_action("Quit Menu", "quit:")
         self.status_item.setMenu_(self.menu)
@@ -465,6 +476,9 @@ class BridgeMenuBar(NSObject):
         else:
             append_command({"cmd": "start_capture", "name": "menu_capture"})
         self.refresh_(None)
+
+    def mapLasers_(self, _sender):
+        open_terminal_command(LASER_WIZARD_CMD)
 
     def toggleSmartDrop_(self, _sender):
         append_command({"cmd": "toggle_smart_drop"})

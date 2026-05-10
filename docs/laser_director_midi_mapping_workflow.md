@@ -6,6 +6,26 @@ Audience: Coding agents, maintainers, and operators.
 
 This document explains how SoundSwitch MIDI mapping is being prepared manually before Laser Director implementation.
 
+## No manual JSON editing workflow
+
+Use the bridge menu bar wizard instead of hand-editing `laser_director.json`.
+
+```text
+1. Open SoundSwitch.
+2. Put SoundSwitch into MIDI mapping mode.
+3. Map a SoundSwitch cue/autoloop to a MIDI note.
+4. Open menu bar -> Map Lasers.
+5. Choose personality: house or default (default aliases to house).
+6. Choose role: groove, buildup, drop, post_drop, breakdown.
+7. Enter MIDI note 0–127.
+8. Review warnings and save.
+9. Restart bridge if prompted.
+10. Keep dry_run=true until ready for live MIDI.
+```
+
+Banks are multiple MIDI mappings for the same role. The bridge rotates banks
+round-robin (example: house groove notes 37, 45, 46).
+
 ## Core idea
 
 SoundSwitch does not know about Python scene names directly.
