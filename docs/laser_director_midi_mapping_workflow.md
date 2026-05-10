@@ -34,13 +34,21 @@ house_drop_1
 
 ## Current operator MIDI setup
 
-The operator is using:
+IAC bus clarification:
+
+```text
+Current example/manual-test/default operator bus: IAC Driver Bus 1
+```
+
+The current operator mapping setup is using:
 
 ```text
 IAC Driver Bus 1
 ```
 
-Do not assume `IAC Driver Bus 2`.
+The MIDI output port must stay configurable via Laser Director config.
+Neither Bus 1 nor Bus 2 should be hardcoded in Python code.
+SoundSwitch MIDI input must match the configured Laser Director output port.
 
 Implementation should allow the MIDI output port to be configured.
 
@@ -165,6 +173,17 @@ Coding agents should understand that this tool is only for manual mapping and lo
 
 Laser Director should eventually mimic the same note presses that the local web pad sends.
 
+Scene config required fields reference:
+
+```text
+- scene name
+- safety_class
+- fallback_scene
+- midi mapping with note/channel/kind
+- optional cooldown_beats
+- optional immediate
+```
+
 A scene config should be able to specify:
 
 ```json
@@ -242,6 +261,17 @@ house_breakdown_1 -> channel 1, note 42
 transition_safe_1 -> channel 1, note 43
 ```
 
+Optional later dubstep mappings (operator examples only, not hardcoded requirements):
+
+```text
+dubstep_phrase_1 -> channel 1, note 50
+dubstep_buildup_1 -> channel 1, note 51
+dubstep_pre_drop_1 -> channel 1, note 52
+dubstep_drop_1 -> channel 1, note 53
+dubstep_drop_sustain_1 -> channel 1, note 54
+dubstep_breakdown_1 -> channel 1, note 55
+```
+
 These are not hardcoded requirements. They are operator mapping examples.
 
 ## Static Looks vs Autoloops
@@ -280,11 +310,20 @@ emergency_scene -> emergency_blackout
 
 Emergency blackout should not depend on phrase gates or cooldowns.
 
+## First live-test safety checklist
+
+```text
+1. Prove safe static look fires correctly.
+2. Prove gentle movement / phrase look fires correctly.
+3. Prove emergency blackout latches and clears.
+4. Do not start live testing with high-impact drop, strobe, or aggressive scenes.
+```
+
 ## Implementation requirements for coding agents
 
 When implementing Laser Director MIDI support:
 
-1. Do not hardcode `IAC Driver Bus 2`.
+1. Do not hardcode any IAC bus in Python code.
 2. Use the configured MIDI output port, currently likely `IAC Driver Bus 1`.
 3. Do not hardcode scene names like `drop_hit` or `low_sweep`.
 4. Treat scene names as arbitrary strings from config.
