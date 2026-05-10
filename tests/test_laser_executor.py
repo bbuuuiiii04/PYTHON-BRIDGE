@@ -270,6 +270,29 @@ class LaserSceneExecutorTests(unittest.TestCase):
         # After reset, first bank value is chosen again.
         self.assertEqual(midi.calls[0][0].note, midi.calls[1][0].note)
 
+    def test_hold_beats_materializes_with_context_bpm(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        cfg = _config(dry_run=False)
+        cfg.scenes["drop_a"] = LaserScene(
+            name="drop_a",
+            scene_type="static",
+            safety_class="high_impact",
+            midi=LaserMidiMessage(
+                kind="note_on",
+                behavior="hold_beats",
+                channel=1,
+                note=41,
+                velocity=127,
+                hold_beats=4,
+            ),
+        )
+        ex = LaserSceneExecutor(config=cfg, midi_output=midi, personality=_personality())
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
+        self.assertEqual(len(midi.calls), 1)
+        rendered = midi.calls[0][0]
+        self.assertEqual(rendered.behavior, "hold_ms")
+        self.assertEqual(rendered.hold_ms, 1875)
+
 
 if __name__ == "__main__":
     unittest.main()

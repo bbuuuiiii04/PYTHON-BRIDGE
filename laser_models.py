@@ -28,6 +28,11 @@ class LaserMidiMessage:
     cc         — CC number 0–127 (used by cc kind).
     value      — CC value 0–127 (used by cc kind).
     duration_ms — note-on hold time in ms for note_pulse; validated 10–250.
+    behavior    — "pulse", "hold_ms", "hold_beats", "note_on", or "note_off".
+                  Backward compatibility: when omitted, runtime falls back to kind.
+    hold_ms     — explicit hold duration for hold_ms behavior; validated 10–30000.
+    hold_beats  — beat-relative hold duration for hold_beats behavior; validated
+                  0.25–128 and materialized by LaserSceneExecutor using ctx.bpm.
     """
     kind: str = "note_pulse"
     channel: int = 1
@@ -36,6 +41,9 @@ class LaserMidiMessage:
     cc: int = 0
     value: int = 0
     duration_ms: int = 80
+    behavior: str = "pulse"
+    hold_ms: int = 0
+    hold_beats: float = 0.0
 
 
 @dataclass(frozen=True)

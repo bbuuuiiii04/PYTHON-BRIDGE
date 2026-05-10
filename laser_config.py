@@ -33,6 +33,7 @@ _REPO_ROOT = Path(__file__).resolve().parent
 _DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "laser_director.json"
 
 _VALID_KINDS = frozenset({"note_pulse", "note_on", "note_off", "cc"})
+_VALID_BEHAVIORS = frozenset({"pulse", "hold_ms", "hold_beats", "note_on", "note_off"})
 _VALID_SAFETY_CLASSES = frozenset({
     "safe", "movement_low", "movement_medium", "movement_high",
     "high_impact", "strobe", "blackout",
@@ -41,6 +42,10 @@ _VALID_SCENE_TYPES = frozenset({"static", "autoloop", "utility"})
 
 _DURATION_MIN = 10
 _DURATION_MAX = 250
+_HOLD_MS_MIN = 10
+_HOLD_MS_MAX = 30000
+_HOLD_BEATS_MIN = 0.25
+_HOLD_BEATS_MAX = 128.0
 
 _PERSONALITY_REQUIRED_ROLE_FIELDS = (
     "safe_scene",
@@ -282,6 +287,12 @@ def _validate_midi(prefix: str, midi: dict[str, Any]) -> list[str]:
     if kind not in _VALID_KINDS:
         errors.append(f"{prefix}: midi 'kind' must be one of {sorted(_VALID_KINDS)}, got {kind!r}")
 
+    behavior = midi.get("behavior")
+    if behavior is not None and behavior not in _VALID_BEHAVIORS:
+        errors.append(
+            f"{prefix}: midi 'behavior' must be one of {sorted(_VALID_BEHAVIORS)}, got {behavior!r}"
+        )
+
     channel = midi.get("channel", 1)
     if not isinstance(channel, int) or not (1 <= channel <= 16):
         errors.append(f"{prefix}: midi 'channel' must be an integer 1–16, got {channel!r}")
@@ -308,6 +319,36 @@ def _validate_midi(prefix: str, midi: dict[str, Any]) -> list[str]:
             errors.append(
                 f"{prefix}: midi 'duration_ms' must be an integer {_DURATION_MIN}–{_DURATION_MAX}, "
                 f"got {duration_ms!r}"
+            )
+
+    if behavior == "pulse":
+        duration_ms = midi.get("duration_ms", 80)
+        if not isinstance(duration_ms, int) or not (_DURATION_MIN <= duration_ms <= _DURATION_MAX):
+            errors.append(
+                f"{prefix}: midi 'duration_ms' must be an integer {_DURATION_MIN}–{_DURATION_MAX} "
+                f"for behavior='pulse', got {duration_ms!r}"
+            )
+    elif behavior == "hold_ms":
+        hold_ms = midi.get("hold_ms")
+        if (
+            not isinstance(hold_ms, int)
+            or isinstance(hold_ms, bool)
+            or not (_HOLD_MS_MIN <= hold_ms <= _HOLD_MS_MAX)
+        ):
+            errors.append(
+                f"{prefix}: midi 'hold_ms' must be an integer {_HOLD_MS_MIN}–{_HOLD_MS_MAX} "
+                f"for behavior='hold_ms', got {hold_ms!r}"
+            )
+    elif behavior == "hold_beats":
+        hold_beats = midi.get("hold_beats")
+        if (
+            not isinstance(hold_beats, (int, float))
+            or isinstance(hold_beats, bool)
+            or not (_HOLD_BEATS_MIN <= float(hold_beats) <= _HOLD_BEATS_MAX)
+        ):
+            errors.append(
+                f"{prefix}: midi 'hold_beats' must be a number {_HOLD_BEATS_MIN}–{_HOLD_BEATS_MAX} "
+                f"for behavior='hold_beats', got {hold_beats!r}"
             )
 
     return errors
@@ -456,14 +497,28 @@ def _build_config(data: dict[str, Any]) -> LaserConfig:
 
 def _build_scene(name: str, data: dict[str, Any]) -> LaserScene:
     midi_raw = data.get("midi", {})
+    kind = str(midi_raw.get("kind", "note_pulse"))
+    behavior = midi_raw.get("behavior")
+    if not isinstance(behavior, str) or not behavior:
+        if kind == "note_pulse":
+            behavior = "pulse"
+        elif kind == "note_on":
+            behavior = "note_on"
+        elif kind == "note_off":
+            behavior = "note_off"
+        else:
+            behavior = "pulse"
     midi = LaserMidiMessage(
-        kind=str(midi_raw.get("kind", "note_pulse")),
+        kind=kind,
         channel=int(midi_raw.get("channel", 1)),
         note=int(midi_raw.get("note", 0)),
         velocity=int(midi_raw.get("velocity", 127)),
         cc=int(midi_raw.get("cc", 0)),
         value=int(midi_raw.get("value", 0)),
         duration_ms=int(midi_raw.get("duration_ms", 80)),
+        behavior=behavior,
+        hold_ms=int(midi_raw.get("hold_ms", 0)),
+        hold_beats=float(midi_raw.get("hold_beats", 0.0)),
     )
     return LaserScene(
         name=name,

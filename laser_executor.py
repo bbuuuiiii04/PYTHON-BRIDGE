@@ -8,6 +8,7 @@ This module intentionally keeps policy selection in LaserDirector while owning:
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import threading
 import time
 from typing import Optional
@@ -18,6 +19,8 @@ from .midi_output import MidiOutput
 
 _AUTO_ROLES = ("phrase", "buildup", "drop", "post_drop", "breakdown")
 _PHRASE_TRIGGER_REASONS = frozenset({"default_init", "phrase_boundary"})
+_MIN_HOLD_MS = 10
+_MAX_HOLD_MS = 30000
 
 
 class LaserSceneExecutor:
@@ -104,7 +107,8 @@ class LaserSceneExecutor:
                 return
 
         priority = self._priority_for_role(role)
-        if not self._midi_output.trigger(scene_def.midi, priority=priority):
+        midi_message = self._materialize_midi(scene_def.midi, ctx)
+        if not self._midi_output.trigger(midi_message, priority=priority):
             self._record_gate("midi_trigger_rejected")
             return
 
@@ -209,3 +213,15 @@ class LaserSceneExecutor:
         if role in ("emergency", "manual", "drop"):
             return "high"
         return "normal"
+
+    def _materialize_midi(self, msg, ctx: LaserContext):
+        behavior = (msg.behavior or "").strip().lower()
+        if behavior != "hold_beats":
+            return msg
+        bpm = float(ctx.bpm) if ctx.bpm else 0.0
+        if bpm <= 0:
+            hold_ms = _MIN_HOLD_MS
+        else:
+            hold_ms = int(round((60000.0 * float(msg.hold_beats)) / bpm))
+        hold_ms = max(_MIN_HOLD_MS, min(_MAX_HOLD_MS, hold_ms))
+        return replace(msg, behavior="hold_ms", hold_ms=hold_ms)

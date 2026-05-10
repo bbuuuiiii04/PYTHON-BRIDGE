@@ -469,6 +469,38 @@ class InvalidDurationTests(unittest.TestCase):
         r = load_laser_director_config(_write_config(cfg))
         self.assertTrue(r.available)
 
+    def test_behavior_hold_ms_requires_valid_range(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        midi = cfg["scenes"]["safe_static"]["midi"]
+        midi["behavior"] = "hold_ms"
+        midi["kind"] = "note_on"
+        midi["hold_ms"] = 30001
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("hold_ms" in e for e in r.errors))
+
+    def test_behavior_hold_beats_requires_valid_range(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        midi = cfg["scenes"]["safe_static"]["midi"]
+        midi["behavior"] = "hold_beats"
+        midi["kind"] = "note_on"
+        midi["hold_beats"] = 0.1
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("hold_beats" in e for e in r.errors))
+
+    def test_behavior_hold_beats_valid(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        midi = cfg["scenes"]["safe_static"]["midi"]
+        midi["behavior"] = "hold_beats"
+        midi["kind"] = "note_on"
+        midi["hold_beats"] = 4
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(r.available, msg=r.errors)
+
 
 # ---------------------------------------------------------------------------
 # midi_output_port validation
@@ -976,6 +1008,7 @@ class LaserModelsTests(unittest.TestCase):
         self.assertEqual(msg.note, 0)
         self.assertEqual(msg.velocity, 127)
         self.assertEqual(msg.duration_ms, 80)
+        self.assertEqual(msg.behavior, "pulse")
 
     def test_laser_scene_defaults(self) -> None:
         scene = LaserScene(
