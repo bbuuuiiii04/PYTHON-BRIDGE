@@ -6,6 +6,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -13,8 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.__main__ import _build_laser_startup_wiring  # noqa: E402
 from rb_ss_bridge_v2.laser_config import LaserConfig, LaserConfigResult  # noqa: E402
 from rb_ss_bridge_v2.laser_models import LaserMidiMessage, LaserPersonality, LaserScene  # noqa: E402
-from rb_ss_bridge_v2.laser_models import LaserContext  # noqa: E402
+from rb_ss_bridge_v2.laser_models import LaserContext, LaserSceneDecision  # noqa: E402
+from rb_ss_bridge_v2.models import BridgeEvent, Ev  # noqa: E402
 from rb_ss_bridge_v2.runtime_status import StatusWriter  # noqa: E402
+from rb_ss_bridge_v2.state_manager import StateManager  # noqa: E402
 from rb_ss_bridge_v2.validation_runner import (  # noqa: E402
     STATUS_FAIL,
     STATUS_NA,
@@ -97,10 +100,12 @@ class LaserStartupWiringTests(unittest.TestCase):
     def test_not_configured_returns_no_director_and_no_provider(self) -> None:
         result = LaserConfigResult(available=False, reason="not_configured")
 
-        director, provider = _build_laser_startup_wiring(result)
+        bundle = _build_laser_startup_wiring(result)
 
-        self.assertIsNone(director)
-        self.assertIsNone(provider)
+        self.assertIsNone(bundle.laser_director)
+        self.assertIsNone(bundle.status_provider)
+        self.assertIsNone(bundle.midi_output)
+        self.assertIsNone(bundle.laser_executor)
 
     def test_invalid_config_returns_error_provider(self) -> None:
         result = LaserConfigResult(
@@ -109,51 +114,64 @@ class LaserStartupWiringTests(unittest.TestCase):
             errors=("missing scenes", "invalid emergency_scene"),
         )
 
-        director, provider = _build_laser_startup_wiring(result)
+        bundle = _build_laser_startup_wiring(result)
 
-        self.assertIsNone(director)
-        self.assertIsNotNone(provider)
-        status = provider()
+        self.assertIsNone(bundle.laser_director)
+        self.assertIsNotNone(bundle.status_provider)
+        status = bundle.status_provider()
         self.assertEqual(status["reason"], "invalid_config")
         self.assertEqual(status["errors"], ["missing scenes", "invalid emergency_scene"])
 
     def test_valid_disabled_builds_director_disabled(self) -> None:
         result = LaserConfigResult(available=True, reason="ok", config=_config(enabled=False))
-
-        director, provider = _build_laser_startup_wiring(result)
-
-        self.assertIsNotNone(director)
-        self.assertIsNotNone(provider)
-        self.assertFalse(provider()["enabled"])
-        self.assertTrue(provider()["available"])
+        bundle = _build_laser_startup_wiring(result)
+        try:
+            self.assertIsNotNone(bundle.laser_director)
+            self.assertIsNotNone(bundle.status_provider)
+            self.assertIsNotNone(bundle.laser_executor)
+            self.assertIsNotNone(bundle.midi_output)
+            self.assertFalse(bundle.status_provider()["enabled"])
+            self.assertTrue(bundle.status_provider()["available"])
+        finally:
+            if bundle.midi_output is not None:
+                bundle.midi_output.stop()
 
     def test_scene_mapping_uses_fallback_and_default_personality(self) -> None:
         result = LaserConfigResult(available=True, reason="ok", config=_config(enabled=True, with_personality=True))
-        director, _provider = _build_laser_startup_wiring(result)
-        assert director is not None
+        bundle = _build_laser_startup_wiring(result)
+        assert bundle.laser_director is not None
+        try:
+            director = bundle.laser_director
+            director.tick(_ctx(playing=False), now=time.monotonic())
+            self.assertEqual(director.status()["current_scene"], "")
+            self.assertEqual(director.status()["last_reason"], "not_playing")
 
-        director.tick(_ctx(playing=False), now=time.monotonic())
-        self.assertEqual(director.status()["current_scene"], "")
-        self.assertEqual(director.status()["last_reason"], "not_playing")
+            director.tick(_ctx(playing=True, position_stale=False), now=time.monotonic())
+            self.assertEqual(director.status()["current_scene"], "default_scene_cfg")
 
-        director.tick(_ctx(playing=True, position_stale=False), now=time.monotonic())
-        self.assertEqual(director.status()["current_scene"], "default_scene_cfg")
-
-        director.set_emergency_blackout(True)
-        director.tick(_ctx(), now=time.monotonic())
-        self.assertEqual(director.status()["current_scene"], "emergency_scene_cfg")
+            director.set_emergency_blackout(True)
+            director.tick(_ctx(), now=time.monotonic())
+            self.assertEqual(director.status()["current_scene"], "emergency_scene_cfg")
+            self.assertIn("executor", bundle.status_provider())
+        finally:
+            if bundle.midi_output is not None:
+                bundle.midi_output.stop()
 
     def test_default_scene_falls_back_to_startup_scene_without_default_personality(self) -> None:
         result = LaserConfigResult(available=True, reason="ok", config=_config(enabled=True, with_personality=False))
-        director, _provider = _build_laser_startup_wiring(result)
-        assert director is not None
-
-        director.tick(_ctx(playing=True, position_stale=False), now=time.monotonic())
-        self.assertEqual(director.status()["current_scene"], "startup_scene_cfg")
+        bundle = _build_laser_startup_wiring(result)
+        assert bundle.laser_director is not None
+        try:
+            director = bundle.laser_director
+            director.tick(_ctx(playing=True, position_stale=False), now=time.monotonic())
+            self.assertEqual(director.status()["current_scene"], "startup_scene_cfg")
+        finally:
+            if bundle.midi_output is not None:
+                bundle.midi_output.stop()
 
 
 class LaserValidationWiringTests(unittest.TestCase):
-    def _runner(self, laser_result: LaserConfigResult) -> ValidationRunner:
+    def _runner(self, laser_result: LaserConfigResult, midi_output: Optional[object] = None) -> ValidationRunner:
         conn = SimpleNamespace(_connected=True, _send_q=queue.Queue(maxsize=16), _drop_count=0)
         pos_cache = Mock()
         pos_cache.get.return_value = None
@@ -162,7 +180,15 @@ class LaserValidationWiringTests(unittest.TestCase):
         live_bpm.get_summary.return_value = None
         sm = Mock()
         sm.snapshot.return_value = {"deck": {}, "lighting_mode": "idle"}
-        return ValidationRunner(conn, pos_cache, live_bpm, sm, scripted_registry={}, laser_config_result=laser_result)
+        return ValidationRunner(
+            conn,
+            pos_cache,
+            live_bpm,
+            sm,
+            scripted_registry={},
+            laser_config_result=laser_result,
+            midi_output=midi_output,
+        )
 
     def test_disabled_config_marks_all_laser_checks_not_applicable(self) -> None:
         runner = self._runner(LaserConfigResult(available=True, reason="ok", config=_config(enabled=False)))
@@ -197,18 +223,31 @@ class LaserValidationWiringTests(unittest.TestCase):
             self.assertEqual(status, STATUS_NA)
             self.assertEqual(detail, "invalid_config")
 
-    def test_enabled_config_reports_config_pass_and_rest_not_wired(self) -> None:
-        runner = self._runner(LaserConfigResult(available=True, reason="ok", config=_config(enabled=True)))
+    def test_enabled_config_reports_laser_midi_checks(self) -> None:
+        midi = Mock()
+        midi.status.return_value = {
+            "running": True,
+            "dry_run": True,
+            "degraded": False,
+            "degraded_reason": "",
+            "port_name": "IAC Driver Bus 1",
+            "queue_size": 0,
+            "queue_max": 64,
+            "drop_count": 0,
+            "last_error": "",
+        }
+        runner = self._runner(
+            LaserConfigResult(available=True, reason="ok", config=_config(enabled=True)),
+            midi_output=midi,
+        )
         checks = []
         runner._check_laser(lambda name, status, detail="": checks.append((name, status, detail)))
 
-        self.assertEqual(checks[0][0], "laser_config")
-        self.assertEqual(checks[0][1], STATUS_PASS)
-        self.assertIn("configured dry_run=True", checks[0][2])
-        for name, status, detail in checks[1:]:
-            self.assertNotEqual(name, "laser_config")
-            self.assertEqual(status, STATUS_NA)
-            self.assertEqual(detail, "not_wired_yet")
+        check_map = {name: (status, detail) for name, status, detail in checks}
+        self.assertEqual(check_map["laser_config"][0], STATUS_PASS)
+        self.assertEqual(check_map["laser_midi_dependency"][0], STATUS_PASS)
+        self.assertEqual(check_map["laser_midi_port"][0], STATUS_NA)
+        self.assertEqual(check_map["laser_midi_queue"][0], STATUS_PASS)
 
     def test_existing_non_laser_validation_checks_still_present(self) -> None:
         runner = self._runner(LaserConfigResult(available=False, reason="not_configured"))
@@ -256,6 +295,75 @@ class RuntimeStatusLaserWiringTests(unittest.TestCase):
             snapshot["laser_director"],
             {"available": False, "enabled": False, "reason": "not_configured"},
         )
+
+
+class LaserPersonalityUnknownNameTests(unittest.TestCase):
+    def test_unknown_personality_does_not_wipe_executor_personality(self) -> None:
+        cfg = _config(enabled=True, dry_run=True, with_personality=True)
+        bundle = _build_laser_startup_wiring(LaserConfigResult(available=True, reason="ok", config=cfg))
+        assert bundle.laser_director is not None
+        assert bundle.laser_executor is not None
+        assert bundle.personality_provider is not None
+        midi_output = bundle.midi_output
+        try:
+            sm = StateManager(
+                queue.Queue(maxsize=8),
+                Mock(),
+                Mock(),
+                live_bpm=Mock(),
+                laser_director=bundle.laser_director,
+                laser_executor=bundle.laser_executor,
+                laser_personality_provider=bundle.personality_provider,
+            )
+            before = bundle.laser_executor.status()
+            self.assertTrue(before["role_cursors"])
+            self.assertEqual(before["role_cursors"]["drop"], 0)
+
+            bundle.laser_executor.on_decision(
+                LaserSceneDecision(
+                    scene="default_scene_cfg",
+                    reason="drop_crossing",
+                    priority=9,
+                    source="policy",
+                    role="drop",
+                ),
+                _ctx(),
+            )
+            bundle.laser_executor.on_decision(
+                LaserSceneDecision(
+                    scene="default_scene_cfg",
+                    reason="post_drop_hold",
+                    priority=10,
+                    source="policy",
+                    role="post_drop",
+                ),
+                _ctx(),
+            )
+            bundle.laser_executor.on_decision(
+                LaserSceneDecision(
+                    scene="default_scene_cfg",
+                    reason="drop_crossing",
+                    priority=9,
+                    source="policy",
+                    role="drop",
+                ),
+                _ctx(),
+            )
+            before = bundle.laser_executor.status()
+            self.assertGreater(before["role_cursors"]["drop"], 0)
+            sm._handle_event(
+                BridgeEvent(
+                    kind=Ev.LASER_SET_PERSONALITY,
+                    deck=0,
+                    payload={"personality": "missing_name"},
+                    source="test",
+                )
+            )
+            after = bundle.laser_executor.status()
+            self.assertEqual(after["role_cursors"]["drop"], before["role_cursors"]["drop"])
+        finally:
+            if midi_output is not None:
+                midi_output.stop()
 
 
 if __name__ == "__main__":

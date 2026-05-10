@@ -38,6 +38,12 @@ Use this with the canonical design in `docs/laser_director_design.md` and the So
 13. Test only safe mappings first (`safe_static`, gentle phrase movement).
 14. After safe mappings are confirmed, test higher-impact mappings (drop/strobe/aggressive looks) in controlled conditions.
 15. Only after all dry-run checks pass, set `dry_run=false` for live MIDI output and re-run the same validation sequence.
+16. Verify optional role banks rotate deterministically:
+   - buildup holds one bank pick through countdown
+   - drop rotates once per drop crossing
+   - post-drop fires once per hold
+   - phrase only fires on phrase/autoloop boundary eligibility
+17. Verify phrase MIDI does not fire immediately when post-drop expires mid-cycle.
 
 ## Live Workflow Guidance
 
@@ -46,6 +52,10 @@ Use this with the canonical design in `docs/laser_director_design.md` and the So
 - Bridge runtime commands like `laser_scene` and `laser_blackout` remain compatibility/dev/test controls.
 - Do not treat bridge manual override or bridge blackout commands as the recommended live performer workflow.
 - Live creative overrides and blackout should be handled directly in SoundSwitch or through the normal external safety path.
+- Production trigger path is:
+  - `LaserDirector -> LaserSceneExecutor -> MidiOutput -> IAC Driver Bus -> SoundSwitch`
+- Local Python MIDI web pad remains setup/debug only.
+- Live mode expects `mido` + `python-rtmidi`; missing dependencies should degrade MIDI only.
 
 ## Rollback
 

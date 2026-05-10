@@ -151,6 +151,11 @@
       "post_drop_scene":  "house_drop_sustain_1",
       "breakdown_scene":  "house_breakdown_1",
       "transition_scene": "transition_safe_1",
+      "phrase_bank":      ["house_phrase_1"],
+      "buildup_bank":     ["house_buildup_1"],
+      "drop_bank":        ["house_drop_1"],
+      "post_drop_bank":   ["house_drop_sustain_1"],
+      "breakdown_bank":   ["house_breakdown_1"],
       "allow_high_impact": true,
       "phrase_interval_beats": 32,
       "minimum_scene_hold_beats": 8,
@@ -159,6 +164,8 @@
       "buildup_hold_beats": 8,
       "pre_drop_lookahead_beats": 4,
       "_comment_pre_drop_deprecated": "pre_drop_scene is intentionally inactive in Laser Director policy; Smart Drop handles final pre-drop autoloop cut/rearm.",
+      "_comment_scene_banks": "Optional role banks rotate deterministically (round-robin) on role entry/eligible trigger only.",
+      "_comment_live_midi_safe_first": "For first live tests keep mappings safe/gentle and leave dry_run=true until validated.",
       "_comment_deprecated_timing_fields": "buildup_approach_beats, buildup_hold_beats, and pre_drop_lookahead_beats are retained for backward compatibility and status only.",
       "_comment_post_drop_hold": "post_drop_scene hold uses minimum_scene_hold_beats; set > 0 for visible post-drop hold."
     }

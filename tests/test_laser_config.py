@@ -746,6 +746,47 @@ class PersonalityValidationTests(unittest.TestCase):
         self.assertFalse(r.available)
         self.assertTrue(any("pre_drop_scene" in e for e in r.errors))
 
+    def test_scene_banks_are_optional(self) -> None:
+        cfg = self._cfg_with_personality(self._valid_personality())
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(r.available, msg=r.errors)
+        p = r.config.personalities["house"]
+        self.assertEqual(p.phrase_bank, ())
+        self.assertEqual(p.buildup_bank, ())
+        self.assertEqual(p.drop_bank, ())
+
+    def test_scene_bank_references_must_exist(self) -> None:
+        p = self._valid_personality()
+        p["drop_bank"] = ["safe_static", "missing_scene"]
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("drop_bank" in e for e in r.errors))
+
+    def test_scene_bank_must_be_list(self) -> None:
+        p = self._valid_personality()
+        p["phrase_bank"] = "safe_static"
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("phrase_bank" in e for e in r.errors))
+
+    def test_scene_bank_items_must_be_non_empty_strings(self) -> None:
+        p = self._valid_personality()
+        p["post_drop_bank"] = ["safe_static", ""]
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("post_drop_bank" in e for e in r.errors))
+
+    def test_scene_bank_empty_list_is_allowed(self) -> None:
+        p = self._valid_personality()
+        p["breakdown_bank"] = []
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(r.available, msg=r.errors)
+        self.assertEqual(r.config.personalities["house"].breakdown_bank, ())
+
     def test_buildup_approach_beats_must_be_non_negative_int(self) -> None:
         p = self._valid_personality()
         p["buildup_approach_beats"] = -1

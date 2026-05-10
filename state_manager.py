@@ -28,7 +28,7 @@ import queue
 import threading
 import time
 from collections import deque
-from typing import Optional
+from typing import Callable, Optional
 
 from .config import (
     AUTOLOOP_ARM_PHRASE_BEATS, AUTOLOOP_BEATS, ARM_GUARD_S, STOP_DEBOUNCE_S,
@@ -43,7 +43,7 @@ from .models import (
     ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot,
     SmartDropEnergyShadow, TrackMetadata,
 )
-from .laser_models import LaserContext
+from .laser_models import LaserContext, LaserPersonality
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
@@ -233,6 +233,8 @@ class StateManager:
         live_bpm=None,
         live_bpm_follow: Optional[bool] = None,
         laser_director=None,
+        laser_executor=None,
+        laser_personality_provider: Optional[Callable[[str], Optional[LaserPersonality]]] = None,
         os2l_connected_provider=None,
     ) -> None:
         self._eq    = event_queue
@@ -242,6 +244,8 @@ class StateManager:
         # Optional Laser Director — None means disabled/not configured.
         # Mutated only from this thread after start().
         self._laser_director = laser_director
+        self._laser_executor = laser_executor
+        self._laser_personality_provider = laser_personality_provider
         # Constant-time connectivity check; must not build a dict or call status().
         self._os2l_connected_provider = os2l_connected_provider
         self._live_bpm_follow = (
@@ -675,7 +679,15 @@ class StateManager:
             elif ev.kind == Ev.LASER_CLEAR_SCENE_OVERRIDE:
                 self._laser_director.clear_manual_override()
             elif ev.kind == Ev.LASER_SET_PERSONALITY:
-                self._laser_director.set_personality(str(ev.payload.get("personality", "")))
+                personality_name = str(ev.payload.get("personality", ""))
+                self._laser_director.set_personality(personality_name)
+                provider = self._laser_personality_provider
+                if provider is not None:
+                    personality_cfg = provider(personality_name)
+                    if personality_cfg is not None:
+                        self._laser_director.set_personality_config(personality_cfg)
+                        if self._laser_executor is not None:
+                            self._laser_executor.set_personality(personality_cfg)
 
     # ── Deck switch ───────────────────────────────────────────────────────────
 
@@ -1263,7 +1275,9 @@ class StateManager:
                     _lctx = self._build_laser_context(
                         active, d, os.last_beat_elapsed_ms, d.meta.bpm, 0.0, 0.0, snap, now,
                     )
-                    self._laser_director.tick(_lctx, now=now)
+                    decision = self._laser_director.tick(_lctx, now=now)
+                    if self._laser_executor is not None:
+                        self._laser_executor.on_decision(decision, _lctx)
                 return
             # Not playing — run lighting machine and auto-detect with TL state only.
             bpm = d.meta.bpm
@@ -1287,7 +1301,9 @@ class StateManager:
                 _lctx = self._build_laser_context(
                     active, d, elapsed_ms, bpm, 0.0, 0.0, snap, now,
                 )
-                self._laser_director.tick(_lctx, now=now)
+                decision = self._laser_director.tick(_lctx, now=now)
+                if self._laser_executor is not None:
+                    self._laser_executor.on_decision(decision, _lctx)
             return
 
         # Interpolate position: memory updates at 60 Hz; push loop at 200 Hz
@@ -1449,7 +1465,9 @@ class StateManager:
                 _lctx = self._build_laser_context(
                     active, d, elapsed_ms, bpm, beat_pos, abs_beat_pos, snap, now,
                 )
-                self._laser_director.tick(_lctx, now=now)
+                decision = self._laser_director.tick(_lctx, now=now)
+                if self._laser_executor is not None:
+                    self._laser_executor.on_decision(decision, _lctx)
             return
 
         # ── Emit elapsed + beat ───────────────────────────────────────────────
@@ -1568,7 +1586,9 @@ class StateManager:
                 now,
                 autoloop_tick_just_fired=autoloop_tick_just_fired,
             )
-            self._laser_director.tick(ctx, now=now)
+            decision = self._laser_director.tick(ctx, now=now)
+            if self._laser_executor is not None:
+                self._laser_executor.on_decision(decision, ctx)
 
         # Elapsed + beatpos — send at every push tick (SS needs continuous updates).
         # Test A: in autoloop only, send absolute beat position to match VDJ-like

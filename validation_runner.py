@@ -66,6 +66,7 @@ class ValidationRunner:
         bridge_pattern: str = "rb_ss_bridge_v2",
         rb_pattern: str = "rekordbox",
         laser_config_result: Optional[LaserConfigResult] = None,
+        midi_output=None,
     ) -> None:
         self._conn = conn
         self._pos_cache = pos_cache
@@ -75,6 +76,7 @@ class ValidationRunner:
         self._bridge_pattern = bridge_pattern
         self._rb_pattern = rb_pattern
         self._laser_config_result = laser_config_result
+        self._midi_output = midi_output
         self._lock = threading.Lock()
         self._last = ValidationResult("idle", 0.0, "idle", [])
 
@@ -246,8 +248,37 @@ class ValidationRunner:
             return
 
         add("laser_config", STATUS_PASS, f"configured dry_run={result.config.dry_run}")
-        for name in _laser_checks[1:]:
-            add(name, STATUS_NA, "not_wired_yet")
+        add("laser_safe_scene", STATUS_PASS, result.config.fallback_scene)
+        add("laser_emergency_scene", STATUS_PASS, result.config.emergency_scene)
+        add("laser_personality_refs", STATUS_PASS, "validated")
+
+        midi = self._midi_output
+        if midi is None:
+            add("laser_midi_dependency", STATUS_NA, "not_wired")
+            add("laser_midi_port", STATUS_NA, "not_wired")
+            add("laser_midi_queue", STATUS_NA, "not_wired")
+            return
+        status = midi.status()
+        if result.config.dry_run:
+            add("laser_midi_dependency", STATUS_PASS, "dry_run transport active")
+            add("laser_midi_port", STATUS_NA, "dry_run")
+        elif status.get("degraded_reason") == "dependency_missing":
+            add("laser_midi_dependency", STATUS_FAIL, status.get("last_error") or "dependency_missing")
+            add("laser_midi_port", STATUS_NA, "dependency_missing")
+        else:
+            add("laser_midi_dependency", STATUS_PASS, "mido available")
+            if status.get("degraded_reason") == "port_unavailable":
+                add("laser_midi_port", STATUS_FAIL, status.get("last_error") or "port_unavailable")
+            else:
+                add("laser_midi_port", STATUS_PASS, status.get("port_name", ""))
+
+        queue_size = int(status.get("queue_size", 0))
+        queue_max = max(1, int(status.get("queue_max", 1)))
+        drop_count = int(status.get("drop_count", 0))
+        if queue_size >= int(queue_max * 0.8) or drop_count > 0:
+            add("laser_midi_queue", STATUS_WARN, f"{queue_size}/{queue_max} drops={drop_count}")
+        else:
+            add("laser_midi_queue", STATUS_PASS, f"{queue_size}/{queue_max} drops={drop_count}")
 
 
 def _pgrep_count(pattern: str) -> int:

@@ -75,6 +75,44 @@ Laser Director MVP should:
 10. Add validation checks for config and MIDI transport.
 11. Preserve all existing OS2L behavior when disabled or degraded.
 
+### Scene banks (v1 live executor)
+
+Per-personality role banks are optional and reference existing scene keys:
+
+- `phrase_bank`
+- `buildup_bank`
+- `drop_bank`
+- `post_drop_bank`
+- `breakdown_bank`
+
+Selection is deterministic round-robin per role (no random choice).
+Missing/empty banks fall back to the existing single-scene role field.
+
+Bank rotation happens only on role-entry / eligible trigger events:
+
+- buildup: pick once at buildup entry; hold through countdown
+- drop: rotate on each drop crossing
+- post_drop: pick once per post-drop hold
+- breakdown: pick once on breakdown entry
+- phrase: trigger only on phrase/autoloop-eligible edges (not every tick)
+
+Phrase MIDI must not fire immediately when post-drop expires. Returning to
+phrase/default internally is allowed, but phrase-trigger MIDI waits for a real
+phrase/autoloop boundary edge.
+
+### Live execution path
+
+Production path:
+
+```text
+LaserDirector -> LaserSceneExecutor -> MidiOutput -> IAC Driver Bus -> SoundSwitch
+```
+
+- `LaserDirector` remains policy-only (scene/reason/role decisions).
+- `LaserSceneExecutor` owns bank rotation, scene lookup, execution gates, and
+  `MidiOutput.trigger(...)`.
+- `MidiOutput` is the only bridge MIDI sender path.
+
 ---
 
 ## 4. Non-Goals

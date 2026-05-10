@@ -179,7 +179,7 @@ class LaserDirector:
 
     # ── Tick (called from StateManager._push_tick) ────────────────────────────
 
-    def tick(self, ctx: LaserContext, *, now: float) -> None:
+    def tick(self, ctx: LaserContext, *, now: float) -> Optional[LaserSceneDecision]:
         """Evaluate policy for one tick. Bounded and non-blocking.
 
         Must not:
@@ -192,7 +192,7 @@ class LaserDirector:
         - Read config files.
         """
         if not self._enabled:
-            return
+            return None
 
         decision = self._decide(ctx, now=now)
 
@@ -226,6 +226,7 @@ class LaserDirector:
 
         self._current_scene = decision.scene
         self._last_reason = decision.reason
+        return decision
 
     def _decide(self, ctx: LaserContext, *, now: float) -> LaserSceneDecision:
         """Priority-ordered scene selection. Returns a LaserSceneDecision."""
@@ -237,6 +238,7 @@ class LaserDirector:
                 reason="emergency",
                 priority=1,
                 source="emergency",
+                role="emergency",
             )
 
         # Priority 2: Manual override (TTL-bounded).
@@ -247,6 +249,7 @@ class LaserDirector:
                     reason="manual_override",
                     priority=2,
                     source="manual",
+                    role="manual",
                 )
             # TTL expired — clear it and fall through.
             self.clear_manual_override()
@@ -260,6 +263,7 @@ class LaserDirector:
                 reason="not_playing",
                 priority=3,
                 source="policy",
+                role="idle",
             )
 
         # Priority 4: No loaded active track -> idle/no output.
@@ -271,6 +275,7 @@ class LaserDirector:
                 reason="idle_no_track",
                 priority=4,
                 source="policy",
+                role="idle",
             )
 
         # Priority 5: Stale position -> idle/no output.
@@ -282,6 +287,7 @@ class LaserDirector:
                 reason="position_stale",
                 priority=5,
                 source="policy",
+                role="idle",
             )
 
         # Priority 6: scripted mode -> idle/no output.
@@ -293,6 +299,7 @@ class LaserDirector:
                 reason="scripted",
                 priority=6,
                 source="policy",
+                role="idle",
             )
 
         # Priority 7: autoloop must be fully ready before automatic scenes.
@@ -304,6 +311,7 @@ class LaserDirector:
                 reason="autoloop_not_ready",
                 priority=7,
                 source="policy",
+                role="idle",
             )
 
         abs_beat = max(ctx.abs_beat, 0.0)
@@ -323,6 +331,7 @@ class LaserDirector:
                 reason="breakdown_active",
                 priority=8,
                 source="policy",
+                role="breakdown",
             )
 
         # Priority 9: Drop crossing (once per target beat).
@@ -340,6 +349,7 @@ class LaserDirector:
                         reason="drop_crossing",
                         priority=9,
                         source="policy",
+                        role="drop",
                     )
 
         # Priority 10: Post-drop hold (using existing minimum_scene_hold_beats).
@@ -355,6 +365,7 @@ class LaserDirector:
                 reason="post_drop_hold",
                 priority=10,
                 source="policy",
+                role="post_drop",
             )
 
         in_post_drop_hold = (
@@ -377,6 +388,7 @@ class LaserDirector:
                 reason="buildup_to_drop_window",
                 priority=11,
                 source="policy",
+                role="buildup",
             )
 
         self._last_smart_abs_beat = abs_beat
@@ -428,6 +440,7 @@ class LaserDirector:
                 reason="phrase_hold_pending",
                 priority=10,
                 source="policy",
+                role="phrase",
             )
 
         if self._normal_changes_only_on_phrase_boundary:
@@ -437,6 +450,7 @@ class LaserDirector:
                     reason="phrase_hold",
                     priority=10,
                     source="policy",
+                    role="phrase",
                 )
             return self._gate_normal_change(
                 ctx=ctx,
@@ -494,6 +508,7 @@ class LaserDirector:
                     reason="hold_minimum_scene",
                     priority=priority,
                     source="policy",
+                    role=self._role_for_reason("hold_minimum_scene"),
                 )
 
         return LaserSceneDecision(
@@ -501,7 +516,31 @@ class LaserDirector:
             reason=candidate_reason,
             priority=priority,
             source="policy",
+            role=self._role_for_reason(candidate_reason),
         )
+
+    def _role_for_reason(self, reason: str) -> str:
+        if reason == "emergency":
+            return "emergency"
+        if reason == "manual_override":
+            return "manual"
+        if reason in (
+            "not_playing",
+            "idle_no_track",
+            "position_stale",
+            "scripted",
+            "autoloop_not_ready",
+        ):
+            return "idle"
+        if reason == "breakdown_active":
+            return "breakdown"
+        if reason == "drop_crossing":
+            return "drop"
+        if reason == "post_drop_hold":
+            return "post_drop"
+        if reason == "buildup_to_drop_window":
+            return "buildup"
+        return "phrase"
 
     # ── Status ────────────────────────────────────────────────────────────────
 

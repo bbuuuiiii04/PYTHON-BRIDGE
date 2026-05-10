@@ -21,6 +21,7 @@ import sys
 import time
 import threading
 import fcntl
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from .config import OSC_LISTEN_PORT, TL_LOG_PATH, TL_PLAYLIST_PATH
@@ -63,6 +64,9 @@ from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService, read_rekordbox_versi
 from .logging_manager import get_logging_manager
 from .laser_config import LaserConfigResult, load_laser_director_config
 from .laser_director import LaserDirector
+from .laser_executor import LaserSceneExecutor
+from .laser_models import LaserPersonality
+from .midi_output import MidiOutput
 from .runtime_status import CommandReader, StatusWriter
 from .validation_runner import ValidationRunner
 
@@ -247,9 +251,18 @@ def _onoff(value: bool) -> str:
     return "on" if value else "off"
 
 
+@dataclass(frozen=True)
+class LaserStartupBundle:
+    laser_director: Optional[LaserDirector]
+    laser_executor: Optional[LaserSceneExecutor]
+    midi_output: Optional[MidiOutput]
+    status_provider: Optional[Callable[[], dict]]
+    personality_provider: Optional[Callable[[str], Optional[LaserPersonality]]]
+
+
 def _build_laser_startup_wiring(
     cfg_result: LaserConfigResult,
-) -> tuple[Optional[LaserDirector], Optional[Callable[[], dict]]]:
+) -> LaserStartupBundle:
     """Build optional LaserDirector and status provider from startup config result."""
     if not cfg_result.available or cfg_result.config is None:
         if cfg_result.reason == "invalid_config":
@@ -263,15 +276,17 @@ def _build_laser_startup_wiring(
                     "errors": errors,
                 }
 
-            return None, _invalid_status
-        return None, None
+            return LaserStartupBundle(None, None, None, _invalid_status, None)
+        return LaserStartupBundle(None, None, None, None, None)
 
     cfg = cfg_result.config
     default_scene = cfg.startup_scene
+    initial_personality: Optional[LaserPersonality] = None
     if cfg.default_personality:
         personality = cfg.personalities.get(cfg.default_personality)
         if personality is not None:
             default_scene = personality.default_scene
+            initial_personality = personality
 
     laser_director = LaserDirector(
         dry_run=cfg.dry_run,
@@ -281,10 +296,36 @@ def _build_laser_startup_wiring(
         emergency_scene=cfg.emergency_scene,
     )
     if cfg.default_personality:
-        personality = cfg.personalities.get(cfg.default_personality)
-        if personality is not None:
-            laser_director.set_personality_config(personality)
-    return laser_director, laser_director.status
+        laser_director.set_personality(cfg.default_personality)
+    if initial_personality is not None:
+        laser_director.set_personality_config(initial_personality)
+
+    midi_output = MidiOutput(
+        port_name=cfg.midi_output_port,
+        dry_run=cfg.dry_run,
+    )
+    midi_output.start()
+    laser_executor = LaserSceneExecutor(
+        config=cfg,
+        midi_output=midi_output,
+        personality=initial_personality,
+    )
+
+    def _status() -> dict:
+        status = laser_director.status()
+        status["executor"] = laser_executor.status()
+        return status
+
+    def _personality_provider(name: str) -> Optional[LaserPersonality]:
+        return cfg.personalities.get(name)
+
+    return LaserStartupBundle(
+        laser_director=laser_director,
+        laser_executor=laser_executor,
+        midi_output=midi_output,
+        status_provider=_status,
+        personality_provider=_personality_provider,
+    )
 
 _LOCK_FD = None
 _LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
@@ -554,7 +595,12 @@ def main() -> None:
 
     log.info("[MAIN] starting")
     laser_cfg_result = load_laser_director_config()
-    laser_director, laser_status_provider = _build_laser_startup_wiring(laser_cfg_result)
+    laser_bundle = _build_laser_startup_wiring(laser_cfg_result)
+    laser_director = laser_bundle.laser_director
+    laser_executor = laser_bundle.laser_executor
+    laser_status_provider = laser_bundle.status_provider
+    laser_personality_provider = laser_bundle.personality_provider
+    midi_output = laser_bundle.midi_output
     log.info(
         "[MAIN] laser-config  reason=%s  available=%s  enabled=%s",
         laser_cfg_result.reason,
@@ -620,6 +666,8 @@ def main() -> None:
         output,
         live_bpm=live_bpm,
         laser_director=laser_director,
+        laser_executor=laser_executor,
+        laser_personality_provider=laser_personality_provider,
     )
     validation_runner = ValidationRunner(
         conn,
@@ -627,6 +675,7 @@ def main() -> None:
         live_bpm,
         sm,
         laser_config_result=laser_cfg_result,
+        midi_output=midi_output,
     )
 
     def _toggle_smart_drop() -> None:
@@ -967,6 +1016,8 @@ def main() -> None:
         live_bpm.stop()
         mtc.stop()
         injector.stop()
+        if midi_output is not None:
+            midi_output.stop()
         discovery.stop()
         conn.stop()
         sys.exit(0)
