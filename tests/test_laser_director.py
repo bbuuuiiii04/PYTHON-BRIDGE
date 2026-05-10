@@ -5,8 +5,8 @@ Covers:
   - Disabled LaserDirector does nothing.
   - Emergency selects configured emergency_scene.
   - Manual override selects provided scene name.
-  - Not playing selects configured safe_scene.
-  - Stale position selects configured safe_scene.
+  - Not playing returns idle/no-output.
+  - Stale position returns idle/no-output.
   - Normal playing selects configured default_scene.
   - Arbitrary scene names are accepted for manual override.
   - No fixed names like low_sweep or drop_hit are required.
@@ -48,6 +48,8 @@ def _ctx(
     abs_beat: float = 64.0,
     lighting_mode: str = "autoloop",
     os2l_connected: bool = True,
+    active_track_loaded: bool = True,
+    autoloop_ready: bool = True,
     breakdown_active: bool = False,
     smart_drops: tuple[int, ...] = (),
     anlz_buildups: tuple[int, ...] = (),
@@ -63,6 +65,8 @@ def _ctx(
         position_stale=position_stale,
         lighting_mode=lighting_mode,
         os2l_connected=os2l_connected,
+        active_track_loaded=active_track_loaded,
+        autoloop_ready=autoloop_ready,
         breakdown_active=breakdown_active,
         smart_drops=smart_drops,
         anlz_buildups=anlz_buildups,
@@ -195,6 +199,12 @@ class EmergencyTests(unittest.TestCase):
         ld.tick(_ctx(playing=False), now=_now())
         self.assertEqual(ld.status()["current_scene"], "emergency_blackout")
 
+    def test_emergency_beats_autoloop_not_ready(self) -> None:
+        ld = _director()
+        ld.set_emergency_blackout(True)
+        ld.tick(_ctx(autoloop_ready=False, active_track_loaded=True), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "emergency_blackout")
+
     def test_emergency_overrides_smart_observation_signals(self) -> None:
         cases = (
             _ctx(abs_beat=32.2, breakdown_active=True, smart_drops=(64,), anlz_buildups=(32,)),
@@ -285,6 +295,13 @@ class ManualOverrideTests(unittest.TestCase):
         ld.set_manual_override("house_drop_1", ttl_s=5.0)
         self.assertEqual(ld.status()["manual_override"], "house_drop_1")
 
+    def test_manual_override_allowed_when_autoloop_not_ready(self) -> None:
+        ld = _director()
+        ld.set_manual_override("manual_scene", ttl_s=10.0)
+        ld.tick(_ctx(autoloop_ready=False), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "manual_scene")
+        self.assertEqual(ld.status()["last_reason"], "manual_override")
+
     def test_manual_override_beats_drop_crossing(self) -> None:
         ld = _director(
             default_scene="d",
@@ -342,16 +359,17 @@ class ManualOverrideTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class NotPlayingTests(unittest.TestCase):
-    def test_not_playing_selects_safe_scene(self) -> None:
+    def test_not_playing_returns_idle_no_output(self) -> None:
         ld = _director()
         ld.tick(_ctx(playing=False), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "safe_static")
+        self.assertEqual(ld.status()["current_scene"], "")
         self.assertEqual(ld.status()["last_reason"], "not_playing")
 
-    def test_not_playing_uses_configured_safe_scene(self) -> None:
+    def test_not_playing_does_not_use_configured_safe_scene(self) -> None:
         ld = _director(safe_scene="my_safe_look")
         ld.tick(_ctx(playing=False), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "my_safe_look")
+        self.assertEqual(ld.status()["current_scene"], "")
+        self.assertEqual(ld.status()["last_reason"], "not_playing")
 
 
 # ---------------------------------------------------------------------------
@@ -359,17 +377,66 @@ class NotPlayingTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class StalePositionTests(unittest.TestCase):
-    def test_stale_position_selects_safe_scene(self) -> None:
+    def test_stale_position_returns_idle_no_output(self) -> None:
         ld = _director()
         ld.tick(_ctx(playing=True, position_stale=True), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "safe_static")
+        self.assertEqual(ld.status()["current_scene"], "")
         self.assertEqual(ld.status()["last_reason"], "position_stale")
 
-    def test_stale_uses_configured_safe_scene(self) -> None:
+    def test_stale_position_does_not_use_configured_safe_scene(self) -> None:
         ld = _director(safe_scene="my_stale_safe")
         ld.tick(_ctx(playing=True, position_stale=True), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "my_stale_safe")
+        self.assertEqual(ld.status()["current_scene"], "")
+        self.assertEqual(ld.status()["last_reason"], "position_stale")
 
+
+class EligibilityGateTests(unittest.TestCase):
+    def test_no_loaded_active_track_returns_idle_no_track(self) -> None:
+        ld = _director(default_scene="d", breakdown_scene="bd", drop_scene="drop")
+        ld.tick(
+            _ctx(
+                playing=True,
+                position_stale=False,
+                active_track_loaded=False,
+                autoloop_ready=True,
+                breakdown_active=True,
+                smart_drops=(64,),
+            ),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "")
+        self.assertEqual(ld.status()["last_reason"], "idle_no_track")
+
+    def test_autoloop_not_ready_skips_automatic_scenes(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", breakdown_scene="bd", drop_scene="drop")
+        ld.tick(
+            _ctx(
+                abs_beat=64.1,
+                playing=True,
+                position_stale=False,
+                active_track_loaded=True,
+                autoloop_ready=False,
+                breakdown_active=True,
+                smart_drops=(64,),
+                anlz_buildups=(64,),
+            ),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "")
+        self.assertEqual(ld.status()["last_reason"], "autoloop_not_ready")
+
+    def test_autoloop_ready_allows_phrase_default_and_smart_observation(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", breakdown_scene="bd", drop_scene="drop")
+        ld.tick(
+            _ctx(abs_beat=31.0, autoloop_ready=True, active_track_loaded=True),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "d")
+        ld.tick(
+            _ctx(abs_beat=31.5, autoloop_ready=True, active_track_loaded=True, breakdown_active=True),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "bd")
 
 # ---------------------------------------------------------------------------
 # Default scene (normal playing)
@@ -416,7 +483,7 @@ class PhraseSceneTests(unittest.TestCase):
         ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
         ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
         ld.tick(_ctx(playing=False, position_stale=False, abs_beat=40.0), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "safe_static")
+        self.assertEqual(ld.status()["current_scene"], "")
         ld.tick(_ctx(playing=True, position_stale=False, abs_beat=64.0), now=_now())
         self.assertEqual(ld.status()["last_reason"], "default_init")
         self.assertEqual(ld.status()["current_scene"], "d")
@@ -425,7 +492,7 @@ class PhraseSceneTests(unittest.TestCase):
         ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
         ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
         ld.tick(_ctx(playing=True, position_stale=True, abs_beat=40.0), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "safe_static")
+        self.assertEqual(ld.status()["current_scene"], "")
         ld.tick(_ctx(playing=True, position_stale=False, abs_beat=64.0), now=_now())
         self.assertEqual(ld.status()["last_reason"], "default_init")
         self.assertEqual(ld.status()["current_scene"], "d")
@@ -442,7 +509,7 @@ class PhraseSceneTests(unittest.TestCase):
         self.assertEqual(ld.status()["current_scene"], "d")
         self.assertEqual(ld.status()["last_reason"], "hold_minimum_scene")
 
-    def test_minimum_hold_does_not_block_emergency_manual_or_safe(self) -> None:
+    def test_minimum_hold_does_not_block_emergency_manual_or_idle(self) -> None:
         ld = _director(
             default_scene="d",
             phrase_scene="p",
@@ -458,7 +525,7 @@ class PhraseSceneTests(unittest.TestCase):
         self.assertEqual(ld.status()["current_scene"], "emergency_blackout")
         ld.clear_emergency_blackout()
         ld.tick(_ctx(playing=False, position_stale=False, abs_beat=33.0), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "safe_static")
+        self.assertEqual(ld.status()["current_scene"], "")
 
     def test_phrase_boundary_only_holds_normal_automatic_scenes(self) -> None:
         ld = _director(
@@ -667,7 +734,8 @@ class SmartObservationTests(unittest.TestCase):
             ),
             now=_now(),
         )
-        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["current_scene"], "")
+        self.assertEqual(ld.status()["last_reason"], "scripted")
 
     def test_scripted_gate_by_lighting_mode_skips_smart_observation(self) -> None:
         ld = _director(default_scene="d", breakdown_scene="bd")
@@ -676,7 +744,8 @@ class SmartObservationTests(unittest.TestCase):
             _ctx(abs_beat=32.2, lighting_mode="scripted", breakdown_active=True),
             now=_now(),
         )
-        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["current_scene"], "")
+        self.assertEqual(ld.status()["last_reason"], "scripted")
 
     def test_tick_does_not_mutate_context_scripted_id(self) -> None:
         ld = _director(default_scene="d", drop_scene="drop")
@@ -1019,6 +1088,45 @@ class StateManagerLaserIntegrationTests(unittest.TestCase):
         self.assertIsInstance(ctx.smart_drops, tuple)
         self.assertIsInstance(ctx.anlz_buildups, tuple)
 
+    def test_build_laser_context_copies_active_track_loaded(self) -> None:
+        from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
+        ld = _director()
+        sm = _make_sm(laser_director=ld)
+        d = DeckState(number=1)
+        d.meta.filepath = "/tracks/test.mp3"
+        snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
+        ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, snap, time.monotonic())
+        self.assertTrue(ctx.active_track_loaded)
+
+    def test_build_laser_context_strict_autoloop_ready(self) -> None:
+        from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
+        ld = _director()
+        sm = _make_sm(laser_director=ld)
+        d = DeckState(number=1)
+        d.meta.filepath = "/tracks/ready.mp3"
+        snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
+
+        sm._os.lighting_mode = "autoloop"
+        sm._os.autoloop_arm_pending = False
+        sm._os.pending_autoloop_arm_meta = None
+        sm._os.last_armed_filepath = "/tracks/ready.mp3"
+        ready_ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, snap, time.monotonic())
+        self.assertTrue(ready_ctx.autoloop_ready)
+
+        sm._os.autoloop_arm_pending = True
+        pending_ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, snap, time.monotonic())
+        self.assertFalse(pending_ctx.autoloop_ready)
+
+        sm._os.autoloop_arm_pending = False
+        sm._os.last_armed_filepath = "/tracks/other.mp3"
+        mismatch_ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, snap, time.monotonic())
+        self.assertFalse(mismatch_ctx.autoloop_ready)
+
+        sm._os.last_armed_filepath = "/tracks/ready.mp3"
+        sm._os.pending_autoloop_arm_meta = object()
+        queued_ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, snap, time.monotonic())
+        self.assertFalse(queued_ctx.autoloop_ready)
+
     def test_laser_context_has_no_smart_breakdowns_field(self) -> None:
         ctx = _ctx()
         self.assertFalse(hasattr(ctx, "smart_breakdowns"))
@@ -1150,28 +1258,28 @@ class EarlyReturnLaserTickTests(unittest.TestCase):
     contexts verifies the policy is correct.
     """
 
-    def test_stale_snap_context_produces_safe_scene(self) -> None:
-        """Context with position_stale=True must select safe_scene."""
+    def test_stale_snap_context_produces_idle_no_output(self) -> None:
+        """Context with position_stale=True must select no output."""
         ld = _director(enabled=True, safe_scene="my_safe_look")
         stale_ctx = _ctx(playing=False, position_stale=True)
         ld.tick(stale_ctx, now=_now())
-        self.assertEqual(ld.status()["current_scene"], "my_safe_look")
+        self.assertEqual(ld.status()["current_scene"], "")
         self.assertIn(ld.status()["last_reason"], ("not_playing", "position_stale"))
 
-    def test_not_playing_context_produces_safe_scene(self) -> None:
-        """Context with playing=False and fresh snap must select safe_scene."""
+    def test_not_playing_context_produces_idle_no_output(self) -> None:
+        """Context with playing=False and fresh snap must select no output."""
         ld = _director(enabled=True, safe_scene="my_safe_look")
         idle_ctx = _ctx(playing=False, position_stale=False)
         ld.tick(idle_ctx, now=_now())
-        self.assertEqual(ld.status()["current_scene"], "my_safe_look")
+        self.assertEqual(ld.status()["current_scene"], "")
         self.assertEqual(ld.status()["last_reason"], "not_playing")
 
-    def test_stale_and_playing_context_produces_safe_scene(self) -> None:
-        """Stale position overrides playing=True — still selects safe_scene."""
+    def test_stale_and_playing_context_produces_idle_no_output(self) -> None:
+        """Stale position overrides playing=True — still selects no output."""
         ld = _director(enabled=True, safe_scene="my_safe_look")
         ctx = _ctx(playing=True, position_stale=True)
         ld.tick(ctx, now=_now())
-        self.assertEqual(ld.status()["current_scene"], "my_safe_look")
+        self.assertEqual(ld.status()["current_scene"], "")
         self.assertEqual(ld.status()["last_reason"], "position_stale")
 
     def test_build_laser_context_with_none_snap_gives_stale_true(self) -> None:

@@ -102,6 +102,8 @@ class LaserContext:
     position_stale: bool
     lighting_mode: str   # "idle", "autoloop", "scripted"
     os2l_connected: bool
+    active_track_loaded: bool = False
+    autoloop_ready: bool = False
     breakdown_active: bool = False
     smart_drops: tuple[int, ...] = field(default_factory=tuple)
     anlz_buildups: tuple[int, ...] = field(default_factory=tuple)

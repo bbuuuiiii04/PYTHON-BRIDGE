@@ -24,9 +24,8 @@ Priority order (dry-run Phase 1)
 1. Disabled              -> do nothing
 2. Emergency blackout    -> emergency_scene (latched until cleared)
 3. Manual override       -> provided scene name (expires after ttl_s)
-4. Not playing           -> safe_scene
-5. Position stale        -> safe_scene
-6. Default               -> default_scene
+4. Not playing / no track / stale / scripted / autoloop-not-ready -> no output
+5. Automatic scenes      -> only when autoloop-ready and unscripted
 """
 from __future__ import annotations
 
@@ -231,25 +230,58 @@ class LaserDirector:
             # TTL expired — clear it and fall through.
             self.clear_manual_override()
 
-        # Priority 3: Not playing.
+        # Priority 3: Not playing -> idle/no output.
         if not ctx.playing:
             self._last_phrase_number = None
             self._reset_smart_observation_state()
             return LaserSceneDecision(
-                scene=self._safe_scene,
+                scene="",
                 reason="not_playing",
                 priority=3,
                 source="policy",
             )
 
-        # Priority 4: Stale position.
+        # Priority 4: No loaded active track -> idle/no output.
+        if not ctx.active_track_loaded:
+            self._last_phrase_number = None
+            self._reset_smart_observation_state()
+            return LaserSceneDecision(
+                scene="",
+                reason="idle_no_track",
+                priority=4,
+                source="policy",
+            )
+
+        # Priority 5: Stale position -> idle/no output.
         if ctx.position_stale:
             self._last_phrase_number = None
             self._reset_smart_observation_state()
             return LaserSceneDecision(
-                scene=self._safe_scene,
+                scene="",
                 reason="position_stale",
-                priority=4,
+                priority=5,
+                source="policy",
+            )
+
+        # Priority 6: scripted mode -> idle/no output.
+        if self._is_scripted_context(ctx):
+            self._last_phrase_number = None
+            self._reset_smart_observation_state()
+            return LaserSceneDecision(
+                scene="",
+                reason="scripted",
+                priority=6,
+                source="policy",
+            )
+
+        # Priority 7: autoloop must be fully ready before automatic scenes.
+        if not ctx.autoloop_ready:
+            self._last_phrase_number = None
+            self._reset_smart_observation_state()
+            return LaserSceneDecision(
+                scene="",
+                reason="autoloop_not_ready",
+                priority=7,
                 source="policy",
             )
 
@@ -260,39 +292,29 @@ class LaserDirector:
         phrase_changed = False if first_playing_tick else phrase_number != self._last_phrase_number
         self._last_phrase_number = phrase_number
 
-        # Priority 4.5: scripted mode bypasses all smart-observation branches.
-        if self._is_scripted_context(ctx):
-            self._reset_smart_observation_state()
-            return self._decide_phrase_default(
-                ctx=ctx,
-                first_playing_tick=first_playing_tick,
-                phrase_changed=phrase_changed,
-                effective_phrase_scene=effective_phrase_scene,
-            )
-
         previous_abs_beat = self._last_smart_abs_beat
 
-        # Priority 5: Existing Smart Breakdown observation.
+        # Priority 8: Existing Smart Breakdown observation.
         if ctx.breakdown_active and self._breakdown_scene:
             self._last_smart_abs_beat = abs_beat
             return LaserSceneDecision(
                 scene=self._breakdown_scene,
                 reason="breakdown_active",
-                priority=5,
+                priority=8,
                 source="policy",
             )
 
-        # Priority 6: Existing ANLZ buildup observation.
+        # Priority 9: Existing ANLZ buildup observation.
         if self._buildup_scene and self._in_buildup_window(abs_beat, ctx.anlz_buildups):
             self._last_smart_abs_beat = abs_beat
             return LaserSceneDecision(
                 scene=self._buildup_scene,
                 reason="buildup_window",
-                priority=6,
+                priority=9,
                 source="policy",
             )
 
-        # Priority 7: Drop crossing (once per target beat).
+        # Priority 10: Drop crossing (once per target beat).
         if previous_abs_beat is not None and self._drop_scene:
             for drop_beat in sorted(set(ctx.smart_drops)):
                 if (
@@ -305,11 +327,11 @@ class LaserDirector:
                     return LaserSceneDecision(
                         scene=self._drop_scene,
                         reason="drop_crossing",
-                        priority=7,
+                        priority=10,
                         source="policy",
                     )
 
-        # Priority 8: Post-drop hold (using existing minimum_scene_hold_beats).
+        # Priority 11: Post-drop hold (using existing minimum_scene_hold_beats).
         if (
             self._post_drop_scene
             and self._minimum_scene_hold_beats > 0
@@ -320,11 +342,11 @@ class LaserDirector:
             return LaserSceneDecision(
                 scene=self._post_drop_scene,
                 reason="post_drop_hold",
-                priority=8,
+                priority=11,
                 source="policy",
             )
 
-        # Priority 9: Pre-drop lookahead window.
+        # Priority 12: Pre-drop lookahead window.
         beats_to_next_drop = self._beats_to_next_drop(abs_beat, ctx.smart_drops)
         if (
             self._pre_drop_scene
@@ -335,7 +357,7 @@ class LaserDirector:
             return LaserSceneDecision(
                 scene=self._pre_drop_scene,
                 reason="pre_drop_window",
-                priority=9,
+                priority=12,
                 source="policy",
             )
 

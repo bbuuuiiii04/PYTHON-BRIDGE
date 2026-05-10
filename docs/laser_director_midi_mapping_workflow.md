@@ -298,7 +298,10 @@ Coding agents should not assume whether a scene is a Static Look or Autoloop. Th
 
 ## Safety notes
 
-Emergency blackout must be treated as a first-class safety path.
+For live operation, performer-facing override and blackout actions should be
+handled directly in SoundSwitch or through the normal external safety path.
+Bridge-side `laser_scene` / `laser_blackout` compatibility commands are for
+internal/dev/test use and should not be treated as the primary live workflow.
 
 The SoundSwitch blackout cue should be manually built so laser fixtures are included and set to off/intensity zero.
 
@@ -310,12 +313,24 @@ emergency_scene -> emergency_blackout
 
 Emergency blackout should not depend on phrase gates or cooldowns.
 
+Laser Director automatic scene selection is subordinate to the existing bridge
+autoloop/scripted architecture:
+
+```text
+- no playing track => no visible Laser Director output
+- no loaded active track => no visible Laser Director output
+- scripted context => no visible Laser Director output
+- automatic musical scenes only when autoloop readiness is true
+```
+
+Future live executors must treat `scene == ""` as send-nothing.
+
 ## First live-test safety checklist
 
 ```text
 1. Prove safe static look fires correctly.
 2. Prove gentle movement / phrase look fires correctly.
-3. Prove emergency blackout latches and clears.
+3. Prove idle/no-output behavior while stopped/stale/unarmed/scripted.
 4. Do not start live testing with high-impact drop, strobe, or aggressive scenes.
 ```
 

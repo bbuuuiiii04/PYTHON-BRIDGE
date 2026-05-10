@@ -68,7 +68,7 @@ Laser Director MVP should:
 3. Support dry-run mode.
 4. Support manual scene trigger by name.
 5. Support latched emergency blackout and explicit blackout clear.
-6. Support safe scene on stop, stale position, unknown active deck, bridge restart, or degraded state.
+6. Support idle/no-output on stop, stale position, no loaded active track, scripted context, or autoloop-not-ready state.
 7. Support simple automatic phrase/default scene changes.
 8. Add Smart Drop / Smart Breakdown integration only after manual and phrase behavior are validated.
 9. Publish Laser Director status to the existing runtime status JSON.
@@ -354,20 +354,19 @@ Priority order:
 
 1. Emergency blackout.
 2. Manual override.
-3. Disabled/degraded/dry-run accounting.
-4. Not playing, stale position, or unknown active deck.
-5. OS2L disconnected, unless explicitly allowed by config.
-6. Transition/master-change safe scene.
-7. Breakdown scene.
-8. Pre-drop/drop/post-drop scenes.
-9. Phrase-boundary scene.
-10. Default scene.
+3. Idle/no-output gate: not playing, no loaded active track, stale position, scripted context, or autoloop-not-ready.
+4. Breakdown scene.
+5. Pre-drop/drop/post-drop scenes.
+6. Phrase-boundary scene.
+7. Default scene.
 
 Timing gates:
 
 - Emergency blackout bypasses all timing/cooldown gates.
-- Manual blackout bypasses normal timing gates.
-- Safe/stale/stop scenes bypass normal phrase timing.
+- Manual override bypasses normal timing gates.
+- Idle/no-output uses `scene=""` and does not emit a visible scene selection.
+- Automatic musical selection requires existing autoloop readiness from `StateManager` (`lighting_mode=="autoloop"`, no pending arm/re-arm, and matching armed filepath).
+- Scripted context (`scripted_id>0` or `lighting_mode=="scripted"`) must return idle/no-output.
 - Normal scene changes respect `minimum_scene_hold_beats`.
 - Normal scene changes occur only at configured phrase boundaries when `normal_changes_only_on_phrase_boundary=true`.
 - Drop/pre-drop scenes may be immediate only when configured and position is fresh.
@@ -466,6 +465,9 @@ laser_clear_scene_override
 laser_set_personality
 ```
 
+These command paths are retained for compatibility, diagnostics, and controlled
+testing. They are not the recommended live performer workflow.
+
 Examples:
 
 ```json
@@ -487,6 +489,11 @@ Parser rules:
 - `laser_set_personality.personality` must be non-empty.
 - Unknown keys may be ignored only if documented in tests.
 - Actual scene/personality existence validation belongs in `LaserDirector`.
+
+Live performer overrides and blackout should be handled directly in
+SoundSwitch or through the normal external safety path. Keep bridge-side
+`laser_scene`/`laser_blackout` compatibility behavior unchanged unless a
+separate cleanup PR explicitly removes it.
 
 `CommandReader` should not mutate `LaserDirector` directly. Add optional callbacks supplied by `__main__.py`; those callbacks enqueue `BridgeEvent`s. Callbacks should return `True` on enqueue success and `False` on queue-full/error so `CommandReader.status().last_error` can report failures.
 
@@ -608,15 +615,19 @@ Missing config should be `not_applicable`, not failure. Disabled config should b
 Defaults:
 
 - Startup: dry-run unless explicitly configured live.
-- Stopped deck: configured safe scene.
-- Stale position: configured safe scene.
-- Unknown active deck: configured safe scene.
+- Stopped deck: idle/no output.
+- Stale position: idle/no output.
+- Unknown active deck: idle/no output.
 - RB restart: clear manual override/cooldowns and trigger safe scene if live enabled.
 - Transition/master switch: block high-impact/strobe scenes.
-- OS2L disconnected: safe scene only unless explicitly allowed.
+- OS2L disconnected: idle/no output unless explicitly allowed.
 - MIDI unavailable: mark degraded; do not affect OS2L.
+- No track playing: idle/no output (`scene=""`).
+- No loaded active track: idle/no output (`scene=""`).
+- Scripted context (`scripted_id>0` or `lighting_mode=="scripted"`): idle/no output (`scene=""`).
+- Automatic musical selection requires autoloop readiness from existing bridge state.
 
-Emergency blackout is latched. `laser_blackout` sets `emergency=True` and immediately triggers the configured emergency scene. `laser_clear_blackout` sets `emergency=False`, clears any manual scene override, and triggers the configured safe scene before returning to automatic policy. `laser_clear_scene_override` clears only the manual scene override and must not clear emergency blackout.
+Emergency blackout remains latched for compatibility with existing runtime commands. `laser_blackout` sets `emergency=True` and immediately triggers the configured emergency scene. `laser_clear_blackout` sets `emergency=False`, clears any manual scene override, and triggers the configured safe scene before returning to automatic policy. `laser_clear_scene_override` clears only the manual scene override and must not clear emergency blackout.
 
 Emergency blackout bypasses all timing and cooldown gates. TTL-based emergency blackout is out of scope for MVP unless this section is updated first.
 
@@ -715,7 +726,7 @@ Never log every tick. Scene/blocked/safe logs should be emitted on state transit
 - Add `LaserDirector.tick(ctx, now)`.
 - Build `LaserContext` in `StateManager._push_tick` using only hot-path-safe values.
 - Trigger default/phrase scenes with minimum hold and phrase gates.
-- Add safe scene on stopped/stale/unknown state.
+- Use idle/no-output (`scene=""`) on stopped/stale/no-track/scripted/autoloop-not-ready state.
 
 ### Phase 4: Status and Validation
 
@@ -761,7 +772,7 @@ Never log every tick. Scene/blocked/safe logs should be emitted on state transit
 - Emergency blackout priority and latch.
 - `laser_clear_blackout` clears emergency and returns safe.
 - `laser_clear_scene_override` does not clear emergency.
-- Stale/stopped safe scene selection.
+- Stale/stopped/no-track/scripted idle-no-output selection.
 - OS2L-disconnected safe gating.
 - Cooldown fallback.
 - Phrase-boundary gating.
@@ -790,14 +801,13 @@ Never log every tick. Scene/blocked/safe logs should be emitted on state transit
 1. Start with missing config; bridge should run normally.
 2. Start with invalid config; bridge should run normally and mark Laser Director disabled/degraded.
 3. Start with valid config and `dry_run=true`; decisions should log/status only.
-4. Send `laser_scene`; status should update.
-5. Send `laser_blackout`; emergency should latch.
-6. Send `laser_clear_scene_override`; emergency should remain latched.
-7. Send `laser_clear_blackout`; safe scene should trigger and automatic policy may resume.
-8. Enable MIDI monitor; switch `dry_run=false`; verify note pulse.
-9. Confirm SoundSwitch mapping fires expected static/autoloop.
-10. Disconnect OS2L; verify safe/degraded behavior.
-11. Test queue pressure; verify drops log without blocking.
+4. Verify idle/no-output gating: not playing, no loaded active track, stale, scripted, and autoloop-not-ready all return `scene=""`.
+5. Verify automatic musical branches run only when autoloop readiness is true.
+6. Verify compatibility command paths (`laser_scene`, `laser_blackout`) only as internal/dev/test controls; do not treat them as the primary live workflow.
+7. Enable MIDI monitor; switch `dry_run=false`; verify note pulse.
+8. Confirm SoundSwitch mapping fires expected static/autoloop.
+9. Disconnect OS2L; verify safe/degraded behavior.
+10. Test queue pressure; verify drops log without blocking.
 
 ---
 
@@ -806,11 +816,11 @@ Never log every tick. Scene/blocked/safe logs should be emitted on state transit
 Rollout:
 
 1. Merge config/model/MIDI dry-run support first.
-2. Enable manual scene command in dry-run.
-3. Validate status and command flow.
-4. Enable live MIDI only for manual scene triggers.
-5. Add automatic phrase scenes.
-6. Add Smart Drop / Breakdown observation.
+2. Validate status and command flow in dry-run, including idle/no-output and autoloop-readiness gating.
+3. Validate automatic phrase/default selection while subordinate to existing autoloop readiness.
+4. Add Smart Drop / Breakdown observation while preserving existing bridge behavior.
+5. Keep compatibility command paths (`laser_scene`, `laser_blackout`) internal/dev/test only.
+6. Enable live MIDI only after automatic policy readiness is validated.
 
 Rollback:
 
