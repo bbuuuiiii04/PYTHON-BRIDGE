@@ -702,9 +702,49 @@ class PersonalityValidationTests(unittest.TestCase):
         p = r.config.personalities["house"]
         self.assertEqual(p.minimum_scene_hold_beats, 0)
         self.assertFalse(p.normal_changes_only_on_phrase_boundary)
+        self.assertEqual(p.buildup_lookahead_beats, 32)
         self.assertEqual(p.buildup_approach_beats, 8)
         self.assertEqual(p.buildup_hold_beats, 8)
         self.assertEqual(p.pre_drop_lookahead_beats, 4)
+
+    def test_buildup_lookahead_beats_must_be_positive_int(self) -> None:
+        p = self._valid_personality()
+        p["buildup_lookahead_beats"] = 0
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("buildup_lookahead_beats" in e for e in r.errors))
+
+    def test_buildup_lookahead_beats_rejects_bool(self) -> None:
+        p = self._valid_personality()
+        p["buildup_lookahead_beats"] = True
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("buildup_lookahead_beats" in e for e in r.errors))
+
+    def test_buildup_lookahead_beats_rejects_negative(self) -> None:
+        p = self._valid_personality()
+        p["buildup_lookahead_beats"] = -1
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("buildup_lookahead_beats" in e for e in r.errors))
+
+    def test_pre_drop_scene_is_optional(self) -> None:
+        p = self._valid_personality()
+        p.pop("pre_drop_scene")
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(r.available, msg=r.errors)
+
+    def test_pre_drop_scene_must_reference_known_scene_when_present(self) -> None:
+        p = self._valid_personality()
+        p["pre_drop_scene"] = "unknown_scene"
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("pre_drop_scene" in e for e in r.errors))
 
     def test_buildup_approach_beats_must_be_non_negative_int(self) -> None:
         p = self._valid_personality()
@@ -838,6 +878,12 @@ class ExampleFileTests(unittest.TestCase):
         result = load_laser_director_config(str(self._EXAMPLE))
         self.assertIn(result.config.default_personality, result.config.personalities)
 
+    def test_example_file_pre_drop_scene_not_active(self) -> None:
+        result = load_laser_director_config(str(self._EXAMPLE))
+        house = result.config.personalities["house"]
+        self.assertEqual(house.pre_drop_scene, "")
+        self.assertEqual(house.buildup_lookahead_beats, 32)
+
 
 # ---------------------------------------------------------------------------
 # LaserConfigResult is frozen
@@ -910,6 +956,7 @@ class LaserModelsTests(unittest.TestCase):
         self.assertEqual(p.phrase_interval_beats, 32)
         self.assertEqual(p.minimum_scene_hold_beats, 0)
         self.assertFalse(p.normal_changes_only_on_phrase_boundary)
+        self.assertEqual(p.buildup_lookahead_beats, 32)
         self.assertEqual(p.buildup_approach_beats, 8)
         self.assertEqual(p.buildup_hold_beats, 8)
         self.assertEqual(p.pre_drop_lookahead_beats, 4)

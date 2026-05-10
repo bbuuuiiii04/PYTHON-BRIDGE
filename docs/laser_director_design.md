@@ -356,9 +356,11 @@ Priority order:
 2. Manual override.
 3. Idle/no-output gate: not playing, no loaded active track, stale position, scripted context, or autoloop-not-ready.
 4. Breakdown scene.
-5. Pre-drop/drop/post-drop scenes.
-6. Phrase-boundary scene.
-7. Default scene.
+5. Drop crossing scene.
+6. Post-drop hold scene.
+7. Buildup countdown scene (Smart-Drop lookahead window).
+8. Phrase-boundary scene.
+9. Default scene.
 
 Timing gates:
 
@@ -370,8 +372,14 @@ Timing gates:
 - Scripted context (`scripted_id>0` or `lighting_mode=="scripted"`) must return idle/no-output.
 - Normal scene changes respect `minimum_scene_hold_beats`.
 - Normal scene changes occur only at configured phrase boundaries when `normal_changes_only_on_phrase_boundary=true`.
-- Drop/pre-drop scenes may be immediate only when configured and position is fresh.
-- Rekordbox ANLZ UP markers are hints only; `buildup_scene` must require a relationship to a future Smart Drop within a bounded distance.
+- Drop scenes may be immediate only when configured and position is fresh.
+- Rekordbox ANLZ UP markers are observation/status hints only; they do not trigger
+  `buildup_scene`.
+- `buildup_scene` is anchored to the next curated Smart Drop and is active when
+  `0 < beats_to_next_drop <= buildup_lookahead_beats` (default 32), unless a
+  higher-priority gate wins.
+- `pre_drop_scene` is intentionally inactive in policy. Smart Drop already
+  handles final pre-drop autoloop cut/rearm behavior.
 
 Cooldown state is updated only after `MidiOutput.trigger()` accepts the message. If a desired scene is blocked by cooldown or safety, choose the configured fallback scene and record the blocked reason in status/logs.
 
@@ -744,7 +752,7 @@ Same-scene reason updates are status/debug-only and must not look like a new sce
 - Do not mutate or replace existing Smart Drop / Smart Breakdown state machines.
 - Compute next drop and beats-to-drop from current absolute beat.
 - Initial windows:
-  - `pre_drop_scene` when `0 < beats_to_next_drop <= 4`.
+  - `buildup_scene` when `0 < beats_to_next_drop <= buildup_lookahead_beats` (default 32).
   - `drop_scene` when absolute beat crosses the target smart-drop beat once.
   - `post_drop_scene` holds until minimum hold or next phrase boundary.
   - `breakdown_scene` follows `os.breakdown_active`.

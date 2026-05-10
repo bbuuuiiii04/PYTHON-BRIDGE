@@ -78,6 +78,7 @@ class _ColorFormatter(logging.Formatter):
     _BGREEN   = "\033[92m"
     _BCYAN    = "\033[96m"
     _BMAGENTA = "\033[95m"
+    _BPINK    = "\033[38;5;213m"
     _ORANGE   = "\033[38;5;214m"
 
     _LEVEL = {
@@ -90,6 +91,12 @@ class _ColorFormatter(logging.Formatter):
 
     # First match wins. Patterns are checked against lowercased message text.
     _PATTERNS = [
+        # Pink: Laser Director config and scene policy.
+        ("[laser] scene",           _BPINK),
+        ("[laser] reason-update",   _BPINK),
+        ("[laser_config]",          _BPINK),
+        ("[main] laser-config",     _BPINK),
+
         # Red: requires attention / playback stopped.
         ("rb-restart",              _BRED),
         ("stop-stale",              _BRED),

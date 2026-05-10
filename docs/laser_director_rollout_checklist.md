@@ -29,10 +29,15 @@ Use this with the canonical design in `docs/laser_director_design.md` and the So
 8. Verify scripted context (`lighting_mode=scripted` or `scripted_id>0`) returns idle/no-output (`scene=""`, `reason="scripted"`).
 9. Verify same-scene reason changes are debug/status-only and do not appear as INFO scene transitions.
 10. Validate Smart Drop/Smart Breakdown behavior remains unchanged.
-11. Validate OS2L behavior remains unchanged throughout rollout.
-12. Test only safe mappings first (`safe_static`, gentle phrase movement).
-13. After safe mappings are confirmed, test higher-impact mappings (drop/strobe/aggressive looks) in controlled conditions.
-14. Only after all dry-run checks pass, set `dry_run=false` for live MIDI output and re-run the same validation sequence.
+11. Verify buildup countdown behavior is Smart-Drop-driven:
+   - no future Smart Drop => no buildup scene
+   - next Smart Drop > 32 beats away => no buildup scene
+   - next Smart Drop within 32 beats => buildup scene until drop crossing (unless higher-priority gate wins)
+   - no automatic `pre_drop_scene` selection
+12. Validate OS2L behavior remains unchanged throughout rollout.
+13. Test only safe mappings first (`safe_static`, gentle phrase movement).
+14. After safe mappings are confirmed, test higher-impact mappings (drop/strobe/aggressive looks) in controlled conditions.
+15. Only after all dry-run checks pass, set `dry_run=false` for live MIDI output and re-run the same validation sequence.
 
 ## Live Workflow Guidance
 
