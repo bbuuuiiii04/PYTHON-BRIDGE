@@ -28,7 +28,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2.laser_models import LaserContext, LaserSceneDecision  # noqa: E402
+from rb_ss_bridge_v2.laser_models import LaserContext, LaserPersonality, LaserSceneDecision  # noqa: E402
 from rb_ss_bridge_v2.laser_director import LaserDirector  # noqa: E402
 from rb_ss_bridge_v2.models import Ev  # noqa: E402
 
@@ -69,6 +69,10 @@ def _director(
     safe_scene: str = "safe_static",
     default_scene: str = "house_phrase_1",
     emergency_scene: str = "emergency_blackout",
+    phrase_scene: str = "",
+    phrase_interval_beats: int = 32,
+    minimum_scene_hold_beats: int = 0,
+    normal_changes_only_on_phrase_boundary: bool = False,
 ) -> LaserDirector:
     return LaserDirector(
         enabled=enabled,
@@ -76,6 +80,10 @@ def _director(
         safe_scene=safe_scene,
         default_scene=default_scene,
         emergency_scene=emergency_scene,
+        phrase_scene=phrase_scene,
+        phrase_interval_beats=phrase_interval_beats,
+        minimum_scene_hold_beats=minimum_scene_hold_beats,
+        normal_changes_only_on_phrase_boundary=normal_changes_only_on_phrase_boundary,
     )
 
 
@@ -305,12 +313,163 @@ class DefaultSceneTests(unittest.TestCase):
         ld = _director()
         ld.tick(_ctx(playing=True, position_stale=False), now=_now())
         self.assertEqual(ld.status()["current_scene"], "house_phrase_1")
-        self.assertEqual(ld.status()["last_reason"], "default")
+        self.assertEqual(ld.status()["last_reason"], "default_init")
 
     def test_playing_uses_configured_default_scene(self) -> None:
         ld = _director(default_scene="my_house_phrase")
         ld.tick(_ctx(playing=True, position_stale=False), now=_now())
         self.assertEqual(ld.status()["current_scene"], "my_house_phrase")
+
+
+# ---------------------------------------------------------------------------
+# Phrase scene behavior
+# ---------------------------------------------------------------------------
+
+class PhraseSceneTests(unittest.TestCase):
+    def test_first_playing_tick_returns_default_not_phrase(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=64.0), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["last_reason"], "default_init")
+
+    def test_phrase_boundary_returns_phrase_scene(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=32.0), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "p")
+        self.assertEqual(ld.status()["last_reason"], "phrase_boundary")
+
+    def test_phrase_scene_name_can_be_arbitrary(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="my_custom_phrase_42", phrase_interval_beats=16)
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=15.0), now=_now())
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=16.0), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "my_custom_phrase_42")
+
+    def test_not_playing_resets_phrase_tracking(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
+        ld.tick(_ctx(playing=False, position_stale=False, abs_beat=40.0), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "safe_static")
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=64.0), now=_now())
+        self.assertEqual(ld.status()["last_reason"], "default_init")
+        self.assertEqual(ld.status()["current_scene"], "d")
+
+    def test_stale_resets_phrase_tracking(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
+        ld.tick(_ctx(playing=True, position_stale=True, abs_beat=40.0), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "safe_static")
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=64.0), now=_now())
+        self.assertEqual(ld.status()["last_reason"], "default_init")
+        self.assertEqual(ld.status()["current_scene"], "d")
+
+    def test_minimum_hold_only_gates_normal_automatic_changes(self) -> None:
+        ld = _director(
+            default_scene="d",
+            phrase_scene="p",
+            phrase_interval_beats=32,
+            minimum_scene_hold_beats=8,
+        )
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=32.0), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["last_reason"], "hold_minimum_scene")
+
+    def test_minimum_hold_does_not_block_emergency_manual_or_safe(self) -> None:
+        ld = _director(
+            default_scene="d",
+            phrase_scene="p",
+            phrase_interval_beats=32,
+            minimum_scene_hold_beats=128,
+        )
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
+        ld.set_manual_override("manual_scene", ttl_s=10.0)
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=32.0), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "manual_scene")
+        ld.set_emergency_blackout(True)
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=33.0), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "emergency_blackout")
+        ld.clear_emergency_blackout()
+        ld.tick(_ctx(playing=False, position_stale=False, abs_beat=33.0), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "safe_static")
+
+    def test_phrase_boundary_only_holds_normal_automatic_scenes(self) -> None:
+        ld = _director(
+            default_scene="d",
+            phrase_scene="p",
+            phrase_interval_beats=32,
+            normal_changes_only_on_phrase_boundary=True,
+        )
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.5), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["last_reason"], "phrase_hold")
+
+        ld._current_scene = ""
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.7), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["last_reason"], "default")
+
+    def test_phrase_tracking_not_consumed_by_emergency_or_manual(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
+        last_phrase = ld._last_phrase_number
+
+        ld.set_manual_override("manual_scene", ttl_s=10.0)
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=32.0), now=_now())
+        self.assertEqual(ld._last_phrase_number, last_phrase)
+
+        ld.clear_manual_override()
+        ld.set_emergency_blackout(True)
+        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=33.0), now=_now())
+        self.assertEqual(ld._last_phrase_number, last_phrase)
+
+    def test_no_per_tick_log_spam(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        with patch("rb_ss_bridge_v2.laser_director.log.info") as info:
+            ld.tick(_ctx(playing=True, position_stale=False, abs_beat=1.0), now=_now())
+            ld.tick(_ctx(playing=True, position_stale=False, abs_beat=1.5), now=_now())
+            for _ in range(100):
+                ld.tick(_ctx(playing=True, position_stale=False, abs_beat=1.5), now=_now())
+        self.assertEqual(info.call_count, 2)
+
+    def test_status_includes_phrase_policy_fields(self) -> None:
+        ld = _director(
+            default_scene="d",
+            phrase_scene="p",
+            phrase_interval_beats=48,
+            minimum_scene_hold_beats=3,
+            normal_changes_only_on_phrase_boundary=True,
+        )
+        s = ld.status()
+        self.assertEqual(s["phrase_scene"], "p")
+        self.assertEqual(s["phrase_interval_beats"], 48)
+        self.assertEqual(s["minimum_scene_hold_beats"], 3)
+        self.assertTrue(s["normal_changes_only_on_phrase_boundary"])
+
+    def test_set_personality_config_applies_phrase_policy(self) -> None:
+        ld = _director(default_scene="d")
+        personality = LaserPersonality(
+            name="house",
+            safe_scene="safe_static",
+            default_scene="d",
+            phrase_scene="custom_phrase",
+            buildup_scene="safe_static",
+            pre_drop_scene="safe_static",
+            drop_scene="safe_static",
+            post_drop_scene="safe_static",
+            breakdown_scene="safe_static",
+            transition_scene="safe_static",
+            phrase_interval_beats=16,
+            minimum_scene_hold_beats=4,
+            normal_changes_only_on_phrase_boundary=True,
+        )
+        ld.set_personality_config(personality)
+        s = ld.status()
+        self.assertEqual(s["phrase_scene"], "custom_phrase")
+        self.assertEqual(s["phrase_interval_beats"], 16)
+        self.assertEqual(s["minimum_scene_hold_beats"], 4)
+        self.assertTrue(s["normal_changes_only_on_phrase_boundary"])
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +521,9 @@ class StatusShapeTests(unittest.TestCase):
         ld = _director()
         s = ld.status()
         for key in ("available", "enabled", "dry_run", "current_scene",
-                    "last_reason", "manual_override", "emergency", "last_error", "personality"):
+                    "last_reason", "manual_override", "emergency", "last_error", "personality",
+                    "phrase_scene", "phrase_interval_beats", "minimum_scene_hold_beats",
+                    "normal_changes_only_on_phrase_boundary"):
             self.assertIn(key, s, msg=f"missing key: {key}")
 
     def test_status_available_true(self) -> None:

@@ -639,6 +639,70 @@ class PersonalityValidationTests(unittest.TestCase):
         r = load_laser_director_config(_write_config(cfg))
         self.assertIsInstance(r.config.personalities["house"], LaserPersonality)
 
+    def test_phrase_interval_beats_must_be_positive_int(self) -> None:
+        p = self._valid_personality()
+        p["phrase_interval_beats"] = 0
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("phrase_interval_beats" in e for e in r.errors))
+
+    def test_phrase_interval_beats_rejects_non_int(self) -> None:
+        p = self._valid_personality()
+        p["phrase_interval_beats"] = "32"
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("phrase_interval_beats" in e for e in r.errors))
+
+    def test_phrase_interval_beats_rejects_bool(self) -> None:
+        p = self._valid_personality()
+        p["phrase_interval_beats"] = True
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("phrase_interval_beats" in e for e in r.errors))
+
+    def test_phrase_interval_beats_defaults_to_32(self) -> None:
+        cfg = self._cfg_with_personality(self._valid_personality())
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(r.available)
+        self.assertEqual(r.config.personalities["house"].phrase_interval_beats, 32)
+
+    def test_minimum_scene_hold_beats_must_be_non_negative_int(self) -> None:
+        p = self._valid_personality()
+        p["minimum_scene_hold_beats"] = -1
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("minimum_scene_hold_beats" in e for e in r.errors))
+
+    def test_minimum_scene_hold_beats_rejects_bool(self) -> None:
+        p = self._valid_personality()
+        p["minimum_scene_hold_beats"] = False
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("minimum_scene_hold_beats" in e for e in r.errors))
+
+    def test_normal_changes_only_on_phrase_boundary_must_be_bool(self) -> None:
+        p = self._valid_personality()
+        p["normal_changes_only_on_phrase_boundary"] = "true"
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(
+            any("normal_changes_only_on_phrase_boundary" in e for e in r.errors)
+        )
+
+    def test_new_personality_fields_default_values(self) -> None:
+        cfg = self._cfg_with_personality(self._valid_personality())
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(r.available)
+        p = r.config.personalities["house"]
+        self.assertEqual(p.minimum_scene_hold_beats, 0)
+        self.assertFalse(p.normal_changes_only_on_phrase_boundary)
+
 
 # ---------------------------------------------------------------------------
 # Never raises
@@ -793,6 +857,8 @@ class LaserModelsTests(unittest.TestCase):
         )
         self.assertFalse(p.allow_high_impact)
         self.assertEqual(p.phrase_interval_beats, 32)
+        self.assertEqual(p.minimum_scene_hold_beats, 0)
+        self.assertFalse(p.normal_changes_only_on_phrase_boundary)
 
 
 if __name__ == "__main__":

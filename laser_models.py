@@ -79,6 +79,8 @@ class LaserPersonality:
     transition_scene: str
     allow_high_impact: bool = False
     phrase_interval_beats: int = 32
+    minimum_scene_hold_beats: int = 0
+    normal_changes_only_on_phrase_boundary: bool = False
 
 
 @dataclass(frozen=True)
