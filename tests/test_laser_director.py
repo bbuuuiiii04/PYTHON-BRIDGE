@@ -48,6 +48,10 @@ def _ctx(
     abs_beat: float = 64.0,
     lighting_mode: str = "autoloop",
     os2l_connected: bool = True,
+    breakdown_active: bool = False,
+    smart_drops: tuple[int, ...] = (),
+    anlz_buildups: tuple[int, ...] = (),
+    scripted_id: int = 0,
 ) -> LaserContext:
     return LaserContext(
         active_deck=active_deck,
@@ -59,6 +63,10 @@ def _ctx(
         position_stale=position_stale,
         lighting_mode=lighting_mode,
         os2l_connected=os2l_connected,
+        breakdown_active=breakdown_active,
+        smart_drops=smart_drops,
+        anlz_buildups=anlz_buildups,
+        scripted_id=scripted_id,
     )
 
 
@@ -73,6 +81,14 @@ def _director(
     phrase_interval_beats: int = 32,
     minimum_scene_hold_beats: int = 0,
     normal_changes_only_on_phrase_boundary: bool = False,
+    breakdown_scene: str = "",
+    buildup_scene: str = "",
+    pre_drop_scene: str = "",
+    drop_scene: str = "",
+    post_drop_scene: str = "",
+    buildup_approach_beats: int = 8,
+    buildup_hold_beats: int = 8,
+    pre_drop_lookahead_beats: int = 4,
 ) -> LaserDirector:
     return LaserDirector(
         enabled=enabled,
@@ -84,6 +100,14 @@ def _director(
         phrase_interval_beats=phrase_interval_beats,
         minimum_scene_hold_beats=minimum_scene_hold_beats,
         normal_changes_only_on_phrase_boundary=normal_changes_only_on_phrase_boundary,
+        breakdown_scene=breakdown_scene,
+        buildup_scene=buildup_scene,
+        pre_drop_scene=pre_drop_scene,
+        drop_scene=drop_scene,
+        post_drop_scene=post_drop_scene,
+        buildup_approach_beats=buildup_approach_beats,
+        buildup_hold_beats=buildup_hold_beats,
+        pre_drop_lookahead_beats=pre_drop_lookahead_beats,
     )
 
 
@@ -463,6 +487,9 @@ class PhraseSceneTests(unittest.TestCase):
             phrase_interval_beats=16,
             minimum_scene_hold_beats=4,
             normal_changes_only_on_phrase_boundary=True,
+            buildup_approach_beats=6,
+            buildup_hold_beats=10,
+            pre_drop_lookahead_beats=3,
         )
         ld.set_personality_config(personality)
         s = ld.status()
@@ -470,6 +497,193 @@ class PhraseSceneTests(unittest.TestCase):
         self.assertEqual(s["phrase_interval_beats"], 16)
         self.assertEqual(s["minimum_scene_hold_beats"], 4)
         self.assertTrue(s["normal_changes_only_on_phrase_boundary"])
+        self.assertEqual(s["buildup_approach_beats"], 6)
+        self.assertEqual(s["buildup_hold_beats"], 10)
+        self.assertEqual(s["pre_drop_lookahead_beats"], 3)
+
+
+# ---------------------------------------------------------------------------
+# Smart observation: breakdown / buildup / drop lifecycle
+# ---------------------------------------------------------------------------
+
+class SmartObservationTests(unittest.TestCase):
+    def test_breakdown_active_selects_breakdown_scene(self) -> None:
+        ld = _director(default_scene="d", breakdown_scene="bd")
+        ld.tick(_ctx(abs_beat=32.0), now=_now())  # initialize phrase tracking
+        ld.tick(_ctx(abs_beat=32.5, breakdown_active=True), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "bd")
+        self.assertEqual(ld.status()["last_reason"], "breakdown_active")
+
+    def test_breakdown_scene_empty_falls_back(self) -> None:
+        ld = _director(default_scene="d", breakdown_scene="")
+        ld.tick(_ctx(abs_beat=10.0), now=_now())
+        ld.tick(_ctx(abs_beat=10.5, breakdown_active=True), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+
+    def test_buildup_window_uses_configurable_timing(self) -> None:
+        ld = _director(
+            default_scene="d",
+            buildup_scene="up",
+            buildup_approach_beats=2,
+            buildup_hold_beats=1,
+        )
+        ld.tick(_ctx(abs_beat=10.0), now=_now())
+        ld.tick(_ctx(abs_beat=18.5, anlz_buildups=(20,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "up")
+        ld.tick(_ctx(abs_beat=21.1, anlz_buildups=(20,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+
+    def test_pre_drop_window_uses_configurable_lookahead(self) -> None:
+        ld = _director(
+            default_scene="d",
+            pre_drop_scene="pre",
+            pre_drop_lookahead_beats=2,
+        )
+        ld.tick(_ctx(abs_beat=61.0, smart_drops=(64,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        ld.tick(_ctx(abs_beat=62.2, smart_drops=(64,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "pre")
+        self.assertEqual(ld.status()["last_reason"], "pre_drop_window")
+
+    def test_first_smart_tick_does_not_fire_drop_crossing(self) -> None:
+        ld = _director(default_scene="d", drop_scene="drop")
+        ld.tick(_ctx(abs_beat=64.2, smart_drops=(64,)), now=_now())
+        self.assertNotEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld._last_smart_abs_beat, 64.2)
+
+    def test_drop_crossing_uses_previous_abs_beat(self) -> None:
+        ld = _director(default_scene="d", drop_scene="drop")
+        ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,)), now=_now())
+        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld.status()["last_reason"], "drop_crossing")
+
+    def test_drop_fires_once_per_target_beat(self) -> None:
+        ld = _director(default_scene="d", drop_scene="drop")
+        ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,)), now=_now())
+        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        ld.tick(_ctx(abs_beat=64.4, smart_drops=(64,)), now=_now())
+        self.assertNotEqual(ld.status()["current_scene"], "drop")
+
+    def test_drop_wins_over_pre_drop_at_crossing(self) -> None:
+        ld = _director(
+            default_scene="d",
+            drop_scene="drop",
+            pre_drop_scene="pre",
+            pre_drop_lookahead_beats=4,
+        )
+        ld.tick(_ctx(abs_beat=63.2, smart_drops=(64,)), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+
+    def test_post_drop_uses_minimum_scene_hold_beats(self) -> None:
+        ld = _director(
+            default_scene="d",
+            drop_scene="drop",
+            post_drop_scene="post",
+            minimum_scene_hold_beats=2,
+        )
+        ld.tick(_ctx(abs_beat=63.1, smart_drops=(64,)), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        ld.tick(_ctx(abs_beat=65.0, smart_drops=(64,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "post")
+        ld.tick(_ctx(abs_beat=66.1, smart_drops=(64,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+
+    def test_zero_minimum_hold_disables_post_drop_hold(self) -> None:
+        ld = _director(
+            default_scene="d",
+            drop_scene="drop",
+            post_drop_scene="post",
+            minimum_scene_hold_beats=0,
+        )
+        ld.tick(_ctx(abs_beat=63.2, smart_drops=(64,)), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,)), now=_now())
+        ld.tick(_ctx(abs_beat=64.5, smart_drops=(64,)), now=_now())
+        self.assertNotEqual(ld.status()["current_scene"], "post")
+
+    def test_scripted_gate_by_scripted_id_skips_smart_observation(self) -> None:
+        ld = _director(
+            default_scene="d",
+            breakdown_scene="bd",
+            buildup_scene="up",
+            pre_drop_scene="pre",
+            drop_scene="drop",
+            post_drop_scene="post",
+        )
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=64.0,
+                scripted_id=99,
+                breakdown_active=True,
+                smart_drops=(64,),
+                anlz_buildups=(64,),
+            ),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "d")
+
+    def test_scripted_gate_by_lighting_mode_skips_smart_observation(self) -> None:
+        ld = _director(default_scene="d", breakdown_scene="bd")
+        ld.tick(_ctx(abs_beat=32.0), now=_now())
+        ld.tick(
+            _ctx(abs_beat=32.2, lighting_mode="scripted", breakdown_active=True),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "d")
+
+    def test_tick_does_not_mutate_context_scripted_id(self) -> None:
+        ld = _director(default_scene="d", drop_scene="drop")
+        ctx = _ctx(abs_beat=64.0, scripted_id=7, smart_drops=(64,))
+        ld.tick(ctx, now=_now())
+        self.assertEqual(ctx.scripted_id, 7)
+
+    def test_scripted_resets_only_smart_state(self) -> None:
+        ld = _director(default_scene="d", drop_scene="drop")
+        ld._laser_drop_fired_beat = 64
+        ld._post_drop_start_abs_beat = 64.0
+        ld._last_smart_abs_beat = 63.0
+        ld.tick(_ctx(abs_beat=65.0, scripted_id=2), now=_now())
+        self.assertIsNone(ld._laser_drop_fired_beat)
+        self.assertEqual(ld._post_drop_start_abs_beat, -1.0)
+        self.assertIsNone(ld._last_smart_abs_beat)
+
+    def test_not_playing_resets_only_smart_state(self) -> None:
+        ld = _director(default_scene="d", drop_scene="drop")
+        ld._laser_drop_fired_beat = 64
+        ld._post_drop_start_abs_beat = 64.0
+        ld._last_smart_abs_beat = 63.0
+        ld.tick(_ctx(playing=False), now=_now())
+        self.assertIsNone(ld._laser_drop_fired_beat)
+        self.assertEqual(ld._post_drop_start_abs_beat, -1.0)
+        self.assertIsNone(ld._last_smart_abs_beat)
+
+    def test_stale_resets_only_smart_state(self) -> None:
+        ld = _director(default_scene="d", drop_scene="drop")
+        ld._laser_drop_fired_beat = 64
+        ld._post_drop_start_abs_beat = 64.0
+        ld._last_smart_abs_beat = 63.0
+        ld.tick(_ctx(playing=True, position_stale=True), now=_now())
+        self.assertIsNone(ld._laser_drop_fired_beat)
+        self.assertEqual(ld._post_drop_start_abs_beat, -1.0)
+        self.assertIsNone(ld._last_smart_abs_beat)
+
+    def test_reset_smart_observation_state_does_not_clear_manual_or_emergency(self) -> None:
+        ld = _director(default_scene="d")
+        ld.set_manual_override("manual_scene", ttl_s=30.0)
+        ld.set_emergency_blackout(True)
+        ld._laser_drop_fired_beat = 64
+        ld._post_drop_start_abs_beat = 64.0
+        ld._last_smart_abs_beat = 63.0
+        ld._reset_smart_observation_state()
+        self.assertIsNone(ld._laser_drop_fired_beat)
+        self.assertEqual(ld._post_drop_start_abs_beat, -1.0)
+        self.assertIsNone(ld._last_smart_abs_beat)
+        self.assertTrue(ld.status()["emergency"])
+        self.assertEqual(ld.status()["manual_override"], "manual_scene")
 
 
 # ---------------------------------------------------------------------------
@@ -523,7 +737,9 @@ class StatusShapeTests(unittest.TestCase):
         for key in ("available", "enabled", "dry_run", "current_scene",
                     "last_reason", "manual_override", "emergency", "last_error", "personality",
                     "phrase_scene", "phrase_interval_beats", "minimum_scene_hold_beats",
-                    "normal_changes_only_on_phrase_boundary"):
+                    "normal_changes_only_on_phrase_boundary", "breakdown_scene", "buildup_scene",
+                    "pre_drop_scene", "drop_scene", "post_drop_scene", "buildup_approach_beats",
+                    "buildup_hold_beats", "pre_drop_lookahead_beats", "laser_drop_fired_beat"):
             self.assertIn(key, s, msg=f"missing key: {key}")
 
     def test_status_available_true(self) -> None:
@@ -733,6 +949,36 @@ class StateManagerLaserIntegrationTests(unittest.TestCase):
         d = DeckState(number=1)
         ctx = sm._build_laser_context(1, d, 0, 0.0, 0.0, 0.0, None, time.monotonic())
         self.assertTrue(ctx.position_stale)
+
+    def test_build_laser_context_copies_breakdown_active(self) -> None:
+        from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
+        ld = _director()
+        sm = _make_sm(laser_director=ld)
+        sm._os.breakdown_active = True
+        d = DeckState(number=1)
+        snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
+        ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, snap, time.monotonic())
+        self.assertTrue(ctx.breakdown_active)
+
+    def test_build_laser_context_copies_smart_drop_and_buildup_observation(self) -> None:
+        from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
+        ld = _director()
+        sm = _make_sm(laser_director=ld)
+        d = DeckState(number=1)
+        d.meta.smart_drops = [64, 128]
+        d.meta.anlz_buildups = [56]
+        d.scripted_id = 42
+        snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
+        ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, snap, time.monotonic())
+        self.assertEqual(ctx.smart_drops, (64, 128))
+        self.assertEqual(ctx.anlz_buildups, (56,))
+        self.assertEqual(ctx.scripted_id, 42)
+        self.assertIsInstance(ctx.smart_drops, tuple)
+        self.assertIsInstance(ctx.anlz_buildups, tuple)
+
+    def test_laser_context_has_no_smart_breakdowns_field(self) -> None:
+        ctx = _ctx()
+        self.assertFalse(hasattr(ctx, "smart_breakdowns"))
 
     def test_os2l_connected_provider_called_in_build_context(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot

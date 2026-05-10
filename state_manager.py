@@ -1589,6 +1589,10 @@ class StateManager:
             position_stale=(snap is None or snap.is_stale(MEM_STALE_S)),
             lighting_mode=self._os.lighting_mode,
             os2l_connected=os2l_connected,
+            breakdown_active=self._os.breakdown_active,
+            smart_drops=tuple(d.meta.smart_drops),
+            anlz_buildups=tuple(d.meta.anlz_buildups),
+            scripted_id=d.scripted_id,
         )
 
     # ── Stop / resume helpers ─────────────────────────────────────────────────

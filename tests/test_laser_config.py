@@ -702,6 +702,33 @@ class PersonalityValidationTests(unittest.TestCase):
         p = r.config.personalities["house"]
         self.assertEqual(p.minimum_scene_hold_beats, 0)
         self.assertFalse(p.normal_changes_only_on_phrase_boundary)
+        self.assertEqual(p.buildup_approach_beats, 8)
+        self.assertEqual(p.buildup_hold_beats, 8)
+        self.assertEqual(p.pre_drop_lookahead_beats, 4)
+
+    def test_buildup_approach_beats_must_be_non_negative_int(self) -> None:
+        p = self._valid_personality()
+        p["buildup_approach_beats"] = -1
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("buildup_approach_beats" in e for e in r.errors))
+
+    def test_buildup_hold_beats_must_be_non_negative_int(self) -> None:
+        p = self._valid_personality()
+        p["buildup_hold_beats"] = -1
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("buildup_hold_beats" in e for e in r.errors))
+
+    def test_pre_drop_lookahead_beats_must_be_non_negative_int(self) -> None:
+        p = self._valid_personality()
+        p["pre_drop_lookahead_beats"] = -1
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("pre_drop_lookahead_beats" in e for e in r.errors))
 
 
 # ---------------------------------------------------------------------------
@@ -859,6 +886,9 @@ class LaserModelsTests(unittest.TestCase):
         self.assertEqual(p.phrase_interval_beats, 32)
         self.assertEqual(p.minimum_scene_hold_beats, 0)
         self.assertFalse(p.normal_changes_only_on_phrase_boundary)
+        self.assertEqual(p.buildup_approach_beats, 8)
+        self.assertEqual(p.buildup_hold_beats, 8)
+        self.assertEqual(p.pre_drop_lookahead_beats, 4)
 
 
 if __name__ == "__main__":

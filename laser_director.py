@@ -71,6 +71,14 @@ class LaserDirector:
         phrase_interval_beats: int = 32,
         minimum_scene_hold_beats: int = 0,
         normal_changes_only_on_phrase_boundary: bool = False,
+        breakdown_scene: str = "",
+        buildup_scene: str = "",
+        pre_drop_scene: str = "",
+        drop_scene: str = "",
+        post_drop_scene: str = "",
+        buildup_approach_beats: int = 8,
+        buildup_hold_beats: int = 8,
+        pre_drop_lookahead_beats: int = 4,
     ) -> None:
         self._dry_run = dry_run
         self._enabled = enabled
@@ -83,6 +91,14 @@ class LaserDirector:
         self._normal_changes_only_on_phrase_boundary = bool(
             normal_changes_only_on_phrase_boundary
         )
+        self._breakdown_scene = breakdown_scene
+        self._buildup_scene = buildup_scene
+        self._pre_drop_scene = pre_drop_scene
+        self._drop_scene = drop_scene
+        self._post_drop_scene = post_drop_scene
+        self._buildup_approach_beats = max(0, int(buildup_approach_beats))
+        self._buildup_hold_beats = max(0, int(buildup_hold_beats))
+        self._pre_drop_lookahead_beats = max(0, int(pre_drop_lookahead_beats))
 
         # Mutable policy state — written only from the StateManager thread.
         self._emergency: bool = False
@@ -94,6 +110,9 @@ class LaserDirector:
         self._personality: str = ""
         self._last_phrase_number: Optional[int] = None
         self._last_scene_change_abs_beat: float = 0.0
+        self._laser_drop_fired_beat: Optional[int] = None
+        self._post_drop_start_abs_beat: float = -1.0
+        self._last_smart_abs_beat: Optional[float] = None
 
     # ── Policy commands (called from StateManager._handle_event) ─────────────
 
@@ -130,7 +149,7 @@ class LaserDirector:
         self._personality = personality
 
     def set_personality_config(self, personality: LaserPersonality) -> None:
-        """Load phrase-policy settings from a validated personality."""
+        """Load scene-role and timing settings from a validated personality."""
         self._phrase_scene = personality.phrase_scene
         self._phrase_interval_beats = max(1, int(personality.phrase_interval_beats))
         self._minimum_scene_hold_beats = max(
@@ -138,6 +157,16 @@ class LaserDirector:
         )
         self._normal_changes_only_on_phrase_boundary = bool(
             personality.normal_changes_only_on_phrase_boundary
+        )
+        self._breakdown_scene = personality.breakdown_scene
+        self._buildup_scene = personality.buildup_scene
+        self._pre_drop_scene = personality.pre_drop_scene
+        self._drop_scene = personality.drop_scene
+        self._post_drop_scene = personality.post_drop_scene
+        self._buildup_approach_beats = max(0, int(personality.buildup_approach_beats))
+        self._buildup_hold_beats = max(0, int(personality.buildup_hold_beats))
+        self._pre_drop_lookahead_beats = max(
+            0, int(personality.pre_drop_lookahead_beats)
         )
 
     # ── Tick (called from StateManager._push_tick) ────────────────────────────
@@ -205,6 +234,7 @@ class LaserDirector:
         # Priority 3: Not playing.
         if not ctx.playing:
             self._last_phrase_number = None
+            self._reset_smart_observation_state()
             return LaserSceneDecision(
                 scene=self._safe_scene,
                 reason="not_playing",
@@ -215,6 +245,7 @@ class LaserDirector:
         # Priority 4: Stale position.
         if ctx.position_stale:
             self._last_phrase_number = None
+            self._reset_smart_observation_state()
             return LaserSceneDecision(
                 scene=self._safe_scene,
                 reason="position_stale",
@@ -225,27 +256,125 @@ class LaserDirector:
         abs_beat = max(ctx.abs_beat, 0.0)
         phrase_number = int(abs_beat // self._phrase_interval_beats)
         effective_phrase_scene = self._effective_phrase_scene()
+        first_playing_tick = self._last_phrase_number is None
+        phrase_changed = False if first_playing_tick else phrase_number != self._last_phrase_number
+        self._last_phrase_number = phrase_number
 
-        # First normal playing tick initializes phrase tracking; do not fire phrase scene.
-        if self._last_phrase_number is None:
-            self._last_phrase_number = phrase_number
+        # Priority 4.5: scripted mode bypasses all smart-observation branches.
+        if self._is_scripted_context(ctx):
+            self._reset_smart_observation_state()
+            return self._decide_phrase_default(
+                ctx=ctx,
+                first_playing_tick=first_playing_tick,
+                phrase_changed=phrase_changed,
+                effective_phrase_scene=effective_phrase_scene,
+            )
+
+        previous_abs_beat = self._last_smart_abs_beat
+
+        # Priority 5: Existing Smart Breakdown observation.
+        if ctx.breakdown_active and self._breakdown_scene:
+            self._last_smart_abs_beat = abs_beat
+            return LaserSceneDecision(
+                scene=self._breakdown_scene,
+                reason="breakdown_active",
+                priority=5,
+                source="policy",
+            )
+
+        # Priority 6: Existing ANLZ buildup observation.
+        if self._buildup_scene and self._in_buildup_window(abs_beat, ctx.anlz_buildups):
+            self._last_smart_abs_beat = abs_beat
+            return LaserSceneDecision(
+                scene=self._buildup_scene,
+                reason="buildup_window",
+                priority=6,
+                source="policy",
+            )
+
+        # Priority 7: Drop crossing (once per target beat).
+        if previous_abs_beat is not None and self._drop_scene:
+            for drop_beat in sorted(set(ctx.smart_drops)):
+                if (
+                    previous_abs_beat < drop_beat <= abs_beat
+                    and self._laser_drop_fired_beat != int(drop_beat)
+                ):
+                    self._laser_drop_fired_beat = int(drop_beat)
+                    self._post_drop_start_abs_beat = abs_beat
+                    self._last_smart_abs_beat = abs_beat
+                    return LaserSceneDecision(
+                        scene=self._drop_scene,
+                        reason="drop_crossing",
+                        priority=7,
+                        source="policy",
+                    )
+
+        # Priority 8: Post-drop hold (using existing minimum_scene_hold_beats).
+        if (
+            self._post_drop_scene
+            and self._minimum_scene_hold_beats > 0
+            and self._post_drop_start_abs_beat >= 0.0
+            and (abs_beat - self._post_drop_start_abs_beat) < self._minimum_scene_hold_beats
+        ):
+            self._last_smart_abs_beat = abs_beat
+            return LaserSceneDecision(
+                scene=self._post_drop_scene,
+                reason="post_drop_hold",
+                priority=8,
+                source="policy",
+            )
+
+        # Priority 9: Pre-drop lookahead window.
+        beats_to_next_drop = self._beats_to_next_drop(abs_beat, ctx.smart_drops)
+        if (
+            self._pre_drop_scene
+            and self._pre_drop_lookahead_beats > 0
+            and 0 < beats_to_next_drop <= self._pre_drop_lookahead_beats
+        ):
+            self._last_smart_abs_beat = abs_beat
+            return LaserSceneDecision(
+                scene=self._pre_drop_scene,
+                reason="pre_drop_window",
+                priority=9,
+                source="policy",
+            )
+
+        self._last_smart_abs_beat = abs_beat
+        if (
+            self._post_drop_start_abs_beat >= 0.0
+            and self._minimum_scene_hold_beats <= 0
+        ):
+            self._post_drop_start_abs_beat = -1.0
+
+        return self._decide_phrase_default(
+            ctx=ctx,
+            first_playing_tick=first_playing_tick,
+            phrase_changed=phrase_changed,
+            effective_phrase_scene=effective_phrase_scene,
+        )
+
+    def _decide_phrase_default(
+        self,
+        *,
+        ctx: LaserContext,
+        first_playing_tick: bool,
+        phrase_changed: bool,
+        effective_phrase_scene: str,
+    ) -> LaserSceneDecision:
+        if first_playing_tick:
             return self._gate_normal_change(
                 ctx=ctx,
                 candidate_scene=self._default_scene,
                 candidate_reason="default_init",
-                priority=6,
+                priority=10,
             )
 
-        phrase_changed = phrase_number != self._last_phrase_number
-        self._last_phrase_number = phrase_number
-
-        # Priority 5: Phrase boundary.
         if phrase_changed:
             return self._gate_normal_change(
                 ctx=ctx,
                 candidate_scene=effective_phrase_scene,
                 candidate_reason="phrase_boundary",
-                priority=5,
+                priority=10,
             )
 
         if self._normal_changes_only_on_phrase_boundary:
@@ -253,23 +382,46 @@ class LaserDirector:
                 return LaserSceneDecision(
                     scene=self._current_scene,
                     reason="phrase_hold",
-                    priority=6,
+                    priority=10,
                     source="policy",
                 )
             return self._gate_normal_change(
                 ctx=ctx,
                 candidate_scene=self._default_scene,
                 candidate_reason="default",
-                priority=6,
+                priority=10,
             )
 
-        # Priority 6: Default (playing with fresh position).
         return self._gate_normal_change(
             ctx=ctx,
             candidate_scene=self._default_scene,
             candidate_reason="default",
-            priority=6,
+            priority=10,
         )
+
+    def _is_scripted_context(self, ctx: LaserContext) -> bool:
+        return ctx.scripted_id > 0 or ctx.lighting_mode == "scripted"
+
+    def _reset_smart_observation_state(self) -> None:
+        self._laser_drop_fired_beat = None
+        self._post_drop_start_abs_beat = -1.0
+        self._last_smart_abs_beat = None
+
+    def _in_buildup_window(self, abs_beat: float, buildups: tuple[int, ...]) -> bool:
+        for buildup_beat in buildups:
+            if (
+                (buildup_beat - self._buildup_approach_beats)
+                <= abs_beat
+                < (buildup_beat + self._buildup_hold_beats)
+            ):
+                return True
+        return False
+
+    def _beats_to_next_drop(self, abs_beat: float, smart_drops: tuple[int, ...]) -> float:
+        future_drops = [float(drop_beat) for drop_beat in smart_drops if drop_beat > abs_beat]
+        if not future_drops:
+            return float("inf")
+        return min(future_drops) - abs_beat
 
     def _effective_phrase_scene(self) -> str:
         return self._phrase_scene or self._default_scene
@@ -330,4 +482,13 @@ class LaserDirector:
             "phrase_interval_beats": self._phrase_interval_beats,
             "minimum_scene_hold_beats": self._minimum_scene_hold_beats,
             "normal_changes_only_on_phrase_boundary": self._normal_changes_only_on_phrase_boundary,
+            "breakdown_scene": self._breakdown_scene,
+            "buildup_scene": self._buildup_scene,
+            "pre_drop_scene": self._pre_drop_scene,
+            "drop_scene": self._drop_scene,
+            "post_drop_scene": self._post_drop_scene,
+            "buildup_approach_beats": self._buildup_approach_beats,
+            "buildup_hold_beats": self._buildup_hold_beats,
+            "pre_drop_lookahead_beats": self._pre_drop_lookahead_beats,
+            "laser_drop_fired_beat": self._laser_drop_fired_beat,
         }

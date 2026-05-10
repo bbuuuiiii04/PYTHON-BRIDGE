@@ -152,7 +152,12 @@
       "breakdown_scene":  "house_breakdown_1",
       "transition_scene": "transition_safe_1",
       "allow_high_impact": true,
-      "phrase_interval_beats": 32
+      "phrase_interval_beats": 32,
+      "minimum_scene_hold_beats": 8,
+      "buildup_approach_beats": 8,
+      "buildup_hold_beats": 8,
+      "pre_drop_lookahead_beats": 4,
+      "_comment_post_drop_hold": "post_drop_scene hold uses minimum_scene_hold_beats; set > 0 for visible post-drop hold."
     }
   }
 }
