@@ -50,6 +50,7 @@ def _ctx(
     os2l_connected: bool = True,
     active_track_loaded: bool = True,
     autoloop_ready: bool = True,
+    autoloop_tick_just_fired: bool = False,
     breakdown_active: bool = False,
     smart_drops: tuple[int, ...] = (),
     anlz_buildups: tuple[int, ...] = (),
@@ -67,6 +68,7 @@ def _ctx(
         os2l_connected=os2l_connected,
         active_track_loaded=active_track_loaded,
         autoloop_ready=autoloop_ready,
+        autoloop_tick_just_fired=autoloop_tick_just_fired,
         breakdown_active=breakdown_active,
         smart_drops=smart_drops,
         anlz_buildups=anlz_buildups,
@@ -93,6 +95,7 @@ def _director(
     buildup_approach_beats: int = 8,
     buildup_hold_beats: int = 8,
     pre_drop_lookahead_beats: int = 4,
+    buildup_max_drop_distance_beats: int = 32,
 ) -> LaserDirector:
     return LaserDirector(
         enabled=enabled,
@@ -112,6 +115,7 @@ def _director(
         buildup_approach_beats=buildup_approach_beats,
         buildup_hold_beats=buildup_hold_beats,
         pre_drop_lookahead_beats=pre_drop_lookahead_beats,
+        buildup_max_drop_distance_beats=buildup_max_drop_distance_beats,
     )
 
 
@@ -469,14 +473,47 @@ class PhraseSceneTests(unittest.TestCase):
     def test_phrase_boundary_returns_phrase_scene(self) -> None:
         ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
         ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
-        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=32.0), now=_now())
+        ld.tick(
+            _ctx(
+                playing=True,
+                position_stale=False,
+                abs_beat=32.0,
+                autoloop_tick_just_fired=True,
+            ),
+            now=_now(),
+        )
         self.assertEqual(ld.status()["current_scene"], "p")
         self.assertEqual(ld.status()["last_reason"], "phrase_boundary")
+
+    def test_phrase_boundary_waits_for_autoloop_tick_edge(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(abs_beat=31.0), now=_now())
+        ld.tick(_ctx(abs_beat=32.0, autoloop_tick_just_fired=False), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["last_reason"], "phrase_hold_pending")
+        self.assertTrue(ld.status()["phrase_trigger_pending"])
+
+    def test_phrase_boundary_pending_fires_on_later_autoloop_tick_edge(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(abs_beat=31.0), now=_now())
+        ld.tick(_ctx(abs_beat=32.0, autoloop_tick_just_fired=False), now=_now())
+        ld.tick(_ctx(abs_beat=32.5, autoloop_tick_just_fired=True), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "p")
+        self.assertEqual(ld.status()["last_reason"], "phrase_boundary")
+        self.assertFalse(ld.status()["phrase_trigger_pending"])
 
     def test_phrase_scene_name_can_be_arbitrary(self) -> None:
         ld = _director(default_scene="d", phrase_scene="my_custom_phrase_42", phrase_interval_beats=16)
         ld.tick(_ctx(playing=True, position_stale=False, abs_beat=15.0), now=_now())
-        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=16.0), now=_now())
+        ld.tick(
+            _ctx(
+                playing=True,
+                position_stale=False,
+                abs_beat=16.0,
+                autoloop_tick_just_fired=True,
+            ),
+            now=_now(),
+        )
         self.assertEqual(ld.status()["current_scene"], "my_custom_phrase_42")
 
     def test_not_playing_resets_phrase_tracking(self) -> None:
@@ -505,7 +542,15 @@ class PhraseSceneTests(unittest.TestCase):
             minimum_scene_hold_beats=8,
         )
         ld.tick(_ctx(playing=True, position_stale=False, abs_beat=31.0), now=_now())
-        ld.tick(_ctx(playing=True, position_stale=False, abs_beat=32.0), now=_now())
+        ld.tick(
+            _ctx(
+                playing=True,
+                position_stale=False,
+                abs_beat=32.0,
+                autoloop_tick_just_fired=True,
+            ),
+            now=_now(),
+        )
         self.assertEqual(ld.status()["current_scene"], "d")
         self.assertEqual(ld.status()["last_reason"], "hold_minimum_scene")
 
@@ -565,7 +610,16 @@ class PhraseSceneTests(unittest.TestCase):
             ld.tick(_ctx(playing=True, position_stale=False, abs_beat=1.5), now=_now())
             for _ in range(100):
                 ld.tick(_ctx(playing=True, position_stale=False, abs_beat=1.5), now=_now())
-        self.assertEqual(info.call_count, 2)
+        self.assertEqual(info.call_count, 1)
+
+    def test_same_scene_reason_update_is_not_new_trigger(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(abs_beat=31.0), now=_now())
+        initial_trigger = ld.status()["last_trigger_abs_beat"]
+        ld.tick(_ctx(abs_beat=31.5), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["last_reason"], "default")
+        self.assertEqual(ld.status()["last_trigger_abs_beat"], initial_trigger)
 
     def test_status_includes_phrase_policy_fields(self) -> None:
         ld = _director(
@@ -638,9 +692,28 @@ class SmartObservationTests(unittest.TestCase):
             buildup_hold_beats=1,
         )
         ld.tick(_ctx(abs_beat=10.0), now=_now())
-        ld.tick(_ctx(abs_beat=18.5, anlz_buildups=(20,)), now=_now())
+        ld.tick(_ctx(abs_beat=18.5, anlz_buildups=(20,), smart_drops=(28,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "up")
-        ld.tick(_ctx(abs_beat=21.1, anlz_buildups=(20,)), now=_now())
+        ld.tick(_ctx(abs_beat=21.1, anlz_buildups=(20,), smart_drops=(28,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+
+    def test_buildup_window_requires_future_smart_drop(self) -> None:
+        ld = _director(default_scene="d", buildup_scene="up")
+        ld.tick(_ctx(abs_beat=10.0), now=_now())
+        ld.tick(_ctx(abs_beat=18.5, anlz_buildups=(20,), smart_drops=(18,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["last_reason"], "default")
+
+    def test_buildup_window_ignores_far_future_drop(self) -> None:
+        ld = _director(
+            default_scene="d",
+            buildup_scene="up",
+            buildup_approach_beats=2,
+            buildup_hold_beats=1,
+            buildup_max_drop_distance_beats=8,
+        )
+        ld.tick(_ctx(abs_beat=10.0), now=_now())
+        ld.tick(_ctx(abs_beat=18.5, anlz_buildups=(20,), smart_drops=(40,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "d")
 
     def test_pre_drop_window_uses_configurable_lookahead(self) -> None:
@@ -687,6 +760,21 @@ class SmartObservationTests(unittest.TestCase):
         ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "drop")
 
+    def test_drop_crossing_beats_buildup_at_exact_crossing(self) -> None:
+        ld = _director(
+            default_scene="d",
+            drop_scene="drop",
+            buildup_scene="up",
+            buildup_approach_beats=8,
+            buildup_hold_beats=8,
+        )
+        ld.tick(_ctx(abs_beat=23.0, smart_drops=(32,), anlz_buildups=(24,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "up")
+        ld.tick(_ctx(abs_beat=31.5, smart_drops=(32,), anlz_buildups=(24,)), now=_now())
+        ld.tick(_ctx(abs_beat=32.1, smart_drops=(32,), anlz_buildups=(24,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld.status()["last_reason"], "drop_crossing")
+
     def test_post_drop_uses_minimum_scene_hold_beats(self) -> None:
         ld = _director(
             default_scene="d",
@@ -701,6 +789,22 @@ class SmartObservationTests(unittest.TestCase):
         self.assertEqual(ld.status()["current_scene"], "post")
         ld.tick(_ctx(abs_beat=66.1, smart_drops=(64,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "d")
+
+    def test_post_drop_hold_not_overridden_by_buildup_window(self) -> None:
+        ld = _director(
+            default_scene="d",
+            drop_scene="drop",
+            post_drop_scene="post",
+            buildup_scene="up",
+            minimum_scene_hold_beats=3,
+            buildup_approach_beats=2,
+            buildup_hold_beats=8,
+        )
+        ld.tick(_ctx(abs_beat=63.0, smart_drops=(64,), anlz_buildups=(65,)), now=_now())
+        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64,), anlz_buildups=(65,)), now=_now())
+        ld.tick(_ctx(abs_beat=65.2, smart_drops=(64,), anlz_buildups=(65,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "post")
+        self.assertEqual(ld.status()["last_reason"], "post_drop_hold")
 
     def test_zero_minimum_hold_disables_post_drop_hold(self) -> None:
         ld = _director(
@@ -851,7 +955,9 @@ class StatusShapeTests(unittest.TestCase):
                     "phrase_scene", "phrase_interval_beats", "minimum_scene_hold_beats",
                     "normal_changes_only_on_phrase_boundary", "breakdown_scene", "buildup_scene",
                     "pre_drop_scene", "drop_scene", "post_drop_scene", "buildup_approach_beats",
-                    "buildup_hold_beats", "pre_drop_lookahead_beats", "laser_drop_fired_beat"):
+                    "buildup_hold_beats", "buildup_max_drop_distance_beats",
+                    "pre_drop_lookahead_beats", "laser_drop_fired_beat",
+                    "phrase_trigger_pending", "last_trigger_abs_beat"):
             self.assertIn(key, s, msg=f"missing key: {key}")
 
     def test_status_available_true(self) -> None:
@@ -1071,6 +1177,25 @@ class StateManagerLaserIntegrationTests(unittest.TestCase):
         snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
         ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, snap, time.monotonic())
         self.assertTrue(ctx.breakdown_active)
+
+    def test_build_laser_context_copies_autoloop_tick_just_fired(self) -> None:
+        from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
+        ld = _director()
+        sm = _make_sm(laser_director=ld)
+        d = DeckState(number=1)
+        snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
+        ctx = sm._build_laser_context(
+            1,
+            d,
+            1000,
+            128.0,
+            0.0,
+            0.0,
+            snap,
+            time.monotonic(),
+            autoloop_tick_just_fired=True,
+        )
+        self.assertTrue(ctx.autoloop_tick_just_fired)
 
     def test_build_laser_context_copies_smart_drop_and_buildup_observation(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot

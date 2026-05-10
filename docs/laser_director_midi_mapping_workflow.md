@@ -323,6 +323,14 @@ autoloop/scripted architecture:
 - automatic musical scenes only when autoloop readiness is true
 ```
 
+For phrase/default policy timing, Laser Director should use existing autoloop
+tick/rearm lifecycle signals from `StateManager` as the timing authority. It
+should not treat standalone continuous beat math as the phrase trigger source.
+
+Same-scene reason-only updates are status/debug changes and should not be
+treated as new trigger candidates. Future live MIDI defaults should trigger on
+non-empty scene-name changes only.
+
 Future live executors must treat `scene == ""` as send-nothing.
 
 ## First live-test safety checklist
