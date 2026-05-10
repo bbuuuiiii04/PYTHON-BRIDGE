@@ -13,6 +13,7 @@ code verification, not document age or detail level.
 | `docs/runtime_invariants.md` | CURRENT AUTHORITATIVE | Extracted invariants from current code paths and tests. |
 | `docs/laser_director_design.md` | PROPOSED FEATURE DESIGN | Canonical Laser Director implementation spec; not current runtime behavior until implemented. |
 | `docs/laser_director_midi_mapping_workflow.md` | PROPOSED FEATURE / OPERATOR SETUP NOTES | SoundSwitch MIDI mapping workflow and operator setup guidance for Laser Director. |
+| `docs/laser_director_rollout_checklist.md` | CURRENT SUPPORTING | Final rollout and validation checklist for safe Laser Director enablement, rollback, and operator test order. |
 | `docs/doc_index.md` | CURRENT AUTHORITATIVE | Maintains the current classification table. |
 | `docs/subsystems/logging.md` | CURRENT SUPPORTING | Runtime logging controls still match `logging_manager.py` and `__main__.py`; supporting detail rather than architecture source. |
 | `docs/validation/direct_master_runtime_validation.md` | VALIDATION EVIDENCE | Correctly describes bounded direct-master observer as shadow-only while noting B6 authority is separate. |

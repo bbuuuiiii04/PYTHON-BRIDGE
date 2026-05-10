@@ -195,6 +195,27 @@ class EmergencyTests(unittest.TestCase):
         ld.tick(_ctx(playing=False), now=_now())
         self.assertEqual(ld.status()["current_scene"], "emergency_blackout")
 
+    def test_emergency_overrides_smart_observation_signals(self) -> None:
+        cases = (
+            _ctx(abs_beat=32.2, breakdown_active=True, smart_drops=(64,), anlz_buildups=(32,)),
+            _ctx(abs_beat=19.0, smart_drops=(64,), anlz_buildups=(20,)),
+            _ctx(abs_beat=64.1, smart_drops=(64,), anlz_buildups=(64,)),
+        )
+        for ctx in cases:
+            with self.subTest(ctx=ctx):
+                ld = _director(
+                    default_scene="d",
+                    breakdown_scene="bd",
+                    buildup_scene="up",
+                    pre_drop_scene="pre",
+                    drop_scene="drop",
+                )
+                ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,)), now=_now())
+                ld.set_emergency_blackout(True)
+                ld.tick(ctx, now=_now())
+                self.assertEqual(ld.status()["current_scene"], "emergency_blackout")
+                self.assertEqual(ld.status()["last_reason"], "emergency")
+
     def test_emergency_latches(self) -> None:
         ld = _director()
         ld.set_emergency_blackout(True)
@@ -263,6 +284,28 @@ class ManualOverrideTests(unittest.TestCase):
         ld = _director()
         ld.set_manual_override("house_drop_1", ttl_s=5.0)
         self.assertEqual(ld.status()["manual_override"], "house_drop_1")
+
+    def test_manual_override_beats_drop_crossing(self) -> None:
+        ld = _director(
+            default_scene="d",
+            breakdown_scene="bd",
+            buildup_scene="up",
+            pre_drop_scene="pre",
+            drop_scene="drop",
+        )
+        ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,)), now=_now())
+        ld.set_manual_override("manual_scene", ttl_s=10.0)
+        ld.tick(
+            _ctx(
+                abs_beat=64.1,
+                breakdown_active=True,
+                smart_drops=(64,),
+                anlz_buildups=(64,),
+            ),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "manual_scene")
+        self.assertEqual(ld.status()["last_reason"], "manual_override")
 
     def test_manual_override_ttl_expiry_falls_back_to_default(self) -> None:
         ld = _director()
