@@ -92,6 +92,7 @@ def _director(
     pre_drop_scene: str = "",
     drop_scene: str = "",
     post_drop_scene: str = "",
+    buildup_lookahead_beats: int = 32,
     buildup_approach_beats: int = 8,
     buildup_hold_beats: int = 8,
     pre_drop_lookahead_beats: int = 4,
@@ -112,6 +113,7 @@ def _director(
         pre_drop_scene=pre_drop_scene,
         drop_scene=drop_scene,
         post_drop_scene=post_drop_scene,
+        buildup_lookahead_beats=buildup_lookahead_beats,
         buildup_approach_beats=buildup_approach_beats,
         buildup_hold_beats=buildup_hold_beats,
         pre_drop_lookahead_beats=pre_drop_lookahead_beats,
@@ -687,6 +689,7 @@ class PhraseSceneTests(unittest.TestCase):
             phrase_interval_beats=16,
             minimum_scene_hold_beats=4,
             normal_changes_only_on_phrase_boundary=True,
+            buildup_lookahead_beats=24,
             buildup_approach_beats=6,
             buildup_hold_beats=10,
             pre_drop_lookahead_beats=3,
@@ -697,6 +700,7 @@ class PhraseSceneTests(unittest.TestCase):
         self.assertEqual(s["phrase_interval_beats"], 16)
         self.assertEqual(s["minimum_scene_hold_beats"], 4)
         self.assertTrue(s["normal_changes_only_on_phrase_boundary"])
+        self.assertEqual(s["buildup_lookahead_beats"], 24)
         self.assertEqual(s["buildup_approach_beats"], 6)
         self.assertEqual(s["buildup_hold_beats"], 10)
         self.assertEqual(s["pre_drop_lookahead_beats"], 3)
@@ -720,23 +724,30 @@ class SmartObservationTests(unittest.TestCase):
         ld.tick(_ctx(abs_beat=10.5, breakdown_active=True), now=_now())
         self.assertEqual(ld.status()["current_scene"], "d")
 
-    def test_buildup_window_uses_configurable_timing(self) -> None:
+    def test_buildup_window_uses_smart_drop_countdown(self) -> None:
         ld = _director(
             default_scene="d",
             buildup_scene="up",
-            buildup_approach_beats=2,
-            buildup_hold_beats=1,
+            buildup_lookahead_beats=8,
         )
         ld.tick(_ctx(abs_beat=10.0), now=_now())
-        ld.tick(_ctx(abs_beat=18.5, anlz_buildups=(20,), smart_drops=(28,)), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "up")
-        ld.tick(_ctx(abs_beat=21.1, anlz_buildups=(20,), smart_drops=(28,)), now=_now())
+        ld.tick(_ctx(abs_beat=19.9, smart_drops=(28,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "d")
+        ld.tick(_ctx(abs_beat=20.1, smart_drops=(28,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "up")
+        self.assertEqual(ld.status()["last_reason"], "buildup_to_drop_window")
+
+    def test_anlz_buildups_alone_do_not_trigger_buildup(self) -> None:
+        ld = _director(default_scene="d", buildup_scene="up")
+        ld.tick(_ctx(abs_beat=10.0), now=_now())
+        ld.tick(_ctx(abs_beat=18.5, anlz_buildups=(20,), smart_drops=()), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["last_reason"], "default")
 
     def test_buildup_window_requires_future_smart_drop(self) -> None:
         ld = _director(default_scene="d", buildup_scene="up")
         ld.tick(_ctx(abs_beat=10.0), now=_now())
-        ld.tick(_ctx(abs_beat=18.5, anlz_buildups=(20,), smart_drops=(18,)), now=_now())
+        ld.tick(_ctx(abs_beat=18.5, smart_drops=(18,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "d")
         self.assertEqual(ld.status()["last_reason"], "default")
 
@@ -744,25 +755,27 @@ class SmartObservationTests(unittest.TestCase):
         ld = _director(
             default_scene="d",
             buildup_scene="up",
-            buildup_approach_beats=2,
-            buildup_hold_beats=1,
-            buildup_max_drop_distance_beats=8,
+            buildup_lookahead_beats=8,
         )
         ld.tick(_ctx(abs_beat=10.0), now=_now())
-        ld.tick(_ctx(abs_beat=18.5, anlz_buildups=(20,), smart_drops=(40,)), now=_now())
+        ld.tick(_ctx(abs_beat=18.5, smart_drops=(40,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "d")
 
-    def test_pre_drop_window_uses_configurable_lookahead(self) -> None:
+    def test_buildup_holds_through_countdown_until_drop_crossing(self) -> None:
         ld = _director(
             default_scene="d",
-            pre_drop_scene="pre",
-            pre_drop_lookahead_beats=2,
+            buildup_scene="up",
+            drop_scene="drop",
+            buildup_lookahead_beats=32,
         )
-        ld.tick(_ctx(abs_beat=61.0, smart_drops=(64,)), now=_now())
+        ld.tick(_ctx(abs_beat=63.0, smart_drops=(96,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "d")
-        ld.tick(_ctx(abs_beat=62.2, smart_drops=(64,)), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "pre")
-        self.assertEqual(ld.status()["last_reason"], "pre_drop_window")
+        ld.tick(_ctx(abs_beat=64.1, smart_drops=(96,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "up")
+        ld.tick(_ctx(abs_beat=95.5, smart_drops=(96,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "up")
+        ld.tick(_ctx(abs_beat=96.1, smart_drops=(96,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
 
     def test_first_smart_tick_does_not_fire_drop_crossing(self) -> None:
         ld = _director(default_scene="d", drop_scene="drop")
@@ -785,12 +798,12 @@ class SmartObservationTests(unittest.TestCase):
         ld.tick(_ctx(abs_beat=64.4, smart_drops=(64,)), now=_now())
         self.assertNotEqual(ld.status()["current_scene"], "drop")
 
-    def test_drop_wins_over_pre_drop_at_crossing(self) -> None:
+    def test_drop_wins_over_buildup_at_crossing(self) -> None:
         ld = _director(
             default_scene="d",
             drop_scene="drop",
-            pre_drop_scene="pre",
-            pre_drop_lookahead_beats=4,
+            buildup_scene="up",
+            buildup_lookahead_beats=32,
         )
         ld.tick(_ctx(abs_beat=63.2, smart_drops=(64,)), now=_now())
         ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,)), now=_now())
@@ -801,13 +814,12 @@ class SmartObservationTests(unittest.TestCase):
             default_scene="d",
             drop_scene="drop",
             buildup_scene="up",
-            buildup_approach_beats=8,
-            buildup_hold_beats=8,
+            buildup_lookahead_beats=32,
         )
-        ld.tick(_ctx(abs_beat=23.0, smart_drops=(32,), anlz_buildups=(24,)), now=_now())
+        ld.tick(_ctx(abs_beat=23.0, smart_drops=(32,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "up")
-        ld.tick(_ctx(abs_beat=31.5, smart_drops=(32,), anlz_buildups=(24,)), now=_now())
-        ld.tick(_ctx(abs_beat=32.1, smart_drops=(32,), anlz_buildups=(24,)), now=_now())
+        ld.tick(_ctx(abs_beat=31.5, smart_drops=(32,)), now=_now())
+        ld.tick(_ctx(abs_beat=32.1, smart_drops=(32,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "drop")
         self.assertEqual(ld.status()["last_reason"], "drop_crossing")
 
@@ -833,12 +845,11 @@ class SmartObservationTests(unittest.TestCase):
             post_drop_scene="post",
             buildup_scene="up",
             minimum_scene_hold_beats=3,
-            buildup_approach_beats=2,
-            buildup_hold_beats=8,
+            buildup_lookahead_beats=32,
         )
-        ld.tick(_ctx(abs_beat=63.0, smart_drops=(64,), anlz_buildups=(65,)), now=_now())
-        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64,), anlz_buildups=(65,)), now=_now())
-        ld.tick(_ctx(abs_beat=65.2, smart_drops=(64,), anlz_buildups=(65,)), now=_now())
+        ld.tick(_ctx(abs_beat=63.0, smart_drops=(64, 80)), now=_now())
+        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64, 80)), now=_now())
+        ld.tick(_ctx(abs_beat=65.2, smart_drops=(64, 80)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "post")
         self.assertEqual(ld.status()["last_reason"], "post_drop_hold")
 
@@ -849,18 +860,43 @@ class SmartObservationTests(unittest.TestCase):
             post_drop_scene="post",
             buildup_scene="up",
             minimum_scene_hold_beats=3,
-            buildup_approach_beats=2,
-            buildup_hold_beats=8,
+            buildup_lookahead_beats=32,
         )
-        ld.tick(_ctx(abs_beat=63.0, smart_drops=(64, 72), anlz_buildups=(70,)), now=_now())
-        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64, 72), anlz_buildups=(70,)), now=_now())
-        ld.tick(_ctx(abs_beat=65.0, smart_drops=(64, 72), anlz_buildups=(70,)), now=_now())
+        ld.tick(_ctx(abs_beat=63.0, smart_drops=(64, 100)), now=_now())
+        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64, 100)), now=_now())
+        ld.tick(_ctx(abs_beat=65.0, smart_drops=(64, 100)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "post")
-        ld.tick(_ctx(abs_beat=67.5, smart_drops=(64, 72), anlz_buildups=(70,)), now=_now())
+        ld.tick(_ctx(abs_beat=67.5, smart_drops=(64, 100)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "d")
-        ld.tick(_ctx(abs_beat=68.5, smart_drops=(64, 72), anlz_buildups=(70,)), now=_now())
+        ld.tick(_ctx(abs_beat=68.5, smart_drops=(64, 100)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "up")
-        self.assertEqual(ld.status()["last_reason"], "buildup_window")
+        self.assertEqual(ld.status()["last_reason"], "buildup_to_drop_window")
+
+    def test_pre_drop_scene_is_inert_in_active_policy(self) -> None:
+        ld = _director(
+            default_scene="d",
+            buildup_scene="up",
+            pre_drop_scene="pre",
+            drop_scene="drop",
+            buildup_lookahead_beats=32,
+            pre_drop_lookahead_beats=4,
+        )
+        ld.tick(_ctx(abs_beat=63.0, smart_drops=(64,)), now=_now())
+        self.assertNotEqual(ld.status()["current_scene"], "pre")
+        ld.tick(_ctx(abs_beat=63.8, smart_drops=(64,)), now=_now())
+        self.assertNotEqual(ld.status()["current_scene"], "pre")
+        self.assertNotEqual(ld.status()["last_reason"], "pre_drop_window")
+
+    def test_autoloop_not_ready_blocks_buildup_and_drop(self) -> None:
+        ld = _director(
+            default_scene="d",
+            buildup_scene="up",
+            drop_scene="drop",
+            buildup_lookahead_beats=32,
+        )
+        ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,), autoloop_ready=False), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "")
+        self.assertEqual(ld.status()["last_reason"], "autoloop_not_ready")
 
     def test_zero_minimum_hold_disables_post_drop_hold(self) -> None:
         ld = _director(
@@ -1010,7 +1046,8 @@ class StatusShapeTests(unittest.TestCase):
                     "last_reason", "manual_override", "emergency", "last_error", "personality",
                     "phrase_scene", "phrase_interval_beats", "minimum_scene_hold_beats",
                     "normal_changes_only_on_phrase_boundary", "breakdown_scene", "buildup_scene",
-                    "pre_drop_scene", "drop_scene", "post_drop_scene", "buildup_approach_beats",
+                    "pre_drop_scene", "drop_scene", "post_drop_scene", "buildup_lookahead_beats",
+                    "buildup_approach_beats",
                     "buildup_hold_beats", "buildup_max_drop_distance_beats",
                     "pre_drop_lookahead_beats", "laser_drop_fired_beat",
                     "phrase_trigger_pending", "last_trigger_abs_beat"):

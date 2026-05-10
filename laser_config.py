@@ -42,12 +42,11 @@ _VALID_SCENE_TYPES = frozenset({"static", "autoloop", "utility"})
 _DURATION_MIN = 10
 _DURATION_MAX = 250
 
-_PERSONALITY_ROLE_FIELDS = (
+_PERSONALITY_REQUIRED_ROLE_FIELDS = (
     "safe_scene",
     "default_scene",
     "phrase_scene",
     "buildup_scene",
-    "pre_drop_scene",
     "drop_scene",
     "post_drop_scene",
     "breakdown_scene",
@@ -318,12 +317,21 @@ def _validate_personality(
     if not isinstance(data, dict):
         return [f"{prefix}: must be an object"]
 
-    for role in _PERSONALITY_ROLE_FIELDS:
+    for role in _PERSONALITY_REQUIRED_ROLE_FIELDS:
         ref = data.get(role)
         if not isinstance(ref, str) or not ref:
             errors.append(f"{prefix}: '{role}' must be a non-empty string")
         elif ref not in scene_keys:
             errors.append(f"{prefix}: '{role}' references unknown scene '{ref}'")
+
+    # Deprecated: pre_drop_scene is optional/inert for active policy.
+    pre_drop_ref = data.get("pre_drop_scene", "")
+    if not isinstance(pre_drop_ref, str):
+        errors.append(f"{prefix}: 'pre_drop_scene' must be a string")
+    elif pre_drop_ref and pre_drop_ref not in scene_keys:
+        errors.append(
+            f"{prefix}: 'pre_drop_scene' references unknown scene '{pre_drop_ref}'"
+        )
 
     phrase_interval_beats = data.get("phrase_interval_beats", 32)
     if (
@@ -351,6 +359,16 @@ def _validate_personality(
     if not isinstance(normal_changes_only_on_phrase_boundary, bool):
         errors.append(
             f"{prefix}: 'normal_changes_only_on_phrase_boundary' must be a boolean"
+        )
+
+    buildup_lookahead_beats = data.get("buildup_lookahead_beats", 32)
+    if (
+        not isinstance(buildup_lookahead_beats, int)
+        or isinstance(buildup_lookahead_beats, bool)
+        or buildup_lookahead_beats < 1
+    ):
+        errors.append(
+            f"{prefix}: 'buildup_lookahead_beats' must be a positive integer"
         )
 
     buildup_approach_beats = data.get("buildup_approach_beats", 8)
@@ -451,6 +469,7 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
         normal_changes_only_on_phrase_boundary=bool(
             data.get("normal_changes_only_on_phrase_boundary", False)
         ),
+        buildup_lookahead_beats=int(data.get("buildup_lookahead_beats", 32)),
         buildup_approach_beats=int(data.get("buildup_approach_beats", 8)),
         buildup_hold_beats=int(data.get("buildup_hold_beats", 8)),
         pre_drop_lookahead_beats=int(data.get("pre_drop_lookahead_beats", 4)),

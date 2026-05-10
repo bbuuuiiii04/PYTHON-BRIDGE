@@ -75,6 +75,7 @@ class LaserDirector:
         pre_drop_scene: str = "",
         drop_scene: str = "",
         post_drop_scene: str = "",
+        buildup_lookahead_beats: int = 32,
         buildup_approach_beats: int = 8,
         buildup_hold_beats: int = 8,
         pre_drop_lookahead_beats: int = 4,
@@ -96,6 +97,8 @@ class LaserDirector:
         self._pre_drop_scene = pre_drop_scene
         self._drop_scene = drop_scene
         self._post_drop_scene = post_drop_scene
+        self._buildup_lookahead_beats = max(0, int(buildup_lookahead_beats))
+        # Deprecated/inert in active policy; retained for compatibility/status.
         self._buildup_approach_beats = max(0, int(buildup_approach_beats))
         self._buildup_hold_beats = max(0, int(buildup_hold_beats))
         self._pre_drop_lookahead_beats = max(0, int(pre_drop_lookahead_beats))
@@ -166,6 +169,8 @@ class LaserDirector:
         self._pre_drop_scene = personality.pre_drop_scene
         self._drop_scene = personality.drop_scene
         self._post_drop_scene = personality.post_drop_scene
+        self._buildup_lookahead_beats = max(0, int(personality.buildup_lookahead_beats))
+        # Deprecated/inert in active policy; retained for compatibility/status.
         self._buildup_approach_beats = max(0, int(personality.buildup_approach_beats))
         self._buildup_hold_beats = max(0, int(personality.buildup_hold_beats))
         self._pre_drop_lookahead_beats = max(
@@ -358,33 +363,19 @@ class LaserDirector:
             and (abs_beat - self._post_drop_start_abs_beat) < self._minimum_scene_hold_beats
         )
 
-        # Priority 11: Existing ANLZ buildup observation, but only when it leads
-        # into a future Smart Drop and not during active post-drop hold.
+        # Priority 11: Smart Drop countdown buildup window.
+        beats_to_next_drop = self._beats_to_next_drop(abs_beat, ctx.smart_drops)
         if (
             self._buildup_scene
             and not in_post_drop_hold
-            and self._in_buildup_window(abs_beat, ctx.anlz_buildups, ctx.smart_drops)
+            and self._buildup_lookahead_beats > 0
+            and 0 < beats_to_next_drop <= self._buildup_lookahead_beats
         ):
             self._last_smart_abs_beat = abs_beat
             return LaserSceneDecision(
                 scene=self._buildup_scene,
-                reason="buildup_window",
+                reason="buildup_to_drop_window",
                 priority=11,
-                source="policy",
-            )
-
-        # Priority 12: Pre-drop lookahead window.
-        beats_to_next_drop = self._beats_to_next_drop(abs_beat, ctx.smart_drops)
-        if (
-            self._pre_drop_scene
-            and self._pre_drop_lookahead_beats > 0
-            and 0 < beats_to_next_drop <= self._pre_drop_lookahead_beats
-        ):
-            self._last_smart_abs_beat = abs_beat
-            return LaserSceneDecision(
-                scene=self._pre_drop_scene,
-                reason="pre_drop_window",
-                priority=12,
                 source="policy",
             )
 
@@ -470,30 +461,6 @@ class LaserDirector:
         self._last_smart_abs_beat = None
         self._phrase_trigger_pending = False
 
-    def _in_buildup_window(
-        self,
-        abs_beat: float,
-        buildups: tuple[int, ...],
-        smart_drops: tuple[int, ...],
-    ) -> bool:
-        for buildup_beat in buildups:
-            if (
-                (buildup_beat - self._buildup_approach_beats)
-                <= abs_beat
-                < (buildup_beat + self._buildup_hold_beats)
-            ):
-                future_drops = [
-                    int(drop_beat)
-                    for drop_beat in smart_drops
-                    if drop_beat > abs_beat and drop_beat > buildup_beat
-                ]
-                if not future_drops:
-                    continue
-                nearest_future_drop = min(future_drops)
-                if nearest_future_drop - int(buildup_beat) <= self._buildup_max_drop_distance_beats:
-                    return True
-        return False
-
     def _beats_to_next_drop(self, abs_beat: float, smart_drops: tuple[int, ...]) -> float:
         future_drops = [float(drop_beat) for drop_beat in smart_drops if drop_beat > abs_beat]
         if not future_drops:
@@ -564,6 +531,7 @@ class LaserDirector:
             "pre_drop_scene": self._pre_drop_scene,
             "drop_scene": self._drop_scene,
             "post_drop_scene": self._post_drop_scene,
+            "buildup_lookahead_beats": self._buildup_lookahead_beats,
             "buildup_approach_beats": self._buildup_approach_beats,
             "buildup_hold_beats": self._buildup_hold_beats,
             "buildup_max_drop_distance_beats": self._buildup_max_drop_distance_beats,

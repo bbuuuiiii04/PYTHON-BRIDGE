@@ -110,13 +110,19 @@ safe_scene -> safe_static
 default_scene -> house_phrase_1
 phrase_scene -> house_phrase_1
 buildup_scene -> house_buildup_1
-pre_drop_scene -> house_pre_drop_1
+pre_drop_scene -> (deprecated/inert for automatic policy)
 drop_scene -> house_drop_1
 post_drop_scene -> house_drop_sustain_1
 breakdown_scene -> house_breakdown_1
 transition_scene -> transition_safe_1
 emergency_scene -> emergency_blackout
 ```
+
+Note: `pre_drop_scene` may remain in config for backward compatibility, but
+automatic Laser Director policy intentionally does not select it. Smart Drop
+already performs the final pre-drop autoloop cut/rearm workflow, and the
+buildup look should persist through the Smart-Drop countdown until drop
+crossing.
 
 ## Manual SoundSwitch mapping method
 
