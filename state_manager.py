@@ -1579,6 +1579,14 @@ class StateManager:
             if self._os2l_connected_provider is not None
             else False
         )
+        active_track_loaded = bool(d.meta.filepath)
+        autoloop_ready = (
+            self._os.lighting_mode == "autoloop"
+            and not self._os.autoloop_arm_pending
+            and self._os.pending_autoloop_arm_meta is None
+            and bool(self._os.last_armed_filepath)
+            and self._os.last_armed_filepath == d.meta.filepath
+        )
         return LaserContext(
             active_deck=active,
             playing=d.playing,
@@ -1589,6 +1597,8 @@ class StateManager:
             position_stale=(snap is None or snap.is_stale(MEM_STALE_S)),
             lighting_mode=self._os.lighting_mode,
             os2l_connected=os2l_connected,
+            active_track_loaded=active_track_loaded,
+            autoloop_ready=autoloop_ready,
             breakdown_active=self._os.breakdown_active,
             smart_drops=tuple(d.meta.smart_drops),
             anlz_buildups=tuple(d.meta.anlz_buildups),

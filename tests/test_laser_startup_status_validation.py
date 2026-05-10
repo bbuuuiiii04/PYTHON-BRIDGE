@@ -71,7 +71,13 @@ def _config(*, enabled: bool, dry_run: bool = True, with_personality: bool = Tru
     )
 
 
-def _ctx(*, playing: bool = True, position_stale: bool = False) -> LaserContext:
+def _ctx(
+    *,
+    playing: bool = True,
+    position_stale: bool = False,
+    active_track_loaded: bool = True,
+    autoloop_ready: bool = True,
+) -> LaserContext:
     return LaserContext(
         active_deck=1,
         playing=playing,
@@ -82,6 +88,8 @@ def _ctx(*, playing: bool = True, position_stale: bool = False) -> LaserContext:
         position_stale=position_stale,
         lighting_mode="autoloop",
         os2l_connected=True,
+        active_track_loaded=active_track_loaded,
+        autoloop_ready=autoloop_ready,
     )
 
 
@@ -125,7 +133,8 @@ class LaserStartupWiringTests(unittest.TestCase):
         assert director is not None
 
         director.tick(_ctx(playing=False), now=time.monotonic())
-        self.assertEqual(director.status()["current_scene"], "safe_scene_cfg")
+        self.assertEqual(director.status()["current_scene"], "")
+        self.assertEqual(director.status()["last_reason"], "not_playing")
 
         director.tick(_ctx(playing=True, position_stale=False), now=time.monotonic())
         self.assertEqual(director.status()["current_scene"], "default_scene_cfg")
