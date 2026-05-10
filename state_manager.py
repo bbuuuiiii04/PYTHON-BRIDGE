@@ -1473,6 +1473,7 @@ class StateManager:
 
         # Beat boundary detection: fire a beat event when elapsed crosses the next beat
         beatpos_out = abs_beat_pos if os.lighting_mode == "autoloop" else beat_pos
+        autoloop_tick_just_fired = False
         if bpm > 0:
             this_beat = int(abs_beat_pos)
             if os.lighting_mode == "autoloop" and grid_pos is not None:
@@ -1520,19 +1521,25 @@ class StateManager:
                     if self._smart_drop_enabled and d.meta.smart_drops:
                         if _smart_drop_tick(self, active, mirror, bpm, this_beat, elapsed_ms):
                             change = True
+                            autoloop_tick_just_fired = True
                     if self._smart_breakdown_enabled and d.meta.smart_breakdowns:
                         if _smart_breakdown_tick(self, active, mirror, bpm, this_beat, elapsed_ms):
                             change = True
+                            autoloop_tick_just_fired = True
                     if self._phrase_anchor_enabled:
                         if _phrase_anchor_tick(
                             self, active, mirror, bpm, this_beat, elapsed_ms, abs_beat_pos
                         ):
                             change = True
+                            autoloop_tick_just_fired = True
 
                 os.last_beat_elapsed_ms = elapsed_ms
                 for dk in (active, mirror, 3, 4):
                     self._out.send_beat(dk, bpm, beat_out, change=change)
+                was_arm_pending = os.autoloop_arm_pending
                 self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos, elapsed_ms)
+                if was_arm_pending and not os.autoloop_arm_pending:
+                    autoloop_tick_just_fired = True
                 if os.lighting_mode == "autoloop":
                     phrase_beat = (this_beat // AUTOLOOP_ARM_PHRASE_BEATS) * AUTOLOOP_ARM_PHRASE_BEATS
                     if (
@@ -1545,11 +1552,22 @@ class StateManager:
                         self._log_autoloop_tick(
                             active, elapsed_ms, beatpos_out, bpm, d.meta.bpm, grid_status
                         )
+                        autoloop_tick_just_fired = True
 
         # Laser Director tick — dry-run only in Phase 1.
         # Must not block, send MIDI, call OS2LOutput, or mutate DeckState/OutputState.
         if self._laser_director is not None:
-            ctx = self._build_laser_context(active, d, elapsed_ms, bpm, beat_pos, abs_beat_pos, snap, now)
+            ctx = self._build_laser_context(
+                active,
+                d,
+                elapsed_ms,
+                bpm,
+                beat_pos,
+                abs_beat_pos,
+                snap,
+                now,
+                autoloop_tick_just_fired=autoloop_tick_just_fired,
+            )
             self._laser_director.tick(ctx, now=now)
 
         # Elapsed + beatpos — send at every push tick (SS needs continuous updates).
@@ -1568,6 +1586,7 @@ class StateManager:
         abs_beat_pos: float,
         snap,
         now: float,
+        autoloop_tick_just_fired: bool = False,
     ):
         """Build a frozen LaserContext from already-computed push-tick locals.
 
@@ -1599,6 +1618,7 @@ class StateManager:
             os2l_connected=os2l_connected,
             active_track_loaded=active_track_loaded,
             autoloop_ready=autoloop_ready,
+            autoloop_tick_just_fired=autoloop_tick_just_fired,
             breakdown_active=self._os.breakdown_active,
             smart_drops=tuple(d.meta.smart_drops),
             anlz_buildups=tuple(d.meta.anlz_buildups),

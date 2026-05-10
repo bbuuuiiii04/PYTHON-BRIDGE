@@ -104,6 +104,7 @@ class LaserContext:
     os2l_connected: bool
     active_track_loaded: bool = False
     autoloop_ready: bool = False
+    autoloop_tick_just_fired: bool = False
     breakdown_active: bool = False
     smart_drops: tuple[int, ...] = field(default_factory=tuple)
     anlz_buildups: tuple[int, ...] = field(default_factory=tuple)

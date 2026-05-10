@@ -17,20 +17,22 @@ Use this with the canonical design in `docs/laser_director_design.md` and the So
 2. Start with intentionally invalid config and verify startup is still healthy (`reason=invalid_config` without bridge failure).
 3. Start with valid config, `enabled=false`, `dry_run=true`; verify status JSON includes `laser_director`.
 4. Enable Laser Director while staying in `dry_run=true`; validate automatic selection is subordinate to existing autoloop readiness.
-5. Verify idle/no-output contract:
+5. Verify phrase/default scene decisions align to real autoloop tick/rearm edges (`[SS][AUTOLOOP-TICK]`, phrase-anchor rearm, smart-drop rearm, smart-breakdown rearm, or arm-locked-final), not 1-2 beats early from standalone beat math.
+6. Verify idle/no-output contract:
    - no playing track => `current_scene=""`
    - no loaded active track => `current_scene=""`
    - stale position => `current_scene=""`
-6. Verify automatic musical scene selection only when all are true:
+7. Verify automatic musical scene selection only when all are true:
    - active deck is playing
    - active deck has loaded track metadata
    - autoloop state is ready (`lighting_mode=autoloop`, no pending arm/re-arm, and matching `last_armed_filepath`)
-7. Verify scripted context (`lighting_mode=scripted` or `scripted_id>0`) returns idle/no-output (`scene=""`, `reason="scripted"`).
-8. Validate Smart Drop/Smart Breakdown behavior remains unchanged.
-9. Validate OS2L behavior remains unchanged throughout rollout.
-10. Test only safe mappings first (`safe_static`, gentle phrase movement).
-11. After safe mappings are confirmed, test higher-impact mappings (drop/strobe/aggressive looks) in controlled conditions.
-12. Only after all dry-run checks pass, set `dry_run=false` for live MIDI output and re-run the same validation sequence.
+8. Verify scripted context (`lighting_mode=scripted` or `scripted_id>0`) returns idle/no-output (`scene=""`, `reason="scripted"`).
+9. Verify same-scene reason changes are debug/status-only and do not appear as INFO scene transitions.
+10. Validate Smart Drop/Smart Breakdown behavior remains unchanged.
+11. Validate OS2L behavior remains unchanged throughout rollout.
+12. Test only safe mappings first (`safe_static`, gentle phrase movement).
+13. After safe mappings are confirmed, test higher-impact mappings (drop/strobe/aggressive looks) in controlled conditions.
+14. Only after all dry-run checks pass, set `dry_run=false` for live MIDI output and re-run the same validation sequence.
 
 ## Live Workflow Guidance
 
@@ -56,3 +58,5 @@ No OS2L rollback is required.
 - Status JSON always includes top-level `laser_director`.
 - Idle/no-track/stale/scripted/autoloop-not-ready paths return `scene=""` (send-nothing semantics for future executor).
 - Automatic scenes are emitted only when autoloop readiness is true.
+- Phrase/default scenes only change on real autoloop tick/rearm edges.
+- Same-scene reason changes are status/debug-only and are not trigger candidates for future MIDI execution.

@@ -366,10 +366,12 @@ Timing gates:
 - Manual override bypasses normal timing gates.
 - Idle/no-output uses `scene=""` and does not emit a visible scene selection.
 - Automatic musical selection requires existing autoloop readiness from `StateManager` (`lighting_mode=="autoloop"`, no pending arm/re-arm, and matching armed filepath).
+- Phrase/default timing must be subordinate to the existing autoloop tick/rearm lifecycle. Phrase-boundary decisions are emitted only when a real autoloop tick/rearm edge fires from `StateManager` (not from standalone continuous beat math).
 - Scripted context (`scripted_id>0` or `lighting_mode=="scripted"`) must return idle/no-output.
 - Normal scene changes respect `minimum_scene_hold_beats`.
 - Normal scene changes occur only at configured phrase boundaries when `normal_changes_only_on_phrase_boundary=true`.
 - Drop/pre-drop scenes may be immediate only when configured and position is fresh.
+- Rekordbox ANLZ UP markers are hints only; `buildup_scene` must require a relationship to a future Smart Drop within a bounded distance.
 
 Cooldown state is updated only after `MidiOutput.trigger()` accepts the message. If a desired scene is blocked by cooldown or safety, choose the configured fallback scene and record the blocked reason in status/logs.
 
@@ -693,6 +695,8 @@ Recommended log lines:
 ```
 
 Never log every tick. Scene/blocked/safe logs should be emitted on state transitions or rate-limited summaries only.
+
+Same-scene reason updates are status/debug-only and must not look like a new scene transition. INFO-level `scene` logs should represent only true scene-name changes.
 
 ---
 

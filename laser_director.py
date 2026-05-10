@@ -78,6 +78,7 @@ class LaserDirector:
         buildup_approach_beats: int = 8,
         buildup_hold_beats: int = 8,
         pre_drop_lookahead_beats: int = 4,
+        buildup_max_drop_distance_beats: int = 32,
     ) -> None:
         self._dry_run = dry_run
         self._enabled = enabled
@@ -98,6 +99,7 @@ class LaserDirector:
         self._buildup_approach_beats = max(0, int(buildup_approach_beats))
         self._buildup_hold_beats = max(0, int(buildup_hold_beats))
         self._pre_drop_lookahead_beats = max(0, int(pre_drop_lookahead_beats))
+        self._buildup_max_drop_distance_beats = max(1, int(buildup_max_drop_distance_beats))
 
         # Mutable policy state — written only from the StateManager thread.
         self._emergency: bool = False
@@ -109,9 +111,11 @@ class LaserDirector:
         self._personality: str = ""
         self._last_phrase_number: Optional[int] = None
         self._last_scene_change_abs_beat: float = 0.0
+        self._last_trigger_abs_beat: float = 0.0
         self._laser_drop_fired_beat: Optional[int] = None
         self._post_drop_start_abs_beat: float = -1.0
         self._last_smart_abs_beat: Optional[float] = None
+        self._phrase_trigger_pending: bool = False
 
     # ── Policy commands (called from StateManager._handle_event) ─────────────
 
@@ -187,7 +191,9 @@ class LaserDirector:
 
         decision = self._decide(ctx, now=now)
 
-        if decision.scene != self._current_scene or decision.reason != self._last_reason:
+        scene_changed = decision.scene != self._current_scene
+        reason_changed = decision.reason != self._last_reason
+        if scene_changed:
             log.info(
                 "[LASER] scene  %s->%s  reason=%s  dry_run=%s",
                 self._current_scene or "(none)",
@@ -195,9 +201,19 @@ class LaserDirector:
                 decision.reason,
                 self._dry_run,
             )
+        elif reason_changed:
+            log.debug(
+                "[LASER] reason-update  scene=%s  reason=%s->%s",
+                decision.scene or "(none)",
+                self._last_reason or "(none)",
+                decision.reason,
+            )
+
+        if scene_changed and decision.scene:
+            self._last_trigger_abs_beat = max(ctx.abs_beat, 0.0)
 
         if (
-            decision.scene != self._current_scene
+            scene_changed
             and decision.reason in ("default", "default_init", "phrase_boundary")
             and self._is_normal_auto_scene(decision.scene)
         ):
@@ -304,17 +320,7 @@ class LaserDirector:
                 source="policy",
             )
 
-        # Priority 9: Existing ANLZ buildup observation.
-        if self._buildup_scene and self._in_buildup_window(abs_beat, ctx.anlz_buildups):
-            self._last_smart_abs_beat = abs_beat
-            return LaserSceneDecision(
-                scene=self._buildup_scene,
-                reason="buildup_window",
-                priority=9,
-                source="policy",
-            )
-
-        # Priority 10: Drop crossing (once per target beat).
+        # Priority 9: Drop crossing (once per target beat).
         if previous_abs_beat is not None and self._drop_scene:
             for drop_beat in sorted(set(ctx.smart_drops)):
                 if (
@@ -327,11 +333,11 @@ class LaserDirector:
                     return LaserSceneDecision(
                         scene=self._drop_scene,
                         reason="drop_crossing",
-                        priority=10,
+                        priority=9,
                         source="policy",
                     )
 
-        # Priority 11: Post-drop hold (using existing minimum_scene_hold_beats).
+        # Priority 10: Post-drop hold (using existing minimum_scene_hold_beats).
         if (
             self._post_drop_scene
             and self._minimum_scene_hold_beats > 0
@@ -342,6 +348,27 @@ class LaserDirector:
             return LaserSceneDecision(
                 scene=self._post_drop_scene,
                 reason="post_drop_hold",
+                priority=10,
+                source="policy",
+            )
+
+        in_post_drop_hold = (
+            self._post_drop_start_abs_beat >= 0.0
+            and self._minimum_scene_hold_beats > 0
+            and (abs_beat - self._post_drop_start_abs_beat) < self._minimum_scene_hold_beats
+        )
+
+        # Priority 11: Existing ANLZ buildup observation, but only when it leads
+        # into a future Smart Drop and not during active post-drop hold.
+        if (
+            self._buildup_scene
+            and not in_post_drop_hold
+            and self._in_buildup_window(abs_beat, ctx.anlz_buildups, ctx.smart_drops)
+        ):
+            self._last_smart_abs_beat = abs_beat
+            return LaserSceneDecision(
+                scene=self._buildup_scene,
+                reason="buildup_window",
                 priority=11,
                 source="policy",
             )
@@ -384,6 +411,7 @@ class LaserDirector:
         effective_phrase_scene: str,
     ) -> LaserSceneDecision:
         if first_playing_tick:
+            self._phrase_trigger_pending = False
             return self._gate_normal_change(
                 ctx=ctx,
                 candidate_scene=self._default_scene,
@@ -392,11 +420,23 @@ class LaserDirector:
             )
 
         if phrase_changed:
+            self._phrase_trigger_pending = True
+
+        if self._phrase_trigger_pending and ctx.autoloop_tick_just_fired:
+            self._phrase_trigger_pending = False
             return self._gate_normal_change(
                 ctx=ctx,
                 candidate_scene=effective_phrase_scene,
                 candidate_reason="phrase_boundary",
                 priority=10,
+            )
+
+        if self._phrase_trigger_pending and self._is_normal_auto_scene(self._current_scene):
+            return LaserSceneDecision(
+                scene=self._current_scene,
+                reason="phrase_hold_pending",
+                priority=10,
+                source="policy",
             )
 
         if self._normal_changes_only_on_phrase_boundary:
@@ -428,15 +468,30 @@ class LaserDirector:
         self._laser_drop_fired_beat = None
         self._post_drop_start_abs_beat = -1.0
         self._last_smart_abs_beat = None
+        self._phrase_trigger_pending = False
 
-    def _in_buildup_window(self, abs_beat: float, buildups: tuple[int, ...]) -> bool:
+    def _in_buildup_window(
+        self,
+        abs_beat: float,
+        buildups: tuple[int, ...],
+        smart_drops: tuple[int, ...],
+    ) -> bool:
         for buildup_beat in buildups:
             if (
                 (buildup_beat - self._buildup_approach_beats)
                 <= abs_beat
                 < (buildup_beat + self._buildup_hold_beats)
             ):
-                return True
+                future_drops = [
+                    int(drop_beat)
+                    for drop_beat in smart_drops
+                    if drop_beat > abs_beat and drop_beat > buildup_beat
+                ]
+                if not future_drops:
+                    continue
+                nearest_future_drop = min(future_drops)
+                if nearest_future_drop - int(buildup_beat) <= self._buildup_max_drop_distance_beats:
+                    return True
         return False
 
     def _beats_to_next_drop(self, abs_beat: float, smart_drops: tuple[int, ...]) -> float:
@@ -511,6 +566,9 @@ class LaserDirector:
             "post_drop_scene": self._post_drop_scene,
             "buildup_approach_beats": self._buildup_approach_beats,
             "buildup_hold_beats": self._buildup_hold_beats,
+            "buildup_max_drop_distance_beats": self._buildup_max_drop_distance_beats,
             "pre_drop_lookahead_beats": self._pre_drop_lookahead_beats,
             "laser_drop_fired_beat": self._laser_drop_fired_beat,
+            "phrase_trigger_pending": self._phrase_trigger_pending,
+            "last_trigger_abs_beat": self._last_trigger_abs_beat,
         }
