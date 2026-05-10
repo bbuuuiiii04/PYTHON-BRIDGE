@@ -78,6 +78,7 @@ class LaserMapWizardTests(unittest.TestCase):
         apply_mapping(cfg, personality="house", role="buildup", note=47)
         apply_mapping(cfg, personality="house", role="drop", note=40)
         apply_mapping(cfg, personality="house", role="drop", note=48)
+        cfg["personalities"]["house"]["drop_style"] = "emphasized_drop"
         apply_mapping(cfg, personality="house", role="post_drop", note=41)
         apply_mapping(cfg, personality="house", role="post_drop", note=49)
         apply_mapping(cfg, personality="house", role="breakdown", note=42)
@@ -85,16 +86,34 @@ class LaserMapWizardTests(unittest.TestCase):
         house = cfg["personalities"]["house"]
         self.assertEqual(len(house["buildup_bank"]), 2)
         self.assertEqual(len(house["drop_bank"]), 2)
-        self.assertEqual(len(house["post_drop_bank"]), 2)
+        self.assertGreaterEqual(len(house["post_drop_bank"]), 2)
         self.assertEqual(len(house["breakdown_bank"]), 2)
 
-    def test_drop_defaults_to_hold_for_beats(self) -> None:
+    def test_drop_defaults_to_autoloop_pulse(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
         scene = apply_mapping(cfg, personality="house", role="drop", note=40)
         midi = cfg["scenes"][scene]["midi"]
-        self.assertEqual(midi["behavior"], "hold_beats")
-        self.assertEqual(midi["kind"], "note_on")
-        self.assertGreater(midi["hold_beats"], 0)
+        self.assertEqual(cfg["scenes"][scene]["scene_type"], "autoloop")
+        self.assertEqual(midi["behavior"], "pulse")
+        self.assertEqual(midi["kind"], "note_pulse")
+
+    def test_drop_mode_reuses_drop_mapping_for_post_drop(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        drop_scene = apply_mapping(cfg, personality="house", role="drop", note=40)
+        house = cfg["personalities"]["house"]
+        self.assertEqual(house["drop_style"], "drop_mode")
+        self.assertEqual(house["post_drop_scene"], drop_scene)
+        self.assertEqual(house["post_drop_bank"], [drop_scene])
+
+    def test_emphasized_drop_supports_separate_post_drop_mapping(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        cfg["personalities"]["house"]["drop_style"] = "emphasized_drop"
+        drop_scene = apply_mapping(cfg, personality="house", role="drop", note=40)
+        post_scene = apply_mapping(cfg, personality="house", role="post_drop", note=41)
+        house = cfg["personalities"]["house"]
+        self.assertNotEqual(drop_scene, post_scene)
+        self.assertEqual(house["drop_scene"], drop_scene)
+        self.assertEqual(house["post_drop_scene"], post_scene)
 
     def test_role_defaults_write_internal_safety_class(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
@@ -102,12 +121,14 @@ class LaserMapWizardTests(unittest.TestCase):
             ("groove", 37, "movement_low"),
             ("buildup", 38, "movement_medium"),
             ("drop", 40, "high_impact"),
-            ("post_drop", 41, "movement_high"),
             ("breakdown", 42, "movement_low"),
         ]
         for role, note, expected in roles:
             scene = apply_mapping(cfg, personality="house", role=role, note=note)
             self.assertEqual(cfg["scenes"][scene]["safety_class"], expected)
+        cfg["personalities"]["house"]["drop_style"] = "emphasized_drop"
+        post_scene = apply_mapping(cfg, personality="house", role="post_drop", note=41)
+        self.assertEqual(cfg["scenes"][post_scene]["safety_class"], "movement_high")
 
     def test_typo_suggestions(self) -> None:
         self.assertEqual(suggest_personality("housse"), "house")
@@ -237,7 +258,6 @@ class LaserMapWizardTests(unittest.TestCase):
         role_map = [
             ("buildup", [38, 47], "buildup_bank"),
             ("drop", [40, 48], "drop_bank"),
-            ("post_drop", [41, 49], "post_drop_bank"),
             ("breakdown", [42, 50], "breakdown_bank"),
         ]
         for role, notes, bank_field in role_map:
@@ -246,6 +266,12 @@ class LaserMapWizardTests(unittest.TestCase):
             update_role_bank_cooldown(cfg, personality="house", role=role, cooldown_beats=11)
             for scene in cfg["personalities"]["house"][bank_field]:
                 self.assertEqual(cfg["scenes"][scene]["cooldown_beats"], 11.0)
+        cfg["personalities"]["house"]["drop_style"] = "emphasized_drop"
+        apply_mapping(cfg, personality="house", role="post_drop", note=41)
+        apply_mapping(cfg, personality="house", role="post_drop", note=49)
+        update_role_bank_cooldown(cfg, personality="house", role="post_drop", cooldown_beats=11)
+        for scene in cfg["personalities"]["house"]["post_drop_bank"]:
+            self.assertEqual(cfg["scenes"][scene]["cooldown_beats"], 11.0)
 
     def test_mixed_role_cooldowns_detected(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
@@ -270,9 +296,21 @@ class LaserMapWizardTests(unittest.TestCase):
         self.assertIn("house (default)", summary)
         self.assertIn("groove", summary)
         self.assertIn("notes 37,45", summary)
-        self.assertIn("hold 4 beats", summary)
+        self.assertIn("drop", summary)
+        self.assertIn("pulse", summary)
+        self.assertIn("Drop style: Drop mode", summary)
+        self.assertNotIn("post_drop", summary)
         self.assertNotIn("Gentle movement", summary)
         self.assertNotIn("High impact", summary)
+
+    def test_summary_shows_post_drop_in_emphasized_mode(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        cfg["personalities"]["house"]["drop_style"] = "emphasized_drop"
+        apply_mapping(cfg, personality="house", role="drop", note=40)
+        apply_mapping(cfg, personality="house", role="post_drop", note=41)
+        summary = render_personality_summary(cfg, "house")
+        self.assertIn("Drop style: Emphasized drop", summary)
+        self.assertIn("post_drop", summary)
 
     def test_verify_runtime_contract_passes_for_wizard_config(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -22,6 +22,8 @@ _DEFAULT_PORT = "IAC Driver Bus 1"
 _DEFAULT_PERSONALITY = "house"
 _PERSONALITY_ALIASES = {"default": _DEFAULT_PERSONALITY}
 _ROLE_CHOICES = ("groove", "buildup", "drop", "post_drop", "breakdown")
+_DROP_STYLE_DROP_MODE = "drop_mode"
+_DROP_STYLE_EMPHASIZED = "emphasized_drop"
 _ROLE_FIELD_MAP = {
     "groove": ("phrase_scene", "phrase_bank"),
     "buildup": ("buildup_scene", "buildup_bank"),
@@ -65,15 +67,14 @@ _ROLE_DEFAULTS = {
         "behavior": "pulse",
     },
     "drop": {
-        "scene_type": "static",
+        "scene_type": "autoloop",
         "safety_class": "high_impact",
         "fallback_resolver": lambda p: (
             p.get("post_drop_scene") or p.get("phrase_scene") or "safe_static"
         ),
         "cooldown_beats": 32.0,
-        "immediate": True,
-        "behavior": "hold_beats",
-        "hold_beats": 4.0,
+        "immediate": False,
+        "behavior": "pulse",
     },
     "post_drop": {
         "scene_type": "autoloop",
@@ -146,6 +147,22 @@ def suggest_role(name: str) -> str:
 
 def canonical_personality(name: str) -> str:
     return _PERSONALITY_ALIASES.get(name.strip().lower(), name.strip().lower())
+
+
+def _get_drop_style(config: dict[str, Any], personality: str) -> str:
+    pdata = config.get("personalities", {}).get(personality, {})
+    if not isinstance(pdata, dict):
+        return _DROP_STYLE_DROP_MODE
+    style = str(pdata.get("drop_style", _DROP_STYLE_DROP_MODE))
+    if style not in (_DROP_STYLE_DROP_MODE, _DROP_STYLE_EMPHASIZED):
+        return _DROP_STYLE_DROP_MODE
+    return style
+
+
+def _visible_roles(config: dict[str, Any], personality: str) -> tuple[str, ...]:
+    if _get_drop_style(config, personality) == _DROP_STYLE_EMPHASIZED:
+        return _ROLE_CHOICES
+    return ("groove", "buildup", "drop", "breakdown")
 
 
 def validate_personality(name: str, personalities: dict[str, Any]) -> ValidationResult:
@@ -272,6 +289,7 @@ def _ensure_house_personality(config: dict[str, Any]) -> None:
         "post_drop_bank": ["house_post_drop_1"],
         "breakdown_bank": ["house_breakdown_1"],
         "allow_high_impact": True,
+        "drop_style": _DROP_STYLE_DROP_MODE,
         "phrase_interval_beats": 32,
         "minimum_scene_hold_beats": 8,
         "buildup_lookahead_beats": 32,
@@ -431,6 +449,7 @@ def _ensure_personality_exists(config: dict[str, Any], personality: str) -> None
         "post_drop_bank": [],
         "breakdown_bank": [],
         "allow_high_impact": False,
+        "drop_style": _DROP_STYLE_DROP_MODE,
         "phrase_interval_beats": 32,
         "minimum_scene_hold_beats": 8,
         "buildup_lookahead_beats": 32,
@@ -467,6 +486,9 @@ def apply_mapping(
     _ensure_personality_exists(config, personality)
     scenes = config.setdefault("scenes", {})
     pdata = config["personalities"][personality]
+    drop_style = _get_drop_style(config, personality)
+    if role == "post_drop" and drop_style == _DROP_STYLE_DROP_MODE:
+        raise ValueError("post_drop mapping is only available in Emphasized drop style.")
     scene_field, bank_field = _ROLE_FIELD_MAP[role]
     defaults = _ROLE_DEFAULTS[role]
     bank = pdata.setdefault(bank_field, [])
@@ -539,6 +561,15 @@ def apply_mapping(
     else:
         if replace_primary or not pdata.get(scene_field):
             pdata[scene_field] = scene_name
+    if role == "drop" and drop_style == _DROP_STYLE_DROP_MODE:
+        pdata["post_drop_scene"] = scene_name
+        post_bank = pdata.setdefault("post_drop_bank", [])
+        if not isinstance(post_bank, list):
+            post_bank = []
+            pdata["post_drop_bank"] = post_bank
+        if scene_name not in post_bank:
+            post_bank.clear()
+            post_bank.append(scene_name)
     primary_name = pdata.get(scene_field if role != "groove" else "phrase_scene")
     if isinstance(primary_name, str) and primary_name and primary_name not in bank:
         bank.insert(0, primary_name)
@@ -677,7 +708,8 @@ def render_personality_summary(config: dict[str, Any], personality: str) -> str:
     scenes = config.get("scenes", {})
     title = f"{personality} (default)" if personality == _DEFAULT_PERSONALITY else personality
     lines: list[str] = [title]
-    for role in _ROLE_CHOICES:
+    visible_roles = _visible_roles(config, personality)
+    for role in visible_roles:
         names = _role_scene_names(config, personality, role)
         if not names:
             lines.append(f"  {role:10s} note -           cooldown -    pulse")
@@ -702,6 +734,12 @@ def render_personality_summary(config: dict[str, Any], personality: str) -> str:
         behavior_set = sorted(set(behaviors))
         behavior_text = behavior_set[0] if len(behavior_set) == 1 else "mixed"
         lines.append(f"  {role:10s} {note_text:15s} {cooldown_text:14s} {behavior_text}")
+    style = _get_drop_style(config, personality)
+    if style == _DROP_STYLE_EMPHASIZED:
+        lines.append("\nDrop style: Emphasized drop")
+    else:
+        lines.append("\nDrop style: Drop mode")
+        lines.append("Post-drop: uses the same drop autoloop mapping")
     lines.append("\nTiming:")
     lines.append(f"  Groove phrase length: {pdata.get('phrase_interval_beats', 32)} beats")
     lines.append(f"  Minimum scene hold: {pdata.get('minimum_scene_hold_beats', 8)} beats")
@@ -750,11 +788,13 @@ def _pick_personality(config: dict[str, Any]) -> str:
         print("Re-enter.")
 
 
-def _pick_role() -> str:
+def _pick_role(config: dict[str, Any], personality: str) -> str:
+    roles = _visible_roles(config, personality)
+    role_text = "/".join(roles)
     while True:
-        entered = _input_with_back("Role [groove/buildup/drop/post_drop/breakdown]:")
+        entered = _input_with_back(f"Role [{role_text}]:")
         result = validate_role(entered)
-        if result.valid:
+        if result.valid and result.value in roles:
             return result.value
         print(_c(f"Unknown role: {entered}", _RED))
         if result.suggestion:
@@ -825,6 +865,15 @@ def _pick_behavior(role: str, scene_type: str) -> tuple[str, int, float]:
         entered = _input_with_back("Hold milliseconds [default 500]:") or "500"
         hold_ms = max(10, min(30000, int(entered)))
     return behavior, hold_ms, hold_beats
+
+
+def _pick_normal_behavior() -> tuple[str, int, float]:
+    entered = _input_with_back(
+        "Behavior [pulse] (use hold only in advanced behavior settings):"
+    ).strip().lower()
+    if entered and entered != "pulse":
+        print(_c("Normal setup uses pulse for SoundSwitch autoloops. Falling back to pulse.", _YELLOW))
+    return ("pulse", 0, 0.0)
 
 
 def _edit_personality_timing(config: dict[str, Any], personality: str) -> bool:
@@ -1011,12 +1060,37 @@ def _print_role_bank(config: dict[str, Any], personality: str, role: str) -> Non
         print(f"  {idx}. {scene_name:18s} note {note:<3} cooldown {cooldown:g}")
 
 
+def _set_drop_style(config: dict[str, Any], personality: str) -> bool:
+    pdata = config.get("personalities", {}).get(personality, {})
+    if not isinstance(pdata, dict):
+        return False
+    current = _get_drop_style(config, personality)
+    print(_c("\nDrop style", _CYAN))
+    print(f"Current: {'Emphasized drop' if current == _DROP_STYLE_EMPHASIZED else 'Drop mode'}")
+    print("  1. Drop mode (single drop mapping; post-drop uses same scene)")
+    print("  2. Emphasized drop (separate drop and post-drop mappings)")
+    choice = _input_with_back("Select style [1/2]:")
+    if choice not in {"1", "2"}:
+        print(_c("No change.", _YELLOW))
+        return False
+    selected = _DROP_STYLE_DROP_MODE if choice == "1" else _DROP_STYLE_EMPHASIZED
+    pdata["drop_style"] = selected
+    if selected == _DROP_STYLE_DROP_MODE:
+        drop_scene = pdata.get("drop_scene")
+        if isinstance(drop_scene, str) and drop_scene:
+            pdata["post_drop_scene"] = drop_scene
+            pdata["post_drop_bank"] = [drop_scene]
+    print(_c("Drop style updated.", _GREEN))
+    return True
+
+
 def _edit_timing_menu(config: dict[str, Any], personality: str) -> bool:
     changed = False
     while True:
         print(_c("\nTiming / Cooldowns", _CYAN))
         print("  1. Edit global personality timing")
         print("  2. Edit role cooldown")
+        print("  3. Set drop style")
         print("  0. Back")
         try:
             choice = _input_with_back(">")
@@ -1030,7 +1104,7 @@ def _edit_timing_menu(config: dict[str, Any], personality: str) -> bool:
             continue
         if choice == "2":
             try:
-                role = _pick_role()
+                role = _pick_role(config, personality)
                 _print_role_bank(config, personality, role)
                 mixed, values = detect_mixed_role_cooldowns(
                     config,
@@ -1068,6 +1142,12 @@ def _edit_timing_menu(config: dict[str, Any], personality: str) -> bool:
                 )
                 print(_c(f"Updated {role} role cooldown -> {cooldown:g}", _GREEN))
                 changed = True
+            except BackRequested:
+                continue
+            continue
+        if choice == "3":
+            try:
+                changed = _set_drop_style(config, personality) or changed
             except BackRequested:
                 continue
             continue
@@ -1196,7 +1276,7 @@ def _remove_scene_from_role(config: dict[str, Any], personality: str, role: str,
 def _edit_existing_mapping_flow(config: dict[str, Any]) -> bool:
     try:
         personality = _pick_personality(config)
-        role = _pick_role()
+        role = _pick_role(config, personality)
         scene_name = _pick_scene_from_role(config, personality, role)
     except BackRequested:
         return False
@@ -1262,7 +1342,7 @@ def _advanced_safety_menu(config: dict[str, Any]) -> bool:
     print(_c("Most users should not change this. Safety class is internal metadata used by the bridge to block risky scenes.", _YELLOW))
     try:
         personality = _pick_personality(config)
-        role = _pick_role()
+        role = _pick_role(config, personality)
         scene_name = _pick_scene_from_role(config, personality, role)
     except BackRequested:
         return False
@@ -1339,9 +1419,12 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[tu
         ("groove", personality.phrase_scene, "default_init"),
         ("buildup", personality.buildup_scene, "buildup_to_drop_window"),
         ("drop", personality.drop_scene, "drop_crossing"),
-        ("post_drop", personality.post_drop_scene, "post_drop_hold"),
         ("breakdown", personality.breakdown_scene, "breakdown_hold"),
     ]
+    if personality.post_drop_scene and personality.post_drop_scene != personality.drop_scene:
+        role_specs.insert(3, ("post_drop", personality.post_drop_scene, "post_drop_hold"))
+    elif personality.post_drop_scene == personality.drop_scene:
+        checks.append(("post_drop", True, "uses same mapping as drop (Drop mode)"))
     beat = 100.0
     for role, scene_name, reason in role_specs:
         scene = cfg.scenes.get(scene_name)
@@ -1433,7 +1516,7 @@ def _handle_map_flow(config: dict[str, Any], *, replace_primary: bool = False) -
                 step = "role"
                 continue
             if step == "role":
-                role = _pick_role()
+                role = _pick_role(config, personality)
                 step = "note"
                 continue
             if step == "note":
@@ -1441,8 +1524,7 @@ def _handle_map_flow(config: dict[str, Any], *, replace_primary: bool = False) -
                 step = "behavior"
                 continue
             if step == "behavior":
-                scene_type = _ROLE_DEFAULTS[role]["scene_type"]
-                behavior, hold_ms, hold_beats = _pick_behavior(role, scene_type)
+                behavior, hold_ms, hold_beats = _pick_normal_behavior()
                 step = "cooldown"
                 continue
             if step == "cooldown":

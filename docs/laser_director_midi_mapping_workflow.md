@@ -46,6 +46,10 @@ Only settings with runtime effect are exposed in normal wizard setup.
 Internal-only fields such as `safety_class` stay hidden from normal setup and are
 available only in **Advanced Safety Metadata**.
 
+Default operator mappings are SoundSwitch autoloops triggered by MIDI pulse.
+Hold behavior is advanced and should only be used when a SoundSwitch control
+requires hold-to-play MIDI input.
+
 ## Timing / Cooldowns
 
 The wizard includes a visible **Edit Timing & Cooldowns** menu.
@@ -64,6 +68,10 @@ An optional **Advanced Safety Metadata** menu is available for expert edits.
 Role cooldown is a runtime-enforced setting. A role cooldown change updates all
 mappings in that role bank and is enforced in `LaserSceneExecutor` using
 `ctx.abs_beat` (not wall-clock time).
+
+Drop style options:
+- **Drop mode** (default): one drop autoloop mapping; post-drop reuses drop mapping.
+- **Emphasized drop**: separate drop and post-drop autoloop mappings.
 
 The wizard includes **Verify mappings actually work**, which loads saved config,
 runs a dry runtime simulation through `LaserSceneExecutor`, and reports PASS/FAIL
