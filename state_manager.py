@@ -715,9 +715,23 @@ class StateManager:
 
         elif self._laser_director is not None:
             if ev.kind == Ev.LASER_TOGGLE:
+                was_enabled = self._laser_director.is_enabled()
                 self._laser_director.toggle_enabled()
+                if (
+                    was_enabled
+                    and not self._laser_director.is_enabled()
+                    and self._laser_executor is not None
+                ):
+                    self._laser_executor.clear_pending_blackout(
+                        reason="laser_director_disabled"
+                    )
             elif ev.kind == Ev.LASER_SET_ENABLED:
-                self._laser_director.set_enabled(bool(ev.payload.get("enabled", False)))
+                enabled = bool(ev.payload.get("enabled", False))
+                self._laser_director.set_enabled(enabled)
+                if not enabled and self._laser_executor is not None:
+                    self._laser_executor.clear_pending_blackout(
+                        reason="laser_director_disabled"
+                    )
             elif ev.kind == Ev.LASER_SCENE:
                 scene = str(ev.payload.get("scene", ""))
                 ttl_s = float(ev.payload.get("ttl_s", 4.0))
@@ -1645,6 +1659,10 @@ class StateManager:
         # Laser Director tick — dry-run only in Phase 1.
         # Must not block, send MIDI, call OS2LOutput, or mutate DeckState/OutputState.
         drop_crossing_decision_emitted = False
+        smart_drop_blackout_arm = bool(
+            smart_drop_signal == _SMART_DROP_SIGNAL_BLACKOUT_ARMED
+            and smart_drop_blackout_mode
+        )
         if self._laser_director is not None:
             ctx = self._build_laser_context(
                 active,
@@ -1656,13 +1674,17 @@ class StateManager:
                 snap,
                 now,
                 autoloop_tick_just_fired=autoloop_tick_just_fired,
+                smart_drop_blackout_arm=smart_drop_blackout_arm,
             )
+            laser_director_enabled = self._laser_director.is_enabled()
             if (
-                smart_drop_signal == _SMART_DROP_SIGNAL_BLACKOUT_ARMED
-                and smart_drop_blackout_mode
+                smart_drop_blackout_arm
+                and not laser_director_enabled
                 and self._laser_executor is not None
             ):
-                self._laser_executor.trigger_blackout_on(ctx)
+                self._laser_executor.clear_pending_blackout(
+                    reason="laser_director_disabled"
+                )
             decision = self._laser_director.tick(ctx, now=now)
             drop_crossing_decision_emitted = bool(
                 decision is not None and decision.reason == "drop_crossing"
@@ -1702,6 +1724,7 @@ class StateManager:
         snap,
         now: float,
         autoloop_tick_just_fired: bool = False,
+        smart_drop_blackout_arm: bool = False,
     ):
         """Build a frozen LaserContext from already-computed push-tick locals.
 
@@ -1747,6 +1770,7 @@ class StateManager:
             current_phrase_is_chorus=current_phrase_is_chorus,
             scripted_id=d.scripted_id,
             smart_drop_blackout_active=self._os.drop_cut_armed,
+            smart_drop_blackout_arm=smart_drop_blackout_arm,
         )
 
     # ── Stop / resume helpers ─────────────────────────────────────────────────

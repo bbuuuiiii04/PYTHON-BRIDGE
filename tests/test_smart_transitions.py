@@ -557,6 +557,52 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_not_called()
 
+    def test_blackout_arm_does_not_trigger_when_laser_director_disabled(self) -> None:
+        sm = self._prepare_manager()
+        sm._os.drop_cut_armed = False
+        sm._os.drop_rearm_beat = 0
+        sm._deck[1].meta.smart_drops = [6]
+        sm._laser_director = Mock()
+        sm._laser_director.is_enabled.return_value = False
+        sm._laser_director.tick.return_value = None
+        sm._push_tick()
+        sm._laser_executor.trigger_blackout_on.assert_not_called()
+        sm._laser_executor.clear_pending_blackout.assert_any_call(
+            reason="laser_director_disabled"
+        )
+
+    def test_blackout_arm_signal_passes_through_context_without_direct_trigger_call(self) -> None:
+        sm = self._prepare_manager()
+        sm._os.drop_cut_armed = False
+        sm._os.drop_rearm_beat = 0
+        sm._deck[1].meta.smart_drops = [6]
+        sm._laser_director = Mock()
+        sm._laser_director.is_enabled.return_value = True
+        sm._laser_director.tick.return_value = SimpleNamespace(
+            scene="up",
+            reason="buildup_to_drop_window",
+            role="buildup",
+        )
+        sm._push_tick()
+        sm._laser_executor.trigger_blackout_on.assert_not_called()
+        _, ctx = sm._laser_executor.on_decision.call_args.args
+        self.assertTrue(ctx.smart_drop_blackout_arm)
+
+    def test_laser_set_enabled_false_clears_pending_blackout_once(self) -> None:
+        sm = self._prepare_manager()
+        sm._laser_director = Mock()
+        sm._laser_director.is_enabled.return_value = True
+        sm._handle_event(
+            BridgeEvent(
+                Ev.LASER_SET_ENABLED,
+                0,
+                {"enabled": False},
+            )
+        )
+        sm._laser_executor.clear_pending_blackout.assert_called_once_with(
+            reason="laser_director_disabled"
+        )
+
 
 class SnapshotStatusTests(unittest.TestCase):
     def test_snapshot_distinguishes_transition_window_from_blackout_pending(self) -> None:

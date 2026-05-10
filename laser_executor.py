@@ -98,6 +98,7 @@ class LaserSceneExecutor:
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_idle")
             return
+        should_arm_blackout = bool(ctx.smart_drop_blackout_arm and role in _AUTO_ROLES)
 
         cursor_before, active_before = self._role_state_snapshot(role)
         selected_scene = self._select_scene(decision, ctx, role_changed)
@@ -157,6 +158,9 @@ class LaserSceneExecutor:
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_same_scene_skip")
             return
+
+        if should_arm_blackout:
+            self.trigger_blackout_on(ctx)
 
         priority = self._priority_for_role(role)
         midi_message = self._materialize_midi(
