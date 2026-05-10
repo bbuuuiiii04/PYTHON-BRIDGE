@@ -81,6 +81,9 @@ class LaserPersonality:
     phrase_interval_beats: int = 32
     minimum_scene_hold_beats: int = 0
     normal_changes_only_on_phrase_boundary: bool = False
+    buildup_approach_beats: int = 8
+    buildup_hold_beats: int = 8
+    pre_drop_lookahead_beats: int = 4
 
 
 @dataclass(frozen=True)
@@ -99,6 +102,10 @@ class LaserContext:
     position_stale: bool
     lighting_mode: str   # "idle", "autoloop", "scripted"
     os2l_connected: bool
+    breakdown_active: bool = False
+    smart_drops: tuple[int, ...] = field(default_factory=tuple)
+    anlz_buildups: tuple[int, ...] = field(default_factory=tuple)
+    scripted_id: int = 0
 
 
 @dataclass(frozen=True)

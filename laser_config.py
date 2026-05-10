@@ -353,6 +353,36 @@ def _validate_personality(
             f"{prefix}: 'normal_changes_only_on_phrase_boundary' must be a boolean"
         )
 
+    buildup_approach_beats = data.get("buildup_approach_beats", 8)
+    if (
+        not isinstance(buildup_approach_beats, int)
+        or isinstance(buildup_approach_beats, bool)
+        or buildup_approach_beats < 0
+    ):
+        errors.append(
+            f"{prefix}: 'buildup_approach_beats' must be a non-negative integer"
+        )
+
+    buildup_hold_beats = data.get("buildup_hold_beats", 8)
+    if (
+        not isinstance(buildup_hold_beats, int)
+        or isinstance(buildup_hold_beats, bool)
+        or buildup_hold_beats < 0
+    ):
+        errors.append(
+            f"{prefix}: 'buildup_hold_beats' must be a non-negative integer"
+        )
+
+    pre_drop_lookahead_beats = data.get("pre_drop_lookahead_beats", 4)
+    if (
+        not isinstance(pre_drop_lookahead_beats, int)
+        or isinstance(pre_drop_lookahead_beats, bool)
+        or pre_drop_lookahead_beats < 0
+    ):
+        errors.append(
+            f"{prefix}: 'pre_drop_lookahead_beats' must be a non-negative integer"
+        )
+
     return errors
 
 
@@ -421,4 +451,7 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
         normal_changes_only_on_phrase_boundary=bool(
             data.get("normal_changes_only_on_phrase_boundary", False)
         ),
+        buildup_approach_beats=int(data.get("buildup_approach_beats", 8)),
+        buildup_hold_beats=int(data.get("buildup_hold_beats", 8)),
+        pre_drop_lookahead_beats=int(data.get("pre_drop_lookahead_beats", 4)),
     )
