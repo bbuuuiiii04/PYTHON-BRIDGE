@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.tools.laser_map_wizard import (  # noqa: E402
     apply_mapping,
+    detect_mixed_role_cooldowns,
     find_duplicate_notes,
     get_main_menu_options,
     is_back_command,
@@ -20,6 +21,7 @@ from rb_ss_bridge_v2.tools.laser_map_wizard import (  # noqa: E402
     suggest_personality,
     suggest_role,
     update_personality_timing,
+    update_scene_safety_class,
     update_scene_cooldown,
     update_role_bank_cooldown,
     _warn_duplicate_note,
@@ -77,6 +79,19 @@ class LaserMapWizardTests(unittest.TestCase):
         self.assertEqual(midi["behavior"], "hold_beats")
         self.assertEqual(midi["kind"], "note_on")
         self.assertGreater(midi["hold_beats"], 0)
+
+    def test_role_defaults_write_internal_safety_class(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        roles = [
+            ("groove", 37, "movement_low"),
+            ("buildup", 38, "movement_medium"),
+            ("drop", 40, "high_impact"),
+            ("post_drop", 41, "movement_high"),
+            ("breakdown", 42, "movement_low"),
+        ]
+        for role, note, expected in roles:
+            scene = apply_mapping(cfg, personality="house", role=role, note=note)
+            self.assertEqual(cfg["scenes"][scene]["safety_class"], expected)
 
     def test_typo_suggestions(self) -> None:
         self.assertEqual(suggest_personality("housse"), "house")
@@ -145,7 +160,10 @@ class LaserMapWizardTests(unittest.TestCase):
             self.assertTrue(is_back_command(token))
 
     def test_timing_menu_reachable_from_main_menu(self) -> None:
-        self.assertIn("Edit Timing & Cooldowns", get_main_menu_options())
+        options = get_main_menu_options()
+        self.assertIn("Timing / Cooldowns", options)
+        self.assertIn("Advanced Safety Metadata", options)
+        self.assertNotIn("Edit one scene cooldown", options)
 
     def test_edit_personality_timing_updates_fields(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
@@ -175,8 +193,16 @@ class LaserMapWizardTests(unittest.TestCase):
 
     def test_role_bank_cooldown_update(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
-        apply_mapping(cfg, personality="house", role="groove", note=37)
-        apply_mapping(cfg, personality="house", role="groove", note=45)
+        first = apply_mapping(cfg, personality="house", role="groove", note=37)
+        second = apply_mapping(cfg, personality="house", role="groove", note=45)
+        notes_before = {
+            first: cfg["scenes"][first]["midi"]["note"],
+            second: cfg["scenes"][second]["midi"]["note"],
+        }
+        behavior_before = {
+            first: cfg["scenes"][first]["midi"]["behavior"],
+            second: cfg["scenes"][second]["midi"]["behavior"],
+        }
         update_role_bank_cooldown(
             cfg,
             personality="house",
@@ -185,15 +211,57 @@ class LaserMapWizardTests(unittest.TestCase):
         )
         for scene in cfg["personalities"]["house"]["phrase_bank"]:
             self.assertEqual(cfg["scenes"][scene]["cooldown_beats"], 18.0)
+            self.assertEqual(cfg["scenes"][scene]["midi"]["note"], notes_before[scene])
+            self.assertEqual(cfg["scenes"][scene]["midi"]["behavior"], behavior_before[scene])
+        self.assertEqual(cfg["personalities"]["house"]["phrase_scene"], first)
+
+    def test_role_cooldown_update_for_other_banks(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        role_map = [
+            ("buildup", [38, 47], "buildup_bank"),
+            ("drop", [40, 48], "drop_bank"),
+            ("post_drop", [41, 49], "post_drop_bank"),
+            ("breakdown", [42, 50], "breakdown_bank"),
+        ]
+        for role, notes, bank_field in role_map:
+            for note in notes:
+                apply_mapping(cfg, personality="house", role=role, note=note)
+            update_role_bank_cooldown(cfg, personality="house", role=role, cooldown_beats=11)
+            for scene in cfg["personalities"]["house"][bank_field]:
+                self.assertEqual(cfg["scenes"][scene]["cooldown_beats"], 11.0)
+
+    def test_mixed_role_cooldowns_detected(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        first = apply_mapping(cfg, personality="house", role="groove", note=37)
+        second = apply_mapping(cfg, personality="house", role="groove", note=45)
+        cfg["scenes"][first]["cooldown_beats"] = 16
+        cfg["scenes"][second]["cooldown_beats"] = 8
+        mixed, values = detect_mixed_role_cooldowns(
+            cfg,
+            personality="house",
+            role="groove",
+        )
+        self.assertTrue(mixed)
+        self.assertEqual(values, [8.0, 16.0])
 
     def test_summary_displays_cooldown_and_behavior(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
         apply_mapping(cfg, personality="house", role="groove", note=37)
+        apply_mapping(cfg, personality="house", role="groove", note=45)
         apply_mapping(cfg, personality="house", role="drop", note=40)
         summary = render_personality_summary(cfg, "house")
-        self.assertIn("cooldown", summary)
-        self.assertIn("pulse", summary)
-        self.assertIn("hold", summary)
+        self.assertIn("house (default)", summary)
+        self.assertIn("groove", summary)
+        self.assertIn("notes 37,45", summary)
+        self.assertIn("hold 4 beats", summary)
+        self.assertNotIn("Gentle movement", summary)
+        self.assertNotIn("High impact", summary)
+
+    def test_advanced_safety_edit_updates_value(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        scene = apply_mapping(cfg, personality="house", role="groove", note=37)
+        update_scene_safety_class(cfg, scene_name=scene, safety_class="strobe")
+        self.assertEqual(cfg["scenes"][scene]["safety_class"], "strobe")
 
 
 if __name__ == "__main__":

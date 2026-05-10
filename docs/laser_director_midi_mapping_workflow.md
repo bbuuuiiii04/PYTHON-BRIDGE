@@ -38,8 +38,13 @@ The wizard includes a visible **Edit Timing & Cooldowns** menu.
 - Groove phrase length: how often normal groove changes can happen.
 - Minimum scene hold: how long a scene must stay before normal changes replace it.
 - Buildup lookahead: how many beats before a Smart Drop buildup is allowed.
-- Scene cooldown: how soon the same exact scene can be triggered again.
+- Role cooldown: how soon the same exact role look can be triggered again.
+  Changing a role cooldown updates every mapping in that role's bank.
 - Hold behavior: pulse / hold_beats / hold_ms / note_on / note_off.
+
+The normal wizard flow does not ask for laser classification. Safety metadata
+(`safety_class`) is assigned automatically from role defaults and kept internal.
+An optional **Advanced Safety Metadata** menu is available for expert edits.
 
 ## Core idea
 
