@@ -159,6 +159,15 @@ def load_laser_director_config(
         )
 
     config = _build_config(data)
+    if (
+        config.smart_drop_mode == "blackout_mask"
+        and config.manual_blackout_on is None
+        and config.manual_blackout_off is None
+    ):
+        log.warning(
+            "smart_drop_mode='blackout_mask' but manual_commands.blackout_on/off are not configured; "
+            "Smart Drop transitions will not be masked."
+        )
     log.info(
         "[laser_config] loaded  enabled=%s  dry_run=%s  scenes=%d  personalities=%d",
         config.enabled,
@@ -576,16 +585,7 @@ def _build_midi_message(raw: Any) -> Optional[LaserMidiMessage]:
     if not isinstance(raw, dict):
         return None
     kind = str(raw.get("kind", "note_pulse"))
-    behavior = raw.get("behavior")
-    if not isinstance(behavior, str) or not behavior:
-        if kind == "note_pulse":
-            behavior = "pulse"
-        elif kind == "note_on":
-            behavior = "note_on"
-        elif kind == "note_off":
-            behavior = "note_off"
-        else:
-            behavior = "pulse"
+    behavior = _infer_behavior(kind, raw.get("behavior"))
     return LaserMidiMessage(
         kind=kind,
         channel=int(raw.get("channel", 1)),
@@ -603,16 +603,7 @@ def _build_midi_message(raw: Any) -> Optional[LaserMidiMessage]:
 def _build_scene(name: str, data: dict[str, Any]) -> LaserScene:
     midi_raw = data.get("midi", {})
     kind = str(midi_raw.get("kind", "note_pulse"))
-    behavior = midi_raw.get("behavior")
-    if not isinstance(behavior, str) or not behavior:
-        if kind == "note_pulse":
-            behavior = "pulse"
-        elif kind == "note_on":
-            behavior = "note_on"
-        elif kind == "note_off":
-            behavior = "note_off"
-        else:
-            behavior = "pulse"
+    behavior = _infer_behavior(kind, midi_raw.get("behavior"))
     midi = LaserMidiMessage(
         kind=kind,
         channel=int(midi_raw.get("channel", 1)),
@@ -668,3 +659,15 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
         buildup_hold_beats=int(data.get("buildup_hold_beats", 8)),
         pre_drop_lookahead_beats=int(data.get("pre_drop_lookahead_beats", 4)),
     )
+
+
+def _infer_behavior(kind: str, behavior: object) -> str:
+    if isinstance(behavior, str) and behavior:
+        return behavior
+    if kind == "note_pulse":
+        return "pulse"
+    if kind == "note_on":
+        return "note_on"
+    if kind == "note_off":
+        return "note_off"
+    return "pulse"

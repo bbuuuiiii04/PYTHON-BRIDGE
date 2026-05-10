@@ -660,6 +660,12 @@ If available:
 
 Policy fields come from `LaserDirector.status()`. Transport fields come from `MidiOutput.status()`. Status collection is allowed in `StatusWriter`, not in `_push_tick`.
 
+Smart Drop status semantics:
+
+- `smart_drop_transition_window_active` means Smart Drop timing is armed (`drop_cut_armed`).
+- `blackout_pending_for_drop_window` (executor status) means blackout-on was actually sent and blackout-off is still pending.
+- `smart_drop_blackout_active` remains for backward compatibility and mirrors executor blackout pending state.
+
 ---
 
 ## 16. Validation

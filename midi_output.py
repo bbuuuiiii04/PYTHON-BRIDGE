@@ -43,13 +43,6 @@ class _QueuedCommand:
     message: Optional[LaserMidiMessage] = None
 
 
-@dataclass(frozen=True)
-class _HeldNote:
-    channel: int
-    note: int
-    off_at: float
-
-
 class MidiOutput:
     """Bounded, non-blocking MIDI output transport."""
 
@@ -335,24 +328,32 @@ class MidiOutput:
         with self._lock:
             outport = self._outport
             mido = self._mido
-            self._active_held_notes.pop((channel, note), None)
         if outport is None or mido is None:
             return
         outport.send(mido.Message("note_off", channel=channel, note=note, velocity=0))
+        with self._lock:
+            self._active_held_notes.pop((channel, note), None)
 
     def _schedule_note_off(self, *, channel: int, note: int, hold_ms: int) -> None:
         off_at = time.monotonic() + max(0.0, hold_ms / 1000.0)
         key = (channel, note)
         with self._lock:
             self._active_held_notes[key] = off_at
-        heapq.heappush(self._scheduled_offs, (off_at, channel, note, int(off_at * 1000)))
+            heapq.heappush(
+                self._scheduled_offs,
+                (off_at, channel, note, int(off_at * 1000)),
+            )
 
     def _process_due_note_offs(self) -> None:
-        while self._scheduled_offs:
-            off_at, channel, note, _ = self._scheduled_offs[0]
-            if off_at > time.monotonic():
-                return
-            heapq.heappop(self._scheduled_offs)
+        while True:
+            with self._lock:
+                if not self._scheduled_offs:
+                    return
+                off_at, channel, note, _ = self._scheduled_offs[0]
+                if off_at > time.monotonic():
+                    return
+                heapq.heappop(self._scheduled_offs)
+
             key = (channel, note)
             with self._lock:
                 active_off_at = self._active_held_notes.get(key)
@@ -365,9 +366,10 @@ class MidiOutput:
                 return
 
     def _next_wait_timeout(self) -> float:
-        if not self._scheduled_offs:
-            return 0.05
-        next_off = self._scheduled_offs[0][0]
+        with self._lock:
+            if not self._scheduled_offs:
+                return 0.05
+            next_off = self._scheduled_offs[0][0]
         return max(0.0, min(0.05, next_off - time.monotonic()))
 
     def _is_note_held(self, key: tuple[int, int]) -> bool:
@@ -375,20 +377,26 @@ class MidiOutput:
             return key in self._active_held_notes
 
     def _clear_scheduled_note_offs(self) -> None:
-        self._scheduled_offs.clear()
+        with self._lock:
+            self._scheduled_offs.clear()
 
     def _clear_held_notes(self, *, send_note_off: bool) -> None:
         with self._lock:
             held = list(self._active_held_notes.keys())
-            self._active_held_notes.clear()
+            if not send_note_off:
+                self._active_held_notes.clear()
         self._clear_scheduled_note_offs()
         if not send_note_off:
             return
         for channel, note in held:
             try:
                 self._send_note_off(channel=channel, note=note)
-            except Exception:
-                return
+            except Exception as exc:
+                self._record_send_error(exc)
+        # Panic/stop cleanup should not leave stale held-note tracking entries.
+        with self._lock:
+            for key in held:
+                self._active_held_notes.pop(key, None)
 
     def _record_rejection(self) -> None:
         with self._lock:

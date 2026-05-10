@@ -473,6 +473,14 @@ class StateManager:
 
     def _publish_snapshot(self) -> None:
         os = self._os
+        executor_blackout_pending = False
+        if self._laser_executor is not None:
+            try:
+                executor_blackout_pending = bool(
+                    self._laser_executor.status().get("blackout_pending_for_drop_window", False)
+                )
+            except Exception:
+                executor_blackout_pending = False
         deck = {}
         for num, state in self._deck.items():
             deck[str(num)] = {
@@ -498,7 +506,8 @@ class StateManager:
             "pending_live_bpm": os.pending_live_bpm,
             "drop_cut_armed": os.drop_cut_armed,
             "smart_drop_transition_window_active": os.drop_cut_armed,
-            "smart_drop_blackout_active": os.drop_cut_armed,
+            # Backward-compatible field name, now reflecting executor blackout MIDI state.
+            "smart_drop_blackout_active": executor_blackout_pending,
             "scripted_id": self._os.scripted_id if hasattr(self._os, "scripted_id") else 0, # compatibility fallback
             "smart_drop_enabled": self._smart_drop_enabled,
             "smart_breakdown_enabled": self._smart_breakdown_enabled,
@@ -1661,6 +1670,10 @@ class StateManager:
             if self._laser_executor is not None:
                 self._laser_executor.on_decision(decision, ctx)
         if smart_drop_signal == _SMART_DROP_SIGNAL_CROSSING and smart_drop_blackout_mode:
+            # Ordering requirement: in blackout mode keep os.drop_cut_armed true
+            # through phrase-anchor processing so _phrase_anchor_tick suppresses
+            # same-beat phrase-anchor rearm. Do crossing cleanup only here,
+            # after phrase-anchor processing has already run for this tick.
             if (
                 self._laser_executor is not None
                 and not drop_crossing_decision_emitted

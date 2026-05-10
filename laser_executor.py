@@ -136,6 +136,7 @@ class LaserSceneExecutor:
             scene_def.cooldown_beats,
             ctx.abs_beat,
             role_changed=role_changed,
+            previous_role=previous_role,
         ):
             self._restore_role_state(role, cursor_before, active_before)
             self._record_gate("role_cooldown_blocked")
@@ -317,12 +318,13 @@ class LaserSceneExecutor:
         abs_beat: float,
         *,
         role_changed: bool,
+        previous_role: str,
     ) -> bool:
         if role not in _AUTO_ROLES:
             return False
-        # Cooldown is for repeated retriggers of the same role window.
-        # First entry into a newly selected role stays eligible.
-        if role_changed:
+        # Keep the intended "UP -> DROP" path eligible even if a recent drop
+        # was triggered; this is a musical transition, not spam retriggering.
+        if role == "drop" and role_changed and previous_role == "buildup":
             return False
         cooldown = float(cooldown_beats)
         if cooldown <= 0:

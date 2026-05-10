@@ -47,6 +47,18 @@ class _FailingPort:
         return None
 
 
+class _FailingNoteOffPort(_RecordingPort):
+    def __init__(self, *, fail_note_off_count: int) -> None:
+        super().__init__()
+        self._remaining_failures = fail_note_off_count
+
+    def send(self, message) -> None:
+        if getattr(message, "type", "") == "note_off" and self._remaining_failures > 0:
+            self._remaining_failures -= 1
+            raise OSError("note_off failed")
+        super().send(message)
+
+
 def _fake_mido_module(port):
     class _FakeMessage:
         def __init__(self, msg_type, **kwargs):
@@ -223,6 +235,87 @@ class MidiOutputTests(unittest.TestCase):
                         timeout_s=0.6,
                     )
                 )
+            finally:
+                out.stop()
+
+    def test_panic_during_due_note_off_is_safe_and_bounded(self) -> None:
+        port = _RecordingPort()
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                msg = LaserMidiMessage(
+                    kind="note_on",
+                    behavior="hold_ms",
+                    channel=1,
+                    note=65,
+                    velocity=120,
+                    hold_ms=100,
+                )
+                self.assertTrue(out.trigger(msg))
+                self.assertTrue(
+                    _wait_until(
+                        lambda: any(m.type == "note_on" for _, m in port.messages),
+                        timeout_s=0.3,
+                    )
+                )
+                time.sleep(0.08)
+                out.panic()
+                self.assertTrue(_wait_until(lambda: out.status()["active_held_notes"] == [], timeout_s=0.5))
+            finally:
+                out.stop()
+        note_off_count = sum(1 for _, msg in port.messages if msg.type == "note_off" and msg.kwargs.get("note") == 65)
+        self.assertLessEqual(note_off_count, 2)
+
+    def test_stop_during_due_note_off_is_safe_and_clears_active(self) -> None:
+        port = _RecordingPort()
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            msg = LaserMidiMessage(
+                kind="note_on",
+                behavior="hold_ms",
+                channel=1,
+                note=66,
+                velocity=120,
+                hold_ms=120,
+            )
+            self.assertTrue(out.trigger(msg))
+            self.assertTrue(
+                _wait_until(
+                    lambda: any(m.type == "note_on" for _, m in port.messages),
+                    timeout_s=0.3,
+                )
+            )
+            time.sleep(0.09)
+            out.stop()
+            self.assertEqual(out.status()["active_held_notes"], [])
+        note_off_count = sum(1 for _, msg in port.messages if msg.type == "note_off" and msg.kwargs.get("note") == 66)
+        self.assertLessEqual(note_off_count, 2)
+
+    def test_note_off_failure_keeps_note_recoverable_until_panic(self) -> None:
+        port = _FailingNoteOffPort(fail_note_off_count=1)
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                msg = LaserMidiMessage(
+                    kind="note_on",
+                    behavior="hold_ms",
+                    channel=1,
+                    note=67,
+                    velocity=120,
+                    hold_ms=60,
+                )
+                self.assertTrue(out.trigger(msg))
+                self.assertTrue(_wait_until(lambda: out.status()["send_error_count"] >= 1, timeout_s=0.5))
+                self.assertTrue(out.status()["active_held_notes"])
+                out.panic()
+                self.assertTrue(_wait_until(lambda: out.status()["active_held_notes"] == [], timeout_s=0.5))
+                self.assertTrue(out.status()["degraded"])
             finally:
                 out.stop()
 

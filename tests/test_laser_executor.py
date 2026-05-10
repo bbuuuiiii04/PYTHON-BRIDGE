@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import sys
 import unittest
 from pathlib import Path
@@ -205,35 +206,36 @@ def _config_with_role_cooldowns(
         manual_blackout_on=manual_blackout_on,
         manual_blackout_off=manual_blackout_off,
     )
-    cfg.scenes["phrase_a"] = LaserScene(
+    scenes = dict(cfg.scenes)
+    scenes["phrase_a"] = LaserScene(
         name="phrase_a",
         scene_type="autoloop",
         safety_class="safe",
-        midi=cfg.scenes["phrase_a"].midi,
+        midi=scenes["phrase_a"].midi,
         cooldown_beats=16.0,
     )
-    cfg.scenes["phrase_b"] = LaserScene(
+    scenes["phrase_b"] = LaserScene(
         name="phrase_b",
         scene_type="autoloop",
         safety_class="safe",
-        midi=cfg.scenes["phrase_b"].midi,
+        midi=scenes["phrase_b"].midi,
         cooldown_beats=16.0,
     )
-    cfg.scenes["buildup_a"] = LaserScene(
+    scenes["buildup_a"] = LaserScene(
         name="buildup_a",
         scene_type="autoloop",
         safety_class="safe",
-        midi=cfg.scenes["buildup_a"].midi,
+        midi=scenes["buildup_a"].midi,
         cooldown_beats=8.0,
     )
-    cfg.scenes["drop_a"] = LaserScene(
+    scenes["drop_a"] = LaserScene(
         name="drop_a",
         scene_type="autoloop",
         safety_class="safe",
-        midi=cfg.scenes["drop_a"].midi,
+        midi=scenes["drop_a"].midi,
         cooldown_beats=32.0,
     )
-    return cfg
+    return replace(cfg, scenes=scenes)
 
 
 class LaserSceneExecutorTests(unittest.TestCase):
@@ -386,7 +388,8 @@ class LaserSceneExecutorTests(unittest.TestCase):
     def test_hold_beats_materializes_with_context_bpm(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
         cfg = _config(dry_run=False)
-        cfg.scenes["drop_a"] = LaserScene(
+        scenes = dict(cfg.scenes)
+        scenes["drop_a"] = LaserScene(
             name="drop_a",
             scene_type="static",
             safety_class="high_impact",
@@ -399,6 +402,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
                 hold_beats=4,
             ),
         )
+        cfg = replace(cfg, scenes=scenes)
         ex = LaserSceneExecutor(config=cfg, midi_output=midi, personality=_personality())
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
         self.assertEqual(len(midi.calls), 1)
@@ -678,13 +682,15 @@ class LaserSceneExecutorTests(unittest.TestCase):
     def test_later_drop_crossing_with_same_scene_is_not_same_scene_skipped(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
         cfg = _config_with_role_cooldowns(dry_run=False)
-        cfg.scenes["drop_a"] = LaserScene(
+        scenes = dict(cfg.scenes)
+        scenes["drop_a"] = LaserScene(
             name="drop_a",
             scene_type="autoloop",
             safety_class="safe",
-            midi=cfg.scenes["drop_a"].midi,
+            midi=scenes["drop_a"].midi,
             cooldown_beats=8.0,
         )
+        cfg = replace(cfg, scenes=scenes)
         ex = LaserSceneExecutor(
             config=cfg,
             midi_output=midi,
@@ -714,6 +720,37 @@ class LaserSceneExecutorTests(unittest.TestCase):
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=333.0))
         self.assertEqual(len(midi.calls), 3)
         self.assertEqual(midi.calls[-1][0].note, 42)
+        self.assertEqual(ex.status()["last_error"], "")
+
+    def test_drop_retrigger_after_post_drop_within_cooldown_is_blocked(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_single_drop_scene_personality(),
+        )
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=300.0))
+        ex.on_decision(_decision("post_a", "post_drop_hold", "post_drop"), _ctx(abs_beat=301.0))
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=302.0))
+        self.assertEqual(len(midi.calls), 2)
+        self.assertEqual(midi.calls[0][0].note, 41)
+        self.assertEqual(midi.calls[1][0].note, 43)
+        self.assertEqual(ex.status()["last_error"], "role_cooldown_blocked")
+
+    def test_drop_after_buildup_remains_allowed_within_cooldown(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config_with_role_cooldowns(dry_run=False),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=300.0))
+        ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), _ctx(abs_beat=310.0))
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=312.0))
+        self.assertEqual(len(midi.calls), 3)
+        self.assertEqual(midi.calls[0][0].note, 41)
+        self.assertEqual(midi.calls[1][0].note, 39)
+        self.assertEqual(midi.calls[2][0].note, 42)
         self.assertEqual(ex.status()["last_error"], "")
 
     def test_drop_mode_post_drop_reuses_drop_note(self) -> None:

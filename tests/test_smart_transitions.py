@@ -166,6 +166,14 @@ class SmartRearmResetTests(unittest.TestCase):
             reason="master_changed"
         )
 
+    def test_master_change_clears_smart_drop_rearm_flags(self) -> None:
+        sm = _manager()
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 64
+        sm._on_master_changed(2, "test")
+        self.assertFalse(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 0)
+
     def test_executor_runtime_state_resets_on_active_track_loaded(self) -> None:
         sm = _manager()
         sm._laser_executor = Mock()
@@ -391,6 +399,17 @@ class SmartDropTests(unittest.TestCase):
         self.assertTrue(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 64)
 
+    def test_blackout_mode_crossing_relies_on_post_phrase_anchor_cleanup_order(self) -> None:
+        sm = _sm([64])
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 64
+        sm._os.phrase_anchor_last_beat = 0
+        # Keep drop_cut_armed true through phrase-anchor processing so same-beat
+        # phrase-anchor rearm is suppressed before crossing cleanup clears flags.
+        self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 64, 32_005), 2)
+        _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_005, 64.0)
+        sm._send_autoloop_deck_load.assert_not_called()
+
     def test_cut_does_not_fire_before_window(self) -> None:
         sm = _sm([64])
         self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 55, 27_500), 0)
@@ -537,6 +556,19 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_not_called()
+
+
+class SnapshotStatusTests(unittest.TestCase):
+    def test_snapshot_distinguishes_transition_window_from_blackout_pending(self) -> None:
+        sm = _manager()
+        sm._os.drop_cut_armed = True
+        sm._laser_executor = Mock()
+        sm._laser_executor.status.return_value = {
+            "blackout_pending_for_drop_window": False
+        }
+        sm._publish_snapshot()
+        self.assertTrue(sm._published_snapshot["smart_drop_transition_window_active"])
+        self.assertFalse(sm._published_snapshot["smart_drop_blackout_active"])
 
 
 class PhraseAnchorTests(unittest.TestCase):
