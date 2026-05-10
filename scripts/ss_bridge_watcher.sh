@@ -6,11 +6,15 @@
 # TimecodeLink is optional - bridge uses direct Rekordbox memory paths (B1-B6)
 # as primary signals; TL fallbacks activate automatically if TL starts later.
 
-BRIDGE_DIR="/Users/bbui"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BRIDGE_DIR="${REPO_ROOT}"
 LOG_FILE="/tmp/bridge.log"
 PYTHON="/opt/homebrew/bin/python3"
 MONITOR_MARKER="RBSS_BRIDGE_MONITOR"
 MANUAL_MODE="${RBSS_BRIDGE_MANUAL:-0}"
+LASER_CONFIG_PATH="${REPO_ROOT}/config/laser_director.json"
+LASER_CONFIG_EXAMPLE="${REPO_ROOT}/config/laser_director.example.json"
 BRIDGE_PID=""
 BRIDGE_MANAGED=0
 BACKOFF_INDEX=0
@@ -35,6 +39,30 @@ log_watcher() {
     printf '[watcher] %s\n' "$*" >> "$LOG_FILE"
 }
 
+ensure_laser_config() {
+    if [ ! -f "$LASER_CONFIG_PATH" ]; then
+        if [ -f "$LASER_CONFIG_EXAMPLE" ]; then
+            cp "$LASER_CONFIG_EXAMPLE" "$LASER_CONFIG_PATH"
+            log_watcher "created laser config from example path=$LASER_CONFIG_PATH"
+        else
+            log_watcher "WARNING missing laser config example path=$LASER_CONFIG_EXAMPLE"
+            return 0
+        fi
+    fi
+
+    "$PYTHON" - "$LASER_CONFIG_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+data["enabled"] = True
+data["dry_run"] = True
+path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
 bridge_pids() {
     pgrep -f "^[^[:space:]]*(python3|Python)[^[:space:]]*([[:space:]]+-u)?[[:space:]]+-m[[:space:]]+rb_ss_bridge_v2$" 2>/dev/null
 }
@@ -51,6 +79,9 @@ monitor_open() {
 start_bridge() {
     (
         cd "$BRIDGE_DIR" || exit 1
+        ensure_laser_config
+        echo "Laser Director config: $LASER_CONFIG_PATH"
+        echo "Laser Director mode: enabled=true dry_run=true"
         exec env \
             RBSS_LIVE_BPM_FOLLOW=1 \
             RBSS_ANLZ_DIRECT=1 \
@@ -64,22 +95,24 @@ start_bridge() {
             RBSS_SMART_REARM_EXPERIMENT=1 \
             RBSS_SMART_DROP=1 \
             RBSS_SMART_BREAKDOWN=1 \
+            RBSS_LASER_CONFIG="$LASER_CONFIG_PATH" \
             "$PYTHON" -m rb_ss_bridge_v2
     ) > "$LOG_FILE" 2>&1 &
     BRIDGE_PID=$!
     BRIDGE_MANAGED=1
     STARTED_AT=$(date +%s)
     WARNED_MULTIPLE=0
-    log_watcher "started bridge pid=$BRIDGE_PID follow=on anlz_direct=on pos_chain_direct=on master_seed_direct=on master_direct=on play_direct=on track_load_direct=on scripted_direct=on phrase_anchor=on smart_drop=on smart_breakdown=on manual=${MANUAL_MODE}"
+    log_watcher "started bridge pid=$BRIDGE_PID follow=on anlz_direct=on pos_chain_direct=on master_seed_direct=on master_direct=on play_direct=on track_load_direct=on scripted_direct=on phrase_anchor=on smart_drop=on smart_breakdown=on laser_config=${LASER_CONFIG_PATH} manual=${MANUAL_MODE}"
 }
 
 start_manual_terminal_bridge() {
+    ensure_laser_config
     MONITOR_OPENED=1
     log_watcher "opening manual bridge terminal"
-    osascript <<'EOF'
+    osascript <<EOF
 tell application "Terminal"
     activate
-    do script "bash -lc 'printf \"\\033]0;RBSS_BRIDGE_MONITOR\\007\"; echo \"━━━ Bridge Manual Session ━━━\"; cd /Users/bbui || exit 1; env RBSS_LIVE_BPM_FOLLOW=1 RBSS_ANLZ_DIRECT=1 RBSS_POS_CHAIN_DIRECT=1 RBSS_MASTER_SEED_DIRECT=1 RBSS_MASTER_DIRECT=1 RBSS_PLAY_DIRECT=1 RBSS_TRACK_LOAD_DIRECT=1 RBSS_SCRIPTED_DIRECT=1 RBSS_SCRIPTED_SHOWFILE_DIRECT=1 RBSS_SMART_REARM_EXPERIMENT=1 RBSS_SMART_DROP=1 RBSS_SMART_BREAKDOWN=1 /opt/homebrew/bin/python3 -u -m rb_ss_bridge_v2 2>&1 | tee /tmp/bridge.log' RBSS_BRIDGE_MONITOR"
+    do script "bash -lc 'printf \"\\033]0;RBSS_BRIDGE_MONITOR\\007\"; echo \"━━━ Bridge Manual Session ━━━\"; cd ${BRIDGE_DIR} || exit 1; echo \"Laser Director config: ${LASER_CONFIG_PATH}\"; echo \"Laser Director mode: enabled=true dry_run=true\"; env RBSS_LIVE_BPM_FOLLOW=1 RBSS_ANLZ_DIRECT=1 RBSS_POS_CHAIN_DIRECT=1 RBSS_MASTER_SEED_DIRECT=1 RBSS_MASTER_DIRECT=1 RBSS_PLAY_DIRECT=1 RBSS_TRACK_LOAD_DIRECT=1 RBSS_SCRIPTED_DIRECT=1 RBSS_SCRIPTED_SHOWFILE_DIRECT=1 RBSS_SMART_REARM_EXPERIMENT=1 RBSS_SMART_DROP=1 RBSS_SMART_BREAKDOWN=1 RBSS_LASER_CONFIG=\"${LASER_CONFIG_PATH}\" ${PYTHON} -u -m rb_ss_bridge_v2 2>&1 | tee ${LOG_FILE}' RBSS_BRIDGE_MONITOR"
     set custom title of selected tab of front window to "RBSS_BRIDGE_MONITOR"
 end tell
 EOF
