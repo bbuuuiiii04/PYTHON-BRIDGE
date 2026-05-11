@@ -134,6 +134,49 @@ class TestSmartPhrasing(unittest.TestCase):
         self.assertFalse(res.state.smart_breakdown_active) # Since < end_beat
         self.assertTrue(res.state.breakdown_end_crossing)
 
+    def test_breakdown_end_crossing_fires_outside_segment(self):
+        """Crossing fires when jumping from 63.5 to 64.0 (end of 32-64)."""
+        snap = self._default_snap(
+            breakdown_segments=(BeatSegment(start_beat=32.0, end_beat=64.0),)
+        )
+        self.engine.update(replace(snap, abs_beat=63.5))
+        res = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertTrue(res.state.breakdown_end_crossing)
+        self.assertFalse(res.state.smart_breakdown_active)
+
+    def test_breakdown_end_crossing_does_not_fire_inside_segment(self):
+        """Crossing should not fire when moving within the segment."""
+        snap = self._default_snap(
+            breakdown_segments=(BeatSegment(start_beat=32.0, end_beat=64.0),)
+        )
+        self.engine.update(replace(snap, abs_beat=40.0))
+        res = self.engine.update(replace(snap, abs_beat=41.0))
+        self.assertFalse(res.state.breakdown_end_crossing)
+        self.assertTrue(res.state.smart_breakdown_active)
+
+    def test_breakdown_start_and_end_crossing_fire_when_jumping_over_entire_segment(self):
+        """If jumping over an entire breakdown segment, both start and end crossings fire."""
+        snap = self._default_snap(
+            breakdown_segments=(BeatSegment(start_beat=32.0, end_beat=64.0),)
+        )
+        self.engine.update(replace(snap, abs_beat=31.0))
+        res = self.engine.update(replace(snap, abs_beat=65.0))
+        self.assertTrue(res.state.breakdown_start_crossing)
+        self.assertTrue(res.state.breakdown_end_crossing)
+        self.assertFalse(res.state.smart_breakdown_active)
+
+    def test_breakdown_end_crossing_deduplication(self):
+        """Crossing should only fire once."""
+        snap = self._default_snap(
+            breakdown_segments=(BeatSegment(start_beat=32.0, end_beat=64.0),)
+        )
+        self.engine.update(replace(snap, abs_beat=63.5))
+        res = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertTrue(res.state.breakdown_end_crossing)
+        
+        res = self.engine.update(replace(snap, abs_beat=64.1))
+        self.assertFalse(res.state.breakdown_end_crossing)
+
     def test_empty_metadata_is_safe(self):
         snap = self._default_snap()
         res = self.engine.update(snap)
