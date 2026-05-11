@@ -184,7 +184,8 @@ class SmartPhrasingEngine:
         current_phrase_is_chorus = current_phrase_label == "chorus"
         current_phrase_is_low = current_phrase_label == "low"
         
-        # 3. Drop crossing
+        # 2. Drop crossing
+        # Drop crossing is detected first so already-fired drops are excluded from the next future drop selection.
         smart_drop_crossing = False
         if prev_abs_beat is not None:
             for drop_beat in sorted(snapshot.smart_drop_beats):
@@ -194,7 +195,7 @@ class SmartPhrasingEngine:
                     self._active_drop_beat = drop_beat
                     break
                     
-        # 2. Resolve next Smart Drop
+        # 3. Resolve next Smart Drop
         next_smart_drop_beat = None
         beats_to_next_drop = None
         for drop_beat in sorted(snapshot.smart_drop_beats):
@@ -230,6 +231,7 @@ class SmartPhrasingEngine:
         for seg in snapshot.breakdown_segments:
             if seg.start_beat <= abs_beat < seg.end_beat:
                 smart_breakdown_active = True
+
             if prev_abs_beat is not None:
                 if prev_abs_beat < seg.start_beat <= abs_beat:
                     breakdown_start_crossing = True
