@@ -1259,6 +1259,96 @@ class SmartPhrasingObservationTests(unittest.TestCase):
         self.assertEqual(ld.status()["current_scene"], "up")
         self.assertEqual(ld.status()["last_reason"], "buildup_to_drop_window")
 
+class SmartPhrasingDropCrossingTests(unittest.TestCase):
+    def _sp(self, **kwargs) -> SmartPhrasingState:
+        default_kwargs = dict(
+            current_phrase_label="other", current_phrase_is_up=False, current_phrase_is_chorus=False,
+            current_phrase_is_low=False, next_smart_drop_beat=None, beats_to_next_drop=None,
+            smart_drop_window_active=False, smart_drop_crossing=False, smart_drop_preclear_requested=False,
+            smart_drop_rearm_requested=False, smart_post_drop_active=False, active_drop_beat=None,
+            smart_buildup_active=False, smart_breakdown_active=False, breakdown_start_crossing=False,
+            breakdown_end_crossing=False, smart_breakdown_clear_requested=False,
+            smart_breakdown_restore_requested=False, transition_mask_should_arm=False,
+            transition_mask_should_clear=False, transition_window_active=False,
+            phrase_anchor_requested=False, reason="test"
+        )
+        default_kwargs.update(kwargs)
+        return SmartPhrasingState(**default_kwargs)
+
+    def test_drop_crossing_from_smart_phrasing(self) -> None:
+        ld = _director(drop_scene="drop")
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=self._sp(smart_drop_crossing=True)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld.status()["last_reason"], "drop_crossing")
+
+    def test_drop_crossing_smart_phrasing_does_not_use_legacy_dedup(self) -> None:
+        ld = _director(drop_scene="drop")
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        ld._laser_drop_fired_beat = 64  # Set legacy dedup field directly
+        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=self._sp(smart_drop_crossing=True)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+
+    def test_drop_crossing_legacy_fallback_when_smart_phrasing_none(self) -> None:
+        ld = _director(drop_scene="drop")
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,), smart_phrasing=None), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld.status()["last_reason"], "drop_crossing")
+
+    def test_drop_crossing_no_fire_when_smart_phrasing_false_even_if_legacy_would_cross(self) -> None:
+        ld = _director(drop_scene="drop", default_scene="d")
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        # smart_drops=(64,) would trigger legacy drop
+        ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,), smart_phrasing=self._sp(smart_drop_crossing=False)), now=_now())
+        self.assertNotEqual(ld.status()["current_scene"], "drop")
+
+    def test_priority_breakdown_wins_over_drop(self) -> None:
+        ld = _director(drop_scene="drop", breakdown_scene="bd")
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=self._sp(smart_breakdown_active=True, smart_drop_crossing=True)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "bd")
+        self.assertEqual(ld.status()["last_reason"], "breakdown_active")
+
+    def test_priority_drop_wins_over_buildup(self) -> None:
+        ld = _director(drop_scene="drop", buildup_scene="up", buildup_lookahead_beats=16)
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        sp = self._sp(smart_drop_crossing=True, beats_to_next_drop=10.0, current_phrase_is_up=True)
+        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=sp), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld.status()["last_reason"], "drop_crossing")
+
+    def test_priority_post_drop_active_unchanged_with_no_crossing(self) -> None:
+        ld = _director(drop_scene="drop", post_drop_scene="pd", minimum_scene_hold_beats=8)
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=self._sp(smart_drop_crossing=True)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        # next tick, drop crossing is false, should be in post drop
+        ld.tick(_ctx(abs_beat=65.0, smart_phrasing=self._sp(smart_drop_crossing=False)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "pd")
+        self.assertEqual(ld.status()["last_reason"], "post_drop_hold")
+
+    def test_priority_gates_win_over_drop(self) -> None:
+        ld = _director(drop_scene="drop", emergency_scene="em")
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        ld.set_emergency_blackout(True)
+        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=self._sp(smart_drop_crossing=True)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "em")
+        self.assertEqual(ld.status()["last_reason"], "emergency")
+
+    def test_gate_clearing_does_not_fire_stale_drop_with_smart_phrasing(self) -> None:
+        """After a gate clears, first eligible tick must not fire drop even if
+        engine had crossing=True during gated period (previous_abs_beat guard)."""
+        ld = _director(drop_scene="drop", default_scene="d")
+        # Establish baseline
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        # Gate activates (stale position) — resets _last_smart_abs_beat to None
+        ld.tick(_ctx(abs_beat=64.0, position_stale=True), now=_now())
+        # Gate clears — first eligible tick with smart_drop_crossing=True
+        # Should NOT fire drop because previous_abs_beat is None
+        ld.tick(_ctx(abs_beat=64.5, smart_phrasing=self._sp(smart_drop_crossing=True)), now=_now())
+        self.assertNotEqual(ld.status()["current_scene"], "drop")
+
 # ---------------------------------------------------------------------------
 # Enable / disable
 # ---------------------------------------------------------------------------
