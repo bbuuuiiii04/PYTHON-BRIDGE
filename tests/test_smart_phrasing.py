@@ -229,6 +229,45 @@ class TestSmartPhrasing(unittest.TestCase):
         self.assertTrue(res.state.transition_mask_should_clear)
         self.assertFalse(res.state.transition_window_active)
 
+    def test_transition_window_active_resets_on_engine_reset(self):
+        def _activate_transition_window(engine: SmartPhrasingEngine, snap: SmartPhrasingSnapshot) -> None:
+            engine.update(replace(snap, abs_beat=50.0))
+            active = engine.update(replace(snap, abs_beat=61.0))
+            self.assertTrue(active.state.transition_window_active)
+
+        base = self._default_snap(smart_drop_beats=(64.0,), transition_window_beats=4.0)
+
+        stop_engine = SmartPhrasingEngine()
+        _activate_transition_window(stop_engine, base)
+        stop_res = stop_engine.update(replace(base, abs_beat=61.0, is_playing=False))
+        self.assertFalse(stop_res.state.transition_window_active)
+        self.assertEqual(stop_res.state.reason, "not_playing")
+
+        no_track_engine = SmartPhrasingEngine()
+        _activate_transition_window(no_track_engine, base)
+        no_track_res = no_track_engine.update(replace(base, abs_beat=61.0, track_id=None))
+        self.assertFalse(no_track_res.state.transition_window_active)
+        self.assertEqual(no_track_res.state.reason, "no_track")
+
+        deck_change_engine = SmartPhrasingEngine()
+        _activate_transition_window(deck_change_engine, base)
+        deck_change_res = deck_change_engine.update(
+            replace(base, deck_id="2", track_id="A", abs_beat=30.0)
+        )
+        self.assertFalse(deck_change_res.state.transition_window_active)
+
+        track_change_engine = SmartPhrasingEngine()
+        _activate_transition_window(track_change_engine, base)
+        track_change_res = track_change_engine.update(
+            replace(base, deck_id="1", track_id="B", abs_beat=30.0)
+        )
+        self.assertFalse(track_change_res.state.transition_window_active)
+
+        playhead_jump_engine = SmartPhrasingEngine()
+        _activate_transition_window(playhead_jump_engine, base)
+        playhead_jump_res = playhead_jump_engine.update(replace(base, abs_beat=30.0))
+        self.assertFalse(playhead_jump_res.state.transition_window_active)
+
     def test_stop_clears_previous_beat_baseline(self):
         snap = self._default_snap(smart_drop_beats=(64.0,))
         self.engine.update(replace(snap, abs_beat=63.5))

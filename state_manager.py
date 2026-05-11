@@ -1281,6 +1281,7 @@ class StateManager:
                     )
                     decision = self._laser_director.tick(_lctx, now=now)
                     if self._laser_executor is not None:
+                        self._laser_executor.on_tick(_lctx)
                         self._laser_executor.on_decision(decision, _lctx)
                 return
             # Not playing — run lighting machine and auto-detect with TL state only.
@@ -1307,6 +1308,7 @@ class StateManager:
                 )
                 decision = self._laser_director.tick(_lctx, now=now)
                 if self._laser_executor is not None:
+                    self._laser_executor.on_tick(_lctx)
                     self._laser_executor.on_decision(decision, _lctx)
             return
 
@@ -1471,6 +1473,7 @@ class StateManager:
                 )
                 decision = self._laser_director.tick(_lctx, now=now)
                 if self._laser_executor is not None:
+                    self._laser_executor.on_tick(_lctx)
                     self._laser_executor.on_decision(decision, _lctx)
             return
 
@@ -1631,6 +1634,7 @@ class StateManager:
                 decision is not None and decision.reason == "drop_crossing"
             )
             if self._laser_executor is not None:
+                self._laser_executor.on_tick(ctx)
                 self._laser_executor.on_decision(decision, ctx)
         if smart_drop_signal == _SMART_DROP_SIGNAL_CROSSING and smart_drop_blackout_mode:
             # Ordering requirement: in blackout mode keep os.drop_cut_armed true

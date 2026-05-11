@@ -588,6 +588,36 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         _, ctx = sm._laser_executor.on_decision.call_args.args
         self.assertTrue(ctx.smart_drop_blackout_arm)
 
+    def test_executor_on_tick_invoked_before_on_decision(self) -> None:
+        sm = self._prepare_manager()
+        sm._os.drop_cut_armed = False
+        sm._os.drop_rearm_beat = 0
+        sm._deck[1].meta.smart_drops = [8]
+        sm._laser_director = Mock()
+        sm._laser_director.is_enabled.return_value = True
+        sm._laser_director.tick.return_value = SimpleNamespace(
+            scene="",
+            reason="autoloop_not_ready",
+            role="idle",
+        )
+        call_order: list[str] = []
+        ctx_by_call: dict[str, object] = {}
+
+        def _record_on_tick(ctx) -> None:
+            call_order.append("on_tick")
+            ctx_by_call["on_tick"] = ctx
+
+        def _record_on_decision(_decision, ctx) -> None:
+            call_order.append("on_decision")
+            ctx_by_call["on_decision"] = ctx
+
+        sm._laser_executor.on_tick.side_effect = _record_on_tick
+        sm._laser_executor.on_decision.side_effect = _record_on_decision
+        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=0):
+            sm._push_tick()
+        self.assertEqual(call_order, ["on_tick", "on_decision"])
+        self.assertIs(ctx_by_call["on_tick"], ctx_by_call["on_decision"])
+
     def test_blackout_arm_persists_across_ticks_while_drop_cut_armed(self) -> None:
         """The arm signal must persist on every tick between arm and crossing.
 
