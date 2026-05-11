@@ -13,11 +13,11 @@ from rb_ss_bridge_v2.models import (  # noqa: E402
     BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot, SmartDropEnergyShadow, TrackMetadata,
 )
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
+from rb_ss_bridge_v2.smart_phrasing import select_smart_drops
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
     StateManager,
     _phrase_anchor_tick,
     _send_direct_autoloop_rearm,
-    _select_smart_drops,
     _smart_drop_tick,
     _smart_breakdown_tick,
 )
@@ -222,26 +222,26 @@ class SmartRearmResetTests(unittest.TestCase):
 
 class SmartDropTests(unittest.TestCase):
     def test_selector_preserves_middle_drops_without_clustering(self) -> None:
-        selected = _select_smart_drops(
+        selected = select_smart_drops(
             [64, 80, 96, 196, 372, 404],
             total_beats=597,
         )
         self.assertEqual(selected, [64, 80, 96, 196, 372, 404])
 
     def test_selector_filters_intro_drops(self) -> None:
-        selected = _select_smart_drops([8, 16, 32, 64], total_beats=160)
+        selected = select_smart_drops([8, 16, 32, 64], total_beats=160)
         self.assertEqual(selected, [32, 64])
 
     def test_selector_filters_outro_when_total_beats_known(self) -> None:
-        selected = _select_smart_drops([64, 560, 580], total_beats=597)
+        selected = select_smart_drops([64, 560, 580], total_beats=597)
         self.assertEqual(selected, [64, 560])
 
     def test_selector_skips_outro_filter_without_total_beats(self) -> None:
-        selected = _select_smart_drops([64, 580], total_beats=0)
+        selected = select_smart_drops([64, 580], total_beats=0)
         self.assertEqual(selected, [64, 580])
 
     def test_selector_sorts_and_dedupes(self) -> None:
-        selected = _select_smart_drops([96, 64, 64, 80], total_beats=160)
+        selected = select_smart_drops([96, 64, 64, 80], total_beats=160)
         self.assertEqual(selected, [64, 80, 96])
 
     def test_anlz_data_stores_raw_selected_and_energy_shadow(self) -> None:
