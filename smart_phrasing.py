@@ -47,6 +47,8 @@ class SmartPhrasingState:
     beats_to_next_drop: Optional[float]
     smart_drop_window_active: bool
     smart_drop_crossing: bool
+    smart_drop_preclear_requested: bool
+    smart_drop_rearm_requested: bool
     smart_post_drop_active: bool
     active_drop_beat: Optional[float]
     smart_buildup_active: bool
@@ -87,6 +89,7 @@ class SmartPhrasingEngine:
         self._last_deck_id: Optional[str] = None
         self._last_track_id: Optional[str] = None
         self._transition_window_active: bool = False
+        self._smart_drop_window_active: bool = False
 
     def reset(self, reason: str) -> SmartPhrasingState:
         self._previous_abs_beat = None
@@ -95,6 +98,7 @@ class SmartPhrasingEngine:
         self._last_deck_id = None
         self._last_track_id = None
         self._transition_window_active = False
+        self._smart_drop_window_active = False
 
         return self._default_state(reason)
 
@@ -108,6 +112,8 @@ class SmartPhrasingEngine:
             beats_to_next_drop=None,
             smart_drop_window_active=False,
             smart_drop_crossing=False,
+            smart_drop_preclear_requested=False,
+            smart_drop_rearm_requested=False,
             smart_post_drop_active=False,
             active_drop_beat=None,
             smart_buildup_active=False,
@@ -211,10 +217,19 @@ class SmartPhrasingEngine:
                 beats_to_next_drop = drop_beat - abs_beat
                 break
                 
-        # 4. Drop window
+        # 4. Drop window and Preclear Intent
         smart_drop_window_active = False
         if next_smart_drop_beat is not None and beats_to_next_drop is not None:
             smart_drop_window_active = beats_to_next_drop <= snapshot.drop_window_beats
+
+        smart_drop_preclear_requested = False
+        if smart_drop_window_active and not self._smart_drop_window_active:
+            smart_drop_preclear_requested = True
+            
+        self._smart_drop_window_active = smart_drop_window_active
+        
+        # 4b. Rearm Intent
+        smart_drop_rearm_requested = smart_drop_crossing
 
         # 5. Post-drop
         smart_post_drop_active = False
@@ -270,6 +285,8 @@ class SmartPhrasingEngine:
             beats_to_next_drop=beats_to_next_drop,
             smart_drop_window_active=smart_drop_window_active,
             smart_drop_crossing=smart_drop_crossing,
+            smart_drop_preclear_requested=smart_drop_preclear_requested,
+            smart_drop_rearm_requested=smart_drop_rearm_requested,
             smart_post_drop_active=smart_post_drop_active,
             active_drop_beat=self._active_drop_beat,
             smart_buildup_active=smart_buildup_active,
