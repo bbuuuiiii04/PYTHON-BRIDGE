@@ -60,6 +60,7 @@ class SmartPhrasingState:
     transition_mask_should_arm: bool
     transition_mask_should_clear: bool
     transition_window_active: bool
+    phrase_anchor_requested: bool
     reason: str = ""
 
 @dataclass(frozen=True)
@@ -127,6 +128,7 @@ class SmartPhrasingEngine:
             transition_mask_should_arm=False,
             transition_mask_should_clear=False,
             transition_window_active=False,
+            phrase_anchor_requested=False,
             reason=reason,
         )
 
@@ -190,9 +192,14 @@ class SmartPhrasingEngine:
         
         prev_abs_beat = self._previous_abs_beat
         
-        # 1. Resolve current phrase
+        # 1. Resolve current phrase and crossings
         current_phrase_label: PhraseLabel = "other"
+        phrase_anchor_requested = False
+        
         for seg in snapshot.phrase_segments:
+            if prev_abs_beat is not None and prev_abs_beat < seg.start_beat <= abs_beat:
+                phrase_anchor_requested = True
+                
             if seg.start_beat <= abs_beat < seg.end_beat:
                 current_phrase_label = seg.label
                 break
@@ -305,6 +312,7 @@ class SmartPhrasingEngine:
             transition_mask_should_arm=transition_mask_should_arm,
             transition_mask_should_clear=transition_mask_should_clear,
             transition_window_active=new_transition_window_active,
+            phrase_anchor_requested=phrase_anchor_requested,
             reason="tick",
         )
         

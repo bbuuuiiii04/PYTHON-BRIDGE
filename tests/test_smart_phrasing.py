@@ -401,5 +401,65 @@ class TestSmartPhrasing(unittest.TestCase):
         # Cross again
         res = self.engine.update(replace(snap, abs_beat=32.0))
         self.assertTrue(res.state.smart_breakdown_clear_requested)
+
+    def test_phrase_anchor_requested_fires_on_segment_start(self):
+        """phrase anchor intent fires when crossing a phrase segment start."""
+        snap = self._default_snap(phrase_segments=(PhraseSegment(start_beat=32.0, end_beat=64.0, label="up"),))
+        self.engine.update(replace(snap, abs_beat=31.0))
+        res = self.engine.update(replace(snap, abs_beat=32.0))
+        self.assertTrue(res.state.phrase_anchor_requested)
+
+    def test_phrase_anchor_requested_does_not_fire_repeatedly(self):
+        """phrase anchor intent does not fire repeatedly within the same segment."""
+        snap = self._default_snap(phrase_segments=(PhraseSegment(start_beat=32.0, end_beat=64.0, label="up"),))
+        self.engine.update(replace(snap, abs_beat=31.0))
+        self.engine.update(replace(snap, abs_beat=32.0))
+        res = self.engine.update(replace(snap, abs_beat=33.0))
+        self.assertFalse(res.state.phrase_anchor_requested)
+
+    def test_phrase_anchor_requested_fires_for_later_segment(self):
+        """phrase anchor intent can fire for a later phrase segment."""
+        snap = self._default_snap(phrase_segments=(
+            PhraseSegment(start_beat=32.0, end_beat=64.0, label="up"),
+            PhraseSegment(start_beat=64.0, end_beat=96.0, label="chorus"),
+        ))
+        self.engine.update(replace(snap, abs_beat=31.0))
+        self.engine.update(replace(snap, abs_beat=32.0))
+        self.engine.update(replace(snap, abs_beat=63.0))
+        res = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertTrue(res.state.phrase_anchor_requested)
+
+    def test_phrase_anchor_requested_fires_when_jumping_over_start(self):
+        """jumping over a phrase segment start fires the anchor intent."""
+        snap = self._default_snap(phrase_segments=(PhraseSegment(start_beat=32.0, end_beat=64.0, label="up"),))
+        self.engine.update(replace(snap, abs_beat=31.0))
+        res = self.engine.update(replace(snap, abs_beat=33.0))
+        self.assertTrue(res.state.phrase_anchor_requested)
+
+    def test_phrase_anchor_requested_resets_on_playhead_jump(self):
+        """reset/playhead jump allows phrase anchor to fire again appropriately."""
+        snap = self._default_snap(phrase_segments=(PhraseSegment(start_beat=32.0, end_beat=64.0, label="up"),))
+        self.engine.update(replace(snap, abs_beat=31.0))
+        res = self.engine.update(replace(snap, abs_beat=32.0))
+        self.assertTrue(res.state.phrase_anchor_requested)
+        
+        # Jump backward
+        res = self.engine.update(replace(snap, abs_beat=31.0))
+        self.assertEqual(res.diagnostics[0].reason, "playhead_jump_backward")
+        self.assertFalse(res.state.phrase_anchor_requested)
+        
+        # Cross again
+        res = self.engine.update(replace(snap, abs_beat=32.0))
+        self.assertTrue(res.state.phrase_anchor_requested)
+
+    def test_phrase_anchor_preserves_current_phrase_label(self):
+        """current phrase label/is_up/is_chorus behavior remains unchanged."""
+        snap = self._default_snap(phrase_segments=(PhraseSegment(start_beat=32.0, end_beat=64.0, label="chorus"),))
+        self.engine.update(replace(snap, abs_beat=31.0))
+        res = self.engine.update(replace(snap, abs_beat=32.0))
+        self.assertTrue(res.state.phrase_anchor_requested)
+        self.assertEqual(res.state.current_phrase_label, "chorus")
+        self.assertTrue(res.state.current_phrase_is_chorus)
+        self.assertFalse(res.state.current_phrase_is_up)
 if __name__ == '__main__':
     unittest.main()

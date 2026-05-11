@@ -96,6 +96,7 @@ def _make_phrasing_state(**overrides):
         transition_mask_should_arm=False,
         transition_mask_should_clear=False,
         transition_window_active=False,
+        phrase_anchor_requested=False,
         reason="test",
     )
     defaults.update(overrides)
