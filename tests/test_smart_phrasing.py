@@ -342,5 +342,64 @@ class TestSmartPhrasing(unittest.TestCase):
         # Enter window again
         res = self.engine.update(replace(snap, abs_beat=60.0))
         self.assertTrue(res.state.smart_drop_preclear_requested)
+
+    def test_smart_breakdown_clear_requested_fires_on_start(self):
+        """Clear intent fires on breakdown start crossing."""
+        snap = self._default_snap(breakdown_segments=(BeatSegment(start_beat=32.0, end_beat=64.0),))
+        self.engine.update(replace(snap, abs_beat=31.0))
+        res = self.engine.update(replace(snap, abs_beat=32.0))
+        self.assertTrue(res.state.breakdown_start_crossing)
+        self.assertTrue(res.state.smart_breakdown_clear_requested)
+
+    def test_smart_breakdown_clear_requested_does_not_fire_repeatedly(self):
+        """Clear intent does not fire repeatedly while inside breakdown."""
+        snap = self._default_snap(breakdown_segments=(BeatSegment(start_beat=32.0, end_beat=64.0),))
+        self.engine.update(replace(snap, abs_beat=31.0))
+        self.engine.update(replace(snap, abs_beat=32.0))
+        res = self.engine.update(replace(snap, abs_beat=33.0))
+        self.assertTrue(res.state.smart_breakdown_active)
+        self.assertFalse(res.state.breakdown_start_crossing)
+        self.assertFalse(res.state.smart_breakdown_clear_requested)
+
+    def test_smart_breakdown_restore_requested_fires_on_end(self):
+        """Restore intent fires on breakdown end crossing."""
+        snap = self._default_snap(breakdown_segments=(BeatSegment(start_beat=32.0, end_beat=64.0),))
+        self.engine.update(replace(snap, abs_beat=63.0))
+        res = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertTrue(res.state.breakdown_end_crossing)
+        self.assertTrue(res.state.smart_breakdown_restore_requested)
+
+    def test_smart_breakdown_restore_requested_does_not_fire_repeatedly(self):
+        """Restore intent does not fire repeatedly after breakdown ends."""
+        snap = self._default_snap(breakdown_segments=(BeatSegment(start_beat=32.0, end_beat=64.0),))
+        self.engine.update(replace(snap, abs_beat=63.0))
+        self.engine.update(replace(snap, abs_beat=64.0))
+        res = self.engine.update(replace(snap, abs_beat=65.0))
+        self.assertFalse(res.state.breakdown_end_crossing)
+        self.assertFalse(res.state.smart_breakdown_restore_requested)
+
+    def test_smart_breakdown_intents_fire_simultaneously_on_jump(self):
+        """Jumping over an entire breakdown can fire both clear and restore in the same tick."""
+        snap = self._default_snap(breakdown_segments=(BeatSegment(start_beat=32.0, end_beat=64.0),))
+        self.engine.update(replace(snap, abs_beat=31.0))
+        res = self.engine.update(replace(snap, abs_beat=65.0))
+        self.assertTrue(res.state.smart_breakdown_clear_requested)
+        self.assertTrue(res.state.smart_breakdown_restore_requested)
+
+    def test_smart_breakdown_intents_reset_on_playhead_jump(self):
+        """Reset/playhead jump allows breakdown intents to fire again appropriately."""
+        snap = self._default_snap(breakdown_segments=(BeatSegment(start_beat=32.0, end_beat=64.0),))
+        self.engine.update(replace(snap, abs_beat=31.0))
+        res = self.engine.update(replace(snap, abs_beat=32.0))
+        self.assertTrue(res.state.smart_breakdown_clear_requested)
+        
+        # Jump backward
+        res = self.engine.update(replace(snap, abs_beat=31.0))
+        self.assertEqual(res.diagnostics[0].reason, "playhead_jump_backward")
+        self.assertFalse(res.state.smart_breakdown_clear_requested)
+        
+        # Cross again
+        res = self.engine.update(replace(snap, abs_beat=32.0))
+        self.assertTrue(res.state.smart_breakdown_clear_requested)
 if __name__ == '__main__':
     unittest.main()

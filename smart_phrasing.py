@@ -55,6 +55,8 @@ class SmartPhrasingState:
     smart_breakdown_active: bool
     breakdown_start_crossing: bool
     breakdown_end_crossing: bool
+    smart_breakdown_clear_requested: bool
+    smart_breakdown_restore_requested: bool
     transition_mask_should_arm: bool
     transition_mask_should_clear: bool
     transition_window_active: bool
@@ -120,6 +122,8 @@ class SmartPhrasingEngine:
             smart_breakdown_active=False,
             breakdown_start_crossing=False,
             breakdown_end_crossing=False,
+            smart_breakdown_clear_requested=False,
+            smart_breakdown_restore_requested=False,
             transition_mask_should_arm=False,
             transition_mask_should_clear=False,
             transition_window_active=False,
@@ -260,6 +264,9 @@ class SmartPhrasingEngine:
                 if prev_abs_beat < seg.end_beat <= abs_beat:
                     breakdown_end_crossing = True
 
+        smart_breakdown_clear_requested = breakdown_start_crossing
+        smart_breakdown_restore_requested = breakdown_end_crossing
+
         # 8. Transition mask intent
         new_transition_window_active = False
         if next_smart_drop_beat is not None and beats_to_next_drop is not None:
@@ -293,6 +300,8 @@ class SmartPhrasingEngine:
             smart_breakdown_active=smart_breakdown_active,
             breakdown_start_crossing=breakdown_start_crossing,
             breakdown_end_crossing=breakdown_end_crossing,
+            smart_breakdown_clear_requested=smart_breakdown_clear_requested,
+            smart_breakdown_restore_requested=smart_breakdown_restore_requested,
             transition_mask_should_arm=transition_mask_should_arm,
             transition_mask_should_clear=transition_mask_should_clear,
             transition_window_active=new_transition_window_active,
