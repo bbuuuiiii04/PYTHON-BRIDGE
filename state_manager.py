@@ -63,7 +63,7 @@ from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
 from .logging_manager import get_logging_manager
 from .filepath_resolver import has_soundswitch_scripted_id
 from .smart_phrasing import (
-    SmartPhrasingEngine, SmartPhrasingSnapshot, PhraseSegment,
+    SmartPhrasingEngine, SmartPhrasingSnapshot, PhraseSegment, BeatSegment,
 )
 from . import bridge_fmt as bf
 
@@ -1708,9 +1708,24 @@ class StateManager:
                 total_beats=len(d.meta.beatgrid_times_ms),
             ),
             smart_drop_beats=tuple(float(x) for x in d.meta.smart_drops),
-            # Phase 2 shadow: breakdown_segments left empty because ANLZ
-            # breakdown data is start-marker-only with no reliable end-beat.
-            breakdown_segments=(),
+            # Phase 2 shadow: Note that this uses raw ANLZ breakdowns filtered
+            # dynamically, while the legacy _smart_breakdown_tick uses pre-filtered
+            # d.meta.smart_breakdowns. This intentional divergence will be resolved
+            # when the legacy breakdown consumer is migrated.
+            breakdown_segments=tuple(
+                BeatSegment(
+                    start_beat=float(bd_beat),
+                    end_beat=float(find_restore_beat(
+                        bd_beat,
+                        d.meta.anlz_buildups,
+                        d.meta.smart_drops,
+                        SMART_BREAKDOWN_DEFAULT_DURATION_BEATS
+                    ))
+                ) for bd_beat in select_smart_breakdowns(
+                    d.meta.anlz_breakdowns,
+                    total_beats=len(d.meta.beatgrid_times_ms)
+                )
+            ),
             phrase_lookahead_beats=self._sp_phrase_lookahead,
             drop_window_beats=self._sp_drop_window,
             post_drop_beats=self._sp_post_drop,
