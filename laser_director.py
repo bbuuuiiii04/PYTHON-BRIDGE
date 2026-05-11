@@ -145,7 +145,7 @@ class LaserDirector:
         self._last_phrase_number: Optional[int] = None
         self._last_scene_change_abs_beat: float = 0.0
         self._last_trigger_abs_beat: float = 0.0
-        self._laser_drop_fired_beat: Optional[int] = None
+        self._laser_drop_fired_beat: Optional[int] = None  # Deprecated in PR 4b: used for legacy fallback only
         self._pending_drop_crossing_beat: Optional[int] = None
         self._drop_rearm_edge_seen_for_pending: bool = False
         self._post_drop_start_abs_beat: float = -1.0
@@ -374,12 +374,8 @@ class LaserDirector:
 
         # Priority 9: Drop crossing (once per target beat).
         if previous_abs_beat is not None and self._drop_scene:
-            for drop_beat in sorted(set(ctx.smart_drops)):
-                if (
-                    previous_abs_beat < drop_beat <= abs_beat
-                    and self._laser_drop_fired_beat != int(drop_beat)
-                ):
-                    self._laser_drop_fired_beat = int(drop_beat)
+            if ctx.smart_phrasing is not None:
+                if ctx.smart_phrasing.smart_drop_crossing:
                     self._pending_drop_crossing_beat = None
                     self._drop_rearm_edge_seen_for_pending = False
                     self._post_drop_start_abs_beat = abs_beat
@@ -391,6 +387,24 @@ class LaserDirector:
                         source="policy",
                         role="drop",
                     )
+            else:
+                for drop_beat in sorted(set(ctx.smart_drops)):
+                    if (
+                        previous_abs_beat < drop_beat <= abs_beat
+                        and self._laser_drop_fired_beat != int(drop_beat)
+                    ):
+                        self._laser_drop_fired_beat = int(drop_beat)
+                        self._pending_drop_crossing_beat = None
+                        self._drop_rearm_edge_seen_for_pending = False
+                        self._post_drop_start_abs_beat = abs_beat
+                        self._last_smart_abs_beat = abs_beat
+                        return LaserSceneDecision(
+                            scene=self._drop_scene,
+                            reason="drop_crossing",
+                            priority=9,
+                            source="policy",
+                            role="drop",
+                        )
 
         # Priority 10: Post-drop hold (using existing minimum_scene_hold_beats).
         if (
