@@ -34,6 +34,7 @@ import time
 from typing import Optional
 
 from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
+from .smart_phrasing import SmartPhrasingState
 
 log = logging.getLogger("laser_director")
 
@@ -44,6 +45,35 @@ log = logging.getLogger("laser_director")
 _DEFAULT_SAFE_SCENE = "safe_static"
 _DEFAULT_DEFAULT_SCENE = "house_phrase_1"
 _DEFAULT_EMERGENCY_SCENE = "emergency_blackout"
+
+# Type-safe default for helper accessors. PR 4a decision paths still use
+# explicit `ctx.smart_phrasing is not None` guards so legacy fields remain
+# the fallback source when smart_phrasing is absent.
+_FALLBACK_SP = SmartPhrasingState(
+    current_phrase_label="other",
+    current_phrase_is_up=False,
+    current_phrase_is_chorus=False,
+    current_phrase_is_low=False,
+    next_smart_drop_beat=None,
+    beats_to_next_drop=None,
+    smart_drop_window_active=False,
+    smart_drop_crossing=False,
+    smart_drop_preclear_requested=False,
+    smart_drop_rearm_requested=False,
+    smart_post_drop_active=False,
+    active_drop_beat=None,
+    smart_buildup_active=False,
+    smart_breakdown_active=False,
+    breakdown_start_crossing=False,
+    breakdown_end_crossing=False,
+    smart_breakdown_clear_requested=False,
+    smart_breakdown_restore_requested=False,
+    transition_mask_should_arm=False,
+    transition_mask_should_clear=False,
+    transition_window_active=False,
+    phrase_anchor_requested=False,
+    reason="fallback",
+)
 
 
 class LaserDirector:
@@ -232,6 +262,9 @@ class LaserDirector:
         self._last_reason = decision.reason
         return decision
 
+    def _sp(self, ctx: LaserContext) -> SmartPhrasingState:
+        return ctx.smart_phrasing if ctx.smart_phrasing is not None else _FALLBACK_SP
+
     def _decide(self, ctx: LaserContext, *, now: float) -> LaserSceneDecision:
         """Priority-ordered scene selection. Returns a LaserSceneDecision."""
 
@@ -328,7 +361,8 @@ class LaserDirector:
         previous_abs_beat = self._last_smart_abs_beat
 
         # Priority 8: Existing Smart Breakdown observation.
-        if ctx.breakdown_active and self._breakdown_scene:
+        breakdown_active = self._sp(ctx).smart_breakdown_active if ctx.smart_phrasing is not None else ctx.breakdown_active
+        if breakdown_active and self._breakdown_scene:
             self._last_smart_abs_beat = abs_beat
             return LaserSceneDecision(
                 scene=self._breakdown_scene,
@@ -381,12 +415,19 @@ class LaserDirector:
         )
 
         # Priority 11: Smart Drop countdown buildup window.
-        beats_to_next_drop = self._beats_to_next_drop(abs_beat, ctx.smart_drops)
+        sp = self._sp(ctx)
+        beats_to_next_drop = sp.beats_to_next_drop if ctx.smart_phrasing is not None else self._beats_to_next_drop(abs_beat, ctx.smart_drops)
+        if beats_to_next_drop is None:
+            beats_to_next_drop = float('inf')
+
+        current_phrase_is_up = sp.current_phrase_is_up if ctx.smart_phrasing is not None else ctx.current_phrase_is_up
+        current_phrase_is_chorus = sp.current_phrase_is_chorus if ctx.smart_phrasing is not None else ctx.current_phrase_is_chorus
+
         if (
             self._buildup_scene
             and not in_post_drop_hold
-            and ctx.current_phrase_is_up
-            and not ctx.current_phrase_is_chorus
+            and current_phrase_is_up
+            and not current_phrase_is_chorus
             and self._buildup_lookahead_beats > 0
             and 0 < beats_to_next_drop <= self._buildup_lookahead_beats
         ):
