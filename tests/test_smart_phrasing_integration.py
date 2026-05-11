@@ -27,8 +27,8 @@ from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
     SmartPhrasingSnapshot,
     SmartPhrasingState,
     PhraseSegment,
+    build_phase2_phrase_segments,
 )
-from rb_ss_bridge_v2.state_manager import _build_phase2_phrase_segments  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +345,7 @@ class TestDropMarkerIsChorousBoundary(unittest.TestCase):
 class TestPhraseSegmentInference(unittest.TestCase):
     def test_shadow_mapping_infers_phrase_segment_from_next_marker_when_safe(self):
         """ANLZ markers at beats 96, 128, 160 produce proper PhraseSegments."""
-        segments = _build_phase2_phrase_segments(
+        segments = build_phase2_phrase_segments(
             anlz_buildups=[96],
             anlz_drops=[128],
             anlz_breakdowns=[160],
@@ -368,7 +368,7 @@ class TestPhraseSegmentInference(unittest.TestCase):
 
     def test_fallback_32_beat_up_segments_when_no_buildups(self):
         """When no anlz_buildups exist, infer 32-beat 'up' before each smart_drop."""
-        segments = _build_phase2_phrase_segments(
+        segments = build_phase2_phrase_segments(
             anlz_buildups=[],
             anlz_drops=[128],
             anlz_breakdowns=[],
@@ -385,7 +385,7 @@ class TestPhraseSegmentInference(unittest.TestCase):
 
     def test_shadow_32_beat_buildup_fallback_can_start_at_beat_zero(self):
         """If a drop occurs at beat 16, the 32-beat inferred fallback starts at beat 0."""
-        segments = _build_phase2_phrase_segments(
+        segments = build_phase2_phrase_segments(
             anlz_buildups=[],
             anlz_drops=[16],
             anlz_breakdowns=[],
@@ -402,7 +402,7 @@ class TestPhraseSegmentInference(unittest.TestCase):
         self.assertEqual(segments[1].start_beat, 16.0)
 
     def test_empty_markers_produce_empty_segments(self):
-        segments = _build_phase2_phrase_segments(
+        segments = build_phase2_phrase_segments(
             anlz_buildups=[],
             anlz_drops=[],
             anlz_breakdowns=[],
@@ -419,7 +419,7 @@ class TestPhraseSegmentInference(unittest.TestCase):
 class TestNoInventedDuration(unittest.TestCase):
     def test_shadow_mapping_does_not_invent_final_segment_duration(self):
         """If total_beats is 0 (no beatgrid), final segment is skipped."""
-        segments = _build_phase2_phrase_segments(
+        segments = build_phase2_phrase_segments(
             anlz_buildups=[96],
             anlz_drops=[128],
             anlz_breakdowns=[],
@@ -434,7 +434,7 @@ class TestNoInventedDuration(unittest.TestCase):
 
     def test_single_marker_no_total_beats_produces_nothing(self):
         """Single marker with no total_beats and no next marker → nothing."""
-        segments = _build_phase2_phrase_segments(
+        segments = build_phase2_phrase_segments(
             anlz_buildups=[],
             anlz_drops=[128],
             anlz_breakdowns=[],

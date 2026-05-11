@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal, Optional
+from .config import (
+    SMART_DROP_IGNORE_INTRO_BEATS,
+    SMART_DROP_IGNORE_OUTRO_BEATS,
+    SMART_BREAKDOWN_IGNORE_INTRO_BEATS,
+    SMART_BREAKDOWN_IGNORE_OUTRO_BEATS,
+)
+
 
 PhraseLabel = Literal["up", "chorus", "low", "other"]
 
@@ -280,3 +287,169 @@ class SmartPhrasingEngine:
         self._previous_abs_beat = snapshot.abs_beat
         
         return SmartPhrasingResult(state=state, diagnostics=tuple(diagnostics))
+
+
+def _latest_marker_beat_at_or_before(abs_beat: float, beats: list[int]) -> Optional[int]:
+    latest: Optional[int] = None
+    for marker in beats:
+        if marker <= abs_beat and (latest is None or marker > latest):
+            latest = marker
+    return latest
+
+
+
+def _current_phrase_context(
+    *,
+    abs_beat: float,
+    up_markers: list[int],
+    chorus_markers: list[int],
+    low_markers: list[int],
+) -> tuple[bool, bool]:
+    up = _latest_marker_beat_at_or_before(abs_beat, up_markers)
+    chorus = _latest_marker_beat_at_or_before(abs_beat, chorus_markers)
+    low = _latest_marker_beat_at_or_before(abs_beat, low_markers)
+
+    candidates: list[tuple[int, int, str]] = []
+    if up is not None:
+        candidates.append((up, 1, "up"))
+    if chorus is not None:
+        candidates.append((chorus, 2, "chorus"))
+    if low is not None:
+        candidates.append((low, 3, "low"))
+    if not candidates:
+        return False, False
+
+    _beat, _priority, marker_type = max(candidates, key=lambda item: (item[0], item[1]))
+    if marker_type == "up":
+        return True, False
+    if marker_type == "chorus":
+        return False, True
+    return False, False
+
+
+
+def build_phase2_phrase_segments(
+    anlz_buildups: list[int],
+    anlz_drops: list[int],
+    anlz_breakdowns: list[int],
+    smart_drops: list[int],
+    total_beats: int,
+) -> tuple[PhraseSegment, ...]:
+    """Phase 2 shadow: infer PhraseSegment ranges from ordered ANLZ markers.
+
+    Maps: anlz_buildups → "up", anlz_drops → "chorus", anlz_breakdowns → "low".
+    Each marker's end_beat = next marker's start_beat.
+    Final marker uses *total_beats* (from beatgrid length) if available,
+    otherwise it is skipped — Phase 2 does not invent arbitrary durations.
+
+    When no explicit anlz_buildups exist but smart_drops are present, infers
+    conservative 32-beat "up" segments before each Smart Drop.  This is a
+    Phase 2 shadow fallback based on the project rule that true musical
+    buildups typically happen during the 32 beats before a Smart Drop.
+
+    Pure computation — no I/O, no config reads, no file parsing.
+    """
+    markers: list[tuple[int, str]] = []
+    for beat in anlz_buildups:
+        markers.append((beat, "up"))
+    for beat in anlz_drops:
+        markers.append((beat, "chorus"))
+    for beat in anlz_breakdowns:
+        markers.append((beat, "low"))
+
+    # Phase 2 shadow fallback: infer 32-beat "up" segments before Smart Drops
+    # when no explicit buildup markers exist from ANLZ analysis.
+    if not anlz_buildups and smart_drops:
+        existing_beats = {m[0] for m in markers}
+        for drop_beat in smart_drops:
+            up_beat = max(0, drop_beat - 32)
+            if up_beat >= 0 and up_beat not in existing_beats:
+                markers.append((up_beat, "up"))
+                existing_beats.add(up_beat)
+
+    if not markers:
+        return ()
+
+    # Same-beat tiebreak: match _current_phrase_context priority
+    # (low=3 > chorus=2 > up=1 → low wins at same beat).
+    _priority = {"low": 0, "chorus": 1, "up": 2}
+    markers.sort(key=lambda m: (m[0], _priority.get(m[1], 3)))
+
+    # Deduplicate: keep highest-priority label at each beat (first after sort).
+    deduped: list[tuple[int, str]] = []
+    for beat, label in markers:
+        if deduped and deduped[-1][0] == beat:
+            continue
+        deduped.append((beat, label))
+
+    # Build segments from consecutive markers.
+    segments: list[PhraseSegment] = []
+    for i in range(len(deduped) - 1):
+        start_beat, label = deduped[i]
+        end_beat = deduped[i + 1][0]
+        if end_beat > start_beat:
+            segments.append(PhraseSegment(
+                start_beat=float(start_beat),
+                end_beat=float(end_beat),
+                label=label,
+            ))
+
+    # Final marker: use total_beats if available; otherwise skip.
+    # Phase 2 does not invent a final segment duration.
+    if deduped and total_beats > 0:
+        last_beat, last_label = deduped[-1]
+        if total_beats > last_beat:
+            segments.append(PhraseSegment(
+                start_beat=float(last_beat),
+                end_beat=float(total_beats),
+                label=last_label,
+            ))
+
+    return tuple(segments)
+
+
+def select_smart_drops(
+    raw_drops: list[int],
+    *,
+    total_beats: int = 0,
+    ignore_intro_beats: int = SMART_DROP_IGNORE_INTRO_BEATS,
+    ignore_outro_beats: int = SMART_DROP_IGNORE_OUTRO_BEATS,
+) -> list[int]:
+    """Return Smart Drop candidates after conservative intro/outro filtering."""
+    selected: list[int] = []
+    outro_start = total_beats - ignore_outro_beats if total_beats > 0 else 0
+    for drop_beat in sorted(set(raw_drops)):
+        if drop_beat < ignore_intro_beats:
+            continue
+        if outro_start > 0 and drop_beat >= outro_start:
+            continue
+        selected.append(drop_beat)
+    return selected
+
+
+def select_smart_breakdowns(
+    raw_breakdowns: list[int],
+    *,
+    total_beats: int = 0,
+) -> list[int]:
+    return select_smart_drops(
+        raw_breakdowns,
+        total_beats=total_beats,
+        ignore_intro_beats=SMART_BREAKDOWN_IGNORE_INTRO_BEATS,
+        ignore_outro_beats=SMART_BREAKDOWN_IGNORE_OUTRO_BEATS,
+    )
+
+
+
+def find_restore_beat(
+    breakdown_beat: int,
+    anlz_buildups: list[int],
+    smart_drops: list[int],
+    default_duration: int,
+) -> int:
+    candidates = []
+    candidates.extend([b for b in anlz_buildups if b > breakdown_beat])
+    candidates.extend([b for b in smart_drops if b > breakdown_beat])
+    if candidates:
+        return min(candidates)
+    return breakdown_beat + default_duration

@@ -39,6 +39,19 @@ from .config import (
     SMART_BREAKDOWN_WINDOW_BEATS, SMART_BREAKDOWN_DEFAULT_DURATION_BEATS,
     SMART_BREAKDOWN_IGNORE_INTRO_BEATS, SMART_BREAKDOWN_IGNORE_OUTRO_BEATS,
 )
+
+from .beat_math import (
+    _compute_beat_pos,
+    _compute_beatgrid_position,
+    _beatgrid_elapsed_for_abs_beat,
+)
+from .smart_phrasing import (
+    build_phase2_phrase_segments,
+    select_smart_drops,
+    select_smart_breakdowns,
+    _current_phrase_context,
+    find_restore_beat,
+)
 from .models import (
     ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot,
     SmartDropEnergyShadow, TrackMetadata,
@@ -157,186 +170,16 @@ class _StateManagerProfiler:
 
 # ── Beat position helper ──────────────────────────────────────────────────────
 
-def _compute_beat_pos(elapsed_ms: float, bpm: float, first_beat_ms: float = 0.0) -> float:
-    """Fractional beat position within current bar.
-
-    Returns 0.0 if bpm == 0. Negative means before first beat.
-    """
-    if bpm <= 0:
-        return 0.0
-    beat_ms = 60_000.0 / bpm
-    offset = elapsed_ms - first_beat_ms
-    pos = math.fmod(offset / beat_ms, 4.0)
-    return pos if pos >= 0 else pos + 4.0
 
 
-def _compute_beatgrid_position(
-    elapsed_ms: float,
-    beatgrid_times_ms: list[float],
-) -> Optional[tuple[float, float]]:
-    """Return (wrapped_0_to_4, absolute) beat position from ordered grid markers."""
-    if len(beatgrid_times_ms) < 2:
-        return None
-
-    times = beatgrid_times_ms
-    idx = bisect.bisect_right(times, elapsed_ms) - 1
-    if idx < 0:
-        interval = times[1] - times[0]
-        if interval <= 0:
-            return None
-        abs_pos = (elapsed_ms - times[0]) / interval
-    elif idx >= len(times) - 1:
-        interval = times[-1] - times[-2]
-        if interval <= 0:
-            return None
-        abs_pos = (len(times) - 1) + ((elapsed_ms - times[-1]) / interval)
-    else:
-        interval = times[idx + 1] - times[idx]
-        if interval <= 0:
-            return None
-        abs_pos = idx + ((elapsed_ms - times[idx]) / interval)
-
-    wrapped = math.fmod(abs_pos, 4.0)
-    if wrapped < 0:
-        wrapped += 4.0
-    return wrapped, abs_pos
 
 
-def _beatgrid_elapsed_for_abs_beat(
-    abs_beat: int,
-    beatgrid_times_ms: list[float],
-) -> Optional[tuple[int, str]]:
-    """Return (elapsed_ms, source) for an absolute beat target from grid markers."""
-    if len(beatgrid_times_ms) < 2:
-        return None
-
-    target = int(abs_beat)
-    times = beatgrid_times_ms
-    if 0 <= target < len(times):
-        return int(round(times[target])), "grid"
-
-    interval = times[-1] - times[-2]
-    if interval <= 0:
-        return None
-    elapsed_ms = times[-1] + ((target - (len(times) - 1)) * interval)
-    return int(round(elapsed_ms)), "grid-extrapolated"
 
 
-def _latest_marker_beat_at_or_before(abs_beat: float, beats: list[int]) -> Optional[int]:
-    latest: Optional[int] = None
-    for marker in beats:
-        if marker <= abs_beat and (latest is None or marker > latest):
-            latest = marker
-    return latest
 
 
-def _current_phrase_context(
-    *,
-    abs_beat: float,
-    up_markers: list[int],
-    chorus_markers: list[int],
-    low_markers: list[int],
-) -> tuple[bool, bool]:
-    up = _latest_marker_beat_at_or_before(abs_beat, up_markers)
-    chorus = _latest_marker_beat_at_or_before(abs_beat, chorus_markers)
-    low = _latest_marker_beat_at_or_before(abs_beat, low_markers)
-
-    candidates: list[tuple[int, int, str]] = []
-    if up is not None:
-        candidates.append((up, 1, "up"))
-    if chorus is not None:
-        candidates.append((chorus, 2, "chorus"))
-    if low is not None:
-        candidates.append((low, 3, "low"))
-    if not candidates:
-        return False, False
-
-    _beat, _priority, marker_type = max(candidates, key=lambda item: (item[0], item[1]))
-    if marker_type == "up":
-        return True, False
-    if marker_type == "chorus":
-        return False, True
-    return False, False
 
 
-def _build_phase2_phrase_segments(
-    anlz_buildups: list[int],
-    anlz_drops: list[int],
-    anlz_breakdowns: list[int],
-    smart_drops: list[int],
-    total_beats: int,
-) -> tuple[PhraseSegment, ...]:
-    """Phase 2 shadow: infer PhraseSegment ranges from ordered ANLZ markers.
-
-    Maps: anlz_buildups → "up", anlz_drops → "chorus", anlz_breakdowns → "low".
-    Each marker's end_beat = next marker's start_beat.
-    Final marker uses *total_beats* (from beatgrid length) if available,
-    otherwise it is skipped — Phase 2 does not invent arbitrary durations.
-
-    When no explicit anlz_buildups exist but smart_drops are present, infers
-    conservative 32-beat "up" segments before each Smart Drop.  This is a
-    Phase 2 shadow fallback based on the project rule that true musical
-    buildups typically happen during the 32 beats before a Smart Drop.
-
-    Pure computation — no I/O, no config reads, no file parsing.
-    """
-    markers: list[tuple[int, str]] = []
-    for beat in anlz_buildups:
-        markers.append((beat, "up"))
-    for beat in anlz_drops:
-        markers.append((beat, "chorus"))
-    for beat in anlz_breakdowns:
-        markers.append((beat, "low"))
-
-    # Phase 2 shadow fallback: infer 32-beat "up" segments before Smart Drops
-    # when no explicit buildup markers exist from ANLZ analysis.
-    if not anlz_buildups and smart_drops:
-        existing_beats = {m[0] for m in markers}
-        for drop_beat in smart_drops:
-            up_beat = max(0, drop_beat - 32)
-            if up_beat >= 0 and up_beat not in existing_beats:
-                markers.append((up_beat, "up"))
-                existing_beats.add(up_beat)
-
-    if not markers:
-        return ()
-
-    # Same-beat tiebreak: match _current_phrase_context priority
-    # (low=3 > chorus=2 > up=1 → low wins at same beat).
-    _priority = {"low": 0, "chorus": 1, "up": 2}
-    markers.sort(key=lambda m: (m[0], _priority.get(m[1], 3)))
-
-    # Deduplicate: keep highest-priority label at each beat (first after sort).
-    deduped: list[tuple[int, str]] = []
-    for beat, label in markers:
-        if deduped and deduped[-1][0] == beat:
-            continue
-        deduped.append((beat, label))
-
-    # Build segments from consecutive markers.
-    segments: list[PhraseSegment] = []
-    for i in range(len(deduped) - 1):
-        start_beat, label = deduped[i]
-        end_beat = deduped[i + 1][0]
-        if end_beat > start_beat:
-            segments.append(PhraseSegment(
-                start_beat=float(start_beat),
-                end_beat=float(end_beat),
-                label=label,
-            ))
-
-    # Final marker: use total_beats if available; otherwise skip.
-    # Phase 2 does not invent a final segment duration.
-    if deduped and total_beats > 0:
-        last_beat, last_label = deduped[-1]
-        if total_beats > last_beat:
-            segments.append(PhraseSegment(
-                start_beat=float(last_beat),
-                end_beat=float(total_beats),
-                label=last_label,
-            ))
-
-    return tuple(segments)
 
 
 class StateManager:
@@ -600,7 +443,7 @@ class StateManager:
             "smart_drop_transition_window_active": os.drop_cut_armed,
             # Backward-compatible field name, now reflecting executor blackout MIDI state.
             "smart_drop_blackout_active": executor_blackout_pending,
-            "scripted_id": self._os.scripted_id if hasattr(self._os, "scripted_id") else 0, # compatibility fallback
+            "scripted_id": 0, # Dead compatibility field — OutputState never had scripted_id; actual per-deck value is in deck[n]["scripted_id"]
             "smart_drop_enabled": self._smart_drop_enabled,
             "smart_breakdown_enabled": self._smart_breakdown_enabled,
             "pending_scripted_arm": (
@@ -693,13 +536,13 @@ class StateManager:
                     total_beats = len(d_obj.meta.beatgrid_times_ms)
                     
                     d_obj.meta.anlz_drops = raw_drops
-                    d_obj.meta.smart_drops = _select_smart_drops(
+                    d_obj.meta.smart_drops = select_smart_drops(
                         raw_drops,
                         total_beats=total_beats,
                     )
                     
                     d_obj.meta.anlz_breakdowns = raw_breakdowns
-                    d_obj.meta.smart_breakdowns = _select_smart_breakdowns(
+                    d_obj.meta.smart_breakdowns = select_smart_breakdowns(
                         raw_breakdowns,
                         total_beats=total_beats,
                     )
@@ -1857,7 +1700,7 @@ class StateManager:
             track_id=d.meta.content_id or None,
             is_playing=d.playing,
             abs_beat=abs_beat_pos if bpm > 0 else None,
-            phrase_segments=_build_phase2_phrase_segments(
+            phrase_segments=build_phase2_phrase_segments(
                 anlz_buildups=d.meta.anlz_buildups,
                 anlz_drops=d.meta.anlz_drops,
                 anlz_breakdowns=d.meta.anlz_breakdowns,
@@ -2500,43 +2343,7 @@ def _smart_drop_tick(
     return _SMART_DROP_SIGNAL_NONE
 
 
-def _select_smart_drops(
-    raw_drops: list[int],
-    *,
-    total_beats: int = 0,
-    ignore_intro_beats: int = SMART_DROP_IGNORE_INTRO_BEATS,
-    ignore_outro_beats: int = SMART_DROP_IGNORE_OUTRO_BEATS,
-) -> list[int]:
-    """Return Smart Drop candidates after conservative intro/outro filtering."""
-    selected: list[int] = []
-    outro_start = total_beats - ignore_outro_beats if total_beats > 0 else 0
-    for drop_beat in sorted(set(raw_drops)):
-        if drop_beat < ignore_intro_beats:
-            continue
-        if outro_start > 0 and drop_beat >= outro_start:
-            continue
-        selected.append(drop_beat)
-    return selected
 
-def _select_smart_breakdowns(
-    raw_breakdowns: list[int],
-    *,
-    total_beats: int = 0,
-) -> list[int]:
-    return _select_smart_drops(
-        raw_breakdowns,
-        total_beats=total_beats,
-        ignore_intro_beats=SMART_BREAKDOWN_IGNORE_INTRO_BEATS,
-        ignore_outro_beats=SMART_BREAKDOWN_IGNORE_OUTRO_BEATS,
-    )
-
-def _find_restore_beat(d: DeckState, breakdown_beat: int) -> int:
-    candidates = []
-    candidates.extend([b for b in d.meta.anlz_buildups if b > breakdown_beat])
-    candidates.extend([b for b in d.meta.smart_drops if b > breakdown_beat])
-    if candidates:
-        return min(candidates)
-    return breakdown_beat + SMART_BREAKDOWN_DEFAULT_DURATION_BEATS
 
 def _smart_breakdown_tick(
     sm: "StateManager",
@@ -2579,7 +2386,7 @@ def _smart_breakdown_tick(
                 sm._out.send_deck_clear(dk)
                 sm._out.send_loop_off(dk)
             os.breakdown_active = True
-            os.breakdown_restore_beat = _find_restore_beat(d, bd_beat)
+            os.breakdown_restore_beat = find_restore_beat(bd_beat, d.meta.anlz_buildups, d.meta.smart_drops, SMART_BREAKDOWN_DEFAULT_DURATION_BEATS)
             break
     return False
 
