@@ -255,5 +255,92 @@ class TestSmartPhrasing(unittest.TestCase):
                 self.assertEqual(diag.reason, "not_playing")
         self.assertTrue(found_reset)
 
+
+    def test_smart_drop_preclear_requested_fires_on_window_entry(self):
+        """Preclear intent fires once when smart_drop_window_active transitions to True."""
+        snap = self._default_snap(smart_drop_beats=(64.0,), drop_window_beats=4.0)
+        # Outside window (beat 59)
+        self.engine.update(replace(snap, abs_beat=59.0))
+        
+        # Enter window (beat 60)
+        res = self.engine.update(replace(snap, abs_beat=60.0))
+        self.assertTrue(res.state.smart_drop_window_active)
+        self.assertTrue(res.state.smart_drop_preclear_requested)
+
+    def test_smart_drop_preclear_requested_does_not_fire_repeatedly(self):
+        """Preclear intent does not fire repeatedly while remaining inside the window."""
+        snap = self._default_snap(smart_drop_beats=(64.0,), drop_window_beats=4.0)
+        self.engine.update(replace(snap, abs_beat=59.0))
+        
+        # Enter window
+        res = self.engine.update(replace(snap, abs_beat=60.0))
+        self.assertTrue(res.state.smart_drop_preclear_requested)
+        
+        # Remain in window
+        res = self.engine.update(replace(snap, abs_beat=61.0))
+        self.assertTrue(res.state.smart_drop_window_active)
+        self.assertFalse(res.state.smart_drop_preclear_requested)
+
+    def test_smart_drop_rearm_requested_fires_on_crossing(self):
+        """Rearm intent fires when smart_drop_crossing fires."""
+        snap = self._default_snap(smart_drop_beats=(64.0,), drop_window_beats=4.0)
+        self.engine.update(replace(snap, abs_beat=63.0))
+        
+        # Cross drop
+        res = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertTrue(res.state.smart_drop_crossing)
+        self.assertTrue(res.state.smart_drop_rearm_requested)
+
+    def test_smart_drop_rearm_requested_deduplicates(self):
+        """Rearm intent deduplicates with existing smart_drop_crossing deduplication."""
+        snap = self._default_snap(smart_drop_beats=(64.0,), drop_window_beats=4.0)
+        self.engine.update(replace(snap, abs_beat=63.0))
+        
+        # Cross drop
+        res = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertTrue(res.state.smart_drop_rearm_requested)
+        
+        # Cross again (same tick/playhead didn't jump back)
+        res = self.engine.update(replace(snap, abs_beat=64.1))
+        self.assertFalse(res.state.smart_drop_crossing)
+        self.assertFalse(res.state.smart_drop_rearm_requested)
+
+    def test_smart_drop_intents_preserve_next_drop_semantics(self):
+        """Preclear and crossing behavior preserve next_smart_drop_beat semantics."""
+        snap = self._default_snap(smart_drop_beats=(64.0, 128.0), drop_window_beats=4.0)
+        self.engine.update(replace(snap, abs_beat=59.0))
+        
+        # Enter window for drop 64
+        res = self.engine.update(replace(snap, abs_beat=60.0))
+        self.assertEqual(res.state.next_smart_drop_beat, 64.0)
+        
+        # Cross drop 64
+        res = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertEqual(res.state.next_smart_drop_beat, 128.0)
+        
+        # Advance to drop 128 window
+        self.engine.update(replace(snap, abs_beat=123.0))
+        res = self.engine.update(replace(snap, abs_beat=124.0))
+        self.assertEqual(res.state.next_smart_drop_beat, 128.0)
+        self.assertTrue(res.state.smart_drop_preclear_requested)
+
+    def test_smart_drop_intents_reset_on_playhead_jump(self):
+        """Playhead jump clears intent state allowing it to fire again."""
+        snap = self._default_snap(smart_drop_beats=(64.0,), drop_window_beats=4.0)
+        self.engine.update(replace(snap, abs_beat=59.0))
+        
+        # Enter window
+        res = self.engine.update(replace(snap, abs_beat=60.0))
+        self.assertTrue(res.state.smart_drop_preclear_requested)
+        
+        # Jump backward
+        res = self.engine.update(replace(snap, abs_beat=59.0))
+        self.assertEqual(res.diagnostics[0].reason, "playhead_jump_backward")
+        self.assertFalse(res.state.smart_drop_preclear_requested)
+        self.assertFalse(res.state.smart_drop_window_active)
+        
+        # Enter window again
+        res = self.engine.update(replace(snap, abs_beat=60.0))
+        self.assertTrue(res.state.smart_drop_preclear_requested)
 if __name__ == '__main__':
     unittest.main()
