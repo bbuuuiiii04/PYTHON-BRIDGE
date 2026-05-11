@@ -24,11 +24,13 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.laser_models import LaserContext, LaserPersonality, LaserSceneDecision  # noqa: E402
+from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState  # noqa: E402
 from rb_ss_bridge_v2.laser_director import LaserDirector  # noqa: E402
 from rb_ss_bridge_v2.models import Ev  # noqa: E402
 
@@ -58,6 +60,7 @@ def _ctx(
     current_phrase_is_chorus: bool = False,
     scripted_id: int = 0,
     smart_drop_blackout_active: bool = False,
+    smart_phrasing: Optional[SmartPhrasingState] = None,
 ) -> LaserContext:
     return LaserContext(
         active_deck=active_deck,
@@ -79,6 +82,7 @@ def _ctx(
         current_phrase_is_chorus=current_phrase_is_chorus,
         scripted_id=scripted_id,
         smart_drop_blackout_active=smart_drop_blackout_active,
+        smart_phrasing=smart_phrasing,
     )
 
 
@@ -1158,6 +1162,102 @@ class SmartObservationTests(unittest.TestCase):
         self.assertTrue(ld.status()["emergency"])
         self.assertEqual(ld.status()["manual_override"], "manual_scene")
 
+
+# ---------------------------------------------------------------------------
+# Smart Phrasing Observation (PR 4a tests)
+# ---------------------------------------------------------------------------
+
+class SmartPhrasingObservationTests(unittest.TestCase):
+    def test_breakdown_from_smart_phrasing(self) -> None:
+        ld = _director(default_scene="d", breakdown_scene="bd")
+        sp = SmartPhrasingState(
+            current_phrase_label="other", current_phrase_is_up=False, current_phrase_is_chorus=False,
+            current_phrase_is_low=False, next_smart_drop_beat=None, beats_to_next_drop=None,
+            smart_drop_window_active=False, smart_drop_crossing=False, smart_drop_preclear_requested=False,
+            smart_drop_rearm_requested=False, smart_post_drop_active=False, active_drop_beat=None,
+            smart_buildup_active=False, smart_breakdown_active=True, breakdown_start_crossing=False,
+            breakdown_end_crossing=False, smart_breakdown_clear_requested=False,
+            smart_breakdown_restore_requested=False, transition_mask_should_arm=False,
+            transition_mask_should_clear=False, transition_window_active=False,
+            phrase_anchor_requested=False, reason="test"
+        )
+        ld.tick(_ctx(abs_beat=32.0), now=_now())  # init
+        ld.tick(_ctx(abs_beat=32.5, smart_phrasing=sp, breakdown_active=False), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "bd")
+        self.assertEqual(ld.status()["last_reason"], "breakdown_active")
+
+    def test_buildup_from_smart_phrasing_beats_to_drop(self) -> None:
+        ld = _director(default_scene="d", buildup_scene="up", buildup_lookahead_beats=16)
+        sp = SmartPhrasingState(
+            current_phrase_label="up", current_phrase_is_up=True, current_phrase_is_chorus=False,
+            current_phrase_is_low=False, next_smart_drop_beat=32.0, beats_to_next_drop=10.0,
+            smart_drop_window_active=False, smart_drop_crossing=False, smart_drop_preclear_requested=False,
+            smart_drop_rearm_requested=False, smart_post_drop_active=False, active_drop_beat=None,
+            smart_buildup_active=False, smart_breakdown_active=False, breakdown_start_crossing=False,
+            breakdown_end_crossing=False, smart_breakdown_clear_requested=False,
+            smart_breakdown_restore_requested=False, transition_mask_should_arm=False,
+            transition_mask_should_clear=False, transition_window_active=False,
+            phrase_anchor_requested=False, reason="test"
+        )
+        ld.tick(_ctx(abs_beat=10.0), now=_now())  # init
+        ld.tick(
+            _ctx(abs_beat=22.0, smart_phrasing=sp, current_phrase_is_up=False, smart_drops=()),
+            now=_now()
+        )
+        self.assertEqual(ld.status()["current_scene"], "up")
+        self.assertEqual(ld.status()["last_reason"], "buildup_to_drop_window")
+
+    def test_phrase_flags_from_smart_phrasing_chorus_blocks_buildup(self) -> None:
+        ld = _director(default_scene="d", buildup_scene="up", buildup_lookahead_beats=16)
+        sp = SmartPhrasingState(
+            current_phrase_label="chorus", current_phrase_is_up=True, current_phrase_is_chorus=True,
+            current_phrase_is_low=False, next_smart_drop_beat=32.0, beats_to_next_drop=10.0,
+            smart_drop_window_active=False, smart_drop_crossing=False, smart_drop_preclear_requested=False,
+            smart_drop_rearm_requested=False, smart_post_drop_active=False, active_drop_beat=None,
+            smart_buildup_active=False, smart_breakdown_active=False, breakdown_start_crossing=False,
+            breakdown_end_crossing=False, smart_breakdown_clear_requested=False,
+            smart_breakdown_restore_requested=False, transition_mask_should_arm=False,
+            transition_mask_should_clear=False, transition_window_active=False,
+            phrase_anchor_requested=False, reason="test"
+        )
+        ld.tick(_ctx(abs_beat=10.0), now=_now())  # init
+        ld.tick(
+            _ctx(abs_beat=22.0, smart_phrasing=sp, current_phrase_is_up=True, current_phrase_is_chorus=False, smart_drops=(32,)),
+            now=_now()
+        )
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["last_reason"], "default")
+
+    def test_buildup_from_smart_phrasing_beats_to_drop_none_safe(self) -> None:
+        ld = _director(default_scene="d", buildup_scene="up", buildup_lookahead_beats=16)
+        sp = SmartPhrasingState(
+            current_phrase_label="up", current_phrase_is_up=True, current_phrase_is_chorus=False,
+            current_phrase_is_low=False, next_smart_drop_beat=None, beats_to_next_drop=None,
+            smart_drop_window_active=False, smart_drop_crossing=False, smart_drop_preclear_requested=False,
+            smart_drop_rearm_requested=False, smart_post_drop_active=False, active_drop_beat=None,
+            smart_buildup_active=False, smart_breakdown_active=False, breakdown_start_crossing=False,
+            breakdown_end_crossing=False, smart_breakdown_clear_requested=False,
+            smart_breakdown_restore_requested=False, transition_mask_should_arm=False,
+            transition_mask_should_clear=False, transition_window_active=False,
+            phrase_anchor_requested=False, reason="test"
+        )
+        ld.tick(_ctx(abs_beat=10.0), now=_now())  # init
+        ld.tick(
+            _ctx(abs_beat=22.0, smart_phrasing=sp, current_phrase_is_up=False, smart_drops=()),
+            now=_now()
+        )
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertEqual(ld.status()["last_reason"], "default")
+
+    def test_legacy_buildup_fallback_works(self) -> None:
+        ld = _director(default_scene="d", buildup_scene="up", buildup_lookahead_beats=16)
+        ld.tick(_ctx(abs_beat=10.0), now=_now())  # init
+        ld.tick(
+            _ctx(abs_beat=48.0, smart_phrasing=None, current_phrase_is_up=True, current_phrase_is_chorus=False, smart_drops=(64,)),
+            now=_now()
+        )
+        self.assertEqual(ld.status()["current_scene"], "up")
+        self.assertEqual(ld.status()["last_reason"], "buildup_to_drop_window")
 
 # ---------------------------------------------------------------------------
 # Enable / disable
