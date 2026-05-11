@@ -78,6 +78,14 @@ class LaserSceneExecutor:
             self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
         self._resolve_pending_blackout(reason=reason)
 
+    def on_tick(self, ctx: LaserContext) -> None:
+        """Consume per-tick SmartPhrasing cleanup intents before decision output."""
+        sp = ctx.smart_phrasing
+        if sp is None:
+            return
+        if sp.transition_mask_should_clear:
+            self._resolve_pending_blackout(reason="smart_phrasing_transition_mask_clear")
+
     def on_decision(self, decision: Optional[LaserSceneDecision], ctx: LaserContext) -> None:
         """Consume one decision and trigger MIDI when all gates pass."""
         if decision is None:
