@@ -273,18 +273,15 @@ class RuntimeStatusLaserWiringTests(unittest.TestCase):
         pos_cache.get.return_value = None
         conn = Mock()
         conn.status.return_value = {"connected": False}
-        mirror = Mock()
-        mirror.get_summary.return_value = {"enabled": False}
         validation_runner = Mock()
         validation_runner.last_result.return_value.to_dict.return_value = {"state": "idle"}
         command_reader = Mock()
-        command_reader.status.return_value = {"armed": False}
+        command_reader.status.return_value = {}
         writer = StatusWriter(
             sm,
             live_bpm,
             pos_cache,
             conn,
-            mirror,
             validation_runner,
             command_reader,
         )

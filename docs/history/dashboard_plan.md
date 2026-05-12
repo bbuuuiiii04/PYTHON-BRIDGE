@@ -77,6 +77,9 @@ basic BPM/scripted identifiers.
 
 ### OS2L Mirror
 
+> **Removed 2026-05-12:** `os2l_mirror.py` and all related menu/command
+> plumbing were deleted. This section is retained as historical context only.
+
 `os2l_mirror.py` records bounded packet history and optional JSONL captures.
 `OS2LConnection` records at the connection boundary:
 

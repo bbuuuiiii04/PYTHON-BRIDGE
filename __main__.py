@@ -34,7 +34,6 @@ from .models import BridgeEvent, Ev
 from .mtc_reader import MTCReader
 from .osl_output import OS2LConnection, OS2LOutput, SoundSwitchDiscovery
 from .os2l_injector import OS2LInjector
-from .os2l_mirror import OS2LMirror
 from .rb_memory import PositionCache, RBMemoryReader
 from .rb_state_reader import (
     make_rb_state_reader,
@@ -649,8 +648,6 @@ def main() -> None:
 
     # OS2L output
     conn = OS2LConnection()
-    mirror = OS2LMirror()
-    conn.set_mirror(mirror)
     conn.start()
     output = OS2LOutput(conn)
     injector = OS2LInjector(conn)
@@ -787,7 +784,6 @@ def main() -> None:
             return False
 
     command_reader = CommandReader(
-        mirror,
         validation_runner,
         smart_drop_toggle_callback=_toggle_smart_drop,
         smart_breakdown_toggle_callback=_toggle_smart_breakdown,
@@ -804,7 +800,6 @@ def main() -> None:
         live_bpm,
         pos_cache,
         conn,
-        mirror,
         validation_runner,
         command_reader,
         laser_status_provider=laser_status_provider,

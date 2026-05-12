@@ -76,14 +76,12 @@ def _make_status_writer(laser_status_provider=None):
         _drop_count=0,
         status=lambda: {"connected": True, "queue_size": 0},
     )
-    mirror = Mock()
-    mirror.get_summary.return_value = {}
     validation_runner = Mock()
     validation_runner.last_result.return_value = Mock(to_dict=lambda: {})
     command_reader = Mock()
     command_reader.status.return_value = {}
     return StatusWriter(
-        sm, live_bpm, pos_cache, conn, mirror,
+        sm, live_bpm, pos_cache, conn,
         validation_runner, command_reader,
         laser_status_provider=laser_status_provider,
     )
@@ -126,7 +124,7 @@ class StatusWriterLaserTests(unittest.TestCase):
         writer = _make_status_writer()
         snap = writer.snapshot()
         for key in ("schema", "written_at", "process", "state_manager",
-                    "deck_runtime", "soundswitch", "mirror", "validation",
+                    "deck_runtime", "soundswitch", "validation",
                     "commands", "recent_errors"):
             self.assertIn(key, snap, msg=f"missing key: {key}")
 
@@ -173,20 +171,20 @@ class CommandReaderCallbackFailureTests(unittest.TestCase):
         def bad():
             raise RuntimeError("queue full")
 
-        reader = CommandReader(Mock(), Mock(), smart_drop_toggle_callback=bad)
+        reader = CommandReader(Mock(), smart_drop_toggle_callback=bad)
         reader.handle_command({"cmd": "toggle_smart_drop"})
         self.assertIn("toggle_smart_drop", reader.status()["last_error"])
         self.assertIn("RuntimeError", reader.status()["last_error"])
         self.assertIn("queue full", reader.status()["last_error"])
 
     def test_smart_drop_false_return_sets_last_error(self) -> None:
-        reader = CommandReader(Mock(), Mock(), smart_drop_toggle_callback=lambda: False)
+        reader = CommandReader(Mock(), smart_drop_toggle_callback=lambda: False)
         reader.handle_command({"cmd": "toggle_smart_drop"})
         self.assertIn("toggle_smart_drop", reader.status()["last_error"])
         self.assertIn("returned False", reader.status()["last_error"])
 
     def test_smart_drop_success_clears_last_error(self) -> None:
-        reader = CommandReader(Mock(), Mock(), smart_drop_toggle_callback=lambda: None)
+        reader = CommandReader(Mock(), smart_drop_toggle_callback=lambda: None)
         reader.handle_command({"cmd": "toggle_smart_drop"})
         self.assertEqual(reader.status()["last_error"], "")
 
@@ -194,7 +192,7 @@ class CommandReaderCallbackFailureTests(unittest.TestCase):
         def bad():
             raise RuntimeError("queue full")
 
-        reader = CommandReader(Mock(), Mock(), smart_breakdown_toggle_callback=bad)
+        reader = CommandReader(Mock(), smart_breakdown_toggle_callback=bad)
         reader.handle_command({"cmd": "toggle_smart_breakdown"})
         self.assertIn("toggle_smart_breakdown", reader.status()["last_error"])
         self.assertIn("RuntimeError", reader.status()["last_error"])
@@ -202,7 +200,7 @@ class CommandReaderCallbackFailureTests(unittest.TestCase):
 
     def test_existing_toggle_smart_drop_no_callback_still_works(self) -> None:
         """No callback registered must not raise."""
-        reader = CommandReader(Mock(), Mock())
+        reader = CommandReader(Mock())
         reader.handle_command({"cmd": "toggle_smart_drop"})
         self.assertEqual(reader.status()["last_error"], "")
 

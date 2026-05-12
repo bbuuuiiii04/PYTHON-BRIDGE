@@ -54,11 +54,11 @@ These defaults exist in `scripts/ss_bridge_watcher.sh`.
 | `SoundSwitchEngine` | `sound_switch_engine.py` | OS2L/SoundSwitch output-intent fanout helper for scripted/autoloop/smart-transition/live-BPM-follow sends requested by `StateManager`. |
 | `beat_math` | `beat_math.py` | Pure beat and beatgrid math helpers used by timing paths. |
 | `OS2LConnection` / `OS2LOutput` | `osl_output.py` | Persistent TCP OS2L connection, sender queue, reconnect, and DNS-SD endpoint discovery. |
-| `OS2LMirror` / `OS2LInjector` | `os2l_mirror.py`, `os2l_injector.py` | Runtime mirror/capture/injection support for validation and operator commands. |
+| `OS2LInjector` | `os2l_injector.py` | Runtime injection support for validation and operator commands. |
 | `StatusWriter` | `runtime_status.py` | Writes `/tmp/rb_ss_bridge_v2_status.json` every 0.5 s for the menu bar. |
 | `CommandReader` | `runtime_status.py` | Tails `/tmp/rb_ss_bridge_v2_commands.jsonl` for menu commands. |
 | `ValidationRunner` | `validation_runner.py` | Runs operator health checks from the menu/command channel. |
-| Menu bar | `scripts/bridge_menubar.py` | Local macOS control/status UI for launch, capture, validation, mirror, and Smart Drop toggle commands. |
+| Menu bar | `scripts/bridge_menubar.py` | Local macOS control/status UI for launch, health check, Smart Phrasing toggles, and laser mapping. |
 
 `SoundSwitchDiscovery` must be retained for the bridge lifetime. It owns the
 Zeroconf browser used to discover `_os2l._tcp.local.` endpoints and update
@@ -521,26 +521,27 @@ wrong position after pause.
 
 `StatusWriter` writes `/tmp/rb_ss_bridge_v2_status.json` with schema `1`. It
 includes process state, `StateManager.snapshot()`, per-deck memory and live BPM,
-SoundSwitch connection status, OS2L mirror summary, validation result, command
-state, and recent errors.
+SoundSwitch connection status, validation result, runtime command status, and
+recent errors.
 
 `CommandReader` tails `/tmp/rb_ss_bridge_v2_commands.jsonl`. Supported commands:
 
 ```text
-arm_live
-disarm_live
-toggle_mirror
-set_mirror
-start_capture
-stop_capture
 run_validation
 toggle_smart_drop
+toggle_smart_breakdown
+toggle_laser_director
+set_laser_director
+laser_blackout
+laser_clear_blackout
+laser_scene
+laser_clear_scene_override
+laser_set_personality
 ```
 
-`arm_live` TTL is capped at 30 s. `run_validation` starts a daemon validation
-thread. Mirror/capture commands mutate `OS2LMirror` directly. `toggle_smart_drop`
-queues `Ev.SMART_DROP_TOGGLE`; the actual runtime flag mutation happens in the
-StateManager thread.
+`run_validation` starts a daemon validation thread. Smart phrasing toggles queue
+`Ev.SMART_DROP_TOGGLE` / `Ev.SMART_BREAKDOWN_TOGGLE`; runtime flag mutation
+happens in the StateManager thread.
 
 ## Logging And Validation
 
