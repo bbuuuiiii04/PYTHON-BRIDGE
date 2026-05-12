@@ -1,11 +1,11 @@
-"""Phase 2 shadow integration tests for Issue #33: SmartPhrasingEngine in StateManager.
+"""Integration tests for Issue #33: SmartPhrasingEngine in StateManager.
 
 Verifies:
   A. LaserContext defaults smart_phrasing to None.
-  B. StateManager populates smart_phrasing shadow state.
-  C. Shadow smart_phrasing does not change LaserDirector decisions.
-  D. Shadow engine is safe on stop / missing track.
-  E. Shadow mapping uses 32-beat buildup lookahead.
+  B. StateManager populates smart_phrasing state.
+  C. Smart phrasing state does not change LaserDirector decisions.
+  D. Smart phrasing engine is safe on stop / missing track.
+  E. Phrase mapping uses 32-beat buildup lookahead.
   F. Smart Drop works without chorus data.
   G. Drop marker is treated as chorus boundary.
   H. Phrase segments inferred from ordered markers when safe.
@@ -33,7 +33,7 @@ from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
     SmartPhrasingSnapshot,
     SmartPhrasingState,
     PhraseSegment,
-    build_phase2_phrase_segments,
+    build_phrase_segments_from_markers,
 )
 from rb_ss_bridge_v2.state_manager import StateManager  # noqa: E402
 
@@ -125,11 +125,11 @@ class TestLaserContextDefault(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# B. test_state_manager_populates_smart_phrasing_shadow_state
+# B. test_state_manager_populates_smart_phrasing_state
 # ---------------------------------------------------------------------------
 
-class TestSmartPhrasingShadowPopulation(unittest.TestCase):
-    def test_state_manager_populates_smart_phrasing_shadow_state(self):
+class TestSmartPhrasingStatePopulation(unittest.TestCase):
+    def test_state_manager_populates_smart_phrasing_state(self):
         """SmartPhrasingEngine returns valid state from direct snapshot call."""
         engine = SmartPhrasingEngine()
         snap = SmartPhrasingSnapshot(
@@ -154,11 +154,11 @@ class TestSmartPhrasingShadowPopulation(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# C. test_shadow_smart_phrasing_does_not_change_laser_decision
+# C. test_smart_phrasing_does_not_change_laser_decision
 # ---------------------------------------------------------------------------
 
-class TestShadowDoesNotChangeDecisions(unittest.TestCase):
-    def test_shadow_smart_phrasing_does_not_change_laser_decision(self):
+class TestSmartPhrasingDoesNotChangeDecisions(unittest.TestCase):
+    def test_smart_phrasing_does_not_change_laser_decision(self):
         """Identical director decisions with None vs populated SmartPhrasingState."""
         ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
 
@@ -194,11 +194,11 @@ class TestShadowDoesNotChangeDecisions(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# D. test_shadow_engine_safe_on_stop_or_missing_track
+# D. test_engine_safe_on_stop_or_missing_track
 # ---------------------------------------------------------------------------
 
-class TestShadowEngineSafeOnStopOrMissingTrack(unittest.TestCase):
-    def test_shadow_engine_safe_on_stop(self):
+class TestEngineSafeOnStopOrMissingTrack(unittest.TestCase):
+    def test_engine_safe_on_stop(self):
         engine = SmartPhrasingEngine()
         snap = SmartPhrasingSnapshot(
             deck_id="1",
@@ -220,7 +220,7 @@ class TestShadowEngineSafeOnStopOrMissingTrack(unittest.TestCase):
         self.assertFalse(s.smart_buildup_active)
         self.assertFalse(s.smart_breakdown_active)
 
-    def test_shadow_engine_safe_on_missing_track(self):
+    def test_engine_safe_on_missing_track(self):
         engine = SmartPhrasingEngine()
         snap = SmartPhrasingSnapshot(
             deck_id="1",
@@ -244,11 +244,11 @@ class TestShadowEngineSafeOnStopOrMissingTrack(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# E. test_shadow_mapping_uses_32_beat_buildup_lookahead
+# E. test_mapping_uses_32_beat_buildup_lookahead
 # ---------------------------------------------------------------------------
 
-class TestShadowBuiltinLookahead(unittest.TestCase):
-    def test_shadow_mapping_uses_32_beat_buildup_lookahead(self):
+class TestBuiltinLookahead(unittest.TestCase):
+    def test_mapping_uses_32_beat_buildup_lookahead(self):
         """Engine considers buildup active 32 beats before drop when in 'up' phrase."""
         engine = SmartPhrasingEngine()
         snap = SmartPhrasingSnapshot(
@@ -278,11 +278,11 @@ class TestShadowBuiltinLookahead(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# F. test_shadow_smart_drop_works_without_chorus_data
+# F. test_smart_drop_works_without_chorus_data
 # ---------------------------------------------------------------------------
 
 class TestSmartDropWithoutChorus(unittest.TestCase):
-    def test_shadow_smart_drop_works_without_chorus_data(self):
+    def test_smart_drop_works_without_chorus_data(self):
         """Smart Drops computed from smart_drop_beats even with no phrase segments."""
         engine = SmartPhrasingEngine()
         snap = SmartPhrasingSnapshot(
@@ -315,11 +315,11 @@ class TestSmartDropWithoutChorus(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# G. test_shadow_mapping_drop_marker_is_chorus_boundary
+# G. test_mapping_drop_marker_is_chorus_boundary
 # ---------------------------------------------------------------------------
 
 class TestDropMarkerIsChorousBoundary(unittest.TestCase):
-    def test_shadow_mapping_drop_marker_is_chorus_boundary(self):
+    def test_mapping_drop_marker_is_chorus_boundary(self):
         """Drop marker at beat 128 = boundary into chorus. Before = 'up'."""
         engine = SmartPhrasingEngine()
         # Build with phrase segments where drop marker aligns with chorus start.
@@ -355,18 +355,18 @@ class TestDropMarkerIsChorousBoundary(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# H. test_shadow_mapping_infers_phrase_segment_from_next_marker_when_safe
+# H. test_mapping_infers_phrase_segment_from_next_marker_when_safe
 # ---------------------------------------------------------------------------
 
 class TestPhraseSegmentInference(unittest.TestCase):
-    def test_shadow_mapping_infers_phrase_segment_from_next_marker_when_safe(self):
+    def test_mapping_infers_phrase_segment_from_next_marker_when_safe(self):
         """ANLZ markers at beats 96, 128, 160 produce proper PhraseSegments."""
-        segments = build_phase2_phrase_segments(
+        segments = build_phrase_segments_from_markers(
             anlz_buildups=[96],
             anlz_drops=[128],
             anlz_breakdowns=[160],
             smart_drops=[128],
-            total_beats=200,
+            total_beats=192,
         )
         self.assertEqual(len(segments), 3)
         # up: 96→128
@@ -377,31 +377,32 @@ class TestPhraseSegmentInference(unittest.TestCase):
         self.assertEqual(segments[1].start_beat, 128.0)
         self.assertEqual(segments[1].end_beat, 160.0)
         self.assertEqual(segments[1].label, "chorus")
-        # low: 160→200 (uses total_beats)
+        # low: 160→192 (uses total_beats)
         self.assertEqual(segments[2].start_beat, 160.0)
-        self.assertEqual(segments[2].end_beat, 200.0)
+        self.assertEqual(segments[2].end_beat, 192.0)
         self.assertEqual(segments[2].label, "low")
 
     def test_fallback_32_beat_up_segments_when_no_buildups(self):
         """When no anlz_buildups exist, infer 32-beat 'up' before each smart_drop."""
-        segments = build_phase2_phrase_segments(
+        segments = build_phrase_segments_from_markers(
             anlz_buildups=[],
             anlz_drops=[128],
             anlz_breakdowns=[],
             smart_drops=[128],
-            total_beats=200,
+            total_beats=160,
         )
-        # Should have up:96→128 (inferred) and chorus:128→200
+        # Should have up:96→128 (inferred) and chorus:128→160
         self.assertEqual(len(segments), 2)
         self.assertEqual(segments[0].label, "up")
         self.assertEqual(segments[0].start_beat, 96.0)
         self.assertEqual(segments[0].end_beat, 128.0)
         self.assertEqual(segments[1].label, "chorus")
         self.assertEqual(segments[1].start_beat, 128.0)
+        self.assertEqual(segments[1].end_beat, 160.0)
 
-    def test_shadow_32_beat_buildup_fallback_can_start_at_beat_zero(self):
+    def test_32_beat_buildup_fallback_can_start_at_beat_zero(self):
         """If a drop occurs at beat 16, the 32-beat inferred fallback starts at beat 0."""
-        segments = build_phase2_phrase_segments(
+        segments = build_phrase_segments_from_markers(
             anlz_buildups=[],
             anlz_drops=[16],
             anlz_breakdowns=[],
@@ -416,26 +417,27 @@ class TestPhraseSegmentInference(unittest.TestCase):
         # And chorus:16→64
         self.assertEqual(segments[1].label, "chorus")
         self.assertEqual(segments[1].start_beat, 16.0)
+        self.assertEqual(segments[1].end_beat, 64.0)
 
     def test_empty_markers_produce_empty_segments(self):
-        segments = build_phase2_phrase_segments(
+        segments = build_phrase_segments_from_markers(
             anlz_buildups=[],
             anlz_drops=[],
             anlz_breakdowns=[],
             smart_drops=[],
-            total_beats=200,
+            total_beats=0,
         )
         self.assertEqual(segments, ())
 
 
 # ---------------------------------------------------------------------------
-# I. test_shadow_mapping_does_not_invent_final_segment_duration
+# I. test_mapping_does_not_invent_final_segment_duration
 # ---------------------------------------------------------------------------
 
 class TestNoInventedDuration(unittest.TestCase):
-    def test_shadow_mapping_does_not_invent_final_segment_duration(self):
+    def test_mapping_does_not_invent_final_segment_duration(self):
         """If total_beats is 0 (no beatgrid), final segment is skipped."""
-        segments = build_phase2_phrase_segments(
+        segments = build_phrase_segments_from_markers(
             anlz_buildups=[96],
             anlz_drops=[128],
             anlz_breakdowns=[],
@@ -450,7 +452,7 @@ class TestNoInventedDuration(unittest.TestCase):
 
     def test_single_marker_no_total_beats_produces_nothing(self):
         """Single marker with no total_beats and no next marker → nothing."""
-        segments = build_phase2_phrase_segments(
+        segments = build_phrase_segments_from_markers(
             anlz_buildups=[],
             anlz_drops=[128],
             anlz_breakdowns=[],
@@ -461,11 +463,11 @@ class TestNoInventedDuration(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# J. test_shadow_mapping_does_not_infer_breakdown_duration_without_end
+# J. test_mapping_does_not_infer_breakdown_duration_without_end
 # ---------------------------------------------------------------------------
 
 class TestBreakdownSegmentsEmpty(unittest.TestCase):
-    def test_shadow_mapping_does_not_infer_breakdown_duration_without_end(self):
+    def test_mapping_does_not_infer_breakdown_duration_without_end(self):
         """Breakdown segments must remain empty — ANLZ stores start-markers only."""
         engine = SmartPhrasingEngine()
         snap = SmartPhrasingSnapshot(
@@ -485,7 +487,7 @@ class TestBreakdownSegmentsEmpty(unittest.TestCase):
         self.assertFalse(result.state.smart_breakdown_active)
 
 
-class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
+class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
     def _prepare_manager(
         self,
         *,
@@ -593,7 +595,7 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
         self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
         sm._send_autoloop_deck_load.assert_called_once()
 
-    def test_shadow_arm_matches_legacy_normal_window(self):
+    def test_arm_matches_legacy_normal_window(self):
         sm = self._prepare_manager(drop_beat=64)
         contexts = [self._push_ctx(sm, beat) for beat in (59, 60, 61, 62, 63, 64)]
         for ctx in contexts:
@@ -605,7 +607,7 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
         self.assertTrue(contexts[4].smart_phrasing_blackout_arm)
         self.assertFalse(contexts[5].smart_phrasing_blackout_arm)
 
-    def test_shadow_arm_matches_legacy_drop_crossing_tick_drops_signal(self):
+    def test_arm_matches_legacy_drop_crossing_tick_drops_signal(self):
         sm = self._prepare_manager(drop_beat=64)
         self._push_ctx(sm, 59)
         self._push_ctx(sm, 60)
@@ -613,7 +615,7 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
         self.assertFalse(crossing.smart_drop_blackout_arm)
         self.assertFalse(crossing.smart_phrasing_blackout_arm)
 
-    def test_shadow_arm_suppressed_when_autoloop_arm_pending(self):
+    def test_arm_suppressed_when_autoloop_arm_pending(self):
         sm = self._prepare_manager(drop_beat=64)
         sm._os.autoloop_arm_pending = True
         for beat in (59, 60, 61, 62, 63, 64):
@@ -621,7 +623,7 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
             self.assertFalse(ctx.smart_drop_blackout_arm)
             self.assertFalse(ctx.smart_phrasing_blackout_arm)
 
-    def test_shadow_arm_suppressed_when_pending_autoloop_arm_meta_set(self):
+    def test_arm_suppressed_when_pending_autoloop_arm_meta_set(self):
         sm = self._prepare_manager(drop_beat=64)
         sm._os.pending_autoloop_arm_meta = TrackMetadata(filepath="/music/pending.mp3")
         for beat in (59, 60, 61, 62, 63, 64):
@@ -629,7 +631,7 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
             self.assertFalse(ctx.smart_drop_blackout_arm)
             self.assertFalse(ctx.smart_phrasing_blackout_arm)
 
-    def test_shadow_arm_suppressed_during_breakdown_active(self):
+    def test_arm_suppressed_during_breakdown_active(self):
         sm = self._prepare_manager(
             drop_beat=64,
             smart_breakdowns=(59,),
@@ -644,7 +646,7 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
             self.assertFalse(ctx.smart_phrasing_blackout_arm)
         self.assertFalse(sm._sp_blackout_arm_latched)
 
-    def test_shadow_arm_suppressed_when_breakdown_starts_between(self):
+    def test_arm_suppressed_when_breakdown_starts_between(self):
         sm = self._prepare_manager(
             drop_beat=64,
             smart_breakdowns=(61,),
@@ -657,7 +659,7 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
         self.assertFalse(arm_ctx.smart_phrasing_blackout_arm)
         self.assertFalse(sm._sp_blackout_arm_latched)
 
-    def test_shadow_arm_retries_across_window_when_legacy_does(self):
+    def test_arm_retries_across_window_when_legacy_does(self):
         sm = self._prepare_manager(drop_beat=64)
         self._push_ctx(sm, 59)
         self._push_ctx(sm, 60)
@@ -666,7 +668,7 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
             self.assertTrue(ctx.smart_drop_blackout_arm)
             self.assertTrue(ctx.smart_phrasing_blackout_arm)
 
-    def test_shadow_arm_latch_resets_on_transition_clear(self):
+    def test_arm_latch_resets_on_transition_clear(self):
         sm = self._prepare_manager(drop_beat=64)
         self._push_ctx(sm, 59)
         self._push_ctx(sm, 60)
@@ -676,7 +678,7 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
         self.assertFalse(clear_ctx.smart_phrasing_blackout_arm)
         self.assertFalse(sm._sp_blackout_arm_latched)
 
-    def test_shadow_arm_latch_resets_on_deck_or_track_change(self):
+    def test_arm_latch_resets_on_deck_or_track_change(self):
         sm = self._prepare_manager(drop_beat=64)
         self._push_ctx(sm, 59)
         self._push_ctx(sm, 60)

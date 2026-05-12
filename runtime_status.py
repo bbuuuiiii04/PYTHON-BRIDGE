@@ -12,7 +12,6 @@ from typing import Any, Callable, Optional
 
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
-MAX_ARM_TTL_S = 30.0
 log = logging.getLogger("runtime_status")
 
 
@@ -30,7 +29,6 @@ class StatusWriter(threading.Thread):
         live_bpm,
         pos_cache,
         conn,
-        mirror,
         validation_runner,
         command_reader,
         *,
@@ -41,7 +39,6 @@ class StatusWriter(threading.Thread):
         self._live_bpm = live_bpm
         self._pos_cache = pos_cache
         self._conn = conn
-        self._mirror = mirror
         self._validation_runner = validation_runner
         self._command_reader = command_reader
         self._laser_status_provider = laser_status_provider
@@ -83,7 +80,6 @@ class StatusWriter(threading.Thread):
             "state_manager": state,
             "deck_runtime": decks,
             "soundswitch": self._conn.status(),
-            "mirror": self._mirror.get_summary(),
             "validation": self._validation_runner.last_result().to_dict(),
             "commands": self._command_reader.status(),
             "laser_director": laser,
@@ -104,7 +100,6 @@ class StatusWriter(threading.Thread):
 class CommandReader(threading.Thread):
     def __init__(
         self,
-        mirror,
         validation_runner,
         smart_drop_toggle_callback: Optional[Callable[[], None]] = None,
         smart_breakdown_toggle_callback: Optional[Callable[[], None]] = None,
@@ -117,7 +112,6 @@ class CommandReader(threading.Thread):
         laser_set_personality_callback: Optional[Callable[[str], Any]] = None,
     ) -> None:
         super().__init__(name="runtime-command-reader", daemon=True)
-        self._mirror = mirror
         self._validation_runner = validation_runner
         self._smart_drop_toggle_callback = smart_drop_toggle_callback
         self._smart_breakdown_toggle_callback = smart_breakdown_toggle_callback
@@ -129,7 +123,6 @@ class CommandReader(threading.Thread):
         self._laser_clear_scene_override_callback = laser_clear_scene_override_callback
         self._laser_set_personality_callback = laser_set_personality_callback
         self._stop_event = threading.Event()
-        self._arm_expires = 0.0
         self._last_command = ""
         self._last_error = ""
         self._lock = threading.Lock()
@@ -138,11 +131,8 @@ class CommandReader(threading.Thread):
         self._stop_event.set()
 
     def status(self) -> dict[str, Any]:
-        now = time.time()
         with self._lock:
             return {
-                "armed": now < self._arm_expires,
-                "arm_expires_at": self._arm_expires,
                 "last_command": self._last_command,
                 "last_error": self._last_error,
             }
@@ -171,27 +161,6 @@ class CommandReader(threading.Thread):
         with self._lock:
             self._last_command = cmd
             self._last_error = ""
-        if cmd == "arm_live":
-            ttl = min(float(command.get("ttl_s", MAX_ARM_TTL_S)), MAX_ARM_TTL_S)
-            with self._lock:
-                self._arm_expires = time.time() + max(0.0, ttl)
-            return
-        if cmd == "disarm_live":
-            with self._lock:
-                self._arm_expires = 0.0
-            return
-        if cmd == "toggle_mirror":
-            self._mirror.toggle()
-            return
-        if cmd == "set_mirror":
-            self._mirror.set_enabled(bool(command.get("enabled")))
-            return
-        if cmd == "start_capture":
-            self._mirror.start_capture(str(command.get("name") or "capture"))
-            return
-        if cmd == "stop_capture":
-            self._mirror.stop_capture()
-            return
         if cmd == "run_validation":
             self._run_validation_async()
             return
@@ -286,12 +255,6 @@ def parse_command(line: str) -> dict[str, Any]:
     if not isinstance(cmd, str) or not cmd:
         raise ValueError("command requires cmd")
     allowed = {
-        "arm_live",
-        "disarm_live",
-        "toggle_mirror",
-        "set_mirror",
-        "start_capture",
-        "stop_capture",
         "run_validation",
         "toggle_smart_drop",
         "toggle_smart_breakdown",
@@ -326,9 +289,6 @@ def parse_command(line: str) -> dict[str, Any]:
         personality = obj.get("personality")
         if not isinstance(personality, str) or not personality:
             raise ValueError("laser_set_personality requires non-empty personality")
-    if "expires_at" in obj:
-        obj = dict(obj)
-        obj.pop("expires_at", None)
     return obj
 
 

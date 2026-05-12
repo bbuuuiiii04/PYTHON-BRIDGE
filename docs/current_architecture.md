@@ -31,8 +31,7 @@ RBSS_SMART_DROP=1
 RBSS_SMART_BREAKDOWN=1
 ```
 
-These defaults are present in both `scripts/ss_bridge_watcher.sh` and the live
-`/Users/bbui/ss_bridge_watcher.sh`.
+These defaults are present in `scripts/ss_bridge_watcher.sh`.
 
 ## Runtime Subsystems
 
@@ -45,7 +44,11 @@ These defaults are present in both `scripts/ss_bridge_watcher.sh` and the live
 | `MTCReader` | position fallback only | yes | MTC thread | IAC Bus 1 MTC | `TC_UPDATE` |
 | `LiveBPMService` | direct displayed-BPM authority when fresh and valid; metadata fallback otherwise | yes | live BPM thread owns BPM validation state | Rekordbox BPM chains, discovery, hints | live BPM snapshots |
 | `FilepathResolver` | auxiliary metadata authority for loaded tracks | async hot path after load | short-lived worker threads | ANLZ path, DB, lsof, audio tags | `FILEPATH_RESOLVED`, `ANLZ_DATA` |
-| `SoundSwitchEngine` | SoundSwitch output behavior and canonical deck-route fanout helper | yes | called by `StateManager` thread | active deck routing, arm/clear/follow intents from `StateManager` | routed OS2L sends for scripted/autoloop/smart-transition/live-BPM-follow helpers |
+| `SmartPhrasingEngine` | pure musical phrasing engine (no OS2L sends, no `OutputState` writes) | yes | called by `StateManager` thread | per-tick `SmartPhrasingSnapshot` | immutable `SmartPhrasingState` intents |
+| `LaserDirector` | laser scene/role policy only | yes | called by `StateManager` thread | `LaserContext` (including `SmartPhrasingState`) | `LaserSceneDecision` |
+| `LaserSceneExecutor` | laser trigger execution only (MIDI/blackout/cooldown/transition-mask) | yes | called by `StateManager` thread | `LaserSceneDecision`, `LaserContext` | MIDI triggers and executor blackout state |
+| `SoundSwitchEngine` | SoundSwitch output-intent fanout helper | yes | called by `StateManager` thread | active deck routing and send intents from `StateManager` | routed OS2L sends for scripted/autoloop/smart-transition/live-BPM-follow helpers |
+| `beat_math.py` | pure beat and beatgrid math helper | yes | called in hot path from `StateManager` | elapsed ms, bpm, beatgrid markers | computed beat positions / target elapsed |
 | `OS2LConnection` / `OS2LOutput` | output transport authority | yes | sender/reconnect threads own sockets | SoundSwitch DNS-SD, send queue | TCP OS2L messages |
 | `StatusWriter` / `CommandReader` | auxiliary operator status/control | auxiliary | status/command threads | snapshots, command JSONL | status JSON, command side effects |
 | `ValidationRunner` | diagnostic only | auxiliary | daemon validation thread when requested | runtime snapshots and process checks | validation result |
@@ -85,6 +88,22 @@ existing TL/MTC/current path.
    sends mirrored OS2L updates to active, mirror, 3, and 4 through
    `SoundSwitchEngine`.
 
+## Smart-Transition Architecture
+
+- `SmartPhrasingEngine` computes smart-drop, smart-breakdown, and phrase-anchor
+  intents from `SmartPhrasingSnapshot` each tick.
+- `StateManager` consumes those intents in `_smart_drop_tick`,
+  `_smart_breakdown_tick`, and `_phrase_anchor_tick`; suppression gates remain
+  in `StateManager`, which also owns `OutputState` writes and transition logs.
+- `StateManager` intentionally remains the owner/writer of
+  `OutputState.phrase_anchor_last_beat` for periodic anchor runtime state.
+- `SoundSwitchEngine` performs canonical OS2L/SoundSwitch deck-route fanout for
+  the sends requested by `StateManager`.
+- `LaserDirector` consumes `SmartPhrasingState` through `LaserContext` to make
+  scene policy decisions only.
+- `LaserSceneExecutor` consumes those decisions and handles laser MIDI output,
+  role cooldown/rotation, blackout latching, and transition-mask cleanup.
+
 ## Current Direct Paths
 
 | Path | Current status |
@@ -104,6 +123,10 @@ Use `docs/doc_index.md` for the full classification. In short:
 
 - Current truth: `README.md`, this file, `docs/bridge_design.md`,
   `docs/runtime_invariants.md`.
+- Offline ANLZ energy tooling: `docs/anlz_energy_project.md`,
+  `docs/re/anlz_waveform_tag_inventory.md`,
+  `docs/validation/anlz_energy_evaluation_guide.md`.
 - Current supporting details: `docs/subsystems/`.
+- Laser policy/scene detail: `docs/laser_director_design.md`.
 - Validation evidence: `docs/validation/`.
 - Rollout history and stale implementation prompts: `docs/history/`.

@@ -2,6 +2,8 @@
 
 Status: CURRENT AUTHORITATIVE
 
+Audited against the current checkout on 2026-05-12.
+
 `rb_ss_bridge_v2` is a realtime Rekordbox to SoundSwitch bridge. It reads
 Rekordbox state, reconciles guarded direct-memory signals with TimecodeLink and
 MTC fallbacks, and speaks VirtualDJ-shaped OS2L to SoundSwitch.
@@ -13,6 +15,27 @@ Start here:
 3. `docs/runtime_invariants.md` - rules that should not be broken during code
    changes.
 4. `docs/doc_index.md` - classification of every markdown file.
+
+Offline ANLZ energy tooling:
+
+- `docs/anlz_energy_project.md` - canonical overview of the bridge-local ANLZ
+  energy investigation toolkit, labels, limits, and validation framing.
+- `docs/re/anlz_waveform_tag_inventory.md` - observed ANLZ waveform/beatgrid/tag
+  inventory.
+- `docs/validation/anlz_energy_evaluation_guide.md` - practical small-corpus
+  human validation workflow.
+## Subsystem map (one-line each)
+
+- `SmartPhrasingEngine` - pure musical phrasing engine; emits smart-drop,
+  smart-breakdown, and phrase-anchor intents.
+- `LaserDirector` - laser role/scene policy from `LaserContext` and
+  `SmartPhrasingState`.
+- `LaserSceneExecutor` - laser MIDI output, blackout/cooldown gates, and
+  transition-mask cleanup.
+- `SoundSwitchEngine` - OS2L/SoundSwitch intent fanout helpers over canonical
+  4-deck routing.
+- `StateManager` - coordinator/event-loop owner; owns `DeckState`, most
+  `OutputState`, runtime timing, and decision logs.
 
 Historical rollout notes and investigation logs are preserved under
 `docs/history/` and `docs/validation/`. They are evidence, not the primary

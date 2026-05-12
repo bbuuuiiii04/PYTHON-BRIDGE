@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-05-09.
+Audited against the current checkout on 2026-05-12.
 
 ## State Ownership
 
@@ -12,6 +12,19 @@ Audited against the current checkout on 2026-05-09.
 - Runtime commands that need state mutation should enqueue a `BridgeEvent`.
 - `BridgeEvent`s are immutable once enqueued.
 - `PositionSnapshot`s are written by `RBMemoryReader` through `PositionCache`.
+
+## SmartPhrasing / Laser Ownership
+
+- `SmartPhrasingEngine` is a pure musical phrasing engine. It emits
+  `SmartPhrasingState` intents and does not send OS2L or write `OutputState`.
+- `LaserDirector` is scene policy only; it does not send OS2L and does not emit
+  MIDI side effects directly.
+- `LaserSceneExecutor` owns laser MIDI trigger execution, blackout/cooldown,
+  and transition-mask cleanup for laser output.
+- `StateManager` remains the coordinator: event-loop owner, suppression-gate
+  owner, `DeckState`/`OutputState` owner, and runtime decision/log owner.
+- `beat_math.py` helpers remain pure computation utilities (no runtime state or
+  I/O side effects).
 
 ## Direct Authority
 
@@ -58,6 +71,22 @@ Audited against the current checkout on 2026-05-09.
 - Autoloop arms send an empty SoundSwitch ID.
 - `OS2LConnection` owns socket I/O on sender/reconnect threads; the push loop
   should only enqueue sends.
+
+## Phrase Anchor
+
+- `OutputState.phrase_anchor_last_beat` remains StateManager-owned state.
+- `StateManager` still owns phrase-anchor sentinel init, stale rebase,
+  successful periodic rearm writes, smart-drop/smart-breakdown alignment writes,
+  and runtime reset writes.
+- `SmartPhrasingEngine` computes periodic phrase-anchor intents from snapshot
+  inputs (`phrase_anchor_last_beat`, `phrase_anchor_period_beats`) and does not
+  write anchor state.
+- `_phrase_anchor_tick` consumes
+  `sp_state.phrase_anchor_preclear_requested` and
+  `sp_state.phrase_anchor_rearm_requested` after suppression gates.
+- `_send_direct_autoloop_rearm(...)` in phrase-anchor flow must use
+  StateManager-computed `next_anchor` (`target_beat=next_anchor`), not
+  `sp_state.phrase_anchor_target_beat`.
 
 ## Live BPM
 

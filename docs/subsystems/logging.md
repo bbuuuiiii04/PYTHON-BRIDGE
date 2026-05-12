@@ -2,6 +2,12 @@
 
 Status: CURRENT SUPPORTING
 
+Audited against the current checkout on 2026-05-12.
+
+This is the canonical runtime logging guide. Historical implementation context
+is retained in `docs/history/logging_implementation_handoff.md`, but current
+runtime behavior should be documented here.
+
 The bridge keeps normal logs readable by default:
 
 ```text
