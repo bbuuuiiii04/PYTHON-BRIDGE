@@ -62,6 +62,7 @@ class SmartPhrasingState:
     transition_window_active: bool
     phrase_anchor_requested: bool
     reason: str = ""
+    breakdown_restore_beat: Optional[float] = None
 
 @dataclass(frozen=True)
 class SmartPhrasingDiagnostic:
@@ -92,6 +93,7 @@ class SmartPhrasingEngine:
         self._last_deck_id: Optional[str] = None
         self._last_track_id: Optional[str] = None
         self._transition_window_active: bool = False
+        self._transition_window_arm_suppressed: bool = False
         self._smart_drop_window_active: bool = False
 
     def reset(self, reason: str) -> SmartPhrasingState:
@@ -101,6 +103,7 @@ class SmartPhrasingEngine:
         self._last_deck_id = None
         self._last_track_id = None
         self._transition_window_active = False
+        self._transition_window_arm_suppressed = False
         self._smart_drop_window_active = False
 
         return self._default_state(reason)
@@ -123,6 +126,7 @@ class SmartPhrasingEngine:
             smart_breakdown_active=False,
             breakdown_start_crossing=False,
             breakdown_end_crossing=False,
+            breakdown_restore_beat=None,
             smart_breakdown_clear_requested=False,
             smart_breakdown_restore_requested=False,
             transition_mask_should_arm=False,
@@ -260,14 +264,19 @@ class SmartPhrasingEngine:
         smart_breakdown_active = False
         breakdown_start_crossing = False
         breakdown_end_crossing = False
+        breakdown_restore_beat: Optional[float] = None
         
         for seg in snapshot.breakdown_segments:
             if seg.start_beat <= abs_beat < seg.end_beat:
                 smart_breakdown_active = True
+                if breakdown_restore_beat is None:
+                    breakdown_restore_beat = seg.end_beat
 
             if prev_abs_beat is not None:
                 if prev_abs_beat < seg.start_beat <= abs_beat:
                     breakdown_start_crossing = True
+                    if breakdown_restore_beat is None:
+                        breakdown_restore_beat = seg.end_beat
                 if prev_abs_beat < seg.end_beat <= abs_beat:
                     breakdown_end_crossing = True
 
@@ -291,11 +300,17 @@ class SmartPhrasingEngine:
             )
         )
 
-        if new_transition_window_active and not self._transition_window_active:
-            if not smart_breakdown_active and not breakdown_between:
+        if new_transition_window_active:
+            rising_edge = not self._transition_window_active
+            suppressed = smart_breakdown_active or breakdown_between
+            if (rising_edge or self._transition_window_arm_suppressed) and not suppressed:
                 transition_mask_should_arm = True
-        elif not new_transition_window_active and self._transition_window_active:
+                self._transition_window_arm_suppressed = False
+            elif rising_edge and suppressed:
+                self._transition_window_arm_suppressed = True
+        elif self._transition_window_active:
             transition_mask_should_clear = True
+            self._transition_window_arm_suppressed = False
             
         self._transition_window_active = new_transition_window_active
         
@@ -316,6 +331,7 @@ class SmartPhrasingEngine:
             smart_breakdown_active=smart_breakdown_active,
             breakdown_start_crossing=breakdown_start_crossing,
             breakdown_end_crossing=breakdown_end_crossing,
+            breakdown_restore_beat=breakdown_restore_beat,
             smart_breakdown_clear_requested=smart_breakdown_clear_requested,
             smart_breakdown_restore_requested=smart_breakdown_restore_requested,
             transition_mask_should_arm=transition_mask_should_arm,

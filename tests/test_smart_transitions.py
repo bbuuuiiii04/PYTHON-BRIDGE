@@ -14,13 +14,22 @@ from rb_ss_bridge_v2.models import (  # noqa: E402
 )
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.sound_switch_engine import SoundSwitchEngine  # noqa: E402
-from rb_ss_bridge_v2.smart_phrasing import select_smart_drops
+from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
+    SmartPhrasingState,
+    find_restore_beat,
+    select_smart_drops,
+)
+from rb_ss_bridge_v2.config import (  # noqa: E402
+    SMART_DROP_LOOKAHEAD_BEATS,
+    SMART_BREAKDOWN_DEFAULT_DURATION_BEATS,
+    SMART_BREAKDOWN_WINDOW_BEATS,
+)
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
     StateManager,
     _phrase_anchor_tick,
     _send_direct_autoloop_rearm,
-    _smart_drop_tick,
-    _smart_breakdown_tick,
+    _smart_drop_tick as _state_manager_smart_drop_tick,
+    _smart_breakdown_tick as _state_manager_smart_breakdown_tick,
 )
 
 
@@ -46,6 +55,135 @@ def _sm(drops=None, filepath="/music/drop.mp3", active=1):
     )
     sm._send_autoloop_deck_load = Mock()
     return sm
+
+
+def _sp_state(**overrides) -> SmartPhrasingState:
+    defaults = dict(
+        current_phrase_label="other",
+        current_phrase_is_up=False,
+        current_phrase_is_chorus=False,
+        current_phrase_is_low=False,
+        next_smart_drop_beat=None,
+        beats_to_next_drop=None,
+        smart_drop_window_active=False,
+        smart_drop_crossing=False,
+        smart_drop_preclear_requested=False,
+        smart_drop_rearm_requested=False,
+        smart_post_drop_active=False,
+        active_drop_beat=None,
+        smart_buildup_active=False,
+        smart_breakdown_active=False,
+        breakdown_start_crossing=False,
+        breakdown_end_crossing=False,
+        smart_breakdown_clear_requested=False,
+        smart_breakdown_restore_requested=False,
+        transition_mask_should_arm=False,
+        transition_mask_should_clear=False,
+        transition_window_active=False,
+        phrase_anchor_requested=False,
+        reason="test",
+        breakdown_restore_beat=None,
+    )
+    defaults.update(overrides)
+    return SmartPhrasingState(**defaults)
+
+
+def _legacy_sp_state_for_drop(sm, active: int, this_beat: int) -> SmartPhrasingState:
+    os = sm._os
+    d = sm._deck[active]
+    if os.drop_cut_armed:
+        crossing = this_beat >= os.drop_rearm_beat
+        return _sp_state(
+            smart_drop_crossing=crossing,
+            active_drop_beat=float(os.drop_rearm_beat) if crossing else None,
+        )
+
+    for drop_beat in d.meta.smart_drops:
+        cutoff = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
+        if this_beat < cutoff:
+            break
+        if this_beat >= drop_beat:
+            continue
+        if any(this_beat <= bd_beat < drop_beat for bd_beat in d.meta.smart_breakdowns):
+            continue
+        return _sp_state(
+            transition_mask_should_arm=True,
+            next_smart_drop_beat=float(drop_beat),
+        )
+    return _sp_state()
+
+
+def _legacy_sp_state_for_breakdown(sm, active: int, this_beat: int) -> SmartPhrasingState:
+    os = sm._os
+    d = sm._deck[active]
+    if os.breakdown_active:
+        return _sp_state(
+            breakdown_end_crossing=this_beat >= os.breakdown_restore_beat,
+        )
+
+    for bd_beat in d.meta.smart_breakdowns:
+        if this_beat < bd_beat:
+            break
+        if this_beat >= bd_beat + SMART_BREAKDOWN_WINDOW_BEATS + 1:
+            continue
+        if this_beat == bd_beat:
+            restore_beat = find_restore_beat(
+                bd_beat,
+                d.meta.anlz_buildups,
+                d.meta.smart_drops,
+                SMART_BREAKDOWN_DEFAULT_DURATION_BEATS,
+            )
+            return _sp_state(
+                breakdown_start_crossing=True,
+                breakdown_restore_beat=float(restore_beat),
+            )
+    return _sp_state()
+
+
+def _smart_drop_tick(
+    sm,
+    active,
+    mirror,
+    bpm,
+    this_beat,
+    elapsed_ms,
+    blackout_mode=True,
+    sp_state=None,
+):
+    if sp_state is None:
+        sp_state = _legacy_sp_state_for_drop(sm, active, this_beat)
+    return _state_manager_smart_drop_tick(
+        sm,
+        active,
+        mirror,
+        bpm,
+        this_beat,
+        elapsed_ms,
+        blackout_mode=blackout_mode,
+        sp_state=sp_state,
+    )
+
+
+def _smart_breakdown_tick(
+    sm,
+    active,
+    mirror,
+    bpm,
+    this_beat,
+    elapsed_ms,
+    sp_state=None,
+):
+    if sp_state is None:
+        sp_state = _legacy_sp_state_for_breakdown(sm, active, this_beat)
+    return _state_manager_smart_breakdown_tick(
+        sm,
+        active,
+        mirror,
+        bpm,
+        this_beat,
+        elapsed_ms,
+        sp_state=sp_state,
+    )
 
 
 def _manager(env=None):
@@ -403,6 +541,25 @@ class SmartDropTests(unittest.TestCase):
         self.assertTrue(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 64)
 
+    def test_smart_drop_arm_consumes_sp_state_not_metadata(self) -> None:
+        sm = _sm([64])
+        sm._deck[1].meta.smart_drops = []
+        signal = _smart_drop_tick(
+            sm,
+            1,
+            2,
+            130.0,
+            60,
+            30_000,
+            sp_state=_sp_state(
+                transition_mask_should_arm=True,
+                next_smart_drop_beat=64.0,
+            ),
+        )
+        self.assertEqual(signal, 1)
+        self.assertTrue(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 64)
+
     def test_blackout_mode_crossing_relies_on_post_phrase_anchor_cleanup_order(self) -> None:
         sm = _sm([64])
         sm._os.drop_cut_armed = True
@@ -429,6 +586,47 @@ class SmartDropTests(unittest.TestCase):
         self.assertTrue(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 64)
         self.assertEqual(sm._os.phrase_anchor_last_beat, -1)
+
+    def test_smart_drop_crossing_consumes_sp_state_not_metadata(self) -> None:
+        sm = _sm([64])
+        sm._deck[1].meta.smart_drops = []
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 64
+        signal = _smart_drop_tick(
+            sm,
+            1,
+            2,
+            130.0,
+            64,
+            32_005,
+            blackout_mode=False,
+            sp_state=_sp_state(
+                smart_drop_crossing=True,
+                active_drop_beat=64.0,
+            ),
+        )
+        self.assertEqual(signal, 2)
+        sm._send_autoloop_deck_load.assert_called_once()
+        self.assertFalse(sm._os.drop_cut_armed)
+        self.assertEqual(sm._os.drop_rearm_beat, 0)
+
+    def test_smart_drop_suppression_gates_still_apply_with_sp_state(self) -> None:
+        sm = _sm([64])
+        sm._os.autoloop_arm_pending = True
+        signal = _smart_drop_tick(
+            sm,
+            1,
+            2,
+            130.0,
+            60,
+            30_000,
+            sp_state=_sp_state(
+                transition_mask_should_arm=True,
+                next_smart_drop_beat=64.0,
+            ),
+        )
+        self.assertEqual(signal, 0)
+        self.assertFalse(sm._os.drop_cut_armed)
 
     def test_smart_drop_crossing_blocks_same_beat_phrase_anchor_rearm(self) -> None:
         sm = _sm([64])
@@ -933,3 +1131,66 @@ class SmartBreakdownTests(unittest.TestCase):
             sm._out.send_loop_off.call_args_list,
             [call(2), call(1), call(3), call(4)],
         )
+
+    def test_breakdown_cut_consumes_sp_state_not_metadata(self):
+        sm = _sm()
+        sm._deck[1].meta.smart_breakdowns = []
+        _smart_breakdown_tick(
+            sm,
+            1,
+            2,
+            130.0,
+            32,
+            16_000,
+            sp_state=_sp_state(
+                breakdown_start_crossing=True,
+                breakdown_restore_beat=64.0,
+            ),
+        )
+        self.assertTrue(sm._os.breakdown_active)
+        self.assertEqual(sm._os.breakdown_restore_beat, 64)
+        self.assertEqual(sm._out.send_deck_clear.call_count, 4)
+        self.assertEqual(sm._out.send_loop_off.call_count, 4)
+
+    def test_breakdown_restore_consumes_sp_state_not_metadata(self):
+        sm = _sm()
+        sm._os.breakdown_active = True
+        sm._os.breakdown_restore_beat = 64
+        _smart_breakdown_tick(
+            sm,
+            1,
+            2,
+            130.0,
+            40,
+            20_000,
+            sp_state=_sp_state(breakdown_end_crossing=False),
+        )
+        self.assertTrue(sm._os.breakdown_active)
+        _smart_breakdown_tick(
+            sm,
+            1,
+            2,
+            130.0,
+            64,
+            32_000,
+            sp_state=_sp_state(breakdown_end_crossing=True),
+        )
+        self.assertFalse(sm._os.breakdown_active)
+        sm._send_autoloop_deck_load.assert_called_once()
+
+    def test_breakdown_suppression_gates_still_apply_with_sp_state(self):
+        sm = _sm()
+        sm._os.autoloop_arm_pending = True
+        _smart_breakdown_tick(
+            sm,
+            1,
+            2,
+            130.0,
+            32,
+            16_000,
+            sp_state=_sp_state(
+                breakdown_start_crossing=True,
+                breakdown_restore_beat=64.0,
+            ),
+        )
+        self.assertFalse(sm._os.breakdown_active)

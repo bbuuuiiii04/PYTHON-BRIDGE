@@ -105,6 +105,7 @@ def _make_phrasing_state(**overrides):
         transition_window_active=False,
         phrase_anchor_requested=False,
         reason="test",
+        breakdown_restore_beat=None,
     )
     defaults.update(overrides)
     return SmartPhrasingState(**defaults)
@@ -660,7 +661,7 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
         sm2._on_track_loaded(1, "shadow-track", BridgeEvent(Ev.TRACK_LOADED, 1))
         self.assertFalse(sm2._sp_blackout_arm_latched)
 
-    def test_shadow_arm_documents_mid_window_breakdown_clear_gap(self):
+    def test_smart_drop_blackout_arm_fires_after_mid_window_breakdown_clears(self):
         sm = self._prepare_manager(
             drop_beat=64,
             smart_breakdowns=(),
@@ -675,12 +676,20 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
         self.assertFalse(sm._sp_blackout_arm_latched)
 
         sm._os.breakdown_active = False
-        # Conservative rising-edge gap (PR 5c): legacy can arm mid-window after
-        # breakdown clears, but SmartPhrasing shadow stays false because latch
-        # never armed on window entry.
         cleared_mid_window = self._push_ctx(sm, 61)
         self.assertTrue(cleared_mid_window.smart_drop_blackout_arm)
-        self.assertFalse(cleared_mid_window.smart_phrasing_blackout_arm)
+        self.assertTrue(cleared_mid_window.smart_phrasing_blackout_arm)
+        self.assertTrue(sm._sp_blackout_arm_latched)
+
+    def test_engine_runs_once_per_tick_in_push_tick(self):
+        sm = self._prepare_manager(drop_beat=64)
+        with patch.object(
+            sm._smart_phrasing_engine,
+            "update",
+            wraps=sm._smart_phrasing_engine.update,
+        ) as update_sp:
+            self._push_ctx(sm, 60)
+        self.assertEqual(update_sp.call_count, 1)
 
     def test_director_disabled_clears_sp_pending_blackout_when_legacy_arm_false(self):
         sm = self._prepare_manager(
@@ -697,11 +706,11 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
         self.assertFalse(suppressed.smart_drop_blackout_arm)
         self.assertFalse(suppressed.smart_phrasing_blackout_arm)
 
-        # Beat 61: legacy arms mid-window after breakdown clears; SP remains false.
+        # Beat 61: both arm after breakdown clears mid-window.
         sm._os.breakdown_active = False
         legacy_only = self._push_ctx(sm, 61)
         self.assertTrue(legacy_only.smart_drop_blackout_arm)
-        self.assertFalse(legacy_only.smart_phrasing_blackout_arm)
+        self.assertTrue(legacy_only.smart_phrasing_blackout_arm)
 
         # Simulate the inverse edge (SP-only arm) to validate the director-disabled guard.
         # Keep this focused by overriding context at the executor entrypoint.
