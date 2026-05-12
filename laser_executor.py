@@ -106,7 +106,10 @@ class LaserSceneExecutor:
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_idle")
             return
-        should_arm_blackout = bool(ctx.smart_drop_blackout_arm and role in _AUTO_ROLES)
+        should_arm_blackout = bool(
+            (ctx.smart_drop_blackout_arm or ctx.smart_phrasing_blackout_arm)
+            and role in _AUTO_ROLES
+        )
 
         cursor_before, active_before = self._role_state_snapshot(role)
         selected_scene = self._select_scene(decision, ctx, role_changed)
