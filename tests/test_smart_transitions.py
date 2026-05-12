@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -13,6 +13,7 @@ from rb_ss_bridge_v2.models import (  # noqa: E402
     BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot, SmartDropEnergyShadow, TrackMetadata,
 )
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
+from rb_ss_bridge_v2.sound_switch_engine import SoundSwitchEngine  # noqa: E402
 from rb_ss_bridge_v2.smart_phrasing import select_smart_drops
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
     StateManager,
@@ -23,9 +24,11 @@ from rb_ss_bridge_v2.state_manager import (  # noqa: E402
 )
 
 
-def _sm(drops=None, filepath="/music/drop.mp3"):
+def _sm(drops=None, filepath="/music/drop.mp3", active=1):
     out = Mock()
-    deck = DeckState(number=1)
+    deck_1 = DeckState(number=1)
+    deck_2 = DeckState(number=2)
+    deck = deck_1 if active == 1 else deck_2
     deck.meta.filepath = filepath
     deck.meta.bpm = 130.0
     deck.meta.first_beat_ms = 0.0
@@ -34,8 +37,9 @@ def _sm(drops=None, filepath="/music/drop.mp3"):
     deck.meta.smart_drops = list(drops or [])
     sm = SimpleNamespace(
         _os=OutputState(lighting_mode="autoloop"),
-        _deck={1: deck, 2: DeckState(number=2)},
+        _deck={1: deck_1, 2: deck_2},
         _out=out,
+        _sse=SoundSwitchEngine(out),
     )
     sm._autoloop_target_elapsed_for_beat = Mock(
         side_effect=lambda beat, _elapsed, _bpm, _meta: (beat * 500, "grid")
@@ -458,6 +462,14 @@ class SmartDropTests(unittest.TestCase):
         self.assertEqual(signal, 1)
         self.assertEqual(sm._out.send_deck_clear.call_count, 4)
         self.assertEqual(sm._out.send_loop_off.call_count, 4)
+        self.assertEqual(
+            sm._out.send_deck_clear.call_args_list,
+            [call(1), call(2), call(3), call(4)],
+        )
+        self.assertEqual(
+            sm._out.send_loop_off.call_args_list,
+            [call(1), call(2), call(3), call(4)],
+        )
         self.assertTrue(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 64)
 
@@ -468,6 +480,21 @@ class SmartDropTests(unittest.TestCase):
         sm._send_autoloop_deck_load.assert_called_once()
         self.assertFalse(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 0)
+
+    def test_legacy_mode_deck2_uses_mirrored_fanout_order(self) -> None:
+        sm = _sm([64], filepath="/music/drop2.mp3", active=2)
+        signal = _smart_drop_tick(
+            sm, 2, 1, 130.0, 60, 30_000, blackout_mode=False
+        )
+        self.assertEqual(signal, 1)
+        self.assertEqual(
+            sm._out.send_deck_clear.call_args_list,
+            [call(2), call(1), call(3), call(4)],
+        )
+        self.assertEqual(
+            sm._out.send_loop_off.call_args_list,
+            [call(2), call(1), call(3), call(4)],
+        )
 
     def test_rearm_uses_autoloop_arm_bpm(self) -> None:
         sm = _sm([64])
@@ -812,6 +839,14 @@ class PhraseAnchorTests(unittest.TestCase):
         self.assertFalse(result)
         self.assertEqual(sm._out.send_deck_clear.call_count, 4)
         self.assertEqual(sm._out.send_loop_off.call_count, 4)
+        self.assertEqual(
+            sm._out.send_deck_clear.call_args_list,
+            [call(1), call(2), call(3), call(4)],
+        )
+        self.assertEqual(
+            sm._out.send_loop_off.call_args_list,
+            [call(1), call(2), call(3), call(4)],
+        )
         sm._send_autoloop_deck_load.assert_not_called()
         # phrase_anchor_last_beat must NOT advance — anchor hasn't fired yet.
         self.assertEqual(sm._os.phrase_anchor_last_beat, 0)
@@ -851,6 +886,14 @@ class SmartBreakdownTests(unittest.TestCase):
         self.assertEqual(sm._os.breakdown_restore_beat, 64)
         self.assertEqual(sm._out.send_deck_clear.call_count, 4)
         self.assertEqual(sm._out.send_loop_off.call_count, 4)
+        self.assertEqual(
+            sm._out.send_deck_clear.call_args_list,
+            [call(1), call(2), call(3), call(4)],
+        )
+        self.assertEqual(
+            sm._out.send_loop_off.call_args_list,
+            [call(1), call(2), call(3), call(4)],
+        )
         
         # Tick inside breakdown
         _smart_breakdown_tick(sm, 1, 2, 130.0, 40, 20_000)

@@ -987,7 +987,7 @@ class StateManager:
         LOG.stats.record_transition(deck, "scripted_arm")
 
         # Phase 0 (immediate): clear all 4 SS deck slots, stop playback + any autoloop
-        for dk in (deck, mirror, 3, 4):
+        for dk in self._sse.deck_route(deck):
             self._out._sub(f"deck {dk} get_filepath", "", verbose=True)
             self._out.send_loop_off(dk)
             self._out.send_deck_play(dk, "off")
@@ -1030,7 +1030,7 @@ class StateManager:
         # Phase 0 clears all 4; if mirror is not reloaded here the push loop sends
         # elapsed to an empty SS deck, which confuses SS's scripted show engine.
         # Matches v1 behaviour: always load both bridge decks at arm time.
-        for dk in (arm.deck, arm.mirror, 3, 4):
+        for dk in self._sse.deck_route(arm.deck):
             self._out.send_deck_load(dk, arm_meta, cur_active, play="on")
         self._log_status()
 
@@ -1142,12 +1142,12 @@ class StateManager:
                       arm_after_master, arm_source or "<none>",
                       bf.short(self._os.last_armed_filepath))
             if arm_after_master and self._autoloop_master_phrase_arm:
-                for dk in (deck, mirror, 3, 4):
+                for dk in self._sse.deck_route(deck):
                     self._out.send_deck_clear(dk)
                     self._out.send_loop_off(dk)
                 log.info("[SM] clear-autoloop  deck=%d  src=%s", deck, arm_source or "<none>")
             else:
-                for dk in (deck, mirror, 3, 4):
+                for dk in self._sse.deck_route(deck):
                     self._out._sub(f"deck {dk} get_filepath", "", verbose=True)
             if d.meta.filepath:
                 self._os.last_armed_filepath = d.meta.filepath
@@ -1212,7 +1212,7 @@ class StateManager:
                     self._deck[dk].meta.first_beat_ms = 0.0
                 abs_beat = self._autoloop_abs_beat_for_elapsed(elapsed_ms, arm_bpm, d.meta)
                 self._set_autoloop_tempo_anchor(elapsed_ms, abs_beat, arm_bpm)
-                for dk in (deck, mirror, 3, 4):
+                for dk in self._sse.deck_route(deck):
                     self._out.send_loop_on(dk)
                     self._out._sub(f"deck {dk} play", "on", verbose=True)
             self._os.autoloop_arm_after_master_change = False
@@ -1488,14 +1488,14 @@ class StateManager:
         # SS autoloop activates on the current tick, not at the next beat boundary.
         # VDJ sends BPM to all 4 decks; SS may use deck 3/4 internally.
         if bpm > 0 and os.last_sent_bpm == 0.0:
-            for dk in (active, mirror, 3, 4):
+            for dk in self._sse.deck_route(active):
                 self._out.send_bpm(dk, bpm)
             os.last_sent_bpm = bpm
         elif bpm > 0 and os.last_sent_bpm > 0:
             threshold = (BPM_THRESHOLD_SCRIPTED if d.scripted_id
                          else BPM_THRESHOLD_UNSCRIPTED)
             if abs(bpm - os.last_sent_bpm) > threshold:
-                for dk in (active, mirror, 3, 4):
+                for dk in self._sse.deck_route(active):
                     self._out.send_bpm(dk, bpm)
                 os.last_sent_bpm = bpm
 
@@ -1530,7 +1530,7 @@ class StateManager:
                     beat_out = this_beat
                     pending_live_bpm = os.pending_live_bpm
                     if pending_live_bpm > 0:
-                        for dk in (active, mirror, 3, 4):
+                        for dk in self._sse.deck_route(active):
                             self._out.send_bpm(dk, pending_live_bpm)
                         bpm = pending_live_bpm
                         os.autoloop_arm_bpm = pending_live_bpm
@@ -1577,7 +1577,7 @@ class StateManager:
                             autoloop_tick_just_fired = True
 
                 os.last_beat_elapsed_ms = elapsed_ms
-                for dk in (active, mirror, 3, 4):
+                for dk in self._sse.deck_route(active):
                     self._out.send_beat(dk, bpm, beat_out, change=change)
                 was_arm_pending = os.autoloop_arm_pending
                 self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos, elapsed_ms)
@@ -1660,7 +1660,7 @@ class StateManager:
         # Elapsed + beatpos — send at every push tick (SS needs continuous updates).
         # Test A: in autoloop only, send absolute beat position to match VDJ-like
         # OS2L timing while leaving beat events unchanged for isolation.
-        for dk in (active, mirror, 3, 4):
+        for dk in self._sse.deck_route(active):
             self._out.send_elapsed(dk, elapsed_ms, beatpos_out)
 
     def _build_laser_context(
@@ -1934,7 +1934,7 @@ class StateManager:
         arm_meta: TrackMetadata,
     ) -> None:
         # VDJ: active deck + mirror 1/2 + decks 3 and 4 all get the same track.
-        for dk in (deck, mirror, 3, 4):
+        for dk in self._sse.deck_route(deck):
             self._out.send_deck_load(dk, arm_meta, active, play="on")
 
     def _schedule_autoloop_master_correction(
@@ -2108,7 +2108,7 @@ class StateManager:
             arm_elapsed_ms = elapsed_ms if lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS else target_elapsed_ms
             object.__setattr__(pending_meta, "elapsed_ms", arm_elapsed_ms)
             if pending_reason.startswith("correction-"):
-                for dk in (active, mirror, 3, 4):
+                for dk in self._sse.deck_route(active):
                     self._out.send_deck_clear(dk)
                     self._out.send_loop_off(dk)
                 log.info("[SM] arm-correction-clear  deck=%d  beat=%d  reason=%s",
@@ -2144,7 +2144,7 @@ class StateManager:
                         "  tolerance=%dms  grid=%s",
                         active, target_beat, lateness_ms,
                         _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS, target_source)
-        for dk in (active, mirror, 3, 4):
+        for dk in self._sse.deck_route(active):
             self._out.send_bpm(dk, arm_bpm)
         os.last_sent_bpm = arm_bpm
         if not scheduled_correction:
@@ -2298,11 +2298,11 @@ def _send_direct_autoloop_rearm(
     object.__setattr__(arm_meta, "elapsed_ms", target_elapsed_ms)
     sm._os.last_arm_mono = time.monotonic()
     sm._os.last_armed_filepath = d.meta.filepath
-    for dk in (active, mirror, 3, 4):
+    for dk in sm._sse.deck_route(active):
         sm._out.send_deck_clear(dk)
         sm._out.send_loop_off(dk)
     sm._send_autoloop_deck_load(active, mirror, active, arm_meta)
-    for dk in (active, mirror, 3, 4):
+    for dk in sm._sse.deck_route(active):
         sm._out.send_bpm(dk, arm_bpm)
     sm._os.last_sent_bpm = arm_bpm
     log.info("[SM] autoloop-rearm  deck=%d  reason=%s  beat=%s  elapsed=%s"
@@ -2376,7 +2376,7 @@ def _smart_drop_tick(
             )
         else:
             log.info("[SM] smart-drop-cut  deck=%d  beat=%d  drop_at=%d", active, this_beat, drop_beat)
-            for dk in (active, mirror, 3, 4):
+            for dk in sm._sse.deck_route(active):
                 sm._out.send_deck_clear(dk)
                 sm._out.send_loop_off(dk)
         os.drop_cut_armed = True
@@ -2424,7 +2424,7 @@ def _smart_breakdown_tick(
             continue
         if this_beat == bd_beat:
             log.info("[SM] smart-breakdown-cut  deck=%d  beat=%d", active, this_beat)
-            for dk in (active, mirror, 3, 4):
+            for dk in sm._sse.deck_route(active):
                 sm._out.send_deck_clear(dk)
                 sm._out.send_loop_off(dk)
             os.breakdown_active = True
@@ -2473,7 +2473,7 @@ def _phrase_anchor_tick(
     if this_beat == next_anchor - 1:
         log.info("[SM] phrase-anchor-clear  deck=%d  beat=%d  anchor=%d",
                  active, this_beat, next_anchor)
-        for dk in (active, mirror, 3, 4):
+        for dk in sm._sse.deck_route(active):
             sm._out.send_deck_clear(dk)
             sm._out.send_loop_off(dk)
         return False
