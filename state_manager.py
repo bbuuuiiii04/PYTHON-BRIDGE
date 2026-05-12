@@ -37,7 +37,7 @@ from .config import (
     BPM_THRESHOLD_SCRIPTED, BPM_THRESHOLD_UNSCRIPTED,
     MEM_STALE_S, SMART_DROP_LOOKAHEAD_BEATS, SMART_DROP_IGNORE_INTRO_BEATS,
     SMART_DROP_IGNORE_OUTRO_BEATS, PHRASE_ANCHOR_BEATS,
-    SMART_BREAKDOWN_WINDOW_BEATS, SMART_BREAKDOWN_DEFAULT_DURATION_BEATS,
+    SMART_BREAKDOWN_DEFAULT_DURATION_BEATS,
     SMART_BREAKDOWN_IGNORE_INTRO_BEATS, SMART_BREAKDOWN_IGNORE_OUTRO_BEATS,
 )
 
@@ -66,6 +66,7 @@ from .filepath_resolver import has_soundswitch_scripted_id
 from .sound_switch_engine import SoundSwitchEngine
 from .smart_phrasing import (
     SmartPhrasingEngine, SmartPhrasingSnapshot, PhraseSegment, BeatSegment,
+    SmartPhrasingState,
 )
 from . import bridge_fmt as bf
 
@@ -1274,8 +1275,12 @@ class StateManager:
                 self._pending_arm = None
                 self._do_stop(active, os.last_beat_elapsed_ms)
                 if self._laser_director is not None:
+                    sp_state = self._update_smart_phrasing_state(
+                        active, d, 0.0, 0.0,
+                    )
                     _lctx = self._build_laser_context(
                         active, d, os.last_beat_elapsed_ms, d.meta.bpm, 0.0, 0.0, snap, now,
+                        sp_state=sp_state,
                     )
                     decision = self._laser_director.tick(_lctx, now=now)
                     if self._laser_executor is not None:
@@ -1301,8 +1306,12 @@ class StateManager:
                         log.warning("[SM] queue-full  event=switch  deck=%d→%d  src=auto",
                                     active, mirror)
             if self._laser_director is not None:
+                sp_state = self._update_smart_phrasing_state(
+                    active, d, 0.0, 0.0,
+                )
                 _lctx = self._build_laser_context(
                     active, d, elapsed_ms, bpm, 0.0, 0.0, snap, now,
+                    sp_state=sp_state,
                 )
                 decision = self._laser_director.tick(_lctx, now=now)
                 if self._laser_executor is not None:
@@ -1466,8 +1475,12 @@ class StateManager:
 
         if not os.was_playing:
             if self._laser_director is not None:
+                sp_state = self._update_smart_phrasing_state(
+                    active, d, 0.0, 0.0,
+                )
                 _lctx = self._build_laser_context(
                     active, d, elapsed_ms, bpm, beat_pos, abs_beat_pos, snap, now,
+                    sp_state=sp_state,
                 )
                 decision = self._laser_director.tick(_lctx, now=now)
                 if self._laser_executor is not None:
@@ -1478,6 +1491,10 @@ class StateManager:
         # ── Emit elapsed + beat ───────────────────────────────────────────────
         if os.lighting_mode == "autoloop" and os.autoloop_arm_pending:
             self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos, elapsed_ms)
+
+        sp_state = self._update_smart_phrasing_state(
+            active, d, abs_beat_pos, bpm,
+        )
 
         # BPM: send immediately when last_sent_bpm is 0 (fresh arm / deck switch) so
         # SS autoloop activates on the current tick, not at the next beat boundary.
@@ -1545,7 +1562,7 @@ class StateManager:
                 # smart-drop / phrase-anchor BEFORE send_beat so deck-load goes
                 # out before the activation beat event reaches SoundSwitch.
                 if os.lighting_mode == "autoloop":
-                    if self._smart_drop_enabled and d.meta.smart_drops:
+                    if self._smart_drop_enabled:
                         smart_drop_signal = _smart_drop_tick(
                             self,
                             active,
@@ -1554,13 +1571,22 @@ class StateManager:
                             this_beat,
                             elapsed_ms,
                             blackout_mode=smart_drop_blackout_mode,
+                            sp_state=sp_state,
                         )
                         if smart_drop_signal == _SMART_DROP_SIGNAL_CROSSING:
                             change = True
                             if not smart_drop_blackout_mode:
                                 autoloop_tick_just_fired = True
-                    if self._smart_breakdown_enabled and d.meta.smart_breakdowns:
-                        if _smart_breakdown_tick(self, active, mirror, bpm, this_beat, elapsed_ms):
+                    if self._smart_breakdown_enabled:
+                        if _smart_breakdown_tick(
+                            self,
+                            active,
+                            mirror,
+                            bpm,
+                            this_beat,
+                            elapsed_ms,
+                            sp_state=sp_state,
+                        ):
                             change = True
                             autoloop_tick_just_fired = True
                     if self._phrase_anchor_enabled:
@@ -1618,6 +1644,7 @@ class StateManager:
                 smart_drop_blackout_arm=smart_drop_blackout_arm,
                 smart_drop_blackout_mode=smart_drop_blackout_mode,
                 smart_drop_signal=smart_drop_signal,
+                sp_state=sp_state,
             )
             laser_director_enabled = self._laser_director.is_enabled()
             if (
@@ -1657,52 +1684,16 @@ class StateManager:
         for dk in self._sse.deck_route(active):
             self._out.send_elapsed(dk, elapsed_ms, beatpos_out)
 
-    def _build_laser_context(
+    def _update_smart_phrasing_state(
         self,
         active: int,
         d,
-        elapsed_ms: int,
-        bpm: float,
-        beat_pos: float,
         abs_beat_pos: float,
-        snap,
-        now: float,
-        autoloop_tick_just_fired: bool = False,
-        smart_drop_blackout_arm: bool = False,
-        smart_drop_blackout_mode: bool = False,
-        smart_drop_signal: int = _SMART_DROP_SIGNAL_NONE,
-    ):
-        """Build a frozen LaserContext from already-computed push-tick locals.
-
-        Must not call conn.status(), read files, build dicts, scan MIDI ports,
-        or perform any I/O. All values come from pre-computed local variables.
-        """
-        os2l_connected = (
-            self._os2l_connected_provider()
-            if self._os2l_connected_provider is not None
-            else False
-        )
-        active_track_loaded = bool(d.meta.filepath)
-        autoloop_ready = (
-            self._os.lighting_mode == "autoloop"
-            and not self._os.autoloop_arm_pending
-            and self._os.pending_autoloop_arm_meta is None
-            and bool(self._os.last_armed_filepath)
-            and self._os.last_armed_filepath == d.meta.filepath
-        )
-        current_phrase_is_up, current_phrase_is_chorus = _current_phrase_context(
-            abs_beat=abs_beat_pos,
-            up_markers=d.meta.anlz_buildups,
-            chorus_markers=d.meta.anlz_drops,
-            low_markers=d.meta.anlz_breakdowns,
-        )
-
-        # ── Phase 2 shadow: SmartPhrasingEngine update (Issue #33) ────────
-        # Build snapshot from already-loaded DeckState.meta.  No I/O, no
-        # config reads, no file parsing.  Result is passive data only.
+        bpm: float,
+    ) -> SmartPhrasingState:
         _sp_snapshot = SmartPhrasingSnapshot(
             deck_id=str(active),
-            track_id=d.meta.content_id or None,
+            track_id=d.meta.content_id or d.meta.filepath or None,
             is_playing=d.playing,
             abs_beat=abs_beat_pos if bpm > 0 else None,
             phrase_segments=build_phase2_phrase_segments(
@@ -1737,10 +1728,60 @@ class StateManager:
             transition_window_beats=self._sp_transition_window,
         )
         _sp_result = self._smart_phrasing_engine.update(_sp_snapshot)
-        if _sp_result.state.transition_mask_should_arm:
+        sp_state = _sp_result.state
+        if sp_state.transition_mask_should_arm and not self._os.breakdown_active:
             self._sp_blackout_arm_latched = True
-        if _sp_result.state.transition_mask_should_clear:
+        if sp_state.transition_mask_should_clear:
             self._sp_blackout_arm_latched = False
+        return sp_state
+
+    def _build_laser_context(
+        self,
+        active: int,
+        d,
+        elapsed_ms: int,
+        bpm: float,
+        beat_pos: float,
+        abs_beat_pos: float,
+        snap,
+        now: float,
+        autoloop_tick_just_fired: bool = False,
+        smart_drop_blackout_arm: bool = False,
+        smart_drop_blackout_mode: bool = False,
+        smart_drop_signal: int = _SMART_DROP_SIGNAL_NONE,
+        *,
+        sp_state: Optional[SmartPhrasingState] = None,
+    ):
+        """Build a frozen LaserContext from already-computed push-tick locals.
+
+        Must not call conn.status(), read files, build dicts, scan MIDI ports,
+        or perform any I/O. All values come from pre-computed local variables.
+        """
+        os2l_connected = (
+            self._os2l_connected_provider()
+            if self._os2l_connected_provider is not None
+            else False
+        )
+        active_track_loaded = bool(d.meta.filepath)
+        autoloop_ready = (
+            self._os.lighting_mode == "autoloop"
+            and not self._os.autoloop_arm_pending
+            and self._os.pending_autoloop_arm_meta is None
+            and bool(self._os.last_armed_filepath)
+            and self._os.last_armed_filepath == d.meta.filepath
+        )
+        current_phrase_is_up, current_phrase_is_chorus = _current_phrase_context(
+            abs_beat=abs_beat_pos,
+            up_markers=d.meta.anlz_buildups,
+            chorus_markers=d.meta.anlz_drops,
+            low_markers=d.meta.anlz_breakdowns,
+        )
+
+        if sp_state is None:
+            sp_state = self._update_smart_phrasing_state(
+                active, d, abs_beat_pos, bpm,
+            )
+
         if smart_drop_signal == _SMART_DROP_SIGNAL_CROSSING:
             self._sp_blackout_arm_latched = False
 
@@ -1774,7 +1815,7 @@ class StateManager:
             smart_drop_blackout_active=self._os.drop_cut_armed,
             smart_drop_blackout_arm=smart_drop_blackout_arm,
             smart_phrasing_blackout_arm=smart_phrasing_blackout_arm,
-            smart_phrasing=_sp_result.state,
+            smart_phrasing=sp_state,
         )
 
     # ── Stop / resume helpers ─────────────────────────────────────────────────
@@ -2308,6 +2349,8 @@ def _smart_drop_tick(
     this_beat: int,
     elapsed_ms: int,
     blackout_mode: bool = True,
+    *,
+    sp_state: SmartPhrasingState,
 ) -> int:
     """Fire smart-drop cut before a detected drop, then rearm on the drop beat.
 
@@ -2317,7 +2360,6 @@ def _smart_drop_tick(
       2 when drop crossing is reached (drop should fire now).
     """
     os = sm._os
-    d = sm._deck[active]
 
     if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
         return _SMART_DROP_SIGNAL_NONE
@@ -2326,46 +2368,44 @@ def _smart_drop_tick(
         return _SMART_DROP_SIGNAL_NONE
 
     if os.drop_cut_armed:
-        if this_beat >= os.drop_rearm_beat:
+        if sp_state.smart_drop_crossing:
+            target_beat = int(sp_state.active_drop_beat or os.drop_rearm_beat)
             if blackout_mode:
                 log.info(
                     "[SM] smart-drop-crossing  deck=%d  beat=%d  drop_at=%d",
                     active,
                     this_beat,
-                    os.drop_rearm_beat,
+                    target_beat,
                 )
                 return _SMART_DROP_SIGNAL_CROSSING
             log.info("[SM] smart-drop-rearm  deck=%d  beat=%d", active, this_beat)
             if _send_direct_autoloop_rearm(
                 sm, active, mirror, bpm, elapsed_ms, "smart-drop",
-                target_beat=os.drop_rearm_beat,
+                target_beat=target_beat,
             ):
-                os.phrase_anchor_last_beat = os.drop_rearm_beat
+                os.phrase_anchor_last_beat = target_beat
                 os.drop_cut_armed = False
                 os.drop_rearm_beat = 0
                 return _SMART_DROP_SIGNAL_CROSSING
         return _SMART_DROP_SIGNAL_NONE
 
-    for drop_beat in d.meta.smart_drops:
-        cutoff = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
-        if this_beat < cutoff:
-            break
-        if this_beat >= drop_beat:
-            continue
-        if any(this_beat <= bd_beat < drop_beat for bd_beat in d.meta.smart_breakdowns):
-            continue
+    if (
+        sp_state.transition_mask_should_arm
+        and sp_state.next_smart_drop_beat is not None
+    ):
+        drop_beat_int = int(sp_state.next_smart_drop_beat)
         if blackout_mode:
             log.info(
                 "[SM] smart-drop-blackout-arm  deck=%d  beat=%d  drop_at=%d",
                 active,
                 this_beat,
-                drop_beat,
+                drop_beat_int,
             )
         else:
-            log.info("[SM] smart-drop-cut  deck=%d  beat=%d  drop_at=%d", active, this_beat, drop_beat)
+            log.info("[SM] smart-drop-cut  deck=%d  beat=%d  drop_at=%d", active, this_beat, drop_beat_int)
             sm._sse.send_smart_transition_clear(active)
         os.drop_cut_armed = True
-        os.drop_rearm_beat = drop_beat
+        os.drop_rearm_beat = drop_beat_int
         return _SMART_DROP_SIGNAL_BLACKOUT_ARMED
     return _SMART_DROP_SIGNAL_NONE
 
@@ -2379,9 +2419,10 @@ def _smart_breakdown_tick(
     bpm: float,
     this_beat: int,
     elapsed_ms: int,
+    *,
+    sp_state: SmartPhrasingState,
 ) -> bool:
     os = sm._os
-    d = sm._deck[active]
 
     if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
         return False
@@ -2390,7 +2431,7 @@ def _smart_breakdown_tick(
         return False
         
     if os.breakdown_active:
-        if this_beat >= os.breakdown_restore_beat:
+        if sp_state.breakdown_end_crossing:
             log.info("[SM] smart-breakdown-restore  deck=%d  beat=%d", active, this_beat)
             if _send_direct_autoloop_rearm(
                 sm, active, mirror, bpm, elapsed_ms, "smart-breakdown",
@@ -2401,18 +2442,12 @@ def _smart_breakdown_tick(
                 os.breakdown_restore_beat = 0
                 return True
         return False
-        
-    for bd_beat in d.meta.smart_breakdowns:
-        if this_beat < bd_beat:
-            break
-        if this_beat >= bd_beat + SMART_BREAKDOWN_WINDOW_BEATS + 1:
-            continue
-        if this_beat == bd_beat:
-            log.info("[SM] smart-breakdown-cut  deck=%d  beat=%d", active, this_beat)
-            sm._sse.send_smart_transition_clear(active)
-            os.breakdown_active = True
-            os.breakdown_restore_beat = find_restore_beat(bd_beat, d.meta.anlz_buildups, d.meta.smart_drops, SMART_BREAKDOWN_DEFAULT_DURATION_BEATS)
-            break
+
+    if sp_state.breakdown_start_crossing and sp_state.breakdown_restore_beat is not None:
+        log.info("[SM] smart-breakdown-cut  deck=%d  beat=%d", active, this_beat)
+        sm._sse.send_smart_transition_clear(active)
+        os.breakdown_active = True
+        os.breakdown_restore_beat = int(sp_state.breakdown_restore_beat)
     return False
 
 def _phrase_anchor_tick(
