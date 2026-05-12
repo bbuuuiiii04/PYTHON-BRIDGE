@@ -14,8 +14,12 @@ code verification, not document age or detail level.
 | `docs/laser_director_design.md` | CURRENT AUTHORITATIVE | Canonical Laser Director design reference; implementation now exists in `laser_director.py`, `laser_executor.py`, and `laser_models.py`. |
 | `docs/laser_director_midi_mapping_workflow.md` | CURRENT SUPPORTING | SoundSwitch MIDI mapping workflow and operator setup guidance used by the implemented Laser Director path. |
 | `docs/laser_director_rollout_checklist.md` | CURRENT SUPPORTING | Final rollout and validation checklist for safe Laser Director enablement, rollback, and operator test order. |
+| `docs/anlz_energy_project.md` | CURRENT SUPPORTING | Canonical bridge-local ANLZ energy tooling overview: scope, labels, data sources, limits, and validation framing. |
 | `docs/doc_index.md` | CURRENT AUTHORITATIVE | Maintains the current classification table. |
+| `docs/re/anlz_waveform_tag_inventory.md` | CURRENT SUPPORTING | Read-only ANLZ tag inventory focused on waveform/beatgrid/phrase tags useful for offline energy scoring. |
 | `docs/subsystems/logging.md` | CURRENT SUPPORTING | Runtime logging controls still match `logging_manager.py` and `__main__.py`; supporting detail rather than architecture source. |
+| `docs/validation/anlz_energy_evaluation_guide.md` | CURRENT SUPPORTING | Practical operator workflow for validating ANLZ energy tooling on a small human-reviewed corpus. |
+| `docs/validation/anlz_energy_corpus_report.md` | CURRENT SUPPORTING | Report template and JSONL schema for offline ANLZ energy corpus runs; explicitly advisory-only. |
 | `docs/validation/direct_master_runtime_validation.md` | VALIDATION EVIDENCE | Correctly describes bounded direct-master observer as shadow-only while noting B6 authority is separate. |
 | `docs/validation/direct_master_runtime_runbook.md` | VALIDATION EVIDENCE | Live evidence capture workflow; its sample command is not the full launcher-default authority set. |
 | `docs/validation/direct_master_runtime_results_template.md` | VALIDATION EVIDENCE | Template for observer results, not behavior documentation. |

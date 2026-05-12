@@ -123,6 +123,9 @@ Use `docs/doc_index.md` for the full classification. In short:
 
 - Current truth: `README.md`, this file, `docs/bridge_design.md`,
   `docs/runtime_invariants.md`.
+- Offline ANLZ energy tooling: `docs/anlz_energy_project.md`,
+  `docs/re/anlz_waveform_tag_inventory.md`,
+  `docs/validation/anlz_energy_evaluation_guide.md`.
 - Current supporting details: `docs/subsystems/`.
 - Laser policy/scene detail: `docs/laser_director_design.md`.
 - Validation evidence: `docs/validation/`.
