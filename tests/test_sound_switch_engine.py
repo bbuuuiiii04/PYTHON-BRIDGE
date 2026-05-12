@@ -60,6 +60,32 @@ class DeckRouteTests(unittest.TestCase):
             [call(deck) for deck in (2, 1, 3, 4)],
         )
 
+    def test_send_smart_transition_clear_fans_out_via_deck_route(self) -> None:
+        out = Mock()
+        sse = SoundSwitchEngine(out)
+        sse.send_smart_transition_clear(2)
+        self.assertEqual(
+            out.send_deck_clear.call_args_list,
+            [call(deck) for deck in (2, 1, 3, 4)],
+        )
+        self.assertEqual(
+            out.send_loop_off.call_args_list,
+            [call(deck) for deck in (2, 1, 3, 4)],
+        )
+
+    def test_send_smart_transition_clear_deck1_route_order(self) -> None:
+        out = Mock()
+        sse = SoundSwitchEngine(out)
+        sse.send_smart_transition_clear(1)
+        self.assertEqual(
+            out.send_deck_clear.call_args_list,
+            [call(deck) for deck in (1, 2, 3, 4)],
+        )
+        self.assertEqual(
+            out.send_loop_off.call_args_list,
+            [call(deck) for deck in (1, 2, 3, 4)],
+        )
+
     def test_send_autoloop_bpm_fans_out_via_deck_route(self) -> None:
         out = Mock()
         sse = SoundSwitchEngine(out)

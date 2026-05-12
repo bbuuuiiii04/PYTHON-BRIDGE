@@ -47,6 +47,17 @@ class SoundSwitchEngine:
             self._out.send_deck_clear(dk)
             self._out.send_loop_off(dk)
 
+    def send_smart_transition_clear(self, active: int) -> None:
+        """Clear SS deck slots and disarm loops across the canonical 4-deck route
+        for a smart-transition cut/preclear (smart-drop legacy cut, smart-breakdown
+        cut, phrase-anchor pre-clear).
+        Byte-equivalent to send_autoloop_clear(active), but kept distinct to avoid
+        coupling smart-transition intent to autoloop arm/disarm semantics.
+        """
+        for dk in self.deck_route(active):
+            self._out.send_deck_clear(dk)
+            self._out.send_loop_off(dk)
+
     def send_autoloop_bpm(self, active: int, bpm: float) -> None:
         """Fan out an autoloop BPM update across the canonical 4-deck route."""
         for dk in self.deck_route(active):

@@ -2363,9 +2363,7 @@ def _smart_drop_tick(
             )
         else:
             log.info("[SM] smart-drop-cut  deck=%d  beat=%d  drop_at=%d", active, this_beat, drop_beat)
-            for dk in sm._sse.deck_route(active):
-                sm._sse.send_deck_clear(dk)
-                sm._sse.send_loop_off(dk)
+            sm._sse.send_smart_transition_clear(active)
         os.drop_cut_armed = True
         os.drop_rearm_beat = drop_beat
         return _SMART_DROP_SIGNAL_BLACKOUT_ARMED
@@ -2411,9 +2409,7 @@ def _smart_breakdown_tick(
             continue
         if this_beat == bd_beat:
             log.info("[SM] smart-breakdown-cut  deck=%d  beat=%d", active, this_beat)
-            for dk in sm._sse.deck_route(active):
-                sm._sse.send_deck_clear(dk)
-                sm._sse.send_loop_off(dk)
+            sm._sse.send_smart_transition_clear(active)
             os.breakdown_active = True
             os.breakdown_restore_beat = find_restore_beat(bd_beat, d.meta.anlz_buildups, d.meta.smart_drops, SMART_BREAKDOWN_DEFAULT_DURATION_BEATS)
             break
@@ -2460,9 +2456,7 @@ def _phrase_anchor_tick(
     if this_beat == next_anchor - 1:
         log.info("[SM] phrase-anchor-clear  deck=%d  beat=%d  anchor=%d",
                  active, this_beat, next_anchor)
-        for dk in sm._sse.deck_route(active):
-            sm._sse.send_deck_clear(dk)
-            sm._sse.send_loop_off(dk)
+        sm._sse.send_smart_transition_clear(active)
         return False
 
     if this_beat >= next_anchor:
