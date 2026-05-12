@@ -47,6 +47,12 @@ Audited against the current checkout on 2026-05-09.
 ## Output
 
 - Only the active bridge deck drives lighting decisions.
+- SoundSwitch/OS2L fanout for autoloop arm/clear/BPM, scripted Phase 0/1,
+  smart-transition clears, and live BPM follow is emitted through
+  `SoundSwitchEngine.deck_route(...)` and `SoundSwitchEngine.send_*` helpers.
+- `StateManager` retains direct `OS2LOutput` calls only for canonical per-tick
+  BPM/beat/elapsed fanout and for the autoloop-arm and idle-disarm raw `_sub`
+  filepath/play/loop sequences in `_apply_lighting`.
 - Scripted/autoloop arms, clears, BPM, beat, elapsed, and beatpos sends must
   cover active, mirror, 3, and 4 as appropriate.
 - Autoloop arms send an empty SoundSwitch ID.

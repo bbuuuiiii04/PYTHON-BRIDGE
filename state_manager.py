@@ -4,7 +4,8 @@ StateManager — authoritative state + 200 Hz push loop.
 Single event-loop thread:
   - drains event_queue at the top of every tick
   - reads PositionCache for current position
-  - drives beat emission and OS2L sends
+  - coordinates SoundSwitch output via SoundSwitchEngine and keeps canonical
+    per-tick beat/BPM/elapsed fanout ordering
   - handles deck switches, arm/clear, play/stop
 
 All DeckState writes happen in this thread. No external locks on DeckState.
@@ -1926,7 +1927,7 @@ class StateManager:
         active: int,
         arm_meta: TrackMetadata,
     ) -> None:
-        # VDJ: active deck + mirror 1/2 + decks 3 and 4 all get the same track.
+        # Thin test-seam adapter kept for parity tests that mock this method.
         self._sse.send_autoloop_deck_load(deck, mirror, active, arm_meta)
 
     def _schedule_autoloop_master_correction(
