@@ -39,6 +39,36 @@ from rb_ss_bridge_v2.models import Ev  # noqa: E402
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _sp(**overrides) -> SmartPhrasingState:
+    defaults = dict(
+        current_phrase_label="other",
+        current_phrase_is_up=False,
+        current_phrase_is_chorus=False,
+        current_phrase_is_low=False,
+        next_smart_drop_beat=None,
+        beats_to_next_drop=None,
+        smart_drop_window_active=False,
+        smart_drop_crossing=False,
+        smart_drop_preclear_requested=False,
+        smart_drop_rearm_requested=False,
+        smart_post_drop_active=False,
+        active_drop_beat=None,
+        smart_buildup_active=False,
+        smart_breakdown_active=False,
+        breakdown_start_crossing=False,
+        breakdown_end_crossing=False,
+        smart_breakdown_clear_requested=False,
+        smart_breakdown_restore_requested=False,
+        transition_mask_should_arm=False,
+        transition_mask_should_clear=False,
+        transition_window_active=False,
+        phrase_anchor_requested=False,
+        reason="test",
+        breakdown_restore_beat=None,
+    )
+    defaults.update(overrides)
+    return SmartPhrasingState(**defaults)
+
 def _ctx(
     *,
     playing: bool = True,
@@ -62,6 +92,20 @@ def _ctx(
     smart_drop_blackout_active: bool = False,
     smart_phrasing: Optional[SmartPhrasingState] = None,
 ) -> LaserContext:
+    if smart_phrasing is None:
+        label = "chorus" if current_phrase_is_chorus else ("up" if current_phrase_is_up else "other")
+        next_drop = next((float(b) for b in sorted(smart_drops) if b > abs_beat), None)
+        beats_to_drop = (next_drop - abs_beat) if next_drop is not None else None
+        smart_phrasing = _sp(
+            current_phrase_label=label,
+            current_phrase_is_up=current_phrase_is_up,
+            current_phrase_is_chorus=current_phrase_is_chorus,
+            next_smart_drop_beat=next_drop,
+            beats_to_next_drop=beats_to_drop,
+            smart_breakdown_active=breakdown_active,
+            reason="synth",
+        )
+
     return LaserContext(
         active_deck=active_deck,
         playing=playing,
@@ -75,11 +119,6 @@ def _ctx(
         active_track_loaded=active_track_loaded,
         autoloop_ready=autoloop_ready,
         autoloop_tick_just_fired=autoloop_tick_just_fired,
-        breakdown_active=breakdown_active,
-        smart_drops=smart_drops,
-        anlz_buildups=anlz_buildups,
-        current_phrase_is_up=current_phrase_is_up,
-        current_phrase_is_chorus=current_phrase_is_chorus,
         scripted_id=scripted_id,
         smart_drop_blackout_active=smart_drop_blackout_active,
         smart_phrasing=smart_phrasing,
@@ -832,7 +871,14 @@ class SmartObservationTests(unittest.TestCase):
             now=_now(),
         )
         self.assertEqual(ld.status()["current_scene"], "up")
-        ld.tick(_ctx(abs_beat=96.1, smart_drops=(96,), smart_drop_blackout_active=True), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=96.1,
+                smart_drop_blackout_active=True,
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=96.0),
+            ),
+            now=_now(),
+        )
         self.assertEqual(ld.status()["current_scene"], "drop")
 
     def test_first_smart_tick_does_not_fire_drop_crossing(self) -> None:
@@ -844,14 +890,27 @@ class SmartObservationTests(unittest.TestCase):
     def test_drop_crossing_uses_previous_abs_beat(self) -> None:
         ld = _director(default_scene="d", drop_scene="drop")
         ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,)), now=_now())
-        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64,)), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=64.1,
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+            ),
+            now=_now(),
+        )
         self.assertEqual(ld.status()["current_scene"], "drop")
         self.assertEqual(ld.status()["last_reason"], "drop_crossing")
 
     def test_drop_crossing_does_not_require_blackout_active(self) -> None:
         ld = _director(default_scene="d", drop_scene="drop")
         ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,)), now=_now())
-        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64,), smart_drop_blackout_active=False), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=64.1,
+                smart_drop_blackout_active=False,
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+            ),
+            now=_now(),
+        )
         self.assertEqual(ld.status()["current_scene"], "drop")
 
     def test_drop_crossing_fires_during_chorus_phrase_context(self) -> None:
@@ -863,9 +922,14 @@ class SmartObservationTests(unittest.TestCase):
         ld.tick(
             _ctx(
                 abs_beat=64.1,
-                smart_drops=(64,),
                 current_phrase_is_chorus=True,
                 smart_drop_blackout_active=True,
+                smart_phrasing=_sp(
+                    smart_drop_crossing=True,
+                    active_drop_beat=64.0,
+                    current_phrase_is_chorus=True,
+                    current_phrase_label="chorus",
+                ),
             ),
             now=_now(),
         )
@@ -875,7 +939,14 @@ class SmartObservationTests(unittest.TestCase):
     def test_drop_fires_once_per_target_beat(self) -> None:
         ld = _director(default_scene="d", drop_scene="drop")
         ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,)), now=_now())
-        ld.tick(_ctx(abs_beat=64.1, smart_drops=(64,), smart_drop_blackout_active=True), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=64.1,
+                smart_drop_blackout_active=True,
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+            ),
+            now=_now(),
+        )
         self.assertEqual(ld.status()["current_scene"], "drop")
         ld.tick(_ctx(abs_beat=64.4, smart_drops=(64,)), now=_now())
         self.assertNotEqual(ld.status()["current_scene"], "drop")
@@ -891,7 +962,14 @@ class SmartObservationTests(unittest.TestCase):
             _ctx(abs_beat=63.2, smart_drops=(64,), current_phrase_is_up=True),
             now=_now(),
         )
-        ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,), smart_drop_blackout_active=True), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=64.0,
+                smart_drop_blackout_active=True,
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+            ),
+            now=_now(),
+        )
         self.assertEqual(ld.status()["current_scene"], "drop")
 
     def test_drop_crossing_beats_buildup_at_exact_crossing(self) -> None:
@@ -910,7 +988,14 @@ class SmartObservationTests(unittest.TestCase):
             _ctx(abs_beat=31.5, smart_drops=(32,), current_phrase_is_up=True),
             now=_now(),
         )
-        ld.tick(_ctx(abs_beat=32.1, smart_drops=(32,), smart_drop_blackout_active=True), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=32.1,
+                smart_drop_blackout_active=True,
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=32.0),
+            ),
+            now=_now(),
+        )
         self.assertEqual(ld.status()["current_scene"], "drop")
         self.assertEqual(ld.status()["last_reason"], "drop_crossing")
 
@@ -922,7 +1007,14 @@ class SmartObservationTests(unittest.TestCase):
             minimum_scene_hold_beats=2,
         )
         ld.tick(_ctx(abs_beat=63.1, smart_drops=(64,)), now=_now())
-        ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,), smart_drop_blackout_active=True), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=64.0,
+                smart_drop_blackout_active=True,
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+            ),
+            now=_now(),
+        )
         self.assertEqual(ld.status()["current_scene"], "drop")
         ld.tick(_ctx(abs_beat=65.0, smart_drops=(64,)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "post")
@@ -944,9 +1036,14 @@ class SmartObservationTests(unittest.TestCase):
         ld.tick(
             _ctx(
                 abs_beat=64.0,
-                smart_drops=(64,),
                 current_phrase_is_chorus=True,
                 smart_drop_blackout_active=True,
+                smart_phrasing=_sp(
+                    smart_drop_crossing=True,
+                    active_drop_beat=64.0,
+                    current_phrase_is_chorus=True,
+                    current_phrase_label="chorus",
+                ),
             ),
             now=_now(),
         )
@@ -968,7 +1065,11 @@ class SmartObservationTests(unittest.TestCase):
         )
         ld.tick(_ctx(abs_beat=63.0, smart_drops=(64, 80)), now=_now())
         ld.tick(
-            _ctx(abs_beat=64.1, smart_drops=(64, 80), smart_drop_blackout_active=True),
+            _ctx(
+                abs_beat=64.1,
+                smart_drop_blackout_active=True,
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+            ),
             now=_now(),
         )
         ld.tick(_ctx(abs_beat=65.2, smart_drops=(64, 80)), now=_now())
@@ -987,7 +1088,11 @@ class SmartObservationTests(unittest.TestCase):
         )
         ld.tick(_ctx(abs_beat=63.0, smart_drops=(64, 100)), now=_now())
         ld.tick(
-            _ctx(abs_beat=64.1, smart_drops=(64, 100), smart_drop_blackout_active=True),
+            _ctx(
+                abs_beat=64.1,
+                smart_drop_blackout_active=True,
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+            ),
             now=_now(),
         )
         ld.tick(_ctx(abs_beat=65.0, smart_drops=(64, 100)), now=_now())
@@ -1120,31 +1225,25 @@ class SmartObservationTests(unittest.TestCase):
 
     def test_scripted_resets_only_smart_state(self) -> None:
         ld = _director(default_scene="d", drop_scene="drop")
-        ld._laser_drop_fired_beat = 64
         ld._post_drop_start_abs_beat = 64.0
         ld._last_smart_abs_beat = 63.0
         ld.tick(_ctx(abs_beat=65.0, scripted_id=2), now=_now())
-        self.assertIsNone(ld._laser_drop_fired_beat)
         self.assertEqual(ld._post_drop_start_abs_beat, -1.0)
         self.assertIsNone(ld._last_smart_abs_beat)
 
     def test_not_playing_resets_only_smart_state(self) -> None:
         ld = _director(default_scene="d", drop_scene="drop")
-        ld._laser_drop_fired_beat = 64
         ld._post_drop_start_abs_beat = 64.0
         ld._last_smart_abs_beat = 63.0
         ld.tick(_ctx(playing=False), now=_now())
-        self.assertIsNone(ld._laser_drop_fired_beat)
         self.assertEqual(ld._post_drop_start_abs_beat, -1.0)
         self.assertIsNone(ld._last_smart_abs_beat)
 
     def test_stale_resets_only_smart_state(self) -> None:
         ld = _director(default_scene="d", drop_scene="drop")
-        ld._laser_drop_fired_beat = 64
         ld._post_drop_start_abs_beat = 64.0
         ld._last_smart_abs_beat = 63.0
         ld.tick(_ctx(playing=True, position_stale=True), now=_now())
-        self.assertIsNone(ld._laser_drop_fired_beat)
         self.assertEqual(ld._post_drop_start_abs_beat, -1.0)
         self.assertIsNone(ld._last_smart_abs_beat)
 
@@ -1152,11 +1251,9 @@ class SmartObservationTests(unittest.TestCase):
         ld = _director(default_scene="d")
         ld.set_manual_override("manual_scene", ttl_s=30.0)
         ld.set_emergency_blackout(True)
-        ld._laser_drop_fired_beat = 64
         ld._post_drop_start_abs_beat = 64.0
         ld._last_smart_abs_beat = 63.0
         ld._reset_smart_observation_state()
-        self.assertIsNone(ld._laser_drop_fired_beat)
         self.assertEqual(ld._post_drop_start_abs_beat, -1.0)
         self.assertIsNone(ld._last_smart_abs_beat)
         self.assertTrue(ld.status()["emergency"])
@@ -1249,50 +1346,21 @@ class SmartPhrasingObservationTests(unittest.TestCase):
         self.assertEqual(ld.status()["current_scene"], "d")
         self.assertEqual(ld.status()["last_reason"], "default")
 
-    def test_legacy_buildup_fallback_works(self) -> None:
+    def test_synthesized_context_buildup_works_without_explicit_sp(self) -> None:
         ld = _director(default_scene="d", buildup_scene="up", buildup_lookahead_beats=16)
         ld.tick(_ctx(abs_beat=10.0), now=_now())  # init
         ld.tick(
-            _ctx(abs_beat=48.0, smart_phrasing=None, current_phrase_is_up=True, current_phrase_is_chorus=False, smart_drops=(64,)),
+            _ctx(abs_beat=48.0, current_phrase_is_up=True, current_phrase_is_chorus=False, smart_drops=(64,)),
             now=_now()
         )
         self.assertEqual(ld.status()["current_scene"], "up")
         self.assertEqual(ld.status()["last_reason"], "buildup_to_drop_window")
 
 class SmartPhrasingDropCrossingTests(unittest.TestCase):
-    def _sp(self, **kwargs) -> SmartPhrasingState:
-        default_kwargs = dict(
-            current_phrase_label="other", current_phrase_is_up=False, current_phrase_is_chorus=False,
-            current_phrase_is_low=False, next_smart_drop_beat=None, beats_to_next_drop=None,
-            smart_drop_window_active=False, smart_drop_crossing=False, smart_drop_preclear_requested=False,
-            smart_drop_rearm_requested=False, smart_post_drop_active=False, active_drop_beat=None,
-            smart_buildup_active=False, smart_breakdown_active=False, breakdown_start_crossing=False,
-            breakdown_end_crossing=False, smart_breakdown_clear_requested=False,
-            smart_breakdown_restore_requested=False, transition_mask_should_arm=False,
-            transition_mask_should_clear=False, transition_window_active=False,
-            phrase_anchor_requested=False, reason="test"
-        )
-        default_kwargs.update(kwargs)
-        return SmartPhrasingState(**default_kwargs)
-
     def test_drop_crossing_from_smart_phrasing(self) -> None:
         ld = _director(drop_scene="drop")
         ld.tick(_ctx(abs_beat=63.0), now=_now())
-        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=self._sp(smart_drop_crossing=True)), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "drop")
-        self.assertEqual(ld.status()["last_reason"], "drop_crossing")
-
-    def test_drop_crossing_smart_phrasing_does_not_use_legacy_dedup(self) -> None:
-        ld = _director(drop_scene="drop")
-        ld.tick(_ctx(abs_beat=63.0), now=_now())
-        ld._laser_drop_fired_beat = 64  # Set legacy dedup field directly
-        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=self._sp(smart_drop_crossing=True)), now=_now())
-        self.assertEqual(ld.status()["current_scene"], "drop")
-
-    def test_drop_crossing_legacy_fallback_when_smart_phrasing_none(self) -> None:
-        ld = _director(drop_scene="drop")
-        ld.tick(_ctx(abs_beat=63.0), now=_now())
-        ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,), smart_phrasing=None), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=_sp(smart_drop_crossing=True)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "drop")
         self.assertEqual(ld.status()["last_reason"], "drop_crossing")
 
@@ -1300,20 +1368,20 @@ class SmartPhrasingDropCrossingTests(unittest.TestCase):
         ld = _director(drop_scene="drop", default_scene="d")
         ld.tick(_ctx(abs_beat=63.0), now=_now())
         # smart_drops=(64,) would trigger legacy drop
-        ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,), smart_phrasing=self._sp(smart_drop_crossing=False)), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_drops=(64,), smart_phrasing=_sp(smart_drop_crossing=False)), now=_now())
         self.assertNotEqual(ld.status()["current_scene"], "drop")
 
     def test_priority_breakdown_wins_over_drop(self) -> None:
         ld = _director(drop_scene="drop", breakdown_scene="bd")
         ld.tick(_ctx(abs_beat=63.0), now=_now())
-        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=self._sp(smart_breakdown_active=True, smart_drop_crossing=True)), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=_sp(smart_breakdown_active=True, smart_drop_crossing=True)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "bd")
         self.assertEqual(ld.status()["last_reason"], "breakdown_active")
 
     def test_priority_drop_wins_over_buildup(self) -> None:
         ld = _director(drop_scene="drop", buildup_scene="up", buildup_lookahead_beats=16)
         ld.tick(_ctx(abs_beat=63.0), now=_now())
-        sp = self._sp(smart_drop_crossing=True, beats_to_next_drop=10.0, current_phrase_is_up=True)
+        sp = _sp(smart_drop_crossing=True, beats_to_next_drop=10.0, current_phrase_is_up=True)
         ld.tick(_ctx(abs_beat=64.0, smart_phrasing=sp), now=_now())
         self.assertEqual(ld.status()["current_scene"], "drop")
         self.assertEqual(ld.status()["last_reason"], "drop_crossing")
@@ -1321,10 +1389,10 @@ class SmartPhrasingDropCrossingTests(unittest.TestCase):
     def test_priority_post_drop_active_unchanged_with_no_crossing(self) -> None:
         ld = _director(drop_scene="drop", post_drop_scene="pd", minimum_scene_hold_beats=8)
         ld.tick(_ctx(abs_beat=63.0), now=_now())
-        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=self._sp(smart_drop_crossing=True)), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=_sp(smart_drop_crossing=True)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "drop")
         # next tick, drop crossing is false, should be in post drop
-        ld.tick(_ctx(abs_beat=65.0, smart_phrasing=self._sp(smart_drop_crossing=False)), now=_now())
+        ld.tick(_ctx(abs_beat=65.0, smart_phrasing=_sp(smart_drop_crossing=False)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "pd")
         self.assertEqual(ld.status()["last_reason"], "post_drop_hold")
 
@@ -1332,7 +1400,7 @@ class SmartPhrasingDropCrossingTests(unittest.TestCase):
         ld = _director(drop_scene="drop", emergency_scene="em")
         ld.tick(_ctx(abs_beat=63.0), now=_now())
         ld.set_emergency_blackout(True)
-        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=self._sp(smart_drop_crossing=True)), now=_now())
+        ld.tick(_ctx(abs_beat=64.0, smart_phrasing=_sp(smart_drop_crossing=True)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "em")
         self.assertEqual(ld.status()["last_reason"], "emergency")
 
@@ -1346,7 +1414,7 @@ class SmartPhrasingDropCrossingTests(unittest.TestCase):
         ld.tick(_ctx(abs_beat=64.0, position_stale=True), now=_now())
         # Gate clears — first eligible tick with smart_drop_crossing=True
         # Should NOT fire drop because previous_abs_beat is None
-        ld.tick(_ctx(abs_beat=64.5, smart_phrasing=self._sp(smart_drop_crossing=True)), now=_now())
+        ld.tick(_ctx(abs_beat=64.5, smart_phrasing=_sp(smart_drop_crossing=True)), now=_now())
         self.assertNotEqual(ld.status()["current_scene"], "drop")
 
 # ---------------------------------------------------------------------------
@@ -1404,7 +1472,7 @@ class StatusShapeTests(unittest.TestCase):
                     "pre_drop_scene", "drop_scene", "post_drop_scene", "buildup_lookahead_beats",
                     "buildup_approach_beats",
                     "buildup_hold_beats", "buildup_max_drop_distance_beats",
-                    "pre_drop_lookahead_beats", "laser_drop_fired_beat",
+                    "pre_drop_lookahead_beats",
                     "phrase_trigger_pending", "last_trigger_abs_beat"):
             self.assertIn(key, s, msg=f"missing key: {key}")
 
@@ -1616,15 +1684,66 @@ class StateManagerLaserIntegrationTests(unittest.TestCase):
         ctx = sm._build_laser_context(1, d, 0, 0.0, 0.0, 0.0, None, time.monotonic())
         self.assertTrue(ctx.position_stale)
 
-    def test_build_laser_context_copies_breakdown_active(self) -> None:
+    def test_build_laser_context_always_populates_smart_phrasing(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
         ld = _director()
         sm = _make_sm(laser_director=ld)
-        sm._os.breakdown_active = True
         d = DeckState(number=1)
         snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
-        ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, snap, time.monotonic())
-        self.assertTrue(ctx.breakdown_active)
+
+        ctx_playing = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 64.0, snap, time.monotonic())
+        self.assertIsNotNone(ctx_playing.smart_phrasing)
+        self.assertEqual(type(ctx_playing.smart_phrasing).__name__, "SmartPhrasingState")
+
+        d.playing = False
+        ctx_not_playing = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 64.0, snap, time.monotonic())
+        self.assertIsNotNone(ctx_not_playing.smart_phrasing)
+        self.assertEqual(type(ctx_not_playing.smart_phrasing).__name__, "SmartPhrasingState")
+
+        d.playing = True
+        ctx_zero_bpm = sm._build_laser_context(1, d, 1000, 0.0, 0.0, 64.0, snap, time.monotonic())
+        self.assertIsNotNone(ctx_zero_bpm.smart_phrasing)
+        self.assertEqual(type(ctx_zero_bpm.smart_phrasing).__name__, "SmartPhrasingState")
+
+        ctx_no_snap = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 64.0, None, time.monotonic())
+        self.assertIsNotNone(ctx_no_snap.smart_phrasing)
+        self.assertEqual(type(ctx_no_snap.smart_phrasing).__name__, "SmartPhrasingState")
+
+    def test_build_laser_context_propagates_explicit_sp_state(self) -> None:
+        from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
+        ld = _director()
+        sm = _make_sm(laser_director=ld)
+        d = DeckState(number=1)
+        snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
+        sentinel = _sp(reason="sentinel-7b")
+
+        ctx = sm._build_laser_context(
+            1,
+            d,
+            1000,
+            128.0,
+            0.0,
+            64.0,
+            snap,
+            time.monotonic(),
+            sp_state=sentinel,
+        )
+        self.assertEqual(ctx.smart_phrasing.reason, "sentinel-7b")
+
+    def test_build_laser_context_maps_breakdown_active_from_smart_phrasing(self) -> None:
+        from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
+        ld = _director()
+        sm = _make_sm(laser_director=ld)
+        d = DeckState(number=1)
+        d.playing = True
+        d.meta.filepath = "/tracks/test-breakdown.mp3"
+        d.meta.beatgrid_times_ms = [float(i * 500) for i in range(256)]
+        d.meta.anlz_breakdowns = [96]
+        d.meta.anlz_buildups = [104]
+        snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
+        ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 97.0, snap, time.monotonic())
+        assert ctx.smart_phrasing is not None
+        self.assertTrue(ctx.smart_phrasing.smart_breakdown_active)
 
     def test_build_laser_context_copies_autoloop_tick_just_fired(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
@@ -1650,89 +1769,125 @@ class StateManagerLaserIntegrationTests(unittest.TestCase):
         ld = _director()
         sm = _make_sm(laser_director=ld)
         d = DeckState(number=1)
+        d.playing = True
+        d.meta.filepath = "/tracks/test-smart-drop.mp3"
+        d.meta.beatgrid_times_ms = [float(i * 500) for i in range(256)]
         d.meta.smart_drops = [64, 128]
         d.meta.anlz_buildups = [56]
         d.scripted_id = 42
         snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
-        ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, snap, time.monotonic())
-        self.assertEqual(ctx.smart_drops, (64, 128))
-        self.assertEqual(ctx.anlz_buildups, (56,))
+        ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 1.0, snap, time.monotonic())
+        assert ctx.smart_phrasing is not None
+        self.assertEqual(ctx.smart_phrasing.next_smart_drop_beat, 64.0)
         self.assertEqual(ctx.scripted_id, 42)
-        self.assertIsInstance(ctx.smart_drops, tuple)
-        self.assertIsInstance(ctx.anlz_buildups, tuple)
 
     def test_build_laser_context_phrase_context_up_when_latest_is_up(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
         ld = _director()
         sm = _make_sm(laser_director=ld)
         d = DeckState(number=1)
+        d.playing = True
+        d.meta.filepath = "/tracks/test-phrase-up.mp3"
+        d.meta.beatgrid_times_ms = [float(i * 500) for i in range(256)]
         d.meta.anlz_buildups = [32]
+        d.meta.anlz_drops = [64]
+        d.meta.smart_drops = [64]
         snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
         ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 40.0, snap, time.monotonic())
-        self.assertTrue(ctx.current_phrase_is_up)
-        self.assertFalse(ctx.current_phrase_is_chorus)
+        assert ctx.smart_phrasing is not None
+        self.assertTrue(ctx.smart_phrasing.current_phrase_is_up)
+        self.assertFalse(ctx.smart_phrasing.current_phrase_is_chorus)
 
     def test_build_laser_context_phrase_context_up_before_chorus_marker(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
         ld = _director()
         sm = _make_sm(laser_director=ld)
         d = DeckState(number=1)
+        d.playing = True
+        d.meta.filepath = "/tracks/test-phrase-up-before-chorus.mp3"
+        d.meta.beatgrid_times_ms = [float(i * 500) for i in range(256)]
         d.meta.anlz_buildups = [32]
         d.meta.anlz_drops = [64]
+        d.meta.smart_drops = [64]
         snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
         ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 50.0, snap, time.monotonic())
-        self.assertTrue(ctx.current_phrase_is_up)
-        self.assertFalse(ctx.current_phrase_is_chorus)
+        assert ctx.smart_phrasing is not None
+        self.assertTrue(ctx.smart_phrasing.current_phrase_is_up)
+        self.assertFalse(ctx.smart_phrasing.current_phrase_is_chorus)
 
     def test_build_laser_context_phrase_context_chorus_after_chorus_marker(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
         ld = _director()
         sm = _make_sm(laser_director=ld)
         d = DeckState(number=1)
+        d.playing = True
+        d.meta.filepath = "/tracks/test-phrase-chorus.mp3"
+        d.meta.beatgrid_times_ms = [float(i * 500) for i in range(256)]
         d.meta.anlz_buildups = [32]
         d.meta.anlz_drops = [64]
+        d.meta.smart_drops = [64]
         snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
         ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 70.0, snap, time.monotonic())
-        self.assertFalse(ctx.current_phrase_is_up)
-        self.assertTrue(ctx.current_phrase_is_chorus)
+        assert ctx.smart_phrasing is not None
+        self.assertFalse(ctx.smart_phrasing.current_phrase_is_up)
+        self.assertTrue(ctx.smart_phrasing.current_phrase_is_chorus)
 
     def test_build_laser_context_phrase_context_low_clears_up_and_chorus(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
         ld = _director()
         sm = _make_sm(laser_director=ld)
         d = DeckState(number=1)
+        d.playing = True
+        d.meta.filepath = "/tracks/test-phrase-low.mp3"
+        d.meta.beatgrid_times_ms = [float(i * 500) for i in range(256)]
         d.meta.anlz_buildups = [32]
         d.meta.anlz_breakdowns = [48]
         d.meta.anlz_drops = [64]
+        d.meta.smart_drops = [64]
         snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
         ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 56.0, snap, time.monotonic())
-        self.assertFalse(ctx.current_phrase_is_up)
-        self.assertFalse(ctx.current_phrase_is_chorus)
+        assert ctx.smart_phrasing is not None
+        self.assertFalse(ctx.smart_phrasing.current_phrase_is_up)
+        self.assertFalse(ctx.smart_phrasing.current_phrase_is_chorus)
 
     def test_build_laser_context_phrase_context_up_after_second_up_marker(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
         ld = _director()
         sm = _make_sm(laser_director=ld)
         d = DeckState(number=1)
+        d.playing = True
+        d.meta.filepath = "/tracks/test-phrase-up-after-second.mp3"
+        d.meta.beatgrid_times_ms = [float(i * 500) for i in range(256)]
         d.meta.anlz_buildups = [32, 96]
         d.meta.anlz_drops = [64]
+        d.meta.smart_drops = [64]
         snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
         chorus_ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 80.0, snap, time.monotonic())
         up_ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 100.0, snap, time.monotonic())
-        self.assertFalse(chorus_ctx.current_phrase_is_up)
-        self.assertTrue(chorus_ctx.current_phrase_is_chorus)
-        self.assertTrue(up_ctx.current_phrase_is_up)
-        self.assertFalse(up_ctx.current_phrase_is_chorus)
+        assert chorus_ctx.smart_phrasing is not None
+        assert up_ctx.smart_phrasing is not None
+        self.assertFalse(chorus_ctx.smart_phrasing.current_phrase_is_up)
+        self.assertTrue(chorus_ctx.smart_phrasing.current_phrase_is_chorus)
+        self.assertTrue(up_ctx.smart_phrasing.current_phrase_is_up)
+        self.assertFalse(up_ctx.smart_phrasing.current_phrase_is_chorus)
 
     def test_build_laser_context_phrase_context_no_markers_defaults_false(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot
         ld = _director()
         sm = _make_sm(laser_director=ld)
         d = DeckState(number=1)
+        d.playing = True
+        d.meta.filepath = "/tracks/test-phrase-none.mp3"
+        d.meta.beatgrid_times_ms = [float(i * 500) for i in range(256)]
         snap = PositionSnapshot(deck=1, elapsed_ms=1000, playing=True, updated_at=time.monotonic())
         ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 100.0, snap, time.monotonic())
-        self.assertFalse(ctx.current_phrase_is_up)
-        self.assertFalse(ctx.current_phrase_is_chorus)
+        assert ctx.smart_phrasing is not None
+        self.assertFalse(ctx.smart_phrasing.current_phrase_is_up)
+        self.assertFalse(ctx.smart_phrasing.current_phrase_is_chorus)
+
+    def test_status_no_longer_exposes_laser_drop_fired_beat(self) -> None:
+        ld = _director()
+        self.assertNotIn("laser_drop_fired_beat", ld.status())
 
     def test_build_laser_context_copies_active_track_loaded(self) -> None:
         from rb_ss_bridge_v2.models import DeckState, PositionSnapshot

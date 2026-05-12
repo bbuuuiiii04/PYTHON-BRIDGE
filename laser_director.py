@@ -46,35 +46,6 @@ _DEFAULT_SAFE_SCENE = "safe_static"
 _DEFAULT_DEFAULT_SCENE = "house_phrase_1"
 _DEFAULT_EMERGENCY_SCENE = "emergency_blackout"
 
-# Type-safe default for helper accessors. PR 4a decision paths still use
-# explicit `ctx.smart_phrasing is not None` guards so legacy fields remain
-# the fallback source when smart_phrasing is absent.
-_FALLBACK_SP = SmartPhrasingState(
-    current_phrase_label="other",
-    current_phrase_is_up=False,
-    current_phrase_is_chorus=False,
-    current_phrase_is_low=False,
-    next_smart_drop_beat=None,
-    beats_to_next_drop=None,
-    smart_drop_window_active=False,
-    smart_drop_crossing=False,
-    smart_drop_preclear_requested=False,
-    smart_drop_rearm_requested=False,
-    smart_post_drop_active=False,
-    active_drop_beat=None,
-    smart_buildup_active=False,
-    smart_breakdown_active=False,
-    breakdown_start_crossing=False,
-    breakdown_end_crossing=False,
-    smart_breakdown_clear_requested=False,
-    smart_breakdown_restore_requested=False,
-    transition_mask_should_arm=False,
-    transition_mask_should_clear=False,
-    transition_window_active=False,
-    phrase_anchor_requested=False,
-    reason="fallback",
-)
-
 
 class LaserDirector:
     """Dry-run laser scene policy director.
@@ -145,7 +116,6 @@ class LaserDirector:
         self._last_phrase_number: Optional[int] = None
         self._last_scene_change_abs_beat: float = 0.0
         self._last_trigger_abs_beat: float = 0.0
-        self._laser_drop_fired_beat: Optional[int] = None  # Deprecated in PR 4b: used for legacy fallback only
         self._pending_drop_crossing_beat: Optional[int] = None
         self._drop_rearm_edge_seen_for_pending: bool = False
         self._post_drop_start_abs_beat: float = -1.0
@@ -262,9 +232,6 @@ class LaserDirector:
         self._last_reason = decision.reason
         return decision
 
-    def _sp(self, ctx: LaserContext) -> SmartPhrasingState:
-        return ctx.smart_phrasing if ctx.smart_phrasing is not None else _FALLBACK_SP
-
     def _decide(self, ctx: LaserContext, *, now: float) -> LaserSceneDecision:
         """Priority-ordered scene selection. Returns a LaserSceneDecision."""
 
@@ -359,9 +326,37 @@ class LaserDirector:
         self._last_phrase_number = phrase_number
 
         previous_abs_beat = self._last_smart_abs_beat
+        sp = ctx.smart_phrasing
+        if sp is None:
+            sp = SmartPhrasingState(
+                current_phrase_label="other",
+                current_phrase_is_up=False,
+                current_phrase_is_chorus=False,
+                current_phrase_is_low=False,
+                next_smart_drop_beat=None,
+                beats_to_next_drop=None,
+                smart_drop_window_active=False,
+                smart_drop_crossing=False,
+                smart_drop_preclear_requested=False,
+                smart_drop_rearm_requested=False,
+                smart_post_drop_active=False,
+                active_drop_beat=None,
+                smart_buildup_active=False,
+                smart_breakdown_active=False,
+                breakdown_start_crossing=False,
+                breakdown_end_crossing=False,
+                smart_breakdown_clear_requested=False,
+                smart_breakdown_restore_requested=False,
+                transition_mask_should_arm=False,
+                transition_mask_should_clear=False,
+                transition_window_active=False,
+                phrase_anchor_requested=False,
+                reason="compat",
+                breakdown_restore_beat=None,
+            )
 
         # Priority 8: Existing Smart Breakdown observation.
-        breakdown_active = self._sp(ctx).smart_breakdown_active if ctx.smart_phrasing is not None else ctx.breakdown_active
+        breakdown_active = sp.smart_breakdown_active
         if breakdown_active and self._breakdown_scene:
             self._last_smart_abs_beat = abs_beat
             return LaserSceneDecision(
@@ -374,37 +369,18 @@ class LaserDirector:
 
         # Priority 9: Drop crossing (once per target beat).
         if previous_abs_beat is not None and self._drop_scene:
-            if ctx.smart_phrasing is not None:
-                if ctx.smart_phrasing.smart_drop_crossing:
-                    self._pending_drop_crossing_beat = None
-                    self._drop_rearm_edge_seen_for_pending = False
-                    self._post_drop_start_abs_beat = abs_beat
-                    self._last_smart_abs_beat = abs_beat
-                    return LaserSceneDecision(
-                        scene=self._drop_scene,
-                        reason="drop_crossing",
-                        priority=9,
-                        source="policy",
-                        role="drop",
-                    )
-            else:
-                for drop_beat in sorted(set(ctx.smart_drops)):
-                    if (
-                        previous_abs_beat < drop_beat <= abs_beat
-                        and self._laser_drop_fired_beat != int(drop_beat)
-                    ):
-                        self._laser_drop_fired_beat = int(drop_beat)
-                        self._pending_drop_crossing_beat = None
-                        self._drop_rearm_edge_seen_for_pending = False
-                        self._post_drop_start_abs_beat = abs_beat
-                        self._last_smart_abs_beat = abs_beat
-                        return LaserSceneDecision(
-                            scene=self._drop_scene,
-                            reason="drop_crossing",
-                            priority=9,
-                            source="policy",
-                            role="drop",
-                        )
+            if sp.smart_drop_crossing:
+                self._pending_drop_crossing_beat = None
+                self._drop_rearm_edge_seen_for_pending = False
+                self._post_drop_start_abs_beat = abs_beat
+                self._last_smart_abs_beat = abs_beat
+                return LaserSceneDecision(
+                    scene=self._drop_scene,
+                    reason="drop_crossing",
+                    priority=9,
+                    source="policy",
+                    role="drop",
+                )
 
         # Priority 10: Post-drop hold (using existing minimum_scene_hold_beats).
         if (
@@ -429,13 +405,12 @@ class LaserDirector:
         )
 
         # Priority 11: Smart Drop countdown buildup window.
-        sp = self._sp(ctx)
-        beats_to_next_drop = sp.beats_to_next_drop if ctx.smart_phrasing is not None else self._beats_to_next_drop(abs_beat, ctx.smart_drops)
+        beats_to_next_drop = sp.beats_to_next_drop
         if beats_to_next_drop is None:
             beats_to_next_drop = float('inf')
 
-        current_phrase_is_up = sp.current_phrase_is_up if ctx.smart_phrasing is not None else ctx.current_phrase_is_up
-        current_phrase_is_chorus = sp.current_phrase_is_chorus if ctx.smart_phrasing is not None else ctx.current_phrase_is_chorus
+        current_phrase_is_up = sp.current_phrase_is_up
+        current_phrase_is_chorus = sp.current_phrase_is_chorus
 
         if (
             self._buildup_scene
@@ -533,19 +508,12 @@ class LaserDirector:
         return ctx.scripted_id > 0 or ctx.lighting_mode == "scripted"
 
     def _reset_smart_observation_state(self) -> None:
-        self._laser_drop_fired_beat = None
         self._pending_drop_crossing_beat = None
         self._drop_rearm_edge_seen_for_pending = False
         self._post_drop_start_abs_beat = -1.0
         self._last_smart_abs_beat = None
         self._smart_drop_blackout_active = False
         self._phrase_trigger_pending = False
-
-    def _beats_to_next_drop(self, abs_beat: float, smart_drops: tuple[int, ...]) -> float:
-        future_drops = [float(drop_beat) for drop_beat in smart_drops if drop_beat > abs_beat]
-        if not future_drops:
-            return float("inf")
-        return min(future_drops) - abs_beat
 
     def _effective_phrase_scene(self) -> str:
         return self._phrase_scene or self._default_scene
@@ -641,7 +609,6 @@ class LaserDirector:
             "buildup_hold_beats": self._buildup_hold_beats,
             "buildup_max_drop_distance_beats": self._buildup_max_drop_distance_beats,
             "pre_drop_lookahead_beats": self._pre_drop_lookahead_beats,
-            "laser_drop_fired_beat": self._laser_drop_fired_beat,
             "pending_drop_crossing_beat": self._pending_drop_crossing_beat,
             "drop_rearm_edge_seen_for_pending": self._drop_rearm_edge_seen_for_pending,
             "smart_drop_blackout_active": self._smart_drop_blackout_active,
