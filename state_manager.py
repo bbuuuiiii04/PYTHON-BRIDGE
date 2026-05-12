@@ -1590,7 +1590,7 @@ class StateManager:
                             autoloop_tick_just_fired = True
                     if self._phrase_anchor_enabled:
                         if _phrase_anchor_tick(
-                            self, active, mirror, bpm, this_beat, elapsed_ms, abs_beat_pos
+                            self, active, mirror, bpm, this_beat, elapsed_ms, abs_beat_pos, sp_state
                         ):
                             change = True
                             autoloop_tick_just_fired = True
@@ -1725,6 +1725,8 @@ class StateManager:
             drop_window_beats=self._sp_drop_window,
             post_drop_beats=self._sp_post_drop,
             transition_window_beats=self._sp_transition_window,
+            phrase_anchor_last_beat=self._os.phrase_anchor_last_beat,
+            phrase_anchor_period_beats=PHRASE_ANCHOR_BEATS,
         )
         _sp_result = self._smart_phrasing_engine.update(_sp_snapshot)
         sp_state = _sp_result.state
@@ -2446,6 +2448,7 @@ def _phrase_anchor_tick(
     this_beat: int,
     elapsed_ms: int,
     abs_beat_pos: float,
+    sp_state: SmartPhrasingState,
 ) -> bool:
     """Rearm autoloop every PHRASE_ANCHOR_BEATS to correct phrasing drift.
 
@@ -2476,13 +2479,13 @@ def _phrase_anchor_tick(
 
     # Pre-clear: 1 beat before anchor so SS renders the cleared state
     # before the reload arrives on the anchor beat.
-    if this_beat == next_anchor - 1:
+    if sp_state.phrase_anchor_preclear_requested:
         log.info("[SM] phrase-anchor-clear  deck=%d  beat=%d  anchor=%d",
                  active, this_beat, next_anchor)
         sm._sse.send_smart_transition_clear(active)
         return False
 
-    if this_beat >= next_anchor:
+    if sp_state.phrase_anchor_rearm_requested:
         log.info("[SM] phrase-anchor  deck=%d  beat=%d  anchor=%d",
                  active, this_beat, next_anchor)
         if _send_direct_autoloop_rearm(

@@ -120,6 +120,9 @@ def _smart_phrasing_state(*, transition_mask_should_clear: bool) -> SmartPhrasin
         transition_mask_should_clear=transition_mask_should_clear,
         transition_window_active=False,
         phrase_anchor_requested=False,
+        phrase_anchor_preclear_requested=False,
+        phrase_anchor_rearm_requested=False,
+        phrase_anchor_target_beat=None,
         reason="test",
     )
 
