@@ -2,15 +2,17 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-05-09. Treat code as the source of
+Audited against the current checkout on 2026-05-12. Treat code as the source of
 truth; `docs/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
 
 The bridge has one central authority thread: `StateManager`. It owns `DeckState`
 and most `OutputState`, drains `BridgeEvent`s, samples `PositionCache`, and
-drives SoundSwitch through `OS2LOutput`. Other threads do not mutate deck state
-directly; they publish immutable events or thread-safe snapshots.
+coordinates SoundSwitch output call ordering through `SoundSwitchEngine`.
+`StateManager` still emits canonical per-tick BPM/beat/elapsed fanout directly
+on `OS2LOutput`. Other threads do not mutate deck state directly; they publish
+immutable events or thread-safe snapshots.
 
 The current live launcher defaults enable guarded direct B1-B6 paths:
 
@@ -43,6 +45,7 @@ These defaults are present in both `scripts/ss_bridge_watcher.sh` and the live
 | `MTCReader` | position fallback only | yes | MTC thread | IAC Bus 1 MTC | `TC_UPDATE` |
 | `LiveBPMService` | direct displayed-BPM authority when fresh and valid; metadata fallback otherwise | yes | live BPM thread owns BPM validation state | Rekordbox BPM chains, discovery, hints | live BPM snapshots |
 | `FilepathResolver` | auxiliary metadata authority for loaded tracks | async hot path after load | short-lived worker threads | ANLZ path, DB, lsof, audio tags | `FILEPATH_RESOLVED`, `ANLZ_DATA` |
+| `SoundSwitchEngine` | SoundSwitch output behavior and canonical deck-route fanout helper | yes | called by `StateManager` thread | active deck routing, arm/clear/follow intents from `StateManager` | routed OS2L sends for scripted/autoloop/smart-transition/live-BPM-follow helpers |
 | `OS2LConnection` / `OS2LOutput` | output transport authority | yes | sender/reconnect threads own sockets | SoundSwitch DNS-SD, send queue | TCP OS2L messages |
 | `StatusWriter` / `CommandReader` | auxiliary operator status/control | auxiliary | status/command threads | snapshots, command JSONL | status JSON, command side effects |
 | `ValidationRunner` | diagnostic only | auxiliary | daemon validation thread when requested | runtime snapshots and process checks | validation result |
@@ -79,7 +82,8 @@ existing TL/MTC/current path.
 5. TL remains present and emits fallback events whenever the matching direct
    readiness callback is false.
 6. `StateManager` resolves tracks, selects scripted or autoloop lighting, and
-   sends mirrored OS2L updates to active, mirror, 3, and 4.
+   sends mirrored OS2L updates to active, mirror, 3, and 4 through
+   `SoundSwitchEngine`.
 
 ## Current Direct Paths
 

@@ -2,13 +2,13 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-05-09. Classification is based on
+Audited against the current checkout on 2026-05-12. Classification is based on
 code verification, not document age or detail level.
 
 | File | Classification | Why |
 | --- | --- | --- |
 | `README.md` | CURRENT AUTHORITATIVE | New repo entry point; points to the current docs path and launcher defaults verified in watcher scripts. |
-| `docs/current_architecture.md` | CURRENT AUTHORITATIVE | Compact current architecture derived from `__main__.py`, `StateManager`, readers, resolver, output, status, and launcher scripts. |
+| `docs/current_architecture.md` | CURRENT AUTHORITATIVE | Compact current architecture derived from `__main__.py`, `StateManager`, readers, resolver, output, status, and launcher scripts; ownership notes reflect post-PR-6 SoundSwitchEngine extraction. |
 | `docs/bridge_design.md` | CURRENT AUTHORITATIVE | Detailed current design anchor. Major claims were checked against runtime wiring and supporting code. |
 | `docs/runtime_invariants.md` | CURRENT AUTHORITATIVE | Extracted invariants from current code paths and tests. |
 | `docs/laser_director_design.md` | PROPOSED FEATURE DESIGN | Canonical Laser Director implementation spec; not current runtime behavior until implemented. |

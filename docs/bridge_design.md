@@ -48,7 +48,8 @@ These defaults exist in both `scripts/ss_bridge_watcher.sh` and the live
 | `LiveBPMService` | `live_bpm.py` | Reads displayed BPM from versioned offset-table chains when supported; otherwise uses validated discovery and metadata fallback. |
 | `MTCReader` | `mtc_reader.py` | Reads IAC Bus 1 MTC at about 25 fps and emits `TC_UPDATE` as position fallback. |
 | `FilepathResolver` | `filepath_resolver.py` | Resolves loaded tracks by ANLZ, lsof/length, and title DB lookup; emits `FILEPATH_RESOLVED`. |
-| `StateManager` | `state_manager.py` | Sole owner of `DeckState` and most `OutputState`; consumes `BridgeEvent`s and drives SoundSwitch output from one event/push loop thread. |
+| `StateManager` | `state_manager.py` | Sole owner of `DeckState` and most `OutputState`; consumes `BridgeEvent`s, owns push-loop output ordering, and coordinates SoundSwitch behavior from one event/push loop thread. |
+| `SoundSwitchEngine` | `sound_switch_engine.py` | SoundSwitch/OS2L output behavior helper for canonical deck routing, scripted arm fanout, autoloop clear/load/BPM fanout, smart-transition clear fanout, and live BPM follow fanout. |
 | `OS2LConnection` / `OS2LOutput` | `osl_output.py` | Persistent TCP OS2L connection, sender queue, reconnect, and DNS-SD endpoint discovery. |
 | `OS2LMirror` / `OS2LInjector` | `os2l_mirror.py`, `os2l_injector.py` | Runtime mirror/capture/injection support for validation and operator commands. |
 | `StatusWriter` | `runtime_status.py` | Writes `/tmp/rb_ss_bridge_v2_status.json` every 0.5 s for the menu bar. |
@@ -65,7 +66,7 @@ the localhost fallback.
 
 | Thread | Writes | Reads |
 | --- | --- | --- |
-| StateManager thread | `DeckState`, most `OutputState`, SoundSwitch commands | Event queue, `PositionCache`, `LiveBPMService` snapshots |
+| StateManager thread | `DeckState`, most `OutputState`, SoundSwitch commands via `SoundSwitchEngine` | Event queue, `PositionCache`, `LiveBPMService` snapshots |
 | `RBMemoryReader` | `PositionCache`, `RB_RESTARTED` events | Rekordbox process memory |
 | `RBStateReader` | Direct `BridgeEvent`s and readiness callbacks | Rekordbox process memory |
 | `LiveBPMService` | Internal BPM state | Rekordbox process memory |
