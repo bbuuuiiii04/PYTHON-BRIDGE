@@ -51,3 +51,10 @@ class SoundSwitchEngine:
         """Fan out an autoloop BPM update across the canonical 4-deck route."""
         for dk in self.deck_route(active):
             self._out.send_bpm(dk, bpm)
+
+    def send_scripted_arm_phase0(self, active: int) -> None:
+        """Phase 0 of scripted arm: clear filepath, loop-off, play-off across the canonical 4-deck route."""
+        for dk in self.deck_route(active):
+            self._out._sub(f"deck {dk} get_filepath", "", verbose=True)
+            self._out.send_loop_off(dk)
+            self._out.send_deck_play(dk, "off")

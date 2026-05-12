@@ -1410,6 +1410,33 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertEqual(sm._deck[1].meta.soundswitch_id, "unknown-ssid-abc")
         self.assertEqual(sm._deck[1].meta.beatgrid_times_ms, [0.0, 468.75])
 
+    def test_scripted_arm_phase0_send_tape(self) -> None:
+        q: queue.Queue = queue.Queue()
+        out = FakeOutput()
+        sm = StateManager(
+            q, PositionCache(), out,
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._deck[1].load_gen = 12
+        sm._deck[1].meta.soundswitch_id = "phase0-tape-ssid"
+        sm._deck[1].meta.filepath = "/tmp/phase0-tape-ssid.wav"
+        sm._deck[1].meta.bpm = 128.0
+        sm._deck[1].meta.first_beat_ms = 0.0
+        sm._deck[1].meta.total_ms = 180000.0
+        sm._deck[1].meta.beatgrid_times_ms = [0.0, 468.75]
+        sm._deck[1].meta.beatgrid_bpms = [128.0, 128.0]
+        sm._deck[1].meta.beatgrid_source = "rekordbox"
+
+        synthetic_id = (hash("phase0-tape-ssid") & 0x7FFFFFFF) or 1
+
+        with patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "1"}, clear=True):
+            with patch.dict(sm_mod.SCRIPTED_TRACKS, {}, clear=True):
+                sm._arm_scripted(1, synthetic_id)
+
+        self.assertEqual(out.loop_offs, [1, 2, 3, 4])
+        self.assertEqual(out.plays, [(1, "off"), (2, "off"), (3, "off"), (4, "off")])
+        self.assertIsNotNone(sm._pending_arm)
+
     def test_scripted_direct_registry_hit_still_uses_registry_id(self) -> None:
         q: queue.Queue = queue.Queue()
         sm = StateManager(

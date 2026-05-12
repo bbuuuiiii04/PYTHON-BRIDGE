@@ -987,10 +987,7 @@ class StateManager:
         LOG.stats.record_transition(deck, "scripted_arm")
 
         # Phase 0 (immediate): clear all 4 SS deck slots, stop playback + any autoloop
-        for dk in self._sse.deck_route(deck):
-            self._out._sub(f"deck {dk} get_filepath", "", verbose=True)
-            self._sse.send_loop_off(dk)
-            self._out.send_deck_play(dk, "off")
+        self._sse.send_scripted_arm_phase0(deck)
 
         # Phase 1 (scheduled): send_deck_load after SS has processed the clear
         arm_meta = TrackMetadata(
