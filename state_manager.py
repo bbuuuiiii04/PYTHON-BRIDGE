@@ -1625,7 +1625,7 @@ class StateManager:
             )
             laser_director_enabled = self._laser_director.is_enabled()
             if (
-                smart_drop_blackout_arm
+                (smart_drop_blackout_arm or ctx.smart_phrasing_blackout_arm)
                 and not laser_director_enabled
                 and self._laser_executor is not None
             ):
