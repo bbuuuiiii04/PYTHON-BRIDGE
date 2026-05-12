@@ -130,6 +130,7 @@ class LaserContext:
     scripted_id: int = 0
     smart_drop_blackout_active: bool = False
     smart_drop_blackout_arm: bool = False
+    smart_phrasing_blackout_arm: bool = False
     # Phase 2 shadow integration (Issue #33): populated by StateManager from
     # SmartPhrasingEngine.update() each tick.  Passive data only — not consumed
     # by LaserDirector or LaserSceneExecutor until Phase 3.
