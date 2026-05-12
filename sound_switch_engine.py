@@ -40,3 +40,14 @@ class SoundSwitchEngine:
         """Fan out an autoloop deck-load (play=on) across the canonical 4-deck route."""
         for dk in self.deck_route(deck):
             self._out.send_deck_load(dk, arm_meta, active, play="on")
+
+    def send_autoloop_clear(self, active: int) -> None:
+        """Clear SS deck slots and disarm autoloop across the canonical 4-deck route."""
+        for dk in self.deck_route(active):
+            self._out.send_deck_clear(dk)
+            self._out.send_loop_off(dk)
+
+    def send_autoloop_bpm(self, active: int, bpm: float) -> None:
+        """Fan out an autoloop BPM update across the canonical 4-deck route."""
+        for dk in self.deck_route(active):
+            self._out.send_bpm(dk, bpm)
