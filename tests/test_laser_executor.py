@@ -740,6 +740,38 @@ class LaserSceneExecutorTests(unittest.TestCase):
             self.assertEqual(midi.calls, [])
             self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
 
+    def test_blackout_arm_fires_for_phrase_role_mid_window_no_phrase_boundary(self) -> None:
+        """Regression: mini-drop case.
+
+        When two drops are <32 beats apart, the executor stays in role="phrase"
+        between them. The arm signal arrives on a phrase tick whose decision
+        reason is "default" (not "phrase_boundary"), so _select_scene returns
+        "". Blackout arming must still fire on this tick because the upcoming
+        drop will need transition masking.
+        """
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=127,
+            velocity=127,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _decision("phrase_a", "default", "phrase"),
+            _ctx(abs_beat=492.0, smart_drop_blackout_arm=True),
+        )
+        notes = [call[0].note for call in midi.calls]
+        # Only blackout_on (127) should be sent; no scene MIDI because
+        # _select_scene returns "" for phrase role outside a phrase_boundary.
+        self.assertEqual(notes, [127])
+        self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
+
     def test_blackout_arm_does_not_fire_when_scene_def_missing(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
         blackout_on = LaserMidiMessage(
@@ -749,6 +781,11 @@ class LaserSceneExecutorTests(unittest.TestCase):
             note=127,
             velocity=127,
         )
+        # Decision.scene must not exist in config.scenes catalog. The
+        # personality's buildup_bank also points at the missing scene so
+        # _select_scene returns the missing name and the scene_def lookup also
+        # fails. Blackout arming must be suppressed because the policy-supplied
+        # decision.scene is absent from the configured scene catalog.
         personality = replace(
             _personality(),
             buildup_scene="missing_buildup_scene",
