@@ -296,6 +296,7 @@ class StateManager:
         self._sp_drop_window: float = float(SMART_DROP_LOOKAHEAD_BEATS)
         self._sp_post_drop: float = 8.0           # conservative default; not consumed until Phase 3
         self._sp_transition_window: float = float(SMART_DROP_LOOKAHEAD_BEATS)
+        self._sp_blackout_arm_latched: bool = False
 
     def set_initial_state(self, active_deck: int, source: str = "TL ENGINE STATE") -> None:
         """Apply startup state read from TL ENGINE STATE before event loop starts."""
@@ -1619,6 +1620,8 @@ class StateManager:
                 now,
                 autoloop_tick_just_fired=autoloop_tick_just_fired,
                 smart_drop_blackout_arm=smart_drop_blackout_arm,
+                smart_drop_blackout_mode=smart_drop_blackout_mode,
+                smart_drop_signal=smart_drop_signal,
             )
             laser_director_enabled = self._laser_director.is_enabled()
             if (
@@ -1670,6 +1673,8 @@ class StateManager:
         now: float,
         autoloop_tick_just_fired: bool = False,
         smart_drop_blackout_arm: bool = False,
+        smart_drop_blackout_mode: bool = False,
+        smart_drop_signal: int = _SMART_DROP_SIGNAL_NONE,
     ):
         """Build a frozen LaserContext from already-computed push-tick locals.
 
@@ -1736,6 +1741,20 @@ class StateManager:
             transition_window_beats=self._sp_transition_window,
         )
         _sp_result = self._smart_phrasing_engine.update(_sp_snapshot)
+        if _sp_result.state.transition_mask_should_arm:
+            self._sp_blackout_arm_latched = True
+        if _sp_result.state.transition_mask_should_clear:
+            self._sp_blackout_arm_latched = False
+        if smart_drop_signal == _SMART_DROP_SIGNAL_CROSSING:
+            self._sp_blackout_arm_latched = False
+
+        smart_phrasing_blackout_arm = bool(
+            smart_drop_blackout_mode
+            and self._sp_blackout_arm_latched
+            and not self._os.autoloop_arm_pending
+            and self._os.pending_autoloop_arm_meta is None
+            and smart_drop_signal != _SMART_DROP_SIGNAL_CROSSING
+        )
 
         return LaserContext(
             active_deck=active,
@@ -1758,6 +1777,7 @@ class StateManager:
             scripted_id=d.scripted_id,
             smart_drop_blackout_active=self._os.drop_cut_armed,
             smart_drop_blackout_arm=smart_drop_blackout_arm,
+            smart_phrasing_blackout_arm=smart_phrasing_blackout_arm,
             smart_phrasing=_sp_result.state,
         )
 
@@ -2162,6 +2182,7 @@ class StateManager:
         os = self._os
         if self._laser_executor is not None:
             self._laser_executor.clear_pending_blackout(reason="smart_rearm_state_cleared")
+        self._sp_blackout_arm_latched = False
         os.drop_cut_armed = False
         os.drop_rearm_beat = 0
         os.breakdown_active = False

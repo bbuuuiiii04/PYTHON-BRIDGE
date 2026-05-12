@@ -13,15 +13,21 @@ Verifies:
   J. Breakdown segments remain empty (start-marker-only data).
 """
 import sys
+import os
+import queue
 import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.laser_models import LaserContext, LaserSceneDecision  # noqa: E402
 from rb_ss_bridge_v2.laser_director import LaserDirector  # noqa: E402
+from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot, TrackMetadata  # noqa: E402
+from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
     SmartPhrasingEngine,
     SmartPhrasingSnapshot,
@@ -29,6 +35,7 @@ from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
     PhraseSegment,
     build_phase2_phrase_segments,
 )
+from rb_ss_bridge_v2.state_manager import StateManager  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +479,208 @@ class TestBreakdownSegmentsEmpty(unittest.TestCase):
         )
         result = engine.update(snap)
         self.assertFalse(result.state.smart_breakdown_active)
+
+
+class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
+    def _prepare_manager(
+        self,
+        *,
+        drop_beat: int = 64,
+        smart_breakdowns: tuple[int, ...] = (),
+        anlz_breakdowns: tuple[int, ...] = (),
+        anlz_buildups: tuple[int, ...] = (),
+    ) -> StateManager:
+        with patch.dict(
+            os.environ,
+            {
+                "RBSS_SMART_REARM_EXPERIMENT": "1",
+                "RBSS_SMART_DROP": "1",
+                "RBSS_SMART_BREAKDOWN": "1",
+            },
+            clear=False,
+        ):
+            sm = StateManager(queue.Queue(), PositionCache(), Mock())
+
+        deck = sm._deck[1]
+        deck.playing = True
+        deck.meta.filepath = "/music/shadow.mp3"
+        deck.meta.content_id = "shadow-track"
+        deck.meta.bpm = 120.0
+        deck.meta.first_beat_ms = 0.0
+        deck.meta.beatgrid_times_ms = [i * 500.0 for i in range(256)]
+        deck.meta.beatgrid_bpms = [120.0 for _ in range(256)]
+        deck.meta.beatgrid_source = "grid"
+        deck.meta.smart_drops = [drop_beat]
+        deck.meta.anlz_drops = [drop_beat]
+        deck.meta.smart_breakdowns = list(smart_breakdowns)
+        deck.meta.anlz_breakdowns = list(anlz_breakdowns)
+        deck.meta.anlz_buildups = list(anlz_buildups)
+
+        sm._os.active_deck = 1
+        sm._os.lighting_mode = "autoloop"
+        sm._os.lighting_desired = "autoloop"
+        sm._os.was_playing = True
+        sm._os.last_sent_bpm = 120.0
+        sm._os.last_armed_filepath = deck.meta.filepath
+        sm._os.last_beat_elapsed_ms = int((drop_beat - 6) * 500)
+        sm._cache.update(
+            PositionSnapshot(
+                1,
+                elapsed_ms=sm._os.last_beat_elapsed_ms,
+                playing=True,
+                updated_at=time.monotonic(),
+            )
+        )
+
+        sm._laser_director = Mock()
+        sm._laser_director.is_enabled.return_value = True
+        sm._laser_director.tick.return_value = SimpleNamespace(
+            scene="house_buildup_1",
+            reason="buildup_to_drop_window",
+            role="buildup",
+        )
+        sm._laser_executor = Mock()
+        sm._laser_executor.smart_drop_blackout_enabled.return_value = True
+        return sm
+
+    def _push_ctx(self, sm: StateManager, beat: int, *, smart_drop_signal_override=None) -> LaserContext:
+        sm._cache.update(
+            PositionSnapshot(
+                1,
+                elapsed_ms=int(beat * 500),
+                playing=True,
+                updated_at=time.monotonic(),
+            )
+        )
+        if smart_drop_signal_override is None:
+            sm._push_tick()
+        else:
+            with patch(
+                "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+                return_value=smart_drop_signal_override,
+            ):
+                sm._push_tick()
+        return sm._laser_executor.on_decision.call_args.args[1]
+
+    def test_shadow_arm_matches_legacy_normal_window(self):
+        sm = self._prepare_manager(drop_beat=64)
+        contexts = [self._push_ctx(sm, beat) for beat in (59, 60, 61, 62, 63, 64)]
+        for ctx in contexts:
+            self.assertEqual(ctx.smart_phrasing_blackout_arm, ctx.smart_drop_blackout_arm)
+        self.assertFalse(contexts[0].smart_phrasing_blackout_arm)
+        self.assertTrue(contexts[1].smart_phrasing_blackout_arm)
+        self.assertTrue(contexts[2].smart_phrasing_blackout_arm)
+        self.assertTrue(contexts[3].smart_phrasing_blackout_arm)
+        self.assertTrue(contexts[4].smart_phrasing_blackout_arm)
+        self.assertFalse(contexts[5].smart_phrasing_blackout_arm)
+
+    def test_shadow_arm_matches_legacy_drop_crossing_tick_drops_signal(self):
+        sm = self._prepare_manager(drop_beat=64)
+        self._push_ctx(sm, 59)
+        self._push_ctx(sm, 60)
+        crossing = self._push_ctx(sm, 64)
+        self.assertFalse(crossing.smart_drop_blackout_arm)
+        self.assertFalse(crossing.smart_phrasing_blackout_arm)
+
+    def test_shadow_arm_suppressed_when_autoloop_arm_pending(self):
+        sm = self._prepare_manager(drop_beat=64)
+        sm._os.autoloop_arm_pending = True
+        for beat in (59, 60, 61, 62, 63, 64):
+            ctx = self._push_ctx(sm, beat)
+            self.assertFalse(ctx.smart_drop_blackout_arm)
+            self.assertFalse(ctx.smart_phrasing_blackout_arm)
+
+    def test_shadow_arm_suppressed_when_pending_autoloop_arm_meta_set(self):
+        sm = self._prepare_manager(drop_beat=64)
+        sm._os.pending_autoloop_arm_meta = TrackMetadata(filepath="/music/pending.mp3")
+        for beat in (59, 60, 61, 62, 63, 64):
+            ctx = self._push_ctx(sm, beat)
+            self.assertFalse(ctx.smart_drop_blackout_arm)
+            self.assertFalse(ctx.smart_phrasing_blackout_arm)
+
+    def test_shadow_arm_suppressed_during_breakdown_active(self):
+        sm = self._prepare_manager(
+            drop_beat=64,
+            smart_breakdowns=(59,),
+            anlz_breakdowns=(59,),
+            anlz_buildups=(62,),
+        )
+        sm._os.breakdown_active = True
+        sm._os.breakdown_restore_beat = 10_000
+        for beat in (59, 60, 61, 62):
+            ctx = self._push_ctx(sm, beat)
+            self.assertFalse(ctx.smart_drop_blackout_arm)
+            self.assertFalse(ctx.smart_phrasing_blackout_arm)
+        self.assertFalse(sm._sp_blackout_arm_latched)
+
+    def test_shadow_arm_suppressed_when_breakdown_starts_between(self):
+        sm = self._prepare_manager(
+            drop_beat=64,
+            smart_breakdowns=(61,),
+            anlz_breakdowns=(61,),
+        )
+        self._push_ctx(sm, 59)
+        arm_ctx = self._push_ctx(sm, 60)
+        self.assertFalse(arm_ctx.smart_phrasing.transition_mask_should_arm)
+        self.assertFalse(arm_ctx.smart_drop_blackout_arm)
+        self.assertFalse(arm_ctx.smart_phrasing_blackout_arm)
+        self.assertFalse(sm._sp_blackout_arm_latched)
+
+    def test_shadow_arm_retries_across_window_when_legacy_does(self):
+        sm = self._prepare_manager(drop_beat=64)
+        self._push_ctx(sm, 59)
+        self._push_ctx(sm, 60)
+        for beat in (61, 62, 63):
+            ctx = self._push_ctx(sm, beat)
+            self.assertTrue(ctx.smart_drop_blackout_arm)
+            self.assertTrue(ctx.smart_phrasing_blackout_arm)
+
+    def test_shadow_arm_latch_resets_on_transition_clear(self):
+        sm = self._prepare_manager(drop_beat=64)
+        self._push_ctx(sm, 59)
+        self._push_ctx(sm, 60)
+        self.assertTrue(sm._sp_blackout_arm_latched)
+        clear_ctx = self._push_ctx(sm, 64)
+        self.assertTrue(clear_ctx.smart_phrasing.transition_mask_should_clear)
+        self.assertFalse(clear_ctx.smart_phrasing_blackout_arm)
+        self.assertFalse(sm._sp_blackout_arm_latched)
+
+    def test_shadow_arm_latch_resets_on_deck_or_track_change(self):
+        sm = self._prepare_manager(drop_beat=64)
+        self._push_ctx(sm, 59)
+        self._push_ctx(sm, 60)
+        self.assertTrue(sm._sp_blackout_arm_latched)
+        sm._on_master_changed(2, "test")
+        self.assertFalse(sm._sp_blackout_arm_latched)
+
+        sm2 = self._prepare_manager(drop_beat=64)
+        self._push_ctx(sm2, 59)
+        self._push_ctx(sm2, 60)
+        self.assertTrue(sm2._sp_blackout_arm_latched)
+        sm2._on_track_loaded(1, "shadow-track", BridgeEvent(Ev.TRACK_LOADED, 1))
+        self.assertFalse(sm2._sp_blackout_arm_latched)
+
+    def test_shadow_arm_documents_mid_window_breakdown_clear_gap(self):
+        sm = self._prepare_manager(
+            drop_beat=64,
+            smart_breakdowns=(),
+            anlz_breakdowns=(59,),
+            anlz_buildups=(61,),
+        )
+        self._push_ctx(sm, 59)
+        sm._os.breakdown_active = True
+        suppressed = self._push_ctx(sm, 60)
+        self.assertFalse(suppressed.smart_drop_blackout_arm)
+        self.assertFalse(suppressed.smart_phrasing_blackout_arm)
+        self.assertFalse(sm._sp_blackout_arm_latched)
+
+        sm._os.breakdown_active = False
+        # Conservative rising-edge gap (PR 5c): legacy can arm mid-window after
+        # breakdown clears, but SmartPhrasing shadow stays false because latch
+        # never armed on window entry.
+        cleared_mid_window = self._push_ctx(sm, 61)
+        self.assertTrue(cleared_mid_window.smart_drop_blackout_arm)
+        self.assertFalse(cleared_mid_window.smart_phrasing_blackout_arm)
 
 
 if __name__ == "__main__":
