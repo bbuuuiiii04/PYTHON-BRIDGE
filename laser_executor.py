@@ -117,19 +117,33 @@ class LaserSceneExecutor:
                 log.debug("[LX] blackout skipped: decision has no scene (role=%s, scene=%s)", role, decision.scene)
             return
 
-        cursor_before, active_before = self._role_state_snapshot(role)
-        selected_scene = self._select_scene(decision, ctx, role_changed)
-        if not selected_scene:
-            if is_drop_crossing:
-                self._resolve_pending_blackout(reason="drop_crossing_no_scene")
-            return
-
         if role in _AUTO_ROLES and not self._passes_automatic_gates(ctx):
             self._record_gate("auto_gate_blocked")
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_auto_gate_blocked")
             if should_arm_blackout:
                 log.debug("[LX] blackout skipped: auto_gate_blocked (playing=%s, track_loaded=%s, stale=%s, mode=%s, scripted=%s, autoloop_ready=%s)", ctx.playing, ctx.active_track_loaded, ctx.position_stale, ctx.lighting_mode, ctx.scripted_id, ctx.autoloop_ready)
+            return
+
+        # Blackout arming is independent of scene selection and scene policy
+        # gates. It must fire on every valid auto-tick where the arm signal is
+        # raised, even when _select_scene declines to trigger scene MIDI on
+        # this tick (e.g., role="phrase" outside a phrase_boundary, which is
+        # the typical state for mini-drops <32 beats apart). Missing scene
+        # mapping is still respected by checking the policy-supplied scene
+        # against the configured scene catalog.
+        if should_arm_blackout:
+            if decision.scene in self._config.scenes:
+                log.debug("[LX] blackout arming: role=%s, reason=%s", role, decision.reason)
+                self.trigger_blackout_on(ctx)
+            else:
+                log.debug("[LX] blackout skipped: missing scene mapping for '%s'", decision.scene)
+
+        cursor_before, active_before = self._role_state_snapshot(role)
+        selected_scene = self._select_scene(decision, ctx, role_changed)
+        if not selected_scene:
+            if is_drop_crossing:
+                self._resolve_pending_blackout(reason="drop_crossing_no_scene")
             return
 
         scene_def = self._config.scenes.get(selected_scene)
@@ -140,17 +154,7 @@ class LaserSceneExecutor:
                 self._last_error = f"missing_scene_mapping:{selected_scene}"
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_missing_scene_mapping")
-            if should_arm_blackout:
-                log.debug("[LX] blackout skipped: missing scene mapping for '%s'", selected_scene)
             return
-
-        # Blackout arming is independent of scene policy gates: once core
-        # automatic/mapping validity checks pass, transition masking should arm
-        # even if the scene is later blocked by high-impact, cooldown, or
-        # same-scene suppression.
-        if should_arm_blackout:
-            log.debug("[LX] blackout arming: role=%s, reason=%s", role, decision.reason)
-            self.trigger_blackout_on(ctx)
 
         allow_high_impact = bool(
             self._personality.allow_high_impact if self._personality is not None else False
