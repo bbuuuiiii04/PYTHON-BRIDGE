@@ -48,10 +48,16 @@ class CommandBuilderTests(unittest.TestCase):
             for name in list(sys.modules)
             if name == "rb_ss_bridge_v2" or name.startswith("rb_ss_bridge_v2.")
         ]
-        with patch.object(sys, "path", scrubbed):
-            for name in modules_to_clear:
-                sys.modules.pop(name, None)
-            loaded = runpy.run_path(str(script_path))
+        saved_modules = {
+            name: sys.modules.pop(name)
+            for name in modules_to_clear
+            if name in sys.modules
+        }
+        try:
+            with patch.object(sys, "path", scrubbed):
+                loaded = runpy.run_path(str(script_path))
+        finally:
+            sys.modules.update(saved_modules)
         self.assertIn("main", loaded)
         self.assertEqual(loaded["REPO_PARENT"], _ROOT.parent)
 
