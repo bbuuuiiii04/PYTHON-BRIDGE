@@ -62,6 +62,7 @@ from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
 from .logging_manager import get_logging_manager
 from .filepath_resolver import has_soundswitch_scripted_id
+from .sound_switch_engine import SoundSwitchEngine
 from .smart_phrasing import (
     SmartPhrasingEngine, SmartPhrasingSnapshot, PhraseSegment, BeatSegment,
 )
@@ -297,6 +298,7 @@ class StateManager:
         self._sp_post_drop: float = 8.0           # conservative default; not consumed until Phase 3
         self._sp_transition_window: float = float(SMART_DROP_LOOKAHEAD_BEATS)
         self._sp_blackout_arm_latched: bool = False
+        self._sse = SoundSwitchEngine(self._out)
 
     def set_initial_state(self, active_deck: int, source: str = "TL ENGINE STATE") -> None:
         """Apply startup state read from TL ENGINE STATE before event loop starts."""
