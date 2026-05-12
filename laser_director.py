@@ -351,6 +351,9 @@ class LaserDirector:
                 transition_mask_should_clear=False,
                 transition_window_active=False,
                 phrase_anchor_requested=False,
+                phrase_anchor_preclear_requested=False,
+                phrase_anchor_rearm_requested=False,
+                phrase_anchor_target_beat=None,
                 reason="compat",
                 breakdown_restore_beat=None,
             )

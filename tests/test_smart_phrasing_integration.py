@@ -20,7 +20,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -104,6 +104,9 @@ def _make_phrasing_state(**overrides):
         transition_mask_should_clear=False,
         transition_window_active=False,
         phrase_anchor_requested=False,
+        phrase_anchor_preclear_requested=False,
+        phrase_anchor_rearm_requested=False,
+        phrase_anchor_target_beat=None,
         reason="test",
         breakdown_restore_beat=None,
     )
@@ -562,6 +565,33 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
             ):
                 sm._push_tick()
         return sm._laser_executor.on_decision.call_args.args[1]
+
+    def test_phrase_anchor_intents_and_rearm_parity_at_64(self):
+        sm = self._prepare_manager(drop_beat=256)
+        sm._phrase_anchor_enabled = True
+        sm._os.phrase_anchor_last_beat = 0
+        sm._os.last_beat_elapsed_ms = int(62 * 500)
+        sm._send_autoloop_deck_load = Mock()
+
+        preclear_ctx = self._push_ctx(sm, 63)
+        self.assertTrue(preclear_ctx.smart_phrasing.phrase_anchor_preclear_requested)
+        self.assertFalse(preclear_ctx.smart_phrasing.phrase_anchor_rearm_requested)
+        self.assertEqual(preclear_ctx.smart_phrasing.phrase_anchor_target_beat, 64)
+        self.assertEqual(
+            sm._out.send_deck_clear.call_args_list,
+            [call(1), call(2), call(3), call(4)],
+        )
+        self.assertEqual(
+            sm._out.send_loop_off.call_args_list,
+            [call(1), call(2), call(3), call(4)],
+        )
+
+        rearm_ctx = self._push_ctx(sm, 64)
+        self.assertFalse(rearm_ctx.smart_phrasing.phrase_anchor_preclear_requested)
+        self.assertTrue(rearm_ctx.smart_phrasing.phrase_anchor_rearm_requested)
+        self.assertEqual(rearm_ctx.smart_phrasing.phrase_anchor_target_beat, 64)
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
+        sm._send_autoloop_deck_load.assert_called_once()
 
     def test_shadow_arm_matches_legacy_normal_window(self):
         sm = self._prepare_manager(drop_beat=64)

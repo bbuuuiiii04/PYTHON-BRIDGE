@@ -63,6 +63,9 @@ def _sp(**overrides) -> SmartPhrasingState:
         transition_mask_should_clear=False,
         transition_window_active=False,
         phrase_anchor_requested=False,
+        phrase_anchor_preclear_requested=False,
+        phrase_anchor_rearm_requested=False,
+        phrase_anchor_target_beat=None,
         reason="test",
         breakdown_restore_beat=None,
     )
@@ -1276,7 +1279,8 @@ class SmartPhrasingObservationTests(unittest.TestCase):
             breakdown_end_crossing=False, smart_breakdown_clear_requested=False,
             smart_breakdown_restore_requested=False, transition_mask_should_arm=False,
             transition_mask_should_clear=False, transition_window_active=False,
-            phrase_anchor_requested=False, reason="test"
+            phrase_anchor_requested=False, phrase_anchor_preclear_requested=False,
+            phrase_anchor_rearm_requested=False, phrase_anchor_target_beat=None, reason="test"
         )
         ld.tick(_ctx(abs_beat=32.0), now=_now())  # init
         ld.tick(_ctx(abs_beat=32.5, smart_phrasing=sp, breakdown_active=False), now=_now())
@@ -1294,7 +1298,8 @@ class SmartPhrasingObservationTests(unittest.TestCase):
             breakdown_end_crossing=False, smart_breakdown_clear_requested=False,
             smart_breakdown_restore_requested=False, transition_mask_should_arm=False,
             transition_mask_should_clear=False, transition_window_active=False,
-            phrase_anchor_requested=False, reason="test"
+            phrase_anchor_requested=False, phrase_anchor_preclear_requested=False,
+            phrase_anchor_rearm_requested=False, phrase_anchor_target_beat=None, reason="test"
         )
         ld.tick(_ctx(abs_beat=10.0), now=_now())  # init
         ld.tick(
@@ -1315,7 +1320,8 @@ class SmartPhrasingObservationTests(unittest.TestCase):
             breakdown_end_crossing=False, smart_breakdown_clear_requested=False,
             smart_breakdown_restore_requested=False, transition_mask_should_arm=False,
             transition_mask_should_clear=False, transition_window_active=False,
-            phrase_anchor_requested=False, reason="test"
+            phrase_anchor_requested=False, phrase_anchor_preclear_requested=False,
+            phrase_anchor_rearm_requested=False, phrase_anchor_target_beat=None, reason="test"
         )
         ld.tick(_ctx(abs_beat=10.0), now=_now())  # init
         ld.tick(
@@ -1336,7 +1342,8 @@ class SmartPhrasingObservationTests(unittest.TestCase):
             breakdown_end_crossing=False, smart_breakdown_clear_requested=False,
             smart_breakdown_restore_requested=False, transition_mask_should_arm=False,
             transition_mask_should_clear=False, transition_window_active=False,
-            phrase_anchor_requested=False, reason="test"
+            phrase_anchor_requested=False, phrase_anchor_preclear_requested=False,
+            phrase_anchor_rearm_requested=False, phrase_anchor_target_beat=None, reason="test"
         )
         ld.tick(_ctx(abs_beat=10.0), now=_now())  # init
         ld.tick(

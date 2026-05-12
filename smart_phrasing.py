@@ -36,6 +36,8 @@ class SmartPhrasingSnapshot:
     drop_window_beats: float
     post_drop_beats: float
     transition_window_beats: float
+    phrase_anchor_last_beat: int = -1
+    phrase_anchor_period_beats: int = 64
 
 @dataclass(frozen=True)
 class SmartPhrasingState:
@@ -61,6 +63,9 @@ class SmartPhrasingState:
     transition_mask_should_clear: bool
     transition_window_active: bool
     phrase_anchor_requested: bool
+    phrase_anchor_preclear_requested: bool = False
+    phrase_anchor_rearm_requested: bool = False
+    phrase_anchor_target_beat: Optional[int] = None
     reason: str = ""
     breakdown_restore_beat: Optional[float] = None
 
@@ -133,6 +138,9 @@ class SmartPhrasingEngine:
             transition_mask_should_clear=False,
             transition_window_active=False,
             phrase_anchor_requested=False,
+            phrase_anchor_preclear_requested=False,
+            phrase_anchor_rearm_requested=False,
+            phrase_anchor_target_beat=None,
             reason=reason,
         )
 
@@ -313,6 +321,18 @@ class SmartPhrasingEngine:
             self._transition_window_arm_suppressed = False
             
         self._transition_window_active = new_transition_window_active
+
+        # 9. Periodic phrase-anchor intents (pure function of snapshot state).
+        phrase_anchor_preclear_requested = False
+        phrase_anchor_rearm_requested = False
+        phrase_anchor_target_beat: Optional[int] = None
+        this_beat_int = int(abs_beat)
+        if snapshot.phrase_anchor_last_beat >= 0 and snapshot.phrase_anchor_period_beats > 0:
+            target_beat = int(snapshot.phrase_anchor_last_beat) + int(snapshot.phrase_anchor_period_beats)
+            if this_beat_int <= target_beat + 8:
+                phrase_anchor_target_beat = target_beat
+                phrase_anchor_preclear_requested = this_beat_int == (target_beat - 1)
+                phrase_anchor_rearm_requested = this_beat_int >= target_beat
         
         state = SmartPhrasingState(
             current_phrase_label=current_phrase_label,
@@ -338,6 +358,9 @@ class SmartPhrasingEngine:
             transition_mask_should_clear=transition_mask_should_clear,
             transition_window_active=new_transition_window_active,
             phrase_anchor_requested=phrase_anchor_requested,
+            phrase_anchor_preclear_requested=phrase_anchor_preclear_requested,
+            phrase_anchor_rearm_requested=phrase_anchor_rearm_requested,
+            phrase_anchor_target_beat=phrase_anchor_target_beat,
             reason="tick",
         )
         

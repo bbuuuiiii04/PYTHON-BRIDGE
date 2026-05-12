@@ -97,6 +97,9 @@ class TestSmartPhrasing(unittest.TestCase):
             transition_mask_should_clear=False,
             transition_window_active=False,
             phrase_anchor_requested=False,
+            phrase_anchor_preclear_requested=False,
+            phrase_anchor_rearm_requested=False,
+            phrase_anchor_target_beat=None,
             reason="test",
             breakdown_restore_beat=None,
         )
@@ -966,5 +969,61 @@ class TestSmartPhrasing(unittest.TestCase):
         self.assertEqual(res.state.current_phrase_label, "chorus")
         self.assertTrue(res.state.current_phrase_is_chorus)
         self.assertFalse(res.state.current_phrase_is_up)
+
+    def test_phrase_anchor_periodic_intents_none_when_sentinel(self):
+        snap = self._default_snap(phrase_anchor_last_beat=-1)
+        res = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertFalse(res.state.phrase_anchor_preclear_requested)
+        self.assertFalse(res.state.phrase_anchor_rearm_requested)
+        self.assertIsNone(res.state.phrase_anchor_target_beat)
+
+    def test_phrase_anchor_periodic_target_beat_from_last_plus_period(self):
+        snap = self._default_snap(phrase_anchor_last_beat=64, phrase_anchor_period_beats=64)
+        res = self.engine.update(replace(snap, abs_beat=100.0))
+        self.assertEqual(res.state.phrase_anchor_target_beat, 128)
+        self.assertFalse(res.state.phrase_anchor_preclear_requested)
+        self.assertFalse(res.state.phrase_anchor_rearm_requested)
+
+    def test_phrase_anchor_periodic_preclear_fires_at_target_minus_one(self):
+        snap = self._default_snap(phrase_anchor_last_beat=0, phrase_anchor_period_beats=64)
+        res = self.engine.update(replace(snap, abs_beat=63.0))
+        self.assertEqual(res.state.phrase_anchor_target_beat, 64)
+        self.assertTrue(res.state.phrase_anchor_preclear_requested)
+        self.assertFalse(res.state.phrase_anchor_rearm_requested)
+
+    def test_phrase_anchor_periodic_rearm_fires_at_target(self):
+        snap = self._default_snap(phrase_anchor_last_beat=0, phrase_anchor_period_beats=64)
+        res = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertEqual(res.state.phrase_anchor_target_beat, 64)
+        self.assertFalse(res.state.phrase_anchor_preclear_requested)
+        self.assertTrue(res.state.phrase_anchor_rearm_requested)
+
+    def test_phrase_anchor_periodic_rearm_fires_within_plus_8_window(self):
+        snap = self._default_snap(phrase_anchor_last_beat=0, phrase_anchor_period_beats=64)
+        res = self.engine.update(replace(snap, abs_beat=70.0))
+        self.assertEqual(res.state.phrase_anchor_target_beat, 64)
+        self.assertFalse(res.state.phrase_anchor_preclear_requested)
+        self.assertTrue(res.state.phrase_anchor_rearm_requested)
+
+    def test_phrase_anchor_periodic_intents_none_beyond_plus_8_window(self):
+        snap = self._default_snap(phrase_anchor_last_beat=0, phrase_anchor_period_beats=64)
+        res = self.engine.update(replace(snap, abs_beat=73.0))
+        self.assertIsNone(res.state.phrase_anchor_target_beat)
+        self.assertFalse(res.state.phrase_anchor_preclear_requested)
+        self.assertFalse(res.state.phrase_anchor_rearm_requested)
+
+    def test_phrase_anchor_periodic_custom_period(self):
+        snap = self._default_snap(phrase_anchor_last_beat=64, phrase_anchor_period_beats=32)
+        res = self.engine.update(replace(snap, abs_beat=95.0))
+        self.assertEqual(res.state.phrase_anchor_target_beat, 96)
+        self.assertTrue(res.state.phrase_anchor_preclear_requested)
+        self.assertFalse(res.state.phrase_anchor_rearm_requested)
+
+    def test_phrase_anchor_periodic_period_zero_disables_intents(self):
+        snap = self._default_snap(phrase_anchor_last_beat=64, phrase_anchor_period_beats=0)
+        res = self.engine.update(replace(snap, abs_beat=96.0))
+        self.assertIsNone(res.state.phrase_anchor_target_beat)
+        self.assertFalse(res.state.phrase_anchor_preclear_requested)
+        self.assertFalse(res.state.phrase_anchor_rearm_requested)
 if __name__ == '__main__':
     unittest.main()
