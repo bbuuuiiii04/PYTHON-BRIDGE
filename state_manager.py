@@ -1524,8 +1524,7 @@ class StateManager:
                     beat_out = this_beat
                     pending_live_bpm = os.pending_live_bpm
                     if pending_live_bpm > 0:
-                        for dk in self._sse.deck_route(active):
-                            self._out.send_bpm(dk, pending_live_bpm)
+                        self._sse.send_live_bpm_follow(active, pending_live_bpm)
                         bpm = pending_live_bpm
                         os.autoloop_arm_bpm = pending_live_bpm
                         self._set_autoloop_tempo_anchor(elapsed_ms, abs_beat_pos, pending_live_bpm)

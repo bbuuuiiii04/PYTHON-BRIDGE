@@ -63,6 +63,15 @@ class SoundSwitchEngine:
         for dk in self.deck_route(active):
             self._out.send_bpm(dk, bpm)
 
+    def send_live_bpm_follow(self, active: int, bpm: float) -> None:
+        """Fan out a live-BPM-follow update across the canonical 4-deck route.
+        Byte-equivalent to send_autoloop_bpm(active, bpm), but kept distinct
+        to avoid coupling live-BPM-follow intent to autoloop arm/disarm
+        semantics.
+        """
+        for dk in self.deck_route(active):
+            self._out.send_bpm(dk, bpm)
+
     def send_scripted_arm_phase0(self, active: int) -> None:
         """Phase 0 of scripted arm: clear filepath, loop-off, play-off across the canonical 4-deck route."""
         for dk in self.deck_route(active):
