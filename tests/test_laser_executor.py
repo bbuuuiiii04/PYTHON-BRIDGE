@@ -72,6 +72,7 @@ def _ctx(
     abs_beat: float = 64.0,
     smart_drop_blackout_active: bool = False,
     smart_drop_blackout_arm: bool = False,
+    smart_phrasing_blackout_arm: bool = False,
     smart_phrasing: SmartPhrasingState | None = None,
 ) -> LaserContext:
     return LaserContext(
@@ -90,6 +91,7 @@ def _ctx(
         scripted_id=scripted_id,
         smart_drop_blackout_active=smart_drop_blackout_active,
         smart_drop_blackout_arm=smart_drop_blackout_arm,
+        smart_phrasing_blackout_arm=smart_phrasing_blackout_arm,
         smart_phrasing=smart_phrasing,
     )
 
@@ -614,6 +616,165 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         self.assertEqual([call[0].note for call in midi.calls], [89, 39])
         self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_smart_phrasing_blackout_arm_triggers_blackout_on_for_valid_auto_decision(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=89,
+            velocity=127,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=200.0, smart_drop_blackout_arm=False, smart_phrasing_blackout_arm=True),
+        )
+        self.assertEqual([call[0].note for call in midi.calls], [89, 39])
+        self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_both_arm_signals_true_sends_blackout_on_exactly_once(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=89,
+            velocity=127,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=200.0, smart_drop_blackout_arm=True, smart_phrasing_blackout_arm=True),
+        )
+        notes = [call[0].note for call in midi.calls]
+        self.assertEqual(notes.count(89), 1)
+        self.assertIn(39, notes)
+
+    def test_smart_phrasing_blackout_arm_suppressed_when_role_not_auto(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=89,
+            velocity=127,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            LaserSceneDecision(scene="drop_a", reason="manual_override", priority=1, source="manual", role="manual"),
+            _ctx(smart_drop_blackout_arm=False, smart_phrasing_blackout_arm=True),
+        )
+        ex.on_decision(
+            LaserSceneDecision(scene="drop_a", reason="emergency", priority=1, source="emergency", role="emergency"),
+            _ctx(smart_drop_blackout_arm=False, smart_phrasing_blackout_arm=True),
+        )
+        ex.on_decision(
+            _decision("", "not_playing", "idle"),
+            _ctx(smart_drop_blackout_arm=False, smart_phrasing_blackout_arm=True),
+        )
+        self.assertEqual([call[0].note for call in midi.calls], [41, 41])
+        self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_smart_phrasing_blackout_arm_false_no_blackout_on(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=89,
+            velocity=127,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=200.0, smart_drop_blackout_arm=False, smart_phrasing_blackout_arm=False),
+        )
+        self.assertEqual([call[0].note for call in midi.calls], [39])
+        self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_smart_phrasing_blackout_arm_retry_across_ticks_idempotent(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=89,
+            velocity=127,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        for beat in (200.0, 201.0, 202.0):
+            ex.on_decision(
+                _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+                _ctx(abs_beat=beat, smart_drop_blackout_arm=False, smart_phrasing_blackout_arm=True),
+            )
+        notes = [call[0].note for call in midi.calls]
+        self.assertEqual(notes.count(89), 1)
+        self.assertEqual(notes.count(39), 1)
+        self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_legacy_arm_still_triggers_when_smart_phrasing_arm_false(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=89,
+            velocity=127,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=200.0, smart_drop_blackout_arm=True, smart_phrasing_blackout_arm=False),
+        )
+        self.assertEqual([call[0].note for call in midi.calls], [89, 39])
+        self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_neither_arm_signal_triggers_blackout_on(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=89,
+            velocity=127,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=200.0, smart_drop_blackout_arm=False, smart_phrasing_blackout_arm=False),
+        )
+        self.assertEqual([call[0].note for call in midi.calls], [39])
+        self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
 
     def test_blackout_arm_signal_does_not_trigger_for_none_manual_emergency_or_gated(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
