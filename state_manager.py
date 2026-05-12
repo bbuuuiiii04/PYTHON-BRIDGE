@@ -47,7 +47,7 @@ from .beat_math import (
     _beatgrid_elapsed_for_abs_beat,
 )
 from .smart_phrasing import (
-    build_phase2_phrase_segments,
+    build_phrase_segments_from_markers,
     select_smart_drops,
     select_smart_breakdowns,
     find_restore_beat,
@@ -290,7 +290,7 @@ class StateManager:
             else None
         )
 
-        # ── Phase 2 shadow: SmartPhrasingEngine (Issue #33) ──────────────
+        # ── SmartPhrasingEngine integration (Issue #33) ───────────────────
         # One engine instance, updated each tick inside _build_laser_context.
         # Timing constants cached here to avoid config reads inside _push_tick.
         self._smart_phrasing_engine = SmartPhrasingEngine()
@@ -447,7 +447,6 @@ class StateManager:
             "smart_drop_transition_window_active": os.drop_cut_armed,
             # Backward-compatible field name, now reflecting executor blackout MIDI state.
             "smart_drop_blackout_active": executor_blackout_pending,
-            "scripted_id": 0, # Dead compatibility field — OutputState never had scripted_id; actual per-deck value is in deck[n]["scripted_id"]
             "smart_drop_enabled": self._smart_drop_enabled,
             "smart_breakdown_enabled": self._smart_breakdown_enabled,
             "pending_scripted_arm": (
@@ -1695,7 +1694,7 @@ class StateManager:
             track_id=d.meta.content_id or d.meta.filepath or None,
             is_playing=d.playing,
             abs_beat=abs_beat_pos if bpm > 0 else None,
-            phrase_segments=build_phase2_phrase_segments(
+            phrase_segments=build_phrase_segments_from_markers(
                 anlz_buildups=d.meta.anlz_buildups,
                 anlz_drops=d.meta.anlz_drops,
                 anlz_breakdowns=d.meta.anlz_breakdowns,
@@ -1703,7 +1702,7 @@ class StateManager:
                 total_beats=len(d.meta.beatgrid_times_ms),
             ),
             smart_drop_beats=tuple(float(x) for x in d.meta.smart_drops),
-            # Phase 2 shadow: Note that this uses raw ANLZ breakdowns filtered
+            # Note: this uses raw ANLZ breakdowns filtered
             # dynamically, while the legacy _smart_breakdown_tick uses pre-filtered
             # d.meta.smart_breakdowns. This intentional divergence will be resolved
             # when the legacy breakdown consumer is migrated.
