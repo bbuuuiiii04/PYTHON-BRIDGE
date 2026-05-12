@@ -673,6 +673,7 @@ def main() -> None:
         sm,
         laser_config_result=laser_cfg_result,
         midi_output=midi_output,
+        laser_status_provider=laser_status_provider,
     )
 
     def _toggle_smart_drop() -> None:

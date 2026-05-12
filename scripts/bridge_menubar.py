@@ -202,11 +202,13 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
             _join(_seg("  └  ", color=_cs()), _seg("—", color=_cs())),
             _seg("  Checks  —", color=_cs()),
             _join(_seg("  Smart Phrasing  ", color=_cs()), _seg("—", color=_cs())),
+            _join(_seg("  Lasers  ", color=_cs()), _seg("—", color=_cs())),
         ]
 
     sm = status.get("state_manager", {})
     ss = status.get("soundswitch", {})
     validation = status.get("validation", {})
+    laser = status.get("laser_director", {})
     active = str(sm.get("active_deck", "?"))
     mode = sm.get("lighting_mode", "idle")
     decks = sm.get("deck", {})
@@ -296,7 +298,65 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
         _seg(f"Breakdowns: {sb_txt}", color=sb_col),
     )
 
-    return [bridge_row, ss_row] + deck_rows + [checks_row, smart_row]
+    laser_available = bool(laser.get("available"))
+    laser_enabled = bool(laser.get("enabled"))
+    laser_emergency = bool(laser.get("emergency"))
+    laser_scene = str(laser.get("current_scene") or "—")
+    laser_reason = str(laser.get("last_reason") or "—")
+    executor = laser.get("executor") or {}
+    midi = executor.get("midi") or {}
+    queue_size = int(midi.get("queue_size", 0) or 0)
+    queue_max = int(midi.get("queue_max", 0) or 0)
+    drop_count = int(midi.get("drop_count", 0) or 0)
+    degraded_reason = str(midi.get("degraded_reason") or "")
+
+    if not laser_available:
+        laser_txt = "—"
+        laser_col = _cs()
+    elif laser_emergency:
+        laser_txt = "BLACKOUT"
+        laser_col = _cr()
+    elif laser_enabled and not degraded_reason:
+        laser_txt = "On"
+        laser_col = _cg()
+    elif laser_enabled:
+        laser_txt = "On"
+        laser_col = _co()
+    else:
+        laser_txt = "Off"
+        laser_col = _cs()
+
+    if len(laser_scene) > 18:
+        laser_scene = laser_scene[:15] + "..."
+    if len(laser_reason) > 18:
+        laser_reason = laser_reason[:15] + "..."
+
+    laser_row = _join(
+        _seg("  Lasers  ", color=_cs()),
+        _seg(laser_txt, color=laser_col),
+        _seg(f"  scene={laser_scene}", color=_cs()),
+        _seg(f"  reason={laser_reason}", color=_cs()),
+        _seg(f"  midi={queue_size}/{queue_max} drops={drop_count}", color=_cs()),
+        _seg(f"  {degraded_reason[:14]}", color=_co()) if degraded_reason else _seg(""),
+    )
+
+    return [bridge_row, ss_row] + deck_rows + [checks_row, smart_row, laser_row]
+
+
+def _phrasing_summary(sp_block: dict | None) -> str:
+    if not sp_block:
+        return "Phrasing: —"
+    phrase = str(sp_block.get("phrase_label") or "other")
+    next_drop = sp_block.get("next_smart_drop_beat")
+    beats_to_drop = sp_block.get("beats_to_next_drop")
+    anchor = sp_block.get("phrase_anchor_target_beat")
+    next_drop_txt = "-" if next_drop is None else str(int(next_drop))
+    if beats_to_drop is None:
+        in_txt = "-"
+    else:
+        in_txt = str(int(round(float(beats_to_drop))))
+    anchor_txt = "-" if anchor is None else str(int(anchor))
+    return f"Phrasing: {phrase}  next_drop={next_drop_txt}  in={in_txt}b  anchor={anchor_txt}"
 
 
 class BridgeMenuBar(NSObject):
@@ -307,7 +367,7 @@ class BridgeMenuBar(NSObject):
         self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self.menu = NSMenu.alloc().init()
         self.status_rows = []
-        for _ in range(8):
+        for _ in range(9):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
             item.setEnabled_(False)
             self.menu.addItem_(item)
@@ -327,6 +387,52 @@ class BridgeMenuBar(NSObject):
         self.smart_breakdown_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Breakdowns", "toggleSmartBreakdown:", "")
         self.smart_breakdown_item.setTarget_(self)
         self.smart_phrasing_menu.addItem_(self.smart_breakdown_item)
+
+        self.laser_menu = NSMenu.alloc().init()
+        self.laser_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Laser Director", None, "")
+        self.laser_item.setSubmenu_(self.laser_menu)
+        self.menu.addItem_(self.laser_item)
+
+        self.laser_toggle_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Laser Director", "toggleLaserDirector:", ""
+        )
+        self.laser_toggle_item.setTarget_(self)
+        self.laser_menu.addItem_(self.laser_toggle_item)
+
+        self.laser_blackout_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Emergency Blackout", "laserBlackout:", ""
+        )
+        self.laser_blackout_item.setTarget_(self)
+        self.laser_menu.addItem_(self.laser_blackout_item)
+
+        self.laser_clear_blackout_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Clear Blackout", "laserClearBlackout:", ""
+        )
+        self.laser_clear_blackout_item.setTarget_(self)
+        self.laser_menu.addItem_(self.laser_clear_blackout_item)
+
+        self.laser_menu.addItem_(NSMenuItem.separatorItem())
+
+        self.laser_scene_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
+        self.laser_scene_item.setEnabled_(False)
+        self.laser_menu.addItem_(self.laser_scene_item)
+
+        self.laser_reason_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
+        self.laser_reason_item.setEnabled_(False)
+        self.laser_menu.addItem_(self.laser_reason_item)
+
+        self.laser_personality_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
+        self.laser_personality_item.setEnabled_(False)
+        self.laser_menu.addItem_(self.laser_personality_item)
+
+        self.laser_midi_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
+        self.laser_midi_item.setEnabled_(False)
+        self.laser_menu.addItem_(self.laser_midi_item)
+
+        self.laser_phrasing_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
+        self.laser_phrasing_item.setEnabled_(False)
+        self.laser_menu.addItem_(self.laser_phrasing_item)
+
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.validation_item = self._add_action("Run Health Check", "runValidation:")
         self.map_lasers_item = self._add_action("Map Lasers", "mapLasers:")
@@ -373,6 +479,39 @@ class BridgeMenuBar(NSObject):
         self.smart_drop_item.setTitle_("Smart Drops: On" if smart_drop_on else "Smart Drops: Off")
         smart_breakdown_on = bool(self._snapshot.get("state_manager", {}).get("smart_breakdown_enabled"))
         self.smart_breakdown_item.setTitle_("Smart Breakdowns: On" if smart_breakdown_on else "Smart Breakdowns: Off")
+        laser = self._snapshot.get("laser_director", {})
+        available = bool(laser.get("available"))
+        enabled = bool(laser.get("enabled"))
+        emergency = bool(laser.get("emergency"))
+        manual_override = bool(laser.get("manual_override"))
+        if available:
+            self.laser_toggle_item.setEnabled_(True)
+            self.laser_toggle_item.setTitle_(f"Laser Director: {'On' if enabled else 'Off'}")
+        else:
+            self.laser_toggle_item.setEnabled_(False)
+            self.laser_toggle_item.setTitle_("Laser Director: not configured")
+
+        self.laser_blackout_item.setEnabled_(available and enabled and not emergency)
+        self.laser_clear_blackout_item.setEnabled_(available and (emergency or manual_override))
+
+        scene = str(laser.get("current_scene") or "—")
+        reason = str(laser.get("last_reason") or "—")
+        personality = str(laser.get("personality") or "—")
+        executor = laser.get("executor") or {}
+        midi = executor.get("midi") or {}
+        queue_size = int(midi.get("queue_size", 0) or 0)
+        queue_max = int(midi.get("queue_max", 0) or 0)
+        drop_count = int(midi.get("drop_count", 0) or 0)
+        degraded_reason = str(midi.get("degraded_reason") or "")
+        midi_suffix = f" {degraded_reason}" if degraded_reason else ""
+        self.laser_scene_item.setTitle_(f"Current Scene: {scene}")
+        self.laser_reason_item.setTitle_(f"Reason: {reason}")
+        self.laser_personality_item.setTitle_(f"Personality: {personality}")
+        self.laser_midi_item.setTitle_(
+            f"MIDI: {queue_size}/{queue_max} drops={drop_count}{midi_suffix}"
+        )
+        sp_block = (self._snapshot.get("state_manager") or {}).get("smart_phrasing")
+        self.laser_phrasing_item.setTitle_(_phrasing_summary(sp_block))
         self._adapt_timer(status)
 
     def _adapt_timer(self, status: str) -> None:
@@ -436,6 +575,18 @@ class BridgeMenuBar(NSObject):
 
     def toggleSmartBreakdown_(self, _sender):
         append_command({"cmd": "toggle_smart_breakdown"})
+        self.refresh_(None)
+
+    def toggleLaserDirector_(self, _sender):
+        append_command({"cmd": "toggle_laser_director"})
+        self.refresh_(None)
+
+    def laserBlackout_(self, _sender):
+        append_command({"cmd": "laser_blackout"})
+        self.refresh_(None)
+
+    def laserClearBlackout_(self, _sender):
+        append_command({"cmd": "laser_clear_blackout"})
         self.refresh_(None)
 
     def quit_(self, _sender):

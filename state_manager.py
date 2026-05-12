@@ -281,6 +281,7 @@ class StateManager:
         # Published from the StateManager thread; read by status writer threads.
         self._snapshot_lock = threading.Lock()
         self._published_snapshot: dict = {}
+        self._last_sp_state: Optional[SmartPhrasingState] = None
         self._publish_snapshot()
         self._snapshot_publish_interval_s = _SNAPSHOT_PUBLISH_INTERVAL_S
         self._next_snapshot_publish_at = time.monotonic() + self._snapshot_publish_interval_s
@@ -413,6 +414,7 @@ class StateManager:
     def _publish_snapshot(self) -> None:
         os = self._os
         executor_blackout_pending = False
+        sp = self._last_sp_state
         if self._laser_executor is not None:
             try:
                 executor_blackout_pending = bool(
@@ -449,6 +451,24 @@ class StateManager:
             "smart_drop_blackout_active": executor_blackout_pending,
             "smart_drop_enabled": self._smart_drop_enabled,
             "smart_breakdown_enabled": self._smart_breakdown_enabled,
+            "smart_phrasing": (
+                None
+                if sp is None
+                else {
+                    "phrase_label": sp.current_phrase_label,
+                    "is_up": sp.current_phrase_is_up,
+                    "is_chorus": sp.current_phrase_is_chorus,
+                    "is_low": sp.current_phrase_is_low,
+                    "next_smart_drop_beat": sp.next_smart_drop_beat,
+                    "beats_to_next_drop": sp.beats_to_next_drop,
+                    "smart_drop_window_active": sp.smart_drop_window_active,
+                    "transition_window_active": sp.transition_window_active,
+                    "smart_breakdown_active": sp.smart_breakdown_active,
+                    "smart_post_drop_active": sp.smart_post_drop_active,
+                    "phrase_anchor_target_beat": sp.phrase_anchor_target_beat,
+                    "reason": sp.reason,
+                }
+            ),
             "pending_scripted_arm": (
                 None
                 if self._pending_arm is None
@@ -1733,6 +1753,7 @@ class StateManager:
             self._sp_blackout_arm_latched = True
         if sp_state.transition_mask_should_clear:
             self._sp_blackout_arm_latched = False
+        self._last_sp_state = sp_state
         return sp_state
 
     def _build_laser_context(
