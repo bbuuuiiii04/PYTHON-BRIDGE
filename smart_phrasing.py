@@ -410,23 +410,23 @@ def _current_phrase_context(
 
 
 
-def build_phase2_phrase_segments(
+def build_phrase_segments_from_markers(
     anlz_buildups: list[int],
     anlz_drops: list[int],
     anlz_breakdowns: list[int],
     smart_drops: list[int],
     total_beats: int,
 ) -> tuple[PhraseSegment, ...]:
-    """Phase 2 shadow: infer PhraseSegment ranges from ordered ANLZ markers.
+    """Infer PhraseSegment ranges from ordered ANLZ markers.
 
     Maps: anlz_buildups → "up", anlz_drops → "chorus", anlz_breakdowns → "low".
     Each marker's end_beat = next marker's start_beat.
     Final marker uses *total_beats* (from beatgrid length) if available,
-    otherwise it is skipped — Phase 2 does not invent arbitrary durations.
+    otherwise it is skipped — this helper does not invent arbitrary durations.
 
     When no explicit anlz_buildups exist but smart_drops are present, infers
     conservative 32-beat "up" segments before each Smart Drop.  This is a
-    Phase 2 shadow fallback based on the project rule that true musical
+    conservative fallback based on the project rule that true musical
     buildups typically happen during the 32 beats before a Smart Drop.
 
     Pure computation — no I/O, no config reads, no file parsing.
@@ -439,7 +439,7 @@ def build_phase2_phrase_segments(
     for beat in anlz_breakdowns:
         markers.append((beat, "low"))
 
-    # Phase 2 shadow fallback: infer 32-beat "up" segments before Smart Drops
+    # Fallback: infer 32-beat "up" segments before Smart Drops
     # when no explicit buildup markers exist from ANLZ analysis.
     if not anlz_buildups and smart_drops:
         existing_beats = {m[0] for m in markers}
