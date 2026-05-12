@@ -293,8 +293,33 @@ class TestSmartPhrasing(unittest.TestCase):
         )
         self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_BLACKOUT_ARMED)
 
+    def test_transition_mask_arm_breakdown_clears_mid_window_rising_edge_gap(self):
+        drop_beat = 64
+        arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
+
+        snap_with_breakdown = self._default_snap(
+            smart_drop_beats=(float(drop_beat),),
+            breakdown_segments=(BeatSegment(start_beat=59.0, end_beat=62.0),),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        self.engine.update(replace(snap_with_breakdown, abs_beat=float(arm_beat - 1)))
+        suppressed = self.engine.update(replace(snap_with_breakdown, abs_beat=float(arm_beat))).state
+        self.assertFalse(suppressed.transition_mask_should_arm)
+        self.assertTrue(suppressed.transition_window_active)
+
+        snap_without_breakdown = self._default_snap(
+            smart_drop_beats=(float(drop_beat),),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        still_in_window = self.engine.update(
+            replace(snap_without_breakdown, abs_beat=float(arm_beat + 1))
+        ).state
+        # Conservative rising-edge gap: PR 5c prevents false-positive arms but does not re-arm mid-window.
+        self.assertFalse(still_in_window.transition_mask_should_arm)
+        self.assertTrue(still_in_window.transition_window_active)
+
     def test_transition_mask_arm_pending_autoloop_meta_documents_current_divergence(self):
-        """Current behavior doc: revisit in PR 5c before production arm migration."""
+        """Current behavior doc: revisit in PR 5d before production arm migration."""
         drop_beat = 64
         arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
         before_arm = arm_beat - 1
@@ -382,8 +407,7 @@ class TestSmartPhrasing(unittest.TestCase):
         self.assertEqual(second_signal, _SMART_DROP_SIGNAL_NONE)
         self.assertTrue(legacy._os.drop_cut_armed)
 
-    def test_transition_mask_arm_breakdown_between_documents_current_divergence(self):
-        """Current behavior doc: revisit in PR 5c before production arm migration."""
+    def test_transition_mask_arm_breakdown_between_suppresses_arm(self):
         drop_beat = 64
         arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
         before_arm = arm_beat - 1
@@ -409,10 +433,10 @@ class TestSmartPhrasing(unittest.TestCase):
         )
         self.engine.update(replace(snap, abs_beat=float(before_arm)))
         arm_state = self.engine.update(replace(snap, abs_beat=float(arm_beat))).state
-        self.assertTrue(arm_state.transition_mask_should_arm)
+        # Parity confirmed at window entry; mid-window re-arm after breakdown clears is a documented rising-edge gap.
+        self.assertFalse(arm_state.transition_mask_should_arm)
 
-    def test_transition_mask_arm_breakdown_active_documents_current_divergence(self):
-        """Current behavior doc: revisit in PR 5c before production arm migration."""
+    def test_transition_mask_arm_breakdown_active_suppresses_arm(self):
         drop_beat = 64
         arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
         before_arm = arm_beat - 1
@@ -431,14 +455,19 @@ class TestSmartPhrasing(unittest.TestCase):
 
         snap = self._default_snap(
             smart_drop_beats=(float(drop_beat),),
+            breakdown_segments=(
+                BeatSegment(start_beat=float(arm_beat - 1), end_beat=float(arm_beat + 1)),
+            ),
             transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
         )
         self.engine.update(replace(snap, abs_beat=float(before_arm)))
         arm_state = self.engine.update(replace(snap, abs_beat=float(arm_beat))).state
-        self.assertTrue(arm_state.transition_mask_should_arm)
+        # Engine suppresses via smart_breakdown_active / musical breakdown segment; legacy suppresses via
+        # os.breakdown_active. This confirms aligned suppression behavior, not identical stimulus parity.
+        self.assertFalse(arm_state.transition_mask_should_arm)
 
     def test_transition_mask_arm_autoloop_pending_documents_current_divergence(self):
-        """Current behavior doc: revisit in PR 5c before production arm migration."""
+        """Current behavior doc: revisit in PR 5d before production arm migration."""
         drop_beat = 64
         arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
         before_arm = arm_beat - 1

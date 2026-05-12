@@ -282,9 +282,18 @@ class SmartPhrasingEngine:
         
         transition_mask_should_arm = False
         transition_mask_should_clear = False
-        
+
+        breakdown_between = (
+            next_smart_drop_beat is not None
+            and any(
+                abs_beat <= seg.start_beat < next_smart_drop_beat
+                for seg in snapshot.breakdown_segments
+            )
+        )
+
         if new_transition_window_active and not self._transition_window_active:
-            transition_mask_should_arm = True
+            if not smart_breakdown_active and not breakdown_between:
+                transition_mask_should_arm = True
         elif not new_transition_window_active and self._transition_window_active:
             transition_mask_should_clear = True
             
