@@ -50,7 +50,6 @@ from .smart_phrasing import (
     build_phase2_phrase_segments,
     select_smart_drops,
     select_smart_breakdowns,
-    _current_phrase_context,
     find_restore_beat,
 )
 from .models import (
@@ -1770,12 +1769,6 @@ class StateManager:
             and bool(self._os.last_armed_filepath)
             and self._os.last_armed_filepath == d.meta.filepath
         )
-        current_phrase_is_up, current_phrase_is_chorus = _current_phrase_context(
-            abs_beat=abs_beat_pos,
-            up_markers=d.meta.anlz_buildups,
-            chorus_markers=d.meta.anlz_drops,
-            low_markers=d.meta.anlz_breakdowns,
-        )
 
         if sp_state is None:
             sp_state = self._update_smart_phrasing_state(
@@ -1806,11 +1799,6 @@ class StateManager:
             active_track_loaded=active_track_loaded,
             autoloop_ready=autoloop_ready,
             autoloop_tick_just_fired=autoloop_tick_just_fired,
-            breakdown_active=self._os.breakdown_active,
-            smart_drops=tuple(d.meta.smart_drops),
-            anlz_buildups=tuple(d.meta.anlz_buildups),
-            current_phrase_is_up=current_phrase_is_up,
-            current_phrase_is_chorus=current_phrase_is_chorus,
             scripted_id=d.scripted_id,
             smart_drop_blackout_active=self._os.drop_cut_armed,
             smart_drop_blackout_arm=smart_drop_blackout_arm,
