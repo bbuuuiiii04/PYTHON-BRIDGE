@@ -1027,8 +1027,7 @@ class StateManager:
         # Phase 0 clears all 4; if mirror is not reloaded here the push loop sends
         # elapsed to an empty SS deck, which confuses SS's scripted show engine.
         # Matches v1 behaviour: always load both bridge decks at arm time.
-        for dk in self._sse.deck_route(arm.deck):
-            self._out.send_deck_load(dk, arm_meta, cur_active, play="on")
+        self._sse.send_scripted_arm_phase1(arm.deck, arm_meta, cur_active)
         self._log_status()
 
     def _arm_unscripted(self, deck: int) -> None:
