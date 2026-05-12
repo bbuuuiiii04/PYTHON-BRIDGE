@@ -58,3 +58,13 @@ class SoundSwitchEngine:
             self._out._sub(f"deck {dk} get_filepath", "", verbose=True)
             self._out.send_loop_off(dk)
             self._out.send_deck_play(dk, "off")
+
+    def send_scripted_arm_phase1(
+        self,
+        deck: int,
+        arm_meta: "TrackMetadata",
+        active: int,
+    ) -> None:
+        """Phase 1 of scripted arm: send_deck_load(play="on") across the canonical 4-deck route for the armed deck."""
+        for dk in self.deck_route(deck):
+            self._out.send_deck_load(dk, arm_meta, active, play="on")
