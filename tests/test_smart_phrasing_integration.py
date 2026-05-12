@@ -682,6 +682,45 @@ class TestSmartPhrasingBlackoutArmShadow(unittest.TestCase):
         self.assertTrue(cleared_mid_window.smart_drop_blackout_arm)
         self.assertFalse(cleared_mid_window.smart_phrasing_blackout_arm)
 
+    def test_director_disabled_clears_sp_pending_blackout_when_legacy_arm_false(self):
+        sm = self._prepare_manager(
+            drop_beat=64,
+            smart_breakdowns=(),
+            anlz_breakdowns=(59,),
+            anlz_buildups=(61,),
+        )
+
+        # Beat 60: window entry while breakdown_active suppresses arming for both signals.
+        self._push_ctx(sm, 59)
+        sm._os.breakdown_active = True
+        suppressed = self._push_ctx(sm, 60)
+        self.assertFalse(suppressed.smart_drop_blackout_arm)
+        self.assertFalse(suppressed.smart_phrasing_blackout_arm)
+
+        # Beat 61: legacy arms mid-window after breakdown clears; SP remains false.
+        sm._os.breakdown_active = False
+        legacy_only = self._push_ctx(sm, 61)
+        self.assertTrue(legacy_only.smart_drop_blackout_arm)
+        self.assertFalse(legacy_only.smart_phrasing_blackout_arm)
+
+        # Simulate the inverse edge (SP-only arm) to validate the director-disabled guard.
+        # Keep this focused by overriding context at the executor entrypoint.
+        sm._laser_executor.reset_mock()
+        sm._laser_director.is_enabled.return_value = False
+        sm._laser_executor.smart_drop_blackout_enabled.return_value = True
+        sp_only_ctx = replace(
+            legacy_only,
+            smart_drop_blackout_arm=False,
+            smart_phrasing_blackout_arm=True,
+        )
+        sm._os.drop_cut_armed = False
+        sm._build_laser_context = Mock(return_value=sp_only_ctx)
+        self._push_ctx(sm, 62)
+
+        sm._laser_executor.clear_pending_blackout.assert_any_call(
+            reason="laser_director_disabled"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
