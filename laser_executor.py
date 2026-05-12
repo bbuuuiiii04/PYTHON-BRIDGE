@@ -9,6 +9,7 @@ This module intentionally keeps policy selection in LaserDirector while owning:
 from __future__ import annotations
 
 from dataclasses import replace
+import logging
 import threading
 import time
 from typing import Optional
@@ -16,6 +17,8 @@ from typing import Optional
 from .laser_config import LaserConfig
 from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
 from .midi_output import MidiOutput
+
+log = logging.getLogger("laser_executor")
 
 _AUTO_ROLES = ("phrase", "buildup", "drop", "post_drop", "breakdown")
 _PHRASE_TRIGGER_REASONS = frozenset({"default_init", "phrase_boundary"})
@@ -102,14 +105,17 @@ class LaserSceneExecutor:
                 self._last_role = role
             self._last_reason = decision.reason
 
-        if role == "idle" or not decision.scene:
-            if is_drop_crossing:
-                self._resolve_pending_blackout(reason="drop_crossing_idle")
-            return
         should_arm_blackout = bool(
             (ctx.smart_drop_blackout_arm or ctx.smart_phrasing_blackout_arm)
             and role in _AUTO_ROLES
         )
+
+        if role == "idle" or not decision.scene:
+            if is_drop_crossing:
+                self._resolve_pending_blackout(reason="drop_crossing_idle")
+            if should_arm_blackout:
+                log.debug("[LX] blackout skipped: decision has no scene (role=%s, scene=%s)", role, decision.scene)
+            return
 
         cursor_before, active_before = self._role_state_snapshot(role)
         selected_scene = self._select_scene(decision, ctx, role_changed)
@@ -122,6 +128,8 @@ class LaserSceneExecutor:
             self._record_gate("auto_gate_blocked")
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_auto_gate_blocked")
+            if should_arm_blackout:
+                log.debug("[LX] blackout skipped: auto_gate_blocked (playing=%s, track_loaded=%s, stale=%s, mode=%s, scripted=%s, autoloop_ready=%s)", ctx.playing, ctx.active_track_loaded, ctx.position_stale, ctx.lighting_mode, ctx.scripted_id, ctx.autoloop_ready)
             return
 
         scene_def = self._config.scenes.get(selected_scene)
@@ -132,7 +140,17 @@ class LaserSceneExecutor:
                 self._last_error = f"missing_scene_mapping:{selected_scene}"
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_missing_scene_mapping")
+            if should_arm_blackout:
+                log.debug("[LX] blackout skipped: missing scene mapping for '%s'", selected_scene)
             return
+
+        # Blackout arming is independent of scene policy gates: once core
+        # automatic/mapping validity checks pass, transition masking should arm
+        # even if the scene is later blocked by high-impact, cooldown, or
+        # same-scene suppression.
+        if should_arm_blackout:
+            log.debug("[LX] blackout arming: role=%s, reason=%s", role, decision.reason)
+            self.trigger_blackout_on(ctx)
 
         allow_high_impact = bool(
             self._personality.allow_high_impact if self._personality is not None else False
@@ -170,9 +188,6 @@ class LaserSceneExecutor:
                 self._resolve_pending_blackout(reason="drop_crossing_same_scene_skip")
             return
 
-        if should_arm_blackout:
-            self.trigger_blackout_on(ctx)
-
         priority = self._priority_for_role(role)
         midi_message = self._materialize_midi(
             scene_def.midi,
@@ -200,18 +215,23 @@ class LaserSceneExecutor:
         """Send manual blackout-on MIDI command for Smart Drop pre-window."""
         del ctx  # context reserved for future diagnostics.
         if not self.smart_drop_blackout_enabled():
+            log.debug("[LX] blackout_on skipped: smart_drop_blackout not enabled")
             return
         with self._lock:
             if self._blackout_pending_for_drop_window:
+                log.debug("[LX] blackout_on skipped: already pending for drop window")
                 return
         msg = self._config.manual_blackout_on
         if msg is None:
+            log.debug("[LX] blackout_on skipped: manual_blackout_on not configured")
             return
         if self._midi_output.trigger(msg, priority="high"):
             with self._lock:
                 self._blackout_pending_for_drop_window = True
+            log.info("[LX] blackout_on sent  note=%s  channel=%s", msg.note, msg.channel)
             return
         self._record_gate("manual_blackout_on_rejected")
+        log.warning("[LX] blackout_on rejected by midi_output")
 
     def _resolve_pending_blackout(self, *, reason: str) -> None:
         """Send blackout-off exactly once for each armed blackout window."""
