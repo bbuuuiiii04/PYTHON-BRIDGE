@@ -1143,7 +1143,7 @@ class StateManager:
                       bf.short(self._os.last_armed_filepath))
             if arm_after_master and self._autoloop_master_phrase_arm:
                 for dk in self._sse.deck_route(deck):
-                    self._out.send_deck_clear(dk)
+                    self._sse.send_deck_clear(dk)
                     self._sse.send_loop_off(dk)
                 log.info("[SM] clear-autoloop  deck=%d  src=%s", deck, arm_source or "<none>")
             else:
@@ -1237,7 +1237,7 @@ class StateManager:
                 self._out.send_deck_play(dn, "off")
                 self._out._sub(f"deck {dn} loop", "off", verbose=True)
             for dn in range(1, 5):
-                self._out.send_deck_clear(dn)
+                self._sse.send_deck_clear(dn)
 
     # ── Push loop ─────────────────────────────────────────────────────────────
 
@@ -2109,7 +2109,7 @@ class StateManager:
             object.__setattr__(pending_meta, "elapsed_ms", arm_elapsed_ms)
             if pending_reason.startswith("correction-"):
                 for dk in self._sse.deck_route(active):
-                    self._out.send_deck_clear(dk)
+                    self._sse.send_deck_clear(dk)
                     self._sse.send_loop_off(dk)
                 log.info("[SM] arm-correction-clear  deck=%d  beat=%d  reason=%s",
                          active, target_beat, pending_reason)
@@ -2299,7 +2299,7 @@ def _send_direct_autoloop_rearm(
     sm._os.last_arm_mono = time.monotonic()
     sm._os.last_armed_filepath = d.meta.filepath
     for dk in sm._sse.deck_route(active):
-        sm._out.send_deck_clear(dk)
+        sm._sse.send_deck_clear(dk)
         sm._sse.send_loop_off(dk)
     sm._send_autoloop_deck_load(active, mirror, active, arm_meta)
     for dk in sm._sse.deck_route(active):
@@ -2377,7 +2377,7 @@ def _smart_drop_tick(
         else:
             log.info("[SM] smart-drop-cut  deck=%d  beat=%d  drop_at=%d", active, this_beat, drop_beat)
             for dk in sm._sse.deck_route(active):
-                sm._out.send_deck_clear(dk)
+                sm._sse.send_deck_clear(dk)
                 sm._sse.send_loop_off(dk)
         os.drop_cut_armed = True
         os.drop_rearm_beat = drop_beat
@@ -2425,7 +2425,7 @@ def _smart_breakdown_tick(
         if this_beat == bd_beat:
             log.info("[SM] smart-breakdown-cut  deck=%d  beat=%d", active, this_beat)
             for dk in sm._sse.deck_route(active):
-                sm._out.send_deck_clear(dk)
+                sm._sse.send_deck_clear(dk)
                 sm._sse.send_loop_off(dk)
             os.breakdown_active = True
             os.breakdown_restore_beat = find_restore_beat(bd_beat, d.meta.anlz_buildups, d.meta.smart_drops, SMART_BREAKDOWN_DEFAULT_DURATION_BEATS)
@@ -2474,7 +2474,7 @@ def _phrase_anchor_tick(
         log.info("[SM] phrase-anchor-clear  deck=%d  beat=%d  anchor=%d",
                  active, this_beat, next_anchor)
         for dk in sm._sse.deck_route(active):
-            sm._out.send_deck_clear(dk)
+            sm._sse.send_deck_clear(dk)
             sm._sse.send_loop_off(dk)
         return False
 
