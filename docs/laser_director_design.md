@@ -1,10 +1,10 @@
 # Laser Director Design Spec
 
-Status: PROPOSED DESIGN — REFINED AGAINST CURRENT CODEBASE — CORRECTED FOR IMPLEMENTATION READINESS
+Status: CURRENT AUTHORITATIVE — design reference; implemented in `laser_director.py`, `laser_executor.py`, and `laser_models.py`. Corrections live with code.
 
 Audience: AI coding agents, future maintainers, and implementation reviewers.
 
-This document defines a proposed `Laser Director` subsystem for `rb_ss_bridge_v2`. It is written against the current architecture: `StateManager` is the single authority for deck/output policy state, consumes immutable `BridgeEvent`s, samples `PositionCache`, uses `LiveBPMService`, and drives SoundSwitch through `OS2LOutput`.
+This document defines the implemented `Laser Director` subsystem design for `rb_ss_bridge_v2`. It is written against the current architecture: `StateManager` is the single authority for deck/output policy state, consumes immutable `BridgeEvent`s, samples `PositionCache`, uses `LiveBPMService`, and drives SoundSwitch through `OS2LOutput`.
 
 Laser Director adds a second output lane: MIDI commands mapped inside SoundSwitch to specific laser static looks and autoloops. MIDI does not replace OS2L. OS2L remains responsible for deck identity, BPM, elapsed time, beat position, play/loop state, scripted/autoloop activation, and normal SoundSwitch timing. MIDI is only the explicit laser-scene selection channel.
 
@@ -933,34 +933,17 @@ Resolved MVP decisions:
 
 ## 25. Documentation Cleanup Recommendation
 
-This corrected document should become the canonical Laser Director feature design. Do not leave multiple equal implementation prompts.
+`docs/laser_director_design.md` is now the canonical CURRENT AUTHORITATIVE
+Laser Director design reference.
 
-Preferred cleanup:
+Maintenance rule:
 
-1. Replace `docs/laser_director_design.md` with this corrected content.
-2. Delete or stop using `docs/laser_director_design_refined.md` after replacement.
-3. Update `docs/doc_index.md` to classify the canonical document as proposed feature design.
-
-If both files are temporarily retained, add this banner to `docs/laser_director_design.md`:
-
-```md
-> Superseded: Do not implement from this file.
-> Canonical Laser Director design is `docs/laser_director_design_refined_corrected.md`.
-```
-
-Add this to `docs/doc_index.md` if keeping all files temporarily:
-
-```md
-| `docs/laser_director_design_refined_corrected.md` | PROPOSED / CANONICAL FEATURE DESIGN | Corrected Laser Director implementation spec checked against current code. |
-| `docs/laser_director_design_refined.md` | SUPERSEDED / DO NOT IMPLEMENT | Earlier refined spec; superseded by corrected command/safety/hot-path guidance. |
-| `docs/laser_director_design.md` | SUPERSEDED / DO NOT IMPLEMENT | Older Laser Director proposal; retained only for history. Conflicts with refined config/module guidance. |
-```
-
-If replacing the original:
-
-```md
-| `docs/laser_director_design.md` | PROPOSED / CANONICAL FEATURE DESIGN | Laser Director implementation spec; not current runtime behavior until implemented. Must preserve `current_architecture.md`, `bridge_design.md`, and `runtime_invariants.md`. |
-```
+1. Keep this file aligned to implemented behavior in `laser_director.py`,
+   `laser_executor.py`, and `laser_models.py`.
+2. If behavior changes in code, update this document and
+   `docs/doc_index.md` in the same PR.
+3. Treat older refined/spec variants as historical references only; do not use
+   them as implementation authority.
 
 ---
 

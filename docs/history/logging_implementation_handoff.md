@@ -2,88 +2,42 @@
 
 Status: HISTORICAL
 
-This records the practical logging updates made for `rb_ss_bridge_v2`.
+Audited against the current checkout on 2026-05-12.
 
-## Implemented
+This document preserves historical context about the logging rollout. Runtime
+operator guidance now lives in `docs/subsystems/logging.md`.
 
-- Added `LoggingManager` in `rb_ss_bridge_v2/logging_manager.py`.
-- Wrapped the bridge event queue so `BridgeEvent.payload` gets:
-  - `__trace_id` for following a call chain.
-  - `__enqueue_mono` for enqueue-to-process latency.
-- Updated `StateManager` INFO logs for high-signal events:
-  - `TRACK_LOADED`
-  - `FILEPATH_RESOLVED`
-  - `MASTER_CHANGED`
-  - `SCRIPTED_ARM`
-- Added bounded log stats for:
-  - event counts
-  - transition counts
-  - latency percentiles
-  - error summaries
-  - recent event samples
-- Added remediation hints for common errors such as OSC listener failures,
-  RB restarts, memory stale states, queue-full conditions, and lsof failures.
-- Added optional JSON log output with `BRIDGE_LOG_JSON=1`.
-- Added a live logging control file:
-  - default path: `/tmp/rb_ss_bridge_v2_logging.json`
-  - override path: `BRIDGE_LOG_CONTROL=/path/to/file.json`
-  - bridge checks the file about once per second and reloads changes.
-- Control file supports:
-  - `debug`: `true` or `false`
-  - `modules`: logger names to keep visible
-  - `decks`: deck numbers to keep visible
-  - `events`: event names to keep visible
-  - `levels`: per-logger level overrides
-  - `anomalies`: enable anomaly tagging
-- `SIGHUP` remains available as a manual reload fallback.
+## Historical Summary
 
-## Noise Reduction
+- Introduced `LoggingManager` (`logging_manager.py`) and queue instrumentation
+  fields (`__trace_id`, `__enqueue_mono`) for traceability and event latency.
+- Added higher-signal StateManager lifecycle/event summaries and bounded logging
+  stats snapshots.
+- Added dynamic runtime logging controls via
+  `/tmp/rb_ss_bridge_v2_logging.json` with optional override path via
+  `BRIDGE_LOG_CONTROL`.
+- Added `BRIDGE_LOG_JSON=1` output mode and retained `SIGHUP` manual reload.
 
-- `tc_update` latency warnings now trigger at `250ms`.
-- Other event latency warnings now trigger at `50ms`.
-## ADHD-Friendly Color System
+## Canonical Runtime Guidance
 
-The color formatter is now attention-based:
+For active operation and debugging procedures, use:
 
-- Red: action needed now, such as RB restart, memory stale, forcing stop, OSC
-  listener failure, or OS2L send error.
-- Orange: degraded but still running, such as event latency, attach failure,
-  queue full, connect failure, or port error.
-- Yellow: retry/fallback/no peers/cooldown.
-- Cyan: deck routing and master-deck decisions.
-- Magenta: scripted show lifecycle.
-- Green: successful user-facing state, including `TRACK_LOADED`,
-  `FILEPATH_RESOLVED`, playing/resume, attached, connected, autoloop, and active
-  deck status lines beginning with `► D`.
-- Yellow: pending autoloop arms, corrective rearm scheduling, fallbacks, and
-  degraded-but-working states.
-- Orange: late autoloop arms, phrase misses, retries, and recoverable failures.
-- Grey: diagnostic/status noise such as timecode/MTC, event processed
-  lines, event relation lines, and scripted registry logs.
+- `docs/subsystems/logging.md`
 
-## Practical Debug Use
+This historical handoff is intentionally concise to avoid duplicated,
+conflicting operator guidance.
 
-Normal operation should be readable at INFO. Use the control file for targeted
-debug without restarting:
+## Addendum (2026-05-12)
 
-```json
-{
-  "debug": true,
-  "events": ["track_loaded", "filepath_resolved", "scripted_arm"],
-  "levels": {
-    "state_manager": "DEBUG",
-    "filepath_resolver": "DEBUG"
-  }
-}
-```
-
-Turn full debug back off:
-
-```json
-{
-  "debug": false
-}
-```
-
-For show operation, prefer targeted debug over global debug so the INFO screen
-stays readable.
+- Smart Drop blackout masking in `laser_executor.py` was decoupled from scene
+  policy gates (`high_impact_blocked`, `role_cooldown_blocked`, and
+  `same_scene_skip`) after core auto/mapping validity checks pass.
+- Blackout arming now executes before those policy gates so transition masking
+  can still engage even when the scene itself is later policy-blocked.
+- Auto-gate failures and missing scene mappings still suppress blackout arming
+  by design.
+- Added regression coverage in `tests/test_laser_executor.py` for:
+  - cooldown-blocked scene + blackout arm
+  - high-impact-blocked scene + blackout arm
+  - auto-gate blocked contexts (blackout must not arm)
+  - missing scene mapping (blackout must not arm)

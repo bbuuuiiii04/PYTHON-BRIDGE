@@ -599,6 +599,212 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertEqual([call[0].note for call in midi.calls], [91, 90])
         self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
 
+    def test_blackout_arm_fires_after_same_scene_already_triggered_in_window(self) -> None:
+        """Regression: arm signal raised mid-buildup must still send blackout_on.
+
+        Real-world sequence: buildup scene fires at window entry, then several
+        seconds later the smart-drop arm signal is raised. The decision is the
+        same buildup scene, so same_scene_skip would discard it. Blackout
+        arming must not be gated by scene retriggering.
+        """
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=127,
+            velocity=127,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        # First tick: buildup scene fires (no arm yet, mid-window).
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=192.0, smart_drop_blackout_arm=False),
+        )
+        triggered_after_first = [call[0].note for call in midi.calls]
+        self.assertEqual(triggered_after_first, [39])
+        self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
+
+        # Later tick in the same window: arm raised, same scene already active.
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=252.0, smart_drop_blackout_arm=True),
+        )
+        notes = [call[0].note for call in midi.calls]
+        # blackout_on (127) must have been sent on the second call.
+        self.assertIn(127, notes)
+        self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_blackout_arm_fires_when_cooldown_blocks_scene(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=127,
+            velocity=127,
+        )
+        cfg = _config(dry_run=False, manual_blackout_on=blackout_on)
+        scenes = dict(cfg.scenes)
+        scenes["buildup_a"] = LaserScene(
+            name="buildup_a",
+            scene_type="autoloop",
+            safety_class="safe",
+            midi=scenes["buildup_a"].midi,
+            cooldown_beats=64.0,
+        )
+        ex = LaserSceneExecutor(
+            config=replace(cfg, scenes=scenes),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=192.0, smart_drop_blackout_arm=False),
+        )
+        self.assertEqual([call[0].note for call in midi.calls], [39])
+        gated_before = ex.status()["gated_count"]
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=240.0, smart_drop_blackout_arm=True),
+        )
+        notes = [call[0].note for call in midi.calls]
+        self.assertEqual(notes, [39, 127])
+        self.assertEqual(notes.count(39), 1)
+        status = ex.status()
+        self.assertTrue(status["blackout_pending_for_drop_window"])
+        self.assertEqual(status["last_error"], "role_cooldown_blocked")
+        self.assertEqual(status["gated_count"], gated_before + 1)
+
+    def test_blackout_arm_fires_when_high_impact_blocks_scene(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=127,
+            velocity=127,
+        )
+        cfg = _config(dry_run=False, manual_blackout_on=blackout_on)
+        scenes = dict(cfg.scenes)
+        scenes["buildup_a"] = LaserScene(
+            name="buildup_a",
+            scene_type="autoloop",
+            safety_class="high_impact",
+            midi=scenes["buildup_a"].midi,
+        )
+        ex = LaserSceneExecutor(
+            config=replace(cfg, scenes=scenes),
+            midi_output=midi,
+            personality=_personality(allow_high_impact=False),
+        )
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=240.0, smart_drop_blackout_arm=True),
+        )
+        notes = [call[0].note for call in midi.calls]
+        self.assertEqual(notes, [127])
+        status = ex.status()
+        self.assertTrue(status["blackout_pending_for_drop_window"])
+        self.assertEqual(status["last_error"], "high_impact_blocked")
+        self.assertEqual(status["gated_count"], 1)
+
+    def test_blackout_arm_does_not_fire_when_auto_gates_fail(self) -> None:
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=127,
+            velocity=127,
+        )
+        cases = (
+            _ctx(playing=False, smart_drop_blackout_arm=True),
+            _ctx(active_track_loaded=False, smart_drop_blackout_arm=True),
+            _ctx(position_stale=True, smart_drop_blackout_arm=True),
+            _ctx(lighting_mode="static", smart_drop_blackout_arm=True),
+            _ctx(scripted_id=7, smart_drop_blackout_arm=True),
+            _ctx(autoloop_ready=False, smart_drop_blackout_arm=True),
+        )
+        for case_ctx in cases:
+            midi = _FakeMidiOutput(dry_run=False)
+            ex = LaserSceneExecutor(
+                config=_config(dry_run=False, manual_blackout_on=blackout_on),
+                midi_output=midi,
+                personality=_personality(),
+            )
+            ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), case_ctx)
+            self.assertEqual(midi.calls, [])
+            self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_blackout_arm_fires_for_phrase_role_mid_window_no_phrase_boundary(self) -> None:
+        """Regression: mini-drop case.
+
+        When two drops are <32 beats apart, the executor stays in role="phrase"
+        between them. The arm signal arrives on a phrase tick whose decision
+        reason is "default" (not "phrase_boundary"), so _select_scene returns
+        "". Blackout arming must still fire on this tick because the upcoming
+        drop will need transition masking.
+        """
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=127,
+            velocity=127,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _decision("phrase_a", "default", "phrase"),
+            _ctx(abs_beat=492.0, smart_drop_blackout_arm=True),
+        )
+        notes = [call[0].note for call in midi.calls]
+        # Only blackout_on (127) should be sent; no scene MIDI because
+        # _select_scene returns "" for phrase role outside a phrase_boundary.
+        self.assertEqual(notes, [127])
+        self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_blackout_arm_does_not_fire_when_scene_def_missing(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=127,
+            velocity=127,
+        )
+        # Decision.scene must not exist in config.scenes catalog. The
+        # personality's buildup_bank also points at the missing scene so
+        # _select_scene returns the missing name and the scene_def lookup also
+        # fails. Blackout arming must be suppressed because the policy-supplied
+        # decision.scene is absent from the configured scene catalog.
+        personality = replace(
+            _personality(),
+            buildup_scene="missing_buildup_scene",
+            buildup_bank=("missing_buildup_scene",),
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=personality,
+        )
+        ex.on_decision(
+            _decision("missing_buildup_scene", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=240.0, smart_drop_blackout_arm=True),
+        )
+        self.assertEqual(midi.calls, [])
+        status = ex.status()
+        self.assertIn("missing_scene_mapping", status["last_error"])
+        self.assertFalse(status["blackout_pending_for_drop_window"])
+
     def test_blackout_arm_signal_triggers_manual_blackout_on_for_valid_auto_decision(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
         blackout_on = LaserMidiMessage(

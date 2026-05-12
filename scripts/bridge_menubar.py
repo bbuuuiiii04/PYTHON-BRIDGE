@@ -37,7 +37,6 @@ MONITOR_PATTERN = r"RBSS_BRIDGE_MONITOR|^tail -n 100 -F /tmp/bridge\.log$"
 MANUAL_LAUNCHCTL_LABEL = "rbss_bridge_manual"
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
-ARM_TTL_S = 30
 LASER_WIZARD_CMD = build_laser_wizard_command(Path(__file__))
 
 ICON_DIR = Path("/Users/bbui")
@@ -202,15 +201,12 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
             _join(_seg("■ ", color=_cs()), _seg("D2", bold=True), _dash),
             _join(_seg("  └  ", color=_cs()), _seg("—", color=_cs())),
             _seg("  Checks  —", color=_cs()),
-            _seg("  Mirror  —", color=_cs()),
             _join(_seg("  Smart Phrasing  ", color=_cs()), _seg("—", color=_cs())),
         ]
 
     sm = status.get("state_manager", {})
     ss = status.get("soundswitch", {})
-    mirror = status.get("mirror", {})
     validation = status.get("validation", {})
-    commands = status.get("commands", {})
     active = str(sm.get("active_deck", "?"))
     mode = sm.get("lighting_mode", "idle")
     decks = sm.get("deck", {})
@@ -218,13 +214,11 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
     smart_breakdown_on = bool(sm.get("smart_breakdown_enabled"))
 
     # Row 0: bridge header
-    armed = commands.get("armed")
     multi_seg = _seg(f"  ⚠ {len(pids)} procs", color=_co()) if len(pids) > 1 else _seg("")
     bridge_row = _join(
         _seg("●  ", color=_cg()),
         _seg("BRIDGE", bold=True),
         _seg(f"  D{active} Active", color=_cs()),
-        _seg("  Armed", color=_co()) if armed else _seg("  Safe", color=_cs()),
         multi_seg,
     )
 
@@ -289,17 +283,7 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
         _seg(f"   {issue}", color=_co()) if issue else _seg(""),
     )
 
-    # Row 7: mirror
-    mirror_on = mirror.get("enabled")
-    last_packet = mirror.get("last_packet") or {}
-    outcome = _short_outcome(last_packet.get("outcome", "—"))
-    mirror_row = _join(
-        _seg("  Mirror  ", color=_cs()),
-        _seg("On" if mirror_on else "Off", color=_cg() if mirror_on else _cs()),
-        _seg(f"   {mirror.get('rate_per_s', 0)}/s   {outcome}", color=_cs()),
-    )
-
-    # Row 8: smart phrasing
+    # Row 7: smart phrasing
     sd_txt = "On" if smart_drop_on else "Off"
     sd_col = _cg() if smart_drop_on else _cs()
     sb_txt = "On" if smart_breakdown_on else "Off"
@@ -312,18 +296,7 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
         _seg(f"Breakdowns: {sb_txt}", color=sb_col),
     )
 
-    return [bridge_row, ss_row] + deck_rows + [checks_row, mirror_row, smart_row]
-
-
-def _short_outcome(outcome: str) -> str:
-    return {
-        "queue_full_drop": "qdrop",
-        "no_socket_drop": "nodrop",
-        "send_error": "err",
-        "sent_live": "sent",
-        "queued": "queued",
-        "simulated": "sim",
-    }.get(str(outcome), str(outcome)[:8])
+    return [bridge_row, ss_row] + deck_rows + [checks_row, smart_row]
 
 
 class BridgeMenuBar(NSObject):
@@ -334,7 +307,7 @@ class BridgeMenuBar(NSObject):
         self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self.menu = NSMenu.alloc().init()
         self.status_rows = []
-        for _ in range(9):
+        for _ in range(8):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
             item.setEnabled_(False)
             self.menu.addItem_(item)
@@ -355,10 +328,7 @@ class BridgeMenuBar(NSObject):
         self.smart_breakdown_item.setTarget_(self)
         self.smart_phrasing_menu.addItem_(self.smart_breakdown_item)
         self.menu.addItem_(NSMenuItem.separatorItem())
-        self.arm_item = self._add_action("Arm Live", "armLive:")
         self.validation_item = self._add_action("Run Health Check", "runValidation:")
-        self.mirror_item = self._add_action("Mirror", "toggleMirror:")
-        self.capture_item = self._add_action("Capture", "toggleCapture:")
         self.map_lasers_item = self._add_action("Map Lasers", "mapLasers:")
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.quit_item = self._add_action("Quit Menu", "quit:")
@@ -399,10 +369,6 @@ class BridgeMenuBar(NSObject):
             self.toggle_item.setTitle_("Bridge Initializing  (click to stop)")
         else:
             self.toggle_item.setTitle_("Bridge Off  (click to start)")
-        commands = self._snapshot.get("commands", {})
-        self.arm_item.setTitle_("Disarm Live" if commands.get("armed") else "Arm Live")
-        capturing = self._snapshot.get("mirror", {}).get("capturing")
-        self.capture_item.setTitle_("Stop Capture" if capturing else "Capture")
         smart_drop_on = bool(self._snapshot.get("state_manager", {}).get("smart_drop_enabled"))
         self.smart_drop_item.setTitle_("Smart Drops: On" if smart_drop_on else "Smart Drops: Off")
         smart_breakdown_on = bool(self._snapshot.get("state_manager", {}).get("smart_breakdown_enabled"))
@@ -457,26 +423,8 @@ class BridgeMenuBar(NSObject):
             )
         self.refresh_(None)
 
-    def armLive_(self, _sender):
-        if self._snapshot.get("commands", {}).get("armed"):
-            append_command({"cmd": "disarm_live"})
-        else:
-            append_command({"cmd": "arm_live", "ttl_s": ARM_TTL_S})
-        self.refresh_(None)
-
     def runValidation_(self, _sender):
         append_command({"cmd": "run_validation"})
-        self.refresh_(None)
-
-    def toggleMirror_(self, _sender):
-        append_command({"cmd": "toggle_mirror"})
-        self.refresh_(None)
-
-    def toggleCapture_(self, _sender):
-        if self._snapshot.get("mirror", {}).get("capturing"):
-            append_command({"cmd": "stop_capture"})
-        else:
-            append_command({"cmd": "start_capture", "name": "menu_capture"})
         self.refresh_(None)
 
     def mapLasers_(self, _sender):

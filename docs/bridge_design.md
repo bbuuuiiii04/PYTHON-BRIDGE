@@ -8,7 +8,7 @@ originSessionId: 88cd1a53-8b87-4b05-b106-26c1fb0a5730
 
 Status: CURRENT AUTHORITATIVE
 
-Last reconciled against the current checkout on 2026-05-08.
+Last reconciled against the current checkout on 2026-05-12.
 
 ## Purpose
 
@@ -35,8 +35,7 @@ RBSS_SMART_DROP=1
 RBSS_SMART_BREAKDOWN=1
 ```
 
-These defaults exist in both `scripts/ss_bridge_watcher.sh` and the live
-`/Users/bbui/ss_bridge_watcher.sh`.
+These defaults exist in `scripts/ss_bridge_watcher.sh`.
 
 ## Runtime Topology
 
@@ -49,13 +48,17 @@ These defaults exist in both `scripts/ss_bridge_watcher.sh` and the live
 | `MTCReader` | `mtc_reader.py` | Reads IAC Bus 1 MTC at about 25 fps and emits `TC_UPDATE` as position fallback. |
 | `FilepathResolver` | `filepath_resolver.py` | Resolves loaded tracks by ANLZ, lsof/length, and title DB lookup; emits `FILEPATH_RESOLVED`. |
 | `StateManager` | `state_manager.py` | Sole owner of `DeckState` and most `OutputState`; consumes `BridgeEvent`s, owns push-loop output ordering, and coordinates SoundSwitch behavior from one event/push loop thread. |
-| `SoundSwitchEngine` | `sound_switch_engine.py` | SoundSwitch/OS2L output behavior helper for canonical deck routing, scripted arm fanout, autoloop clear/load/BPM fanout, smart-transition clear fanout, and live BPM follow fanout. |
+| `SmartPhrasingEngine` | `smart_phrasing.py` | Pure musical phrasing engine producing immutable smart-drop, smart-breakdown, transition-mask, and phrase-anchor intents. |
+| `LaserDirector` | `laser_director.py` | Scene-policy/role selector from `LaserContext`; no direct OS2L or MIDI transport side effects. |
+| `LaserSceneExecutor` | `laser_executor.py` | Executes laser decisions via MIDI with blackout/cooldown/role-bank logic and transition-mask cleanup. |
+| `SoundSwitchEngine` | `sound_switch_engine.py` | OS2L/SoundSwitch output-intent fanout helper for scripted/autoloop/smart-transition/live-BPM-follow sends requested by `StateManager`. |
+| `beat_math` | `beat_math.py` | Pure beat and beatgrid math helpers used by timing paths. |
 | `OS2LConnection` / `OS2LOutput` | `osl_output.py` | Persistent TCP OS2L connection, sender queue, reconnect, and DNS-SD endpoint discovery. |
-| `OS2LMirror` / `OS2LInjector` | `os2l_mirror.py`, `os2l_injector.py` | Runtime mirror/capture/injection support for validation and operator commands. |
+| `OS2LInjector` | `os2l_injector.py` | Runtime injection support for validation and operator commands. |
 | `StatusWriter` | `runtime_status.py` | Writes `/tmp/rb_ss_bridge_v2_status.json` every 0.5 s for the menu bar. |
 | `CommandReader` | `runtime_status.py` | Tails `/tmp/rb_ss_bridge_v2_commands.jsonl` for menu commands. |
 | `ValidationRunner` | `validation_runner.py` | Runs operator health checks from the menu/command channel. |
-| Menu bar | `scripts/bridge_menubar.py` | Local macOS control/status UI for launch, capture, validation, mirror, and Smart Drop toggle commands. |
+| Menu bar | `scripts/bridge_menubar.py` | Local macOS control/status UI for launch, health check, Smart Phrasing toggles, and laser mapping. |
 
 `SoundSwitchDiscovery` must be retained for the bridge lifetime. It owns the
 Zeroconf browser used to discover `_os2l._tcp.local.` endpoints and update
@@ -393,8 +396,29 @@ from the 32-beat phrase-lock target.
 
 ## Smart Rearm, Smart Drop, Phrase Anchor, Smart Breakdown
 
+Post-PR-7 architecture split:
+
+- `SmartPhrasingEngine` computes smart-transition intents from snapshot inputs.
+- `StateManager` consumes those intents, applies suppression gates, owns
+  `OutputState` writes/logs, and triggers side effects in deterministic order.
+- `SoundSwitchEngine` performs canonical 4-deck OS2L fanout for helper sends
+  requested by `StateManager`.
+- `LaserDirector` and `LaserSceneExecutor` consume the same
+  `SmartPhrasingState` for laser scene policy and MIDI execution.
+
+Intentionally retained after the refactor:
+
+- `StateManager` keeps event-loop ownership, suppression-gate ownership,
+  `DeckState`/`OutputState` writes, and decision/log ordering.
+- `StateManager` keeps direct per-tick `OS2LOutput` BPM/beat/elapsed fanout and
+  raw `_sub` sequences used by autoloop-arm and idle-disarm paths in
+  `_apply_lighting`.
+- `OutputState.phrase_anchor_last_beat` remains StateManager-owned runtime state
+  even though periodic phrase-anchor intents are computed in
+  `SmartPhrasingEngine`.
+
 The Smart Rearm experiment is enabled only when `RBSS_SMART_REARM_EXPERIMENT=1`.
-Launcher defaults enable the experiment but explicitly set `RBSS_SMART_DROP=0`.
+Launcher defaults enable the experiment and set `RBSS_SMART_DROP=1`.
 Phrase Anchor defaults on within the experiment unless `RBSS_PHRASE_ANCHOR=0`.
 
 Smart Drop:
@@ -412,9 +436,10 @@ Smart Drop:
 - Runtime Smart Drop acts on `smart_drops`, not raw `anlz_drops`.
 - Phase 2 energy shadow does not move runtime targets; `_smart_drop_tick()`
   still uses `smart_drops` only.
-- Four beats before a future drop, clears and loop-offs active, mirror, 3, and 4.
-- On the drop beat, sends direct autoloop rearm before the beat event so
-  SoundSwitch sees the reload before activation.
+- `SmartPhrasingEngine` emits Smart Drop intents (window, preclear, crossing).
+- When preclear/crossing intents are true and gates pass, `StateManager`
+  triggers smart-transition clear/rearm sends through helper paths while
+  preserving existing beat-order requirements.
 - Can be toggled at runtime from the menu bar through `toggle_smart_drop`.
 - When toggled off, pending Smart Drop cut/rearm state is cleared.
 - The runtime toggle cannot enable Smart Drop if the global Smart Rearm
@@ -426,16 +451,22 @@ Phrase Anchor:
 - Rearms autoloop every `PHRASE_ANCHOR_BEATS=64` beats to correct phrasing drift.
 - Fires at the next clean 64-beat periodic anchor. It no longer snaps to nearby
   ANLZ drops; exact drop handling belongs to Smart Drop.
-- Sends pre-clear one beat before the anchor, then direct rearm on the anchor.
+- `SmartPhrasingEngine` emits periodic phrase-anchor preclear/rearm intents from
+  snapshot inputs (`phrase_anchor_last_beat`, `phrase_anchor_period_beats`).
+- `_phrase_anchor_tick` consumes those intents after suppression gates; it keeps
+  init sentinel and stale-rebase ownership in `StateManager` and sends pre-clear
+  one beat before anchor plus direct rearm on anchor.
 - Uses `_send_direct_autoloop_rearm()`, not `_apply_lighting("autoloop")`.
 
 Smart Breakdown:
 
 - Automatically handles lighting transitions during breakdown sections using ANLZ
   `breakdown_beat_indices` and `buildup_beat_indices`.
-- When a smart breakdown beat is reached, it clears all SoundSwitch slots and
-  disables loops to create a blackout/breakdown state.
-- It automatically restores the autoloop state when a "restore beat" is reached.
+- `SmartPhrasingEngine` emits smart-breakdown clear/restore intents from
+  breakdown segments.
+- When clear/restore intents are true and gates pass, `StateManager` invokes
+  smart-transition clear or direct rearm helper paths and updates breakdown
+  runtime state.
 - The restore beat is the next available buildup or smart drop after the
   breakdown; if none are found, it uses `SMART_BREAKDOWN_DEFAULT_DURATION_BEATS=64`.
 - Smart Breakdown can be toggled at runtime from the menu bar.
@@ -490,26 +521,27 @@ wrong position after pause.
 
 `StatusWriter` writes `/tmp/rb_ss_bridge_v2_status.json` with schema `1`. It
 includes process state, `StateManager.snapshot()`, per-deck memory and live BPM,
-SoundSwitch connection status, OS2L mirror summary, validation result, command
-state, and recent errors.
+SoundSwitch connection status, validation result, runtime command status, and
+recent errors.
 
 `CommandReader` tails `/tmp/rb_ss_bridge_v2_commands.jsonl`. Supported commands:
 
 ```text
-arm_live
-disarm_live
-toggle_mirror
-set_mirror
-start_capture
-stop_capture
 run_validation
 toggle_smart_drop
+toggle_smart_breakdown
+toggle_laser_director
+set_laser_director
+laser_blackout
+laser_clear_blackout
+laser_scene
+laser_clear_scene_override
+laser_set_personality
 ```
 
-`arm_live` TTL is capped at 30 s. `run_validation` starts a daemon validation
-thread. Mirror/capture commands mutate `OS2LMirror` directly. `toggle_smart_drop`
-queues `Ev.SMART_DROP_TOGGLE`; the actual runtime flag mutation happens in the
-StateManager thread.
+`run_validation` starts a daemon validation thread. Smart phrasing toggles queue
+`Ev.SMART_DROP_TOGGLE` / `Ev.SMART_BREAKDOWN_TOGGLE`; runtime flag mutation
+happens in the StateManager thread.
 
 ## Logging And Validation
 
