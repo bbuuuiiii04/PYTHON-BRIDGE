@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.runtime_status import (  # noqa: E402
     MAX_ARM_TTL_S,
     CommandReader,
+    StatusWriter,
     parse_command,
 )
 
@@ -187,6 +188,93 @@ class LaserCommandCallbackTests(unittest.TestCase):
         reader.handle_command({"cmd": "laser_set_personality", "personality": "dubstep"})
 
         self.assertIn("callback returned False", reader.status()["last_error"])
+
+
+class RuntimeStatusWriterTests(unittest.TestCase):
+    def _make_writer(self, *, sm_snapshot, laser_status):
+        sm = Mock()
+        sm.snapshot.return_value = sm_snapshot
+        live_bpm = Mock()
+        live_bpm.get_status.return_value = None
+        live_bpm.get_summary.return_value = None
+        pos_cache = Mock()
+        pos_cache.get.return_value = None
+        conn = Mock()
+        conn.status.return_value = {"connected": True}
+        mirror = Mock()
+        mirror.get_summary.return_value = {"enabled": False}
+        validation_runner = Mock()
+        validation_result = Mock()
+        validation_result.to_dict.return_value = {
+            "state": "idle",
+            "checks": [],
+            "pass_count": 0,
+            "warn_count": 0,
+            "fail_count": 0,
+            "not_applicable_count": 0,
+            "warming_count": 0,
+            "latest_issue": "",
+        }
+        validation_runner.last_result.return_value = validation_result
+        command_reader = Mock()
+        command_reader.status.return_value = {"armed": False}
+        return StatusWriter(
+            sm,
+            live_bpm,
+            pos_cache,
+            conn,
+            mirror,
+            validation_runner,
+            command_reader,
+            laser_status_provider=lambda: laser_status,
+        )
+
+    def test_status_writer_emits_smart_phrasing_block(self) -> None:
+        writer = self._make_writer(
+            sm_snapshot={
+                "active_deck": 1,
+                "deck": {"1": {}, "2": {}},
+                "smart_phrasing": {
+                    "phrase_label": "up",
+                    "next_smart_drop_beat": 128.0,
+                    "beats_to_next_drop": 32.0,
+                },
+            },
+            laser_status={"available": False, "enabled": False, "reason": "not_configured"},
+        )
+        snap = writer.snapshot()
+        self.assertEqual(
+            snap["state_manager"]["smart_phrasing"]["phrase_label"],
+            "up",
+        )
+        self.assertEqual(
+            snap["state_manager"]["smart_phrasing"]["next_smart_drop_beat"],
+            128.0,
+        )
+
+    def test_status_writer_laser_director_includes_executor(self) -> None:
+        writer = self._make_writer(
+            sm_snapshot={"active_deck": 1, "deck": {"1": {}, "2": {}}},
+            laser_status={
+                "available": True,
+                "enabled": True,
+                "current_scene": "house_phrase_1",
+                "executor": {
+                    "midi": {
+                        "queue_size": 1,
+                        "queue_max": 256,
+                        "drop_count": 0,
+                    }
+                },
+            },
+        )
+        snap = writer.snapshot()
+        self.assertTrue(snap["laser_director"]["available"])
+        self.assertEqual(snap["laser_director"]["current_scene"], "house_phrase_1")
+        self.assertEqual(
+            snap["laser_director"]["executor"]["midi"]["queue_size"],
+            1,
+        )
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .laser_config import LaserConfigResult
 from .scripted_tracks import SCRIPTED_TRACKS
@@ -67,6 +67,7 @@ class ValidationRunner:
         rb_pattern: str = "rekordbox",
         laser_config_result: Optional[LaserConfigResult] = None,
         midi_output=None,
+        laser_status_provider: Optional[Callable[[], dict]] = None,
     ) -> None:
         self._conn = conn
         self._pos_cache = pos_cache
@@ -77,6 +78,7 @@ class ValidationRunner:
         self._rb_pattern = rb_pattern
         self._laser_config_result = laser_config_result
         self._midi_output = midi_output
+        self._laser_status_provider = laser_status_provider
         self._lock = threading.Lock()
         self._last = ValidationResult("idle", 0.0, "idle", [])
 
@@ -226,6 +228,7 @@ class ValidationRunner:
             "laser_midi_dependency",
             "laser_midi_port",
             "laser_midi_queue",
+            "laser_director_runtime",
         )
         result = self._laser_config_result
         if result is None or result.reason == "not_configured":
@@ -257,6 +260,7 @@ class ValidationRunner:
             add("laser_midi_dependency", STATUS_NA, "not_wired")
             add("laser_midi_port", STATUS_NA, "not_wired")
             add("laser_midi_queue", STATUS_NA, "not_wired")
+            add("laser_director_runtime", STATUS_NA, "not_wired")
             return
         status = midi.status()
         if result.config.dry_run:
@@ -279,6 +283,37 @@ class ValidationRunner:
             add("laser_midi_queue", STATUS_WARN, f"{queue_size}/{queue_max} drops={drop_count}")
         else:
             add("laser_midi_queue", STATUS_PASS, f"{queue_size}/{queue_max} drops={drop_count}")
+
+        if self._laser_status_provider is None:
+            add("laser_director_runtime", STATUS_NA, "no_status_provider")
+            return
+        try:
+            ldir = self._laser_status_provider() or {}
+        except Exception as exc:
+            add("laser_director_runtime", STATUS_FAIL, f"provider_error:{exc}")
+            return
+
+        if not ldir.get("available"):
+            add("laser_director_runtime", STATUS_NA, str(ldir.get("reason", "unavailable")))
+            return
+        if not ldir.get("enabled"):
+            add("laser_director_runtime", STATUS_NA, "disabled")
+            return
+        if ldir.get("emergency"):
+            add("laser_director_runtime", STATUS_WARN, "emergency_blackout_latched")
+            return
+
+        last_err = ldir.get("last_error") or (ldir.get("executor", {}) or {}).get("last_error")
+        if last_err:
+            add("laser_director_runtime", STATUS_WARN, str(last_err))
+            return
+
+        ex_midi = (ldir.get("executor", {}) or {}).get("midi", {}) or {}
+        if ex_midi.get("degraded_reason"):
+            add("laser_director_runtime", STATUS_WARN, str(ex_midi.get("degraded_reason")))
+            return
+
+        add("laser_director_runtime", STATUS_PASS, f"scene={ldir.get('current_scene') or '-'}")
 
 
 def _pgrep_count(pattern: str) -> int:
