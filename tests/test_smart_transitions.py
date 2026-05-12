@@ -851,6 +851,22 @@ class PhraseAnchorTests(unittest.TestCase):
         # phrase_anchor_last_beat must NOT advance — anchor hasn't fired yet.
         self.assertEqual(sm._os.phrase_anchor_last_beat, 0)
 
+    def test_phrase_anchor_pre_clear_deck2_uses_mirrored_fanout_order(self) -> None:
+        sm = _sm(active=2)
+        sm._os.phrase_anchor_last_beat = 0
+        result = _phrase_anchor_tick(sm, 2, 1, 130.0, 63, 31_500, 63.0)
+        self.assertFalse(result)
+        self.assertEqual(
+            sm._out.send_deck_clear.call_args_list,
+            [call(2), call(1), call(3), call(4)],
+        )
+        self.assertEqual(
+            sm._out.send_loop_off.call_args_list,
+            [call(2), call(1), call(3), call(4)],
+        )
+        sm._send_autoloop_deck_load.assert_not_called()
+        self.assertEqual(sm._os.phrase_anchor_last_beat, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -903,3 +919,17 @@ class SmartBreakdownTests(unittest.TestCase):
         _smart_breakdown_tick(sm, 1, 2, 130.0, 64, 32_000)
         self.assertFalse(sm._os.breakdown_active)
         sm._send_autoloop_deck_load.assert_called_once()
+
+    def test_breakdown_cut_deck2_uses_mirrored_fanout_order(self):
+        sm = _sm(active=2, filepath="/music/drop2.mp3")
+        sm._deck[2].meta.smart_breakdowns = [32]
+        sm._smart_breakdown_enabled = True
+        _smart_breakdown_tick(sm, 2, 1, 130.0, 32, 16_000)
+        self.assertEqual(
+            sm._out.send_deck_clear.call_args_list,
+            [call(2), call(1), call(3), call(4)],
+        )
+        self.assertEqual(
+            sm._out.send_loop_off.call_args_list,
+            [call(2), call(1), call(3), call(4)],
+        )
