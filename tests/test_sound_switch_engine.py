@@ -25,6 +25,12 @@ class DeckRouteTests(unittest.TestCase):
         self.assertEqual(len(self.sse.deck_route(1)), 4)
         self.assertEqual(len(self.sse.deck_route(2)), 4)
 
+    def test_send_loop_off_delegates_to_output(self) -> None:
+        out = Mock()
+        sse = SoundSwitchEngine(out)
+        sse.send_loop_off(3)
+        out.send_loop_off.assert_called_once_with(3)
+
 
 class StateManagerWiringTests(unittest.TestCase):
     def _sm(self) -> StateManager:

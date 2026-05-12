@@ -21,3 +21,7 @@ class SoundSwitchEngine:
         """Return canonical 4-deck routing tuple for the active deck."""
         mirror = 3 - active
         return (active, mirror, 3, 4)
+
+    def send_loop_off(self, deck: int) -> None:
+        """Delegate per-deck loop-off to the underlying OS2L output."""
+        self._out.send_loop_off(deck)
