@@ -12,7 +12,7 @@ import bisect
 from dataclasses import dataclass
 from typing import Literal
 
-IntensityClass = Literal["subtle", "medium", "major", "peak", "low_confidence"]
+IntensityClass = Literal["low", "medium", "high", "peak", "low_confidence"]
 
 DROP_LIFT_SUBTLE = 0.05
 DROP_LIFT_MEDIUM = 0.15
@@ -157,11 +157,11 @@ def classify_drop_intensity(window: EnergyWindow) -> SmartTransitionIntensity:
     if lift >= DROP_LIFT_PEAK:
         return _intensity("peak", window, confidence, "strong_post_drop_lift", "blackout_mask_ok_high_laser")
     if lift >= DROP_LIFT_MAJOR:
-        return _intensity("major", window, confidence, "major_post_drop_lift", "normal_smart_drop_high_laser")
+        return _intensity("high", window, confidence, "major_post_drop_lift", "normal_smart_drop_high_laser")
     if lift >= DROP_LIFT_MEDIUM:
         return _intensity("medium", window, confidence, "medium_post_drop_lift", "normal_smart_drop")
     if lift >= DROP_LIFT_SUBTLE:
-        return _intensity("subtle", window, confidence, "subtle_post_drop_lift", "avoid_blackout")
+        return _intensity("low", window, confidence, "subtle_post_drop_lift", "avoid_blackout")
     return _intensity("low_confidence", window, confidence, "no_clear_drop_lift", "no_change")
 
 
@@ -182,9 +182,9 @@ def classify_breakdown_intensity(window: EnergyWindow) -> SmartTransitionIntensi
     if depth >= BREAKDOWN_DEPTH_TRUE_LOW and window.post_mean <= 0.25:
         return _intensity("peak", window, confidence, "true_low_breakdown", "minimal_look_blackout_optional")
     if depth >= BREAKDOWN_DEPTH_MEDIUM:
-        return _intensity("major", window, confidence, "clear_breakdown", "clear_or_minimal_look")
+        return _intensity("high", window, confidence, "clear_breakdown", "clear_or_minimal_look")
     if depth >= DROP_LIFT_SUBTLE:
-        return _intensity("subtle", window, confidence, "mild_breakdown", "reduce_intensity")
+        return _intensity("low", window, confidence, "mild_breakdown", "reduce_intensity")
     return _intensity("low_confidence", window, confidence, "no_clear_breakdown", "no_change")
 
 
@@ -203,11 +203,11 @@ def classify_buildup_intensity(window: EnergyWindow) -> SmartTransitionIntensity
 
     slope = window.post_mean - window.pre_mean
     if slope >= BUILDUP_SLOPE_STRONG:
-        return _intensity("major", window, confidence, "strong_rising_buildup", "escalate_fx_before_drop")
+        return _intensity("high", window, confidence, "strong_rising_buildup", "escalate_fx_before_drop")
     if slope >= BUILDUP_SLOPE_MILD:
         return _intensity("medium", window, confidence, "mild_rising_buildup", "normal_buildup_behavior")
     if slope >= DROP_LIFT_SUBTLE:
-        return _intensity("subtle", window, confidence, "slight_rise", "small_escalation")
+        return _intensity("low", window, confidence, "slight_rise", "small_escalation")
     return _intensity("low_confidence", window, confidence, "flat_or_falling_buildup", "no_change")
 
 

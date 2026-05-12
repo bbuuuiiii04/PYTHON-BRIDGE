@@ -14,6 +14,15 @@ Start here:
    changes.
 4. `docs/doc_index.md` - classification of every markdown file.
 
+Offline ANLZ energy tooling:
+
+- `docs/anlz_energy_project.md` - canonical overview of the bridge-local ANLZ
+  energy investigation toolkit, labels, limits, and validation framing.
+- `docs/re/anlz_waveform_tag_inventory.md` - observed ANLZ waveform/beatgrid/tag
+  inventory.
+- `docs/validation/anlz_energy_evaluation_guide.md` - practical small-corpus
+  human validation workflow.
+
 Historical rollout notes and investigation logs are preserved under
 `docs/history/` and `docs/validation/`. They are evidence, not the primary
 description of current behavior.

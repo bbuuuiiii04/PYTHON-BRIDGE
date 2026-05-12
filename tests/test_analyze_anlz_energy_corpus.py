@@ -170,6 +170,15 @@ class AnalyzeAnlzEnergyCorpusTests(unittest.TestCase):
         profile = analyze_anlz_energy_corpus._classify_profile([])
         self.assertEqual(profile, "unknown")
 
+    def test_profile_classification_contrast_label(self) -> None:
+        profile = analyze_anlz_energy_corpus._classify_profile(
+            [
+                {"marker_kind": "breakdown", "class_name": "high"},
+                {"marker_kind": "breakdown", "class_name": "peak"},
+            ]
+        )
+        self.assertEqual(profile, "contrast")
+
     def test_extract_waveform_and_grid_per_root_not_global(self) -> None:
         root1 = "/a/ANLZ0000.DAT"
         root2 = "/b/ANLZ0000.DAT"

@@ -244,40 +244,40 @@ def _extract_markers_from_pssi(parsed: list[tuple[Path, Any]]) -> dict[str, list
 def _classify_profile(marker_rows: list[dict[str, Any]]) -> str:
     if not marker_rows:
         return "unknown"
-    peak_or_major_drop = sum(
-        1 for row in marker_rows if row["marker_kind"] == "drop" and row["class_name"] in ("peak", "major")
+    peak_or_high_drop = sum(
+        1 for row in marker_rows if row["marker_kind"] == "drop" and row["class_name"] in ("peak", "high")
     )
     strong_breakdowns = sum(
-        1 for row in marker_rows if row["marker_kind"] == "breakdown" and row["class_name"] in ("peak", "major")
+        1 for row in marker_rows if row["marker_kind"] == "breakdown" and row["class_name"] in ("peak", "high")
     )
-    if peak_or_major_drop >= 2:
-        return "high_energy_peak"
-    if strong_breakdowns >= 2 and peak_or_major_drop == 0:
-        return "breakdown_heavy"
-    if peak_or_major_drop == 0 and strong_breakdowns <= 1:
-        return "chill_minimal"
-    return "standard_dance"
+    if peak_or_high_drop >= 2:
+        return "peak"
+    if strong_breakdowns >= 2 and peak_or_high_drop == 0:
+        return "contrast"
+    if peak_or_high_drop == 0 and strong_breakdowns <= 1:
+        return "groove"
+    return "drive"
 
 
 def _marker_action(marker_kind: str, class_name: str) -> str:
     if marker_kind == "drop":
         if class_name == "peak":
             return "candidate_blackout_mask_high_laser"
-        if class_name in ("major", "medium"):
+        if class_name in ("high", "medium"):
             return "normal_smart_drop_behavior"
-        if class_name == "subtle":
+        if class_name == "low":
             return "avoid_blackout"
         return "no_change_low_confidence"
     if marker_kind == "breakdown":
-        if class_name in ("peak", "major"):
+        if class_name in ("peak", "high"):
             return "clear_minimal_look"
-        if class_name == "subtle":
+        if class_name == "low":
             return "reduce_intensity"
         return "no_change_low_confidence"
     if marker_kind == "buildup":
-        if class_name in ("major", "medium"):
+        if class_name in ("high", "medium"):
             return "rising_energy_escalation_ok"
-        if class_name == "subtle":
+        if class_name == "low":
             return "small_escalation_only"
         return "no_change_low_confidence"
     return "no_change"

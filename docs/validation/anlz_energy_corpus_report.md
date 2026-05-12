@@ -5,6 +5,10 @@ Status: VALIDATION TEMPLATE (offline/advisory)
 This report format is for offline evidence collection only. It does not change
 runtime `StateManager`, Smart Phrasing decisions, OS2L behavior, or MIDI output.
 
+Use `docs/validation/anlz_energy_evaluation_guide.md` as the operator workflow
+for selecting tracks, separating Rekordbox marker quality from energy quality,
+and interpreting genre-heavy results.
+
 ## Generate A Real Report Locally
 
 From repository root:
@@ -29,16 +33,16 @@ python3 tools/analyze_anlz_energy_corpus.py \
 
 - `peak` drop: candidate for blackout-mask and high laser intensity.
 - `medium` drop: normal smart-drop behavior.
-- `subtle` drop: avoid blackout-style treatment.
-- true low breakdown (`major`/`peak` breakdown class): prefer clear/minimal look.
+- `low` drop: avoid blackout-style treatment.
+- true low breakdown (`high`/`peak` breakdown class): prefer clear/minimal look.
 - `low_confidence`: no automatic behavior change.
 
 ## Performance Profile Label Hints
 
-- `high_energy_peak`: multiple major/peak drops.
-- `standard_dance`: mixed energetic events with moderate confidence.
-- `breakdown_heavy`: repeated strong breakdown evidence and weak drop evidence.
-- `chill_minimal`: limited strong drops and generally restrained dynamics.
+- `peak`: multiple high/peak drops; built around payoff moments.
+- `contrast`: repeated strong breakdown evidence and weak drop evidence.
+- `groove`: limited strong drops and generally restrained but danceable groove.
+- `drive`: mixed energetic events with sustained pressure and motion.
 - `unknown`: insufficient markers or insufficient confidence.
 
 ## JSONL Output Schema

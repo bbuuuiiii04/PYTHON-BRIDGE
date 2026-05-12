@@ -77,8 +77,8 @@ class EnergyModelTests(unittest.TestCase):
         assert window is not None
         self.assertAlmostEqual(window.pre_mean, window.post_mean, places=4)
 
-    def test_drop_classification_subtle_medium_major_peak(self) -> None:
-        subtle = classify_drop_intensity(
+    def test_drop_classification_low_medium_high_peak(self) -> None:
+        low = classify_drop_intensity(
             EnergyWindow(
                 beat=64,
                 pre=(0.50,) * 16,
@@ -90,7 +90,7 @@ class EnergyModelTests(unittest.TestCase):
                 valley=0.50,
             )
         )
-        self.assertEqual(subtle.class_name, "subtle")
+        self.assertEqual(low.class_name, "low")
 
         medium = classify_drop_intensity(
             EnergyWindow(
@@ -106,7 +106,7 @@ class EnergyModelTests(unittest.TestCase):
         )
         self.assertEqual(medium.class_name, "medium")
 
-        major = classify_drop_intensity(
+        high = classify_drop_intensity(
             EnergyWindow(
                 beat=64,
                 pre=(0.20,) * 16,
@@ -118,7 +118,7 @@ class EnergyModelTests(unittest.TestCase):
                 valley=0.20,
             )
         )
-        self.assertEqual(major.class_name, "major")
+        self.assertEqual(high.class_name, "high")
 
         peak = classify_drop_intensity(
             EnergyWindow(
@@ -147,7 +147,7 @@ class EnergyModelTests(unittest.TestCase):
                 valley=0.12,
             )
         )
-        self.assertIn(result.class_name, ("major", "peak"))
+        self.assertIn(result.class_name, ("high", "peak"))
 
     def test_buildup_rising_energy_classification(self) -> None:
         result = classify_buildup_intensity(
@@ -162,7 +162,7 @@ class EnergyModelTests(unittest.TestCase):
                 valley=0.20,
             )
         )
-        self.assertIn(result.class_name, ("medium", "major"))
+        self.assertIn(result.class_name, ("medium", "high"))
 
     def test_low_confidence_with_tiny_window(self) -> None:
         grid = [float(i * 500) for i in range(30)]
