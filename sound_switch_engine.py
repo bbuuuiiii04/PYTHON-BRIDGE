@@ -25,3 +25,7 @@ class SoundSwitchEngine:
     def send_loop_off(self, deck: int) -> None:
         """Delegate per-deck loop-off to the underlying OS2L output."""
         self._out.send_loop_off(deck)
+
+    def send_deck_clear(self, deck: int) -> None:
+        """Delegate per-deck SS clear to the underlying OS2L output."""
+        self._out.send_deck_clear(deck)
