@@ -69,6 +69,26 @@ class DeckRouteTests(unittest.TestCase):
             [call(deck, 130.0) for deck in (1, 2, 3, 4)],
         )
 
+    def test_send_scripted_arm_phase0_fans_out_via_deck_route(self) -> None:
+        out = Mock()
+        sse = SoundSwitchEngine(out)
+        sse.send_scripted_arm_phase0(2)
+        self.assertEqual(
+            out._sub.call_args_list,
+            [call(f"deck {dk} get_filepath", "", verbose=True) for dk in (2, 1, 3, 4)],
+        )
+        self.assertEqual(out.send_loop_off.call_args_list, [call(dk) for dk in (2, 1, 3, 4)])
+        self.assertEqual(
+            out.send_deck_play.call_args_list,
+            [call(dk, "off") for dk in (2, 1, 3, 4)],
+        )
+
+    def test_send_scripted_arm_phase0_deck1_route_order(self) -> None:
+        out = Mock()
+        sse = SoundSwitchEngine(out)
+        sse.send_scripted_arm_phase0(1)
+        self.assertEqual(out.send_loop_off.call_args_list, [call(dk) for dk in (1, 2, 3, 4)])
+
 
 class StateManagerWiringTests(unittest.TestCase):
     def _sm(self) -> StateManager:
