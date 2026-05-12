@@ -95,6 +95,32 @@ class DeckRouteTests(unittest.TestCase):
             [call(deck, 130.0) for deck in (1, 2, 3, 4)],
         )
 
+    def test_send_live_bpm_follow_fans_out_via_deck_route(self) -> None:
+        out = Mock()
+        sse = SoundSwitchEngine(out)
+        sse.send_live_bpm_follow(2, 130.0)
+        self.assertEqual(
+            out.send_bpm.call_args_list,
+            [call(deck, 130.0) for deck in (2, 1, 3, 4)],
+        )
+
+    def test_send_live_bpm_follow_deck1_route_order(self) -> None:
+        out = Mock()
+        sse = SoundSwitchEngine(out)
+        sse.send_live_bpm_follow(1, 128.5)
+        self.assertEqual(
+            out.send_bpm.call_args_list,
+            [call(deck, 128.5) for deck in (1, 2, 3, 4)],
+        )
+
+    def test_send_live_bpm_follow_passes_bpm_arg_verbatim(self) -> None:
+        out = Mock()
+        sse = SoundSwitchEngine(out)
+        sse.send_live_bpm_follow(1, 127.37)
+        self.assertEqual(len(out.send_bpm.call_args_list), 4)
+        for args in out.send_bpm.call_args_list:
+            self.assertEqual(args, call(args.args[0], 127.37))
+
     def test_send_scripted_arm_phase0_fans_out_via_deck_route(self) -> None:
         out = Mock()
         sse = SoundSwitchEngine(out)
