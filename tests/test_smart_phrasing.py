@@ -1,7 +1,10 @@
 import sys
+import queue
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -14,6 +17,15 @@ from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
     SmartPhrasingDiagnostic,
     SmartPhrasingResult,
     SmartPhrasingEngine,
+)
+from rb_ss_bridge_v2.config import SMART_DROP_LOOKAHEAD_BEATS  # noqa: E402
+from rb_ss_bridge_v2.models import DeckState, OutputState  # noqa: E402
+from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
+from rb_ss_bridge_v2.state_manager import (  # noqa: E402
+    StateManager,
+    _SMART_DROP_SIGNAL_BLACKOUT_ARMED,
+    _SMART_DROP_SIGNAL_NONE,
+    _smart_drop_tick,
 )
 
 class TestSmartPhrasing(unittest.TestCase):
@@ -36,6 +48,30 @@ class TestSmartPhrasing(unittest.TestCase):
         )
         defaults.update(kwargs)
         return SmartPhrasingSnapshot(**defaults)
+
+    def _legacy_smart_drop_sm(
+        self,
+        *,
+        smart_drops: list[int],
+        smart_breakdowns: list[int] | None = None,
+        autoloop_arm_pending: bool = False,
+        pending_autoloop_arm_meta: object | None = None,
+    ) -> SimpleNamespace:
+        out = Mock()
+        deck = DeckState(number=1)
+        deck.meta.filepath = "/music/drop.mp3"
+        deck.meta.bpm = 130.0
+        deck.meta.first_beat_ms = 0.0
+        deck.meta.smart_drops = list(smart_drops)
+        deck.meta.smart_breakdowns = list(smart_breakdowns or [])
+        sm = SimpleNamespace(
+            _os=OutputState(lighting_mode="autoloop"),
+            _deck={1: deck, 2: DeckState(number=2)},
+            _out=out,
+        )
+        sm._os.autoloop_arm_pending = autoloop_arm_pending
+        sm._os.pending_autoloop_arm_meta = pending_autoloop_arm_meta
+        return sm
 
     def test_default_state_for_missing_track(self):
         snap = self._default_snap(deck_id=None)
@@ -228,6 +264,267 @@ class TestSmartPhrasing(unittest.TestCase):
         res = self.engine.update(replace(snap, abs_beat=64.0))
         self.assertTrue(res.state.transition_mask_should_clear)
         self.assertFalse(res.state.transition_window_active)
+
+    def test_transition_window_beats_equals_smart_drop_lookahead_beats(self):
+        sm = StateManager(queue.Queue(), PositionCache(), Mock())
+        self.assertEqual(sm._sp_transition_window, float(SMART_DROP_LOOKAHEAD_BEATS))
+
+    def test_transition_mask_arm_fires_on_same_tick_as_smart_drop_blackout_armed(self):
+        drop_beat = 64
+        arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
+        before_arm = arm_beat - 1
+
+        snap = self._default_snap(
+            smart_drop_beats=(float(drop_beat),),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        self.engine.update(replace(snap, abs_beat=float(before_arm)))
+        arm_state = self.engine.update(replace(snap, abs_beat=float(arm_beat))).state
+        self.assertTrue(arm_state.transition_mask_should_arm)
+
+        legacy = self._legacy_smart_drop_sm(smart_drops=[drop_beat])
+        legacy_signal = _smart_drop_tick(
+            legacy,
+            1,
+            2,
+            130.0,
+            int(arm_beat),
+            int(arm_beat * 500),
+        )
+        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_BLACKOUT_ARMED)
+
+    def test_transition_mask_arm_pending_autoloop_meta_documents_current_divergence(self):
+        """Current behavior doc: revisit in PR 5c before production arm migration."""
+        drop_beat = 64
+        arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
+        before_arm = arm_beat - 1
+
+        legacy = self._legacy_smart_drop_sm(
+            smart_drops=[drop_beat],
+            pending_autoloop_arm_meta=object(),
+        )
+        legacy_signal = _smart_drop_tick(
+            legacy,
+            1,
+            2,
+            130.0,
+            int(arm_beat),
+            int(arm_beat * 500),
+        )
+        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_NONE)
+
+        snap = self._default_snap(
+            smart_drop_beats=(float(drop_beat),),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        self.engine.update(replace(snap, abs_beat=float(before_arm)))
+        arm_state = self.engine.update(replace(snap, abs_beat=float(arm_beat))).state
+        self.assertTrue(arm_state.transition_mask_should_arm)
+
+    def test_transition_mask_arm_does_not_fire_before_window_entry(self):
+        drop_beat = 64
+        arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
+        before_arm = arm_beat - 1
+
+        snap = self._default_snap(
+            smart_drop_beats=(float(drop_beat),),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        no_arm_state = self.engine.update(replace(snap, abs_beat=float(before_arm))).state
+        self.assertFalse(no_arm_state.transition_mask_should_arm)
+
+        legacy = self._legacy_smart_drop_sm(smart_drops=[drop_beat])
+        legacy_signal = _smart_drop_tick(
+            legacy,
+            1,
+            2,
+            130.0,
+            int(before_arm),
+            int(before_arm * 500),
+        )
+        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_NONE)
+
+    def test_transition_mask_arm_fires_only_once_per_window_entry(self):
+        drop_beat = 64
+        arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
+        before_arm = arm_beat - 1
+
+        snap = self._default_snap(
+            smart_drop_beats=(float(drop_beat),),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        self.engine.update(replace(snap, abs_beat=float(before_arm)))
+        first_in_window = self.engine.update(replace(snap, abs_beat=float(arm_beat))).state
+        still_in_window = self.engine.update(replace(snap, abs_beat=float(arm_beat + 1))).state
+
+        self.assertTrue(first_in_window.transition_mask_should_arm)
+        self.assertFalse(still_in_window.transition_mask_should_arm)
+        self.assertTrue(still_in_window.transition_window_active)
+
+        legacy = self._legacy_smart_drop_sm(smart_drops=[drop_beat])
+        first_signal = _smart_drop_tick(
+            legacy,
+            1,
+            2,
+            130.0,
+            int(arm_beat),
+            int(arm_beat * 500),
+        )
+        second_signal = _smart_drop_tick(
+            legacy,
+            1,
+            2,
+            130.0,
+            int(arm_beat + 1),
+            int((arm_beat + 1) * 500),
+        )
+        self.assertEqual(first_signal, _SMART_DROP_SIGNAL_BLACKOUT_ARMED)
+        self.assertEqual(second_signal, _SMART_DROP_SIGNAL_NONE)
+        self.assertTrue(legacy._os.drop_cut_armed)
+
+    def test_transition_mask_arm_breakdown_between_documents_current_divergence(self):
+        """Current behavior doc: revisit in PR 5c before production arm migration."""
+        drop_beat = 64
+        arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
+        before_arm = arm_beat - 1
+
+        legacy = self._legacy_smart_drop_sm(
+            smart_drops=[drop_beat],
+            smart_breakdowns=[arm_beat + 2],
+        )
+        legacy_signal = _smart_drop_tick(
+            legacy,
+            1,
+            2,
+            130.0,
+            int(arm_beat),
+            int(arm_beat * 500),
+        )
+        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_NONE)
+
+        snap = self._default_snap(
+            smart_drop_beats=(float(drop_beat),),
+            breakdown_segments=(BeatSegment(start_beat=float(arm_beat + 1), end_beat=float(drop_beat + 1)),),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        self.engine.update(replace(snap, abs_beat=float(before_arm)))
+        arm_state = self.engine.update(replace(snap, abs_beat=float(arm_beat))).state
+        self.assertTrue(arm_state.transition_mask_should_arm)
+
+    def test_transition_mask_arm_breakdown_active_documents_current_divergence(self):
+        """Current behavior doc: revisit in PR 5c before production arm migration."""
+        drop_beat = 64
+        arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
+        before_arm = arm_beat - 1
+
+        legacy = self._legacy_smart_drop_sm(smart_drops=[drop_beat])
+        legacy._os.breakdown_active = True
+        legacy_signal = _smart_drop_tick(
+            legacy,
+            1,
+            2,
+            130.0,
+            int(arm_beat),
+            int(arm_beat * 500),
+        )
+        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_NONE)
+
+        snap = self._default_snap(
+            smart_drop_beats=(float(drop_beat),),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        self.engine.update(replace(snap, abs_beat=float(before_arm)))
+        arm_state = self.engine.update(replace(snap, abs_beat=float(arm_beat))).state
+        self.assertTrue(arm_state.transition_mask_should_arm)
+
+    def test_transition_mask_arm_autoloop_pending_documents_current_divergence(self):
+        """Current behavior doc: revisit in PR 5c before production arm migration."""
+        drop_beat = 64
+        arm_beat = drop_beat - SMART_DROP_LOOKAHEAD_BEATS
+        before_arm = arm_beat - 1
+
+        legacy = self._legacy_smart_drop_sm(
+            smart_drops=[drop_beat],
+            autoloop_arm_pending=True,
+        )
+        legacy_signal = _smart_drop_tick(
+            legacy,
+            1,
+            2,
+            130.0,
+            int(arm_beat),
+            int(arm_beat * 500),
+        )
+        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_NONE)
+
+        snap = self._default_snap(
+            smart_drop_beats=(float(drop_beat),),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        self.engine.update(replace(snap, abs_beat=float(before_arm)))
+        arm_state = self.engine.update(replace(snap, abs_beat=float(arm_beat))).state
+        self.assertTrue(arm_state.transition_mask_should_arm)
+
+    def test_transition_mask_arm_resets_on_deck_change(self):
+        snap = self._default_snap(
+            smart_drop_beats=(64.0,),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        self.engine.update(replace(snap, abs_beat=59.0))
+        arm_state = self.engine.update(replace(snap, abs_beat=60.0)).state
+        self.assertTrue(arm_state.transition_mask_should_arm)
+
+        reset_state = self.engine.update(
+            replace(snap, deck_id="2", track_id="A", abs_beat=30.0)
+        ).state
+        self.assertFalse(reset_state.transition_mask_should_arm)
+        self.assertFalse(reset_state.transition_window_active)
+
+        self.engine.update(replace(snap, deck_id="2", track_id="A", abs_beat=59.0))
+        rearm_state = self.engine.update(
+            replace(snap, deck_id="2", track_id="A", abs_beat=60.0)
+        ).state
+        self.assertTrue(rearm_state.transition_mask_should_arm)
+
+    def test_transition_mask_arm_resets_on_track_change(self):
+        snap = self._default_snap(
+            smart_drop_beats=(64.0,),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        self.engine.update(replace(snap, abs_beat=59.0))
+        arm_state = self.engine.update(replace(snap, abs_beat=60.0)).state
+        self.assertTrue(arm_state.transition_mask_should_arm)
+
+        reset_state = self.engine.update(
+            replace(snap, deck_id="1", track_id="B", abs_beat=30.0)
+        ).state
+        self.assertFalse(reset_state.transition_mask_should_arm)
+        self.assertFalse(reset_state.transition_window_active)
+
+        self.engine.update(replace(snap, deck_id="1", track_id="B", abs_beat=59.0))
+        rearm_state = self.engine.update(
+            replace(snap, deck_id="1", track_id="B", abs_beat=60.0)
+        ).state
+        self.assertTrue(rearm_state.transition_mask_should_arm)
+
+    def test_transition_mask_arm_resets_on_backward_jump_from_inside_window(self):
+        snap = self._default_snap(
+            smart_drop_beats=(64.0,),
+            transition_window_beats=float(SMART_DROP_LOOKAHEAD_BEATS),
+        )
+        self.engine.update(replace(snap, abs_beat=59.0))
+        self.engine.update(replace(snap, abs_beat=60.0))
+        inside_window = self.engine.update(replace(snap, abs_beat=61.0)).state
+        self.assertTrue(inside_window.transition_window_active)
+        self.assertFalse(inside_window.transition_mask_should_arm)
+
+        reset_state = self.engine.update(replace(snap, abs_beat=30.0)).state
+        self.assertFalse(reset_state.transition_mask_should_arm)
+        self.assertFalse(reset_state.transition_window_active)
+
+        self.engine.update(replace(snap, abs_beat=59.0))
+        rearm_state = self.engine.update(replace(snap, abs_beat=60.0)).state
+        self.assertTrue(rearm_state.transition_mask_should_arm)
 
     def test_transition_window_active_resets_on_engine_reset(self):
         def _activate_transition_window(engine: SmartPhrasingEngine, snap: SmartPhrasingSnapshot) -> None:
