@@ -37,6 +37,16 @@ class DeckRouteTests(unittest.TestCase):
         sse.send_deck_clear(4)
         out.send_deck_clear.assert_called_once_with(4)
 
+    def test_send_autoloop_deck_load_fans_out_via_deck_route(self) -> None:
+        out = Mock()
+        sse = SoundSwitchEngine(out)
+        arm_meta = Mock()
+        sse.send_autoloop_deck_load(1, 2, 1, arm_meta)
+        self.assertEqual(
+            out.send_deck_load.call_args_list,
+            [call(deck, arm_meta, 1, play="on") for deck in (1, 2, 3, 4)],
+        )
+
 
 class StateManagerWiringTests(unittest.TestCase):
     def _sm(self) -> StateManager:

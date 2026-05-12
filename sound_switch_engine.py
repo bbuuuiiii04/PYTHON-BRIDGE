@@ -29,3 +29,14 @@ class SoundSwitchEngine:
     def send_deck_clear(self, deck: int) -> None:
         """Delegate per-deck SS clear to the underlying OS2L output."""
         self._out.send_deck_clear(deck)
+
+    def send_autoloop_deck_load(
+        self,
+        deck: int,
+        mirror: int,
+        active: int,
+        arm_meta: "TrackMetadata",
+    ) -> None:
+        """Fan out an autoloop deck-load (play=on) across the canonical 4-deck route."""
+        for dk in self.deck_route(deck):
+            self._out.send_deck_load(dk, arm_meta, active, play="on")
