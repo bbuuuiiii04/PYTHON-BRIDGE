@@ -1142,9 +1142,7 @@ class StateManager:
                       arm_after_master, arm_source or "<none>",
                       bf.short(self._os.last_armed_filepath))
             if arm_after_master and self._autoloop_master_phrase_arm:
-                for dk in self._sse.deck_route(deck):
-                    self._sse.send_deck_clear(dk)
-                    self._sse.send_loop_off(dk)
+                self._sse.send_autoloop_clear(deck)
                 log.info("[SM] clear-autoloop  deck=%d  src=%s", deck, arm_source or "<none>")
             else:
                 for dk in self._sse.deck_route(deck):
@@ -2107,9 +2105,7 @@ class StateManager:
             arm_elapsed_ms = elapsed_ms if lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS else target_elapsed_ms
             object.__setattr__(pending_meta, "elapsed_ms", arm_elapsed_ms)
             if pending_reason.startswith("correction-"):
-                for dk in self._sse.deck_route(active):
-                    self._sse.send_deck_clear(dk)
-                    self._sse.send_loop_off(dk)
+                self._sse.send_autoloop_clear(active)
                 log.info("[SM] arm-correction-clear  deck=%d  beat=%d  reason=%s",
                          active, target_beat, pending_reason)
             self._send_autoloop_deck_load(
@@ -2143,8 +2139,7 @@ class StateManager:
                         "  tolerance=%dms  grid=%s",
                         active, target_beat, lateness_ms,
                         _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS, target_source)
-        for dk in self._sse.deck_route(active):
-            self._out.send_bpm(dk, arm_bpm)
+        self._sse.send_autoloop_bpm(active, arm_bpm)
         os.last_sent_bpm = arm_bpm
         if not scheduled_correction:
             os.autoloop_arm_pending = False
@@ -2297,12 +2292,9 @@ def _send_direct_autoloop_rearm(
     object.__setattr__(arm_meta, "elapsed_ms", target_elapsed_ms)
     sm._os.last_arm_mono = time.monotonic()
     sm._os.last_armed_filepath = d.meta.filepath
-    for dk in sm._sse.deck_route(active):
-        sm._sse.send_deck_clear(dk)
-        sm._sse.send_loop_off(dk)
+    sm._sse.send_autoloop_clear(active)
     sm._send_autoloop_deck_load(active, mirror, active, arm_meta)
-    for dk in sm._sse.deck_route(active):
-        sm._out.send_bpm(dk, arm_bpm)
+    sm._sse.send_autoloop_bpm(active, arm_bpm)
     sm._os.last_sent_bpm = arm_bpm
     log.info("[SM] autoloop-rearm  deck=%d  reason=%s  beat=%s  elapsed=%s"
              "  target_elapsed=%s  late=%dms  grid=%s  bpm=%.1f  file=%s",
