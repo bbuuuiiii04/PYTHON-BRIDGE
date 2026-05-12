@@ -1934,8 +1934,7 @@ class StateManager:
         arm_meta: TrackMetadata,
     ) -> None:
         # VDJ: active deck + mirror 1/2 + decks 3 and 4 all get the same track.
-        for dk in self._sse.deck_route(deck):
-            self._out.send_deck_load(dk, arm_meta, active, play="on")
+        self._sse.send_autoloop_deck_load(deck, mirror, active, arm_meta)
 
     def _schedule_autoloop_master_correction(
         self,
