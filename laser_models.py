@@ -70,6 +70,7 @@ class LaserScene:
     fallback_scene: str = "safe_static"
     cooldown_beats: float = 0.0
     immediate: bool = False
+    label: str = ""
 
 
 @dataclass(frozen=True)

@@ -8,13 +8,16 @@ This document explains how SoundSwitch MIDI mapping is being prepared manually b
 
 ## No manual JSON editing workflow
 
-Use the bridge menu bar wizard instead of hand-editing `laser_director.json`.
+Use Laser Pad (`python3 -m rb_ss_bridge_v2.scripts.laser_pad`) instead of
+hand-editing `laser_director.json`.
+
+The terminal wizard remains available as a deprecated fallback during cutover.
 
 ```text
 1. Open SoundSwitch.
 2. Put SoundSwitch into MIDI mapping mode.
 3. Map a SoundSwitch cue/autoloop to a MIDI note.
-4. Open menu bar -> Map Lasers.
+4. Open Laser Pad (`http://127.0.0.1:8765`) and long-press a note tile.
 5. Choose personality: house or default (default aliases to house).
 6. Choose role:
    - Drop mode: groove, buildup, drop, breakdown
@@ -30,15 +33,15 @@ Banks are multiple MIDI mappings for the same role. The bridge rotates banks
 round-robin (example: house groove notes 37, 45, 46).
 
 To add multiple looks for one role, map the same personality + role again with
-a new MIDI note. The wizard automatically adds that mapping to the role bank.
+a new MIDI note. Laser Pad automatically adds that mapping to the role bank.
 
-At any wizard prompt, press Escape or type `back` to go back.
+In Laser Pad, use long-press to open mapping edit and backdrop-click to close.
 
-## Wizard Setting Runtime Contract
+## Mapping Setting Runtime Contract
 
-Only settings with runtime effect are exposed in normal wizard setup.
+Only settings with runtime effect are exposed in normal operator setup.
 
-| Wizard Label | Config Key | Model Field | Runtime Consumer | Proof Test |
+| UI Label | Config Key | Model Field | Runtime Consumer | Proof Test |
 | --- | --- | --- | --- | --- |
 | Personality + role mapping | `personalities.<p>.*_scene` + role bank keys | `LaserPersonality` role fields + banks | `LaserSceneExecutor._bank_for_role()` and role selection path | `tests/test_laser_map_wizard.py::test_second_mapping_auto_appends_bank_keeps_primary` |
 | MIDI note | `scenes.<scene>.midi.note` | `LaserMidiMessage.note` | `MidiOutput._send_trigger()` | `tests/test_laser_map_wizard.py::test_verify_runtime_contract_passes_for_wizard_config` |
@@ -56,7 +59,7 @@ only be used when a SoundSwitch control requires hold-to-play MIDI input.
 
 ## Timing / Cooldowns
 
-The wizard includes a visible **Edit Timing & Cooldowns** menu.
+Laser Pad includes visible timing and cooldown controls.
 
 - Groove phrase length: how often normal groove changes can happen.
 - Minimum scene hold: how long a scene must stay before normal changes replace it.
@@ -65,7 +68,7 @@ The wizard includes a visible **Edit Timing & Cooldowns** menu.
   Changing a role cooldown updates every mapping in that role's bank.
 - Hold behavior (advanced): pulse / hold_beats / hold_ms / note_on / note_off.
 
-The normal wizard flow does not ask for laser classification. Safety metadata
+The normal Laser Pad flow does not ask for laser classification. Safety metadata
 (`safety_class`) is assigned automatically from role defaults and kept internal.
 An optional **Advanced Safety Metadata** menu is available for expert edits.
 
@@ -78,7 +81,7 @@ Drop style options:
   is hidden from normal role selection.
 - **Emphasized drop**: separate drop and post-drop autoloop mappings.
 
-The wizard includes **Verify mappings actually work**, which loads saved config,
+Laser Pad includes **Verify mappings actually work**, which loads saved config,
 runs a dry runtime simulation through `LaserSceneExecutor`, and reports PASS/FAIL
 for role mapping outputs and cooldown enforcement.
 

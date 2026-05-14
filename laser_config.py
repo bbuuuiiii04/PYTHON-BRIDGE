@@ -624,6 +624,7 @@ def _build_scene(name: str, data: dict[str, Any]) -> LaserScene:
         fallback_scene=str(data.get("fallback_scene", "safe_static")),
         cooldown_beats=float(data.get("cooldown_beats", 0.0)),
         immediate=bool(data.get("immediate", False)),
+        label=str(data.get("label", "")),
     )
 
 

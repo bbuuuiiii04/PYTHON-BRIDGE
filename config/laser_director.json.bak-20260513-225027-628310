@@ -1,0 +1,218 @@
+{
+  "_comment": "Local Laser Director config for watcher dry-run validation.",
+  "default_personality": "house",
+  "dry_run": false,
+  "emergency_scene": "emergency_blackout",
+  "enabled": true,
+  "fallback_scene": "safe_static",
+  "manual_commands": {
+    "blackout_off": {
+      "behavior": "note_off",
+      "channel": 1,
+      "kind": "note_off",
+      "note": 127,
+      "velocity": 0
+    },
+    "blackout_on": {
+      "behavior": "note_on",
+      "channel": 1,
+      "kind": "note_on",
+      "note": 127,
+      "velocity": 127
+    }
+  },
+  "midi_output_port": "IAC Driver Bus 1",
+  "personalities": {
+    "house": {
+      "_comment_deprecated_timing_fields": "buildup_approach_beats, buildup_hold_beats, and pre_drop_lookahead_beats are retained for backward compatibility and status only.",
+      "_comment_post_drop_hold": "post_drop_scene hold uses minimum_scene_hold_beats; set > 0 for visible post-drop hold.",
+      "_comment_pre_drop_deprecated": "pre_drop_scene is intentionally inactive in Laser Director policy; Smart Drop handles final pre-drop autoloop cut/rearm.",
+      "allow_high_impact": true,
+      "breakdown_scene": "house_breakdown_1",
+      "buildup_approach_beats": 8,
+      "buildup_hold_beats": 8,
+      "buildup_lookahead_beats": 32,
+      "buildup_scene": "house_buildup_1",
+      "default_scene": "house_phrase_1",
+      "drop_scene": "house_drop_1",
+      "drop_style": "drop_mode",
+      "minimum_scene_hold_beats": 8,
+      "phrase_bank": [
+        "house_groove_1"
+      ],
+      "phrase_interval_beats": 32,
+      "phrase_scene": "house_groove_1",
+      "post_drop_bank": [
+        "house_drop_1"
+      ],
+      "post_drop_scene": "house_drop_1",
+      "pre_drop_lookahead_beats": 4,
+      "pre_drop_scene": "",
+      "safe_scene": "safe_static",
+      "transition_scene": "transition_safe_1"
+    }
+  },
+  "scenes": {
+    "emergency_blackout": {
+      "cooldown_beats": 0,
+      "fallback_scene": "safe_static",
+      "immediate": true,
+      "midi": {
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 44,
+        "velocity": 127
+      },
+      "safety_class": "blackout",
+      "scene_type": "utility"
+    },
+    "house_breakdown_1": {
+      "cooldown_beats": 8,
+      "fallback_scene": "safe_static",
+      "immediate": false,
+      "midi": {
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 42,
+        "velocity": 127
+      },
+      "safety_class": "movement_low",
+      "scene_type": "autoloop"
+    },
+    "house_buildup_1": {
+      "cooldown_beats": 8,
+      "fallback_scene": "house_phrase_1",
+      "immediate": false,
+      "midi": {
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 38,
+        "velocity": 127
+      },
+      "safety_class": "movement_medium",
+      "scene_type": "autoloop"
+    },
+    "house_drop_1": {
+      "cooldown_beats": 32,
+      "fallback_scene": "house_drop_sustain_1",
+      "immediate": true,
+      "midi": {
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 40,
+        "velocity": 127
+      },
+      "safety_class": "high_impact",
+      "scene_type": "static"
+    },
+    "house_drop_sustain_1": {
+      "cooldown_beats": 16,
+      "fallback_scene": "house_phrase_1",
+      "immediate": false,
+      "midi": {
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 41,
+        "velocity": 127
+      },
+      "safety_class": "movement_high",
+      "scene_type": "autoloop"
+    },
+    "house_groove_1": {
+      "cooldown_beats": 16.0,
+      "fallback_scene": "safe_static",
+      "immediate": false,
+      "midi": {
+        "behavior": "pulse",
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 0,
+        "velocity": 127
+      },
+      "safety_class": "movement_low",
+      "scene_type": "autoloop"
+    },
+    "house_phrase_1": {
+      "cooldown_beats": 16.0,
+      "fallback_scene": "safe_static",
+      "immediate": false,
+      "midi": {
+        "behavior": "pulse",
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 0,
+        "velocity": 127
+      },
+      "safety_class": "movement_low",
+      "scene_type": "autoloop"
+    },
+    "house_post_drop_1": {
+      "cooldown_beats": 16.0,
+      "fallback_scene": "safe_static",
+      "immediate": false,
+      "midi": {
+        "behavior": "pulse",
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 41,
+        "velocity": 127
+      },
+      "safety_class": "movement_high",
+      "scene_type": "autoloop"
+    },
+    "house_pre_drop_1": {
+      "cooldown_beats": 0,
+      "fallback_scene": "safe_static",
+      "immediate": true,
+      "midi": {
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 39,
+        "velocity": 127
+      },
+      "safety_class": "movement_low",
+      "scene_type": "static"
+    },
+    "safe_static": {
+      "cooldown_beats": 0,
+      "fallback_scene": "safe_static",
+      "immediate": true,
+      "midi": {
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 36,
+        "velocity": 127
+      },
+      "safety_class": "safe",
+      "scene_type": "static"
+    },
+    "transition_safe_1": {
+      "cooldown_beats": 0,
+      "fallback_scene": "safe_static",
+      "immediate": true,
+      "midi": {
+        "channel": 1,
+        "duration_ms": 80,
+        "kind": "note_pulse",
+        "note": 43,
+        "velocity": 127
+      },
+      "safety_class": "safe",
+      "scene_type": "static"
+    }
+  },
+  "smart_drop_mode": "blackout_mask",
+  "stale_scene": "safe_static",
+  "startup_scene": "safe_static",
+  "stop_scene": "safe_static"
+}

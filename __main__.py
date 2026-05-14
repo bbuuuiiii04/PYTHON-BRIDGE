@@ -68,6 +68,7 @@ from .laser_models import LaserPersonality
 from .midi_output import MidiOutput
 from .runtime_status import CommandReader, StatusWriter
 from .validation_runner import ValidationRunner
+from .tools.config_reloader import ConfigReloader, HOT_RELOAD_DISABLE_ENV
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -998,10 +999,31 @@ def main() -> None:
     )
     LOG.start_control_watcher(log)
 
+    def _on_laser_config_reload(result: LaserConfigResult) -> None:
+        if not result.available or result.config is None:
+            detail = "; ".join(result.errors) if result.errors else result.reason
+            log.warning(
+                "[MAIN] laser-config-reload  changed=1  status=invalid  reason=%s",
+                detail,
+            )
+            return
+        log.warning(
+            "[MAIN] laser-config-reload  changed=1  status=detected  action=restart_required"
+        )
+
+    config_reloader = ConfigReloader(on_reload=_on_laser_config_reload)
+    hot_reload_disabled = os.environ.get(HOT_RELOAD_DISABLE_ENV) == "1"
+    if hot_reload_disabled:
+        log.info("[MAIN] laser-config-reload  enabled=0  reason=%s", HOT_RELOAD_DISABLE_ENV)
+    else:
+        log.info("[MAIN] laser-config-reload  enabled=1  path=%s", config_reloader.config_path)
+        config_reloader.start()
+
     # Graceful shutdown on SIGTERM / SIGINT
     def _shutdown(sig, frame):
         log.info("[MAIN] shutdown  sig=%d", sig)
         LOG.stop_control_watcher()
+        config_reloader.stop()
         status_writer.stop()
         command_reader.stop()
         sm.stop()

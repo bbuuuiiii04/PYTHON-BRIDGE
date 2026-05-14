@@ -26,7 +26,7 @@ from AppKit import (
 )
 from Foundation import NSAttributedString, NSMutableAttributedString, NSObject, NSTimer
 
-from command_builders import build_laser_wizard_command
+from command_builders import build_laser_pad_command
 
 
 WATCHER = "/Users/bbui/ss_bridge_watcher.sh"
@@ -37,7 +37,7 @@ MONITOR_PATTERN = r"RBSS_BRIDGE_MONITOR|^tail -n 100 -F /tmp/bridge\.log$"
 MANUAL_LAUNCHCTL_LABEL = "rbss_bridge_manual"
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
-LASER_WIZARD_CMD = build_laser_wizard_command(Path(__file__))
+LASER_PAD_CMD = build_laser_pad_command(Path(__file__))
 
 ICON_DIR = Path("/Users/bbui")
 ICONS = {
@@ -567,7 +567,7 @@ class BridgeMenuBar(NSObject):
         self.refresh_(None)
 
     def mapLasers_(self, _sender):
-        open_terminal_command(LASER_WIZARD_CMD)
+        open_terminal_command(LASER_PAD_CMD)
 
     def toggleSmartDrop_(self, _sender):
         append_command({"cmd": "toggle_smart_drop"})

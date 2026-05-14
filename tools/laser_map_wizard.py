@@ -15,6 +15,7 @@ from ..laser_config import load_laser_director_config
 from ..laser_executor import LaserSceneExecutor
 from ..laser_models import LaserContext, LaserMidiMessage, LaserSceneDecision
 from ..midi_output import MidiOutput
+from . import laser_config_ops as _ops
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "laser_director.json"
@@ -24,6 +25,10 @@ _PERSONALITY_ALIASES = {"default": _DEFAULT_PERSONALITY}
 _ROLE_CHOICES = ("groove", "buildup", "drop", "post_drop", "breakdown")
 _DROP_STYLE_DROP_MODE = "drop_mode"
 _DROP_STYLE_EMPHASIZED = "emphasized_drop"
+_DEPRECATION_BANNER = (
+    "DEPRECATED: laser_map_wizard is retiring in favor of Laser Pad "
+    "(python3 -m rb_ss_bridge_v2.scripts.laser_pad)."
+)
 _ROLE_FIELD_MAP = {
     "groove": ("phrase_scene", "phrase_bank"),
     "buildup": ("buildup_scene", "buildup_bank"),
@@ -1698,6 +1703,37 @@ def _handle_map_flow(config: dict[str, Any], *, replace_primary: bool = False) -
                 step = "cooldown"
 
 
+# Delegate shared pure operations to the extracted module so both CLI and web pad
+# share one implementation.
+ValidationResult = _ops.ValidationResult
+suggest_personality = _ops.suggest_personality
+suggest_role = _ops.suggest_role
+canonical_personality = _ops.canonical_personality
+validate_personality = _ops.validate_personality
+validate_role = _ops.validate_role
+parse_midi_note = _ops.parse_midi_note
+_parse_channel = _ops._parse_channel
+load_or_create_config = _ops.load_or_create_config
+find_duplicate_notes = _ops.find_duplicate_notes
+_find_scene_for_note = _ops._find_scene_for_note
+_build_midi_payload = _ops._build_midi_payload
+_ensure_personality_exists = _ops._ensure_personality_exists
+apply_mapping = _ops.apply_mapping
+add_mapping_to_bank = _ops.add_mapping_to_bank
+validate_config_data = _ops.validate_config_data
+save_config_atomically = _ops.save_config_atomically
+_visible_roles = _ops._visible_roles
+detect_mixed_role_cooldowns = _ops.detect_mixed_role_cooldowns
+render_personality_summary = _ops.render_personality_summary
+_primary_scene_for_role = _ops._primary_scene_for_role
+update_scene_cooldown = _ops.update_scene_cooldown
+update_personality_timing = _ops.update_personality_timing
+update_role_bank_cooldown = _ops.update_role_bank_cooldown
+update_personality_cooldown = _ops.update_personality_cooldown
+update_scene_safety_class = _ops.update_scene_safety_class
+verify_mappings_runtime = _ops.verify_mappings_runtime
+
+
 def run_wizard(config_path: Path = _DEFAULT_CONFIG_PATH) -> int:
     try:
         config = load_or_create_config(config_path)
@@ -1705,6 +1741,7 @@ def run_wizard(config_path: Path = _DEFAULT_CONFIG_PATH) -> int:
         print(_c(f"Config JSON parse error: {exc}", _RED))
         return 2
 
+    print(_c(_DEPRECATION_BANNER, _YELLOW))
     _print_header()
     dirty = False
     while True:

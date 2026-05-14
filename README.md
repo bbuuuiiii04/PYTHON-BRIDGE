@@ -73,3 +73,23 @@ Verify Laser Director status after launch:
 ```bash
 cat /tmp/rb_ss_bridge_v2_status.json | jq .laser_director
 ```
+
+## Laser Pad (web mapping UI)
+
+Run the in-repo Laser Pad server:
+
+```bash
+cd /Users/bbui
+python3 -m rb_ss_bridge_v2.scripts.laser_pad --host 0.0.0.0 --port 8765
+```
+
+Then open:
+
+- `http://127.0.0.1:8765` on desktop
+- `http://<your-mac-lan-ip>:8765` on iPad (same LAN)
+
+Laser Pad is now the canonical mapping surface.
+`tools/laser_map_wizard.py` remains available during deprecation but is no longer
+the recommended operator path.
+
+Detailed workflow and API notes are in `docs/laser_pad.md`.
