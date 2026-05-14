@@ -30,6 +30,7 @@ from rb_ss_bridge_v2.tools.laser_map_wizard import (  # noqa: E402
     update_scene_safety_class,
     update_scene_cooldown,
     update_role_bank_cooldown,
+    run_wizard,
     _pick_normal_behavior,
     _visible_roles,
     _warn_duplicate_note,
@@ -49,6 +50,16 @@ class _FakeMidi:
 
 
 class LaserMapWizardTests(unittest.TestCase):
+    def test_wizard_prints_deprecation_banner_on_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            with patch("builtins.input", return_value="0"), patch("builtins.print") as mocked_print:
+                result = run_wizard(path)
+
+        self.assertEqual(result, 0)
+        rendered = "\n".join(" ".join(str(arg) for arg in call.args) for call in mocked_print.call_args_list)
+        self.assertIn("DEPRECATED: laser_map_wizard is retiring in favor of Laser Pad", rendered)
+
     def test_create_config_from_scratch_defaults_dry_run_true(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "laser_director.json"

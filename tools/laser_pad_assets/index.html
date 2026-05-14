@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Laser Pad</title>
+    <script src="/static/pad.js?v=ux-3"></script>
+    <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+    <link rel="stylesheet" href="/static/pad.css?v=ux-3" />
+  </head>
+  <body x-data="laserPadApp()" x-init="init()">
+    <div class="app panel" x-cloak>
+      <div class="header-grid header-grid-engine">
+        <div class="header-card engine-toggle" :class="{'engine-live': config?.enabled, 'engine-dry': config?.dry_run}">
+          <label>Engine</label>
+          <div class="engine-row">
+            <label class="inline-check">
+              <input type="checkbox" :checked="!!config?.enabled" @change="setEnabled($event.target.checked)" />
+              <span>Enabled</span>
+            </label>
+            <span class="engine-state" x-text="engineStateLabel()"></span>
+          </div>
+        </div>
+
+        <div class="header-card">
+          <label>Default Personality</label>
+          <select :value="config?.default_personality || ''" @change="setDefaultPersonality($event.target.value)">
+            <template x-if="!personalityNames().length">
+              <option value="" disabled>No personalities loaded</option>
+            </template>
+            <template x-for="name in personalityNames()" :key="name">
+              <option :value="name" x-text="name"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+
+      <div class="header-grid">
+        <div class="header-card">
+          <label>Quick Test Channel</label>
+          <input type="number" min="1" max="16" x-model.number="test.channel" />
+        </div>
+
+        <div class="header-card">
+          <label>Quick Test Note</label>
+          <input type="number" min="0" max="127" x-model.number="test.note" />
+        </div>
+        <div class="header-card">
+          <label>Quick Test Velocity</label>
+          <input type="number" min="0" max="127" x-model.number="test.velocity" />
+        </div>
+        <div class="header-card">
+          <label>Quick Test Hold Beats</label>
+          <input type="number" min="0.25" max="128" step="0.25" x-model.number="test.hold_beats" />
+        </div>
+      </div>
+
+      <div class="header-grid">
+        <div class="header-card">
+          <label>Actions</label>
+          <div class="drawer-actions">
+            <button @click="fireQuickTest()">Fire Quick Test</button>
+            <button @click="verifyDraft()">Verify</button>
+            <button @click="openHistoryPanel()">History</button>
+            <button @click="commitDraft()">Commit</button>
+            <button @click="discardDraft()">Discard</button>
+            <button class="settings-trigger" @click="openSettingsPanel()" title="Settings" aria-label="Settings">⚙</button>
+          </div>
+        </div>
+        <div class="header-card">
+          <label>Status</label>
+          <div class="status" x-text="statusText || 'ready'"></div>
+        </div>
+      </div>
+
+      <template x-if="duplicateWarning">
+        <div class="badge-bar" x-text="duplicateWarning"></div>
+      </template>
+      <template x-if="liveErrors.length">
+        <div class="badge-bar error" x-text="`${liveErrors.length} config error(s): ${liveErrors[0]}`"></div>
+      </template>
+      <template x-if="!duplicateWarning && liveWarnings.length">
+        <div class="badge-bar warn" x-text="liveWarnings[0]"></div>
+      </template>
+
+      <div class="result-panels">
+        <section class="result-panel">
+          <button class="panel-toggle" @click="showVerifyPanel = !showVerifyPanel">
+            <span>Diagnostics</span>
+            <span x-text="showVerifyPanel ? 'Hide' : 'Show'"></span>
+          </button>
+          <div class="panel-content" x-show="showVerifyPanel">
+            <template x-if="!validateResults.errors.length && !validateResults.warnings.length && !verifyResults.checks.length">
+              <div class="panel-empty">No diagnostics run yet.</div>
+            </template>
+            <template x-if="validateResults.errors.length || validateResults.warnings.length">
+              <div>
+                <strong style="font-size:0.78rem; color: var(--muted);">Validation</strong>
+                <template x-if="validateResults.errors.length">
+                  <ul class="result-list error" style="margin-top: 6px;">
+                    <template x-for="err in validateResults.errors" :key="err">
+                      <li x-text="err"></li>
+                    </template>
+                  </ul>
+                </template>
+                <template x-if="validateResults.warnings.length">
+                  <ul class="result-list warn" style="margin-top: 6px;">
+                    <template x-for="warn in validateResults.warnings" :key="warn">
+                      <li x-text="warn"></li>
+                    </template>
+                  </ul>
+                </template>
+              </div>
+            </template>
+            <template x-if="verifyResults.checks.length">
+              <div style="margin-top: 10px;">
+                <strong style="font-size:0.78rem; color: var(--muted);">Runtime Verify</strong>
+                <ul class="result-list verify" style="margin-top: 6px;">
+                  <template x-for="row in verifyResults.checks" :key="`${row.name}-${row.detail}`">
+                    <li :class="row.ok ? 'ok' : 'bad'">
+                      <strong x-text="row.name"></strong>
+                      <span x-text="row.ok ? 'ok' : 'failed'"></span>
+                      <div x-text="row.detail"></div>
+                    </li>
+                  </template>
+                </ul>
+              </div>
+            </template>
+          </div>
+        </section>
+      </div>
+
+      <div class="header-card timing-card">
+        <label>Personality Timing (<span x-text="activePersonality()"></span>)</label>
+        <div class="timing-grid">
+          <label>Groove Phrase Length (beats)
+            <input type="number" min="1" x-model.number="timingDraft.phrase_interval_beats" />
+          </label>
+          <label>Minimum Scene Hold (beats)
+            <input type="number" min="0" x-model.number="timingDraft.minimum_scene_hold_beats" />
+          </label>
+          <label>Buildup Lookahead (beats)
+            <input type="number" min="1" x-model.number="timingDraft.buildup_lookahead_beats" />
+          </label>
+          <button @click="saveTimingDraft()" :disabled="!canSaveTimingDraft()">Apply Timing</button>
+        </div>
+      </div>
+
+      <div class="bank-tabs">
+        <template x-for="bank in banks()" :key="bank.id">
+          <button
+            class="bank-tab"
+            :class="{'active': bank.id === activeBankId}"
+            @click="activeBankId = bank.id"
+          >
+            <span x-text="bank.name"></span>
+            <span class="channel-pill" x-text="`Ch${bank.channel || 1}`"></span>
+          </button>
+        </template>
+      </div>
+
+      <div class="note-grid">
+        <template x-for="note in currentNotes()" :key="note">
+          <button
+            class="note-btn"
+            :class="[roleClass(note), {'mapped': isMapped(note), 'drop-target': isDropTarget(note), 'firing': isFiring(note)}]"
+            :draggable="isMapped(note) && !sceneMetaByNote(note).system"
+            @mouseup="handleNoteMouseUp(note, $event)"
+            @keydown.enter.prevent="handleNoteKeyboardFire(note)"
+            @keydown.space.prevent="handleNoteKeyboardFire(note)"
+            @contextmenu="openDrawerPlaceholder(note)"
+            @touchstart.passive="startTouchLongPress(note)"
+            @touchend="endTouchLongPress(note)"
+            @touchcancel="cancelTouchLongPress()"
+            @dragstart="dragStart(note, $event)"
+            @dragenter="dragEnter(note, $event)"
+            @dragover="dragOver(note, $event)"
+            @dragleave="dragLeave(note)"
+            @drop="dropOn(note, $event)"
+            @dragend="dragEnd()"
+          >
+            <span class="note-num" x-text="note"></span>
+            <span class="safety-dot" :class="safetyDotClass(note)"></span>
+            <span class="note-label" x-text="displayLabel(note)"></span>
+            <div class="role-chip" x-text="roleText(note)"></div>
+            <div class="channel-pill" x-text="channelPill(note)"></div>
+          </button>
+        </template>
+      </div>
+
+      <template x-if="openNote !== null">
+        <div class="drawer-backdrop" @click.self="closeDrawer()">
+          <div class="drawer panel">
+            <h3>Note <span x-text="openNote"></span> Mapping</h3>
+            <template x-if="drawer.system">
+              <div class="badge-bar warn">Managed via Settings → Blackout.</div>
+            </template>
+            <div class="drawer-grid">
+              <label>Personality
+                <input type="text" x-model="drawer.personality" :disabled="drawer.system" @input="queueDraftSave()" />
+              </label>
+              <label>Role
+                <select x-model="drawer.role" :disabled="drawer.system" @change="queueDraftSave()">
+                  <option value="groove">groove</option>
+                  <option value="buildup">buildup</option>
+                  <option value="drop">drop</option>
+                  <option value="post_drop">post_drop</option>
+                  <option value="breakdown">breakdown</option>
+                </select>
+              </label>
+              <label>Behavior
+                <select x-model="drawer.behavior" :disabled="drawer.system" @change="drawer.behaviorTouched = true; queueDraftSave()">
+                  <option value="pulse">Tap</option>
+                  <option value="hold_beats">Hold</option>
+                </select>
+              </label>
+              <label>Velocity
+                <input type="number" min="0" max="127" x-model.number="drawer.velocity" :disabled="drawer.system" @input="queueDraftSave()" />
+                <span class="field-error" x-show="fieldError('velocity')" x-text="fieldError('velocity')"></span>
+              </label>
+              <label x-show="drawer.behavior === 'hold_beats'">Hold Beats
+                <input type="number" step="0.25" min="0.25" max="128" x-model.number="drawer.hold_beats" :disabled="drawer.system" @input="queueDraftSave()" />
+                <span class="field-error" x-show="fieldError('hold_beats')" x-text="fieldError('hold_beats')"></span>
+              </label>
+              <label x-show="drawer.behavior === 'pulse'">Pulse Duration (ms)
+                <input type="number" min="10" max="250" x-model.number="drawer.duration_ms" :disabled="drawer.system" @input="queueDraftSave()" />
+              </label>
+              <label>Cooldown Beats
+                <input type="number" step="0.25" min="0" x-model.number="drawer.cooldown_beats" :disabled="drawer.system" @input="queueDraftSave()" />
+                <span class="field-error" x-show="fieldError('cooldown_beats')" x-text="fieldError('cooldown_beats')"></span>
+              </label>
+              <label>Safety Class
+                <select x-model="drawer.safety_class" :disabled="drawer.system" @change="queueDraftSave()">
+                  <option value="safe">safe</option>
+                  <option value="movement_low">movement_low</option>
+                  <option value="movement_medium">movement_medium</option>
+                  <option value="movement_high">movement_high</option>
+                  <option value="high_impact">high_impact</option>
+                  <option value="strobe">strobe</option>
+                  <option value="blackout">blackout</option>
+                </select>
+              </label>
+              <label>Label
+                <input type="text" x-model="drawer.label" :disabled="drawer.system" @input="queueDraftSave()" />
+              </label>
+            </div>
+            <div class="drawer-actions">
+              <label>
+                <input type="checkbox" x-model="drawer.immediate" :disabled="drawer.system" @change="queueDraftSave()" />
+                Immediate
+              </label>
+              <button @click="setDrawerPrimary()" :disabled="drawer.system || !drawerIsMapped()">Set Primary</button>
+              <button @click="removeDrawerMapping()" :disabled="drawer.system || !drawerIsMapped()">Remove Mapping</button>
+              <button @click="persistDrawer()" :disabled="drawer.system || !canApplyDrawer()">Apply Now</button>
+              <button @click="closeDrawer()">Close</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="historyOpen">
+        <div class="drawer-backdrop" @click.self="closeHistoryPanel()">
+          <div class="drawer panel history-drawer">
+            <h3>Backup History</h3>
+            <div class="history-layout">
+              <div class="history-list">
+                <button @click="loadHistory()">Refresh</button>
+                <template x-if="historyLoading">
+                  <div class="panel-empty">Loading history…</div>
+                </template>
+                <template x-if="!historyLoading && !historyItems.length">
+                  <div class="panel-empty">No backups found.</div>
+                </template>
+                <template x-for="item in historyItems" :key="item.name">
+                  <button
+                    class="history-item"
+                    :class="{'active': historySelected && historySelected.name === item.name}"
+                    @click="selectHistoryItem(item.name)"
+                  >
+                    <div class="name" x-text="item.name"></div>
+                    <div class="meta">
+                      <span x-text="formatHistoryTime(item.mtime)"></span>
+                      <span x-text="formatHistorySize(item.size)"></span>
+                    </div>
+                  </button>
+                </template>
+              </div>
+              <div class="history-diff">
+                <div class="history-actions">
+                  <button @click="restoreSelectedHistory()" :disabled="!historySelected">Restore Selected</button>
+                  <button @click="closeHistoryPanel()">Close</button>
+                </div>
+                <pre x-text="historyDiff || 'Select a backup to view diff.'"></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="settingsOpen">
+        <div class="settings-backdrop" @click.self="closeSettingsPanel()" @keydown.escape.window="closeSettingsPanel()">
+          <aside class="settings-panel panel" role="dialog" aria-label="Settings">
+            <header class="settings-header">
+              <h3>Settings</h3>
+              <button class="settings-close" @click="closeSettingsPanel()" aria-label="Close settings">×</button>
+            </header>
+
+            <nav class="settings-tabs">
+              <template x-for="tab in settingsTabs" :key="tab.id">
+                <button
+                  class="settings-tab"
+                  :class="{'active': settingsActiveTab === tab.id}"
+                  @click="settingsActiveTab = tab.id"
+                  x-text="tab.label"
+                ></button>
+              </template>
+            </nav>
+
+            <div class="settings-body">
+              <section class="settings-section" x-show="settingsActiveTab === 'global'">
+                <h4>Smart Drop Mode</h4>
+                <div class="settings-field">
+                  <label>smart_drop_mode</label>
+                  <select :value="config?.smart_drop_mode || 'blackout_mask'" @change="setSmartDropMode($event.target.value)">
+                    <template x-for="mode in smartDropModes()" :key="mode">
+                      <option :value="mode" x-text="mode"></option>
+                    </template>
+                  </select>
+                  <span class="settings-field-help">
+                    blackout_mask: pad drops with blackout MIDI cover. legacy_rearm: classic re-arm path.
+                  </span>
+                </div>
+
+                <h4 style="margin-top: 20px;">MIDI Output</h4>
+                <div class="settings-field">
+                  <label>MIDI Output Port</label>
+                  <select x-model="selectedPort" @change="setMidiPort()">
+                    <template x-if="!availablePorts().length">
+                      <option value="" disabled>No MIDI ports detected</option>
+                    </template>
+                    <template x-for="port in availablePorts()" :key="port">
+                      <option :value="port" x-text="port + (midiPorts.includes(port) ? '' : ' (configured, offline)')"></option>
+                    </template>
+                  </select>
+                  <div class="port-fallback">
+                    <input
+                      type="text"
+                      placeholder="Type port name (e.g. IAC Driver Bus 1)"
+                      x-model="manualPort"
+                      @keydown.enter.prevent="applyManualPort()"
+                    />
+                    <button @click="applyManualPort()" :disabled="!manualPort.trim()">Use</button>
+                  </div>
+                  <div class="drawer-actions">
+                    <button @click="refreshMidiPorts()">Refresh Ports</button>
+                    <label class="inline-check">
+                      <input type="checkbox" x-model="draftDryRun" @change="setDryRun()" />
+                      Dry Run
+                    </label>
+                  </div>
+                </div>
+
+                <h4 style="margin-top: 20px;">Lifecycle Scenes</h4>
+                <span class="settings-field-help" style="display:block; margin-bottom: 10px;">
+                  Choose which scene the bridge fires at each lifecycle event. Leave blank to inherit.
+                </span>
+
+                <template x-for="field in ['startup_scene','stop_scene','stale_scene','emergency_scene','fallback_scene']" :key="field">
+                  <div class="settings-field">
+                    <label x-text="field"></label>
+                    <select :value="config?.[field] || ''" @change="setLifecycleScene(field, $event.target.value)">
+                      <option value="">(none)</option>
+                      <template x-for="name in availableScenes()" :key="name">
+                        <option :value="name" x-text="name"></option>
+                      </template>
+                    </select>
+                  </div>
+                </template>
+              </section>
+
+              <section class="settings-section" x-show="settingsActiveTab === 'personalities'">
+                <div class="settings-personalities-head">
+                  <h4>Personalities</h4>
+                  <button @click="createPersonalityPrompt()">+ New</button>
+                </div>
+                <span class="settings-field-help" style="display:block; margin-bottom: 12px;">
+                  Add, rename, duplicate, or remove personalities. Renaming the default updates references automatically.
+                </span>
+
+                <template x-for="name in personalityNames()" :key="name">
+                  <div class="settings-personality-row">
+                    <div class="settings-personality-meta">
+                      <strong x-text="name"></strong>
+                      <span class="settings-personality-default"
+                        x-show="config?.default_personality === name">default</span>
+                    </div>
+                    <div class="settings-personality-actions">
+                      <button @click="renamePersonalityPrompt(name)">Rename</button>
+                      <button @click="duplicatePersonalityPrompt(name)">Duplicate</button>
+                      <button
+                        class="danger"
+                        @click="deletePersonalityConfirm(name)"
+                        :disabled="personalityNames().length <= 1"
+                      >Delete</button>
+                    </div>
+                  </div>
+                </template>
+              </section>
+
+              <section class="settings-section" x-show="settingsActiveTab === 'blackout'">
+                <h4>Manual Blackout MIDI</h4>
+                <span class="settings-field-help" style="display:block; margin-bottom: 12px;">
+                  Used by smart_drop_mode=blackout_mask to cover Smart Drop transitions.
+                  Both blackout_on and blackout_off must be configured when blackout_mask is active.
+                </span>
+
+                <template x-for="slot in [{key:'on', label:'Blackout ON'}, {key:'off', label:'Blackout OFF'}]" :key="slot.key">
+                  <div class="settings-blackout-card">
+                    <div class="settings-blackout-head">
+                      <strong x-text="slot.label"></strong>
+                      <span class="settings-blackout-status" x-text="blackoutConfigured(slot.key) ? 'configured' : 'not set'"></span>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-field">
+                        <label>Channel (1-16)</label>
+                        <input type="number" min="1" max="16" x-model.number="blackoutForm[slot.key].channel" />
+                      </div>
+                      <div class="settings-field">
+                        <label>Note (0-127)</label>
+                        <input type="number" min="0" max="127" x-model.number="blackoutForm[slot.key].note" />
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-field">
+                        <label>Velocity (0-127)</label>
+                        <input type="number" min="0" max="127" x-model.number="blackoutForm[slot.key].velocity" />
+                      </div>
+                      <div class="settings-field">
+                        <label>Duration ms</label>
+                        <input type="number" min="10" max="2000" x-model.number="blackoutForm[slot.key].duration_ms" />
+                      </div>
+                    </div>
+                    <div class="drawer-actions">
+                      <button @click="saveBlackout(slot.key)">Save</button>
+                      <button @click="clearBlackout(slot.key)" :disabled="!blackoutConfigured(slot.key)">Clear</button>
+                    </div>
+                  </div>
+                </template>
+              </section>
+
+              <section class="settings-section" x-show="settingsActiveTab === 'banks'">
+                <h4>Banks</h4>
+                <span class="settings-field-help" style="display:block; margin-bottom: 12px;">
+                  Rename banks or change their MIDI channel. Note ranges are fixed by the default layout — use Reset to restore 4 × 32.
+                </span>
+                <template x-for="(bank, idx) in banks()" :key="bank.id || idx">
+                  <div class="settings-bank-row">
+                    <div class="settings-bank-meta">
+                      <span class="settings-bank-id" x-text="bank.id || `bank_${idx + 1}`"></span>
+                      <span class="settings-bank-range"
+                        x-text="`notes ${bank.notes?.[0] ?? '?'}\u2013${bank.notes?.[bank.notes?.length - 1] ?? '?'} (${bank.notes?.length ?? 0})`"></span>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-field">
+                        <label>Name</label>
+                        <input type="text" :value="bank.name" @change="saveBank(idx, 'name', $event.target.value)" />
+                      </div>
+                      <div class="settings-field">
+                        <label>Channel</label>
+                        <input type="number" min="1" max="16" :value="bank.channel || 1" @change="saveBank(idx, 'channel', $event.target.value)" />
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <div class="drawer-actions" style="margin-top: 12px;">
+                  <button @click="resetBanksToDefault()">Reset to Default (4 × 32)</button>
+                </div>
+              </section>
+            </div>
+          </aside>
+        </div>
+      </template>
+
+      <template x-if="overwriteDialog.open">
+        <div class="modal-backdrop" @click.self="cancelOverwrite()">
+          <div class="modal panel">
+            <h3>Overwrite Existing Mapping?</h3>
+            <p>
+              Note <strong x-text="overwriteDialog.targetNote"></strong> already has a mapping.
+              Continue to replace target placement with the dragged mapping?
+            </p>
+            <div class="drawer-actions">
+              <button @click="confirmOverwrite()">Overwrite</button>
+              <button @click="cancelOverwrite()">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </body>
+</html>

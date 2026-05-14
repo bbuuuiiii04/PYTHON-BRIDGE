@@ -11,10 +11,25 @@ _SCRIPTS = _ROOT / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from command_builders import build_laser_wizard_command  # noqa: E402
+from command_builders import build_laser_pad_command, build_laser_wizard_command  # noqa: E402
 
 
 class CommandBuilderTests(unittest.TestCase):
+    def test_pad_command_uses_repo_parent_for_module_launch(self) -> None:
+        script_path = Path("/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar.py")
+        command = build_laser_pad_command(script_path)
+        self.assertTrue(command.startswith("cd /Users/bbui && python3 -m"))
+
+    def test_pad_command_contains_module_launch(self) -> None:
+        script_path = Path("/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar.py")
+        command = build_laser_pad_command(script_path)
+        self.assertIn("python3 -m rb_ss_bridge_v2.scripts.laser_pad --host 0.0.0.0 --port 8765", command)
+
+    def test_pad_command_contains_script_fallback_launch(self) -> None:
+        script_path = Path("/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar.py")
+        command = build_laser_pad_command(script_path)
+        self.assertIn("python3 scripts/laser_pad.py --host 0.0.0.0 --port 8765", command)
+
     def test_wizard_command_uses_repo_parent_for_module_launch(self) -> None:
         script_path = Path("/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar.py")
         command = build_laser_wizard_command(script_path)
