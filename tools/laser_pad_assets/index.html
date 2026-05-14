@@ -4,83 +4,87 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Laser Pad</title>
-    <script src="/static/pad.js?v=ux-3"></script>
+    <script src="/static/pad.js?v=ux-4"></script>
     <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
-    <link rel="stylesheet" href="/static/pad.css?v=ux-3" />
+    <link rel="stylesheet" href="/static/pad.css?v=ux-4" />
   </head>
   <body x-data="laserPadApp()" x-init="init()">
     <div class="app panel" x-cloak>
-      <div class="header-grid header-grid-engine">
-        <div class="header-card engine-toggle" :class="{'engine-live': config?.enabled, 'engine-dry': config?.dry_run}">
-          <label>Engine</label>
-          <div class="engine-row">
-            <label class="inline-check">
-              <input type="checkbox" :checked="!!config?.enabled" @change="setEnabled($event.target.checked)" />
-              <span>Enabled</span>
-            </label>
-            <span class="engine-state" x-text="engineStateLabel()"></span>
+      <header class="laser-header">
+        <div class="header-title-row">
+          <div class="title-chip">▓▓ LASER PAD ▓▓</div>
+          <div class="runtime-pill" :class="runtimeStatusClass()">
+            <span>Live</span>
+            <strong x-text="runtime.active_personality || '-'"></strong>
+            <span x-text="runtime.current_scene || 'offline'"></span>
+            <span class="runtime-reason" x-text="runtime.last_reason || '-'"></span>
           </div>
+          <div class="status-line" x-text="statusText || 'ready'"></div>
         </div>
 
-        <div class="header-card">
-          <label>Default Personality</label>
-          <select :value="config?.default_personality || ''" @change="setDefaultPersonality($event.target.value)">
-            <template x-if="!personalityNames().length">
-              <option value="" disabled>No personalities loaded</option>
-            </template>
-            <template x-for="name in personalityNames()" :key="name">
-              <option :value="name" x-text="name"></option>
-            </template>
-          </select>
-        </div>
-      </div>
+        <div class="control-strip">
+          <label class="field-inline wide-field">Output
+            <select x-model="selectedPort" @change="setMidiPort()">
+              <template x-if="!availablePorts().length">
+                <option value="" disabled>No MIDI ports detected</option>
+              </template>
+              <template x-for="port in availablePorts()" :key="port">
+                <option :value="port" x-text="port + (midiPorts.includes(port) ? '' : ' (offline)')"></option>
+              </template>
+            </select>
+          </label>
 
-      <div class="header-grid">
-        <div class="header-card">
-          <label>Quick Test Channel</label>
-          <input type="number" min="1" max="16" x-model.number="test.channel" />
-        </div>
-
-        <div class="header-card">
-          <label>Quick Test Note</label>
-          <input type="number" min="0" max="127" x-model.number="test.note" />
-        </div>
-        <div class="header-card">
-          <label>Quick Test Velocity</label>
-          <input type="number" min="0" max="127" x-model.number="test.velocity" />
-        </div>
-        <div class="header-card">
-          <label>Quick Test Hold Beats</label>
-          <input type="number" min="0.25" max="128" step="0.25" x-model.number="test.hold_beats" />
-        </div>
-      </div>
-
-      <div class="header-grid">
-        <div class="header-card">
-          <label>Actions</label>
-          <div class="drawer-actions">
-            <button @click="fireQuickTest()">Fire Quick Test</button>
-            <button @click="verifyDraft()">Verify</button>
-            <button @click="openHistoryPanel()">History</button>
-            <button @click="commitDraft()">Commit</button>
-            <button @click="discardDraft()">Discard</button>
-            <button class="settings-trigger" @click="openSettingsPanel()" title="Settings" aria-label="Settings">⚙</button>
+          <label class="field-inline personality-field">Personality
+            <select :value="activePersonality()" @change="setActivePersonality($event.target.value)">
+              <template x-if="!personalityNames().length">
+                <option value="" disabled>No personalities loaded</option>
+              </template>
+              <template x-for="name in personalityNames()" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </label>
+          <div class="icon-trio" aria-label="Personality actions">
+            <button type="button" title="New personality" @click="createPersonalityPrompt()">+</button>
+            <button type="button" title="Rename personality" @click="renamePersonalityPrompt(activePersonality())">✎</button>
+            <button type="button" title="Personality settings" @click="openSettingsTab('personalities')">ⓘ</button>
           </div>
-        </div>
-        <div class="header-card">
-          <label>Status</label>
-          <div class="status" x-text="statusText || 'ready'"></div>
-        </div>
-      </div>
 
-      <template x-if="duplicateWarning">
-        <div class="badge-bar" x-text="duplicateWarning"></div>
-      </template>
-      <template x-if="liveErrors.length">
-        <div class="badge-bar error" x-text="`${liveErrors.length} config error(s): ${liveErrors[0]}`"></div>
-      </template>
-      <template x-if="!duplicateWarning && liveWarnings.length">
-        <div class="badge-bar warn" x-text="liveWarnings[0]"></div>
+          <label class="inline-check">
+            <input type="checkbox" :checked="!!config?.enabled" @change="setEnabled($event.target.checked)" />
+            <span>enabled</span>
+          </label>
+          <label class="inline-check">
+            <input type="checkbox" x-model="draftDryRun" @change="setDryRun()" />
+            <span>dry_run</span>
+          </label>
+          <label class="field-inline mini-field">BPM (test)
+            <input type="number" min="1" max="300" x-model.number="test.bpm" @change="persistTestUi()" />
+          </label>
+          <button class="primary-action" @click="commitDraft()">💾 Commit</button>
+          <button class="icon-action" title="Validate" @click="validateDraftOnly()">✓</button>
+          <button class="icon-action" title="Verify" @click="verifyDraft()">▶</button>
+          <button class="settings-trigger" @click="openSettingsPanel()" title="Settings" aria-label="Settings">⚙</button>
+        </div>
+
+        <div class="quick-test-row">
+          <span>Quick test:</span>
+          <label>Ch <input type="number" min="1" max="16" x-model.number="test.channel" @change="persistTestUi()" /></label>
+          <label>Note <input type="number" min="0" max="127" x-model.number="test.note" @change="persistTestUi()" /></label>
+          <label>Vel <input type="number" min="0" max="127" x-model.number="test.velocity" @change="persistTestUi()" /></label>
+          <label>Beats <input type="number" min="0.25" max="128" step="0.25" x-model.number="test.hold_beats" @change="persistTestUi()" /></label>
+          <button @click="fireQuickTest()">Fire</button>
+        </div>
+
+        <template x-if="headerBanner()">
+          <button class="header-banner" :class="headerBanner().kind" @click="openDiagnosticsPanel()" x-text="headerBanner().text"></button>
+        </template>
+      </header>
+      <template x-if="lastReassignUndo.visible">
+        <div class="undo-bar" role="status" aria-live="polite">
+          <span x-text="lastReassignUndo.message"></span>
+          <button @click="undoLastReassign()">Undo</button>
+        </div>
       </template>
 
       <div class="result-panels">
@@ -130,40 +134,31 @@
         </section>
       </div>
 
-      <div class="header-card timing-card">
-        <label>Personality Timing (<span x-text="activePersonality()"></span>)</label>
-        <div class="timing-grid">
-          <label>Groove Phrase Length (beats)
-            <input type="number" min="1" x-model.number="timingDraft.phrase_interval_beats" />
-          </label>
-          <label>Minimum Scene Hold (beats)
-            <input type="number" min="0" x-model.number="timingDraft.minimum_scene_hold_beats" />
-          </label>
-          <label>Buildup Lookahead (beats)
-            <input type="number" min="1" x-model.number="timingDraft.buildup_lookahead_beats" />
-          </label>
-          <button @click="saveTimingDraft()" :disabled="!canSaveTimingDraft()">Apply Timing</button>
-        </div>
-      </div>
-
       <div class="bank-tabs">
         <template x-for="bank in banks()" :key="bank.id">
           <button
             class="bank-tab"
             :class="{'active': bank.id === activeBankId}"
             @click="activeBankId = bank.id"
+            @contextmenu.prevent="editBankPrompt(bank.id)"
+            @touchstart.passive="startBankLongPress(bank.id)"
+            @touchend="cancelBankLongPress()"
+            @touchcancel="cancelBankLongPress()"
           >
             <span x-text="bank.name"></span>
+            <span class="tab-dot">·</span>
             <span class="channel-pill" x-text="`Ch${bank.channel || 1}`"></span>
           </button>
         </template>
+        <button class="bank-tab add-bank" @click="addBankPrompt()" title="Add bank">+</button>
       </div>
 
       <div class="note-grid">
         <template x-for="note in currentNotes()" :key="note">
           <button
             class="note-btn"
-            :class="[roleClass(note), {'mapped': isMapped(note), 'drop-target': isDropTarget(note), 'firing': isFiring(note)}]"
+            :class="[roleClass(note), {'mapped': isMapped(note), 'drop-target': isDropTarget(note), 'firing': isFiring(note), 'pressing': isPressing(note), 'verify-fail': verifyState(note)?.ok === false}]"
+            :title="noteTitle(note)"
             :draggable="isMapped(note) && !sceneMetaByNote(note).system"
             @mouseup="handleNoteMouseUp(note, $event)"
             @keydown.enter.prevent="handleNoteKeyboardFire(note)"
@@ -182,78 +177,169 @@
             <span class="note-num" x-text="note"></span>
             <span class="safety-dot" :class="safetyDotClass(note)"></span>
             <span class="note-label" x-text="displayLabel(note)"></span>
-            <div class="role-chip" x-text="roleText(note)"></div>
-            <div class="channel-pill" x-text="channelPill(note)"></div>
+            <span class="note-behavior" x-text="tileBehaviorText(note)"></span>
+            <div class="role-chip" x-show="isMapped(note)" x-text="roleText(note)"></div>
           </button>
         </template>
       </div>
 
       <template x-if="openNote !== null">
         <div class="drawer-backdrop" @click.self="closeDrawer()">
-          <div class="drawer panel">
-            <h3>Note <span x-text="openNote"></span> Mapping</h3>
+          <div class="drawer panel mapping-drawer">
+            <header class="drawer-head">
+              <h3>Note <span x-text="openNote"></span> · <span x-text="midiNoteName(openNote)"></span></h3>
+              <button class="settings-close" @click="closeDrawer()" aria-label="Close mapping drawer">×</button>
+            </header>
             <template x-if="drawer.system">
-              <div class="badge-bar warn">Managed via Settings → Blackout.</div>
+              <div class="badge-bar warn system-cta">
+                <span>Managed via Settings → Blackout.</span>
+                <button @click="openSettingsTab('blackout'); closeDrawer()">Open Blackout Settings</button>
+              </div>
             </template>
-            <div class="drawer-grid">
-              <label>Personality
-                <input type="text" x-model="drawer.personality" :disabled="drawer.system" @input="queueDraftSave()" />
-              </label>
-              <label>Role
-                <select x-model="drawer.role" :disabled="drawer.system" @change="queueDraftSave()">
-                  <option value="groove">groove</option>
-                  <option value="buildup">buildup</option>
-                  <option value="drop">drop</option>
-                  <option value="post_drop">post_drop</option>
-                  <option value="breakdown">breakdown</option>
-                </select>
-              </label>
-              <label>Behavior
-                <select x-model="drawer.behavior" :disabled="drawer.system" @change="drawer.behaviorTouched = true; queueDraftSave()">
-                  <option value="pulse">Tap</option>
-                  <option value="hold_beats">Hold</option>
-                </select>
-              </label>
-              <label>Velocity
-                <input type="number" min="0" max="127" x-model.number="drawer.velocity" :disabled="drawer.system" @input="queueDraftSave()" />
-                <span class="field-error" x-show="fieldError('velocity')" x-text="fieldError('velocity')"></span>
-              </label>
-              <label x-show="drawer.behavior === 'hold_beats'">Hold Beats
-                <input type="number" step="0.25" min="0.25" max="128" x-model.number="drawer.hold_beats" :disabled="drawer.system" @input="queueDraftSave()" />
-                <span class="field-error" x-show="fieldError('hold_beats')" x-text="fieldError('hold_beats')"></span>
-              </label>
-              <label x-show="drawer.behavior === 'pulse'">Pulse Duration (ms)
-                <input type="number" min="10" max="250" x-model.number="drawer.duration_ms" :disabled="drawer.system" @input="queueDraftSave()" />
-              </label>
-              <label>Cooldown Beats
-                <input type="number" step="0.25" min="0" x-model.number="drawer.cooldown_beats" :disabled="drawer.system" @input="queueDraftSave()" />
-                <span class="field-error" x-show="fieldError('cooldown_beats')" x-text="fieldError('cooldown_beats')"></span>
-              </label>
-              <label>Safety Class
-                <select x-model="drawer.safety_class" :disabled="drawer.system" @change="queueDraftSave()">
-                  <option value="safe">safe</option>
-                  <option value="movement_low">movement_low</option>
-                  <option value="movement_medium">movement_medium</option>
-                  <option value="movement_high">movement_high</option>
-                  <option value="high_impact">high_impact</option>
-                  <option value="strobe">strobe</option>
-                  <option value="blackout">blackout</option>
-                </select>
-              </label>
-              <label>Label
+
+            <div class="drawer-top-grid">
+              <label>Label:
                 <input type="text" x-model="drawer.label" :disabled="drawer.system" @input="queueDraftSave()" />
               </label>
-            </div>
-            <div class="drawer-actions">
-              <label>
-                <input type="checkbox" x-model="drawer.immediate" :disabled="drawer.system" @change="queueDraftSave()" />
-                Immediate
+              <label>Bank:
+                <select :value="activeBankId" @change="activeBankId = $event.target.value" disabled>
+                  <template x-for="bank in banks()" :key="bank.id">
+                    <option :value="bank.id" x-text="bank.name"></option>
+                  </template>
+                </select>
               </label>
-              <button @click="setDrawerPrimary()" :disabled="drawer.system || !drawerIsMapped()">Set Primary</button>
-              <button @click="removeDrawerMapping()" :disabled="drawer.system || !drawerIsMapped()">Remove Mapping</button>
-              <button @click="persistDrawer()" :disabled="drawer.system || !canApplyDrawer()">Apply Now</button>
-              <button @click="closeDrawer()">Close</button>
+              <label>Move to bank:
+                <select :disabled="drawer.system" @change="moveOpenNoteToBank($event.target.value); $event.target.value = ''">
+                  <option value="">Select bank…</option>
+                  <template x-for="bank in banks().filter((bank) => bank.id !== activeBankId)" :key="bank.id">
+                    <option :value="bank.id" x-text="`${bank.name} · Ch${bank.channel || 1}`"></option>
+                  </template>
+                </select>
+              </label>
             </div>
+
+            <section class="drawer-card primary-card">
+              <h4>PRIMARY MAPPING</h4>
+              <div class="drawer-grid">
+                <label>Personality:
+                  <select x-model="drawer.personality" :disabled="drawer.system" @change="queueDraftSave()">
+                    <template x-for="name in personalityNames()" :key="name">
+                      <option :value="name" x-text="name"></option>
+                    </template>
+                  </select>
+                </label>
+                <label>Role:
+                  <select x-model="drawer.role" :disabled="drawer.system" @change="queueDraftSave()">
+                    <option value="groove">groove</option>
+                    <option value="buildup">buildup</option>
+                    <option value="drop">drop</option>
+                    <option value="post_drop">post_drop</option>
+                    <option value="breakdown">breakdown</option>
+                  </select>
+                </label>
+                <label>Scene name:
+                  <input type="text" :value="drawerSceneDetails().sceneName || '(new on apply)'" disabled />
+                </label>
+                <div class="radio-row">
+                  <span>Message:</span>
+                  <label><input type="radio" checked disabled /> Note</label>
+                  <label><input type="radio" disabled /> CC</label>
+                </div>
+                <label>Behavior:
+                  <select x-model="drawer.behavior" :disabled="drawer.system" @change="drawer.behaviorTouched = true; queueDraftSave()">
+                    <option value="pulse">Tap</option>
+                    <option value="hold_beats">Hold</option>
+                  </select>
+                </label>
+                <label>Duration ms:
+                  <input type="number" min="10" max="250" x-model.number="drawer.duration_ms" :disabled="drawer.system" @input="queueDraftSave()" />
+                </label>
+                <label>Channel:
+                  <input type="number" min="1" max="16" :value="currentBank()?.channel || 1" disabled />
+                </label>
+                <label>Velocity:
+                  <input type="number" min="0" max="127" x-model.number="drawer.velocity" :disabled="drawer.system" @input="queueDraftSave()" />
+                  <span class="field-error" x-show="fieldError('velocity')" x-text="fieldError('velocity')"></span>
+                </label>
+                <label>Cooldown beats:
+                  <input type="number" step="0.25" min="0" x-model.number="drawer.cooldown_beats" :disabled="drawer.system" @input="queueDraftSave()" />
+                  <span class="field-error" x-show="fieldError('cooldown_beats')" x-text="fieldError('cooldown_beats')"></span>
+                </label>
+                <label class="inline-check drawer-check">
+                  <input type="checkbox" x-model="drawer.immediate" :disabled="drawer.system" @change="queueDraftSave()" />
+                  <span>immediate</span>
+                </label>
+                <label>Safety class:
+                  <select x-model="drawer.safety_class" :disabled="drawer.system" @change="queueDraftSave()">
+                    <option value="safe">safe</option>
+                    <option value="movement_low">movement_low</option>
+                    <option value="movement_medium">movement_medium</option>
+                    <option value="movement_high">movement_high</option>
+                    <option value="high_impact">high_impact</option>
+                    <option value="strobe">strobe</option>
+                    <option value="blackout">blackout</option>
+                  </select>
+                </label>
+                <label>Fallback scene:
+                  <select :disabled="drawer.system" :value="currentSceneConfig()?.fallback_scene || 'safe_static'" @change="queueScenePatch(drawerSceneDetails().sceneName, { fallback_scene: $event.target.value })">
+                    <template x-for="name in availableScenes()" :key="name">
+                      <option :value="name" x-text="name"></option>
+                    </template>
+                  </select>
+                </label>
+              </div>
+              <div class="drawer-actions">
+                <button @click="sendTest(currentBank()?.channel || 1, openNote)" :disabled="drawer.system">Fire test</button>
+                <button
+                  @click="setDrawerPrimary()"
+                  :disabled="drawer.system || !drawerIsMapped() || drawerRoleChanged()"
+                  :title="drawerRoleChanged() ? 'Apply role change first' : ''"
+                >Set as primary</button>
+                <button @click="removeDrawerMapping()" :disabled="drawer.system || !drawerIsMapped()">Remove mapping</button>
+              </div>
+            </section>
+
+            <section class="drawer-card bank-pool" x-show="!drawer.system && drawer.role">
+              <h4>BANK ROTATION POOL (<span x-text="roleBankScenes(drawer.role).length"></span> scenes)</h4>
+              <template x-if="!roleBankScenes(drawer.role).length">
+                <div class="panel-empty">No scenes in this role bank yet.</div>
+              </template>
+              <template x-for="sceneName in roleBankScenes(drawer.role)" :key="sceneName">
+                <div class="pool-row">
+                  <span class="pool-dot">•</span>
+                  <code x-text="sceneName"></code>
+                  <span x-text="`note ${sceneMidi(sceneName).note ?? '-'}`"></span>
+                  <span x-text="sceneBehaviorText(sceneName)"></span>
+                  <span class="pool-primary-slot">
+                    <template x-if="sceneName === primarySceneForRole(drawer.role)">
+                      <span class="primary-star">⭐ primary</span>
+                    </template>
+                    <template x-if="sceneName !== primarySceneForRole(drawer.role)">
+                      <button @click="makeScenePrimary(drawer.role, sceneName)">make primary</button>
+                    </template>
+                  </span>
+                  <button class="danger" @click="removeSceneFromBank(drawer.role, sceneName)">×</button>
+                </div>
+              </template>
+              <button class="link-button" @click="addSceneToCurrentBankPrompt()">+ add another scene to this bank</button>
+            </section>
+
+            <details class="advanced-drawer">
+              <summary>Advanced (CC fields, hold_ms/hold_beats, raw JSON view)</summary>
+              <div class="drawer-grid">
+                <label>CC number:
+                  <input type="number" disabled placeholder="not implemented" />
+                </label>
+                <label>CC value:
+                  <input type="number" disabled placeholder="not implemented" />
+                </label>
+                <label>Hold beats:
+                  <input type="number" step="0.25" min="0.25" max="128" x-model.number="drawer.hold_beats" :disabled="drawer.system" @input="queueDraftSave()" />
+                  <span class="field-error" x-show="fieldError('hold_beats')" x-text="fieldError('hold_beats')"></span>
+                </label>
+              </div>
+              <pre class="raw-json" x-text="rawSceneJson(openNote)"></pre>
+            </details>
           </div>
         </div>
       </template>
@@ -360,6 +446,24 @@
                   </div>
                 </div>
 
+                <h4 style="margin-top: 20px;">Timing / Draft</h4>
+                <div class="drawer-grid">
+                  <label>Groove Phrase Length
+                    <input type="number" min="1" x-model.number="timingDraft.phrase_interval_beats" />
+                  </label>
+                  <label>Minimum Scene Hold
+                    <input type="number" min="0" x-model.number="timingDraft.minimum_scene_hold_beats" />
+                  </label>
+                  <label>Buildup Lookahead
+                    <input type="number" min="1" x-model.number="timingDraft.buildup_lookahead_beats" />
+                  </label>
+                </div>
+                <div class="drawer-actions">
+                  <button @click="saveTimingDraft()" :disabled="!canSaveTimingDraft()">Apply Timing</button>
+                  <button @click="openHistoryPanel()">History</button>
+                  <button @click="discardDraft()">Discard Draft</button>
+                </div>
+
                 <h4 style="margin-top: 20px;">Lifecycle Scenes</h4>
                 <span class="settings-field-help" style="display:block; margin-bottom: 10px;">
                   Choose which scene the bridge fires at each lifecycle event. Leave blank to inherit.
@@ -397,6 +501,7 @@
                     <div class="settings-personality-actions">
                       <button @click="renamePersonalityPrompt(name)">Rename</button>
                       <button @click="duplicatePersonalityPrompt(name)">Duplicate</button>
+                      <button @click="setDefaultPersonality(name)" :disabled="config?.default_personality === name">Set Default</button>
                       <button
                         class="danger"
                         @click="deletePersonalityConfirm(name)"

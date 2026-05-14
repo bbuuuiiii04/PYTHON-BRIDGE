@@ -12,12 +12,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.laser_config import load_laser_director_config
 from rb_ss_bridge_v2.tools.laser_config_ops import (
+    _ensure_personality_exists,
     apply_mapping,
+    detect_mixed_role_cooldowns,
+    find_bank_range_collisions,
     find_duplicate_notes,
     find_duplicate_notes_keyed,
     find_soft_duplicate_notes,
     load_or_create_config,
+    render_personality_summary,
     save_config_atomically,
+    update_personality_timing,
+    update_role_bank_cooldown,
+    update_scene_cooldown,
+    update_scene_safety_class,
     validate_config_data,
     verify_mappings_runtime,
 )
@@ -137,8 +145,12 @@ class LaserConfigOpsTests(unittest.TestCase):
 
             checks = verify_mappings_runtime(path)
 
-        failed = [item for item in checks if not item[1]]
+        failed = [item for item in checks if not item["ok"]]
         self.assertEqual(failed, [], msg=str(checks))
+        role_rows = [row for row in checks if row.get("role") == "drop"]
+        self.assertTrue(role_rows)
+        self.assertEqual(role_rows[0]["note"], 40)
+        self.assertEqual(role_rows[0]["channel"], 1)
 
     def test_laser_models_label_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -290,6 +302,188 @@ class LaserConfigOpsTests(unittest.TestCase):
         named_tmp.assert_not_called()
         self.assertEqual(errors, [])
         self.assertIsInstance(warnings, list)
+
+    def test_bank_range_collision_helper_ignores_non_overlapping_ranges(self) -> None:
+        pad_meta = {
+            "banks": [
+                {"id": "bank_1", "channel": 1, "notes": list(range(0, 32))},
+                {"id": "bank_2", "channel": 1, "notes": list(range(32, 64))},
+            ]
+        }
+
+        self.assertEqual(find_bank_range_collisions(pad_meta), [])
+
+    def test_bank_range_collision_helper_warns_for_same_channel_overlap(self) -> None:
+        pad_meta = {
+            "banks": [
+                {"id": "bank_1", "channel": 1, "notes": [32, 33, 34]},
+                {"id": "bank_2", "channel": 1, "notes": [34, 35]},
+            ]
+        }
+
+        collisions = find_bank_range_collisions(pad_meta)
+
+        self.assertEqual(len(collisions), 1)
+        self.assertEqual(collisions[0]["bank_a"], "bank_1")
+        self.assertEqual(collisions[0]["bank_b"], "bank_2")
+        self.assertEqual(collisions[0]["channel"], 1)
+        self.assertEqual(collisions[0]["overlap_notes"], [34])
+
+    def test_bank_range_collision_helper_ignores_different_channels(self) -> None:
+        pad_meta = {
+            "banks": [
+                {"id": "bank_1", "channel": 1, "notes": [32, 33, 34]},
+                {"id": "bank_2", "channel": 2, "notes": [34, 35]},
+            ]
+        }
+
+        self.assertEqual(find_bank_range_collisions(pad_meta), [])
+
+    def test_validate_config_data_surfaces_bank_overlap_as_warning(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        cfg["_pad_meta"]["banks"][1]["notes"] = [31, 32, 33]
+
+        errors, warnings = validate_config_data(cfg)
+
+        self.assertEqual(errors, [])
+        self.assertTrue(any("bank channel overlap" in warning for warning in warnings))
+
+    def test_apply_mapping_keeps_primary_and_appends_bank(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        first = apply_mapping(cfg, personality="house", role="groove", note=37)
+        second = apply_mapping(cfg, personality="house", role="groove", note=45)
+
+        house = cfg["personalities"]["house"]
+        self.assertEqual(house["phrase_scene"], first)
+        self.assertEqual(house["default_scene"], first)
+        self.assertEqual(house["phrase_bank"], [first, second])
+
+    def test_drop_mode_reuses_drop_mapping_for_post_drop(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        drop_scene = apply_mapping(cfg, personality="house", role="drop", note=40)
+
+        house = cfg["personalities"]["house"]
+        self.assertEqual(house["drop_style"], "drop_mode")
+        self.assertEqual(house["post_drop_scene"], drop_scene)
+        self.assertEqual(house["post_drop_bank"], [drop_scene])
+
+    def test_emphasized_drop_supports_separate_post_drop_mapping(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        cfg["personalities"]["house"]["drop_style"] = "emphasized_drop"
+        drop_scene = apply_mapping(cfg, personality="house", role="drop", note=40)
+        post_scene = apply_mapping(cfg, personality="house", role="post_drop", note=41)
+
+        house = cfg["personalities"]["house"]
+        self.assertNotEqual(drop_scene, post_scene)
+        self.assertEqual(house["drop_scene"], drop_scene)
+        self.assertEqual(house["post_drop_scene"], post_scene)
+
+    def test_existing_legacy_personality_shape_is_reshaped(self) -> None:
+        cfg = {
+            "enabled": False,
+            "dry_run": True,
+            "default_personality": "legacy",
+            "personalities": {
+                "legacy": {
+                    "scene": "legacy_scene",
+                }
+            },
+            "scenes": {
+                "legacy_scene": {
+                    "scene_type": "autoloop",
+                    "safety_class": "movement_low",
+                    "fallback_scene": "safe_static",
+                    "cooldown_beats": 8,
+                    "immediate": False,
+                    "midi": {
+                        "kind": "note_pulse",
+                        "behavior": "pulse",
+                        "channel": 1,
+                        "note": 12,
+                        "velocity": 127,
+                        "duration_ms": 80,
+                    },
+                }
+            },
+        }
+
+        scene = apply_mapping(cfg, personality="legacy", role="groove", note=37)
+
+        legacy = cfg["personalities"]["legacy"]
+        self.assertEqual(legacy["phrase_scene"], scene)
+        self.assertIn(scene, legacy["phrase_bank"])
+        self.assertIn("drop_style", legacy)
+
+    def test_existing_personality_defaults_are_backfilled_with_isolated_mutables(self) -> None:
+        cfg = {
+            "personalities": {
+                "house": {
+                    "safe_scene": "custom_safe",
+                },
+            },
+        }
+
+        _ensure_personality_exists(cfg, "house")
+
+        house = cfg["personalities"]["house"]
+        self.assertEqual(house["safe_scene"], "custom_safe")
+        self.assertEqual(house["phrase_bank"], [])
+        self.assertEqual(house["minimum_scene_hold_beats"], 8)
+
+        house["phrase_bank"].append("mutated_scene")
+        cfg["personalities"]["techno"] = {"safe_scene": "techno_safe"}
+        _ensure_personality_exists(cfg, "techno")
+
+        self.assertEqual(cfg["personalities"]["techno"]["phrase_bank"], [])
+
+    def test_personality_timing_scene_cooldown_and_safety_mutators(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        scene = apply_mapping(cfg, personality="house", role="groove", note=37)
+
+        update_personality_timing(
+            cfg,
+            personality="house",
+            phrase_interval_beats=48,
+            minimum_scene_hold_beats=10,
+            buildup_lookahead_beats=24,
+        )
+        update_scene_cooldown(cfg, scene_name=scene, cooldown_beats=12.5)
+        update_scene_safety_class(cfg, scene_name=scene, safety_class="strobe")
+
+        house = cfg["personalities"]["house"]
+        self.assertEqual(house["phrase_interval_beats"], 48)
+        self.assertEqual(house["minimum_scene_hold_beats"], 10)
+        self.assertEqual(house["buildup_lookahead_beats"], 24)
+        self.assertEqual(cfg["scenes"][scene]["cooldown_beats"], 12.5)
+        self.assertEqual(cfg["scenes"][scene]["safety_class"], "strobe")
+
+    def test_role_bank_cooldown_and_mixed_cooldown_detection(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        first = apply_mapping(cfg, personality="house", role="groove", note=37)
+        second = apply_mapping(cfg, personality="house", role="groove", note=45)
+        cfg["scenes"][first]["cooldown_beats"] = 16
+        cfg["scenes"][second]["cooldown_beats"] = 8
+
+        mixed, values = detect_mixed_role_cooldowns(cfg, personality="house", role="groove")
+        update_role_bank_cooldown(cfg, personality="house", role="groove", cooldown_beats=18)
+
+        self.assertTrue(mixed)
+        self.assertEqual(values, [8.0, 16.0])
+        for scene in cfg["personalities"]["house"]["phrase_bank"]:
+            self.assertEqual(cfg["scenes"][scene]["cooldown_beats"], 18.0)
+
+    def test_summary_displays_cooldown_behavior_and_drop_mode(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        apply_mapping(cfg, personality="house", role="groove", note=37)
+        apply_mapping(cfg, personality="house", role="groove", note=45)
+        apply_mapping(cfg, personality="house", role="drop", note=40)
+
+        summary = render_personality_summary(cfg, "house")
+
+        self.assertIn("house (default)", summary)
+        self.assertIn("notes 37,45", summary)
+        self.assertIn("Drop style: Drop mode", summary)
+        self.assertNotIn("post_drop", summary)
 
 
 if __name__ == "__main__":

@@ -80,16 +80,18 @@ Run the in-repo Laser Pad server:
 
 ```bash
 cd /Users/bbui
-python3 -m rb_ss_bridge_v2.scripts.laser_pad --host 0.0.0.0 --port 8765
+python3 -m rb_ss_bridge_v2.scripts.laser_pad --host 127.0.0.1 --port 8765
 ```
+
+> **iPad on LAN** (optional): for operator access from another device on the same Wi-Fi,
+> edit `launchagents/com.bbui.laser-pad.plist` and change `--host 127.0.0.1` to
+> `--host 0.0.0.0`, then `launchctl unload` + `launchctl load` the plist. Treat this as
+> a deliberate exposure — anyone on your LAN can write the laser config draft.
 
 Then open:
 
 - `http://127.0.0.1:8765` on desktop
-- `http://<your-mac-lan-ip>:8765` on iPad (same LAN)
 
 Laser Pad is now the canonical mapping surface.
-`tools/laser_map_wizard.py` remains available during deprecation but is no longer
-the recommended operator path.
 
 Detailed workflow and API notes are in `docs/laser_pad.md`.

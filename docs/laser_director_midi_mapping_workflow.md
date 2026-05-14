@@ -4,26 +4,24 @@ Status: Operator setup notes for Laser Director / SoundSwitch MIDI mapping.
 
 Audience: Coding agents, maintainers, and operators.
 
-This document explains how SoundSwitch MIDI mapping is being prepared manually before Laser Director implementation.
+This document explains how SoundSwitch MIDI mapping is prepared through Laser Pad.
 
 ## No manual JSON editing workflow
 
-Use Laser Pad (`python3 -m rb_ss_bridge_v2.scripts.laser_pad`) instead of
-hand-editing `laser_director.json`.
-
-The terminal wizard remains available as a deprecated fallback during cutover.
+Use Laser Pad (`http://127.0.0.1:8765`) instead of hand-editing
+`laser_director.json`.
 
 ```text
 1. Open SoundSwitch.
 2. Put SoundSwitch into MIDI mapping mode.
 3. Map a SoundSwitch cue/autoloop to a MIDI note.
 4. Open Laser Pad (`http://127.0.0.1:8765`) and long-press a note tile.
-5. Choose personality: house or default (default aliases to house).
+5. Choose personality: house or another configured profile.
 6. Choose role:
    - Drop mode: groove, buildup, drop, breakdown
    - Emphasized drop: groove, buildup, drop, post_drop, breakdown
-7. Enter MIDI note 0–127.
-8. Review warnings and save.
+7. Adjust note behavior, cooldown, safety, or label if needed.
+8. Review warnings and commit the draft.
 9. Restart bridge if prompted.
 10. Keep dry_run=true until ready for live MIDI.
 11. Set `smart_drop_mode` explicitly (`blackout_mask` or `legacy_rearm`) as needed.
@@ -35,7 +33,8 @@ round-robin (example: house groove notes 37, 45, 46).
 To add multiple looks for one role, map the same personality + role again with
 a new MIDI note. Laser Pad automatically adds that mapping to the role bank.
 
-In Laser Pad, use long-press to open mapping edit and backdrop-click to close.
+In Laser Pad, use long-press to open mapping edit, tap tiles to test-fire, and
+drag/drop mapped tiles to reassign notes.
 
 ## Mapping Setting Runtime Contract
 
@@ -43,8 +42,8 @@ Only settings with runtime effect are exposed in normal operator setup.
 
 | UI Label | Config Key | Model Field | Runtime Consumer | Proof Test |
 | --- | --- | --- | --- | --- |
-| Personality + role mapping | `personalities.<p>.*_scene` + role bank keys | `LaserPersonality` role fields + banks | `LaserSceneExecutor._bank_for_role()` and role selection path | `tests/test_laser_map_wizard.py::test_second_mapping_auto_appends_bank_keeps_primary` |
-| MIDI note | `scenes.<scene>.midi.note` | `LaserMidiMessage.note` | `MidiOutput._send_trigger()` | `tests/test_laser_map_wizard.py::test_verify_runtime_contract_passes_for_wizard_config` |
+| Personality + role mapping | `personalities.<p>.*_scene` + role bank keys | `LaserPersonality` role fields + banks | `LaserSceneExecutor._bank_for_role()` and role selection path | `tests/test_laser_config_ops.py::test_apply_mapping_keeps_primary_and_appends_bank` |
+| MIDI note | `scenes.<scene>.midi.note` | `LaserMidiMessage.note` | `MidiOutput._send_trigger()` | `tests/test_laser_config_ops.py::test_verify_mappings_runtime_passes_on_example` |
 | Trigger behavior | `scenes.<scene>.midi.behavior` | `LaserMidiMessage.behavior` | `LaserSceneExecutor._materialize_midi()` + `MidiOutput._send_trigger()` | `tests/test_laser_executor.py::test_hold_beats_materializes_with_context_bpm` |
 | Role cooldown | `scenes.<scene>.cooldown_beats` (normalized per role bank) | `LaserScene.cooldown_beats` | `LaserSceneExecutor._is_role_cooldown_blocked()` | `tests/test_laser_executor.py::test_role_cooldown_blocks_then_allows_after_beats` |
 | Role bank rotation | `personalities.<p>.phrase_bank` etc | `LaserPersonality.*_bank` | `LaserSceneExecutor._choose_bank_scene_locked()` | `tests/test_laser_executor.py::test_drop_bank_rotates_each_crossing` |

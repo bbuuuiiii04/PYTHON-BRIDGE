@@ -3,20 +3,29 @@
 Status: CURRENT SUPPORTING
 
 `Laser Pad` is the browser-based configuration and test surface for Laser Director
-MIDI scene mappings. It progressively replaces `tools/laser_map_wizard.py` by
-sharing the same pure operations in `tools/laser_config_ops.py`.
+MIDI scene mappings. The terminal wizard is retired; Laser Pad is the only
+operator mapper.
 
 ## Launch
 
 ```bash
 cd /Users/bbui
-python3 -m rb_ss_bridge_v2.scripts.laser_pad --host 0.0.0.0 --port 8765
+python3 -m rb_ss_bridge_v2.scripts.laser_pad --host 127.0.0.1 --port 8765
 ```
 
-Open:
+> **iPad on LAN** (optional): for operator access from another device on the same Wi-Fi,
+> edit `launchagents/com.bbui.laser-pad.plist` and change `--host 127.0.0.1` to
+> `--host 0.0.0.0`, then `launchctl unload` + `launchctl load` the plist. Treat this as
+> a deliberate exposure — anyone on your LAN can write the laser config draft.
 
-- `http://127.0.0.1:8765` (desktop)
-- `http://<your-mac-lan-ip>:8765` (iPad on same LAN)
+For the always-on login server, install the tracked LaunchAgent:
+
+```bash
+cp launchagents/com.bbui.laser-pad.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.bbui.laser-pad.plist
+```
+
+Open `http://127.0.0.1:8765`.
 
 ## Current capabilities
 
@@ -29,6 +38,11 @@ Open:
 - Drawer supports explicit **Set Primary** and **Remove Mapping** parity actions.
 - Commit/discard controls (`/api/commit`, `/api/discard`).
 - Validate and runtime verify actions (`/api/validate`, `/api/verify`).
+- Live runtime mirror from `GET /api/runtime_status`.
+- Verify failures mark note tiles inline.
+- Long-press note tiles show a progress indicator before opening the drawer.
+- Drag/drop reassignment supports undo for the last move.
+- Bank validation warns when channel and note ranges overlap.
 - Collapsible validate/verify result panels persist the latest run output.
 - Backup history list + diff + restore (`/api/history*`).
 - In-app history drawer supports refresh, diff view, and restore-to-draft.
@@ -40,6 +54,10 @@ Open:
 
 ## Recent updates
 
+- `2026-05-14`: `_ensure_personality_exists` now backfills missing default keys on existing personalities (was: return-early). Legacy configs are self-healed on first load; explicitly-omitted defaults will be re-added.
+- `2026-05-13`: Retired the terminal wizard and made Laser Pad the only mapper.
+- `2026-05-13`: Added always-on LaunchAgent support for the local pad server.
+- `2026-05-13`: Added live runtime mirror, inline verify dots, long-press progress, drag/drop undo, and bank overlap warnings.
 - `2026-05-13`: Restoring history now normalizes legacy backups and reinjects required pad/core defaults.
 - `2026-05-13`: `GET /api/history` now returns deterministic JSON errors on server-side enumeration failures.
 - `2026-05-13`: Drop-mode mapping removal now keeps `post_drop` references synchronized to avoid orphan scene pointers.
@@ -59,12 +77,38 @@ Open:
 - `POST /api/test_note`
 - `POST /api/validate`
 - `POST /api/verify`
+- `GET /api/runtime_status`
 - `GET /api/history`
 - `GET /api/history/<name>/diff`
 - `POST /api/history/<name>/restore`
 - `GET /api/midi_ports`
 
-Parity tracking is maintained in `docs/laser_pad_parity.md`.
+Historical parity notes are maintained in `docs/laser_pad_parity.md`.
+
+## Verification
+
+- `launchctl list | grep laser-pad` shows the LaunchAgent loaded.
+- Clicking menu bar **Laser Pad...** opens `http://127.0.0.1:8765` in the default browser within about 1 second.
+- `curl -sS http://127.0.0.1:8765/api/config | jq .config.schema` returns a number or `null` for older configs.
+
+## Picking up code changes
+
+The LaunchAgent only restarts on crash (`KeepAlive.SuccessfulExit=false`). After
+editing `tools/laser_pad_web.py` or any pad asset, force the agent to reload:
+
+```bash
+launchctl kickstart -k gui/$UID/com.bbui.laser-pad
+```
+
+Manual debugging launches must first unload the agent to avoid port 8765
+collision:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.bbui.laser-pad.plist
+python3 -m rb_ss_bridge_v2.scripts.laser_pad --host 127.0.0.1 --port 8765
+# when done:
+launchctl load ~/Library/LaunchAgents/com.bbui.laser-pad.plist
+```
 
 ## SoundSwitch channel caveat
 
