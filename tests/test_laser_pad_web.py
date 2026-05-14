@@ -1068,8 +1068,78 @@ class LaserPadWebTests(unittest.TestCase):
             expected = verify_mappings_runtime(tmp_verify_path)
             actual = service.verify_draft()["checks"]
 
-        normalized = [(row["name"], row["ok"], row["detail"]) for row in actual]
-        self.assertEqual(normalized, expected)
+        self.assertEqual(actual, expected)
+
+    def test_runtime_status_route_returns_slim_laser_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            status_path = Path(td) / "status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "written_at": time.time(),
+                        "laser_director": {
+                            "enabled": True,
+                            "emergency": False,
+                            "personality": "house",
+                            "current_scene": "drop_001",
+                            "last_reason": "phrase_anchor_drop",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = LaserPadService(Path(td) / "laser_director.json", status_path=status_path)
+
+            with self._running_server(service) as port:
+                status, payload, _raw = self._request_json(
+                    port=port,
+                    method="GET",
+                    path="/api/runtime_status",
+                )
+
+        self.assertEqual(status, 200)
+        assert payload is not None
+        self.assertTrue(payload["available"])
+        self.assertTrue(payload["enabled"])
+        self.assertEqual(payload["active_personality"], "house")
+        self.assertEqual(payload["current_scene"], "drop_001")
+        self.assertEqual(payload["last_reason"], "phrase_anchor_drop")
+        self.assertLess(payload["stale_seconds"], 5.0)
+
+    def test_runtime_status_route_treats_missing_or_stale_file_as_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            status_path = Path(td) / "status.json"
+            service = LaserPadService(Path(td) / "laser_director.json", status_path=status_path)
+
+            with self._running_server(service) as port:
+                status, payload, _raw = self._request_json(
+                    port=port,
+                    method="GET",
+                    path="/api/runtime_status",
+                )
+
+        self.assertEqual(status, 200)
+        assert payload is not None
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["reason"], "status_file_missing_or_stale")
+
+    def test_runtime_status_route_reports_parse_error_without_500(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            status_path = Path(td) / "status.json"
+            status_path.write_text("{bad", encoding="utf-8")
+            service = LaserPadService(Path(td) / "laser_director.json", status_path=status_path)
+
+            with self._running_server(service) as port:
+                status, payload, _raw = self._request_json(
+                    port=port,
+                    method="GET",
+                    path="/api/runtime_status",
+                )
+
+        self.assertEqual(status, 200)
+        assert payload is not None
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["reason"], "parse_error")
 
     def test_verify_http_route_returns_checks_list(self) -> None:
         with tempfile.TemporaryDirectory() as td:

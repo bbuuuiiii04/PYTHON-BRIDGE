@@ -52,12 +52,17 @@ window.laserPadApp = function laserPadApp() {
       buildup_lookahead_beats: 32,
     },
     activeBankId: 'bank_1',
-    test: { channel: 1, note: 60, velocity: 127, behavior: 'pulse', duration_ms: 100, hold_beats: 4 },
+    test: { channel: 1, note: 60, velocity: 127, behavior: 'pulse', duration_ms: 100, hold_beats: 4, bpm: 128 },
     statusText: '',
+    runtime: { active_personality: '', current_scene: '', last_reason: '', stale_seconds: 0, available: false, enabled: false, emergency: false },
+    runtimeTimer: null,
+    beforeUnloadHandler: null,
     firingNote: null,
     firingTimer: null,
     touchLongPressTimer: null,
+    bankLongPressTimer: null,
     touchLongPressed: false,
+    pressProgress: { note: null, startedAt: 0 },
     suppressClickNote: null,
     duplicateWarning: '',
     openNote: null,
@@ -67,6 +72,13 @@ window.laserPadApp = function laserPadApp() {
     showVerifyPanel: false,
     validateResults: { errors: [], warnings: [] },
     verifyResults: { checks: [] },
+    verifyByNote: {},
+    lastReassignUndo: {
+      visible: false,
+      message: '',
+      patch: null,
+      timer: null,
+    },
     historyOpen: false,
     historyLoading: false,
     historyItems: [],
@@ -109,7 +121,66 @@ window.laserPadApp = function laserPadApp() {
     async init() {
       await this.refreshConfig();
       await this.refreshMidiPorts();
+      await this.refreshRuntimeStatus();
+      this.startRuntimeTimer();
       this.loading = false;
+    },
+
+    startRuntimeTimer() {
+      this.stopRuntimeTimer();
+      this.runtimeTimer = setInterval(() => {
+        this.refreshRuntimeStatus();
+      }, 1000);
+      if (typeof window !== 'undefined') {
+        this.beforeUnloadHandler = () => this.stopRuntimeTimer();
+        window.addEventListener('beforeunload', this.beforeUnloadHandler);
+      }
+    },
+
+    stopRuntimeTimer() {
+      if (this.runtimeTimer) {
+        clearInterval(this.runtimeTimer);
+        this.runtimeTimer = null;
+      }
+      if (typeof window !== 'undefined' && this.beforeUnloadHandler) {
+        window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+        this.beforeUnloadHandler = null;
+      }
+    },
+
+    destroy() {
+      this.stopRuntimeTimer();
+    },
+
+    async refreshRuntimeStatus() {
+      try {
+        const response = await fetch('/api/runtime_status');
+        const data = await response.json();
+        this.runtime = {
+          active_personality: String(data.active_personality || ''),
+          current_scene: String(data.current_scene || ''),
+          last_reason: this.runtimeReasonLabel(data),
+          stale_seconds: Number(data.stale_seconds || 0),
+          available: Boolean(data.available),
+          enabled: Boolean(data.enabled),
+          emergency: Boolean(data.emergency),
+        };
+      } catch (err) {
+        this.runtime = { active_personality: '', current_scene: '', last_reason: '', stale_seconds: 0, available: false, enabled: false, emergency: false };
+      }
+    },
+
+    runtimeReasonLabel(data) {
+      const reason = String(data?.last_reason || data?.reason || '');
+      if (reason === 'status_file_missing_or_stale') return 'Bridge offline';
+      if (reason === 'parse_error') return 'Status unavailable';
+      return reason;
+    },
+
+    runtimeStatusClass() {
+      if (this.runtime?.emergency) return 'runtime-emergency';
+      if (this.runtime?.available && this.runtime?.enabled) return 'runtime-live';
+      return 'runtime-offline';
     },
 
     async refreshConfig() {
@@ -123,6 +194,7 @@ window.laserPadApp = function laserPadApp() {
         this.softDuplicates = Array.isArray(payload.soft_duplicates) ? payload.soft_duplicates : [];
         this.selectedPort = String(this.config?.midi_output_port || this.selectedPort || '');
         this.draftDryRun = Boolean(this.config?.dry_run ?? true);
+        this.syncTestUi();
         this.syncTimingDraft();
         if (!this.bankById(this.activeBankId)) {
           this.activeBankId = (this.banks()[0] || {}).id || 'bank_1';
@@ -155,6 +227,15 @@ window.laserPadApp = function laserPadApp() {
       return Array.isArray(bank?.notes) ? bank.notes : [];
     },
 
+    syncTestUi() {
+      const ui = this.config?._pad_meta?.ui || {};
+      this.test.bpm = Number(ui.bpm_for_test_fire ?? this.test.bpm ?? 128);
+      this.test.velocity = Number(ui.last_test_velocity ?? this.test.velocity ?? 127);
+      this.test.hold_beats = Number(ui.last_test_hold_beats ?? this.test.hold_beats ?? 4);
+      this.test.channel = Number(ui.last_test_channel ?? this.test.channel ?? 1);
+      this.test.note = Number(ui.last_test_note ?? this.test.note ?? 60);
+    },
+
     activePersonality() {
       const selected = this.config?._pad_meta?.ui?.last_personality;
       if (typeof selected === 'string' && selected) {
@@ -168,12 +249,25 @@ window.laserPadApp = function laserPadApp() {
       return personalities[this.activePersonality()] || {};
     },
 
+    drawerPersonalityName() {
+      if (this.openNote !== null && this.openNote !== undefined && this.drawer.personality) {
+        return String(this.drawer.personality);
+      }
+      return this.activePersonality();
+    },
+
+    drawerPersonalityData() {
+      const personalities = this.config?.personalities || {};
+      return personalities[this.drawerPersonalityName()] || {};
+    },
+
     sceneMetaByNote(note) {
       return this.sceneDetailsByNote(note);
     },
 
-    sceneDetailsByNote(note) {
-      const pdata = this.personalityData();
+    sceneDetailsByNote(note, personalityName = this.activePersonality()) {
+      const personalities = this.config?.personalities || {};
+      const pdata = personalities[personalityName] || {};
       const scenes = this.config?.scenes || {};
       const bankChannel = Number(this.currentBank()?.channel || 1);
       const manual = this.config?.manual_commands || {};
@@ -273,8 +367,10 @@ window.laserPadApp = function laserPadApp() {
 
     displayLabel(note) {
       const meta = this.sceneMetaByNote(note);
+      if (!meta.mapped) return String(note);
       if (meta.label) return meta.label;
-      return '';
+      if (meta.mapped && meta.role) return `${meta.role} ${note}`;
+      return String(note);
     },
 
     roleClass(note) {
@@ -285,7 +381,7 @@ window.laserPadApp = function laserPadApp() {
     roleText(note) {
       const meta = this.sceneMetaByNote(note);
       if (!meta.role) return 'unmapped';
-      return meta.primary ? `${meta.role} · primary` : meta.role;
+      return meta.primary ? `⭐ ${meta.role}` : meta.role;
     },
 
     safetyDotClass(note) {
@@ -301,8 +397,58 @@ window.laserPadApp = function laserPadApp() {
       return Number(this.firingNote) === Number(note);
     },
 
+    isPressing(note) {
+      return Number(this.pressProgress.note) === Number(note);
+    },
+
     channelPill(note) {
       return `Ch${this.sceneMetaByNote(note).channel}`;
+    },
+
+    // Tile decoration keys use the bank's channel; verify rows use scene.midi.channel.
+    // These must agree, which the pad enforces by mirroring bank.channel into scene.midi.channel
+    // whenever a mapping is created/moved. If that invariant ever breaks, verify-fail dots
+    // will silently fail to render. See apply_mapping in tools/laser_config_ops.py.
+    noteKey(note) {
+      return `${Number(this.currentBank()?.channel || 1)}:${Number(note)}`;
+    },
+
+    verifyState(note) {
+      return this.verifyByNote[this.noteKey(note)] || null;
+    },
+
+    noteTitle(note) {
+      const meta = this.sceneDetailsByNote(note);
+      const state = this.verifyState(note);
+      const verifyText = state && state.ok === false ? `verify: ${state.detail}` : '';
+      if (!meta.mapped) return verifyText || `note ${note}`;
+      const duration = meta.behavior === 'hold_beats'
+        ? `${meta.hold_beats} beats`
+        : `${meta.duration_ms}ms`;
+      return [
+        `${meta.sceneName} · ch${meta.channel} · note${note} · ${meta.behavior} ${duration}`,
+        verifyText,
+      ].filter(Boolean).join('\n');
+    },
+
+    cloneMapping(note) {
+      const meta = this.sceneDetailsByNote(note);
+      if (!meta.mapped || !meta.sceneName) return null;
+      const scene = this.config?.scenes?.[meta.sceneName];
+      if (!scene || typeof scene !== 'object') return null;
+      return {
+        sceneName: meta.sceneName,
+        midi: JSON.parse(JSON.stringify(scene.midi || {})),
+      };
+    },
+
+    patchForSnapshot(snapshot) {
+      if (!snapshot || !snapshot.sceneName) return {};
+      return {
+        [snapshot.sceneName]: {
+          midi: snapshot.midi,
+        },
+      };
     },
 
     computeDuplicateWarning() {
@@ -320,6 +466,79 @@ window.laserPadApp = function laserPadApp() {
       return `Duplicate mapping on ${key} across ${refs.length} scenes`;
     },
 
+    headerBanner() {
+      if (Array.isArray(this.liveErrors) && this.liveErrors.length) {
+        return { kind: 'error', text: `${this.liveErrors.length} config error(s): ${this.liveErrors[0]}` };
+      }
+      if (this.duplicateWarning) {
+        const warningSuffix = this.liveWarnings.length ? ` · ${this.liveWarnings[0]}` : '';
+        return { kind: 'warn', text: `${this.duplicateWarning}${warningSuffix}` };
+      }
+      if (Array.isArray(this.liveWarnings) && this.liveWarnings.length) {
+        return { kind: 'warn', text: this.liveWarnings[0] };
+      }
+      return null;
+    },
+
+    openDiagnosticsPanel() {
+      this.showVerifyPanel = true;
+      if (typeof document !== 'undefined') {
+        document.querySelector('.result-panels')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    },
+
+    openSettingsTab(tab) {
+      this.settingsActiveTab = tab;
+      this.openSettingsPanel();
+    },
+
+    async validateDraftOnly() {
+      try {
+        const response = await fetch('/api/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        const data = await response.json();
+        const errors = Array.isArray(data.errors) ? data.errors : [];
+        const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+        this.validateResults = { errors, warnings };
+        this.showVerifyPanel = true;
+        this.statusText = `Validation: ${errors.length} error(s), ${warnings.length} warning(s)`;
+      } catch (err) {
+        this.statusText = `Validation failed: ${err.message}`;
+      }
+    },
+
+    async persistTestUi() {
+      const patch = {
+        _pad_meta: {
+          ui: {
+            bpm_for_test_fire: Number(this.test.bpm || 128),
+            last_test_channel: Number(this.test.channel || 1),
+            last_test_note: Number(this.test.note || 0),
+            last_test_velocity: Number(this.test.velocity || 127),
+            last_test_hold_beats: Number(this.test.hold_beats || 4),
+          },
+        },
+      };
+      try {
+        const response = await fetch('/api/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patch }),
+        });
+        const data = await response.json();
+        if (!data.ok) {
+          this.statusText = data.error || 'Quick test settings save failed';
+          return;
+        }
+        this.statusText = 'Quick test settings saved';
+      } catch (err) {
+        this.statusText = `Quick test settings save failed: ${err.message}`;
+      }
+    },
+
     async fireQuickTest() {
       const channel = Number(this.test.channel || 1);
       const note = Number(this.test.note || 0);
@@ -332,6 +551,80 @@ window.laserPadApp = function laserPadApp() {
         hold_beats: Number(mapped ? (meta.hold_beats ?? this.test.hold_beats ?? 4) : (this.test.hold_beats ?? 4)),
       };
       await this.sendTest(channel, note, overrides);
+    },
+
+    async addBankPrompt() {
+      const name = window.prompt('Bank name:', `Bank ${this.banks().length + 1}`);
+      if (!name || !name.trim()) return;
+      const channelRaw = window.prompt('MIDI channel (1-16):', '1');
+      if (channelRaw === null) return;
+      const channel = Number(channelRaw);
+      if (!Number.isFinite(channel) || channel < 1 || channel > 16) {
+        this.statusText = 'Channel must be 1-16.';
+        return;
+      }
+      const existingNotes = new Set(this.banks().flatMap((bank) => Array.isArray(bank.notes) ? bank.notes : []));
+      const notes = [];
+      for (let note = 0; note <= 127; note += 1) {
+        if (!existingNotes.has(note) && notes.length < 16) notes.push(note);
+      }
+      if (!notes.length) {
+        this.statusText = 'No unmapped MIDI notes available for a new bank.';
+        return;
+      }
+      const idSeed = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || `bank_${this.banks().length + 1}`;
+      let id = idSeed;
+      let suffix = 2;
+      const ids = new Set(this.banks().map((bank) => bank.id));
+      while (ids.has(id)) {
+        id = `${idSeed}_${suffix}`;
+        suffix += 1;
+      }
+      const banks = [
+        ...this.banks().map((bank) => ({ ...bank, notes: [...(bank.notes || [])] })),
+        {
+          id,
+          name: name.trim(),
+          channel,
+          notes,
+          default_role: 'groove',
+          default_behavior: 'pulse',
+          default_duration_ms: 80,
+          default_safety: 'movement_low',
+          default_cooldown_beats: 16,
+        },
+      ];
+      await this.patchBanks(banks, `Added bank ${name.trim()}`);
+      this.activeBankId = id;
+    },
+
+    editBankPrompt(bankId) {
+      const index = this.banks().findIndex((bank) => bank.id === bankId);
+      if (index < 0) return;
+      const bank = this.banks()[index];
+      const name = window.prompt('Bank name:', bank.name || bank.id);
+      if (name && name.trim()) {
+        this.saveBank(index, 'name', name.trim());
+      }
+      const channelRaw = window.prompt('MIDI channel (1-16):', String(bank.channel || 1));
+      if (channelRaw !== null) {
+        this.saveBank(index, 'channel', channelRaw);
+      }
+    },
+
+    startBankLongPress(bankId) {
+      this.cancelBankLongPress();
+      this.bankLongPressTimer = setTimeout(() => {
+        this.editBankPrompt(bankId);
+        this.bankLongPressTimer = null;
+      }, 500);
+    },
+
+    cancelBankLongPress() {
+      if (this.bankLongPressTimer) {
+        clearTimeout(this.bankLongPressTimer);
+        this.bankLongPressTimer = null;
+      }
     },
 
     async refreshMidiPorts() {
@@ -490,6 +783,28 @@ window.laserPadApp = function laserPadApp() {
       }
     },
 
+    async setActivePersonality(name) {
+      const value = String(name || '').trim();
+      if (!value) return;
+      try {
+        const response = await fetch('/api/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // /api/draft deep-merges nested dicts; sibling _pad_meta keys are preserved.
+          body: JSON.stringify({ patch: { _pad_meta: { ui: { last_personality: value } } } }),
+        });
+        const data = await response.json();
+        if (!data.ok) {
+          this.statusText = data.error || 'Failed to set active personality';
+          return;
+        }
+        this.statusText = `active_personality=${value}`;
+        await this.refreshConfig();
+      } catch (err) {
+        this.statusText = `Active personality update failed: ${err.message}`;
+      }
+    },
+
     async _personalityCRUD(path, body, successMsg) {
       try {
         const response = await fetch(path, {
@@ -583,6 +898,238 @@ window.laserPadApp = function laserPadApp() {
       }
     },
 
+    currentSceneConfig() {
+      if (this.openNote === null || this.openNote === undefined) return null;
+      const sceneName = this.drawerSceneDetails().sceneName;
+      return sceneName ? this.config?.scenes?.[sceneName] || null : null;
+    },
+
+    drawerSceneDetails() {
+      if (this.openNote === null || this.openNote === undefined) {
+        return { mapped: false, sceneName: '', role: '', personality: this.drawerPersonalityName() };
+      }
+      return this.sceneDetailsByNote(this.openNote, this.drawerPersonalityName());
+    },
+
+    async queueScenePatch(sceneName, scenePatch) {
+      if (!sceneName) return;
+      try {
+        const response = await fetch('/api/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patch: { scenes: { [sceneName]: scenePatch } } }),
+        });
+        const data = await response.json();
+        if (!data.ok) {
+          this.statusText = data.error || 'Scene update failed';
+          return;
+        }
+        this.statusText = `Updated ${sceneName}`;
+        await this.refreshConfig();
+      } catch (err) {
+        this.statusText = `Scene update failed: ${err.message}`;
+      }
+    },
+
+    midiNoteName(note) {
+      const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+      const n = Number(note);
+      if (!Number.isFinite(n)) return '';
+      return `${names[((n % 12) + 12) % 12]}${Math.floor(n / 12) - 1}`;
+    },
+
+    sceneMidi(sceneName) {
+      const scene = this.config?.scenes?.[sceneName] || {};
+      return scene.midi || {};
+    },
+
+    sceneBehaviorText(sceneName) {
+      const midi = this.sceneMidi(sceneName);
+      const behavior = String(midi.behavior || 'pulse');
+      if (behavior === 'hold_beats') return `hold ${Number(midi.hold_beats || 0)} beats`;
+      if (behavior === 'hold_ms') return `hold ${Number(midi.hold_ms || midi.duration_ms || 0)}ms`;
+      return `${behavior} ${Number(midi.duration_ms || 80)}ms`;
+    },
+
+    tileBehaviorText(note) {
+      const meta = this.sceneDetailsByNote(note);
+      if (!meta.mapped) return '';
+      if (meta.behavior === 'hold_beats') return `hold ${Number(meta.hold_beats || 0)} beats`;
+      return meta.behavior || 'pulse';
+    },
+
+    primarySceneForRole(role) {
+      const [sceneField] = this._roleSceneFields(role);
+      return sceneField ? this.drawerPersonalityData()?.[sceneField] || '' : '';
+    },
+
+    roleBankScenes(role) {
+      const [_sceneField, bankField] = this._roleSceneFields(role);
+      const pdata = this.drawerPersonalityData() || {};
+      const primary = this.primarySceneForRole(role);
+      const bank = Array.isArray(pdata[bankField]) ? pdata[bankField] : [];
+      return [primary, ...bank].filter((name, idx, arr) => name && arr.indexOf(name) === idx);
+    },
+
+    async makeScenePrimary(role, sceneName) {
+      const [sceneField, bankField] = this._roleSceneFields(role);
+      if (!sceneField || !bankField || !sceneName) return;
+      const personality = this.drawerPersonalityName();
+      const bank = this.roleBankScenes(role);
+      const reordered = [sceneName, ...bank.filter((name) => name !== sceneName)];
+      const patch = {
+        personalities: {
+          [personality]: {
+            [sceneField]: sceneName,
+            [bankField]: reordered,
+          },
+        },
+      };
+      if (role === 'groove') {
+        patch.personalities[personality].default_scene = sceneName;
+      }
+      await this.applyPatch(patch, `Primary ${role} mapping set to ${sceneName}`);
+    },
+
+    async removeSceneFromBank(role, sceneName) {
+      const [sceneField, bankField] = this._roleSceneFields(role);
+      if (!sceneField || !bankField || !sceneName) return;
+      const proceed = window.confirm(`Remove ${sceneName} from ${role} bank?`);
+      if (!proceed) return;
+      const personality = this.drawerPersonalityName();
+      const nextBank = this.roleBankScenes(role).filter((name) => name !== sceneName);
+      const nextPrimary = this.primarySceneForRole(role) === sceneName ? (nextBank[0] || '') : this.primarySceneForRole(role);
+      const patch = {
+        personalities: {
+          [personality]: {
+            [sceneField]: nextPrimary,
+            [bankField]: nextBank,
+          },
+        },
+      };
+      if (role === 'groove') {
+        patch.personalities[personality].default_scene = nextPrimary;
+      }
+      await this.applyPatch(patch, `Removed ${sceneName} from ${role} bank`);
+    },
+
+    async addSceneToCurrentBankPrompt() {
+      const noteRaw = window.prompt('Pick an unmapped MIDI note to add:', '');
+      if (noteRaw === null) return;
+      const note = Number(noteRaw);
+      if (!Number.isFinite(note) || note < 0 || note > 127) {
+        this.statusText = 'MIDI note must be 0-127.';
+        return;
+      }
+      const meta = this.sceneDetailsByNote(note, this.drawerPersonalityName());
+      if (meta.mapped) {
+        this.statusText = `Note ${note} is already mapped — pick an unmapped note.`;
+        return;
+      }
+      try {
+        const response = await fetch('/api/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mapping: {
+              personality: this.drawerPersonalityName(),
+              role: this.drawer.role || this.currentBank()?.default_role || 'groove',
+              note,
+              channel: Number(this.currentBank()?.channel || 1),
+              velocity: Number(this.drawer.velocity || 127),
+              behavior: this.drawer.behavior || 'pulse',
+              hold_beats: Number(this.drawer.hold_beats || 4),
+              duration_ms: Number(this.drawer.duration_ms || 80),
+              cooldown_beats: Number(this.drawer.cooldown_beats || 8),
+              safety_class: this.drawer.safety_class || this.currentBank()?.default_safety || 'movement_low',
+              immediate: Boolean(this.drawer.immediate),
+              label: '',
+              add_to_bank: true,
+              replace_primary: false,
+            },
+          }),
+        });
+        const data = await response.json();
+        if (!data.ok) {
+          this.statusText = data.error || 'Failed to add bank scene';
+          return;
+        }
+        this.statusText = `Added ${data.scene_name || `note ${note}`} to ${this.drawer.role} bank`;
+        await this.refreshConfig();
+      } catch (err) {
+        this.statusText = `Failed to add bank scene: ${err.message}`;
+      }
+    },
+
+    async applyPatch(patch, successMsg) {
+      try {
+        const response = await fetch('/api/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patch }),
+        });
+        const data = await response.json();
+        if (!data.ok) {
+          this.statusText = data.error || 'Draft update failed';
+          return false;
+        }
+        this.statusText = successMsg;
+        await this.refreshConfig();
+        return true;
+      } catch (err) {
+        this.statusText = `Draft update failed: ${err.message}`;
+        return false;
+      }
+    },
+
+    async patchBanks(banks, successMsg = 'Banks updated') {
+      return this.applyPatch({ _pad_meta: { banks } }, successMsg);
+    },
+
+    async moveOpenNoteToBank(targetBankId) {
+      if (!targetBankId || this.openNote === null || this.openNote === undefined) return;
+      const note = Number(this.openNote);
+      const sourceBank = this.currentBank();
+      const targetBank = this.bankById(targetBankId);
+      if (!sourceBank || !targetBank) return;
+      const sourceChannel = Number(sourceBank.channel || 1);
+      const targetChannel = Number(targetBank.channel || 1);
+      if (sourceChannel !== targetChannel) {
+        const proceed = window.confirm(
+          `Move note ${note} from Ch${sourceChannel} to ${targetBank.name} Ch${targetChannel}? The scene MIDI channel will be updated.`
+        );
+        if (!proceed) return;
+      }
+      const banks = this.banks().map((bank) => {
+        const notes = Array.isArray(bank.notes) ? bank.notes.filter((n) => Number(n) !== note) : [];
+        if (bank.id === targetBankId && !notes.includes(note)) {
+          notes.push(note);
+          notes.sort((a, b) => Number(a) - Number(b));
+        }
+        return { ...bank, notes };
+      });
+      const meta = this.sceneDetailsByNote(note);
+      const patch = { _pad_meta: { banks } };
+      if (meta.mapped && meta.sceneName) {
+        patch.scenes = {
+          [meta.sceneName]: {
+            midi: {
+              note,
+              channel: targetChannel,
+            },
+          },
+        };
+      }
+      const ok = await this.applyPatch(patch, `Moved note ${note} to ${targetBank.name}`);
+      if (ok) this.activeBankId = targetBankId;
+    },
+
+    rawSceneJson(note) {
+      const meta = this.sceneDetailsByNote(note);
+      if (!meta.sceneName) return '{}';
+      return JSON.stringify(this.config?.scenes?.[meta.sceneName] || {}, null, 2);
+    },
+
     syncTimingDraft() {
       const pdata = this.personalityData();
       this.timingDraft = {
@@ -670,6 +1217,7 @@ window.laserPadApp = function laserPadApp() {
 
     async verifyDraft() {
       try {
+        this.verifyByNote = {};
         const validateResponse = await fetch('/api/validate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -688,6 +1236,16 @@ window.laserPadApp = function laserPadApp() {
         const data = await verifyResponse.json();
         const checks = Array.isArray(data.checks) ? data.checks : [];
         this.verifyResults = { checks };
+        const verifyByNote = {};
+        checks.forEach((row) => {
+          if (row && row.ok === false && row.channel !== undefined && row.note !== undefined) {
+            verifyByNote[`${Number(row.channel)}:${Number(row.note)}`] = {
+              ok: false,
+              detail: String(row.detail || row.name || 'verify failed'),
+            };
+          }
+        });
+        this.verifyByNote = verifyByNote;
         this.showVerifyPanel = true;
         const failed = checks.filter((row) => !row.ok).length;
         this.statusText = `Diagnostics: ${errors.length} error(s), ${warnings.length} warning(s), ${failed}/${checks.length} verify failures`;
@@ -776,11 +1334,13 @@ window.laserPadApp = function laserPadApp() {
     startTouchLongPress(note) {
       this.cancelTouchLongPress();
       this.touchLongPressed = false;
+      this.pressProgress = { note: Number(note), startedAt: Date.now() };
       this.touchLongPressTimer = setTimeout(() => {
         this.openDrawerPlaceholder(note);
         this.suppressClickNote = Number(note);
         this.touchLongPressed = true;
         this.touchLongPressTimer = null;
+        this.pressProgress = { note: null, startedAt: 0 };
       }, 500);
     },
 
@@ -794,6 +1354,7 @@ window.laserPadApp = function laserPadApp() {
       } else if (this.touchLongPressed) {
         this.touchLongPressed = false;
       }
+      this.pressProgress = { note: null, startedAt: 0 };
     },
 
     cancelTouchLongPress() {
@@ -802,6 +1363,7 @@ window.laserPadApp = function laserPadApp() {
         this.touchLongPressTimer = null;
       }
       this.touchLongPressed = false;
+      this.pressProgress = { note: null, startedAt: 0 };
     },
 
     openDrawerPlaceholder(note) {
@@ -831,7 +1393,12 @@ window.laserPadApp = function laserPadApp() {
 
     drawerIsMapped() {
       if (this.openNote === null || this.openNote === undefined) return false;
-      return this.sceneDetailsByNote(this.openNote).mapped;
+      return this.drawerSceneDetails().mapped;
+    },
+
+    drawerRoleChanged() {
+      const meta = this.drawerSceneDetails();
+      return Boolean(meta.mapped && this.drawer.role && meta.role && this.drawer.role !== meta.role);
     },
 
     _roleSceneFields(role) {
@@ -847,12 +1414,16 @@ window.laserPadApp = function laserPadApp() {
 
     async setDrawerPrimary() {
       if (this.openNote === null || this.openNote === undefined) return;
-      const meta = this.sceneDetailsByNote(this.openNote);
+      const meta = this.drawerSceneDetails();
       if (!meta.mapped || !meta.sceneName || !meta.role) return;
-      const personality = this.activePersonality();
+      if (this.drawerRoleChanged()) {
+        this.statusText = 'Apply role change before setting primary.';
+        return;
+      }
+      const personality = this.drawerPersonalityName();
       const [sceneField, bankField] = this._roleSceneFields(meta.role);
       if (!sceneField || !bankField) return;
-      const pdata = this.personalityData() || {};
+      const pdata = this.drawerPersonalityData() || {};
       const existingBank = Array.isArray(pdata[bankField]) ? [...pdata[bankField]] : [];
       const reorderedBank = [meta.sceneName, ...existingBank.filter((name) => name !== meta.sceneName)];
       const patch = {
@@ -882,14 +1453,14 @@ window.laserPadApp = function laserPadApp() {
 
     async removeDrawerMapping() {
       if (this.openNote === null || this.openNote === undefined) return;
-      const meta = this.sceneDetailsByNote(this.openNote);
+      const meta = this.drawerSceneDetails();
       if (!meta.mapped || !meta.sceneName || !meta.role) return;
       const proceed = window.confirm(`Remove mapping ${meta.sceneName}?`);
       if (!proceed) return;
-      const personality = this.activePersonality();
+      const personality = this.drawerPersonalityName();
       const [sceneField, bankField] = this._roleSceneFields(meta.role);
       if (!sceneField || !bankField) return;
-      const pdata = this.personalityData() || {};
+      const pdata = this.drawerPersonalityData() || {};
       const existingBank = Array.isArray(pdata[bankField]) ? [...pdata[bankField]] : [];
       const newBank = existingBank.filter((name) => name !== meta.sceneName);
       const fallbackPrimary = newBank[0] || '';
@@ -1110,6 +1681,12 @@ window.laserPadApp = function laserPadApp() {
         return;
       }
       const targetMeta = this.sceneDetailsByNote(targetNote);
+      if (sourceMeta.system || targetMeta.system) {
+        this.statusText = 'Cannot move blackout system mappings.';
+        return;
+      }
+      const sourceBefore = this.cloneMapping(sourceNote);
+      const targetBefore = this.cloneMapping(targetNote);
       const targetChannel = Number(this.currentBank()?.channel || 1);
       const patch = {
         scenes: {
@@ -1140,12 +1717,60 @@ window.laserPadApp = function laserPadApp() {
           this.statusText = data.error || 'Drag/drop update failed';
           return;
         }
+        this.armReassignUndo(sourceBefore, targetBefore, sourceNote, targetNote);
         this.statusText = allowSwap
           ? `Swapped note ${sourceNote} with ${targetNote}`
           : `Moved mapping ${sourceNote} → ${targetNote}`;
         await this.refreshConfig();
       } catch (err) {
         this.statusText = `Drag/drop failed: ${err.message}`;
+      }
+    },
+
+    armReassignUndo(sourceBefore, targetBefore, sourceNote, targetNote) {
+      if (this.lastReassignUndo.timer) {
+        clearTimeout(this.lastReassignUndo.timer);
+      }
+      const scenes = {
+        ...this.patchForSnapshot(sourceBefore),
+        ...this.patchForSnapshot(targetBefore),
+      };
+      this.lastReassignUndo = {
+        visible: true,
+        message: `Moved ${sourceNote} -> ${targetNote}`,
+        patch: { scenes },
+        timer: setTimeout(() => {
+          this.lastReassignUndo.visible = false;
+          this.lastReassignUndo.patch = null;
+          this.lastReassignUndo.timer = null;
+        }, 10000),
+      };
+    },
+
+    async undoLastReassign() {
+      const patch = this.lastReassignUndo.patch;
+      if (!patch) return;
+      if (this.lastReassignUndo.timer) {
+        clearTimeout(this.lastReassignUndo.timer);
+      }
+      this.lastReassignUndo.visible = false;
+      this.lastReassignUndo.patch = null;
+      this.lastReassignUndo.timer = null;
+      try {
+        const response = await fetch('/api/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patch }),
+        });
+        const data = await response.json();
+        if (!data.ok) {
+          this.statusText = data.error || 'Undo failed';
+          return;
+        }
+        this.statusText = 'Reassign undone';
+        await this.refreshConfig();
+      } catch (err) {
+        this.statusText = `Undo failed: ${err.message}`;
       }
     },
 

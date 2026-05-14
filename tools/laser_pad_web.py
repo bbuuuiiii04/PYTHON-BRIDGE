@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 import mido
 
 from ..laser_config import LaserConfigResult, load_laser_director_config
+from ..runtime_status import STATUS_PATH
 from .laser_config_ops import (
     _DEFAULT_CONFIG_PATH,
     _DEFAULT_PERSONALITY,
@@ -40,8 +41,14 @@ _ASSETS_DIR = Path(__file__).resolve().parent / "laser_pad_assets"
 
 
 class LaserPadService:
-    def __init__(self, config_path: Path = _DEFAULT_CONFIG_PATH) -> None:
+    def __init__(
+        self,
+        config_path: Path = _DEFAULT_CONFIG_PATH,
+        *,
+        status_path: Path | str = STATUS_PATH,
+    ) -> None:
         self._config_path = Path(config_path)
+        self._status_path = Path(status_path)
         self._lock = Lock()
         self._draft = load_or_create_config(self._config_path)
 
@@ -345,14 +352,45 @@ class LaserPadService:
         finally:
             temp_path.unlink(missing_ok=True)
         return {
-            "checks": [
-                {
-                    "name": name,
-                    "ok": ok,
-                    "detail": detail,
-                }
-                for name, ok, detail in checks
-            ]
+            "checks": checks,
+        }
+
+    def get_runtime_status(self) -> dict[str, Any]:
+        try:
+            raw = self._status_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except FileNotFoundError:
+            return {"available": False, "reason": "status_file_missing_or_stale"}
+        except json.JSONDecodeError:
+            return {"available": False, "reason": "parse_error"}
+        except OSError:
+            return {"available": False, "reason": "read_error"}
+        written_at = float(data.get("written_at", 0.0) or 0.0)
+        stale_seconds = max(0.0, time.time() - written_at) if written_at else 999999.0
+        if stale_seconds > 5.0:
+            return {
+                "available": False,
+                "reason": "status_file_missing_or_stale",
+                "written_at": written_at,
+                "stale_seconds": stale_seconds,
+            }
+        laser = data.get("laser_director")
+        if not isinstance(laser, dict):
+            return {
+                "available": False,
+                "reason": "laser_status_missing",
+                "written_at": written_at,
+                "stale_seconds": stale_seconds,
+            }
+        return {
+            "available": True,
+            "enabled": bool(laser.get("enabled")),
+            "emergency": bool(laser.get("emergency")),
+            "active_personality": str(laser.get("personality") or ""),
+            "current_scene": str(laser.get("current_scene") or ""),
+            "last_reason": str(laser.get("last_reason") or laser.get("reason") or ""),
+            "written_at": written_at,
+            "stale_seconds": stale_seconds,
         }
 
     def _history_path(self, name: str) -> Path:
@@ -541,6 +579,9 @@ class _LaserPadHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/midi_ports":
             self._send_json(HTTPStatus.OK, {"ports": self.service.get_midi_ports()})
+            return
+        if parsed.path == "/api/runtime_status":
+            self._send_json(HTTPStatus.OK, self.service.get_runtime_status())
             return
         if parsed.path == "/api/history":
             try:

@@ -13,7 +13,7 @@ code verification, not document age or detail level.
 | `docs/runtime_invariants.md` | CURRENT AUTHORITATIVE | Extracted invariants from current code paths and tests. |
 | `docs/laser_director_design.md` | CURRENT AUTHORITATIVE | Canonical Laser Director design reference; implementation now exists in `laser_director.py`, `laser_executor.py`, and `laser_models.py`. |
 | `docs/laser_pad.md` | CURRENT SUPPORTING | Browser-based Laser Pad workflow, API surface, and operator caveats for the in-repo mapping UI. |
-| `docs/laser_pad_parity.md` | CURRENT SUPPORTING | Wizard-to-web parity matrix mapping terminal actions to Laser Pad UI/API affordances. |
+| `docs/laser_pad_parity.md` | CURRENT SUPPORTING | Historical parity note confirming Laser Pad owns all retired terminal mapper actions. |
 | `docs/laser_director_midi_mapping_workflow.md` | CURRENT SUPPORTING | SoundSwitch MIDI mapping workflow and operator setup guidance used by the implemented Laser Director path. |
 | `docs/laser_director_rollout_checklist.md` | CURRENT SUPPORTING | Final rollout and validation checklist for safe Laser Director enablement, rollback, and operator test order. |
 | `docs/anlz_energy_project.md` | CURRENT SUPPORTING | Canonical bridge-local ANLZ energy tooling overview: scope, labels, data sources, limits, and validation framing. |

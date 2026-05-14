@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -572,9 +573,7 @@ def _build_midi_payload(
 
 def _ensure_personality_exists(config: dict[str, Any], personality: str) -> None:
     personalities = config.setdefault("personalities", {})
-    if personality in personalities:
-        return
-    personalities[personality] = {
+    defaults = {
         "safe_scene": "safe_static",
         "default_scene": "",
         "phrase_scene": "",
@@ -595,6 +594,14 @@ def _ensure_personality_exists(config: dict[str, Any], personality: str) -> None
         "minimum_scene_hold_beats": 8,
         "buildup_lookahead_beats": 32,
     }
+    if personality in personalities:
+        existing = personalities.get(personality)
+        if isinstance(existing, dict):
+            for key, value in defaults.items():
+                if key not in existing:
+                    existing[key] = copy.deepcopy(value)
+        return
+    personalities[personality] = copy.deepcopy(defaults)
 
 
 def apply_mapping(
@@ -756,6 +763,19 @@ def validate_config_data(
     for note, refs in find_duplicate_notes(config):
         refs_text = ", ".join(f"{p}:{r}:{s}" for p, r, s in refs)
         warnings.append(f"duplicate note {note}: {refs_text}")
+    for collision in find_bank_range_collisions(config.get("_pad_meta", {})):
+        notes = collision["overlap_notes"]
+        if not notes:
+            note_text = "notes unknown"
+        elif len(notes) == 1:
+            note_text = f"note {notes[0]}"
+        else:
+            note_text = f"notes {notes[0]}-{notes[-1]}"
+        warnings.append(
+            "bank channel overlap: "
+            f"{collision['bank_a']} <-> {collision['bank_b']} on "
+            f"Ch{collision['channel']} {note_text}"
+        )
     personalities = config.get("personalities", {})
     scenes = config.get("scenes", {})
     for pname, pdata in personalities.items():
@@ -816,6 +836,39 @@ def validate_config_data(
                 "manual blackout commands are configured but smart_drop_mode=legacy_rearm; blackout commands are unused"
             )
     return errors, warnings
+
+
+def find_bank_range_collisions(pad_meta: dict[str, Any]) -> list[dict[str, Any]]:
+    banks = pad_meta.get("banks", []) if isinstance(pad_meta, dict) else []
+    if not isinstance(banks, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for i, bank_a in enumerate(banks):
+        if not isinstance(bank_a, dict):
+            continue
+        for bank_b in banks[i + 1 :]:
+            if not isinstance(bank_b, dict):
+                continue
+            try:
+                channel_a = int(bank_a.get("channel", 1))
+                channel_b = int(bank_b.get("channel", 1))
+            except (TypeError, ValueError):
+                continue
+            if channel_a != channel_b:
+                continue
+            notes_a = set(bank_a.get("notes") or [])
+            notes_b = set(bank_b.get("notes") or [])
+            overlap = sorted(int(note) for note in notes_a & notes_b)
+            if overlap:
+                out.append(
+                    {
+                        "bank_a": bank_a.get("id"),
+                        "bank_b": bank_b.get("id"),
+                        "channel": channel_a,
+                        "overlap_notes": overlap[:8],
+                    }
+                )
+    return out
 
 
 def save_config_atomically(
@@ -1073,26 +1126,50 @@ def _verify_ctx(abs_beat: float, *, autoloop_tick_just_fired: bool = False) -> L
     )
 
 
-def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[tuple[str, bool, str]]:
+def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[dict[str, Any]]:
     result = load_laser_director_config(str(config_path))
-    checks: list[tuple[str, bool, str]] = []
+    checks: list[dict[str, Any]] = []
+
+    def add_check(
+        name: str,
+        ok: bool,
+        detail: str,
+        *,
+        personality_name: str = "",
+        role: str = "",
+        scene_name: str = "",
+        channel: Optional[int] = None,
+        note: Optional[int] = None,
+    ) -> None:
+        row: dict[str, Any] = {
+            "name": name,
+            "ok": ok,
+            "detail": detail,
+            "personality": personality_name,
+            "role": role,
+            "scene_name": scene_name,
+        }
+        if channel is not None:
+            row["channel"] = int(channel)
+        if note is not None:
+            row["note"] = int(note)
+        checks.append(row)
+
     if not result.available or result.config is None:
         reason = result.reason if result.reason else "config unavailable"
-        checks.append(("config load", False, reason))
+        add_check("config load", False, reason)
         return checks
     cfg = result.config
     if str(getattr(cfg, "smart_drop_mode", "blackout_mask")) == "blackout_mask":
         has_blackout_pair = cfg.manual_blackout_on is not None and cfg.manual_blackout_off is not None
-        checks.append(
-            (
-                "smart_drop_blackout_commands",
-                has_blackout_pair,
-                "ready" if has_blackout_pair else "missing blackout_on/blackout_off for blackout_mask mode",
-            )
+        add_check(
+            "smart_drop_blackout_commands",
+            has_blackout_pair,
+            "ready" if has_blackout_pair else "missing blackout_on/blackout_off for blackout_mask mode",
         )
     personality = cfg.personalities.get(cfg.default_personality or "")
     if personality is None:
-        checks.append(("default personality", False, "missing default personality"))
+        add_check("default personality", False, "missing default personality")
         return checks
 
     midi = _DryCheckMidiOutput()
@@ -1106,12 +1183,29 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[tu
     if personality.post_drop_scene and personality.post_drop_scene != personality.drop_scene:
         role_specs.insert(3, ("post_drop", personality.post_drop_scene, "post_drop_hold"))
     elif personality.post_drop_scene == personality.drop_scene:
-        checks.append(("post_drop", True, "uses same mapping as drop (Drop mode)"))
+        drop_scene = cfg.scenes.get(personality.drop_scene)
+        add_check(
+            "post_drop",
+            True,
+            "uses same mapping as drop (Drop mode)",
+            personality_name=cfg.default_personality or "",
+            role="post_drop",
+            scene_name=personality.drop_scene,
+            channel=drop_scene.midi.channel if drop_scene else None,
+            note=drop_scene.midi.note if drop_scene else None,
+        )
     beat = 100.0
     for role, scene_name, reason in role_specs:
         scene = cfg.scenes.get(scene_name)
         if scene is None:
-            checks.append((f"{role}", False, f"missing scene '{scene_name}'"))
+            add_check(
+                f"{role}",
+                False,
+                f"missing scene '{scene_name}'",
+                personality_name=cfg.default_personality or "",
+                role=role,
+                scene_name=scene_name,
+            )
             beat += 64.0
             continue
         before = len(midi.calls)
@@ -1127,31 +1221,68 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[tu
         )
         after = len(midi.calls)
         if after != before + 1:
-            checks.append((f"{role}", False, "no midi trigger"))
+            add_check(
+                f"{role}",
+                False,
+                "no midi trigger",
+                personality_name=cfg.default_personality or "",
+                role=role,
+                scene_name=scene_name,
+                channel=scene.midi.channel,
+                note=scene.midi.note,
+            )
             beat += 64.0
             continue
         sent, _ = midi.calls[-1]
         expect_note = scene.midi.note
         if int(sent.note) != int(expect_note):
-            checks.append((f"{role}", False, f"expected note {expect_note}, got {sent.note}"))
+            add_check(
+                f"{role}",
+                False,
+                f"expected note {expect_note}, got {sent.note}",
+                personality_name=cfg.default_personality or "",
+                role=role,
+                scene_name=scene_name,
+                channel=scene.midi.channel,
+                note=scene.midi.note,
+            )
             beat += 64.0
             continue
         if scene.midi.behavior == "hold_beats":
             ok = sent.behavior == "hold_ms" and int(sent.hold_ms) > 0
-            checks.append((f"{role}", ok, f"note {sent.note} hold conversion"))
+            add_check(
+                f"{role}",
+                ok,
+                f"note {sent.note} hold conversion",
+                personality_name=cfg.default_personality or "",
+                role=role,
+                scene_name=scene_name,
+                channel=scene.midi.channel,
+                note=scene.midi.note,
+            )
         else:
-            checks.append(
-                (
-                    f"{role}",
-                    True,
-                    f"note {sent.note} {_describe_behavior({'behavior': sent.behavior, 'hold_ms': sent.hold_ms, 'hold_beats': sent.hold_beats})}",
-                )
+            add_check(
+                f"{role}",
+                True,
+                f"note {sent.note} {_describe_behavior({'behavior': sent.behavior, 'hold_ms': sent.hold_ms, 'hold_beats': sent.hold_beats})}",
+                personality_name=cfg.default_personality or "",
+                role=role,
+                scene_name=scene_name,
+                channel=scene.midi.channel,
+                note=scene.midi.note,
             )
         beat += 64.0
 
     cooldown_scene = cfg.scenes.get(personality.phrase_scene)
     if cooldown_scene is None or cooldown_scene.cooldown_beats <= 0:
-        checks.append(("cooldown enforcement", False, "NOT IMPLEMENTED"))
+        add_check(
+            "cooldown enforcement",
+            False,
+            "NOT IMPLEMENTED",
+            personality_name=cfg.default_personality or "",
+            role="groove",
+            scene_name=personality.phrase_scene,
+        )
         return checks
     midi2 = _DryCheckMidiOutput()
     ex2 = LaserSceneExecutor(config=cfg, midi_output=midi2, personality=personality)
@@ -1176,5 +1307,14 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[tu
         _verify_ctx(500.0 + max(0.0, cooldown_scene.cooldown_beats - 1.0), autoloop_tick_just_fired=True),
     )
     blocked = len(midi2.calls) == 1 and ex2.status().get("last_error") == "role_cooldown_blocked"
-    checks.append(("cooldown enforcement", blocked, "role_cooldown_blocked" if blocked else "cooldown not enforced"))
+    add_check(
+        "cooldown enforcement",
+        blocked,
+        "role_cooldown_blocked" if blocked else "cooldown not enforced",
+        personality_name=cfg.default_personality or "",
+        role="groove",
+        scene_name=personality.phrase_scene,
+        channel=cooldown_scene.midi.channel,
+        note=cooldown_scene.midi.note,
+    )
     return checks

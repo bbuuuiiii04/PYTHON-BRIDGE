@@ -26,8 +26,6 @@ from AppKit import (
 )
 from Foundation import NSAttributedString, NSMutableAttributedString, NSObject, NSTimer
 
-from command_builders import build_laser_pad_command
-
 
 WATCHER = "/Users/bbui/ss_bridge_watcher.sh"
 MENUBAR_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*[[:space:]]+/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar\.py$"
@@ -37,7 +35,7 @@ MONITOR_PATTERN = r"RBSS_BRIDGE_MONITOR|^tail -n 100 -F /tmp/bridge\.log$"
 MANUAL_LAUNCHCTL_LABEL = "rbss_bridge_manual"
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
-LASER_PAD_CMD = build_laser_pad_command(Path(__file__))
+LASER_PAD_URL = "http://127.0.0.1:8765"
 
 ICON_DIR = Path("/Users/bbui")
 ICONS = {
@@ -177,13 +175,17 @@ def append_command(command: dict) -> None:
         pass
 
 
-def open_terminal_command(command: str, title: str = "RBSS_LASER_WIZARD") -> None:
+def open_terminal_command(command: str, title: str = "RBSS_TERMINAL") -> None:
     safe_cmd = command.replace("\\", "\\\\").replace('"', '\\"')
     script = (
         'tell application "Terminal" to activate\n'
         f'tell application "Terminal" to do script "{safe_cmd}"'
     )
     subprocess.run(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def open_browser_url(url: str) -> None:
+    subprocess.run(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
@@ -435,7 +437,7 @@ class BridgeMenuBar(NSObject):
 
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.validation_item = self._add_action("Run Health Check", "runValidation:")
-        self.map_lasers_item = self._add_action("Map Lasers", "mapLasers:")
+        self.map_lasers_item = self._add_action("Laser Pad…", "mapLasers:")
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.quit_item = self._add_action("Quit Menu", "quit:")
         self.status_item.setMenu_(self.menu)
@@ -567,7 +569,7 @@ class BridgeMenuBar(NSObject):
         self.refresh_(None)
 
     def mapLasers_(self, _sender):
-        open_terminal_command(LASER_PAD_CMD)
+        open_browser_url(LASER_PAD_URL)
 
     def toggleSmartDrop_(self, _sender):
         append_command({"cmd": "toggle_smart_drop"})
