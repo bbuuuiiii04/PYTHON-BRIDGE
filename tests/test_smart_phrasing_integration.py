@@ -35,7 +35,7 @@ from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
     PhraseSegment,
     build_phrase_segments_from_markers,
 )
-from rb_ss_bridge_v2.state_manager import StateManager  # noqa: E402
+from rb_ss_bridge_v2.state_manager import SmartDropTickResult, StateManager  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -81,35 +81,7 @@ def _now():
 
 def _make_phrasing_state(**overrides):
     """Build a SmartPhrasingState with safe defaults; override any field."""
-    defaults = dict(
-        current_phrase_label="other",
-        current_phrase_is_up=False,
-        current_phrase_is_chorus=False,
-        current_phrase_is_low=False,
-        next_smart_drop_beat=None,
-        beats_to_next_drop=None,
-        smart_drop_window_active=False,
-        smart_drop_crossing=False,
-        smart_drop_preclear_requested=False,
-        smart_drop_rearm_requested=False,
-        smart_post_drop_active=False,
-        active_drop_beat=None,
-        smart_buildup_active=False,
-        smart_breakdown_active=False,
-        breakdown_start_crossing=False,
-        breakdown_end_crossing=False,
-        smart_breakdown_clear_requested=False,
-        smart_breakdown_restore_requested=False,
-        transition_mask_should_arm=False,
-        transition_mask_should_clear=False,
-        transition_window_active=False,
-        phrase_anchor_requested=False,
-        phrase_anchor_preclear_requested=False,
-        phrase_anchor_rearm_requested=False,
-        phrase_anchor_target_beat=None,
-        reason="test",
-        breakdown_restore_beat=None,
-    )
+    defaults = dict(reason="test")
     defaults.update(overrides)
     return SmartPhrasingState(**defaults)
 
@@ -549,7 +521,13 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
         sm._laser_executor.smart_drop_blackout_enabled.return_value = True
         return sm
 
-    def _push_ctx(self, sm: StateManager, beat: int, *, smart_drop_signal_override=None) -> LaserContext:
+    def _push_ctx(
+        self,
+        sm: StateManager,
+        beat: int,
+        *,
+        smart_drop_result_override: SmartDropTickResult | None = None,
+    ) -> LaserContext:
         sm._cache.update(
             PositionSnapshot(
                 1,
@@ -558,12 +536,12 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
                 updated_at=time.monotonic(),
             )
         )
-        if smart_drop_signal_override is None:
+        if smart_drop_result_override is None:
             sm._push_tick()
         else:
             with patch(
                 "rb_ss_bridge_v2.state_manager._smart_drop_tick",
-                return_value=smart_drop_signal_override,
+                return_value=smart_drop_result_override,
             ):
                 sm._push_tick()
         return sm._laser_executor.on_decision.call_args.args[1]
@@ -640,11 +618,11 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
         )
         sm._os.breakdown_active = True
         sm._os.breakdown_restore_beat = 10_000
-        for beat in (59, 60, 61, 62):
+        for beat in (59, 60, 61):
             ctx = self._push_ctx(sm, beat)
             self.assertFalse(ctx.smart_drop_blackout_arm)
             self.assertFalse(ctx.smart_phrasing_blackout_arm)
-        self.assertFalse(sm._sp_blackout_arm_latched)
+        self.assertFalse(sm._last_sp_state.transition_mask_arm_latched)
 
     def test_arm_suppressed_when_breakdown_starts_between(self):
         sm = self._prepare_manager(
@@ -657,7 +635,7 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
         self.assertFalse(arm_ctx.smart_phrasing.transition_mask_should_arm)
         self.assertFalse(arm_ctx.smart_drop_blackout_arm)
         self.assertFalse(arm_ctx.smart_phrasing_blackout_arm)
-        self.assertFalse(sm._sp_blackout_arm_latched)
+        self.assertFalse(sm._last_sp_state.transition_mask_arm_latched)
 
     def test_arm_retries_across_window_when_legacy_does(self):
         sm = self._prepare_manager(drop_beat=64)
@@ -672,26 +650,26 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
         sm = self._prepare_manager(drop_beat=64)
         self._push_ctx(sm, 59)
         self._push_ctx(sm, 60)
-        self.assertTrue(sm._sp_blackout_arm_latched)
+        self.assertTrue(sm._last_sp_state.transition_mask_arm_latched)
         clear_ctx = self._push_ctx(sm, 64)
         self.assertTrue(clear_ctx.smart_phrasing.transition_mask_should_clear)
         self.assertFalse(clear_ctx.smart_phrasing_blackout_arm)
-        self.assertFalse(sm._sp_blackout_arm_latched)
+        self.assertFalse(sm._last_sp_state.transition_mask_arm_latched)
 
     def test_arm_latch_resets_on_deck_or_track_change(self):
         sm = self._prepare_manager(drop_beat=64)
         self._push_ctx(sm, 59)
         self._push_ctx(sm, 60)
-        self.assertTrue(sm._sp_blackout_arm_latched)
+        self.assertTrue(sm._last_sp_state.transition_mask_arm_latched)
         sm._on_master_changed(2, "test")
-        self.assertFalse(sm._sp_blackout_arm_latched)
+        self.assertFalse(sm._last_sp_state.transition_mask_arm_latched)
 
         sm2 = self._prepare_manager(drop_beat=64)
         self._push_ctx(sm2, 59)
         self._push_ctx(sm2, 60)
-        self.assertTrue(sm2._sp_blackout_arm_latched)
+        self.assertTrue(sm2._last_sp_state.transition_mask_arm_latched)
         sm2._on_track_loaded(1, "shadow-track", BridgeEvent(Ev.TRACK_LOADED, 1))
-        self.assertFalse(sm2._sp_blackout_arm_latched)
+        self.assertFalse(sm2._last_sp_state.transition_mask_arm_latched)
 
     def test_smart_drop_blackout_arm_fires_after_mid_window_breakdown_clears(self):
         sm = self._prepare_manager(
@@ -705,13 +683,70 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
         suppressed = self._push_ctx(sm, 60)
         self.assertFalse(suppressed.smart_drop_blackout_arm)
         self.assertFalse(suppressed.smart_phrasing_blackout_arm)
-        self.assertFalse(sm._sp_blackout_arm_latched)
+        self.assertFalse(sm._last_sp_state.transition_mask_arm_latched)
 
         sm._os.breakdown_active = False
         cleared_mid_window = self._push_ctx(sm, 61)
         self.assertTrue(cleared_mid_window.smart_drop_blackout_arm)
         self.assertTrue(cleared_mid_window.smart_phrasing_blackout_arm)
-        self.assertTrue(sm._sp_blackout_arm_latched)
+        self.assertTrue(sm._last_sp_state.transition_mask_arm_latched)
+
+    def test_latch_survives_mid_window_breakdown_gate_and_reappears_after_clear(self):
+        sm = self._prepare_manager(drop_beat=64)
+
+        self._push_ctx(sm, 59)
+        armed_ctx = self._push_ctx(sm, 60)
+        self.assertTrue(armed_ctx.smart_phrasing.transition_mask_should_arm)
+        self.assertTrue(sm._last_sp_state.transition_mask_arm_latched)
+        self.assertTrue(armed_ctx.smart_phrasing_blackout_arm)
+
+        sm._os.breakdown_active = True
+        gated_ctx = self._push_ctx(sm, 61)
+        self.assertFalse(gated_ctx.smart_phrasing_blackout_arm)
+        self.assertFalse(gated_ctx.smart_drop_blackout_arm)
+        self.assertTrue(sm._last_sp_state.transition_mask_arm_latched)
+
+        sm._os.breakdown_active = False
+        resumed_ctx = self._push_ctx(sm, 62)
+        self.assertTrue(resumed_ctx.smart_phrasing_blackout_arm)
+        self.assertTrue(resumed_ctx.smart_drop_blackout_arm)
+        self.assertTrue(sm._last_sp_state.transition_mask_arm_latched)
+
+    def test_clear_smart_rearm_state_resets_engine_transition_window(self):
+        sm = self._prepare_manager(drop_beat=64)
+
+        self._push_ctx(sm, 59)
+        in_window_ctx = self._push_ctx(sm, 60)
+        self.assertTrue(in_window_ctx.smart_phrasing.transition_window_active)
+        self.assertTrue(sm._smart_phrasing_engine._transition_window_active)
+
+        sm._clear_smart_rearm_state()
+        self.assertFalse(sm._smart_phrasing_engine._transition_window_active)
+
+    def test_clear_smart_rearm_state_preserves_prev_abs_beat_so_next_tick_crossing_detects(self):
+        sm = self._prepare_manager(drop_beat=64)
+
+        self._push_ctx(sm, 63)
+        sm._clear_smart_rearm_state()
+        crossing_ctx = self._push_ctx(sm, 64)
+        self.assertTrue(crossing_ctx.smart_phrasing.smart_drop_crossing)
+
+    def test_toggle_smart_drop_does_not_replay_fired_drop(self):
+        sm = self._prepare_manager(drop_beat=64)
+
+        self._push_ctx(sm, 63)
+        first_crossing_ctx = self._push_ctx(sm, 64)
+        self.assertTrue(first_crossing_ctx.smart_phrasing.smart_drop_crossing)
+        self.assertIn(64.0, sm._smart_phrasing_engine._fired_drop_beats)
+
+        sm.toggle_smart_drop()
+        sm.toggle_smart_drop()
+
+        self.assertIn(64.0, sm._smart_phrasing_engine._fired_drop_beats)
+        sm._smart_phrasing_engine._previous_abs_beat = 63.0
+        replay_ctx = self._push_ctx(sm, 64)
+        self.assertFalse(replay_ctx.smart_phrasing.smart_drop_crossing)
+        self.assertIn(64.0, sm._smart_phrasing_engine._fired_drop_beats)
 
     def test_engine_runs_once_per_tick_in_push_tick(self):
         sm = self._prepare_manager(drop_beat=64)

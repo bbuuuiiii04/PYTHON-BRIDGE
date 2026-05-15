@@ -15,16 +15,20 @@ from rb_ss_bridge_v2.models import (  # noqa: E402
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.sound_switch_engine import SoundSwitchEngine  # noqa: E402
 from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
+    SmartPhrasingEngine,
+    SmartPhrasingSnapshot,
     SmartPhrasingState,
     find_restore_beat,
     select_smart_drops,
 )
 from rb_ss_bridge_v2.config import (  # noqa: E402
+    PHRASE_ANCHOR_BEATS,
     SMART_DROP_LOOKAHEAD_BEATS,
     SMART_BREAKDOWN_DEFAULT_DURATION_BEATS,
     SMART_BREAKDOWN_WINDOW_BEATS,
 )
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
+    SmartDropTickResult,
     StateManager,
     _phrase_anchor_tick,
     _send_direct_autoloop_rearm,
@@ -153,6 +157,35 @@ def _smart_drop_tick(
     blackout_mode=True,
     sp_state=None,
 ):
+    if sp_state is None:
+        sp_state = _legacy_sp_state_for_drop(sm, active, this_beat)
+    result = _state_manager_smart_drop_tick(
+        sm,
+        active,
+        mirror,
+        bpm,
+        this_beat,
+        elapsed_ms,
+        blackout_mode=blackout_mode,
+        sp_state=sp_state,
+    )
+    if result.crossing:
+        return 2
+    if result.blackout_armed:
+        return 1
+    return 0
+
+
+def _smart_drop_tick_typed(
+    sm,
+    active,
+    mirror,
+    bpm,
+    this_beat,
+    elapsed_ms,
+    blackout_mode=True,
+    sp_state=None,
+) -> SmartDropTickResult:
     if sp_state is None:
         sp_state = _legacy_sp_state_for_drop(sm, active, this_beat)
     return _state_manager_smart_drop_tick(
@@ -547,7 +580,7 @@ class SmartDropTests(unittest.TestCase):
     def test_smart_drop_arm_consumes_sp_state_not_metadata(self) -> None:
         sm = _sm([64])
         sm._deck[1].meta.smart_drops = []
-        signal = _smart_drop_tick(
+        result = _smart_drop_tick_typed(
             sm,
             1,
             2,
@@ -559,7 +592,9 @@ class SmartDropTests(unittest.TestCase):
                 next_smart_drop_beat=64.0,
             ),
         )
-        self.assertEqual(signal, 1)
+        self.assertTrue(result.blackout_armed)
+        self.assertFalse(result.crossing)
+        self.assertEqual(result.target_beat, 64)
         self.assertTrue(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 64)
 
@@ -615,6 +650,26 @@ class SmartDropTests(unittest.TestCase):
         sm._send_autoloop_deck_load.assert_called_once()
         self.assertFalse(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 0)
+
+    def test_smart_drop_crossing_no_target_beat_returns_none(self) -> None:
+        sm = _sm([64])
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 0
+        result = _smart_drop_tick_typed(
+            sm,
+            1,
+            2,
+            130.0,
+            64,
+            32_005,
+            blackout_mode=False,
+            sp_state=_sp_state(
+                smart_drop_crossing=True,
+                active_drop_beat=None,
+            ),
+        )
+        self.assertEqual(result, SmartDropTickResult.none())
+        sm._send_autoloop_deck_load.assert_not_called()
 
     def test_smart_drop_suppression_gates_still_apply_with_sp_state(self) -> None:
         sm = _sm([64])
@@ -755,7 +810,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
     def test_crossing_clears_pending_blackout_when_laser_director_missing(self) -> None:
         sm = self._prepare_manager()
         sm._laser_director = None
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_called_once_with(
             reason="smart_drop_crossing_without_drop_decision"
@@ -766,7 +824,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         sm = self._prepare_manager()
         sm._laser_director = Mock()
         sm._laser_director.tick.return_value = None
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_called_once_with(
             reason="smart_drop_crossing_without_drop_decision"
@@ -777,7 +838,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         sm = self._prepare_manager()
         sm._laser_director = Mock()
         sm._laser_director.tick.return_value = SimpleNamespace(reason="manual_override")
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_called_once_with(
             reason="smart_drop_crossing_without_drop_decision"
@@ -787,7 +851,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         sm = self._prepare_manager()
         sm._laser_director = Mock()
         sm._laser_director.tick.return_value = SimpleNamespace(reason="drop_crossing")
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_not_called()
 
@@ -847,7 +914,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
 
         sm._laser_executor.on_tick.side_effect = _record_on_tick
         sm._laser_executor.on_decision.side_effect = _record_on_decision
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=0):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult.none(),
+        ):
             sm._push_tick()
         self.assertEqual(call_order, ["on_tick", "on_decision"])
         self.assertIs(ctx_by_call["on_tick"], ctx_by_call["on_decision"])
@@ -913,7 +983,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
             reason="drop_crossing",
             role="drop",
         )
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=2),
+        ):
             sm._push_tick()
         _, ctx = sm._laser_executor.on_decision.call_args.args
         self.assertFalse(ctx.smart_drop_blackout_arm)
@@ -948,6 +1021,57 @@ class SnapshotStatusTests(unittest.TestCase):
 
 
 class PhraseAnchorTests(unittest.TestCase):
+    def test_phrase_anchor_target_matches_state_manager_math(self) -> None:
+        engine = SmartPhrasingEngine()
+        cases = (
+            (0, 0),
+            (0, PHRASE_ANCHOR_BEATS + 9),
+            (64, 100),
+            (120, 128),
+        )
+        for last_beat, this_beat in cases:
+            with self.subTest(last_beat=last_beat, this_beat=this_beat):
+                snap = SmartPhrasingSnapshot(
+                    deck_id="1",
+                    track_id=f"track-{last_beat}-{this_beat}",
+                    is_playing=True,
+                    abs_beat=float(this_beat),
+                    phrase_segments=(),
+                    smart_drop_beats=(),
+                    breakdown_segments=(),
+                    phrase_lookahead_beats=32.0,
+                    drop_window_beats=4.0,
+                    post_drop_beats=8.0,
+                    transition_window_beats=4.0,
+                    phrase_anchor_last_beat=last_beat,
+                    phrase_anchor_period_beats=PHRASE_ANCHOR_BEATS,
+                )
+                result = engine.update(snap)
+                self.assertEqual(
+                    result.state.phrase_anchor_target_beat,
+                    last_beat + PHRASE_ANCHOR_BEATS,
+                )
+
+    def test_phrase_anchor_uses_sp_target(self) -> None:
+        sm = _sm()
+        sm._os.phrase_anchor_last_beat = 0
+        sp_target = 72
+        _phrase_anchor_tick(
+            sm, 1, 2, 130.0, sp_target, 36_000, float(sp_target),
+            _sp_state(
+                phrase_anchor_rearm_requested=True,
+                phrase_anchor_target_beat=sp_target,
+            ),
+        )
+        sm._send_autoloop_deck_load.assert_called_once()
+        sm._autoloop_target_elapsed_for_beat.assert_called_once_with(
+            sp_target,
+            36_000,
+            130.0,
+            sm._send_autoloop_deck_load.call_args.args[3],
+        )
+        self.assertEqual(sm._os.phrase_anchor_last_beat, sp_target)
+
     def test_phrase_anchor_skipped_while_transition_arm_pending(self) -> None:
         sm = _sm()
         sm._os.autoloop_arm_pending = True
@@ -1035,7 +1159,10 @@ class PhraseAnchorTests(unittest.TestCase):
         # Recovery rebases from this_beat=120, so next anchor is 120+64=184.
         sm = _sm()
         sm._os.phrase_anchor_last_beat = 0
-        _phrase_anchor_tick(sm, 1, 2, 130.0, 120, 60_000, 120.0, _sp_state())
+        _phrase_anchor_tick(
+            sm, 1, 2, 130.0, 120, 60_000, 120.0,
+            _sp_state(phrase_anchor_target_beat=64),
+        )
         sm._send_autoloop_deck_load.assert_not_called()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 120)
 
@@ -1043,16 +1170,25 @@ class PhraseAnchorTests(unittest.TestCase):
         # After recovery at beat 120, next anchor is 184 — not 128.
         sm = _sm()
         sm._os.phrase_anchor_last_beat = 0
-        _phrase_anchor_tick(sm, 1, 2, 130.0, 120, 60_000, 120.0, _sp_state())
+        _phrase_anchor_tick(
+            sm, 1, 2, 130.0, 120, 60_000, 120.0,
+            _sp_state(phrase_anchor_target_beat=64),
+        )
         self.assertEqual(sm._os.phrase_anchor_last_beat, 120)
-        _phrase_anchor_tick(sm, 1, 2, 130.0, 128, 64_000, 128.0, _sp_state())
+        _phrase_anchor_tick(
+            sm, 1, 2, 130.0, 128, 64_000, 128.0,
+            _sp_state(phrase_anchor_target_beat=184),
+        )
         sm._send_autoloop_deck_load.assert_not_called()
 
     def test_phrase_anchor_fires_at_184_after_stale_recovery(self) -> None:
         # After recovery at beat 120, anchor fires at 120+64=184.
         sm = _sm()
         sm._os.phrase_anchor_last_beat = 0
-        _phrase_anchor_tick(sm, 1, 2, 130.0, 120, 60_000, 120.0, _sp_state())
+        _phrase_anchor_tick(
+            sm, 1, 2, 130.0, 120, 60_000, 120.0,
+            _sp_state(phrase_anchor_target_beat=64),
+        )
         _phrase_anchor_tick(
             sm, 1, 2, 130.0, 184, 92_000, 184.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=184),
@@ -1061,8 +1197,8 @@ class PhraseAnchorTests(unittest.TestCase):
         self.assertEqual(sm._os.phrase_anchor_last_beat, 184)
 
     def test_phrase_anchor_pre_clear_fires_one_beat_before(self) -> None:
-        # phrase_anchor_last_beat=0, no drops → next_anchor=64.
-        # At beat 63 (next_anchor - 1): clear fires 4 times, loop_off 4 times,
+        # phrase_anchor_last_beat=0, no drops -> target=64.
+        # At beat 63 (target - 1): clear fires 4 times, loop_off 4 times,
         # no deck load, returns False.
         sm = _sm()
         sm._os.phrase_anchor_last_beat = 0

@@ -40,35 +40,7 @@ from rb_ss_bridge_v2.models import Ev  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def _sp(**overrides) -> SmartPhrasingState:
-    defaults = dict(
-        current_phrase_label="other",
-        current_phrase_is_up=False,
-        current_phrase_is_chorus=False,
-        current_phrase_is_low=False,
-        next_smart_drop_beat=None,
-        beats_to_next_drop=None,
-        smart_drop_window_active=False,
-        smart_drop_crossing=False,
-        smart_drop_preclear_requested=False,
-        smart_drop_rearm_requested=False,
-        smart_post_drop_active=False,
-        active_drop_beat=None,
-        smart_buildup_active=False,
-        smart_breakdown_active=False,
-        breakdown_start_crossing=False,
-        breakdown_end_crossing=False,
-        smart_breakdown_clear_requested=False,
-        smart_breakdown_restore_requested=False,
-        transition_mask_should_arm=False,
-        transition_mask_should_clear=False,
-        transition_window_active=False,
-        phrase_anchor_requested=False,
-        phrase_anchor_preclear_requested=False,
-        phrase_anchor_rearm_requested=False,
-        phrase_anchor_target_beat=None,
-        reason="test",
-        breakdown_restore_beat=None,
-    )
+    defaults = dict(reason="test")
     defaults.update(overrides)
     return SmartPhrasingState(**defaults)
 
@@ -1544,12 +1516,44 @@ def _make_sm(laser_director=None, os2l_connected_provider=None):
     output = MagicMock()
     live_bpm = MagicMock()
     live_bpm.get_snapshot.return_value = None
-    return StateManager(
+    sm = StateManager(
         eq, pos_cache, output,
         live_bpm=live_bpm,
         laser_director=laser_director,
         os2l_connected_provider=os2l_connected_provider,
     )
+
+    raw_build_laser_context = sm._build_laser_context
+
+    def _build_laser_context_with_sp(
+        active,
+        d,
+        elapsed_ms,
+        bpm,
+        beat_pos,
+        abs_beat_pos,
+        snap,
+        now,
+        **kwargs,
+    ):
+        sp_state = kwargs.pop("sp_state", None)
+        if sp_state is None:
+            sp_state = sm._update_smart_phrasing_state(active, d, abs_beat_pos, bpm)
+        return raw_build_laser_context(
+            active,
+            d,
+            elapsed_ms,
+            bpm,
+            beat_pos,
+            abs_beat_pos,
+            snap,
+            now,
+            sp_state=sp_state,
+            **kwargs,
+        )
+
+    sm._build_laser_context = _build_laser_context_with_sp
+    return sm
 
 
 class StateManagerLaserIntegrationTests(unittest.TestCase):

@@ -41,28 +41,29 @@ class SmartPhrasingSnapshot:
 
 @dataclass(frozen=True)
 class SmartPhrasingState:
-    current_phrase_label: PhraseLabel
-    current_phrase_is_up: bool
-    current_phrase_is_chorus: bool
-    current_phrase_is_low: bool
-    next_smart_drop_beat: Optional[float]
-    beats_to_next_drop: Optional[float]
-    smart_drop_window_active: bool
-    smart_drop_crossing: bool
-    smart_drop_preclear_requested: bool
-    smart_drop_rearm_requested: bool
-    smart_post_drop_active: bool
-    active_drop_beat: Optional[float]
-    smart_buildup_active: bool
-    smart_breakdown_active: bool
-    breakdown_start_crossing: bool
-    breakdown_end_crossing: bool
-    smart_breakdown_clear_requested: bool
-    smart_breakdown_restore_requested: bool
-    transition_mask_should_arm: bool
-    transition_mask_should_clear: bool
-    transition_window_active: bool
-    phrase_anchor_requested: bool
+    current_phrase_label: PhraseLabel = "other"
+    current_phrase_is_up: bool = False
+    current_phrase_is_chorus: bool = False
+    current_phrase_is_low: bool = False
+    next_smart_drop_beat: Optional[float] = None
+    beats_to_next_drop: Optional[float] = None
+    smart_drop_window_active: bool = False
+    smart_drop_crossing: bool = False
+    smart_drop_preclear_requested: bool = False
+    smart_drop_rearm_requested: bool = False
+    smart_post_drop_active: bool = False
+    active_drop_beat: Optional[float] = None
+    smart_buildup_active: bool = False
+    smart_breakdown_active: bool = False
+    breakdown_start_crossing: bool = False
+    breakdown_end_crossing: bool = False
+    smart_breakdown_clear_requested: bool = False
+    smart_breakdown_restore_requested: bool = False
+    transition_mask_should_arm: bool = False
+    transition_mask_should_clear: bool = False
+    transition_window_active: bool = False
+    transition_mask_arm_latched: bool = False
+    phrase_anchor_requested: bool = False
     phrase_anchor_preclear_requested: bool = False
     phrase_anchor_rearm_requested: bool = False
     phrase_anchor_target_beat: Optional[int] = None
@@ -100,6 +101,7 @@ class SmartPhrasingEngine:
         self._transition_window_active: bool = False
         self._transition_window_arm_suppressed: bool = False
         self._smart_drop_window_active: bool = False
+        self._blackout_arm_latched: bool = False
 
     def reset(self, reason: str) -> SmartPhrasingState:
         self._previous_abs_beat = None
@@ -110,39 +112,29 @@ class SmartPhrasingEngine:
         self._transition_window_active = False
         self._transition_window_arm_suppressed = False
         self._smart_drop_window_active = False
+        self._blackout_arm_latched = False
 
         return self._default_state(reason)
 
+    def clear_blackout_latch(self) -> None:
+        self._blackout_arm_latched = False
+
+    def clear_smart_rearm_state(self) -> None:
+        """Clear smart-rearm internals without dropping beat continuity.
+
+        Preserves _previous_abs_beat, _fired_drop_beats, _last_deck_id, and
+        _last_track_id so next-tick crossing detection, fired-drop
+        suppression, and track/deck continuity still work after
+        StateManager-side smart-rearm clears.
+        """
+        self._active_drop_beat = None
+        self._smart_drop_window_active = False
+        self._blackout_arm_latched = False
+        self._transition_window_active = False
+        self._transition_window_arm_suppressed = False
+
     def _default_state(self, reason: str) -> SmartPhrasingState:
-        return SmartPhrasingState(
-            current_phrase_label="other",
-            current_phrase_is_up=False,
-            current_phrase_is_chorus=False,
-            current_phrase_is_low=False,
-            next_smart_drop_beat=None,
-            beats_to_next_drop=None,
-            smart_drop_window_active=False,
-            smart_drop_crossing=False,
-            smart_drop_preclear_requested=False,
-            smart_drop_rearm_requested=False,
-            smart_post_drop_active=False,
-            active_drop_beat=None,
-            smart_buildup_active=False,
-            smart_breakdown_active=False,
-            breakdown_start_crossing=False,
-            breakdown_end_crossing=False,
-            breakdown_restore_beat=None,
-            smart_breakdown_clear_requested=False,
-            smart_breakdown_restore_requested=False,
-            transition_mask_should_arm=False,
-            transition_mask_should_clear=False,
-            transition_window_active=False,
-            phrase_anchor_requested=False,
-            phrase_anchor_preclear_requested=False,
-            phrase_anchor_rearm_requested=False,
-            phrase_anchor_target_beat=None,
-            reason=reason,
-        )
+        return SmartPhrasingState(reason=reason)
 
     def update(self, snapshot: SmartPhrasingSnapshot) -> SmartPhrasingResult:
         diagnostics: list[SmartPhrasingDiagnostic] = []
@@ -319,6 +311,11 @@ class SmartPhrasingEngine:
         elif self._transition_window_active:
             transition_mask_should_clear = True
             self._transition_window_arm_suppressed = False
+
+        if transition_mask_should_arm:
+            self._blackout_arm_latched = True
+        if smart_drop_crossing or transition_mask_should_clear:
+            self._blackout_arm_latched = False
             
         self._transition_window_active = new_transition_window_active
 
@@ -329,8 +326,8 @@ class SmartPhrasingEngine:
         this_beat_int = int(abs_beat)
         if snapshot.phrase_anchor_last_beat >= 0 and snapshot.phrase_anchor_period_beats > 0:
             target_beat = int(snapshot.phrase_anchor_last_beat) + int(snapshot.phrase_anchor_period_beats)
+            phrase_anchor_target_beat = target_beat
             if this_beat_int <= target_beat + 8:
-                phrase_anchor_target_beat = target_beat
                 phrase_anchor_preclear_requested = this_beat_int == (target_beat - 1)
                 phrase_anchor_rearm_requested = this_beat_int >= target_beat
         
@@ -357,6 +354,7 @@ class SmartPhrasingEngine:
             transition_mask_should_arm=transition_mask_should_arm,
             transition_mask_should_clear=transition_mask_should_clear,
             transition_window_active=new_transition_window_active,
+            transition_mask_arm_latched=self._blackout_arm_latched,
             phrase_anchor_requested=phrase_anchor_requested,
             phrase_anchor_preclear_requested=phrase_anchor_preclear_requested,
             phrase_anchor_rearm_requested=phrase_anchor_rearm_requested,
