@@ -31,8 +31,9 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
+from typing import Literal, Optional
 
+from .laser_decision_log import LaserDecision, LaserDecisionLog
 from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
 from .smart_phrasing import SmartPhrasingState
 
@@ -122,6 +123,7 @@ class LaserDirector:
         self._last_smart_abs_beat: Optional[float] = None
         self._phrase_trigger_pending: bool = False
         self._smart_drop_blackout_active: bool = False
+        self._decision_log = LaserDecisionLog()
 
     # ── Policy commands (called from StateManager._handle_event) ─────────────
 
@@ -203,6 +205,12 @@ class LaserDirector:
         scene_changed = decision.scene != self._current_scene
         reason_changed = decision.reason != self._last_reason
         if scene_changed:
+            self._record_decision(
+                ctx,
+                decision,
+                now=now,
+                triggered_by="scene_change",
+            )
             log.info(
                 "[LASER] scene  %s->%s  reason=%s  dry_run=%s",
                 self._current_scene or "(none)",
@@ -211,6 +219,12 @@ class LaserDirector:
                 self._dry_run,
             )
         elif reason_changed:
+            self._record_decision(
+                ctx,
+                decision,
+                now=now,
+                triggered_by="reason_update",
+            )
             log.debug(
                 "[LASER] reason-update  scene=%s  reason=%s->%s",
                 decision.scene or "(none)",
@@ -231,6 +245,29 @@ class LaserDirector:
         self._current_scene = decision.scene
         self._last_reason = decision.reason
         return decision
+
+    def _record_decision(
+        self,
+        ctx: LaserContext,
+        decision: LaserSceneDecision,
+        *,
+        now: float,
+        triggered_by: Literal["scene_change", "reason_update"],
+    ) -> None:
+        self._decision_log.record(
+            LaserDecision(
+                mono=now,
+                wall=time.time(),
+                scene=decision.scene,
+                prev_scene=self._current_scene,
+                reason=decision.reason,
+                abs_beat=ctx.abs_beat,
+                deck=ctx.active_deck,
+                personality=self._personality,
+                lighting_mode=ctx.lighting_mode,
+                triggered_by=triggered_by,
+            )
+        )
 
     def _decide(self, ctx: LaserContext, *, now: float) -> LaserSceneDecision:
         """Priority-ordered scene selection. Returns a LaserSceneDecision."""
@@ -617,4 +654,5 @@ class LaserDirector:
             "smart_drop_blackout_active": self._smart_drop_blackout_active,
             "phrase_trigger_pending": self._phrase_trigger_pending,
             "last_trigger_abs_beat": self._last_trigger_abs_beat,
+            "recent_decisions": self._decision_log.recent_as_dicts(32),
         }
