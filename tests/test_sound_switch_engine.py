@@ -37,7 +37,7 @@ class DeckRouteTests(unittest.TestCase):
         sse.send_deck_clear(4)
         out.send_deck_clear.assert_called_once_with(4)
 
-    def test_send_autoloop_deck_load_fans_out_via_deck_route(self) -> None:
+    def test_autoloop_deck_load_fans_out_via_deck_route(self) -> None:
         out = Mock()
         sse = SoundSwitchEngine(out)
         arm_meta = Mock()
@@ -205,7 +205,7 @@ class StateManagerRouteFanoutTests(unittest.TestCase):
 
     def test_direct_autoloop_rearm_fanout_uses_deck1_route_order(self) -> None:
         sm = self._sm()
-        sm._send_autoloop_deck_load = Mock()
+        sm._sse.send_autoloop_deck_load = Mock()
         self._configure_active_deck(sm, active=1, bpm=130.0)
         ok = _send_direct_autoloop_rearm(
             sm, active=1, mirror=2, bpm=130.0, elapsed_ms=32_005, reason="test", target_beat=64
@@ -215,7 +215,7 @@ class StateManagerRouteFanoutTests(unittest.TestCase):
 
     def test_direct_autoloop_rearm_fanout_uses_deck2_route_order(self) -> None:
         sm = self._sm()
-        sm._send_autoloop_deck_load = Mock()
+        sm._sse.send_autoloop_deck_load = Mock()
         self._configure_active_deck(sm, active=2, bpm=131.0)
         ok = _send_direct_autoloop_rearm(
             sm, active=2, mirror=1, bpm=131.0, elapsed_ms=32_005, reason="test", target_beat=64

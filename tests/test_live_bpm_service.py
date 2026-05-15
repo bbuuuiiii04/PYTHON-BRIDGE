@@ -2,6 +2,7 @@ import os
 import queue
 import struct
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -29,6 +30,7 @@ from rb_ss_bridge_v2.state_manager import (
     _beatgrid_elapsed_for_abs_beat,
     _compute_beatgrid_position,
 )
+from rb_ss_bridge_v2.autoloop_controller import AutoloopTickContext
 
 
 class FakeLiveBPMReader:
@@ -527,6 +529,13 @@ class FakeLiveProvider:
         self.bpm = None
 
 
+def _autoloop_tick(sm, active, mirror, bpm, abs_beat_pos, elapsed_ms=None):
+    return sm._autoloop.tick(
+        0.0,
+        AutoloopTickContext(active, mirror, bpm, abs_beat_pos, elapsed_ms),
+    )
+
+
 class StateManagerLiveBPMTests(unittest.TestCase):
     def test_beatgrid_position_exact_marker(self) -> None:
         self.assertEqual(_compute_beatgrid_position(1500.0, [1000.0, 1500.0, 2100.0]), (1.0, 1.0))
@@ -576,6 +585,24 @@ class StateManagerLiveBPMTests(unittest.TestCase):
 
         live.bpm = 130.0
         self.assertEqual(sm._os.autoloop_arm_bpm, 123.45)
+
+    def test_autoloop_live_bpm_records_to_session_started_after_init(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), tempfile.TemporaryDirectory() as tmp:
+            output = FakeOutput()
+            sm = StateManager(
+                queue.Queue(), PositionCache(), output,
+                live_bpm=FakeLiveProvider(123.45), live_bpm_follow=False,
+            )
+            path = str(Path(tmp) / "capture.jsonl")
+
+            self.assertTrue(sm.start_session_recording(path))
+            deck = sm._deck[1]
+            deck.meta.filepath = "/tmp/test.wav"
+            deck.meta.bpm = 120.0
+            sm._apply_lighting(1, "autoloop", 1000, 120.0)
+
+            self.assertEqual(sm.recording_status()["counts"]["live_bpm"], 1)
+            self.assertTrue(sm.stop_session_recording())
 
     def test_autoloop_arm_falls_back_without_live_bpm(self) -> None:
         output = FakeOutput()
@@ -639,10 +666,10 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertEqual(sm._os.autoloop_arm_target_elapsed_ms, 16000)
         self.assertEqual(sm._os.autoloop_arm_target_source, "grid")
 
-        sm._maybe_lock_autoloop_arm(2, 1, 120.0, 31.9, 15950)
+        _autoloop_tick(sm, 2, 1, 120.0, 31.9, 15950)
         self.assertEqual(output.loads, [])
 
-        sm._maybe_lock_autoloop_arm(2, 1, 120.0, 32.0, 16000)
+        _autoloop_tick(sm, 2, 1, 120.0, 32.0, 16000)
 
         self.assertEqual(len(output.loads), 4)
         self.assertEqual(output.loads[0][0], 2)
@@ -771,7 +798,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertEqual(sm._os.pending_autoloop_arm_reason, "short-runway")
         self.assertLess(sm._os.autoloop_arm_target_elapsed_ms - 28194, 1000)
 
-        sm._maybe_lock_autoloop_arm(2, 1, 132.0, 64.0, sm._os.autoloop_arm_target_elapsed_ms)
+        _autoloop_tick(sm, 2, 1, 132.0, 64.0, sm._os.autoloop_arm_target_elapsed_ms)
 
         self.assertEqual(len(output.loads), 4)
         self.assertTrue(sm._os.autoloop_arm_pending)
@@ -847,12 +874,12 @@ class StateManagerLiveBPMTests(unittest.TestCase):
             live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
         )
 
-        self.assertEqual(sm._next_autoloop_arm_phrase(0.2), 32)
-        self.assertEqual(sm._next_autoloop_arm_phrase(5.2), 32)
-        self.assertEqual(sm._next_autoloop_arm_phrase(31.9), 32)
-        self.assertEqual(sm._next_autoloop_arm_phrase(32.0), 64)
-        self.assertEqual(sm._next_autoloop_arm_phrase(33.0), 64)
-        self.assertEqual(sm._next_autoloop_arm_phrase(-0.5), 32)
+        self.assertEqual(sm._autoloop.next_arm_phrase(0.2), 32)
+        self.assertEqual(sm._autoloop.next_arm_phrase(5.2), 32)
+        self.assertEqual(sm._autoloop.next_arm_phrase(31.9), 32)
+        self.assertEqual(sm._autoloop.next_arm_phrase(32.0), 64)
+        self.assertEqual(sm._autoloop.next_arm_phrase(33.0), 64)
+        self.assertEqual(sm._autoloop.next_arm_phrase(-0.5), 32)
 
     def test_previous_autoloop_arm_phrase_anchors_recent_phrase_start(self) -> None:
         sm = StateManager(
@@ -860,10 +887,10 @@ class StateManagerLiveBPMTests(unittest.TestCase):
             live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
         )
 
-        self.assertEqual(sm._previous_autoloop_arm_phrase(0.2), 0)
-        self.assertEqual(sm._previous_autoloop_arm_phrase(16.2), 0)
-        self.assertEqual(sm._previous_autoloop_arm_phrase(33.9), 32)
-        self.assertEqual(sm._previous_autoloop_arm_phrase(32.0), 32)
+        self.assertEqual(sm._autoloop.previous_arm_phrase(0.2), 0)
+        self.assertEqual(sm._autoloop.previous_arm_phrase(16.2), 0)
+        self.assertEqual(sm._autoloop.previous_arm_phrase(33.9), 32)
+        self.assertEqual(sm._autoloop.previous_arm_phrase(32.0), 32)
 
     def test_autoloop_arm_phrase_lock_sends_arm_bpm_at_target(self) -> None:
         output = FakeOutput()
@@ -876,13 +903,13 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.autoloop_arm_bpm = 120.5
         sm._os.autoloop_arm_pending = True
 
-        sm._maybe_lock_autoloop_arm(1, 2, 120.5, 5.2)
+        _autoloop_tick(sm, 1, 2, 120.5, 5.2)
 
         self.assertTrue(sm._os.autoloop_arm_pending)
         self.assertEqual(sm._os.autoloop_arm_sync_beat, 32)
         self.assertEqual(output.bpms, [])
 
-        sm._maybe_lock_autoloop_arm(1, 2, 120.5, 32.0)
+        _autoloop_tick(sm, 1, 2, 120.5, 32.0)
 
         self.assertFalse(sm._os.autoloop_arm_pending)
         self.assertEqual(sm._os.autoloop_arm_sync_beat, 0)
@@ -906,11 +933,11 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.autoloop_arm_target_elapsed_ms = 16000
         sm._os.autoloop_arm_target_source = "grid"
 
-        sm._maybe_lock_autoloop_arm(1, 2, 120.0, 32.0, 15999)
+        _autoloop_tick(sm, 1, 2, 120.0, 32.0, 15999)
         self.assertTrue(sm._os.autoloop_arm_pending)
         self.assertEqual(output.bpms, [])
 
-        sm._maybe_lock_autoloop_arm(1, 2, 120.0, 32.0, 16000)
+        _autoloop_tick(sm, 1, 2, 120.0, 32.0, 16000)
         self.assertFalse(sm._os.autoloop_arm_pending)
         self.assertEqual(output.bpms[-4:], [(1, 120.0), (2, 120.0), (3, 120.0), (4, 120.0)])
 
@@ -935,7 +962,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.pending_autoloop_arm_source = "test"
 
         with self.assertLogs("state_manager", level="WARNING") as logs:
-            sm._maybe_lock_autoloop_arm(1, 2, 120.0, 129.2, 64200)
+            _autoloop_tick(sm, 1, 2, 120.0, 129.2, 64200)
 
         self.assertEqual(output.beats, [])
         self.assertEqual(len(output.loads), 4)
@@ -967,7 +994,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.pending_autoloop_arm_active = 1
         sm._os.pending_autoloop_arm_source = "test"
 
-        sm._maybe_lock_autoloop_arm(1, 2, 120.0, 128.0, 64000)
+        _autoloop_tick(sm, 1, 2, 120.0, 128.0, 64000)
 
         self.assertEqual(output.beats, [])
         self.assertEqual(len(output.loads), 4)
@@ -987,7 +1014,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.autoloop_arm_target_source = "grid"
 
         with self.assertLogs("state_manager", level="INFO") as logs:
-            sm._maybe_lock_autoloop_arm(1, 2, 120.0, 32.1, 16125)
+            _autoloop_tick(sm, 1, 2, 120.0, 32.1, 16125)
 
         self.assertFalse(any("AUTOLOOP-PHRASE-MISS" in line for line in logs.output))
 
@@ -1006,7 +1033,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.autoloop_arm_target_source = "grid"
 
         with self.assertLogs("state_manager", level="WARNING") as logs:
-            sm._maybe_lock_autoloop_arm(1, 2, 120.0, 32.4, 16200)
+            _autoloop_tick(sm, 1, 2, 120.0, 32.4, 16200)
 
         self.assertFalse(sm._os.autoloop_arm_pending)
         self.assertEqual(output.bpms[-4:], [(1, 120.0), (2, 120.0), (3, 120.0), (4, 120.0)])
@@ -1073,7 +1100,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.was_playing = True
         sm._os.last_sent_bpm = 180.0
         sm._os.last_beat_elapsed_ms = 29600
-        sm._set_autoloop_tempo_anchor(0, 0.0, 180.0)
+        sm._autoloop.set_tempo_anchor(0, 0.0, 180.0)
 
         cache.update(PositionSnapshot(1, elapsed_ms=30000, playing=False, updated_at=time.monotonic()))
         sm._push_tick()
@@ -1643,7 +1670,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
             },
         )()
 
-        text = sm._live_bpm_status_text(1)
+        text = sm._autoloop.live_bpm_status_text(1)
 
         self.assertIn("live_bpm=124.50", text)
         self.assertIn(f"live_source={LIVE_BPM_DIRECT_SOURCE}", text)
@@ -1680,7 +1707,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             sm, output = self._autoloop_sm(FakeLiveProvider(132.0), follow=None)
 
-            bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.5, 100.0)
+            bpm = sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.5, 100.0)
 
         self.assertEqual(bpm, 128.0)
         self.assertEqual(output.bpms, [])
@@ -1691,7 +1718,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         with patch.dict(os.environ, {"RBSS_LIVE_BPM_FOLLOW": "0"}, clear=True):
             sm, output = self._autoloop_sm(FakeLiveProvider(132.0), follow=None)
 
-            bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.5, 100.0)
+            bpm = sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.5, 100.0)
 
         self.assertEqual(bpm, 128.0)
         self.assertEqual(output.bpms, [])
@@ -1700,7 +1727,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
     def test_live_bpm_follow_explicit_false_keeps_v1_timing(self) -> None:
         sm, output = self._autoloop_sm(FakeLiveProvider(132.0), follow=False)
 
-        bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.5, 100.0)
+        bpm = sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.5, 100.0)
 
         self.assertEqual(bpm, 128.0)
         self.assertEqual(output.bpms, [])
@@ -1709,7 +1736,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
     def test_live_bpm_follow_applies_changed_bpm_without_rearming_autoloop(self) -> None:
         sm, output = self._autoloop_sm(FakeLiveProvider(132.0), follow=True)
 
-        bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
+        bpm = sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
 
         self.assertEqual(bpm, 128.0)
         self.assertEqual(sm._os.autoloop_arm_bpm, 128.0)
@@ -1737,7 +1764,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.was_playing = True
         sm._os.last_beat_elapsed_ms = 500
 
-        self.assertEqual(sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 1.2, 100.0), 128.0)
+        self.assertEqual(sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 1.2, 100.0), 128.0)
         self.assertEqual(output.bpms, [])
         self.assertEqual(sm._os.pending_live_bpm, 132.0)
         live.bpm = None
@@ -1759,9 +1786,9 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         live = FakeLiveProvider(132.0)
         sm, output = self._autoloop_sm(live, follow=True)
 
-        self.assertEqual(sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0), 128.0)
+        self.assertEqual(sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0), 128.0)
         live.bpm = 134.0
-        self.assertEqual(sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.4, 100.05), 128.0)
+        self.assertEqual(sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.4, 100.05), 128.0)
         self.assertEqual(output.bpms, [])
         self.assertEqual(sm._os.pending_live_bpm, 134.0)
 
@@ -1777,9 +1804,9 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         live = FakeLiveProvider(132.0)
         sm, _ = self._autoloop_sm(live, follow=True)
 
-        sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
+        sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
         live.bpm = None
-        sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.4, 100.5)
+        sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.4, 100.5)
 
         self.assertEqual(sm._os.pending_live_bpm, 132.0)
         self.assertEqual(sm._os.autoloop_arm_bpm, 128.0)
@@ -1791,7 +1818,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.autoloop_arm_target_elapsed_ms = 16000
         sm._os.autoloop_arm_target_source = "grid"
 
-        sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 20.0, 100.0)
+        sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 20.0, 100.0)
 
         self.assertEqual(sm._os.pending_live_bpm, 132.0)
         self.assertEqual(sm._os.autoloop_arm_sync_beat, 32)
@@ -1805,13 +1832,13 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         )
         meta = TrackMetadata(bpm=120.0, first_beat_ms=1000.0)
 
-        self.assertEqual(sm._autoloop_target_elapsed_for_beat(16, 0, 120.0, meta), (9000, "fallback"))
+        self.assertEqual(sm._autoloop.target_elapsed_for_beat(16, 0, 120.0, meta), (9000, "fallback"))
 
     def test_live_bpm_follow_waits_until_resume_settle_completed(self) -> None:
         sm, output = self._autoloop_sm(FakeLiveProvider(132.0), follow=True)
         sm._os.was_playing = False
 
-        bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
+        bpm = sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
 
         self.assertEqual(bpm, 128.0)
         self.assertEqual(output.bpms, [])
@@ -1819,7 +1846,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
 
     def test_live_bpm_follow_clears_pending_on_master_change(self) -> None:
         sm, _ = self._autoloop_sm(FakeLiveProvider(132.0), follow=True)
-        sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
+        sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
         sm._os.autoloop_change_on_next_beat = True
 
         sm._on_master_changed(2, "test")
@@ -1831,7 +1858,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
 
     def test_live_bpm_follow_clears_pending_on_active_track_load(self) -> None:
         sm, _ = self._autoloop_sm(FakeLiveProvider(132.0), follow=True)
-        sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
+        sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
         sm._os.autoloop_arm_pending = True
         sm._os.autoloop_arm_sync_beat = 32
 
@@ -1844,7 +1871,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
     def test_live_bpm_follow_clears_pending_on_rekordbox_restart(self) -> None:
         live = FakeLiveProvider(132.0)
         sm, _ = self._autoloop_sm(live, follow=True)
-        sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
+        sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
 
         sm._handle_event(BridgeEvent(Ev.RB_RESTARTED, 1, {"pid": 123}, "test"))
 
@@ -1856,7 +1883,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
     def test_live_bpm_follow_ignores_small_jitter(self) -> None:
         sm, output = self._autoloop_sm(FakeLiveProvider(128.05), follow=True)
 
-        bpm = sm._maybe_apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
+        bpm = sm._autoloop.apply_live_bpm_follow(1, 2, 128.0, 8.2, 100.0)
 
         self.assertEqual(bpm, 128.0)
         self.assertEqual(output.bpms, [])

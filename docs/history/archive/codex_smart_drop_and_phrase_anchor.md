@@ -598,7 +598,7 @@ def _send_direct_autoloop_rearm(
     object.__setattr__(arm_meta, "elapsed_ms", target_elapsed_ms)
     sm._os.last_arm_mono = time.monotonic()
     sm._os.last_armed_filepath = d.meta.filepath
-    sm._send_autoloop_deck_load(active, mirror, active, arm_meta)
+    sm._sse.send_autoloop_deck_load(active, mirror, active, arm_meta)
     log.info("[SM] autoloop-rearm  deck=%d  reason=%s  beat=%s  elapsed=%s"
              "  target_elapsed=%s  late=%dms  grid=%s  bpm=%.1f  file=%s",
              active, reason, target_beat if target_beat is not None else "-",
@@ -856,7 +856,7 @@ Mock `StateManager` internals. Test against the module-level functions directly.
   skipped as already past. This documents the accepted suppression window.
 - `test_phrase_anchor_skipped_while_transition_arm_pending`: call `_phrase_anchor_tick(sm, ...)`
   with `sm._os.autoloop_arm_pending=True`, `phrase_anchor_last_beat=0`, `this_beat=64`
-  → `_send_autoloop_deck_load` NOT called
+  → `send_autoloop_deck_load` NOT called
 
 **State reset on mode transition tests:**
 - `test_drop_cut_cleared_on_idle_transition`: `drop_cut_armed=True`; call
@@ -878,13 +878,13 @@ Mock `StateManager` internals. Test against the module-level functions directly.
   `drop_cut_armed=True`, `drop_rearm_beat=64`
 - `test_cut_does_not_fire_before_window`: `this_beat=55` → no cut
 - `test_rearm_fires_on_drop_beat`: `drop_cut_armed=True`, `drop_rearm_beat=64`,
-  `this_beat=64` → `_send_autoloop_deck_load` called through direct rearm helper;
+  `this_beat=64` → `send_autoloop_deck_load` called through direct rearm helper;
   `drop_cut_armed=False`, `drop_rearm_beat=0`
 - `test_past_drop_skipped`: `this_beat=70`, `drop_beat=64` → no cut, no rearm
 - `test_past_drops_scanned_but_ignored`: `anlz_drops=[32,64,128]`,
   `this_beat=124` → past drops are ignored and the upcoming drop can still cut at 124
 - `test_rearm_uses_autoloop_arm_bpm`: `autoloop_arm_bpm=130.5`, push-loop `bpm=131.0`
-  → `_send_autoloop_deck_load` called with `arm_meta.bpm == 130.5`
+  → `send_autoloop_deck_load` called with `arm_meta.bpm == 130.5`
 - `test_rearm_falls_back_to_push_bpm_when_arm_bpm_zero`: `autoloop_arm_bpm=0`,
   push-loop `bpm=131.0` → `arm_meta.bpm == 131.0`
 - `test_rearm_uses_target_elapsed_for_drop_beat`: `target_beat=64` and a mocked
@@ -893,12 +893,12 @@ Mock `StateManager` internals. Test against the module-level functions directly.
 
 **Phrase anchor tests:**
 - `test_phrase_anchor_fires_at_64`: `phrase_anchor_last_beat=0`, `this_beat=64` →
-  `_send_autoloop_deck_load` called; `phrase_anchor_last_beat=64`
+  `send_autoloop_deck_load` called; `phrase_anchor_last_beat=64`
 - `test_phrase_anchor_snaps_to_nearby_future_drop`: `next_anchor=64`, `drop_beat=60`,
   `anlz_drops=[60]`. Call 1: `this_beat=58` → `drop_beat >= this_beat` and within ±8 of
   64, so `next_anchor` is snapped to 60 but `58 < 60` → no rearm, no deck-load.
   Call 2: `this_beat=60` (same `sm` state, `phrase_anchor_last_beat` unchanged) →
-  `this_beat >= next_anchor(60)` → rearm fires; assert `_send_autoloop_deck_load` called
+  `this_beat >= next_anchor(60)` → rearm fires; assert `send_autoloop_deck_load` called
   and `phrase_anchor_last_beat == 60`.
 - `test_phrase_anchor_chooses_closest_drop_not_earliest`: `next_anchor=64`,
   `anlz_drops=[56, 60]`, `this_beat=56` → snap to 60 because `abs(60-64)` is smaller
@@ -933,7 +933,7 @@ Mock `StateManager` internals. Test against the module-level functions directly.
 - **Does SS cleanly rearm after a 1-bar filepath-clear gap (~1.9 s at 130 BPM)?**
   The cut sends `send_deck_clear` (filepath="") + `send_loop_off` — identical to the
   existing arm-correction-clear path (state_manager.py:1500-1504) which already works
-  in production. The rearm sends the full filepath again via `_send_autoloop_deck_load`.
+  in production. The rearm sends the full filepath again via `send_autoloop_deck_load`.
   Assumed safe; confirm via `[INJECT]` logs on first live test.
 - **ANLZ path availability**: drop detection is intentionally tied to the
   `_on_track_loaded` `if anlz_path:` branch. Do not try to recover an ANLZ path from
@@ -972,7 +972,7 @@ Log evidence of working sequence:
 
 - **Push loop ordering**: `_smart_drop_tick` / `_phrase_anchor_tick` now execute BEFORE `send_beat` in the beat-boundary block. Deck-load must precede the activation beat event — this matches the arm-lock pattern SS requires.
 - **`change=True` on rearm beat**: both tick functions return `bool`; push loop sets `change=True` for the beat event when either fires a rearm. This resets SS's internal beat counter.
-- **`_send_direct_autoloop_rearm` BPM finalization**: after `_send_autoloop_deck_load`, sends `send_bpm` to all 4 decks and updates `last_sent_bpm`, matching the `_maybe_lock_autoloop_arm` finalization sequence.
+- **`_send_direct_autoloop_rearm` BPM finalization**: after `send_autoloop_deck_load`, sends `send_bpm` to all 4 decks and updates `last_sent_bpm`, matching the `_maybe_lock_autoloop_arm` finalization sequence.
 - **Smart drop disabled in production** (`RBSS_SMART_DROP=0` in watcher). Only phrase anchor is live.
 
 ### Rule for future SS re-anchor work

@@ -56,10 +56,11 @@ def _sm(drops=None, filepath="/music/drop.mp3", active=1):
         _out=out,
         _sse=SoundSwitchEngine(out),
     )
-    sm._autoloop_target_elapsed_for_beat = Mock(
+    sm._autoloop = SimpleNamespace()
+    sm._autoloop.target_elapsed_for_beat = Mock(
         side_effect=lambda beat, _elapsed, _bpm, _meta: (beat * 500, "grid")
     )
-    sm._send_autoloop_deck_load = Mock()
+    sm._sse.send_autoloop_deck_load = Mock()
     return sm
 
 
@@ -692,7 +693,7 @@ class SmartDropTests(unittest.TestCase):
             sm, 1, 2, 130.0, 64, 32_005, 64.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
     def test_cut_does_not_fire_before_window(self) -> None:
         sm = _sm([64])
@@ -705,7 +706,7 @@ class SmartDropTests(unittest.TestCase):
         sm._os.drop_cut_armed = True
         sm._os.drop_rearm_beat = 64
         self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 64, 32_005), 2)
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
         self.assertTrue(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 64)
         self.assertEqual(sm._os.phrase_anchor_last_beat, -1)
@@ -729,7 +730,7 @@ class SmartDropTests(unittest.TestCase):
             ),
         )
         self.assertEqual(signal, 2)
-        sm._send_autoloop_deck_load.assert_called_once()
+        sm._sse.send_autoloop_deck_load.assert_called_once()
         self.assertFalse(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 0)
 
@@ -751,7 +752,7 @@ class SmartDropTests(unittest.TestCase):
             ),
         )
         self.assertEqual(result, SmartDropTickResult.none())
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
     def test_smart_drop_suppression_gates_still_apply_with_sp_state(self) -> None:
         sm = _sm([64])
@@ -781,7 +782,7 @@ class SmartDropTests(unittest.TestCase):
             sm, 1, 2, 130.0, 64, 32_005, 64.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
     def test_smart_drop_crossing_does_not_update_phrase_anchor_directly(self) -> None:
         sm = _sm([60])
@@ -790,7 +791,7 @@ class SmartDropTests(unittest.TestCase):
         sm._os.phrase_anchor_last_beat = 0
         self.assertEqual(_smart_drop_tick(sm, 1, 2, 130.0, 60, 30_005), 2)
         self.assertEqual(sm._os.phrase_anchor_last_beat, 0)
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
     def test_past_drops_scanned_but_ignored(self) -> None:
         sm = _sm([32, 64, 128])
@@ -821,7 +822,7 @@ class SmartDropTests(unittest.TestCase):
             sm, 1, 2, 130.0, 64, 32_005, blackout_mode=False
         )
         self.assertEqual(signal, 2)
-        sm._send_autoloop_deck_load.assert_called_once()
+        sm._sse.send_autoloop_deck_load.assert_called_once()
         self.assertFalse(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 0)
 
@@ -844,20 +845,20 @@ class SmartDropTests(unittest.TestCase):
         sm = _sm([64])
         sm._os.autoloop_arm_bpm = 130.5
         _send_direct_autoloop_rearm(sm, 1, 2, 131.0, 32_005, "test", target_beat=64)
-        arm_meta = sm._send_autoloop_deck_load.call_args.args[3]
+        arm_meta = sm._sse.send_autoloop_deck_load.call_args.args[3]
         self.assertEqual(arm_meta.bpm, 130.5)
 
     def test_rearm_falls_back_to_push_bpm_when_arm_bpm_zero(self) -> None:
         sm = _sm([64])
         sm._os.autoloop_arm_bpm = 0.0
         _send_direct_autoloop_rearm(sm, 1, 2, 131.0, 32_005, "test", target_beat=64)
-        arm_meta = sm._send_autoloop_deck_load.call_args.args[3]
+        arm_meta = sm._sse.send_autoloop_deck_load.call_args.args[3]
         self.assertEqual(arm_meta.bpm, 131.0)
 
     def test_rearm_uses_target_elapsed_for_drop_beat(self) -> None:
         sm = _sm([64])
         _send_direct_autoloop_rearm(sm, 1, 2, 131.0, 32_125, "test", target_beat=64)
-        arm_meta = sm._send_autoloop_deck_load.call_args.args[3]
+        arm_meta = sm._sse.send_autoloop_deck_load.call_args.args[3]
         self.assertEqual(arm_meta.elapsed_ms, 32_000)
 
 
@@ -1151,12 +1152,12 @@ class PhraseAnchorTests(unittest.TestCase):
                 phrase_anchor_target_beat=sp_target,
             ),
         )
-        sm._send_autoloop_deck_load.assert_called_once()
-        sm._autoloop_target_elapsed_for_beat.assert_called_once_with(
+        sm._sse.send_autoloop_deck_load.assert_called_once()
+        sm._autoloop.target_elapsed_for_beat.assert_called_once_with(
             sp_target,
             36_000,
             130.0,
-            sm._send_autoloop_deck_load.call_args.args[3],
+            sm._sse.send_autoloop_deck_load.call_args.args[3],
         )
         self.assertEqual(sm._os.phrase_anchor_last_beat, sp_target)
 
@@ -1168,7 +1169,7 @@ class PhraseAnchorTests(unittest.TestCase):
             sm, 1, 2, 130.0, 64, 32_000, 64.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
     def test_phrase_anchor_skipped_while_pending_arm_meta_set(self) -> None:
         sm = _sm()
@@ -1178,7 +1179,7 @@ class PhraseAnchorTests(unittest.TestCase):
             sm, 1, 2, 130.0, 64, 32_000, 64.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
     def test_phrase_anchor_fires_at_64(self) -> None:
         sm = _sm()
@@ -1187,33 +1188,33 @@ class PhraseAnchorTests(unittest.TestCase):
             sm, 1, 2, 130.0, 64, 32_000, 64.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_called_once()
+        sm._sse.send_autoloop_deck_load.assert_called_once()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
 
     def test_phrase_anchor_snaps_to_nearby_future_drop(self) -> None:
         sm = _sm([60])
         sm._os.phrase_anchor_last_beat = 0
         _phrase_anchor_tick(sm, 1, 2, 130.0, 58, 29_000, 58.0, _sp_state())
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
         _phrase_anchor_tick(sm, 1, 2, 130.0, 60, 30_000, 60.0, _sp_state())
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
         _phrase_anchor_tick(
             sm, 1, 2, 130.0, 64, 32_000, 64.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_called_once()
+        sm._sse.send_autoloop_deck_load.assert_called_once()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
 
     def test_phrase_anchor_does_not_snap_to_past_drop(self) -> None:
         sm = _sm([55])
         sm._os.phrase_anchor_last_beat = 0
         _phrase_anchor_tick(sm, 1, 2, 130.0, 62, 31_000, 62.0, _sp_state())
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
         _phrase_anchor_tick(
             sm, 1, 2, 130.0, 64, 32_000, 64.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_called_once()
+        sm._sse.send_autoloop_deck_load.assert_called_once()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
 
     def test_phrase_anchor_blocked_by_drop_cut(self) -> None:
@@ -1224,7 +1225,7 @@ class PhraseAnchorTests(unittest.TestCase):
             sm, 1, 2, 130.0, 64, 32_000, 64.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
     def test_phrase_anchor_blocked_by_breakdown_active(self) -> None:
         sm = _sm()
@@ -1235,12 +1236,12 @@ class PhraseAnchorTests(unittest.TestCase):
             sm, 1, 2, 130.0, 64, 32_000, 64.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
     def test_phrase_anchor_init_sentinel(self) -> None:
         sm = _sm()
         _phrase_anchor_tick(sm, 1, 2, 130.0, 75, 37_500, 75.0, _sp_state())
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
 
     def test_phrase_anchor_skips_stale_missed_anchor(self) -> None:
@@ -1251,7 +1252,7 @@ class PhraseAnchorTests(unittest.TestCase):
             sm, 1, 2, 130.0, 120, 60_000, 120.0,
             _sp_state(phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 120)
 
     def test_phrase_anchor_does_not_fire_at_128_after_stale_recovery(self) -> None:
@@ -1267,7 +1268,7 @@ class PhraseAnchorTests(unittest.TestCase):
             sm, 1, 2, 130.0, 128, 64_000, 128.0,
             _sp_state(phrase_anchor_target_beat=184),
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
     def test_phrase_anchor_fires_at_184_after_stale_recovery(self) -> None:
         # After recovery at beat 120, anchor fires at 120+64=184.
@@ -1281,7 +1282,7 @@ class PhraseAnchorTests(unittest.TestCase):
             sm, 1, 2, 130.0, 184, 92_000, 184.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=184),
         )
-        sm._send_autoloop_deck_load.assert_called_once()
+        sm._sse.send_autoloop_deck_load.assert_called_once()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 184)
 
     def test_phrase_anchor_pre_clear_fires_one_beat_before(self) -> None:
@@ -1305,7 +1306,7 @@ class PhraseAnchorTests(unittest.TestCase):
             sm._out.send_loop_off.call_args_list,
             [call(1), call(2), call(3), call(4)],
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
         # phrase_anchor_last_beat must NOT advance — anchor hasn't fired yet.
         self.assertEqual(sm._os.phrase_anchor_last_beat, 0)
 
@@ -1325,14 +1326,14 @@ class PhraseAnchorTests(unittest.TestCase):
             sm._out.send_loop_off.call_args_list,
             [call(2), call(1), call(3), call(4)],
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 0)
 
     def test_phrase_anchor_consumes_intent_only(self) -> None:
         sm = _sm()
         sm._os.phrase_anchor_last_beat = 0
         _phrase_anchor_tick(sm, 1, 2, 130.0, 64, 32_000, 64.0, _sp_state())
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
         self.assertEqual(sm._os.phrase_anchor_last_beat, 0)
 
     def test_phrase_anchor_intent_alone_does_not_bypass_gates(self) -> None:
@@ -1343,7 +1344,7 @@ class PhraseAnchorTests(unittest.TestCase):
             sm, 1, 2, 130.0, 64, 32_000, 64.0,
             _sp_state(phrase_anchor_rearm_requested=True, phrase_anchor_target_beat=64),
         )
-        sm._send_autoloop_deck_load.assert_not_called()
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
 
 if __name__ == "__main__":
@@ -1396,7 +1397,7 @@ class SmartBreakdownTests(unittest.TestCase):
         # Tick on restore beat
         _smart_breakdown_tick(sm, 1, 2, 130.0, 64, 32_000)
         self.assertFalse(sm._os.breakdown_active)
-        sm._send_autoloop_deck_load.assert_called_once()
+        sm._sse.send_autoloop_deck_load.assert_called_once()
 
     def test_breakdown_cut_deck2_uses_mirrored_fanout_order(self):
         sm = _sm(active=2, filepath="/music/drop2.mp3")
@@ -1456,7 +1457,7 @@ class SmartBreakdownTests(unittest.TestCase):
             sp_state=_sp_state(breakdown_end_crossing=True),
         )
         self.assertFalse(sm._os.breakdown_active)
-        sm._send_autoloop_deck_load.assert_called_once()
+        sm._sse.send_autoloop_deck_load.assert_called_once()
 
     def test_breakdown_suppression_gates_still_apply_with_sp_state(self):
         sm = _sm()
