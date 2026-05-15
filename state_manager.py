@@ -306,6 +306,9 @@ class StateManager:
         self._sp_drop_window: float = float(SMART_DROP_LOOKAHEAD_BEATS)
         self._sp_post_drop: float = 8.0           # conservative default; not consumed until Phase 3
         self._sp_transition_window: float = float(SMART_DROP_LOOKAHEAD_BEATS)
+        self._phrase_segments_cache: dict[int, tuple[int, tuple[PhraseSegment, ...]]] = {}
+        self._smart_drop_beats_cache: dict[int, tuple[int, tuple[float, ...]]] = {}
+        self._breakdown_segments_cache: dict[int, tuple[int, tuple[BeatSegment, ...]]] = {}
         self._sse = SoundSwitchEngine(self._out)
 
         def _autoloop_rearm_bridge(*args, **kwargs):
@@ -598,6 +601,7 @@ class StateManager:
             if d_obj is not None:
                 gen = ev.payload.get("load_gen", -1)
                 if gen == d_obj.load_gen:
+                    self._clear_phrase_segment_cache(ev.deck)
                     raw_drops = list(ev.payload.get("drop_beat_indices", []))
                     raw_breakdowns = list(ev.payload.get("breakdown_beat_indices", []))
                     raw_buildups = list(ev.payload.get("buildup_beat_indices", []))
@@ -905,6 +909,7 @@ class StateManager:
         meta.beatgrid_source = payload.get("beatgrid_source", "")
         meta.soundswitch_id = payload["soundswitch_id"]
         meta.total_ms       = payload["total_ms"]
+        self._clear_phrase_segment_cache(deck)
         if self._live_bpm is not None and meta.bpm > 0:
             try:
                 self._live_bpm.update_hint(deck, meta.bpm, meta.bpm)
@@ -1751,36 +1756,36 @@ class StateManager:
         abs_beat_pos: float,
         bpm: float,
     ) -> SmartPhrasingState:
+        deck = int(active)
+        phrase_cached = self._phrase_segments_cache.get(deck)
+        if phrase_cached and phrase_cached[0] == d.load_gen:
+            phrase_segments = phrase_cached[1]
+        else:
+            phrase_segments = tuple(self._build_phrase_segments(d))
+            self._phrase_segments_cache[deck] = (d.load_gen, phrase_segments)
+
+        drop_cached = self._smart_drop_beats_cache.get(deck)
+        if drop_cached and drop_cached[0] == d.load_gen:
+            smart_drop_beats = drop_cached[1]
+        else:
+            smart_drop_beats = tuple(self._build_smart_drop_beats(d))
+            self._smart_drop_beats_cache[deck] = (d.load_gen, smart_drop_beats)
+
+        breakdown_cached = self._breakdown_segments_cache.get(deck)
+        if breakdown_cached and breakdown_cached[0] == d.load_gen:
+            breakdown_segments = breakdown_cached[1]
+        else:
+            breakdown_segments = tuple(self._build_breakdown_segments(d))
+            self._breakdown_segments_cache[deck] = (d.load_gen, breakdown_segments)
+
         _sp_snapshot = SmartPhrasingSnapshot(
             deck_id=str(active),
             track_id=d.meta.content_id or d.meta.filepath or None,
             is_playing=d.playing,
             abs_beat=abs_beat_pos if bpm > 0 else None,
-            phrase_segments=build_phrase_segments_from_markers(
-                anlz_buildups=d.meta.anlz_buildups,
-                anlz_drops=d.meta.anlz_drops,
-                anlz_breakdowns=d.meta.anlz_breakdowns,
-                smart_drops=d.meta.smart_drops,
-                total_beats=len(d.meta.beatgrid_times_ms),
-            ),
-            smart_drop_beats=tuple(float(x) for x in d.meta.smart_drops),
-            # Note: this uses raw ANLZ breakdowns filtered
-            # dynamically, while the coordinator breakdown path uses pre-filtered
-            # d.meta.smart_breakdowns.
-            breakdown_segments=tuple(
-                BeatSegment(
-                    start_beat=float(bd_beat),
-                    end_beat=float(find_restore_beat(
-                        bd_beat,
-                        d.meta.anlz_buildups,
-                        d.meta.smart_drops,
-                        SMART_BREAKDOWN_DEFAULT_DURATION_BEATS
-                    ))
-                ) for bd_beat in select_smart_breakdowns(
-                    d.meta.anlz_breakdowns,
-                    total_beats=len(d.meta.beatgrid_times_ms)
-                )
-            ),
+            phrase_segments=phrase_segments,
+            smart_drop_beats=smart_drop_beats,
+            breakdown_segments=breakdown_segments,
             phrase_lookahead_beats=self._sp_phrase_lookahead,
             drop_window_beats=self._sp_drop_window,
             post_drop_beats=self._sp_post_drop,
@@ -1792,6 +1797,41 @@ class StateManager:
         sp_state = _sp_result.state
         self._last_sp_state = sp_state
         return sp_state
+
+    def _clear_phrase_segment_cache(self, deck: int) -> None:
+        self._phrase_segments_cache.pop(deck, None)
+        self._smart_drop_beats_cache.pop(deck, None)
+        self._breakdown_segments_cache.pop(deck, None)
+
+    def _build_phrase_segments(self, d) -> tuple[PhraseSegment, ...]:
+        return build_phrase_segments_from_markers(
+            anlz_buildups=d.meta.anlz_buildups,
+            anlz_drops=d.meta.anlz_drops,
+            anlz_breakdowns=d.meta.anlz_breakdowns,
+            smart_drops=d.meta.smart_drops,
+            total_beats=len(d.meta.beatgrid_times_ms),
+        )
+
+    def _build_smart_drop_beats(self, d) -> tuple[float, ...]:
+        return tuple(float(x) for x in d.meta.smart_drops)
+
+    def _build_breakdown_segments(self, d) -> tuple[BeatSegment, ...]:
+        # Note: this uses raw ANLZ breakdowns filtered dynamically, while the
+        # coordinator breakdown path uses pre-filtered d.meta.smart_breakdowns.
+        return tuple(
+            BeatSegment(
+                start_beat=float(bd_beat),
+                end_beat=float(find_restore_beat(
+                    bd_beat,
+                    d.meta.anlz_buildups,
+                    d.meta.smart_drops,
+                    SMART_BREAKDOWN_DEFAULT_DURATION_BEATS
+                ))
+            ) for bd_beat in select_smart_breakdowns(
+                d.meta.anlz_breakdowns,
+                total_beats=len(d.meta.beatgrid_times_ms)
+            )
+        )
 
     def _build_laser_context(
         self,
