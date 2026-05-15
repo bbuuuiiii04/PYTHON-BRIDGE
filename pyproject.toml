@@ -30,6 +30,7 @@ packages = [
 ]
 py-modules = [
     "rb_ss_bridge_v2.anlz_reader",
+    "rb_ss_bridge_v2.autoloop_controller",
     "rb_ss_bridge_v2.beat_math",
     "rb_ss_bridge_v2.bridge_fmt",
     "rb_ss_bridge_v2.config",

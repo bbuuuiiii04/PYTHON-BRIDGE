@@ -557,7 +557,7 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
         sm._phrase_anchor_enabled = True
         sm._os.phrase_anchor_last_beat = 0
         sm._os.last_beat_elapsed_ms = int(62 * 500)
-        sm._send_autoloop_deck_load = Mock()
+        sm._sse.send_autoloop_deck_load = Mock()
 
         preclear_ctx = self._push_ctx(sm, 63)
         self.assertTrue(preclear_ctx.smart_phrasing.phrase_anchor_preclear_requested)
@@ -577,7 +577,7 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
         self.assertTrue(rearm_ctx.smart_phrasing.phrase_anchor_rearm_requested)
         self.assertEqual(rearm_ctx.smart_phrasing.phrase_anchor_target_beat, 64)
         self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
-        sm._send_autoloop_deck_load.assert_called_once()
+        sm._sse.send_autoloop_deck_load.assert_called_once()
 
     def test_arm_matches_legacy_normal_window(self):
         sm = self._prepare_manager(drop_beat=64)

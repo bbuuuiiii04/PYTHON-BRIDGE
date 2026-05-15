@@ -372,7 +372,7 @@ state_manager.py
   _should_delay_autoloop_master_arm()
   _is_near_autoloop_phrase_start()
   _mark_autoloop_master_relock()
-  _send_autoloop_deck_load()
+  send_autoloop_deck_load()
   _clear_live_bpm_follow()
   _live_bpm_status_text()
   _live_bpm_follow_status_text()

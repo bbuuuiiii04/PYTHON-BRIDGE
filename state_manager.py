@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import bisect
 import logging
-import math
 import os as _os
 import queue
 import threading
@@ -33,7 +32,7 @@ from dataclasses import dataclass, replace
 from typing import Callable, Optional
 
 from .config import (
-    AUTOLOOP_ARM_PHRASE_BEATS, AUTOLOOP_BEATS, ARM_GUARD_S, STOP_DEBOUNCE_S,
+    AUTOLOOP_ARM_PHRASE_BEATS, ARM_GUARD_S, STOP_DEBOUNCE_S,
     PLAY_SETTLE_MS, TIMING_COMPENSATION_MS,
     BPM_THRESHOLD_SCRIPTED, BPM_THRESHOLD_UNSCRIPTED,
     MEM_STALE_S, SMART_DROP_LOOKAHEAD_BEATS, SMART_DROP_IGNORE_INTRO_BEATS,
@@ -65,6 +64,11 @@ from .logging_manager import get_logging_manager
 from .filepath_resolver import has_soundswitch_scripted_id
 from .session_recorder import SessionRecorder
 from .sound_switch_engine import SoundSwitchEngine
+from .autoloop_controller import (
+    AutoloopController,
+    AutoloopTickContext,
+    send_direct_autoloop_rearm as _send_direct_autoloop_rearm,
+)
 from .smart_phrasing import (
     SmartPhrasingEngine, SmartPhrasingSnapshot, PhraseSegment, BeatSegment,
     SmartPhrasingState,
@@ -82,7 +86,6 @@ __all__ = ["StateManager", "SmartDropTickResult"]
 
 _LATENCY_WARN_MS = 50.0
 _TC_LATENCY_WARN_MS = 250.0
-_AUTOLOOP_IDLE_DEBOUNCE_S = max(STOP_DEBOUNCE_S, 2.0)
 LIVE_BPM_FOLLOW_ENV = "RBSS_LIVE_BPM_FOLLOW"
 AUTOLOOP_MASTER_PHRASE_ARM_ENV = "RBSS_AUTOLOOP_MASTER_PHRASE_ARM"
 SMART_DROP_ENV = "RBSS_SMART_DROP"
@@ -90,11 +93,6 @@ SMART_BREAKDOWN_ENV = "RBSS_SMART_BREAKDOWN"
 PHRASE_ANCHOR_ENV = "RBSS_PHRASE_ANCHOR"
 SMART_REARM_EXPERIMENT_ENV = "RBSS_SMART_REARM_EXPERIMENT"
 SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
-_LIVE_BPM_FOLLOW_THRESHOLD = BPM_THRESHOLD_UNSCRIPTED
-_LIVE_BPM_FOLLOW_SEND_INTERVAL_S = 0.10
-_AUTOLOOP_MASTER_PHRASE_START_GRACE_BEATS = 0.5
-_AUTOLOOP_PHRASE_LATE_TOLERANCE_MS = 125
-_AUTOLOOP_PHRASE_MIN_RUNWAY_MS = 1000
 STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 _PROFILE_SUMMARY_INTERVAL_S = 10.0
@@ -310,6 +308,16 @@ class StateManager:
         self._smart_drop_beats_cache: dict[int, tuple[int, tuple[float, ...]]] = {}
         self._breakdown_segments_cache: dict[int, tuple[int, tuple[BeatSegment, ...]]] = {}
         self._sse = SoundSwitchEngine(self._out)
+        self._autoloop = AutoloopController(
+            output_state_ref=lambda: self._os,
+            deck_ref=lambda d: self._deck[d],
+            live_bpm_service=self._live_bpm,
+            sse=self._sse,
+            clock=time.monotonic,
+            logger=log,
+            live_bpm_follow=self._live_bpm_follow,
+            recorder_ref=lambda: self._recorder,
+        )
 
         def _autoloop_rearm_bridge(*args, **kwargs):
             return _send_direct_autoloop_rearm(self, *args, **kwargs)
@@ -704,10 +712,10 @@ class StateManager:
             self._os.autoloop_arm_deck = 0
             self._os.last_autoloop_status_phrase_beat = 0
             self._clear_smart_rearm_state()
-            self._clear_autoloop_arm_phrase_lock()
-            self._clear_live_bpm_follow()
-            self._clear_autoloop_tempo_relock()
-            self._clear_pending_autoloop_master_phrase_arm()
+            self._autoloop.clear_arm_phrase_lock()
+            self._autoloop.clear_live_bpm_follow()
+            self._autoloop.clear_tempo_relock()
+            self._autoloop.clear_pending_master_phrase_arm()
             if self._live_bpm is not None:
                 try:
                     self._live_bpm.invalidate()
@@ -804,10 +812,10 @@ class StateManager:
         self._os.autoloop_arm_after_master_change = True
         self._os.autoloop_master_change_source = source
         self._clear_smart_rearm_state()
-        self._clear_autoloop_arm_phrase_lock()
-        self._clear_live_bpm_follow()
-        self._clear_autoloop_tempo_relock()
-        self._clear_pending_autoloop_master_phrase_arm()
+        self._autoloop.clear_arm_phrase_lock()
+        self._autoloop.clear_live_bpm_follow()
+        self._autoloop.clear_tempo_relock()
+        self._autoloop.clear_pending_master_phrase_arm()
         if self._laser_executor is not None:
             self._laser_executor.reset_runtime_state(reason="master_changed")
 
@@ -820,10 +828,10 @@ class StateManager:
         d.load_gen += 1
         if deck == self._os.active_deck:
             self._clear_smart_rearm_state()
-            self._clear_autoloop_arm_phrase_lock()
-            self._clear_live_bpm_follow()
-            self._clear_autoloop_tempo_relock()
-            self._clear_pending_autoloop_master_phrase_arm()
+            self._autoloop.clear_arm_phrase_lock()
+            self._autoloop.clear_live_bpm_follow()
+            self._autoloop.clear_tempo_relock()
+            self._autoloop.clear_pending_master_phrase_arm()
             if self._laser_executor is not None:
                 self._laser_executor.reset_runtime_state(reason="active_track_loaded")
         d.tl_title = title
@@ -1145,7 +1153,7 @@ class StateManager:
         # Idle transitions are debounced to prevent flicker on transient pauses.
         debounce_s = STOP_DEBOUNCE_S if desired == "idle" else 0.0
         if desired == "idle" and os.lighting_mode == "autoloop":
-            debounce_s = _AUTOLOOP_IDLE_DEBOUNCE_S
+            debounce_s = self._autoloop.idle_debounce_s
         if (now - os.lighting_stable_since) < debounce_s:
             return
 
@@ -1166,7 +1174,6 @@ class StateManager:
 
         Called only by _update_lighting, only on actual mode changes.
         """
-        mirror = 3 - deck
         d = self._deck[deck]
         self._os.last_arm_mono = time.monotonic()
 
@@ -1181,106 +1188,12 @@ class StateManager:
         elif mode == "autoloop":
             self._clear_smart_rearm_state()
             self._pending_arm = None
-            self._os.push_reset_bpm = True
-            arm_bpm, bpm_source = self._autoloop_arm_bpm(deck, d.meta.bpm)
-            self._os.autoloop_arm_bpm = arm_bpm
-            self._os.autoloop_arm_deck = deck
-            self._os.autoloop_arm_pending = True
-            self._os.autoloop_arm_sync_beat = 0
-            self._os.autoloop_arm_pending_since = time.monotonic()
-            self._os.last_autoloop_status_phrase_beat = 0
-            self._clear_live_bpm_follow()
-            self._clear_autoloop_tempo_relock()
-            self._clear_autoloop_tempo_anchor()
-            self._clear_pending_autoloop_master_phrase_arm()
-            self._os.last_live_follow_bpm = arm_bpm
-            self._os.last_live_follow_send_mono = 0.0
-            self._os.live_follow_generation += 1
-            arm_after_master = self._os.autoloop_arm_after_master_change
-            arm_source = self._os.autoloop_master_change_source
-            self._os.autoloop_arm_after_master_change = False
-            self._os.autoloop_master_change_source = ""
-            log.info("[SM] arm-autoloop  deck=%d  elapsed=%s  bpm=%.1f  src=%s  file=%s",
-                     deck, bf.elapsed(elapsed_ms), arm_bpm, bpm_source, bf.short(d.meta.filepath))
-            log.debug("[SM] arm-autoloop  deck=%d  mirror=%d  loop=%d  meta_bpm=%.2f"
-                      "  after_master=%s  master_src=%s  prev=%s",
-                      deck, mirror, AUTOLOOP_BEATS, d.meta.bpm,
-                      arm_after_master, arm_source or "<none>",
-                      bf.short(self._os.last_armed_filepath))
-            if arm_after_master and self._autoloop_master_phrase_arm:
-                self._sse.send_autoloop_clear(deck)
-                log.info("[SM] clear-autoloop  deck=%d  src=%s", deck, arm_source or "<none>")
-            else:
-                for dk in self._sse.deck_route(deck):
-                    self._out._sub(f"deck {dk} get_filepath", "", verbose=True)
-            if d.meta.filepath:
-                self._os.last_armed_filepath = d.meta.filepath
-                arm_meta = TrackMetadata(
-                    filepath=d.meta.filepath,
-                    soundswitch_id="",
-                    bpm=arm_bpm,
-                    first_beat_ms=d.meta.first_beat_ms,
-                    beatgrid_times_ms=list(d.meta.beatgrid_times_ms),
-                    beatgrid_bpms=list(d.meta.beatgrid_bpms),
-                    beatgrid_source=d.meta.beatgrid_source,
-                    total_ms=d.meta.total_ms,
-                )
-                object.__setattr__(arm_meta, "elapsed_ms", elapsed_ms)
-                abs_beat = self._autoloop_abs_beat_for_elapsed(elapsed_ms, arm_bpm, arm_meta)
-                self._set_autoloop_tempo_anchor(elapsed_ms, abs_beat, arm_bpm)
-                if self._should_delay_autoloop_master_arm(arm_after_master, abs_beat):
-                    target = self._next_autoloop_arm_phrase(abs_beat)
-                    target_elapsed_ms, target_source = self._autoloop_target_elapsed_for_beat(
-                        target, elapsed_ms, arm_bpm, arm_meta,
-                    )
-                    pending_reason = "scheduled"
-                    if target_elapsed_ms - elapsed_ms < _AUTOLOOP_PHRASE_MIN_RUNWAY_MS:
-                        pending_reason = "short-runway"
-                    self._os.autoloop_arm_sync_beat = target
-                    self._os.autoloop_arm_target_elapsed_ms = target_elapsed_ms
-                    self._os.autoloop_arm_target_source = target_source
-                    self._os.pending_autoloop_arm_meta = arm_meta
-                    self._os.pending_autoloop_arm_deck = deck
-                    self._os.pending_autoloop_arm_mirror = mirror
-                    self._os.pending_autoloop_arm_active = deck
-                    self._os.pending_autoloop_arm_source = arm_source or "master"
-                    self._os.pending_autoloop_arm_reason = pending_reason
-                    log.info("[SM] arm-pending  deck=%d  beat=%.1f→%d  until=%dms  file=%s",
-                             deck, abs_beat, target,
-                             target_elapsed_ms - elapsed_ms, bf.short(d.meta.filepath))
-                    log.debug("[SM] arm-pending  deck=%d  target_elapsed=%dms  grid=%s"
-                              "  src=%s  reason=%s",
-                              deck, target_elapsed_ms, target_source,
-                              arm_source or "<none>", pending_reason)
-                else:
-                    self._send_autoloop_deck_load(deck, mirror, deck, arm_meta)
-                    if arm_after_master and self._autoloop_master_phrase_arm:
-                        phrase_beat = self._previous_autoloop_arm_phrase(abs_beat)
-                        phrase_elapsed_ms, phrase_source = self._autoloop_target_elapsed_for_beat(
-                            phrase_beat, elapsed_ms, arm_bpm, arm_meta,
-                        )
-                        lateness_ms = max(0, elapsed_ms - phrase_elapsed_ms)
-                        if lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS:
-                            self._schedule_autoloop_master_correction(
-                                deck, mirror, deck, arm_meta, arm_bpm, elapsed_ms,
-                                phrase_beat, arm_source or "master", "phrase-grace-late",
-                            )
-                            log.warning("[SS][AUTOLOOP-MASTER-ARM-GRACE-LATE]"
-                                        " [SM] arm-grace-late  deck=%d  beat=%d"
-                                        "  late=%dms  tolerance=%dms",
-                                        deck, phrase_beat, lateness_ms,
-                                        _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS)
-            else:
-                self._os.last_armed_filepath = ""
-                for dk in (deck, mirror):
-                    self._deck[dk].meta.first_beat_ms = 0.0
-                abs_beat = self._autoloop_abs_beat_for_elapsed(elapsed_ms, arm_bpm, d.meta)
-                self._set_autoloop_tempo_anchor(elapsed_ms, abs_beat, arm_bpm)
-                for dk in self._sse.deck_route(deck):
-                    self._out.send_loop_on(dk)
-                    self._out._sub(f"deck {dk} play", "on", verbose=True)
-            self._os.autoloop_arm_after_master_change = False
-            self._os.autoloop_master_change_source = ""
+            self._autoloop.arm_autoloop(
+                deck,
+                elapsed_ms,
+                bpm,
+                self._autoloop_master_phrase_arm,
+            )
 
         elif mode == "idle":
             self._clear_smart_rearm_state()
@@ -1291,11 +1204,11 @@ class StateManager:
             self._os.last_autoloop_status_phrase_beat = 0
             self._os.autoloop_arm_after_master_change = False
             self._os.autoloop_master_change_source = ""
-            self._clear_autoloop_arm_phrase_lock()
-            self._clear_live_bpm_follow()
-            self._clear_autoloop_tempo_relock()
-            self._clear_autoloop_tempo_anchor()
-            self._clear_pending_autoloop_master_phrase_arm()
+            self._autoloop.clear_arm_phrase_lock()
+            self._autoloop.clear_live_bpm_follow()
+            self._autoloop.clear_tempo_relock()
+            self._autoloop.clear_tempo_anchor()
+            self._autoloop.clear_pending_master_phrase_arm()
             self._os.live_follow_generation += 1
             for dn in range(1, 5):
                 self._out.send_deck_play(dn, "off")
@@ -1409,7 +1322,7 @@ class StateManager:
         # ── Rate-limited timecode log (once per 5 s, both decks) ────────────────
         if now - self._last_pos_log[active] >= 5.0:
             self._last_pos_log[active] = now
-            _live_a = self._live_bpm_value(active)
+            _live_a = self._autoloop.live_bpm_value(active)
             _live_a_s = f"  live_bpm={_live_a:.1f}" if _live_a is not None else ""
             log.info("[SM] pos  deck=%d  %s  bpm=%.1f%s  mode=%s  file=%s",
                      active, bf.elapsed(elapsed_ms), d.meta.bpm, _live_a_s,
@@ -1420,7 +1333,7 @@ class StateManager:
         if mirror_snap and now - self._last_pos_log[mirror] >= 5.0:
             self._last_pos_log[mirror] = now
             dm = self._deck[mirror]
-            _live_m = self._live_bpm_value(mirror)
+            _live_m = self._autoloop.live_bpm_value(mirror)
             _live_m_s = f"  live_bpm={_live_m:.1f}" if _live_m is not None else ""
             log.info("[SM] pos  deck=%d  %s  bpm=%.1f%s  mode=%s  file=%s",
                      mirror, bf.elapsed(mirror_snap.elapsed_ms), dm.meta.bpm, _live_m_s,
@@ -1439,7 +1352,7 @@ class StateManager:
         beat_pos = _compute_beat_pos(elapsed_ms, bpm, d.meta.first_beat_ms) if bpm > 0 else 0.0
         beat_ms = 60_000.0 / bpm if bpm > 0 else 0.0
         abs_beat_pos = (
-            self._autoloop_fallback_abs_beat_for_elapsed(active, elapsed_ms, bpm, d.meta.first_beat_ms)
+            self._autoloop.fallback_abs_beat_for_elapsed(active, elapsed_ms, bpm, d.meta.first_beat_ms)
             if beat_ms > 0 else 0.0
         )
         grid_pos = None
@@ -1447,11 +1360,11 @@ class StateManager:
             grid_pos = _compute_beatgrid_position(elapsed_ms, d.meta.beatgrid_times_ms)
             if grid_pos is not None:
                 beat_pos, abs_beat_pos = grid_pos
-        bpm = self._maybe_apply_live_bpm_follow(active, mirror, bpm, abs_beat_pos, now)
+        bpm = self._autoloop.apply_live_bpm_follow(active, mirror, bpm, abs_beat_pos, now)
         if bpm > 0 and grid_pos is None:
             beat_pos = _compute_beat_pos(elapsed_ms, bpm, d.meta.first_beat_ms)
             beat_ms = 60_000.0 / bpm
-            abs_beat_pos = self._autoloop_fallback_abs_beat_for_elapsed(
+            abs_beat_pos = self._autoloop.fallback_abs_beat_for_elapsed(
                 active, elapsed_ms, bpm, d.meta.first_beat_ms,
             )
 
@@ -1560,7 +1473,10 @@ class StateManager:
 
         # ── Emit elapsed + beat ───────────────────────────────────────────────
         if os.lighting_mode == "autoloop" and os.autoloop_arm_pending:
-            self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos, elapsed_ms)
+            self._autoloop.tick(
+                now,
+                AutoloopTickContext(active, mirror, bpm, abs_beat_pos, elapsed_ms),
+            )
 
         sp_state = self._update_smart_phrasing_state(
             active, d, abs_beat_pos, bpm,
@@ -1597,7 +1513,7 @@ class StateManager:
                 )
                 last_beat = int(last_grid_pos[1]) if last_grid_pos is not None else this_beat
             elif os.lighting_mode == "autoloop":
-                last_abs_beat = self._autoloop_fallback_abs_beat_for_elapsed(
+                last_abs_beat = self._autoloop.fallback_abs_beat_for_elapsed(
                     active, os.last_beat_elapsed_ms, bpm, d.meta.first_beat_ms,
                 )
                 last_beat = int(last_abs_beat)
@@ -1607,7 +1523,10 @@ class StateManager:
             if this_beat > last_beat:
                 beat_index = this_beat % 4
                 if os.pending_autoloop_arm_meta is not None:
-                    self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos, elapsed_ms)
+                    self._autoloop.tick(
+                        now,
+                        AutoloopTickContext(active, mirror, bpm, abs_beat_pos, elapsed_ms),
+                    )
                 if os.lighting_mode == "autoloop":
                     beat_out = this_beat
                     pending_live_bpm = os.pending_live_bpm
@@ -1615,7 +1534,7 @@ class StateManager:
                         self._sse.send_live_bpm_follow(active, pending_live_bpm)
                         bpm = pending_live_bpm
                         os.autoloop_arm_bpm = pending_live_bpm
-                        self._set_autoloop_tempo_anchor(elapsed_ms, abs_beat_pos, pending_live_bpm)
+                        self._autoloop.set_tempo_anchor(elapsed_ms, abs_beat_pos, pending_live_bpm)
                         os.last_live_follow_bpm = pending_live_bpm
                         os.last_live_follow_send_mono = now
                         os.last_sent_bpm = pending_live_bpm
@@ -1664,7 +1583,10 @@ class StateManager:
                 for dk in self._sse.deck_route(active):
                     self._out.send_beat(dk, bpm, beat_out, change=change)
                 was_arm_pending = os.autoloop_arm_pending
-                self._maybe_lock_autoloop_arm(active, mirror, bpm, abs_beat_pos, elapsed_ms)
+                self._autoloop.tick(
+                    now,
+                    AutoloopTickContext(active, mirror, bpm, abs_beat_pos, elapsed_ms),
+                )
                 if was_arm_pending and not os.autoloop_arm_pending:
                     autoloop_tick_just_fired = True
                 if os.lighting_mode == "autoloop":
@@ -1676,7 +1598,7 @@ class StateManager:
                     ):
                         os.last_autoloop_status_phrase_beat = phrase_beat
                         grid_status = d.meta.beatgrid_source if grid_pos is not None else "fallback"
-                        self._log_autoloop_tick(
+                        self._autoloop.log_autoloop_tick(
                             active, elapsed_ms, beatpos_out, bpm, d.meta.bpm, grid_status
                         )
                         autoloop_tick_just_fired = True
@@ -1915,10 +1837,10 @@ class StateManager:
         os.autoloop_arm_deck      = 0
         os.last_autoloop_status_phrase_beat = 0
         self._clear_smart_rearm_state()
-        self._clear_autoloop_arm_phrase_lock()
-        self._clear_live_bpm_follow()
-        self._clear_autoloop_tempo_relock()
-        self._clear_autoloop_tempo_anchor()
+        self._autoloop.clear_arm_phrase_lock()
+        self._autoloop.clear_live_bpm_follow()
+        self._autoloop.clear_tempo_relock()
+        self._autoloop.clear_tempo_anchor()
         os.live_follow_generation += 1
         if self._laser_executor is not None:
             self._laser_executor.reset_runtime_state(reason="stop")
@@ -1942,370 +1864,6 @@ class StateManager:
         self._os.last_beat_elapsed_ms = elapsed_ms
         self._os.last_autoloop_status_phrase_beat = 0
         self._log_status()
-
-    def _log_autoloop_tick(
-        self,
-        active: int,
-        elapsed_ms: int,
-        beatpos_out: float,
-        timing_bpm: float,
-        meta_bpm: float,
-        grid_status: str,
-    ) -> None:
-        os = self._os
-        live_status = self._live_bpm_status_text(active)
-        log.info("[SS][AUTOLOOP-TICK] [SM] autoloop-tick  deck=%d  elapsed=%s  beat=%.2f"
-                  "  bpm=%.2f  arm_bpm=%.2f  meta_bpm=%.2f  grid=%s  %s  %s  file=%s",
-                  active, bf.elapsed(elapsed_ms), beatpos_out,
-                  timing_bpm, os.autoloop_arm_bpm, meta_bpm, grid_status, live_status,
-                  self._live_bpm_follow_status_text(),
-                  bf.short(os.last_armed_filepath))
-
-    def _should_delay_autoloop_master_arm(self, arm_after_master: bool, abs_beat_pos: float) -> bool:
-        if not self._autoloop_master_phrase_arm or not arm_after_master:
-            return False
-        return not self._is_near_autoloop_phrase_start(abs_beat_pos)
-
-    def _is_near_autoloop_phrase_start(self, abs_beat_pos: float) -> bool:
-        phrase_offset = math.fmod(max(abs_beat_pos, 0.0), AUTOLOOP_ARM_PHRASE_BEATS)
-        if phrase_offset < 0:
-            phrase_offset += AUTOLOOP_ARM_PHRASE_BEATS
-        return phrase_offset <= _AUTOLOOP_MASTER_PHRASE_START_GRACE_BEATS
-
-    def _autoloop_abs_beat_for_elapsed(
-        self,
-        elapsed_ms: int,
-        bpm: float,
-        meta: TrackMetadata,
-    ) -> float:
-        grid_pos = _compute_beatgrid_position(elapsed_ms, meta.beatgrid_times_ms)
-        if grid_pos is not None:
-            return grid_pos[1]
-        if bpm <= 0:
-            return 0.0
-        beat_ms = 60_000.0 / bpm
-        return (elapsed_ms - meta.first_beat_ms) / beat_ms
-
-    def _autoloop_target_elapsed_for_beat(
-        self,
-        target_beat: int,
-        current_elapsed_ms: int,
-        bpm: float,
-        meta: TrackMetadata,
-    ) -> tuple[int, str]:
-        grid_target = _beatgrid_elapsed_for_abs_beat(target_beat, meta.beatgrid_times_ms)
-        if grid_target is not None:
-            return grid_target
-        if bpm <= 0:
-            return current_elapsed_ms, "fallback"
-        beat_ms = 60_000.0 / bpm
-        os = self._os
-        if os.autoloop_anchor_bpm > 0:
-            elapsed_ms = os.autoloop_anchor_elapsed_ms + (
-                (target_beat - os.autoloop_anchor_abs_beat) * beat_ms
-            )
-        else:
-            elapsed_ms = meta.first_beat_ms + (target_beat * beat_ms)
-        return int(round(elapsed_ms)), "fallback"
-
-    def _autoloop_fallback_abs_beat_for_elapsed(
-        self,
-        deck: int,
-        elapsed_ms: int,
-        bpm: float,
-        first_beat_ms: float,
-    ) -> float:
-        os = self._os
-        if (
-            os.lighting_mode == "autoloop"
-            and os.autoloop_arm_deck == deck
-            and os.autoloop_anchor_bpm > 0
-            and bpm > 0
-        ):
-            beat_ms = 60_000.0 / bpm
-            return os.autoloop_anchor_abs_beat + (
-                (elapsed_ms - os.autoloop_anchor_elapsed_ms) / beat_ms
-            )
-        if bpm <= 0:
-            return 0.0
-        beat_ms = 60_000.0 / bpm
-        return (elapsed_ms - first_beat_ms) / beat_ms
-
-    def _set_autoloop_tempo_anchor(self, elapsed_ms: int, abs_beat: float, bpm: float) -> None:
-        os = self._os
-        os.autoloop_anchor_elapsed_ms = elapsed_ms
-        os.autoloop_anchor_abs_beat = abs_beat
-        os.autoloop_anchor_bpm = bpm
-
-    def _clear_autoloop_tempo_anchor(self) -> None:
-        os = self._os
-        os.autoloop_anchor_elapsed_ms = 0
-        os.autoloop_anchor_abs_beat = 0.0
-        os.autoloop_anchor_bpm = 0.0
-
-    def _send_autoloop_deck_load(
-        self,
-        deck: int,
-        mirror: int,
-        active: int,
-        arm_meta: TrackMetadata,
-    ) -> None:
-        # Thin test-seam adapter kept for parity tests that mock this method.
-        self._sse.send_autoloop_deck_load(deck, mirror, active, arm_meta)
-
-    def _schedule_autoloop_master_correction(
-        self,
-        deck: int,
-        mirror: int,
-        active: int,
-        arm_meta: TrackMetadata,
-        bpm: float,
-        current_elapsed_ms: int,
-        from_target_beat: int,
-        source: str,
-        reason: str,
-    ) -> None:
-        correction_meta = TrackMetadata(
-            filepath=arm_meta.filepath,
-            soundswitch_id=arm_meta.soundswitch_id,
-            bpm=arm_meta.bpm,
-            first_beat_ms=arm_meta.first_beat_ms,
-            beatgrid_times_ms=list(arm_meta.beatgrid_times_ms),
-            beatgrid_bpms=list(arm_meta.beatgrid_bpms),
-            beatgrid_source=arm_meta.beatgrid_source,
-            total_ms=arm_meta.total_ms,
-            content_id=arm_meta.content_id,
-        )
-        target = int(from_target_beat) + AUTOLOOP_ARM_PHRASE_BEATS
-        target_elapsed_ms, target_source = self._autoloop_target_elapsed_for_beat(
-            target, current_elapsed_ms, bpm, correction_meta,
-        )
-        while target_elapsed_ms - current_elapsed_ms < _AUTOLOOP_PHRASE_MIN_RUNWAY_MS:
-            target += AUTOLOOP_ARM_PHRASE_BEATS
-            target_elapsed_ms, target_source = self._autoloop_target_elapsed_for_beat(
-                target, current_elapsed_ms, bpm, correction_meta,
-            )
-
-        os = self._os
-        os.autoloop_arm_pending = True
-        os.autoloop_arm_pending_since = time.monotonic()
-        os.autoloop_arm_sync_beat = target
-        os.autoloop_arm_target_elapsed_ms = target_elapsed_ms
-        os.autoloop_arm_target_source = target_source
-        os.pending_autoloop_arm_meta = correction_meta
-        os.pending_autoloop_arm_deck = deck
-        os.pending_autoloop_arm_mirror = mirror
-        os.pending_autoloop_arm_active = active
-        os.pending_autoloop_arm_source = source
-        os.pending_autoloop_arm_reason = f"correction-{reason}"
-        log.info("[SM] arm-correction-pending  deck=%d  beat=%d  until=%dms"
-                 "  reason=%s  grid=%s  src=%s  file=%s",
-                 deck, target, target_elapsed_ms - current_elapsed_ms,
-                 reason, target_source, source or "<none>",
-                 bf.short(correction_meta.filepath))
-
-    def _maybe_apply_live_bpm_follow(
-        self,
-        deck: int,
-        mirror: int,
-        timing_bpm: float,
-        abs_beat_pos: float,
-        now: float,
-    ) -> float:
-        os = self._os
-        if not self._live_bpm_follow or os.lighting_mode != "autoloop":
-            return timing_bpm
-        if os.autoloop_arm_deck != deck or os.autoloop_arm_bpm <= 0:
-            self._clear_live_bpm_follow()
-            return timing_bpm
-        if not os.was_playing:
-            return timing_bpm
-        if not self._deck[deck].playing:
-            self._clear_live_bpm_follow()
-            return timing_bpm
-
-        live_bpm = self._live_bpm_value(deck)
-        if live_bpm is None:
-            return timing_bpm
-
-        if abs(live_bpm - timing_bpm) <= _LIVE_BPM_FOLLOW_THRESHOLD:
-            self._clear_live_bpm_follow()
-            return timing_bpm
-
-        if now - os.last_live_follow_send_mono < _LIVE_BPM_FOLLOW_SEND_INTERVAL_S:
-            return timing_bpm
-
-        os.pending_live_bpm = live_bpm
-        return timing_bpm
-
-    def _live_bpm_value(self, deck: int) -> Optional[float]:
-        if self._live_bpm is None:
-            return None
-        try:
-            live = self._live_bpm.get_bpm(deck)
-        except Exception:
-            log.debug("live BPM read failed", exc_info=True)
-            return None
-        if live is None or not math.isfinite(live) or live <= 0:
-            # Recorder hook is inside this method, not at the call site, so mirror-deck BPM is captured too.
-            if self._recorder:
-                self._recorder.record_live_bpm(deck, None, self._live_bpm_status(deck))
-            return None
-        bpm = float(live)
-        if self._recorder:
-            self._recorder.record_live_bpm(deck, bpm, self._live_bpm_status(deck))
-        return bpm
-
-    def _live_bpm_status(self, deck: int):
-        if self._live_bpm is None:
-            return None
-        try:
-            return self._live_bpm.get_status(deck)
-        except Exception:
-            return None
-
-    def _next_autoloop_arm_phrase(self, abs_beat_pos: float) -> int:
-        """Calculate next phrase boundary for autoloop arm synchronization."""
-        beat = max(1, int(abs_beat_pos) + 1)
-        while beat % AUTOLOOP_ARM_PHRASE_BEATS != 0:
-            beat += 1
-        return beat
-
-    def _previous_autoloop_arm_phrase(self, abs_beat_pos: float) -> int:
-        beat = max(0, int(math.floor(abs_beat_pos)))
-        return (beat // AUTOLOOP_ARM_PHRASE_BEATS) * AUTOLOOP_ARM_PHRASE_BEATS
-
-    def _maybe_lock_autoloop_arm(
-        self,
-        active: int,
-        mirror: int,
-        bpm: float,
-        abs_beat_pos: float,
-        elapsed_ms: Optional[int] = None,
-    ) -> None:
-        os = self._os
-        if (
-            os.lighting_mode != "autoloop"
-            or os.autoloop_arm_deck != active
-            or not os.autoloop_arm_pending
-            or bpm <= 0
-        ):
-            return
-
-        if os.autoloop_arm_sync_beat == 0:
-            os.autoloop_arm_sync_beat = self._next_autoloop_arm_phrase(abs_beat_pos)
-        if elapsed_ms is None:
-            deck_elapsed = self._deck[active].elapsed_ms
-            if deck_elapsed > 0:
-                elapsed_ms = deck_elapsed
-            elif bpm > 0:
-                beat_ms = 60_000.0 / bpm
-                elapsed_ms = int(round(self._deck[active].meta.first_beat_ms + (abs_beat_pos * beat_ms)))
-            else:
-                elapsed_ms = 0
-        if os.autoloop_arm_target_elapsed_ms == 0:
-            os.autoloop_arm_target_elapsed_ms, os.autoloop_arm_target_source = (
-                self._autoloop_target_elapsed_for_beat(
-                    os.autoloop_arm_sync_beat,
-                    elapsed_ms,
-                    bpm,
-                    self._deck[active].meta,
-                )
-            )
-            log.info("[SM] arm-pending  deck=%d  beat=%.1f→%d  until=%dms  grid=%s",
-                     active, abs_beat_pos, os.autoloop_arm_sync_beat,
-                     os.autoloop_arm_target_elapsed_ms - elapsed_ms,
-                     os.autoloop_arm_target_source or "fallback")
-
-        if elapsed_ms < os.autoloop_arm_target_elapsed_ms:
-            return
-
-        current_beat = int(abs_beat_pos)
-        target_beat = os.autoloop_arm_sync_beat
-        target_elapsed_ms = os.autoloop_arm_target_elapsed_ms
-        target_source = os.autoloop_arm_target_source or "fallback"
-        lateness_ms = max(0, elapsed_ms - target_elapsed_ms)
-        arm_bpm = os.autoloop_arm_bpm if os.autoloop_arm_bpm > 0 else bpm
-        pending_meta = os.pending_autoloop_arm_meta
-        scheduled_correction = False
-        if pending_meta is not None:
-            pending_source = os.pending_autoloop_arm_source or "<none>"
-            pending_reason = os.pending_autoloop_arm_reason or "scheduled"
-            needs_correction = (
-                pending_reason == "short-runway"
-                or lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS
-            )
-            arm_elapsed_ms = elapsed_ms if lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS else target_elapsed_ms
-            object.__setattr__(pending_meta, "elapsed_ms", arm_elapsed_ms)
-            if pending_reason.startswith("correction-"):
-                self._sse.send_autoloop_clear(active)
-                log.info("[SM] arm-correction-clear  deck=%d  beat=%d  reason=%s",
-                         active, target_beat, pending_reason)
-            self._send_autoloop_deck_load(
-                os.pending_autoloop_arm_deck or active,
-                os.pending_autoloop_arm_mirror or mirror,
-                os.pending_autoloop_arm_active or active,
-                pending_meta,
-            )
-            os.autoloop_change_on_next_beat = False
-            log.info("[SM] arm-locked  deck=%d  beat=%d  late=%dms"
-                     "  bpm=%.2f  reason=%s  correction=%s  src=%s",
-                     active, target_beat, lateness_ms,
-                     arm_bpm, pending_reason, needs_correction, pending_source)
-            self._clear_pending_autoloop_master_phrase_arm()
-            if needs_correction:
-                reason = "late" if lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS else "short-runway"
-                self._schedule_autoloop_master_correction(
-                    active, mirror, active, pending_meta, arm_bpm, elapsed_ms,
-                    target_beat, pending_source, reason,
-                )
-                scheduled_correction = True
-                if lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS:
-                    log.warning("[SS][AUTOLOOP-MASTER-ARM-LATE-CORRECTION]"
-                                " [SM] arm-late  deck=%d  beat=%d  late=%dms"
-                                "  tolerance=%dms  grid=%s",
-                                active, target_beat, lateness_ms,
-                                _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS, target_source)
-        elif lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS:
-            log.warning("[SS][AUTOLOOP-PHRASE-MISS]"
-                        " [SM] arm-phrase-miss  deck=%d  beat=%d  late=%dms"
-                        "  tolerance=%dms  grid=%s",
-                        active, target_beat, lateness_ms,
-                        _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS, target_source)
-        self._sse.send_autoloop_bpm(active, arm_bpm)
-        os.last_sent_bpm = arm_bpm
-        if not scheduled_correction:
-            os.autoloop_arm_pending = False
-            os.autoloop_arm_sync_beat = 0
-            os.autoloop_arm_target_elapsed_ms = 0
-            os.autoloop_arm_target_source = ""
-            os.autoloop_arm_pending_since = 0.0
-        log.info("[SM] arm-locked-final  deck=%d  beat=%d  late=%dms  bpm=%.2f",
-                 active, target_beat, lateness_ms, arm_bpm)
-
-    def _clear_autoloop_arm_phrase_lock(self) -> None:
-        os = self._os
-        os.autoloop_arm_pending = False
-        os.autoloop_arm_sync_beat = 0
-        os.autoloop_arm_target_elapsed_ms = 0
-        os.autoloop_arm_target_source = ""
-        os.autoloop_arm_pending_since = 0.0
-
-    def _clear_live_bpm_follow(self) -> None:
-        os = self._os
-        os.pending_live_bpm = 0.0
-
-    def _clear_autoloop_tempo_relock(self) -> None:
-        self._os.autoloop_change_on_next_beat = False
-
-    def _clear_pending_autoloop_master_phrase_arm(self) -> None:
-        os = self._os
-        os.pending_autoloop_arm_meta = None
-        os.pending_autoloop_arm_deck = 0
-        os.pending_autoloop_arm_mirror = 0
-        os.pending_autoloop_arm_active = 0
-        os.pending_autoloop_arm_source = ""
-        os.pending_autoloop_arm_reason = ""
 
     def _clear_smart_rearm_state(self) -> None:
         os = self._os
@@ -2348,39 +1906,6 @@ class StateManager:
             self._clear_smart_rearm_state()
         log.info("[SM] smart-breakdown-toggle  enabled=%s", self._smart_breakdown_enabled)
 
-    def _autoloop_arm_bpm(self, deck: int, fallback_bpm: float) -> tuple[float, str]:
-        live = self._live_bpm_value(deck)
-        if live is not None:
-            return live, "live"
-        return fallback_bpm, "fallback"
-
-    def _live_bpm_status_text(self, deck: int) -> str:
-        if self._live_bpm is None:
-            return "live_bpm=unavailable"
-        try:
-            status = self._live_bpm.get_status(deck)
-        except Exception:
-            log.debug("live BPM status read failed", exc_info=True)
-            status = None
-        if status is None:
-            return "live_bpm=fallback_meta live_source=fallback_meta"
-        age_ms = (time.monotonic() - status.updated_at) * 1000.0
-        source = getattr(status, "source", "unknown")
-        return (
-            f"live_bpm={status.bpm:.2f} "
-            f"live_source={source} "
-            f"live_age_ms={age_ms:.0f} "
-            f"live_addr=0x{status.addr:x}/{status.type_name}"
-        )
-
-    def _live_bpm_follow_status_text(self) -> str:
-        os = self._os
-        if not self._live_bpm_follow:
-            return "follow=off"
-        if os.pending_live_bpm > 0:
-            return f"follow=on pending_bpm={os.pending_live_bpm:.2f}"
-        return "follow=on gated_bpm=active"
-
     # ── Instrumentation ───────────────────────────────────────────────────────
 
     def _log_status(self) -> None:
@@ -2393,51 +1918,3 @@ class StateManager:
             log.info("%s [SM] status  deck=%d  file=%s  bpm=%.1f  pos=%s  mode=%s",
                      mark, dk, bf.short(d.meta.filepath), d.meta.bpm, pos_s,
                      ("scripted" if d.scripted_id else "autoloop") if d.playing else "stopped")
-
-
-def _send_direct_autoloop_rearm(
-    sm: "StateManager",
-    active: int,
-    mirror: int,
-    bpm: float,
-    elapsed_ms: int,
-    reason: str,
-    target_beat: Optional[int] = None,
-) -> bool:
-    d = sm._deck[active]
-    if not d.meta.filepath:
-        return False
-
-    arm_bpm = sm._os.autoloop_arm_bpm if sm._os.autoloop_arm_bpm > 0 else bpm
-    arm_meta = TrackMetadata(
-        filepath=d.meta.filepath,
-        soundswitch_id="",
-        bpm=arm_bpm,
-        first_beat_ms=d.meta.first_beat_ms,
-        beatgrid_times_ms=list(d.meta.beatgrid_times_ms),
-        beatgrid_bpms=list(d.meta.beatgrid_bpms),
-        beatgrid_source=d.meta.beatgrid_source,
-        total_ms=d.meta.total_ms,
-    )
-    target_elapsed_ms = elapsed_ms
-    target_source = "current"
-    lateness_ms = 0
-    if target_beat is not None:
-        target_elapsed_ms, target_source = sm._autoloop_target_elapsed_for_beat(
-            target_beat, elapsed_ms, arm_bpm, arm_meta,
-        )
-        lateness_ms = max(0, elapsed_ms - target_elapsed_ms)
-
-    object.__setattr__(arm_meta, "elapsed_ms", target_elapsed_ms)
-    sm._os.last_arm_mono = time.monotonic()
-    sm._os.last_armed_filepath = d.meta.filepath
-    sm._sse.send_autoloop_clear(active)
-    sm._send_autoloop_deck_load(active, mirror, active, arm_meta)
-    sm._sse.send_autoloop_bpm(active, arm_bpm)
-    sm._os.last_sent_bpm = arm_bpm
-    log.info("[SM] autoloop-rearm  deck=%d  reason=%s  beat=%s  elapsed=%s"
-             "  target_elapsed=%s  late=%dms  grid=%s  bpm=%.1f  file=%s",
-             active, reason, target_beat if target_beat is not None else "-",
-             bf.elapsed(elapsed_ms), bf.elapsed(target_elapsed_ms),
-             lateness_ms, target_source, arm_bpm, bf.short(d.meta.filepath))
-    return True
