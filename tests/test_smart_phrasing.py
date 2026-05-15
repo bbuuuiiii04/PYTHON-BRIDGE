@@ -801,6 +801,21 @@ class TestSmartPhrasing(unittest.TestCase):
         self.assertTrue(res.state.smart_drop_window_active)
         self.assertFalse(res.state.smart_drop_preclear_requested)
 
+    def test_clear_smart_rearm_state_drops_smart_drop_window_latch(self):
+        snap = self._default_snap(smart_drop_beats=(64.0,), drop_window_beats=4.0)
+        self.engine.update(replace(snap, abs_beat=59.0))
+        entered = self.engine.update(replace(snap, abs_beat=60.0))
+        self.assertTrue(entered.state.smart_drop_window_active)
+        self.assertTrue(entered.state.smart_drop_preclear_requested)
+
+        self.engine.clear_smart_rearm_state()
+        self.assertFalse(self.engine._smart_drop_window_active)
+        self.assertIsNone(self.engine._active_drop_beat)
+
+        next_tick = self.engine.update(replace(snap, abs_beat=60.5))
+        self.assertTrue(next_tick.state.smart_drop_window_active)
+        self.assertTrue(next_tick.state.smart_drop_preclear_requested)
+
     def test_smart_drop_rearm_requested_fires_on_crossing(self):
         """Rearm intent fires when smart_drop_crossing fires."""
         snap = self._default_snap(smart_drop_beats=(64.0,), drop_window_beats=4.0)

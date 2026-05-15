@@ -122,11 +122,13 @@ class SmartPhrasingEngine:
     def clear_smart_rearm_state(self) -> None:
         """Clear smart-rearm internals without dropping beat continuity.
 
-        Preserves _previous_abs_beat, _fired_drop_beats, _active_drop_beat,
-        _smart_drop_window_active, _last_deck_id, and _last_track_id so
-        next-tick crossing detection and track/deck continuity still work
-        after StateManager-side smart-rearm clears.
+        Preserves _previous_abs_beat, _fired_drop_beats, _last_deck_id, and
+        _last_track_id so next-tick crossing detection, fired-drop
+        suppression, and track/deck continuity still work after
+        StateManager-side smart-rearm clears.
         """
+        self._active_drop_beat = None
+        self._smart_drop_window_active = False
         self._blackout_arm_latched = False
         self._transition_window_active = False
         self._transition_window_arm_suppressed = False
