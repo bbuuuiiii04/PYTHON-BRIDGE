@@ -1,3 +1,4 @@
 *.jsonl
 !*.fixture.jsonl
+!perf_baseline.jsonl
 !.gitkeep
