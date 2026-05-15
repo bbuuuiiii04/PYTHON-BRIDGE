@@ -326,8 +326,8 @@ class SmartPhrasingEngine:
         this_beat_int = int(abs_beat)
         if snapshot.phrase_anchor_last_beat >= 0 and snapshot.phrase_anchor_period_beats > 0:
             target_beat = int(snapshot.phrase_anchor_last_beat) + int(snapshot.phrase_anchor_period_beats)
+            phrase_anchor_target_beat = target_beat
             if this_beat_int <= target_beat + 8:
-                phrase_anchor_target_beat = target_beat
                 phrase_anchor_preclear_requested = this_beat_int == (target_beat - 1)
                 phrase_anchor_rearm_requested = this_beat_int >= target_beat
         

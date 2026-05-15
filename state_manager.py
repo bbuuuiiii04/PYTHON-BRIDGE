@@ -2513,14 +2513,15 @@ def _phrase_anchor_tick(
     if os.breakdown_active:
         return False
 
-    if os.phrase_anchor_last_beat < 0:
-        os.phrase_anchor_last_beat = (
-            int(abs_beat_pos) // PHRASE_ANCHOR_BEATS
-        ) * PHRASE_ANCHOR_BEATS
+    target = sp_state.phrase_anchor_target_beat
+    if target is None:
+        if os.phrase_anchor_last_beat < 0:
+            os.phrase_anchor_last_beat = (
+                int(abs_beat_pos) // PHRASE_ANCHOR_BEATS
+            ) * PHRASE_ANCHOR_BEATS
         return False
 
-    next_anchor = os.phrase_anchor_last_beat + PHRASE_ANCHOR_BEATS
-    if this_beat > next_anchor + 8:
+    if this_beat > target + 8:
         os.phrase_anchor_last_beat = this_beat
         return False
 
@@ -2528,17 +2529,17 @@ def _phrase_anchor_tick(
     # before the reload arrives on the anchor beat.
     if sp_state.phrase_anchor_preclear_requested:
         log.info("[SM] phrase-anchor-clear  deck=%d  beat=%d  anchor=%d",
-                 active, this_beat, next_anchor)
+                 active, this_beat, target)
         sm._sse.send_smart_transition_clear(active)
         return False
 
     if sp_state.phrase_anchor_rearm_requested:
         log.info("[SM] phrase-anchor  deck=%d  beat=%d  anchor=%d",
-                 active, this_beat, next_anchor)
+                 active, this_beat, target)
         if _send_direct_autoloop_rearm(
             sm, active, mirror, bpm, elapsed_ms, "phrase-anchor",
-            target_beat=next_anchor,
+            target_beat=target,
         ):
-            os.phrase_anchor_last_beat = next_anchor
+            os.phrase_anchor_last_beat = target
             return True
     return False

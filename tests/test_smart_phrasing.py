@@ -1032,10 +1032,10 @@ class TestSmartPhrasing(unittest.TestCase):
         self.assertFalse(res.state.phrase_anchor_preclear_requested)
         self.assertTrue(res.state.phrase_anchor_rearm_requested)
 
-    def test_phrase_anchor_periodic_intents_none_beyond_plus_8_window(self):
+    def test_phrase_anchor_periodic_target_emitted_beyond_plus_8_window(self):
         snap = self._default_snap(phrase_anchor_last_beat=0, phrase_anchor_period_beats=64)
         res = self.engine.update(replace(snap, abs_beat=73.0))
-        self.assertIsNone(res.state.phrase_anchor_target_beat)
+        self.assertEqual(res.state.phrase_anchor_target_beat, 64)
         self.assertFalse(res.state.phrase_anchor_preclear_requested)
         self.assertFalse(res.state.phrase_anchor_rearm_requested)
 

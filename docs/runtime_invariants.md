@@ -84,9 +84,10 @@ Audited against the current checkout on 2026-05-12.
 - `_phrase_anchor_tick` consumes
   `sp_state.phrase_anchor_preclear_requested` and
   `sp_state.phrase_anchor_rearm_requested` after suppression gates.
-- `_send_direct_autoloop_rearm(...)` in phrase-anchor flow must use
-  StateManager-computed `next_anchor` (`target_beat=next_anchor`), not
-  `sp_state.phrase_anchor_target_beat`.
+- `_send_direct_autoloop_rearm(...)` in phrase-anchor flow consumes
+  `sp_state.phrase_anchor_target_beat` as the canonical target. `StateManager`
+  writes `OutputState.phrase_anchor_last_beat` after a successful rearm, after
+  the stale-rebase fallback, and during sentinel bootstrap.
 
 ## Live BPM
 
