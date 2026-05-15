@@ -785,6 +785,11 @@ def main() -> None:
             log.warning("[MAIN] queue-full  event=laser-set-personality")
             return False
 
+    def _toggle_record_session(path: Optional[str], dedup: bool) -> bool:
+        if not path:
+            path = f"/tmp/rbss-session-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
+        return sm.toggle_session_recording(path, dedup=dedup)
+
     command_reader = CommandReader(
         validation_runner,
         smart_drop_toggle_callback=_toggle_smart_drop,
@@ -796,6 +801,7 @@ def main() -> None:
         laser_scene_callback=_laser_scene,
         laser_clear_scene_override_callback=_laser_clear_scene_override,
         laser_set_personality_callback=_laser_set_personality,
+        record_session_toggle_callback=_toggle_record_session,
     )
     status_writer = StatusWriter(
         sm,

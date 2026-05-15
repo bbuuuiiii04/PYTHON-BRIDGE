@@ -95,3 +95,17 @@ Then open:
 Laser Pad is now the canonical mapping surface.
 
 Detailed workflow and API notes are in `docs/laser_pad.md`.
+
+## Development
+
+Install the project with test dependencies:
+
+```bash
+pip install -e ".[dev]"
+```
+
+Run the test suite:
+
+```bash
+python -m unittest discover tests
+```

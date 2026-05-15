@@ -110,6 +110,7 @@ class CommandReader(threading.Thread):
         laser_scene_callback: Optional[Callable[[str, float], Any]] = None,
         laser_clear_scene_override_callback: Optional[Callable[[], Any]] = None,
         laser_set_personality_callback: Optional[Callable[[str], Any]] = None,
+        record_session_toggle_callback: Optional[Callable[[Optional[str], bool], Any]] = None,
     ) -> None:
         super().__init__(name="runtime-command-reader", daemon=True)
         self._validation_runner = validation_runner
@@ -122,6 +123,7 @@ class CommandReader(threading.Thread):
         self._laser_scene_callback = laser_scene_callback
         self._laser_clear_scene_override_callback = laser_clear_scene_override_callback
         self._laser_set_personality_callback = laser_set_personality_callback
+        self._record_session_toggle_callback = record_session_toggle_callback
         self._stop_event = threading.Event()
         self._last_command = ""
         self._last_error = ""
@@ -231,6 +233,15 @@ class CommandReader(threading.Thread):
                     with self._lock:
                         self._last_error = f"laser_set_personality callback failed: {detail}"
             return
+        if cmd == "toggle_record_session":
+            if self._record_session_toggle_callback:
+                path = command.get("path")
+                dedup = bool(command.get("dedup", False))
+                ok, detail = _invoke_callback(lambda: self._record_session_toggle_callback(path, dedup))
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"toggle_record_session callback failed: {detail}"
+            return
         raise ValueError(f"unknown command: {cmd}")
 
     def _run_validation_async(self) -> None:
@@ -265,6 +276,7 @@ def parse_command(line: str) -> dict[str, Any]:
         "laser_scene",
         "laser_clear_scene_override",
         "laser_set_personality",
+        "toggle_record_session",
     }
     if cmd not in allowed:
         raise ValueError(f"unknown command: {cmd}")
@@ -289,6 +301,13 @@ def parse_command(line: str) -> dict[str, Any]:
         personality = obj.get("personality")
         if not isinstance(personality, str) or not personality:
             raise ValueError("laser_set_personality requires non-empty personality")
+    if cmd == "toggle_record_session":
+        path = obj.get("path")
+        if path is not None and (not isinstance(path, str) or not path):
+            raise ValueError("toggle_record_session path must be a non-empty string")
+        dedup = obj.get("dedup", False)
+        if not isinstance(dedup, bool):
+            raise ValueError("toggle_record_session dedup must be boolean")
     return obj
 
 

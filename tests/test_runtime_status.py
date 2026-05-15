@@ -50,6 +50,25 @@ class RuntimeCommandTests(unittest.TestCase):
 
         callback.assert_called_once()
 
+    def test_parse_command_accepts_toggle_record_session(self) -> None:
+        command = parse_command(
+            '{"cmd": "toggle_record_session", "path": "/tmp/capture.jsonl", "dedup": true}'
+        )
+
+        self.assertEqual(command["cmd"], "toggle_record_session")
+        self.assertEqual(command["path"], "/tmp/capture.jsonl")
+        self.assertTrue(command["dedup"])
+
+    def test_toggle_record_session_delegates_to_callback(self) -> None:
+        callback = Mock(return_value=True)
+        reader = CommandReader(Mock(), record_session_toggle_callback=callback)
+
+        reader.handle_command(
+            {"cmd": "toggle_record_session", "path": "/tmp/capture.jsonl", "dedup": True}
+        )
+
+        callback.assert_called_once_with("/tmp/capture.jsonl", True)
+
 
 class LaserCommandParseTests(unittest.TestCase):
     def test_parse_command_accepts_toggle_laser_director(self) -> None:

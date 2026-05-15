@@ -63,6 +63,7 @@ from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
 from .logging_manager import get_logging_manager
 from .filepath_resolver import has_soundswitch_scripted_id
+from .session_recorder import SessionRecorder
 from .sound_switch_engine import SoundSwitchEngine
 from .smart_phrasing import (
     SmartPhrasingEngine, SmartPhrasingSnapshot, PhraseSegment, BeatSegment,
@@ -221,11 +222,13 @@ class StateManager:
         laser_executor=None,
         laser_personality_provider: Optional[Callable[[str], Optional[LaserPersonality]]] = None,
         os2l_connected_provider=None,
+        recorder: Optional[SessionRecorder] = None,
     ) -> None:
         self._eq    = event_queue
         self._cache = position_cache
         self._out   = output
         self._live_bpm = live_bpm
+        self._recorder = recorder if recorder is not None else SessionRecorder.from_env()
         # Optional Laser Director — None means disabled/not configured.
         # Mutated only from this thread after start().
         self._laser_director = laser_director
@@ -495,10 +498,37 @@ class StateManager:
                     "phase": "phase2_pending",
                 }
             ),
+            "recording": self.recording_status(),
             "deck": deck,
         }
         with self._snapshot_lock:
             self._published_snapshot = snapshot
+
+    def start_session_recording(self, path: str, *, dedup: bool = False) -> bool:
+        if self._recorder:
+            return False
+        self._recorder = SessionRecorder(path, dedup=dedup)
+        log.info("[SM] record-session-start  path=%s  dedup=%s", path, "on" if dedup else "off")
+        return True
+
+    def stop_session_recording(self) -> bool:
+        if not self._recorder:
+            return False
+        path = str(self._recorder.path)
+        self._recorder.close()
+        self._recorder = None
+        log.info("[SM] record-session-stop  path=%s", path)
+        return True
+
+    def toggle_session_recording(self, path: str, *, dedup: bool = False) -> bool:
+        if self._recorder:
+            return self.stop_session_recording()
+        return self.start_session_recording(path, dedup=dedup)
+
+    def recording_status(self) -> dict:
+        if not self._recorder:
+            return {"active": False, "path": "", "dedup": False, "counts": {}}
+        return self._recorder.status()
 
     def _drain_events(self) -> None:
         """Consume all pending events without blocking."""
@@ -507,6 +537,8 @@ class StateManager:
                 ev = self._eq.get_nowait()
             except queue.Empty:
                 break
+            if self._recorder:
+                self._recorder.record_event(ev)
             try:
                 payload = ev.payload or {}
                 anomaly = LOG.detect_anomaly(ev)
@@ -1283,6 +1315,8 @@ class StateManager:
 
         # ── Read position from memory ─────────────────────────────────────────
         snap = self._cache.get(active)
+        if self._recorder and snap:
+            self._recorder.record_position(active, snap)
 
         # When memory has no snap for this deck (DPU unresolved — e.g. no track
         # loaded in RB, DVS mode, or DPU2 vtable mismatch), synthesize a snap
@@ -2083,8 +2117,22 @@ class StateManager:
             log.debug("live BPM read failed", exc_info=True)
             return None
         if live is None or not math.isfinite(live) or live <= 0:
+            # Recorder hook is inside this method, not at the call site, so mirror-deck BPM is captured too.
+            if self._recorder:
+                self._recorder.record_live_bpm(deck, None, self._live_bpm_status(deck))
             return None
-        return float(live)
+        bpm = float(live)
+        if self._recorder:
+            self._recorder.record_live_bpm(deck, bpm, self._live_bpm_status(deck))
+        return bpm
+
+    def _live_bpm_status(self, deck: int):
+        if self._live_bpm is None:
+            return None
+        try:
+            return self._live_bpm.get_status(deck)
+        except Exception:
+            return None
 
     def _next_autoloop_arm_phrase(self, abs_beat_pos: float) -> int:
         """Calculate next phrase boundary for autoloop arm synchronization."""

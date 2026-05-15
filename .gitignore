@@ -3,4 +3,5 @@ __pycache__/
 .DS_Store
 .env
 .venv/
+.hypothesis/
 config/laser_director.json

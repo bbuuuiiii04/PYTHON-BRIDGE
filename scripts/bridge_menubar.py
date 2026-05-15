@@ -36,6 +36,7 @@ MANUAL_LAUNCHCTL_LABEL = "rbss_bridge_manual"
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
 LASER_PAD_URL = "http://127.0.0.1:8765"
+RECORDING_PATH_TEMPLATE = "/tmp/rbss-session-{stamp}.jsonl"
 
 ICON_DIR = Path("/Users/bbui")
 ICONS = {
@@ -186,6 +187,18 @@ def open_terminal_command(command: str, title: str = "RBSS_TERMINAL") -> None:
 
 def open_browser_url(url: str) -> None:
     subprocess.run(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def default_recording_path() -> str:
+    return RECORDING_PATH_TEMPLATE.format(stamp=time.strftime("%Y%m%d-%H%M%S"))
+
+
+def recording_status_from_snapshot(status: dict) -> dict:
+    sm = status.get("state_manager") or {}
+    rec = sm.get("recording") or {}
+    if not isinstance(rec, dict):
+        return {"active": False, "path": ""}
+    return rec
 
 
 def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
@@ -437,6 +450,7 @@ class BridgeMenuBar(NSObject):
 
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.validation_item = self._add_action("Run Health Check", "runValidation:")
+        self.record_session_item = self._add_action("Record Session: Off", "toggleRecordSession:")
         self.map_lasers_item = self._add_action("Laser Pad…", "mapLasers:")
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.quit_item = self._add_action("Quit Menu", "quit:")
@@ -514,6 +528,18 @@ class BridgeMenuBar(NSObject):
         )
         sp_block = (self._snapshot.get("state_manager") or {}).get("smart_phrasing")
         self.laser_phrasing_item.setTitle_(_phrasing_summary(sp_block))
+        recording = recording_status_from_snapshot(self._snapshot)
+        recording_active = bool(recording.get("active"))
+        if status == "off":
+            self.record_session_item.setEnabled_(False)
+            self.record_session_item.setTitle_("Record Session: Bridge Off")
+        else:
+            self.record_session_item.setEnabled_(True)
+            if recording_active:
+                rec_path = Path(str(recording.get("path") or "")).name or "capture"
+                self.record_session_item.setTitle_(f"Record Session: On ({rec_path})")
+            else:
+                self.record_session_item.setTitle_("Record Session: Off")
         self._adapt_timer(status)
 
     def _adapt_timer(self, status: str) -> None:
@@ -567,6 +593,16 @@ class BridgeMenuBar(NSObject):
     def runValidation_(self, _sender):
         append_command({"cmd": "run_validation"})
         self.refresh_(None)
+
+    def toggleRecordSession_(self, _sender):
+        recording = recording_status_from_snapshot(read_status())
+        command = {"cmd": "toggle_record_session"}
+        if not bool(recording.get("active")):
+            command["path"] = default_recording_path()
+            command["dedup"] = False
+        append_command(command)
+        if self is not None:
+            self.refresh_(None)
 
     def mapLasers_(self, _sender):
         open_browser_url(LASER_PAD_URL)
