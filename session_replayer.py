@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 import queue
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 from unittest.mock import Mock
+from unittest.mock import patch
 
 from .live_bpm import LiveBPMStatus
 from .models import BridgeEvent, PositionSnapshot
@@ -18,6 +20,14 @@ class PreTickInputs:
     events: list[BridgeEvent] = field(default_factory=list)
     positions: list[tuple[int, PositionSnapshot]] = field(default_factory=list)
     live_bpm: list[tuple[int, Optional[float], Optional[LiveBPMStatus]]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ReplayRunResult:
+    state_manager: StateManager
+    ticks: int
+    start_mono: float
+    end_mono: float
 
 
 @dataclass
@@ -151,3 +161,86 @@ class ReplayHarness:
             live_bpm=self.live_bpm,
             live_bpm_follow=False,
         )
+
+    def run_for(
+        self,
+        *,
+        seconds: float,
+        state_manager: Optional[StateManager] = None,
+        output=None,
+    ) -> ReplayRunResult:
+        """Replay captured inputs through StateManager ticks for a fixed span.
+
+        The replay clock is synthetic so recorded positions are not treated as
+        stale, but profiler timings use perf_counter so real CPU regressions are
+        still visible to performance tests.
+        """
+        if seconds <= 0:
+            raise ValueError("seconds must be positive")
+
+        sm = state_manager if state_manager is not None else self.make_state_manager(output=output)
+        start = self._start_mono()
+        end = start + float(seconds)
+        interval = sm._TICK_INTERVAL
+        self.position_cache.now = start
+        self.live_bpm.now = start
+        sm._next_snapshot_publish_at = start
+
+        events = sorted(self.session.events, key=lambda ev: ev.mono)
+        event_index = 0
+        tick = 0
+        mono_t = start
+        while mono_t < end:
+            while event_index < len(events) and events[event_index].mono <= mono_t:
+                self.event_queue.put_nowait(events[event_index])
+                event_index += 1
+
+            self.position_cache.now = mono_t
+            self.live_bpm.now = mono_t
+            self._run_one_tick(sm, mono_t)
+            tick += 1
+            mono_t = start + tick * interval
+
+        return ReplayRunResult(
+            state_manager=sm,
+            ticks=tick,
+            start_mono=start,
+            end_mono=min(mono_t, end),
+        )
+
+    def _run_one_tick(self, sm: StateManager, mono_t: float) -> None:
+        profiler = sm._profiler
+        with patch("rb_ss_bridge_v2.state_manager.time.monotonic", return_value=mono_t):
+            if profiler is None:
+                sm._drain_events()
+                sm._push_tick()
+                sm._maybe_publish_snapshot(mono_t)
+                return
+
+            queue_depth = sm._queue_depth()
+            t0 = time.perf_counter()
+            sm._drain_events()
+            t1 = time.perf_counter()
+            sm._push_tick()
+            t2 = time.perf_counter()
+            did_publish = sm._maybe_publish_snapshot(mono_t)
+            t3 = time.perf_counter()
+
+        elapsed_s = t3 - t0
+        profiler.record(
+            tick_ms=elapsed_s * 1000.0,
+            drain_ms=(t1 - t0) * 1000.0,
+            push_ms=(t2 - t1) * 1000.0,
+            snapshot_ms=((t3 - t2) * 1000.0 if did_publish else None),
+            overrun_ms=max(0.0, (elapsed_s - sm._TICK_INTERVAL) * 1000.0),
+            queue_depth=queue_depth,
+        )
+
+    def _start_mono(self) -> float:
+        candidates: list[float] = []
+        candidates.extend(ev.mono for ev in self.session.events)
+        for snaps in self.session.positions.values():
+            candidates.extend(snap.updated_at for snap in snaps)
+        for samples in self.session.live_bpm.values():
+            candidates.extend(t for t, _ in samples)
+        return min(candidates) if candidates else 0.0
