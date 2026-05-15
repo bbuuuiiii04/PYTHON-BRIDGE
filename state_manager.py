@@ -69,10 +69,16 @@ from .smart_phrasing import (
     SmartPhrasingEngine, SmartPhrasingSnapshot, PhraseSegment, BeatSegment,
     SmartPhrasingState,
 )
+from .smart_rearm import (
+    SmartDropTickResult,
+    SmartRearmContext,
+    SmartRearmCoordinator,
+)
 from . import bridge_fmt as bf
 
 log = logging.getLogger("state_manager")
 LOG = get_logging_manager()
+__all__ = ["StateManager", "SmartDropTickResult"]
 
 _LATENCY_WARN_MS = 50.0
 _TC_LATENCY_WARN_MS = 250.0
@@ -93,25 +99,6 @@ STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 _PROFILE_SUMMARY_INTERVAL_S = 10.0
 _PROFILE_WINDOW = 2048
-
-
-@dataclass(frozen=True)
-class SmartDropTickResult:
-    """Typed smart-drop tick status for StateManager/laser context plumbing.
-
-    target_beat is carried for downstream phrase-anchor canonicality wiring
-    (PR-3) and is intentionally not consumed in PR-2 logic.
-    """
-
-    crossing: bool
-    blackout_armed: bool
-    # Optional canonical beat for the current arm/crossing event.
-    # Populated now for PR-3 follow-up; currently informational only.
-    target_beat: Optional[int] = None
-
-    @classmethod
-    def none(cls) -> "SmartDropTickResult":
-        return cls(crossing=False, blackout_armed=False)
 
 
 class _RollingDurations:
@@ -320,6 +307,16 @@ class StateManager:
         self._sp_post_drop: float = 8.0           # conservative default; not consumed until Phase 3
         self._sp_transition_window: float = float(SMART_DROP_LOOKAHEAD_BEATS)
         self._sse = SoundSwitchEngine(self._out)
+
+        def _autoloop_rearm_bridge(*args, **kwargs):
+            return _send_direct_autoloop_rearm(self, *args, **kwargs)
+
+        self._smart_rearm = SmartRearmCoordinator(
+            output_state_ref=lambda: self._os,
+            deck_ref=lambda d: self._deck[d],
+            send_direct_autoloop_rearm=_autoloop_rearm_bridge,
+            send_smart_transition_clear=self._sse.send_smart_transition_clear,
+        )
 
     def set_initial_state(self, active_deck: int, source: str = "TL ENGINE STATE") -> None:
         """Apply startup state read from TL ENGINE STATE before event loop starts."""
@@ -1630,39 +1627,33 @@ class StateManager:
                 # smart-drop / phrase-anchor BEFORE send_beat so deck-load goes
                 # out before the activation beat event reaches SoundSwitch.
                 if os.lighting_mode == "autoloop":
-                    if self._smart_drop_enabled:
-                        smart_drop_result = _smart_drop_tick(
-                            self,
-                            active,
-                            mirror,
-                            bpm,
-                            this_beat,
-                            elapsed_ms,
+                    smart_rearm_result = self._smart_rearm.tick(
+                        active,
+                        sp_state,
+                        SmartRearmContext(
+                            mirror=mirror,
+                            bpm=bpm,
+                            this_beat=this_beat,
+                            elapsed_ms=elapsed_ms,
+                            abs_beat_pos=abs_beat_pos,
                             blackout_mode=smart_drop_blackout_mode,
-                            sp_state=sp_state,
-                        )
-                        if smart_drop_result.crossing:
-                            change = True
-                            if not smart_drop_blackout_mode:
-                                autoloop_tick_just_fired = True
-                    if self._smart_breakdown_enabled:
-                        if _smart_breakdown_tick(
-                            self,
-                            active,
-                            mirror,
-                            bpm,
-                            this_beat,
-                            elapsed_ms,
-                            sp_state=sp_state,
-                        ):
-                            change = True
+                            smart_drop_enabled=self._smart_drop_enabled,
+                            smart_breakdown_enabled=self._smart_breakdown_enabled,
+                            phrase_anchor_enabled=self._phrase_anchor_enabled,
+                            lighting_mode_is_autoloop=True,
+                        ),
+                    )
+                    smart_drop_result = smart_rearm_result.drop
+                    if smart_drop_result.crossing:
+                        change = True
+                        if not smart_drop_blackout_mode:
                             autoloop_tick_just_fired = True
-                    if self._phrase_anchor_enabled:
-                        if _phrase_anchor_tick(
-                            self, active, mirror, bpm, this_beat, elapsed_ms, abs_beat_pos, sp_state
-                        ):
-                            change = True
-                            autoloop_tick_just_fired = True
+                    if smart_rearm_result.breakdown_fired:
+                        change = True
+                        autoloop_tick_just_fired = True
+                    if smart_rearm_result.phrase_anchor_fired:
+                        change = True
+                        autoloop_tick_just_fired = True
 
                 os.last_beat_elapsed_ms = elapsed_ms
                 for dk in self._sse.deck_route(active):
@@ -1733,7 +1724,7 @@ class StateManager:
                 self._laser_executor.on_decision(decision, ctx)
         if smart_drop_result.crossing and smart_drop_blackout_mode:
             # Ordering requirement: in blackout mode keep os.drop_cut_armed true
-            # through phrase-anchor processing so _phrase_anchor_tick suppresses
+            # through phrase-anchor processing so the coordinator suppresses
             # same-beat phrase-anchor rearm. Do crossing cleanup only here,
             # after phrase-anchor processing has already run for this tick.
             if (
@@ -1774,9 +1765,8 @@ class StateManager:
             ),
             smart_drop_beats=tuple(float(x) for x in d.meta.smart_drops),
             # Note: this uses raw ANLZ breakdowns filtered
-            # dynamically, while the legacy _smart_breakdown_tick uses pre-filtered
-            # d.meta.smart_breakdowns. This intentional divergence will be resolved
-            # when the legacy breakdown consumer is migrated.
+            # dynamically, while the coordinator breakdown path uses pre-filtered
+            # d.meta.smart_breakdowns.
             breakdown_segments=tuple(
                 BeatSegment(
                     start_beat=float(bd_beat),
@@ -2411,183 +2401,3 @@ def _send_direct_autoloop_rearm(
              bf.elapsed(elapsed_ms), bf.elapsed(target_elapsed_ms),
              lateness_ms, target_source, arm_bpm, bf.short(d.meta.filepath))
     return True
-
-
-def _smart_drop_tick(
-    sm: "StateManager",
-    active: int,
-    mirror: int,
-    bpm: float,
-    this_beat: int,
-    elapsed_ms: int,
-    blackout_mode: bool = True,
-    *,
-    sp_state: SmartPhrasingState,
-) -> SmartDropTickResult:
-    """Fire smart-drop cut before a detected drop, then rearm on the drop beat.
-
-    Returns typed crossing/arm status for the current beat.
-    """
-    os = sm._os
-
-    if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
-        return SmartDropTickResult.none()
-
-    if os.breakdown_active:
-        return SmartDropTickResult.none()
-
-    target_beat: Optional[int]
-    if os.drop_cut_armed:
-        if sp_state.smart_drop_crossing:
-            if sp_state.active_drop_beat is not None:
-                target_beat = int(sp_state.active_drop_beat)
-            elif os.drop_rearm_beat:
-                target_beat = int(os.drop_rearm_beat)
-            else:
-                target_beat = None
-            if target_beat is None:
-                log.warning(
-                    "[SM] smart-drop-crossing-no-target  deck=%d  beat=%d"
-                    "  rearm_beat=%d  active_drop_beat=%s",
-                    active,
-                    this_beat,
-                    os.drop_rearm_beat,
-                    sp_state.active_drop_beat,
-                )
-                return SmartDropTickResult.none()
-            if blackout_mode:
-                log.info(
-                    "[SM] smart-drop-crossing  deck=%d  beat=%d  drop_at=%d",
-                    active,
-                    this_beat,
-                    target_beat,
-                )
-                return SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=target_beat)
-            log.info("[SM] smart-drop-rearm  deck=%d  beat=%d", active, this_beat)
-            if _send_direct_autoloop_rearm(
-                sm, active, mirror, bpm, elapsed_ms, "smart-drop",
-                target_beat=target_beat,
-            ):
-                os.phrase_anchor_last_beat = target_beat
-                os.drop_cut_armed = False
-                os.drop_rearm_beat = 0
-                return SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=target_beat)
-        return SmartDropTickResult.none()
-
-    if (
-        sp_state.transition_mask_should_arm
-        and sp_state.next_smart_drop_beat is not None
-    ):
-        drop_beat_int = int(sp_state.next_smart_drop_beat)
-        if blackout_mode:
-            log.info(
-                "[SM] smart-drop-blackout-arm  deck=%d  beat=%d  drop_at=%d",
-                active,
-                this_beat,
-                drop_beat_int,
-            )
-        else:
-            log.info("[SM] smart-drop-cut  deck=%d  beat=%d  drop_at=%d", active, this_beat, drop_beat_int)
-            sm._sse.send_smart_transition_clear(active)
-        os.drop_cut_armed = True
-        os.drop_rearm_beat = drop_beat_int
-        return SmartDropTickResult(crossing=False, blackout_armed=True, target_beat=drop_beat_int)
-    return SmartDropTickResult.none()
-
-
-
-
-def _smart_breakdown_tick(
-    sm: "StateManager",
-    active: int,
-    mirror: int,
-    bpm: float,
-    this_beat: int,
-    elapsed_ms: int,
-    *,
-    sp_state: SmartPhrasingState,
-) -> bool:
-    os = sm._os
-
-    if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
-        return False
-
-    if os.drop_cut_armed:
-        return False
-        
-    if os.breakdown_active:
-        if sp_state.breakdown_end_crossing:
-            log.info("[SM] smart-breakdown-restore  deck=%d  beat=%d", active, this_beat)
-            if _send_direct_autoloop_rearm(
-                sm, active, mirror, bpm, elapsed_ms, "smart-breakdown",
-                target_beat=os.breakdown_restore_beat,
-            ):
-                os.phrase_anchor_last_beat = os.breakdown_restore_beat
-                os.breakdown_active = False
-                os.breakdown_restore_beat = 0
-                return True
-        return False
-
-    if sp_state.breakdown_start_crossing and sp_state.breakdown_restore_beat is not None:
-        log.info("[SM] smart-breakdown-cut  deck=%d  beat=%d", active, this_beat)
-        sm._sse.send_smart_transition_clear(active)
-        os.breakdown_active = True
-        os.breakdown_restore_beat = int(sp_state.breakdown_restore_beat)
-    return False
-
-def _phrase_anchor_tick(
-    sm: "StateManager",
-    active: int,
-    mirror: int,
-    bpm: float,
-    this_beat: int,
-    elapsed_ms: int,
-    abs_beat_pos: float,
-    sp_state: SmartPhrasingState,
-) -> bool:
-    """Rearm autoloop every PHRASE_ANCHOR_BEATS to correct phrasing drift.
-
-    Returns True if a rearm fired (caller should set change=True on the beat
-    event), False otherwise.
-    """
-    os = sm._os
-
-    if os.autoloop_arm_pending or os.pending_autoloop_arm_meta is not None:
-        return False
-
-    if os.drop_cut_armed:
-        return False
-
-    if os.breakdown_active:
-        return False
-
-    target = sp_state.phrase_anchor_target_beat
-    if target is None:
-        if os.phrase_anchor_last_beat < 0:
-            os.phrase_anchor_last_beat = (
-                int(abs_beat_pos) // PHRASE_ANCHOR_BEATS
-            ) * PHRASE_ANCHOR_BEATS
-        return False
-
-    if this_beat > target + 8:
-        os.phrase_anchor_last_beat = this_beat
-        return False
-
-    # Pre-clear: 1 beat before anchor so SS renders the cleared state
-    # before the reload arrives on the anchor beat.
-    if sp_state.phrase_anchor_preclear_requested:
-        log.info("[SM] phrase-anchor-clear  deck=%d  beat=%d  anchor=%d",
-                 active, this_beat, target)
-        sm._sse.send_smart_transition_clear(active)
-        return False
-
-    if sp_state.phrase_anchor_rearm_requested:
-        log.info("[SM] phrase-anchor  deck=%d  beat=%d  anchor=%d",
-                 active, this_beat, target)
-        if _send_direct_autoloop_rearm(
-            sm, active, mirror, bpm, elapsed_ms, "phrase-anchor",
-            target_beat=target,
-        ):
-            os.phrase_anchor_last_beat = target
-            return True
-    return False

@@ -24,6 +24,11 @@ from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
     SmartPhrasingSnapshot,
     SmartPhrasingState,
 )
+from rb_ss_bridge_v2.models import DeckState, OutputState  # noqa: E402
+from rb_ss_bridge_v2.smart_rearm import (  # noqa: E402
+    SmartRearmContext,
+    SmartRearmCoordinator,
+)
 
 _SIGNAL_NONE = 0
 _SIGNAL_BLACKOUT_ARMED = 1
@@ -140,7 +145,7 @@ class _DropArmState:
 
 
 def _smart_drop_state(arm: _DropArmState, sp: SmartPhrasingState, *, blackout_mode: bool) -> int:
-    # Mirrors state_manager._smart_drop_tick (state_manager.py:2354-2420) and
+    # Mirrors SmartRearmCoordinator._drop and
     # the smart_drop_blackout_arm derivation around state_manager.py:1641-1650.
     # Intentionally omitted production gates (none affect current scenarios):
     #   - os.autoloop_arm_pending / os.pending_autoloop_arm_meta short-circuit
@@ -179,17 +184,24 @@ class _GoldenHarness:
         track_id: str = "track-A",
         bpm: float = 128.0,
         phrase_anchor_last_beat: int = -1,
+        use_real_smart_rearm: bool = False,
     ) -> None:
         self._deck_id = deck_id
         self._track_id = track_id
         self._bpm = bpm
         self._phrase_anchor_last_beat = phrase_anchor_last_beat
+        self._use_real_smart_rearm = use_real_smart_rearm
         self._playing = True
         self._smart_drop_beats = smart_drop_beats
         self._phrase_segments = phrase_segments
         self._breakdown_segments = breakdown_segments
         self._breakdown_active = False
         self._arm = _DropArmState()
+        self._os = OutputState(lighting_mode="autoloop")
+        self._os.phrase_anchor_last_beat = phrase_anchor_last_beat
+        self._deck = {1: DeckState(number=1), 2: DeckState(number=2)}
+        self._direct_rearm_calls: list[tuple[tuple, dict]] = []
+        self._transition_clear_calls: list[int] = []
         self._now = 0.0
         self._last_abs_beat = 0.0
 
@@ -210,6 +222,49 @@ class _GoldenHarness:
         self._director.set_personality_config(personality)
         self._midi = _FakeMidiOutput(dry_run=True)
         self._executor = LaserSceneExecutor(config=cfg, midi_output=self._midi, personality=personality)
+        self._smart_rearm = SmartRearmCoordinator(
+            output_state_ref=lambda: self._os,
+            deck_ref=lambda d: self._deck[d],
+            send_direct_autoloop_rearm=self._send_direct_autoloop_rearm,
+            send_smart_transition_clear=self._send_smart_transition_clear,
+        )
+
+    def _send_direct_autoloop_rearm(self, *args, **kwargs) -> bool:
+        self._direct_rearm_calls.append((args, kwargs))
+        return True
+
+    def _send_smart_transition_clear(self, active: int) -> None:
+        self._transition_clear_calls.append(active)
+
+    def _smart_drop_signal(self, sp_state: SmartPhrasingState, smart_drop_blackout_mode: bool) -> int:
+        if not self._use_real_smart_rearm:
+            return _smart_drop_state(self._arm, sp_state, blackout_mode=smart_drop_blackout_mode)
+
+        result = self._smart_rearm.tick(
+            int(self._deck_id),
+            sp_state,
+            SmartRearmContext(
+                mirror=2 if self._deck_id == "1" else 1,
+                bpm=self._bpm,
+                this_beat=int(self._last_abs_beat),
+                elapsed_ms=int(round((self._last_abs_beat * 60_000.0) / self._bpm))
+                if self._bpm > 0
+                else 0,
+                abs_beat_pos=self._last_abs_beat,
+                blackout_mode=smart_drop_blackout_mode,
+                smart_drop_enabled=True,
+                smart_breakdown_enabled=False,
+                phrase_anchor_enabled=False,
+                lighting_mode_is_autoloop=True,
+            ),
+        )
+        self._arm.drop_cut_armed = self._os.drop_cut_armed
+        self._arm.drop_rearm_beat = self._os.drop_rearm_beat
+        if result.drop.crossing:
+            return _SIGNAL_CROSSING
+        if result.drop.blackout_armed:
+            return _SIGNAL_BLACKOUT_ARMED
+        return _SIGNAL_NONE
 
     def tick(
         self,
@@ -261,7 +316,7 @@ class _GoldenHarness:
         )
 
         smart_drop_blackout_mode = self._executor.smart_drop_blackout_enabled()
-        signal = _smart_drop_state(self._arm, sp_state, blackout_mode=smart_drop_blackout_mode)
+        signal = self._smart_drop_signal(sp_state, smart_drop_blackout_mode)
 
         smart_drop_blackout_arm = bool(
             (
@@ -331,6 +386,9 @@ class _GoldenHarness:
                 self._executor.clear_pending_blackout(reason="smart_drop_crossing_without_drop_decision")
             self._arm.drop_cut_armed = False
             self._arm.drop_rearm_beat = 0
+            if self._use_real_smart_rearm:
+                self._os.drop_cut_armed = False
+                self._os.drop_rearm_beat = 0
 
         # Monotonic per-tick clock. LaserDirector only reads `now` for
         # _manual_override_expires_at (laser_director.py:250); none of the
@@ -364,6 +422,10 @@ class _GoldenHarness:
         self._engine.reset("master_changed")
         self._arm.drop_cut_armed = False
         self._arm.drop_rearm_beat = 0
+        self._os.drop_cut_armed = False
+        self._os.drop_rearm_beat = 0
+        self._os.breakdown_active = False
+        self._os.breakdown_restore_beat = 0
         self._breakdown_active = False
         self._track_id = track_id
         self._smart_drop_beats = smart_drop_beats
@@ -395,6 +457,10 @@ class _GoldenHarness:
         self._breakdown_active = False
         self._arm.drop_cut_armed = False
         self._arm.drop_rearm_beat = 0
+        self._os.drop_cut_armed = False
+        self._os.drop_rearm_beat = 0
+        self._os.breakdown_active = False
+        self._os.breakdown_restore_beat = 0
 
     def resume(
         self,
@@ -416,6 +482,10 @@ class _GoldenHarness:
         self._breakdown_active = False
         self._arm.drop_cut_armed = False
         self._arm.drop_rearm_beat = 0
+        self._os.drop_cut_armed = False
+        self._os.drop_rearm_beat = 0
+        self._os.breakdown_active = False
+        self._os.breakdown_restore_beat = 0
         self._track_id = track_id
         self._smart_drop_beats = smart_drop_beats
         self._phrase_segments = phrase_segments
@@ -462,6 +532,21 @@ def _run_scenario_2() -> list[tuple[int, str, int, int, str]]:
             PhraseSegment(64.0, 80.0, "chorus"),
         ),
         smart_drop_mode="blackout_mask",
+    )
+    for beat in _beats(50.0, 70.0):
+        h.tick(abs_beat=beat)
+    return h.transcript()
+
+
+def _run_scenario_2_real_coordinator() -> list[tuple[int, str, int, int, str]]:
+    h = _GoldenHarness(
+        smart_drop_beats=(64.0,),
+        phrase_segments=(
+            PhraseSegment(48.0, 64.0, "up"),
+            PhraseSegment(64.0, 80.0, "chorus"),
+        ),
+        smart_drop_mode="blackout_mask",
+        use_real_smart_rearm=True,
     )
     for beat in _beats(50.0, 70.0):
         h.tick(abs_beat=beat)
@@ -559,6 +644,18 @@ class GoldenTraceTests(unittest.TestCase):
     def test_smart_drop_blackout_window(self) -> None:
         self.assertEqual(
             _run_scenario_2(),
+            [
+                (50, "buildup_a", 1, 39, "normal"),
+                (60, "blackout_on", 1, 89, "high"),
+                (64, "blackout_off", 1, 90, "high"),
+                (64, "drop_a", 1, 41, "high"),
+                (64, "post_a", 1, 43, "normal"),
+            ],
+        )
+
+    def test_smart_drop_blackout_window_real_coordinator(self) -> None:
+        self.assertEqual(
+            _run_scenario_2_real_coordinator(),
             [
                 (50, "buildup_a", 1, 39, "normal"),
                 (60, "blackout_on", 1, 89, "high"),

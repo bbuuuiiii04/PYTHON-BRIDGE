@@ -24,8 +24,8 @@ from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
     StateManager,
     SmartDropTickResult,
-    _smart_drop_tick,
 )
+from rb_ss_bridge_v2.smart_rearm import SmartRearmContext, SmartRearmCoordinator  # noqa: E402
 
 class TestSmartPhrasing(unittest.TestCase):
     def setUp(self):
@@ -71,6 +71,40 @@ class TestSmartPhrasing(unittest.TestCase):
         sm._os.autoloop_arm_pending = autoloop_arm_pending
         sm._os.pending_autoloop_arm_meta = pending_autoloop_arm_meta
         return sm
+
+    def _smart_drop_tick(
+        self,
+        sm: SimpleNamespace,
+        active: int,
+        mirror: int,
+        bpm: float,
+        this_beat: int,
+        elapsed_ms: int,
+        *,
+        sp_state: SmartPhrasingState,
+    ) -> SmartDropTickResult:
+        coordinator = SmartRearmCoordinator(
+            output_state_ref=lambda: sm._os,
+            deck_ref=lambda d: sm._deck[d],
+            send_direct_autoloop_rearm=lambda *args, **kwargs: True,
+            send_smart_transition_clear=lambda active: None,
+        )
+        return coordinator.tick(
+            active,
+            sp_state,
+            SmartRearmContext(
+                mirror=mirror,
+                bpm=bpm,
+                this_beat=this_beat,
+                elapsed_ms=elapsed_ms,
+                abs_beat_pos=float(this_beat),
+                blackout_mode=True,
+                smart_drop_enabled=True,
+                smart_breakdown_enabled=False,
+                phrase_anchor_enabled=False,
+                lighting_mode_is_autoloop=True,
+            ),
+        ).drop
 
     def _sp_state(self, **overrides) -> SmartPhrasingState:
         defaults = dict(reason="test")
@@ -287,7 +321,7 @@ class TestSmartPhrasing(unittest.TestCase):
         self.assertTrue(arm_state.transition_mask_should_arm)
 
         legacy = self._legacy_smart_drop_sm(smart_drops=[drop_beat])
-        legacy_signal = _smart_drop_tick(
+        legacy_signal = self._smart_drop_tick(
             legacy,
             1,
             2,
@@ -454,7 +488,7 @@ class TestSmartPhrasing(unittest.TestCase):
             smart_drops=[drop_beat],
             pending_autoloop_arm_meta=object(),
         )
-        legacy_signal = _smart_drop_tick(
+        legacy_signal = self._smart_drop_tick(
             legacy,
             1,
             2,
@@ -489,7 +523,7 @@ class TestSmartPhrasing(unittest.TestCase):
         self.assertFalse(no_arm_state.transition_mask_should_arm)
 
         legacy = self._legacy_smart_drop_sm(smart_drops=[drop_beat])
-        legacy_signal = _smart_drop_tick(
+        legacy_signal = self._smart_drop_tick(
             legacy,
             1,
             2,
@@ -521,7 +555,7 @@ class TestSmartPhrasing(unittest.TestCase):
         self.assertTrue(still_in_window.transition_window_active)
 
         legacy = self._legacy_smart_drop_sm(smart_drops=[drop_beat])
-        first_signal = _smart_drop_tick(
+        first_signal = self._smart_drop_tick(
             legacy,
             1,
             2,
@@ -533,7 +567,7 @@ class TestSmartPhrasing(unittest.TestCase):
                 next_smart_drop_beat=float(drop_beat),
             ),
         )
-        second_signal = _smart_drop_tick(
+        second_signal = self._smart_drop_tick(
             legacy,
             1,
             2,
@@ -559,7 +593,7 @@ class TestSmartPhrasing(unittest.TestCase):
             smart_drops=[drop_beat],
             smart_breakdowns=[arm_beat + 2],
         )
-        legacy_signal = _smart_drop_tick(
+        legacy_signal = self._smart_drop_tick(
             legacy,
             1,
             2,
@@ -590,7 +624,7 @@ class TestSmartPhrasing(unittest.TestCase):
 
         legacy = self._legacy_smart_drop_sm(smart_drops=[drop_beat])
         legacy._os.breakdown_active = True
-        legacy_signal = _smart_drop_tick(
+        legacy_signal = self._smart_drop_tick(
             legacy,
             1,
             2,
@@ -627,7 +661,7 @@ class TestSmartPhrasing(unittest.TestCase):
             smart_drops=[drop_beat],
             autoloop_arm_pending=True,
         )
-        legacy_signal = _smart_drop_tick(
+        legacy_signal = self._smart_drop_tick(
             legacy,
             1,
             2,
