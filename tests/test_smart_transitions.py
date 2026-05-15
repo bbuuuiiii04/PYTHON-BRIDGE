@@ -25,6 +25,7 @@ from rb_ss_bridge_v2.config import (  # noqa: E402
     SMART_BREAKDOWN_WINDOW_BEATS,
 )
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
+    SmartDropTickResult,
     StateManager,
     _phrase_anchor_tick,
     _send_direct_autoloop_rearm,
@@ -153,6 +154,35 @@ def _smart_drop_tick(
     blackout_mode=True,
     sp_state=None,
 ):
+    if sp_state is None:
+        sp_state = _legacy_sp_state_for_drop(sm, active, this_beat)
+    result = _state_manager_smart_drop_tick(
+        sm,
+        active,
+        mirror,
+        bpm,
+        this_beat,
+        elapsed_ms,
+        blackout_mode=blackout_mode,
+        sp_state=sp_state,
+    )
+    if result.crossing:
+        return 2
+    if result.blackout_armed:
+        return 1
+    return 0
+
+
+def _smart_drop_tick_typed(
+    sm,
+    active,
+    mirror,
+    bpm,
+    this_beat,
+    elapsed_ms,
+    blackout_mode=True,
+    sp_state=None,
+) -> SmartDropTickResult:
     if sp_state is None:
         sp_state = _legacy_sp_state_for_drop(sm, active, this_beat)
     return _state_manager_smart_drop_tick(
@@ -547,7 +577,7 @@ class SmartDropTests(unittest.TestCase):
     def test_smart_drop_arm_consumes_sp_state_not_metadata(self) -> None:
         sm = _sm([64])
         sm._deck[1].meta.smart_drops = []
-        signal = _smart_drop_tick(
+        result = _smart_drop_tick_typed(
             sm,
             1,
             2,
@@ -559,7 +589,9 @@ class SmartDropTests(unittest.TestCase):
                 next_smart_drop_beat=64.0,
             ),
         )
-        self.assertEqual(signal, 1)
+        self.assertTrue(result.blackout_armed)
+        self.assertFalse(result.crossing)
+        self.assertEqual(result.target_beat, 64)
         self.assertTrue(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 64)
 
@@ -615,6 +647,26 @@ class SmartDropTests(unittest.TestCase):
         sm._send_autoloop_deck_load.assert_called_once()
         self.assertFalse(sm._os.drop_cut_armed)
         self.assertEqual(sm._os.drop_rearm_beat, 0)
+
+    def test_smart_drop_crossing_no_target_beat_returns_none(self) -> None:
+        sm = _sm([64])
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 0
+        result = _smart_drop_tick_typed(
+            sm,
+            1,
+            2,
+            130.0,
+            64,
+            32_005,
+            blackout_mode=False,
+            sp_state=_sp_state(
+                smart_drop_crossing=True,
+                active_drop_beat=None,
+            ),
+        )
+        self.assertEqual(result, SmartDropTickResult.none())
+        sm._send_autoloop_deck_load.assert_not_called()
 
     def test_smart_drop_suppression_gates_still_apply_with_sp_state(self) -> None:
         sm = _sm([64])
@@ -755,7 +807,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
     def test_crossing_clears_pending_blackout_when_laser_director_missing(self) -> None:
         sm = self._prepare_manager()
         sm._laser_director = None
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_called_once_with(
             reason="smart_drop_crossing_without_drop_decision"
@@ -766,7 +821,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         sm = self._prepare_manager()
         sm._laser_director = Mock()
         sm._laser_director.tick.return_value = None
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_called_once_with(
             reason="smart_drop_crossing_without_drop_decision"
@@ -777,7 +835,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         sm = self._prepare_manager()
         sm._laser_director = Mock()
         sm._laser_director.tick.return_value = SimpleNamespace(reason="manual_override")
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_called_once_with(
             reason="smart_drop_crossing_without_drop_decision"
@@ -787,7 +848,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         sm = self._prepare_manager()
         sm._laser_director = Mock()
         sm._laser_director.tick.return_value = SimpleNamespace(reason="drop_crossing")
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_not_called()
 
@@ -847,7 +911,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
 
         sm._laser_executor.on_tick.side_effect = _record_on_tick
         sm._laser_executor.on_decision.side_effect = _record_on_decision
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=0):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult.none(),
+        ):
             sm._push_tick()
         self.assertEqual(call_order, ["on_tick", "on_decision"])
         self.assertIs(ctx_by_call["on_tick"], ctx_by_call["on_decision"])
@@ -913,7 +980,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
             reason="drop_crossing",
             role="drop",
         )
-        with patch("rb_ss_bridge_v2.state_manager._smart_drop_tick", return_value=2):
+        with patch(
+            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
+            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=2),
+        ):
             sm._push_tick()
         _, ctx = sm._laser_executor.on_decision.call_args.args
         self.assertFalse(ctx.smart_drop_blackout_arm)

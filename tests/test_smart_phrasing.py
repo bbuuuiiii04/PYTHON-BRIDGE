@@ -23,8 +23,7 @@ from rb_ss_bridge_v2.models import DeckState, OutputState  # noqa: E402
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
     StateManager,
-    _SMART_DROP_SIGNAL_BLACKOUT_ARMED,
-    _SMART_DROP_SIGNAL_NONE,
+    SmartDropTickResult,
     _smart_drop_tick,
 )
 
@@ -74,35 +73,7 @@ class TestSmartPhrasing(unittest.TestCase):
         return sm
 
     def _sp_state(self, **overrides) -> SmartPhrasingState:
-        defaults = dict(
-            current_phrase_label="other",
-            current_phrase_is_up=False,
-            current_phrase_is_chorus=False,
-            current_phrase_is_low=False,
-            next_smart_drop_beat=None,
-            beats_to_next_drop=None,
-            smart_drop_window_active=False,
-            smart_drop_crossing=False,
-            smart_drop_preclear_requested=False,
-            smart_drop_rearm_requested=False,
-            smart_post_drop_active=False,
-            active_drop_beat=None,
-            smart_buildup_active=False,
-            smart_breakdown_active=False,
-            breakdown_start_crossing=False,
-            breakdown_end_crossing=False,
-            smart_breakdown_clear_requested=False,
-            smart_breakdown_restore_requested=False,
-            transition_mask_should_arm=False,
-            transition_mask_should_clear=False,
-            transition_window_active=False,
-            phrase_anchor_requested=False,
-            phrase_anchor_preclear_requested=False,
-            phrase_anchor_rearm_requested=False,
-            phrase_anchor_target_beat=None,
-            reason="test",
-            breakdown_restore_beat=None,
-        )
+        defaults = dict(reason="test")
         defaults.update(overrides)
         return SmartPhrasingState(**defaults)
 
@@ -328,7 +299,46 @@ class TestSmartPhrasing(unittest.TestCase):
                 next_smart_drop_beat=float(drop_beat),
             ),
         )
-        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_BLACKOUT_ARMED)
+        self.assertTrue(legacy_signal.blackout_armed)
+        self.assertFalse(legacy_signal.crossing)
+        self.assertEqual(legacy_signal.target_beat, drop_beat)
+
+    def test_transition_mask_arm_latched_sets_on_window_arm(self):
+        snap = self._default_snap(
+            smart_drop_beats=(64.0,),
+            transition_window_beats=4.0,
+        )
+        self.engine.update(replace(snap, abs_beat=59.0))
+        arm_state = self.engine.update(replace(snap, abs_beat=60.0)).state
+        self.assertTrue(arm_state.transition_mask_should_arm)
+        self.assertTrue(arm_state.transition_mask_arm_latched)
+
+    def test_transition_mask_arm_latched_clears_on_crossing(self):
+        snap = self._default_snap(
+            smart_drop_beats=(64.0,),
+            transition_window_beats=4.0,
+        )
+        self.engine.update(replace(snap, abs_beat=59.0))
+        self.engine.update(replace(snap, abs_beat=60.0))
+        crossing_state = self.engine.update(replace(snap, abs_beat=64.0)).state
+        self.assertTrue(crossing_state.smart_drop_crossing)
+        self.assertFalse(crossing_state.transition_mask_arm_latched)
+
+    def test_transition_mask_arm_latched_clears_on_manual_clear_and_reset(self):
+        snap = self._default_snap(
+            smart_drop_beats=(64.0,),
+            transition_window_beats=4.0,
+        )
+        self.engine.update(replace(snap, abs_beat=59.0))
+        latched = self.engine.update(replace(snap, abs_beat=60.0)).state
+        self.assertTrue(latched.transition_mask_arm_latched)
+
+        self.engine.clear_blackout_latch()
+        after_api_clear = self.engine.update(replace(snap, abs_beat=60.5)).state
+        self.assertFalse(after_api_clear.transition_mask_arm_latched)
+
+        reset_state = self.engine.reset("test-reset")
+        self.assertFalse(reset_state.transition_mask_arm_latched)
 
     def test_transition_mask_arm_breakdown_clears_mid_window_rising_edge_gap(self):
         drop_beat = 64
@@ -456,7 +466,7 @@ class TestSmartPhrasing(unittest.TestCase):
                 next_smart_drop_beat=float(drop_beat),
             ),
         )
-        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_NONE)
+        self.assertEqual(legacy_signal, SmartDropTickResult.none())
 
         snap = self._default_snap(
             smart_drop_beats=(float(drop_beat),),
@@ -491,7 +501,7 @@ class TestSmartPhrasing(unittest.TestCase):
                 next_smart_drop_beat=float(drop_beat),
             ),
         )
-        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_NONE)
+        self.assertEqual(legacy_signal, SmartDropTickResult.none())
 
     def test_transition_mask_arm_fires_only_once_per_window_entry(self):
         drop_beat = 64
@@ -534,8 +544,10 @@ class TestSmartPhrasing(unittest.TestCase):
                 smart_drop_crossing=False,
             ),
         )
-        self.assertEqual(first_signal, _SMART_DROP_SIGNAL_BLACKOUT_ARMED)
-        self.assertEqual(second_signal, _SMART_DROP_SIGNAL_NONE)
+        self.assertTrue(first_signal.blackout_armed)
+        self.assertFalse(first_signal.crossing)
+        self.assertEqual(first_signal.target_beat, drop_beat)
+        self.assertEqual(second_signal, SmartDropTickResult.none())
         self.assertTrue(legacy._os.drop_cut_armed)
 
     def test_transition_mask_arm_breakdown_between_suppresses_arm(self):
@@ -559,7 +571,7 @@ class TestSmartPhrasing(unittest.TestCase):
                 next_smart_drop_beat=float(drop_beat),
             ),
         )
-        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_NONE)
+        self.assertEqual(legacy_signal, SmartDropTickResult.none())
 
         snap = self._default_snap(
             smart_drop_beats=(float(drop_beat),),
@@ -590,7 +602,7 @@ class TestSmartPhrasing(unittest.TestCase):
                 next_smart_drop_beat=float(drop_beat),
             ),
         )
-        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_NONE)
+        self.assertEqual(legacy_signal, SmartDropTickResult.none())
 
         snap = self._default_snap(
             smart_drop_beats=(float(drop_beat),),
@@ -627,7 +639,7 @@ class TestSmartPhrasing(unittest.TestCase):
                 next_smart_drop_beat=float(drop_beat),
             ),
         )
-        self.assertEqual(legacy_signal, _SMART_DROP_SIGNAL_NONE)
+        self.assertEqual(legacy_signal, SmartDropTickResult.none())
 
         snap = self._default_snap(
             smart_drop_beats=(float(drop_beat),),
