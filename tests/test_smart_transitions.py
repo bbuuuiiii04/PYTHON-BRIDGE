@@ -30,10 +30,12 @@ from rb_ss_bridge_v2.config import (  # noqa: E402
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
     SmartDropTickResult,
     StateManager,
-    _phrase_anchor_tick,
     _send_direct_autoloop_rearm,
-    _smart_drop_tick as _state_manager_smart_drop_tick,
-    _smart_breakdown_tick as _state_manager_smart_breakdown_tick,
+)
+from rb_ss_bridge_v2.smart_rearm import (  # noqa: E402
+    SmartRearmContext,
+    SmartRearmCoordinator,
+    SmartRearmTickResult,
 )
 
 
@@ -147,6 +149,43 @@ def _legacy_sp_state_for_breakdown(sm, active: int, this_beat: int) -> SmartPhra
     return _sp_state()
 
 
+def _coordinator(sm) -> SmartRearmCoordinator:
+    return SmartRearmCoordinator(
+        output_state_ref=lambda: sm._os,
+        deck_ref=lambda d: sm._deck[d],
+        send_direct_autoloop_rearm=lambda *args, **kwargs: _send_direct_autoloop_rearm(
+            sm, *args, **kwargs
+        ),
+        send_smart_transition_clear=sm._sse.send_smart_transition_clear,
+    )
+
+
+def _ctx(
+    mirror,
+    bpm,
+    this_beat,
+    elapsed_ms,
+    *,
+    abs_beat_pos=None,
+    blackout_mode=True,
+    smart_drop_enabled=False,
+    smart_breakdown_enabled=False,
+    phrase_anchor_enabled=False,
+) -> SmartRearmContext:
+    return SmartRearmContext(
+        mirror=mirror,
+        bpm=bpm,
+        this_beat=this_beat,
+        elapsed_ms=elapsed_ms,
+        abs_beat_pos=float(this_beat) if abs_beat_pos is None else abs_beat_pos,
+        blackout_mode=blackout_mode,
+        smart_drop_enabled=smart_drop_enabled,
+        smart_breakdown_enabled=smart_breakdown_enabled,
+        phrase_anchor_enabled=phrase_anchor_enabled,
+        lighting_mode_is_autoloop=True,
+    )
+
+
 def _smart_drop_tick(
     sm,
     active,
@@ -159,16 +198,18 @@ def _smart_drop_tick(
 ):
     if sp_state is None:
         sp_state = _legacy_sp_state_for_drop(sm, active, this_beat)
-    result = _state_manager_smart_drop_tick(
-        sm,
+    result = _coordinator(sm).tick(
         active,
-        mirror,
-        bpm,
-        this_beat,
-        elapsed_ms,
-        blackout_mode=blackout_mode,
-        sp_state=sp_state,
-    )
+        sp_state,
+        _ctx(
+            mirror,
+            bpm,
+            this_beat,
+            elapsed_ms,
+            blackout_mode=blackout_mode,
+            smart_drop_enabled=True,
+        ),
+    ).drop
     if result.crossing:
         return 2
     if result.blackout_armed:
@@ -188,16 +229,18 @@ def _smart_drop_tick_typed(
 ) -> SmartDropTickResult:
     if sp_state is None:
         sp_state = _legacy_sp_state_for_drop(sm, active, this_beat)
-    return _state_manager_smart_drop_tick(
-        sm,
+    return _coordinator(sm).tick(
         active,
-        mirror,
-        bpm,
-        this_beat,
-        elapsed_ms,
-        blackout_mode=blackout_mode,
-        sp_state=sp_state,
-    )
+        sp_state,
+        _ctx(
+            mirror,
+            bpm,
+            this_beat,
+            elapsed_ms,
+            blackout_mode=blackout_mode,
+            smart_drop_enabled=True,
+        ),
+    ).drop
 
 
 def _smart_breakdown_tick(
@@ -211,14 +254,53 @@ def _smart_breakdown_tick(
 ):
     if sp_state is None:
         sp_state = _legacy_sp_state_for_breakdown(sm, active, this_beat)
-    return _state_manager_smart_breakdown_tick(
-        sm,
+    return _coordinator(sm).tick(
         active,
-        mirror,
-        bpm,
-        this_beat,
-        elapsed_ms,
-        sp_state=sp_state,
+        sp_state,
+        _ctx(
+            mirror,
+            bpm,
+            this_beat,
+            elapsed_ms,
+            smart_breakdown_enabled=True,
+        ),
+    ).breakdown_fired
+
+
+def _phrase_anchor_tick(
+    sm,
+    active,
+    mirror,
+    bpm,
+    this_beat,
+    elapsed_ms,
+    abs_beat_pos,
+    sp_state,
+):
+    return _coordinator(sm).tick(
+        active,
+        sp_state,
+        _ctx(
+            mirror,
+            bpm,
+            this_beat,
+            elapsed_ms,
+            abs_beat_pos=abs_beat_pos,
+            phrase_anchor_enabled=True,
+        ),
+    ).phrase_anchor_fired
+
+
+def _rearm_result(
+    drop: SmartDropTickResult,
+    *,
+    breakdown_fired: bool = False,
+    phrase_anchor_fired: bool = False,
+) -> SmartRearmTickResult:
+    return SmartRearmTickResult(
+        drop=drop,
+        breakdown_fired=breakdown_fired,
+        phrase_anchor_fired=phrase_anchor_fired,
     )
 
 
@@ -810,9 +892,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
     def test_crossing_clears_pending_blackout_when_laser_director_missing(self) -> None:
         sm = self._prepare_manager()
         sm._laser_director = None
-        with patch(
-            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
-            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        with patch.object(
+            sm._smart_rearm,
+            "tick",
+            return_value=_rearm_result(SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64)),
         ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_called_once_with(
@@ -824,9 +907,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         sm = self._prepare_manager()
         sm._laser_director = Mock()
         sm._laser_director.tick.return_value = None
-        with patch(
-            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
-            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        with patch.object(
+            sm._smart_rearm,
+            "tick",
+            return_value=_rearm_result(SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64)),
         ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_called_once_with(
@@ -838,9 +922,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         sm = self._prepare_manager()
         sm._laser_director = Mock()
         sm._laser_director.tick.return_value = SimpleNamespace(reason="manual_override")
-        with patch(
-            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
-            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        with patch.object(
+            sm._smart_rearm,
+            "tick",
+            return_value=_rearm_result(SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64)),
         ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_called_once_with(
@@ -851,9 +936,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
         sm = self._prepare_manager()
         sm._laser_director = Mock()
         sm._laser_director.tick.return_value = SimpleNamespace(reason="drop_crossing")
-        with patch(
-            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
-            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64),
+        with patch.object(
+            sm._smart_rearm,
+            "tick",
+            return_value=_rearm_result(SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=64)),
         ):
             sm._push_tick()
         sm._laser_executor.clear_pending_blackout.assert_not_called()
@@ -914,9 +1000,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
 
         sm._laser_executor.on_tick.side_effect = _record_on_tick
         sm._laser_executor.on_decision.side_effect = _record_on_decision
-        with patch(
-            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
-            return_value=SmartDropTickResult.none(),
+        with patch.object(
+            sm._smart_rearm,
+            "tick",
+            return_value=_rearm_result(SmartDropTickResult.none()),
         ):
             sm._push_tick()
         self.assertEqual(call_order, ["on_tick", "on_decision"])
@@ -983,9 +1070,10 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
             reason="drop_crossing",
             role="drop",
         )
-        with patch(
-            "rb_ss_bridge_v2.state_manager._smart_drop_tick",
-            return_value=SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=2),
+        with patch.object(
+            sm._smart_rearm,
+            "tick",
+            return_value=_rearm_result(SmartDropTickResult(crossing=True, blackout_armed=False, target_beat=2)),
         ):
             sm._push_tick()
         _, ctx = sm._laser_executor.on_decision.call_args.args

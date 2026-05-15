@@ -36,6 +36,7 @@ from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
     build_phrase_segments_from_markers,
 )
 from rb_ss_bridge_v2.state_manager import SmartDropTickResult, StateManager  # noqa: E402
+from rb_ss_bridge_v2.smart_rearm import SmartRearmTickResult  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -539,9 +540,14 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
         if smart_drop_result_override is None:
             sm._push_tick()
         else:
-            with patch(
-                "rb_ss_bridge_v2.state_manager._smart_drop_tick",
-                return_value=smart_drop_result_override,
+            with patch.object(
+                sm._smart_rearm,
+                "tick",
+                return_value=SmartRearmTickResult(
+                    drop=smart_drop_result_override,
+                    breakdown_fired=False,
+                    phrase_anchor_fired=False,
+                ),
             ):
                 sm._push_tick()
         return sm._laser_executor.on_decision.call_args.args[1]
