@@ -493,6 +493,68 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertEqual(midi.calls[2][1], "high")
         self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
 
+    def test_trigger_blackout_on_coerces_pulse_message_to_note_on(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_pulse",
+            behavior="pulse",
+            channel=1,
+            note=89,
+            velocity=127,
+            duration_ms=80,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            midi_output=midi,
+            personality=_personality(),
+        )
+
+        ex.trigger_blackout_on(_ctx(abs_beat=319.0))
+
+        self.assertEqual(len(midi.calls), 1)
+        sent, priority = midi.calls[0]
+        self.assertEqual(priority, "high")
+        self.assertEqual(sent.note, 89)
+        self.assertEqual(sent.kind, "note_on")
+        self.assertEqual(sent.behavior, "note_on")
+
+    def test_resolve_pending_blackout_coerces_pulse_message_to_note_off(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(
+            kind="note_on",
+            behavior="note_on",
+            channel=1,
+            note=89,
+            velocity=127,
+        )
+        blackout_off = LaserMidiMessage(
+            kind="note_pulse",
+            behavior="pulse",
+            channel=1,
+            note=90,
+            velocity=127,
+            duration_ms=80,
+        )
+        ex = LaserSceneExecutor(
+            config=_config(
+                dry_run=False,
+                manual_blackout_on=blackout_on,
+                manual_blackout_off=blackout_off,
+            ),
+            midi_output=midi,
+            personality=_personality(),
+        )
+
+        ex.trigger_blackout_on(_ctx(abs_beat=319.0))
+        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=320.0))
+
+        self.assertEqual(len(midi.calls), 3)
+        sent_off, priority = midi.calls[2]
+        self.assertEqual(priority, "high")
+        self.assertEqual(sent_off.note, 90)
+        self.assertEqual(sent_off.kind, "note_off")
+        self.assertEqual(sent_off.behavior, "note_off")
+
     def test_on_tick_clear_then_drop_crossing_sends_blackout_off_once_and_drop_scene(self) -> None:
         """Current ordering is on_tick cleanup before on_decision drop output."""
         midi = _FakeMidiOutput(dry_run=False)

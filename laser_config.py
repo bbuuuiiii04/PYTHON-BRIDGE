@@ -315,6 +315,10 @@ def _validate_manual_commands(data: dict[str, Any], *, smart_drop_mode: str) -> 
     errors: list[str] = []
     manual_commands = data.get("manual_commands")
 
+    def _resolved_behavior(raw: dict[str, Any]) -> str:
+        kind = str(raw.get("kind", "note_pulse"))
+        return _infer_behavior(kind, raw.get("behavior"))
+
     if manual_commands is None:
         if "manual_blackout_on" in data or "manual_blackout_off" in data:
             manual_commands = {
@@ -348,6 +352,22 @@ def _validate_manual_commands(data: dict[str, Any], *, smart_drop_mode: str) -> 
         errors.append(
             "'manual_commands.blackout_on' and 'manual_commands.blackout_off' must both be configured when smart_drop_mode='blackout_mask'"
         )
+
+    if smart_drop_mode == "blackout_mask" and has_blackout_on:
+        assert isinstance(blackout_on, dict)
+        blackout_on_behavior = _resolved_behavior(blackout_on)
+        if blackout_on_behavior != "note_on":
+            errors.append(
+                "'manual_commands.blackout_on' must resolve to behavior='note_on' (set kind='note_on' or behavior='note_on') so Smart Drop blackout stays held across the pre-drop window"
+            )
+
+    if smart_drop_mode == "blackout_mask" and has_blackout_off:
+        assert isinstance(blackout_off, dict)
+        blackout_off_behavior = _resolved_behavior(blackout_off)
+        if blackout_off_behavior != "note_off":
+            errors.append(
+                "'manual_commands.blackout_off' must resolve to behavior='note_off' (set kind='note_off' or behavior='note_off') so Smart Drop blackout clears deterministically at crossing"
+            )
 
     return errors
 

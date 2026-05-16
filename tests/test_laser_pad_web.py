@@ -553,18 +553,18 @@ class LaserPadWebTests(unittest.TestCase):
             payload = {
                 "manual_commands": {
                     "blackout_on": {
-                        "kind": "note_pulse",
+                        "kind": "note_on",
+                        "behavior": "note_on",
                         "channel": 1,
                         "note": 0,
                         "velocity": 127,
-                        "duration_ms": 80,
                     },
                     "blackout_off": {
-                        "kind": "note_pulse",
+                        "kind": "note_off",
+                        "behavior": "note_off",
                         "channel": 1,
                         "note": 1,
-                        "velocity": 127,
-                        "duration_ms": 80,
+                        "velocity": 0,
                     },
                 }
             }
@@ -583,7 +583,8 @@ class LaserPadWebTests(unittest.TestCase):
                     "patch": {
                         "manual_commands": {
                             "blackout_on": {
-                                "kind": "note_pulse",
+                                "kind": "note_on",
+                                "behavior": "note_on",
                                 "channel": 1,
                                 "note": 5,
                                 "velocity": 100,
@@ -1197,11 +1198,11 @@ class LaserPadWebTests(unittest.TestCase):
                     "patch": {
                         "manual_commands": {
                             "blackout_on": {
-                                "kind": "note_pulse",
+                                "kind": "note_on",
+                                "behavior": "note_on",
                                 "channel": 1,
                                 "note": 42,
                                 "velocity": 127,
-                                "duration_ms": 80,
                             }
                         }
                     }

@@ -1806,12 +1806,13 @@ window.laserPadApp = function laserPadApp() {
     async saveBlackout(which) {
       const slot = which === 'on' ? 'blackout_on' : 'blackout_off';
       const form = this.blackoutForm[which] || {};
+      const isOn = which === 'on';
       const message = {
-        kind: 'note_pulse',
+        kind: isOn ? 'note_on' : 'note_off',
+        behavior: isOn ? 'note_on' : 'note_off',
         channel: Math.max(1, Math.min(16, Number(form.channel) || 1)),
         note: Math.max(0, Math.min(127, Number(form.note) || 0)),
         velocity: Math.max(0, Math.min(127, Number(form.velocity) || 127)),
-        duration_ms: Math.max(10, Math.min(2000, Number(form.duration_ms) || 80)),
       };
       try {
         const response = await fetch('/api/draft', {

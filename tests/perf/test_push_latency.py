@@ -38,7 +38,7 @@ class PushLatencyPerfTests(unittest.TestCase):
     @unittest.skipUnless(RUN_PERF, "set RBSS_RUN_PERF=1 to run performance budget tests")
     def test_state_manager_push_latency_budget(self) -> None:
         if not FIXTURE.exists():
-            self.fail(
+            self.skipTest(
                 "missing performance replay fixture: "
                 f"{FIXTURE}. Generate it from a real bridge session with "
                 "python scripts/record_session.py for about 30 seconds of "

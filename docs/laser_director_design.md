@@ -442,6 +442,7 @@ Timing gates:
   1) pre-window manual blackout-on,
   2) drop scene MIDI on crossing,
   3) manual blackout-off MIDI.
+- In `smart_drop_mode="blackout_mask"`, `manual_commands.blackout_on` must resolve to `behavior="note_on"` and `manual_commands.blackout_off` must resolve to `behavior="note_off"`; pulse semantics are rejected because they auto-release blackout before crossing.
 - blackout-off must be emitted exactly once when a blackout window resolves, including
   successful drop, blocked/rejected drop, stop, track/deck change, and other Smart Drop resets.
 
