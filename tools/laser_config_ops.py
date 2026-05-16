@@ -387,9 +387,6 @@ def _ensure_house_personality(config: dict[str, Any]) -> None:
         "phrase_interval_beats": 32,
         "minimum_scene_hold_beats": 8,
         "buildup_lookahead_beats": 32,
-        "buildup_approach_beats": 8,
-        "buildup_hold_beats": 8,
-        "pre_drop_lookahead_beats": 4,
     }
 
 
