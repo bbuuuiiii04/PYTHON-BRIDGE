@@ -45,6 +45,7 @@ window.laserPadApp = function laserPadApp() {
     midiPorts: [],
     selectedPort: '',
     manualPort: '',
+    manualPortOpen: false,
     draftDryRun: true,
     timingDraft: {
       phrase_interval_beats: 32,
@@ -54,6 +55,22 @@ window.laserPadApp = function laserPadApp() {
     activeBankId: 'bank_1',
     test: { channel: 1, note: 60, velocity: 127, behavior: 'pulse', duration_ms: 100, hold_beats: 4, bpm: 128 },
     statusText: '',
+    currentConfigHash: '',
+    lastCommittedHash: '',
+    saveState: { kind: 'saved', timestamp: '', lastError: '' },
+    modal: {
+      open: false,
+      type: 'confirm',
+      title: '',
+      message: '',
+      fields: [],
+      error: '',
+      confirmText: 'Confirm',
+      cancelText: 'Cancel',
+      danger: false,
+      validate: null,
+    },
+    modalResolver: null,
     runtime: { active_personality: '', current_scene: '', last_reason: '', stale_seconds: 0, available: false, enabled: false, emergency: false },
     runtimeTimer: null,
     beforeUnloadHandler: null,
@@ -183,6 +200,82 @@ window.laserPadApp = function laserPadApp() {
       return 'runtime-offline';
     },
 
+    configHash(config) {
+      try {
+        return JSON.stringify(config || {});
+      } catch (_err) {
+        return '';
+      }
+    },
+
+    /**
+     * True when the current draft hash differs from the draft hash at the last
+     * successful commit (or first page load if nothing has been committed yet).
+     * This is a page-session approximation, not a disk vs draft comparison.
+     */
+    hasUnsavedChanges() {
+      return Boolean(this.currentConfigHash && this.lastCommittedHash && this.currentConfigHash !== this.lastCommittedHash);
+    },
+
+    saveBadgeClass() {
+      return `save-badge ${this.saveState.kind}`;
+    },
+
+    saveBadgeText() {
+      if (this.saveState.kind === 'saving') return 'Saving…';
+      if (this.saveState.kind === 'error') return this.saveState.lastError || 'Save failed';
+      if (this.saveState.timestamp) return `Saved ${this.saveState.timestamp}`;
+      return 'Saved';
+    },
+
+    markSaving() {
+      this.saveState = { ...this.saveState, kind: 'saving', lastError: '' };
+    },
+
+    markSaved() {
+      const now = new Date();
+      this.saveState = {
+        kind: 'saved',
+        timestamp: now.toLocaleTimeString(),
+        lastError: '',
+      };
+    },
+
+    markSaveError(message) {
+      this.saveState = {
+        ...this.saveState,
+        kind: 'error',
+        lastError: String(message || 'Save failed'),
+      };
+    },
+
+    async draftPost(body, { successMsg, refresh = true } = {}) {
+      this.markSaving();
+      try {
+        const response = await fetch('/api/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await response.json();
+        if (!data.ok) {
+          const msg = data.error || 'Save failed';
+          this.statusText = msg;
+          this.markSaveError(msg);
+          return { ok: false, data };
+        }
+        if (successMsg) this.statusText = successMsg;
+        if (refresh) await this.refreshConfig();
+        this.markSaved();
+        return { ok: true, data };
+      } catch (err) {
+        const msg = `Save failed: ${err.message}`;
+        this.statusText = msg;
+        this.markSaveError(msg);
+        return { ok: false, error: err };
+      }
+    },
+
     async refreshConfig() {
       try {
         const response = await fetch('/api/config');
@@ -204,8 +297,14 @@ window.laserPadApp = function laserPadApp() {
           const first = this.currentNotes()[0];
           this.test.note = first || 0;
         }
+        const nextHash = this.configHash(this.config);
+        this.currentConfigHash = nextHash;
+        if (!this.lastCommittedHash) {
+          this.lastCommittedHash = nextHash;
+        }
+        // markSaved() is only ever called from real save sites.
       } catch (err) {
-        this.statusText = `Config load failed: ${err.message}`;
+        this.statusText = `Couldn't load config: ${err.message}`;
       }
     },
 
@@ -492,6 +591,90 @@ window.laserPadApp = function laserPadApp() {
       this.openSettingsPanel();
     },
 
+    openPromptModal(options) {
+      return new Promise((resolve) => {
+        const opts = options || {};
+        this.modal = {
+          open: true,
+          type: 'prompt',
+          title: String(opts.title || ''),
+          message: String(opts.message || ''),
+          fields: Array.isArray(opts.fields) ? opts.fields.map((field) => ({
+            name: String(field.name || ''),
+            label: String(field.label || ''),
+            value: String(field.value ?? ''),
+            type: String(field.type || 'text'),
+            placeholder: String(field.placeholder || ''),
+            min: field.min,
+            max: field.max,
+            step: field.step,
+          })) : [],
+          error: '',
+          confirmText: String(opts.confirmText || 'Save'),
+          cancelText: String(opts.cancelText || 'Cancel'),
+          danger: false,
+          validate: typeof opts.validate === 'function' ? opts.validate : null,
+        };
+        this.modalResolver = resolve;
+      });
+    },
+
+    openConfirmModal(options) {
+      return new Promise((resolve) => {
+        const opts = options || {};
+        this.modal = {
+          open: true,
+          type: 'confirm',
+          title: String(opts.title || ''),
+          message: String(opts.message || ''),
+          fields: [],
+          error: '',
+          confirmText: String(opts.confirmText || 'Confirm'),
+          cancelText: String(opts.cancelText || 'Cancel'),
+          danger: Boolean(opts.danger),
+          validate: null,
+        };
+        this.modalResolver = resolve;
+      });
+    },
+
+    closeModal(result = null) {
+      if (!this.modal.open) return;
+      const resolve = this.modalResolver;
+      this.modalResolver = null;
+      this.modal = {
+        open: false,
+        type: 'confirm',
+        title: '',
+        message: '',
+        fields: [],
+        error: '',
+        confirmText: 'Confirm',
+        cancelText: 'Cancel',
+        danger: false,
+        validate: null,
+      };
+      if (typeof resolve === 'function') {
+        resolve(result);
+      }
+    },
+
+    submitModalPrompt() {
+      if (!this.modal.open || this.modal.type !== 'prompt') return;
+      const values = {};
+      this.modal.fields.forEach((field) => {
+        values[field.name] = field.value;
+      });
+      if (typeof this.modal.validate === 'function') {
+        const error = this.modal.validate(values);
+        if (error) {
+          this.modal.error = String(error);
+          return;
+        }
+      }
+      this.closeModal(values);
+    },
+
     async validateDraftOnly() {
       try {
         const response = await fetch('/api/validate', {
@@ -504,9 +687,9 @@ window.laserPadApp = function laserPadApp() {
         const warnings = Array.isArray(data.warnings) ? data.warnings : [];
         this.validateResults = { errors, warnings };
         this.showVerifyPanel = true;
-        this.statusText = `Validation: ${errors.length} error(s), ${warnings.length} warning(s)`;
+        this.statusText = `Config issues: ${errors.length} error(s), ${warnings.length} warning(s)`;
       } catch (err) {
-        this.statusText = `Validation failed: ${err.message}`;
+        this.statusText = `Config check failed: ${err.message}`;
       }
     },
 
@@ -522,21 +705,7 @@ window.laserPadApp = function laserPadApp() {
           },
         },
       };
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Quick test settings save failed';
-          return;
-        }
-        this.statusText = 'Quick test settings saved';
-      } catch (err) {
-        this.statusText = `Quick test settings save failed: ${err.message}`;
-      }
+      await this.draftPost({ patch }, { successMsg: 'Manual test settings saved', refresh: false });
     },
 
     async fireQuickTest() {
@@ -554,13 +723,27 @@ window.laserPadApp = function laserPadApp() {
     },
 
     async addBankPrompt() {
-      const name = window.prompt('Bank name:', `Bank ${this.banks().length + 1}`);
-      if (!name || !name.trim()) return;
-      const channelRaw = window.prompt('MIDI channel (1-16):', '1');
-      if (channelRaw === null) return;
-      const channel = Number(channelRaw);
+      const values = await this.openPromptModal({
+        title: 'Add bank',
+        message: 'Pick a name and which MIDI channel it uses.',
+        confirmText: 'Create bank',
+        fields: [
+          { name: 'name', label: 'Bank name', value: `Bank ${this.banks().length + 1}`, placeholder: 'e.g. Bank 5' },
+          { name: 'channel', label: 'MIDI channel (1–16)', value: '1', type: 'number', min: 1, max: 16, step: 1 },
+        ],
+        validate: (input) => {
+          const name = String(input.name || '').trim();
+          const channel = Number(input.channel);
+          if (!name) return 'Bank name is required.';
+          if (!Number.isFinite(channel) || channel < 1 || channel > 16) return 'Channel must be 1–16.';
+          return '';
+        },
+      });
+      if (!values) return;
+      const name = String(values.name || '').trim();
+      const channel = Number(values.channel);
       if (!Number.isFinite(channel) || channel < 1 || channel > 16) {
-        this.statusText = 'Channel must be 1-16.';
+        this.statusText = 'Channel must be 1–16.';
         return;
       }
       const existingNotes = new Set(this.banks().flatMap((bank) => Array.isArray(bank.notes) ? bank.notes : []));
@@ -598,18 +781,31 @@ window.laserPadApp = function laserPadApp() {
       this.activeBankId = id;
     },
 
-    editBankPrompt(bankId) {
+    async editBankPrompt(bankId) {
       const index = this.banks().findIndex((bank) => bank.id === bankId);
       if (index < 0) return;
       const bank = this.banks()[index];
-      const name = window.prompt('Bank name:', bank.name || bank.id);
-      if (name && name.trim()) {
-        this.saveBank(index, 'name', name.trim());
-      }
-      const channelRaw = window.prompt('MIDI channel (1-16):', String(bank.channel || 1));
-      if (channelRaw !== null) {
-        this.saveBank(index, 'channel', channelRaw);
-      }
+      const values = await this.openPromptModal({
+        title: 'Rename bank',
+        message: 'Update the name and/or MIDI channel.',
+        confirmText: 'Save',
+        fields: [
+          { name: 'name', label: 'Bank name', value: String(bank.name || bank.id || '') },
+          { name: 'channel', label: 'MIDI channel (1–16)', value: String(bank.channel || 1), type: 'number', min: 1, max: 16, step: 1 },
+        ],
+        validate: (input) => {
+          const name = String(input.name || '').trim();
+          const channel = Number(input.channel);
+          if (!name) return 'Bank name is required.';
+          if (!Number.isFinite(channel) || channel < 1 || channel > 16) return 'Channel must be 1–16.';
+          return '';
+        },
+      });
+      if (!values) return;
+      const banks = this.banks().map((b, i) => i === index
+        ? { ...b, name: String(values.name || '').trim(), channel: Number(values.channel) }
+        : b);
+      await this.patchBanks(banks, `Bank ${index + 1} updated`);
     },
 
     startBankLongPress(bankId) {
@@ -636,7 +832,7 @@ window.laserPadApp = function laserPadApp() {
           this.selectedPort = this.midiPorts[0];
         }
       } catch (err) {
-        this.statusText = `MIDI port refresh failed: ${err.message}`;
+        this.statusText = `MIDI output refresh failed: ${err.message}`;
       }
     },
 
@@ -656,27 +852,18 @@ window.laserPadApp = function laserPadApp() {
       if (!name) return;
       this.selectedPort = name;
       this.manualPort = '';
-      await this.setMidiPort();
+      const result = await this.setMidiPort();
+      if (result?.ok) {
+        this.manualPortOpen = false;
+      }
     },
 
     async setMidiPort() {
       if (!this.selectedPort) return;
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch: { midi_output_port: this.selectedPort } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Failed to set MIDI output port';
-          return;
-        }
-        this.statusText = `MIDI output set: ${this.selectedPort}`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `MIDI port update failed: ${err.message}`;
-      }
+      return this.draftPost(
+        { patch: { midi_output_port: this.selectedPort } },
+        { successMsg: `MIDI output: ${this.selectedPort}` }
+      );
     },
 
     engineStateLabel() {
@@ -703,109 +890,50 @@ window.laserPadApp = function laserPadApp() {
     async setSmartDropMode(value) {
       const v = String(value || '').trim();
       if (!v) return;
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch: { smart_drop_mode: v } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Failed to set smart_drop_mode';
-          return;
-        }
-        this.statusText = `smart_drop_mode=${v}`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Smart-drop update failed: ${err.message}`;
-      }
+      await this.draftPost(
+        { patch: { smart_drop_mode: v } },
+        { successMsg: `Drop transition: ${v}` }
+      );
     },
 
     async setLifecycleScene(field, value) {
       const key = String(field || '').trim();
       if (!key) return;
       const v = String(value || '');
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch: { [key]: v } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || `Failed to update ${key}`;
-          return;
-        }
-        this.statusText = `${key}=${v || '(none)'}`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `${key} update failed: ${err.message}`;
-      }
+      await this.draftPost(
+        { patch: { [key]: v } },
+        { successMsg: `${this.lifecycleSceneLabel(key)}: ${v || '(none)'}` }
+      );
     },
 
     async setEnabled(enabled) {
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch: { enabled: Boolean(enabled) } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Failed to toggle engine';
-          return;
-        }
-        this.statusText = `enabled=${enabled ? 'true' : 'false'}`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Engine toggle failed: ${err.message}`;
-      }
+      await this.draftPost(
+        { patch: { enabled: Boolean(enabled) } },
+        { successMsg: `Lasers: ${enabled ? 'on' : 'off'}` }
+      );
     },
 
     async setDefaultPersonality(name) {
       const value = String(name || '').trim();
       if (!value) return;
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch: { default_personality: value } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Failed to set default personality';
-          return;
-        }
-        this.statusText = `default_personality=${value}`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Personality update failed: ${err.message}`;
-      }
+      await this.draftPost(
+        { patch: { default_personality: value } },
+        { successMsg: `Default personality: ${value}` }
+      );
     },
 
     async setActivePersonality(name) {
       const value = String(name || '').trim();
       if (!value) return;
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          // /api/draft deep-merges nested dicts; sibling _pad_meta keys are preserved.
-          body: JSON.stringify({ patch: { _pad_meta: { ui: { last_personality: value } } } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Failed to set active personality';
-          return;
-        }
-        this.statusText = `active_personality=${value}`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Active personality update failed: ${err.message}`;
-      }
+      await this.draftPost(
+        // /api/draft deep-merges nested dicts; sibling _pad_meta keys are preserved.
+        { patch: { _pad_meta: { ui: { last_personality: value } } } },
+        { successMsg: `Active personality: ${value}` }
+      );
     },
 
     async _personalityCRUD(path, body, successMsg) {
+      this.markSaving();
       try {
         const response = await fetch(path, {
           method: 'POST',
@@ -814,21 +942,38 @@ window.laserPadApp = function laserPadApp() {
         });
         const data = await response.json();
         if (!data.ok) {
-          this.statusText = data.error || `Personality op failed`;
+          const msg = data.error || 'Personality action failed';
+          this.statusText = msg;
+          this.markSaveError(msg);
           return false;
         }
         this.statusText = successMsg;
         await this.refreshConfig();
+        this.markSaved();
         return true;
       } catch (err) {
-        this.statusText = `Personality op failed: ${err.message}`;
+        const msg = `Personality action failed: ${err.message}`;
+        this.statusText = msg;
+        this.markSaveError(msg);
         return false;
       }
     },
 
     async createPersonalityPrompt() {
-      const name = window.prompt('New personality name:', '');
-      if (!name) return;
+      const values = await this.openPromptModal({
+        title: 'New personality',
+        message: 'Use lowercase letters, digits, and underscores. 1–32 characters.',
+        confirmText: 'Create',
+        fields: [{ name: 'name', label: 'Name', value: '', placeholder: 'e.g. techno_dark' }],
+        validate: (input) => {
+          const name = String(input.name || '').trim();
+          if (!name) return 'Name is required.';
+          if (!/^[a-z0-9_]{1,32}$/.test(name)) return 'Use lowercase letters, digits, underscores only. Max 32 chars.';
+          return '';
+        },
+      });
+      if (!values) return;
+      const name = String(values.name || '').trim();
       await this._personalityCRUD(
         '/api/personality/create',
         { name },
@@ -837,9 +982,20 @@ window.laserPadApp = function laserPadApp() {
     },
 
     async renamePersonalityPrompt(oldName) {
-      const next = window.prompt(`Rename '${oldName}' to:`, oldName);
-      if (!next) return;
-      const trimmed = next.trim();
+      const values = await this.openPromptModal({
+        title: `Rename personality '${oldName}'`,
+        message: 'Type a new name. Use lowercase letters, digits, and underscores. 1–32 characters.',
+        confirmText: 'Rename',
+        fields: [{ name: 'name', label: 'Name', value: String(oldName || '') }],
+        validate: (input) => {
+          const next = String(input.name || '').trim();
+          if (!next) return 'Name is required.';
+          if (!/^[a-z0-9_]{1,32}$/.test(next)) return 'Use lowercase letters, digits, underscores only. Max 32 chars.';
+          return '';
+        },
+      });
+      if (!values) return;
+      const trimmed = String(values.name || '').trim();
       if (!trimmed || trimmed.toLowerCase() === oldName) return;
       await this._personalityCRUD(
         '/api/personality/rename',
@@ -849,12 +1005,20 @@ window.laserPadApp = function laserPadApp() {
     },
 
     async duplicatePersonalityPrompt(sourceName) {
-      const next = window.prompt(
-        `Duplicate '${sourceName}' as:`,
-        `${sourceName}_copy`
-      );
-      if (!next) return;
-      const trimmed = next.trim();
+      const values = await this.openPromptModal({
+        title: `Duplicate personality '${sourceName}' as…`,
+        message: 'Pick a new name for the copy. Use lowercase letters, digits, and underscores. 1–32 characters.',
+        confirmText: 'Duplicate',
+        fields: [{ name: 'name', label: 'Name', value: `${sourceName}_copy` }],
+        validate: (input) => {
+          const next = String(input.name || '').trim();
+          if (!next) return 'Name is required.';
+          if (!/^[a-z0-9_]{1,32}$/.test(next)) return 'Use lowercase letters, digits, underscores only. Max 32 chars.';
+          return '';
+        },
+      });
+      if (!values) return;
+      const trimmed = String(values.name || '').trim();
       if (!trimmed) return;
       await this._personalityCRUD(
         '/api/personality/duplicate',
@@ -865,12 +1029,15 @@ window.laserPadApp = function laserPadApp() {
 
     async deletePersonalityConfirm(name) {
       if (this.personalityNames().length <= 1) {
-        this.statusText = 'Cannot delete the last remaining personality.';
+        this.statusText = "Can't delete the last remaining personality.";
         return;
       }
-      const proceed = window.confirm(
-        `Delete personality '${name}'? This removes its scene/bank assignments. Cannot be undone in the draft (use Discard to revert from disk).`
-      );
+      const proceed = await this.openConfirmModal({
+        title: `Delete personality '${name}'?`,
+        message: 'This removes its scenes and bank assignments. You can still recover by discarding unsaved changes.',
+        confirmText: 'Delete',
+        danger: true,
+      });
       if (!proceed) return;
       await this._personalityCRUD(
         '/api/personality/delete',
@@ -880,22 +1047,21 @@ window.laserPadApp = function laserPadApp() {
     },
 
     async setDryRun() {
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch: { dry_run: Boolean(this.draftDryRun) } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Failed to update dry_run';
-          return;
-        }
-        this.statusText = `dry_run=${this.draftDryRun ? 'true' : 'false'}`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Dry run update failed: ${err.message}`;
-      }
+      await this.draftPost(
+        { patch: { dry_run: Boolean(this.draftDryRun) } },
+        { successMsg: `Test mode: ${this.draftDryRun ? 'on' : 'off'}` }
+      );
+    },
+
+    lifecycleSceneLabel(field) {
+      const labels = {
+        startup_scene: 'When laser bridge starts',
+        stop_scene: 'When laser bridge stops',
+        stale_scene: 'When music data goes silent',
+        emergency_scene: 'Emergency / panic',
+        fallback_scene: 'Default backup scene',
+      };
+      return labels[String(field || '')] || String(field || '');
     },
 
     currentSceneConfig() {
@@ -913,22 +1079,10 @@ window.laserPadApp = function laserPadApp() {
 
     async queueScenePatch(sceneName, scenePatch) {
       if (!sceneName) return;
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch: { scenes: { [sceneName]: scenePatch } } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Scene update failed';
-          return;
-        }
-        this.statusText = `Updated ${sceneName}`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Scene update failed: ${err.message}`;
-      }
+      await this.draftPost(
+        { patch: { scenes: { [sceneName]: scenePatch } } },
+        { successMsg: `Updated ${sceneName}` }
+      );
     },
 
     midiNoteName(note) {
@@ -994,7 +1148,12 @@ window.laserPadApp = function laserPadApp() {
     async removeSceneFromBank(role, sceneName) {
       const [sceneField, bankField] = this._roleSceneFields(role);
       if (!sceneField || !bankField || !sceneName) return;
-      const proceed = window.confirm(`Remove ${sceneName} from ${role} bank?`);
+      const proceed = await this.openConfirmModal({
+        title: `Remove '${sceneName}' from this bank?`,
+        message: "It stays in the config but won't fire from this stage anymore.",
+        confirmText: 'Remove',
+        danger: true,
+      });
       if (!proceed) return;
       const personality = this.drawerPersonalityName();
       const nextBank = this.roleBankScenes(role).filter((name) => name !== sceneName);
@@ -1014,72 +1173,54 @@ window.laserPadApp = function laserPadApp() {
     },
 
     async addSceneToCurrentBankPrompt() {
-      const noteRaw = window.prompt('Pick an unmapped MIDI note to add:', '');
-      if (noteRaw === null) return;
-      const note = Number(noteRaw);
+      const values = await this.openPromptModal({
+        title: 'Add scene to this bank',
+        message: 'Pick an unmapped MIDI note (0–127).',
+        confirmText: 'Add scene',
+        fields: [{ name: 'note', label: 'MIDI note', value: '', type: 'number', min: 0, max: 127, step: 1 }],
+        validate: (input) => {
+          const note = Number(input.note);
+          if (!Number.isFinite(note) || note < 0 || note > 127) return 'MIDI note must be 0–127.';
+          return '';
+        },
+      });
+      if (!values) return;
+      const note = Number(values.note);
       if (!Number.isFinite(note) || note < 0 || note > 127) {
-        this.statusText = 'MIDI note must be 0-127.';
+        this.statusText = 'MIDI note must be 0–127.';
         return;
       }
       const meta = this.sceneDetailsByNote(note, this.drawerPersonalityName());
       if (meta.mapped) {
-        this.statusText = `Note ${note} is already mapped — pick an unmapped note.`;
+        this.statusText = `Pad ${note} is already mapped — pick an unmapped pad.`;
         return;
       }
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            mapping: {
-              personality: this.drawerPersonalityName(),
-              role: this.drawer.role || this.currentBank()?.default_role || 'groove',
-              note,
-              channel: Number(this.currentBank()?.channel || 1),
-              velocity: Number(this.drawer.velocity || 127),
-              behavior: this.drawer.behavior || 'pulse',
-              hold_beats: Number(this.drawer.hold_beats || 4),
-              duration_ms: Number(this.drawer.duration_ms || 80),
-              cooldown_beats: Number(this.drawer.cooldown_beats || 8),
-              safety_class: this.drawer.safety_class || this.currentBank()?.default_safety || 'movement_low',
-              immediate: Boolean(this.drawer.immediate),
-              label: '',
-              add_to_bank: true,
-              replace_primary: false,
-            },
-          }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Failed to add bank scene';
-          return;
-        }
-        this.statusText = `Added ${data.scene_name || `note ${note}`} to ${this.drawer.role} bank`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Failed to add bank scene: ${err.message}`;
+      const result = await this.draftPost({
+        mapping: {
+          personality: this.drawerPersonalityName(),
+          role: this.drawer.role || this.currentBank()?.default_role || 'groove',
+          note,
+          channel: Number(this.currentBank()?.channel || 1),
+          velocity: Number(this.drawer.velocity || 127),
+          behavior: this.drawer.behavior || 'pulse',
+          hold_beats: Number(this.drawer.hold_beats || 4),
+          duration_ms: Number(this.drawer.duration_ms || 80),
+          cooldown_beats: Number(this.drawer.cooldown_beats || 8),
+          safety_class: this.drawer.safety_class || this.currentBank()?.default_safety || 'movement_low',
+          immediate: Boolean(this.drawer.immediate),
+          label: '',
+          add_to_bank: true,
+          replace_primary: false,
+        },
+      });
+      if (result.ok) {
+        this.statusText = `Added ${result.data.scene_name || `note ${note}`} to ${this.drawer.role} bank`;
       }
     },
 
     async applyPatch(patch, successMsg) {
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Draft update failed';
-          return false;
-        }
-        this.statusText = successMsg;
-        await this.refreshConfig();
-        return true;
-      } catch (err) {
-        this.statusText = `Draft update failed: ${err.message}`;
-        return false;
-      }
+      const result = await this.draftPost({ patch }, { successMsg });
+      return result.ok;
     },
 
     async patchBanks(banks, successMsg = 'Banks updated') {
@@ -1095,9 +1236,11 @@ window.laserPadApp = function laserPadApp() {
       const sourceChannel = Number(sourceBank.channel || 1);
       const targetChannel = Number(targetBank.channel || 1);
       if (sourceChannel !== targetChannel) {
-        const proceed = window.confirm(
-          `Move note ${note} from Ch${sourceChannel} to ${targetBank.name} Ch${targetChannel}? The scene MIDI channel will be updated.`
-        );
+        const proceed = await this.openConfirmModal({
+          title: 'Move pad to different channel?',
+          message: `Pad ${note} will move from Ch${sourceChannel} to ${targetBank.name} Ch${targetChannel}. The scene MIDI channel will be updated.`,
+          confirmText: 'Move',
+        });
         if (!proceed) return;
       }
       const banks = this.banks().map((bank) => {
@@ -1163,25 +1306,11 @@ window.laserPadApp = function laserPadApp() {
           },
         },
       };
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Failed to update timing';
-          return;
-        }
-        this.statusText = `Updated timing for ${personality}`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Timing save failed: ${err.message}`;
-      }
+      await this.draftPost({ patch }, { successMsg: `Saved timing for ${personality}` });
     },
 
     async commitDraft() {
+      this.markSaving();
       try {
         const response = await fetch('/api/commit', {
           method: 'POST',
@@ -1189,10 +1318,20 @@ window.laserPadApp = function laserPadApp() {
           body: '{}',
         });
         const data = await response.json();
-        this.statusText = data.ok ? 'Committed draft' : `Commit failed: ${(data.errors || []).join('; ')}`;
-        await this.refreshConfig();
+        if (data.ok) {
+          this.statusText = 'Saved & applied';
+          await this.refreshConfig();
+          this.lastCommittedHash = this.currentConfigHash;
+          this.markSaved();
+        } else {
+          const msg = `Save failed: ${(data.errors || []).join('; ')}`;
+          this.statusText = msg;
+          this.markSaveError(msg);
+        }
       } catch (err) {
-        this.statusText = `Commit failed: ${err.message}`;
+        const msg = `Save failed: ${err.message}`;
+        this.statusText = msg;
+        this.markSaveError(msg);
       }
     },
 
@@ -1209,7 +1348,8 @@ window.laserPadApp = function laserPadApp() {
           return;
         }
         await this.refreshConfig();
-        this.statusText = 'Draft discarded and reloaded from disk';
+        this.lastCommittedHash = this.currentConfigHash;
+        this.statusText = 'Unsaved changes discarded';
       } catch (err) {
         this.statusText = `Discard failed: ${err.message}`;
       }
@@ -1248,7 +1388,7 @@ window.laserPadApp = function laserPadApp() {
         this.verifyByNote = verifyByNote;
         this.showVerifyPanel = true;
         const failed = checks.filter((row) => !row.ok).length;
-        this.statusText = `Diagnostics: ${errors.length} error(s), ${warnings.length} warning(s), ${failed}/${checks.length} verify failures`;
+        this.statusText = `System checks: ${errors.length} error(s), ${warnings.length} warning(s), ${failed}/${checks.length} live tests failed`;
       } catch (err) {
         this.statusText = `Diagnostics failed: ${err.message}`;
       }
@@ -1271,12 +1411,12 @@ window.laserPadApp = function laserPadApp() {
         });
         const data = await response.json();
         if (!response.ok || data?.ok === false) {
-          this.statusText = data?.error || 'Test note failed';
+          this.statusText = data?.error || 'Send test failed';
           return;
         }
-        this.statusText = `Fired note ${Number(note)} @ Ch${Number(channel)}`;
+        this.statusText = `Sent pad ${Number(note)} on channel ${Number(channel)}`;
       } catch (err) {
-        this.statusText = `Test note failed: ${err.message}`;
+        this.statusText = `Send test failed: ${err.message}`;
       }
     },
 
@@ -1437,25 +1577,22 @@ window.laserPadApp = function laserPadApp() {
       if (meta.role === 'groove') {
         patch.personalities[personality].default_scene = meta.sceneName;
       }
-      const response = await fetch('/api/draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patch }),
-      });
-      const data = await response.json();
-      if (!data.ok) {
-        this.statusText = data.error || 'Failed to set primary mapping';
-        return;
-      }
-      this.statusText = `Primary ${meta.role} mapping set to ${meta.sceneName}`;
-      await this.refreshConfig();
+      await this.draftPost(
+        { patch },
+        { successMsg: `Primary ${meta.role} mapping set to ${meta.sceneName}` }
+      );
     },
 
     async removeDrawerMapping() {
       if (this.openNote === null || this.openNote === undefined) return;
       const meta = this.drawerSceneDetails();
       if (!meta.mapped || !meta.sceneName || !meta.role) return;
-      const proceed = window.confirm(`Remove mapping ${meta.sceneName}?`);
+      const proceed = await this.openConfirmModal({
+        title: `Remove mapping for '${meta.sceneName}'?`,
+        message: 'The scene definition stays. Only the pad-to-scene mapping goes away.',
+        confirmText: 'Remove',
+        danger: true,
+      });
       if (!proceed) return;
       const personality = this.drawerPersonalityName();
       const [sceneField, bankField] = this._roleSceneFields(meta.role);
@@ -1486,19 +1623,11 @@ window.laserPadApp = function laserPadApp() {
           [personality]: personalityPatch,
         },
       };
-      const response = await fetch('/api/draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patch }),
-      });
-      const data = await response.json();
-      if (!data.ok) {
-        this.statusText = data.error || 'Failed to remove mapping';
-        return;
-      }
-      this.statusText = `Removed mapping ${meta.sceneName}`;
-      this.openNote = null;
-      await this.refreshConfig();
+      const result = await this.draftPost(
+        { patch },
+        { successMsg: `Removed mapping ${meta.sceneName}` }
+      );
+      if (result.ok) this.openNote = null;
     },
 
     drawerValidationErrors() {
@@ -1535,6 +1664,7 @@ window.laserPadApp = function laserPadApp() {
         }
         return;
       }
+      this.markSaving();
       if (this.draftTimer) {
         clearTimeout(this.draftTimer);
       }
@@ -1572,20 +1702,13 @@ window.laserPadApp = function laserPadApp() {
             replace_primary: true,
           },
         }
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const data = await response.json();
-        if (data.ok) {
-          this.statusText = `Draft updated${data.scene_name ? ` (${data.scene_name})` : ''}`;
-          await this.refreshConfig();
-        } else {
-          this.statusText = data.error || 'Failed to update draft';
+        const result = await this.draftPost(payload);
+        if (result.ok) {
+          this.statusText = `Draft updated${result.data.scene_name ? ` (${result.data.scene_name})` : ''}`;
         }
       } catch (err) {
         this.statusText = `Drawer apply failed: ${err.message}`;
+        this.markSaveError(this.statusText);
       }
     },
 
@@ -1706,24 +1829,12 @@ window.laserPadApp = function laserPadApp() {
           },
         };
       }
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Drag/drop update failed';
-          return;
-        }
+      const result = await this.draftPost({ patch });
+      if (result.ok) {
         this.armReassignUndo(sourceBefore, targetBefore, sourceNote, targetNote);
         this.statusText = allowSwap
           ? `Swapped note ${sourceNote} with ${targetNote}`
           : `Moved mapping ${sourceNote} → ${targetNote}`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Drag/drop failed: ${err.message}`;
       }
     },
 
@@ -1756,22 +1867,7 @@ window.laserPadApp = function laserPadApp() {
       this.lastReassignUndo.visible = false;
       this.lastReassignUndo.patch = null;
       this.lastReassignUndo.timer = null;
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Undo failed';
-          return;
-        }
-        this.statusText = 'Reassign undone';
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Undo failed: ${err.message}`;
-      }
+      await this.draftPost({ patch }, { successMsg: 'Reassign undone' });
     },
 
     openSettingsPanel() {
@@ -1814,22 +1910,10 @@ window.laserPadApp = function laserPadApp() {
         note: Math.max(0, Math.min(127, Number(form.note) || 0)),
         velocity: Math.max(0, Math.min(127, Number(form.velocity) || 127)),
       };
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch: { manual_commands: { [slot]: message } } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || `Failed to save ${slot}`;
-          return;
-        }
-        this.statusText = `${slot} saved`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `${slot} save failed: ${err.message}`;
-      }
+      await this.draftPost(
+        { patch: { manual_commands: { [slot]: message } } },
+        { successMsg: `${slot} saved` }
+      );
     },
 
     async saveBank(index, field, value) {
@@ -1845,27 +1929,21 @@ window.laserPadApp = function laserPadApp() {
         return;
       }
       banks[index] = { ...banks[index], [field]: trimmed };
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch: { _pad_meta: { banks } } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || 'Bank update failed';
-          return;
-        }
-        this.statusText = `Bank ${index + 1} ${field} updated`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `Bank update failed: ${err.message}`;
-      }
+      await this.draftPost(
+        { patch: { _pad_meta: { banks } } },
+        { successMsg: `Bank ${index + 1} ${field} updated` }
+      );
     },
 
     async resetBanksToDefault() {
-      const proceed = window.confirm('Reset all banks to default 4 × 32 layout? Custom names and channels will be lost.');
+      const proceed = await this.openConfirmModal({
+        title: 'Reset all banks?',
+        message: 'All banks return to the default 4 × 32 layout. Custom names and MIDI channels will be lost.',
+        confirmText: 'Reset',
+        danger: true,
+      });
       if (!proceed) return;
+      this.markSaving();
       try {
         const response = await fetch('/api/banks/reset', {
           method: 'POST',
@@ -1874,34 +1952,27 @@ window.laserPadApp = function laserPadApp() {
         });
         const data = await response.json();
         if (!data.ok) {
-          this.statusText = data.error || 'Reset banks failed';
+          const msg = data.error || 'Reset banks failed';
+          this.statusText = msg;
+          this.markSaveError(msg);
           return;
         }
         this.statusText = 'Banks reset to default (4 × 32)';
         await this.refreshConfig();
+        this.markSaved();
       } catch (err) {
-        this.statusText = `Reset banks failed: ${err.message}`;
+        const msg = `Reset banks failed: ${err.message}`;
+        this.statusText = msg;
+        this.markSaveError(msg);
       }
     },
 
     async clearBlackout(which) {
       const slot = which === 'on' ? 'blackout_on' : 'blackout_off';
-      try {
-        const response = await fetch('/api/draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ patch: { manual_commands: { [slot]: null } } }),
-        });
-        const data = await response.json();
-        if (!data.ok) {
-          this.statusText = data.error || `Failed to clear ${slot}`;
-          return;
-        }
-        this.statusText = `${slot} cleared`;
-        await this.refreshConfig();
-      } catch (err) {
-        this.statusText = `${slot} clear failed: ${err.message}`;
-      }
+      await this.draftPost(
+        { patch: { manual_commands: { [slot]: null } } },
+        { successMsg: `${slot} cleared` }
+      );
     },
 
     openHistoryPanel() {
@@ -1961,8 +2032,13 @@ window.laserPadApp = function laserPadApp() {
 
     async restoreSelectedHistory() {
       if (!this.historySelected) return;
-      const proceed = window.confirm(`Restore ${this.historySelected.name}?`);
+      const proceed = await this.openConfirmModal({
+        title: `Restore '${this.historySelected.name}'?`,
+        message: 'Loads this backup as your unsaved draft. You can still Save & Apply or Discard.',
+        confirmText: 'Restore',
+      });
       if (!proceed) return;
+      this.markSaving();
       try {
         const response = await fetch(`/api/history/${this.historySelected.name}/restore`, {
           method: 'POST',
@@ -1971,14 +2047,19 @@ window.laserPadApp = function laserPadApp() {
         });
         const data = await response.json();
         if (!response.ok) {
-          this.statusText = data.error || 'Restore failed';
+          const msg = data.error || 'Restore failed';
+          this.statusText = msg;
+          this.markSaveError(msg);
           return;
         }
         this.statusText = `Restored ${this.historySelected.name} to draft`;
         await this.refreshConfig();
         await this.loadHistory();
+        this.markSaved();
       } catch (err) {
-        this.statusText = `Restore failed: ${err.message}`;
+        const msg = `Restore failed: ${err.message}`;
+        this.statusText = msg;
+        this.markSaveError(msg);
       }
     },
   };

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import sys
 import tempfile
 import threading
@@ -947,6 +948,53 @@ class LaserPadWebTests(unittest.TestCase):
                     )
 
         self.assertEqual(status, 403)
+
+    def test_root_serves_updated_laser_pad_markup(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            with self._running_server(service) as port:
+                status, _payload, raw = self._request_json(
+                    port=port,
+                    method="GET",
+                    path="/",
+                )
+
+        self.assertEqual(status, 200)
+        self.assertIn("💾 Save &amp; Apply", raw)
+        self.assertIn("Manual MIDI Test", raw)
+        self.assertIn("Automatic scenes", raw)
+        self.assertIn("Lasers enabled", raw)
+        self.assertIn("Test mode", raw)
+        self.assertIn("Type port name…", raw)
+        self.assertIn("PRIMARY MAPPING", raw)
+        self.assertIn("Cooldown beats", raw)
+        self.assertIn("save-badge", raw)
+        self.assertIn("submitModalPrompt", raw)
+        self.assertIn("modal-fields", raw)
+        self.assertIn("Manual MIDI Test", raw)
+        self.assertIn("has-changes", raw)
+        self.assertNotIn("quick-test-row", raw)
+        self.assertNotIn("MIDI Output Port", raw)
+        self.assertNotIn("Lifecycle Scenes", raw)
+        self.assertNotIn("💾 Commit", raw)
+
+    def test_pad_js_uses_in_app_modals_not_native_dialogs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            with self._running_server(service) as port:
+                status, _payload, raw = self._request_json(
+                    port=port,
+                    method="GET",
+                    path="/static/pad.js",
+                )
+
+        self.assertEqual(status, 200)
+        self.assertIn("openPromptModal(", raw)
+        self.assertIn("openConfirmModal(", raw)
+        self.assertIsNone(
+            re.search(r"\b(?:window\.)?(?:prompt|confirm)\s*\(", raw),
+            "pad.js still contains a native prompt()/confirm() call",
+        )
 
     def test_draft_patch_rejects_non_list_banks(self) -> None:
         with tempfile.TemporaryDirectory() as td:
