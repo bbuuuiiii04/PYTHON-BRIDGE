@@ -1647,7 +1647,14 @@ class LaserPadWebTests(unittest.TestCase):
             service.commit_draft()
             service.commit_draft()
 
-            with patch("pathlib.Path.stat", autospec=True, side_effect=OSError("unreadable")):
+            original_stat = Path.stat
+
+            def flaky_stat(candidate):
+                if candidate.name.startswith(f"{path.name}.bak-"):
+                    raise OSError("unreadable")
+                return original_stat(candidate)
+
+            with patch("pathlib.Path.stat", autospec=True, side_effect=flaky_stat):
                 items = service.list_history()
 
         self.assertEqual(items, [])
