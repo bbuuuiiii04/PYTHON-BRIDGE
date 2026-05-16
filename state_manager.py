@@ -1317,6 +1317,7 @@ class StateManager:
                 raw_elapsed_ms = tl_ms + (age_ms if (mem_playing or d.playing) else 0.0)
 
         elapsed_ms = int(raw_elapsed_ms) + TIMING_COMPENSATION_MS
+        prev_elapsed_ms = d.elapsed_ms
         d.elapsed_ms = elapsed_ms
 
         # ── Rate-limited timecode log (once per 5 s, both decks) ────────────────
@@ -1603,6 +1604,11 @@ class StateManager:
                         )
                         autoloop_tick_just_fired = True
 
+        if os.lighting_mode == "autoloop":
+            self._maybe_log_energy_suggest_would_fire(
+                active, prev_elapsed_ms, elapsed_ms, d
+            )
+
         # Laser Director tick — dry-run only in Phase 1.
         # Must not block, send MIDI, call OS2LOutput, or mutate DeckState/OutputState.
         drop_crossing_decision_emitted = False
@@ -1670,6 +1676,24 @@ class StateManager:
         # OS2L timing while leaving beat events unchanged for isolation.
         for dk in self._sse.deck_route(active):
             self._out.send_elapsed(dk, elapsed_ms, beatpos_out)
+
+    def _maybe_log_energy_suggest_would_fire(
+        self, active: int, prev_elapsed_ms: float, elapsed_ms: float, d: DeckState
+    ) -> None:
+        shadows = d.meta.smart_drop_energy_shadow
+        if not shadows:
+            return
+        for shadow in shadows:
+            if shadow.confidence <= 0.0:
+                continue
+            suggested = float(shadow.suggested_elapsed_ms)
+            if prev_elapsed_ms < suggested <= elapsed_ms:
+                log.info(
+                    "[SM] energy-suggest ★ deck=%d would-fire-now@%s  conf=%.2f",
+                    active,
+                    bf.elapsed(shadow.suggested_elapsed_ms),
+                    shadow.confidence,
+                )
 
     def _update_smart_phrasing_state(
         self,

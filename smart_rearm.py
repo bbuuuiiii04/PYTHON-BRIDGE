@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from . import bridge_fmt as bf
 from .config import PHRASE_ANCHOR_BEATS
 from .models import DeckState, OutputState
 from .smart_phrasing import SmartPhrasingState
@@ -133,12 +134,14 @@ class SmartRearmCoordinator:
                         ctx.this_beat,
                         target_beat,
                     )
+                    self._maybe_log_energy_suggest_fired(active, target_beat)
                     return SmartDropTickResult(
                         crossing=True,
                         blackout_armed=False,
                         target_beat=target_beat,
                     )
                 log.info("[SM] smart-drop-rearm  deck=%d  beat=%d", active, ctx.this_beat)
+                self._maybe_log_energy_suggest_fired(active, target_beat)
                 if self._send_direct_autoloop_rearm(
                     active,
                     ctx.mirror,
@@ -185,6 +188,33 @@ class SmartRearmCoordinator:
                 target_beat=drop_beat_int,
             )
         return SmartDropTickResult.none()
+
+    def _maybe_log_energy_suggest_fired(self, active: int, target_beat: int) -> None:
+        d = self._deck_ref(active)
+        shadows = getattr(d.meta, "smart_drop_energy_shadow", None)
+        if not shadows:
+            return
+        match = next(
+            (
+                s
+                for s in shadows
+                if int(s.anlz_beat) == int(target_beat) and s.confidence > 0.0
+            ),
+            None,
+        )
+        if match is None:
+            return
+        shift_ms = int(match.suggested_elapsed_ms - match.anlz_elapsed_ms)
+        log.info(
+            "[SM] energy-suggest ★ deck=%d fired@%s  %+dms had higher lift "
+            "(%.2f→%.2f conf=%.2f)",
+            active,
+            bf.elapsed(match.anlz_elapsed_ms),
+            shift_ms,
+            match.lift_at_anlz,
+            match.lift_at_suggested,
+            match.confidence,
+        )
 
     def _breakdown(
         self,
