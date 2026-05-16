@@ -1,10 +1,17 @@
+import io
+import logging
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2.models import DeckState, OutputState, TrackMetadata  # noqa: E402
+from rb_ss_bridge_v2.models import (  # noqa: E402
+    DeckState,
+    OutputState,
+    SmartDropEnergyShadow,
+    TrackMetadata,
+)
 from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState  # noqa: E402
 from rb_ss_bridge_v2.smart_rearm import (  # noqa: E402
     SmartDropTickResult,
@@ -17,6 +24,40 @@ def _sp_state(**overrides) -> SmartPhrasingState:
     defaults = dict(reason="test")
     defaults.update(overrides)
     return SmartPhrasingState(**defaults)
+
+
+def _energy_logs(fn) -> str:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    logger = logging.getLogger("state_manager")
+    previous_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        fn()
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+    return stream.getvalue()
+
+
+def _shadow(
+    *,
+    anlz_beat: int = 64,
+    suggested_beat: int = 72,
+    anlz_elapsed_ms: int = 32_000,
+    suggested_elapsed_ms: int = 36_000,
+    confidence: float = 3.35,
+) -> SmartDropEnergyShadow:
+    return SmartDropEnergyShadow(
+        anlz_beat,
+        suggested_beat,
+        anlz_elapsed_ms,
+        suggested_elapsed_ms,
+        -7.69,
+        -4.34,
+        confidence,
+    )
 
 
 class _Harness:
@@ -133,6 +174,87 @@ class SmartRearmDropTests(unittest.TestCase):
             h.direct_calls,
             [((1, 2, 128.0, 32_000, "smart-drop"), {"target_beat": 64})],
         )
+
+    def test_energy_suggest_fires_on_crossing_with_confidence(self) -> None:
+        h = _Harness()
+        h.os.drop_cut_armed = True
+        h.os.drop_rearm_beat = 64
+        h.deck[1].meta.smart_drop_energy_shadow = [_shadow()]
+
+        logs = _energy_logs(
+            lambda: h.tick(
+                _sp_state(smart_drop_crossing=True, active_drop_beat=64.0),
+                h.ctx(smart_drop_enabled=True, this_beat=64, blackout_mode=True),
+            )
+        )
+
+        self.assertIn("[SM] energy-suggest ★ deck=1 fired@0:32.000", logs)
+        self.assertIn("+4000ms had higher lift (-7.69→-4.34 conf=3.35)", logs)
+
+    def test_energy_suggest_silent_when_confidence_zero(self) -> None:
+        h = _Harness()
+        h.os.drop_cut_armed = True
+        h.os.drop_rearm_beat = 64
+        h.deck[1].meta.smart_drop_energy_shadow = [_shadow(confidence=0.0)]
+
+        logs = _energy_logs(
+            lambda: h.tick(
+                _sp_state(smart_drop_crossing=True, active_drop_beat=64.0),
+                h.ctx(smart_drop_enabled=True, this_beat=64, blackout_mode=True),
+            )
+        )
+
+        self.assertNotIn("energy-suggest", logs)
+
+    def test_energy_suggest_silent_when_no_shadow(self) -> None:
+        h = _Harness()
+        h.os.drop_cut_armed = True
+        h.os.drop_rearm_beat = 64
+
+        logs = _energy_logs(
+            lambda: h.tick(
+                _sp_state(smart_drop_crossing=True, active_drop_beat=64.0),
+                h.ctx(smart_drop_enabled=True, this_beat=64, blackout_mode=True),
+            )
+        )
+
+        self.assertNotIn("energy-suggest", logs)
+
+    def test_energy_suggest_silent_when_anlz_beat_mismatch(self) -> None:
+        h = _Harness()
+        h.os.drop_cut_armed = True
+        h.os.drop_rearm_beat = 64
+        h.deck[1].meta.smart_drop_energy_shadow = [_shadow(anlz_beat=96)]
+
+        logs = _energy_logs(
+            lambda: h.tick(
+                _sp_state(smart_drop_crossing=True, active_drop_beat=64.0),
+                h.ctx(smart_drop_enabled=True, this_beat=64, blackout_mode=True),
+            )
+        )
+
+        self.assertNotIn("energy-suggest", logs)
+
+    def test_energy_suggest_fires_in_blackout_and_rearm_paths(self) -> None:
+        for blackout_mode in (True, False):
+            with self.subTest(blackout_mode=blackout_mode):
+                h = _Harness()
+                h.os.drop_cut_armed = True
+                h.os.drop_rearm_beat = 64
+                h.deck[1].meta.smart_drop_energy_shadow = [_shadow()]
+
+                logs = _energy_logs(
+                    lambda: h.tick(
+                        _sp_state(smart_drop_crossing=True, active_drop_beat=64.0),
+                        h.ctx(
+                            smart_drop_enabled=True,
+                            this_beat=64,
+                            blackout_mode=blackout_mode,
+                        ),
+                    )
+                )
+
+                self.assertIn("[SM] energy-suggest ★ deck=1 fired@0:32.000", logs)
 
     def test_drop_path_is_gated_by_pending_autoloop_arm(self) -> None:
         h = _Harness()

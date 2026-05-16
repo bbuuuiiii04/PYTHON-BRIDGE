@@ -84,6 +84,7 @@ class _ColorFormatter(logging.Formatter):
     _BMAGENTA = "\033[95m"
     _BPINK    = "\033[38;5;213m"
     _ORANGE   = "\033[38;5;214m"
+    _LIME     = "\033[1;38;5;82m"
 
     _LEVEL = {
         logging.DEBUG:    _GREY,
@@ -100,6 +101,7 @@ class _ColorFormatter(logging.Formatter):
         ("[laser] reason-update",   _BPINK),
         ("[laser_config]",          _BPINK),
         ("[main] laser-config",     _BPINK),
+        ("[sm] energy-suggest",     _LIME),
 
         # Red: requires attention / playback stopped.
         ("rb-restart",              _BRED),
