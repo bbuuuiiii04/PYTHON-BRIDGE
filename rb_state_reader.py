@@ -131,7 +131,7 @@ class RBStateReader(threading.Thread):
         self._drop_unrouted_events = drop_unrouted_events
         self._shadow_logs_enabled = shadow_logs_enabled
         self._offs = offsets
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         hz = poll_hz if poll_hz is not None else max(1, MEM_POLL_HZ // 2)
         self._period = 1.0 / hz
         self._rb_pid = rb_pid
@@ -165,7 +165,7 @@ class RBStateReader(threading.Thread):
         self._last_livepos_log: dict[int, float] = {}
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
         self._set_all_anlz_unavailable()
         self._set_all_transport_unavailable()
         self._set_all_track_load_unavailable()
@@ -200,7 +200,7 @@ class RBStateReader(threading.Thread):
                  self._rb_pid, base, self._offs.version)
 
         next_tick = self._clock()
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 self._tick(task, base)
             except OSError as exc:

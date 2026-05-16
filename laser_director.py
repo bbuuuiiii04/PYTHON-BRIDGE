@@ -78,10 +78,6 @@ class LaserDirector:
         drop_scene: str = "",
         post_drop_scene: str = "",
         buildup_lookahead_beats: int = 32,
-        buildup_approach_beats: int = 8,
-        buildup_hold_beats: int = 8,
-        pre_drop_lookahead_beats: int = 4,
-        buildup_max_drop_distance_beats: int = 32,
     ) -> None:
         self._dry_run = dry_run
         self._enabled = enabled
@@ -100,11 +96,6 @@ class LaserDirector:
         self._drop_scene = drop_scene
         self._post_drop_scene = post_drop_scene
         self._buildup_lookahead_beats = max(0, int(buildup_lookahead_beats))
-        # Deprecated/inert in active policy; retained for compatibility/status.
-        self._buildup_approach_beats = max(0, int(buildup_approach_beats))
-        self._buildup_hold_beats = max(0, int(buildup_hold_beats))
-        self._pre_drop_lookahead_beats = max(0, int(pre_drop_lookahead_beats))
-        self._buildup_max_drop_distance_beats = max(1, int(buildup_max_drop_distance_beats))
 
         # Mutable policy state — written only from the StateManager thread.
         self._emergency: bool = False
@@ -175,12 +166,6 @@ class LaserDirector:
         self._drop_scene = personality.drop_scene
         self._post_drop_scene = personality.post_drop_scene
         self._buildup_lookahead_beats = max(0, int(personality.buildup_lookahead_beats))
-        # Deprecated/inert in active policy; retained for compatibility/status.
-        self._buildup_approach_beats = max(0, int(personality.buildup_approach_beats))
-        self._buildup_hold_beats = max(0, int(personality.buildup_hold_beats))
-        self._pre_drop_lookahead_beats = max(
-            0, int(personality.pre_drop_lookahead_beats)
-        )
 
     # ── Tick (called from StateManager._push_tick) ────────────────────────────
 
@@ -645,10 +630,6 @@ class LaserDirector:
             "drop_scene": self._drop_scene,
             "post_drop_scene": self._post_drop_scene,
             "buildup_lookahead_beats": self._buildup_lookahead_beats,
-            "buildup_approach_beats": self._buildup_approach_beats,
-            "buildup_hold_beats": self._buildup_hold_beats,
-            "buildup_max_drop_distance_beats": self._buildup_max_drop_distance_beats,
-            "pre_drop_lookahead_beats": self._pre_drop_lookahead_beats,
             "pending_drop_crossing_beat": self._pending_drop_crossing_beat,
             "drop_rearm_edge_seen_for_pending": self._drop_rearm_edge_seen_for_pending,
             "smart_drop_blackout_active": self._smart_drop_blackout_active,

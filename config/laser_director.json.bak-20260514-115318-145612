@@ -214,19 +214,15 @@
   "midi_output_port": "IAC Driver Bus 1",
   "personalities": {
     "house": {
-      "_comment_deprecated_timing_fields": "buildup_approach_beats, buildup_hold_beats, and pre_drop_lookahead_beats are retained for backward compatibility and status only.",
       "_comment_post_drop_hold": "post_drop_scene hold uses minimum_scene_hold_beats; set > 0 for visible post-drop hold.",
-      "_comment_pre_drop_deprecated": "pre_drop_scene is intentionally inactive in Laser Director policy; Smart Drop handles final pre-drop autoloop cut/rearm.",
       "allow_high_impact": true,
       "breakdown_bank": [
         "house_breakdown_1"
       ],
       "breakdown_scene": "house_breakdown_1",
-      "buildup_approach_beats": 8,
       "buildup_bank": [
         "house_buildup_1"
       ],
-      "buildup_hold_beats": 8,
       "buildup_lookahead_beats": 32,
       "buildup_scene": "house_buildup_1",
       "default_scene": "house_groove_1",
@@ -245,7 +241,6 @@
         "house_drop_1"
       ],
       "post_drop_scene": "house_drop_1",
-      "pre_drop_lookahead_beats": 4,
       "pre_drop_scene": "",
       "safe_scene": "safe_static",
       "transition_scene": "transition_safe_1"

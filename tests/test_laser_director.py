@@ -117,10 +117,6 @@ def _director(
     drop_scene: str = "",
     post_drop_scene: str = "",
     buildup_lookahead_beats: int = 32,
-    buildup_approach_beats: int = 8,
-    buildup_hold_beats: int = 8,
-    pre_drop_lookahead_beats: int = 4,
-    buildup_max_drop_distance_beats: int = 32,
 ) -> LaserDirector:
     return LaserDirector(
         enabled=enabled,
@@ -138,10 +134,6 @@ def _director(
         drop_scene=drop_scene,
         post_drop_scene=post_drop_scene,
         buildup_lookahead_beats=buildup_lookahead_beats,
-        buildup_approach_beats=buildup_approach_beats,
-        buildup_hold_beats=buildup_hold_beats,
-        pre_drop_lookahead_beats=pre_drop_lookahead_beats,
-        buildup_max_drop_distance_beats=buildup_max_drop_distance_beats,
     )
 
 
@@ -714,9 +706,6 @@ class PhraseSceneTests(unittest.TestCase):
             minimum_scene_hold_beats=4,
             normal_changes_only_on_phrase_boundary=True,
             buildup_lookahead_beats=24,
-            buildup_approach_beats=6,
-            buildup_hold_beats=10,
-            pre_drop_lookahead_beats=3,
         )
         ld.set_personality_config(personality)
         s = ld.status()
@@ -725,9 +714,6 @@ class PhraseSceneTests(unittest.TestCase):
         self.assertEqual(s["minimum_scene_hold_beats"], 4)
         self.assertTrue(s["normal_changes_only_on_phrase_boundary"])
         self.assertEqual(s["buildup_lookahead_beats"], 24)
-        self.assertEqual(s["buildup_approach_beats"], 6)
-        self.assertEqual(s["buildup_hold_beats"], 10)
-        self.assertEqual(s["pre_drop_lookahead_beats"], 3)
 
 
 # ---------------------------------------------------------------------------
@@ -1128,7 +1114,6 @@ class SmartObservationTests(unittest.TestCase):
             pre_drop_scene="pre",
             drop_scene="drop",
             buildup_lookahead_beats=32,
-            pre_drop_lookahead_beats=4,
         )
         ld.tick(_ctx(abs_beat=63.0, smart_drops=(64,)), now=_now())
         self.assertNotEqual(ld.status()["current_scene"], "pre")
@@ -1449,9 +1434,6 @@ class StatusShapeTests(unittest.TestCase):
                     "phrase_scene", "phrase_interval_beats", "minimum_scene_hold_beats",
                     "normal_changes_only_on_phrase_boundary", "breakdown_scene", "buildup_scene",
                     "pre_drop_scene", "drop_scene", "post_drop_scene", "buildup_lookahead_beats",
-                    "buildup_approach_beats",
-                    "buildup_hold_beats", "buildup_max_drop_distance_beats",
-                    "pre_drop_lookahead_beats",
                     "phrase_trigger_pending", "last_trigger_abs_beat"):
             self.assertIn(key, s, msg=f"missing key: {key}")
 

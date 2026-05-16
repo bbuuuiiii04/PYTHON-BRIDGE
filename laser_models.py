@@ -99,9 +99,6 @@ class LaserPersonality:
     minimum_scene_hold_beats: int = 0
     normal_changes_only_on_phrase_boundary: bool = False
     buildup_lookahead_beats: int = 32
-    buildup_approach_beats: int = 8
-    buildup_hold_beats: int = 8
-    pre_drop_lookahead_beats: int = 4
 
 
 @dataclass(frozen=True)

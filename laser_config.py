@@ -65,6 +65,12 @@ _PERSONALITY_BANK_FIELDS = (
     "post_drop_bank",
     "breakdown_bank",
 )
+_DEPRECATED_PERSONALITY_TIMING_FIELDS = (
+    "buildup_approach_beats",
+    "buildup_hold_beats",
+    "pre_drop_lookahead_beats",
+    "buildup_max_drop_distance_beats",
+)
 _LIFECYCLE_SCENE_FIELDS = (
     "startup_scene",
     "stop_scene",
@@ -147,6 +153,8 @@ def load_laser_director_config(
     if not isinstance(data, dict):
         return _invalid("config root must be a JSON object")
 
+    _warn_deprecated_personality_timing_fields(data)
+
     errors = _validate(data)
     if errors:
         log.warning("[laser_config] config invalid (%d error(s))", len(errors))
@@ -196,6 +204,31 @@ def _invalid(msg: str) -> LaserConfigResult:
         available=False,
         reason="invalid_config",
         errors=(msg,),
+    )
+
+
+def _warn_deprecated_personality_timing_fields(data: dict[str, Any]) -> None:
+    personalities = data.get("personalities")
+    if not isinstance(personalities, dict):
+        return
+    present: set[str] = set()
+    for personality_data in personalities.values():
+        if not isinstance(personality_data, dict):
+            continue
+        for field_name in _DEPRECATED_PERSONALITY_TIMING_FIELDS:
+            if field_name in personality_data:
+                present.add(field_name)
+    if not present:
+        return
+    ordered = [
+        field_name
+        for field_name in _DEPRECATED_PERSONALITY_TIMING_FIELDS
+        if field_name in present
+    ]
+    log.warning(
+        "[LASER-CONFIG] deprecated keys ignored: %s - remove from config; "
+        "will be hard-fail in a future release.",
+        ", ".join(ordered),
     )
 
 
@@ -484,36 +517,6 @@ def _validate_personality(
             f"{prefix}: 'buildup_lookahead_beats' must be a positive integer"
         )
 
-    buildup_approach_beats = data.get("buildup_approach_beats", 8)
-    if (
-        not isinstance(buildup_approach_beats, int)
-        or isinstance(buildup_approach_beats, bool)
-        or buildup_approach_beats < 0
-    ):
-        errors.append(
-            f"{prefix}: 'buildup_approach_beats' must be a non-negative integer"
-        )
-
-    buildup_hold_beats = data.get("buildup_hold_beats", 8)
-    if (
-        not isinstance(buildup_hold_beats, int)
-        or isinstance(buildup_hold_beats, bool)
-        or buildup_hold_beats < 0
-    ):
-        errors.append(
-            f"{prefix}: 'buildup_hold_beats' must be a non-negative integer"
-        )
-
-    pre_drop_lookahead_beats = data.get("pre_drop_lookahead_beats", 4)
-    if (
-        not isinstance(pre_drop_lookahead_beats, int)
-        or isinstance(pre_drop_lookahead_beats, bool)
-        or pre_drop_lookahead_beats < 0
-    ):
-        errors.append(
-            f"{prefix}: 'pre_drop_lookahead_beats' must be a non-negative integer"
-        )
-
     for bank_field in _PERSONALITY_BANK_FIELDS:
         bank_raw = data.get(bank_field)
         if bank_raw is None:
@@ -656,9 +659,6 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
             data.get("normal_changes_only_on_phrase_boundary", False)
         ),
         buildup_lookahead_beats=int(data.get("buildup_lookahead_beats", 32)),
-        buildup_approach_beats=int(data.get("buildup_approach_beats", 8)),
-        buildup_hold_beats=int(data.get("buildup_hold_beats", 8)),
-        pre_drop_lookahead_beats=int(data.get("pre_drop_lookahead_beats", 4)),
     )
 
 
