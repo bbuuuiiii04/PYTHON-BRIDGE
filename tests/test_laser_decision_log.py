@@ -117,8 +117,9 @@ class LaserDirectorDecisionLogIntegrationTests(unittest.TestCase):
         director = LaserDirector(enabled=True, default_scene="house_phrase_1")
         director.set_personality("peak")
 
-        with patch("rb_ss_bridge_v2.laser_director.time.time", side_effect=[1700.0, 1701.0, 1702.0]):
+        with patch("rb_ss_bridge_v2.laser_director.time.time", return_value=1700.0):
             director.tick(_ctx(active_deck=2, abs_beat=64.0), now=10.0)
+        with patch("rb_ss_bridge_v2.laser_director.time.time", return_value=1701.0):
             director.tick(_ctx(active_deck=2, abs_beat=65.0), now=11.0)
 
         decisions = director.status()["recent_decisions"]
