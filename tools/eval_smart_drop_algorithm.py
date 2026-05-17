@@ -7,9 +7,12 @@ import ast
 from dataclasses import dataclass
 import json
 import math
+import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Optional, Sequence
+import warnings
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -70,6 +73,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     tune.add_argument("--corpus", required=True)
     tune.add_argument("--ridge", type=float, default=0.01)
 
+    label = sub.add_parser("label-from-cues", help="Auto-build a corpus YAML from Rekordbox DROP-commented cues.")
+    label.add_argument("--cue-comment", default="DROP", help="Cue comment substring (case-insensitive) marking the real drop.")
+    label.add_argument("--tracks", help="Optional newline-delimited file of titles to restrict the scan to.")
+    label.add_argument("--exclude-scripted", default="~/TimecodeLink/playlist.yaml", help="TL playlist.yaml whose tracks are excluded as scripted. Empty string disables.")
+    label.add_argument("--split", choices=["training", "holdout"], default="training", help="Split assigned to every emitted track.")
+    label.add_argument("--holdout-titles", help="Optional file: titles listed here override --split to 'holdout'.")
+    label.add_argument("--cue-window-beats", type=int, default=8, help="Max beat distance from RB drop for a cue to count as the same drop.")
+    label.add_argument("--output", help="Output corpus YAML path. Default: stdout.")
+
     args = parser.parse_args(argv)
     if args.mode == "scaffold":
         return _cmd_scaffold(args)
@@ -77,6 +89,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _cmd_evaluate(args)
     if args.mode == "tune":
         return _cmd_tune(args)
+    if args.mode == "label-from-cues":
+        return _cmd_label_from_cues(args)
     return 2
 
 
@@ -159,6 +173,176 @@ def _cmd_tune(args: argparse.Namespace) -> int:
         print("warning: high condition number (multicollinearity)")
     print(_format_per_track_holdout(rows, weights=named))
     return 0
+
+
+def _cmd_label_from_cues(args: argparse.Namespace) -> int:
+    db = None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            from pyrekordbox.db6 import Rekordbox6Database  # type: ignore
+        db = Rekordbox6Database(os.path.expanduser("~/Library/Pioneer/rekordbox/master.db"), unlock=True)
+        all_content = list(db.get_content())
+        scripted, restrict = _load_scripted_titles(args.exclude_scripted), _title_lines(args.tracks)
+        candidates = [c for c in all_content if not restrict or _matches_any(c, restrict)]
+        kept = [c for c in candidates if not _matches_any(c, scripted)]
+        excluded = len(candidates) - len(kept)
+        print(f"[label] excluded {excluded} scripted tracks", file=sys.stderr)
+        tracks, stats, manual, orphans = _label_tracks(
+            kept, db, args.cue_comment.lower(), args, _title_lines(args.holdout_titles)
+        )
+    except Exception as exc:
+        print(f"[label] RB scan failed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if db is not None:
+            try: db.close()
+            except Exception: pass
+
+    text = _format_labeled_tracks(tracks)
+    if args.output:
+        out = Path(args.output).expanduser(); out.parent.mkdir(parents=True, exist_ok=True); out.write_text(text, encoding="utf-8")
+    else:
+        print(text, end="")
+    _label_summary(len(all_content), excluded, stats, manual, orphans, args)
+    return 0
+
+
+def _label_tracks(candidates: list[Any], db: Any, needle: str, args: argparse.Namespace,
+                  holdouts: list[str]) -> tuple[list[dict[str, Any]], dict[str, int], list[str], list[str]]:
+    from pyrekordbox.anlz import AnlzFile  # type: ignore
+    stats = {k: 0 for k in ("marked", "auto", "nowave", "manual", "orphan")}
+    tracks: list[dict[str, Any]] = []; manual: list[str] = []; orphans: list[str] = []
+    for content in candidates:
+        anlz_path = _first_dat(db.get_anlz_paths(content))
+        if not anlz_path:
+            continue
+        cues = _extract_cues(AnlzFile.parse_file(anlz_path))
+        drop_cues = [(i, c) for i, c in enumerate(cues) if needle in c["text"].lower()]
+        if not drop_cues:
+            continue
+        stats["marked"] += 1
+        data = read_anlz_drops(anlz_path); ctx = data.waveform_context
+        if ctx is None or len(ctx.beatgrid_times_ms) < 2:
+            stats["nowave"] += 1; continue
+        beatgrid = list(ctx.beatgrid_times_ms); window_ms = abs(args.cue_window_beats * (beatgrid[1] - beatgrid[0]))
+        rows: list[dict[str, Any]] = []; matched: set[int] = set(); title = _content_title(content)
+        for rb_beat in data.drop_beat_indices:
+            rb_ms = beatgrid[rb_beat] if 0 <= rb_beat < len(beatgrid) else None
+            drops_near = [] if rb_ms is None else [(i, c) for i, c in drop_cues if abs(c["ms"] - rb_ms) <= window_ms]
+            row = {"rekordbox_beat": rb_beat, "rekordbox_elapsed": _format_elapsed(int(round(rb_ms or 0)))}
+            if drops_near:
+                i, cue = min(drops_near, key=lambda item: abs(item[1]["ms"] - (rb_ms or 0)))
+                matched.add(i)
+                correct = _nearest_beat(cue["ms"], beatgrid); delta = correct - rb_beat
+                stats["auto"] += 1
+                row.update({"correct_beat": correct, "correct_elapsed": _format_elapsed(int(round(beatgrid[correct]))), "notes": f"auto from cue '{cue['text']}' @{_format_elapsed(cue['ms'])} (delta={delta:+d} beats)"})
+            else:
+                stats["manual"] += 1
+                row.update({"correct_beat": None, "correct_elapsed": None, "notes": f"no DROP cue within +/-{args.cue_window_beats} beats - manual fill"})
+                manual.append(f'{_yaml_scalar(title)} beat {rb_beat}: {row["notes"]}')
+            rows.append(row)
+        for i, cue in drop_cues:
+            if i in matched:
+                continue
+            cue_beat = _nearest_beat(cue["ms"], beatgrid)
+            if any(abs(cue["ms"] - beatgrid[b]) <= window_ms for b in data.drop_beat_indices if 0 <= b < len(beatgrid)):
+                continue
+            stats["orphan"] += 1
+            rows.append({"rekordbox_beat": None, "rekordbox_elapsed": None, "correct_beat": cue_beat, "correct_elapsed": _format_elapsed(int(round(beatgrid[cue_beat]))),
+                         "notes": "user-marked drop with no RB candidate; v1 cannot predict, v2 can score only if seeded"})
+            orphans.append(f'{_yaml_scalar(title)} cue@beat {cue_beat}: user-marked but no RB drop candidate')
+        tracks.append({"anlz_path": anlz_path, "audio_path": content.FolderPath or "", "title": title, "split": "holdout" if _matches_title(title, holdouts) else args.split, "drops": rows})
+    return tracks, stats, manual, orphans
+
+
+def _extract_cues(anlz: Any) -> list[dict[str, Any]]:
+    cues: list[dict[str, Any]] = []
+    for tag_type in ("PCO2", "PCOB"):
+        for tag in anlz.getall_tags(tag_type):
+            content = getattr(tag, "content", None)
+            entries = getattr(content, "entries", None) if not isinstance(content, dict) else content.get("entries")
+            for entry in entries or []:
+                cues.append({"ms": int(getattr(entry, "time")), "text": "" if tag_type == "PCOB" else str(getattr(entry, "comment", "") or ""), "hot": int(getattr(entry, "hot_cue", 0) or 0)})
+    return cues
+
+
+def _format_labeled_tracks(tracks: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for track in tracks:
+        lines += [f"- anlz_path: {_yaml_scalar(track['anlz_path'])}", f"  audio_path: {_yaml_scalar(track['audio_path'])}",
+                  f"  title: {_yaml_scalar(track['title'])}", f"  split: {track['split']}", "  drops:"]
+        for drop in track["drops"]:
+            for prefix, key in (("    - ", "rekordbox_beat"), ("      ", "rekordbox_elapsed"),
+                                ("      ", "correct_beat"), ("      ", "correct_elapsed")):
+                lines.append(f"{prefix}{key}: {_yaml_value(drop[key])}")
+            lines.append(f"      notes: {_yaml_scalar(drop['notes'])}")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _load_scripted_titles(path: str) -> list[str]:
+    if not path:
+        return []
+    p = Path(path).expanduser()
+    if not p.exists():
+        print(f"[label] warning: scripted playlist missing: {p}", file=sys.stderr)
+        return []
+    try:
+        titles: list[str] = []; cur: Optional[str] = None; saw_bridge = False
+        for raw in p.read_text(encoding="utf-8").splitlines():
+            s = raw.strip()
+            if "track_id:" in s:
+                cur = s.split("track_id:", 1)[1].strip().strip("\"'")
+                saw_bridge = False
+            elif "address:" in s and "/bridge/track_loaded" in s:
+                saw_bridge = True
+            elif s.startswith("value:") and saw_bridge and cur:
+                try:
+                    if int(float(s[len("value:"):].strip())) >= 2:
+                        titles.append(cur)
+                except ValueError:
+                    pass
+                saw_bridge = False
+        return titles
+    except Exception as exc:
+        print(f"[label] warning: scripted playlist unreadable: {exc}", file=sys.stderr)
+        return []
+
+
+def _title_lines(path: Optional[str]) -> list[str]:
+    return [] if not path else [line.strip() for line in Path(path).expanduser().read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _matches_any(content: Any, titles: Sequence[str]) -> bool:
+    fp, title = str(getattr(content, "FolderPath", "") or ""), str(getattr(content, "Title", "") or "")
+    return any(_matches_title(fp, [item]) or _matches_title(title, [item]) for item in titles)
+
+
+def _matches_title(text: str, titles: Sequence[str]) -> bool:
+    lower = text.lower()
+    return any(title.lower() in lower or ((words := [w.lower() for w in re.split(r"[\s()\[\]\-]+", title) if w]) and all(w in lower for w in words)) for title in titles)
+
+
+def _first_dat(paths: Sequence[Any]) -> Optional[str]:
+    return next((str(path) for path in paths or [] if str(path).upper().endswith(".DAT")), None)
+
+
+def _content_title(content: Any) -> str:
+    return str(getattr(content, "Title", "") or Path(str(content.FolderPath or "")).stem)
+
+
+def _label_summary(scanned: int, excluded: int, stats: dict[str, int],
+                   manual: list[str], orphans: list[str], args: argparse.Namespace) -> None:
+    lines = [f"scanned {scanned} RB tracks", f"excluded {excluded} scripted tracks",
+             f"{stats['marked']} tracks had a '{args.cue_comment}'-commented cue",
+             f"  auto-labeled drops: {stats['auto']}", f"  skipped (no waveform): {stats['nowave']}",
+             f"  manual review (no cue near RB drop): {stats['manual']}", f"  orphan cues (no RB drop near cue): {stats['orphan']}"]
+    if manual:
+        lines += ["", "manual review needed:"] + [f"  - {item}" for item in manual]
+    if orphans:
+        lines += ["orphan cues:"] + [f"  - {item}" for item in orphans]
+    for line in lines:
+        print(f"[label] {line}".rstrip(), file=sys.stderr)
 
 
 def _load_corpus(path: str) -> list[dict[str, Any]]:
@@ -534,6 +718,10 @@ def _nearest_beat(elapsed_ms: int, beatgrid_times_ms: Sequence[float]) -> int:
 
 def _yaml_scalar(value: str) -> str:
     return json.dumps(value)
+
+
+def _yaml_value(value: Any) -> str:
+    return "null" if value is None else (_yaml_scalar(value) if isinstance(value, str) else str(value))
 
 
 if __name__ == "__main__":
