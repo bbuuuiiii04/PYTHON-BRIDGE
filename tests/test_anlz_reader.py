@@ -10,13 +10,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
     _compute_bar_energies,
     TrackAnlzData,
+    WaveformContext,
     _calculate_smart_drop_energy_shadow,
     _detect_drop_beats,
     _extract_beatgrid_times,
     _extract_pssi_phrases,
     _extract_smart_drop_energy_shadow,
+    _extract_waveform_context,
     _extract_waveform_phrases,
     _extract_waveform,
+    _broad_onset_score,
+    _distance_penalty,
+    _downbeat_alignment,
+    _make_multi_feature_scorer,
+    _multi_feature_score,
+    _onset_score,
+    _post_lift,
+    _pre_valley_depth,
+    _score_confidence,
+    _v1_compute_shadows,
     read_anlz_drops,
 )
 
@@ -57,6 +69,18 @@ def _bar_heights(bars: list[int], entries_per_bar: int = 4) -> list[int]:
 
 def _beat_heights(values: dict[int, int], total_beats: int = 120, default: int = 10) -> list[int]:
     return [values.get(beat, default) for beat in range(total_beats)]
+
+
+def _shadow_v1_fields(shadow):
+    return (
+        shadow.anlz_beat,
+        shadow.suggested_beat,
+        shadow.anlz_elapsed_ms,
+        shadow.suggested_elapsed_ms,
+        shadow.lift_at_anlz,
+        shadow.lift_at_suggested,
+        shadow.confidence,
+    )
 
 
 
@@ -212,6 +236,110 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         ]
         self.assertEqual(_extract_smart_drop_energy_shadow(parsed, [64]), [])
 
+    def test_v1_behavior_preserved_when_scorer_kwarg_omitted(self) -> None:
+        heights = _beat_heights(
+            {
+                **{beat: 20 for beat in range(48, 64)},
+                **{beat: 2 for beat in range(64, 72)},
+                **{beat: 30 for beat in range(72, 96)},
+            }
+        )
+        beatgrid = _beatgrid_ms(len(heights) + 1)
+        waveform_duration_ms = len(heights) * 500
+
+        default = _calculate_smart_drop_energy_shadow(
+            heights,
+            waveform_duration_ms=waveform_duration_ms,
+            beatgrid_times_ms=beatgrid,
+            selected_drops=[64],
+        )
+        legacy = _v1_compute_shadows(
+            heights,
+            ms_per_entry=500.0,
+            beatgrid_times_ms=beatgrid,
+            selected_drops=[64],
+        )
+
+        self.assertEqual(len(default), 1)
+        self.assertEqual([_shadow_v1_fields(item) for item in default],
+                         [_shadow_v1_fields(item) for item in legacy])
+        self.assertEqual(default[0].suggested_beat, 72)
+        self.assertEqual(default[0].source, "v1")
+
+    def test_onset_score_uses_max_single_beat_jump_in_post_window(self) -> None:
+        self.assertEqual(
+            _onset_score(0, [1, 1, 4, 10, 10, 10], _beatgrid_ms(6)),
+            6,
+        )
+
+    def test_broad_onset_score_uses_two_beat_jump(self) -> None:
+        self.assertEqual(
+            _broad_onset_score(0, [1, 1, 5, 5, 5], _beatgrid_ms(5)),
+            4,
+        )
+
+    def test_post_lift_matches_current_energy_lift_signal(self) -> None:
+        heights = _beat_heights(
+            {
+                **{beat: 2 for beat in range(4, 20)},
+                **{beat: 20 for beat in range(20, 36)},
+            },
+            total_beats=48,
+        )
+        self.assertGreater(_post_lift(20, heights, _beatgrid_ms(49)), 0.0)
+
+    def test_pre_valley_depth_detects_quiet_section_before_drop(self) -> None:
+        heights = _beat_heights(
+            {
+                **{beat: 20 for beat in range(0, 16)},
+                **{beat: 2 for beat in range(16, 20)},
+            },
+            total_beats=33,
+        )
+        self.assertEqual(_pre_valley_depth(20, heights, _beatgrid_ms(33)), 18)
+
+    def test_downbeat_alignment_scores_bar_and_half_bar_positions(self) -> None:
+        self.assertEqual(_downbeat_alignment(64), 1.0)
+        self.assertEqual(_downbeat_alignment(66), 0.5)
+        self.assertEqual(_downbeat_alignment(67), 0.0)
+
+    def test_distance_penalty_falls_off_from_anlz_beat(self) -> None:
+        self.assertEqual(_distance_penalty(64, 64), 1.0)
+        self.assertEqual(_distance_penalty(68, 64), 0.5)
+        self.assertEqual(_distance_penalty(72, 64), 0.0)
+
+    def test_multi_feature_score_uses_known_feature_values(self) -> None:
+        score = _multi_feature_score(
+            0,
+            [1, 1, 4, 10, 10, 10],
+            _beatgrid_ms(6),
+            0,
+            None,
+            {
+                "onset_score": 1.0,
+                "distance_penalty": 2.0,
+            },
+        )
+        self.assertEqual(score, 8.0)
+
+    def test_make_multi_feature_scorer_applies_trained_weights_on_tiny_dataset(self) -> None:
+        scorer = _make_multi_feature_scorer({
+            "onset_score": 1.0,
+            "downbeat_alignment": 0.25,
+        })
+        beatgrid = _beatgrid_ms(6)
+        heights = [1, 1, 4, 10, 10, 10]
+
+        self.assertGreater(
+            scorer(0, heights, beatgrid, 0, None),
+            scorer(1, heights, beatgrid, 0, None),
+        )
+
+    def test_score_confidence_uses_best_second_best_margin(self) -> None:
+        self.assertAlmostEqual(_score_confidence(10.0, 7.0), 0.3)
+        self.assertEqual(_score_confidence(0.0, 0.0), 0.0)
+        self.assertEqual(_score_confidence(1.0, 3.0), 0.0)
+
 
 class AnlzExtractionTests(unittest.TestCase):
     def test_pssi_kind5_returns_bridge_beats_minus_one(self) -> None:
@@ -362,7 +490,55 @@ class AnlzExtractionTests(unittest.TestCase):
             with patch("pyrekordbox.anlz.AnlzFile.parse_file", side_effect=parse_file):
                 result = read_anlz_drops(str(dat))
 
-        self.assertEqual(result, TrackAnlzData([]))
+        self.assertEqual(result.drop_beat_indices, [])
+        self.assertIsNotNone(result.waveform_context)
+
+    def test_waveform_context_populated_when_waveform_and_beatgrid_present(self) -> None:
+        parsed = [
+            (Path("ANLZ0000.EXT"), FakeAnlz({
+                "PWV3": [FakeTag([32, 33, 63, 5])],
+                "PQT2": [FakeTag(times_s=[i * 0.5 for i in range(8)])],
+            })),
+        ]
+
+        context = _extract_waveform_context(parsed)
+
+        self.assertEqual(
+            context,
+            WaveformContext(
+                heights=(0, 1, 31, 5),
+                ms_per_entry=1000.0,
+                beatgrid_times_ms=tuple(i * 500.0 for i in range(8)),
+            ),
+        )
+
+    def test_waveform_context_is_none_without_waveform(self) -> None:
+        parsed = [
+            (Path("ANLZ0000.EXT"), FakeAnlz({
+                "PQT2": [FakeTag(times_s=[i * 0.5 for i in range(8)])],
+            })),
+        ]
+
+        self.assertIsNone(_extract_waveform_context(parsed))
+
+    def test_read_anlz_drops_returns_waveform_context_with_pssi_result(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dat = Path(td) / "ANLZ0000.DAT"
+            dat.touch()
+
+            def parse_file(path):
+                return FakeAnlz({
+                    "PSSI": [FakeTag([FakeEntry(5, 9)])],
+                    "PWV3": [FakeTag([10] * 16)],
+                    "PQT2": [FakeTag(times_s=[i * 0.5 for i in range(16)])],
+                })
+
+            with patch("pyrekordbox.anlz.AnlzFile.parse_file", side_effect=parse_file):
+                result = read_anlz_drops(str(dat))
+
+        self.assertEqual(result.drop_beat_indices, [8])
+        self.assertIsNotNone(result.waveform_context)
+        self.assertEqual(result.waveform_context.heights, (10,) * 16)
 
     def test_candidate_ordering_ext_before_dat_for_waveform(self) -> None:
         parsed = [

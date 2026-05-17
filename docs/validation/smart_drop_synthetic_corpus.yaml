@@ -1,0 +1,112 @@
+# Synthetic corpus for harness plumbing only.
+# The `correct_beat` values here are fixture-rigged so v2 hits 100% - this
+# exercises the scoring path end-to-end, NOT the algorithm's real-world
+# accuracy. Step 5 (real user labels) is where actual signal comes from.
+# Do not draw conclusions about v1-vs-v2 quality from these results.
+[
+  {
+    "track_id": "synthetic-training-1",
+    "title": "Synthetic Training 1",
+    "split": "training",
+    "anlz_path": "/synthetic/ANLZ0000.DAT",
+    "audio_path": "/synthetic/track-1.wav",
+    "beatgrid_times_ms": {"count": 64, "step_ms": 500.0},
+    "waveform_values": {
+      "length": 64,
+      "default": 10,
+      "ranges": [[4, 20, 18], [20, 24, 2], [24, 48, 28]]
+    },
+    "spectral_features": {
+      "sr": 22050,
+      "schema_version": 1,
+      "sub_bass_envelope": {"length": 64, "default": 0.1, "ranges": [[24, 48, 0.9]]},
+      "kick_envelope": {"length": 64, "default": 0.1, "points": [[24, 1.0]]},
+      "high_band_envelope": {"length": 64, "default": 0.2, "ranges": [[20, 22, 1.0], [22, 24, 0.0]]}
+    },
+    "drops": [{"rekordbox_beat": 20, "correct_beat": 22, "notes": "synthetic v2 target"}]
+  },
+  {
+    "track_id": "synthetic-training-2",
+    "title": "Synthetic Training 2",
+    "split": "training",
+    "anlz_path": "/synthetic/ANLZ0000.DAT",
+    "audio_path": "/synthetic/track-2.wav",
+    "beatgrid_times_ms": {"count": 72, "step_ms": 500.0},
+    "waveform_values": {
+      "length": 72,
+      "default": 12,
+      "ranges": [[8, 24, 20], [24, 28, 3], [28, 56, 30]]
+    },
+    "spectral_features": {
+      "sr": 22050,
+      "schema_version": 1,
+      "sub_bass_envelope": {"length": 72, "default": 0.1, "ranges": [[28, 56, 0.95]]},
+      "kick_envelope": {"length": 72, "default": 0.1, "points": [[28, 1.0]]},
+      "high_band_envelope": {"length": 72, "default": 0.2, "ranges": [[24, 26, 1.0], [26, 28, 0.0]]}
+    },
+    "drops": [{"rekordbox_beat": 24, "correct_beat": 26, "notes": "synthetic v2 target"}]
+  },
+  {
+    "track_id": "synthetic-training-3",
+    "title": "Synthetic Training 3",
+    "split": "training",
+    "anlz_path": "/synthetic/ANLZ0000.DAT",
+    "audio_path": "/synthetic/track-3.wav",
+    "beatgrid_times_ms": {"count": 80, "step_ms": 500.0},
+    "waveform_values": {
+      "length": 80,
+      "default": 11,
+      "ranges": [[12, 32, 21], [32, 36, 4], [36, 64, 29]]
+    },
+    "spectral_features": {
+      "sr": 22050,
+      "schema_version": 1,
+      "sub_bass_envelope": {"length": 80, "default": 0.1, "ranges": [[36, 64, 0.9]]},
+      "kick_envelope": {"length": 80, "default": 0.1, "points": [[36, 1.0]]},
+      "high_band_envelope": {"length": 80, "default": 0.2, "ranges": [[32, 34, 1.0], [34, 36, 0.0]]}
+    },
+    "drops": [{"rekordbox_beat": 32, "correct_beat": 34, "notes": "synthetic v2 target"}]
+  },
+  {
+    "track_id": "synthetic-holdout-1",
+    "title": "Synthetic Holdout 1",
+    "split": "holdout",
+    "anlz_path": "/synthetic/ANLZ0000.DAT",
+    "audio_path": "/synthetic/track-4.wav",
+    "beatgrid_times_ms": {"count": 76, "step_ms": 500.0},
+    "waveform_values": {
+      "length": 76,
+      "default": 13,
+      "ranges": [[8, 28, 19], [28, 32, 2], [32, 60, 31]]
+    },
+    "spectral_features": {
+      "sr": 22050,
+      "schema_version": 1,
+      "sub_bass_envelope": {"length": 76, "default": 0.1, "ranges": [[32, 60, 0.9]]},
+      "kick_envelope": {"length": 76, "default": 0.1, "points": [[32, 1.0]]},
+      "high_band_envelope": {"length": 76, "default": 0.2, "ranges": [[28, 30, 1.0], [30, 32, 0.0]]}
+    },
+    "drops": [{"rekordbox_beat": 28, "correct_beat": 30, "notes": "synthetic v2 target"}]
+  },
+  {
+    "track_id": "synthetic-holdout-2",
+    "title": "Synthetic Holdout 2",
+    "split": "holdout",
+    "anlz_path": "/synthetic/ANLZ0000.DAT",
+    "audio_path": "/synthetic/track-5.wav",
+    "beatgrid_times_ms": {"count": 88, "step_ms": 500.0},
+    "waveform_values": {
+      "length": 88,
+      "default": 10,
+      "ranges": [[16, 40, 18], [40, 44, 3], [44, 72, 30]]
+    },
+    "spectral_features": {
+      "sr": 22050,
+      "schema_version": 1,
+      "sub_bass_envelope": {"length": 88, "default": 0.1, "ranges": [[44, 72, 0.9]]},
+      "kick_envelope": {"length": 88, "default": 0.1, "points": [[44, 1.0]]},
+      "high_band_envelope": {"length": 88, "default": 0.2, "ranges": [[40, 42, 1.0], [42, 44, 0.0]]}
+    },
+    "drops": [{"rekordbox_beat": 40, "correct_beat": 42, "notes": "synthetic v2 target"}]
+  }
+]

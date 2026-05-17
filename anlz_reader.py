@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .models import SmartDropEnergyShadow
 
@@ -35,6 +35,30 @@ _MIN_BEATGRID_INTERVAL_MS = 150.0
 _MAX_BEATGRID_INTERVAL_MS = 3000.0
 _PWV3_MS_PER_ENTRY_FALLBACK = 6.7
 
+MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
+    "onset_score": 0.5,
+    "broad_onset_score": 0.3,
+    "post_lift": 0.3,
+    "pre_valley_depth": 0.5,
+    "downbeat_alignment": 0.5,
+    "distance_penalty": 0.5,
+    "sub_bass_onset": 1.0,
+    "kick_attack": 1.0,
+    "pre_drop_filter_sweep": 0.6,
+}
+
+MultiFeatureScorer = Callable[
+    [int, list[int], list[float], int, Optional[Any]],
+    float,
+]
+
+
+@dataclass(frozen=True)
+class WaveformContext:
+    heights: tuple[int, ...]
+    ms_per_entry: float
+    beatgrid_times_ms: tuple[float, ...]
+
 
 @dataclass
 class TrackAnlzData:
@@ -43,6 +67,7 @@ class TrackAnlzData:
     buildup_beat_indices: list[int] = field(default_factory=list)
     mood: int = 0
     energy_shadow: list[SmartDropEnergyShadow] = field(default_factory=list)
+    waveform_context: Optional[WaveformContext] = None
 
 
 def read_smart_drop_energy_shadow(
@@ -95,6 +120,7 @@ def read_anlz_drops(anlz_path: str) -> TrackAnlzData:
             return TrackAnlzData([])
 
         mood, pssi_drops, pssi_breakdowns, pssi_buildups = _extract_pssi_phrases(parsed)
+        waveform_context = _extract_waveform_context(parsed)
         if pssi_drops or pssi_breakdowns:
             return TrackAnlzData(
                 pssi_drops,
@@ -102,6 +128,7 @@ def read_anlz_drops(anlz_path: str) -> TrackAnlzData:
                 pssi_buildups,
                 mood,
                 _extract_smart_drop_energy_shadow(parsed, pssi_drops),
+                waveform_context,
             )
 
         waveform_drops, waveform_breakdowns = _extract_waveform_phrases(parsed)
@@ -111,6 +138,7 @@ def read_anlz_drops(anlz_path: str) -> TrackAnlzData:
             [],
             0,
             _extract_smart_drop_energy_shadow(parsed, waveform_drops),
+            waveform_context,
         )
     except Exception:
         log.debug("ANLZ drop read failed", exc_info=True)
@@ -229,11 +257,35 @@ def _extract_smart_drop_energy_shadow(
         return []
 
 
+def _extract_waveform_context(parsed: list[tuple[Path, Any]]) -> Optional[WaveformContext]:
+    waveform = _extract_waveform(parsed)
+    if waveform is None:
+        return None
+    heights, _waveform_source = waveform
+    beatgrid_times_ms = _extract_beatgrid_times(parsed)
+    if len(beatgrid_times_ms) < 8:
+        return None
+    waveform_duration_ms = _duration_from_beatgrid(beatgrid_times_ms)
+    if waveform_duration_ms <= 0 or not heights:
+        return None
+    ms_per_entry = waveform_duration_ms / len(heights)
+    if ms_per_entry <= 0:
+        return None
+    return WaveformContext(
+        heights=tuple(heights),
+        ms_per_entry=ms_per_entry,
+        beatgrid_times_ms=tuple(beatgrid_times_ms),
+    )
+
+
 def _calculate_smart_drop_energy_shadow(
     heights: list[int],
     waveform_duration_ms: float,
     beatgrid_times_ms: list[float],
     selected_drops: list[int],
+    *,
+    scorer: Optional[MultiFeatureScorer] = None,
+    spectral_features: Optional[Any] = None,
 ) -> list[SmartDropEnergyShadow]:
     if not heights or waveform_duration_ms <= 0 or len(beatgrid_times_ms) < 8:
         return []
@@ -242,6 +294,23 @@ def _calculate_smart_drop_energy_shadow(
     if ms_per_entry <= 0:
         return []
 
+    if scorer is not None:
+        return _v2_compute_shadows(
+            heights,
+            beatgrid_times_ms,
+            selected_drops,
+            scorer=scorer,
+            spectral_features=spectral_features,
+        )
+    return _v1_compute_shadows(heights, ms_per_entry, beatgrid_times_ms, selected_drops)
+
+
+def _v1_compute_shadows(
+    heights: list[int],
+    ms_per_entry: float,
+    beatgrid_times_ms: list[float],
+    selected_drops: list[int],
+) -> list[SmartDropEnergyShadow]:
     shadows: list[SmartDropEnergyShadow] = []
     for drop_beat in sorted(set(int(beat) for beat in selected_drops)):
         lift_at_anlz = _energy_lift_for_beat(
@@ -280,6 +349,73 @@ def _calculate_smart_drop_energy_shadow(
     return shadows
 
 
+def _v2_compute_shadows(
+    heights: list[int],
+    beatgrid_times_ms: list[float],
+    selected_drops: list[int],
+    *,
+    scorer: MultiFeatureScorer,
+    spectral_features: Optional[Any] = None,
+) -> list[SmartDropEnergyShadow]:
+    shadows: list[SmartDropEnergyShadow] = []
+    source = "v2_spectral" if spectral_features is not None else "v2_waveform"
+    for drop_beat in sorted(set(int(beat) for beat in selected_drops)):
+        if drop_beat < 0 or drop_beat >= len(beatgrid_times_ms):
+            continue
+
+        scored: list[tuple[int, float]] = []
+        for candidate_beat in range(drop_beat, drop_beat + 9):
+            if candidate_beat < 0 or candidate_beat >= len(beatgrid_times_ms):
+                continue
+            score = scorer(
+                candidate_beat,
+                heights,
+                beatgrid_times_ms,
+                drop_beat,
+                spectral_features,
+            )
+            scored.append((candidate_beat, score))
+        if not scored:
+            continue
+
+        scored.sort(key=lambda item: item[1], reverse=True)
+        best_beat, best_score = scored[0]
+        second_score = scored[1][1] if len(scored) > 1 else 0.0
+        score_at_anlz = next(
+            (score for beat, score in scored if beat == drop_beat),
+            0.0,
+        )
+        confidence = _score_confidence(best_score, second_score)
+
+        shadows.append(SmartDropEnergyShadow(
+            anlz_beat=drop_beat,
+            suggested_beat=best_beat,
+            anlz_elapsed_ms=int(round(beatgrid_times_ms[drop_beat])),
+            suggested_elapsed_ms=int(round(beatgrid_times_ms[best_beat])),
+            lift_at_anlz=score_at_anlz,
+            lift_at_suggested=best_score,
+            confidence=confidence,
+            score_at_anlz=score_at_anlz,
+            score_at_suggested=best_score,
+            feature_breakdown=_multi_feature_breakdown(
+                best_beat,
+                heights,
+                beatgrid_times_ms,
+                drop_beat,
+                spectral_features,
+            ),
+            source=source,
+        ))
+    return shadows
+
+
+def _score_confidence(best: float, second_best: float) -> float:
+    if best <= 0.0:
+        return 0.0
+    raw = (best - second_best) / max(best, 1e-6)
+    return max(0.0, min(1.0, raw))
+
+
 def _energy_lift_for_beat(
     heights: list[int],
     ms_per_entry: float,
@@ -303,6 +439,228 @@ def _energy_lift_for_beat(
     if before is None or after is None:
         return None
     return after - before
+
+
+def _onset_score(
+    beat: int,
+    heights: list[int],
+    beatgrid_times_ms: list[float],
+) -> float:
+    energies = _beat_energies(heights, beatgrid_times_ms, beat, beat + 5)
+    if len(energies) < 2:
+        return 0.0
+    return max(0.0, max(b - a for a, b in zip(energies, energies[1:])))
+
+
+def _broad_onset_score(
+    beat: int,
+    heights: list[int],
+    beatgrid_times_ms: list[float],
+) -> float:
+    before = _average_feature_energy(heights, beatgrid_times_ms, beat, beat + 2)
+    after = _average_feature_energy(heights, beatgrid_times_ms, beat + 2, beat + 4)
+    if before is None or after is None:
+        return 0.0
+    return max(0.0, after - before)
+
+
+def _post_lift(
+    beat: int,
+    heights: list[int],
+    beatgrid_times_ms: list[float],
+) -> float:
+    ms_per_entry = _ms_per_waveform_entry(heights, beatgrid_times_ms)
+    if ms_per_entry is None:
+        return 0.0
+    lift = _energy_lift_for_beat(heights, ms_per_entry, beatgrid_times_ms, beat)
+    return 0.0 if lift is None else lift
+
+
+def _pre_valley_depth(
+    beat: int,
+    heights: list[int],
+    beatgrid_times_ms: list[float],
+) -> float:
+    prior = _average_feature_energy(heights, beatgrid_times_ms, beat - 16, beat - 4)
+    valley = _average_feature_energy(heights, beatgrid_times_ms, beat - 4, beat)
+    if prior is None or valley is None:
+        return 0.0
+    return max(0.0, prior - valley)
+
+
+def _downbeat_alignment(beat: int) -> float:
+    if beat % 4 == 0:
+        return 1.0
+    if beat % 2 == 0:
+        return 0.5
+    return 0.0
+
+
+def _distance_penalty(beat: int, anlz_beat: int) -> float:
+    return max(0.0, 1.0 - (abs(int(beat) - int(anlz_beat)) / 8.0))
+
+
+def _multi_feature_breakdown(
+    beat: int,
+    heights: list[int],
+    beatgrid_times_ms: list[float],
+    anlz_beat: int,
+    spectral_features: Optional[Any],
+) -> dict[str, float]:
+    features = {
+        "onset_score": _onset_score(beat, heights, beatgrid_times_ms),
+        "broad_onset_score": _broad_onset_score(beat, heights, beatgrid_times_ms),
+        "post_lift": _post_lift(beat, heights, beatgrid_times_ms),
+        "pre_valley_depth": _pre_valley_depth(beat, heights, beatgrid_times_ms),
+        "downbeat_alignment": _downbeat_alignment(beat),
+        "distance_penalty": _distance_penalty(beat, anlz_beat),
+    }
+    if spectral_features is None:
+        features.update({
+            "sub_bass_onset": 0.0,
+            "kick_attack": 0.0,
+            "pre_drop_filter_sweep": 0.0,
+        })
+    else:
+        features.update({
+            "sub_bass_onset": _sub_bass_onset(beat, spectral_features),
+            "kick_attack": _kick_attack(beat, spectral_features),
+            "pre_drop_filter_sweep": _pre_drop_filter_sweep(beat, spectral_features),
+        })
+    return features
+
+
+def _multi_feature_score(
+    beat: int,
+    heights: list[int],
+    beatgrid_times_ms: list[float],
+    anlz_beat: int,
+    spectral_features: Optional[Any],
+    weights: Optional[dict[str, float]] = None,
+) -> float:
+    resolved = weights if weights is not None else MULTI_FEATURE_WEIGHTS_V2
+    features = _multi_feature_breakdown(
+        beat,
+        heights,
+        beatgrid_times_ms,
+        anlz_beat,
+        spectral_features,
+    )
+    return sum(features[name] * resolved.get(name, 0.0) for name in features)
+
+
+def _make_multi_feature_scorer(weights: dict[str, float]) -> MultiFeatureScorer:
+    weight_copy = dict(weights)
+
+    def scorer(
+        beat: int,
+        heights: list[int],
+        beatgrid_times_ms: list[float],
+        anlz_beat: int,
+        spectral_features: Optional[Any],
+    ) -> float:
+        return _multi_feature_score(
+            beat,
+            heights,
+            beatgrid_times_ms,
+            anlz_beat,
+            spectral_features,
+            weight_copy,
+        )
+
+    return scorer
+
+
+def _sub_bass_onset(beat: int, spectral_features: Any) -> float:
+    return _spectral_onset(beat, _spectral_envelope(spectral_features, "sub_bass_envelope"))
+
+
+def _kick_attack(beat: int, spectral_features: Any) -> float:
+    envelope = _spectral_envelope(spectral_features, "kick_envelope")
+    if not envelope:
+        return 0.0
+    best = 0.0
+    for index in range(max(1, beat), min(len(envelope), beat + 5)):
+        prior = envelope[index - 1]
+        current = envelope[index]
+        following = envelope[index + 1] if index + 1 < len(envelope) else current
+        best = max(best, current - max(prior, following))
+    return max(0.0, best)
+
+
+def _pre_drop_filter_sweep(beat: int, spectral_features: Any) -> float:
+    envelope = _spectral_envelope(spectral_features, "high_band_envelope")
+    if not envelope or beat < 4:
+        return 0.0
+    early = envelope[max(0, beat - 4):max(0, beat - 2)]
+    late = envelope[max(0, beat - 2):beat]
+    if not early or not late:
+        return 0.0
+    return max(0.0, (sum(early) / len(early)) - (sum(late) / len(late)))
+
+
+def _spectral_onset(beat: int, envelope: list[float]) -> float:
+    if not envelope:
+        return 0.0
+    start = max(0, beat)
+    stop = min(len(envelope), beat + 5)
+    if stop - start < 2:
+        return 0.0
+    return max(0.0, max(envelope[i + 1] - envelope[i] for i in range(start, stop - 1)))
+
+
+def _spectral_envelope(spectral_features: Any, attr: str) -> list[float]:
+    try:
+        return [float(value) for value in getattr(spectral_features, attr)]
+    except Exception:
+        return []
+
+
+def _beat_energies(
+    heights: list[int],
+    beatgrid_times_ms: list[float],
+    start_beat: int,
+    end_beat: int,
+) -> list[float]:
+    energies: list[float] = []
+    for beat in range(start_beat, end_beat):
+        value = _average_feature_energy(heights, beatgrid_times_ms, beat, beat + 1)
+        if value is not None:
+            energies.append(value)
+    return energies
+
+
+def _average_feature_energy(
+    heights: list[int],
+    beatgrid_times_ms: list[float],
+    start_beat: int,
+    end_beat: int,
+) -> Optional[float]:
+    ms_per_entry = _ms_per_waveform_entry(heights, beatgrid_times_ms)
+    if ms_per_entry is None:
+        return None
+    return _average_waveform_energy_for_beats(
+        heights,
+        ms_per_entry,
+        beatgrid_times_ms,
+        start_beat,
+        end_beat,
+    )
+
+
+def _ms_per_waveform_entry(
+    heights: list[int],
+    beatgrid_times_ms: list[float],
+) -> Optional[float]:
+    if not heights or len(beatgrid_times_ms) < 2:
+        return None
+    duration_ms = _duration_from_beatgrid(beatgrid_times_ms)
+    if duration_ms <= 0:
+        return None
+    ms_per_entry = duration_ms / len(heights)
+    if ms_per_entry <= 0:
+        return None
+    return ms_per_entry
 
 
 def _average_waveform_energy_for_beats(
