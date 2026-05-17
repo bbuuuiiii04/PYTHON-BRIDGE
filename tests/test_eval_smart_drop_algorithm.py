@@ -135,6 +135,25 @@ class LabelFromCuesTests(unittest.TestCase):
         rows, out, err = self.run_label([content("Track A")], [cue(32000, "DROP")], paths={"Track A": []})
         self.assertEqual((rows, out), ([], "")); self.assertNotIn("Track A", err)
 
+    def test_per_track_failure_is_isolated(self):
+        contents = [content("Bad Track"), content("Good Track")]
+        calls = {"n": 0}
+        def parse_side_effect(_path):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("corrupt header")
+            return FakeAnlz(pco2=[cue(32000, "DROP")])
+        out, err = io.StringIO(), io.StringIO()
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=FakeDb(contents)), \
+             patch("pyrekordbox.anlz.AnlzFile.parse_file", side_effect=parse_side_effect), \
+             patch.object(eval_tool, "read_anlz_drops", return_value=anlz_data((64,))), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(eval_tool.main(["label-from-cues", "--exclude-scripted", ""]), 0)
+        rows = eval_tool._parse_simple_yaml_corpus(out.getvalue())
+        self.assertEqual(len(rows), 1); self.assertEqual(rows[0]["title"], "Good Track")
+        self.assertIn("skipped Bad Track", err.getvalue())
+        self.assertIn("errors (per-track exceptions): 1", err.getvalue())
+
     def test_holdout_titles_overrides_split(self):
         with tempfile.NamedTemporaryFile("w") as f:
             f.write("Track A\n")

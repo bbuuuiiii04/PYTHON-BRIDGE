@@ -211,22 +211,28 @@ def _cmd_label_from_cues(args: argparse.Namespace) -> int:
 def _label_tracks(candidates: list[Any], db: Any, needle: str, args: argparse.Namespace,
                   holdouts: list[str]) -> tuple[list[dict[str, Any]], dict[str, int], list[str], list[str]]:
     from pyrekordbox.anlz import AnlzFile  # type: ignore
-    stats = {k: 0 for k in ("marked", "auto", "nowave", "manual", "orphan")}
+    stats = {k: 0 for k in ("marked", "auto", "nowave", "manual", "orphan", "errors")}
     tracks: list[dict[str, Any]] = []; manual: list[str] = []; orphans: list[str] = []
     for content in candidates:
-        anlz_path = _first_dat(db.get_anlz_paths(content))
-        if not anlz_path:
+        title = _content_title(content)
+        try:
+            anlz_path = _first_dat(db.get_anlz_paths(content))
+            if not anlz_path:
+                continue
+            cues = _extract_cues(AnlzFile.parse_file(anlz_path))
+            drop_cues = [(i, c) for i, c in enumerate(cues) if needle in c["text"].lower()]
+            if not drop_cues:
+                continue
+            stats["marked"] += 1
+            data = read_anlz_drops(anlz_path); ctx = data.waveform_context
+        except Exception as exc:
+            stats["errors"] += 1
+            print(f"[label] skipped {title}: {exc}", file=sys.stderr)
             continue
-        cues = _extract_cues(AnlzFile.parse_file(anlz_path))
-        drop_cues = [(i, c) for i, c in enumerate(cues) if needle in c["text"].lower()]
-        if not drop_cues:
-            continue
-        stats["marked"] += 1
-        data = read_anlz_drops(anlz_path); ctx = data.waveform_context
         if ctx is None or len(ctx.beatgrid_times_ms) < 2:
             stats["nowave"] += 1; continue
         beatgrid = list(ctx.beatgrid_times_ms); window_ms = abs(args.cue_window_beats * (beatgrid[1] - beatgrid[0]))
-        rows: list[dict[str, Any]] = []; matched: set[int] = set(); title = _content_title(content)
+        rows: list[dict[str, Any]] = []; matched: set[int] = set()
         for rb_beat in data.drop_beat_indices:
             rb_ms = beatgrid[rb_beat] if 0 <= rb_beat < len(beatgrid) else None
             drops_near = [] if rb_ms is None else [(i, c) for i, c in drop_cues if abs(c["ms"] - rb_ms) <= window_ms]
@@ -263,7 +269,10 @@ def _extract_cues(anlz: Any) -> list[dict[str, Any]]:
             content = getattr(tag, "content", None)
             entries = getattr(content, "entries", None) if not isinstance(content, dict) else content.get("entries")
             for entry in entries or []:
-                cues.append({"ms": int(getattr(entry, "time")), "text": "" if tag_type == "PCOB" else str(getattr(entry, "comment", "") or ""), "hot": int(getattr(entry, "hot_cue", 0) or 0)})
+                time_ms = getattr(entry, "time", None)
+                if time_ms is None:
+                    continue
+                cues.append({"ms": int(time_ms), "text": "" if tag_type == "PCOB" else str(getattr(entry, "comment", "") or ""), "hot": int(getattr(entry, "hot_cue", 0) or 0)})
     return cues
 
 
@@ -336,11 +345,12 @@ def _label_summary(scanned: int, excluded: int, stats: dict[str, int],
     lines = [f"scanned {scanned} RB tracks", f"excluded {excluded} scripted tracks",
              f"{stats['marked']} tracks had a '{args.cue_comment}'-commented cue",
              f"  auto-labeled drops: {stats['auto']}", f"  skipped (no waveform): {stats['nowave']}",
-             f"  manual review (no cue near RB drop): {stats['manual']}", f"  orphan cues (no RB drop near cue): {stats['orphan']}"]
+             f"  manual review (no cue near RB drop): {stats['manual']}", f"  orphan cues (no RB drop near cue): {stats['orphan']}",
+             f"  errors (per-track exceptions): {stats['errors']}"]
     if manual:
         lines += ["", "manual review needed:"] + [f"  - {item}" for item in manual]
     if orphans:
-        lines += ["orphan cues:"] + [f"  - {item}" for item in orphans]
+        lines += ["", "orphan cues:"] + [f"  - {item}" for item in orphans]
     for line in lines:
         print(f"[label] {line}".rstrip(), file=sys.stderr)
 
