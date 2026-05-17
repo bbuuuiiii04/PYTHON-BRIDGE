@@ -6,11 +6,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-np = pytest.importorskip("numpy")
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
 
 from rb_ss_bridge_v2 import audio_spectral_features as spectral  # noqa: E402
 from rb_ss_bridge_v2.audio_spectral_features import SpectralFeatures  # noqa: E402
@@ -38,6 +40,7 @@ def _fake_deps(*, mel=None, load_raises: bool = False):
     return fake, np, SimpleNamespace()
 
 
+@unittest.skipUnless(HAS_NUMPY, "numpy not installed")
 class AudioSpectralFeatureTests(unittest.TestCase):
     def test_extract_spectral_features_returns_per_beat_envelopes(self) -> None:
         with tempfile.TemporaryDirectory() as td:
