@@ -23,6 +23,10 @@ class SmartDropEnergyShadow:
     lift_at_anlz: float
     lift_at_suggested: float
     confidence: float
+    score_at_anlz: float = 0.0
+    score_at_suggested: float = 0.0
+    feature_breakdown: Optional[dict[str, float]] = None
+    source: str = "v1"
 
 
 @dataclass

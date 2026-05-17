@@ -20,6 +20,8 @@ dev = [
     "coverage>=7",
     "hypothesis>=6.100",
 ]
+spectral = ["librosa>=0.10.2,<0.11", "soundfile>=0.12,<1.0"]
+analysis = ["numpy", "scipy>=1.10"]
 
 [tool.setuptools]
 package-dir = { "rb_ss_bridge_v2" = "." }
@@ -30,6 +32,7 @@ packages = [
 ]
 py-modules = [
     "rb_ss_bridge_v2.anlz_reader",
+    "rb_ss_bridge_v2.audio_spectral_features",
     "rb_ss_bridge_v2.autoloop_controller",
     "rb_ss_bridge_v2.beat_math",
     "rb_ss_bridge_v2.bridge_fmt",
@@ -60,6 +63,7 @@ py-modules = [
     "rb_ss_bridge_v2.session_replayer",
     "rb_ss_bridge_v2.smart_phrasing",
     "rb_ss_bridge_v2.sound_switch_engine",
+    "rb_ss_bridge_v2.spectral_cache",
     "rb_ss_bridge_v2.ss_library_scanner",
     "rb_ss_bridge_v2.state_manager",
     "rb_ss_bridge_v2.tl_tailer",
