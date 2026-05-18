@@ -25,6 +25,7 @@ from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
     _make_multi_feature_scorer,
     _multi_feature_score,
     _onset_score,
+    _pattern_onset,
     _post_lift,
     _pre_valley_depth,
     _score_confidence,
@@ -307,6 +308,14 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         self.assertEqual(_distance_penalty(64, 64), 1.0)
         self.assertEqual(_distance_penalty(68, 64), 0.5)
         self.assertEqual(_distance_penalty(72, 64), 0.0)
+
+    def test_pattern_onset_discriminates_adjacent_beats(self) -> None:
+        envelope = [0.0] * 16 + [1.0] * 16
+        before, onset, after = [_pattern_onset(beat, envelope, window=8) for beat in (15, 16, 17)]
+
+        self.assertGreater(onset, before)
+        self.assertGreater(onset, after * 0.95)
+        self.assertGreater(abs(onset - before), 0.05)
 
     def test_multi_feature_score_uses_known_feature_values(self) -> None:
         score = _multi_feature_score(

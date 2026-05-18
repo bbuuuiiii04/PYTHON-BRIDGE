@@ -39,9 +39,10 @@ FEATURE_NAMES = [
     "pre_valley_depth",
     "downbeat_alignment",
     "distance_penalty",
-    "sub_bass_onset",
-    "kick_attack",
-    "pre_drop_filter_sweep",
+    "kick_pattern_onset",
+    "bass_pattern_onset",
+    "phrase_energy_step",
+    "spectral_balance_shift",
 ]
 
 
