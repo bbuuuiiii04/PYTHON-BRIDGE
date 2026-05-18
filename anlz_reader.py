@@ -48,6 +48,8 @@ MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
     "high_mid_pattern_onset": 0.261845,
     "phrase_energy_step": 0.033573,
     "spectral_balance_shift": 0.407899,
+    "centroid_drop": 1.000000,
+    "spectral_flux_onset": 1.000000,
 }
 
 MultiFeatureScorer = Callable[
@@ -528,6 +530,8 @@ def _multi_feature_breakdown(
         "high_mid_pattern_onset": spectral_score(_high_mid_pattern_onset),
         "phrase_energy_step": spectral_score(_phrase_energy_step),
         "spectral_balance_shift": spectral_score(_spectral_balance_shift),
+        "centroid_drop": spectral_score(_centroid_drop),
+        "spectral_flux_onset": spectral_score(_spectral_flux_onset),
     })
     return features
 
@@ -615,6 +619,29 @@ def _spectral_balance_shift(beat: int, spectral_features: Any) -> float:
     return max(0.0, lows_ratio(beat, after_end) - lows_ratio(before_start, beat))
 
 
+def _centroid_drop(beat: int, spectral_features: Any) -> float:
+    centroids = _per_beat_centroid(spectral_features)
+    if not centroids:
+        return 0.0
+    before_start, after_end = max(0, beat - 8), min(len(centroids), beat + 8)
+    if before_start >= beat or after_end <= beat:
+        return 0.0
+    before = sum(centroids[before_start:beat]) / (beat - before_start)
+    after = sum(centroids[beat:after_end]) / (after_end - beat)
+    return max(0.0, (before - after) / _BAND_CENTERS_HZ[-1])
+
+
+def _spectral_flux_onset(beat: int, spectral_features: Any) -> float:
+    energy = _per_beat_total_energy(spectral_features)
+    if not energy or beat < 1 or beat >= len(energy):
+        return 0.0
+    peak = max(energy[max(0, beat - 1):min(len(energy), beat + 2)])
+    baseline = sorted(energy[max(0, beat - 8):beat])
+    if not baseline:
+        return 0.0
+    return max(0.0, peak - baseline[len(baseline) // 2])
+
+
 def _pattern_onset(beat: int, envelope: list[float], window: int = 8) -> float:
     if not envelope:
         return 0.0
@@ -624,6 +651,36 @@ def _pattern_onset(beat: int, envelope: list[float], window: int = 8) -> float:
     after = sum(envelope[beat:after_end]) / (after_end - beat)
     before = sum(envelope[before_start:beat]) / (beat - before_start)
     return max(0.0, after - before)
+
+
+_BAND_CENTERS_HZ = (60.0, 130.0, 500.0, 2400.0, 8000.0)
+_SPECTRAL_BAND_ATTRS = (
+    "sub_bass_envelope", "kick_envelope", "low_mid_envelope",
+    "high_mid_envelope", "high_band_envelope",
+)
+
+
+def _spectral_bands(spectral_features: Any) -> tuple[list[float], ...]:
+    return tuple(_spectral_envelope(spectral_features, attr) for attr in _SPECTRAL_BAND_ATTRS)
+
+
+def _per_beat_centroid(spectral_features: Any) -> list[float]:
+    bands = _spectral_bands(spectral_features)
+    if not all(bands):
+        return []
+    centroids: list[float] = []
+    for values in zip(*bands):
+        total = sum(values)
+        if total <= 1e-9:
+            centroids.append(0.0)
+            continue
+        centroids.append(sum(c * v for c, v in zip(_BAND_CENTERS_HZ, values)) / total)
+    return centroids
+
+
+def _per_beat_total_energy(spectral_features: Any) -> list[float]:
+    bands = _spectral_bands(spectral_features)
+    return [] if not all(bands) else [sum(values) for values in zip(*bands)]
 
 
 def _spectral_triplet(spectral_features: Any) -> tuple[list[float], list[float], list[float]]:

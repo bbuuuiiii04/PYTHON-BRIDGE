@@ -337,6 +337,25 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         self.assertLess(_low_mid_pattern_onset(2, features), 0.1)
         self.assertLess(_high_mid_pattern_onset(2, features), 0.1)
 
+    def test_centroid_drop_and_flux_detect_synthetic_drop(self) -> None:
+        from rb_ss_bridge_v2.anlz_reader import _centroid_drop, _spectral_flux_onset
+        buildup, drop = (0.1,) * 16, (1.0,) * 16
+        inv_buildup, inv_drop = (1.0,) * 16, (0.2,) * 16
+        features = SpectralFeatures(
+            sr=22050,
+            schema_version=2,
+            sub_bass_envelope=buildup + drop,
+            kick_envelope=buildup + drop,
+            low_mid_envelope=buildup + drop,
+            high_mid_envelope=inv_buildup + inv_drop,
+            high_band_envelope=inv_buildup + inv_drop,
+        )
+
+        self.assertGreater(_centroid_drop(16, features), 0.05)
+        self.assertGreater(_spectral_flux_onset(16, features), 0.5)
+        self.assertEqual(_centroid_drop(2, features), 0.0)
+        self.assertAlmostEqual(_spectral_flux_onset(2, features), 0.0, delta=0.1)
+
     def test_multi_feature_score_uses_known_feature_values(self) -> None:
         score = _multi_feature_score(
             0,

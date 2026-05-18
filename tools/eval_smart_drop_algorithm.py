@@ -45,6 +45,8 @@ FEATURE_NAMES = [
     "high_mid_pattern_onset",
     "phrase_energy_step",
     "spectral_balance_shift",
+    "centroid_drop",
+    "spectral_flux_onset",
 ]
 
 
