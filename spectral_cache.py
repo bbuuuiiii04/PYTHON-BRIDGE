@@ -41,6 +41,8 @@ def get_cached(
             schema_version=int(payload["schema_version"]),
             sub_bass_envelope=tuple(float(v) for v in payload["sub_bass_envelope"]),
             kick_envelope=tuple(float(v) for v in payload["kick_envelope"]),
+            low_mid_envelope=tuple(float(v) for v in payload["low_mid_envelope"]),
+            high_mid_envelope=tuple(float(v) for v in payload["high_mid_envelope"]),
             high_band_envelope=tuple(float(v) for v in payload["high_band_envelope"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -154,6 +156,8 @@ def _payload_for_write(
         "sr": int(features.sr),
         "sub_bass_envelope": list(features.sub_bass_envelope),
         "kick_envelope": list(features.kick_envelope),
+        "low_mid_envelope": list(features.low_mid_envelope),
+        "high_mid_envelope": list(features.high_mid_envelope),
         "high_band_envelope": list(features.high_band_envelope),
     }
 

@@ -22,6 +22,8 @@ from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
     _broad_onset_score,
     _distance_penalty,
     _downbeat_alignment,
+    _high_mid_pattern_onset,
+    _low_mid_pattern_onset,
     _make_multi_feature_scorer,
     _multi_feature_score,
     _onset_score,
@@ -32,6 +34,7 @@ from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
     _v1_compute_shadows,
     read_anlz_drops,
 )
+from rb_ss_bridge_v2.audio_spectral_features import SpectralFeatures  # noqa: E402
 
 
 class FakeEntry:
@@ -316,6 +319,23 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         self.assertGreater(onset, before)
         self.assertGreater(onset, after * 0.95)
         self.assertGreater(abs(onset - before), 0.05)
+
+    def test_low_mid_and_high_mid_pattern_onsets_detect_transitions(self) -> None:
+        silent, loud = (0.0,) * 16, (1.0,) * 16
+        features = SpectralFeatures(
+            sr=22050,
+            schema_version=2,
+            sub_bass_envelope=silent + loud,
+            kick_envelope=silent + loud,
+            low_mid_envelope=silent + loud,
+            high_mid_envelope=silent + loud,
+            high_band_envelope=silent + loud,
+        )
+
+        self.assertGreater(_low_mid_pattern_onset(16, features), 0.5)
+        self.assertGreater(_high_mid_pattern_onset(16, features), 0.5)
+        self.assertLess(_low_mid_pattern_onset(2, features), 0.1)
+        self.assertLess(_high_mid_pattern_onset(2, features), 0.1)
 
     def test_multi_feature_score_uses_known_feature_values(self) -> None:
         score = _multi_feature_score(

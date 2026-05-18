@@ -8,7 +8,7 @@ from typing import Any, Optional, Sequence
 
 log = logging.getLogger("audio_spectral_features")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _LAZY_IMPORTS: Optional[tuple[Any, Any, Any]] = None
 
 
@@ -18,6 +18,8 @@ class SpectralFeatures:
     schema_version: int
     sub_bass_envelope: tuple[float, ...]
     kick_envelope: tuple[float, ...]
+    low_mid_envelope: tuple[float, ...]
+    high_mid_envelope: tuple[float, ...]
     high_band_envelope: tuple[float, ...]
 
 
@@ -83,6 +85,12 @@ def extract_spectral_features(
             ),
             kick_envelope=_band_envelope_per_beat(
                 np, mel, freqs, frame_times_ms, beatgrid_times_ms, 60.0, 200.0
+            ),
+            low_mid_envelope=_band_envelope_per_beat(
+                np, mel, freqs, frame_times_ms, beatgrid_times_ms, 200.0, 800.0
+            ),
+            high_mid_envelope=_band_envelope_per_beat(
+                np, mel, freqs, frame_times_ms, beatgrid_times_ms, 800.0, 4000.0
             ),
             high_band_envelope=_band_envelope_per_beat(
                 np, mel, freqs, frame_times_ms, beatgrid_times_ms, 4000.0, 12000.0
