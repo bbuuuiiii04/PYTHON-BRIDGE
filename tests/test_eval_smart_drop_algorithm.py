@@ -73,7 +73,12 @@ class FakeDb:
     def get_content(self):
         return self._contents
     def get_anlz_paths(self, content):
-        return self._paths.get(content.Title, [f"/anlz/{content.Title}.DAT"])
+        paths = self._paths.get(content.Title, [f"/anlz/{content.Title}.DAT"])
+        if isinstance(paths, dict):
+            return paths
+        if not paths:
+            return {"DAT": None, "EXT": None, "2EX": None}
+        return {"DAT": paths[0], "EXT": None, "2EX": None}
     def get_cue(self, ContentID=None):
         if ContentID is None:
             return [cue for cues in self._cues.values() for cue in cues]
@@ -146,6 +151,16 @@ class LabelFromCuesTests(unittest.TestCase):
     def test_no_anlz_path_skips_silently(self):
         rows, out, err = self.run_label([content("Track A")], paths={"Track A": []}, db_cues={"Track A": [db_cue(1, 32000, "DROP")]})
         self.assertEqual((rows, out), ([], "")); self.assertNotIn("Track A", err)
+
+    def test_get_anlz_paths_dict_shape_is_consumed(self):
+        paths = {"Track A": {"DAT": "/anlz/Track A.DAT", "EXT": None, "2EX": None}}
+        rows, _out, _err = self.run_label(
+            [content("Track A")],
+            paths=paths,
+            db_cues={"Track A": [db_cue(1, 32000, "DROP")]},
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["drops"][0]["correct_beat"], 64)
 
     def test_per_track_failure_is_isolated(self):
         contents = [content("Bad Track", 1), content("Good Track", 2)]

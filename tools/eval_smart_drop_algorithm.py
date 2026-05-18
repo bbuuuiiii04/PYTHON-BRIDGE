@@ -347,7 +347,10 @@ def _matches_title(text: str, titles: Sequence[str]) -> bool:
     return any(title.lower() in lower or ((words := [w.lower() for w in re.split(r"[\s()\[\]\-]+", title) if w]) and all(w in lower for w in words)) for title in titles)
 
 
-def _first_dat(paths: Sequence[Any]) -> Optional[str]:
+def _first_dat(paths: Any) -> Optional[str]:
+    if isinstance(paths, dict):
+        dat = paths.get("DAT")
+        return str(dat) if dat is not None else None
     return next((str(path) for path in paths or [] if str(path).upper().endswith(".DAT")), None)
 
 
