@@ -210,7 +210,6 @@ def _cmd_label_from_cues(args: argparse.Namespace) -> int:
 
 def _label_tracks(candidates: list[Any], db: Any, needle: str, args: argparse.Namespace,
                   holdouts: list[str]) -> tuple[list[dict[str, Any]], dict[str, int], list[str], list[str]]:
-    from pyrekordbox.anlz import AnlzFile  # type: ignore
     stats = {k: 0 for k in ("marked", "auto", "nowave", "manual", "orphan", "errors")}
     tracks: list[dict[str, Any]] = []; manual: list[str] = []; orphans: list[str] = []
     for content in candidates:
@@ -219,7 +218,7 @@ def _label_tracks(candidates: list[Any], db: Any, needle: str, args: argparse.Na
             anlz_path = _first_dat(db.get_anlz_paths(content))
             if not anlz_path:
                 continue
-            cues = _extract_cues(AnlzFile.parse_file(anlz_path))
+            cues = _extract_cues_from_db(db, content)
             drop_cues = [(i, c) for i, c in enumerate(cues) if needle in c["text"].lower()]
             if not drop_cues:
                 continue
@@ -260,6 +259,22 @@ def _label_tracks(candidates: list[Any], db: Any, needle: str, args: argparse.Na
             orphans.append(f'{_yaml_scalar(title)} cue@beat {cue_beat}: user-marked but no RB drop candidate')
         tracks.append({"anlz_path": anlz_path, "audio_path": content.FolderPath or "", "title": title, "split": "holdout" if _matches_title(title, holdouts) else args.split, "drops": rows})
     return tracks, stats, manual, orphans
+
+
+def _extract_cues_from_db(db: Any, content: Any) -> list[dict[str, Any]]:
+    try:
+        rows = db.get_cue(ContentID=content.ID)
+    except TypeError:
+        rows = [c for c in db.get_cue() if getattr(c, "ContentID", None) == content.ID]
+    cues: list[dict[str, Any]] = []
+    for row in rows:
+        in_msec = getattr(row, "InMsec", None)
+        if in_msec is None or in_msec < 0:
+            continue
+        cues.append({"ms": int(in_msec),
+                     "text": str(getattr(row, "Comment", "") or ""),
+                     "hot": 1 if getattr(row, "is_hot_cue", False) else 0})
+    return cues
 
 
 def _extract_cues(anlz: Any) -> list[dict[str, Any]]:

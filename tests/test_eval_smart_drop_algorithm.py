@@ -68,12 +68,19 @@ class EvalSmartDropAlgorithmTests(unittest.TestCase):
 
 
 class FakeDb:
-    def __init__(self, contents, paths=None):
-        self._contents = contents; self._paths = paths or {}
+    def __init__(self, contents, paths=None, cues_by_content=None):
+        self._contents = contents; self._paths = paths or {}; self._cues = cues_by_content or {}
     def get_content(self):
         return self._contents
     def get_anlz_paths(self, content):
         return self._paths.get(content.Title, [f"/anlz/{content.Title}.DAT"])
+    def get_cue(self, ContentID=None):
+        if ContentID is None:
+            return [cue for cues in self._cues.values() for cue in cues]
+        cues = self._cues.get(ContentID, [])
+        if isinstance(cues, Exception):
+            raise cues
+        return cues
     def close(self):
         pass
 
@@ -87,65 +94,65 @@ class FakeAnlz:
 def cue(ms, comment="", hot=0):
     return SimpleNamespace(time=ms, comment=comment, hot_cue=hot)
 
-def content(title):
-    return SimpleNamespace(Title=title, FolderPath=f"/music/{title}.wav")
+def db_cue(content_id, ms, comment="", hot=False):
+    return SimpleNamespace(ContentID=content_id, InMsec=ms, Comment=comment,
+                           is_hot_cue=hot, is_memory_cue=not hot)
+
+def content(title, id=1):
+    return SimpleNamespace(ID=id, Title=title, FolderPath=f"/music/{title}.wav")
 
 def anlz_data(drops=(64,), beats=120):
     return SimpleNamespace(drop_beat_indices=list(drops),
                            waveform_context=SimpleNamespace(beatgrid_times_ms=[i * 500.0 for i in range(beats)]))
 
 class LabelFromCuesTests(unittest.TestCase):
-    def run_label(self, contents, pco2=(), pcob=(), drops=(64,), paths=None, extra=()):
-        db = FakeDb(contents, paths); out, err = io.StringIO(), io.StringIO()
+    def run_label(self, contents, pco2=(), pcob=(), drops=(64,), paths=None, extra=(), db_cues=None):
+        cue_map = {next(c.ID for c in contents if c.Title == title): cues
+                   for title, cues in (db_cues or {}).items()}
+        db = FakeDb(contents, paths, cue_map); out, err = io.StringIO(), io.StringIO()
         with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
-             patch("pyrekordbox.anlz.AnlzFile.parse_file", return_value=FakeAnlz(pco2, pcob)), \
              patch.object(eval_tool, "read_anlz_drops", return_value=anlz_data(drops)), \
              contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             self.assertEqual(eval_tool.main(["label-from-cues", "--exclude-scripted", "", *extra]), 0)
         return eval_tool._parse_simple_yaml_corpus(out.getvalue()), out.getvalue(), err.getvalue()
 
     def test_includes_track_with_drop_cue(self):
-        self.assertEqual(self.run_label([content("Track A")], [cue(32000, "DROP")])[0][0]["drops"][0]["correct_beat"], 64)
+        self.assertEqual(self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "DROP")]})[0][0]["drops"][0]["correct_beat"], 64)
 
     def test_excludes_track_without_drop_cue(self):
-        rows, out, _err = self.run_label([content("Track A")], [cue(32000, "break")])
+        rows, out, _err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "break")]})
         self.assertEqual((rows, out), ([], ""))
 
     def test_excludes_scripted_titles(self):
         with tempfile.NamedTemporaryFile("w") as tl:
             tl.write('track_id: "Track A"\naddress: /bridge/track_loaded\nvalue: 2\n')
             tl.flush()
-            rows, _out, err = self.run_label([content("Track A")], [cue(32000, "DROP")], extra=["--exclude-scripted", tl.name])
+            rows, _out, err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "DROP")]}, extra=["--exclude-scripted", tl.name])
         self.assertEqual(rows, []); self.assertIn("excluded 1 scripted tracks", err)
 
     def test_prefers_drop_commented_cue_over_closer_unmarked_cue(self):
-        rows, _out, _err = self.run_label([content("Track A")], [cue(32000, ""), cue(32500, "DROP")])
+        rows, _out, _err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, ""), db_cue(1, 32500, "DROP")]})
         self.assertEqual(rows[0]["drops"][0]["correct_beat"], 65)
 
     def test_no_cue_in_window_emits_null_correct_beat(self):
-        rows, _out, _err = self.run_label([content("Track A")], [cue(40000, "DROP")])
+        rows, _out, _err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 40000, "DROP")]})
         drops = rows[0]["drops"]
         self.assertIsNone(drops[0]["correct_beat"]); self.assertIn("manual fill", drops[0]["notes"])
         self.assertIsNone(drops[1]["rekordbox_beat"]); self.assertEqual(drops[1]["correct_beat"], 80)
 
     def test_hot_cue_with_drop_comment_counts(self):
-        self.assertEqual(self.run_label([content("Track A")], [cue(32000, "DROP", 1)])[0][0]["drops"][0]["correct_beat"], 64)
+        self.assertEqual(self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "DROP", hot=True)]})[0][0]["drops"][0]["correct_beat"], 64)
 
     def test_no_anlz_path_skips_silently(self):
-        rows, out, err = self.run_label([content("Track A")], [cue(32000, "DROP")], paths={"Track A": []})
+        rows, out, err = self.run_label([content("Track A")], paths={"Track A": []}, db_cues={"Track A": [db_cue(1, 32000, "DROP")]})
         self.assertEqual((rows, out), ([], "")); self.assertNotIn("Track A", err)
 
     def test_per_track_failure_is_isolated(self):
-        contents = [content("Bad Track"), content("Good Track")]
-        calls = {"n": 0}
-        def parse_side_effect(_path):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise RuntimeError("corrupt header")
-            return FakeAnlz(pco2=[cue(32000, "DROP")])
+        contents = [content("Bad Track", 1), content("Good Track", 2)]
+        db = FakeDb(contents, cues_by_content={1: RuntimeError("corrupt header"),
+                                               2: [db_cue(2, 32000, "DROP")]})
         out, err = io.StringIO(), io.StringIO()
-        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=FakeDb(contents)), \
-             patch("pyrekordbox.anlz.AnlzFile.parse_file", side_effect=parse_side_effect), \
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
              patch.object(eval_tool, "read_anlz_drops", return_value=anlz_data((64,))), \
              contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             self.assertEqual(eval_tool.main(["label-from-cues", "--exclude-scripted", ""]), 0)
@@ -158,20 +165,20 @@ class LabelFromCuesTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile("w") as f:
             f.write("Track A\n")
             f.flush()
-            rows, _out, _err = self.run_label([content("Track A")], [cue(32000, "DROP")], extra=["--holdout-titles", f.name])
+            rows, _out, _err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "DROP")]}, extra=["--holdout-titles", f.name])
         self.assertEqual(rows[0]["split"], "holdout")
 
     def test_output_to_file_writes_yaml(self):
         with tempfile.TemporaryDirectory() as td:
             path = str(Path(td) / "foo.yaml")
-            rows, out, _err = self.run_label([content("Track A")], [cue(32000, "DROP")], extra=["--output", path])
+            rows, out, _err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "DROP")]}, extra=["--output", path])
             self.assertEqual((rows, out), ([], "")); self.assertIn('title: "Track A"', Path(path).read_text())
 
     def test_pcob_legacy_cue_with_no_comment_does_not_trigger_inclusion(self):
-        self.assertEqual(self.run_label([content("Track A")], [], [cue(32000)])[0], [])
+        self.assertEqual(self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "")]})[0], [])
 
     def test_missing_tl_playlist_file_falls_through_with_warning(self):
-        rows, _out, err = self.run_label([content("Track A")], [cue(32000, "DROP")], extra=["--exclude-scripted", "/tmp/no-such-tl.yaml"])
+        rows, _out, err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "DROP")]}, extra=["--exclude-scripted", "/tmp/no-such-tl.yaml"])
         self.assertEqual(rows[0]["title"], "Track A"); self.assertIn("warning: scripted playlist missing", err)
 
 
