@@ -39,13 +39,15 @@ MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
     "onset_score": 0.000000,
     "broad_onset_score": 0.000000,
     "post_lift": 0.000000,
-    "pre_valley_depth": 0.026953,
-    "downbeat_alignment": 0.139651,
-    "distance_penalty": 0.008416,
+    "pre_valley_depth": 0.026830,
+    "downbeat_alignment": 0.138414,
+    "distance_penalty": 0.006134,
     "kick_pattern_onset": 0.000000,
     "bass_pattern_onset": 0.000000,
-    "phrase_energy_step": 0.047577,
-    "spectral_balance_shift": 0.393241,
+    "low_mid_pattern_onset": 0.000000,
+    "high_mid_pattern_onset": 0.261845,
+    "phrase_energy_step": 0.033573,
+    "spectral_balance_shift": 0.407899,
 }
 
 MultiFeatureScorer = Callable[
@@ -522,6 +524,8 @@ def _multi_feature_breakdown(
     features.update({
         "kick_pattern_onset": spectral_score(_kick_pattern_onset),
         "bass_pattern_onset": spectral_score(_bass_pattern_onset),
+        "low_mid_pattern_onset": spectral_score(_low_mid_pattern_onset),
+        "high_mid_pattern_onset": spectral_score(_high_mid_pattern_onset),
         "phrase_energy_step": spectral_score(_phrase_energy_step),
         "spectral_balance_shift": spectral_score(_spectral_balance_shift),
     })
@@ -575,6 +579,14 @@ def _kick_pattern_onset(beat: int, spectral_features: Any) -> float:
 
 def _bass_pattern_onset(beat: int, spectral_features: Any) -> float:
     return _pattern_onset(beat, _spectral_envelope(spectral_features, "sub_bass_envelope"), window=8)
+
+
+def _low_mid_pattern_onset(beat: int, spectral_features: Any) -> float:
+    return _pattern_onset(beat, _spectral_envelope(spectral_features, "low_mid_envelope"), window=8)
+
+
+def _high_mid_pattern_onset(beat: int, spectral_features: Any) -> float:
+    return _pattern_onset(beat, _spectral_envelope(spectral_features, "high_mid_envelope"), window=8)
 
 
 def _phrase_energy_step(beat: int, spectral_features: Any) -> float:

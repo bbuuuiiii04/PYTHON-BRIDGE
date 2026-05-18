@@ -55,6 +55,8 @@ class AudioSpectralFeatureTests(unittest.TestCase):
         self.assertIsInstance(features, SpectralFeatures)
         self.assertEqual(len(features.sub_bass_envelope), 4)
         self.assertEqual(len(features.kick_envelope), 4)
+        self.assertEqual(len(features.low_mid_envelope), 4)
+        self.assertEqual(len(features.high_mid_envelope), 4)
         self.assertEqual(len(features.high_band_envelope), 4)
 
     def test_extract_spectral_features_normalizes_band_envelopes(self) -> None:

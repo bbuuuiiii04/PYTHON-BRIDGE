@@ -18,6 +18,8 @@ def _features() -> SpectralFeatures:
         schema_version=SCHEMA_VERSION,
         sub_bass_envelope=(0.1, 0.2, 0.3),
         kick_envelope=(0.4, 0.5, 0.6),
+        low_mid_envelope=(0.2, 0.3, 0.4),
+        high_mid_envelope=(0.5, 0.6, 0.7),
         high_band_envelope=(0.7, 0.8, 0.9),
     )
 

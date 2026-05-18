@@ -41,6 +41,8 @@ FEATURE_NAMES = [
     "distance_penalty",
     "kick_pattern_onset",
     "bass_pattern_onset",
+    "low_mid_pattern_onset",
+    "high_mid_pattern_onset",
     "phrase_energy_step",
     "spectral_balance_shift",
 ]
@@ -523,6 +525,12 @@ def _track_spectral_features(
                 ),
                 kick_envelope=tuple(
                     float(v) for v in _series_values(payload["kick_envelope"])
+                ),
+                low_mid_envelope=tuple(
+                    float(v) for v in _series_values(payload["low_mid_envelope"])
+                ),
+                high_mid_envelope=tuple(
+                    float(v) for v in _series_values(payload["high_mid_envelope"])
                 ),
                 high_band_envelope=tuple(
                     float(v) for v in _series_values(payload["high_band_envelope"])
