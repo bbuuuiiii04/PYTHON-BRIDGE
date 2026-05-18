@@ -38,18 +38,18 @@ _PWV3_MS_PER_ENTRY_FALLBACK = 6.7
 MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
     "onset_score": 0.000000,
     "broad_onset_score": 0.000000,
-    "post_lift": 0.000000,
-    "pre_valley_depth": 0.026830,
-    "downbeat_alignment": 0.138414,
-    "distance_penalty": 0.006134,
-    "kick_pattern_onset": 0.000000,
+    "post_lift": 0.018090,
+    "pre_valley_depth": 0.004451,
+    "downbeat_alignment": 0.085715,
+    "distance_penalty": 0.019825,
+    "kick_pattern_onset": 0.352444,
     "bass_pattern_onset": 0.000000,
     "low_mid_pattern_onset": 0.000000,
-    "high_mid_pattern_onset": 0.261845,
-    "phrase_energy_step": 0.033573,
-    "spectral_balance_shift": 0.407899,
-    "centroid_drop": 1.000000,
-    "spectral_flux_onset": 1.000000,
+    "high_mid_pattern_onset": 1.023799,
+    "phrase_energy_step": 0.121384,
+    "spectral_balance_shift": 0.000000,
+    "centroid_drop": 0.663423,
+    "spectral_flux_onset": 0.251814,
 }
 
 MultiFeatureScorer = Callable[
