@@ -36,15 +36,16 @@ _MAX_BEATGRID_INTERVAL_MS = 3000.0
 _PWV3_MS_PER_ENTRY_FALLBACK = 6.7
 
 MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
-    "onset_score": 0.5,
-    "broad_onset_score": 0.3,
-    "post_lift": 0.3,
-    "pre_valley_depth": 0.5,
-    "downbeat_alignment": 0.5,
-    "distance_penalty": 0.5,
-    "sub_bass_onset": 1.0,
-    "kick_attack": 1.0,
-    "pre_drop_filter_sweep": 0.6,
+    "onset_score": 0.000000,
+    "broad_onset_score": 0.000000,
+    "post_lift": 0.000000,
+    "pre_valley_depth": 0.026953,
+    "downbeat_alignment": 0.139651,
+    "distance_penalty": 0.008416,
+    "kick_pattern_onset": 0.000000,
+    "bass_pattern_onset": 0.000000,
+    "phrase_energy_step": 0.047577,
+    "spectral_balance_shift": 0.393241,
 }
 
 MultiFeatureScorer = Callable[
@@ -515,18 +516,15 @@ def _multi_feature_breakdown(
         "downbeat_alignment": _downbeat_alignment(beat),
         "distance_penalty": _distance_penalty(beat, anlz_beat),
     }
-    if spectral_features is None:
-        features.update({
-            "sub_bass_onset": 0.0,
-            "kick_attack": 0.0,
-            "pre_drop_filter_sweep": 0.0,
-        })
-    else:
-        features.update({
-            "sub_bass_onset": _sub_bass_onset(beat, spectral_features),
-            "kick_attack": _kick_attack(beat, spectral_features),
-            "pre_drop_filter_sweep": _pre_drop_filter_sweep(beat, spectral_features),
-        })
+    def spectral_score(fn: Callable[[int, Any], float]) -> float:
+        return 0.0 if spectral_features is None else fn(beat, spectral_features)
+
+    features.update({
+        "kick_pattern_onset": spectral_score(_kick_pattern_onset),
+        "bass_pattern_onset": spectral_score(_bass_pattern_onset),
+        "phrase_energy_step": spectral_score(_phrase_energy_step),
+        "spectral_balance_shift": spectral_score(_spectral_balance_shift),
+    })
     return features
 
 
@@ -571,42 +569,57 @@ def _make_multi_feature_scorer(weights: dict[str, float]) -> MultiFeatureScorer:
     return scorer
 
 
-def _sub_bass_onset(beat: int, spectral_features: Any) -> float:
-    return _spectral_onset(beat, _spectral_envelope(spectral_features, "sub_bass_envelope"))
+def _kick_pattern_onset(beat: int, spectral_features: Any) -> float:
+    return _pattern_onset(beat, _spectral_envelope(spectral_features, "kick_envelope"), window=8)
 
 
-def _kick_attack(beat: int, spectral_features: Any) -> float:
-    envelope = _spectral_envelope(spectral_features, "kick_envelope")
+def _bass_pattern_onset(beat: int, spectral_features: Any) -> float:
+    return _pattern_onset(beat, _spectral_envelope(spectral_features, "sub_bass_envelope"), window=8)
+
+
+def _phrase_energy_step(beat: int, spectral_features: Any) -> float:
+    kick, bass, high = _spectral_triplet(spectral_features)
+    if not kick or not bass or not high:
+        return 0.0
+    n = min(len(kick), len(bass), len(high))
+    combined = [kick[i] + bass[i] + high[i] for i in range(n)]
+    return _pattern_onset(beat, combined, window=8)
+
+
+def _spectral_balance_shift(beat: int, spectral_features: Any) -> float:
+    kick, bass, high = _spectral_triplet(spectral_features)
+    if not kick or not bass or not high:
+        return 0.0
+    n = min(len(kick), len(bass), len(high))
+    before_start, after_end = max(0, beat - 8), min(n, beat + 8)
+    if before_start >= beat or after_end <= beat:
+        return 0.0
+
+    def lows_ratio(start: int, end: int) -> float:
+        lows = sum(kick[i] + bass[i] for i in range(start, end))
+        highs = sum(high[i] for i in range(start, end)) + 1e-6
+        return lows / (lows + highs)
+
+    return max(0.0, lows_ratio(beat, after_end) - lows_ratio(before_start, beat))
+
+
+def _pattern_onset(beat: int, envelope: list[float], window: int = 8) -> float:
     if not envelope:
         return 0.0
-    best = 0.0
-    for index in range(max(1, beat), min(len(envelope), beat + 5)):
-        prior = envelope[index - 1]
-        current = envelope[index]
-        following = envelope[index + 1] if index + 1 < len(envelope) else current
-        best = max(best, current - max(prior, following))
-    return max(0.0, best)
+    after_end, before_start = min(len(envelope), beat + window), max(0, beat - window)
+    if after_end <= beat or before_start >= beat:
+        return 0.0
+    after = sum(envelope[beat:after_end]) / (after_end - beat)
+    before = sum(envelope[before_start:beat]) / (beat - before_start)
+    return max(0.0, after - before)
 
 
-def _pre_drop_filter_sweep(beat: int, spectral_features: Any) -> float:
-    envelope = _spectral_envelope(spectral_features, "high_band_envelope")
-    if not envelope or beat < 4:
-        return 0.0
-    early = envelope[max(0, beat - 4):max(0, beat - 2)]
-    late = envelope[max(0, beat - 2):beat]
-    if not early or not late:
-        return 0.0
-    return max(0.0, (sum(early) / len(early)) - (sum(late) / len(late)))
-
-
-def _spectral_onset(beat: int, envelope: list[float]) -> float:
-    if not envelope:
-        return 0.0
-    start = max(0, beat)
-    stop = min(len(envelope), beat + 5)
-    if stop - start < 2:
-        return 0.0
-    return max(0.0, max(envelope[i + 1] - envelope[i] for i in range(start, stop - 1)))
+def _spectral_triplet(spectral_features: Any) -> tuple[list[float], list[float], list[float]]:
+    return (
+        _spectral_envelope(spectral_features, "kick_envelope"),
+        _spectral_envelope(spectral_features, "sub_bass_envelope"),
+        _spectral_envelope(spectral_features, "high_band_envelope"),
+    )
 
 
 def _spectral_envelope(spectral_features: Any, attr: str) -> list[float]:
