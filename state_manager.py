@@ -64,6 +64,16 @@ from .logging_manager import get_logging_manager
 from .filepath_resolver import has_soundswitch_scripted_id
 from .session_recorder import SessionRecorder
 from .sound_switch_engine import SoundSwitchEngine
+from . import spectral_cache
+from .audio_spectral_features import extract_spectral_features
+from .anlz_reader import (
+    MULTI_FEATURE_WEIGHTS_V2,
+    TrackAnlzData,
+    _calculate_smart_drop_energy_shadow,
+    _duration_from_beatgrid,
+    _make_multi_feature_scorer,
+    read_anlz_drops,
+)
 from .autoloop_controller import (
     AutoloopController,
     AutoloopTickContext,
@@ -92,11 +102,59 @@ SMART_DROP_ENV = "RBSS_SMART_DROP"
 SMART_BREAKDOWN_ENV = "RBSS_SMART_BREAKDOWN"
 PHRASE_ANCHOR_ENV = "RBSS_PHRASE_ANCHOR"
 SMART_REARM_EXPERIMENT_ENV = "RBSS_SMART_REARM_EXPERIMENT"
+SPECTRAL_ENABLE_ENV = "RBSS_SPECTRAL_ENABLE"
 SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
 STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 _PROFILE_SUMMARY_INTERVAL_S = 10.0
 _PROFILE_WINDOW = 2048
+
+
+def _read_runtime_anlz_data(
+    anlz_path: str,
+    *,
+    audio_filepath: str = "",
+    spectral_enabled: bool = False,
+) -> TrackAnlzData:
+    data = read_anlz_drops(anlz_path)
+    if not spectral_enabled:
+        return data
+    ctx = data.waveform_context
+    if ctx is None or not data.drop_beat_indices:
+        return data
+
+    beatgrid_times_ms = list(ctx.beatgrid_times_ms)
+    features = _runtime_spectral_features(audio_filepath, beatgrid_times_ms)
+    data.energy_shadow = _calculate_smart_drop_energy_shadow(
+        list(ctx.heights),
+        _duration_from_beatgrid(beatgrid_times_ms),
+        beatgrid_times_ms,
+        data.drop_beat_indices,
+        # TODO(M4): hoist the v2 runtime scorer if this path becomes hot enough.
+        scorer=_make_multi_feature_scorer(MULTI_FEATURE_WEIGHTS_V2),
+        spectral_features=features,
+    )
+    return data
+
+
+def _runtime_spectral_features(audio_filepath: str, beatgrid_times_ms: list[float]):
+    if not audio_filepath:
+        return None
+    cached = spectral_cache.get_cached(audio_filepath, beatgrid_times_ms)
+    if cached is not None:
+        return cached
+    features = extract_spectral_features(audio_filepath, beatgrid_times_ms)
+    if features is not None:
+        spectral_cache.put_cached(audio_filepath, beatgrid_times_ms, features)
+    return features
+
+
+def _energy_shadow_priority(shadows: list[SmartDropEnergyShadow]) -> int:
+    if any(item.source == "v2_spectral" for item in shadows):
+        return 2
+    if any(item.source == "v2_waveform" for item in shadows):
+        return 1
+    return 0
 
 
 class _RollingDurations:
@@ -243,6 +301,10 @@ class StateManager:
             self._smart_rearm_experiment
             and _os.environ.get(PHRASE_ANCHOR_ENV, "1") != "0"
         )
+        self._spectral_enable = (
+            self._smart_rearm_experiment
+            and _os.environ.get(SPECTRAL_ENABLE_ENV, "0") == "1"
+        )
         self._stop  = threading.Event()
 
         # Per-deck state (written only by this thread after start())
@@ -270,6 +332,7 @@ class StateManager:
         # ANLZ path keyed by bridge deck: populated by ANLZ_PATH event,
         # consumed by _on_track_loaded to skip lsof
         self._pending_anlz_path: dict[int, str] = {}
+        self._loaded_anlz_path: dict[int, tuple[str, int]] = {}
 
         # Guards stale lsof results: each TRACK_LOADED increments this per deck
         # FilepathResolver echoes load_gen back in FILEPATH_RESOLVED
@@ -609,53 +672,85 @@ class StateManager:
             if d_obj is not None:
                 gen = ev.payload.get("load_gen", -1)
                 if gen == d_obj.load_gen:
-                    self._clear_phrase_segment_cache(ev.deck)
+                    meta = d_obj.meta
+                    event_source = ev.payload.get("source", "anlz")
                     raw_drops = list(ev.payload.get("drop_beat_indices", []))
                     raw_breakdowns = list(ev.payload.get("breakdown_beat_indices", []))
                     raw_buildups = list(ev.payload.get("buildup_beat_indices", []))
-                    total_beats = len(d_obj.meta.beatgrid_times_ms)
-                    
-                    d_obj.meta.anlz_drops = raw_drops
-                    d_obj.meta.smart_drops = select_smart_drops(
-                        raw_drops,
+                    raw_mood = ev.payload.get("mood", 0)
+                    total_beats = len(meta.beatgrid_times_ms)
+
+                    existing_markers_empty = not any((
+                        meta.anlz_drops, meta.anlz_breakdowns,
+                        meta.anlz_buildups, meta.anlz_mood,
+                    ))
+                    can_update = event_source == "anlz" or existing_markers_empty
+                    markers_changed = can_update and (
+                        raw_drops != meta.anlz_drops
+                        or raw_breakdowns != meta.anlz_breakdowns
+                        or raw_buildups != meta.anlz_buildups
+                        or raw_mood != meta.anlz_mood
+                    )
+
+                    next_drops = raw_drops if can_update else meta.anlz_drops
+                    next_smart_drops = select_smart_drops(
+                        next_drops,
                         total_beats=total_beats,
                     )
-                    
-                    d_obj.meta.anlz_breakdowns = raw_breakdowns
-                    d_obj.meta.smart_breakdowns = select_smart_breakdowns(
-                        raw_breakdowns,
+                    next_breakdowns = raw_breakdowns if can_update else meta.anlz_breakdowns
+                    next_smart_breakdowns = select_smart_breakdowns(
+                        next_breakdowns,
                         total_beats=total_beats,
                     )
-                    
-                    d_obj.meta.anlz_buildups = raw_buildups
-                    d_obj.meta.anlz_mood = ev.payload.get("mood", 0)
-                    
-                    selected_set = set(d_obj.meta.smart_drops)
-                    shadow = [
+
+                    selected_set = set(next_smart_drops)
+                    new_shadow = [
                         item for item in ev.payload.get("energy_shadow", [])
                         if isinstance(item, SmartDropEnergyShadow)
                         and item.anlz_beat in selected_set
                     ]
-                    d_obj.meta.smart_drop_energy_shadow = shadow
-                    log.info("[SM] smart-transition-select  deck=%d  drops=%d  smart_drops=%d  bd=%d  smart_bd=%d  up=%d",
-                             ev.deck,
-                             len(d_obj.meta.anlz_drops),
-                             len(d_obj.meta.smart_drops),
-                             len(d_obj.meta.anlz_breakdowns),
-                             len(d_obj.meta.smart_breakdowns),
-                             len(d_obj.meta.anlz_buildups))
-                    for item in shadow:
-                        log.info(
-                            "[SM] smart-drop-energy-shadow  deck=%d  "
-                            "anlz_elapsed=%s  suggested_elapsed=%s  "
-                            "lift_anlz=%.2f  lift_suggested=%.2f  confidence=%.2f",
-                            ev.deck,
-                            bf.elapsed(item.anlz_elapsed_ms),
-                            bf.elapsed(item.suggested_elapsed_ms),
-                            item.lift_at_anlz,
-                            item.lift_at_suggested,
-                            item.confidence,
-                        )
+                    if (
+                        meta.smart_drop_energy_shadow
+                        and _energy_shadow_priority(meta.smart_drop_energy_shadow)
+                        > _energy_shadow_priority(new_shadow)
+                    ):
+                        new_shadow = [
+                            item for item in meta.smart_drop_energy_shadow
+                            if item.anlz_beat in selected_set
+                        ]
+                    shadow_changed = new_shadow != meta.smart_drop_energy_shadow
+
+                    if markers_changed:
+                        self._clear_phrase_segment_cache(ev.deck)
+                        meta.anlz_drops = raw_drops
+                        meta.smart_drops = next_smart_drops
+                        meta.anlz_breakdowns = raw_breakdowns
+                        meta.smart_breakdowns = next_smart_breakdowns
+                        meta.anlz_buildups = raw_buildups
+                        meta.anlz_mood = raw_mood
+                    meta.smart_drop_energy_shadow = new_shadow
+                    if markers_changed or shadow_changed:
+                        log.info("[SM] smart-transition-select  deck=%d  drops=%d  smart_drops=%d  bd=%d  smart_bd=%d  up=%d  source=%s",
+                                 ev.deck,
+                                 len(meta.anlz_drops),
+                                 len(meta.smart_drops),
+                                 len(meta.anlz_breakdowns),
+                                 len(meta.smart_breakdowns),
+                                 len(meta.anlz_buildups),
+                                 event_source)
+                        for item in new_shadow:
+                            log.info(
+                                "[SM] smart-drop-energy-shadow  deck=%d  "
+                                "anlz_elapsed=%s  suggested_elapsed=%s  "
+                                "lift_anlz=%.2f  lift_suggested=%.2f  confidence=%.2f  source=%s",
+                                ev.deck,
+                                bf.elapsed(item.anlz_elapsed_ms),
+                                bf.elapsed(item.suggested_elapsed_ms),
+                                item.lift_at_anlz,
+                                item.lift_at_suggested,
+                                item.confidence,
+                                item.source,
+                            )
                 else:
                     log.debug("[SM] anlz-drops-stale  deck=%d  gen=%d  current=%d",
                               ev.deck, gen, d_obj.load_gen)
@@ -826,6 +921,7 @@ class StateManager:
         d.meta.clear()
         d.scripted_id = 0
         d.load_gen += 1
+        self._loaded_anlz_path.pop(deck, None)
         if deck == self._os.active_deck:
             self._clear_smart_rearm_state()
             self._autoloop.clear_arm_phrase_lock()
@@ -853,39 +949,8 @@ class StateManager:
             log.debug("track load: deck %d using ANLZ path for resolution", deck)
             self._resolver.resolve_by_anlz(deck, d.load_gen, anlz_path, trace_id=trace_id)
             if self._smart_rearm_experiment:
-                eq = self._eq
-                load_gen = d.load_gen
-
-                def _anlz_worker(path: str, bridge_deck: int, gen: int) -> None:
-                    try:
-                        from .anlz_reader import read_anlz_drops
-                        result = read_anlz_drops(path)
-                    except Exception:
-                        log.debug("[SM] anlz-worker-error", exc_info=True)
-                        return
-                    try:
-                        eq.put_nowait(BridgeEvent(
-                            kind=Ev.ANLZ_DATA,
-                            deck=bridge_deck,
-                            payload={
-                                "drop_beat_indices": result.drop_beat_indices,
-                                "breakdown_beat_indices": result.breakdown_beat_indices,
-                                "buildup_beat_indices": result.buildup_beat_indices,
-                                "mood": result.mood,
-                                "energy_shadow": result.energy_shadow,
-                                "load_gen": gen,
-                            },
-                            source="anlz",
-                        ))
-                    except queue.Full:
-                        log.warning("[SM] queue-full  event=anlz-data  deck=%d", bridge_deck)
-
-                threading.Thread(
-                    target=_anlz_worker,
-                    args=(anlz_path, deck, load_gen),
-                    daemon=True,
-                    name=f"anlz-drop-{deck}",
-                ).start()
+                self._loaded_anlz_path[deck] = (anlz_path, d.load_gen)
+                self._start_anlz_worker(anlz_path, deck, d.load_gen)
         else:
             other = 3 - deck
             other_path = self._deck[other].meta.filepath
@@ -894,6 +959,53 @@ class StateManager:
             self._resolver.resolve_async(deck, d.load_gen, other_path, trace_id=trace_id)
             if title:
                 self._resolver.resolve_by_title(deck, d.load_gen, title, trace_id=trace_id)
+
+    def _start_anlz_worker(
+        self,
+        anlz_path: str,
+        deck: int,
+        load_gen: int,
+        *,
+        audio_filepath: str = "",
+        spectral_enabled: bool = False,
+    ) -> None:
+        eq = self._eq
+        source = "anlz_spectral" if spectral_enabled else "anlz"
+
+        def _anlz_worker(path: str, bridge_deck: int, gen: int) -> None:
+            try:
+                result = _read_runtime_anlz_data(
+                    path,
+                    audio_filepath=audio_filepath,
+                    spectral_enabled=spectral_enabled,
+                )
+            except Exception:
+                log.debug("[SM] anlz-worker-error", exc_info=True)
+                return
+            try:
+                eq.put_nowait(BridgeEvent(
+                    kind=Ev.ANLZ_DATA,
+                    deck=bridge_deck,
+                    payload={
+                        "drop_beat_indices": result.drop_beat_indices,
+                        "breakdown_beat_indices": result.breakdown_beat_indices,
+                        "buildup_beat_indices": result.buildup_beat_indices,
+                        "mood": result.mood,
+                        "energy_shadow": result.energy_shadow,
+                        "load_gen": gen,
+                        "source": source,
+                    },
+                    source=source,
+                ))
+            except queue.Full:
+                log.warning("[SM] queue-full  event=anlz-data  deck=%d", bridge_deck)
+
+        threading.Thread(
+            target=_anlz_worker,
+            args=(anlz_path, deck, load_gen),
+            daemon=True,
+            name=f"{source}-drop-{deck}",
+        ).start()
 
     def attach_resolver(self, resolver) -> None:  # type: ignore[type-arg]
         self._resolver = resolver
@@ -944,6 +1056,18 @@ class StateManager:
                 log.info("[SM][SHADOW] scripted-clear  deck=%d  reason=no-ssid  latency_ms=%d",
                          deck, int(load_delta_ms))
         LOG.stats.record_transition(deck, "filepath_resolved")
+        if self._spectral_enable:
+            loaded_anlz = self._loaded_anlz_path.pop(deck, None)
+            if loaded_anlz is not None:
+                anlz_path, anlz_gen = loaded_anlz
+                if anlz_gen == d.load_gen:
+                    self._start_anlz_worker(
+                        anlz_path,
+                        deck,
+                        d.load_gen,
+                        audio_filepath=meta.filepath,
+                        spectral_enabled=True,
+                    )
         if _os.environ.get("RBSS_SCRIPTED_DIRECT") != "0":
             ssid = meta.soundswitch_id
             filepath = meta.filepath
