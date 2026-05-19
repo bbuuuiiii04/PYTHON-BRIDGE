@@ -1,5 +1,7 @@
 import contextlib
 import io
+import json
+import math
 import sys
 import tempfile
 import unittest
@@ -21,6 +23,33 @@ FIXTURE = (
 
 
 class EvalSmartDropAlgorithmTests(unittest.TestCase):
+    def _require_scipy(self) -> None:
+        try:
+            import scipy  # noqa: F401
+        except ImportError:
+            self.skipTest("scipy not installed")
+
+    def _run_stdout(self, argv: list[str]) -> tuple[int, str]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = eval_tool.main(argv)
+        return code, out.getvalue()
+
+    def _tuned_weights(self, text: str) -> dict[str, float]:
+        weights: dict[str, float] = {}
+        in_block = False
+        for raw in text.splitlines():
+            line = raw.strip()
+            if line == "MULTI_FEATURE_WEIGHTS_V2 = {":
+                in_block = True
+                continue
+            if in_block and line == "}":
+                break
+            if in_block:
+                name, value = line.rstrip(",").split(":", 1)
+                weights[name.strip().strip('"')] = float(value)
+        return weights
+
     def test_evaluate_runs_against_synthetic_corpus(self) -> None:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -53,10 +82,7 @@ class EvalSmartDropAlgorithmTests(unittest.TestCase):
         self.assertIn("drops:", out.getvalue())
 
     def test_tune_runs_when_analysis_extra_is_available(self) -> None:
-        try:
-            import scipy  # noqa: F401
-        except ImportError:
-            self.skipTest("scipy not installed")
+        self._require_scipy()
 
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -65,6 +91,145 @@ class EvalSmartDropAlgorithmTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("MULTI_FEATURE_WEIGHTS_V2", out.getvalue())
         self.assertIn("condition number", out.getvalue())
+
+    def test_tune_rank_loss_runs_on_synthetic_corpus(self) -> None:
+        self._require_scipy()
+
+        code, text = self._run_stdout(["tune", "--corpus", str(FIXTURE), "--objective", "rank_loss"])
+
+        self.assertEqual(code, 0)
+        self.assertIn("MULTI_FEATURE_WEIGHTS_V2 = {", text)
+        weights = self._tuned_weights(text)
+        self.assertEqual(set(weights), set(eval_tool.FEATURE_NAMES))
+        self.assertTrue(all(math.isfinite(value) and value >= 0.0 for value in weights.values()))
+        self.assertTrue(any(value > 0.0 for value in weights.values()))
+
+    def test_tune_rank_loss_respects_anchor(self) -> None:
+        self._require_scipy()
+
+        code, text = self._run_stdout([
+            "tune",
+            "--corpus",
+            str(FIXTURE),
+            "--objective",
+            "rank_loss",
+            "--anchor",
+            "centroid_drop=1.0",
+            "--anchor-l2",
+            "100.0",
+        ])
+
+        self.assertEqual(code, 0)
+        self.assertAlmostEqual(self._tuned_weights(text)["centroid_drop"], 1.0, delta=0.1)
+
+    def test_tune_rank_loss_respects_l1(self) -> None:
+        self._require_scipy()
+
+        code, text = self._run_stdout([
+            "tune",
+            "--corpus",
+            str(FIXTURE),
+            "--objective",
+            "rank_loss",
+            "--l1",
+            "10.0",
+        ])
+
+        self.assertEqual(code, 0)
+        weights = self._tuned_weights(text)
+        zeroes = [value for value in weights.values() if value <= 1e-9]
+        self.assertGreaterEqual(len(zeroes), len(eval_tool.FEATURE_NAMES) // 2)
+
+    def test_bootstrap_ci_deterministic(self) -> None:
+        argv = [
+            "bootstrap-ci",
+            "--corpus",
+            str(FIXTURE),
+            "--weights",
+            "shipped",
+            "--seed",
+            "0",
+            "--n-iter",
+            "50",
+        ]
+
+        self.assertEqual(self._run_stdout(argv), self._run_stdout(argv))
+
+    def test_bootstrap_ci_paired_ci_includes_zero_for_identical_weights(self) -> None:
+        code, text = self._run_stdout([
+            "bootstrap-ci",
+            "--corpus",
+            str(FIXTURE),
+            "--weights",
+            "shipped",
+            "--weights-b",
+            "shipped",
+            "--seed",
+            "0",
+            "--n-iter",
+            "50",
+        ])
+
+        self.assertEqual(code, 0)
+        line = next(line for line in text.splitlines() if "paired diff (b - a) 95% CI" in line)
+        low, high = [float(value.strip().removesuffix("pp")) for value in line.split("[", 1)[1].split("]", 1)[0].split(",")]
+        self.assertLessEqual(low, 0.0)
+        self.assertGreaterEqual(high, 0.0)
+
+    def test_reshuffle_deterministic(self) -> None:
+        argv = [
+            "reshuffle",
+            "--corpus",
+            str(FIXTURE),
+            "--weights-a",
+            "shipped",
+            "--weights-b",
+            "shipped",
+            "--seed",
+            "0",
+            "--n-splits",
+            "3",
+        ]
+
+        self.assertEqual(self._run_stdout(argv), self._run_stdout(argv))
+
+    def test_reshuffle_zero_diff_for_identical_weights(self) -> None:
+        code, text = self._run_stdout([
+            "reshuffle",
+            "--corpus",
+            str(FIXTURE),
+            "--weights-a",
+            "shipped",
+            "--weights-b",
+            "shipped",
+            "--seed",
+            "0",
+            "--n-splits",
+            "3",
+        ])
+
+        self.assertEqual(code, 0)
+        self.assertIn("ties:           3/3", text)
+        self.assertIn("mean diff:      +0.0pp (b - a)", text)
+
+    def test_evaluate_with_weights_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            weights_path = Path(td) / "weights.json"
+            weights_path.write_text(
+                json.dumps({name: 0.0 for name in eval_tool.FEATURE_NAMES}),
+                encoding="utf-8",
+            )
+
+            code, text = self._run_stdout([
+                "evaluate",
+                "--corpus",
+                str(FIXTURE),
+                "--weights",
+                str(weights_path),
+            ])
+
+        self.assertEqual(code, 0)
+        self.assertIn("v2 (waveform + spectral)", text)
 
 
 class FakeDb:

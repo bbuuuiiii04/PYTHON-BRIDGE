@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import json
 import math
 import os
+import random
 import re
 import sys
 from pathlib import Path
@@ -61,6 +62,21 @@ class LabeledDrop:
     spectral: Optional[SpectralFeatures]
 
 
+@dataclass
+class NnlsTuneResult:
+    weights: dict[str, float]
+    residual: float
+    condition: float
+
+
+@dataclass
+class RankLossTuneResult:
+    weights: dict[str, float]
+    pairs: int
+    final_loss: float
+    zero_count: int
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluate smart-drop v2 scoring offline.")
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -73,10 +89,35 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     evaluate = sub.add_parser("evaluate", help="Evaluate v1/v2 variants against a corpus")
     evaluate.add_argument("--corpus", required=True)
+    evaluate.add_argument("--weights", help="Weight set for the v2 spectral variant: shipped, nnls, or JSON/YAML file")
 
     tune = sub.add_parser("tune", help="Fit nonnegative weights on the training split")
     tune.add_argument("--corpus", required=True)
+    tune.add_argument("--objective", choices=["nnls", "rank_loss"], default=None)
     tune.add_argument("--ridge", type=float, default=0.01)
+    tune.add_argument("--margin", type=float, default=0.1)
+    tune.add_argument("--anchor-l2", type=float, default=1.0)
+    tune.add_argument("--l1", type=float, default=0.01)
+    tune.add_argument("--anchor", action="append", default=[])
+    tune.add_argument("--seed", type=int, default=0)
+
+    bootstrap = sub.add_parser("bootstrap-ci", help="Track-level bootstrap CI for frozen weights")
+    bootstrap.add_argument("--corpus", required=True)
+    bootstrap.add_argument("--weights", required=True)
+    bootstrap.add_argument("--weights-b")
+    bootstrap.add_argument("--split", choices=["holdout", "training", "all"], default="holdout")
+    bootstrap.add_argument("--n-iter", type=int, default=1000)
+    bootstrap.add_argument("--seed", type=int, default=0)
+    bootstrap.add_argument("--metric", choices=["exact", "near"], default="exact")
+
+    reshuffle = sub.add_parser("reshuffle", help="Random track-level split comparison for frozen weights")
+    reshuffle.add_argument("--corpus", required=True)
+    reshuffle.add_argument("--weights-a", required=True)
+    reshuffle.add_argument("--weights-b", required=True)
+    reshuffle.add_argument("--n-splits", type=int, default=10)
+    reshuffle.add_argument("--holdout-frac", type=float, default=0.32)
+    reshuffle.add_argument("--seed", type=int, default=0)
+    reshuffle.add_argument("--retune-b", action="store_true")
 
     label = sub.add_parser("label-from-cues", help="Auto-build a corpus YAML from Rekordbox DROP-commented cues.")
     label.add_argument("--cue-comment", default="DROP", help="Cue comment substring (case-insensitive) marking the real drop.")
@@ -94,6 +135,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _cmd_evaluate(args)
     if args.mode == "tune":
         return _cmd_tune(args)
+    if args.mode == "bootstrap-ci":
+        return _cmd_bootstrap_ci(args)
+    if args.mode == "reshuffle":
+        return _cmd_reshuffle(args)
     if args.mode == "label-from-cues":
         return _cmd_label_from_cues(args)
     return 2
@@ -124,25 +169,45 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     if not rows:
         print("No labeled drops found.")
         return 1
+    weights = None
+    if args.weights:
+        try:
+            weights = _resolve_weight_spec(args.weights, rows)
+        except ImportError:
+            print('install with: pip install -e ".[analysis]"')
+            return 1
+        except ValueError as exc:
+            print(str(exc))
+            return 1
 
     variants = {
         "v1 (mean-lift)": _predict_v1,
         "v2 (waveform only)": _predict_v2_waveform,
-        "v2 (waveform + spectral)": _predict_v2_spectral,
+        "v2 (waveform + spectral)": (
+            _predict_v2_spectral
+            if weights is None
+            else lambda row: _predict_v2(row, row.spectral, weights)
+        ),
     }
     print(_format_summary_table(rows, variants))
     print()
     print("Per-feature ablation on training (v2 full):")
-    print(_format_ablation(rows))
+    print(_format_ablation(rows, weights=weights))
     print()
-    print(_format_per_track_holdout(rows))
+    print(_format_per_track_holdout(rows, weights=weights))
     return 0
 
 
 def _cmd_tune(args: argparse.Namespace) -> int:
+    objective = args.objective or "nnls"
+    if args.objective is None:
+        print(
+            "warning: tune currently defaults to --objective nnls; pass --objective rank_loss for the anchored tuner",
+            file=sys.stderr,
+        )
     try:
         import numpy as np  # type: ignore
-        from scipy.optimize import nnls  # type: ignore
+        from scipy.optimize import minimize, nnls  # type: ignore
     except ImportError:
         print('install with: pip install -e ".[analysis]"')
         return 1
@@ -152,32 +217,189 @@ def _cmd_tune(args: argparse.Namespace) -> int:
         print("No training labels found.")
         return 1
 
-    x, y = _training_matrix(rows, np)
-    if x.size == 0:
-        print("No candidate rows available for tuning.")
-        return 1
-    ridge = max(0.0, float(args.ridge))
-    if ridge > 0.0:
-        x = np.vstack([x, math.sqrt(ridge) * np.eye(x.shape[1])])
-        y = np.concatenate([y, np.zeros(x.shape[1])])
+    if objective == "nnls":
+        try:
+            result = _fit_nnls_weights(rows, np, nnls, ridge=float(args.ridge))
+        except ValueError as exc:
+            print(str(exc))
+            return 1
+        named = result.weights
+        _print_tuned_weights(named)
+        zeroes = [name for name, value in named.items() if value <= 1e-9]
+        if zeroes:
+            print("warning: zero weights: " + ", ".join(zeroes))
+        print(f"residual={result.residual:.6f}")
+        print(f"condition number = {result.condition:.1f}")
+        if result.condition > 100:
+            print("warning: high condition number (multicollinearity)")
+        print(_format_per_track_holdout(rows, weights=named))
+        return 0
 
-    weights, residual = nnls(x, y)
-    named = {name: float(weights[index]) for index, name in enumerate(FEATURE_NAMES)}
+    try:
+        anchors = _parse_anchors(args.anchor)
+        result = _fit_rank_loss_weights(
+            rows,
+            np,
+            minimize,
+            margin=float(args.margin),
+            anchor_l2=float(args.anchor_l2),
+            l1=float(args.l1),
+            anchors=anchors,
+            seed=int(args.seed),
+        )
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    named = result.weights
+    _print_tuned_weights(named)
+    print(f"pairs={result.pairs}")
+    print(f"final loss={result.final_loss:.6f}")
+    print(f"zero-weight features={result.zero_count}")
+    print(_format_per_track_holdout(rows, weights=named))
+    return 0
+
+
+def _cmd_bootstrap_ci(args: argparse.Namespace) -> int:
+    rows = _labeled_drops(_load_corpus(args.corpus))
+    if args.split != "all":
+        sample_rows = [row for row in rows if row.split == args.split]
+    else:
+        sample_rows = rows
+    if not sample_rows:
+        print(f"No labeled drops found for split={args.split}.")
+        return 1
+    if args.n_iter <= 0:
+        print("--n-iter must be positive")
+        return 1
+    try:
+        weights_a = _resolve_weight_spec(args.weights, rows)
+        weights_b = _resolve_weight_spec(args.weights_b, rows) if args.weights_b else None
+    except ImportError:
+        print('install with: pip install -e ".[analysis]"')
+        return 1
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+
+    groups = _group_rows_by_track(sample_rows)
+    track_ids = sorted(groups)
+    counts_a = _track_metric_counts(sample_rows, weights_a)
+    counts_b = _track_metric_counts(sample_rows, weights_b) if weights_b is not None else None
+    rng = random.Random(int(args.seed))
+    values_a: list[float] = []
+    diffs: list[float] = []
+    for _index in range(int(args.n_iter)):
+        sampled = [rng.choice(track_ids) for _ in track_ids]
+        score_a = _metric_from_track_counts(sampled, counts_a, args.metric)
+        values_a.append(score_a)
+        if counts_b is not None:
+            score_b = _metric_from_track_counts(sampled, counts_b, args.metric)
+            diffs.append(score_b - score_a)
+
+    point = _metric_from_track_counts(track_ids, counts_a, args.metric)
+    low, high = _percentile_interval(values_a)
+    print(f"bootstrap-ci (track-level, n_iter={args.n_iter}, split={args.split}, metric={args.metric})")
+    print(f"  point estimate: {_format_pct(point)}")
+    print(f"  95% CI:         [{_format_pct(low)}, {_format_pct(high)}]")
+    print(f"  mean:           {_format_pct(_mean(values_a))}")
+    print(f"  std:            {_format_pp(_stddev(values_a), signed=False)}")
+    print(f"  unique tracks:  {len(track_ids)}")
+    if weights_b is not None:
+        diff_low, diff_high = _percentile_interval(diffs)
+        print(f"  paired diff (b - a) 95% CI: [{_format_pp(diff_low)}, {_format_pp(diff_high)}]")
+        print(f"  paired diff mean:          {_format_pp(_mean(diffs))}")
+    return 0
+
+
+def _cmd_reshuffle(args: argparse.Namespace) -> int:
+    if args.n_splits <= 0:
+        print("--n-splits must be positive")
+        return 1
+    if not 0.0 < float(args.holdout_frac) < 1.0:
+        print("--holdout-frac must be between 0 and 1")
+        return 1
+    rows = _labeled_drops(_load_corpus(args.corpus))
+    groups = _group_rows_by_track(rows)
+    track_ids = sorted(groups)
+    if len(track_ids) < 2:
+        print("reshuffle requires at least two tracks")
+        return 1
+    try:
+        weights_a = _resolve_weight_spec(args.weights_a, rows)
+        frozen_b = None if args.retune_b else _resolve_weight_spec(args.weights_b, rows)
+    except ImportError:
+        print('install with: pip install -e ".[analysis]"')
+        return 1
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    np = minimize = None
+    if args.retune_b:
+        try:
+            import numpy as np  # type: ignore
+            from scipy.optimize import minimize  # type: ignore
+        except ImportError:
+            print('install with: pip install -e ".[analysis]"')
+            return 1
+
+    rng = random.Random(int(args.seed))
+    records: list[tuple[int, float, float, float]] = []
+    track_scores_a = _track_metric_values(rows, weights_a, "exact")
+    track_scores_b = None if args.retune_b else _track_metric_values(rows, frozen_b, "exact")
+    holdout_count = max(1, min(len(track_ids) - 1, int(round(len(track_ids) * float(args.holdout_frac)))))
+    for index in range(int(args.n_splits)):
+        shuffled = list(track_ids)
+        rng.shuffle(shuffled)
+        holdout_ids = set(shuffled[:holdout_count])
+        train_ids = set(shuffled[holdout_count:])
+        holdout_rows = [row for track_id in sorted(holdout_ids) for row in groups[track_id]]
+        if args.retune_b:
+            train_rows = [row for track_id in sorted(train_ids) for row in groups[track_id]]
+            try:
+                weights_b = _fit_rank_loss_weights(
+                    train_rows,
+                    np,
+                    minimize,
+                    margin=0.1,
+                    anchor_l2=1.0,
+                    l1=0.01,
+                    anchors={},
+                    seed=int(args.seed) + index,
+                ).weights
+            except ValueError as exc:
+                print(str(exc))
+                return 1
+        else:
+            weights_b = frozen_b
+        score_a = _mean([track_scores_a[track_id] for track_id in holdout_ids])
+        score_b = (
+            _per_track_metric_for_weights(holdout_rows, weights_b, "exact")
+            if track_scores_b is None
+            else _mean([track_scores_b[track_id] for track_id in holdout_ids])
+        )
+        records.append((index + 1, score_a, score_b, score_b - score_a))
+
+    wins_a = [record for record in records if record[1] > record[2]]
+    wins_b = [record for record in records if record[2] > record[1]]
+    ties = [record for record in records if record[1] == record[2]]
+    print(f"reshuffle (n_splits={args.n_splits}, holdout_frac={float(args.holdout_frac):.2f}, retune_b={bool(args.retune_b)})")
+    print("  split  weights_a  weights_b  diff")
+    for split, score_a, score_b, diff in records:
+        print(f"  {split:>4}   {_format_pct(score_a):>8}  {_format_pct(score_b):>8}  {_format_pp(diff):>8}")
+    print("  --")
+    print(f"  weights_a wins: {len(wins_a)}/{len(records)} (avg {_format_pp(_mean([a - b for _i, a, b, _d in wins_a]))} when winning)")
+    print(f"  weights_b wins: {len(wins_b)}/{len(records)} (avg {_format_pp(_mean([b - a for _i, a, b, _d in wins_b]))} when winning)")
+    print(f"  ties:           {len(ties)}/{len(records)}")
+    print(f"  mean diff:      {_format_pp(_mean([record[3] for record in records]))} (b - a)")
+    return 0
+
+
+def _print_tuned_weights(named: dict[str, float]) -> None:
     print("Tuned weights:")
     print("MULTI_FEATURE_WEIGHTS_V2 = {")
     for name in FEATURE_NAMES:
         print(f'    "{name}": {named[name]:.6f},')
     print("}")
-    zeroes = [name for name, value in named.items() if value <= 1e-9]
-    if zeroes:
-        print("warning: zero weights: " + ", ".join(zeroes))
-    condition = _condition_number(x, np)
-    print(f"residual={residual:.6f}")
-    print(f"condition number = {condition:.1f}")
-    if condition > 100:
-        print("warning: high condition number (multicollinearity)")
-    print(_format_per_track_holdout(rows, weights=named))
-    return 0
 
 
 def _cmd_label_from_cues(args: argparse.Namespace) -> int:
@@ -646,18 +868,26 @@ def _format_summary_table(
     return "\n".join(lines)
 
 
-def _format_ablation(rows: list[LabeledDrop]) -> str:
+def _format_ablation(
+    rows: list[LabeledDrop],
+    *,
+    weights: Optional[dict[str, float]] = None,
+) -> str:
     training = [row for row in rows if row.split == "training"]
     if not training:
         return "  no training rows"
-    baseline, _near = _accuracy(training, _predict_v2_spectral)
+    base_weights = weights or MULTI_FEATURE_WEIGHTS_V2
+    baseline, _near = _accuracy(
+        training,
+        lambda row: _predict_v2(row, row.spectral, base_weights),
+    )
     lines = []
     for feature in FEATURE_NAMES:
-        weights = dict(MULTI_FEATURE_WEIGHTS_V2)
-        weights[feature] = 0.0
+        ablated = dict(base_weights)
+        ablated[feature] = 0.0
         exact, _ = _accuracy(
             training,
-            lambda row, weights=weights: _predict_v2(row, row.spectral, weights),
+            lambda row, weights=ablated: _predict_v2(row, row.spectral, weights),
         )
         delta = int(round((exact - baseline) * 100))
         lines.append(f"  -{feature:<24} -> {exact:.0%} ({delta:+d} pp)")
@@ -724,6 +954,296 @@ def _training_matrix(rows: list[LabeledDrop], np: Any) -> tuple[Any, Any]:
             x_rows.append([features.get(name, 0.0) for name in FEATURE_NAMES])
             y_rows.append(1.0 if beat == row.correct_beat else 0.0)
     return np.asarray(x_rows, dtype=float), np.asarray(y_rows, dtype=float)
+
+
+def _fit_nnls_weights(rows: list[LabeledDrop], np: Any, nnls: Any, *, ridge: float) -> NnlsTuneResult:
+    x, y = _training_matrix(rows, np)
+    if x.size == 0:
+        raise ValueError("No candidate rows available for tuning.")
+    ridge = max(0.0, float(ridge))
+    if ridge > 0.0:
+        x = np.vstack([x, math.sqrt(ridge) * np.eye(x.shape[1])])
+        y = np.concatenate([y, np.zeros(x.shape[1])])
+    weights, residual = nnls(x, y)
+    named = {name: float(weights[index]) for index, name in enumerate(FEATURE_NAMES)}
+    return NnlsTuneResult(
+        weights=named,
+        residual=float(residual),
+        condition=_condition_number(x, np),
+    )
+
+
+def _fit_rank_loss_weights(
+    rows: list[LabeledDrop],
+    np: Any,
+    minimize: Any,
+    *,
+    margin: float,
+    anchor_l2: float,
+    l1: float,
+    anchors: dict[str, float],
+    seed: int,
+) -> RankLossTuneResult:
+    if margin < 0.0:
+        raise ValueError("--margin must be non-negative")
+    if anchor_l2 < 0.0:
+        raise ValueError("--anchor-l2 must be non-negative")
+    if l1 < 0.0:
+        raise ValueError("--l1 must be non-negative")
+    design = _rank_loss_design(rows, np)
+    if design.size == 0:
+        raise ValueError("No valid rank-loss pairs available for tuning.")
+    pair_count = int(design.shape[0])
+    # Keep CLI regularizer strengths aligned with the ad-hoc PR #88 tuner while
+    # reporting the hinge term as an average over rank pairs.
+    regularizer_scale = 1.0 / float(pair_count + len(rows))
+    effective_anchor_l2 = anchor_l2 * regularizer_scale
+    effective_l1 = l1 * regularizer_scale
+    w0 = np.asarray([float(MULTI_FEATURE_WEIGHTS_V2.get(name, 0.0)) for name in FEATURE_NAMES], dtype=float)
+    if not np.any(w0):
+        rng = np.random.default_rng(int(seed))
+        w0 = rng.uniform(0.0, 0.01, size=len(FEATURE_NAMES))
+    anchor_indexes = [(FEATURE_NAMES.index(name), value) for name, value in anchors.items()]
+
+    def objective(weights: Any) -> tuple[float, Any]:
+        raw_margin = margin - design.dot(weights)
+        active = raw_margin > 0.0
+        active_margin = raw_margin[active]
+        loss = float(np.sum(active_margin * active_margin) / pair_count) if active_margin.size else 0.0
+        grad = np.zeros_like(weights)
+        if active_margin.size:
+            grad -= (2.0 / pair_count) * design[active].T.dot(active_margin)
+        if effective_anchor_l2 > 0.0:
+            for index, value in anchor_indexes:
+                delta = float(weights[index]) - float(value)
+                loss += effective_anchor_l2 * delta * delta
+                grad[index] += 2.0 * effective_anchor_l2 * delta
+        if effective_l1 > 0.0:
+            loss += effective_l1 * float(np.sum(weights))
+            grad += effective_l1
+        return loss, grad
+
+    result = minimize(
+        objective,
+        w0,
+        method="L-BFGS-B",
+        jac=True,
+        bounds=[(0.0, None)] * len(FEATURE_NAMES),
+        options={"maxiter": 1000},
+    )
+    weights = np.maximum(result.x, 0.0)
+    final_loss, _grad = objective(weights)
+    named = {name: float(weights[index]) for index, name in enumerate(FEATURE_NAMES)}
+    zero_count = sum(1 for value in named.values() if value <= 1e-9)
+    return RankLossTuneResult(
+        weights=named,
+        pairs=pair_count,
+        final_loss=float(final_loss),
+        zero_count=zero_count,
+    )
+
+
+def _rank_loss_design(rows: list[LabeledDrop], np: Any) -> Any:
+    pairs: list[list[float]] = []
+    for row in rows:
+        start = row.rekordbox_beat
+        end = row.rekordbox_beat + 8
+        if row.correct_beat < start or row.correct_beat > end:
+            continue
+        if row.correct_beat < 0 or row.correct_beat >= len(row.beatgrid_times_ms):
+            continue
+        correct = _feature_vector(row, row.correct_beat)
+        for beat in range(start, end + 1):
+            if beat == row.correct_beat:
+                continue
+            if beat < 0 or beat >= len(row.beatgrid_times_ms):
+                continue
+            wrong = _feature_vector(row, beat)
+            pairs.append([correct[index] - wrong[index] for index in range(len(FEATURE_NAMES))])
+    return np.asarray(pairs, dtype=float)
+
+
+def _feature_vector(row: LabeledDrop, beat: int) -> list[float]:
+    features = _multi_feature_breakdown(
+        beat,
+        row.heights,
+        row.beatgrid_times_ms,
+        row.rekordbox_beat,
+        row.spectral,
+    )
+    return [float(features.get(name, 0.0)) for name in FEATURE_NAMES]
+
+
+def _parse_anchors(items: Sequence[str]) -> dict[str, float]:
+    anchors: dict[str, float] = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"invalid --anchor {item!r}; expected NAME=VALUE")
+        name, value = item.split("=", 1)
+        name = name.strip()
+        if name not in FEATURE_NAMES:
+            raise ValueError(f"unknown anchor feature: {name}")
+        try:
+            anchors[name] = float(value)
+        except ValueError as exc:
+            raise ValueError(f"invalid anchor value for {name}: {value}") from exc
+    return anchors
+
+
+def _resolve_weight_spec(spec: str, rows: list[LabeledDrop]) -> dict[str, float]:
+    if spec == "shipped":
+        return _complete_weights(dict(MULTI_FEATURE_WEIGHTS_V2), source="shipped", report_missing=False)
+    if spec == "nnls":
+        import numpy as np  # type: ignore
+        from scipy.optimize import nnls  # type: ignore
+
+        training = [row for row in rows if row.split == "training"]
+        if not training:
+            raise ValueError("No training labels found for nnls weights.")
+        return _fit_nnls_weights(training, np, nnls, ridge=0.01).weights
+    return _load_weights_file(spec)
+
+
+def _load_weights_file(path: str) -> dict[str, float]:
+    weight_path = Path(path).expanduser()
+    text = weight_path.read_text(encoding="utf-8")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = _parse_simple_weights_yaml(text)
+    if not isinstance(payload, dict):
+        raise ValueError(f"weights file must be a mapping: {path}")
+    return _complete_weights(payload, source=str(weight_path), report_missing=True)
+
+
+def _parse_simple_weights_yaml(text: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        key, value = _split_yaml_pair(line)
+        if not key:
+            continue
+        payload[key.strip("\"'")] = _parse_scalar(value)
+    return payload
+
+
+def _complete_weights(payload: dict[str, Any], *, source: str, report_missing: bool) -> dict[str, float]:
+    unknown = sorted(name for name in payload if name not in FEATURE_NAMES)
+    if unknown:
+        raise ValueError(f"weights file contains unknown features in {source}: {', '.join(unknown)}")
+    missing = [name for name in FEATURE_NAMES if name not in payload]
+    if missing and report_missing:
+        print(
+            "weights file missing features defaulted to 0.0: " + ", ".join(missing),
+            file=sys.stderr,
+        )
+    weights: dict[str, float] = {}
+    for name in FEATURE_NAMES:
+        try:
+            weights[name] = float(payload.get(name, 0.0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"weights file has non-numeric value for {name}") from exc
+    return weights
+
+
+def _group_rows_by_track(rows: list[LabeledDrop]) -> dict[str, list[LabeledDrop]]:
+    groups: dict[str, list[LabeledDrop]] = {}
+    for row in rows:
+        groups.setdefault(row.track_id, []).append(row)
+    return groups
+
+
+def _track_metric_counts(
+    rows: list[LabeledDrop],
+    weights: dict[str, float],
+) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for row in rows:
+        predicted = _predict_v2(row, row.spectral, weights)
+        item = counts.setdefault(row.track_id, {"exact": 0, "near": 0, "total": 0})
+        item["total"] += 1
+        if predicted == row.correct_beat:
+            item["exact"] += 1
+        if predicted is not None and abs(predicted - row.correct_beat) <= 1:
+            item["near"] += 1
+    return counts
+
+
+def _metric_from_track_counts(
+    track_ids: Sequence[str],
+    counts: dict[str, dict[str, int]],
+    metric: str,
+) -> float:
+    total = sum(counts[track_id]["total"] for track_id in track_ids)
+    if total <= 0:
+        return 0.0
+    correct = sum(counts[track_id][metric] for track_id in track_ids)
+    return correct / total
+
+
+def _metric_for_weights(rows: list[LabeledDrop], weights: dict[str, float], metric: str) -> float:
+    exact, near = _accuracy(rows, lambda row: _predict_v2(row, row.spectral, weights))
+    return exact if metric == "exact" else near
+
+
+def _track_metric_values(
+    rows: list[LabeledDrop],
+    weights: dict[str, float],
+    metric: str,
+) -> dict[str, float]:
+    groups = _group_rows_by_track(rows)
+    return {
+        track_id: _metric_for_weights(track_rows, weights, metric)
+        for track_id, track_rows in groups.items()
+    }
+
+
+def _per_track_metric_for_weights(rows: list[LabeledDrop], weights: dict[str, float], metric: str) -> float:
+    groups = _group_rows_by_track(rows)
+    if not groups:
+        return 0.0
+    return _mean([_metric_for_weights(group_rows, weights, metric) for group_rows in groups.values()])
+
+
+def _percentile_interval(values: list[float]) -> tuple[float, float]:
+    return _percentile(values, 0.025), _percentile(values, 0.975)
+
+
+def _percentile(values: list[float], percent: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    rank = (len(ordered) - 1) * percent
+    lower = int(math.floor(rank))
+    upper = int(math.ceil(rank))
+    if lower == upper:
+        return float(ordered[lower])
+    fraction = rank - lower
+    return float(ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction)
+
+
+def _mean(values: Sequence[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _stddev(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    mean = _mean(values)
+    return math.sqrt(sum((value - mean) ** 2 for value in values) / len(values))
+
+
+def _format_pct(value: float) -> str:
+    return f"{value * 100.0:.1f}%"
+
+
+def _format_pp(value: float, *, signed: bool = True) -> str:
+    sign = "+" if signed else ""
+    return f"{value * 100.0:{sign}.1f}pp"
 
 
 def _condition_number(matrix: Any, np: Any) -> float:
