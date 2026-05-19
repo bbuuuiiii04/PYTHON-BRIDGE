@@ -35,21 +35,45 @@ _MIN_BEATGRID_INTERVAL_MS = 150.0
 _MAX_BEATGRID_INTERVAL_MS = 3000.0
 _PWV3_MS_PER_ENTRY_FALLBACK = 6.7
 
+# Multi-feature smart-drop scoring weights.
+#
+# Produced by tools/eval_smart_drop_algorithm.py from the anchored-tuner-harness
+# tuner commit on main: 288203697e207420c894529327f30d9c38775443
+# branch with the anchored pairwise hinge rank-loss objective and no anchors:
+#
+#     python tools/eval_smart_drop_algorithm.py tune \
+#         --corpus ~/smart_drop_corpus_filtered.yaml \
+#         --objective rank_loss --margin 0.1 --l1 0.01 --seed 0
+#
+# Corpus: ~/smart_drop_corpus_filtered.yaml (66 tracks / 367 labeled windows).
+#
+# Validation (5 seeds x 20 random track-level splits = 100 split-comparisons):
+#   retune vs PR #88 (shipped): 68/26/6 wins/losses/ties, mean diff +1.5pp.
+#   retune vs PR #87:           50/40/10,                 mean diff +0.7pp.
+#   PR #88 vs PR #87:           40/55/5,                  mean diff -0.8pp
+#                               (i.e. PR #88's nominal advantage was noise).
+#   Bootstrap-ci paired diff vs shipped on full corpus (n=56 unique tracks):
+#                               +1.6pp, 95% CI [-2.3pp, +5.5pp].
+#
+# The anchored-on-seed-features prior used in PR #88 is dropped. Under the
+# rank-loss objective the data drives centroid_drop and spectral_flux_onset
+# to ~0 on this corpus; forcing them positive (PR #88) measurably hurt
+# generalization. See docs/drop_detection_review_v2.md.
 MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
     "onset_score": 0.000000,
     "broad_onset_score": 0.000000,
-    "post_lift": 0.018090,
-    "pre_valley_depth": 0.004451,
-    "downbeat_alignment": 0.085715,
-    "distance_penalty": 0.019825,
-    "kick_pattern_onset": 0.352444,
+    "post_lift": 0.013896,
+    "pre_valley_depth": 0.006064,
+    "downbeat_alignment": 0.077649,
+    "distance_penalty": 0.031940,
+    "kick_pattern_onset": 0.958909,
     "bass_pattern_onset": 0.000000,
     "low_mid_pattern_onset": 0.000000,
-    "high_mid_pattern_onset": 1.023799,
-    "phrase_energy_step": 0.121384,
-    "spectral_balance_shift": 0.000000,
-    "centroid_drop": 0.663423,
-    "spectral_flux_onset": 0.251814,
+    "high_mid_pattern_onset": 1.661027,
+    "phrase_energy_step": 0.344555,
+    "spectral_balance_shift": 0.037456,
+    "centroid_drop": 0.000000,
+    "spectral_flux_onset": 0.003867,
 }
 
 MultiFeatureScorer = Callable[
