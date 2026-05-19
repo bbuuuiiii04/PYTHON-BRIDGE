@@ -1,3 +1,6 @@
+import csv
+import json
+import os
 import sys
 import tempfile
 import unittest
@@ -382,6 +385,35 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
             scorer(0, heights, beatgrid, 0, None),
             scorer(1, heights, beatgrid, 0, None),
         )
+
+    def test_v2_telemetry_appends_csv_when_enabled(self) -> None:
+        scorer = _make_multi_feature_scorer({"onset_score": 1.0})
+        beatgrid = _beatgrid_ms(12)
+        heights = [1, 1, 4, 10, 10, 10, 10, 10, 10, 10, 10, 10]
+
+        with tempfile.TemporaryDirectory() as td:
+            telemetry_path = Path(td) / "smart_drop.csv"
+            with patch.dict(os.environ, {"RBSS_SMART_DROP_TELEMETRY_CSV": str(telemetry_path)}):
+                shadows = _calculate_smart_drop_energy_shadow(
+                    heights,
+                    waveform_duration_ms=len(heights) * 500,
+                    beatgrid_times_ms=beatgrid,
+                    selected_drops=[0],
+                    scorer=scorer,
+                )
+
+            rows = list(csv.DictReader(telemetry_path.open(encoding="utf-8")))
+
+        self.assertEqual(len(shadows), 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["schema"], "1")
+        self.assertEqual(rows[0]["source"], "v2_waveform")
+        self.assertEqual(int(rows[0]["anlz_beat"]), shadows[0].anlz_beat)
+        self.assertEqual(int(rows[0]["suggested_beat"]), shadows[0].suggested_beat)
+        self.assertEqual(rows[0]["correct_beat"], "")
+        candidates = json.loads(rows[0]["top_candidates_json"])
+        self.assertEqual(candidates[0]["beat"], shadows[0].suggested_beat)
+        self.assertIn("onset_score", json.loads(rows[0]["feature_breakdown_json"]))
 
     def test_score_confidence_uses_best_second_best_margin(self) -> None:
         self.assertAlmostEqual(_score_confidence(10.0, 7.0), 0.3)

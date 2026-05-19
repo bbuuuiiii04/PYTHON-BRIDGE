@@ -12,14 +12,38 @@
 """
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass, field
+import json
 import logging
+import os
 from pathlib import Path
+import time
 from typing import Any, Callable, Optional
 
 from .models import SmartDropEnergyShadow
 
 log = logging.getLogger("anlz_reader")
+
+SMART_DROP_TELEMETRY_CSV_ENV = "RBSS_SMART_DROP_TELEMETRY_CSV"
+_SMART_DROP_TELEMETRY_SCHEMA = 1
+_SMART_DROP_TELEMETRY_FIELDS = [
+    "schema",
+    "created_at",
+    "source",
+    "anlz_beat",
+    "suggested_beat",
+    "anlz_elapsed_ms",
+    "suggested_elapsed_ms",
+    "score_at_anlz",
+    "score_at_suggested",
+    "confidence",
+    "top_candidates_json",
+    "feature_breakdown_json",
+    "correct_beat",
+    "correct_elapsed_ms",
+    "notes",
+]
 
 BREAKDOWN_THRESHOLD = 0.35
 DROP_THRESHOLD = 0.65
@@ -415,8 +439,14 @@ def _v2_compute_shadows(
             0.0,
         )
         confidence = _score_confidence(best_score, second_score)
-
-        shadows.append(SmartDropEnergyShadow(
+        feature_breakdown = _multi_feature_breakdown(
+            best_beat,
+            heights,
+            beatgrid_times_ms,
+            drop_beat,
+            spectral_features,
+        )
+        shadow = SmartDropEnergyShadow(
             anlz_beat=drop_beat,
             suggested_beat=best_beat,
             anlz_elapsed_ms=int(round(beatgrid_times_ms[drop_beat])),
@@ -426,16 +456,61 @@ def _v2_compute_shadows(
             confidence=confidence,
             score_at_anlz=score_at_anlz,
             score_at_suggested=best_score,
-            feature_breakdown=_multi_feature_breakdown(
-                best_beat,
-                heights,
-                beatgrid_times_ms,
-                drop_beat,
-                spectral_features,
-            ),
+            feature_breakdown=feature_breakdown,
             source=source,
-        ))
+        )
+        _append_smart_drop_telemetry(shadow, scored, feature_breakdown)
+        shadows.append(shadow)
     return shadows
+
+
+def _append_smart_drop_telemetry(
+    shadow: SmartDropEnergyShadow,
+    scored: list[tuple[int, float]],
+    feature_breakdown: dict[str, float],
+) -> None:
+    path = os.environ.get(SMART_DROP_TELEMETRY_CSV_ENV, "")
+    if not path:
+        return
+    try:
+        telemetry_path = Path(path).expanduser()
+        telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+        needs_header = not telemetry_path.exists() or telemetry_path.stat().st_size == 0
+        row = {
+            "schema": _SMART_DROP_TELEMETRY_SCHEMA,
+            "created_at": f"{time.time():.3f}",
+            "source": shadow.source,
+            "anlz_beat": shadow.anlz_beat,
+            "suggested_beat": shadow.suggested_beat,
+            "anlz_elapsed_ms": shadow.anlz_elapsed_ms,
+            "suggested_elapsed_ms": shadow.suggested_elapsed_ms,
+            "score_at_anlz": f"{shadow.score_at_anlz:.6f}",
+            "score_at_suggested": f"{shadow.score_at_suggested:.6f}",
+            "confidence": f"{shadow.confidence:.6f}",
+            "top_candidates_json": json.dumps(
+                [
+                    {"beat": beat, "score": round(float(score), 6)}
+                    for beat, score in scored[:9]
+                ],
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            "feature_breakdown_json": json.dumps(
+                {name: round(float(value), 6) for name, value in feature_breakdown.items()},
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            "correct_beat": "",
+            "correct_elapsed_ms": "",
+            "notes": "",
+        }
+        with telemetry_path.open("a", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=_SMART_DROP_TELEMETRY_FIELDS)
+            if needs_header:
+                writer.writeheader()
+            writer.writerow(row)
+    except Exception:
+        log.warning("smart-drop telemetry append failed", exc_info=True)
 
 
 def _score_confidence(best: float, second_best: float) -> float:
