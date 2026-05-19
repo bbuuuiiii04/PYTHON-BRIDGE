@@ -30,8 +30,11 @@ from rb_ss_bridge_v2.config import (  # noqa: E402
 from rb_ss_bridge_v2.state_manager import (  # noqa: E402
     SmartDropTickResult,
     StateManager,
+    _read_runtime_anlz_data,
     _send_direct_autoloop_rearm,
 )
+from rb_ss_bridge_v2.anlz_reader import TrackAnlzData, WaveformContext  # noqa: E402
+from rb_ss_bridge_v2.audio_spectral_features import SpectralFeatures  # noqa: E402
 from rb_ss_bridge_v2.smart_rearm import (  # noqa: E402
     SmartRearmContext,
     SmartRearmCoordinator,
@@ -96,6 +99,42 @@ def _sp_state(**overrides) -> SmartPhrasingState:
     )
     defaults.update(overrides)
     return SmartPhrasingState(**defaults)
+
+
+def _spectral_features(length: int) -> SpectralFeatures:
+    low = tuple(0.0 for _ in range(length))
+    high_mid = tuple(1.0 if index == 4 else 0.0 for index in range(length))
+    return SpectralFeatures(
+        sr=22050,
+        schema_version=2,
+        sub_bass_envelope=low,
+        kick_envelope=tuple(1.0 if index == 4 else 0.0 for index in range(length)),
+        low_mid_envelope=low,
+        high_mid_envelope=high_mid,
+        high_band_envelope=low,
+    )
+
+
+def _filepath_payload() -> dict:
+    return {
+        "filepath": "/music/track.wav",
+        "bpm": 128.0,
+        "content_id": "abc",
+        "first_beat_ms": 0.0,
+        "beatgrid_times_ms": [i * 500.0 for i in range(12)],
+        "beatgrid_bpms": [],
+        "beatgrid_source": "db",
+        "soundswitch_id": "",
+        "total_ms": 6_000.0,
+        "load_gen": 1,
+    }
+
+
+def _anlz_payload(drops, *, source="anlz", energy_shadow=None) -> dict:
+    payload = {"drop_beat_indices": drops, "load_gen": 7, "source": source}
+    if energy_shadow is not None:
+        payload["energy_shadow"] = energy_shadow
+    return payload
 
 
 def _legacy_sp_state_for_drop(sm, active: int, this_beat: int) -> SmartPhrasingState:
@@ -348,6 +387,92 @@ class SmartRearmFlagTests(unittest.TestCase):
         resolver.resolve_by_anlz.assert_called_once()
         thread.assert_not_called()
 
+    def test_spectral_enable_starts_enrichment_after_filepath_resolved(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SPECTRAL_ENABLE": "1",
+        })
+        resolver = Mock()
+        sm.attach_resolver(resolver)
+        sm._pending_anlz_path[1] = "/tmp/ANLZ0000.EXT"
+
+        with patch.object(sm, "_start_anlz_worker") as start_worker:
+            sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
+            sm._on_filepath_resolved(1, _filepath_payload())
+
+        start_worker.assert_has_calls([
+            call("/tmp/ANLZ0000.EXT", 1, 1),
+            call(
+                "/tmp/ANLZ0000.EXT",
+                1,
+                1,
+                audio_filepath="/music/track.wav",
+                spectral_enabled=True,
+            ),
+        ])
+
+    def test_spectral_disabled_does_not_start_enrichment_after_filepath_resolved(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+        })
+        resolver = Mock()
+        sm.attach_resolver(resolver)
+        sm._pending_anlz_path[1] = "/tmp/ANLZ0000.EXT"
+
+        with patch.object(sm, "_start_anlz_worker") as start_worker:
+            sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
+            sm._on_filepath_resolved(1, _filepath_payload())
+
+        start_worker.assert_called_once_with("/tmp/ANLZ0000.EXT", 1, 1)
+
+    def test_runtime_anlz_data_uses_v2_spectral_when_enabled(self) -> None:
+        beatgrid = [i * 500.0 for i in range(12)]
+        data = TrackAnlzData(
+            [0],
+            energy_shadow=[SmartDropEnergyShadow(0, 0, 0, 0, 0.1, 0.1, 0.0)],
+            waveform_context=WaveformContext(
+                heights=tuple([1, 1, 2, 3, 8, 6, 5, 4, 3, 2, 1, 1]),
+                ms_per_entry=500.0,
+                beatgrid_times_ms=tuple(beatgrid),
+            ),
+        )
+
+        with patch("rb_ss_bridge_v2.state_manager.read_anlz_drops", return_value=data), \
+             patch("rb_ss_bridge_v2.state_manager.spectral_cache.get_cached",
+                   return_value=_spectral_features(len(beatgrid))), \
+             patch("rb_ss_bridge_v2.state_manager.extract_spectral_features") as extract:
+            result = _read_runtime_anlz_data(
+                "/tmp/ANLZ0000.EXT",
+                audio_filepath="/music/track.wav",
+                spectral_enabled=True,
+            )
+
+        extract.assert_not_called()
+        self.assertEqual(len(result.energy_shadow), 1)
+        self.assertEqual(result.energy_shadow[0].source, "v2_spectral")
+
+    def test_runtime_anlz_data_keeps_default_path_when_spectral_disabled(self) -> None:
+        data = TrackAnlzData(
+            [32],
+            energy_shadow=[SmartDropEnergyShadow(32, 32, 16_000, 16_000, 0.1, 0.1, 0.0)],
+            waveform_context=WaveformContext(
+                heights=tuple([1] * 40),
+                ms_per_entry=500.0,
+                beatgrid_times_ms=tuple(i * 500.0 for i in range(40)),
+            ),
+        )
+
+        with patch("rb_ss_bridge_v2.state_manager.read_anlz_drops", return_value=data), \
+             patch("rb_ss_bridge_v2.state_manager.spectral_cache.get_cached") as get_cached:
+            result = _read_runtime_anlz_data(
+                "/tmp/ANLZ0000.EXT",
+                audio_filepath="/music/track.wav",
+                spectral_enabled=False,
+            )
+
+        get_cached.assert_not_called()
+        self.assertIs(result.energy_shadow, data.energy_shadow)
+
     def test_smart_drop_kill_switch_disables_cut(self) -> None:
         sm = _manager({
             "RBSS_SMART_REARM_EXPERIMENT": "1",
@@ -533,6 +658,107 @@ class SmartDropTests(unittest.TestCase):
             [32, 64],
         )
 
+    def test_late_v1_shadow_does_not_replace_v2_spectral_shadow(self) -> None:
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
+        sm._deck[1].load_gen = 7
+        sm._deck[1].meta.beatgrid_times_ms = [i * 500.0 for i in range(100)]
+        v2_shadow = [
+            SmartDropEnergyShadow(
+                32, 36, 16_000, 18_000, 0.2, 0.5, 0.3, source="v2_spectral"
+            )
+        ]
+        v1_shadow = [
+            SmartDropEnergyShadow(32, 32, 16_000, 16_000, 0.4, 0.4, 0.0)
+        ]
+
+        sm._handle_event(BridgeEvent(
+            Ev.ANLZ_DATA,
+            1,
+            {
+                "drop_beat_indices": [32],
+                "energy_shadow": v2_shadow,
+                "load_gen": 7,
+            },
+        ))
+        sm._handle_event(BridgeEvent(
+            Ev.ANLZ_DATA,
+            1,
+            {
+                "drop_beat_indices": [32],
+                "energy_shadow": v1_shadow,
+                "load_gen": 7,
+            },
+        ))
+
+        self.assertEqual(sm._deck[1].meta.smart_drop_energy_shadow[0].source, "v2_spectral")
+        self.assertEqual(sm._deck[1].meta.smart_drop_energy_shadow[0].suggested_beat, 36)
+
+    def test_v2_spectral_does_not_clobber_v1_markers(self) -> None:
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
+        sm._deck[1].load_gen = 7
+        sm._deck[1].meta.beatgrid_times_ms = [i * 500.0 for i in range(100)]
+
+        sm._handle_event(BridgeEvent(
+            Ev.ANLZ_DATA,
+            1,
+            _anlz_payload([32]),
+        ))
+        sm._handle_event(BridgeEvent(
+            Ev.ANLZ_DATA,
+            1,
+            _anlz_payload([], source="anlz_spectral"),
+        ))
+
+        self.assertEqual(sm._deck[1].meta.anlz_drops, [32])
+        self.assertEqual(sm._deck[1].meta.smart_drops, [32])
+
+    def test_duplicate_anlz_data_does_not_relog_smart_transition_select(self) -> None:
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
+        sm._deck[1].load_gen = 7
+        sm._deck[1].meta.beatgrid_times_ms = [i * 500.0 for i in range(100)]
+        payload = _anlz_payload([32], energy_shadow=[
+            SmartDropEnergyShadow(32, 32, 16_000, 16_000, 0.4, 0.4, 0.0)
+        ])
+
+        with self.assertLogs("state_manager", level="INFO") as captured:
+            sm._handle_event(BridgeEvent(Ev.ANLZ_DATA, 1, payload))
+            sm._handle_event(BridgeEvent(Ev.ANLZ_DATA, 1, payload))
+
+        transition_logs = [
+            line for line in captured.output
+            if "smart-transition-select" in line
+        ]
+        self.assertEqual(len(transition_logs), 1)
+
+    def test_v2_spectral_shadow_upgrade_still_logs(self) -> None:
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
+        sm._deck[1].load_gen = 7
+        sm._deck[1].meta.beatgrid_times_ms = [i * 500.0 for i in range(100)]
+
+        with self.assertLogs("state_manager", level="INFO") as captured:
+            sm._handle_event(BridgeEvent(
+                Ev.ANLZ_DATA,
+                1,
+                _anlz_payload([32], energy_shadow=[
+                    SmartDropEnergyShadow(32, 32, 16_000, 16_000, 0.4, 0.4, 0.0)
+                ]),
+            ))
+            sm._handle_event(BridgeEvent(
+                Ev.ANLZ_DATA,
+                1,
+                _anlz_payload([32], source="anlz_spectral", energy_shadow=[
+                    SmartDropEnergyShadow(
+                        32, 36, 16_000, 18_000, 0.2, 0.5, 0.3,
+                        source="v2_spectral",
+                    )
+                ]),
+            ))
+
+        output = "\n".join(captured.output)
+        self.assertIn("smart-transition-select", output)
+        self.assertIn("source=anlz_spectral", output)
+        self.assertEqual(sm._deck[1].meta.smart_drop_energy_shadow[0].source, "v2_spectral")
+
     def test_energy_shadow_log_uses_elapsed_timestamps(self) -> None:
         sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
         sm._deck[1].load_gen = 7
@@ -553,6 +779,7 @@ class SmartDropTests(unittest.TestCase):
         output = "\n".join(captured.output)
         self.assertIn("anlz_elapsed=0:16.000", output)
         self.assertIn("suggested_elapsed=0:20.000", output)
+        self.assertIn("source=v1", output)
         self.assertNotIn("suggested=40", output)
 
     def test_anlz_data_accepts_breakdowns_and_buildups(self) -> None:
