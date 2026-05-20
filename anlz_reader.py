@@ -103,6 +103,9 @@ MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
     "buildup_sweep_slope": 0.000000,
     "amplitude_jump_at_c": 0.117237,
     "bass_sustain_1bar": 0.182334,
+    "drum_attack_sustained": 0.000000,
+    "kick_max_locked_in": 0.000000,
+    "drums_dominant_over_tonal": 0.000000,
     "phrase_grid_alignment": 0.000000,
     "post_drop_kick_continuity": 0.078622,
     "post_drop_energy_stability": 2.596686,
@@ -116,6 +119,9 @@ _PHASE_1A_FEATURE_NAMES = {
     "amplitude_jump_at_c",
     "phrase_grid_alignment",
     "bass_sustain_1bar",
+    "drum_attack_sustained",
+    "kick_max_locked_in",
+    "drums_dominant_over_tonal",
 }
 
 MultiFeatureScorer = Callable[
@@ -676,6 +682,9 @@ def _multi_feature_breakdown(
         "buildup_sweep_slope": spectral_score(_buildup_sweep_slope),
         "amplitude_jump_at_c": spectral_score(_amplitude_jump_at_c),
         "bass_sustain_1bar": spectral_score(_bass_sustain_1bar),
+        "drum_attack_sustained": spectral_score(_drum_attack_sustained),
+        "kick_max_locked_in": spectral_score(_kick_max_locked_in),
+        "drums_dominant_over_tonal": spectral_score(_drums_dominant_over_tonal),
         "phrase_grid_alignment": _phrase_grid_alignment(beat, phrases),
         "post_drop_kick_continuity": spectral_score(_post_drop_kick_continuity),
         "post_drop_energy_stability": spectral_score(_post_drop_energy_stability),
@@ -872,6 +881,37 @@ def _bass_sustain_1bar(beat: int, spectral_features: Any) -> float:
     return min(1.0, immediate / (late + 1e-6))
 
 
+def _drum_attack_sustained(beat: int, spectral_features: Any) -> float:
+    onset = _spectral_envelope(spectral_features, "onset_strength_envelope")
+    if beat < 0 or beat + 8 > len(onset):
+        return 0.5
+    peak = _p90(onset) or max(onset)
+    threshold = 0.5 * peak
+    if threshold <= 0.0:
+        return 0.0
+    hits = sum(1 for value in onset[beat:beat + 8] if value >= threshold)
+    return min(1.0, max(0.0, hits / 8.0))
+
+
+def _kick_max_locked_in(beat: int, spectral_features: Any) -> float:
+    kick_max = _spectral_envelope(spectral_features, "kick_max_envelope")
+    if beat < 0 or beat + 8 > len(kick_max):
+        return 0.5
+    peak = _p90(kick_max) or max(kick_max)
+    threshold = 0.5 * peak
+    if threshold <= 0.0:
+        return 0.0
+    hits = sum(1 for value in kick_max[beat:beat + 8] if value >= threshold)
+    return min(1.0, max(0.0, hits / 8.0))
+
+
+def _drums_dominant_over_tonal(beat: int, spectral_features: Any) -> float:
+    flatness = _spectral_envelope(spectral_features, "spectral_flatness_envelope")
+    if beat < 0 or beat + 8 > len(flatness):
+        return 0.5
+    return min(1.0, max(0.0, sum(flatness[beat:beat + 8]) / 8.0))
+
+
 def _phrase_grid_alignment(beat: int, phrases: Optional[Any]) -> float:
     if not phrases:
         return 0.0
@@ -943,6 +983,14 @@ def _pattern_onset(beat: int, envelope: list[float], window: int = 8) -> float:
     after = sum(envelope[beat:after_end]) / (after_end - beat)
     before = sum(envelope[before_start:beat]) / (beat - before_start)
     return max(0.0, after - before)
+
+
+def _p90(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(float(value) for value in values)
+    index = min(len(ordered) - 1, int(0.9 * (len(ordered) - 1)))
+    return ordered[index]
 
 
 _BAND_CENTERS_HZ = (60.0, 130.0, 500.0, 2400.0, 8000.0)

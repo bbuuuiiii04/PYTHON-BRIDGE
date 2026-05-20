@@ -17,6 +17,8 @@ from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
     WaveformContext,
     _calculate_smart_drop_energy_shadow,
     _detect_drop_beats,
+    _drum_attack_sustained,
+    _drums_dominant_over_tonal,
     _extract_beatgrid_times,
     _extract_pssi_phrases,
     _extract_smart_drop_energy_shadow,
@@ -30,6 +32,7 @@ from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
     _distance_penalty,
     _downbeat_alignment,
     _high_mid_pattern_onset,
+    _kick_max_locked_in,
     _low_mid_pattern_onset,
     _make_multi_feature_scorer,
     _multi_feature_breakdown,
@@ -89,20 +92,37 @@ def _beat_heights(values: dict[int, int], total_beats: int = 120, default: int =
     return [values.get(beat, default) for beat in range(total_beats)]
 
 
-def _spectral_features(values, kick=None, high_mid=None, high_band=None, sub_bass=None) -> SpectralFeatures:
+def _spectral_features(
+    values,
+    kick=None,
+    high_mid=None,
+    high_band=None,
+    sub_bass=None,
+    kick_max=None,
+    onset=None,
+    flatness=None,
+) -> SpectralFeatures:
     series = tuple(float(value) for value in values)
     kick_series = tuple(float(value) for value in (kick if kick is not None else values))
     high_mid_series = tuple(float(value) for value in (high_mid if high_mid is not None else values))
     high_band_series = tuple(float(value) for value in (high_band if high_band is not None else values))
     sub_bass_series = tuple(float(value) for value in (sub_bass if sub_bass is not None else values))
+    kick_max_series = tuple(
+        float(value) for value in (kick_max if kick_max is not None else kick_series)
+    )
+    onset_series = tuple(float(value) for value in (onset if onset is not None else values))
+    flatness_series = tuple(float(value) for value in (flatness if flatness is not None else values))
     return SpectralFeatures(
         sr=22050,
-        schema_version=2,
+        schema_version=3,
         sub_bass_envelope=sub_bass_series,
         kick_envelope=kick_series,
         low_mid_envelope=series,
         high_mid_envelope=high_mid_series,
         high_band_envelope=high_band_series,
+        kick_max_envelope=kick_max_series,
+        onset_strength_envelope=onset_series,
+        spectral_flatness_envelope=flatness_series,
     )
 
 
@@ -111,6 +131,9 @@ _POST_DROP_FEATURE_NAMES = (
     "buildup_sweep_slope",
     "amplitude_jump_at_c",
     "bass_sustain_1bar",
+    "drum_attack_sustained",
+    "kick_max_locked_in",
+    "drums_dominant_over_tonal",
     "phrase_grid_alignment",
     "post_drop_kick_continuity",
     "post_drop_energy_stability",
@@ -395,12 +418,15 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         silent, loud = (0.0,) * 16, (1.0,) * 16
         features = SpectralFeatures(
             sr=22050,
-            schema_version=2,
+            schema_version=3,
             sub_bass_envelope=silent + loud,
             kick_envelope=silent + loud,
             low_mid_envelope=silent + loud,
             high_mid_envelope=silent + loud,
             high_band_envelope=silent + loud,
+            kick_max_envelope=silent + loud,
+            onset_strength_envelope=silent + loud,
+            spectral_flatness_envelope=silent + loud,
         )
 
         self.assertGreater(_low_mid_pattern_onset(16, features), 0.5)
@@ -414,12 +440,15 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         inv_buildup, inv_drop = (1.0,) * 16, (0.2,) * 16
         features = SpectralFeatures(
             sr=22050,
-            schema_version=2,
+            schema_version=3,
             sub_bass_envelope=buildup + drop,
             kick_envelope=buildup + drop,
             low_mid_envelope=buildup + drop,
             high_mid_envelope=inv_buildup + inv_drop,
             high_band_envelope=inv_buildup + inv_drop,
+            kick_max_envelope=buildup + drop,
+            onset_strength_envelope=buildup + drop,
+            spectral_flatness_envelope=buildup + drop,
         )
 
         self.assertGreater(_centroid_drop(16, features), 0.05)
@@ -480,6 +509,72 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
             _bass_sustain_1bar(100, _spectral_features(sub, sub_bass=sub)),
             0.5,
         )
+
+    def test_drum_attack_sustained_scores_sustained_onsets_high(self) -> None:
+        base = [0.1] * 100 + [0.9] * 50
+
+        self.assertGreater(
+            _drum_attack_sustained(100, _spectral_features(base, onset=base)),
+            0.9,
+        )
+
+    def test_drum_attack_sustained_scores_brief_spike_low(self) -> None:
+        onset = [0.0] * 100 + [0.9] + [0.0] * 49
+
+        self.assertLess(
+            _drum_attack_sustained(100, _spectral_features(onset, onset=onset)),
+            0.5,
+        )
+
+    def test_drum_attack_sustained_ignores_global_outlier(self) -> None:
+        onset = [0.1] * 100 + [0.7] * 8 + [0.1] * 40 + [10.0]
+
+        self.assertGreater(
+            _drum_attack_sustained(100, _spectral_features(onset, onset=onset)),
+            0.9,
+        )
+
+    def test_kick_max_locked_in_scores_sustained_transients_high(self) -> None:
+        kick_max = [0.1] * 100 + [0.9] * 50
+
+        self.assertGreater(
+            _kick_max_locked_in(100, _spectral_features(kick_max, kick_max=kick_max)),
+            0.9,
+        )
+
+    def test_kick_max_locked_in_scores_brief_transient_low(self) -> None:
+        kick_max = [0.0] * 100 + [0.9] + [0.0] * 49
+
+        self.assertLess(
+            _kick_max_locked_in(100, _spectral_features(kick_max, kick_max=kick_max)),
+            0.5,
+        )
+
+    def test_kick_max_locked_in_ignores_global_outlier(self) -> None:
+        kick_max = [0.1] * 100 + [0.7] * 8 + [0.1] * 40 + [10.0]
+
+        self.assertGreater(
+            _kick_max_locked_in(100, _spectral_features(kick_max, kick_max=kick_max)),
+            0.9,
+        )
+
+    def test_drums_dominant_over_tonal_uses_flatness_window(self) -> None:
+        noisy = [0.1] * 100 + [0.8] * 8 + [0.1] * 8
+        tonal = [0.1] * 116
+
+        self.assertGreater(
+            _drums_dominant_over_tonal(100, _spectral_features(noisy, flatness=noisy)),
+            0.7,
+        )
+        self.assertLess(
+            _drums_dominant_over_tonal(100, _spectral_features(tonal, flatness=tonal)),
+            0.2,
+        )
+
+    def test_richer_spectral_features_return_neutral_without_payload(self) -> None:
+        self.assertEqual(_drum_attack_sustained(100, None), 0.5)
+        self.assertEqual(_kick_max_locked_in(100, None), 0.5)
+        self.assertEqual(_drums_dominant_over_tonal(100, None), 0.5)
 
     def test_phrase_grid_alignment_uses_soft_32_and_16_beat_grid(self) -> None:
         self.assertEqual(_phrase_grid_alignment(64, [32]), 1.0)

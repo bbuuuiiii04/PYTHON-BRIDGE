@@ -106,12 +106,19 @@ def _spectral_features(length: int) -> SpectralFeatures:
     high_mid = tuple(1.0 if index == 4 else 0.0 for index in range(length))
     return SpectralFeatures(
         sr=22050,
-        schema_version=2,
+        schema_version=3,
         sub_bass_envelope=low,
         kick_envelope=tuple(1.0 if index == 4 else 0.0 for index in range(length)),
         low_mid_envelope=low,
         high_mid_envelope=high_mid,
         high_band_envelope=low,
+        kick_max_envelope=tuple(
+            1.0 if index == 4 else 0.0 for index in range(length)
+        ),
+        onset_strength_envelope=tuple(
+            1.0 if index == 4 else 0.0 for index in range(length)
+        ),
+        spectral_flatness_envelope=low,
     )
 
 

@@ -32,10 +32,14 @@ def _fake_deps(*, mel=None, load_raises: bool = False):
             return frames * hop_length / sr
 
     fake = FakeLibrosa()
+    fake.onset = SimpleNamespace(
+        onset_strength=lambda **kwargs: np.ones(40, dtype=float)
+    )
     fake.feature = SimpleNamespace(
         melspectrogram=lambda **kwargs: (
             mel if mel is not None else np.ones((128, 40), dtype=float)
-        )
+        ),
+        spectral_flatness=lambda **kwargs: np.ones((1, 40), dtype=float) * 0.25,
     )
     return fake, np, SimpleNamespace()
 
@@ -58,6 +62,10 @@ class AudioSpectralFeatureTests(unittest.TestCase):
         self.assertEqual(len(features.low_mid_envelope), 4)
         self.assertEqual(len(features.high_mid_envelope), 4)
         self.assertEqual(len(features.high_band_envelope), 4)
+        self.assertEqual(len(features.kick_max_envelope), 4)
+        self.assertEqual(len(features.onset_strength_envelope), 4)
+        self.assertEqual(len(features.spectral_flatness_envelope), 4)
+        self.assertEqual(features.schema_version, spectral.SCHEMA_VERSION)
 
     def test_extract_spectral_features_normalizes_band_envelopes(self) -> None:
         mel = np.ones((128, 40), dtype=float)
@@ -74,6 +82,27 @@ class AudioSpectralFeatureTests(unittest.TestCase):
         self.assertIsNotNone(features)
         self.assertLessEqual(max(features.kick_envelope), 1.0)
         self.assertGreaterEqual(min(features.kick_envelope), 0.0)
+
+    def test_extract_spectral_features_populates_richer_envelopes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            audio = Path(td) / "track.wav"
+            audio.write_bytes(b"fake")
+            with patch.object(spectral, "_lazy_import_librosa", return_value=_fake_deps()):
+                features = spectral.extract_spectral_features(
+                    str(audio),
+                    [0.0, 250.0, 500.0, 750.0],
+                )
+
+        self.assertIsNotNone(features)
+        self.assertTrue(
+            all(isinstance(value, float) for value in features.kick_max_envelope)
+        )
+        self.assertTrue(
+            all(isinstance(value, float) for value in features.onset_strength_envelope)
+        )
+        self.assertTrue(
+            all(isinstance(value, float) for value in features.spectral_flatness_envelope)
+        )
 
     def test_extract_spectral_features_returns_none_for_missing_audio(self) -> None:
         with patch.object(spectral, "_lazy_import_librosa", return_value=_fake_deps()):

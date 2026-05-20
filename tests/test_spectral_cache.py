@@ -21,6 +21,9 @@ def _features() -> SpectralFeatures:
         low_mid_envelope=(0.2, 0.3, 0.4),
         high_mid_envelope=(0.5, 0.6, 0.7),
         high_band_envelope=(0.7, 0.8, 0.9),
+        kick_max_envelope=(0.8, 0.9, 1.0),
+        onset_strength_envelope=(0.3, 0.4, 0.5),
+        spectral_flatness_envelope=(0.1, 0.2, 0.3),
     )
 
 

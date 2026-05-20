@@ -52,6 +52,9 @@ FEATURE_NAMES = [
     "buildup_sweep_slope",
     "amplitude_jump_at_c",
     "bass_sustain_1bar",
+    "drum_attack_sustained",
+    "kick_max_locked_in",
+    "drums_dominant_over_tonal",
     "phrase_grid_alignment",
     "post_drop_kick_continuity",
     "post_drop_energy_stability",
@@ -769,6 +772,21 @@ def _track_spectral_features(
                 ),
                 high_band_envelope=tuple(
                     float(v) for v in _series_values(payload["high_band_envelope"])
+                ),
+                kick_max_envelope=tuple(
+                    float(v) for v in _series_values(
+                        payload.get("kick_max_envelope", [])
+                    )
+                ),
+                onset_strength_envelope=tuple(
+                    float(v) for v in _series_values(
+                        payload.get("onset_strength_envelope", [])
+                    )
+                ),
+                spectral_flatness_envelope=tuple(
+                    float(v) for v in _series_values(
+                        payload.get("spectral_flatness_envelope", [])
+                    )
                 ),
             )
         except Exception:

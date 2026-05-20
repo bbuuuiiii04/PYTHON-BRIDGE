@@ -44,6 +44,13 @@ def get_cached(
             low_mid_envelope=tuple(float(v) for v in payload["low_mid_envelope"]),
             high_mid_envelope=tuple(float(v) for v in payload["high_mid_envelope"]),
             high_band_envelope=tuple(float(v) for v in payload["high_band_envelope"]),
+            kick_max_envelope=tuple(float(v) for v in payload["kick_max_envelope"]),
+            onset_strength_envelope=tuple(
+                float(v) for v in payload["onset_strength_envelope"]
+            ),
+            spectral_flatness_envelope=tuple(
+                float(v) for v in payload["spectral_flatness_envelope"]
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         log.debug("spectral cache payload invalid key=%s: %s", key, exc)
@@ -159,6 +166,9 @@ def _payload_for_write(
         "low_mid_envelope": list(features.low_mid_envelope),
         "high_mid_envelope": list(features.high_mid_envelope),
         "high_band_envelope": list(features.high_band_envelope),
+        "kick_max_envelope": list(features.kick_max_envelope),
+        "onset_strength_envelope": list(features.onset_strength_envelope),
+        "spectral_flatness_envelope": list(features.spectral_flatness_envelope),
     }
 
 
