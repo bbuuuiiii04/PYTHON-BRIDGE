@@ -18,6 +18,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import statistics
 import time
 from typing import Any, Callable, Optional
 
@@ -86,18 +87,35 @@ _PWV3_MS_PER_ENTRY_FALLBACK = 6.7
 MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
     "onset_score": 0.000000,
     "broad_onset_score": 0.000000,
-    "post_lift": 0.013896,
-    "pre_valley_depth": 0.006064,
-    "downbeat_alignment": 0.077649,
-    "distance_penalty": 0.031940,
-    "kick_pattern_onset": 0.958909,
+    "post_lift": 0.009298,
+    "pre_valley_depth": 0.006509,
+    "downbeat_alignment": 0.052488,
+    "distance_penalty": 0.022968,
+    "kick_pattern_onset": 0.529964,
     "bass_pattern_onset": 0.000000,
     "low_mid_pattern_onset": 0.000000,
-    "high_mid_pattern_onset": 1.661027,
-    "phrase_energy_step": 0.344555,
-    "spectral_balance_shift": 0.037456,
+    "high_mid_pattern_onset": 1.729775,
+    "phrase_energy_step": 0.202022,
+    "spectral_balance_shift": 0.000000,
     "centroid_drop": 0.000000,
-    "spectral_flux_onset": 0.003867,
+    "spectral_flux_onset": 0.000000,
+    "silence_frame_pre": 0.011893,
+    "buildup_sweep_slope": 0.000000,
+    "amplitude_jump_at_c": 0.117237,
+    "bass_sustain_1bar": 0.182334,
+    "phrase_grid_alignment": 0.000000,
+    "post_drop_kick_continuity": 0.078622,
+    "post_drop_energy_stability": 2.596686,
+    "post_drop_minus_pre_drop": 0.138271,
+    "no_bigger_drop_later": 0.696017,
+}
+
+_PHASE_1A_FEATURE_NAMES = {
+    "silence_frame_pre",
+    "buildup_sweep_slope",
+    "amplitude_jump_at_c",
+    "phrase_grid_alignment",
+    "bass_sustain_1bar",
 }
 
 MultiFeatureScorer = Callable[
@@ -339,6 +357,8 @@ def _calculate_smart_drop_energy_shadow(
     *,
     scorer: Optional[MultiFeatureScorer] = None,
     spectral_features: Optional[Any] = None,
+    wide_window: bool = False,
+    phrases: Optional[Any] = None,
 ) -> list[SmartDropEnergyShadow]:
     if not heights or waveform_duration_ms <= 0 or len(beatgrid_times_ms) < 8:
         return []
@@ -354,6 +374,8 @@ def _calculate_smart_drop_energy_shadow(
             selected_drops,
             scorer=scorer,
             spectral_features=spectral_features,
+            wide_window=wide_window,
+            phrases=phrases,
         )
     return _v1_compute_shadows(heights, ms_per_entry, beatgrid_times_ms, selected_drops)
 
@@ -409,7 +431,19 @@ def _v2_compute_shadows(
     *,
     scorer: MultiFeatureScorer,
     spectral_features: Optional[Any] = None,
+    wide_window: bool = False,
+    phrases: Optional[Any] = None,
 ) -> list[SmartDropEnergyShadow]:
+    """Compute v2 shadows; per-candidate scoring uses the scorer closure.
+
+    Contract: callers MUST pass the same ``wide_window`` and ``phrases``
+    values to both `_make_multi_feature_scorer` and this function. The
+    per-candidate score comes from the closure, which captured its own
+    ``wide_window``/``phrases``; the final ``feature_breakdown`` uses this
+    function's kwargs. Mismatched values produce telemetry rows where
+    ``score_at_suggested`` does not equal
+    ``sum(features[name] * weights[name])``.
+    """
     shadows: list[SmartDropEnergyShadow] = []
     source = "v2_spectral" if spectral_features is not None else "v2_waveform"
     for drop_beat in sorted(set(int(beat) for beat in selected_drops)):
@@ -417,7 +451,8 @@ def _v2_compute_shadows(
             continue
 
         scored: list[tuple[int, float]] = []
-        for candidate_beat in range(drop_beat, drop_beat + 9):
+        window_end = drop_beat + (17 if wide_window else 9)
+        for candidate_beat in range(drop_beat, window_end):
             if candidate_beat < 0 or candidate_beat >= len(beatgrid_times_ms):
                 continue
             score = scorer(
@@ -445,6 +480,8 @@ def _v2_compute_shadows(
             beatgrid_times_ms,
             drop_beat,
             spectral_features,
+            wide_window=wide_window,
+            phrases=phrases,
         )
         shadow = SmartDropEnergyShadow(
             anlz_beat=drop_beat,
@@ -600,8 +637,9 @@ def _downbeat_alignment(beat: int) -> float:
     return 0.0
 
 
-def _distance_penalty(beat: int, anlz_beat: int) -> float:
-    return max(0.0, 1.0 - (abs(int(beat) - int(anlz_beat)) / 8.0))
+def _distance_penalty(beat: int, anlz_beat: int, *, wide_window: bool = False) -> float:
+    divisor = 16.0 if wide_window else 8.0
+    return max(0.0, 1.0 - (abs(int(beat) - int(anlz_beat)) / divisor))
 
 
 def _multi_feature_breakdown(
@@ -610,6 +648,9 @@ def _multi_feature_breakdown(
     beatgrid_times_ms: list[float],
     anlz_beat: int,
     spectral_features: Optional[Any],
+    *,
+    wide_window: bool = False,
+    phrases: Optional[Any] = None,
 ) -> dict[str, float]:
     features = {
         "onset_score": _onset_score(beat, heights, beatgrid_times_ms),
@@ -617,7 +658,7 @@ def _multi_feature_breakdown(
         "post_lift": _post_lift(beat, heights, beatgrid_times_ms),
         "pre_valley_depth": _pre_valley_depth(beat, heights, beatgrid_times_ms),
         "downbeat_alignment": _downbeat_alignment(beat),
-        "distance_penalty": _distance_penalty(beat, anlz_beat),
+        "distance_penalty": _distance_penalty(beat, anlz_beat, wide_window=wide_window),
     }
     def spectral_score(fn: Callable[[int, Any], float]) -> float:
         return 0.0 if spectral_features is None else fn(beat, spectral_features)
@@ -631,6 +672,15 @@ def _multi_feature_breakdown(
         "spectral_balance_shift": spectral_score(_spectral_balance_shift),
         "centroid_drop": spectral_score(_centroid_drop),
         "spectral_flux_onset": spectral_score(_spectral_flux_onset),
+        "silence_frame_pre": spectral_score(_silence_frame_pre),
+        "buildup_sweep_slope": spectral_score(_buildup_sweep_slope),
+        "amplitude_jump_at_c": spectral_score(_amplitude_jump_at_c),
+        "bass_sustain_1bar": spectral_score(_bass_sustain_1bar),
+        "phrase_grid_alignment": _phrase_grid_alignment(beat, phrases),
+        "post_drop_kick_continuity": spectral_score(_post_drop_kick_continuity),
+        "post_drop_energy_stability": spectral_score(_post_drop_energy_stability),
+        "post_drop_minus_pre_drop": spectral_score(_post_drop_minus_pre_drop),
+        "no_bigger_drop_later": spectral_score(_no_bigger_drop_later),
     })
     return features
 
@@ -642,6 +692,9 @@ def _multi_feature_score(
     anlz_beat: int,
     spectral_features: Optional[Any],
     weights: Optional[dict[str, float]] = None,
+    *,
+    wide_window: bool = False,
+    phrases: Optional[Any] = None,
 ) -> float:
     resolved = weights if weights is not None else MULTI_FEATURE_WEIGHTS_V2
     features = _multi_feature_breakdown(
@@ -650,12 +703,25 @@ def _multi_feature_score(
         beatgrid_times_ms,
         anlz_beat,
         spectral_features,
+        wide_window=wide_window,
+        phrases=phrases,
     )
-    return sum(features[name] * resolved.get(name, 0.0) for name in features)
+    phase_1a_enabled = wide_window or bool(phrases)
+    return sum(
+        features[name] * resolved.get(name, 0.0)
+        for name in features
+        if phase_1a_enabled or name not in _PHASE_1A_FEATURE_NAMES
+    )
 
 
-def _make_multi_feature_scorer(weights: dict[str, float]) -> MultiFeatureScorer:
+def _make_multi_feature_scorer(
+    weights: dict[str, float],
+    *,
+    wide_window: bool = False,
+    phrases: Optional[Any] = None,
+) -> MultiFeatureScorer:
     weight_copy = dict(weights)
+    phrases_copy = tuple(phrases) if phrases else None
 
     def scorer(
         beat: int,
@@ -671,6 +737,8 @@ def _make_multi_feature_scorer(weights: dict[str, float]) -> MultiFeatureScorer:
             anlz_beat,
             spectral_features,
             weight_copy,
+            wide_window=wide_window,
+            phrases=phrases_copy,
         )
 
     return scorer
@@ -739,6 +807,131 @@ def _spectral_flux_onset(beat: int, spectral_features: Any) -> float:
     if not baseline:
         return 0.0
     return max(0.0, peak - baseline[len(baseline) // 2])
+
+
+def _silence_frame_pre(beat: int, spectral_features: Any) -> float:
+    """Kick/sub silence frame immediately before a candidate drop."""
+    kick = _spectral_envelope(spectral_features, "kick_envelope")
+    sub = _spectral_envelope(spectral_features, "sub_bass_envelope")
+    n = min(len(kick), len(sub))
+    if n <= 0:
+        return 0.0
+    energy = [kick[i] + sub[i] for i in range(n)]
+    pre = energy[max(0, beat - 2):beat]
+    context = energy[max(0, beat - 16):max(0, beat - 2)]
+    if len(pre) < 2 or len(context) < 4:
+        return 0.0
+    pre_mean = sum(pre) / len(pre)
+    context_mean = sum(context) / len(context)
+    if pre_mean >= context_mean:
+        return 0.0
+    return max(0.0, min(1.0, 1.0 - pre_mean / (context_mean + 1e-6)))
+
+
+def _buildup_sweep_slope(beat: int, spectral_features: Any) -> float:
+    """High-band end-vs-start lift over the pre-drop buildup window."""
+    high_mid = _spectral_envelope(spectral_features, "high_mid_envelope")
+    high_band = _spectral_envelope(spectral_features, "high_band_envelope")
+    n = min(len(high_mid), len(high_band))
+    if n <= 0:
+        return 0.0
+    high = [high_mid[i] + high_band[i] for i in range(n)]
+    window = high[max(0, beat - 32):beat]
+    if len(window) < 16:
+        return 0.0
+    head_len = max(1, len(window) // 4)
+    head = sum(window[:head_len]) / head_len
+    tail = sum(window[-head_len:]) / head_len
+    peak = max(window) + 1e-6
+    return max(0.0, min(1.0, (tail - head) / peak))
+
+
+def _amplitude_jump_at_c(beat: int, spectral_features: Any) -> float:
+    """Kick/sub jump from the silence frame into the candidate drop."""
+    kick = _spectral_envelope(spectral_features, "kick_envelope")
+    sub = _spectral_envelope(spectral_features, "sub_bass_envelope")
+    n = min(len(kick), len(sub))
+    if beat < 2 or beat + 1 >= n:
+        return 0.0
+    energy = [kick[i] + sub[i] for i in range(n)]
+    post = (energy[beat] + energy[beat + 1]) / 2.0
+    pre = (energy[beat - 1] + energy[beat - 2]) / 2.0
+    ratio = post / (pre + 1e-6)
+    return min(1.0, max(0.0, ratio / 10.0))
+
+
+def _bass_sustain_1bar(beat: int, spectral_features: Any) -> float:
+    """Score immediate sub-bass sustain after a candidate drop."""
+    if spectral_features is None:
+        return 0.5
+    sub = _spectral_envelope(spectral_features, "sub_bass_envelope")
+    if beat < 0 or beat + 12 > len(sub):
+        return 0.5
+    immediate = sum(sub[beat:beat + 4]) / 4.0
+    late = sum(sub[beat + 4:beat + 12]) / 8.0
+    return min(1.0, immediate / (late + 1e-6))
+
+
+def _phrase_grid_alignment(beat: int, phrases: Optional[Any]) -> float:
+    if not phrases:
+        return 0.0
+    best = 0.0
+    for anchor in phrases:
+        rel = (beat - int(anchor)) % 32
+        offset_32 = min(rel, 32 - rel)
+        rel16 = rel % 16
+        offset_16 = min(rel16, 16 - rel16)
+        score = max(
+            1.0 - offset_32 / 4.0,
+            0.5 - offset_16 / 8.0,
+            0.0,
+        )
+        best = max(best, score)
+    return best
+
+
+def _post_drop_kick_continuity(beat: int, spectral_features: Any) -> float:
+    kick = _spectral_envelope(spectral_features, "kick_envelope")
+    start, end = beat + 1, min(beat + 17, len(kick))
+    if start >= end:
+        return 0.0
+    threshold = statistics.median(kick) * 1.5
+    count = sum(1 for value in kick[start:end] if value >= threshold)
+    return min(1.0, max(0.0, count / (end - start)))
+
+
+def _post_drop_energy_stability(beat: int, spectral_features: Any) -> float:
+    energy = _per_beat_total_energy(spectral_features)
+    window = energy[beat + 1:min(beat + 17, len(energy))]
+    if len(window) < 8:
+        return 0.0
+    mean = sum(window) / len(window)
+    variance = sum((value - mean) ** 2 for value in window) / len(window)
+    return max(0.0, 1.0 - variance / (mean ** 2 + 1e-6))
+
+
+def _post_drop_minus_pre_drop(beat: int, spectral_features: Any) -> float:
+    energy = _per_beat_total_energy(spectral_features)
+    post_window = energy[beat + 1:min(beat + 17, len(energy))]
+    pre_window = energy[max(0, beat - 16):beat]
+    if len(post_window) < 4 or len(pre_window) < 4:
+        return 0.0
+    post = sum(post_window) / len(post_window)
+    pre = sum(pre_window) / len(pre_window)
+    return max(0.0, min(1.0, post - pre))
+
+
+def _no_bigger_drop_later(beat: int, spectral_features: Any) -> float:
+    energy = _per_beat_total_energy(spectral_features)
+    current_window = energy[beat + 1:min(beat + 33, len(energy))]
+    future_window = energy[beat + 33:min(beat + 65, len(energy))]
+    if len(current_window) < 16:
+        return 0.5
+    if len(future_window) < 16:
+        return 0.5
+    current_peak = max(current_window)
+    future_peak = max(future_window)
+    return current_peak / (current_peak + future_peak + 1e-6)
 
 
 def _pattern_onset(beat: int, envelope: list[float], window: int = 8) -> float:

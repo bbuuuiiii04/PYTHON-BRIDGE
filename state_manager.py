@@ -103,6 +103,7 @@ SMART_BREAKDOWN_ENV = "RBSS_SMART_BREAKDOWN"
 PHRASE_ANCHOR_ENV = "RBSS_PHRASE_ANCHOR"
 SMART_REARM_EXPERIMENT_ENV = "RBSS_SMART_REARM_EXPERIMENT"
 SPECTRAL_ENABLE_ENV = "RBSS_SPECTRAL_ENABLE"
+WIDE_WINDOW_ENV = "RBSS_DROP_WIDE_WINDOW"
 SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
 STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
@@ -115,6 +116,7 @@ def _read_runtime_anlz_data(
     *,
     audio_filepath: str = "",
     spectral_enabled: bool = False,
+    wide_window: bool = False,
 ) -> TrackAnlzData:
     data = read_anlz_drops(anlz_path)
     if not spectral_enabled:
@@ -125,14 +127,21 @@ def _read_runtime_anlz_data(
 
     beatgrid_times_ms = list(ctx.beatgrid_times_ms)
     features = _runtime_spectral_features(audio_filepath, beatgrid_times_ms)
+    phrases = list(data.buildup_beat_indices) + list(data.breakdown_beat_indices)
     data.energy_shadow = _calculate_smart_drop_energy_shadow(
         list(ctx.heights),
         _duration_from_beatgrid(beatgrid_times_ms),
         beatgrid_times_ms,
         data.drop_beat_indices,
         # TODO(M4): hoist the v2 runtime scorer if this path becomes hot enough.
-        scorer=_make_multi_feature_scorer(MULTI_FEATURE_WEIGHTS_V2),
+        scorer=_make_multi_feature_scorer(
+            MULTI_FEATURE_WEIGHTS_V2,
+            wide_window=wide_window,
+            phrases=phrases,
+        ),
         spectral_features=features,
+        wide_window=wide_window,
+        phrases=phrases,
     )
     return data
 
@@ -305,6 +314,7 @@ class StateManager:
             self._smart_rearm_experiment
             and _os.environ.get(SPECTRAL_ENABLE_ENV, "0") == "1"
         )
+        self._wide_window_enable = _os.environ.get(WIDE_WINDOW_ENV, "1") != "0"
         self._stop  = threading.Event()
 
         # Per-deck state (written only by this thread after start())
@@ -950,7 +960,12 @@ class StateManager:
             self._resolver.resolve_by_anlz(deck, d.load_gen, anlz_path, trace_id=trace_id)
             if self._smart_rearm_experiment:
                 self._loaded_anlz_path[deck] = (anlz_path, d.load_gen)
-                self._start_anlz_worker(anlz_path, deck, d.load_gen)
+                self._start_anlz_worker(
+                    anlz_path,
+                    deck,
+                    d.load_gen,
+                    wide_window=self._wide_window_enable,
+                )
         else:
             other = 3 - deck
             other_path = self._deck[other].meta.filepath
@@ -968,6 +983,7 @@ class StateManager:
         *,
         audio_filepath: str = "",
         spectral_enabled: bool = False,
+        wide_window: bool = False,
     ) -> None:
         eq = self._eq
         source = "anlz_spectral" if spectral_enabled else "anlz"
@@ -978,6 +994,7 @@ class StateManager:
                     path,
                     audio_filepath=audio_filepath,
                     spectral_enabled=spectral_enabled,
+                    wide_window=wide_window,
                 )
             except Exception:
                 log.debug("[SM] anlz-worker-error", exc_info=True)
@@ -1067,6 +1084,7 @@ class StateManager:
                         d.load_gen,
                         audio_filepath=meta.filepath,
                         spectral_enabled=True,
+                        wide_window=self._wide_window_enable,
                     )
         if _os.environ.get("RBSS_SCRIPTED_DIRECT") != "0":
             ssid = meta.soundswitch_id

@@ -48,7 +48,18 @@ FEATURE_NAMES = [
     "spectral_balance_shift",
     "centroid_drop",
     "spectral_flux_onset",
+    "silence_frame_pre",
+    "buildup_sweep_slope",
+    "amplitude_jump_at_c",
+    "bass_sustain_1bar",
+    "phrase_grid_alignment",
+    "post_drop_kick_continuity",
+    "post_drop_energy_stability",
+    "post_drop_minus_pre_drop",
+    "no_bigger_drop_later",
 ]
+
+WIDE_WINDOW_ENV = "RBSS_DROP_WIDE_WINDOW"
 
 
 @dataclass
@@ -839,13 +850,15 @@ def _predict_v2(
     spectral: Optional[SpectralFeatures],
     weights: dict[str, float],
 ) -> Optional[int]:
+    wide_window = os.environ.get(WIDE_WINDOW_ENV, "1") != "0"
     shadows = _calculate_smart_drop_energy_shadow(
         row.heights,
         _duration_from_beatgrid(row.beatgrid_times_ms),
         row.beatgrid_times_ms,
         [row.rekordbox_beat],
-        scorer=_make_multi_feature_scorer(weights),
+        scorer=_make_multi_feature_scorer(weights, wide_window=wide_window),
         spectral_features=spectral,
+        wide_window=wide_window,
     )
     return shadows[0].suggested_beat if shadows else None
 
