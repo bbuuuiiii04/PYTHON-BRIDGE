@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.laser_config import load_laser_director_config
+from rb_ss_bridge_v2.ss_metadata_importer import LookCatalog, LookRecord
 from rb_ss_bridge_v2.tools.laser_config_ops import (
     _ensure_personality_exists,
     apply_mapping,
@@ -63,6 +64,39 @@ class LaserConfigOpsTests(unittest.TestCase):
         self.assertIn(scene_b, cfg["personalities"]["house"]["phrase_bank"])
         self.assertEqual(cfg["scenes"][scene_a]["midi"].get("channel"), 1)
         self.assertEqual(cfg["scenes"][scene_b]["midi"].get("channel"), 2)
+
+    def test_apply_mapping_preserves_ss_look_name_on_existing_scene(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cfg = load_or_create_config(Path(td) / "laser_director.json")
+            scene = apply_mapping(cfg, personality="house", role="groove", note=77)
+            cfg["scenes"][scene]["ss_look_name"] = "BLUE FANNING"
+
+            same_scene = apply_mapping(cfg, personality="house", role="groove", note=77)
+
+        self.assertEqual(same_scene, scene)
+        self.assertEqual(cfg["scenes"][scene]["ss_look_name"], "BLUE FANNING")
+
+    def test_validate_config_data_warns_for_unknown_ss_look_name(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cfg = load_or_create_config(Path(td) / "laser_director.json")
+            scene = apply_mapping(cfg, personality="house", role="groove", note=78)
+            cfg["scenes"][scene]["ss_look_name"] = "RENAMED LOOK"
+
+        catalog = LookCatalog(
+            (
+                LookRecord(
+                    name="BLUE FANNING",
+                    source_file="SoundSwitchVenues.bin",
+                    bank_header="STATIC LASERS",
+                    look_type="static",
+                ),
+            )
+        )
+        _errors, warnings = validate_config_data(cfg, ss_catalog=catalog)
+
+        self.assertTrue(
+            any("unknown SoundSwitch look 'RENAMED LOOK'" in warning for warning in warnings)
+        )
 
     def test_validate_config_data_clean_example_no_errors(self) -> None:
         example_path = Path(__file__).resolve().parents[1] / "config" / "laser_director.example.json"

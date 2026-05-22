@@ -179,6 +179,19 @@ class ValidConfigTests(unittest.TestCase):
         scene = self._result.config.scenes["safe_static"]
         self.assertIsInstance(scene, LaserScene)
 
+    def test_valid_config_scene_ss_look_name_defaults_empty(self) -> None:
+        scene = self._result.config.scenes["safe_static"]
+        self.assertEqual(scene.ss_look_name, "")
+
+    def test_valid_config_scene_ss_look_name_round_trips(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["scenes"]["safe_static"]["ss_look_name"] = "BLUE FANNING"
+        result = load_laser_director_config(_write_config(cfg))
+
+        self.assertTrue(result.available)
+        self.assertEqual(result.config.scenes["safe_static"].ss_look_name, "BLUE FANNING")
+
     def test_valid_config_scene_midi_is_laser_midi_message(self) -> None:
         midi = self._result.config.scenes["safe_static"].midi
         self.assertIsInstance(midi, LaserMidiMessage)
@@ -717,6 +730,18 @@ class InvalidDurationTests(unittest.TestCase):
         midi["hold_beats"] = 4
         r = load_laser_director_config(_write_config(cfg))
         self.assertTrue(r.available, msg=r.errors)
+
+
+class InvalidSceneMetadataTests(unittest.TestCase):
+    def test_ss_look_name_must_be_string(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["scenes"]["safe_static"]["ss_look_name"] = 42
+
+        r = load_laser_director_config(_write_config(cfg))
+
+        self.assertFalse(r.available)
+        self.assertTrue(any("ss_look_name" in e for e in r.errors))
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ import mido
 
 from ..laser_config import LaserConfigResult, load_laser_director_config
 from ..runtime_status import STATUS_PATH
+from ..ss_metadata_importer import LookCatalog, build_catalog as build_ss_catalog
 from .laser_config_ops import (
     _DEFAULT_CONFIG_PATH,
     _DEFAULT_PERSONALITY,
@@ -51,6 +52,7 @@ class LaserPadService:
         self._status_path = Path(status_path)
         self._lock = Lock()
         self._draft = load_or_create_config(self._config_path)
+        self._ss_catalog: LookCatalog | None = None
 
     @property
     def config_path(self) -> Path:
@@ -89,8 +91,13 @@ class LaserPadService:
     def get_config_payload(self) -> dict[str, Any]:
         with self._lock:
             config = json.loads(json.dumps(self._draft))
+            ss_catalog = self._ss_catalog
         loader_result = self._load_config_result(config)
-        errors, warnings = validate_config_data(config, loader_result=loader_result)
+        errors, warnings = validate_config_data(
+            config,
+            loader_result=loader_result,
+            ss_catalog=ss_catalog,
+        )
         hard_dupes = [
             {
                 "channel": int(channel),
@@ -157,6 +164,9 @@ class LaserPadService:
         label = payload.get("label")
         if isinstance(label, str):
             self._draft.setdefault("scenes", {}).setdefault(scene_name, {})["label"] = label
+        ss_look_name = payload.get("ss_look_name")
+        if isinstance(ss_look_name, str):
+            self._draft.setdefault("scenes", {}).setdefault(scene_name, {})["ss_look_name"] = ss_look_name
         return scene_name
 
     def apply_draft_patch(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -172,8 +182,13 @@ class LaserPadService:
             if isinstance(mapping, dict):
                 mapped_scene = self._apply_mapping_patch(mapping)
             config = json.loads(json.dumps(self._draft))
+            ss_catalog = self._ss_catalog
         loader_result = self._load_config_result(config)
-        errors, warnings = validate_config_data(config, loader_result=loader_result)
+        errors, warnings = validate_config_data(
+            config,
+            loader_result=loader_result,
+            ss_catalog=ss_catalog,
+        )
         result: dict[str, Any] = {
             "ok": True,
             "errors": errors,
@@ -191,9 +206,14 @@ class LaserPadService:
     def commit_draft(self) -> dict[str, Any]:
         with self._lock:
             config = json.loads(json.dumps(self._draft))
+            ss_catalog = self._ss_catalog
 
         loader_result = self._load_config_result(config)
-        errors, warnings = validate_config_data(config, loader_result=loader_result)
+        errors, warnings = validate_config_data(
+            config,
+            loader_result=loader_result,
+            ss_catalog=ss_catalog,
+        )
         if errors:
             return {
                 "ok": False,
@@ -203,8 +223,13 @@ class LaserPadService:
 
         with self._lock:
             config_to_save = json.loads(json.dumps(self._draft))
+            ss_catalog_to_save = self._ss_catalog
             loader_result_to_save = self._load_config_result(config_to_save)
-            save_errors, save_warnings = validate_config_data(config_to_save, loader_result=loader_result_to_save)
+            save_errors, save_warnings = validate_config_data(
+                config_to_save,
+                loader_result=loader_result_to_save,
+                ss_catalog=ss_catalog_to_save,
+            )
             if save_errors:
                 return {
                     "ok": False,
@@ -322,8 +347,13 @@ class LaserPadService:
                 cooldown_beats=cooldown_beats,
             )
             config = json.loads(json.dumps(self._draft))
+            ss_catalog = self._ss_catalog
         loader_result = self._load_config_result(config)
-        errors, warnings = validate_config_data(config, loader_result=loader_result)
+        errors, warnings = validate_config_data(
+            config,
+            loader_result=loader_result,
+            ss_catalog=ss_catalog,
+        )
         return {
             "ok": True,
             "errors": errors,
@@ -333,11 +363,29 @@ class LaserPadService:
     def validate_draft(self) -> dict[str, Any]:
         with self._lock:
             config = json.loads(json.dumps(self._draft))
+            ss_catalog = self._ss_catalog
         loader_result = self._load_config_result(config)
-        errors, warnings = validate_config_data(config, loader_result=loader_result)
+        errors, warnings = validate_config_data(
+            config,
+            loader_result=loader_result,
+            ss_catalog=ss_catalog,
+        )
         return {
             "errors": errors,
             "warnings": warnings,
+        }
+
+    def get_ss_catalog(self, *, refresh: bool = False) -> dict[str, Any]:
+        with self._lock:
+            catalog = self._ss_catalog
+        if refresh or catalog is None:
+            catalog = build_ss_catalog()
+            with self._lock:
+                self._ss_catalog = catalog
+        return {
+            "ok": True,
+            "count": len(catalog.records),
+            "records": catalog.as_dicts(),
         }
 
     def verify_draft(self) -> dict[str, Any]:
@@ -583,6 +631,9 @@ class _LaserPadHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/runtime_status":
             self._send_json(HTTPStatus.OK, self.service.get_runtime_status())
             return
+        if parsed.path == "/api/ss_catalog":
+            self._send_json(HTTPStatus.OK, self.service.get_ss_catalog())
+            return
         if parsed.path == "/api/history":
             try:
                 self._send_json(HTTPStatus.OK, {"items": self.service.list_history()})
@@ -610,6 +661,7 @@ class _LaserPadHandler(BaseHTTPRequestHandler):
                 "/api/discard",
                 "/api/validate",
                 "/api/verify",
+                "/api/ss_catalog/refresh",
                 "/api/role_cooldown",
                 "/api/banks/reset",
                 "/api/personality/create",
@@ -639,6 +691,8 @@ class _LaserPadHandler(BaseHTTPRequestHandler):
                 result = self.service.validate_draft()
             elif parsed.path == "/api/verify":
                 result = self.service.verify_draft()
+            elif parsed.path == "/api/ss_catalog/refresh":
+                result = self.service.get_ss_catalog(refresh=True)
             elif parsed.path == "/api/role_cooldown":
                 result = self.service.apply_role_cooldown(payload)
             elif parsed.path == "/api/banks/reset":

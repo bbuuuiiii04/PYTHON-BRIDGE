@@ -62,6 +62,7 @@ class LaserScene:
                     or safety. Must be a key in the scenes dict.
     cooldown_beats — minimum beat hold before this scene can re-trigger.
     immediate      — when True, may trigger between phrase boundaries.
+    ss_look_name   — optional SoundSwitch look name for operator orientation only.
     """
     name: str
     scene_type: str
@@ -71,6 +72,7 @@ class LaserScene:
     cooldown_beats: float = 0.0
     immediate: bool = False
     label: str = ""
+    ss_look_name: str = ""
 
 
 @dataclass(frozen=True)

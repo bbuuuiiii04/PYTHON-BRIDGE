@@ -16,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.tools.laser_pad_web import LaserPadService, build_handler
+from rb_ss_bridge_v2.ss_metadata_importer import LookCatalog, LookRecord
 from rb_ss_bridge_v2.tools.laser_config_ops import _ensure_house_personality, verify_mappings_runtime
 
 
@@ -189,6 +190,83 @@ class LaserPadWebTests(unittest.TestCase):
                 ports = service.get_midi_ports()
 
         self.assertEqual(ports, ["IAC Driver Bus 1", "LoopMIDI"])
+
+    def test_ss_catalog_http_route_returns_records(self) -> None:
+        catalog = LookCatalog(
+            (
+                LookRecord(
+                    name="BLUE FANNING",
+                    source_file="SoundSwitchAutoLoopsEx.bin",
+                    bank_header="DROP // HIGH ENERGY",
+                    look_type="autoloop",
+                ),
+            )
+        )
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            with patch("rb_ss_bridge_v2.tools.laser_pad_web.build_ss_catalog", return_value=catalog):
+                with self._running_server(service) as port:
+                    status, payload, _raw = self._request_json(
+                        port=port,
+                        method="GET",
+                        path="/api/ss_catalog",
+                    )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["records"][0]["name"], "BLUE FANNING")
+
+    def test_ss_catalog_refresh_replaces_cached_catalog(self) -> None:
+        old_catalog = LookCatalog(
+            (
+                LookRecord("OLD LOOK", "old.bin", "OLD", "static"),
+            )
+        )
+        new_catalog = LookCatalog(
+            (
+                LookRecord("NEW LOOK", "new.bin", "NEW", "static"),
+            )
+        )
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            service._ss_catalog = old_catalog
+            with patch("rb_ss_bridge_v2.tools.laser_pad_web.build_ss_catalog", return_value=new_catalog):
+                with self._running_server(service) as port:
+                    status, payload, _raw = self._request_json(
+                        port=port,
+                        method="POST",
+                        path="/api/ss_catalog/refresh",
+                        payload={},
+                    )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["records"][0]["name"], "NEW LOOK")
+
+    def test_get_config_uses_cached_ss_catalog_for_orphan_warning(self) -> None:
+        catalog = LookCatalog(
+            (
+                LookRecord("KNOWN LOOK", "SoundSwitchVenues.bin", "STATIC LASERS", "static"),
+            )
+        )
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            service._ss_catalog = catalog
+            result = service.apply_draft_patch(
+                {
+                    "mapping": {
+                        "personality": "house",
+                        "role": "groove",
+                        "note": 104,
+                        "ss_look_name": "MISSING LOOK",
+                    }
+                }
+            )
+            payload = service.get_config_payload()
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(
+            any("unknown SoundSwitch look 'MISSING LOOK'" in warning for warning in payload["warnings"])
+        )
 
     def test_create_personality_adds_skeleton_and_persists_in_draft(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -705,6 +783,7 @@ class LaserPadWebTests(unittest.TestCase):
                         "hold_beats": 4,
                         "cooldown_beats": 12,
                         "label": "drop impact 1",
+                        "ss_look_name": "BLUE FANNING",
                     }
                 }
             )
@@ -717,6 +796,7 @@ class LaserPadWebTests(unittest.TestCase):
         self.assertEqual(scene["midi"]["channel"], 2)
         self.assertEqual(scene["midi"]["behavior"], "hold_beats")
         self.assertEqual(scene["label"], "drop impact 1")
+        self.assertEqual(scene["ss_look_name"], "BLUE FANNING")
 
     def test_drag_drop_reassignment_patch_sequence_updates_scene_notes(self) -> None:
         with tempfile.TemporaryDirectory() as td:

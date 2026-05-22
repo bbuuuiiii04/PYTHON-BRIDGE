@@ -40,6 +40,7 @@ window.laserPadApp = function laserPadApp() {
     config: {},
     liveErrors: [],
     liveWarnings: [],
+    ssCatalog: [],
     hardDuplicates: [],
     softDuplicates: [],
     midiPorts: [],
@@ -130,12 +131,14 @@ window.laserPadApp = function laserPadApp() {
       immediate: false,
       safety_class: 'movement_low',
       label: '',
+      ss_look_name: '',
       source_behavior: 'pulse',
       behaviorTouched: false,
       system: false,
     },
 
     async init() {
+      await this.refreshSsCatalog();
       await this.refreshConfig();
       await this.refreshMidiPorts();
       await this.refreshRuntimeStatus();
@@ -308,6 +311,50 @@ window.laserPadApp = function laserPadApp() {
       }
     },
 
+    async refreshSsCatalog(force = false) {
+      try {
+        const response = await fetch(force ? '/api/ss_catalog/refresh' : '/api/ss_catalog', {
+          method: force ? 'POST' : 'GET',
+          headers: force ? { 'Content-Type': 'application/json' } : undefined,
+          body: force ? '{}' : undefined,
+        });
+        const payload = await response.json();
+        this.ssCatalog = Array.isArray(payload.records) ? payload.records : [];
+        if (force) {
+          await this.refreshConfig();
+          this.statusText = `SoundSwitch catalog refreshed (${this.ssCatalog.length} looks)`;
+        }
+      } catch (err) {
+        this.ssCatalog = [];
+        if (force) this.statusText = `Catalog refresh failed: ${err.message}`;
+      }
+    },
+
+    ssCatalogHas(name) {
+      return this.ssCatalog.some((record) => record.name === name);
+    },
+
+    ssCatalogGroups() {
+      const groups = [];
+      const byKey = new Map();
+      this.ssCatalog.forEach((record) => {
+        const header = String(record.bank_header || record.source_file || 'Ungrouped');
+        const key = `${record.source_file || ''}:${header}`;
+        if (!byKey.has(key)) {
+          const group = { key, label: header, records: [] };
+          byKey.set(key, group);
+          groups.push(group);
+        }
+        byKey.get(key).records.push(record);
+      });
+      return groups;
+    },
+
+    ssLookOptionLabel(record) {
+      const source = String(record.source_file || '');
+      return source ? `${record.name} · ${source}` : String(record.name || '');
+    },
+
     banks() {
       const banks = this.config?._pad_meta?.banks;
       return Array.isArray(banks) ? banks : [];
@@ -381,6 +428,7 @@ window.laserPadApp = function laserPadApp() {
             primary: true,
             safetyClass: 'blackout',
             label: slot === 'blackout_on' ? 'BLACKOUT ON' : 'BLACKOUT OFF',
+            ss_look_name: '',
             channel: bankChannel,
             personality: '',
             behavior: String(cmd.behavior || 'pulse'),
@@ -425,6 +473,7 @@ window.laserPadApp = function laserPadApp() {
               primary: pdata[sceneField] === sceneName,
               safetyClass: scene.safety_class || 'safe',
               label: scene.label || '',
+              ss_look_name: scene.ss_look_name || '',
               channel: midiChannel,
               personality: this.activePersonality(),
               behavior: midi.behavior || 'pulse',
@@ -446,6 +495,7 @@ window.laserPadApp = function laserPadApp() {
         primary: false,
         safetyClass: 'safe',
         label: this.unmappedLabel(note),
+        ss_look_name: '',
         channel: bankChannel,
         personality: this.activePersonality(),
         behavior: this.currentBank()?.default_behavior || 'pulse',
@@ -1209,6 +1259,7 @@ window.laserPadApp = function laserPadApp() {
           safety_class: this.drawer.safety_class || this.currentBank()?.default_safety || 'movement_low',
           immediate: Boolean(this.drawer.immediate),
           label: '',
+          ss_look_name: this.drawer.ss_look_name || '',
           add_to_bank: true,
           replace_primary: false,
         },
@@ -1523,6 +1574,7 @@ window.laserPadApp = function laserPadApp() {
       this.drawer.safety_class = meta.safetyClass || this.currentBank()?.default_safety || 'movement_low';
       this.drawer.immediate = Boolean(meta.immediate);
       this.drawer.label = meta.label || '';
+      this.drawer.ss_look_name = meta.ss_look_name || '';
       this.drawer.system = Boolean(meta.system);
       this.statusText = `Editing note ${note}`;
     },
@@ -1698,6 +1750,7 @@ window.laserPadApp = function laserPadApp() {
             safety_class: this.drawer.safety_class,
             immediate: Boolean(this.drawer.immediate),
             label: this.drawer.label,
+            ss_look_name: this.drawer.ss_look_name || '',
             add_to_bank: false,
             replace_primary: true,
           },

@@ -269,6 +269,26 @@
                     <option value="blackout">Blackout</option>
                   </select>
                 </label>
+                <label>SS Look:
+                  <template x-if="ssCatalog.length">
+                    <select x-model="drawer.ss_look_name" :disabled="drawer.system" @change="queueDraftSave()">
+                      <option value="">(none)</option>
+                      <template x-if="drawer.ss_look_name && !ssCatalogHas(drawer.ss_look_name)">
+                        <option :value="drawer.ss_look_name" x-text="`${drawer.ss_look_name} (not in catalog)`"></option>
+                      </template>
+                      <template x-for="group in ssCatalogGroups()" :key="group.key">
+                        <optgroup :label="group.label">
+                          <template x-for="record in group.records" :key="`${record.source_file}:${record.name}`">
+                            <option :value="record.name" x-text="ssLookOptionLabel(record)"></option>
+                          </template>
+                        </optgroup>
+                      </template>
+                    </select>
+                  </template>
+                  <template x-if="!ssCatalog.length">
+                    <input type="text" x-model="drawer.ss_look_name" :disabled="drawer.system" @input="queueDraftSave()" />
+                  </template>
+                </label>
                 <label title="Falls back to this scene if the main one fails to load or is invalid.">Backup scene:
                   <select :disabled="drawer.system" :value="currentSceneConfig()?.fallback_scene || 'safe_static'" @change="queueScenePatch(drawerSceneDetails().sceneName, { fallback_scene: $event.target.value })">
                     <template x-for="name in availableScenes()" :key="name">

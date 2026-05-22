@@ -13,6 +13,7 @@ from typing import Any, Optional
 from ..laser_config import LaserConfigResult, load_laser_director_config
 from ..laser_executor import LaserSceneExecutor
 from ..laser_models import LaserContext, LaserMidiMessage, LaserSceneDecision
+from ..ss_metadata_importer import LookCatalog
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "laser_director.json"
@@ -742,6 +743,7 @@ def validate_config_data(
     config: dict[str, Any],
     *,
     loader_result: Optional[LaserConfigResult] = None,
+    ss_catalog: Optional[LookCatalog] = None,
 ) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -775,6 +777,19 @@ def validate_config_data(
         )
     personalities = config.get("personalities", {})
     scenes = config.get("scenes", {})
+    if ss_catalog is not None:
+        known_looks = {record.name for record in ss_catalog.records if record.name}
+        if known_looks and isinstance(scenes, dict):
+            for scene_name, scene in sorted(scenes.items()):
+                if not isinstance(scene, dict):
+                    continue
+                ss_look_name = scene.get("ss_look_name", "")
+                if not isinstance(ss_look_name, str) or not ss_look_name:
+                    continue
+                if ss_look_name not in known_looks:
+                    warnings.append(
+                        f"unknown SoundSwitch look '{ss_look_name}' on scene {scene_name} (renamed in SS?)"
+                    )
     for pname, pdata in personalities.items():
         if not isinstance(pdata, dict):
             continue

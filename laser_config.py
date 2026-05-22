@@ -389,6 +389,10 @@ def _validate_scene(name: str, data: Any) -> list[str]:
             f"{prefix}: 'safety_class' must be one of {sorted(_VALID_SAFETY_CLASSES)}, got {safety_class!r}"
         )
 
+    ss_look_name = data.get("ss_look_name", "")
+    if not isinstance(ss_look_name, str):
+        errors.append(f"{prefix}: 'ss_look_name' must be a string")
+
     midi_raw = data.get("midi")
     if not isinstance(midi_raw, dict):
         errors.append(f"{prefix}: 'midi' must be an object")
@@ -648,6 +652,7 @@ def _build_scene(name: str, data: dict[str, Any]) -> LaserScene:
         cooldown_beats=float(data.get("cooldown_beats", 0.0)),
         immediate=bool(data.get("immediate", False)),
         label=str(data.get("label", "")),
+        ss_look_name=str(data.get("ss_look_name", "")),
     )
 
 
