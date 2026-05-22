@@ -3,6 +3,7 @@
 Public API
 ----------
 load_laser_director_config(path=None) -> LaserConfigResult
+load_laser_director_config_from_dict(data) -> LaserConfigResult
 
 Path resolution (in order):
   1. ``path`` argument, if provided.
@@ -65,6 +66,14 @@ _PERSONALITY_BANK_FIELDS = (
     "post_drop_bank",
     "breakdown_bank",
 )
+_PERSONALITY_DEFAULTED_FIELDS = {
+    "aliases": (),
+    "bpm_band_min": 0.0,
+    "bpm_band_max": 0.0,
+    "pre_drop_blackout_beats": 4,
+    "post_drop_hold_beats": 8,
+    "breakdown_default_restore_beats": 64,
+}
 _DEPRECATED_PERSONALITY_TIMING_FIELDS = (
     "buildup_approach_beats",
     "buildup_hold_beats",
@@ -102,6 +111,7 @@ class LaserConfig:
     stale_scene: str
     emergency_scene: str
     fallback_scene: str
+    bpm_priority: tuple[str, ...] = field(default_factory=tuple)
     manual_blackout_on: Optional[LaserMidiMessage] = None
     manual_blackout_off: Optional[LaserMidiMessage] = None
 
@@ -153,6 +163,17 @@ def load_laser_director_config(
     if not isinstance(data, dict):
         return _invalid("config root must be a JSON object")
 
+    return load_laser_director_config_from_dict(data)
+
+
+def load_laser_director_config_from_dict(data: dict[str, Any]) -> LaserConfigResult:
+    """Validate and build a Laser Director config from an already-parsed dict.
+
+    Never raises. Returns LaserConfigResult in all cases.
+    """
+    if not isinstance(data, dict):
+        return _invalid("config root must be a JSON object")
+
     _warn_deprecated_personality_timing_fields(data)
 
     errors = _validate(data)
@@ -166,7 +187,9 @@ def load_laser_director_config(
             errors=tuple(errors),
         )
 
+    _log_missing_personality_field_defaults(data)
     config = _build_config(data)
+    _log_bpm_overlaps(config)
     if (
         config.smart_drop_mode == "blackout_mask"
         and config.manual_blackout_on is None
@@ -230,6 +253,51 @@ def _warn_deprecated_personality_timing_fields(data: dict[str, Any]) -> None:
         "will be hard-fail in a future release.",
         ", ".join(ordered),
     )
+
+
+def _log_missing_personality_field_defaults(data: dict[str, Any]) -> None:
+    personalities = data.get("personalities")
+    if not isinstance(personalities, dict):
+        return
+    for name, personality_data in personalities.items():
+        if not isinstance(personality_data, dict):
+            continue
+        for field_name, default in _PERSONALITY_DEFAULTED_FIELDS.items():
+            if field_name in personality_data:
+                continue
+            log.info(
+                "[CONFIG] personality %r missing field %r - using default %r",
+                str(name),
+                field_name,
+                default,
+            )
+
+
+def _log_bpm_overlaps(config: LaserConfig) -> None:
+    bands: list[tuple[str, float, float]] = []
+    for name, personality in config.personalities.items():
+        bpm_min = float(personality.bpm_band_min)
+        bpm_max = float(personality.bpm_band_max)
+        if bpm_min == 0.0 and bpm_max == 0.0:
+            continue
+        bands.append((name, bpm_min, bpm_max))
+
+    for idx, (left_name, left_min, left_max) in enumerate(bands):
+        for right_name, right_min, right_max in bands[idx + 1:]:
+            overlap_min = max(left_min, right_min)
+            overlap_max = min(left_max, right_max)
+            if overlap_min < overlap_max:
+                log.info(
+                    "[CONFIG] bpm-overlap personalities=%s[%g-%g],%s[%g-%g] zone=%g-%g",
+                    left_name,
+                    left_min,
+                    left_max,
+                    right_name,
+                    right_min,
+                    right_max,
+                    overlap_min,
+                    overlap_max,
+                )
 
 
 def _validate(data: dict[str, Any]) -> list[str]:
@@ -296,6 +364,8 @@ def _validate(data: dict[str, Any]) -> list[str]:
         else:
             for p_name, p_data in personalities_raw.items():
                 errors.extend(_validate_personality(p_name, p_data, scene_keys))
+            errors.extend(_validate_personality_aliases(personalities_raw))
+            errors.extend(_validate_bpm_priority(data, personalities_raw))
 
             default_p = data.get("default_personality")
             if not isinstance(default_p, str) or not default_p:
@@ -308,6 +378,58 @@ def _validate(data: dict[str, Any]) -> list[str]:
                 )
 
     errors.extend(_validate_manual_commands(data, smart_drop_mode=smart_drop_mode))
+    return errors
+
+
+def canon_alias(value: str) -> str:
+    return " ".join(value.strip().lower().split())
+
+
+def _validate_personality_aliases(personalities_raw: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    seen: dict[str, str] = {}
+    for p_name, p_data in personalities_raw.items():
+        if not isinstance(p_data, dict):
+            continue
+        aliases = p_data.get("aliases", [])
+        if aliases is None:
+            aliases = []
+        if not isinstance(aliases, list):
+            errors.append(f"personality '{p_name}': 'aliases' must be a list of strings")
+            continue
+        for index, alias in enumerate(aliases):
+            if not isinstance(alias, str) or not alias.strip():
+                errors.append(
+                    f"personality '{p_name}': 'aliases[{index}]' must be a non-empty string"
+                )
+                continue
+            canonical = canon_alias(alias)
+            owner = seen.get(canonical)
+            if owner is not None and owner != p_name:
+                errors.append(
+                    f"personality '{p_name}': alias {alias!r} duplicates personality '{owner}'"
+                )
+            else:
+                seen[canonical] = str(p_name)
+    return errors
+
+
+def _validate_bpm_priority(
+    data: dict[str, Any],
+    personalities_raw: dict[str, Any],
+) -> list[str]:
+    errors: list[str] = []
+    bpm_priority = data.get("bpm_priority", [])
+    if bpm_priority is None:
+        bpm_priority = []
+    if not isinstance(bpm_priority, list):
+        return ["'bpm_priority' must be a list of personality names"]
+    for index, name in enumerate(bpm_priority):
+        if not isinstance(name, str) or not name:
+            errors.append(f"'bpm_priority[{index}]' must be a non-empty string")
+            continue
+        if name not in personalities_raw:
+            errors.append(f"'bpm_priority[{index}]' references unknown personality '{name}'")
     return errors
 
 
@@ -537,6 +659,42 @@ def _validate_personality(
             f"{prefix}: 'buildup_lookahead_beats' must be a positive integer"
         )
 
+    for field_name in (
+        "pre_drop_blackout_beats",
+        "post_drop_hold_beats",
+        "breakdown_default_restore_beats",
+    ):
+        value = data.get(field_name, _PERSONALITY_DEFAULTED_FIELDS[field_name])
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < 0
+        ):
+            errors.append(f"{prefix}: '{field_name}' must be a non-negative integer")
+
+    bpm_band_min = data.get("bpm_band_min", 0.0)
+    bpm_band_max = data.get("bpm_band_max", 0.0)
+    bpm_values_valid = True
+    for field_name, value in (
+        ("bpm_band_min", bpm_band_min),
+        ("bpm_band_max", bpm_band_max),
+    ):
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or float(value) < 0.0
+        ):
+            errors.append(f"{prefix}: '{field_name}' must be a non-negative number")
+            bpm_values_valid = False
+    if bpm_values_valid:
+        bpm_min = float(bpm_band_min)
+        bpm_max = float(bpm_band_max)
+        if not (bpm_min == 0.0 and bpm_max == 0.0) and bpm_min >= bpm_max:
+            errors.append(
+                f"{prefix}: 'bpm_band_min' must be less than 'bpm_band_max' "
+                "unless both are 0.0"
+            )
+
     for bank_field in _PERSONALITY_BANK_FIELDS:
         bank_raw = data.get(bank_field)
         if bank_raw is None:
@@ -582,6 +740,7 @@ def _build_config(data: dict[str, Any]) -> LaserConfig:
         stale_scene=str(data.get("stale_scene", "")),
         emergency_scene=str(data.get("emergency_scene", "")),
         fallback_scene=str(data.get("fallback_scene", "")),
+        bpm_priority=tuple(str(name) for name in data.get("bpm_priority", []) or ()),
         manual_blackout_on=manual_blackout_on,
         manual_blackout_off=manual_blackout_off,
     )
@@ -672,6 +831,9 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
         breakdown_bank=tuple(
             str(scene) for scene in data.get("breakdown_bank", []) or ()
         ),
+        aliases=tuple(canon_alias(str(alias)) for alias in data.get("aliases", []) or ()),
+        bpm_band_min=float(data.get("bpm_band_min", 0.0)),
+        bpm_band_max=float(data.get("bpm_band_max", 0.0)),
         allow_high_impact=bool(data.get("allow_high_impact", False)),
         phrase_interval_beats=int(data.get("phrase_interval_beats", 32)),
         minimum_scene_hold_beats=int(data.get("minimum_scene_hold_beats", 0)),
@@ -679,6 +841,11 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
             data.get("normal_changes_only_on_phrase_boundary", False)
         ),
         buildup_lookahead_beats=int(data.get("buildup_lookahead_beats", 32)),
+        pre_drop_blackout_beats=int(data.get("pre_drop_blackout_beats", 4)),
+        post_drop_hold_beats=int(data.get("post_drop_hold_beats", 8)),
+        breakdown_default_restore_beats=int(
+            data.get("breakdown_default_restore_beats", 64)
+        ),
     )
 
 

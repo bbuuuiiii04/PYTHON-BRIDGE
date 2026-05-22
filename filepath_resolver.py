@@ -24,7 +24,7 @@ import warnings
 from pathlib import Path
 from typing import Optional
 
-from .config import AUDIO_EXTS, LSOF_LEN_TOLERANCE_MS, LSOF_COOLDOWN_S
+from .config import AUDIO_EXTS, LSOF_LEN_TOLERANCE_MS, LSOF_COOLDOWN_S, RB_DB_PATH
 from .logging_manager import get_logging_manager
 from .models import BridgeEvent, Ev, PositionSnapshot
 from . import bridge_fmt as bf
@@ -242,8 +242,7 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             from pyrekordbox.db6 import Rekordbox6Database  # type: ignore
-        db_path = os.path.expanduser("~/Library/Pioneer/rekordbox/master.db")
-        db = Rekordbox6Database(db_path, unlock=True)
+        db = Rekordbox6Database(str(RB_DB_PATH), unlock=True)
         for c in db.get_content():
             anlz_db = getattr(c, 'AnalysisDataPath', None) or ""
             if anlz_uuid in anlz_db:
@@ -278,8 +277,7 @@ def _db_lookup(filepath: str) -> tuple[str, float, float]:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             from pyrekordbox.db6 import Rekordbox6Database  # type: ignore
-        db_path = os.path.expanduser("~/Library/Pioneer/rekordbox/master.db")
-        db = Rekordbox6Database(db_path, unlock=True)
+        db = Rekordbox6Database(str(RB_DB_PATH), unlock=True)
         norm = filepath.replace("\\", "/")
         for c in db.get_content():
             if not c.FolderPath:
@@ -369,8 +367,7 @@ class FilepathResolver:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     from pyrekordbox.db6 import Rekordbox6Database  # type: ignore
-                db_path = os.path.expanduser("~/Library/Pioneer/rekordbox/master.db")
-                db = Rekordbox6Database(db_path, unlock=True)
+                db = Rekordbox6Database(str(RB_DB_PATH), unlock=True)
                 best = None
                 for c in db.get_content():
                     fp = (c.FolderPath or "").lower()

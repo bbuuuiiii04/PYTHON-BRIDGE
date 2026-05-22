@@ -117,6 +117,7 @@ def _director(
     drop_scene: str = "",
     post_drop_scene: str = "",
     buildup_lookahead_beats: int = 32,
+    post_drop_hold_beats: int = 8,
 ) -> LaserDirector:
     return LaserDirector(
         enabled=enabled,
@@ -134,6 +135,7 @@ def _director(
         drop_scene=drop_scene,
         post_drop_scene=post_drop_scene,
         buildup_lookahead_beats=buildup_lookahead_beats,
+        post_drop_hold_beats=post_drop_hold_beats,
     )
 
 
@@ -715,6 +717,49 @@ class PhraseSceneTests(unittest.TestCase):
         self.assertTrue(s["normal_changes_only_on_phrase_boundary"])
         self.assertEqual(s["buildup_lookahead_beats"], 24)
 
+    def test_set_personality_config_applies_post_drop_hold(self) -> None:
+        ld = _director(default_scene="d")
+        personality = LaserPersonality(
+            name="dubstep",
+            safe_scene="safe_static",
+            default_scene="d",
+            phrase_scene="p",
+            buildup_scene="up",
+            pre_drop_scene="pre",
+            drop_scene="drop",
+            post_drop_scene="post",
+            breakdown_scene="bd",
+            transition_scene="safe_static",
+            post_drop_hold_beats=16,
+        )
+        ld.set_personality_config(personality)
+        self.assertEqual(ld.status()["post_drop_hold_beats"], 16)
+
+    def test_queue_personality_change_applies_on_phrase_boundary(self) -> None:
+        ld = _director(default_scene="house_default", phrase_interval_beats=32)
+        personality = LaserPersonality(
+            name="dubstep",
+            safe_scene="safe_static",
+            default_scene="dubstep_default",
+            phrase_scene="dubstep_phrase",
+            buildup_scene="up",
+            pre_drop_scene="pre",
+            drop_scene="drop",
+            post_drop_scene="post",
+            breakdown_scene="bd",
+            transition_scene="safe_static",
+        )
+        ld.queue_personality_change("dubstep", personality)
+        ld.tick(_ctx(abs_beat=31.0, autoloop_tick_just_fired=False), now=_now())
+        self.assertEqual(ld.status()["personality"], "")
+        self.assertEqual(ld.status()["pending_personality"], "dubstep")
+
+        ld.tick(_ctx(abs_beat=32.0, autoloop_tick_just_fired=True), now=_now())
+
+        self.assertEqual(ld.status()["personality"], "dubstep")
+        self.assertIsNone(ld.status()["pending_personality"])
+        self.assertEqual(ld.status()["current_scene"], "dubstep_phrase")
+
 
 # ---------------------------------------------------------------------------
 # Smart observation: breakdown / buildup / drop lifecycle
@@ -727,6 +772,29 @@ class SmartObservationTests(unittest.TestCase):
         ld.tick(_ctx(abs_beat=32.5, breakdown_active=True), now=_now())
         self.assertEqual(ld.status()["current_scene"], "bd")
         self.assertEqual(ld.status()["last_reason"], "breakdown_active")
+
+    def test_post_drop_hold_uses_post_drop_hold_beats_not_minimum_scene_hold(self) -> None:
+        ld = _director(
+            default_scene="d",
+            drop_scene="drop",
+            post_drop_scene="post",
+            minimum_scene_hold_beats=0,
+            post_drop_hold_beats=4,
+        )
+        ld.tick(_ctx(abs_beat=63.0), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=64.0,
+                smart_phrasing=_sp(smart_drop_crossing=True),
+            ),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "drop")
+
+        ld.tick(_ctx(abs_beat=65.0), now=_now())
+
+        self.assertEqual(ld.status()["current_scene"], "post")
+        self.assertEqual(ld.status()["last_reason"], "post_drop_hold")
 
     def test_breakdown_scene_empty_falls_back(self) -> None:
         ld = _director(default_scene="d", breakdown_scene="")
@@ -960,12 +1028,13 @@ class SmartObservationTests(unittest.TestCase):
         self.assertEqual(ld.status()["current_scene"], "drop")
         self.assertEqual(ld.status()["last_reason"], "drop_crossing")
 
-    def test_post_drop_uses_minimum_scene_hold_beats(self) -> None:
+    def test_post_drop_uses_post_drop_hold_beats(self) -> None:
         ld = _director(
             default_scene="d",
             drop_scene="drop",
             post_drop_scene="post",
             minimum_scene_hold_beats=2,
+            post_drop_hold_beats=2,
         )
         ld.tick(_ctx(abs_beat=63.1, smart_drops=(64,)), now=_now())
         ld.tick(
@@ -988,6 +1057,7 @@ class SmartObservationTests(unittest.TestCase):
             drop_scene="drop",
             post_drop_scene="post",
             minimum_scene_hold_beats=2,
+            post_drop_hold_beats=2,
             buildup_scene="up",
         )
         ld.tick(
@@ -1022,6 +1092,7 @@ class SmartObservationTests(unittest.TestCase):
             post_drop_scene="post",
             buildup_scene="up",
             minimum_scene_hold_beats=3,
+            post_drop_hold_beats=3,
             buildup_lookahead_beats=32,
         )
         ld.tick(_ctx(abs_beat=63.0, smart_drops=(64, 80)), now=_now())
@@ -1045,6 +1116,7 @@ class SmartObservationTests(unittest.TestCase):
             post_drop_scene="post",
             buildup_scene="up",
             minimum_scene_hold_beats=3,
+            post_drop_hold_beats=3,
             buildup_lookahead_beats=32,
         )
         ld.tick(_ctx(abs_beat=63.0, smart_drops=(64, 100)), now=_now())

@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Literal, Optional
+from typing import Callable, Literal, Optional
 
 from .laser_decision_log import LaserDecision, LaserDecisionLog
 from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
@@ -78,6 +78,7 @@ class LaserDirector:
         drop_scene: str = "",
         post_drop_scene: str = "",
         buildup_lookahead_beats: int = 32,
+        post_drop_hold_beats: int = 8,
     ) -> None:
         self._dry_run = dry_run
         self._enabled = enabled
@@ -96,6 +97,7 @@ class LaserDirector:
         self._drop_scene = drop_scene
         self._post_drop_scene = post_drop_scene
         self._buildup_lookahead_beats = max(0, int(buildup_lookahead_beats))
+        self._post_drop_hold_beats = max(0, int(post_drop_hold_beats))
 
         # Mutable policy state — written only from the StateManager thread.
         self._emergency: bool = False
@@ -105,6 +107,10 @@ class LaserDirector:
         self._last_reason: str = ""
         self._last_error: str = ""
         self._personality: str = ""
+        self._pending_personality: Optional[tuple[str, LaserPersonality]] = None
+        self._personality_apply_callback: Optional[
+            Callable[[str, LaserPersonality], None]
+        ] = None
         self._last_phrase_number: Optional[int] = None
         self._last_scene_change_abs_beat: float = 0.0
         self._last_trigger_abs_beat: float = 0.0
@@ -150,6 +156,24 @@ class LaserDirector:
     def set_personality(self, personality: str) -> None:
         self._personality = personality
 
+    def get_personality(self) -> str:
+        return self._personality
+
+    def set_personality_apply_callback(
+        self,
+        callback: Optional[Callable[[str, LaserPersonality], None]],
+    ) -> None:
+        self._personality_apply_callback = callback
+
+    def queue_personality_change(
+        self,
+        personality: str,
+        config: LaserPersonality,
+    ) -> None:
+        if personality == self._personality and self._pending_personality is None:
+            return
+        self._pending_personality = (personality, config)
+
     def set_personality_config(self, personality: LaserPersonality) -> None:
         """Load scene-role and timing settings from a validated personality."""
         self._phrase_scene = personality.phrase_scene
@@ -166,6 +190,7 @@ class LaserDirector:
         self._drop_scene = personality.drop_scene
         self._post_drop_scene = personality.post_drop_scene
         self._buildup_lookahead_beats = max(0, int(personality.buildup_lookahead_beats))
+        self._post_drop_hold_beats = max(0, int(personality.post_drop_hold_beats))
 
     # ── Tick (called from StateManager._push_tick) ────────────────────────────
 
@@ -256,6 +281,7 @@ class LaserDirector:
 
     def _decide(self, ctx: LaserContext, *, now: float) -> LaserSceneDecision:
         """Priority-ordered scene selection. Returns a LaserSceneDecision."""
+        self._apply_pending_personality(ctx)
 
         # Priority 1: Emergency blackout (latched; bypasses all other gates).
         if self._emergency:
@@ -407,12 +433,12 @@ class LaserDirector:
                     role="drop",
                 )
 
-        # Priority 10: Post-drop hold (using existing minimum_scene_hold_beats).
+        # Priority 10: Post-drop hold.
         if (
             self._post_drop_scene
-            and self._minimum_scene_hold_beats > 0
+            and self._post_drop_hold_beats > 0
             and self._post_drop_start_abs_beat >= 0.0
-            and (abs_beat - self._post_drop_start_abs_beat) < self._minimum_scene_hold_beats
+            and (abs_beat - self._post_drop_start_abs_beat) < self._post_drop_hold_beats
         ):
             self._last_smart_abs_beat = abs_beat
             return LaserSceneDecision(
@@ -425,8 +451,8 @@ class LaserDirector:
 
         in_post_drop_hold = (
             self._post_drop_start_abs_beat >= 0.0
-            and self._minimum_scene_hold_beats > 0
-            and (abs_beat - self._post_drop_start_abs_beat) < self._minimum_scene_hold_beats
+            and self._post_drop_hold_beats > 0
+            and (abs_beat - self._post_drop_start_abs_beat) < self._post_drop_hold_beats
         )
 
         # Priority 11: Smart Drop countdown buildup window.
@@ -457,7 +483,7 @@ class LaserDirector:
         self._last_smart_abs_beat = abs_beat
         if (
             self._post_drop_start_abs_beat >= 0.0
-            and self._minimum_scene_hold_beats <= 0
+            and self._post_drop_hold_beats <= 0
         ):
             self._post_drop_start_abs_beat = -1.0
 
@@ -467,6 +493,36 @@ class LaserDirector:
             phrase_changed=phrase_changed,
             effective_phrase_scene=effective_phrase_scene,
         )
+
+    def _apply_pending_personality(self, ctx: LaserContext) -> None:
+        pending = self._pending_personality
+        if pending is None:
+            return
+        if self._is_scripted_context(ctx):
+            return
+        if not self._pending_personality_can_apply(ctx):
+            return
+
+        name, config = pending
+        self._pending_personality = None
+        if self._personality_apply_callback is not None:
+            self._personality_apply_callback(name, config)
+        else:
+            self.set_personality(name)
+            self.set_personality_config(config)
+        log.info("[LASER] personality  active=%s", name)
+
+    def _pending_personality_can_apply(self, ctx: LaserContext) -> bool:
+        if not ctx.playing or not ctx.active_track_loaded or ctx.lighting_mode == "idle":
+            return True
+        if ctx.autoloop_tick_just_fired:
+            return True
+        # Outgoing personality owns boundary timing until it releases.
+        # New personality's phrase_interval_beats takes effect on next phrase.
+        interval = max(1, self._phrase_interval_beats)
+        abs_beat = max(ctx.abs_beat, 0.0)
+        nearest_boundary = round(abs_beat / interval) * interval
+        return abs(abs_beat - nearest_boundary) < 0.01
 
     def _decide_phrase_default(
         self,
@@ -620,9 +676,13 @@ class LaserDirector:
             "emergency": self._emergency,
             "last_error": self._last_error,
             "personality": self._personality,
+            "pending_personality": (
+                self._pending_personality[0] if self._pending_personality else None
+            ),
             "phrase_scene": self._phrase_scene,
             "phrase_interval_beats": self._phrase_interval_beats,
             "minimum_scene_hold_beats": self._minimum_scene_hold_beats,
+            "post_drop_hold_beats": self._post_drop_hold_beats,
             "normal_changes_only_on_phrase_boundary": self._normal_changes_only_on_phrase_boundary,
             "breakdown_scene": self._breakdown_scene,
             "buildup_scene": self._buildup_scene,

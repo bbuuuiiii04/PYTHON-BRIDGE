@@ -24,6 +24,7 @@ TL_LOG_PATH = Path(
 TL_PLAYLIST_PATH = Path(
     "~/Library/Application Support/TimecodeLink/playlist.yaml"
 ).expanduser()
+RB_DB_PATH = Path("~/Library/Pioneer/rekordbox/master.db").expanduser()
 
 # ── RB Direct Memory (arm64, RB 7.2.11) ─────────────────────────────────────
 # All offsets are from the TEXT segment load base (post-ASLR).

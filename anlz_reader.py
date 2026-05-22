@@ -103,6 +103,8 @@ MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
     "buildup_sweep_slope": 0.000000,
     "amplitude_jump_at_c": 0.117237,
     "bass_sustain_1bar": 0.182334,
+    # Retained as schema-v3 evidence only: current corpus retunes/ablations did
+    # not improve shipped accuracy, so keep these dormant until better proof.
     "drum_attack_sustained": 0.000000,
     "kick_max_locked_in": 0.000000,
     "drums_dominant_over_tonal": 0.000000,

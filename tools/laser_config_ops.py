@@ -10,7 +10,11 @@ from difflib import get_close_matches
 from pathlib import Path
 from typing import Any, Optional
 
-from ..laser_config import LaserConfigResult, load_laser_director_config
+from ..laser_config import (
+    LaserConfigResult,
+    canon_alias as canonical_alias,
+    load_laser_director_config,
+)
 from ..laser_executor import LaserSceneExecutor
 from ..laser_models import LaserContext, LaserMidiMessage, LaserSceneDecision
 
@@ -214,6 +218,38 @@ def canonical_personality(name: str) -> str:
     return _PERSONALITY_ALIASES.get(name.strip().lower(), name.strip().lower())
 
 
+def validate_personality_aliases_for_draft(config: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    personalities = config.get("personalities", {})
+    if not isinstance(personalities, dict):
+        return errors
+    seen: dict[str, str] = {}
+    for pname, pdata in personalities.items():
+        if not isinstance(pdata, dict):
+            continue
+        aliases = pdata.get("aliases", [])
+        if aliases is None:
+            aliases = []
+        if not isinstance(aliases, list):
+            errors.append(f"personality '{pname}': 'aliases' must be a list of strings")
+            continue
+        for index, alias in enumerate(aliases):
+            if not isinstance(alias, str) or not alias.strip():
+                errors.append(
+                    f"personality '{pname}': 'aliases[{index}]' must be a non-empty string"
+                )
+                continue
+            canonical = canonical_alias(alias)
+            owner = seen.get(canonical)
+            if owner is not None and owner != pname:
+                errors.append(
+                    f"personality '{pname}': alias {alias!r} duplicates personality '{owner}'"
+                )
+                continue
+            seen[canonical] = str(pname)
+    return errors
+
+
 def _get_drop_style(config: dict[str, Any], personality: str) -> str:
     pdata = config.get("personalities", {}).get(personality, {})
     if not isinstance(pdata, dict):
@@ -342,6 +378,14 @@ def _ensure_house_personality(config: dict[str, Any]) -> None:
         "post_drop_scene": "house_drop_1",
         "breakdown_scene": "house_breakdown_1",
     }
+    resolver_defaults = {
+        "aliases": ["house"],
+        "bpm_band_min": 120,
+        "bpm_band_max": 130,
+        "pre_drop_blackout_beats": 4,
+        "post_drop_hold_beats": 8,
+        "breakdown_default_restore_beats": 64,
+    }
     role_bank_fields = {
         "phrase_bank": "phrase_scene",
         "buildup_bank": "buildup_scene",
@@ -366,6 +410,9 @@ def _ensure_house_personality(config: dict[str, Any]) -> None:
                 continue
             if isinstance(primary, str) and primary:
                 existing[bank_field] = [primary]
+        for key, value in resolver_defaults.items():
+            if key not in existing:
+                existing[key] = copy.deepcopy(value)
         return
     personalities[_DEFAULT_PERSONALITY] = {
         "safe_scene": "safe_static",
@@ -387,6 +434,7 @@ def _ensure_house_personality(config: dict[str, Any]) -> None:
         "phrase_interval_beats": 32,
         "minimum_scene_hold_beats": 8,
         "buildup_lookahead_beats": 32,
+        **copy.deepcopy(resolver_defaults),
     }
 
 
@@ -395,12 +443,17 @@ def _ensure_core_fields(config: dict[str, Any]) -> None:
     config.setdefault("dry_run", True)
     config.setdefault("smart_drop_mode", "blackout_mask")
     config.setdefault("midi_output_port", _DEFAULT_PORT)
-    config.setdefault("startup_scene", "safe_static")
-    config.setdefault("stop_scene", "safe_static")
-    config.setdefault("stale_scene", "safe_static")
-    config.setdefault("emergency_scene", "emergency_blackout")
-    config.setdefault("fallback_scene", "safe_static")
+    for key, default in (
+        ("startup_scene", "safe_static"),
+        ("stop_scene", "safe_static"),
+        ("stale_scene", "safe_static"),
+        ("emergency_scene", "emergency_blackout"),
+        ("fallback_scene", "safe_static"),
+    ):
+        if not isinstance(config.get(key), str) or not config[key]:
+            config[key] = default
     config.setdefault("default_personality", _DEFAULT_PERSONALITY)
+    config.setdefault("bpm_priority", [])
 
 
 def load_or_create_config(path: Path = _DEFAULT_CONFIG_PATH) -> dict[str, Any]:
@@ -472,7 +525,14 @@ def find_duplicate_notes_keyed(
         else:
             key = note
         grouped.setdefault(key, []).append((pname, role, scene_name))
-    return sorted((key, refs) for key, refs in grouped.items() if len(refs) > 1)
+    # Sharing the SAME scene across personalities/roles is intentional and
+    # corresponds to a single MIDI mapping; only flag when 2+ DISTINCT scenes
+    # share the key.
+    return sorted(
+        (key, refs)
+        for key, refs in grouped.items()
+        if len({scene_name for _, _, scene_name in refs}) > 1
+    )
 
 
 def find_soft_duplicate_notes(config: dict[str, Any]) -> list[tuple[int, list[tuple[str, str, str]]]]:
@@ -484,6 +544,31 @@ def find_soft_duplicate_notes(config: dict[str, Any]) -> list[tuple[int, list[tu
 
 def find_duplicate_notes(config: dict[str, Any]) -> list[tuple[int, list[tuple[str, str, str]]]]:
     return find_soft_duplicate_notes(config)
+
+
+def _format_bpm(value: float) -> str:
+    return f"{value:g}"
+
+
+def _personality_bpm_bands(config: dict[str, Any]) -> list[tuple[str, float, float]]:
+    personalities = config.get("personalities", {})
+    if not isinstance(personalities, dict):
+        return []
+    bands: list[tuple[str, float, float]] = []
+    for pname, pdata in personalities.items():
+        if not isinstance(pdata, dict):
+            continue
+        try:
+            bpm_min = float(pdata.get("bpm_band_min", 0.0) or 0.0)
+            bpm_max = float(pdata.get("bpm_band_max", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if bpm_min == 0.0 and bpm_max == 0.0:
+            continue
+        if bpm_min >= bpm_max:
+            continue
+        bands.append((str(pname), bpm_min, bpm_max))
+    return bands
 
 
 def _role_scene_name(personality: str, role: str, index: int = 1) -> str:
@@ -590,6 +675,12 @@ def _ensure_personality_exists(config: dict[str, Any], personality: str) -> None
         "phrase_interval_beats": 32,
         "minimum_scene_hold_beats": 8,
         "buildup_lookahead_beats": 32,
+        "aliases": [],
+        "bpm_band_min": 0.0,
+        "bpm_band_max": 0.0,
+        "pre_drop_blackout_beats": 4,
+        "post_drop_hold_beats": 8,
+        "breakdown_default_restore_beats": 64,
     }
     if personality in personalities:
         existing = personalities.get(personality)
@@ -778,6 +869,19 @@ def validate_config_data(
     for pname, pdata in personalities.items():
         if not isinstance(pdata, dict):
             continue
+        default_personality = str(config.get("default_personality", _DEFAULT_PERSONALITY))
+        aliases = pdata.get("aliases", [])
+        canonical_aliases = []
+        if isinstance(aliases, list):
+            canonical_aliases = [
+                canonical_alias(alias)
+                for alias in aliases
+                if isinstance(alias, str) and canonical_alias(alias)
+            ]
+        if pname != default_personality and not canonical_aliases:
+            warnings.append(
+                f"personality '{pname}' has no aliases; only reachable via BPM fallback or as default"
+            )
         allow_hi = bool(pdata.get("allow_high_impact", False))
         drop_scene = pdata.get("drop_scene")
         if isinstance(drop_scene, str) and drop_scene in scenes:
@@ -786,6 +890,42 @@ def validate_config_data(
                 warnings.append(
                     f"personality '{pname}' drop scene is high_impact while allow_high_impact=false"
                 )
+        for role in _visible_roles(config, str(pname)):
+            scene_names = _scene_names_for_role(config, str(pname), role)
+            if not scene_names:
+                warnings.append(f"personality '{pname}' has no {role} scene configured")
+                continue
+            missing = [scene_name for scene_name in scene_names if scene_name not in scenes]
+            for scene_name in missing:
+                warnings.append(
+                    f"personality '{pname}' {role} scene '{scene_name}' is missing"
+                )
+    bpm_priority_raw = config.get("bpm_priority", [])
+    bpm_priority = [
+        str(name)
+        for name in bpm_priority_raw
+        if isinstance(bpm_priority_raw, list) and isinstance(name, str) and name
+    ]
+    bpm_priority_set = set(bpm_priority)
+    bands = _personality_bpm_bands(config)
+    for pname, _bpm_min, _bpm_max in bands:
+        if pname not in bpm_priority_set:
+            warnings.append(
+                f"personality '{pname}' BPM band ignored (not in bpm_priority)"
+            )
+    for index, (left_name, left_min, left_max) in enumerate(bands):
+        for right_name, right_min, right_max in bands[index + 1 :]:
+            overlap_min = max(left_min, right_min)
+            overlap_max = min(left_max, right_max)
+            if overlap_min >= overlap_max:
+                continue
+            warnings.append(
+                "BPM band overlap "
+                f"{left_name}[{_format_bpm(left_min)}-{_format_bpm(left_max)}] "
+                f"and {right_name}[{_format_bpm(right_min)}-{_format_bpm(right_max)}] "
+                f"zone={_format_bpm(overlap_min)}-{_format_bpm(overlap_max)}; "
+                "first in bpm_priority wins"
+            )
     manual_commands = config.get("manual_commands", {})
     blackout_on = (
         manual_commands.get("blackout_on")
@@ -1047,6 +1187,9 @@ def update_personality_timing(
     phrase_interval_beats: Optional[int] = None,
     minimum_scene_hold_beats: Optional[int] = None,
     buildup_lookahead_beats: Optional[int] = None,
+    pre_drop_blackout_beats: Optional[int] = None,
+    post_drop_hold_beats: Optional[int] = None,
+    breakdown_default_restore_beats: Optional[int] = None,
 ) -> None:
     pdata = config.setdefault("personalities", {}).setdefault(personality, {})
     if phrase_interval_beats is not None:
@@ -1061,6 +1204,16 @@ def update_personality_timing(
         if buildup_lookahead_beats < 1:
             raise ValueError("buildup_lookahead_beats must be positive.")
         pdata["buildup_lookahead_beats"] = int(buildup_lookahead_beats)
+    for field_name, value in (
+        ("pre_drop_blackout_beats", pre_drop_blackout_beats),
+        ("post_drop_hold_beats", post_drop_hold_beats),
+        ("breakdown_default_restore_beats", breakdown_default_restore_beats),
+    ):
+        if value is None:
+            continue
+        if value < 0:
+            raise ValueError(f"{field_name} must be non-negative.")
+        pdata[field_name] = int(value)
 
 
 def update_role_bank_cooldown(

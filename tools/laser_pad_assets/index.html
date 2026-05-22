@@ -4,8 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Laser Pad</title>
-    <script src="/static/pad.js?v=ux-5"></script>
-    <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+    <script src="/static/pad-state.js?v=ux-5"></script>
+    <script src="/static/pad-selectors.js?v=ux-5"></script>
+    <script src="/static/pad-actions.js?v=ux-5"></script>
+    <script src="/static/pad-ui.js?v=ux-5"></script>
+    <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" integrity="sha384-l8f0VcPi/M1iHPv8egOnY/15TDwqgbOR1anMIJWvU6nLRgZVLTLSaNqi/TOoT5Fh" crossorigin="anonymous" defer></script>
     <link rel="stylesheet" href="/static/pad.css?v=ux-5" />
   </head>
   <body x-data="laserPadApp()" x-init="init()">
@@ -141,54 +144,85 @@
         </section>
       </div>
 
-      <div class="bank-tabs">
-        <template x-for="bank in banks()" :key="bank.id">
-          <button
-            class="bank-tab"
-            :class="{'active': bank.id === activeBankId}"
-            @click="activeBankId = bank.id"
-            @contextmenu.prevent="editBankPrompt(bank.id)"
-            @touchstart.passive="startBankLongPress(bank.id)"
-            @touchend="cancelBankLongPress()"
-            @touchcancel="cancelBankLongPress()"
-          >
-            <span x-text="bank.name"></span>
-            <span class="tab-dot">·</span>
-            <span class="channel-pill" x-text="`Ch${bank.channel || 1}`"></span>
-          </button>
-        </template>
-        <button class="bank-tab add-bank" @click="addBankPrompt()" title="Add bank">+</button>
-      </div>
+      <section class="pad-area">
+        <div class="pad-editor-toolbar">
+          <label class="field-inline personality-field">Editing
+            <select :value="activePersonality()" @change="setActivePersonality($event.target.value)">
+              <template x-if="!personalityNames().length">
+                <option value="" disabled>No personalities loaded</option>
+              </template>
+              <template x-for="name in personalityNames()" :key="'pad-editor-' + name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </label>
+          <span class="pad-toolbar-hint" title="Hold ⌘ (or Ctrl on Windows/Linux) and left-click a pad to add or remove its scene from the personality you're editing.">
+            <kbd>⌘</kbd>+click pad to toggle membership
+          </span>
+        </div>
 
-      <div class="note-grid">
-        <template x-for="note in currentNotes()" :key="note">
-          <button
-            class="note-btn"
-            :class="[roleClass(note), {'mapped': isMapped(note), 'drop-target': isDropTarget(note), 'firing': isFiring(note), 'pressing': isPressing(note), 'verify-fail': verifyState(note)?.ok === false}]"
-            :title="noteTitle(note)"
-            :draggable="isMapped(note) && !sceneMetaByNote(note).system"
-            @mouseup="handleNoteMouseUp(note, $event)"
-            @keydown.enter.prevent="handleNoteKeyboardFire(note)"
-            @keydown.space.prevent="handleNoteKeyboardFire(note)"
-            @contextmenu="openDrawerPlaceholder(note)"
-            @touchstart.passive="startTouchLongPress(note)"
-            @touchend="endTouchLongPress(note)"
-            @touchcancel="cancelTouchLongPress()"
-            @dragstart="dragStart(note, $event)"
-            @dragenter="dragEnter(note, $event)"
-            @dragover="dragOver(note, $event)"
-            @dragleave="dragLeave(note)"
-            @drop="dropOn(note, $event)"
-            @dragend="dragEnd()"
-          >
-            <span class="note-num" x-text="note"></span>
-            <span class="safety-dot" :class="safetyDotClass(note)"></span>
-            <span class="note-label" x-text="displayLabel(note)"></span>
-            <span class="note-behavior" x-text="tileBehaviorText(note)"></span>
-            <div class="role-chip" x-show="isMapped(note)" x-text="roleText(note)"></div>
-          </button>
-        </template>
-      </div>
+        <div class="bank-tabs">
+          <template x-for="bank in banks()" :key="bank.id">
+            <button
+              class="bank-tab"
+              :class="{'active': bank.id === activeBankId}"
+              @click="activeBankId = bank.id"
+              @contextmenu.prevent="editBankPrompt(bank.id)"
+              @touchstart.passive="startBankLongPress(bank.id)"
+              @touchend="cancelBankLongPress()"
+              @touchcancel="cancelBankLongPress()"
+            >
+              <span x-text="bank.name"></span>
+              <span class="tab-dot">·</span>
+              <span class="channel-pill" x-text="`Ch${bank.channel || 1}`"></span>
+            </button>
+          </template>
+          <button class="bank-tab add-bank" @click="addBankPrompt()" title="Add bank">+</button>
+        </div>
+
+        <div class="note-grid">
+          <template x-for="note in currentNotes()" :key="note">
+            <button
+              class="note-btn"
+              :class="[roleClass(note), {
+                'mapped': isMapped(note),
+                'in-active-personality': padInActivePersonality(note),
+                'pad-dim': isMapped(note) && !padInActivePersonality(note) && !sceneMetaByNote(note).system,
+                'drop-target': isDropTarget(note),
+                'firing': isFiring(note),
+                'pressing': isPressing(note),
+                'verify-fail': verifyState(note)?.ok === false,
+              }]"
+              :title="noteTitle(note)"
+              :draggable="isMapped(note) && !sceneMetaByNote(note).system"
+              @mouseup="handleNoteMouseUp(note, $event)"
+              @keydown.enter.prevent="handleNoteKeyboardFire(note)"
+              @keydown.space.prevent="handleNoteKeyboardFire(note)"
+              @contextmenu.prevent="openDrawerPlaceholder(note)"
+              @touchstart.passive="startTouchLongPress(note)"
+              @touchend="endTouchLongPress(note)"
+              @touchcancel="cancelTouchLongPress()"
+              @dragstart="dragStart(note, $event)"
+              @dragenter="dragEnter(note, $event)"
+              @dragover="dragOver(note, $event)"
+              @dragleave="dragLeave(note)"
+              @drop="dropOn(note, $event)"
+              @dragend="dragEnd()"
+            >
+              <span class="note-num" x-text="note"></span>
+              <div class="pad-personality-chips" x-show="isMapped(note) && !sceneMetaByNote(note).system">
+                <template x-for="chip in personalityChipsForNote(note)" :key="chip.name">
+                  <span class="pad-personality-chip" :class="{'active': chip.isActive}" :style="`--pc-color: ${chip.color}`" :title="chip.name" x-text="chip.initial"></span>
+                </template>
+              </div>
+              <span class="safety-dot" :class="safetyDotClass(note)"></span>
+              <span class="note-label" x-text="displayLabel(note)"></span>
+              <span class="note-behavior" x-text="tileBehaviorText(note)"></span>
+              <div class="role-chip" x-show="isMapped(note)" x-text="roleText(note)"></div>
+            </button>
+          </template>
+        </div>
+      </section>
 
       <template x-if="openNote !== null">
         <div class="drawer-backdrop" @click.self="closeDrawer()">
@@ -220,14 +254,12 @@
 
             <section class="drawer-card primary-card">
               <h4>PRIMARY MAPPING</h4>
+              <div class="drawer-personality-info">
+                <strong>Editing for personality:</strong>
+                <span class="drawer-personality-name" x-text="activePersonality()"></span>
+                <span class="settings-field-help">Change in the toolbar above to retarget edits.</span>
+              </div>
               <div class="drawer-grid">
-                <label>Personality:
-                  <select x-model="drawer.personality" :disabled="drawer.system" @change="queueDraftSave()">
-                    <template x-for="name in personalityNames()" :key="name">
-                      <option :value="name" x-text="name"></option>
-                    </template>
-                  </select>
-                </label>
                 <label>Role:
                   <select x-model="drawer.role" :disabled="drawer.system" @change="queueDraftSave()">
                     <option value="groove">Groove</option>
@@ -327,6 +359,17 @@
                   <span class="field-error" x-show="fieldError('hold_beats')" x-text="fieldError('hold_beats')"></span>
                 </label>
               </div>
+              <template x-if="personalitiesUsingScene(drawerSceneDetails().sceneName).length">
+                <div class="scene-usage-list">
+                  <strong>Used by</strong>
+                  <span class="settings-field-help">
+                    Role labels: groove=phrase_scene, buildup=buildup_scene, drop=drop_scene, post_drop=post_drop_scene, breakdown=breakdown_scene.
+                  </span>
+                  <template x-for="ref in personalitiesUsingScene(drawerSceneDetails().sceneName)" :key="ref">
+                    <span x-text="ref"></span>
+                  </template>
+                </div>
+              </template>
               <pre class="raw-json" x-text="rawSceneJson(openNote)"></pre>
             </details>
           </div>
@@ -426,24 +469,6 @@
                   </div>
                 </div>
 
-                <h4 style="margin-top: 20px;">Timing</h4>
-                <div class="drawer-grid">
-                  <label title="Beats per phrase before scene rotation.">Phrase length (beats)
-                    <input type="number" min="1" x-model.number="timingDraft.phrase_interval_beats" />
-                  </label>
-                  <label>Shortest scene (beats)
-                    <input type="number" min="0" x-model.number="timingDraft.minimum_scene_hold_beats" />
-                  </label>
-                  <label>Buildup head-start (beats)
-                    <input type="number" min="1" x-model.number="timingDraft.buildup_lookahead_beats" />
-                  </label>
-                </div>
-                <div class="drawer-actions">
-                  <button @click="saveTimingDraft()" :disabled="!canSaveTimingDraft()">Apply timing</button>
-                  <button @click="openHistoryPanel()">Backup history</button>
-                  <button @click="discardDraft()">Discard unsaved changes</button>
-                </div>
-
                 <h4 style="margin-top: 20px;">Automatic scenes</h4>
                 <span class="settings-field-help" style="display:block; margin-bottom: 10px;">
                   Choose which scene the laser bridge fires when something specific happens. Leave blank to use the default backup.
@@ -471,14 +496,63 @@
                   Add, rename, duplicate, or remove personalities. Renaming the default updates everything that uses it.
                 </span>
 
+                <div class="resolver-test-panel">
+                  <h4>Resolver test</h4>
+                  <div class="settings-row">
+                    <label class="settings-field">Playlist name
+                      <input type="text" x-model="resolverTest.playlist" placeholder="Dubstep Heaters" @keydown.enter.prevent="resolvePlaylistTest()" />
+                    </label>
+                    <label class="settings-field">File BPM
+                      <input type="number" min="0" step="0.01" x-model="resolverTest.bpm" placeholder="optional" @keydown.enter.prevent="resolvePlaylistTest()" />
+                    </label>
+                  </div>
+                  <div class="drawer-actions">
+                    <button @click="resolvePlaylistTest()" :disabled="resolverTest.loading">Test resolver</button>
+                    <span class="resolver-test-result" x-show="resolverTest.result" x-text="resolverTestLabel()"></span>
+                    <span class="field-error" x-show="resolverTest.error" x-text="resolverTest.error"></span>
+                  </div>
+                </div>
+
                 <template x-for="name in personalityNames()" :key="name">
                   <div class="settings-personality-row">
                     <div class="settings-personality-meta">
                       <strong x-text="name"></strong>
                       <span class="settings-personality-default"
                         x-show="config?.default_personality === name">default</span>
+                      <span class="settings-personality-aliases" x-text="aliasSummary(name)"></span>
+                    </div>
+                    <div class="settings-personality-chip-controls" :title="`Pad chip for ${name}`">
+                      <span
+                        class="settings-personality-chip-preview"
+                        :class="{'active': activePersonality() === name}"
+                        :style="`--pc-color: ${personalityColor(name)}`"
+                        x-text="personalityInitials(name)"
+                      ></span>
+                      <input
+                        type="text"
+                        class="settings-personality-initial-input"
+                        :value="personalityInitials(name)"
+                        maxlength="3"
+                        :placeholder="name.slice(0,2).toUpperCase()"
+                        aria-label="Chip initials"
+                        @change="setPersonalityInitial(name, $event.target.value)"
+                      />
+                      <input
+                        type="color"
+                        class="settings-personality-color-picker"
+                        :value="personalityColor(name)"
+                        aria-label="Chip color"
+                        @change="setPersonalityColor(name, $event.target.value)"
+                      />
+                      <button
+                        type="button"
+                        class="settings-personality-chip-reset"
+                        title="Reset chip to auto-assigned color/initials"
+                        @click="resetPersonalityChip(name)"
+                      >↺</button>
                     </div>
                     <div class="settings-personality-actions">
+                      <button @click="setActivePersonality(name)">Edit</button>
                       <button @click="renamePersonalityPrompt(name)">Rename</button>
                       <button @click="duplicatePersonalityPrompt(name)">Duplicate</button>
                       <button @click="setDefaultPersonality(name)" :disabled="config?.default_personality === name">Make default</button>
@@ -490,6 +564,91 @@
                     </div>
                   </div>
                 </template>
+
+                <div class="settings-personality-editor">
+                  <div class="settings-personalities-head">
+                    <div>
+                      <h4 x-text="displayPersonalityName(activePersonality())"></h4>
+                      <span class="settings-personality-summary" x-text="personalityMatchSummary()"></span>
+                    </div>
+                    <span class="settings-personality-default"
+                      x-show="config?.default_personality === activePersonality()">default</span>
+                  </div>
+
+                  <div class="personality-editor-section">
+                    <h5>Aliases</h5>
+                    <div class="settings-field">
+                      <label>PER GENRE aliases</label>
+                      <textarea rows="4" x-model="aliasesDraft.text" placeholder="house&#10;deep house"></textarea>
+                      <span class="settings-field-help">Separate aliases with commas or new lines. Matching is case-insensitive and collapses extra spaces.</span>
+                    </div>
+                    <div class="drawer-actions">
+                      <button @click="saveAliasesDraft()" :disabled="!canSaveAliasesDraft()">Apply aliases</button>
+                    </div>
+                  </div>
+
+                  <div class="personality-editor-section">
+                    <h5>BPM band</h5>
+                    <div class="drawer-grid">
+                      <label>BPM band min
+                        <input type="number" min="0" step="0.01" x-model.number="bpmBandDraft.min" />
+                      </label>
+                      <label>BPM band max
+                        <input type="number" min="0" step="0.01" x-model.number="bpmBandDraft.max" />
+                      </label>
+                    </div>
+                    <div class="drawer-actions">
+                      <button @click="saveBpmBandDraft()" :disabled="!canSaveBpmBandDraft()">Apply BPM band</button>
+                    </div>
+                  </div>
+
+                  <div class="personality-editor-section">
+                    <h5>Timing</h5>
+                    <div class="drawer-grid">
+                      <label title="Beats per phrase before scene rotation.">Phrase length (beats)
+                        <input type="number" min="1" x-model.number="timingDraft.phrase_interval_beats" />
+                      </label>
+                      <label>Shortest scene (beats)
+                        <input type="number" min="0" x-model.number="timingDraft.minimum_scene_hold_beats" />
+                      </label>
+                      <label>Buildup head-start (beats)
+                        <input type="number" min="1" x-model.number="timingDraft.buildup_lookahead_beats" />
+                      </label>
+                      <label>Pre-drop blackout (beats)
+                        <input type="number" min="0" x-model.number="timingDraft.pre_drop_blackout_beats" />
+                      </label>
+                      <label>After-drop hold (beats)
+                        <input type="number" min="0" x-model.number="timingDraft.post_drop_hold_beats" />
+                      </label>
+                      <label>Breakdown restore (beats)
+                        <input type="number" min="0" x-model.number="timingDraft.breakdown_default_restore_beats" />
+                      </label>
+                    </div>
+                    <div class="drawer-actions">
+                      <button @click="saveTimingDraft()" :disabled="!canSaveTimingDraft()">Apply timing</button>
+                    </div>
+                  </div>
+
+                  <div class="personality-editor-section">
+                    <h5>Banks</h5>
+                    <template x-for="role in bankRoleDefinitions()" :key="role.key">
+                      <div class="personality-bank-role">
+                        <div class="personality-bank-role-head">
+                          <strong x-text="role.label"></strong>
+                          <span class="field-error" x-show="bankWarningForRole(role.key)" x-text="bankWarningForRole(role.key)"></span>
+                        </div>
+                        <label class="settings-field">Primary scene
+                          <select :value="personalityPrimaryScene(role.key)" @change="savePersonalityPrimaryScene(role.key, $event.target.value)">
+                            <option value="">(none)</option>
+                            <template x-for="name in sceneOptionsForRole(role.key)" :key="role.key + '-primary-' + name">
+                              <option :value="name" x-text="`${name} #${sceneNote(name)}`"></option>
+                            </template>
+                          </select>
+                        </label>
+                      </div>
+                    </template>
+                  </div>
+                </div>
               </section>
 
               <section class="settings-section" x-show="settingsActiveTab === 'blackout'">
