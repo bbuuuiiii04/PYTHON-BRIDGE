@@ -42,6 +42,7 @@ from .rb_state_reader import (
 )
 from .scripted_tracks import preload_from_tl, resolve_filepaths
 from .ss_library_scanner import start_ss_library_scan
+from .ss_metadata_importer import build_catalog as build_ss_catalog, check_ss_plist
 from .state_manager import (
     AUTOLOOP_MASTER_PHRASE_ARM_ENV,
     LIVE_BPM_FOLLOW_ENV,
@@ -621,6 +622,8 @@ def main() -> None:
         callback=seed_soundswitch_id_cache,
         scripted_id_callback=seed_soundswitch_scripted_id_cache,
     )
+    check_ss_plist()
+    build_ss_catalog()
 
     # Shared authoritative event queue.
     raw_event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)

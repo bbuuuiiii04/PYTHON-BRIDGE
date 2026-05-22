@@ -65,6 +65,7 @@ py-modules = [
     "rb_ss_bridge_v2.sound_switch_engine",
     "rb_ss_bridge_v2.spectral_cache",
     "rb_ss_bridge_v2.ss_library_scanner",
+    "rb_ss_bridge_v2.ss_metadata_importer",
     "rb_ss_bridge_v2.state_manager",
     "rb_ss_bridge_v2.tl_tailer",
     "rb_ss_bridge_v2.validation_runner",
