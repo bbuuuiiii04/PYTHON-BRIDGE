@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import re
+import unittest
 
-from playwright.sync_api import Page, expect
+try:
+    from playwright.sync_api import Page, expect
+except ImportError as exc:
+    raise unittest.SkipTest(f"playwright not installed: {exc}") from exc
 
 
 def _goto(page: Page, laser_pad_server) -> list[str]:
