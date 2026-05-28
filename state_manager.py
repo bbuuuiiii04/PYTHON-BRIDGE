@@ -62,6 +62,7 @@ from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
 from .logging_manager import get_logging_manager
 from .filepath_resolver import has_soundswitch_scripted_id
+from .personality_resolver import PersonalityResolver, PlaylistCache
 from .session_recorder import SessionRecorder
 from .sound_switch_engine import SoundSwitchEngine
 from . import spectral_cache
@@ -103,6 +104,7 @@ SMART_BREAKDOWN_ENV = "RBSS_SMART_BREAKDOWN"
 PHRASE_ANCHOR_ENV = "RBSS_PHRASE_ANCHOR"
 SMART_REARM_EXPERIMENT_ENV = "RBSS_SMART_REARM_EXPERIMENT"
 SPECTRAL_ENABLE_ENV = "RBSS_SPECTRAL_ENABLE"
+WIDE_WINDOW_ENV = "RBSS_DROP_WIDE_WINDOW"
 SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
 STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
@@ -115,6 +117,7 @@ def _read_runtime_anlz_data(
     *,
     audio_filepath: str = "",
     spectral_enabled: bool = False,
+    wide_window: bool = False,
 ) -> TrackAnlzData:
     data = read_anlz_drops(anlz_path)
     if not spectral_enabled:
@@ -125,14 +128,21 @@ def _read_runtime_anlz_data(
 
     beatgrid_times_ms = list(ctx.beatgrid_times_ms)
     features = _runtime_spectral_features(audio_filepath, beatgrid_times_ms)
+    phrases = list(data.buildup_beat_indices) + list(data.breakdown_beat_indices)
     data.energy_shadow = _calculate_smart_drop_energy_shadow(
         list(ctx.heights),
         _duration_from_beatgrid(beatgrid_times_ms),
         beatgrid_times_ms,
         data.drop_beat_indices,
         # TODO(M4): hoist the v2 runtime scorer if this path becomes hot enough.
-        scorer=_make_multi_feature_scorer(MULTI_FEATURE_WEIGHTS_V2),
+        scorer=_make_multi_feature_scorer(
+            MULTI_FEATURE_WEIGHTS_V2,
+            wide_window=wide_window,
+            phrases=phrases,
+        ),
         spectral_features=features,
+        wide_window=wide_window,
+        phrases=phrases,
     )
     return data
 
@@ -305,6 +315,7 @@ class StateManager:
             self._smart_rearm_experiment
             and _os.environ.get(SPECTRAL_ENABLE_ENV, "0") == "1"
         )
+        self._wide_window_enable = _os.environ.get(WIDE_WINDOW_ENV, "1") != "0"
         self._stop  = threading.Event()
 
         # Per-deck state (written only by this thread after start())
@@ -320,6 +331,12 @@ class StateManager:
 
         # FM-3: initialize resolver and pending arm before any events arrive
         self._resolver = None
+        self._personality_resolver: Optional[PersonalityResolver] = None
+        self._personality_playlist_cache: Optional[PlaylistCache] = None
+        # Bridge only sees logical decks 1/2 via _RB_TO_BRIDGE (DDJ-800 mirrors
+        # 1<->3 and 2<->4 at the physical layer). Extend this dict if logical
+        # deck count grows.
+        self._personality_eligible_deck: dict[int, bool] = {1: False, 2: False}
         self._pending_arm: Optional[ArmSequence] = None
 
         # Rate-limited position logging (once every 5 s per deck)
@@ -367,6 +384,9 @@ class StateManager:
         self._sp_drop_window: float = float(SMART_DROP_LOOKAHEAD_BEATS)
         self._sp_post_drop: float = 8.0           # conservative default; not consumed until Phase 3
         self._sp_transition_window: float = float(SMART_DROP_LOOKAHEAD_BEATS)
+        self._sp_breakdown_default_restore: int = SMART_BREAKDOWN_DEFAULT_DURATION_BEATS
+        self._active_personality_for_timing: Optional[LaserPersonality] = None
+        self._last_applied_personality: Optional[LaserPersonality] = None
         self._phrase_segments_cache: dict[int, tuple[int, tuple[PhraseSegment, ...]]] = {}
         self._smart_drop_beats_cache: dict[int, tuple[int, tuple[float, ...]]] = {}
         self._breakdown_segments_cache: dict[int, tuple[int, tuple[BeatSegment, ...]]] = {}
@@ -391,6 +411,10 @@ class StateManager:
             send_direct_autoloop_rearm=_autoloop_rearm_bridge,
             send_smart_transition_clear=self._sse.send_smart_transition_clear,
         )
+        callback = getattr(self._laser_director, "set_personality_apply_callback", None)
+        if callable(callback):
+            callback(self._apply_personality_change)
+        self._recache_initial_personality_timing()
 
     def set_initial_state(self, active_deck: int, source: str = "TL ENGINE STATE") -> None:
         """Apply startup state read from TL ENGINE STATE before event loop starts."""
@@ -778,6 +802,7 @@ class StateManager:
             sid = ev.payload.get("scripted_id", 0)
             if sid:
                 d_obj = self._deck[d]
+                self._personality_eligible_deck[d] = False
                 if d_obj.scripted_id != sid:
                     d_obj.scripted_id = sid
                     # If OSC arrived after the deck switch already armed the wrong show,
@@ -854,15 +879,19 @@ class StateManager:
             elif ev.kind == Ev.LASER_CLEAR_SCENE_OVERRIDE:
                 self._laser_director.clear_manual_override()
             elif ev.kind == Ev.LASER_SET_PERSONALITY:
+                if ev.source not in {"test", "unit_test", "internal"}:
+                    log.warning(
+                        "[PERSONALITY] external LASER_SET_PERSONALITY source=%s",
+                        ev.source or "unknown",
+                    )
                 personality_name = str(ev.payload.get("personality", ""))
-                self._laser_director.set_personality(personality_name)
                 provider = self._laser_personality_provider
-                if provider is not None:
+                if provider is None:
+                    self._laser_director.set_personality(personality_name)
+                else:
                     personality_cfg = provider(personality_name)
                     if personality_cfg is not None:
-                        self._laser_director.set_personality_config(personality_cfg)
-                        if self._laser_executor is not None:
-                            self._laser_executor.set_personality(personality_cfg)
+                        self._apply_personality_change(personality_name, personality_cfg)
 
     # ── Deck switch ───────────────────────────────────────────────────────────
 
@@ -913,6 +942,15 @@ class StateManager:
         self._autoloop.clear_pending_master_phrase_arm()
         if self._laser_executor is not None:
             self._laser_executor.reset_runtime_state(reason="master_changed")
+        if (
+            self._personality_eligible_deck.get(new_deck, False)
+            and new_d.meta.content_id
+        ):
+            self._resolve_personality_for_deck(
+                new_deck,
+                new_d.meta,
+                trigger="master_changed",
+            )
 
     # ── Track load → lsof trigger ─────────────────────────────────────────────
 
@@ -920,6 +958,7 @@ class StateManager:
         d = self._deck[deck]
         d.meta.clear()
         d.scripted_id = 0
+        self._personality_eligible_deck[deck] = False
         d.load_gen += 1
         self._loaded_anlz_path.pop(deck, None)
         if deck == self._os.active_deck:
@@ -950,7 +989,12 @@ class StateManager:
             self._resolver.resolve_by_anlz(deck, d.load_gen, anlz_path, trace_id=trace_id)
             if self._smart_rearm_experiment:
                 self._loaded_anlz_path[deck] = (anlz_path, d.load_gen)
-                self._start_anlz_worker(anlz_path, deck, d.load_gen)
+                self._start_anlz_worker(
+                    anlz_path,
+                    deck,
+                    d.load_gen,
+                    wide_window=self._wide_window_enable,
+                )
         else:
             other = 3 - deck
             other_path = self._deck[other].meta.filepath
@@ -968,6 +1012,7 @@ class StateManager:
         *,
         audio_filepath: str = "",
         spectral_enabled: bool = False,
+        wide_window: bool = False,
     ) -> None:
         eq = self._eq
         source = "anlz_spectral" if spectral_enabled else "anlz"
@@ -978,6 +1023,7 @@ class StateManager:
                     path,
                     audio_filepath=audio_filepath,
                     spectral_enabled=spectral_enabled,
+                    wide_window=wide_window,
                 )
             except Exception:
                 log.debug("[SM] anlz-worker-error", exc_info=True)
@@ -1009,6 +1055,143 @@ class StateManager:
 
     def attach_resolver(self, resolver) -> None:  # type: ignore[type-arg]
         self._resolver = resolver
+
+    def attach_personality_resolver(self, resolver: PersonalityResolver) -> None:
+        self._personality_resolver = resolver
+
+    def attach_personality_playlist_cache(self, cache: PlaylistCache) -> None:
+        self._personality_playlist_cache = cache
+
+    def attach_laser_personality_provider(
+        self,
+        provider: Optional[Callable[[str], Optional[LaserPersonality]]],
+    ) -> None:
+        self._laser_personality_provider = provider
+
+    def get_last_applied_personality(self) -> Optional[LaserPersonality]:
+        return self._last_applied_personality
+
+    def _recache_initial_personality_timing(self) -> None:
+        director = self._laser_director
+        provider = self._laser_personality_provider
+        get_personality = getattr(director, "get_personality", None)
+        if provider is None or not callable(get_personality):
+            return
+        personality = provider(str(get_personality()))
+        if personality is not None:
+            self._recache_personality_timing(personality)
+
+    def _apply_personality_change(
+        self,
+        name: str,
+        personality: LaserPersonality,
+    ) -> None:
+        if self._laser_director is not None:
+            self._laser_director.set_personality(name)
+            self._laser_director.set_personality_config(personality)
+        if self._laser_executor is not None:
+            self._laser_executor.set_personality(personality)
+        self._recache_personality_timing(personality)
+        self._last_applied_personality = personality
+
+    def _recache_personality_timing(
+        self,
+        personality: Optional[LaserPersonality],
+    ) -> None:
+        self._active_personality_for_timing = personality
+        if personality is None:
+            self._sp_drop_window = float(SMART_DROP_LOOKAHEAD_BEATS)
+            self._sp_transition_window = float(SMART_DROP_LOOKAHEAD_BEATS)
+            self._sp_post_drop = 8.0
+            self._sp_breakdown_default_restore = SMART_BREAKDOWN_DEFAULT_DURATION_BEATS
+        else:
+            self._sp_drop_window = float(personality.pre_drop_blackout_beats)
+            self._sp_transition_window = float(personality.pre_drop_blackout_beats)
+            self._sp_post_drop = float(personality.post_drop_hold_beats)
+            self._sp_breakdown_default_restore = int(
+                personality.breakdown_default_restore_beats
+            )
+        for deck in (1, 2):
+            self._clear_phrase_segment_cache(deck)
+
+    def _resolve_personality_for_deck(
+        self,
+        deck: int,
+        meta: TrackMetadata,
+        *,
+        trigger: str = "filepath_resolved",
+    ) -> None:
+        resolver = self._personality_resolver
+        director = self._laser_director
+        provider = self._laser_personality_provider
+        if resolver is None or director is None or provider is None:
+            return
+        if deck != self._os.active_deck:
+            log.debug(
+                "[PERSONALITY] skip-resolve deck=%d trigger=%s reason=not-master active=%d",
+                deck,
+                trigger,
+                self._os.active_deck,
+            )
+            return
+
+        content_id = str(meta.content_id or "")
+        cache = self._personality_playlist_cache
+        playlists: frozenset[str]
+        if cache is None:
+            playlists = frozenset()
+        elif not content_id:
+            playlists = frozenset()
+        else:
+            cached = cache.get(content_id)
+            if cached is None:
+                cache.refresh()
+                cached = cache.get(content_id)
+            playlists = cached or frozenset()
+
+        resolution = resolver.resolve(playlists=playlists, bpm=meta.bpm)
+        personality_cfg = provider(resolution.name)
+        if personality_cfg is None:
+            log.warning(
+                "[PERSONALITY] deck=%d content_id=%r unresolved=%r reason=missing_config",
+                deck,
+                content_id,
+                resolution.name,
+            )
+            return
+
+        queue_change = getattr(director, "queue_personality_change", None)
+        if callable(queue_change):
+            queue_change(resolution.name, personality_cfg)
+
+        mismatch = ""
+        bpm_min = float(personality_cfg.bpm_band_min)
+        bpm_max = float(personality_cfg.bpm_band_max)
+        if (
+            resolution.reason == "playlist_match"
+            and meta.bpm > 0
+            and not (bpm_min == 0.0 and bpm_max == 0.0)
+            and not (bpm_min <= meta.bpm < bpm_max)
+        ):
+            mismatch = f" outside band {bpm_min:g}-{bpm_max:g}"
+
+        matched = f' matched="{resolution.matched}"' if resolution.matched else ""
+        reason = resolution.reason
+        if reason == "default" and not resolution.matched:
+            matched = " reason=bpm_no_match"
+        log.info(
+            '[PERSONALITY] deck=%d trigger=%s content_id=%r file="%s" -> %s '
+            '(rule=%s%s, file_bpm=%g%s)',
+            deck,
+            trigger,
+            content_id,
+            bf.short(meta.filepath),
+            resolution.name,
+            reason,
+            matched,
+            meta.bpm,
+            mismatch,
+        )
 
     # ── Filepath resolved ─────────────────────────────────────────────────────
 
@@ -1067,6 +1250,7 @@ class StateManager:
                         d.load_gen,
                         audio_filepath=meta.filepath,
                         spectral_enabled=True,
+                        wide_window=self._wide_window_enable,
                     )
         if _os.environ.get("RBSS_SCRIPTED_DIRECT") != "0":
             ssid = meta.soundswitch_id
@@ -1101,6 +1285,7 @@ class StateManager:
                         deck, len(filepath_matches), int(load_delta_ms),
                     )
             if scripted_id is not None:
+                self._personality_eligible_deck[deck] = False
                 source = "direct" if ssid_direct else "registry"
                 log_fn = log.warning if matched_by_filepath and not ssid else log.info
                 log_fn("[SM] scripted-match  deck=%d  scripted_id=%d"
@@ -1116,6 +1301,7 @@ class StateManager:
                 except queue.Full:
                     log.warning("[SM] queue-full  event=scripted-arm  deck=%d", deck)
             else:
+                self._personality_eligible_deck[deck] = True
                 try:
                     self._eq.put_nowait(BridgeEvent(
                         kind=Ev.SCRIPTED_CLEAR,
@@ -1124,6 +1310,7 @@ class StateManager:
                     ))
                 except queue.Full:
                     log.warning("[SM] queue-full  event=scripted-clear  deck=%d", deck)
+                self._resolve_personality_for_deck(deck, meta)
 
     # ── Scripted arm / clear ──────────────────────────────────────────────────
 
@@ -1895,7 +2082,7 @@ class StateManager:
                     bd_beat,
                     d.meta.anlz_buildups,
                     d.meta.smart_drops,
-                    SMART_BREAKDOWN_DEFAULT_DURATION_BEATS
+                    self._sp_breakdown_default_restore
                 ))
             ) for bd_beat in select_smart_breakdowns(
                 d.meta.anlz_breakdowns,

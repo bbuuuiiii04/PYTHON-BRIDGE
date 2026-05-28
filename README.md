@@ -109,3 +109,9 @@ Run the test suite:
 ```bash
 python -m unittest discover tests
 ```
+
+Check the Laser Pad frontend syntax before merging UI changes:
+
+```bash
+node --check tools/laser_pad_assets/pad.js
+```

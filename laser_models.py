@@ -94,11 +94,17 @@ class LaserPersonality:
     drop_bank: tuple[str, ...] = field(default_factory=tuple)
     post_drop_bank: tuple[str, ...] = field(default_factory=tuple)
     breakdown_bank: tuple[str, ...] = field(default_factory=tuple)
+    aliases: tuple[str, ...] = field(default_factory=tuple)
+    bpm_band_min: float = 0.0
+    bpm_band_max: float = 0.0
     allow_high_impact: bool = False
     phrase_interval_beats: int = 32
     minimum_scene_hold_beats: int = 0
     normal_changes_only_on_phrase_boundary: bool = False
     buildup_lookahead_beats: int = 32
+    pre_drop_blackout_beats: int = 4
+    post_drop_hold_beats: int = 8
+    breakdown_default_restore_beats: int = 64
 
 
 @dataclass(frozen=True)

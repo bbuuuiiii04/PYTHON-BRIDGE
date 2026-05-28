@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import math
+import os
 import sys
 import tempfile
 import unittest
@@ -61,6 +62,42 @@ class EvalSmartDropAlgorithmTests(unittest.TestCase):
         self.assertIn("v2 (waveform + spectral)", text)
         self.assertIn("Per-feature ablation", text)
         self.assertIn("Per-track holdout", text)
+
+    def test_predict_v2_defaults_wide_window_on(self) -> None:
+        row = eval_tool.LabeledDrop(
+            track_id="track",
+            split="training",
+            rekordbox_beat=0,
+            correct_beat=16,
+            heights=[1] * 20,
+            beatgrid_times_ms=[i * 500.0 for i in range(20)],
+            spectral=None,
+        )
+
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(eval_tool, "_calculate_smart_drop_energy_shadow",
+                          return_value=[SimpleNamespace(suggested_beat=16)]) as calculate:
+            self.assertEqual(eval_tool._predict_v2(row, None, {"distance_penalty": 1.0}), 16)
+
+        self.assertTrue(calculate.call_args.kwargs["wide_window"])
+
+    def test_predict_v2_honors_wide_window_kill_switch(self) -> None:
+        row = eval_tool.LabeledDrop(
+            track_id="track",
+            split="training",
+            rekordbox_beat=0,
+            correct_beat=8,
+            heights=[1] * 20,
+            beatgrid_times_ms=[i * 500.0 for i in range(20)],
+            spectral=None,
+        )
+
+        with patch.dict(os.environ, {"RBSS_DROP_WIDE_WINDOW": "0"}), \
+             patch.object(eval_tool, "_calculate_smart_drop_energy_shadow",
+                          return_value=[SimpleNamespace(suggested_beat=8)]) as calculate:
+            self.assertEqual(eval_tool._predict_v2(row, None, {"distance_penalty": 1.0}), 8)
+
+        self.assertFalse(calculate.call_args.kwargs["wide_window"])
 
     def test_scaffold_runs_without_requiring_real_anlz(self) -> None:
         out = io.StringIO()

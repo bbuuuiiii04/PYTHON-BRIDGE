@@ -109,7 +109,6 @@ class CommandReader(threading.Thread):
         laser_clear_blackout_callback: Optional[Callable[[], Any]] = None,
         laser_scene_callback: Optional[Callable[[str, float], Any]] = None,
         laser_clear_scene_override_callback: Optional[Callable[[], Any]] = None,
-        laser_set_personality_callback: Optional[Callable[[str], Any]] = None,
         record_session_toggle_callback: Optional[Callable[[Optional[str], bool], Any]] = None,
     ) -> None:
         super().__init__(name="runtime-command-reader", daemon=True)
@@ -122,7 +121,6 @@ class CommandReader(threading.Thread):
         self._laser_clear_blackout_callback = laser_clear_blackout_callback
         self._laser_scene_callback = laser_scene_callback
         self._laser_clear_scene_override_callback = laser_clear_scene_override_callback
-        self._laser_set_personality_callback = laser_set_personality_callback
         self._record_session_toggle_callback = record_session_toggle_callback
         self._stop_event = threading.Event()
         self._last_command = ""
@@ -225,14 +223,6 @@ class CommandReader(threading.Thread):
                     with self._lock:
                         self._last_error = f"laser_clear_scene_override callback failed: {detail}"
             return
-        if cmd == "laser_set_personality":
-            if self._laser_set_personality_callback:
-                personality = str(command["personality"])
-                ok, detail = _invoke_callback(lambda: self._laser_set_personality_callback(personality))
-                if not ok:
-                    with self._lock:
-                        self._last_error = f"laser_set_personality callback failed: {detail}"
-            return
         if cmd == "toggle_record_session":
             if self._record_session_toggle_callback:
                 path = command.get("path")
@@ -275,7 +265,6 @@ def parse_command(line: str) -> dict[str, Any]:
         "laser_clear_blackout",
         "laser_scene",
         "laser_clear_scene_override",
-        "laser_set_personality",
         "toggle_record_session",
     }
     if cmd not in allowed:
@@ -297,10 +286,6 @@ def parse_command(line: str) -> dict[str, Any]:
             raise ValueError("laser_scene ttl_s must be finite")
         obj = dict(obj)
         obj["ttl_s"] = min(30.0, max(0.0, ttl_s))
-    if cmd == "laser_set_personality":
-        personality = obj.get("personality")
-        if not isinstance(personality, str) or not personality:
-            raise ValueError("laser_set_personality requires non-empty personality")
     if cmd == "toggle_record_session":
         path = obj.get("path")
         if path is not None and (not isinstance(path, str) or not path):

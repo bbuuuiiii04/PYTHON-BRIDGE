@@ -289,6 +289,44 @@ class LaserConfigOpsTests(unittest.TestCase):
         self.assertTrue(any(note == 92 for note, _ in soft_dupes))
         self.assertEqual(soft_dupes, legacy_dupes)
 
+    def test_shared_scene_across_personalities_is_not_a_duplicate(self) -> None:
+        # Two personalities referencing the SAME scene at the same MIDI note is
+        # legitimate scene sharing, not a collision. find_duplicate_notes_keyed
+        # should not flag it for either 'channel_note' or 'note' keys.
+        with tempfile.TemporaryDirectory() as td:
+            cfg = load_or_create_config(Path(td) / "laser_director.json")
+            scene_name = apply_mapping(cfg, personality="house", role="breakdown", note=77)
+            _ensure_personality_exists(cfg, "dubstep")
+            cfg["personalities"]["dubstep"]["breakdown_scene"] = scene_name
+            cfg["personalities"]["dubstep"]["breakdown_bank"] = [scene_name]
+
+        hard_dupes = find_duplicate_notes_keyed(cfg, by="channel_note")
+        soft_dupes = find_soft_duplicate_notes(cfg)
+
+        self.assertFalse(
+            any(key == (1, 77) for key, _ in hard_dupes),
+            f"shared scene should not be flagged as hard duplicate: {hard_dupes}",
+        )
+        self.assertFalse(
+            any(note == 77 for note, _ in soft_dupes),
+            f"shared scene should not be flagged as soft duplicate: {soft_dupes}",
+        )
+
+    def test_shared_scene_across_roles_in_same_personality_is_not_a_duplicate(self) -> None:
+        # Same scene used in two role banks of the same personality is unusual
+        # but not a collision: there is only one MIDI mapping.
+        with tempfile.TemporaryDirectory() as td:
+            cfg = load_or_create_config(Path(td) / "laser_director.json")
+            scene_name = apply_mapping(cfg, personality="house", role="groove", note=78)
+            cfg["personalities"]["house"]["breakdown_bank"].append(scene_name)
+
+        hard_dupes = find_duplicate_notes_keyed(cfg, by="channel_note")
+
+        self.assertFalse(
+            any(key == (1, 78) for key, _ in hard_dupes),
+            f"same scene in two roles should not be flagged: {hard_dupes}",
+        )
+
     def test_validate_config_data_uses_provided_loader_result_no_temp_file(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "laser_director.json"
@@ -429,12 +467,20 @@ class LaserConfigOpsTests(unittest.TestCase):
         self.assertEqual(house["safe_scene"], "custom_safe")
         self.assertEqual(house["phrase_bank"], [])
         self.assertEqual(house["minimum_scene_hold_beats"], 8)
+        self.assertEqual(house["aliases"], [])
+        self.assertEqual(house["bpm_band_min"], 0.0)
+        self.assertEqual(house["bpm_band_max"], 0.0)
+        self.assertEqual(house["pre_drop_blackout_beats"], 4)
+        self.assertEqual(house["post_drop_hold_beats"], 8)
+        self.assertEqual(house["breakdown_default_restore_beats"], 64)
 
         house["phrase_bank"].append("mutated_scene")
+        house["aliases"].append("mutated_alias")
         cfg["personalities"]["techno"] = {"safe_scene": "techno_safe"}
         _ensure_personality_exists(cfg, "techno")
 
         self.assertEqual(cfg["personalities"]["techno"]["phrase_bank"], [])
+        self.assertEqual(cfg["personalities"]["techno"]["aliases"], [])
 
     def test_personality_timing_scene_cooldown_and_safety_mutators(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
@@ -446,6 +492,9 @@ class LaserConfigOpsTests(unittest.TestCase):
             phrase_interval_beats=48,
             minimum_scene_hold_beats=10,
             buildup_lookahead_beats=24,
+            pre_drop_blackout_beats=12,
+            post_drop_hold_beats=6,
+            breakdown_default_restore_beats=40,
         )
         update_scene_cooldown(cfg, scene_name=scene, cooldown_beats=12.5)
         update_scene_safety_class(cfg, scene_name=scene, safety_class="strobe")
@@ -454,8 +503,26 @@ class LaserConfigOpsTests(unittest.TestCase):
         self.assertEqual(house["phrase_interval_beats"], 48)
         self.assertEqual(house["minimum_scene_hold_beats"], 10)
         self.assertEqual(house["buildup_lookahead_beats"], 24)
+        self.assertEqual(house["pre_drop_blackout_beats"], 12)
+        self.assertEqual(house["post_drop_hold_beats"], 6)
+        self.assertEqual(house["breakdown_default_restore_beats"], 40)
         self.assertEqual(cfg["scenes"][scene]["cooldown_beats"], 12.5)
         self.assertEqual(cfg["scenes"][scene]["safety_class"], "strobe")
+
+    def test_validate_config_data_reports_personality_resolver_warnings(self) -> None:
+        cfg = load_or_create_config(Path("/tmp/not-used.json"))
+        cfg["personalities"]["techno"] = json.loads(json.dumps(cfg["personalities"]["house"]))
+        cfg["personalities"]["techno"]["aliases"] = []
+        cfg["personalities"]["techno"]["bpm_band_min"] = 125
+        cfg["personalities"]["techno"]["bpm_band_max"] = 135
+        cfg["bpm_priority"] = ["house"]
+
+        _errors, warnings = validate_config_data(cfg)
+
+        warning_text = "\n".join(warnings)
+        self.assertIn("personality 'techno' has no aliases", warning_text)
+        self.assertIn("personality 'techno' BPM band ignored", warning_text)
+        self.assertIn("BPM band overlap house[120-130] and techno[125-135]", warning_text)
 
     def test_role_bank_cooldown_and_mixed_cooldown_detection(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))

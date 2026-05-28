@@ -25,6 +25,7 @@ Covers:
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import sys
@@ -39,6 +40,7 @@ from rb_ss_bridge_v2.laser_config import (  # noqa: E402
     LaserConfigResult,
     _infer_behavior,
     load_laser_director_config,
+    load_laser_director_config_from_dict,
 )
 from rb_ss_bridge_v2.laser_models import (  # noqa: E402
     LaserMidiMessage,
@@ -88,10 +90,43 @@ def _write_config(data: dict) -> str:
 
 def _with_scene(overrides: dict, scene_name: str = "safe_static") -> dict:
     """Return a copy of _MINIMAL_CONFIG with the named scene overridden."""
-    import copy
     cfg = copy.deepcopy(_MINIMAL_CONFIG)
     cfg["scenes"][scene_name] = overrides
     return cfg
+
+
+class DictLoaderParityTests(unittest.TestCase):
+    def test_dict_loader_matches_path_loader_for_fixture_configs(self) -> None:
+        invalid_missing_scene = copy.deepcopy(_MINIMAL_CONFIG)
+        invalid_missing_scene["startup_scene"] = "missing_scene"
+        fixtures = [
+            ("minimal", copy.deepcopy(_MINIMAL_CONFIG)),
+            (
+                "with_manual_blackout",
+                {
+                    **copy.deepcopy(_MINIMAL_CONFIG),
+                    "manual_commands": {
+                        "blackout_on": {"kind": "note_on", "channel": 1, "note": 1},
+                        "blackout_off": {"kind": "note_off", "channel": 1, "note": 1},
+                    },
+                },
+            ),
+            ("invalid_missing_scene", invalid_missing_scene),
+            (
+                "example",
+                json.loads(
+                    (Path(__file__).resolve().parents[1] / "config" / "laser_director.example.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            ),
+        ]
+        for name, config in fixtures:
+            with self.subTest(name=name):
+                path_result = load_laser_director_config(_write_config(config))
+                dict_result = load_laser_director_config_from_dict(copy.deepcopy(config))
+
+                self.assertEqual(dict_result, path_result)
 
 
 # ---------------------------------------------------------------------------
@@ -952,6 +987,61 @@ class PersonalityValidationTests(unittest.TestCase):
         self.assertEqual(p.minimum_scene_hold_beats, 0)
         self.assertFalse(p.normal_changes_only_on_phrase_boundary)
         self.assertEqual(p.buildup_lookahead_beats, 32)
+        self.assertEqual(p.aliases, ())
+        self.assertEqual(p.bpm_band_min, 0.0)
+        self.assertEqual(p.bpm_band_max, 0.0)
+        self.assertEqual(p.pre_drop_blackout_beats, 4)
+        self.assertEqual(p.post_drop_hold_beats, 8)
+        self.assertEqual(p.breakdown_default_restore_beats, 64)
+        self.assertEqual(r.config.bpm_priority, ())
+
+    def test_aliases_are_canonicalized(self) -> None:
+        p = self._valid_personality()
+        p["aliases"] = ["  Tech   House  "]
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(r.available, msg=r.errors)
+        self.assertEqual(r.config.personalities["house"].aliases, ("tech house",))
+
+    def test_duplicate_alias_across_personalities_fails(self) -> None:
+        import copy
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        house = self._valid_personality()
+        house["aliases"] = ["House"]
+        dubstep = self._valid_personality()
+        dubstep["aliases"] = [" house "]
+        cfg["personalities"] = {"house": house, "dubstep": dubstep}
+        cfg["default_personality"] = "house"
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("duplicates" in e for e in r.errors))
+
+    def test_bpm_band_min_must_be_less_than_max_unless_disabled(self) -> None:
+        p = self._valid_personality()
+        p["bpm_band_min"] = 130
+        p["bpm_band_max"] = 120
+        cfg = self._cfg_with_personality(p)
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("bpm_band_min" in e for e in r.errors))
+
+    def test_bpm_priority_references_existing_personalities(self) -> None:
+        p = self._valid_personality()
+        cfg = self._cfg_with_personality(p)
+        cfg["bpm_priority"] = ["dubstep"]
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertTrue(any("bpm_priority" in e for e in r.errors))
+
+    def test_bpm_priority_stored_in_config(self) -> None:
+        p = self._valid_personality()
+        p["bpm_band_min"] = 120
+        p["bpm_band_max"] = 130
+        cfg = self._cfg_with_personality(p)
+        cfg["bpm_priority"] = ["house"]
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertTrue(r.available, msg=r.errors)
+        self.assertEqual(r.config.bpm_priority, ("house",))
 
     def test_buildup_lookahead_beats_must_be_positive_int(self) -> None:
         p = self._valid_personality()

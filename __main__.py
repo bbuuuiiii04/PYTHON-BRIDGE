@@ -24,7 +24,7 @@ import fcntl
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .config import OSC_LISTEN_PORT, TL_LOG_PATH, TL_PLAYLIST_PATH
+from .config import OSC_LISTEN_PORT, RB_DB_PATH, TL_LOG_PATH, TL_PLAYLIST_PATH
 from .filepath_resolver import (
     FilepathResolver,
     seed_soundswitch_id_cache,
@@ -61,11 +61,12 @@ from .tl_tailer import (
 from .diagnostics import DriftDetector, enable_debug, is_debug
 from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService, read_rekordbox_version
 from .logging_manager import get_logging_manager
-from .laser_config import LaserConfigResult, load_laser_director_config
+from .laser_config import LaserConfig, LaserConfigResult, load_laser_director_config
 from .laser_director import LaserDirector
 from .laser_executor import LaserSceneExecutor
 from .laser_models import LaserPersonality
 from .midi_output import MidiOutput
+from .personality_resolver import PersonalityResolver, PlaylistCache
 from .runtime_status import CommandReader, StatusWriter
 from .validation_runner import ValidationRunner
 from .tools.config_reloader import ConfigReloader, HOT_RELOAD_DISABLE_ENV
@@ -262,6 +263,25 @@ class LaserStartupBundle:
     personality_provider: Optional[Callable[[str], Optional[LaserPersonality]]]
 
 
+def _build_personality_resolver(cfg: LaserConfig) -> PersonalityResolver:
+    alias_index = {
+        alias: name
+        for name, personality in cfg.personalities.items()
+        for alias in personality.aliases
+    }
+    bpm_bands = {
+        name: (personality.bpm_band_min, personality.bpm_band_max)
+        for name, personality in cfg.personalities.items()
+    }
+    return PersonalityResolver(
+        alias_index=alias_index,
+        bpm_priority=cfg.bpm_priority,
+        bpm_bands=bpm_bands,
+        known_personalities=set(cfg.personalities.keys()),
+        default=cfg.default_personality,
+    )
+
+
 def _build_laser_startup_wiring(
     cfg_result: LaserConfigResult,
 ) -> LaserStartupBundle:
@@ -453,15 +473,13 @@ def start_osc_listener(
 
 def _auto_populate(track_id: int, active_deck: int, eq: queue.Queue) -> None:
     """Query RB DB for an unknown track_id and register it, then fire SCRIPTED_ARM."""
-    import os
     import warnings
     log.info("[MAIN] auto-populate  id=%d  action=db-query", track_id)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             from pyrekordbox.db6 import Rekordbox6Database  # type: ignore
-        db_path = os.path.expanduser("~/Library/Pioneer/rekordbox/master.db")
-        db = Rekordbox6Database(db_path, unlock=True)
+        db = Rekordbox6Database(str(RB_DB_PATH), unlock=True)
         # We don't know the name; register a placeholder so the ID is known
         # The real metadata will arrive via lsof
         from .scripted_tracks import register
@@ -669,6 +687,22 @@ def main() -> None:
         laser_executor=laser_executor,
         laser_personality_provider=laser_personality_provider,
     )
+    if laser_cfg_result.available and laser_cfg_result.config is not None:
+        cfg = laser_cfg_result.config
+        personality_resolver = _build_personality_resolver(cfg)
+        playlist_cache = PlaylistCache(RB_DB_PATH)
+        sm.attach_personality_resolver(personality_resolver)
+        sm.attach_personality_playlist_cache(playlist_cache)
+        threading.Thread(
+            target=playlist_cache.refresh,
+            name="personality-cache-bootstrap",
+            daemon=True,
+        ).start()
+        log.info(
+            "[MAIN] personality-resolver attached aliases=%d bpm_priority=%d",
+            sum(len(p.aliases) for p in cfg.personalities.values()),
+            len(cfg.bpm_priority),
+        )
     validation_runner = ValidationRunner(
         conn,
         pos_cache,
@@ -774,19 +808,6 @@ def main() -> None:
             log.warning("[MAIN] queue-full  event=laser-clear-scene-override")
             return False
 
-    def _laser_set_personality(personality: str) -> bool:
-        try:
-            event_queue.put_nowait(BridgeEvent(
-                kind=Ev.LASER_SET_PERSONALITY,
-                deck=0,
-                payload={"personality": personality},
-                source="runtime_command",
-            ))
-            return True
-        except queue.Full:
-            log.warning("[MAIN] queue-full  event=laser-set-personality")
-            return False
-
     def _toggle_record_session(path: Optional[str], dedup: bool) -> bool:
         if not path:
             path = f"/tmp/rbss-session-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
@@ -802,7 +823,6 @@ def main() -> None:
         laser_clear_blackout_callback=_laser_clear_blackout,
         laser_scene_callback=_laser_scene,
         laser_clear_scene_override_callback=_laser_clear_scene_override,
-        laser_set_personality_callback=_laser_set_personality,
         record_session_toggle_callback=_toggle_record_session,
     )
     status_writer = StatusWriter(
@@ -1015,8 +1035,54 @@ def main() -> None:
                 detail,
             )
             return
-        log.warning(
-            "[MAIN] laser-config-reload  changed=1  status=detected  action=restart_required"
+        cfg = result.config
+        sm.attach_personality_resolver(_build_personality_resolver(cfg))
+        sm.attach_laser_personality_provider(
+            lambda name, cfg=cfg: cfg.personalities.get(name)
+        )
+        active_name = ""
+        get_personality = getattr(laser_director, "get_personality", None)
+        if callable(get_personality):
+            active_name = str(get_personality() or "")
+        active_personality = cfg.personalities.get(active_name) if active_name else None
+        if active_name and active_personality is None:
+            log.warning(
+                "[MAIN] laser-config-reload  active_personality=%r missing "
+                "from new config; falling back to default=%r",
+                active_name,
+                cfg.default_personality,
+            )
+            active_name = cfg.default_personality
+            active_personality = cfg.personalities.get(active_name)
+        existing = sm.get_last_applied_personality()
+        active_unchanged = bool(
+            active_name
+            and active_personality is not None
+            and active_personality == existing
+        )
+        if active_name and active_personality is not None and not active_unchanged:
+            try:
+                event_queue.put_nowait(
+                    BridgeEvent(
+                        kind=Ev.LASER_SET_PERSONALITY,
+                        deck=0,
+                        payload={"personality": active_name},
+                        source="internal",
+                    )
+                )
+            except queue.Full:
+                log.warning(
+                    "[MAIN] queue-full  event=laser-set-personality "
+                    "reason=reload  active=%r",
+                    active_name,
+                )
+        log.info(
+            "[MAIN] laser-config-reload  changed=1  status=applied  "
+            "action=resolver_and_provider_rebuilt aliases=%d "
+            "bpm_priority=%d active_unchanged=%s",
+            sum(len(p.aliases) for p in cfg.personalities.values()),
+            len(cfg.bpm_priority),
+            "yes" if active_unchanged else "no",
         )
 
     config_reloader = ConfigReloader(on_reload=_on_laser_config_reload)

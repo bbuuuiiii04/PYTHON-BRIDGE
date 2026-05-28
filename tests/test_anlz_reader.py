@@ -1,5 +1,6 @@
 import csv
 import json
+import math
 import os
 import sys
 import tempfile
@@ -16,24 +17,37 @@ from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
     WaveformContext,
     _calculate_smart_drop_energy_shadow,
     _detect_drop_beats,
+    _drum_attack_sustained,
+    _drums_dominant_over_tonal,
     _extract_beatgrid_times,
     _extract_pssi_phrases,
     _extract_smart_drop_energy_shadow,
     _extract_waveform_context,
     _extract_waveform_phrases,
     _extract_waveform,
+    _amplitude_jump_at_c,
+    _bass_sustain_1bar,
     _broad_onset_score,
+    _buildup_sweep_slope,
     _distance_penalty,
     _downbeat_alignment,
     _high_mid_pattern_onset,
+    _kick_max_locked_in,
     _low_mid_pattern_onset,
     _make_multi_feature_scorer,
+    _multi_feature_breakdown,
     _multi_feature_score,
+    _no_bigger_drop_later,
     _onset_score,
     _pattern_onset,
+    _post_drop_energy_stability,
+    _post_drop_kick_continuity,
+    _post_drop_minus_pre_drop,
     _post_lift,
     _pre_valley_depth,
+    _phrase_grid_alignment,
     _score_confidence,
+    _silence_frame_pre,
     _v1_compute_shadows,
     read_anlz_drops,
 )
@@ -76,6 +90,56 @@ def _bar_heights(bars: list[int], entries_per_bar: int = 4) -> list[int]:
 
 def _beat_heights(values: dict[int, int], total_beats: int = 120, default: int = 10) -> list[int]:
     return [values.get(beat, default) for beat in range(total_beats)]
+
+
+def _spectral_features(
+    values,
+    kick=None,
+    high_mid=None,
+    high_band=None,
+    sub_bass=None,
+    kick_max=None,
+    onset=None,
+    flatness=None,
+) -> SpectralFeatures:
+    series = tuple(float(value) for value in values)
+    kick_series = tuple(float(value) for value in (kick if kick is not None else values))
+    high_mid_series = tuple(float(value) for value in (high_mid if high_mid is not None else values))
+    high_band_series = tuple(float(value) for value in (high_band if high_band is not None else values))
+    sub_bass_series = tuple(float(value) for value in (sub_bass if sub_bass is not None else values))
+    kick_max_series = tuple(
+        float(value) for value in (kick_max if kick_max is not None else kick_series)
+    )
+    onset_series = tuple(float(value) for value in (onset if onset is not None else values))
+    flatness_series = tuple(float(value) for value in (flatness if flatness is not None else values))
+    return SpectralFeatures(
+        sr=22050,
+        schema_version=3,
+        sub_bass_envelope=sub_bass_series,
+        kick_envelope=kick_series,
+        low_mid_envelope=series,
+        high_mid_envelope=high_mid_series,
+        high_band_envelope=high_band_series,
+        kick_max_envelope=kick_max_series,
+        onset_strength_envelope=onset_series,
+        spectral_flatness_envelope=flatness_series,
+    )
+
+
+_POST_DROP_FEATURE_NAMES = (
+    "silence_frame_pre",
+    "buildup_sweep_slope",
+    "amplitude_jump_at_c",
+    "bass_sustain_1bar",
+    "drum_attack_sustained",
+    "kick_max_locked_in",
+    "drums_dominant_over_tonal",
+    "phrase_grid_alignment",
+    "post_drop_kick_continuity",
+    "post_drop_energy_stability",
+    "post_drop_minus_pre_drop",
+    "no_bigger_drop_later",
+)
 
 
 def _shadow_v1_fields(shadow):
@@ -273,6 +337,29 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         self.assertEqual(default[0].suggested_beat, 72)
         self.assertEqual(default[0].source, "v1")
 
+    def test_wide_window_scores_seventeen_candidates_when_enabled(self) -> None:
+        def scorer(beat, _heights, _beatgrid, _anlz_beat, _spectral):
+            return float(beat)
+
+        default = _calculate_smart_drop_energy_shadow(
+            [1] * 20,
+            waveform_duration_ms=10_000,
+            beatgrid_times_ms=_beatgrid_ms(20),
+            selected_drops=[0],
+            scorer=scorer,
+        )
+        wide = _calculate_smart_drop_energy_shadow(
+            [1] * 20,
+            waveform_duration_ms=10_000,
+            beatgrid_times_ms=_beatgrid_ms(20),
+            selected_drops=[0],
+            scorer=scorer,
+            wide_window=True,
+        )
+
+        self.assertEqual(default[0].suggested_beat, 8)
+        self.assertEqual(wide[0].suggested_beat, 16)
+
     def test_onset_score_uses_max_single_beat_jump_in_post_window(self) -> None:
         self.assertEqual(
             _onset_score(0, [1, 1, 4, 10, 10, 10], _beatgrid_ms(6)),
@@ -315,6 +402,10 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         self.assertEqual(_distance_penalty(68, 64), 0.5)
         self.assertEqual(_distance_penalty(72, 64), 0.0)
 
+    def test_distance_penalty_rescales_for_wide_window(self) -> None:
+        self.assertEqual(_distance_penalty(72, 64, wide_window=True), 0.5)
+        self.assertEqual(_distance_penalty(80, 64, wide_window=True), 0.0)
+
     def test_pattern_onset_discriminates_adjacent_beats(self) -> None:
         envelope = [0.0] * 16 + [1.0] * 16
         before, onset, after = [_pattern_onset(beat, envelope, window=8) for beat in (15, 16, 17)]
@@ -327,12 +418,15 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         silent, loud = (0.0,) * 16, (1.0,) * 16
         features = SpectralFeatures(
             sr=22050,
-            schema_version=2,
+            schema_version=3,
             sub_bass_envelope=silent + loud,
             kick_envelope=silent + loud,
             low_mid_envelope=silent + loud,
             high_mid_envelope=silent + loud,
             high_band_envelope=silent + loud,
+            kick_max_envelope=silent + loud,
+            onset_strength_envelope=silent + loud,
+            spectral_flatness_envelope=silent + loud,
         )
 
         self.assertGreater(_low_mid_pattern_onset(16, features), 0.5)
@@ -346,18 +440,261 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         inv_buildup, inv_drop = (1.0,) * 16, (0.2,) * 16
         features = SpectralFeatures(
             sr=22050,
-            schema_version=2,
+            schema_version=3,
             sub_bass_envelope=buildup + drop,
             kick_envelope=buildup + drop,
             low_mid_envelope=buildup + drop,
             high_mid_envelope=inv_buildup + inv_drop,
             high_band_envelope=inv_buildup + inv_drop,
+            kick_max_envelope=buildup + drop,
+            onset_strength_envelope=buildup + drop,
+            spectral_flatness_envelope=buildup + drop,
         )
 
         self.assertGreater(_centroid_drop(16, features), 0.05)
         self.assertGreater(_spectral_flux_onset(16, features), 0.5)
         self.assertEqual(_centroid_drop(2, features), 0.0)
         self.assertAlmostEqual(_spectral_flux_onset(2, features), 0.0, delta=0.1)
+
+    def test_silence_frame_pre_detects_kick_sub_gap(self) -> None:
+        values = [1.0] * 40
+        values[30:32] = [0.05, 0.05]
+
+        self.assertGreater(_silence_frame_pre(32, _spectral_features(values)), 0.8)
+        self.assertAlmostEqual(_silence_frame_pre(32, _spectral_features([1.0] * 40)), 0.0)
+
+    def test_buildup_sweep_slope_detects_high_band_rise(self) -> None:
+        rising = [0.0] * 40
+        rising[8:32] = [0.0] * 8 + [0.5] * 8 + [1.0] * 8
+        flat = [0.5] * 40
+
+        self.assertGreater(_buildup_sweep_slope(32, _spectral_features(rising)), 0.8)
+        self.assertAlmostEqual(_buildup_sweep_slope(32, _spectral_features(flat)), 0.0)
+
+    def test_buildup_sweep_slope_uses_high_band_not_sub_bass(self) -> None:
+        flat = [0.5] * 40
+        rising = [0.0] * 8 + [0.0] * 8 + [0.5] * 8 + [1.0] * 8 + [0.0] * 8
+        features = _spectral_features(flat, high_mid=rising, high_band=rising)
+        self.assertGreater(_buildup_sweep_slope(32, features), 0.5)
+
+    def test_amplitude_jump_at_c_detects_silence_to_slam(self) -> None:
+        jump = [0.2] * 40
+        jump[30:32] = [0.05, 0.05]
+        jump[32:34] = [1.0, 1.0]
+        flat = [0.5] * 40
+
+        self.assertGreater(_amplitude_jump_at_c(32, _spectral_features(jump)), 0.9)
+        self.assertAlmostEqual(_amplitude_jump_at_c(32, _spectral_features(flat)), 0.1, delta=0.01)
+
+    def test_bass_sustain_1bar_sustained_drop_scores_high(self) -> None:
+        sub = [0.1] * 100 + [0.9] * 50
+        self.assertGreater(
+            _bass_sustain_1bar(100, _spectral_features(sub, sub_bass=sub)),
+            0.95,
+        )
+
+    def test_bass_sustain_1bar_fake_drop_scores_low(self) -> None:
+        sub = [0.1] * 100 + [0.2] * 4 + [0.9] * 8 + [0.0] * 40
+        self.assertLess(
+            _bass_sustain_1bar(100, _spectral_features(sub, sub_bass=sub)),
+            0.5,
+        )
+
+    def test_bass_sustain_1bar_none_spectral(self) -> None:
+        self.assertEqual(_bass_sustain_1bar(100, None), 0.5)
+
+    def test_bass_sustain_1bar_window_overrun(self) -> None:
+        sub = [0.5] * 105
+        self.assertEqual(
+            _bass_sustain_1bar(100, _spectral_features(sub, sub_bass=sub)),
+            0.5,
+        )
+
+    def test_drum_attack_sustained_scores_sustained_onsets_high(self) -> None:
+        base = [0.1] * 100 + [0.9] * 50
+
+        self.assertGreater(
+            _drum_attack_sustained(100, _spectral_features(base, onset=base)),
+            0.9,
+        )
+
+    def test_drum_attack_sustained_scores_brief_spike_low(self) -> None:
+        onset = [0.0] * 100 + [0.9] + [0.0] * 49
+
+        self.assertLess(
+            _drum_attack_sustained(100, _spectral_features(onset, onset=onset)),
+            0.5,
+        )
+
+    def test_drum_attack_sustained_ignores_global_outlier(self) -> None:
+        onset = [0.1] * 100 + [0.7] * 8 + [0.1] * 40 + [10.0]
+
+        self.assertGreater(
+            _drum_attack_sustained(100, _spectral_features(onset, onset=onset)),
+            0.9,
+        )
+
+    def test_kick_max_locked_in_scores_sustained_transients_high(self) -> None:
+        kick_max = [0.1] * 100 + [0.9] * 50
+
+        self.assertGreater(
+            _kick_max_locked_in(100, _spectral_features(kick_max, kick_max=kick_max)),
+            0.9,
+        )
+
+    def test_kick_max_locked_in_scores_brief_transient_low(self) -> None:
+        kick_max = [0.0] * 100 + [0.9] + [0.0] * 49
+
+        self.assertLess(
+            _kick_max_locked_in(100, _spectral_features(kick_max, kick_max=kick_max)),
+            0.5,
+        )
+
+    def test_kick_max_locked_in_ignores_global_outlier(self) -> None:
+        kick_max = [0.1] * 100 + [0.7] * 8 + [0.1] * 40 + [10.0]
+
+        self.assertGreater(
+            _kick_max_locked_in(100, _spectral_features(kick_max, kick_max=kick_max)),
+            0.9,
+        )
+
+    def test_drums_dominant_over_tonal_uses_flatness_window(self) -> None:
+        noisy = [0.1] * 100 + [0.8] * 8 + [0.1] * 8
+        tonal = [0.1] * 116
+
+        self.assertGreater(
+            _drums_dominant_over_tonal(100, _spectral_features(noisy, flatness=noisy)),
+            0.7,
+        )
+        self.assertLess(
+            _drums_dominant_over_tonal(100, _spectral_features(tonal, flatness=tonal)),
+            0.2,
+        )
+
+    def test_richer_spectral_features_return_neutral_without_payload(self) -> None:
+        self.assertEqual(_drum_attack_sustained(100, None), 0.5)
+        self.assertEqual(_kick_max_locked_in(100, None), 0.5)
+        self.assertEqual(_drums_dominant_over_tonal(100, None), 0.5)
+
+    def test_phrase_grid_alignment_uses_soft_32_and_16_beat_grid(self) -> None:
+        self.assertEqual(_phrase_grid_alignment(64, [32]), 1.0)
+        self.assertEqual(_phrase_grid_alignment(66, [32]), 0.5)
+        self.assertEqual(_phrase_grid_alignment(69, [32]), 0.0)
+        self.assertEqual(_phrase_grid_alignment(80, [32]), 0.5)
+        self.assertEqual(_phrase_grid_alignment(64, []), 0.0)
+
+    def test_phrase_grid_alignment_picks_best_anchor_when_multiple(self) -> None:
+        # Beat 64 is +32 from anchor 32 (exact, score 1.0) and +52 from anchor 12 (score 0.0).
+        # max() should pick 1.0.
+        self.assertEqual(_phrase_grid_alignment(64, [12, 32]), 1.0)
+
+        # Beat 48 is +16 from anchor 32 (score 0.5) and +36 from anchor 12 (score 0.0).
+        # max() should pick 0.5.
+        self.assertEqual(_phrase_grid_alignment(48, [12, 32]), 0.5)
+
+        # All anchors equally bad -> 0.0.
+        self.assertEqual(_phrase_grid_alignment(21, [12, 32]), 0.0)
+
+    def test_phase_1a_features_are_scoring_gated_until_wide_or_phrases(self) -> None:
+        values = [1.0] * 80
+        values[30:32] = [0.05, 0.05]
+        features = _spectral_features(values)
+        weights = {"silence_frame_pre": 1.0, "phrase_grid_alignment": 1.0}
+
+        self.assertEqual(
+            _multi_feature_score(32, [1] * 80, _beatgrid_ms(80), 32, features, weights),
+            0.0,
+        )
+        self.assertGreater(
+            _multi_feature_score(
+                32,
+                [1] * 80,
+                _beatgrid_ms(80),
+                32,
+                features,
+                weights,
+                wide_window=True,
+            ),
+            0.8,
+        )
+        self.assertGreater(
+            _multi_feature_score(
+                64,
+                [1] * 80,
+                _beatgrid_ms(80),
+                64,
+                features,
+                weights,
+                phrases=[32],
+            ),
+            0.9,
+        )
+
+    def test_post_drop_kick_continuity_distinguishes_sustained_from_collapsed(self) -> None:
+        base = [0.1] * 40
+        sustained, collapsed = base.copy(), base.copy()
+        for index in range(17, 33):
+            sustained[index] = 1.0
+        for index in range(17, 21):
+            collapsed[index] = 1.0
+
+        self.assertGreater(
+            _post_drop_kick_continuity(16, _spectral_features(base, kick=sustained)),
+            0.5,
+        )
+        self.assertLess(
+            _post_drop_kick_continuity(16, _spectral_features(base, kick=collapsed)),
+            0.3,
+        )
+
+    def test_post_drop_energy_stability_high_for_steady_groove(self) -> None:
+        steady, spiky = [0.1] * 40, [0.1] * 40
+        steady[17:33] = [1.0] * 16
+        spiky[17:33] = [0.0 if index % 2 else 2.0 for index in range(16)]
+
+        self.assertGreater(_post_drop_energy_stability(16, _spectral_features(steady)), 0.8)
+        self.assertLess(_post_drop_energy_stability(16, _spectral_features(spiky)), 0.3)
+
+    def test_post_drop_minus_pre_drop_positive_when_energy_lifts(self) -> None:
+        lifted, same, falling = [0.1] * 40, [0.4] * 40, [1.0] * 40
+        lifted[17:33] = [1.0] * 16
+        falling[17:33] = [0.2] * 16
+
+        self.assertGreater(_post_drop_minus_pre_drop(16, _spectral_features(lifted)), 0.5)
+        self.assertAlmostEqual(_post_drop_minus_pre_drop(16, _spectral_features(same)), 0.0)
+        self.assertEqual(_post_drop_minus_pre_drop(16, _spectral_features(falling)), 0.0)
+
+    def test_no_bigger_drop_later_detects_fake_drop(self) -> None:
+        fake, winner, short = [0.0] * 81, [0.0] * 81, [0.0] * 49
+        fake[17:49], fake[49:81] = [1.0] * 32, [2.0] * 32
+        winner[17:49] = [1.0] * 32
+        short[17:49] = [1.0] * 32
+
+        self.assertLess(_no_bigger_drop_later(16, _spectral_features(fake)), 0.5)
+        self.assertGreater(_no_bigger_drop_later(16, _spectral_features(winner)), 0.5)
+        self.assertEqual(_no_bigger_drop_later(16, _spectral_features(short)), 0.5)
+
+    def test_multi_feature_breakdown_includes_new_features(self) -> None:
+        breakdown = _multi_feature_breakdown(0, [1, 1, 1], _beatgrid_ms(3), 0, None)
+
+        for name in _POST_DROP_FEATURE_NAMES:
+            self.assertIn(name, breakdown)
+            self.assertEqual(breakdown[name], 0.0)
+
+    def test_multi_feature_breakdown_with_spectral_returns_finite_values(self) -> None:
+        values = [0.1] * 80
+        values[17:33] = [1.0] * 16
+        breakdown = _multi_feature_breakdown(
+            16,
+            [1] * 80,
+            _beatgrid_ms(80),
+            16,
+            _spectral_features(values),
+        )
+
+        for name in _POST_DROP_FEATURE_NAMES:
+            self.assertIsInstance(breakdown[name], float)
+            self.assertTrue(math.isfinite(breakdown[name]))
 
     def test_multi_feature_score_uses_known_feature_values(self) -> None:
         score = _multi_feature_score(

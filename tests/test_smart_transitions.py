@@ -106,12 +106,19 @@ def _spectral_features(length: int) -> SpectralFeatures:
     high_mid = tuple(1.0 if index == 4 else 0.0 for index in range(length))
     return SpectralFeatures(
         sr=22050,
-        schema_version=2,
+        schema_version=3,
         sub_bass_envelope=low,
         kick_envelope=tuple(1.0 if index == 4 else 0.0 for index in range(length)),
         low_mid_envelope=low,
         high_mid_envelope=high_mid,
         high_band_envelope=low,
+        kick_max_envelope=tuple(
+            1.0 if index == 4 else 0.0 for index in range(length)
+        ),
+        onset_strength_envelope=tuple(
+            1.0 if index == 4 else 0.0 for index in range(length)
+        ),
+        spectral_flatness_envelope=low,
     )
 
 
@@ -401,13 +408,40 @@ class SmartRearmFlagTests(unittest.TestCase):
             sm._on_filepath_resolved(1, _filepath_payload())
 
         start_worker.assert_has_calls([
-            call("/tmp/ANLZ0000.EXT", 1, 1),
+            call("/tmp/ANLZ0000.EXT", 1, 1, wide_window=True),
             call(
                 "/tmp/ANLZ0000.EXT",
                 1,
                 1,
                 audio_filepath="/music/track.wav",
                 spectral_enabled=True,
+                wide_window=True,
+            ),
+        ])
+
+    def test_drop_wide_window_env_zero_disables_wide_window_for_anlz_workers(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SPECTRAL_ENABLE": "1",
+            "RBSS_DROP_WIDE_WINDOW": "0",
+        })
+        resolver = Mock()
+        sm.attach_resolver(resolver)
+        sm._pending_anlz_path[1] = "/tmp/ANLZ0000.EXT"
+
+        with patch.object(sm, "_start_anlz_worker") as start_worker:
+            sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
+            sm._on_filepath_resolved(1, _filepath_payload())
+
+        start_worker.assert_has_calls([
+            call("/tmp/ANLZ0000.EXT", 1, 1, wide_window=False),
+            call(
+                "/tmp/ANLZ0000.EXT",
+                1,
+                1,
+                audio_filepath="/music/track.wav",
+                spectral_enabled=True,
+                wide_window=False,
             ),
         ])
 
@@ -423,12 +457,13 @@ class SmartRearmFlagTests(unittest.TestCase):
             sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
             sm._on_filepath_resolved(1, _filepath_payload())
 
-        start_worker.assert_called_once_with("/tmp/ANLZ0000.EXT", 1, 1)
+        start_worker.assert_called_once_with("/tmp/ANLZ0000.EXT", 1, 1, wide_window=True)
 
     def test_runtime_anlz_data_uses_v2_spectral_when_enabled(self) -> None:
         beatgrid = [i * 500.0 for i in range(12)]
         data = TrackAnlzData(
             [0],
+            buildup_beat_indices=list(range(9)),
             energy_shadow=[SmartDropEnergyShadow(0, 0, 0, 0, 0.1, 0.1, 0.0)],
             waveform_context=WaveformContext(
                 heights=tuple([1, 1, 2, 3, 8, 6, 5, 4, 3, 2, 1, 1]),
@@ -450,6 +485,10 @@ class SmartRearmFlagTests(unittest.TestCase):
         extract.assert_not_called()
         self.assertEqual(len(result.energy_shadow), 1)
         self.assertEqual(result.energy_shadow[0].source, "v2_spectral")
+        self.assertGreater(
+            result.energy_shadow[0].feature_breakdown["phrase_grid_alignment"],
+            0.0,
+        )
 
     def test_runtime_anlz_data_keeps_default_path_when_spectral_disabled(self) -> None:
         data = TrackAnlzData(

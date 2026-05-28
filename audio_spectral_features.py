@@ -8,7 +8,7 @@ from typing import Any, Optional, Sequence
 
 log = logging.getLogger("audio_spectral_features")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _LAZY_IMPORTS: Optional[tuple[Any, Any, Any]] = None
 
 
@@ -21,6 +21,9 @@ class SpectralFeatures:
     low_mid_envelope: tuple[float, ...]
     high_mid_envelope: tuple[float, ...]
     high_band_envelope: tuple[float, ...]
+    kick_max_envelope: tuple[float, ...]
+    onset_strength_envelope: tuple[float, ...]
+    spectral_flatness_envelope: tuple[float, ...]
 
 
 def _lazy_import_librosa() -> Optional[tuple[Any, Any, Any]]:
@@ -95,6 +98,29 @@ def extract_spectral_features(
             high_band_envelope=_band_envelope_per_beat(
                 np, mel, freqs, frame_times_ms, beatgrid_times_ms, 4000.0, 12000.0
             ),
+            kick_max_envelope=_band_envelope_per_beat(
+                np,
+                mel,
+                freqs,
+                frame_times_ms,
+                beatgrid_times_ms,
+                60.0,
+                200.0,
+                reducer="max",
+            ),
+            onset_strength_envelope=_frame_envelope_per_beat(
+                np,
+                librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length),
+                frame_times_ms,
+                beatgrid_times_ms,
+            ),
+            spectral_flatness_envelope=_frame_envelope_per_beat(
+                np,
+                librosa.feature.spectral_flatness(y=y, hop_length=hop_length)[0],
+                frame_times_ms,
+                beatgrid_times_ms,
+                normalize=False,
+            ),
         )
     except Exception as exc:
         log.debug("spectral feature extraction failed for %s: %s", audio_filepath, exc)
@@ -109,6 +135,8 @@ def _band_envelope_per_beat(
     beatgrid_times_ms: Sequence[float],
     low_hz: float,
     high_hz: float,
+    *,
+    reducer: str = "mean",
 ) -> tuple[float, ...]:
     mask = (freqs >= low_hz) & (freqs < high_hz)
     if not bool(np.any(mask)):
@@ -117,8 +145,31 @@ def _band_envelope_per_beat(
     band = np.asarray(mel[mask, :], dtype=float)
     if band.size == 0:
         return tuple(0.0 for _ in beatgrid_times_ms)
-    envelope = np.mean(band, axis=0)
+    envelope = np.max(band, axis=0) if reducer == "max" else np.mean(band, axis=0)
     envelope = _normalize_envelope(np, envelope)
+    return _frame_envelope_per_beat(np, envelope, frame_times_ms, beatgrid_times_ms)
+
+
+def _frame_envelope_per_beat(
+    np: Any,
+    envelope: Any,
+    frame_times_ms: Any,
+    beatgrid_times_ms: Sequence[float],
+    *,
+    normalize: bool = True,
+) -> tuple[float, ...]:
+    envelope = np.asarray(envelope, dtype=float)
+    if normalize:
+        envelope = _normalize_envelope(np, envelope)
+    if envelope.size == 0:
+        return tuple(0.0 for _ in beatgrid_times_ms)
+    frame_times_ms = np.asarray(frame_times_ms, dtype=float)
+    if frame_times_ms.size == 0:
+        return tuple(0.0 for _ in beatgrid_times_ms)
+    if frame_times_ms.size != envelope.size:
+        size = min(int(frame_times_ms.size), int(envelope.size))
+        frame_times_ms = frame_times_ms[:size]
+        envelope = envelope[:size]
 
     beat_times = [float(value) for value in beatgrid_times_ms]
     if len(beat_times) >= 2:

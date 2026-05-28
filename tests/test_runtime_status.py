@@ -132,13 +132,9 @@ class LaserCommandParseTests(unittest.TestCase):
         command = parse_command('{"cmd":"laser_clear_scene_override"}')
         self.assertEqual(command["cmd"], "laser_clear_scene_override")
 
-    def test_parse_command_accepts_laser_set_personality(self) -> None:
-        command = parse_command('{"cmd":"laser_set_personality","personality":"dubstep"}')
-        self.assertEqual(command["personality"], "dubstep")
-
-    def test_parse_command_laser_set_personality_requires_non_empty(self) -> None:
+    def test_parse_command_rejects_laser_set_personality_runtime_override(self) -> None:
         with self.assertRaises(ValueError):
-            parse_command('{"cmd":"laser_set_personality","personality":""}')
+            parse_command('{"cmd":"laser_set_personality","personality":"dubstep"}')
 
 
 class LaserCommandCallbackTests(unittest.TestCase):
@@ -174,15 +170,13 @@ class LaserCommandCallbackTests(unittest.TestCase):
 
         callback.assert_called_once_with("custom_123", 4.0)
 
-    def test_laser_set_personality_callback_failure_sets_last_error(self) -> None:
+    def test_laser_set_personality_runtime_command_is_unknown(self) -> None:
         reader = CommandReader(
             Mock(),
-            laser_set_personality_callback=lambda _personality: False,
         )
 
-        reader.handle_command({"cmd": "laser_set_personality", "personality": "dubstep"})
-
-        self.assertIn("callback returned False", reader.status()["last_error"])
+        with self.assertRaises(ValueError):
+            reader.handle_command({"cmd": "laser_set_personality", "personality": "dubstep"})
 
 
 class RuntimeStatusWriterTests(unittest.TestCase):

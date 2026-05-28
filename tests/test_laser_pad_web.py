@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2.tools.laser_pad_web import LaserPadService, build_handler
+from rb_ss_bridge_v2.tools.laser_pad_web import LaserPadService, _parse_args, build_handler
 from rb_ss_bridge_v2.tools.laser_config_ops import _ensure_house_personality, verify_mappings_runtime
 
 
@@ -50,6 +50,11 @@ class LaserPadWebTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2.0)
+
+    def test_parse_args_defaults_to_loopback_bind(self) -> None:
+        args = _parse_args([])
+
+        self.assertEqual(args.host, "127.0.0.1")
 
     def _request_json(
         self,
@@ -205,6 +210,12 @@ class LaserPadWebTests(unittest.TestCase):
         self.assertEqual(skeleton["phrase_interval_beats"], 32)
         self.assertEqual(skeleton["minimum_scene_hold_beats"], 8)
         self.assertEqual(skeleton["buildup_lookahead_beats"], 32)
+        self.assertEqual(skeleton["aliases"], [])
+        self.assertEqual(skeleton["bpm_band_min"], 0.0)
+        self.assertEqual(skeleton["bpm_band_max"], 0.0)
+        self.assertEqual(skeleton["pre_drop_blackout_beats"], 4)
+        self.assertEqual(skeleton["post_drop_hold_beats"], 8)
+        self.assertEqual(skeleton["breakdown_default_restore_beats"], 64)
         self.assertEqual(skeleton["phrase_bank"], [])
         self.assertEqual(skeleton["safe_scene"], "safe_static")
 
@@ -302,6 +313,7 @@ class LaserPadWebTests(unittest.TestCase):
             self.assertEqual(
                 personalities["deep_house"]["phrase_bank"], before_house_bank
             )
+            self.assertEqual(personalities["deep_house"]["aliases"], [])
             self.assertEqual(cfg["default_personality"], "house")
 
             # patching house's bank must NOT bleed into deep_house (independence)
@@ -672,6 +684,79 @@ class LaserPadWebTests(unittest.TestCase):
         if before != "house":
             self.assertNotEqual(after, before)
 
+    def test_draft_patch_adds_scene_to_role_bank(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            service.apply_draft_patch(
+                {
+                    "patch": {
+                        "personalities": {
+                            "house": {
+                                "phrase_bank": ["house_groove_1", "house_drop_1"],
+                            }
+                        }
+                    }
+                }
+            )
+            cfg = service.get_config_payload()["config"]
+
+        self.assertEqual(
+            cfg["personalities"]["house"]["phrase_bank"],
+            ["house_groove_1", "house_drop_1"],
+        )
+
+    def test_draft_patch_removes_scene_from_role_bank(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            service.apply_draft_patch(
+                {
+                    "patch": {
+                        "personalities": {
+                            "house": {
+                                "phrase_bank": ["house_groove_1", "house_drop_1"],
+                            }
+                        }
+                    }
+                }
+            )
+            service.apply_draft_patch(
+                {
+                    "patch": {
+                        "personalities": {
+                            "house": {
+                                "phrase_bank": ["house_groove_1"],
+                            }
+                        }
+                    }
+                }
+            )
+            cfg = service.get_config_payload()["config"]
+
+        self.assertEqual(
+            cfg["personalities"]["house"]["phrase_bank"],
+            ["house_groove_1"],
+        )
+
+    def test_draft_patch_clears_primary_when_removed_from_bank(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            service.apply_draft_patch(
+                {
+                    "patch": {
+                        "personalities": {
+                            "house": {
+                                "phrase_bank": [],
+                                "phrase_scene": "",
+                            }
+                        }
+                    }
+                }
+            )
+            cfg = service.get_config_payload()["config"]
+
+        self.assertEqual(cfg["personalities"]["house"]["phrase_bank"], [])
+        self.assertEqual(cfg["personalities"]["house"]["phrase_scene"], "")
+
     def test_draft_round_trip_patch_then_get_config(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service = LaserPadService(Path(td) / "laser_director.json")
@@ -963,6 +1048,11 @@ class LaserPadWebTests(unittest.TestCase):
         self.assertIn("💾 Save &amp; Apply", raw)
         self.assertIn("Manual MIDI Test", raw)
         self.assertIn("Automatic scenes", raw)
+        self.assertIn("Resolver test", raw)
+        self.assertIn("PER GENRE aliases", raw)
+        self.assertIn("BPM band min", raw)
+        self.assertIn("Pre-drop blackout", raw)
+        self.assertIn("Used by", raw)
         self.assertIn("Lasers enabled", raw)
         self.assertIn("Test mode", raw)
         self.assertIn("Type port name…", raw)
@@ -982,13 +1072,21 @@ class LaserPadWebTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             service = LaserPadService(Path(td) / "laser_director.json")
             with self._running_server(service) as port:
-                status, _payload, raw = self._request_json(
-                    port=port,
-                    method="GET",
-                    path="/static/pad.js",
-                )
-
-        self.assertEqual(status, 200)
+                parts = []
+                for script in (
+                    "pad-state.js",
+                    "pad-selectors.js",
+                    "pad-actions.js",
+                    "pad-ui.js",
+                ):
+                    status, _payload, raw = self._request_json(
+                        port=port,
+                        method="GET",
+                        path=f"/static/{script}",
+                    )
+                    self.assertEqual(status, 200)
+                    parts.append(raw)
+        raw = "\n".join(parts)
         self.assertIn("openPromptModal(", raw)
         self.assertIn("openConfirmModal(", raw)
         self.assertIsNone(
@@ -1031,6 +1129,145 @@ class LaserPadWebTests(unittest.TestCase):
         assert payload is not None
         self.assertFalse(payload.get("ok", True))
         self.assertIs(after_type, before_type)
+
+    def test_draft_patch_rejects_duplicate_alias_without_mutating_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            before = service.get_config_payload()["config"]
+            with self._running_server(service) as port:
+                status, payload, _raw = self._request_json(
+                    port=port,
+                    method="POST",
+                    path="/api/draft",
+                    payload={
+                        "patch": {
+                            "personalities": {
+                                "techno": {
+                                    "aliases": ["house"],
+                                }
+                            }
+                        }
+                    },
+                )
+            after = service.get_config_payload()["config"]
+
+        self.assertEqual(status, 400)
+        assert payload is not None
+        self.assertFalse(payload.get("ok", True))
+        self.assertIn("duplicates personality 'house'", str(payload.get("error", "")))
+        self.assertEqual(after, before)
+
+    def test_resolve_test_uses_draft_aliases_bpm_and_default(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            service.create_personality({"name": "dubstep"})
+            service.apply_draft_patch(
+                {
+                    "patch": {
+                        "bpm_priority": ["dubstep", "house"],
+                        "personalities": {
+                            "dubstep": {
+                                "aliases": ["dubstep"],
+                                "bpm_band_min": 140,
+                                "bpm_band_max": 155,
+                            }
+                        },
+                    }
+                }
+            )
+
+            alias_result = service.resolve_test(playlist="Dubstep Heaters", bpm="")
+            bpm_result = service.resolve_test(playlist="", bpm="145")
+            default_result = service.resolve_test(playlist="Random Playlist", bpm="118")
+
+        self.assertEqual(alias_result["personality"], "dubstep")
+        self.assertEqual(alias_result["reason"], "playlist_match")
+        self.assertEqual(alias_result["matched"], "dubstep")
+        self.assertEqual(bpm_result["personality"], "dubstep")
+        self.assertEqual(bpm_result["reason"], "bpm_range_match")
+        self.assertEqual(default_result["personality"], "house")
+        self.assertEqual(default_result["reason"], "default")
+
+    def test_resolve_test_http_route(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            with self._running_server(service) as port:
+                status, payload, _raw = self._request_json(
+                    port=port,
+                    method="GET",
+                    path="/api/resolve-test?playlist=House%20Favorites",
+                )
+
+        self.assertEqual(status, 200)
+        assert payload is not None
+        self.assertTrue(payload.get("ok"))
+        self.assertEqual(payload.get("personality"), "house")
+        self.assertEqual(payload.get("reason"), "playlist_match")
+
+    def test_resolve_test_handles_invalid_default_personality(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            service.apply_draft_patch(
+                {"patch": {"default_personality": "nonexistent"}}
+            )
+            result = service.resolve_test(playlist="", bpm="")
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("personality"), "")
+        self.assertEqual(result.get("reason"), "default")
+
+    def test_fresh_config_alias_save_does_not_trigger_unrelated_validation(self):
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            result = service.apply_draft_patch(
+                {
+                    "patch": {
+                        "personalities": {
+                            "house": {"aliases": ["house", "deep_house"]}
+                        }
+                    }
+                }
+            )
+        self.assertTrue(result.get("ok"))
+        self.assertNotIn(
+            "startup_scene",
+            "; ".join(str(error) for error in result.get("errors", [])),
+        )
+
+    def test_empty_core_scene_fields_are_repaired_before_alias_save(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "startup_scene": "",
+                        "stop_scene": "",
+                        "stale_scene": "",
+                        "emergency_scene": "",
+                        "fallback_scene": "",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = LaserPadService(path)
+            result = service.apply_draft_patch(
+                {
+                    "patch": {
+                        "personalities": {
+                            "house": {"aliases": ["house", "deep_house"]}
+                        }
+                    }
+                }
+            )
+            config = service.get_config_payload()["config"]
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("errors", []))
+        self.assertEqual(config["startup_scene"], "safe_static")
+        self.assertEqual(config["stop_scene"], "safe_static")
+        self.assertEqual(config["stale_scene"], "safe_static")
+        self.assertEqual(config["emergency_scene"], "emergency_blackout")
+        self.assertEqual(config["fallback_scene"], "safe_static")
 
     def test_test_note_rejects_note_above_127(self) -> None:
         with tempfile.TemporaryDirectory() as td:

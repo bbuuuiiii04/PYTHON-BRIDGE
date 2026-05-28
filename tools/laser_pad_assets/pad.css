@@ -542,6 +542,97 @@ body {
   background: rgba(127, 29, 29, 0.2);
 }
 
+.pad-area {
+  margin-top: 10px;
+}
+
+.pad-editor-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 44px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--soft-line);
+  border-bottom-color: rgba(125, 211, 252, 0.45);
+  border-radius: 8px 8px 0 0;
+  background: #101827;
+  box-shadow: 0 8px 16px rgba(2, 6, 23, 0.28);
+  flex-wrap: wrap;
+}
+
+.pad-editor-toolbar .field-inline {
+  min-height: 30px;
+}
+
+.pad-toolbar-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  opacity: 0.85;
+  cursor: help;
+  user-select: none;
+}
+
+.pad-toolbar-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  background: rgba(13, 18, 29, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+}
+
+.role-radio-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.role-radio-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.role-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.9);
+  color: var(--text);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.role-radio input {
+  margin: 0;
+  accent-color: #7dd3fc;
+}
+
+.role-radio:has(input:checked) {
+  border-color: #7dd3fc;
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.4);
+}
+
 .bank-tabs {
   display: flex;
   gap: 8px;
@@ -678,6 +769,246 @@ body {
   border-radius: 999px;
   background: var(--danger);
   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.22);
+}
+
+.note-btn {
+  transition: opacity 220ms ease, filter 220ms ease;
+}
+
+.note-btn.in-active-personality {
+  border-color: #38bdf8 !important;
+  border-width: 3px !important;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.4), 0 0 12px rgba(56, 189, 248, 0.5) !important;
+}
+
+/* Mapped pads that don't belong to the active personality fade back so the
+   active personality's pads pop. We dim child elements individually rather
+   than putting opacity/filter on the button so personality chips stay fully
+   readable and informative. System pads (blackout) and feedback states
+   (firing, drop-target, verify-fail) are exempt. */
+.note-btn.pad-dim {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: linear-gradient(180deg, rgba(20, 26, 38, 0.55), rgba(10, 15, 25, 0.85)) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04) !important;
+}
+
+.note-btn.pad-dim .note-num,
+.note-btn.pad-dim .note-label,
+.note-btn.pad-dim .note-behavior,
+.note-btn.pad-dim .role-chip,
+.note-btn.pad-dim .safety-dot {
+  opacity: 0.45;
+  transition: opacity 220ms ease;
+}
+
+.note-btn.pad-dim:hover .note-num,
+.note-btn.pad-dim:hover .note-label,
+.note-btn.pad-dim:hover .note-behavior,
+.note-btn.pad-dim:hover .role-chip,
+.note-btn.pad-dim:hover .safety-dot,
+.note-btn.pad-dim:focus-visible .note-num,
+.note-btn.pad-dim:focus-visible .note-label,
+.note-btn.pad-dim:focus-visible .note-behavior,
+.note-btn.pad-dim:focus-visible .role-chip,
+.note-btn.pad-dim:focus-visible .safety-dot,
+.note-btn.pad-dim.firing .note-num,
+.note-btn.pad-dim.firing .note-label,
+.note-btn.pad-dim.firing .note-behavior,
+.note-btn.pad-dim.firing .role-chip,
+.note-btn.pad-dim.firing .safety-dot,
+.note-btn.pad-dim.drop-target .note-num,
+.note-btn.pad-dim.drop-target .note-label,
+.note-btn.pad-dim.drop-target .note-behavior,
+.note-btn.pad-dim.drop-target .role-chip,
+.note-btn.pad-dim.drop-target .safety-dot,
+.note-btn.pad-dim.verify-fail .note-num,
+.note-btn.pad-dim.verify-fail .note-label,
+.note-btn.pad-dim.verify-fail .note-behavior,
+.note-btn.pad-dim.verify-fail .role-chip,
+.note-btn.pad-dim.verify-fail .safety-dot {
+  opacity: 1;
+}
+
+/* Personality chips: tiny glassy badges showing which personalities reference
+   this pad's scene. Each chip carries a CSS custom property `--pc-color`
+   (set inline by JS from a stable hash of the personality name) used to
+   tint the translucent fill, border, and active glow so the same name
+   always renders identically across pads. Active personality renders first
+   and lights up; inactive personalities sit back as soft accents. */
+.pad-personality-chips {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  max-width: calc(100% - 50px);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.note-btn.verify-fail .pad-personality-chips {
+  left: 24px;
+}
+
+.pad-personality-chip {
+  --pc-color: hsl(220, 10%, 55%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pc-color) 32%, transparent),
+    color-mix(in srgb, var(--pc-color) 18%, transparent)
+  );
+  border: 1px solid color-mix(in srgb, var(--pc-color) 60%, rgba(255, 255, 255, 0.18));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px) saturate(140%);
+  -webkit-backdrop-filter: blur(6px) saturate(140%);
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 220ms ease,
+    background 220ms ease,
+    color 220ms ease,
+    border-color 220ms ease;
+}
+
+.pad-personality-chip.active {
+  color: #ffffff;
+  font-weight: 800;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pc-color) 92%, white 12%),
+    var(--pc-color)
+  );
+  border-color: rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.22),
+    0 0 14px color-mix(in srgb, var(--pc-color) 65%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+  transform: translateY(-1px);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+
+/* Settings → Personalities row: per-personality chip color + initial editor.
+   Sits between the meta block (left) and the actions block (right). The
+   preview swatch reuses .pad-personality-chip styling so what you see in
+   the editor matches the live pad. */
+.settings-personality-chip-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.settings-personality-chip-preview {
+  /* Inherits .pad-personality-chip's --pc-color via inline style; we only
+     need the visual rules here. Slightly larger than pad chips so the
+     editor preview is easy to read. */
+  --pc-color: hsl(220, 10%, 55%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pc-color) 32%, transparent),
+    color-mix(in srgb, var(--pc-color) 18%, transparent)
+  );
+  border: 1px solid color-mix(in srgb, var(--pc-color) 60%, rgba(255, 255, 255, 0.18));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.settings-personality-chip-preview.active {
+  color: #ffffff;
+  font-weight: 800;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pc-color) 92%, white 12%),
+    var(--pc-color)
+  );
+  border-color: rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.22),
+    0 0 14px color-mix(in srgb, var(--pc-color) 65%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+.settings-personality-initial-input {
+  width: 52px;
+  padding: 4px 6px;
+  text-align: center;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: rgba(13, 18, 29, 0.7);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.settings-personality-initial-input:focus {
+  outline: none;
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+}
+
+.settings-personality-color-picker {
+  width: 32px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(13, 18, 29, 0.7);
+  cursor: pointer;
+}
+
+.settings-personality-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.settings-personality-color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+.settings-personality-chip-reset {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  background: rgba(13, 18, 29, 0.7);
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.settings-personality-chip-reset:hover {
+  color: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .note-btn.pressing {
@@ -1123,7 +1454,8 @@ body {
 }
 
 .settings-field select,
-.settings-field input {
+.settings-field input,
+.settings-field textarea {
   min-height: 34px;
   border-radius: 8px;
   border: 1px solid #2a3449;
@@ -1133,9 +1465,78 @@ body {
   font-size: 0.9rem;
 }
 
+.settings-field textarea {
+  min-height: 88px;
+  resize: vertical;
+  line-height: 1.35;
+}
+
 .settings-field-help {
   font-size: 0.75rem;
   color: var(--muted);
+}
+
+.resolver-test-panel,
+.settings-personality-editor {
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 14px;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.resolver-test-panel h4,
+.settings-personality-editor h4 {
+  margin: 0 0 10px 0;
+}
+
+.settings-personality-summary {
+  display: block;
+  max-width: 680px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.personality-editor-section {
+  border-top: 1px solid #1f2937;
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.personality-editor-section h5 {
+  margin: 0 0 10px 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  letter-spacing: 0;
+}
+
+.personality-bank-role {
+  padding: 10px 0;
+  border-top: 1px solid rgba(51, 65, 85, 0.7);
+}
+
+.personality-bank-role:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.personality-bank-role-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.personality-bank-role-head .field-error {
+  margin-top: 0;
+  text-align: right;
+}
+
+.resolver-test-result {
+  color: #93c5fd;
+  font-size: 0.82rem;
 }
 
 .settings-blackout-card {
@@ -1201,6 +1602,11 @@ body {
   color: #38bdf8;
 }
 
+.settings-personality-aliases {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
 .settings-personality-actions {
   display: flex;
   gap: 6px;
@@ -1216,6 +1622,23 @@ body {
 .settings-personality-actions button.danger:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.scene-usage-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 10px 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.scene-usage-list span {
+  border: 1px solid #2a3449;
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: #cbd5e1;
 }
 
 .settings-bank-row {
@@ -1542,6 +1965,14 @@ body {
 
   .result-panels {
     grid-template-columns: 1fr;
+  }
+
+  .pad-editor-toolbar {
+    align-items: stretch;
+  }
+
+  .role-radio-group {
+    width: 100%;
   }
 
   .timing-grid {

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import difflib
+import ipaddress
 import json
 import logging
 import mimetypes
+import sys
 import tempfile
 import time
 from http import HTTPStatus
@@ -12,11 +15,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import mido
 
-from ..laser_config import LaserConfigResult, load_laser_director_config
+from ..laser_config import LaserConfigResult, load_laser_director_config_from_dict
+from ..personality_resolver import PersonalityResolver, canonicalize_text
 from ..runtime_status import STATUS_PATH
 from .laser_config_ops import (
     _DEFAULT_CONFIG_PATH,
@@ -34,10 +38,12 @@ from .laser_config_ops import (
     save_config_atomically,
     update_role_bank_cooldown,
     validate_config_data,
+    validate_personality_aliases_for_draft,
     verify_mappings_runtime,
 )
 
 _ASSETS_DIR = Path(__file__).resolve().parent / "laser_pad_assets"
+logger = logging.getLogger("laser_pad_web")
 
 
 class LaserPadService:
@@ -57,14 +63,7 @@ class LaserPadService:
         return self._config_path
 
     def _load_config_result(self, config: dict[str, Any]) -> LaserConfigResult:
-        with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as fp:
-            json.dump(config, fp, indent=2, sort_keys=True)
-            fp.write("\n")
-            temp_path = Path(fp.name)
-        try:
-            return load_laser_director_config(str(temp_path))
-        finally:
-            temp_path.unlink(missing_ok=True)
+        return load_laser_director_config_from_dict(config)
 
     def _duplicate_refs(self, refs: list[tuple[str, str, str]]) -> list[dict[str, str]]:
         return [
@@ -88,7 +87,7 @@ class LaserPadService:
 
     def get_config_payload(self) -> dict[str, Any]:
         with self._lock:
-            config = json.loads(json.dumps(self._draft))
+            config = copy.deepcopy(self._draft)
         loader_result = self._load_config_result(config)
         errors, warnings = validate_config_data(config, loader_result=loader_result)
         hard_dupes = [
@@ -164,14 +163,18 @@ class LaserPadService:
             patch = payload.get("patch")
             if isinstance(patch, dict):
                 self._validate_patch_payload(patch)
-                candidate = json.loads(json.dumps(self._draft))
+                candidate = copy.deepcopy(self._draft)
                 self._deep_merge(candidate, patch)
+                if "personalities" in patch:
+                    alias_errors = validate_personality_aliases_for_draft(candidate)
+                    if alias_errors:
+                        raise ValueError("; ".join(alias_errors))
                 self._draft = candidate
             mapping = payload.get("mapping")
             mapped_scene = ""
             if isinstance(mapping, dict):
                 mapped_scene = self._apply_mapping_patch(mapping)
-            config = json.loads(json.dumps(self._draft))
+            config = copy.deepcopy(self._draft)
         loader_result = self._load_config_result(config)
         errors, warnings = validate_config_data(config, loader_result=loader_result)
         result: dict[str, Any] = {
@@ -190,7 +193,7 @@ class LaserPadService:
 
     def commit_draft(self) -> dict[str, Any]:
         with self._lock:
-            config = json.loads(json.dumps(self._draft))
+            config = copy.deepcopy(self._draft)
 
         loader_result = self._load_config_result(config)
         errors, warnings = validate_config_data(config, loader_result=loader_result)
@@ -202,7 +205,7 @@ class LaserPadService:
             }
 
         with self._lock:
-            config_to_save = json.loads(json.dumps(self._draft))
+            config_to_save = copy.deepcopy(self._draft)
             loader_result_to_save = self._load_config_result(config_to_save)
             save_errors, save_warnings = validate_config_data(config_to_save, loader_result=loader_result_to_save)
             if save_errors:
@@ -244,6 +247,11 @@ class LaserPadService:
             if len(personalities) <= 1:
                 raise ValueError("cannot delete the last remaining personality")
             personalities.pop(name)
+            bpm_priority = self._draft.get("bpm_priority")
+            if isinstance(bpm_priority, list):
+                self._draft["bpm_priority"] = [
+                    item for item in bpm_priority if item != name
+                ]
             new_default = str(self._draft.get("default_personality", ""))
             if new_default == name:
                 new_default = sorted(personalities.keys())[0]
@@ -265,7 +273,17 @@ class LaserPadService:
             if new_name in personalities:
                 raise ValueError(f"personality '{new_name}' already exists")
             source_data = personalities[source]
-            personalities[new_name] = json.loads(json.dumps(source_data))
+            personalities[new_name] = copy.deepcopy(source_data)
+            if isinstance(personalities[new_name], dict):
+                personalities[new_name]["aliases"] = []
+            bpm_priority = self._draft.get("bpm_priority")
+            if (
+                isinstance(bpm_priority, list)
+                and source in bpm_priority
+                and new_name not in bpm_priority
+            ):
+                idx = bpm_priority.index(source)
+                bpm_priority.insert(idx + 1, new_name)
         return {"ok": True, "name": new_name, "source": source}
 
     def rename_personality(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -280,6 +298,11 @@ class LaserPadService:
             if new_name in personalities:
                 raise ValueError(f"personality '{new_name}' already exists")
             personalities[new_name] = personalities.pop(old_name)
+            bpm_priority = self._draft.get("bpm_priority")
+            if isinstance(bpm_priority, list):
+                self._draft["bpm_priority"] = [
+                    new_name if item == old_name else item for item in bpm_priority
+                ]
             if str(self._draft.get("default_personality", "")) == old_name:
                 self._draft["default_personality"] = new_name
             pad_meta = self._draft.get("_pad_meta")
@@ -321,7 +344,7 @@ class LaserPadService:
                 role=role,
                 cooldown_beats=cooldown_beats,
             )
-            config = json.loads(json.dumps(self._draft))
+            config = copy.deepcopy(self._draft)
         loader_result = self._load_config_result(config)
         errors, warnings = validate_config_data(config, loader_result=loader_result)
         return {
@@ -332,7 +355,7 @@ class LaserPadService:
 
     def validate_draft(self) -> dict[str, Any]:
         with self._lock:
-            config = json.loads(json.dumps(self._draft))
+            config = copy.deepcopy(self._draft)
         loader_result = self._load_config_result(config)
         errors, warnings = validate_config_data(config, loader_result=loader_result)
         return {
@@ -340,9 +363,56 @@ class LaserPadService:
             "warnings": warnings,
         }
 
+    def resolve_test(self, *, playlist: str, bpm: Any = 0.0) -> dict[str, Any]:
+        with self._lock:
+            config = copy.deepcopy(self._draft)
+        personalities = config.get("personalities", {})
+        if not isinstance(personalities, dict):
+            personalities = {}
+        alias_index: dict[str, str] = {}
+        bpm_bands: dict[str, tuple[float, float]] = {}
+        known_personalities = {str(name) for name in personalities.keys()}
+        for pname, pdata in personalities.items():
+            if not isinstance(pdata, dict):
+                continue
+            for alias in pdata.get("aliases", []) or []:
+                canonical = canonicalize_text(str(alias))
+                if canonical:
+                    alias_index[canonical] = str(pname)
+            try:
+                bpm_bands[str(pname)] = (
+                    float(pdata.get("bpm_band_min", 0.0) or 0.0),
+                    float(pdata.get("bpm_band_max", 0.0) or 0.0),
+                )
+            except (TypeError, ValueError):
+                bpm_bands[str(pname)] = (0.0, 0.0)
+        try:
+            file_bpm = float(bpm or 0.0)
+        except (TypeError, ValueError):
+            file_bpm = 0.0
+        resolver = PersonalityResolver(
+            alias_index=alias_index,
+            bpm_priority=tuple(str(name) for name in config.get("bpm_priority", []) or ()),
+            bpm_bands=bpm_bands,
+            known_personalities=known_personalities,
+            default=str(config.get("default_personality", "")),
+            quiet=True,
+        )
+        playlist_name = str(playlist or "")
+        playlists = frozenset({playlist_name}) if playlist_name else frozenset()
+        resolution = resolver.resolve(playlists=playlists, bpm=file_bpm)
+        return {
+            "ok": True,
+            "playlist": playlist_name,
+            "bpm": file_bpm,
+            "personality": resolution.name,
+            "reason": resolution.reason,
+            "matched": resolution.matched,
+        }
+
     def verify_draft(self) -> dict[str, Any]:
         with self._lock:
-            config = json.loads(json.dumps(self._draft))
+            config = copy.deepcopy(self._draft)
         with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as fp:
             json.dump(config, fp, indent=2, sort_keys=True)
             fp.write("\n")
@@ -574,19 +644,12 @@ class _LaserPadHandler(BaseHTTPRequestHandler):
                 return
             self._serve_file(target)
             return
-        if parsed.path == "/api/config":
-            self._send_json(HTTPStatus.OK, self.service.get_config_payload())
-            return
-        if parsed.path == "/api/midi_ports":
-            self._send_json(HTTPStatus.OK, {"ports": self.service.get_midi_ports()})
-            return
-        if parsed.path == "/api/runtime_status":
-            self._send_json(HTTPStatus.OK, self.service.get_runtime_status())
-            return
-        if parsed.path == "/api/history":
+        route = _GET_ROUTES.get(parsed.path)
+        if route is not None:
             try:
-                self._send_json(HTTPStatus.OK, {"items": self.service.list_history()})
+                route(self, parsed)
             except Exception as exc:  # noqa: BLE001
+                logger.exception("Unhandled error handling %s %s", self.command, self.path)
                 self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
             return
         if parsed.path.startswith("/api/history/") and parsed.path.endswith("/diff"):
@@ -595,30 +658,16 @@ class _LaserPadHandler(BaseHTTPRequestHandler):
                 diff_text = self.service.history_diff(name)
                 self._send_json(HTTPStatus.OK, {"name": name, "diff": diff_text})
             except Exception as exc:  # noqa: BLE001
+                logger.exception("Unhandled error handling %s %s", self.command, self.path)
                 self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if (
-            parsed.path
-            not in {
-                "/api/test_note",
-                "/api/draft",
-                "/api/commit",
-                "/api/discard",
-                "/api/validate",
-                "/api/verify",
-                "/api/role_cooldown",
-                "/api/banks/reset",
-                "/api/personality/create",
-                "/api/personality/rename",
-                "/api/personality/duplicate",
-                "/api/personality/delete",
-            }
-            and not parsed.path.startswith("/api/history/")
-        ):
+        route = _POST_ROUTES.get(parsed.path)
+        is_history_restore = parsed.path.startswith("/api/history/") and parsed.path.endswith("/restore")
+        if route is None and not is_history_restore:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         content_length = int(self.headers.get("Content-Length", "0") or "0")
@@ -627,43 +676,61 @@ class _LaserPadHandler(BaseHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8")) if body else {}
             if not isinstance(payload, dict):
                 raise ValueError("request body must be a JSON object")
-            if parsed.path == "/api/test_note":
-                result = self.service.test_note(payload)
-            elif parsed.path == "/api/draft":
-                result = self.service.apply_draft_patch(payload)
-            elif parsed.path == "/api/commit":
-                result = self.service.commit_draft()
-            elif parsed.path == "/api/discard":
-                result = self.service.discard_draft()
-            elif parsed.path == "/api/validate":
-                result = self.service.validate_draft()
-            elif parsed.path == "/api/verify":
-                result = self.service.verify_draft()
-            elif parsed.path == "/api/role_cooldown":
-                result = self.service.apply_role_cooldown(payload)
-            elif parsed.path == "/api/banks/reset":
-                result = self.service.reset_banks_to_default()
-            elif parsed.path == "/api/personality/create":
-                result = self.service.create_personality(payload)
-            elif parsed.path == "/api/personality/rename":
-                result = self.service.rename_personality(payload)
-            elif parsed.path == "/api/personality/duplicate":
-                result = self.service.duplicate_personality(payload)
-            elif parsed.path == "/api/personality/delete":
-                result = self.service.delete_personality(payload)
+            if route is not None:
+                result = route(self.service, payload)
             else:
-                if parsed.path.startswith("/api/history/") and parsed.path.endswith("/restore"):
-                    name = parsed.path[len("/api/history/") : -len("/restore")].strip("/")
-                    result = self.service.restore_history(name)
-                else:
-                    self.send_error(HTTPStatus.NOT_FOUND)
-                    return
+                name = parsed.path[len("/api/history/") : -len("/restore")].strip("/")
+                result = self.service.restore_history(name)
             self._send_json(HTTPStatus.OK, result)
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Unhandled error handling %s %s", self.command, self.path)
             self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
-        return
+        logging.getLogger("laser_pad_web").info("%s - %s", self.address_string(), format % args)
+
+
+def _send_resolve_test(handler: _LaserPadHandler, parsed: Any) -> None:
+    query = parse_qs(parsed.query)
+    playlist = query.get("playlist", [""])[0]
+    bpm = query.get("bpm", ["0"])[0]
+    handler._send_json(
+        HTTPStatus.OK,
+        handler.service.resolve_test(playlist=playlist, bpm=bpm),
+    )
+
+
+_GET_ROUTES = {
+    "/api/config": lambda h, _parsed: h._send_json(
+        HTTPStatus.OK, h.service.get_config_payload()
+    ),
+    "/api/midi_ports": lambda h, _parsed: h._send_json(
+        HTTPStatus.OK, {"ports": h.service.get_midi_ports()}
+    ),
+    "/api/runtime_status": lambda h, _parsed: h._send_json(
+        HTTPStatus.OK, h.service.get_runtime_status()
+    ),
+    "/api/resolve-test": _send_resolve_test,
+    "/api/history": lambda h, _parsed: h._send_json(
+        HTTPStatus.OK, {"items": h.service.list_history()}
+    ),
+}
+
+
+_POST_ROUTES = {
+    "/api/test_note": lambda svc, payload: svc.test_note(payload),
+    "/api/draft": lambda svc, payload: svc.apply_draft_patch(payload),
+    "/api/commit": lambda svc, _payload: svc.commit_draft(),
+    "/api/discard": lambda svc, _payload: svc.discard_draft(),
+    "/api/validate": lambda svc, _payload: svc.validate_draft(),
+    "/api/verify": lambda svc, _payload: svc.verify_draft(),
+    "/api/role_cooldown": lambda svc, payload: svc.apply_role_cooldown(payload),
+    "/api/banks/reset": lambda svc, _payload: svc.reset_banks_to_default(),
+    "/api/personality/create": lambda svc, payload: svc.create_personality(payload),
+    "/api/personality/rename": lambda svc, payload: svc.rename_personality(payload),
+    "/api/personality/duplicate": lambda svc, payload: svc.duplicate_personality(payload),
+    "/api/personality/delete": lambda svc, payload: svc.delete_personality(payload),
+}
 
 
 def build_handler(service: LaserPadService) -> type[_LaserPadHandler]:
@@ -676,10 +743,16 @@ def build_handler(service: LaserPadService) -> type[_LaserPadHandler]:
 
 def run_server(
     *,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8765,
     config_path: Path = _DEFAULT_CONFIG_PATH,
 ) -> None:
+    host = _resolve_bind_host(host)
+    if not _is_loopback_host(host):
+        print(
+            f"WARNING: laser_pad_web is exposed to non-loopback {host}; local-only safety assumption is disabled.",
+            file=sys.stderr,
+        )
     service = LaserPadService(config_path=config_path)
     handler = build_handler(service)
     server = ThreadingHTTPServer((host, port), handler)
@@ -687,19 +760,39 @@ def run_server(
     server.serve_forever()
 
 
+def _resolve_bind_host(value: str) -> str:
+    if value == "localhost":
+        return "127.0.0.1"
+    if value == "lan":
+        return "0.0.0.0"
+    return value
+
+
+def _is_loopback_host(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
+
+
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Laser Pad web server")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default=None)
+    parser.add_argument("--bind", default=None)
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(
         "--config",
         default=str(_DEFAULT_CONFIG_PATH),
         help="Path to laser_director.json",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    args.host = _resolve_bind_host(args.bind or args.host or "127.0.0.1")
+    return args
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     args = _parse_args(argv)
     run_server(host=args.host, port=args.port, config_path=Path(args.config))
     return 0
