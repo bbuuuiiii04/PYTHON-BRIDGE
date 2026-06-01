@@ -39,6 +39,23 @@ never repeat back-to-back, and the cycle's starting look varies per session. The
 `primary`/`*_scene` field stays but becomes cosmetic (just `bank[0]`'s label) — no
 config migration, no Pad UI change.
 
+## Scales to any bank size (10 / 15 / 20+ looks)
+The approach is **bank-size-agnostic** — there is no cap in config validation, and
+`cursor % len(bank)` / `rng.randrange(len(bank))` work for any N. Notes:
+- This fix is what *makes large banks usable at all*: today, no matter how many looks
+  you add, only `bank[0]` ever fires (cursor resets to 0 each track). Persistent
+  round-robin is the only thing that lets a 20-look bank actually cycle.
+- Round-robin **scales better than random** here: it guarantees all N looks appear
+  within N drops, evenly, with no back-to-back repeats. Pure random neglects/repeats
+  (the "I added 20 looks but keep seeing the same 3" problem) and that gets worse, not
+  better, as N grows. So a larger planned bank *strengthens* the round-robin choice.
+- **Growing the bank live (Save & Apply):** a personality apply calls
+  `LaserSceneExecutor.set_personality` (`state_manager.py:1093`), which under this fix
+  reseeds cursors → after adding looks you resume at a random index in the now-larger
+  bank. Acceptable and well-defined. If a reload path swaps config *without*
+  `set_personality`, the persisted cursor still adapts via `% len(bank)`. Either way:
+  no crash, no stuck-on-primary, modulo absorbs the length change.
+
 ## Optional (only if the fixed cycle order ever feels scripted) — shuffle-bag
 Instead of a monotonic cursor, keep a shuffled permutation of the bank per role;
 hand out looks in that order; when exhausted, reshuffle (avoid making the new first
@@ -55,6 +72,10 @@ rule. Leave this OUT of the first pass unless requested; note it in a comment.
   injected RNG → deterministic assert), and a different personality starts fresh.
 - **Single-entry bank unchanged:** roles with one look (buildup/breakdown today) still
   return that look every time (cursor % 1 == 0).
+- **Large bank (e.g. 20 looks):** seeded start, 20 successive drop entries return all
+  20 distinct looks with no repeat, then wrap — proves size-agnostic behavior.
+- **Bank grows on reapply:** after `set_personality` with a larger bank, selection
+  stays in range and keeps rotating (no index error, no reset-to-primary).
 - Keep existing executor/round-robin tests green (some may need the injected RNG /
   updated expectations now that cursors persist).
 
