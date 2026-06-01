@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import random
 import sys
 import unittest
 from pathlib import Path
@@ -131,7 +132,10 @@ def _decision(scene: str, reason: str, role: str) -> LaserSceneDecision:
     return LaserSceneDecision(scene=scene, reason=reason, priority=10, source="policy", role=role)
 
 
-def _personality(*, allow_high_impact: bool = True) -> LaserPersonality:
+def _personality(*, allow_high_impact: bool = True, rotating_banks: bool = False) -> LaserPersonality:
+    phrase_bank = ("phrase_a", "phrase_b") if rotating_banks else ("phrase_a",)
+    buildup_bank = ("buildup_a", "buildup_b") if rotating_banks else ("buildup_a",)
+    drop_bank = ("drop_a", "drop_b") if rotating_banks else ("drop_a",)
     return LaserPersonality(
         name="house",
         safe_scene="safe",
@@ -143,9 +147,9 @@ def _personality(*, allow_high_impact: bool = True) -> LaserPersonality:
         post_drop_scene="post_a",
         breakdown_scene="break_a",
         transition_scene="safe",
-        phrase_bank=("phrase_a", "phrase_b"),
-        buildup_bank=("buildup_a", "buildup_b"),
-        drop_bank=("drop_a", "drop_b"),
+        phrase_bank=phrase_bank,
+        buildup_bank=buildup_bank,
+        drop_bank=drop_bank,
         post_drop_bank=("post_a",),
         breakdown_bank=("break_a",),
         allow_high_impact=allow_high_impact,
@@ -166,7 +170,7 @@ def _drop_mode_personality(*, allow_high_impact: bool = True) -> LaserPersonalit
         transition_scene="safe",
         phrase_bank=("phrase_a", "phrase_b"),
         buildup_bank=("buildup_a", "buildup_b"),
-        drop_bank=("drop_a", "drop_b"),
+        drop_bank=("drop_a",),
         post_drop_bank=("drop_a",),
         breakdown_bank=("break_a",),
         allow_high_impact=allow_high_impact,
@@ -276,6 +280,24 @@ def _config_with_role_cooldowns(
     return replace(cfg, scenes=scenes)
 
 
+def _five_drop_config() -> tuple[LaserConfig, LaserPersonality]:
+    cfg = _config(dry_run=False)
+    scenes = dict(cfg.scenes)
+    scenes.update(
+        {
+            "drop_c": _scene("drop_c", note=45),
+            "drop_d": _scene("drop_d", note=46),
+            "drop_e": _scene("drop_e", note=47),
+        }
+    )
+    personality = replace(
+        _personality(),
+        drop_bank=("drop_a", "drop_b", "drop_c", "drop_d", "drop_e"),
+    )
+    cfg = replace(cfg, scenes=scenes, personalities={"house": personality})
+    return cfg, personality
+
+
 class LaserSceneExecutorTests(unittest.TestCase):
     def test_smart_drop_mode_controls_blackout_algorithm(self) -> None:
         midi = _FakeMidiOutput(dry_run=True)
@@ -359,7 +381,12 @@ class LaserSceneExecutorTests(unittest.TestCase):
 
     def test_drop_bank_rotates_each_crossing(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False),
+            midi_output=midi,
+            personality=_personality(rotating_banks=True),
+            rng=random.Random(2),
+        )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
         ex.on_decision(_decision("post_a", "post_drop_hold", "post_drop"), _ctx())
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
@@ -413,15 +440,64 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertEqual(len(midi.calls), 1)
         self.assertEqual(midi.calls[0][1], "high")
 
-    def test_personality_reset_clears_bank_state(self) -> None:
+    def test_runtime_reset_preserves_drop_cursor_across_track_lifecycle(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        cfg, personality = _five_drop_config()
+        ex = LaserSceneExecutor(
+            config=cfg,
+            midi_output=midi,
+            personality=personality,
+            rng=random.Random(0),
+        )
+        notes = []
+        for reset_reason in (
+            "active_track_loaded",
+            "master_changed",
+            "stop",
+            "active_track_loaded",
+            "stop",
+            "master_changed",
+        ):
+            ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
+            notes.append(midi.calls[-1][0].note)
+            cursor_after_drop = ex.status()["role_cursors"]["drop"]
+            ex.reset_runtime_state(reason=reset_reason)
+            status = ex.status()
+            self.assertEqual(status["role_cursors"]["drop"], cursor_after_drop)
+            self.assertEqual(status["role_active_scenes"]["drop"], "")
+        self.assertEqual(notes, [41, 42, 45, 46, 47, 41])
+
+    def test_personality_change_reseeds_bank_cursors(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        cfg, personality = _five_drop_config()
+        ex = LaserSceneExecutor(
+            config=cfg,
+            midi_output=midi,
+            personality=personality,
+            rng=random.Random(0),
+        )
+        self.assertEqual(ex.status()["role_cursors"]["drop"], 0)
+        ex.set_personality(replace(personality, name="techno"))
+        status = ex.status()
+        self.assertEqual(status["role_cursors"]["drop"], 3)
+        self.assertEqual(status["role_active_scenes"]["drop"], "")
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
-        ex.set_personality(_personality())
-        ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
-        self.assertEqual(len(midi.calls), 2)
-        # After reset, first bank value is chosen again.
-        self.assertEqual(midi.calls[0][0].note, midi.calls[1][0].note)
+        self.assertEqual(midi.calls[-1][0].note, 46)
+
+    def test_single_entry_bank_is_stable_across_runtime_resets(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False),
+            midi_output=midi,
+            personality=_single_drop_scene_personality(),
+            rng=random.Random(5),
+        )
+        notes = []
+        for reset_reason in ("active_track_loaded", "stop", "master_changed"):
+            ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
+            notes.append(midi.calls[-1][0].note)
+            ex.reset_runtime_state(reason=reset_reason)
+        self.assertEqual(notes, [41, 41, 41])
 
     def test_hold_beats_materializes_with_context_bpm(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
@@ -1270,7 +1346,8 @@ class LaserSceneExecutorTests(unittest.TestCase):
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
             midi_output=midi,
-            personality=_personality(),
+            personality=_personality(rotating_banks=True),
+            rng=random.Random(2),
         )
         ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx(abs_beat=100.0))
         ex.on_decision(_decision("phrase_a", "phrase_boundary", "phrase"), _ctx(abs_beat=108.0, autoloop_tick_just_fired=True))
@@ -1340,7 +1417,8 @@ class LaserSceneExecutorTests(unittest.TestCase):
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
             midi_output=midi,
-            personality=_personality(),
+            personality=_personality(rotating_banks=True),
+            rng=random.Random(2),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=300.0))
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=301.0))
@@ -1372,7 +1450,8 @@ class LaserSceneExecutorTests(unittest.TestCase):
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
             midi_output=midi,
-            personality=_personality(),
+            personality=_personality(rotating_banks=True),
+            rng=random.Random(2),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=300.0))
         ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), _ctx(abs_beat=310.0))

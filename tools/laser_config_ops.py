@@ -1323,7 +1323,12 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
         return checks
 
     midi = _DryCheckMidiOutput()
-    ex = LaserSceneExecutor(config=cfg, midi_output=midi, personality=personality)
+    ex = LaserSceneExecutor(
+        config=cfg,
+        midi_output=midi,
+        personality=personality,
+        randomize_cursors=False,
+    )
     role_specs = [
         ("groove", personality.phrase_scene, "default_init"),
         ("buildup", personality.buildup_scene, "buildup_to_drop_window"),
@@ -1435,7 +1440,12 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
         )
         return checks
     midi2 = _DryCheckMidiOutput()
-    ex2 = LaserSceneExecutor(config=cfg, midi_output=midi2, personality=personality)
+    ex2 = LaserSceneExecutor(
+        config=cfg,
+        midi_output=midi2,
+        personality=personality,
+        randomize_cursors=False,
+    )
     ex2.on_decision(
         LaserSceneDecision(
             scene=personality.phrase_scene,

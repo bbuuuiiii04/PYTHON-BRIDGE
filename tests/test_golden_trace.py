@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+import random
 import sys
 import unittest
 from pathlib import Path
@@ -221,7 +222,12 @@ class _GoldenHarness:
         )
         self._director.set_personality_config(personality)
         self._midi = _FakeMidiOutput(dry_run=True)
-        self._executor = LaserSceneExecutor(config=cfg, midi_output=self._midi, personality=personality)
+        self._executor = LaserSceneExecutor(
+            config=cfg,
+            midi_output=self._midi,
+            personality=personality,
+            rng=random.Random(2),
+        )
         self._smart_rearm = SmartRearmCoordinator(
             output_state_ref=lambda: self._os,
             deck_ref=lambda d: self._deck[d],
