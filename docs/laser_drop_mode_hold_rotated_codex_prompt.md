@@ -36,24 +36,27 @@ Teach `LaserDirector` the personality's `drop_style` (add it alongside
 - `emphasized_drop` path unchanged.
 Net: in `drop_mode` a drop = one rotated drop look, held; no second look.
 
-## Part 2 — UNRESOLVED: drop rotation does not advance live (instrument first)
-Live: 11/11 drops fired `house_drop_1` (bank[0]) despite `drop_bank` of 5 and the
-`randomize_cursors` rotation change being loaded in the running process (verified:
-the imported module has it). Unit tests + offline sim show the cursor seeds non-zero
-and advances — but on the rig it behaves like cursor is pinned at 0 / reseeds to 0
-each track. **Do not blind-fix this.** Steps:
-1. Add diagnostic logging at each bank selection: role, `cursor` before/after,
-   `len(bank)`, selected index, scene, and whether a reseed/reset just happened.
-2. Likely suspect to verify: `set_personality` is called on **every** master/track
-   change (`state_manager.py:_apply_personality_change` → `executor.set_personality`
-   → `reset_runtime_state(reset_cursors=True)` → reseed) even when the personality is
-   **unchanged** — which would reset/replace the cursor every track. If so, only
-   reseed on an **actual personality change**, not on every track/deck event.
-3. Confirm on the rig (logs) that the drop cursor advances one step per drop and
-   persists across track loads before declaring done.
+## Part 2 — verify rotation is actually visible (the "stuck" was a logging artifact)
+The earlier "drops never rotate" reading was a **misdiagnosis**: the
+`[LASER] scene X->house_drop_1 reason=drop_crossing` lines come from
+`laser_director.py:225` and log the **director's decision** (always the configured
+primary `drop_scene`), NOT the scene the executor actually fires. The executor runs
+its own bank rotation on `selected_scene` and sends *that* to MIDI, but **never logs
+the fired scene/note** (only `[LX] blackout_on`). So the director log showing
+`house_drop_1` every drop is expected and proves nothing about rotation.
 
-This must be solved for Part 1 to be meaningful (a held look is only good if it
-rotates). Root-cause from the logging, not assumption.
+The real reason every drop looked identical is Part 1 (the 8-beat post-drop hold of a
+single pinned scene masks the brief, possibly-rotating drop flash). Once Part 1 makes
+the drop look itself sustain, rotation becomes visible.
+
+Required so this is verifiable (not assumed):
+1. **Add an executor log of the actually-fired scene + note** on each trigger (role,
+   selected_scene, note, cursor index). This is the missing observability that caused
+   the misdiagnosis.
+2. With that log, confirm on the rig that consecutive drops fire **different** drop
+   scenes (`house_drop_1, 2, 3, …`). If they genuinely don't advance, then revisit
+   the cursor/`set_personality`-reseed path — but verify with the new log first; do
+   not assume a rotation bug that the director-decision log cannot show.
 
 ## Part 3 — config cleanup
 With the director no longer using a separate post-drop in `drop_mode`, stop
