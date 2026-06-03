@@ -55,7 +55,6 @@ _PERSONALITY_REQUIRED_ROLE_FIELDS = (
     "phrase_scene",
     "buildup_scene",
     "drop_scene",
-    "post_drop_scene",
     "breakdown_scene",
     "transition_scene",
 )
@@ -612,6 +611,21 @@ def _validate_personality(
         elif ref not in scene_keys:
             errors.append(f"{prefix}: '{role}' references unknown scene '{ref}'")
 
+    # post_drop_scene: required only in emphasized_drop (it holds a separate
+    # post-drop look). In drop_mode the drop look itself is held, so an empty
+    # post_drop_scene is valid. When present it must reference a known scene.
+    post_drop_ref = data.get("post_drop_scene", "")
+    if not isinstance(post_drop_ref, str):
+        errors.append(f"{prefix}: 'post_drop_scene' must be a string")
+    elif _canon_drop_style(data.get("drop_style")) == "emphasized_drop" and not post_drop_ref:
+        errors.append(
+            f"{prefix}: 'post_drop_scene' must be a non-empty string for emphasized_drop"
+        )
+    elif post_drop_ref and post_drop_ref not in scene_keys:
+        errors.append(
+            f"{prefix}: 'post_drop_scene' references unknown scene '{post_drop_ref}'"
+        )
+
     # Deprecated: pre_drop_scene is optional/inert for active policy.
     pre_drop_ref = data.get("pre_drop_scene", "")
     if not isinstance(pre_drop_ref, str):
@@ -846,7 +860,14 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
         breakdown_default_restore_beats=int(
             data.get("breakdown_default_restore_beats", 64)
         ),
+        drop_style=_canon_drop_style(data.get("drop_style")),
     )
+
+
+def _canon_drop_style(value: object) -> str:
+    """Normalize drop_style to a known value; default to drop_mode."""
+    style = str(value or "").strip().lower()
+    return "emphasized_drop" if style == "emphasized_drop" else "drop_mode"
 
 
 def _infer_behavior(kind: str, behavior: object) -> str:

@@ -118,6 +118,7 @@ def _director(
     post_drop_scene: str = "",
     buildup_lookahead_beats: int = 32,
     post_drop_hold_beats: int = 8,
+    drop_style: str = "drop_mode",
 ) -> LaserDirector:
     return LaserDirector(
         enabled=enabled,
@@ -136,6 +137,7 @@ def _director(
         post_drop_scene=post_drop_scene,
         buildup_lookahead_beats=buildup_lookahead_beats,
         post_drop_hold_beats=post_drop_hold_beats,
+        drop_style=drop_style,
     )
 
 
@@ -780,6 +782,7 @@ class SmartObservationTests(unittest.TestCase):
             post_drop_scene="post",
             minimum_scene_hold_beats=0,
             post_drop_hold_beats=4,
+            drop_style="emphasized_drop",
         )
         ld.tick(_ctx(abs_beat=63.0), now=_now())
         ld.tick(
@@ -966,6 +969,10 @@ class SmartObservationTests(unittest.TestCase):
         self.assertEqual(ld.status()["last_reason"], "drop_crossing")
 
     def test_drop_fires_once_per_target_beat(self) -> None:
+        # The drop_crossing edge must fire exactly once per target beat. In
+        # drop_mode the drop look is then HELD (reason "drop_hold") for the
+        # post-drop window, so current_scene stays "drop" — but the crossing
+        # is not re-emitted on subsequent ticks.
         ld = _director(default_scene="d", drop_scene="drop")
         ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,)), now=_now())
         ld.tick(
@@ -977,8 +984,41 @@ class SmartObservationTests(unittest.TestCase):
             now=_now(),
         )
         self.assertEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld.status()["last_reason"], "drop_crossing")
         ld.tick(_ctx(abs_beat=64.4, smart_drops=(64,)), now=_now())
-        self.assertNotEqual(ld.status()["current_scene"], "drop")
+        # No second crossing: the drop look is held, not re-fired.
+        self.assertEqual(ld.status()["last_reason"], "drop_hold")
+        self.assertEqual(ld.status()["current_scene"], "drop")
+
+    def test_drop_mode_holds_drop_look_and_ignores_post_drop_scene(self) -> None:
+        # In drop_mode the rotated drop look is held for the post-drop window;
+        # any configured post_drop_scene is ignored and no post_drop_hold reason
+        # is ever emitted. This is the fix for "same look every drop".
+        ld = _director(
+            default_scene="d",
+            drop_scene="drop",
+            post_drop_scene="post",  # present, but must be ignored in drop_mode
+            post_drop_hold_beats=4,
+            drop_style="drop_mode",
+        )
+        ld.tick(_ctx(abs_beat=63.0, smart_drops=(64,)), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=64.0,
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+            ),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld.status()["last_reason"], "drop_crossing")
+        # During the hold window: drop look held (not "post").
+        ld.tick(_ctx(abs_beat=65.0, smart_drops=(64,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld.status()["last_reason"], "drop_hold")
+        # After the window expires: back to default; post never fired.
+        ld.tick(_ctx(abs_beat=68.1, smart_drops=(64,)), now=_now())
+        self.assertEqual(ld.status()["current_scene"], "d")
+        self.assertNotEqual(ld.status()["last_reason"], "post_drop_hold")
 
     def test_drop_wins_over_buildup_at_crossing(self) -> None:
         ld = _director(
@@ -1035,6 +1075,7 @@ class SmartObservationTests(unittest.TestCase):
             post_drop_scene="post",
             minimum_scene_hold_beats=2,
             post_drop_hold_beats=2,
+            drop_style="emphasized_drop",
         )
         ld.tick(_ctx(abs_beat=63.1, smart_drops=(64,)), now=_now())
         ld.tick(
@@ -1059,6 +1100,7 @@ class SmartObservationTests(unittest.TestCase):
             minimum_scene_hold_beats=2,
             post_drop_hold_beats=2,
             buildup_scene="up",
+            drop_style="emphasized_drop",
         )
         ld.tick(
             _ctx(abs_beat=63.1, smart_drops=(64,), current_phrase_is_chorus=True),
@@ -1094,6 +1136,7 @@ class SmartObservationTests(unittest.TestCase):
             minimum_scene_hold_beats=3,
             post_drop_hold_beats=3,
             buildup_lookahead_beats=32,
+            drop_style="emphasized_drop",
         )
         ld.tick(_ctx(abs_beat=63.0, smart_drops=(64, 80)), now=_now())
         ld.tick(
@@ -1118,6 +1161,7 @@ class SmartObservationTests(unittest.TestCase):
             minimum_scene_hold_beats=3,
             post_drop_hold_beats=3,
             buildup_lookahead_beats=32,
+            drop_style="emphasized_drop",
         )
         ld.tick(_ctx(abs_beat=63.0, smart_drops=(64, 100)), now=_now())
         ld.tick(
@@ -1423,7 +1467,7 @@ class SmartPhrasingDropCrossingTests(unittest.TestCase):
         self.assertEqual(ld.status()["last_reason"], "drop_crossing")
 
     def test_priority_post_drop_active_unchanged_with_no_crossing(self) -> None:
-        ld = _director(drop_scene="drop", post_drop_scene="pd", minimum_scene_hold_beats=8)
+        ld = _director(drop_scene="drop", post_drop_scene="pd", minimum_scene_hold_beats=8, drop_style="emphasized_drop")
         ld.tick(_ctx(abs_beat=63.0), now=_now())
         ld.tick(_ctx(abs_beat=64.0, smart_phrasing=_sp(smart_drop_crossing=True)), now=_now())
         self.assertEqual(ld.status()["current_scene"], "drop")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+import random
 import sys
 import unittest
 from pathlib import Path
@@ -96,6 +97,9 @@ def _personality() -> LaserPersonality:
         breakdown_bank=("break_a",),
         allow_high_impact=True,
         minimum_scene_hold_beats=8,
+        # These scenarios exercise the separate post-drop hold; that is the
+        # emphasized_drop behavior. (drop_mode holds the drop look instead.)
+        drop_style="emphasized_drop",
     )
 
 
@@ -221,7 +225,12 @@ class _GoldenHarness:
         )
         self._director.set_personality_config(personality)
         self._midi = _FakeMidiOutput(dry_run=True)
-        self._executor = LaserSceneExecutor(config=cfg, midi_output=self._midi, personality=personality)
+        self._executor = LaserSceneExecutor(
+            config=cfg,
+            midi_output=self._midi,
+            personality=personality,
+            rng=random.Random(2),
+        )
         self._smart_rearm = SmartRearmCoordinator(
             output_state_ref=lambda: self._os,
             deck_ref=lambda d: self._deck[d],

@@ -152,6 +152,46 @@ class LaserConfigOpsTests(unittest.TestCase):
         self.assertEqual(role_rows[0]["note"], 40)
         self.assertEqual(role_rows[0]["channel"], 1)
 
+    def test_verify_mappings_runtime_uses_primary_for_multi_entry_banks(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            cfg = load_or_create_config(path)
+            apply_mapping(cfg, personality="house", role="groove", note=37)
+            apply_mapping(cfg, personality="house", role="groove", note=45)
+            apply_mapping(cfg, personality="house", role="groove", note=46)
+            apply_mapping(cfg, personality="house", role="drop", note=40)
+            apply_mapping(cfg, personality="house", role="drop", note=41)
+            apply_mapping(cfg, personality="house", role="drop", note=42)
+            cfg["manual_commands"] = {
+                "blackout_on": {
+                    "kind": "note_on",
+                    "behavior": "note_on",
+                    "channel": 1,
+                    "note": 90,
+                    "velocity": 127,
+                },
+                "blackout_off": {
+                    "kind": "note_off",
+                    "behavior": "note_off",
+                    "channel": 1,
+                    "note": 90,
+                    "velocity": 0,
+                },
+            }
+            save_config_atomically(cfg, path)
+
+            results = [verify_mappings_runtime(path) for _ in range(10)]
+
+        for checks in results:
+            failed = [item for item in checks if not item["ok"]]
+            self.assertEqual(failed, [], msg=str(checks))
+            groove_rows = [row for row in checks if row.get("role") == "groove"]
+            drop_rows = [row for row in checks if row.get("role") == "drop"]
+            self.assertTrue(groove_rows)
+            self.assertTrue(drop_rows)
+            self.assertEqual(groove_rows[0]["note"], 37)
+            self.assertEqual(drop_rows[0]["note"], 40)
+
     def test_laser_models_label_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "laser_director.json"
@@ -396,14 +436,17 @@ class LaserConfigOpsTests(unittest.TestCase):
         self.assertEqual(house["default_scene"], first)
         self.assertEqual(house["phrase_bank"], [first, second])
 
-    def test_drop_mode_reuses_drop_mapping_for_post_drop(self) -> None:
+    def test_drop_mode_does_not_pin_post_drop(self) -> None:
+        # In drop_mode the drop look itself is held for the post-drop window;
+        # there is no separate post-drop scene, so mapping a drop must leave
+        # post_drop_scene / post_drop_bank empty (not pinned to the drop).
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
-        drop_scene = apply_mapping(cfg, personality="house", role="drop", note=40)
+        apply_mapping(cfg, personality="house", role="drop", note=40)
 
         house = cfg["personalities"]["house"]
         self.assertEqual(house["drop_style"], "drop_mode")
-        self.assertEqual(house["post_drop_scene"], drop_scene)
-        self.assertEqual(house["post_drop_bank"], [drop_scene])
+        self.assertEqual(house["post_drop_scene"], "")
+        self.assertEqual(house["post_drop_bank"], [])
 
     def test_emphasized_drop_supports_separate_post_drop_mapping(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))

@@ -105,6 +105,10 @@ class LaserPersonality:
     pre_drop_blackout_beats: int = 4
     post_drop_hold_beats: int = 8
     breakdown_default_restore_beats: int = 64
+    # "drop_mode": the drop look itself is held for the post-drop window (no
+    # separate post-drop scene). "emphasized_drop": a separate post_drop_scene
+    # is held after the drop. Default mirrors the config-tooling default.
+    drop_style: str = "drop_mode"
 
 
 @dataclass(frozen=True)

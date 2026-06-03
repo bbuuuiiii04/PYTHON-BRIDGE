@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import logging
+import random
 import threading
 import time
 from typing import Optional
@@ -36,10 +37,14 @@ class LaserSceneExecutor:
         config: LaserConfig,
         midi_output: MidiOutput,
         personality: Optional[LaserPersonality],
+        rng: Optional[random.Random] = None,
+        randomize_cursors: bool = True,
     ) -> None:
         self._config = config
         self._midi_output = midi_output
         self._personality = personality
+        self._rng = rng if rng is not None else random.Random()
+        self._randomize_cursors = bool(randomize_cursors)
         self._lock = threading.Lock()
         self._last_role = "idle"
         self._last_triggered_scene = ""
@@ -50,7 +55,7 @@ class LaserSceneExecutor:
         self._gated_count = 0
         self._missing_scene_count = 0
         self._same_scene_skip_count = 0
-        self._role_cursors = {role: 0 for role in _AUTO_ROLES}
+        self._role_cursors = self._seed_role_cursors()
         self._role_active_scene = {role: "" for role in _AUTO_ROLES}
         self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
         self._blackout_pending_for_drop_window = False
@@ -59,7 +64,7 @@ class LaserSceneExecutor:
         """Switch executor personality and reset role-bank execution state."""
         with self._lock:
             self._personality = personality
-        self.reset_runtime_state(reason="set_personality")
+        self.reset_runtime_state(reason="set_personality", reset_cursors=True)
 
     def smart_drop_blackout_enabled(self) -> bool:
         """Return whether Smart Drop should use blackout-mask timing."""
@@ -69,14 +74,15 @@ class LaserSceneExecutor:
         """Clear a pending Smart Drop blackout window, if any."""
         self._resolve_pending_blackout(reason=reason)
 
-    def reset_runtime_state(self, *, reason: str = "runtime_reset") -> None:
+    def reset_runtime_state(self, *, reason: str = "runtime_reset", reset_cursors: bool = False) -> None:
         """Reset role cooldown/bank state across track/deck lifecycle changes."""
         with self._lock:
             self._last_role = "idle"
             self._last_reason = ""
             self._last_triggered_scene = ""
             self._last_error = ""
-            self._role_cursors = {role: 0 for role in _AUTO_ROLES}
+            if reset_cursors:
+                self._role_cursors = self._seed_role_cursors()
             self._role_active_scene = {role: "" for role in _AUTO_ROLES}
             self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
         self._resolve_pending_blackout(reason=reason)
@@ -214,6 +220,19 @@ class LaserSceneExecutor:
             self._last_error = ""
             if role in self._role_last_trigger_beat:
                 self._role_last_trigger_beat[role] = float(ctx.abs_beat)
+            fired_cursor = self._role_cursors.get(role)
+
+        # Observability: the scene the executor ACTUALLY fired (after bank
+        # rotation), which the director's decision log cannot show. This is the
+        # signal to confirm drop-bank rotation on the rig.
+        log.info(
+            "[LX] fired  role=%s  scene=%s  note=%s  reason=%s  cursor=%s",
+            role,
+            selected_scene,
+            getattr(scene_def.midi, "note", None),
+            decision.reason,
+            fired_cursor,
+        )
 
     def trigger_blackout_on(self, ctx: LaserContext) -> None:
         """Send manual blackout-on MIDI command for Smart Drop pre-window."""
@@ -320,6 +339,15 @@ class LaserSceneExecutor:
         self._role_cursors[role] = cursor + 1
         self._role_active_scene[role] = scene
         return scene
+
+    def _seed_role_cursors(self) -> dict[str, int]:
+        if not self._randomize_cursors:
+            return {role: 0 for role in _AUTO_ROLES}
+        cursors: dict[str, int] = {}
+        for role in _AUTO_ROLES:
+            bank = self._bank_for_role(role)
+            cursors[role] = self._rng.randrange(len(bank)) if bank else 0
+        return cursors
 
     def _bank_for_role(self, role: str) -> tuple[str, ...]:
         personality = self._personality

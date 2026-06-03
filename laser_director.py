@@ -79,6 +79,7 @@ class LaserDirector:
         post_drop_scene: str = "",
         buildup_lookahead_beats: int = 32,
         post_drop_hold_beats: int = 8,
+        drop_style: str = "drop_mode",
     ) -> None:
         self._dry_run = dry_run
         self._enabled = enabled
@@ -98,6 +99,7 @@ class LaserDirector:
         self._post_drop_scene = post_drop_scene
         self._buildup_lookahead_beats = max(0, int(buildup_lookahead_beats))
         self._post_drop_hold_beats = max(0, int(post_drop_hold_beats))
+        self._drop_style = self._canon_drop_style(drop_style)
 
         # Mutable policy state — written only from the StateManager thread.
         self._emergency: bool = False
@@ -191,6 +193,14 @@ class LaserDirector:
         self._post_drop_scene = personality.post_drop_scene
         self._buildup_lookahead_beats = max(0, int(personality.buildup_lookahead_beats))
         self._post_drop_hold_beats = max(0, int(personality.post_drop_hold_beats))
+        self._drop_style = self._canon_drop_style(
+            getattr(personality, "drop_style", "drop_mode")
+        )
+
+    @staticmethod
+    def _canon_drop_style(value: object) -> str:
+        style = str(value or "").strip().lower()
+        return "emphasized_drop" if style == "emphasized_drop" else "drop_mode"
 
     # ── Tick (called from StateManager._push_tick) ────────────────────────────
 
@@ -433,27 +443,37 @@ class LaserDirector:
                     role="drop",
                 )
 
-        # Priority 10: Post-drop hold.
-        if (
-            self._post_drop_scene
-            and self._post_drop_hold_beats > 0
+        # Priority 10: Hold after the drop.
+        in_post_drop_hold = (
+            self._post_drop_hold_beats > 0
             and self._post_drop_start_abs_beat >= 0.0
             and (abs_beat - self._post_drop_start_abs_beat) < self._post_drop_hold_beats
-        ):
-            self._last_smart_abs_beat = abs_beat
-            return LaserSceneDecision(
-                scene=self._post_drop_scene,
-                reason="post_drop_hold",
-                priority=10,
-                source="policy",
-                role="post_drop",
-            )
-
-        in_post_drop_hold = (
-            self._post_drop_start_abs_beat >= 0.0
-            and self._post_drop_hold_beats > 0
-            and (abs_beat - self._post_drop_start_abs_beat) < self._post_drop_hold_beats
         )
+        if in_post_drop_hold:
+            if self._drop_style == "emphasized_drop":
+                if self._post_drop_scene:
+                    self._last_smart_abs_beat = abs_beat
+                    return LaserSceneDecision(
+                        scene=self._post_drop_scene,
+                        reason="post_drop_hold",
+                        priority=10,
+                        source="policy",
+                        role="post_drop",
+                    )
+            elif self._drop_scene:
+                # drop_mode: hold the rotated drop look itself for the post-drop
+                # window; there is no separate post-drop scene. The executor keeps
+                # the already-fired (rotated) drop scene latched via role-unchanged
+                # + same-scene skip, so this decision MUST NOT re-fire MIDI — the
+                # reason is deliberately not "drop_crossing".
+                self._last_smart_abs_beat = abs_beat
+                return LaserSceneDecision(
+                    scene=self._drop_scene,
+                    reason="drop_hold",
+                    priority=10,
+                    source="policy",
+                    role="drop",
+                )
 
         # Priority 11: Smart Drop countdown buildup window.
         beats_to_next_drop = sp.beats_to_next_drop
@@ -649,7 +669,7 @@ class LaserDirector:
             return "idle"
         if reason == "breakdown_active":
             return "breakdown"
-        if reason == "drop_crossing":
+        if reason in ("drop_crossing", "drop_hold"):
             return "drop"
         if reason == "post_drop_hold":
             return "post_drop"
@@ -683,6 +703,7 @@ class LaserDirector:
             "phrase_interval_beats": self._phrase_interval_beats,
             "minimum_scene_hold_beats": self._minimum_scene_hold_beats,
             "post_drop_hold_beats": self._post_drop_hold_beats,
+            "drop_style": self._drop_style,
             "normal_changes_only_on_phrase_boundary": self._normal_changes_only_on_phrase_boundary,
             "breakdown_scene": self._breakdown_scene,
             "buildup_scene": self._buildup_scene,
