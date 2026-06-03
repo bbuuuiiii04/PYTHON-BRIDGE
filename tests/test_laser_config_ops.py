@@ -436,14 +436,17 @@ class LaserConfigOpsTests(unittest.TestCase):
         self.assertEqual(house["default_scene"], first)
         self.assertEqual(house["phrase_bank"], [first, second])
 
-    def test_drop_mode_reuses_drop_mapping_for_post_drop(self) -> None:
+    def test_drop_mode_does_not_pin_post_drop(self) -> None:
+        # In drop_mode the drop look itself is held for the post-drop window;
+        # there is no separate post-drop scene, so mapping a drop must leave
+        # post_drop_scene / post_drop_bank empty (not pinned to the drop).
         cfg = load_or_create_config(Path("/tmp/not-used.json"))
-        drop_scene = apply_mapping(cfg, personality="house", role="drop", note=40)
+        apply_mapping(cfg, personality="house", role="drop", note=40)
 
         house = cfg["personalities"]["house"]
         self.assertEqual(house["drop_style"], "drop_mode")
-        self.assertEqual(house["post_drop_scene"], drop_scene)
-        self.assertEqual(house["post_drop_bank"], [drop_scene])
+        self.assertEqual(house["post_drop_scene"], "")
+        self.assertEqual(house["post_drop_bank"], [])
 
     def test_emphasized_drop_supports_separate_post_drop_mapping(self) -> None:
         cfg = load_or_create_config(Path("/tmp/not-used.json"))

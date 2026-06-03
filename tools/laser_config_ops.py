@@ -810,14 +810,11 @@ def apply_mapping(
         if replace_primary or not pdata.get(scene_field):
             pdata[scene_field] = scene_name
     if role == "drop" and drop_style == _DROP_STYLE_DROP_MODE:
-        pdata["post_drop_scene"] = scene_name
-        post_bank = pdata.setdefault("post_drop_bank", [])
-        if not isinstance(post_bank, list):
-            post_bank = []
-            pdata["post_drop_bank"] = post_bank
-        if scene_name not in post_bank:
-            post_bank.clear()
-            post_bank.append(scene_name)
+        # In drop_mode the drop look itself is held for the post-drop window;
+        # there is no separate post-drop scene. Keep these empty so the config
+        # is not misleading (the director ignores post_drop_scene in drop_mode).
+        pdata["post_drop_scene"] = ""
+        pdata["post_drop_bank"] = []
     primary_name = pdata.get(scene_field if role != "groove" else "phrase_scene")
     if isinstance(primary_name, str) and primary_name and primary_name not in bank:
         bank.insert(0, primary_name)
@@ -1335,14 +1332,21 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
         ("drop", personality.drop_scene, "drop_crossing"),
         ("breakdown", personality.breakdown_scene, "breakdown_hold"),
     ]
-    if personality.post_drop_scene and personality.post_drop_scene != personality.drop_scene:
+    drop_style = getattr(personality, "drop_style", _DROP_STYLE_DROP_MODE)
+    if (
+        drop_style == _DROP_STYLE_EMPHASIZED
+        and personality.post_drop_scene
+        and personality.post_drop_scene != personality.drop_scene
+    ):
         role_specs.insert(3, ("post_drop", personality.post_drop_scene, "post_drop_hold"))
-    elif personality.post_drop_scene == personality.drop_scene:
+    else:
+        # drop_mode (and emphasized that mirrors the drop): the drop look itself
+        # is held for the post-drop window — no separate post-drop trigger.
         drop_scene = cfg.scenes.get(personality.drop_scene)
         add_check(
             "post_drop",
             True,
-            "uses same mapping as drop (Drop mode)",
+            "drop look held for post-drop window (Drop mode)",
             personality_name=cfg.default_personality or "",
             role="post_drop",
             scene_name=personality.drop_scene,

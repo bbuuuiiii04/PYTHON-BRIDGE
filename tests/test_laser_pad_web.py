@@ -888,7 +888,9 @@ class LaserPadWebTests(unittest.TestCase):
             )["scene_name"]
             config = service.get_config_payload()["config"]
             pdata = config["personalities"]["house"]
-            self.assertTrue(pdata.get("post_drop_scene"))
+            # drop_mode no longer pins post_drop to the mapped drop; the drop
+            # look itself is held for the post-drop window.
+            self.assertFalse(pdata.get("post_drop_scene"))
             self.assertIn(second_drop_scene, pdata.get("drop_bank", []))
 
             new_bank = [name for name in pdata.get("drop_bank", []) if name != drop_scene]

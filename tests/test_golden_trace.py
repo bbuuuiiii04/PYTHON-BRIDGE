@@ -97,6 +97,9 @@ def _personality() -> LaserPersonality:
         breakdown_bank=("break_a",),
         allow_high_impact=True,
         minimum_scene_hold_beats=8,
+        # These scenarios exercise the separate post-drop hold; that is the
+        # emphasized_drop behavior. (drop_mode holds the drop look instead.)
+        drop_style="emphasized_drop",
     )
 
 

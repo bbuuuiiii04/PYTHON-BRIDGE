@@ -220,6 +220,19 @@ class LaserSceneExecutor:
             self._last_error = ""
             if role in self._role_last_trigger_beat:
                 self._role_last_trigger_beat[role] = float(ctx.abs_beat)
+            fired_cursor = self._role_cursors.get(role)
+
+        # Observability: the scene the executor ACTUALLY fired (after bank
+        # rotation), which the director's decision log cannot show. This is the
+        # signal to confirm drop-bank rotation on the rig.
+        log.info(
+            "[LX] fired  role=%s  scene=%s  note=%s  reason=%s  cursor=%s",
+            role,
+            selected_scene,
+            getattr(scene_def.midi, "note", None),
+            decision.reason,
+            fired_cursor,
+        )
 
     def trigger_blackout_on(self, ctx: LaserContext) -> None:
         """Send manual blackout-on MIDI command for Smart Drop pre-window."""
