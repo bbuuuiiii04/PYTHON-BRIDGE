@@ -22,6 +22,7 @@ import struct
 import subprocess
 import threading
 import time
+from dataclasses import replace
 from typing import Callable, Optional
 
 from .config import (
@@ -38,6 +39,14 @@ from .rb_offsets import ChainEntry, RBOffsetVersion, load_offsets_for_version
 
 log = logging.getLogger("rb_memory")
 POS_CHAIN_DIRECT_ENV = "RBSS_POS_CHAIN_DIRECT"
+# Opt-in: when the live_pos chain is healthy, skip the redundant per-tick ObjC
+# read_deck() (whose result the chain immediately overwrites) and the deck-2
+# resolution pipeline (whose inner the chain makes unnecessary). Default OFF —
+# leaves the production hot path byte-for-byte unchanged until A/B-measured.
+POS_CHAIN_SKIP_OBJC_ENV = "RBSS_POS_CHAIN_SKIP_OBJC"
+# Cadence for refreshing deck-1 track_length_ms via read_deck() while in
+# skip-ObjC mode (the chain cannot read length; filepath_resolver needs it).
+_LENGTH_REFRESH_INTERVAL_S = 1.0
 
 # ── mach syscall bindings ────────────────────────────────────────────────────
 
@@ -1007,6 +1016,15 @@ class RBMemoryReader(threading.Thread):
         self._deck_playing_hint = deck_playing_hint
         self._pos_chain_direct = os.environ.get(POS_CHAIN_DIRECT_ENV) == "1"
         self._offsets = load_offsets_for_version(rb_version) if self._pos_chain_direct and rb_version else None
+        # Skip-ObjC optimization is only meaningful when the chain path is the
+        # authoritative writer (chain mode on + offsets resolved).
+        self._skip_objc_when_chain = (
+            os.environ.get(POS_CHAIN_SKIP_OBJC_ENV) == "1"
+            and self._pos_chain_direct
+            and self._offsets is not None
+        )
+        self._chain_ok_last: dict[int, bool] = {1: False, 2: False}
+        self._length_refresh_at: float = 0.0
         self._stop     = threading.Event()
         self._session: Optional[RBSession] = None
         self._interval = 1.0 / MEM_POLL_HZ
@@ -1089,8 +1107,14 @@ class RBMemoryReader(threading.Thread):
             and now_t - self._d2_play_seen_at < _D2_PLAY_RECENT_S
         )
 
+        # When the deck-2 live_pos chain was healthy last tick, the ObjC deck-2
+        # inner is never read (the chain supplies deck-2 position), so skip the
+        # whole resolution pipeline — including its periodic blocking zone scans.
+        # Falls back automatically the moment the chain misses a tick.
+        skip2 = self._skip_objc_when_chain and self._chain_ok_last.get(2, False)
+
         # Drive deck-2 resolution pipeline (non-blocking).
-        if s._deck2_inner is None:
+        if not skip2 and s._deck2_inner is None:
             if s._d2_pending:
                 # Mid-validation: take samples this tick.
                 s.poll_deck2_candidates(now_t)
@@ -1129,12 +1153,12 @@ class RBMemoryReader(threading.Thread):
                         attempt=self._d2_attempts,
                         deck2_playing=deck2_recently_playing,
                     )
-        elif s._d2_pending:
+        elif not skip2 and s._d2_pending:
             # Deck 2 got committed mid-window; discard leftover pending state.
             s._d2_pending.clear()
             s._d2_samples.clear()
             self._d2_attempts = 0
-        if s._deck2_inner is not None and s._deck2_inner != self._d2_last_committed_inner:
+        if not skip2 and s._deck2_inner is not None and s._deck2_inner != self._d2_last_committed_inner:
             self._d2_last_committed_inner = s._deck2_inner
             if self._d2_unresolved_since > 0.0:
                 ttc_ms = (now_t - self._d2_unresolved_since) * 1000.0
@@ -1145,6 +1169,10 @@ class RBMemoryReader(threading.Thread):
                     self._d2_attempts,
                 )
             self._d2_unresolved_since = 0.0
+
+        if self._skip_objc_when_chain:
+            self._read_decks_chain_first(s, now_t)
+            return
 
         for deck in (1, 2):
             snap = s.read_deck(deck)
@@ -1163,6 +1191,59 @@ class RBMemoryReader(threading.Thread):
                         warn = self._drift.update(deck, chain_snap.elapsed_ms, chain_snap.playing)
                         if warn:
                             log.warning("drift deck=%d: %s", deck, warn)
+
+    def _publish_chain(self, deck: int, chain_snap: PositionSnapshot) -> None:
+        self._cache.update(chain_snap)
+        if self._drift is not None:
+            warn = self._drift.update(deck, chain_snap.elapsed_ms, chain_snap.playing)
+            if warn:
+                log.warning("drift deck=%d: %s", deck, warn)
+
+    def _read_decks_chain_first(self, s: "RBSession", now_t: float) -> None:
+        """Skip-ObjC path: chain is authoritative; read_deck only as fallback.
+
+        For each deck, read the live_pos chain first. When it is valid we publish
+        it and skip the redundant ObjC read_deck() — except for a slow-cadence
+        deck-1 read used solely to keep track_length_ms fresh (the chain cannot
+        read length). When the chain misses a tick, fall back to read_deck() so
+        position never goes dark.
+        """
+        for deck in (1, 2):
+            previous = self._cache.get(deck)
+            chain_snap = s.read_live_pos_chain(deck, previous)
+            chain_ok = chain_snap is not None
+            self._chain_ok_last[deck] = chain_ok
+            if chain_ok:
+                self._publish_chain(deck, chain_snap)
+                if deck == 1 and now_t - self._length_refresh_at >= _LENGTH_REFRESH_INTERVAL_S:
+                    self._refresh_deck1_length(s, now_t)
+                continue
+            # Chain unavailable this tick — ObjC fallback (also re-seeds length).
+            snap = s.read_deck(deck)
+            if snap is not None:
+                self._cache.update(snap)
+                if self._drift is not None:
+                    warn = self._drift.update(deck, snap.elapsed_ms, snap.playing)
+                    if warn:
+                        log.warning("drift deck=%d: %s", deck, warn)
+
+    def _refresh_deck1_length(self, s: "RBSession", now_t: float) -> None:
+        """Refresh deck-1 track_length_ms without disturbing chain position.
+
+        read_deck(1) is the only producer of track_length_ms; the chain carries
+        the last known length forward. Merge a changed length into the current
+        (chain-authoritative) cache snapshot, leaving elapsed/playing/updated_at
+        untouched.
+        """
+        self._length_refresh_at = now_t
+        snap = s.read_deck(1)
+        if snap is None or snap.track_length_ms <= 0:
+            return
+        cur = self._cache.get(1)
+        if cur is None:
+            self._cache.update(snap)
+        elif cur.track_length_ms != snap.track_length_ms:
+            self._cache.update(replace(cur, track_length_ms=snap.track_length_ms))
 
     def _try_attach(self) -> None:
         pid = get_rb_pid()
