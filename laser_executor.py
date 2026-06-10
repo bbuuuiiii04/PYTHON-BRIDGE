@@ -55,6 +55,7 @@ class LaserSceneExecutor:
         self._gated_count = 0
         self._missing_scene_count = 0
         self._same_scene_skip_count = 0
+        self._role_bank_shuffle: dict[str, tuple[str, ...]] = {}
         self._role_cursors = self._seed_role_cursors()
         self._role_active_scene = {role: "" for role in _AUTO_ROLES}
         self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
@@ -88,6 +89,7 @@ class LaserSceneExecutor:
             self._last_error = ""
             if reset_cursors:
                 self._role_cursors = self._seed_role_cursors()
+            self._reshuffle_phrase_bank_locked()
             self._role_active_scene = {role: "" for role in _AUTO_ROLES}
             self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
         self.clear_pending_blackout(reason=reason)
@@ -405,11 +407,25 @@ class LaserSceneExecutor:
             cursors[role] = self._rng.randrange(len(bank)) if bank else 0
         return cursors
 
+    def _reshuffle_phrase_bank_locked(self) -> None:
+        """Re-randomize phrase-bank traversal order. Caller must hold self._lock."""
+        personality = self._personality
+        bank = list(personality.phrase_bank) if personality is not None else []
+        if len(bank) > 1:
+            self._rng.shuffle(bank)
+            self._role_bank_shuffle["phrase"] = tuple(bank)
+            self._role_cursors["phrase"] = 0
+        else:
+            self._role_bank_shuffle.pop("phrase", None)
+
     def _bank_for_role(self, role: str) -> tuple[str, ...]:
         personality = self._personality
         if personality is None:
             return ()
         if role == "phrase":
+            shuffled = self._role_bank_shuffle.get("phrase")
+            if shuffled:
+                return shuffled
             return personality.phrase_bank
         if role == "buildup":
             return personality.buildup_bank
