@@ -1104,6 +1104,7 @@ class StateManager:
             self._sp_transition_window = float(SMART_DROP_LOOKAHEAD_BEATS)
             self._sp_post_drop = 8.0
             self._sp_breakdown_default_restore = SMART_BREAKDOWN_DEFAULT_DURATION_BEATS
+            self._sp_phrase_lookahead = 32.0
         else:
             self._sp_drop_window = float(personality.pre_drop_blackout_beats)
             self._sp_transition_window = float(personality.pre_drop_blackout_beats)
@@ -1111,6 +1112,7 @@ class StateManager:
             self._sp_breakdown_default_restore = int(
                 personality.breakdown_default_restore_beats
             )
+            self._sp_phrase_lookahead = float(personality.buildup_lookahead_beats)
         for deck in (1, 2):
             self._clear_phrase_segment_cache(deck)
 
