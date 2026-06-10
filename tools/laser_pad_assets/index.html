@@ -10,80 +10,99 @@
     <script src="/static/pad-ui.js?v=ux-5"></script>
     <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" integrity="sha384-l8f0VcPi/M1iHPv8egOnY/15TDwqgbOR1anMIJWvU6nLRgZVLTLSaNqi/TOoT5Fh" crossorigin="anonymous" defer></script>
     <link rel="stylesheet" href="/static/pad.css?v=ux-5" />
+    <link rel="stylesheet" href="/static/pad-overrides.css?v=ux-overhaul" />
   </head>
   <body x-data="laserPadApp()" x-init="init()">
     <div class="app panel" x-cloak>
       <header class="laser-header">
-        <div class="header-title-row">
-          <div class="title-chip">▓▓ LASER PAD ▓▓</div>
-          <div class="runtime-pill" :class="runtimeStatusClass()">
-            <span>Live</span>
-            <strong x-text="runtime.active_personality || '-'"></strong>
-            <span x-text="runtime.current_scene || 'offline'"></span>
-            <span class="runtime-reason" x-text="runtime.last_reason || '-'"></span>
+        <!-- ROW 1: Global Status & Master Actions -->
+        <div class="header-row-1">
+          <div class="header-left">
+            <div class="title-chip">▓▓ LASER PAD ▓▓</div>
+            <label class="inline-check master-enable-toggle">
+              <input type="checkbox" :checked="!!config?.enabled" @change="setEnabled($event.target.checked)" />
+              <span>Lasers enabled</span>
+            </label>
           </div>
-          <div class="status-line" x-text="statusText || 'ready'"></div>
+          <div class="header-center">
+            <div class="runtime-pill" :class="runtimeStatusClass()">
+              <span>Live</span>
+              <strong x-text="runtime.active_personality || '-'"></strong>
+              <span x-text="runtime.current_scene || 'offline'"></span>
+              <span class="runtime-reason" x-text="runtime.last_reason || '-'"></span>
+            </div>
+            <div class="status-line" x-text="statusText || 'ready'"></div>
+          </div>
+          <div class="header-right">
+            <div class="commit-cluster">
+              <span class="save-badge" :class="saveBadgeClass()" x-text="saveBadgeText()" :title="saveState.kind === 'error' ? saveState.lastError : ''" aria-live="polite" aria-atomic="true"></span>
+              <button class="primary-action" :class="{'has-changes': hasUnsavedChanges()}" :aria-label="hasUnsavedChanges() ? 'Save & Apply, unsaved changes' : 'Save & Apply'" title="Writes your unsaved changes to disk and tells the running bridge to reload." @click="commitDraft()">💾 Save &amp; Apply</button>
+            </div>
+            <button class="settings-trigger icon-action" @click="openSettingsPanel()" title="Settings" aria-label="Settings">⚙</button>
+          </div>
         </div>
 
-        <div class="control-strip">
-          <label class="field-inline wide-field" title="MIDI output port">Output
-            <select x-model="selectedPort" @change="setMidiPort()">
-              <template x-if="!availablePorts().length">
-                <option value="" disabled>No MIDI outputs found</option>
-              </template>
-              <template x-for="port in availablePorts()" :key="port">
-                <option :value="port" x-text="port + (midiPorts.includes(port) ? '' : ' (offline)')"></option>
-              </template>
-            </select>
-          </label>
-          <details class="header-port-fallback" :open="manualPortOpen" @toggle="manualPortOpen = $event.target.open">
-            <summary>Type port name…</summary>
-            <div class="port-fallback">
-              <input
-                type="text"
-                placeholder="Type port name (e.g. IAC Driver Bus 1)"
-                x-model="manualPort"
-                @keydown.enter.prevent="applyManualPort()"
-              />
-              <button @click="applyManualPort()" :disabled="!manualPort.trim()">Use</button>
-              <button type="button" class="subtle" @click="refreshMidiPorts()">Reload outputs</button>
+        <!-- ROW 2: Configuration & Testing -->
+        <div class="header-row-2">
+          <div class="header-group">
+            <label class="field-inline wide-field" title="MIDI output port">Output
+              <select x-model="selectedPort" @change="setMidiPort()">
+                <template x-if="!availablePorts().length">
+                  <option value="" disabled>No MIDI outputs found</option>
+                </template>
+                <template x-for="port in availablePorts()" :key="port">
+                  <option :value="port" x-text="port + (midiPorts.includes(port) ? '' : ' (offline)')"></option>
+                </template>
+              </select>
+            </label>
+            <details class="header-port-fallback" :open="manualPortOpen" @toggle="manualPortOpen = $event.target.open">
+              <summary>Type port name…</summary>
+              <div class="port-fallback">
+                <input
+                  type="text"
+                  placeholder="Type port name (e.g. IAC Driver Bus 1)"
+                  x-model="manualPort"
+                  @keydown.enter.prevent="applyManualPort()"
+                />
+                <button class="link-button" @click="applyManualPort()" :disabled="!manualPort.trim()">Use</button>
+                <button type="button" class="subtle" @click="refreshMidiPorts()">Reload outputs</button>
+              </div>
+            </details>
+          </div>
+
+          <div class="header-separator"></div>
+
+          <div class="header-group">
+            <label class="field-inline personality-field">Personality
+              <select :value="activePersonality()" @change="setActivePersonality($event.target.value)">
+                <template x-if="!personalityNames().length">
+                  <option value="" disabled>No personalities loaded</option>
+                </template>
+                <template x-for="name in personalityNames()" :key="name">
+                  <option :value="name" x-text="name"></option>
+                </template>
+              </select>
+            </label>
+            <div class="icon-trio" aria-label="Personality actions">
+              <button class="icon-action" type="button" title="New personality" @click="createPersonalityPrompt()">+</button>
+              <button class="icon-action" type="button" title="Rename personality" @click="renamePersonalityPrompt(activePersonality())">✎</button>
+              <button class="icon-action" type="button" title="Personality settings" @click="openSettingsTab('personalities')">ⓘ</button>
             </div>
-          </details>
-
-          <label class="field-inline personality-field">Personality
-            <select :value="activePersonality()" @change="setActivePersonality($event.target.value)">
-              <template x-if="!personalityNames().length">
-                <option value="" disabled>No personalities loaded</option>
-              </template>
-              <template x-for="name in personalityNames()" :key="name">
-                <option :value="name" x-text="name"></option>
-              </template>
-            </select>
-          </label>
-          <div class="icon-trio" aria-label="Personality actions">
-            <button type="button" title="New personality" @click="createPersonalityPrompt()">+</button>
-            <button type="button" title="Rename personality" @click="renamePersonalityPrompt(activePersonality())">✎</button>
-            <button type="button" title="Personality settings" @click="openSettingsTab('personalities')">ⓘ</button>
           </div>
 
-          <label class="inline-check">
-            <input type="checkbox" :checked="!!config?.enabled" @change="setEnabled($event.target.checked)" />
-            <span>Lasers enabled</span>
-          </label>
-          <label class="inline-check" title="Practice mode — pads light up in the UI but don't send real MIDI.">
-            <input type="checkbox" x-model="draftDryRun" @change="setDryRun()" />
-            <span>Test mode</span>
-          </label>
-          <label class="field-inline mini-field" title="Beats per minute used for test timing.">Test BPM
-            <input type="number" min="1" max="300" x-model.number="test.bpm" @change="persistTestUi()" />
-          </label>
-          <div class="commit-cluster">
-            <span class="save-badge" :class="saveBadgeClass()" x-text="saveBadgeText()" :title="saveState.kind === 'error' ? saveState.lastError : ''" aria-live="polite" aria-atomic="true"></span>
-            <button class="primary-action" :class="{'has-changes': hasUnsavedChanges()}" :aria-label="hasUnsavedChanges() ? 'Save & Apply, unsaved changes' : 'Save & Apply'" title="Writes your unsaved changes to disk and tells the running bridge to reload." @click="commitDraft()">💾 Save &amp; Apply</button>
+          <div class="header-separator"></div>
+
+          <div class="header-group">
+            <label class="inline-check test-mode-toggle" title="Practice mode — pads light up in the UI but don't send real MIDI.">
+              <input type="checkbox" x-model="draftDryRun" @change="setDryRun()" />
+              <span>Test mode</span>
+            </label>
+            <label class="field-inline mini-field" title="Beats per minute used for test timing.">Test BPM
+              <input type="number" min="1" max="300" x-model.number="test.bpm" @change="persistTestUi()" />
+            </label>
+            <button class="icon-action" title="Check config" @click="validateDraftOnly()">✓</button>
+            <button class="icon-action" title="Run live test" @click="verifyDraft()">▶</button>
           </div>
-          <button class="icon-action" title="Check config" @click="validateDraftOnly()">✓</button>
-          <button class="icon-action" title="Run live test" @click="verifyDraft()">▶</button>
-          <button class="settings-trigger" @click="openSettingsPanel()" title="Settings" aria-label="Settings">⚙</button>
         </div>
 
         <template x-if="headerBanner()">

@@ -138,7 +138,7 @@ window.LaserPad = window.LaserPad || {};
      */
     sceneDetailsByNote(note, personalityName = this.activePersonality()) {
       const cache = this._selectorCache instanceof Map ? this._selectorCache : null;
-      const cacheKey = `sceneDetailsByNote:${this.currentConfigHash}:${note}:${personalityName}`;
+      const cacheKey = `sceneDetailsByNote:${this.currentConfigHash}:${this.activeBankId}:${note}:${personalityName}`;
       if (cache?.has(cacheKey)) return cache.get(cacheKey);
       const remember = (value) => {
         cache?.set(cacheKey, value);
@@ -429,7 +429,7 @@ window.LaserPad = window.LaserPad || {};
      */
     personalityChipsForNote(note) {
       const cache = this._selectorCache instanceof Map ? this._selectorCache : null;
-      const cacheKey = `personalityChipsForNote:${this.currentConfigHash}:${note}`;
+      const cacheKey = `personalityChipsForNote:${this.currentConfigHash}:${this.activeBankId}:${note}`;
       if (cache?.has(cacheKey)) return cache.get(cacheKey);
       const remember = (value) => {
         cache?.set(cacheKey, value);
