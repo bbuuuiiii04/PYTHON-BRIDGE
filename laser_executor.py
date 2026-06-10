@@ -59,6 +59,10 @@ class LaserSceneExecutor:
         self._role_active_scene = {role: "" for role in _AUTO_ROLES}
         self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
         self._blackout_pending_for_drop_window = False
+        # Named blackout-mask holders (breakdown, master_switch). The physical
+        # MIDI note is shared with the Smart Drop blackout; note_off is only
+        # sent when BOTH the drop-window latch and this set are clear.
+        self._mask_owners: set[str] = set()
 
     def set_personality(self, personality: Optional[LaserPersonality]) -> None:
         """Switch executor personality and reset role-bank execution state."""
@@ -72,6 +76,7 @@ class LaserSceneExecutor:
 
     def clear_pending_blackout(self, *, reason: str = "smart_drop_reset") -> None:
         """Clear a pending Smart Drop blackout window, if any."""
+        self._release_all_masks()
         self._resolve_pending_blackout(reason=reason)
 
     def reset_runtime_state(self, *, reason: str = "runtime_reset", reset_cursors: bool = False) -> None:
@@ -85,7 +90,7 @@ class LaserSceneExecutor:
                 self._role_cursors = self._seed_role_cursors()
             self._role_active_scene = {role: "" for role in _AUTO_ROLES}
             self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
-        self._resolve_pending_blackout(reason=reason)
+        self.clear_pending_blackout(reason=reason)
 
     def on_tick(self, ctx: LaserContext) -> None:
         """Consume per-tick SmartPhrasing cleanup intents before decision output."""
@@ -263,7 +268,8 @@ class LaserSceneExecutor:
             pending = self._blackout_pending_for_drop_window
             if pending:
                 self._blackout_pending_for_drop_window = False
-        if not pending:
+            owners_remain = bool(self._mask_owners)
+        if not pending or owners_remain:
             return
         msg = self._config.manual_blackout_off
         if msg is None:
@@ -271,6 +277,49 @@ class LaserSceneExecutor:
         msg = replace(msg, kind="note_off", behavior="note_off")
         if not self._midi_output.trigger(msg, priority="high"):
             self._record_gate("manual_blackout_off_rejected")
+
+    def hold_blackout_mask(self, owner: str) -> None:
+        """Hold the manual blackout note on behalf of *owner* (refcounted by name)."""
+        if not self.smart_drop_blackout_enabled():
+            return
+        msg = self._config.manual_blackout_on
+        if msg is None:
+            return
+        with self._lock:
+            already_dark = bool(self._mask_owners) or self._blackout_pending_for_drop_window
+            self._mask_owners.add(owner)
+        if already_dark:
+            return
+        msg = replace(msg, kind="note_on", behavior="note_on")
+        if self._midi_output.trigger(msg, priority="high"):
+            log.info("[LX] mask_on  owner=%s  note=%s", owner, msg.note)
+            return
+        with self._lock:
+            self._mask_owners.discard(owner)
+        self._record_gate("manual_blackout_on_rejected")
+
+    def release_blackout_mask(self, owner: str) -> None:
+        """Release *owner*'s hold; sends note_off only when nothing else holds it."""
+        with self._lock:
+            if owner not in self._mask_owners:
+                return
+            self._mask_owners.discard(owner)
+            still_dark = bool(self._mask_owners) or self._blackout_pending_for_drop_window
+        log.info("[LX] mask_off  owner=%s  still_dark=%s", owner, still_dark)
+        if still_dark:
+            return
+        msg = self._config.manual_blackout_off
+        if msg is None:
+            return
+        msg = replace(msg, kind="note_off", behavior="note_off")
+        if not self._midi_output.trigger(msg, priority="high"):
+            self._record_gate("manual_blackout_off_rejected")
+
+    def _release_all_masks(self) -> None:
+        with self._lock:
+            owners = tuple(self._mask_owners)
+        for owner in owners:
+            self.release_blackout_mask(owner)
 
     def status(self) -> dict:
         with self._lock:
@@ -294,6 +343,7 @@ class LaserSceneExecutor:
                 "missing_scene_count": self._missing_scene_count,
                 "same_scene_skip_count": self._same_scene_skip_count,
                 "blackout_pending_for_drop_window": self._blackout_pending_for_drop_window,
+                "blackout_mask_owners": sorted(self._mask_owners),
                 "role_cursors": role_cursors,
                 "role_active_scenes": active_scenes,
                 "role_last_trigger_beat": last_trigger_beats,
