@@ -690,7 +690,7 @@ def main() -> None:
     if laser_cfg_result.available and laser_cfg_result.config is not None:
         cfg = laser_cfg_result.config
         personality_resolver = _build_personality_resolver(cfg)
-        playlist_cache = PlaylistCache(RB_DB_PATH)
+        playlist_cache = PlaylistCache(RB_DB_PATH, folder_name="BY GENRE")
         sm.attach_personality_resolver(personality_resolver)
         sm.attach_personality_playlist_cache(playlist_cache)
         threading.Thread(
