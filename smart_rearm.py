@@ -55,12 +55,16 @@ class SmartRearmCoordinator:
         deck_ref: Callable[[int], DeckState],
         send_direct_autoloop_rearm: Callable[..., None],
         send_smart_transition_clear: Callable[..., None],
+        hold_blackout_mask: Optional[Callable[[str], None]] = None,
+        release_blackout_mask: Optional[Callable[[str], None]] = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._output_state_ref = output_state_ref
         self._deck_ref = deck_ref
         self._send_direct_autoloop_rearm = send_direct_autoloop_rearm
         self._send_smart_transition_clear = send_smart_transition_clear
+        self._hold_blackout_mask = hold_blackout_mask or (lambda owner: None)
+        self._release_blackout_mask = release_blackout_mask or (lambda owner: None)
         self._clock = clock
 
     def tick(
@@ -237,6 +241,7 @@ class SmartRearmCoordinator:
                     active,
                     ctx.this_beat,
                 )
+                self._release_blackout_mask("breakdown")
                 if self._send_direct_autoloop_rearm(
                     active,
                     ctx.mirror,
@@ -255,12 +260,20 @@ class SmartRearmCoordinator:
             sp_state.breakdown_start_crossing
             and sp_state.breakdown_restore_beat is not None
         ):
-            log.info(
-                "[SM] smart-breakdown-cut  deck=%d  beat=%d",
-                active,
-                ctx.this_beat,
-            )
-            self._send_smart_transition_clear(active)
+            if ctx.blackout_mode:
+                log.info(
+                    "[SM] smart-breakdown-blackout  deck=%d  beat=%d",
+                    active,
+                    ctx.this_beat,
+                )
+                self._hold_blackout_mask("breakdown")
+            else:
+                log.info(
+                    "[SM] smart-breakdown-cut  deck=%d  beat=%d",
+                    active,
+                    ctx.this_beat,
+                )
+                self._send_smart_transition_clear(active)
             os.breakdown_active = True
             os.breakdown_restore_beat = int(sp_state.breakdown_restore_beat)
         return False

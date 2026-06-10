@@ -408,11 +408,21 @@ class StateManager:
         def _autoloop_rearm_bridge(*args, **kwargs):
             return _send_direct_autoloop_rearm(self, *args, **kwargs)
 
+        def _hold_mask(owner: str) -> None:
+            if self._laser_executor is not None:
+                self._laser_executor.hold_blackout_mask(owner)
+
+        def _release_mask(owner: str) -> None:
+            if self._laser_executor is not None:
+                self._laser_executor.release_blackout_mask(owner)
+
         self._smart_rearm = SmartRearmCoordinator(
             output_state_ref=lambda: self._os,
             deck_ref=lambda d: self._deck[d],
             send_direct_autoloop_rearm=_autoloop_rearm_bridge,
             send_smart_transition_clear=self._sse.send_smart_transition_clear,
+            hold_blackout_mask=_hold_mask,
+            release_blackout_mask=_release_mask,
         )
         callback = getattr(self._laser_director, "set_personality_apply_callback", None)
         if callable(callback):
