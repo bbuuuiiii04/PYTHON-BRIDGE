@@ -169,6 +169,9 @@ class OutputState:
     breakdown_active: bool = False
     breakdown_restore_beat: int = 0
     phrase_anchor_last_beat: int = -1
+    # Origin beat for the 32-beat MIDI re-fire counter (Piece 2). -1 = no phrase
+    # marker seen yet on this track → fall back to the absolute 32-beat grid.
+    midi_refire_origin_beat: int = -1
 
 
 @dataclass

@@ -367,6 +367,9 @@ class StateManager:
         self._snapshot_lock = threading.Lock()
         self._published_snapshot: dict = {}
         self._last_sp_state: Optional[SmartPhrasingState] = None
+        # Latches sp.phrase_anchor_requested (one 200 Hz tick) until the next
+        # beat boundary consumes it, so a marker crossing can never be dropped.
+        self._pending_phrase_marker: bool = False
         self._publish_snapshot()
         self._snapshot_publish_interval_s = _SNAPSHOT_PUBLISH_INTERVAL_S
         self._next_snapshot_publish_at = time.monotonic() + self._snapshot_publish_interval_s
@@ -1795,6 +1798,8 @@ class StateManager:
         sp_state = self._update_smart_phrasing_state(
             active, d, abs_beat_pos, bpm,
         )
+        if sp_state.phrase_anchor_requested:
+            self._pending_phrase_marker = True
 
         # BPM: send immediately when last_sent_bpm is 0 (fresh arm / deck switch) so
         # SS autoloop activates on the current tick, not at the next beat boundary.
@@ -1904,18 +1909,33 @@ class StateManager:
                 if was_arm_pending and not os.autoloop_arm_pending:
                     autoloop_tick_just_fired = True
                 if os.lighting_mode == "autoloop":
-                    phrase_beat = (this_beat // AUTOLOOP_ARM_PHRASE_BEATS) * AUTOLOOP_ARM_PHRASE_BEATS
-                    if (
-                        phrase_beat > 0
-                        and phrase_beat > last_beat
-                        and phrase_beat != os.last_autoloop_status_phrase_beat
-                    ):
-                        os.last_autoloop_status_phrase_beat = phrase_beat
+                    # Phrase-relative MIDI re-fire (Piece 2):
+                    #   primary  — RB phrase-marker crossing (latched), resets the counter
+                    #   secondary— every 32 beats counted from the last marker fire
+                    #   fallback — absolute 32-grid until the first marker is seen
+                    marker_crossed = self._pending_phrase_marker
+                    self._pending_phrase_marker = False
+                    origin = os.midi_refire_origin_beat
+                    refire = False
+                    if marker_crossed:
+                        refire = True
+                    elif origin >= 0:
+                        refire = (this_beat - origin) >= AUTOLOOP_ARM_PHRASE_BEATS
+                    else:
+                        refire = (
+                            (this_beat // AUTOLOOP_ARM_PHRASE_BEATS)
+                            > (last_beat // AUTOLOOP_ARM_PHRASE_BEATS)
+                        )
+                    if refire and this_beat != os.last_autoloop_status_phrase_beat:
+                        os.midi_refire_origin_beat = this_beat
+                        os.last_autoloop_status_phrase_beat = this_beat
                         grid_status = d.meta.beatgrid_source if grid_pos is not None else "fallback"
                         self._autoloop.log_autoloop_tick(
                             active, elapsed_ms, beatpos_out, bpm, d.meta.bpm, grid_status
                         )
                         autoloop_tick_just_fired = True
+                        if self._laser_executor is not None:
+                            self._laser_executor.release_blackout_mask("master_switch")
 
         if os.lighting_mode == "autoloop":
             self._maybe_log_energy_suggest_would_fire(
@@ -2218,6 +2238,8 @@ class StateManager:
         os.breakdown_active = False
         os.breakdown_restore_beat = 0
         os.phrase_anchor_last_beat = -1
+        os.midi_refire_origin_beat = -1
+        self._pending_phrase_marker = False
 
     def toggle_smart_drop(self) -> None:
         """Toggle smart drop on/off at runtime. Must run in StateManager thread."""
