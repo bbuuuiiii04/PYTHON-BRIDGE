@@ -190,11 +190,17 @@ class LaserSceneExecutor:
             return
 
         same_scene_skip = False
+        refire_roles = ("phrase", "buildup", "breakdown")
         with self._lock:
             if (
                 role not in ("manual", "emergency")
                 and not is_drop_crossing
                 and selected_scene == self._last_triggered_scene
+                and not (
+                    ctx.autoloop_tick_just_fired
+                    and role in refire_roles
+                    and scene_def.scene_type == "autoloop"
+                )
             ):
                 self._same_scene_skip_count += 1
                 same_scene_skip = True
