@@ -1514,11 +1514,20 @@ class StateManager:
         elif mode == "autoloop":
             self._clear_smart_rearm_state()
             self._pending_arm = None
+            if (
+                self._os.autoloop_arm_after_master_change
+                and self._laser_executor is not None
+                and self._laser_director is not None
+                and self._laser_director.is_enabled()
+            ):
+                # Mask the transition: SS stays dark from the master switch until
+                # the first phrase-relative re-fire (Task 4 releases this owner).
+                self._laser_executor.hold_blackout_mask("master_switch")
             self._autoloop.arm_autoloop(
                 deck,
                 elapsed_ms,
                 bpm,
-                self._autoloop_master_phrase_arm,
+                False,
             )
 
         elif mode == "idle":

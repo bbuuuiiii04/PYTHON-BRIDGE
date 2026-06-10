@@ -256,6 +256,22 @@ class AutoloopController:
                 )
             else:
                 self._sse.send_autoloop_deck_load(deck, mirror, deck, arm_meta)
+                if arm_after_master and not autoloop_master_phrase_arm:
+                    # Immediate master-switch arm: finalize now (mirror the
+                    # _maybe_lock_autoloop_arm finalization) so autoloop_ready /
+                    # smart-rearm gates open without waiting for the next
+                    # absolute 32-beat boundary. The MIDI transition mask covers
+                    # the un-phased window visually.
+                    self._sse.send_autoloop_bpm(deck, arm_bpm)
+                    os.last_sent_bpm = arm_bpm
+                    self.clear_arm_phrase_lock()
+                    self._log.info(
+                        "[SM] arm-immediate  deck=%d  beat=%.1f  bpm=%.2f  src=%s",
+                        deck,
+                        abs_beat,
+                        arm_bpm,
+                        arm_source or "<none>",
+                    )
                 if arm_after_master and autoloop_master_phrase_arm:
                     phrase_beat = self.previous_arm_phrase(abs_beat)
                     phrase_elapsed_ms, phrase_source = self.target_elapsed_for_beat(
