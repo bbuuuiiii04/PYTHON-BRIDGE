@@ -564,6 +564,13 @@ class LaserDirector:
         if phrase_changed:
             self._phrase_trigger_pending = True
 
+        sp = ctx.smart_phrasing
+        if sp is not None and (sp.phrase_anchor_requested or sp.breakdown_end_crossing):
+            # Marker crossings and breakdown restores are phrase boundaries for
+            # the marker-relative re-fire model; arm the pending latch so the
+            # same-tick autoloop_tick_just_fired emits a phrase_boundary fire.
+            self._phrase_trigger_pending = True
+
         if self._phrase_trigger_pending and ctx.autoloop_tick_just_fired:
             self._phrase_trigger_pending = False
             return self._gate_normal_change(
