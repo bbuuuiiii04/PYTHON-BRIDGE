@@ -350,11 +350,13 @@ Manual command ownership is deliberately split by phase:
 
 ```text
 Before the StateManager gate:
-  parse commands, validate payloads, report status, and optionally queue one diagnostic/manual adapter command through a bounded path.
+  parse JSONL commands, validate payloads, and define BridgeEvent contracts only.
+  do not add adapter handoff, real bridge output, __main__.py callbacks, or durable policy state.
   do not create long-lived manual override, blackout latch, or auto-resume state outside StateManager.
 
 After the StateManager gate:
   StateManager-side LED policy objects may own manual override, blackout, and clear semantics.
+  bridge-side adapter trigger calls may begin only through StateManager-owned manual command handling.
   automatic role-entry still waits for the later automation phase.
 ```
 
@@ -396,6 +398,33 @@ adapter.trigger(decision)
 ```
 
 That call must return immediately after queueing or rejecting the command.
+
+Concrete v1 bounds:
+
+```text
+adapter trigger target:
+  under 1 ms after dedupe/rate-limit and put_nowait/reject
+
+adapter queue:
+  default maxsize = 8
+  configurable hard cap = 16
+  queue full = reject/drop command, increment visible degraded/drop counter, do not block
+
+Govee request timeout:
+  default = 2.0 seconds per request
+  no unbounded retries
+
+worker shutdown:
+  join timeout = 1.0 second
+  shutdown failure degrades LED lane only
+
+scene retrigger cooldown:
+  default = 4 seconds for ordinary scene re-triggers
+
+high-impact/drop cooldown:
+  default = 12 seconds between high-impact room looks
+  drop flash duration max = 750 ms unless hardware scene semantics force a safer shorter value
+```
 
 ---
 
@@ -712,11 +741,12 @@ Phase-specific grounding rule:
 ```text
 Phase 1 capability capture may create standalone API request code only after fresh official-doc extraction in the same phase report.
 Phase 1 dry-run mode must not make live calls and must still write/validate the official-source extraction summary.
-Phase 1 live capture must require --live, GOVEE_API_KEY in the environment, Supervisor approval of the exact command, short timeouts, and sanitized evidence.
+Phase 1 live capture must require --live, GOVEE_API_KEY in the environment, Supervisor approval of the exact command, 2.0 second request timeouts, and sanitized evidence.
 Phase 2 manual trigger code must refresh or re-check official docs before any control/dynamic-scene request code is written.
 Phase 2 live proof must use only documented request shapes and must record sanitized evidence of what was attempted.
 Phase 3 bridge skeleton must not perform real Govee API calls.
-Phase 5 bridge transport may perform real Govee calls only behind config/capability gates and a bounded worker-owned I/O path.
+Phase 5 may implement isolated adapter send logic and mocked tests, but must not create bridge-runtime live Govee output.
+Bridge-runtime live Govee output waits until StateManager-owned manual handling after the Phase 6 gate.
 ```
 
 Third-party libraries may be used later only after the official API contract is understood. A library wrapper does not replace official-doc grounding.
@@ -750,12 +780,13 @@ Before Phase 2 manual live proof:
   enabled = false
   dry_run = true
 
-After Phase 2 manual proof and Phase 5 transport gates pass:
+After Phase 2 manual proof, Phase 5 isolated transport tests, and Phase 7 StateManager-owned manual bridge output pass:
   live config may default to enabled = true
   dry_run = false requires explicit live config and capability-backed target mapping
+  automatic role-entry still requires automation_enabled = true and the pre-Phase-8 rehearsal gate
 ```
 
-That preserves dry-run safety for early phases while matching the user-selected posture that Govee output should be enabled by default once bridge integration is proven.
+That preserves dry-run safety for early phases while matching the user-selected posture that Govee output may be enabled by default once StateManager-owned bridge integration is proven.
 
 Secret posture:
 
@@ -781,83 +812,95 @@ password
 
 ---
 
-## 15. Conceptual Config Sections
+## 15. Minimal v1 Config Schema
 
-Do not include exact schema yet, but the config should eventually cover:
+Do not let the schema emerge accidentally during implementation. The v1 config should start with this minimal shape and add fields only when a phase requires them.
 
-```text
-global settings
+```json
+{
+  "schema_version": 1,
+  "enabled": false,
+  "dry_run": true,
+  "automation_enabled": false,
+  "targets": {
+    "room_perimeter": {
+      "label": "Room perimeter",
+      "device_ref": "redacted-or-operator-local-id",
+      "expected_model": "H612D",
+      "control_route": "govee_platform",
+      "capabilities": ["scene", "color", "brightness", "off"]
+    }
+  },
+  "looks": {
+    "room_safe_default": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "operator_scene_name_or_id",
+      "fallback": "room_blackout",
+      "safety_class": "safe",
+      "brightness": 35,
+      "allow_strobe": false
+    },
+    "room_blackout": {
+      "target": "room_perimeter",
+      "action": "off",
+      "safety_class": "blackout",
+      "brightness": 0,
+      "allow_strobe": false
+    }
+  },
+  "banks": {
+    "default": {
+      "ambient": ["room_safe_default"],
+      "groove": ["room_safe_default"],
+      "buildup": ["room_safe_default"],
+      "pre_drop": ["room_safe_default"],
+      "drop": ["room_safe_default"],
+      "post_drop": ["room_safe_default"],
+      "breakdown": ["room_safe_default"],
+      "utility": ["room_safe_default", "room_blackout"]
+    }
+  },
+  "safe_default": "room_safe_default",
+  "blackout": "room_blackout",
+  "rate_limits": {
+    "queue_maxsize": 8,
+    "scene_retrigger_cooldown_s": 4.0,
+    "high_impact_cooldown_s": 12.0,
+    "request_timeout_s": 2.0,
+    "worker_shutdown_timeout_s": 1.0
+  },
+  "safety": {
+    "max_brightness": 70,
+    "allow_strobe": false,
+    "max_strobe_duration_ms": 750,
+    "high_impact_cooldown_s": 12.0,
+    "drop_flash_duration_ms": 750,
+    "emergency_blackout_always_available": true,
+    "scripted_mode_automation": false
+  }
+}
 ```
 
-- enabled
-- dry run
-- default personality
-- rate limit posture
-- safety defaults
+Validation rules:
 
 ```text
-targets
+enabled, dry_run, and automation_enabled are required booleans.
+dry_run=false requires enabled=true, a non-empty target map, capability-backed look mappings, and GOVEE_API_KEY in the environment at runtime.
+automation_enabled=true is invalid until the pre-Phase-8 rehearsal gate passes.
+targets must not contain API keys, auth headers, bearer tokens, passwords, or realistic secrets.
+looks must reference existing targets.
+banks must reference existing looks.
+safe_default and blackout must reference existing looks.
+queue_maxsize defaults to 8 and must not exceed 16.
+request_timeout_s defaults to 2.0 and must be finite and positive.
+worker_shutdown_timeout_s defaults to 1.0 and must be finite and positive.
+scene_retrigger_cooldown_s defaults to 4.0.
+high_impact_cooldown_s defaults to 12.0.
+max_brightness must clamp output brightness before dispatch.
+allow_strobe=false disables strobe-like looks even if a bank references them.
+emergency_blackout_always_available must remain true in v1.
 ```
-
-- Govee device or zone references
-- target names
-- optional group/zone labels
-- expected model/SKU where useful
-- preferred control route where useful
-
-```text
-looks
-```
-
-- bridge-level LED look names
-- role
-- energy
-- color family
-- motion type
-- safety class
-- Govee scene reference or fallback basic action
-- fallback look
-- operator label
-
-```text
-personalities
-```
-
-- house
-- bass house
-- dubstep
-- trap
-- techno
-- hard techno
-- default
-
-Each personality can define banks.
-
-```text
-banks
-```
-
-- ambient bank
-- groove bank
-- buildup bank
-- pre-drop bank
-- drop bank
-- post-drop bank
-- breakdown bank
-- utility bank
-
-```text
-safety
-```
-
-- blackout look
-- safe default look
-- strobe allowance
-- minimum time between high-impact looks
-- brightness/intensity posture
-- maximum room-impact duration
-
-Again: no exact schema yet. This is the planning shape.
 
 ---
 
@@ -1122,6 +1165,14 @@ Notes:
 
 Manual control is required from the first backend version.
 
+The first v1 operator surface is only:
+
+```text
+/tmp/rb_ss_bridge_v2_commands.jsonl
+```
+
+Do not build UI, MIDI, keyboard, or multiple operator surfaces early. Those remain optional future work after the JSONL path, StateManager ownership, blackout recovery, and rehearsal gate are proven.
+
 Conceptual manual actions:
 
 ```text
@@ -1143,7 +1194,7 @@ emergency blackout
   > default / safe state
 ```
 
-The bridge should eventually expose these through a UI, but the backend command path should come first.
+The bridge may eventually expose these through a UI, but the JSONL backend command path comes first.
 
 Manual control must be useful during a real show. The operator should not need to open the Govee app mid-set for normal trigger, blackout, or recovery actions.
 
@@ -1206,6 +1257,9 @@ scene_capability_missing
 scene_unavailable
 adapter_error
 rate_limited
+queue_full
+automation_gated
+rehearsal_gate_missing
 ok
 ```
 
@@ -1213,7 +1267,7 @@ ok
 
 ## 21. Startup Flow
 
-High-level startup:
+High-level startup after the StateManager-owned bridge integration phase:
 
 ```text
 1. Load LED config.
@@ -1221,7 +1275,7 @@ High-level startup:
 3. If invalid, mark LED unavailable and continue.
 4. If valid, build LEDLookDirector.
 5. Build GoveeSceneAdapter.
-6. Start adapter worker thread if appropriate.
+6. Start adapter worker thread only when the active phase and config permit it.
 7. Run target/scene/capability discovery outside the hot path.
 8. Attach LED status provider.
 9. Continue normal bridge startup.
@@ -1237,7 +1291,7 @@ Discovery may run asynchronously or in a bounded startup-safe way. It should not
 
 ## 22. Runtime Flow
 
-Automatic runtime flow:
+Automatic runtime flow after the automation phase opens:
 
 ```text
 StateManager computes current bridge context.
@@ -1251,7 +1305,7 @@ Adapter worker sends command.
 Status updates.
 ```
 
-Manual runtime flow:
+Manual runtime flow after the StateManager gate opens:
 
 ```text
 Operator command arrives.
@@ -1260,6 +1314,40 @@ Bridge sets manual LED override or blackout state.
 LEDLookDirector produces manual/emergency decision.
 GoveeSceneAdapter queues selected look.
 Adapter worker sends command.
+```
+
+Default inert behavior:
+
+```text
+not playing:
+  no automatic LED command
+
+stale position:
+  no automation
+
+unknown phrase or missing SmartPhrasing context:
+  keep current safe/default look or do nothing; do not guess a high-impact look
+
+queue full:
+  reject/drop the command, increment visible degraded/drop counter, do not block
+
+adapter unavailable/degraded:
+  LED lane is inert and status-visible; SoundSwitch and lasers continue
+
+unsupported scene or missing capability:
+  disable only affected look; fall back to safe_default or do nothing
+
+invalid config or not_configured:
+  LED lane unavailable; bridge startup continues
+
+scripted mode:
+  manual-only by default; no automatic LED role changes unless explicitly enabled later
+
+automation_enabled=false:
+  manual commands and emergency blackout may work; automatic role-entry is inert
+
+emergency blackout:
+  always available when the LED lane is configured, even if automation is disabled
 ```
 
 ---
@@ -1492,6 +1580,12 @@ avoid sustained full-room strobe
 avoid repeated peak impact triggers too close together
 do not spam on/off for strobe
 do not allow Govee failure to crash bridge
+max_brightness defaults to 70 unless the operator explicitly lowers it
+allow_strobe defaults to false
+max_strobe_duration_ms defaults to 750
+high_impact_cooldown_s defaults to 12
+drop_flash_duration_ms defaults to 750
+emergency blackout remains available regardless of automation_enabled
 ```
 
 Strobe-like looks should be short impact macros.
@@ -1555,7 +1649,7 @@ live output evidence is sanitized
 
 Unit tests should not require live Govee devices.
 
-Standalone diagnostic tools may require operator visual confirmation for real Govee hardware behavior, but those live checks must be opt-in, documented, bounded by timeouts, and sanitized.
+Standalone diagnostic tools may require operator visual confirmation for real Govee hardware behavior, but those live checks must be opt-in, documented, bounded by explicit request timeouts, and sanitized.
 
 ---
 
@@ -1669,10 +1763,11 @@ Authoritative phase map when the orchestrator is present:
 Phase 1: Standalone Govee capability capture
 Phase 2: Standalone manual Govee trigger
 Phase 3: LED bridge skeleton, dry-run/status/config only
-Phase 4: Manual LED runtime command parser/diagnostic path, no StateManager changes
-Phase 5: Real GoveeSceneAdapter transport
+Phase 4: Manual LED JSONL command contract and BridgeEvent parser, no StateManager changes
+Phase 5: Isolated GoveeSceneAdapter transport/config/tests, no bridge runtime wiring
 Phase 6: Hard StateManager gate review
 Phase 7: StateManager LED manual/status ownership, no automation
+Pre-Phase-8 rehearsal gate: manual bridge path and adapter safety evidence
 Phase 8: Automatic LED role-entry triggers behind explicit enable flag
 Phase 9: Rehearsal hardening and docs
 Phase 10: Optional UI planning only
@@ -1874,7 +1969,7 @@ Live calls require explicit Supervisor approval for this phase.
 Live tools must require --live.
 Live tools must require GOVEE_API_KEY in the environment.
 Live tools must never echo the key.
-Timeouts must be bounded.
+Request timeouts default to 2.0 seconds.
 Retries must be conservative and documented.
 Auth failure, rate limit, unavailable target, unsupported scene, or ambiguous capability stops the phase.
 ```
@@ -1933,11 +2028,13 @@ validation_runner.py
 Deliverables:
 
 ```text
-minimal schema for targets, looks, personalities, banks, and safety defaults
+minimal v1 schema for enabled, dry_run, automation_enabled, targets, looks, banks, safe_default, blackout, rate_limits, and safety
 safe/default/blackout look validation
 capability-aware look availability
 bank reference validation
 manual look name validation
+queue/request/shutdown/cooldown bound validation
+strobe/brightness/high-impact safety validation
 example config without secrets
 ```
 
@@ -1986,73 +2083,80 @@ Deliverables:
 allowlisted LED command names
 strict command payload validation
 bounded TTL/clamping where applicable
-clear command-reader last_error on callback failure
+BridgeEvent constants/contracts for later StateManager ownership
+no __main__.py callbacks
+no adapter handoff
+no durable blackout/manual override/auto-resume policy state
 manual blackout command shape
 manual clear-blackout command shape
 manual look command shape
 manual clear-override command shape
-tests for invalid names, invalid TTL, missing fields, unknown command, and callback failure
+tests for invalid names, invalid TTL, missing fields, unknown command, and payload normalization
 ```
 
 Exit criteria:
 
 ```text
 Manual command parsing is safe.
-Queue-full/callback-false behavior is visible and non-fatal.
+No callback, queue, adapter, or live-output path exists yet.
 No automatic LED policy runs.
 No StateManager changes.
 ```
 
-### Supporting Requirement Set 5: Manual Real Govee Output Transport Integration, No StateManager Tick Integration
+### Supporting Requirement Set 5: Isolated GoveeSceneAdapter Transport, No Bridge Runtime Wiring
 
 Goal:
 
 ```text
-Start and expose the Govee adapter as a bridge-side output transport for manual commands only.
+Implement or harden the Govee adapter/config/test layer in isolation.
+Do not start it from the bridge runtime.
 ```
 
 Allowed files:
 
 ```text
-__main__.py
-runtime_status.py
-validation_runner.py
 govee_scene_adapter.py
 led_config.py
 led_models.py
-tests/test_runtime_status.py
-tests/test_validation_runner.py
 tests/test_govee_scene_adapter.py
+tests/test_led_config.py
 ```
 
 Forbidden files:
 
 ```text
 state_manager.py
+__main__.py
+runtime_status.py
+validation_runner.py
 laser_director.py
 laser_executor.py
 midi_output.py
 sound_switch_engine.py
 automatic role-entry policy paths
+tools/govee_*.py
 ```
 
 Deliverables:
 
 ```text
-startup loading of LED config with missing/invalid fail-soft behavior
-adapter worker start/stop with bounded shutdown
-manual command callback that queues adapter work non-blockingly
-status provider including queue depth, degraded state, counters, and capability summary
-validation checks for LED config, adapter worker, queue, and degraded state
-mocked tests for queue-full, degraded adapter, timeout, send error, and status provider failure
+adapter trigger path with default queue maxsize 8 and hard cap 16
+trigger call target under 1 ms after dedupe/rate-limit and put_nowait/reject
+adapter worker start/stop with 1.0 second shutdown timeout
+Govee request timeout default 2.0 seconds
+ordinary scene retrigger cooldown default 4 seconds
+high-impact/drop cooldown default 12 seconds
+drop flash duration max 750 ms
+status dict including queue depth, degraded state, counters, and capability summary
+mocked tests for queue-full, degraded adapter, timeout/send error, malformed response, status, bounds, and shutdown
 ```
 
 Exit criteria:
 
 ```text
-Manual commands can trigger dry-run or approved live Govee output.
-Bridge starts normally when Govee config is missing/invalid.
-Govee failure does not affect SoundSwitch or lasers.
+Adapter/config tests pass in isolation.
+No bridge runtime file starts or exposes the adapter.
+No bridge-side dry-run or live Govee output path exists yet.
 No StateManager changes yet.
 ```
 
@@ -2061,7 +2165,7 @@ No StateManager changes yet.
 Goal:
 
 ```text
-Make StateManager aware of LEDLookDirector only after standalone proof and manual transport are safe.
+Make StateManager aware of LEDLookDirector only after standalone proof and isolated transport tests are safe.
 Do not add automatic role-entry triggering yet.
 ```
 
@@ -2093,6 +2197,7 @@ Deliverables:
 ```text
 StateManager accepts optional LEDLookDirector/adapter dependencies
 manual/emergency LED state is owned by StateManager event thread where needed
+first bridge-runtime adapter output path is StateManager-owned manual command handling only
 adapter trigger calls are bounded and non-blocking
 status includes LED layer without breaking existing status keys
 tests prove _push_tick does not call Govee client/network methods
@@ -2108,12 +2213,43 @@ Manual override and blackout priorities are correct.
 Existing laser and OS2L tests still pass.
 ```
 
+### Supporting Requirement Set 6.5: Pre-Automation Manual Rehearsal Gate
+
+Goal:
+
+```text
+Prove manual bridge control and LED failure isolation before automatic role-entry begins.
+```
+
+Required evidence:
+
+```text
+manual scene trigger works through the JSONL command path
+manual blackout/off works through the JSONL command path
+clear blackout works and does not clear unrelated manual state incorrectly
+adapter failure, timeout, degraded state, and queue-full do not affect SoundSwitch or lasers
+no command spam occurs during a realistic manual run
+Govee latency is acceptable for section-level room cues, not beat/frame precision
+status exposes queue depth, degraded reason, last error, dry_run/live state, and capability state without secrets
+emergency blackout remains available even when automation is disabled
+```
+
+Exit criteria:
+
+```text
+Supervisor explicitly confirms:
+PHASE APPROVED - PRE-AUTOMATION REHEARSAL GATE PASSED
+```
+
+Without that exact gate result, Supporting Requirement Set 7 must not begin.
+
 ### Supporting Requirement Set 7: Automatic Role-Entry Triggers Behind Explicit Enable Flag
 
 Goal:
 
 ```text
 Add automatic LED role-entry triggering without command spam.
+Requires the Pre-Automation Manual Rehearsal Gate to have passed.
 ```
 
 Allowed files:
@@ -2256,7 +2392,7 @@ capability cache
 Exit criteria:
 
 ```text
-Only begin optional future work after manual live output, StateManager wiring, automatic role-entry, rehearsal validation, and rollback docs are complete.
+Only begin optional future work after JSONL manual live output, StateManager wiring, pre-automation rehearsal validation, automatic role-entry, and rollback docs are complete.
 ```
 
 ---
@@ -2384,9 +2520,10 @@ Before manual live proof:
   enabled = false
   dry_run = true
 
-After manual proof and real adapter transport pass:
+After manual proof, isolated adapter tests, StateManager-owned manual bridge output, and the pre-automation rehearsal gate pass:
   live config may default to enabled = true
   dry_run = false requires explicit live config and capability-backed target mapping
+  automation_enabled must remain false until Phase 8 explicitly opens automation
 ```
 
 Hard gate:
@@ -2394,7 +2531,7 @@ Hard gate:
 ```text
 Do not touch state_manager.py before the orchestrator Phase 6 gate explicitly opens StateManager LED changes.
 Do not run live Govee calls before Phase 2 Supervisor approval.
-Do not enable automatic role-entry before orchestrator Phase 8.
+Do not enable automatic role-entry before the pre-Phase-8 rehearsal gate and orchestrator Phase 8 approval.
 ```
 
 ---
@@ -2506,7 +2643,7 @@ How should brightness caps be represented?
 Should strobe looks require explicit high-impact enable?
 Should LED mapping live inside the existing Laser Pad UI later?
 Should scene discovery be cached locally?
-Should manual controls be keyboard, MIDI, web UI, or all three?
+Which optional control surface, if any, should follow the v1 JSONL command path later?
 Should an external govee_worker process be added only after adapter testing?
 ```
 
