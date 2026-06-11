@@ -84,7 +84,7 @@ Evidence and handoff docs:
 
 - `docs/validation/live_bpm_findings.md`
 - `docs/history/live_bpm_handoff.md`
-- `docs/bridge_design.md` Live BPM section
+- `docs/architecture/bridge_design.md` Live BPM section
 
 Current TL-retirement interpretation:
 
@@ -360,7 +360,7 @@ Already covered:
 - `rb_offsets.py` / `rb_state_reader.py` already carry shipped TL-style chains
   for master, live BPM, live position, and track info on supported Rekordbox
   versions
-- `docs/bridge_design.md` documents the current `rb_memory.py` Deck-2 scan and
+- `docs/architecture/bridge_design.md` documents the current `rb_memory.py` Deck-2 scan and
   validation behavior
 
 Next:

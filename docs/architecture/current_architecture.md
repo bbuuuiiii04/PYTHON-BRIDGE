@@ -3,7 +3,7 @@
 Status: CURRENT AUTHORITATIVE
 
 Audited against the current checkout on 2026-05-12. Treat code as the source of
-truth; `docs/bridge_design.md` is the detailed companion reference.
+truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
 
@@ -119,14 +119,16 @@ existing TL/MTC/current path.
 
 ## Documentation Map
 
-Use `docs/doc_index.md` for the full classification. In short:
+Use `docs/architecture/doc_index.md` for the full classification. In short:
 
-- Current truth: `README.md`, this file, `docs/bridge_design.md`,
-  `docs/runtime_invariants.md`.
-- Offline ANLZ energy tooling: `docs/anlz_energy_project.md`,
-  `docs/re/anlz_waveform_tag_inventory.md`,
+- Current truth: `README.md`, this file, `docs/architecture/bridge_design.md`,
+  `docs/architecture/runtime_invariants.md`.
+- Offline ANLZ energy tooling: `docs/research/anlz_energy_project.md`,
+  `docs/research/anlz_waveform_tag_inventory.md`,
   `docs/validation/anlz_energy_evaluation_guide.md`.
 - Current supporting details: `docs/subsystems/`.
-- Laser policy/scene detail: `docs/laser_director_design.md`.
+- Laser policy/scene detail: `docs/architecture/laser_director_design.md`.
+- Active and deferred plans: `docs/plans/`.
+- Agent prompts and review prompts: `docs/prompts/`.
 - Validation evidence: `docs/validation/`.
-- Rollout history and stale implementation prompts: `docs/history/`.
+- Rollout history: `docs/history/`.

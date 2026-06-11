@@ -69,12 +69,16 @@ class _Harness:
         }
         self.direct_calls: list[tuple[tuple, dict]] = []
         self.clear_calls: list[int] = []
+        self.hold_calls: list[str] = []
+        self.release_calls: list[str] = []
         self.direct_return = True
         self.coordinator = SmartRearmCoordinator(
             output_state_ref=lambda: self.os,
             deck_ref=lambda d: self.deck[d],
             send_direct_autoloop_rearm=self._send_direct,
             send_smart_transition_clear=self._send_clear,
+            hold_blackout_mask=self._hold_mask,
+            release_blackout_mask=self._release_mask,
         )
 
     def ctx(
@@ -113,6 +117,12 @@ class _Harness:
 
     def _send_clear(self, active: int) -> None:
         self.clear_calls.append(active)
+
+    def _hold_mask(self, owner: str) -> None:
+        self.hold_calls.append(owner)
+
+    def _release_mask(self, owner: str) -> None:
+        self.release_calls.append(owner)
 
 
 class SmartRearmDropTests(unittest.TestCase):
@@ -271,7 +281,7 @@ class SmartRearmDropTests(unittest.TestCase):
 
 
 class SmartRearmBreakdownTests(unittest.TestCase):
-    def test_breakdown_start_clears_and_sets_restore_state(self) -> None:
+    def test_breakdown_start_holds_blackout_mask_and_sets_restore_state(self) -> None:
         h = _Harness()
         result = h.tick(
             _sp_state(breakdown_start_crossing=True, breakdown_restore_beat=64.0),
@@ -281,6 +291,26 @@ class SmartRearmBreakdownTests(unittest.TestCase):
         self.assertFalse(result.breakdown_fired)
         self.assertTrue(h.os.breakdown_active)
         self.assertEqual(h.os.breakdown_restore_beat, 64)
+        self.assertEqual(h.hold_calls, ["breakdown"])
+        self.assertEqual(h.clear_calls, [])
+        self.assertEqual(h.direct_calls, [])
+
+    def test_breakdown_legacy_start_clears_and_sets_restore_state(self) -> None:
+        h = _Harness()
+        result = h.tick(
+            _sp_state(breakdown_start_crossing=True, breakdown_restore_beat=64.0),
+            h.ctx(
+                smart_breakdown_enabled=True,
+                this_beat=32,
+                elapsed_ms=16_000,
+                blackout_mode=False,
+            ),
+        )
+
+        self.assertFalse(result.breakdown_fired)
+        self.assertTrue(h.os.breakdown_active)
+        self.assertEqual(h.os.breakdown_restore_beat, 64)
+        self.assertEqual(h.hold_calls, [])
         self.assertEqual(h.clear_calls, [1])
         self.assertEqual(h.direct_calls, [])
 
@@ -298,6 +328,7 @@ class SmartRearmBreakdownTests(unittest.TestCase):
         self.assertFalse(h.os.breakdown_active)
         self.assertEqual(h.os.breakdown_restore_beat, 0)
         self.assertEqual(h.os.phrase_anchor_last_beat, 64)
+        self.assertEqual(h.release_calls, ["breakdown"])
         self.assertEqual(
             h.direct_calls,
             [((1, 2, 128.0, 32_000, "smart-breakdown"), {"target_beat": 64})],

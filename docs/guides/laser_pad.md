@@ -83,7 +83,7 @@ Open `http://127.0.0.1:8765`.
 - `POST /api/history/<name>/restore`
 - `GET /api/midi_ports`
 
-Historical parity notes are maintained in `docs/laser_pad_parity.md`.
+Historical parity notes are maintained in `docs/guides/laser_pad_parity.md`.
 
 ## Verification
 

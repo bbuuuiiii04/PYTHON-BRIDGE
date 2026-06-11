@@ -2,21 +2,43 @@
 
 Status: Required Integration Plan / Architecture Reference
 Target repo context: `rb_ss_bridge_v2` / Rekordbox → SoundSwitch bridge
-Required companion orchestrator: `docs/led_agent_orchestrator_workflow.md`
-Repo path when promoted with orchestrator: `docs/led_look_director_integration_plan_revised.md`
+Required companion orchestrator: `docs/plans/led_agent_orchestrator_workflow.md`
+Repo path when promoted with orchestrator: `docs/plans/led_look_director_integration_plan_revised.md`
 Precedence: this plan is required for architecture/design context; the orchestrator controls phase order, gates, allowed files, forbidden files, stop conditions, and agent prompts. If either document is stricter about secrets, hot-path safety, StateManager boundaries, or Govee API grounding, apply the stricter rule.
 Revision focus: Incorporates architecture corrections from review, especially around `StateManager`, non-blocking output transports, Govee capability discovery, official Govee API grounding, secrets handling, and phase-gated automation safety.
 
-Use this document together with the orchestrator. Do not use this document's phase section as the controlling execution schedule when `docs/led_agent_orchestrator_workflow.md` is present. If there is a conflict, the orchestrator wins for execution control; the stricter safety rule wins for architecture, secrets, hot-path behavior, StateManager boundaries, and Govee API grounding.
+Use this document together with the orchestrator. Do not use this document's phase section as the controlling execution schedule when `docs/plans/led_agent_orchestrator_workflow.md` is present. If there is a conflict, the orchestrator wins for execution control; the stricter safety rule wins for architecture, secrets, hot-path behavior, StateManager boundaries, and Govee API grounding.
 
 Before automation begins, both repo-local documents must exist:
 
 ```text
-docs/led_agent_orchestrator_workflow.md
-docs/led_look_director_integration_plan_revised.md
+docs/plans/led_agent_orchestrator_workflow.md
+docs/plans/led_look_director_integration_plan_revised.md
 ```
 
 If either document is missing, the automation loop must stop before Phase 1 rather than continuing from memory, copied paths, or stale Desktop/Downloads files.
+
+## 0. Implementation Readiness Verdict
+
+This plan is ready to hand to an implementation agent only when paired with `docs/plans/led_agent_orchestrator_workflow.md`. The orchestrator is the controlling execution document. This integration plan supplies the architecture, creative model, repo-local contracts, config/status/validation expectations, and risk rationale.
+
+Readiness constraints:
+
+```text
+Ready for Phase 1:
+  yes, if the orchestrator is present and the agent follows its phase gates.
+
+Ready for direct bridge implementation:
+  no, not until standalone Govee capability capture and manual live proof pass.
+
+Ready for StateManager changes:
+  no, not until the Phase 6 StateManager gate is explicitly approved.
+
+Ready for automatic LED role-entry:
+  no, not until Phase 7 StateManager manual/status ownership is implemented and approved.
+```
+
+The implementation path must minimize human interruption. Human/operator input is limited to physical LEDs, Govee account/environment setup, Govee app scene creation when required, and visual confirmation of actual LED behavior. Code review, phase approval, rollback decisions, test interpretation, file-scope policing, and API-shape interpretation are AI Supervisor responsibilities.
 
 ---
 
@@ -86,7 +108,7 @@ LEDLookDirector = what should the room feel like?
 GoveeSceneAdapter = safely tell Govee to do it.
 ```
 
-This separation matters because Govee API/network behavior must never contaminate bridge timing. Consumer smart-home lights are already enough of a little circus without letting them block the 200 Hz loop like they own the venue.
+This separation matters because Govee API/network behavior must never contaminate bridge timing. Consumer smart-home lights are latency-prone enough without letting them block the 200 Hz loop.
 
 ---
 
@@ -253,7 +275,7 @@ Musical role enters: drop
   → optional compatibility rules later keep them from clashing
 ```
 
-The systems should be coordinated by musical context, not welded together. Welding them together is how a lighting rig becomes a very expensive screensaver with bass.
+The systems should be coordinated by musical context, not welded together. Fixed one-to-one pairings would reduce variety and make the room layer repetitive.
 
 ---
 
@@ -292,6 +314,49 @@ StateManager must not perform Govee network/API calls.
 ```
 
 The Govee adapter owns slow I/O.
+
+### Repo-Local Integration Contracts
+
+The current bridge already has the patterns the LED lane should reuse.
+
+```text
+Bounded output transport:
+  midi_output.MidiOutput is the implementation model.
+  Public trigger methods return quickly after put_nowait-style queueing or rejection.
+  Worker threads own slow I/O and shutdown is bounded.
+
+Runtime commands:
+  runtime_status.CommandReader parses /tmp/rb_ss_bridge_v2_commands.jsonl.
+  __main__.py callbacks enqueue BridgeEvent instances with put_nowait.
+  models.Ev owns event kind constants.
+  state_manager.StateManager._handle_event owns durable runtime policy state.
+
+Runtime status:
+  runtime_status.StatusWriter takes safe provider callbacks.
+  Provider exceptions become degraded/default status blocks.
+  Status writing must not expose secrets or call Govee network paths.
+
+Validation:
+  validation_runner.ValidationRunner may inspect config results, adapter status, and queue/degraded counters.
+  Validation must not perform live Govee API calls.
+
+StateManager:
+  _push_tick may build a small immutable LED context from values already computed for SoundSwitch/laser policy.
+  _push_tick may call LEDLookDirector.tick(...) and GoveeSceneAdapter.trigger(...) only after the StateManager gate opens.
+  _push_tick must not call Govee client methods, adapter status(), config loaders, file I/O, DNS, network I/O, sleeps, retries, subprocesses, or blocking queue operations.
+```
+
+Manual command ownership is deliberately split by phase:
+
+```text
+Before the StateManager gate:
+  parse commands, validate payloads, report status, and optionally queue one diagnostic/manual adapter command through a bounded path.
+  do not create long-lived manual override, blackout latch, or auto-resume state outside StateManager.
+
+After the StateManager gate:
+  StateManager-side LED policy objects may own manual override, blackout, and clear semantics.
+  automatic role-entry still waits for the later automation phase.
+```
 
 ---
 
@@ -384,7 +449,7 @@ This can be useful if:
 - stronger crash isolation is needed
 - the Govee layer becomes complex enough to deserve its own runtime
 
-Do not start with the external process unless live testing proves the internal adapter is too risky. Adding another process too early is how “reliability” turns into another thing to supervise, restart, log, and emotionally resent.
+Do not start with the external process unless live testing proves the internal adapter is too risky. Adding another process too early adds supervision, restart, logging, and deployment overhead before there is evidence it is needed.
 
 ---
 
@@ -426,12 +491,15 @@ Conceptual models:
 
 - `LEDLook`
 - `LEDPersonality`
+- `LEDContext`
 - `LEDLookDecision`
 - `LEDLookStatus`
 - `LEDTarget`
 - `LEDAdapterStatus`
 
-No need to over-model at first. Start boring. Boring code survives.
+No need to over-model at first. Keep the v1 model surface small and explicit.
+
+`LEDContext` should mirror the laser-side boundary style: a small immutable snapshot built from values StateManager already computed for the current tick. It may include active deck, playing state, elapsed time, BPM, beat position, lighting mode, scripted id, active-track-loaded flag, stale-position flag, and SmartPhrasing state. It must not carry mutable `DeckState`, `OutputState`, adapter instances, config loaders, Govee client objects, or anything that requires I/O to inspect.
 
 ### `led_config.py`
 
@@ -539,7 +607,7 @@ Dry-run still works.
 Status clearly reports scene capability missing.
 ```
 
-Supported model list is a good sign. It is not a blank check from the LED gods.
+Supported model list is a useful signal. It is not proof that the exact paired device exposes the scene controls needed for this integration.
 
 ---
 
@@ -577,7 +645,7 @@ The creative target remains scene/effect triggering, but the system must survive
 
 ---
 
-## Govee API Reference Grounding Requirements
+### Govee API Reference Grounding Requirements
 
 This workflow is not enough by itself to write Govee API code.
 
@@ -617,7 +685,7 @@ device status formats
 rate-limit/error semantics
 ```
 
-Before Phase 2 live code exists, the agent must produce a short source-grounding note in the phase output that extracts from the official docs:
+Before Phase 1 API code is accepted, the agent must produce a short source-grounding note in the phase output that extracts from the official docs:
 
 ```text
 base URL
@@ -642,10 +710,13 @@ Official examples are not exempt from the secrets rule. Any copied or summarized
 Phase-specific grounding rule:
 
 ```text
-Phase 1 may define dry-run models and interfaces only.
-Phase 1 must not hard-code live endpoint paths/payloads unless they were extracted from official docs in the same phase report.
-Phase 2 must inspect official docs before any live discovery/manual trigger code is written.
+Phase 1 capability capture may create standalone API request code only after fresh official-doc extraction in the same phase report.
+Phase 1 dry-run mode must not make live calls and must still write/validate the official-source extraction summary.
+Phase 1 live capture must require --live, GOVEE_API_KEY in the environment, Supervisor approval of the exact command, short timeouts, and sanitized evidence.
+Phase 2 manual trigger code must refresh or re-check official docs before any control/dynamic-scene request code is written.
 Phase 2 live proof must use only documented request shapes and must record sanitized evidence of what was attempted.
+Phase 3 bridge skeleton must not perform real Govee API calls.
+Phase 5 bridge transport may perform real Govee calls only behind config/capability gates and a bounded worker-owned I/O path.
 ```
 
 Third-party libraries may be used later only after the official API contract is understood. A library wrapper does not replace official-doc grounding.
@@ -668,7 +739,7 @@ Reason:
 - LED scenes are not MIDI notes.
 - Govee targets are not SoundSwitch fixtures.
 - room safety rules are different from laser safety rules.
-- Govee scene IDs/device IDs are their own mess.
+- Govee scene IDs and device IDs have their own lifecycle and validation rules.
 - LED mapping should not bloat laser mapping.
 - lasers and room LEDs are separate creative systems.
 
@@ -911,7 +982,7 @@ room_drop_fast_runner
 room_drop_short_strobe
 ```
 
-Drop scenes should usually be short. Since the LEDs wrap the crowd, do not make every drop a full-room strobe assault. Somehow humans enjoy retinas.
+Drop scenes should usually be short. Since the LEDs wrap the crowd, do not make every drop a full-room strobe or peak-brightness event.
 
 ### Post-Drop Bank
 
@@ -1074,7 +1145,7 @@ emergency blackout
 
 The bridge should eventually expose these through a UI, but the backend command path should come first.
 
-Manual control must be useful during a real show. Nobody should have to open the Govee app mid-set like some kind of RGB hostage negotiator.
+Manual control must be useful during a real show. The operator should not need to open the Govee app mid-set for normal trigger, blackout, or recovery actions.
 
 ---
 
@@ -1319,7 +1390,7 @@ room_drop_white_burst
   → back_wall: red chase
 ```
 
-Do not require zones in v1, but avoid designing the config so narrowly that zones are impossible later. Present-you should be less rude to future-you, a radical concept.
+Do not require zones in v1, but avoid designing the config so narrowly that zones are impossible later.
 
 ---
 
@@ -1425,7 +1496,7 @@ do not allow Govee failure to crash bridge
 
 Strobe-like looks should be short impact macros.
 
-The room should feel exciting, not like everyone has been trapped inside a haunted printer.
+The room should feel exciting while remaining comfortable and controllable.
 
 ---
 
@@ -1484,7 +1555,7 @@ live output evidence is sanitized
 
 Unit tests should not require live Govee devices.
 
-Standalone diagnostic tools may be manually verified when they require real Govee hardware, but those live checks must be opt-in, documented, bounded by timeouts, and sanitized.
+Standalone diagnostic tools may require operator visual confirmation for real Govee hardware behavior, but those live checks must be opt-in, documented, bounded by timeouts, and sanitized.
 
 ---
 
@@ -1550,7 +1621,7 @@ Initial operator workflow:
 10. Test manual LED scene command.
 11. Test manual blackout/off.
 12. Watch runtime status.
-13. Enable real adapter only after Opus supervisor approval.
+13. Enable real adapter only after Supervisor approval.
 14. Test scene triggering with one track.
 15. Enable role-entry automation behind explicit flag.
 16. Rehearse before event use.
@@ -1586,18 +1657,36 @@ But initial integration should not depend on the UI.
 
 ---
 
-## 36. Reference Phase Gates And Automation Safety Requirements
+## 36. Supporting Gate And Automation Safety Requirements
 
-When this integration plan is used without the standalone orchestrator, this section can serve as a reference safety scaffold. When `docs/led_agent_orchestrator_workflow.md` is present, the orchestrator controls phase order, gates, allowed files, forbidden files, stop conditions, and agent prompts; this section provides supporting safety requirements and rationale.
+When this integration plan is used without the standalone orchestrator, this section can serve as a reference safety scaffold. When `docs/plans/led_agent_orchestrator_workflow.md` is present, the orchestrator controls phase order, gates, allowed files, forbidden files, stop conditions, and agent prompts; this section provides supporting safety requirements and rationale.
 
-Supervisor means the Opus supervisor agent, not the human operator.
+Supervisor means the Supervisor agent, not the human operator.
+
+Authoritative phase map when the orchestrator is present:
+
+```text
+Phase 1: Standalone Govee capability capture
+Phase 2: Standalone manual Govee trigger
+Phase 3: LED bridge skeleton, dry-run/status/config only
+Phase 4: Manual LED runtime command parser/diagnostic path, no StateManager changes
+Phase 5: Real GoveeSceneAdapter transport
+Phase 6: Hard StateManager gate review
+Phase 7: StateManager LED manual/status ownership, no automation
+Phase 8: Automatic LED role-entry triggers behind explicit enable flag
+Phase 9: Rehearsal hardening and docs
+Phase 10: Optional UI planning only
+Phase 11: Optional external worker only if evidence requires it
+```
+
+The detailed requirement sets below are not phase numbers when the orchestrator is present. Use them only as supporting requirements and rationale.
 
 The expected automation shape is:
 
 ```text
 Cursor/Codex implementation agent performs the phase work.
-Opus supervisor agent reviews phase output, diffs, tests, and evidence.
-Opus supervisor agent approves, rejects, or requests revisions.
+Supervisor agent reviews phase output, diffs, tests, and evidence.
+Supervisor agent approves, rejects, or requests revisions.
 Implementation agent revises until the phase gate passes.
 Human/operator input is requested only for physical or account/environment preconditions the agents cannot perform.
 ```
@@ -1606,7 +1695,7 @@ Human/operator input boundary:
 
 ```text
 May request: place/power/pair LED strips, create/select scenes in the Govee app if not API-accessible, confirm observed physical light behavior, make GOVEE_API_KEY available in the runtime environment without revealing it, or fix external account/network/hardware state.
-Must not request: ordinary code review, phase approval, test interpretation, rollback decision, file-scope policing, API-shape guessing, or bridge architecture decisions that Opus can decide from evidence.
+Must not request: ordinary code review, phase approval, test interpretation, rollback decision, file-scope policing, API-shape guessing, or bridge architecture decisions that the Supervisor can decide from evidence.
 ```
 
 General rules for every phase:
@@ -1615,8 +1704,8 @@ General rules for every phase:
 Do not implement work from a later phase.
 Do not touch files outside the phase allowlist.
 Do not touch forbidden files.
-Do not create branches or commits unless the Opus supervisor explicitly asks.
-Do not run live Govee API calls unless the phase allows live calls and the Opus supervisor explicitly approves live testing.
+Do not create branches or commits unless the Supervisor explicitly asks.
+Do not run live Govee API calls unless the phase allows live calls and the Supervisor explicitly approves live testing.
 Do not request, print, log, persist, or expose GOVEE_API_KEY.
 Do not place secrets in config files, docs, fixtures, status JSON, screenshots, or command logs.
 Do not guess API details.
@@ -1638,15 +1727,15 @@ open blockers
 rollback instructions for only this phase's changes
 ```
 
-Opus supervisor rejection rules:
+Supervisor rejection rules:
 
 ```text
-Reject if state_manager.py is touched before Phase 6.
+Reject if state_manager.py is touched before the orchestrator Phase 6 gate explicitly opens StateManager LED changes.
 Reject if any secret appears in a file, log excerpt, status fixture, screenshot, or command example.
 Reject if API endpoint/payload/header details are added without citing official docs inspected in that phase.
 Reject if bridge runtime files are changed in standalone phases.
 Reject if tests are missing for runtime behavior changed in that phase.
-Reject if live Govee calls run without explicit Opus supervisor approval.
+Reject if live Govee calls run without explicit Supervisor approval.
 Reject if the agent claims unsupported capability should work anyway.
 ```
 
@@ -1655,19 +1744,19 @@ Rollback rule:
 ```text
 Rollback means revert only the current phase's edits.
 Do not clean unrelated dirty files.
-Do not delete operator-generated config/backups/artifacts unless explicitly directed by the Opus supervisor after confirming scope.
+Do not delete operator-generated config/backups/artifacts unless explicitly directed by the Supervisor after confirming scope.
 If a phase fails, stop with a failure report rather than pushing speculative fixes into the next phase.
 ```
 
 Important execution note:
 
 ```text
-The reference phases below are not the controlling Cursor execution schedule when docs/led_agent_orchestrator_workflow.md is present.
-Use them only as supporting safety/design rationale.
+The supporting requirement sets below are not the controlling Cursor execution schedule when docs/plans/led_agent_orchestrator_workflow.md is present.
+Use them only as supporting safety/design rationale; the orchestrator phase map above controls execution.
 For actual phase order, file allowlists, forbidden files, gates, and prompts, follow the orchestrator.
 ```
 
-### Reference Phase 1: Standalone Dry-Run Foundation
+### Supporting Requirement Set 1: Standalone Dry-Run Foundation
 
 Goal:
 
@@ -1688,7 +1777,7 @@ config/led_look_director.example.json
 tests/test_led_config.py
 tests/test_led_look_director.py
 tests/test_govee_scene_adapter.py
-docs/led_agent_orchestrator_workflow.md
+docs/plans/led_agent_orchestrator_workflow.md
 ```
 
 Forbidden files:
@@ -1732,7 +1821,7 @@ Dry-run adapter trigger returns immediately after queueing or rejecting.
 Config validation rejects secret-like keys.
 ```
 
-### Reference Phase 2: Standalone Official API Grounding, Capability Capture, And Manual Live Proof
+### Supporting Requirement Set 2: Standalone Official API Grounding, Capability Capture, And Manual Live Proof
 
 Goal:
 
@@ -1781,7 +1870,7 @@ Live-call rules:
 
 ```text
 Default is no live calls.
-Live calls require explicit Opus supervisor approval for this phase.
+Live calls require explicit Supervisor approval for this phase.
 Live tools must require --live.
 Live tools must require GOVEE_API_KEY in the environment.
 Live tools must never echo the key.
@@ -1811,7 +1900,7 @@ No secrets written anywhere.
 Failure does not crash the tool.
 ```
 
-### Reference Phase 3: LED Look Config And Banks, No Runtime Wiring
+### Supporting Requirement Set 3: LED Look Config And Banks, No Runtime Wiring
 
 Goal:
 
@@ -1862,7 +1951,7 @@ The schema leaves room for multiple zones later.
 No runtime bridge wiring exists yet.
 ```
 
-### Reference Phase 4: Manual Command Contract And Parser, No Automatic Runtime Wiring
+### Supporting Requirement Set 4: Manual Command Contract And Parser, No Automatic Runtime Wiring
 
 Goal:
 
@@ -1877,7 +1966,7 @@ runtime_status.py
 models.py
 tests/test_runtime_status.py
 tests/test_led_runtime_commands.py
-docs/led_agent_orchestrator_workflow.md
+docs/plans/led_agent_orchestrator_workflow.md
 ```
 
 Forbidden files:
@@ -1914,7 +2003,7 @@ No automatic LED policy runs.
 No StateManager changes.
 ```
 
-### Reference Phase 5: Manual Real Govee Output Transport Integration, No StateManager Tick Integration
+### Supporting Requirement Set 5: Manual Real Govee Output Transport Integration, No StateManager Tick Integration
 
 Goal:
 
@@ -1967,7 +2056,7 @@ Govee failure does not affect SoundSwitch or lasers.
 No StateManager changes yet.
 ```
 
-### Reference Phase 6: StateManager Manual/Status Wiring Gate
+### Supporting Requirement Set 6: StateManager Manual/Status Wiring Gate
 
 Goal:
 
@@ -2019,7 +2108,7 @@ Manual override and blackout priorities are correct.
 Existing laser and OS2L tests still pass.
 ```
 
-### Reference Phase 7: Automatic Role-Entry Triggers Behind Explicit Enable Flag
+### Supporting Requirement Set 7: Automatic Role-Entry Triggers Behind Explicit Enable Flag
 
 Goal:
 
@@ -2072,7 +2161,7 @@ Blackout beats manual override.
 Bridge timing remains unaffected.
 ```
 
-### Reference Phase 8: Rehearsal Validation And Health Checks
+### Supporting Requirement Set 8: Rehearsal Validation And Health Checks
 
 Goal:
 
@@ -2109,7 +2198,7 @@ Manual fallback is documented and tested.
 Live use remains opt-in.
 ```
 
-### Reference Phase 9: Rollback, Runbook, And Supervisor Handoff
+### Supporting Requirement Set 9: Rollback, Runbook, And Supervisor Handoff
 
 Goal:
 
@@ -2144,7 +2233,7 @@ Supervisor can disable or roll back the LED layer without touching lasers or Sou
 Known live-test evidence is sanitized and documented.
 ```
 
-### Reference Phase 10: Optional Future Work Only
+### Supporting Requirement Set 10: Optional Future Work Only
 
 Goal:
 
@@ -2167,7 +2256,7 @@ capability cache
 Exit criteria:
 
 ```text
-Only begin Phase 10 after manual live output, StateManager wiring, automatic role-entry, rehearsal validation, and rollback docs are complete.
+Only begin optional future work after manual live output, StateManager wiring, automatic role-entry, rehearsal validation, and rollback docs are complete.
 ```
 
 ---
@@ -2234,7 +2323,7 @@ Live integration tests should be opt-in only, never default.
 Docs to add later:
 
 ```text
-docs/led_agent_orchestrator_workflow.md
+docs/plans/led_agent_orchestrator_workflow.md
 ```
 
 Controlling phase-gated automation workflow. The orchestrator is required alongside this integration plan before handing the work to an implementation agent.
@@ -2258,13 +2347,13 @@ docs/govee_capability_notes.md
 Sanitized notes on official API grounding, confirmed device capabilities, model behavior, unsupported scenes, and fallback behavior. Must not contain secrets.
 
 ```text
-docs/current_architecture.md
+docs/architecture/current_architecture.md
 ```
 
 Update only after implementation exists.
 
 ```text
-docs/runtime_invariants.md
+docs/architecture/runtime_invariants.md
 ```
 
 Update only after implementation exists.
@@ -2278,7 +2367,7 @@ This document stays as the planning record.
 Conservative rollout:
 
 ```text
-Follow the phase roadmap in docs/led_agent_orchestrator_workflow.md when the orchestrator is present.
+Follow the phase roadmap in docs/plans/led_agent_orchestrator_workflow.md when the orchestrator is present.
 This plan's rollout section is reference context for the same safety shape:
 - standalone Govee capability discovery before bridge runtime changes
 - manual live proof before StateManager integration
@@ -2303,9 +2392,9 @@ After manual proof and real adapter transport pass:
 Hard gate:
 
 ```text
-Do not touch state_manager.py before Phase 6.
-Do not run live Govee calls before Phase 2 Opus supervisor approval.
-Do not enable automatic role-entry before Phase 7.
+Do not touch state_manager.py before the orchestrator Phase 6 gate explicitly opens StateManager LED changes.
+Do not run live Govee calls before Phase 2 Supervisor approval.
+Do not enable automatic role-entry before orchestrator Phase 8.
 ```
 
 ---
@@ -2360,7 +2449,7 @@ Do not build UI before backend proof.
 
 ### Config Complexity
 
-Keep v1 config simple. The LED config should not become a sacred text nobody can safely edit.
+Keep v1 config simple. Operators should be able to edit LED config safely without needing to understand unrelated bridge internals.
 
 ---
 

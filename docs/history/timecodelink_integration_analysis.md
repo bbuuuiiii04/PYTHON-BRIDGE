@@ -507,7 +507,7 @@ This is the actionable section.
 | ----------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `track_loaded` (deck → title)       | **Shipped in `RBStateReader`**                         | Per-deck **500-byte track-info** chain (`track_info_per_deck`) → UTF-8 decode up to NUL; **`TRACK_LOADED` fires only when the string changes and is non-empty** (no emit on clear-to-empty). Same spirit as TL diffing track identity across polls (§3.1). |
 | Play / Pause per deck               | **Shipped in `RBStateReader`**                         | TL does **not** read a dedicated “playing” boolean from RB for this path (§7.6). **`RBStateReader` mirrors TL:** `is_playing = (live_pos_now != live_pos_prev)` on the **`live_pos_per_deck` → `readInt64`** chain. This is **orthogonal** to `rb_memory.py`'s `secondary+RB_PLAY_OFF` sign bit (still used for `PositionSnapshot.playing` corroboration). |
-| `bpm_update` (effective, post-sync) | **`RBStateReader` + `live_bpm.py`**                    | **`RBStateReader`** reads TL's **fixed per-version float chain** at poll rate when offsets exist (`_BPM_EMIT_THRESHOLD = 0.05`, finite values in `(0, 1000)` only). **`live_bpm.py`** remains the bridge’s pattern-scan + **session-validated** path. For autoloop arm/follow policy see `docs/bridge_design.md`. |
+| `bpm_update` (effective, post-sync) | **`RBStateReader` + `live_bpm.py`**                    | **`RBStateReader`** reads TL's **fixed per-version float chain** at poll rate when offsets exist (`_BPM_EMIT_THRESHOLD = 0.05`, finite values in `(0, 1000)` only). **`live_bpm.py`** remains the bridge’s pattern-scan + **session-validated** path. For autoloop arm/follow policy see `docs/architecture/bridge_design.md`. |
 | `master_change`                     | **High** — one byte at a global offset                 | Need the "current master deck index" offset; the `0xFF`-as-sentinel pattern matches a single uint8 read.                                                                    |
 | ENGINE STATE 15 s snapshot          | **Already done**                                       | Bridge reads the underlying values directly via `rb_memory.py`; the 15 s log block is just a digest.                                                                        |
 | Beat grid / cue points / waveform   | **Medium** — read ANLZ files directly                  | Same files TL parses. Pioneer ANLZ is public via crate-digger. **No new infrastructure needed.** Useful only if the bridge wants beat-grid bars or cue-point times.         |
@@ -533,7 +533,7 @@ This is the actionable section.
 
 **Shipped:** option **(a)** — the bridge embeds TL's macOS ARM64 `offsets-macos` extract in `rb_offsets.py` and implements **`RBStateReader`** as outlined in §9–10.
 
-**Before promoting direct-read events to sole authority:** run **`TLLogTailer` and `RBStateReader` in parallel** (`docs/bridge_design.md`, §10.3–10.5), record per-source timing deltas, then add **explicit arbitration** if TL is ever gated off — **`StateManager` today applies `PLAY` / `PAUSE` the same way for every `event.source`**, so enabling both producers without merging guarantees **duplicate or competing transitions**.
+**Before promoting direct-read events to sole authority:** run **`TLLogTailer` and `RBStateReader` in parallel** (`docs/architecture/bridge_design.md`, §10.3–10.5), record per-source timing deltas, then add **explicit arbitration** if TL is ever gated off — **`StateManager` today applies `PLAY` / `PAUSE` the same way for every `event.source`**, so enabling both producers without merging guarantees **duplicate or competing transitions**.
 
 **Fragility:** the embedded table inherits **exact version-string keys** (`load_offsets_for_version(rb_version)` is a plain map lookup; no normalization such as `7.2.11.0342 → 7.2.11`) and **per-release offset drift** when Rekordbox bumps binaries. `live_bpm.py`-style discovery remains the bridge's strategy when offsets are absent.
 
@@ -888,7 +888,7 @@ The `ChainEntry` class is the bridge equivalent of TL's `(QList<u64> hops, u64 f
 
 ## 10. Migration path — replacing `TLLogTailer` with a direct `RBStateReader`
 
-This is Deliverable 4 from the brief. The recommendation remains **incremental and reversible**: keep **`TLLogTailer`** as fallback until parallel validation passes (`docs/bridge_design.md`). Kill-switch for the reader: set env **`RBSS_RB_STATE_DISABLE`** (any value) — **`run()` returns immediately** with no attach. (`RBSS_LIVE_BPM_DISABLE` is the analogous pattern for `LiveBPMService`.)
+This is Deliverable 4 from the brief. The recommendation remains **incremental and reversible**: keep **`TLLogTailer`** as fallback until parallel validation passes (`docs/architecture/bridge_design.md`). Kill-switch for the reader: set env **`RBSS_RB_STATE_DISABLE`** (any value) — **`run()` returns immediately** with no attach. (`RBSS_LIVE_BPM_DISABLE` is the analogous pattern for `LiveBPMService`.)
 
 ### 10.1 Acquisition — preferred option D: extract from TL's qrc resource
 
@@ -939,7 +939,7 @@ For deck 0 BPM `04DD3570 0 2C8 188`:
 
 The **identity of the 5 deck-2 trackInfo middle hops** (e.g. deck 0 = `0x80`, deck 1 = `0x68`, deck 2/3 = `0x48`) cannot be derived by simple stride from deck 0 — TL ships them as explicit per-deck values. The bridge would do the same.
 
-The full extracted YAML for all 5 supported versions (7.2.8 / 7.2.10 / 7.2.11 / 7.2.13 / 7.2.14) is in `docs/offsets-macos.yaml` alongside this analysis. The same procedure also yielded `docs/offsets-windows.yaml` (3.6 KB, 8 versions of RB on Windows including 6.x branches) and `docs/offsets-macos-x86_64.yaml`, useful only as comparative data.
+The full extracted YAML for all 5 supported versions (7.2.8 / 7.2.10 / 7.2.11 / 7.2.13 / 7.2.14) is in `docs/data/offsets-macos.yaml` alongside this analysis. The same procedure also yielded `docs/data/offsets-windows.yaml` (3.6 KB, 8 versions of RB on Windows including 6.x branches) and `docs/data/offsets-macos-x86_64.yaml`, useful only as comparative data.
 
 ### 10.1a Fallback acquisition options
 

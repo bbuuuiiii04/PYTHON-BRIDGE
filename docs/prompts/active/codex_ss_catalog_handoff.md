@@ -95,7 +95,7 @@ For each PR:
 2. Run targeted tests (`pytest tests/test_<new_module>.py -v`).
 3. Run the full test suite (`pytest -q`) to confirm no regression.
 4. Run the bridge in dry-run mode and tail `/tmp/bridge.log` to confirm clean startup.
-5. Update `docs/runtime_invariants.md` and `docs/current_architecture.md` as needed.
+5. Update `docs/architecture/runtime_invariants.md` and `docs/architecture/current_architecture.md` as needed.
 
 ---
 

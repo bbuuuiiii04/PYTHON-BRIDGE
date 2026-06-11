@@ -207,7 +207,7 @@ class _GoldenHarness:
         self._direct_rearm_calls: list[tuple[tuple, dict]] = []
         self._transition_clear_calls: list[int] = []
         self._now = 0.0
-        self._last_abs_beat = 0.0
+        self._last_abs_beat: float | None = None
 
         cfg = _config(smart_drop_mode=smart_drop_mode)
         personality = _personality()
@@ -287,15 +287,18 @@ class _GoldenHarness:
         autoloop_tick_just_fired: bool | None = None,
         breakdown_active: bool | None = None,
     ) -> LaserContext:
+        previous_abs_beat = self._last_abs_beat
         self._last_abs_beat = abs_beat
         is_playing = self._playing if playing is None else playing
-        # Whole-beat heuristic. Production sets autoloop_tick_just_fired in
-        # state_manager._push_tick based on real autoloop arm/lock/beat-event
-        # boundaries (state_manager.py:1574-1636); the harness mimics it
-        # deterministically by firing on integer beats. Pass an explicit value
-        # to override for scenarios that need different behavior.
+        # Production raises autoloop_tick_just_fired on arm locks, smart rearm
+        # events, and phrase-relative 32-beat re-fires. These golden scenarios
+        # only need the absolute-grid fallback before any marker is seen.
         if autoloop_tick_just_fired is None:
-            autoloop_tick_just_fired = abs(abs_beat - round(abs_beat)) < 1e-9
+            autoloop_tick_just_fired = (
+                previous_abs_beat is not None
+                and int(max(abs_beat, 0.0) // 32.0)
+                > int(max(previous_abs_beat, 0.0) // 32.0)
+            )
 
         snap = SmartPhrasingSnapshot(
             deck_id=self._deck_id,
@@ -349,7 +352,7 @@ class _GoldenHarness:
         #   - os2l_connected (hardcoded True)
         #   - active_track_loaded (kwarg, default True)
         #   - autoloop_ready (kwarg, default True)
-        #   - autoloop_tick_just_fired (kwarg or whole-beat heuristic)
+        #   - autoloop_tick_just_fired (kwarg or 32-beat fallback heuristic)
         #   - scripted_id (kwarg, default 0)
         #   - position_stale (kwarg, default False; production: snap.is_stale)
         #   - elapsed_ms (synthesized from abs_beat/bpm; production: real clock)

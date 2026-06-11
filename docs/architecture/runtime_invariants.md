@@ -102,6 +102,6 @@ Audited against the current checkout on 2026-05-12.
 ## Historical Docs
 
 - Historical rollout notes are evidence, not authority.
-- If a history file conflicts with current code or `docs/bridge_design.md`,
+- If a history file conflicts with current code or `docs/architecture/bridge_design.md`,
   treat the code and current docs as authoritative and the history file as
   stale context.

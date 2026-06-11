@@ -95,7 +95,7 @@ marker?" The direction depends on marker type:
 
 ### Supporting docs
 
-- `docs/re/anlz_waveform_tag_inventory.md`
+- `docs/research/anlz_waveform_tag_inventory.md`
 - `docs/validation/anlz_energy_corpus_report.md`
 - `docs/validation/anlz_energy_evaluation_guide.md`
 

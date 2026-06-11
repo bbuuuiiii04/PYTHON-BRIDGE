@@ -40,7 +40,7 @@ from .smart_phrasing import SmartPhrasingState
 log = logging.getLogger("laser_director")
 
 # These are example scene names taken from the operator's early mapping notes
-# (docs/laser_director_midi_mapping_workflow.md). They are constructor defaults
+# (docs/guides/laser_director_midi_mapping_workflow.md). They are constructor defaults
 # only — any arbitrary string is valid. A future config loader must supply its
 # own values rather than relying on these constants.
 _DEFAULT_SAFE_SCENE = "safe_static"

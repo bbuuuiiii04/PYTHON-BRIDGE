@@ -92,7 +92,7 @@ Give us your honest read in under 600 words. Specific is better than general. If
 
 ## Reference docs
 
-- `docs/drop_detection_review_brief.md` — original problem statement, current shipped weights, history of failed attempts.
-- `docs/drop_detection_review_v2.md` — the "stuck at 8 failures" framing that the reviewer LLMs ultimately reframed.
+- `docs/prompts/reviews/drop_detection_review_brief.md` — original problem statement, current shipped weights, history of failed attempts.
+- `docs/prompts/reviews/drop_detection_review_v2.md` — the "stuck at 8 failures" framing that the reviewer LLMs ultimately reframed.
 - Both docs include a "Resolution (2026-05-18)" section with the bootstrap/reshuffle numbers above.
 - PR #88 commit message has the same numbers and the full feature list.

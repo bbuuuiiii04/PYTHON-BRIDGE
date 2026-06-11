@@ -2,7 +2,7 @@
 
 Status: rollout and validation checklist for final Laser Director go-live.
 
-Use this with the canonical design in `docs/laser_director_design.md` and the SoundSwitch mapping workflow in `docs/laser_director_midi_mapping_workflow.md`.
+Use this with the canonical design in `docs/architecture/laser_director_design.md` and the SoundSwitch mapping workflow in `docs/guides/laser_director_midi_mapping_workflow.md`.
 
 ## Preconditions
 

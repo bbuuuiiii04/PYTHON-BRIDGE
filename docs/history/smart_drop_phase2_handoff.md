@@ -192,5 +192,5 @@ compact later.
   - waveform extraction and `_detect_drop_beats()`
 - `tests/test_smart_drop.py`
   - Phase 1 selector/runtime tests
-- `docs/bridge_design.md`
+- `docs/architecture/bridge_design.md`
   - current authoritative runtime behavior

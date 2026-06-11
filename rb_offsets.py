@@ -10,7 +10,7 @@ follows the chains via ``mach_vm_read_overwrite`` to extract per-deck state.
 
 This module:
   1. Carries an embedded copy of the same data, extracted in-session from
-     TimecodeLink 0.0.24+042 (file: ``docs/offsets-macos.yaml``). The licence
+     TimecodeLink 0.0.24+042 (file: ``docs/data/offsets-macos.yaml``). The licence
      boundary is irrelevant: ``offsets-macos`` is a list of integers; it is not
      copyrightable expression and can be re-derived independently from RB
      itself with a few hours of pattern scanning (see ``probe_live_bpm.py``).

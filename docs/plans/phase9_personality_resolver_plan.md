@@ -9,7 +9,7 @@ a real set or rehearsal. Phases 7+ remain deferred.
 
 The bridge already supports multiple `LaserPersonality` profiles in `laser_director.example.json` and can swap them via `set_personality()`. What's missing is **automatic selection per track** plus **per-personality timing** (the global pre-drop blackout, post-drop hold, and breakdown restore length should vary by genre).
 
-There is an **existing Phase 9 plan in the repo** at `rb_ss_bridge_v2/docs/phase9_personality_resolver_plan.md` that proposes a different design: Rekordbox **Genre tag** → MyTag → BPM, with sticky runtime override, and routing kept at top-level config (not per-personality).
+There is an **existing Phase 9 plan in the repo** at `rb_ss_bridge_v2/docs/plans/phase9_personality_resolver_plan.md` that proposes a different design: Rekordbox **Genre tag** → MyTag → BPM, with sticky runtime override, and routing kept at top-level config (not per-personality).
 
 The operator (you) has overridden several of those choices in conversation:
 - Signal must be **PER GENRE playlist folder** in Rekordbox, not the Genre tag.
@@ -25,7 +25,7 @@ Scope: **unscripted tracks only.** Scripted tracks already have full SoundSwitch
 
 ## Phase −1 — Doc supersession (BLOCKING, do first)
 
-Before any code change, **replace** `rb_ss_bridge_v2/docs/phase9_personality_resolver_plan.md` with the current plan's design, calling out the divergence in a "Supersedes prior design" section at the top:
+Before any code change, **replace** `rb_ss_bridge_v2/docs/plans/phase9_personality_resolver_plan.md` with the current plan's design, calling out the divergence in a "Supersedes prior design" section at the top:
 
 - **Signal source:** PER GENRE playlist folder (not Rekordbox Genre tag).
 - **Mapping shape:** per-personality `aliases` list (not top-level `personality_routing.genre_map`).
@@ -345,7 +345,7 @@ Alias edits via the web UI:
 
 Each phase is shippable on its own. Phase −1 is blocking.
 
-### Phase −1 — Replace `docs/phase9_personality_resolver_plan.md`
+### Phase −1 — Replace `docs/plans/phase9_personality_resolver_plan.md`
 Per Section above. Hand-off doc, no code.
 
 ### Phase 0 — `LaserPersonality` field additions (no behavior change)
@@ -412,7 +412,7 @@ Per Section above. Hand-off doc, no code.
 
 | File | Phase | Action |
 |---|---|---|
-| `rb_ss_bridge_v2/docs/phase9_personality_resolver_plan.md` | −1 | Replace with this design |
+| `rb_ss_bridge_v2/docs/plans/phase9_personality_resolver_plan.md` | −1 | Replace with this design |
 | `rb_ss_bridge_v2/laser_models.py` | 0 | Add 6 fields to `LaserPersonality` dataclass |
 | `rb_ss_bridge_v2/laser_config.py` (LaserConfig at :87) | 0,1 | Add `bpm_priority` to `LaserConfig`; parse + validate new fields; alias-uniqueness; missing-field logging |
 | `rb_ss_bridge_v2/runtime_status.py` (line 228) | 3 | Remove runtime manual personality command |

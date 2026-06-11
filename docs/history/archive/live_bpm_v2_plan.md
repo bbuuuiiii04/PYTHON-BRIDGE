@@ -7,7 +7,7 @@ testing showed that SoundSwitch rearms autoloops when the bridge sends a BPM
 update. Current runtime behavior enables active live follow by default, sends
 validated BPM changes with rate limiting, and pairs the apply with a one-shot
 beat `change=True` re-lock. This document is retained as the older V2 design
-record; `docs/bridge_design.md` is authoritative for current runtime behavior.
+record; `docs/architecture/bridge_design.md` is authoritative for current runtime behavior.
 
 ## Goals
 

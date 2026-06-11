@@ -5,7 +5,7 @@ Status: DEPRECATED
 > Historical note: this was an implementation planning prompt, not the current
 > bridge design. It contains superseded behavior, including Phrase Anchor
 > snap-to-drop logic and earlier Smart Drop planning details. Use
-> `docs/bridge_design.md` for current runtime semantics.
+> `docs/architecture/bridge_design.md` for current runtime semantics.
 
 ## Context
 

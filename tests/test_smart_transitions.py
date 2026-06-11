@@ -58,6 +58,7 @@ def _sm(drops=None, filepath="/music/drop.mp3", active=1):
         _deck={1: deck_1, 2: deck_2},
         _out=out,
         _sse=SoundSwitchEngine(out),
+        _laser_executor=Mock(),
     )
     sm._autoloop = SimpleNamespace()
     sm._autoloop.target_elapsed_for_beat = Mock(
@@ -197,6 +198,7 @@ def _legacy_sp_state_for_breakdown(sm, active: int, this_beat: int) -> SmartPhra
 
 
 def _coordinator(sm) -> SmartRearmCoordinator:
+    laser_executor = getattr(sm, "_laser_executor", None)
     return SmartRearmCoordinator(
         output_state_ref=lambda: sm._os,
         deck_ref=lambda d: sm._deck[d],
@@ -204,6 +206,12 @@ def _coordinator(sm) -> SmartRearmCoordinator:
             sm, *args, **kwargs
         ),
         send_smart_transition_clear=sm._sse.send_smart_transition_clear,
+        hold_blackout_mask=(
+            laser_executor.hold_blackout_mask if laser_executor is not None else None
+        ),
+        release_blackout_mask=(
+            laser_executor.release_blackout_mask if laser_executor is not None else None
+        ),
     )
 
 
@@ -298,6 +306,7 @@ def _smart_breakdown_tick(
     this_beat,
     elapsed_ms,
     sp_state=None,
+    blackout_mode=True,
 ):
     if sp_state is None:
         sp_state = _legacy_sp_state_for_breakdown(sm, active, this_beat)
@@ -309,6 +318,7 @@ def _smart_breakdown_tick(
             bpm,
             this_beat,
             elapsed_ms,
+            blackout_mode=blackout_mode,
             smart_breakdown_enabled=True,
         ),
     ).breakdown_fired
@@ -1645,16 +1655,9 @@ class SmartBreakdownTests(unittest.TestCase):
         _smart_breakdown_tick(sm, 1, 2, 130.0, 32, 16_000)
         self.assertTrue(sm._os.breakdown_active)
         self.assertEqual(sm._os.breakdown_restore_beat, 64)
-        self.assertEqual(sm._out.send_deck_clear.call_count, 4)
-        self.assertEqual(sm._out.send_loop_off.call_count, 4)
-        self.assertEqual(
-            sm._out.send_deck_clear.call_args_list,
-            [call(1), call(2), call(3), call(4)],
-        )
-        self.assertEqual(
-            sm._out.send_loop_off.call_args_list,
-            [call(1), call(2), call(3), call(4)],
-        )
+        sm._laser_executor.hold_blackout_mask.assert_called_once_with("breakdown")
+        self.assertEqual(sm._out.send_deck_clear.call_count, 0)
+        self.assertEqual(sm._out.send_loop_off.call_count, 0)
         
         # Tick inside breakdown
         _smart_breakdown_tick(sm, 1, 2, 130.0, 40, 20_000)
@@ -1663,13 +1666,16 @@ class SmartBreakdownTests(unittest.TestCase):
         # Tick on restore beat
         _smart_breakdown_tick(sm, 1, 2, 130.0, 64, 32_000)
         self.assertFalse(sm._os.breakdown_active)
+        sm._laser_executor.release_blackout_mask.assert_called_once_with("breakdown")
         sm._sse.send_autoloop_deck_load.assert_called_once()
 
-    def test_breakdown_cut_deck2_uses_mirrored_fanout_order(self):
+    def test_legacy_breakdown_cut_deck2_uses_mirrored_fanout_order(self):
         sm = _sm(active=2, filepath="/music/drop2.mp3")
         sm._deck[2].meta.smart_breakdowns = [32]
         sm._smart_breakdown_enabled = True
-        _smart_breakdown_tick(sm, 2, 1, 130.0, 32, 16_000)
+        _smart_breakdown_tick(
+            sm, 2, 1, 130.0, 32, 16_000, blackout_mode=False
+        )
         self.assertEqual(
             sm._out.send_deck_clear.call_args_list,
             [call(2), call(1), call(3), call(4)],
@@ -1696,8 +1702,9 @@ class SmartBreakdownTests(unittest.TestCase):
         )
         self.assertTrue(sm._os.breakdown_active)
         self.assertEqual(sm._os.breakdown_restore_beat, 64)
-        self.assertEqual(sm._out.send_deck_clear.call_count, 4)
-        self.assertEqual(sm._out.send_loop_off.call_count, 4)
+        sm._laser_executor.hold_blackout_mask.assert_called_once_with("breakdown")
+        self.assertEqual(sm._out.send_deck_clear.call_count, 0)
+        self.assertEqual(sm._out.send_loop_off.call_count, 0)
 
     def test_breakdown_restore_consumes_sp_state_not_metadata(self):
         sm = _sm()

@@ -83,7 +83,7 @@ _PWV3_MS_PER_ENTRY_FALLBACK = 6.7
 # The anchored-on-seed-features prior used in PR #88 is dropped. Under the
 # rank-loss objective the data drives centroid_drop and spectral_flux_onset
 # to ~0 on this corpus; forcing them positive (PR #88) measurably hurt
-# generalization. See docs/drop_detection_review_v2.md.
+# generalization. See docs/prompts/reviews/drop_detection_review_v2.md.
 MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
     "onset_score": 0.000000,
     "broad_onset_score": 0.000000,

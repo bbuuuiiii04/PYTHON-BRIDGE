@@ -934,7 +934,7 @@ Resolved MVP decisions:
 
 ## 25. Documentation Cleanup Recommendation
 
-`docs/laser_director_design.md` is now the canonical CURRENT AUTHORITATIVE
+`docs/architecture/laser_director_design.md` is now the canonical CURRENT AUTHORITATIVE
 Laser Director design reference.
 
 Maintenance rule:
@@ -942,7 +942,7 @@ Maintenance rule:
 1. Keep this file aligned to implemented behavior in `laser_director.py`,
    `laser_executor.py`, and `laser_models.py`.
 2. If behavior changes in code, update this document and
-   `docs/doc_index.md` in the same PR.
+   `docs/architecture/doc_index.md` in the same PR.
 3. Treat older refined/spec variants as historical references only; do not use
    them as implementation authority.
 

@@ -2,28 +2,32 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-05-12.
+Audited against the current checkout on 2026-06-11.
 
 `rb_ss_bridge_v2` is a realtime Rekordbox to SoundSwitch bridge. It reads
 Rekordbox state, reconciles guarded direct-memory signals with TimecodeLink and
 MTC fallbacks, and speaks VirtualDJ-shaped OS2L to SoundSwitch.
 
+AI agents and automated contributors should read `AGENTS.md` first.
+
 Start here:
 
-1. `docs/current_architecture.md` - 15-minute current-state overview.
-2. `docs/bridge_design.md` - detailed current design and invariants.
-3. `docs/runtime_invariants.md` - rules that should not be broken during code
+1. `AGENTS.md` - AI agent orientation and source map.
+2. `docs/architecture/current_architecture.md` - 15-minute current-state overview.
+3. `docs/architecture/runtime_invariants.md` - rules that should not be broken during code
    changes.
-4. `docs/doc_index.md` - classification of every markdown file.
+4. `docs/architecture/bridge_design.md` - detailed current design and invariants.
+5. `docs/architecture/doc_index.md` - classification of every markdown file.
 
 Offline ANLZ energy tooling:
 
-- `docs/anlz_energy_project.md` - canonical overview of the bridge-local ANLZ
+- `docs/research/anlz_energy_project.md` - canonical overview of the bridge-local ANLZ
   energy investigation toolkit, labels, limits, and validation framing.
-- `docs/re/anlz_waveform_tag_inventory.md` - observed ANLZ waveform/beatgrid/tag
+- `docs/research/anlz_waveform_tag_inventory.md` - observed ANLZ waveform/beatgrid/tag
   inventory.
 - `docs/validation/anlz_energy_evaluation_guide.md` - practical small-corpus
   human validation workflow.
+
 ## Subsystem map (one-line each)
 
 - `SmartPhrasingEngine` - pure musical phrasing engine; emits smart-drop,
@@ -94,7 +98,7 @@ Then open:
 
 Laser Pad is now the canonical mapping surface.
 
-Detailed workflow and API notes are in `docs/laser_pad.md`.
+Detailed workflow and API notes are in `docs/guides/laser_pad.md`.
 
 ## Development
 
