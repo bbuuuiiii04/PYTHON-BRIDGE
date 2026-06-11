@@ -79,14 +79,14 @@ class DeckState:
     meta: TrackMetadata = field(default_factory=TrackMetadata)
     playing: bool = False
     elapsed_ms: int = 0
-    # TL-managed scripted show ID (0 = unscripted / none)
+    # Scripted show ID (0 = unscripted / none)
     scripted_id: int = 0
     # generation counter: incremented on every track_loaded event so
     # in-flight lsof threads can detect staleness
     load_gen: int = 0
-    # Track title from TL [EVENT] Deck X loaded — used as DB lookup fallback
-    # when ANLZ fails and lsof can't disambiguate by track length
-    tl_title: str = ""
+    # Track title hint from the load event; used as DB lookup fallback when
+    # ANLZ fails and lsof can't disambiguate by track length.
+    track_title_hint: str = ""
 
 
 @dataclass
@@ -118,7 +118,7 @@ class BridgeEvent:
     kind: str       # one of Ev.* constants
     deck: int       # 1 or 2 (0 = global / irrelevant)
     payload: dict[str, Any] = field(default_factory=dict)
-    source: str = ""          # 'tl_log', 'osc', 'lsof', 'memory'
+    source: str = ""          # producer name, e.g. 'rb_state', 'osc', 'lsof', 'memory'
     mono: float = field(default_factory=time.monotonic)
 
 
@@ -202,10 +202,10 @@ class Ev:
                                             #   first_beat_ms, soundswitch_id, total_ms, load_gen}
     ANLZ_PATH         = "anlz_path"         # deck, payload={anlz_path: str} — fires before TRACK_LOADED
     ANLZ_DATA         = "anlz_data"         # deck, payload={drop_beat_indices: list[int], load_gen: int}
-    BPM_UPDATE        = "bpm_update"        # deck, payload={bpm: float} — from ENGINE STATE every ~15s
-    TC_UPDATE         = "tc_update"         # deck, payload={elapsed_ms: int} — from ENGINE STATE TC
+    BPM_UPDATE        = "bpm_update"        # deck, payload={bpm: float}
+    TC_UPDATE         = "tc_update"         # deck, payload={elapsed_ms: int}
     SCRIPTED_ARM      = "scripted_arm"      # deck, payload={scripted_id: int}
-    SCRIPTED_CLEAR    = "scripted_clear"    # deck  (TL value=1 / default)
+    SCRIPTED_CLEAR    = "scripted_clear"    # deck
     RB_RESTARTED      = "rb_restarted"      # global, payload={pid: int}
     SMART_DROP_TOGGLE = "smart_drop_toggle" # global runtime toggle from menu/command channel
     SMART_BREAKDOWN_TOGGLE = "smart_breakdown_toggle"

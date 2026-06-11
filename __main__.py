@@ -3,10 +3,10 @@ rb_ss_bridge_v2 — entry point and wiring.
 
 Replaces Frida hooks with:
   - Direct RB memory (master change, play/pause, track load, position)
-  - TL log parsing  (fallback state, MTC provider, startup ENGINE STATE)
+  - MTC fallback    (active-deck timecode)
   - lsof / DB        (filepath identification on track load)
 
-OSC is kept for scripted show triggers (TL playlist.yaml osc_triggers).
+OSC is kept for bridge control triggers.
 
 Run:
   python -m rb_ss_bridge_v2
@@ -24,7 +24,7 @@ import fcntl
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .config import OSC_LISTEN_PORT, RB_DB_PATH, TL_LOG_PATH, TL_PLAYLIST_PATH
+from .config import OSC_LISTEN_PORT, RB_DB_PATH
 from .filepath_resolver import (
     FilepathResolver,
     seed_soundswitch_id_cache,
@@ -36,11 +36,15 @@ from .osl_output import OS2LConnection, OS2LOutput, SoundSwitchDiscovery
 from .os2l_injector import OS2LInjector
 from .rb_memory import PositionCache, RBMemoryReader
 from .rb_state_reader import (
+    ANLZ_DIRECT_ENV,
+    MASTER_DIRECT_ENV,
+    PLAY_DIRECT_ENV,
+    TRACK_LOAD_DIRECT_ENV,
     make_rb_state_reader,
     direct_master_label,
     read_direct_master_status,
 )
-from .scripted_tracks import preload_from_tl, resolve_filepaths
+from .scripted_tracks import resolve_filepaths
 from .ss_library_scanner import start_ss_library_scan
 from .state_manager import (
     AUTOLOOP_MASTER_PHRASE_ARM_ENV,
@@ -49,14 +53,6 @@ from .state_manager import (
     SMART_DROP_ENV,
     SMART_REARM_EXPERIMENT_ENV,
     StateManager,
-)
-from .tl_tailer import (
-    ANLZ_DIRECT_ENV,
-    MASTER_DIRECT_ENV,
-    PLAY_DIRECT_ENV,
-    TRACK_LOAD_DIRECT_ENV,
-    TLLogTailer,
-    read_initial_state,
 )
 from .diagnostics import DriftDetector, enable_debug, is_debug
 from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService, read_rekordbox_version
@@ -368,7 +364,7 @@ def _acquire_single_instance_lock() -> bool:
     return True
 
 
-# ── OSC listener (scripted arm triggers from TL) ──────────────────────────────
+# ── OSC listener (bridge control triggers) ────────────────────────────────────
 
 def start_osc_listener(
     event_queue: queue.Queue[BridgeEvent],
@@ -376,11 +372,10 @@ def start_osc_listener(
     *,
     master_direct_ready: Optional[Callable[[], bool]] = None,
 ) -> None:
-    """Listen on UDP for /bridge/active_deck and /bridge/track_loaded from TL."""
+    """Listen on UDP for bridge active-deck and track-loaded control messages."""
     try:
         from pythonosc import dispatcher as osc_dispatcher  # type: ignore
         from pythonosc import osc_server                    # type: ignore
-        from pythonosc.udp_client import SimpleUDPClient    # type: ignore
     except ImportError:
         LOG.log_error(log, "python-osc not installed - scripted arm triggers will not work")
         return
@@ -414,9 +409,9 @@ def start_osc_listener(
             return
         if os.environ.get(SCRIPTED_DIRECT_ENV) != "0":
             return
-        # Use the deck that most recently received a TRACK_LOADED event from the TL log.
-        # This is more reliable than get_active_deck() when loading on the non-master deck,
-        # because TL log events carry explicit deck info (A/B/C/D) while the OSC message does not.
+        # Use the deck that most recently received a TRACK_LOADED event.
+        # This is more reliable than get_active_deck() when loading on the non-master deck
+        # because track-loaded events carry explicit deck info while this OSC message does not.
         # Falls back to active deck if no TRACK_LOADED has been seen yet (startup edge case).
         target = state_manager.get_last_loaded_deck() or state_manager.get_active_deck()
         if track_id >= 2:
@@ -431,7 +426,7 @@ def start_osc_listener(
                     name="auto-populate",
                 ).start()
                 return
-            log.info("[MAIN][SHADOW] scripted-tl-osc  deck=%d  id=%d", target, track_id)  # A6 shadow log
+            log.info("[MAIN][SHADOW] scripted-osc  deck=%d  id=%d", target, track_id)
             event_queue.put_nowait(BridgeEvent(
                 kind=Ev.SCRIPTED_ARM,
                 deck=target,
@@ -456,19 +451,9 @@ def start_osc_listener(
 
     log.info("[MAIN] osc-listen  port=%d", OSC_LISTEN_PORT)
     if os.environ.get(SCRIPTED_DIRECT_ENV) != "0":
-        log.info("[MAIN] rsr-direct  scripted=on  (%s=0 to re-enable tl-osc path)",
+        log.info("[MAIN] rsr-direct  scripted=on  (%s=0 to re-enable legacy osc path)",
                  SCRIPTED_DIRECT_ENV)
     threading.Thread(target=srv.serve_forever, name="osc-server", daemon=True).start()
-
-    # Re-register with TL so it re-announces current state
-    def _register():
-        time.sleep(1.0)
-        try:
-            cl = SimpleUDPClient("127.0.0.1", 20808)
-            cl.send_message("/Register", [])
-        except Exception:
-            pass
-    threading.Thread(target=_register, daemon=True).start()
 
 
 def _auto_populate(track_id: int, active_deck: int, eq: queue.Queue) -> None:
@@ -493,91 +478,30 @@ def _auto_populate(track_id: int, active_deck: int, eq: queue.Queue) -> None:
     ))
 
 
-def _seed_initial_decks(eq: queue.Queue[BridgeEvent], init: dict) -> None:
-    """Replay fresh ENGINE STATE deck identity through the normal event path."""
-    decks = init.get("decks") or {}
-    if not decks:
-        return
-
-    seeded = 0
-    for deck in sorted(decks):
-        info = decks[deck]
-        title = str(info.get("title", ""))
-        if not title:
-            continue
-
-        events = [
-            BridgeEvent(
-                kind=Ev.TRACK_LOADED,
-                deck=deck,
-                payload={"title": title},
-                source="initial_engine_state",
-            ),
-        ]
-        bpm = float(info.get("bpm", 0.0) or 0.0)
-        if bpm > 0:
-            events.append(BridgeEvent(
-                kind=Ev.BPM_UPDATE,
-                deck=deck,
-                payload={"bpm": bpm},
-                source="initial_engine_state",
-            ))
-        elapsed_ms = int(info.get("elapsed_ms", 0) or 0)
-        if elapsed_ms > 0:
-            events.append(BridgeEvent(
-                kind=Ev.TC_UPDATE,
-                deck=deck,
-                payload={
-                    "elapsed_ms": elapsed_ms,
-                    "pitch_factor": float(info.get("pitch_factor", 1.0) or 1.0),
-                },
-                source="initial_engine_state",
-            ))
-        if bool(info.get("playing", False)):
-            events.append(BridgeEvent(
-                kind=Ev.PLAY,
-                deck=deck,
-                source="initial_engine_state",
-            ))
-
-        try:
-            for ev in events:
-                eq.put_nowait(ev)
-            seeded += 1
-            log.info("[MAIN] startup-deck  deck=%d  title=%s  bpm=%.1f  playing=%s",
-                     deck, title, bpm, bool(info.get("playing", False)))
-        except queue.Full:
-            log.warning("[MAIN] queue-full  event=startup-deck  deck=%d  title=%s",
-                        deck, title)
-
-    if seeded:
-        log.info("[MAIN] startup-preload  count=%d", seeded)
-
-
-def _direct_master_startup_seed(rb_version: str, tl_deck: int) -> tuple[int, str]:
-    """Return startup active deck and seed source, failing closed to TL."""
+def _direct_master_startup_seed(rb_version: str, fallback_deck: int = 1) -> tuple[int, str]:
+    """Return startup active deck and seed source, defaulting to deck 1."""
     if os.environ.get(MASTER_SEED_DIRECT_ENV) != "1":
-        return tl_deck, "TL ENGINE STATE"
+        return fallback_deck, "default startup"
 
     if not rb_version:
-        log.info("[MASTER-SEED] direct=none tl=%s using=tl reason=version_lookup_failed",
-                 direct_master_label(tl_deck))
-        return tl_deck, "TL ENGINE STATE"
+        log.info("[MASTER-SEED] direct=none fallback=%s using=fallback reason=version_lookup_failed",
+                 direct_master_label(fallback_deck))
+        return fallback_deck, "default startup"
 
     first = read_direct_master_status(rb_version)
     if not first.supported:
-        log.info("[MASTER-SEED] direct=none tl=%s using=tl reason=unsupported_version",
-                 direct_master_label(tl_deck))
-        return tl_deck, "TL ENGINE STATE"
+        log.info("[MASTER-SEED] direct=none fallback=%s using=fallback reason=unsupported_version",
+                 direct_master_label(fallback_deck))
+        return fallback_deck, "default startup"
     if not first.readable:
-        log.info("[MASTER-SEED] direct=none tl=%s using=tl reason=%s",
-                 direct_master_label(tl_deck), first.reason or "unreadable")
-        return tl_deck, "TL ENGINE STATE"
+        log.info("[MASTER-SEED] direct=none fallback=%s using=fallback reason=%s",
+                 direct_master_label(fallback_deck), first.reason or "unreadable")
+        return fallback_deck, "default startup"
     if first.bridge_deck not in (1, 2):
-        log.info("[MASTER-SEED] direct=%s tl=%s using=tl reason=%s",
-                 direct_master_label(first.bridge_deck), direct_master_label(tl_deck),
+        log.info("[MASTER-SEED] direct=%s fallback=%s using=fallback reason=%s",
+                 direct_master_label(first.bridge_deck), direct_master_label(fallback_deck),
                  first.reason or "none")
-        return tl_deck, "TL ENGINE STATE"
+        return fallback_deck, "default startup"
 
     time.sleep(0.5)
     second = read_direct_master_status(
@@ -592,14 +516,14 @@ def _direct_master_startup_seed(rb_version: str, tl_deck: int) -> tuple[int, str
         or second.rb_raw != first.rb_raw
     ):
         reason = second.reason if not second.readable else "unstable"
-        log.info("[MASTER-SEED] direct=%s tl=%s using=tl reason=%s",
+        log.info("[MASTER-SEED] direct=%s fallback=%s using=fallback reason=%s",
                  direct_master_label(second.bridge_deck),
-                 direct_master_label(tl_deck),
+                 direct_master_label(fallback_deck),
                  reason or "unstable")
-        return tl_deck, "TL ENGINE STATE"
+        return fallback_deck, "default startup"
 
-    log.info("[MASTER-SEED] direct=%s tl=%s using=direct",
-             direct_master_label(first.bridge_deck), direct_master_label(tl_deck))
+    log.info("[MASTER-SEED] direct=%s fallback=%s using=direct",
+             direct_master_label(first.bridge_deck), direct_master_label(fallback_deck))
     return int(first.bridge_deck), "direct master seed"
 
 
@@ -632,8 +556,7 @@ def main() -> None:
         ),
     )
 
-    # Startup: pre-register scripted tracks from TL playlist.yaml + resolve filepaths
-    preload_from_tl(str(TL_PLAYLIST_PATH))
+    # Startup: resolve any scripted tracks already registered by bridge config/tests.
     resolve_filepaths()
     start_ss_library_scan(
         callback=seed_soundswitch_id_cache,
@@ -835,12 +758,11 @@ def main() -> None:
         laser_status_provider=laser_status_provider,
     )
 
-    # Initialize master deck from last TL ENGINE STATE (fixes startup deck bug)
-    init = read_initial_state(TL_LOG_PATH)
+    # Initialize master deck from guarded direct read when available, otherwise deck 1.
     rb_version_for_direct_master = read_rekordbox_version()
     initial_active_deck, initial_active_source = _direct_master_startup_seed(
         rb_version_for_direct_master,
-        init['active_deck'],
+        1,
     )
     sm.set_initial_state(initial_active_deck, source=initial_active_source)
     log.info("[MASTER-INIT] version=%s seed_source=%s deck=%d",
@@ -851,9 +773,8 @@ def main() -> None:
     # Filepath resolver (triggered by TRACK_LOADED, pushes FILEPATH_RESOLVED)
     resolver = FilepathResolver(event_queue, pos_cache)
     sm.attach_resolver(resolver)
-    _seed_initial_decks(event_queue, init)
 
-    # TL log tailer
+    # Direct-reader readiness gates
     def _set_anlz_direct_ready(deck: int, ready: bool) -> None:
         if deck not in (1, 2):
             return
@@ -901,15 +822,6 @@ def main() -> None:
     def _is_master_direct_ready() -> bool:
         with master_direct_ready_lock:
             return master_direct_ready_flag
-
-    tailer = TLLogTailer(
-        TL_LOG_PATH,
-        event_queue,
-        anlz_direct_ready=_is_anlz_direct_ready if anlz_direct else None,
-        master_direct_ready=_is_master_direct_ready if master_direct else None,
-        play_direct_ready=_is_play_direct_ready if play_direct else None,
-        track_load_direct_ready=_is_track_load_direct_ready if track_load_direct else None,
-    )
 
     if anlz_direct or play_direct or track_load_direct or master_direct:
         rb_version = read_rekordbox_version()
@@ -973,7 +885,6 @@ def main() -> None:
     mtc.start()
 
     # Start all components
-    tailer.start()
     if rb_state_reader is not None:
         rb_state_reader.start()
     mem_reader.start()
@@ -1001,7 +912,7 @@ def main() -> None:
         direct_flags.append("master")
     log.info(
         "[MAIN] running  state=on  active_deck=%d  seed=%s  rb_version=%s"
-        "  tl=optional  rsr=%s  direct=%s  live_bpm=%s  follow=%s"
+        "  rsr=%s  direct=%s  live_bpm=%s  follow=%s"
         "  phrase_arm=%s  smart_rearm=%s  smart_drop=%s  phrase_anchor=%s"
         "  scripted_direct=%s  osc=%d  log_control=%s",
         initial_active_deck,
@@ -1101,7 +1012,6 @@ def main() -> None:
         status_writer.stop()
         command_reader.stop()
         sm.stop()
-        tailer.stop()
         if rb_state_reader is not None:
             rb_state_reader.stop()
         mem_reader.stop()

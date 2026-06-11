@@ -246,7 +246,6 @@ class LoggingEventQueue:
 _DIAG_MODULES: dict[str, str] = {
     "sm":   "state_manager",
     "mem":  "rb_memory",
-    "tl":   "tl_tailer",
     "fres": "filepath_resolver",
     "lbpm": "live_bpm",
     "os2l": "osl_output",
@@ -279,7 +278,7 @@ class LoggingManager:
         ("RB pid", "Rekordbox likely restarted or exited; wait for re-attach before trusting memory"),
         ("attach failed", "check Rekordbox process, task_for_pid entitlement, and macOS privacy prompts"),
         ("memory stale", "check RB memory reader attachment and recent RB restart logs"),
-        ("unknown id", "verify TimecodeLink playlist.yaml values and scripted track registry"),
+        ("unknown id", "verify scripted track registry values"),
         ("queue full", "reduce producer burst rate or increase queue capacity"),
         ("lsof", "check Rekordbox file handles and LSOF_LEN_TOLERANCE_MS in config.py"),
     )

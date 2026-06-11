@@ -2,7 +2,7 @@
 
 Status: CURRENT SUPPORTING
 
-Audited against the current checkout on 2026-05-12.
+Audited against the current checkout on 2026-06-11.
 
 This is the canonical runtime logging guide. Historical implementation context
 is retained in `docs/history/logging_implementation_handoff.md`, but current
@@ -11,7 +11,7 @@ runtime behavior should be documented here.
 The bridge keeps normal logs readable by default:
 
 ```text
-14:23:45 [INFO   ] TRACK_LOADED title=Track Name load_gen=12 [deck=1 src=tl_log tr:a3f91c]
+14:23:45 [INFO   ] TRACK_LOADED title=Track Name load_gen=12 [deck=1 src=rb_state tr:a3f91c]
 14:23:45 [INFO   ] FILEPATH_RESOLVED path=track.mp3 bpm=128.4 ssid=yes latency=35.2ms [deck=1 src=lsof tr:a3f91c]
 14:23:45 [INFO   ] SCRIPTED_ARM id=5021 path=track.mp3 elapsed=1234ms bpm=128.4 first_beat=0.0ms [deck=1 tr:a3f91c]
 ```
@@ -246,7 +246,7 @@ Scoped logs:
 ```python
 from .logging_manager import log_event_scope
 
-with log_event_scope("track_load", deck=1, source="tl_log") as trace_id:
+with log_event_scope("track_load", deck=1, source="rb_state") as trace_id:
     log.info("TRACK_LOADED title=%s", title)
 ```
 

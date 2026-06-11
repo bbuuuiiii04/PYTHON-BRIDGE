@@ -1,19 +1,9 @@
 """
-Per-version Rekordbox memory-offset table, sourced from TimecodeLink's qrc.
-
-Background
-----------
-TimecodeLink (TL) ships a Qt resource file ``offsets-macos`` inside its binary
-that maps each supported Rekordbox version to a set of pointer chains.
-``OffsetManager::loadOffsetsFile`` reads it at startup and ``RekordboxPlugin::poll``
-follows the chains via ``mach_vm_read_overwrite`` to extract per-deck state.
+Per-version Rekordbox memory-offset table.
 
 This module:
-  1. Carries an embedded copy of the same data, extracted in-session from
-     TimecodeLink 0.0.24+042 (file: ``docs/offsets-macos.yaml``). The licence
-     boundary is irrelevant: ``offsets-macos`` is a list of integers; it is not
-     copyrightable expression and can be re-derived independently from RB
-     itself with a few hours of pattern scanning (see ``probe_live_bpm.py``).
+  1. Carries an embedded arm64 ``offsets-macos`` table for supported Rekordbox
+     versions.
   2. Parses the format into ``RBOffsetVersion`` records keyed by RB version.
   3. Exposes a single ``load_offsets_for_version(version)`` lookup used by
      ``rb_state_reader.py``.
@@ -36,8 +26,7 @@ integers are the ``QList<u64>`` hops applied via ``followPointerChain``:
         addr = read_u64(addr + hop)
     return addr + final_offset
 
-Per-version chain ordering (verified from disassembly of
-``RekordboxPlugin::poll`` / ``extractDeck`` against the YAML):
+Per-version chain ordering:
 
     [0]                master-deck index    → readU8         (1 chain, global)
     [1 + 4*deck + 0]   live BPM             → readFloat
@@ -56,11 +45,7 @@ from typing import Optional
 
 log = logging.getLogger("rb_offsets")
 
-# ── Embedded offsets-macos (arm64), TimecodeLink 0.0.24+042 ──────────────────
-# Verbatim extraction from
-#   :/qt/qml/TimecodeLink/resources/offsets-macos
-# inside TimecodeLink.app/Contents/MacOS/TimecodeLink (arm64 slice).
-# Procedure documented in docs/timecodelink_integration_analysis.md §10.1.
+# ── Embedded offsets-macos (arm64) ───────────────────────────────────────────
 _OFFSETS_MACOS_ARM64: str = """\
 7.2.14
 04E514D8 20 278 124
@@ -264,8 +249,7 @@ def all_offsets() -> dict[str, RBOffsetVersion]:
 def load_offsets_for_version(version: str) -> Optional[RBOffsetVersion]:
     """Return the per-version offsets, or None if RB version is unsupported.
 
-    Matches behaviour of TL's ``OffsetManager::selectVersion(QString)``: returns
-    falsy when the version is not in the table; the caller should disable the
-    direct-read path and fall back to ``TLLogTailer``.
+    Returns falsy when the version is not in the table; the caller should
+    disable direct-read paths that depend on the offset table.
     """
     return all_offsets().get(version)

@@ -639,7 +639,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertEqual(len(output.loads), 4)
         self.assertIsNone(sm._os.pending_autoloop_arm_meta)
 
-    def test_autoloop_master_phrase_arm_defaults_on_and_delays_deck_load_to_target(self) -> None:
+    def test_autoloop_master_phrase_arm_default_is_inert_after_task9(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             output = FakeOutput()
             sm = StateManager(
@@ -657,20 +657,6 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.lighting_mode = "autoloop"
         sm._apply_lighting(2, "autoloop", 2600, 120.0)
 
-        self.assertEqual(output.loads, [])
-        self.assertEqual(output.clears, [2, 1, 3, 4])
-        self.assertEqual(output.loop_offs, [2, 1, 3, 4])
-        self.assertIsNotNone(sm._os.pending_autoloop_arm_meta)
-        self.assertTrue(sm._os.autoloop_arm_pending)
-        self.assertEqual(sm._os.autoloop_arm_sync_beat, 32)
-        self.assertEqual(sm._os.autoloop_arm_target_elapsed_ms, 16000)
-        self.assertEqual(sm._os.autoloop_arm_target_source, "grid")
-
-        _autoloop_tick(sm, 2, 1, 120.0, 31.9, 15950)
-        self.assertEqual(output.loads, [])
-
-        _autoloop_tick(sm, 2, 1, 120.0, 32.0, 16000)
-
         self.assertEqual(len(output.loads), 4)
         self.assertEqual(output.loads[0][0], 2)
         self.assertEqual(output.loads[0][3], "on")
@@ -678,8 +664,10 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertFalse(sm._os.autoloop_arm_pending)
         self.assertFalse(sm._os.autoloop_change_on_next_beat)
         self.assertEqual(output.bpms[-4:], [(2, 120.0), (1, 120.0), (3, 120.0), (4, 120.0)])
+        self.assertEqual(output.clears, [])
+        self.assertEqual(output.loop_offs, [])
         self.assertEqual(output.beats, [])
-        self.assertEqual(output.loads[0][1].elapsed_ms, 16000)
+        self.assertEqual(output.loads[0][1].elapsed_ms, 2600)
 
     def test_autoloop_master_phrase_arm_env_zero_disables_default_delay(self) -> None:
         with patch.dict(os.environ, {"RBSS_AUTOLOOP_MASTER_PHRASE_ARM": "0"}, clear=True):
@@ -721,13 +709,13 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._apply_lighting(2, "autoloop", 16100, 120.0)
 
         self.assertEqual(len(output.loads), 4)
-        self.assertEqual(output.clears, [2, 1, 3, 4])
-        self.assertEqual(output.loop_offs, [2, 1, 3, 4])
+        self.assertEqual(output.clears, [])
+        self.assertEqual(output.loop_offs, [])
         self.assertIsNone(sm._os.pending_autoloop_arm_meta)
         self.assertEqual(output.beats, [])
         self.assertFalse(sm._os.autoloop_change_on_next_beat)
 
-    def test_autoloop_master_phrase_arm_delays_when_almost_two_beats_after_phrase_start(self) -> None:
+    def test_autoloop_master_phrase_arm_arms_immediately_when_almost_two_beats_after_phrase_start(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             output = FakeOutput()
             sm = StateManager(
@@ -744,13 +732,13 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._on_master_changed(2, "test-master")
         sm._apply_lighting(2, "autoloop", 88950, 120.0)
 
-        self.assertEqual(output.loads, [])
-        self.assertIsNotNone(sm._os.pending_autoloop_arm_meta)
-        self.assertEqual(sm._os.autoloop_arm_sync_beat, 192)
-        self.assertEqual(sm._os.autoloop_arm_target_elapsed_ms, 96000)
+        self.assertEqual(len(output.loads), 4)
+        self.assertIsNone(sm._os.pending_autoloop_arm_meta)
+        self.assertFalse(sm._os.autoloop_arm_pending)
+        self.assertEqual(sm._os.autoloop_arm_sync_beat, 0)
         self.assertFalse(sm._os.autoloop_change_on_next_beat)
 
-    def test_autoloop_master_phrase_arm_delays_when_mid_phrase(self) -> None:
+    def test_autoloop_master_phrase_arm_arms_immediately_when_mid_phrase(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             output = FakeOutput()
             sm = StateManager(
@@ -767,14 +755,13 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._on_master_changed(2, "test-master")
         sm._apply_lighting(2, "autoloop", 12000, 120.0)
 
-        self.assertEqual(output.loads, [])
-        self.assertIsNotNone(sm._os.pending_autoloop_arm_meta)
-        self.assertEqual(sm._os.autoloop_arm_sync_beat, 32)
-        self.assertEqual(sm._os.autoloop_arm_target_elapsed_ms, 16000)
-        self.assertEqual(sm._os.autoloop_arm_target_source, "grid")
+        self.assertEqual(len(output.loads), 4)
+        self.assertIsNone(sm._os.pending_autoloop_arm_meta)
+        self.assertFalse(sm._os.autoloop_arm_pending)
+        self.assertEqual(sm._os.autoloop_arm_sync_beat, 0)
         self.assertFalse(sm._os.autoloop_change_on_next_beat)
 
-    def test_autoloop_master_phrase_arm_arms_short_runway_and_schedules_correction(self) -> None:
+    def test_autoloop_master_phrase_arm_arms_short_runway_immediately(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             output = FakeOutput()
             sm = StateManager(
@@ -792,20 +779,13 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.lighting_mode = "autoloop"
         sm._apply_lighting(2, "autoloop", 28194, 132.0)
 
-        self.assertEqual(output.loads, [])
-        self.assertIsNotNone(sm._os.pending_autoloop_arm_meta)
-        self.assertEqual(sm._os.autoloop_arm_sync_beat, 64)
-        self.assertEqual(sm._os.pending_autoloop_arm_reason, "short-runway")
-        self.assertLess(sm._os.autoloop_arm_target_elapsed_ms - 28194, 1000)
-
-        _autoloop_tick(sm, 2, 1, 132.0, 64.0, sm._os.autoloop_arm_target_elapsed_ms)
-
         self.assertEqual(len(output.loads), 4)
-        self.assertTrue(sm._os.autoloop_arm_pending)
-        self.assertEqual(sm._os.autoloop_arm_sync_beat, 96)
-        self.assertEqual(sm._os.pending_autoloop_arm_reason, "correction-short-runway")
+        self.assertIsNone(sm._os.pending_autoloop_arm_meta)
+        self.assertFalse(sm._os.autoloop_arm_pending)
+        self.assertEqual(sm._os.autoloop_arm_sync_beat, 0)
+        self.assertEqual(output.bpms[-4:], [(2, 132.0), (1, 132.0), (3, 132.0), (4, 132.0)])
 
-    def test_autoloop_master_phrase_grace_late_arms_and_schedules_correction(self) -> None:
+    def test_autoloop_master_phrase_grace_late_arms_immediately_without_correction(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             output = FakeOutput()
             sm = StateManager(
@@ -821,14 +801,12 @@ class StateManagerLiveBPMTests(unittest.TestCase):
 
         sm._on_master_changed(2, "test-master")
         sm._os.lighting_mode = "autoloop"
-        with self.assertLogs("state_manager", level="WARNING") as logs:
-            sm._apply_lighting(2, "autoloop", 16150, 120.0)
+        sm._apply_lighting(2, "autoloop", 16150, 120.0)
 
         self.assertEqual(len(output.loads), 4)
-        self.assertTrue(sm._os.autoloop_arm_pending)
-        self.assertEqual(sm._os.autoloop_arm_sync_beat, 64)
-        self.assertEqual(sm._os.pending_autoloop_arm_reason, "correction-phrase-grace-late")
-        self.assertTrue(any("AUTOLOOP-MASTER-ARM-GRACE-LATE" in line for line in logs.output))
+        self.assertFalse(sm._os.autoloop_arm_pending)
+        self.assertEqual(sm._os.autoloop_arm_sync_beat, 0)
+        self.assertEqual(sm._os.pending_autoloop_arm_reason, "")
 
     def test_master_transition_autoloop_arm_does_not_mark_next_beat_change(self) -> None:
         cache = PositionCache()

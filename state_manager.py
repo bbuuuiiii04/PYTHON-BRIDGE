@@ -342,9 +342,9 @@ class StateManager:
         # Rate-limited position logging (once every 5 s per deck)
         self._last_pos_log: dict[int, float] = {1: 0.0, 2: 0.0}
 
-        # TL TC fallback: (elapsed_ms, wall_time, pitch_factor) per deck
-        # Updated by TC_UPDATE events. pitch_factor from ENGINE STATE pitch% field.
-        self._tl_tc: dict[int, tuple[int, float, float]] = {1: (0, 0.0, 1.0), 2: (0, 0.0, 1.0)}
+        # Timecode fallback anchor: (elapsed_ms, wall_time, pitch_factor) per deck.
+        # Updated by TC_UPDATE events.
+        self._tc_anchor: dict[int, tuple[int, float, float]] = {1: (0, 0.0, 1.0), 2: (0, 0.0, 1.0)}
 
         # ANLZ path keyed by bridge deck: populated by ANLZ_PATH event,
         # consumed by _on_track_loaded to skip lsof
@@ -429,8 +429,8 @@ class StateManager:
             callback(self._apply_personality_change)
         self._recache_initial_personality_timing()
 
-    def set_initial_state(self, active_deck: int, source: str = "TL ENGINE STATE") -> None:
-        """Apply startup state read from TL ENGINE STATE before event loop starts."""
+    def set_initial_state(self, active_deck: int, source: str = "default startup") -> None:
+        """Apply startup active-deck state before the event loop starts."""
         if active_deck in (1, 2):
             self._os.active_deck = active_deck
             log.info("[SM] init  deck=%d  src=%s", active_deck, source)
@@ -454,24 +454,24 @@ class StateManager:
         """Best current elapsed estimate for memory-side provisional discovery.
 
         This is a read-only hint for RBMemoryReader. StateManager remains the
-        authority for TL/MTC synthesis; the memory reader only uses this value
+        authority for timecode synthesis; the memory reader only uses this value
         to find paused Deck-2 candidates and still requires movement validation
         before publishing memory snapshots.
         """
         if deck not in (1, 2):
             return None
         d = self._deck[deck]
-        tl_ms, tl_at, tl_pitch = self._tl_tc.get(deck, (0, 0.0, 1.0))
+        anchor_ms, anchor_at, anchor_pitch = self._tc_anchor.get(deck, (0, 0.0, 1.0))
         now = time.monotonic()
-        if tl_ms > 0 and 0.0 < now - tl_at < 45.0:
-            age_ms = (now - tl_at) * 1000.0 * tl_pitch
-            return int(tl_ms + (age_ms if d.playing else 0.0))
+        if anchor_ms > 0 and 0.0 < now - anchor_at < 45.0:
+            age_ms = (now - anchor_at) * 1000.0 * anchor_pitch
+            return int(anchor_ms + (age_ms if d.playing else 0.0))
         if d.elapsed_ms > 0:
             return d.elapsed_ms
         return None
 
     def get_deck_playing(self, deck: int) -> bool:
-        """TL-authoritative play state hint for memory-side discovery scheduling."""
+        """Authoritative play state hint for memory-side discovery scheduling."""
         if deck not in (1, 2):
             return False
         return self._deck[deck].playing
@@ -796,10 +796,9 @@ class StateManager:
             tc_ms = ev.payload.get('elapsed_ms', 0)
             if tc_ms > 0:
                 pitch = ev.payload.get('pitch_factor', 1.0)
-                self._tl_tc[ev.deck] = (tc_ms, ev.mono, pitch)
+                self._tc_anchor[ev.deck] = (tc_ms, ev.mono, pitch)
 
         elif ev.kind == Ev.BPM_UPDATE:
-            # ENGINE STATE fires every ~15s with live pitch-adjusted BPM
             d = self._deck[ev.deck]
             new_bpm = ev.payload.get('bpm', 0.0)
             if self._live_bpm is not None and new_bpm > 0:
@@ -914,7 +913,7 @@ class StateManager:
             return
         log.info("[SM] switch  %d→%d  src=%s", old_deck, new_deck, source)
         LOG.stats.record_transition(new_deck, "master")
-        # OSC race fix: TL's /bridge/active_deck can arrive after /bridge/track_loaded,
+        # OSC race fix: /bridge/active_deck can arrive after /bridge/track_loaded,
         # so SCRIPTED_ARM may land on the old active deck. If old deck wasn't playing
         # and new deck has no scripted_id, transfer it.
         old_d = self._deck[old_deck]
@@ -982,7 +981,7 @@ class StateManager:
             self._autoloop.clear_pending_master_phrase_arm()
             if self._laser_executor is not None:
                 self._laser_executor.reset_runtime_state(reason="active_track_loaded")
-        d.tl_title = title
+        d.track_title_hint = title
         self._last_loaded_deck = deck
         trace_id = str(ev.payload.get("__trace_id", ""))
         if trace_id:
@@ -1374,8 +1373,8 @@ class StateManager:
         if not d.meta.soundswitch_id:
             d.meta.soundswitch_id = track.get("ssid", "")
 
-        # Get current elapsed — prefer memory snap, fall back to d.elapsed_ms which
-        # the push loop keeps current via TL TC when the DPU is unresolvable (DVS mode).
+        # Get current elapsed: prefer memory snap, otherwise use the push loop's
+        # latest elapsed estimate when the DPU is unresolvable.
         snap = self._cache.get(deck)
         if snap and not snap.is_stale():
             elapsed_ms = snap.elapsed_ms
@@ -1435,7 +1434,7 @@ class StateManager:
         self._log_status()
 
     def _arm_unscripted(self, deck: int) -> None:
-        """TL value=1: clear scripted state. Lighting machine re-evaluates next tick."""
+        """Clear scripted state. Lighting machine re-evaluates next tick."""
         d = self._deck[deck]
         log.info("[SM] clear-scripted  deck=%d", deck)
         d.scripted_id = 0
@@ -1568,17 +1567,16 @@ class StateManager:
         if self._recorder and snap:
             self._recorder.record_position(active, snap)
 
-        # When memory has no snap for this deck (DPU unresolved — e.g. no track
+        # When memory has no snap for this deck (DPU unresolved, e.g. no track
         # loaded in RB, DVS mode, or DPU2 vtable mismatch), synthesize a snap
-        # from TL TC so the push loop can resume/beat/elapsed normally.
-        # TL TC fires every ~15 s from ENGINE STATE; 45 s guard limits drift.
+        # from recent timecode so the push loop can resume/beat/elapsed normally.
         if snap is None:
-            tl_ms, tl_at, tl_pitch = self._tl_tc.get(active, (0, 0.0, 1.0))
-            if tl_ms > 0 and tl_at > 0 and (now - tl_at) < 45.0:
-                age_ms = (now - tl_at) * 1000.0 * tl_pitch
+            anchor_ms, anchor_at, anchor_pitch = self._tc_anchor.get(active, (0, 0.0, 1.0))
+            if anchor_ms > 0 and anchor_at > 0 and (now - anchor_at) < 45.0:
+                age_ms = (now - anchor_at) * 1000.0 * anchor_pitch
                 snap = PositionSnapshot(
                     deck=active,
-                    elapsed_ms=int(tl_ms + (age_ms if d.playing else 0.0)),
+                    elapsed_ms=int(anchor_ms + (age_ms if d.playing else 0.0)),
                     playing=d.playing,
                     track_length_ms=0,
                     updated_at=now,
@@ -1605,7 +1603,7 @@ class StateManager:
                         self._laser_executor.on_tick(_lctx)
                         self._laser_executor.on_decision(decision, _lctx)
                 return
-            # Not playing — run lighting machine and auto-detect with TL state only.
+            # Not playing: run lighting machine and auto-detect from current state.
             bpm = d.meta.bpm
             elapsed_ms = d.elapsed_ms or 0
             confident_playing = d.playing
@@ -1642,14 +1640,14 @@ class StateManager:
         raw_elapsed_ms = snap.elapsed_ms + (elapsed_since if snap.playing else 0.0)
         mem_playing = snap.playing
 
-        # TL TC fallback: when memory gives 0 (v2's container/DPU path reaches the wrong
+        # Timecode fallback: when memory gives 0 (v2's container/DPU path reaches the wrong
         # inner for deck 2 in DDJ-800 mode — the correct deck-2 inner does write position
         # at +0xC, but it's reachable via outer+0x78, not container+0x480 or DPU scan).
         if snap.elapsed_ms == 0:
-            tl_ms, tl_at, tl_pitch = self._tl_tc.get(active, (0, 0.0, 1.0))
-            if tl_ms > 0 and tl_at > 0 and (now - tl_at) < 45.0:
-                age_ms = (now - tl_at) * 1000.0 * tl_pitch
-                raw_elapsed_ms = tl_ms + (age_ms if (mem_playing or d.playing) else 0.0)
+            anchor_ms, anchor_at, anchor_pitch = self._tc_anchor.get(active, (0, 0.0, 1.0))
+            if anchor_ms > 0 and anchor_at > 0 and (now - anchor_at) < 45.0:
+                age_ms = (now - anchor_at) * 1000.0 * anchor_pitch
+                raw_elapsed_ms = anchor_ms + (age_ms if (mem_playing or d.playing) else 0.0)
 
         elapsed_ms = int(raw_elapsed_ms) + TIMING_COMPENSATION_MS
         prev_elapsed_ms = d.elapsed_ms
@@ -1684,7 +1682,7 @@ class StateManager:
             os.last_sent_bpm = 0.0
             os.push_reset_bpm = False
 
-        # Beat position: computed from ENGINE STATE BPM (pitch-adjusted every ~15s).
+        # Beat position: computed from the current pitch-adjusted BPM.
         beat_pos = _compute_beat_pos(elapsed_ms, bpm, d.meta.first_beat_ms) if bpm > 0 else 0.0
         beat_ms = 60_000.0 / bpm if bpm > 0 else 0.0
         abs_beat_pos = (
@@ -1705,15 +1703,13 @@ class StateManager:
             )
 
         # ── Stop detection ────────────────────────────────────────────────────
-        # TL PAUSE event sets d.playing=False; memory confirms it persists.
-        # In v2 (no Frida), TL log is the authoritative play source.
-        # is_playing (OR) is kept for other_playing / auto-detect where memory
-        # corroboration helps guard against mis-mapped DPU offsets.
+        # d.playing is the authoritative transport state; memory corroboration
+        # is kept for other_playing / auto-detect to guard against mis-mapped DPU offsets.
         is_playing = mem_playing or d.playing
 
         # ── Lighting state machine ────────────────────────────────────────────
-        # TL is authoritative: d.playing=False (TL said pause) means not playing,
-        # even if memory (unreliable on DDJ-800 mode=4112) still shows playing.
+        # Authoritative pause state wins even if memory (unreliable on DDJ-800
+        # mode=4112) still shows playing.
         confident_playing = d.playing
         self._update_lighting(active, d, confident_playing, elapsed_ms, bpm, now)
         if os.lighting_mode == "autoloop" and grid_pos is None:
@@ -1724,8 +1720,8 @@ class StateManager:
         # Arm guard recomputed here so it reflects any arm fired by _update_lighting.
         arm_guard = (now - os.last_arm_mono) < ARM_GUARD_S
 
-        # Stop detection is TL-authoritative for the same reason: d.playing=False
-        # means stopped, memory cannot override a TL pause event.
+        # Stop detection follows authoritative transport state; memory cannot
+        # override a pause event.
         if not d.playing and not arm_guard and os.was_playing:
             if os.not_playing_since == 0.0:
                 os.not_playing_since = now
@@ -1736,7 +1732,7 @@ class StateManager:
             stop_confirmed = False
 
         # Check other deck for auto-switch.
-        # Require TL confirmation (d.playing) in addition to memory — guards against
+        # Require authoritative confirmation (d.playing) in addition to memory; guards against
         # wrong DPU offsets causing memory to misreport the other deck as playing.
         other_snap = self._cache.get(mirror)
         other_playing = ((other_snap is not None and not other_snap.is_stale()
@@ -1764,9 +1760,8 @@ class StateManager:
             return
 
         # ── Auto-detect: active idle + mirror playing → switch ───────────────
-        # Handles the case where TL doesn't send MASTER_CHANGED (e.g. track loaded
-        # on deck 2 with nothing on deck 1 — RB may auto-assign master without a
-        # deck-change log line).
+        # Handles the case where RB auto-assigns master without an explicit
+        # deck-change event.
         if not os.was_playing and not d.playing and not arm_guard:
             if self._deck[mirror].playing:
                 log.info("[SM] switch  %d→%d  src=auto  reason=idle+mirror-playing",
@@ -1781,7 +1776,7 @@ class StateManager:
                                 active, mirror)
 
         # ── Resume detection (was stopped, now playing) ───────────────────────
-        # TL authoritative: d.playing=True means TL confirmed playback.
+        # Authoritative transport state confirmed playback.
         real_play = d.playing
         if not os.was_playing and real_play:
             if os.play_settle_after == 0.0:

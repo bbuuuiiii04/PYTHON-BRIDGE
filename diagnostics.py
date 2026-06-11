@@ -4,7 +4,7 @@ Pipeline diagnostics and debug tooling.
 Enable per-module debug logging:
   export BRIDGE_DEBUG=1   (or pass --debug on CLI)
 
-Drift detection between memory position and TL-derived state.
+Drift detection for memory position reads.
 Per-deck state transition logger.
 Latency sampler for event ingestion → processing.
 """
@@ -128,15 +128,10 @@ class LatencyTracker:
         }
 
 
-# ── Memory vs TL position drift detector ─────────────────────────────────────
+# ── Memory position drift detector ───────────────────────────────────────────
 
 class DriftDetector:
-    """Detects when memory position diverges from TL-expected position.
-
-    The TL log doesn't give us position, but we know position should be
-    monotonically increasing when playing. A backward jump or sudden freeze
-    indicates a seek or RB restart.
-    """
+    """Detects implausible memory-position movement while playing."""
 
     _BACKWARD_JUMP_MS  = 2_000   # ignore normal rewinds less than this
     _FREEZE_THRESHOLD_S = 3.0    # flag if position doesn't advance for this long
@@ -172,7 +167,7 @@ class DriftDetector:
 
 def enable_debug() -> None:
     """Set all bridge loggers to DEBUG level."""
-    for name in ("tl_tailer", "rb_memory", "filepath_resolver",
+    for name in ("rb_memory", "filepath_resolver",
                  "scripted_tracks", "osl_output", "state_manager",
                  "diagnostics", "bridge", "logging_manager"):
         logging.getLogger(name).setLevel(logging.DEBUG)

@@ -331,7 +331,7 @@ def _scan_static_elapsed_candidates(
     window: int,
     tolerance_ms: int = _D2_STATIC_TOL_MS,
 ) -> list[int]:
-    """Find paused Deck-2 candidates by matching current TL/MTC elapsed.
+    """Find paused Deck-2 candidates by matching current timecode elapsed.
 
     This is intentionally weaker than movement validation. It only produces a
     provisional candidate for later strict promotion and should never be used as
@@ -751,7 +751,7 @@ class RBSession:
              Primary method. Finds any field advancing at ~44100 Hz regardless of
              the inner1/inner2 relative offset (proven session-dependent).
           S. paused/static scan: if target_ms is available, find one unique field
-             near current TL/MTC elapsed and hold it as provisional only.
+             near current timecode elapsed and hold it as provisional only.
           D. ObjC heap moving scan: after repeated near-inner1 failures while
              Deck 2 is playing, scan vmmap-derived ObjC heap regions for moving
              fields near target_ms.
@@ -932,7 +932,7 @@ class RBSession:
         """Read position + play state for bridge_deck (1 or 2).
 
         Deck 1: container → DPU1 → inner1 (proven reliable).
-        Deck 2: validated deck2_inner (None → caller falls back to TL TC).
+        Deck 2: validated deck2_inner (None -> caller falls back to timecode).
         Returns None if data unavailable.
         """
         if bridge_deck == 1:

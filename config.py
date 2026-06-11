@@ -17,13 +17,6 @@ SMART_BREAKDOWN_IGNORE_OUTRO_BEATS = 32
 
 PHRASE_ANCHOR_BEATS = 64
 
-# ── TimecodeLink ─────────────────────────────────────────────────────────────
-TL_LOG_PATH = Path(
-    "~/Library/Application Support/TimecodeLink/timecodelink.log"
-).expanduser()
-TL_PLAYLIST_PATH = Path(
-    "~/Library/Application Support/TimecodeLink/playlist.yaml"
-).expanduser()
 RB_DB_PATH = Path("~/Library/Pioneer/rekordbox/master.db").expanduser()
 
 # ── RB Direct Memory (arm64, RB 7.2.11) ─────────────────────────────────────

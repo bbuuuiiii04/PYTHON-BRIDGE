@@ -3,8 +3,8 @@
 # Manual launcher for rb_ss_bridge_v2.
 # Watches for Rekordbox and SoundSwitch. When they are present, starts or adopts
 # one bridge process and opens one dedicated Terminal monitor.
-# TimecodeLink is optional - bridge uses direct Rekordbox memory paths (B1-B6)
-# as primary signals; TL fallbacks activate automatically if TL starts later.
+# Bridge uses direct Rekordbox memory paths (B1-B6) as primary signals, with
+# MTC available as the timecode fallback.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
