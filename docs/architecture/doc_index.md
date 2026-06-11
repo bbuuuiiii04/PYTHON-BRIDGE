@@ -85,22 +85,14 @@ source of truth when documents conflict.
 | --- | --- | --- |
 | `docs/validation/anlz_energy_evaluation_guide.md` | VALIDATION EVIDENCE | Practical operator workflow for validating ANLZ energy tooling on a small corpus. |
 | `docs/validation/anlz_energy_corpus_report.md` | VALIDATION EVIDENCE | Report template and JSONL schema for offline ANLZ energy corpus runs. |
-| `docs/validation/direct_master_runtime_validation.md` | VALIDATION EVIDENCE | Bounded direct-master observer validation. |
-| `docs/validation/direct_master_runtime_runbook.md` | VALIDATION EVIDENCE | Live evidence capture workflow for direct-master validation. |
-| `docs/validation/direct_master_runtime_results_template.md` | VALIDATION EVIDENCE | Template for observer results, not behavior documentation. |
-| `docs/validation/live_bpm_findings.md` | VALIDATION EVIDENCE | Historical/live probe evidence and session-local address warnings. |
 | `docs/validation/autoloop_beatphase_findings.md` | VALIDATION EVIDENCE | SoundSwitch activation and beatphase evidence supporting autoloop design. |
 
 ## History
 
 | File | Classification | Why |
 | --- | --- | --- |
-| `docs/history/tl_retirement_process_log.md` | HISTORICAL / ROLLOUT LOG | Chronology of B1-B6 promotion and validation. Current state must be checked against code. |
-| `docs/history/timecodelink_integration_analysis.md` | HISTORICAL / ROLLOUT LOG | Reverse-engineering evidence for TL internals and offsets; not current bridge behavior. |
-| `docs/history/code_update_tracker.md` | HISTORICAL / ROLLOUT LOG | Review/approval tracker with historical rules and change notes. |
 | `docs/history/dashboard_plan.md` | HISTORICAL / ROLLOUT LOG | Planning/implemented-slice note for operator dashboard; status code is authoritative. |
 | `docs/history/logging_implementation_handoff.md` | HISTORICAL / ROLLOUT LOG | Historical logging handoff. Current guidance is in `docs/subsystems/logging.md`. |
-| `docs/history/live_bpm_handoff.md` | HISTORICAL / ROLLOUT LOG | Handoff with useful evidence pointers; current behavior belongs in architecture/design docs. |
 | `docs/history/pssi_mood23_up_mapping_spike_2026-05-10.md` | HISTORICAL / ROLLOUT LOG | Historical PSSI/mood mapping investigation. |
 | `docs/history/smart_drop_phase2_handoff.md` | HISTORICAL / ROLLOUT LOG | Local Phase 2 handoff and validation evidence; current behavior is summarized in `docs/architecture/bridge_design.md`. |
 | `docs/history/archive/live_bpm_v2_plan.md` | ARCHIVED STALE HISTORY | Older live-BPM rearm design record with fields that no longer match current `OutputState`. |
@@ -110,9 +102,9 @@ source of truth when documents conflict.
 
 | File | Classification | Why |
 | --- | --- | --- |
-| `docs/data/offsets-macos.yaml` | CURRENT SUPPORTING | Extracted TimecodeLink offset data retained as repo-local reference data. |
-| `docs/data/offsets-macos-x86_64.yaml` | CURRENT SUPPORTING | Comparative x86_64 TimecodeLink offset data. |
-| `docs/data/offsets-windows.yaml` | CURRENT SUPPORTING | Comparative Windows TimecodeLink offset data. |
+| `docs/data/offsets-macos.yaml` | CURRENT SUPPORTING | Rekordbox offset data retained as repo-local reference data. |
+| `docs/data/offsets-macos-x86_64.yaml` | CURRENT SUPPORTING | Comparative x86_64 Rekordbox offset data. |
+| `docs/data/offsets-windows.yaml` | CURRENT SUPPORTING | Comparative Windows Rekordbox offset data. |
 
 ## Main Path For New Developers
 

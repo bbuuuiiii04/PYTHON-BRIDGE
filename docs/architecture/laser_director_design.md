@@ -17,7 +17,7 @@ Implementation must treat code as the source of truth. If this document and curr
 The current bridge is a local macOS realtime daemon. It:
 
 - Reads guarded direct Rekordbox state where available.
-- Falls back to TimecodeLink and MTC where direct state is unsupported, stale, or not ready.
+- Uses MTC where direct position is unsupported, stale, or not ready.
 - Uses `StateManager` as the central authority thread.
 - Publishes immutable `BridgeEvent`s into a queue.
 - Samples direct position through `PositionCache`.

@@ -331,10 +331,10 @@ class LabelFromCuesTests(unittest.TestCase):
         self.assertEqual((rows, out), ([], ""))
 
     def test_excludes_scripted_titles(self):
-        with tempfile.NamedTemporaryFile("w") as tl:
-            tl.write('track_id: "Track A"\naddress: /bridge/track_loaded\nvalue: 2\n')
-            tl.flush()
-            rows, _out, err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "DROP")]}, extra=["--exclude-scripted", tl.name])
+        with tempfile.NamedTemporaryFile("w") as manifest:
+            manifest.write('track_id: "Track A"\naddress: /bridge/track_loaded\nvalue: 2\n')
+            manifest.flush()
+            rows, _out, err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "DROP")]}, extra=["--exclude-scripted", manifest.name])
         self.assertEqual(rows, []); self.assertIn("excluded 1 scripted tracks", err)
 
     def test_prefers_drop_commented_cue_over_closer_unmarked_cue(self):
@@ -394,9 +394,9 @@ class LabelFromCuesTests(unittest.TestCase):
     def test_pcob_legacy_cue_with_no_comment_does_not_trigger_inclusion(self):
         self.assertEqual(self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "")]})[0], [])
 
-    def test_missing_tl_playlist_file_falls_through_with_warning(self):
-        rows, _out, err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "DROP")]}, extra=["--exclude-scripted", "/tmp/no-such-tl.yaml"])
-        self.assertEqual(rows[0]["title"], "Track A"); self.assertIn("warning: scripted playlist missing", err)
+    def test_missing_scripted_manifest_file_falls_through_with_warning(self):
+        rows, _out, err = self.run_label([content("Track A")], db_cues={"Track A": [db_cue(1, 32000, "DROP")]}, extra=["--exclude-scripted", "/tmp/no-such-scripted.yaml"])
+        self.assertEqual(rows[0]["title"], "Track A"); self.assertIn("warning: scripted manifest missing", err)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 ---
 name: rb_ss_bridge_v2 design rules and invariants
-description: Current authoritative design reference for rb_ss_bridge_v2. Covers runtime wiring, direct/TL authority, state ownership, lighting, timing, fallbacks, launcher defaults, and known hazards.
+description: Current authoritative design reference for rb_ss_bridge_v2. Covers runtime wiring, direct/MTC authority, state ownership, lighting, timing, fallbacks, launcher defaults, and known hazards.
 type: project
 originSessionId: 88cd1a53-8b87-4b05-b106-26c1fb0a5730
 ---
@@ -8,15 +8,14 @@ originSessionId: 88cd1a53-8b87-4b05-b106-26c1fb0a5730
 
 Status: CURRENT AUTHORITATIVE
 
-Last reconciled against the current checkout on 2026-05-12.
+Last reconciled against the current checkout on 2026-06-11.
 
 ## Purpose
 
 `rb_ss_bridge_v2` bridges Rekordbox on macOS to SoundSwitch by pretending to be
 VirtualDJ on OS2L. It is Frida-free and injection-free. Direct Rekordbox process
 memory reads provide the primary modern signals when the matching guarded direct
-flags are enabled. TimecodeLink remains present as a fallback and safety source,
-not as a single all-or-nothing authority.
+flags are enabled. MTC remains available as a timecode fallback.
 
 The live launcher defaults currently run with B1-B6 direct paths enabled:
 
@@ -41,7 +40,6 @@ These defaults exist in `scripts/ss_bridge_watcher.sh`.
 
 | Component | File | Current role |
 | --- | --- | --- |
-| `TLLogTailer` | `tl_tailer.py` | Tails TimecodeLink log and enqueues TL/ENGINE events unless the matching direct source is enabled and currently ready. |
 | `RBStateReader` | `rb_state_reader.py` | Reads versioned Rekordbox offset-table chains at about 30 Hz. Can authoritatively emit ANLZ, track-load, play/pause, and master events through `authoritative_kinds`. |
 | `RBMemoryReader` | `rb_memory.py` | Polls position at 60 Hz into `PositionCache`; can use versioned direct position chains with ObjC scan fallback. Emits `RB_RESTARTED`. |
 | `LiveBPMService` | `live_bpm.py` | Reads displayed BPM from versioned offset-table chains when supported; otherwise uses validated discovery and metadata fallback. |
@@ -73,7 +71,6 @@ the localhost fallback.
 | `RBMemoryReader` | `PositionCache`, `RB_RESTARTED` events | Rekordbox process memory |
 | `RBStateReader` | Direct `BridgeEvent`s and readiness callbacks | Rekordbox process memory |
 | `LiveBPMService` | Internal BPM state | Rekordbox process memory |
-| `TLLogTailer` | TL/ENGINE `BridgeEvent`s | TimecodeLink log |
 | `MTCReader` | `TC_UPDATE` events | IAC Bus 1 MIDI |
 | Resolver workers | `FILEPATH_RESOLVED`, `ANLZ_DATA` events | DB, ANLZ, lsof, audio files |
 | OSC server | OSC `MASTER_CHANGED` / legacy scripted events | UDP port 7001 |
@@ -93,25 +90,25 @@ Drop menu toggle follows this pattern with `Ev.SMART_DROP_TOGGLE`.
 
 `StateManager` does not perform broad event-source arbitration. Source selection
 must happen before events reach it: `__main__.py` configures
-`RBStateReader.authoritative_kinds`, and `TLLogTailer` uses per-signal readiness
-callbacks to decide whether to bypass TL events.
+`RBStateReader.authoritative_kinds`, and direct events are routed only when the
+corresponding guarded direct flag is enabled.
 
 | Signal | Default/fallback source | Direct source | Current authority rule |
 | --- | --- | --- | --- |
-| ANLZ path | TL ANLZ correlation | `RBStateReader` `Ev.ANLZ_PATH` | Direct when `RBSS_ANLZ_DIRECT=1` and readable for that deck; otherwise TL. |
-| Position | `RBMemoryReader` ObjC scan, MTC, TL TC | `RBMemoryReader` versioned `live_pos_per_deck` chain | Direct chain when `RBSS_POS_CHAIN_DIRECT=1` and valid; ObjC/MTC/TL fallback remains. |
-| Startup master seed | TL ENGINE STATE | one-shot direct `master_deck` reads | Direct can seed startup only with `RBSS_MASTER_SEED_DIRECT=1` after two stable valid reads; otherwise TL ENGINE STATE. |
-| Runtime master | TL log/ENGINE/OSC | `RBStateReader` `Ev.MASTER_CHANGED` | Direct when `RBSS_MASTER_DIRECT=1` and the current master byte is readable and valid; otherwise TL/OSC fallback. |
-| Play/pause | TL log | `RBStateReader` movement-derived `Ev.PLAY`/`Ev.PAUSE` | Direct when `RBSS_PLAY_DIRECT=1` and transport is warmed/readable for that deck; otherwise TL. |
-| Track load | TL log title | `RBStateReader` full title string | Direct when `RBSS_TRACK_LOAD_DIRECT=1` and `RBSS_ANLZ_DIRECT=1` and title is readable; otherwise TL. |
-| Scripted arm/clear | TL OSC `/bridge/track_loaded` | `FILEPATH_RESOLVED` from direct load path | Direct by default unless `RBSS_SCRIPTED_DIRECT=0`; direct uses resolved SSID/registry/filepath, not TL OSC deck guessing. |
-| Live/displayed BPM | ENGINE/metadata fallback | `LiveBPMService` offset-table or validated discovery | Direct when fresh and valid; fallback to metadata/ENGINE. |
-| TC fallback | TL ENGINE TC | MTCReader | MTC writes frequent `TC_UPDATE`; TL TC remains low-rate safety fallback. |
+| ANLZ path | none | `RBStateReader` `Ev.ANLZ_PATH` | Direct when `RBSS_ANLZ_DIRECT=1` and readable for that deck. |
+| Position | `RBMemoryReader` ObjC scan, MTC | `RBMemoryReader` versioned `live_pos_per_deck` chain | Direct chain when `RBSS_POS_CHAIN_DIRECT=1` and valid; ObjC/MTC fallback remains. |
+| Startup master seed | deck 1 default | one-shot direct `master_deck` reads | Direct can seed startup only with `RBSS_MASTER_SEED_DIRECT=1` after two stable valid reads; otherwise deck 1 startup. |
+| Runtime master | OSC/control fallback | `RBStateReader` `Ev.MASTER_CHANGED` | Direct when `RBSS_MASTER_DIRECT=1` and the current master byte is readable and valid. |
+| Play/pause | none | `RBStateReader` movement-derived `Ev.PLAY`/`Ev.PAUSE` | Direct when `RBSS_PLAY_DIRECT=1` and transport is warmed/readable for that deck. |
+| Track load | none | `RBStateReader` full title string | Direct when `RBSS_TRACK_LOAD_DIRECT=1` and `RBSS_ANLZ_DIRECT=1` and title is readable. |
+| Scripted arm/clear | OSC `/bridge/track_loaded` when direct scripted mode is disabled | `FILEPATH_RESOLVED` from direct load path | Direct by default unless `RBSS_SCRIPTED_DIRECT=0`; direct uses resolved SSID/registry/filepath. |
+| Live/displayed BPM | metadata fallback | `LiveBPMService` offset-table or validated discovery | Direct when fresh and valid; fallback to metadata. |
+| TC fallback | none | MTCReader | MTC writes frequent `TC_UPDATE`. |
 
 Fail-closed rule: every direct authority path must become active only when its
 own current-readiness condition is true. Unsupported Rekordbox versions, attach
-failure, unreadable chains, stale reads, and no-master sentinels fall back to the
-existing TL/current path.
+failure, unreadable chains, stale reads, and no-master sentinels keep the
+corresponding direct path inactive.
 
 ## Direct B1-B6 Details
 
@@ -119,8 +116,7 @@ existing TL/current path.
 
 With `RBSS_ANLZ_DIRECT=1`, `RBStateReader._tick_deck()` reads
 `anlz_path_per_deck[d]`. Non-empty paths enqueue `Ev.ANLZ_PATH` with
-`source='rb_state'`. `TLLogTailer` suppresses TL ANLZ output only for a bridge
-deck whose direct ANLZ path was readable in the current tick.
+`source='rb_state'` when the direct ANLZ path is readable for that bridge deck.
 
 Direct `_tick_deck()` ordering is contractual: ANLZ is read and enqueued before
 direct `TRACK_LOADED`. `StateManager._on_track_loaded()` consumes the pending
@@ -147,14 +143,14 @@ direct master byte twice, 0.5 s apart, using the same offset table as
 `RBStateReader`. Direct seed is used only if both reads are readable, valid
 bridge decks, stable, and equal. Any unsupported version, attach failure,
 unreadable chain, invalid deck, unstable read, or `0xFF` no-master sentinel
-falls closed to the TL ENGINE STATE active deck.
+falls closed to the default startup deck.
 
 ### B3: Direct Play/Pause
 
 With `RBSS_PLAY_DIRECT=1`, `RBStateReader` infers play/pause by movement in
 `live_pos_per_deck[d]` after warmup and evidence polls. A failed position read
-resets inference for that deck. TL play/pause is bypassed only once the direct
-transport path is currently readable and has a baseline/last state for the deck.
+resets inference for that deck. The direct transport path emits only once it is
+currently readable and has a baseline/last state for the deck.
 
 `StateManager` still treats `d.playing` as the authoritative play state after
 the selected source has produced events. The raw `PositionSnapshot.playing` bit
@@ -164,16 +160,15 @@ unreliable for lighting/stop authority.
 ### B4: Direct Track Load
 
 With `RBSS_TRACK_LOAD_DIRECT=1`, direct track-load requires
-`RBSS_ANLZ_DIRECT=1`. If ANLZ direct is not enabled, B4 is ignored so TL
-track-load remains authoritative and ANLZ-before-load ordering is preserved.
+`RBSS_ANLZ_DIRECT=1`. If ANLZ direct is not enabled, B4 is ignored so
+ANLZ-before-load ordering is preserved.
 
-Direct track load emits the full direct Rekordbox title string, not TL's
-truncated log title. TL track-load output is bypassed only while direct title
+Direct track load emits the full direct Rekordbox title string only while title
 memory is currently readable and non-empty for the bridge deck.
 
 ### B5: Direct Scripted Routing
 
-`RBSS_SCRIPTED_DIRECT` defaults on unless set to `0`. In direct mode, the TL OSC
+`RBSS_SCRIPTED_DIRECT` defaults on unless set to `0`. In direct mode, the OSC
 `/bridge/track_loaded` handler returns after parsing and does not enqueue
 `SCRIPTED_ARM` or `SCRIPTED_CLEAR`.
 
@@ -188,7 +183,7 @@ Direct scripted routing happens after `FILEPATH_RESOLVED`:
 4. Enqueue `SCRIPTED_ARM` when matched, otherwise `SCRIPTED_CLEAR`.
 
 Deck identity comes from `FILEPATH_RESOLVED`, which inherited the original
-`TRACK_LOADED` deck. It does not depend on active deck or TL OSC ordering.
+`TRACK_LOADED` deck. It does not depend on active-deck OSC ordering.
 
 ### B6: Direct Runtime Master
 
@@ -198,23 +193,12 @@ when the raw master byte changes and maps to a valid Rekordbox deck index. The
 `0xFF` no-master sentinel updates the direct baseline but does not emit an event
 and does not mark direct master ready.
 
-`TLLogTailer` bypasses TL log and ENGINE STATE `MASTER_CHANGED` only while direct
-master is currently ready. OSC `/bridge/active_deck` is also bypassed only while
-direct master is enabled and ready. If direct master is unsupported, unreadable,
-sentinel, missing, or not warmed up, TL/OSC remain the fail-closed fallback.
-ENGINE STATE BPM and TC fallback events still flow.
+OSC `/bridge/active_deck` is bypassed only while direct master is enabled and
+ready. If direct master is unsupported, unreadable, sentinel, missing, or not
+warmed up, direct master stays inactive.
 
-B6 was live-validated on 2026-05-07 under the full B1-B6 flag set. The evidence
-is preserved in `docs/history/tl_retirement_process_log.md`.
-
-### Direct Master Observer Is Separate
-
-`read_direct_master_status()`, startup observation helpers, and
-`DirectMasterRuntimeObserver` are diagnostic/status tools. The bounded runtime
-observer uses its own ephemeral reader, compares against `TLMasterSnapshot`, logs
-`comparison_source=tl_master_snapshot` and `authority=tl_log`, and does not
-enqueue `MASTER_CHANGED` or mutate `StateManager`. Do not confuse this observer
-with the B6 main `RBStateReader` authority path.
+`read_direct_master_status()` is diagnostic/status support. Runtime direct
+master authority is only the guarded B6 main `RBStateReader` path.
 
 ## StateManager Event Handling
 
@@ -229,7 +213,7 @@ with the B6 main `RBStateReader` authority path.
 | `ANLZ_DATA` | If `load_gen` matches, store drop beat indices for Smart Drop/Phrase Anchor. |
 | `FILEPATH_RESOLVED` | Ignore stale generations; update full metadata; feed LiveBPM hint; run direct scripted match/clear if enabled. |
 | `BPM_UPDATE` | Feed LiveBPM hint and update `d.meta.bpm` when movement is large enough. |
-| `TC_UPDATE` | Store `_tl_tc[deck] = (elapsed_ms, mono, pitch_factor)` for MTC/TL fallback synthesis. |
+| `TC_UPDATE` | Store `_tc_anchor[deck] = (elapsed_ms, mono, pitch_factor)` for timecode fallback synthesis. |
 | `SCRIPTED_ARM` | Set `scripted_id`; if active scripted lighting is already armed, force re-arm. |
 | `SCRIPTED_CLEAR` | Clear scripted state and SSID. |
 | `RB_RESTARTED` | Stop/reset play/scripted/autoloop/live BPM state and invalidate LiveBPMService. |
@@ -242,21 +226,17 @@ new `TRACK_LOADED` invalidates older async work for that deck.
 Startup does the following, in order:
 
 1. Acquire `/tmp/rb_ss_bridge_v2.lock`; exit if another bridge owns it.
-2. Preload scripted tracks from TimecodeLink `playlist.yaml`, resolve registered
-   filepaths, and start SoundSwitch library scanning.
+2. Resolve registered scripted filepaths and start SoundSwitch library scanning.
 3. Create the shared raw event queue and wrap it with logging instrumentation.
 4. Create `PositionCache`, `LiveBPMService`, OS2L connection/output/mirror,
    injector, discovery, `StateManager`, validation runner, command reader, and
    status writer.
-5. Read latest TL ENGINE STATE via `read_initial_state()`.
-6. Read Rekordbox version and run direct master startup seed if enabled.
-7. Call `StateManager.set_initial_state()` with the chosen active deck/source.
-8. Attach `FilepathResolver` and seed loaded startup decks through normal
-   `TRACK_LOADED` / `BPM_UPDATE` / `TC_UPDATE` / `PLAY` events.
-9. Create `TLLogTailer` with readiness callbacks.
-10. If any direct B1/B3/B4/B6 flag is enabled, create `RBStateReader` with the
+5. Read Rekordbox version and run direct master startup seed if enabled.
+6. Call `StateManager.set_initial_state()` with the chosen active deck/source.
+7. Attach `FilepathResolver`.
+8. If any direct B1/B3/B4/B6 flag is enabled, create `RBStateReader` with the
     corresponding `authoritative_kinds`.
-11. Start TL tailer, direct reader, memory reader, LiveBPMService, injector,
+9. Start direct reader, memory reader, LiveBPMService, injector,
     StateManager thread, command reader, status writer, MTC reader, and OSC
     listener.
 
@@ -268,9 +248,9 @@ frequency: about 30 Hz.
 Position synthesis for the active deck:
 
 1. Use a fresh `PositionCache` snap if present.
-2. If no snap, synthesize from `_tl_tc` only when the TC anchor is less than 45 s
+2. If no snap, synthesize from `_tc_anchor` only when the TC anchor is less than 45 s
    old.
-3. If snap exists but `snap.elapsed_ms == 0`, use the same `_tl_tc` fallback when
+3. If snap exists but `snap.elapsed_ms == 0`, use the same `_tc_anchor` fallback when
    the anchor is less than 45 s old.
 4. Otherwise keep the current deck elapsed fallback.
 
@@ -283,11 +263,10 @@ Interpolation:
 elapsed_ms = snap.elapsed_ms + (age_ms if snap.playing else 0)
 ```
 
-`_tl_tc` has two writers through `TC_UPDATE`:
+`_tc_anchor` is written through `TC_UPDATE`:
 
 1. `MTCReader`: about 25 fps, `pitch_factor=1.0`, already pitch-adjusted track
    time.
-2. TL ENGINE STATE: about 15 s cadence, pitch factor from ENGINE STATE.
 
 Resume-after-pause hazard: when `d.playing` flips true, stale TC anchors could
 advance immediately. `PLAY_SETTLE_MS=400` prevents beat/elapsed emission during
@@ -335,7 +314,7 @@ Elapsed is captured at phase 0 and refreshed from `PositionCache` at phase 1
 when a fresh snap is available. `_arm_scripted()` debounces repeated arms for the
 same `(track_id, deck)` for 2 s.
 
-Legacy TL OSC mode (`RBSS_SCRIPTED_DIRECT=0`) has no deck in
+Legacy OSC scripted mode (`RBSS_SCRIPTED_DIRECT=0`) has no deck in
 `/bridge/track_loaded`, so the bridge uses `get_last_loaded_deck()` and only
 falls back to `get_active_deck()` before any load has been seen. Direct scripted
 mode should not use that fallback because resolved events already carry the
@@ -360,7 +339,7 @@ Autoloop BPM concepts:
 
 | Name | Meaning |
 | --- | --- |
-| `meta_bpm` | Metadata or ENGINE fallback BPM (`d.meta.bpm`). |
+| `meta_bpm` | Metadata fallback BPM (`d.meta.bpm`). |
 | `live_bpm` | Fresh validated displayed BPM from `LiveBPMService`. |
 | `arm_bpm` | BPM snapshot chosen when current autoloop was armed. |
 | `timing_bpm` | BPM currently used for outgoing beat/elapsed timing. |
@@ -501,7 +480,7 @@ Stop detection:
 if not d.playing and not arm_guard and os.was_playing:
     start not_playing_since
     after STOP_DEBOUNCE_S:
-        if mirror deck is playing by TL and fresh memory: queue MASTER_CHANGED
+        if mirror deck is playing by authoritative state and fresh memory: queue MASTER_CHANGED
         else: _do_stop()
 ```
 
@@ -509,9 +488,10 @@ if not d.playing and not arm_guard and os.was_playing:
 itself; the lighting machine applies idle and sends the SoundSwitch clear.
 
 Auto-switch fallback also handles active idle + mirror playing when no explicit
-master event arrives. The stronger stopped+mirror-playing path requires both TL
-and memory corroboration for the mirror deck. The active-idle path uses TL
-playing state only, for startup cases where memory may not yet be resolved.
+master event arrives. The stronger stopped+mirror-playing path requires both
+authoritative state and memory corroboration for the mirror deck. The
+active-idle path uses authoritative playing state only, for startup cases where
+memory may not yet be resolved.
 
 Resume detection waits `PLAY_SETTLE_MS=400` after `d.playing` becomes true before
 emitting beat/elapsed, preventing stale TC synthesis from producing an early
@@ -550,8 +530,7 @@ Runtime logs are intentionally summary-centric. Important operator lines:
 - `[MAIN] running`: direct flags, live BPM, follow, Smart Rearm, scripted direct,
   OSC port, and log-control path.
 - `[MAIN] rsr-direct`: active direct `RBStateReader` event classes.
-- `[RBMASTER][DIRECT]`, `[MASTER-SEED]`, `[RBMASTER][RUNTIME]`: direct master
-  status/observer evidence.
+- `[RBMASTER][DIRECT]`, `[MASTER-SEED]`: direct master status evidence.
 - `[ANLZ][DIRECT]`, `[TITLE][DIRECT]`, `[LIVEPOS][DIRECT]`: direct state-reader
   evidence when shadow/direct logging is enabled.
 - `[LBPM][DIRECT]`, `[LBPM][SOURCE]`, `[LBPM][CURRENT]`, `[LBPM][SUMMARY]`: live
@@ -560,22 +539,19 @@ Runtime logs are intentionally summary-centric. Important operator lines:
   `[SM] arm-pending`, `[SM] autoloop-rearm`: StateManager decisions.
 - `[SS][AUTOLOOP-TICK]`: 32-beat phrase boundary status only, not per-beat spam.
 
-Use `docs/history/tl_retirement_process_log.md` for direct/TL retirement
-evidence and `docs/validation/direct_master_runtime_validation.md` for bounded
-direct-master observer validation. Update those after new live runs or
-decisions.
+Update current validation notes after new live runs or decisions.
 
 ## Failure Modes And Mitigations
 
 | Scenario | Effect | Mitigation |
 | --- | --- | --- |
-| Unsupported Rekordbox version | Direct offset-table readers no-op or fail closed | TL fallback remains; add offsets before promoting direct paths for that version. |
-| Direct reader attach/read failure | Direct readiness false | TLLogTailer/OSC paths continue unless direct is ready. |
-| Direct master `0xFF` sentinel | No master event; direct master not ready | TL/OSC fallback remains active. |
-| Deck-2 position unresolved | `pos=no-snap`; timing from MTC/TL TC | Retry discovery; MTC covers gap. |
+| Unsupported Rekordbox version | Direct offset-table readers no-op or fail closed | Add offsets before promoting direct paths for that version. |
+| Direct reader attach/read failure | Direct readiness false | Direct path stays inactive. |
+| Direct master `0xFF` sentinel | No master event; direct master not ready | Direct master stays inactive. |
+| Deck-2 position unresolved | `pos=no-snap`; timing from MTC/current elapsed | Retry discovery; MTC covers gap. |
 | RB restarts mid-show | Memory stale / old pointers invalid | `RB_RESTARTED` resets state and invalidates live BPM. |
-| MTC unavailable | Position fallback only has TL TC cadence | TL TC still flows; warning logged. |
-| Live BPM unavailable/disabled | Autoloop uses metadata/ENGINE BPM | Fail closed; `RBSS_LIVE_BPM_DISABLE=1` is supported. |
+| MTC unavailable | Position fallback has no external timecode anchor | Warning logged; direct memory continues when available. |
+| Live BPM unavailable/disabled | Autoloop uses metadata BPM | Fail closed; `RBSS_LIVE_BPM_DISABLE=1` is supported. |
 | Resolver stale result | Old filepath could arrive after a new load | `load_gen` mismatch is ignored. |
 | False SoundSwitch SSID candidate | Could arm wrong show if trusted blindly | Default direct scripted path uses registry/unique filepath; show-file direct is separately gated. |
 
@@ -583,18 +559,18 @@ decisions.
 
 - Do not make memory play bits override `d.playing`; selected play/pause events
   are authority.
-- Do not bypass TL just because an env var is set. Bypass only when direct
-  readiness for that signal is currently true.
+- Do not treat a direct flag as readiness. Direct authority requires current
+  readiness for that signal.
 - Do not reverse direct ANLZ-before-TRACK_LOADED ordering.
-- Do not route legacy TL OSC scripted arms by active deck when
+- Do not route legacy OSC scripted arms by active deck when
   `get_last_loaded_deck()` is available.
 - Do not block or sleep in the `StateManager` thread.
 - Do not omit mirror/3/4 from SoundSwitch arms, clears, BPM, beat, or elapsed
   sends.
 - Do not send a SoundSwitch ID on autoloop arms.
-- Do not remove MTC/TL TC fallback while direct position can still be stale,
+- Do not remove MTC fallback while direct position can still be stale,
   unresolved, or unavailable.
 - Do not hardcode absolute memory addresses across Rekordbox restarts. Offset
   tables are version-specific; discovered heap addresses are session-local.
-- Do not treat the bounded direct-master observer as runtime authority. Runtime
-  direct master authority is only the guarded B6 main `RBStateReader` path.
+- Runtime direct master authority is only the guarded B6 main `RBStateReader`
+  path.

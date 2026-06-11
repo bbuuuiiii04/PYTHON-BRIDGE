@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-05-12. Treat code as the source of
+Audited against the current checkout on 2026-06-11. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -40,7 +40,6 @@ These defaults are present in `scripts/ss_bridge_watcher.sh`.
 | `StateManager` | live authority after source selection | yes | owns `DeckState`, most `OutputState`, lighting state | `BridgeEvent`s, `PositionCache`, `LiveBPMService` | OS2L sends, snapshots |
 | `RBStateReader` | guarded live authority for ANLZ, play/pause, track load, runtime master when enabled and ready | yes | `rb-state-reader` thread | Rekordbox offset-table chains | authoritative events and readiness callbacks |
 | `RBMemoryReader` | live position authority when direct chain or validated memory snapshot is fresh; fallback scanner retained | yes | memory reader thread writes `PositionCache` | Rekordbox memory, offset tables, vmmap | `PositionSnapshot`s, `RB_RESTARTED` |
-| `TLLogTailer` | fallback for direct-retired signals; live source for ENGINE BPM/TC fallback | yes | tailer thread | TimecodeLink log and ENGINE STATE | TL/ENGINE `BridgeEvent`s |
 | `MTCReader` | position fallback only | yes | MTC thread | IAC Bus 1 MTC | `TC_UPDATE` |
 | `LiveBPMService` | direct displayed-BPM authority when fresh and valid; metadata fallback otherwise | yes | live BPM thread owns BPM validation state | Rekordbox BPM chains, discovery, hints | live BPM snapshots |
 | `FilepathResolver` | auxiliary metadata authority for loaded tracks | async hot path after load | short-lived worker threads | ANLZ path, DB, lsof, audio tags | `FILEPATH_RESOLVED`, `ANLZ_DATA` |
@@ -55,36 +54,31 @@ These defaults are present in `scripts/ss_bridge_watcher.sh`.
 
 ## Authority Model
 
-`StateManager` does not choose between TL and direct sources broadly. Source
+`StateManager` does not perform broad event-source arbitration. Source
 selection happens before events reach it:
 
 - `__main__.py` builds `RBStateReader.authoritative_kinds` from enabled direct
   flags.
 - `RBStateReader` reports per-signal readiness.
-- `TLLogTailer` bypasses TL events only when the matching direct path is both
-  enabled and currently ready.
 - OSC `/bridge/active_deck` is bypassed only while direct master is currently
   ready.
 
 This is fail-closed. Unsupported versions, attach failures, unreadable chains,
-sentinels, stale data, and unwarmed transport inference fall back to the
-existing TL/MTC/current path.
+sentinels, stale data, and unwarmed transport inference leave the corresponding
+direct path inactive while MTC/current state fallbacks continue where available.
 
 ## Signal Flow
 
 1. Startup creates the event queue, OS2L connection, resolver, live BPM service,
-   status/command helpers, `StateManager`, TL tailer, optional `RBStateReader`,
+   status/command helpers, `StateManager`, optional `RBStateReader`,
    `RBMemoryReader`, `MTCReader`, and OSC listener.
 2. Startup master is seeded from direct master only when
    `RBSS_MASTER_SEED_DIRECT=1` and two direct reads are stable and valid;
-   otherwise TL ENGINE/config state wins.
-3. Fresh ENGINE STATE deck metadata is replayed through normal
-   `TRACK_LOADED`/`BPM_UPDATE`/`TC_UPDATE`/`PLAY` events.
+   otherwise deck 1 is the default startup deck.
+3. MTC can publish `TC_UPDATE` as an active-deck position fallback.
 4. Direct ANLZ, track-load, play/pause, and master events flow from
    `RBStateReader` only when configured as authoritative.
-5. TL remains present and emits fallback events whenever the matching direct
-   readiness callback is false.
-6. `StateManager` resolves tracks, selects scripted or autoloop lighting, and
+5. `StateManager` resolves tracks, selects scripted or autoloop lighting, and
    sends mirrored OS2L updates to active, mirror, 3, and 4 through
    `SoundSwitchEngine`.
 
@@ -108,14 +102,14 @@ existing TL/MTC/current path.
 
 | Path | Current status |
 | --- | --- |
-| B1 ANLZ | Direct when path is readable for the deck; TL ANLZ remains fallback. |
-| B2 Position | Direct versioned position chain when valid; ObjC scan, MTC, and TL TC remain fallbacks. |
-| C1 Startup master seed | Direct only after two stable valid reads; otherwise TL ENGINE/config state. |
-| B3 Play/pause | Direct movement-derived events after warmup/evidence; TL play/pause remains fallback. |
-| B4 Track load | Direct full-title load only when direct ANLZ is enabled and title memory is readable; TL load remains fallback. |
-| B5 Scripted routing | Direct from `FILEPATH_RESOLVED` by SSID, show-file SSID, or unique filepath; TL OSC path remains available when disabled. |
-| B6 Runtime master | Direct `MASTER_CHANGED` when direct master byte is readable and valid; TL/OSC remain fallback. |
-| Live BPM | Direct offset-table BPM when fresh and valid; discovery and metadata/ENGINE fallback remain. |
+| B1 ANLZ | Direct when path is readable for the deck. |
+| B2 Position | Direct versioned position chain when valid; ObjC scan and MTC remain fallbacks. |
+| C1 Startup master seed | Direct only after two stable valid reads; otherwise deck 1 default startup. |
+| B3 Play/pause | Direct movement-derived events after warmup/evidence. |
+| B4 Track load | Direct full-title load only when direct ANLZ is enabled and title memory is readable. |
+| B5 Scripted routing | Direct from `FILEPATH_RESOLVED` by SSID, show-file SSID, or unique filepath. |
+| B6 Runtime master | Direct `MASTER_CHANGED` when direct master byte is readable and valid; OSC remains a bridge control input. |
+| Live BPM | Direct offset-table BPM when fresh and valid; discovery and metadata fallback remain. |
 
 ## Documentation Map
 

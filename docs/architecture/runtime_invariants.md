@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-05-12.
+Audited against the current checkout on 2026-06-11.
 
 ## State Ownership
 
@@ -28,10 +28,11 @@ Audited against the current checkout on 2026-05-12.
 
 ## Direct Authority
 
-- A direct flag alone must not bypass TL.
-- TL is bypassed only when the matching direct readiness condition is currently
-  true.
-- Direct master startup seed must use two stable valid reads or fall back to TL.
+- A direct flag alone must not mark a direct path ready.
+- Direct authority is active only when the matching direct readiness condition is
+  currently true.
+- Direct master startup seed must use two stable valid reads or fall back to the
+  default startup deck.
 - Direct runtime master must ignore the no-master sentinel and remain not-ready
   until the byte maps to a valid Rekordbox deck.
 - Direct track load requires direct ANLZ to be enabled so ANLZ-before-load
@@ -49,10 +50,10 @@ Audited against the current checkout on 2026-05-12.
 ## Position And Timing
 
 - Memory play bits do not override `DeckState.playing`.
-- Position priority is fresh `PositionCache`, then fresh `_tl_tc` fallback, then
+- Position priority is fresh `PositionCache`, then fresh `_tc_anchor` fallback, then
   existing deck elapsed fallback.
-- MTC and TL TC fallback stay retained while direct position can be stale,
-  unresolved, or unavailable.
+- MTC fallback stays retained while direct position can be stale, unresolved, or
+  unavailable.
 - Deck 2 memory candidates are session-local and must pass behavioral
   validation before publication.
 - Absolute heap addresses must not be reused across Rekordbox restarts.

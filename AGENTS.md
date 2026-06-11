@@ -21,8 +21,8 @@
 | Area | Files | Purpose |
 | --- | --- | --- |
 | Runtime coordinator | `__main__.py`, `state_manager.py`, `models.py`, `config.py` | Startup wiring, event loop ownership, state models, config constants. |
-| Rekordbox direct readers | `rb_state_reader.py`, `rb_memory.py`, `rb_offsets.py`, `rb_state_shadow.py`, `live_bpm.py`, `probe_live_bpm.py`, `probe_deck2.py` | Direct state, position, BPM, offsets, probes, and debug shadowing. |
-| TL/MTC fallback | `tl_tailer.py`, `mtc_reader.py` | TimecodeLink log and MIDI timecode fallback inputs. |
+| Rekordbox direct readers | `rb_state_reader.py`, `rb_memory.py`, `rb_offsets.py`, `live_bpm.py`, `probe_live_bpm.py`, `probe_deck2.py` | Direct state, position, BPM, offsets, and probes. |
+| MTC fallback | `mtc_reader.py` | MIDI timecode fallback input. |
 | Track metadata | `filepath_resolver.py`, `anlz_reader.py`, `scripted_tracks.py`, `ss_library_scanner.py` | Filepath, ANLZ, scripted-track, and SoundSwitch library resolution. |
 | Lighting and phrasing | `smart_phrasing.py`, `smart_rearm.py`, `autoloop_controller.py`, `sound_switch_engine.py`, `beat_math.py` | Phrase intent, rearm timing, autoloop control, SoundSwitch fanout, beat math. |
 | Laser output lane | `laser_director.py`, `laser_executor.py`, `laser_config.py`, `laser_models.py`, `laser_decision_log.py`, `personality_resolver.py` | Laser policy, MIDI execution, config validation, decision models/logs, personality selection. |

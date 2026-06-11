@@ -5,8 +5,8 @@ Status: CURRENT AUTHORITATIVE
 Audited against the current checkout on 2026-06-11.
 
 `rb_ss_bridge_v2` is a realtime Rekordbox to SoundSwitch bridge. It reads
-Rekordbox state, reconciles guarded direct-memory signals with TimecodeLink and
-MTC fallbacks, and speaks VirtualDJ-shaped OS2L to SoundSwitch.
+Rekordbox state through guarded direct-memory readers, uses MTC as a position
+fallback, and speaks VirtualDJ-shaped OS2L to SoundSwitch.
 
 AI agents and automated contributors should read `AGENTS.md` first.
 
@@ -53,7 +53,7 @@ python3 -m rb_ss_bridge_v2
 ```
 
 The local launcher scripts currently default to guarded direct B1-B6 paths with
-TimecodeLink and MTC retained as fallbacks.
+MTC retained as the timecode fallback.
 
 ## Watcher Laser Director Config
 

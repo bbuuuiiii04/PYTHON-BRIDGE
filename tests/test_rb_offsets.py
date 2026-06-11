@@ -1,4 +1,4 @@
-"""Unit tests for the embedded TimecodeLink offsets-macos table."""
+"""Unit tests for the embedded offsets-macos table."""
 from __future__ import annotations
 
 import sys

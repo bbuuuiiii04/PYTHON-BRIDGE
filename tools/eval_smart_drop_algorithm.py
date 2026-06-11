@@ -136,7 +136,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     label = sub.add_parser("label-from-cues", help="Auto-build a corpus YAML from Rekordbox DROP-commented cues.")
     label.add_argument("--cue-comment", default="DROP", help="Cue comment substring (case-insensitive) marking the real drop.")
     label.add_argument("--tracks", help="Optional newline-delimited file of titles to restrict the scan to.")
-    label.add_argument("--exclude-scripted", default="~/TimecodeLink/playlist.yaml", help="TL playlist.yaml whose tracks are excluded as scripted. Empty string disables.")
+    label.add_argument("--exclude-scripted", default="", help="Scripted-track manifest whose titles are excluded. Empty string disables.")
     label.add_argument("--split", choices=["training", "holdout"], default="training", help="Split assigned to every emitted track.")
     label.add_argument("--holdout-titles", help="Optional file: titles listed here override --split to 'holdout'.")
     label.add_argument("--cue-window-beats", type=int, default=8, help="Max beat distance from RB drop for a cue to count as the same drop.")
@@ -550,7 +550,7 @@ def _load_scripted_titles(path: str) -> list[str]:
         return []
     p = Path(path).expanduser()
     if not p.exists():
-        print(f"[label] warning: scripted playlist missing: {p}", file=sys.stderr)
+        print(f"[label] warning: scripted manifest missing: {p}", file=sys.stderr)
         return []
     try:
         titles: list[str] = []; cur: Optional[str] = None; saw_bridge = False
@@ -570,7 +570,7 @@ def _load_scripted_titles(path: str) -> list[str]:
                 saw_bridge = False
         return titles
     except Exception as exc:
-        print(f"[label] warning: scripted playlist unreadable: {exc}", file=sys.stderr)
+        print(f"[label] warning: scripted manifest unreadable: {exc}", file=sys.stderr)
         return []
 
 
