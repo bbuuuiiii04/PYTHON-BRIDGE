@@ -141,6 +141,44 @@ class MidiOutputTests(unittest.TestCase):
             finally:
                 out.stop()
 
+    def test_live_note_on_logs_after_transport_send(self) -> None:
+        port = _RecordingPort()
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_module(port)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                with self.assertLogs("midi_output", level="INFO") as captured:
+                    self.assertTrue(
+                        out.trigger(
+                            LaserMidiMessage(
+                                kind="note_on",
+                                behavior="note_on",
+                                channel=1,
+                                note=32,
+                                velocity=127,
+                            )
+                        )
+                    )
+                    self.assertTrue(
+                        _wait_until(
+                            lambda: any(
+                                m.type == "note_on" and m.kwargs.get("note") == 32
+                                for _, m in port.messages
+                            ),
+                            timeout_s=0.3,
+                        )
+                    )
+            finally:
+                out.stop()
+
+        output = "\n".join(captured.output)
+        self.assertIn("[MIDI] tx", output)
+        self.assertIn("type=note_on", output)
+        self.assertIn("channel=1", output)
+        self.assertIn("note=32", output)
+        self.assertIn("velocity=127", output)
+
     def test_status_shape(self) -> None:
         out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=True)
         keys = set(out.status().keys())

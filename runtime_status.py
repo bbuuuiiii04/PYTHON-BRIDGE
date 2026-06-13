@@ -22,6 +22,18 @@ _DEFAULT_LASER_STATUS: dict[str, Any] = {
 }
 
 
+_DEFAULT_LED_STATUS: dict[str, Any] = {
+    "available": False,
+    "enabled": False,
+    "reason": "not_configured",
+    "manual_override": "",
+    "emergency_blackout": False,
+    "last_error": "",
+    "trigger_count": 0,
+    "rejected_count": 0,
+}
+
+
 class StatusWriter(threading.Thread):
     def __init__(
         self,
@@ -33,6 +45,7 @@ class StatusWriter(threading.Thread):
         command_reader,
         *,
         laser_status_provider: Optional[Callable[[], dict]] = None,
+        led_status_provider: Optional[Callable[[], dict]] = None,
     ) -> None:
         super().__init__(name="runtime-status", daemon=True)
         self._sm = sm
@@ -42,6 +55,7 @@ class StatusWriter(threading.Thread):
         self._validation_runner = validation_runner
         self._command_reader = command_reader
         self._laser_status_provider = laser_status_provider
+        self._led_status_provider = led_status_provider
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
@@ -73,6 +87,11 @@ class StatusWriter(threading.Thread):
             if self._laser_status_provider is None
             else self._safe_laser_status()
         )
+        led = (
+            dict(_DEFAULT_LED_STATUS)
+            if self._led_status_provider is None
+            else self._safe_led_status()
+        )
         return {
             "schema": 1,
             "written_at": time.time(),
@@ -83,6 +102,7 @@ class StatusWriter(threading.Thread):
             "validation": self._validation_runner.last_result().to_dict(),
             "commands": self._command_reader.status(),
             "laser_director": laser,
+            "led_look_director": led,
             "recent_errors": [],
         }
 
@@ -92,6 +112,16 @@ class StatusWriter(threading.Thread):
         except Exception as exc:
             log.warning("[STATUS] laser_status_provider_failed err=%s", exc)
             fallback = dict(_DEFAULT_LASER_STATUS)
+            fallback["reason"] = "provider_error"
+            fallback["last_error"] = f"{type(exc).__name__}: {exc}"
+            return fallback
+
+    def _safe_led_status(self) -> dict[str, Any]:
+        try:
+            return self._led_status_provider()
+        except Exception as exc:
+            log.warning("[STATUS] led_status_provider_failed err=%s", exc)
+            fallback = dict(_DEFAULT_LED_STATUS)
             fallback["reason"] = "provider_error"
             fallback["last_error"] = f"{type(exc).__name__}: {exc}"
             return fallback
@@ -109,6 +139,11 @@ class CommandReader(threading.Thread):
         laser_clear_blackout_callback: Optional[Callable[[], Any]] = None,
         laser_scene_callback: Optional[Callable[[str, float], Any]] = None,
         laser_clear_scene_override_callback: Optional[Callable[[], Any]] = None,
+        led_set_enabled_callback: Optional[Callable[[bool], Any]] = None,
+        led_scene_callback: Optional[Callable[[str, Optional[float], Optional[str]], Any]] = None,
+        led_blackout_callback: Optional[Callable[[Optional[str], Optional[str]], Any]] = None,
+        led_clear_blackout_callback: Optional[Callable[[], Any]] = None,
+        led_clear_scene_override_callback: Optional[Callable[[], Any]] = None,
         record_session_toggle_callback: Optional[Callable[[Optional[str], bool], Any]] = None,
     ) -> None:
         super().__init__(name="runtime-command-reader", daemon=True)
@@ -121,6 +156,11 @@ class CommandReader(threading.Thread):
         self._laser_clear_blackout_callback = laser_clear_blackout_callback
         self._laser_scene_callback = laser_scene_callback
         self._laser_clear_scene_override_callback = laser_clear_scene_override_callback
+        self._led_set_enabled_callback = led_set_enabled_callback
+        self._led_scene_callback = led_scene_callback
+        self._led_blackout_callback = led_blackout_callback
+        self._led_clear_blackout_callback = led_clear_blackout_callback
+        self._led_clear_scene_override_callback = led_clear_scene_override_callback
         self._record_session_toggle_callback = record_session_toggle_callback
         self._stop_event = threading.Event()
         self._last_command = ""
@@ -232,6 +272,55 @@ class CommandReader(threading.Thread):
                     with self._lock:
                         self._last_error = f"toggle_record_session callback failed: {detail}"
             return
+        if cmd == "set_led_look_director":
+            if self._led_set_enabled_callback:
+                enabled = bool(command["enabled"])
+                ok, detail = _invoke_callback(lambda: self._led_set_enabled_callback(enabled))
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"set_led_look_director callback failed: {detail}"
+            return
+        if cmd == "led_scene":
+            if self._led_scene_callback:
+                look = str(command["look"])
+                ttl_raw = command.get("ttl_s")
+                ttl_s = float(ttl_raw) if ttl_raw is not None else None
+                target_raw = command.get("target")
+                target = str(target_raw) if target_raw is not None else None
+                ok, detail = _invoke_callback(
+                    lambda: self._led_scene_callback(look, ttl_s, target)
+                )
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"led_scene callback failed: {detail}"
+            return
+        if cmd == "led_blackout":
+            if self._led_blackout_callback:
+                reason_raw = command.get("reason")
+                reason = str(reason_raw) if reason_raw is not None else None
+                target_raw = command.get("target")
+                target = str(target_raw) if target_raw is not None else None
+                ok, detail = _invoke_callback(
+                    lambda: self._led_blackout_callback(reason, target)
+                )
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"led_blackout callback failed: {detail}"
+            return
+        if cmd == "led_clear_blackout":
+            if self._led_clear_blackout_callback:
+                ok, detail = _invoke_callback(self._led_clear_blackout_callback)
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"led_clear_blackout callback failed: {detail}"
+            return
+        if cmd == "led_clear_scene_override":
+            if self._led_clear_scene_override_callback:
+                ok, detail = _invoke_callback(self._led_clear_scene_override_callback)
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"led_clear_scene_override callback failed: {detail}"
+            return
         raise ValueError(f"unknown command: {cmd}")
 
     def _run_validation_async(self) -> None:
@@ -266,6 +355,11 @@ def parse_command(line: str) -> dict[str, Any]:
         "laser_scene",
         "laser_clear_scene_override",
         "toggle_record_session",
+        "led_scene",
+        "led_blackout",
+        "led_clear_blackout",
+        "led_clear_scene_override",
+        "set_led_look_director",
     }
     if cmd not in allowed:
         raise ValueError(f"unknown command: {cmd}")
@@ -293,6 +387,69 @@ def parse_command(line: str) -> dict[str, Any]:
         dedup = obj.get("dedup", False)
         if not isinstance(dedup, bool):
             raise ValueError("toggle_record_session dedup must be boolean")
+    if cmd == "led_scene":
+        extra = set(obj.keys()) - {"cmd", "look", "scene", "ttl_s", "target"}
+        if extra:
+            raise ValueError("led_scene has unknown fields")
+        look = obj.get("look")
+        scene = obj.get("scene")
+        if look is None and scene is None:
+            raise ValueError("led_scene requires non-empty look")
+        if look is not None and scene is not None and look != scene:
+            raise ValueError("led_scene look and scene must match when both provided")
+        selected = look if look is not None else scene
+        if not isinstance(selected, str) or not selected.strip():
+            raise ValueError("led_scene requires non-empty look")
+        normalized = selected.strip()
+        obj = dict(obj)
+        obj["look"] = normalized
+        obj.pop("scene", None)
+        if "ttl_s" in obj:
+            ttl_s = obj["ttl_s"]
+            if isinstance(ttl_s, bool) or not isinstance(ttl_s, (int, float)):
+                raise ValueError("led_scene ttl_s must be numeric")
+            ttl_s = float(ttl_s)
+            if not math.isfinite(ttl_s):
+                raise ValueError("led_scene ttl_s must be finite")
+            if ttl_s <= 0.0:
+                raise ValueError("led_scene ttl_s must be positive")
+            if ttl_s > 300.0:
+                raise ValueError("led_scene ttl_s must be <= 300.0")
+            obj["ttl_s"] = ttl_s
+        target = obj.get("target")
+        if target is not None:
+            if not isinstance(target, str) or not target.strip():
+                raise ValueError("led_scene target must be a non-empty string")
+            obj = dict(obj)
+            obj["target"] = target.strip()
+    if cmd == "led_blackout":
+        extra = set(obj.keys()) - {"cmd", "reason", "target"}
+        if extra:
+            raise ValueError("led_blackout has unknown fields")
+        reason = obj.get("reason")
+        if reason is not None:
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError("led_blackout reason must be a non-empty string")
+            obj = dict(obj)
+            obj["reason"] = reason.strip()
+        target = obj.get("target")
+        if target is not None:
+            if not isinstance(target, str) or not target.strip():
+                raise ValueError("led_blackout target must be a non-empty string")
+            obj = dict(obj)
+            obj["target"] = target.strip()
+    if cmd in {"led_clear_blackout", "led_clear_scene_override"}:
+        extra = set(obj.keys()) - {"cmd"}
+        if extra:
+            raise ValueError(f"{cmd} does not accept payload fields")
+    if cmd == "set_led_look_director":
+        extra = set(obj.keys()) - {"cmd", "enabled"}
+        if extra:
+            raise ValueError("set_led_look_director has unknown fields")
+        if "enabled" not in obj:
+            raise ValueError("set_led_look_director requires enabled")
+        if not isinstance(obj["enabled"], bool):
+            raise ValueError("set_led_look_director enabled must be boolean")
     return obj
 
 

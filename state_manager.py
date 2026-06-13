@@ -25,11 +25,12 @@ import bisect
 import logging
 import os as _os
 import queue
+import re
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, replace
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .config import (
     AUTOLOOP_ARM_PHRASE_BEATS, ARM_GUARD_S, STOP_DEBOUNCE_S,
@@ -56,6 +57,7 @@ from .models import (
     ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot,
     SmartDropEnergyShadow, TrackMetadata,
 )
+from .led_models import LEDContext
 from .laser_models import LaserContext, LaserPersonality
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
@@ -110,6 +112,29 @@ STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 _PROFILE_SUMMARY_INTERVAL_S = 10.0
 _PROFILE_WINDOW = 2048
+_LED_ADAPTER_STATUS_SAFE_KEYS = {
+    "available",
+    "running",
+    "dry_run",
+    "degraded",
+    "degraded_reason",
+    "queue_depth",
+    "queue_max",
+    "accepted_count",
+    "rejected_count",
+    "dropped_count",
+    "queue_full_count",
+    "deduped_count",
+    "rate_limited_count",
+    "send_count",
+    "send_error_count",
+    "malformed_response_count",
+    "consecutive_send_failures",
+    "circuit_open",
+    "last_error",
+    "last_command_at",
+    "last_command_look",
+}
 
 
 def _read_runtime_anlz_data(
@@ -274,6 +299,8 @@ class StateManager:
         laser_director=None,
         laser_executor=None,
         laser_personality_provider: Optional[Callable[[str], Optional[LaserPersonality]]] = None,
+        led_look_director=None,
+        led_scene_adapter=None,
         os2l_connected_provider=None,
         recorder: Optional[SessionRecorder] = None,
     ) -> None:
@@ -287,6 +314,52 @@ class StateManager:
         self._laser_director = laser_director
         self._laser_executor = laser_executor
         self._laser_personality_provider = laser_personality_provider
+        self._led_look_director = led_look_director
+        self._led_scene_adapter = led_scene_adapter
+        self._led_manual_override = ""
+        self._led_manual_target_override = ""
+        self._led_emergency_blackout = False
+        self._led_last_error = ""
+        self._led_last_event = ""
+        self._led_last_look = ""
+        self._led_trigger_count = 0
+        self._led_rejected_count = 0
+        self._led_enabled_latch = False
+        self._led_dry_run_latch = True
+        self._led_automation_enabled_latch = False
+        self._led_scripted_mode_automation_latch = False
+        self._led_last_auto_role_key = ""
+        self._led_automation_gate_reason = "not_configured"
+        self._led_automation_trigger_count = 0
+        self._led_automation_gated_count = 0
+        self._led_smart_drop_blackout_key = ""
+        self._led_automation_offset_s = 0.0
+        self._led_last_idle_role_key = ""
+        self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
+        if self._led_look_director is not None:
+            try:
+                status_payload = self._led_look_director.status()
+                self._led_enabled_latch = bool(status_payload.get("enabled", False))
+                self._led_dry_run_latch = bool(status_payload.get("dry_run", True))
+                self._led_automation_enabled_latch = bool(
+                    status_payload.get("automation_enabled", False)
+                )
+                self._led_scripted_mode_automation_latch = bool(
+                    status_payload.get("scripted_mode_automation", False)
+                )
+                self._led_automation_offset_s = max(
+                    0.0,
+                    float(status_payload.get("automation_offset_s", 0.0)),
+                )
+                self._led_automation_gate_reason = (
+                    "" if self._led_automation_enabled_latch else "automation_disabled"
+                )
+            except Exception:
+                self._led_enabled_latch = False
+                self._led_dry_run_latch = True
+                self._led_automation_enabled_latch = False
+                self._led_scripted_mode_automation_latch = False
+                self._led_automation_gate_reason = "status_unavailable"
         # Constant-time connectivity check; must not build a dict or call status().
         self._os2l_connected_provider = os2l_connected_provider
         self._live_bpm_follow = (
@@ -309,7 +382,7 @@ class StateManager:
         )
         self._phrase_anchor_enabled = (
             self._smart_rearm_experiment
-            and _os.environ.get(PHRASE_ANCHOR_ENV, "1") != "0"
+            and _os.environ.get(PHRASE_ANCHOR_ENV, "0") == "1"
         )
         self._spectral_enable = (
             self._smart_rearm_experiment
@@ -475,6 +548,132 @@ class StateManager:
         if deck not in (1, 2):
             return False
         return self._deck[deck].playing
+
+    def led_status_provider(self) -> dict[str, Any]:
+        available = self._led_look_director is not None and self._led_scene_adapter is not None
+        reason = "ok"
+        if not available:
+            reason = "not_configured"
+        elif not self._led_enabled_latch:
+            reason = "disabled"
+        elif self._led_last_error:
+            reason = "degraded"
+
+        payload: dict[str, Any] = {
+            "available": bool(available),
+            "enabled": bool(self._led_enabled_latch),
+            "reason": reason,
+            "manual_override": self._led_manual_override,
+            "manual_target_override": self._led_manual_target_override,
+            "emergency_blackout": bool(self._led_emergency_blackout),
+            "last_error": self._led_last_error,
+            "last_event": self._led_last_event,
+            "last_look": self._led_last_look,
+            "trigger_count": int(self._led_trigger_count),
+            "rejected_count": int(self._led_rejected_count),
+            "dry_run": bool(self._led_dry_run_latch),
+            "automation_enabled": bool(self._led_automation_enabled_latch),
+            "automation_gate_reason": self._led_automation_gate_reason,
+            "automation_last_role_key": self._led_last_auto_role_key,
+            "automation_trigger_count": int(self._led_automation_trigger_count),
+            "automation_gated_count": int(self._led_automation_gated_count),
+            "automation_offset_s": float(self._led_automation_offset_s),
+            "smart_drop_blackout_active": bool(self._led_smart_drop_blackout_key),
+        }
+
+        if self._led_look_director is not None:
+            try:
+                raw_director = self._led_look_director.status()
+                if isinstance(raw_director, dict):
+                    payload["director"] = {
+                        "available": bool(raw_director.get("available", True)),
+                        "enabled": bool(raw_director.get("enabled", False)),
+                        "dry_run": bool(raw_director.get("dry_run", True)),
+                        "automation_enabled": bool(raw_director.get("automation_enabled", False)),
+                        "scripted_mode_automation": bool(
+                            raw_director.get("scripted_mode_automation", False)
+                        ),
+                        "current_look": str(raw_director.get("current_look", "")),
+                        "last_reason": str(raw_director.get("last_reason", "")),
+                        "last_source": str(raw_director.get("last_source", "")),
+                        "manual_override": str(raw_director.get("manual_override", "")),
+                        "emergency_blackout": bool(raw_director.get("emergency_blackout", False)),
+                    }
+            except Exception as exc:
+                payload["reason"] = "provider_error"
+                payload["last_error"] = f"director_status_error:{type(exc).__name__}"
+
+        if self._led_scene_adapter is not None:
+            try:
+                raw_adapter = self._led_scene_adapter.status()
+                payload["adapter"] = self._sanitize_led_adapter_status(raw_adapter)
+            except Exception as exc:
+                payload["reason"] = "provider_error"
+                payload["last_error"] = f"adapter_status_error:{type(exc).__name__}"
+
+        return payload
+
+    def _sanitize_led_adapter_status(self, raw_status: Any) -> dict[str, Any]:
+        if not isinstance(raw_status, dict):
+            return {}
+        safe: dict[str, Any] = {}
+        for key in _LED_ADAPTER_STATUS_SAFE_KEYS:
+            if key not in raw_status:
+                continue
+            value = raw_status.get(key)
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                safe[key] = value
+        provider = raw_status.get("provider")
+        if isinstance(provider, dict):
+            provider_safe: dict[str, Any] = {}
+            for key in ("api_key_present", "target_count", "scene_count"):
+                value = provider.get(key)
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    provider_safe[key] = value
+            if provider_safe:
+                safe["provider"] = provider_safe
+        return safe
+
+    def _sanitize_led_scene_ref(self, scene_ref: Any) -> str:
+        text = str(scene_ref or "").strip()
+        if not text:
+            return ""
+        if re.fullmatch(r"[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5,}", text):
+            return "<redacted>"
+        if len(text) > 80:
+            return "<redacted>"
+        if any(ch in text for ch in ("\n", "\r", "\t")):
+            return "<redacted>"
+        if not any(ch.isalpha() for ch in text):
+            return "<redacted>"
+        allowed_punct = {" ", "_", "-", ".", "/", ":"}
+        if not all(ch.isalnum() or ch in allowed_punct for ch in text):
+            return "<redacted>"
+        return text
+
+    def _set_led_automation_gate_reason(
+        self,
+        reason: str,
+        *,
+        active_deck: Optional[int] = None,
+        role: str = "",
+        role_key: str = "",
+    ) -> None:
+        previous = self._led_automation_gate_reason
+        self._led_automation_gate_reason = reason
+        if reason == previous:
+            return
+        log.info(
+            "[RGB] gate-reason-change reason=%s prev=%s enabled=%s dry_run=%s automation_enabled=%s active_deck=%d role=%s role_key=%s",
+            reason or "clear",
+            previous or "clear",
+            bool(self._led_enabled_latch),
+            bool(self._led_dry_run_latch),
+            bool(self._led_automation_enabled_latch),
+            int(active_deck if active_deck is not None else self._os.active_deck),
+            role or "-",
+            role_key or "-",
+        )
 
     def snapshot(self) -> dict:
         """Return the latest published state copy.
@@ -834,6 +1033,11 @@ class StateManager:
                 d.scripted_id = 0
             if self._os.was_playing:
                 self._do_stop(self._os.active_deck, self._os.last_beat_elapsed_ms)
+                self._dispatch_led_idle_ambient(
+                    active=self._os.active_deck,
+                    d=self._deck[self._os.active_deck],
+                    reason="rb_restart",
+                )
             self._os.was_playing = False
             self._os.not_playing_since = 0.0
             # Reset lighting state machine so it re-derives on next tick without debounce.
@@ -859,6 +1063,15 @@ class StateManager:
 
         elif ev.kind == Ev.SMART_BREAKDOWN_TOGGLE:
             self.toggle_smart_breakdown()
+
+        elif ev.kind in {
+            Ev.LED_SET_ENABLED,
+            Ev.LED_SCENE,
+            Ev.LED_BLACKOUT,
+            Ev.LED_CLEAR_BLACKOUT,
+            Ev.LED_CLEAR_SCENE_OVERRIDE,
+        }:
+            self._handle_led_event(ev)
 
         elif self._laser_director is not None:
             if ev.kind == Ev.LASER_TOGGLE:
@@ -905,6 +1118,643 @@ class StateManager:
                     if personality_cfg is not None:
                         self._apply_personality_change(personality_name, personality_cfg)
 
+    def _handle_led_event(self, ev: BridgeEvent) -> None:
+        if ev.kind == Ev.LED_SET_ENABLED:
+            self._led_enabled_latch = bool(ev.payload.get("enabled", False))
+            self._dispatch_led_manual_command(reason="set_enabled")
+            return
+
+        if ev.kind == Ev.LED_SCENE:
+            look = str(ev.payload.get("look", "")).strip()
+            if not look:
+                self._led_last_event = "manual_scene"
+                self._led_last_error = "led_scene_missing_look"
+                self._led_rejected_count += 1
+                return
+            if "target" in ev.payload:
+                target = str(ev.payload.get("target", "")).strip()
+                if target and not self._led_target_exists(target):
+                    self._led_last_event = "manual_scene"
+                    self._led_last_error = f"unknown_target:{target}"
+                    self._led_rejected_count += 1
+                    return
+                self._led_manual_target_override = target
+            else:
+                self._led_manual_target_override = ""
+            self._led_manual_override = look
+            self._dispatch_led_manual_command(reason="manual_scene")
+            return
+
+        if ev.kind == Ev.LED_BLACKOUT:
+            if "target" in ev.payload:
+                target = str(ev.payload.get("target", "")).strip()
+                if target and not self._led_target_exists(target):
+                    self._led_last_event = "blackout"
+                    self._led_last_error = f"unknown_target:{target}"
+                    self._led_rejected_count += 1
+                    return
+                self._led_manual_target_override = target
+            self._led_emergency_blackout = True
+            self._dispatch_led_manual_command(reason="blackout")
+            return
+
+        if ev.kind == Ev.LED_CLEAR_BLACKOUT:
+            self._led_emergency_blackout = False
+            self._dispatch_led_manual_command(reason="clear_blackout")
+            return
+
+        if ev.kind == Ev.LED_CLEAR_SCENE_OVERRIDE:
+            self._led_manual_override = ""
+            self._led_manual_target_override = ""
+            self._dispatch_led_manual_command(reason="clear_scene_override")
+            return
+
+    def _led_target_exists(self, target_name: str) -> bool:
+        director = self._led_look_director
+        if director is None:
+            return False
+        config = getattr(director, "_config", None)
+        if config is None:
+            return False
+        targets = getattr(config, "targets", None)
+        if not isinstance(targets, dict):
+            return False
+        return target_name in targets
+
+    def _dispatch_led_manual_command(self, *, reason: str) -> None:
+        self._led_last_event = reason
+        self._led_last_auto_role_key = ""
+        self._led_last_idle_role_key = ""
+
+        if self._led_look_director is None or self._led_scene_adapter is None:
+            self._led_last_error = "not_configured"
+            return
+        if not self._led_enabled_latch:
+            self._led_last_error = ""
+            return
+
+        manual_look = self._led_manual_override or None
+        try:
+            set_manual_override = getattr(self._led_look_director, "set_manual_override", None)
+            if callable(set_manual_override):
+                accepted = set_manual_override(manual_look)
+                if accepted is False and manual_look:
+                    self._led_manual_override = ""
+                    self._led_last_error = f"unknown_look:{manual_look}"
+                    self._led_rejected_count += 1
+                    return
+            set_emergency_blackout = getattr(self._led_look_director, "set_emergency_blackout", None)
+            if callable(set_emergency_blackout):
+                set_emergency_blackout(self._led_emergency_blackout)
+            decision = self._led_look_director.tick(
+                LEDContext(
+                    role="manual",
+                    manual_look=manual_look,
+                    emergency_blackout=self._led_emergency_blackout,
+                    target_override=self._led_manual_target_override,
+                )
+            )
+        except Exception as exc:
+            self._led_last_error = f"director_error:{type(exc).__name__}"
+            self._led_rejected_count += 1
+            return
+
+        if decision is None:
+            self._led_last_error = ""
+            self._led_last_look = ""
+            return
+
+        try:
+            accepted = bool(self._led_scene_adapter.trigger(decision))
+        except Exception as exc:
+            self._led_last_error = f"adapter_error:{type(exc).__name__}"
+            self._led_rejected_count += 1
+            return
+
+        if accepted:
+            self._led_trigger_count += 1
+            self._led_last_error = ""
+            self._led_last_look = str(getattr(decision, "look", ""))
+            return
+
+        self._led_rejected_count += 1
+        self._led_last_error = "adapter_rejected"
+
+    def _dispatch_led_smart_drop_blackout(
+        self,
+        *,
+        active: int,
+        d: DeckState,
+        sp_state: SmartPhrasingState,
+        phase: str,
+    ) -> None:
+        marker = ""
+        if sp_state.active_drop_beat is not None:
+            marker = f"{sp_state.active_drop_beat:.3f}"
+        elif sp_state.next_smart_drop_beat is not None:
+            marker = f"{sp_state.next_smart_drop_beat:.3f}"
+        blackout_key = f"{active}:{d.load_gen}:smart_drop_blackout:{phase}:{marker}"
+        if blackout_key == self._led_smart_drop_blackout_key:
+            return
+
+        context = LEDContext(
+            role="pre_drop",
+            manual_look=None,
+            emergency_blackout=True,
+            active_deck=active,
+            playing=d.playing,
+            lighting_mode=self._os.lighting_mode,
+            scripted_id=d.scripted_id,
+        )
+        try:
+            decision = self._led_look_director.tick(context)
+        except Exception as exc:
+            self._led_last_error = f"director_error:{type(exc).__name__}"
+            self._led_rejected_count += 1
+            self._led_automation_gated_count += 1
+            self._set_led_automation_gate_reason(
+                "director_error",
+                active_deck=active,
+                role="smart_drop_blackout",
+                role_key=blackout_key,
+            )
+            log.warning(
+                "[RGB] director-error role=%s phase=%s role_key=%s active_deck=%d err=%s",
+                "smart_drop_blackout",
+                phase,
+                blackout_key,
+                active,
+                type(exc).__name__,
+            )
+            self._led_last_auto_role_key = blackout_key
+            return
+
+        self._led_last_auto_role_key = blackout_key
+        self._led_last_event = f"automation:smart_drop_blackout:{phase}"
+        if decision is None:
+            self._led_automation_gated_count += 1
+            self._set_led_automation_gate_reason(
+                "no_look:smart_drop_blackout",
+                active_deck=active,
+                role="smart_drop_blackout",
+                role_key=blackout_key,
+            )
+            return
+
+        look = str(getattr(decision, "look", ""))
+        scene_ref = self._sanitize_led_scene_ref(getattr(decision, "scene_ref", ""))
+        decision_reason = str(getattr(decision, "reason", ""))
+        try:
+            accepted = bool(self._led_scene_adapter.trigger(decision))
+        except Exception as exc:
+            self._led_last_error = f"adapter_error:{type(exc).__name__}"
+            self._led_rejected_count += 1
+            self._led_automation_gated_count += 1
+            self._set_led_automation_gate_reason(
+                "adapter_error",
+                active_deck=active,
+                role="smart_drop_blackout",
+                role_key=blackout_key,
+            )
+            log.warning(
+                "[RGB] adapter-error role=%s phase=%s look=%s scene_ref=%s reason=%s role_key=%s active_deck=%d err=%s",
+                "smart_drop_blackout",
+                phase,
+                look or "-",
+                scene_ref or "-",
+                decision_reason or "-",
+                blackout_key,
+                active,
+                type(exc).__name__,
+            )
+            return
+
+        if accepted:
+            self._led_trigger_count += 1
+            self._led_automation_trigger_count += 1
+            self._led_smart_drop_blackout_key = blackout_key
+            self._led_last_error = ""
+            self._led_last_look = look
+            self._set_led_automation_gate_reason(
+                "",
+                active_deck=active,
+                role="smart_drop_blackout",
+                role_key=blackout_key,
+            )
+            log.info(
+                "[RGB] trigger-accepted role=%s phase=%s look=%s scene_ref=%s reason=%s role_key=%s trigger_count=%d active_deck=%d",
+                "smart_drop_blackout",
+                phase,
+                look or "-",
+                scene_ref or "-",
+                decision_reason or "-",
+                blackout_key,
+                self._led_automation_trigger_count,
+                active,
+            )
+            return
+
+        self._led_rejected_count += 1
+        self._led_automation_gated_count += 1
+        self._led_last_error = "adapter_rejected"
+        self._set_led_automation_gate_reason(
+            "adapter_rejected",
+            active_deck=active,
+            role="smart_drop_blackout",
+            role_key=blackout_key,
+        )
+        log.warning(
+            "[RGB] adapter-rejected role=%s phase=%s look=%s scene_ref=%s reason=%s role_key=%s active_deck=%d",
+            "smart_drop_blackout",
+            phase,
+            look or "-",
+            scene_ref or "-",
+            decision_reason or "-",
+            blackout_key,
+            active,
+        )
+
+    def _dispatch_led_automation(
+        self,
+        *,
+        active: int,
+        d: DeckState,
+        sp_state: SmartPhrasingState,
+        position_stale: bool = False,
+        autoloop_ready: bool = True,
+    ) -> None:
+        if self._led_look_director is None or self._led_scene_adapter is None:
+            self._gate_led_automation("not_configured", active_deck=active)
+            return
+        if not self._led_enabled_latch:
+            self._gate_led_automation("disabled", active_deck=active)
+            return
+        if not self._led_automation_enabled_latch:
+            self._gate_led_automation("automation_disabled", active_deck=active)
+            return
+        if self._led_emergency_blackout:
+            self._gate_led_automation("emergency_blackout", active_deck=active)
+            return
+        if self._led_manual_override:
+            self._gate_led_automation("manual_override", active_deck=active)
+            return
+        if d.scripted_id and not self._led_scripted_mode_automation_latch:
+            self._gate_led_automation("scripted_mode", active_deck=active)
+            return
+        if not d.playing or not d.meta.filepath:
+            self._gate_led_automation("not_ready", active_deck=active)
+            return
+        if position_stale:
+            self._gate_led_automation("position_stale", active_deck=active)
+            return
+        if self._os.lighting_mode != "autoloop":
+            self._gate_led_automation("not_autoloop", active_deck=active)
+            return
+        if not autoloop_ready:
+            self._gate_led_automation("autoloop_not_ready", active_deck=active)
+            return
+
+        self._led_last_idle_role_key = ""
+        if sp_state.smart_drop_crossing:
+            # Pre-drop blackout may already be active; at the crossing beat fire the
+            # drop look (laser parity) instead of re-asserting room_blackout.
+            self._led_smart_drop_blackout_key = ""
+        elif self._led_should_smart_drop_blackout(sp_state):
+            self._dispatch_led_smart_drop_blackout(
+                active=active,
+                d=d,
+                sp_state=sp_state,
+                phase="pre_drop",
+            )
+            return
+
+        role = self._led_role_from_smart_phrasing(sp_state)
+        role_key = self._led_automation_role_key(active, d, sp_state, role)
+        if role_key == self._led_last_auto_role_key:
+            return
+
+        context = LEDContext(
+            role=role,
+            manual_look=None,
+            emergency_blackout=False,
+            active_deck=active,
+            playing=d.playing,
+            lighting_mode=self._os.lighting_mode,
+            scripted_id=d.scripted_id,
+        )
+        try:
+            decision = self._led_look_director.tick(context)
+        except Exception as exc:
+            self._led_last_error = f"director_error:{type(exc).__name__}"
+            self._led_rejected_count += 1
+            self._led_automation_gated_count += 1
+            self._set_led_automation_gate_reason(
+                "director_error",
+                active_deck=active,
+                role=role,
+                role_key=role_key,
+            )
+            log.warning(
+                "[RGB] director-error role=%s role_key=%s active_deck=%d err=%s",
+                role,
+                role_key,
+                active,
+                type(exc).__name__,
+            )
+            self._led_last_auto_role_key = role_key
+            return
+
+        self._led_last_auto_role_key = role_key
+        self._led_last_event = f"automation:{role}"
+        if decision is None:
+            self._led_automation_gated_count += 1
+            no_look_reason = f"no_look:{role}"
+            self._set_led_automation_gate_reason(
+                no_look_reason,
+                active_deck=active,
+                role=role,
+                role_key=role_key,
+            )
+            log.info(
+                "[RGB] no-look role=%s role_key=%s reason=%s active_deck=%d",
+                role,
+                role_key,
+                no_look_reason,
+                active,
+            )
+            return
+
+        look = str(getattr(decision, "look", ""))
+        scene_ref = self._sanitize_led_scene_ref(getattr(decision, "scene_ref", ""))
+        decision_reason = str(getattr(decision, "reason", ""))
+        try:
+            accepted = bool(self._led_scene_adapter.trigger(decision))
+        except Exception as exc:
+            self._led_last_error = f"adapter_error:{type(exc).__name__}"
+            self._led_rejected_count += 1
+            self._led_automation_gated_count += 1
+            self._set_led_automation_gate_reason(
+                "adapter_error",
+                active_deck=active,
+                role=role,
+                role_key=role_key,
+            )
+            log.warning(
+                "[RGB] adapter-error role=%s look=%s scene_ref=%s reason=%s role_key=%s active_deck=%d err=%s",
+                role,
+                look,
+                scene_ref or "-",
+                decision_reason or "-",
+                role_key,
+                active,
+                type(exc).__name__,
+            )
+            return
+
+        if accepted:
+            self._led_trigger_count += 1
+            self._led_automation_trigger_count += 1
+            self._led_last_error = ""
+            self._led_last_look = look
+            self._led_smart_drop_blackout_key = ""
+            self._set_led_automation_gate_reason(
+                "",
+                active_deck=active,
+                role=role,
+                role_key=role_key,
+            )
+            log.info(
+                "[RGB] trigger-accepted role=%s look=%s scene_ref=%s reason=%s role_key=%s trigger_count=%d active_deck=%d",
+                role,
+                look or "-",
+                scene_ref or "-",
+                decision_reason or "-",
+                role_key,
+                self._led_automation_trigger_count,
+                active,
+            )
+            return
+
+        self._led_rejected_count += 1
+        self._led_automation_gated_count += 1
+        self._led_last_error = "adapter_rejected"
+        self._set_led_automation_gate_reason(
+            "adapter_rejected",
+            active_deck=active,
+            role=role,
+            role_key=role_key,
+        )
+        log.warning(
+            "[RGB] adapter-rejected role=%s look=%s scene_ref=%s reason=%s role_key=%s active_deck=%d",
+            role,
+            look or "-",
+            scene_ref or "-",
+            decision_reason or "-",
+            role_key,
+            active,
+        )
+
+    def _dispatch_led_idle_ambient(
+        self,
+        *,
+        active: int,
+        d: DeckState,
+        reason: str,
+    ) -> None:
+        self._led_smart_drop_blackout_key = ""
+
+        role_key = f"{active}:{d.load_gen}:idle_ambient:{bool(d.meta.filepath)}"
+        if self._led_look_director is None or self._led_scene_adapter is None:
+            self._gate_led_automation("not_configured", active_deck=active, role="ambient")
+            return
+        if not self._led_enabled_latch:
+            self._gate_led_automation("disabled", active_deck=active, role="ambient")
+            return
+        if not self._led_automation_enabled_latch:
+            self._gate_led_automation("automation_disabled", active_deck=active, role="ambient")
+            return
+        if self._led_emergency_blackout:
+            self._gate_led_automation("emergency_blackout", active_deck=active, role="ambient")
+            return
+        if self._led_manual_override:
+            self._gate_led_automation("manual_override", active_deck=active, role="ambient")
+            return
+        if role_key == self._led_last_idle_role_key:
+            return
+
+        context = LEDContext(
+            role="ambient",
+            manual_look=None,
+            emergency_blackout=False,
+            active_deck=active,
+            playing=False,
+            lighting_mode="idle",
+            scripted_id=d.scripted_id,
+        )
+        try:
+            decision = self._led_look_director.tick(context)
+        except Exception as exc:
+            self._led_last_error = f"director_error:{type(exc).__name__}"
+            self._led_rejected_count += 1
+            self._led_automation_gated_count += 1
+            self._set_led_automation_gate_reason(
+                "director_error",
+                active_deck=active,
+                role="ambient",
+                role_key=role_key,
+            )
+            self._led_last_auto_role_key = role_key
+            self._led_last_idle_role_key = role_key
+            return
+
+        self._led_last_auto_role_key = role_key
+        self._led_last_idle_role_key = role_key
+        self._led_last_event = f"automation:idle_ambient:{reason}"
+        if decision is None:
+            self._led_automation_gated_count += 1
+            self._set_led_automation_gate_reason(
+                "no_look:ambient",
+                active_deck=active,
+                role="ambient",
+                role_key=role_key,
+            )
+            return
+
+        look = str(getattr(decision, "look", ""))
+        try:
+            accepted = bool(self._led_scene_adapter.trigger(decision))
+        except Exception as exc:
+            self._led_last_error = f"adapter_error:{type(exc).__name__}"
+            self._led_rejected_count += 1
+            self._led_automation_gated_count += 1
+            self._set_led_automation_gate_reason(
+                "adapter_error",
+                active_deck=active,
+                role="ambient",
+                role_key=role_key,
+            )
+            log.warning(
+                "[RGB] adapter-error role=ambient look=%s reason=%s role_key=%s active_deck=%d err=%s",
+                look or "-",
+                reason,
+                role_key,
+                active,
+                type(exc).__name__,
+            )
+            return
+
+        if accepted:
+            self._led_trigger_count += 1
+            self._led_automation_trigger_count += 1
+            self._led_last_error = ""
+            self._led_last_look = look
+            self._set_led_automation_gate_reason(
+                "",
+                active_deck=active,
+                role="ambient",
+                role_key=role_key,
+            )
+            log.info(
+                "[RGB] trigger-accepted role=ambient look=%s reason=%s role_key=%s trigger_count=%d active_deck=%d",
+                look or "-",
+                reason,
+                role_key,
+                self._led_automation_trigger_count,
+                active,
+            )
+            return
+
+        self._led_rejected_count += 1
+        self._led_automation_gated_count += 1
+        self._led_last_error = "adapter_rejected"
+        self._set_led_automation_gate_reason(
+            "adapter_rejected",
+            active_deck=active,
+            role="ambient",
+            role_key=role_key,
+        )
+
+    def _gate_led_automation(
+        self,
+        reason: str,
+        *,
+        active_deck: Optional[int] = None,
+        role: str = "",
+        role_key: str = "",
+    ) -> None:
+        if reason != self._led_automation_gate_reason:
+            self._led_automation_gated_count += 1
+        self._set_led_automation_gate_reason(
+            reason,
+            active_deck=active_deck,
+            role=role,
+            role_key=role_key,
+        )
+        self._led_last_auto_role_key = ""
+
+    def _led_autoloop_ready(self, d: DeckState) -> bool:
+        os = self._os
+        return bool(
+            os.lighting_mode == "autoloop"
+            and not os.autoloop_arm_pending
+            and os.pending_autoloop_arm_meta is None
+            and d.meta.filepath
+            and os.last_armed_filepath == d.meta.filepath
+        )
+
+    def _led_should_smart_drop_blackout(self, sp_state: SmartPhrasingState) -> bool:
+        """True when Govee should be in pre-drop blackout for Smart Drop."""
+        return bool(
+            sp_state.transition_mask_arm_latched
+            or sp_state.transition_mask_should_arm
+            or sp_state.transition_window_active
+        )
+
+    def _led_role_from_smart_phrasing(self, sp_state: SmartPhrasingState) -> str:
+        if sp_state.smart_drop_crossing:
+            return "drop"
+        if sp_state.smart_breakdown_active or sp_state.breakdown_start_crossing:
+            return "breakdown"
+        if sp_state.smart_post_drop_active:
+            return "post_drop"
+        if sp_state.transition_window_active:
+            return "pre_drop"
+        if self._led_buildup_active(sp_state):
+            return "buildup"
+        if sp_state.current_phrase_is_chorus:
+            return "groove"
+        return "ambient"
+
+    def _led_buildup_active(self, sp_state: SmartPhrasingState) -> bool:
+        """Match laser_director: buildup only in up phrase within lookahead of next drop."""
+        beats_to_next_drop = sp_state.beats_to_next_drop
+        if beats_to_next_drop is None or beats_to_next_drop <= 0:
+            return False
+        if beats_to_next_drop > self._sp_phrase_lookahead:
+            return False
+        return bool(
+            sp_state.current_phrase_is_up
+            and not sp_state.current_phrase_is_chorus
+        )
+
+    def _led_automation_role_key(
+        self,
+        active: int,
+        d: DeckState,
+        sp_state: SmartPhrasingState,
+        role: str,
+    ) -> str:
+        marker = ""
+        if role in {"drop", "post_drop"} and sp_state.active_drop_beat is not None:
+            marker = f"{sp_state.active_drop_beat:.3f}"
+        elif role in {"buildup", "pre_drop"} and sp_state.next_smart_drop_beat is not None:
+            marker = f"{sp_state.next_smart_drop_beat:.3f}"
+        elif role == "breakdown" and sp_state.breakdown_restore_beat is not None:
+            marker = f"{sp_state.breakdown_restore_beat:.3f}"
+        elif role in {"ambient", "groove"}:
+            marker = str(sp_state.current_phrase_label)
+        return f"{active}:{d.load_gen}:{role}:{marker}"
+
     # ── Deck switch ───────────────────────────────────────────────────────────
 
     def _on_master_changed(self, new_deck: int, source: str) -> None:
@@ -947,6 +1797,9 @@ class StateManager:
         self._os.last_autoloop_status_phrase_beat = 0
         self._os.autoloop_arm_after_master_change = True
         self._os.autoloop_master_change_source = source
+        self._led_last_auto_role_key = ""
+        self._led_last_idle_role_key = ""
+        self._led_smart_drop_blackout_key = ""
         self._clear_smart_rearm_state()
         self._autoloop.clear_arm_phrase_lock()
         self._autoloop.clear_live_bpm_follow()
@@ -1177,6 +2030,8 @@ class StateManager:
         queue_change = getattr(director, "queue_personality_change", None)
         if callable(queue_change):
             queue_change(resolution.name, personality_cfg)
+        # Timing drives SmartPhrasing + LED before phrase-boundary scene apply.
+        self._recache_personality_timing(personality_cfg)
 
         mismatch = ""
         bpm_min = float(personality_cfg.bpm_band_min)
@@ -1602,6 +2457,11 @@ class StateManager:
                     if self._laser_executor is not None:
                         self._laser_executor.on_tick(_lctx)
                         self._laser_executor.on_decision(decision, _lctx)
+                self._dispatch_led_idle_ambient(
+                    active=active,
+                    d=d,
+                    reason="stale_stop",
+                )
                 return
             # Not playing: run lighting machine and auto-detect from current state.
             bpm = d.meta.bpm
@@ -1609,10 +2469,12 @@ class StateManager:
             confident_playing = d.playing
             self._update_lighting(active, d, confident_playing, elapsed_ms, bpm, now)
             arm_guard = (now - os.last_arm_mono) < ARM_GUARD_S
+            switch_requested = False
             if not d.playing and not arm_guard:
                 if self._deck[mirror].playing:
                     log.info("[SM] switch  %d→%d  src=auto  reason=idle+mirror-playing",
                              active, mirror)
+                    switch_requested = True
                     os.last_arm_mono = now
                     try:
                         self._eq.put_nowait(BridgeEvent(
@@ -1633,6 +2495,12 @@ class StateManager:
                 if self._laser_executor is not None:
                     self._laser_executor.on_tick(_lctx)
                     self._laser_executor.on_decision(decision, _lctx)
+            if not switch_requested:
+                self._dispatch_led_idle_ambient(
+                    active=active,
+                    d=d,
+                    reason="stale_idle",
+                )
             return
 
         # Interpolate position: memory updates at 60 Hz; push loop at 200 Hz
@@ -1757,15 +2625,22 @@ class StateManager:
                                 active, mirror)
             else:
                 self._do_stop(active, elapsed_ms)
+                self._dispatch_led_idle_ambient(
+                    active=active,
+                    d=d,
+                    reason="stop_confirmed",
+                )
             return
 
         # ── Auto-detect: active idle + mirror playing → switch ───────────────
         # Handles the case where RB auto-assigns master without an explicit
         # deck-change event.
+        idle_switch_requested = False
         if not os.was_playing and not d.playing and not arm_guard:
             if self._deck[mirror].playing:
                 log.info("[SM] switch  %d→%d  src=auto  reason=idle+mirror-playing",
                          active, mirror)
+                idle_switch_requested = True
                 os.last_arm_mono = now
                 try:
                     self._eq.put_nowait(BridgeEvent(
@@ -1788,6 +2663,12 @@ class StateManager:
             return   # don't emit beats until flash-arm fires
 
         if not os.was_playing:
+            if not idle_switch_requested:
+                self._dispatch_led_idle_ambient(
+                    active=active,
+                    d=d,
+                    reason="idle",
+                )
             if self._laser_director is not None:
                 sp_state = self._update_smart_phrasing_state(
                     active, d, 0.0, 0.0,
@@ -1814,6 +2695,21 @@ class StateManager:
         )
         if sp_state.phrase_anchor_requested:
             self._pending_phrase_marker = True
+        if d.playing:
+            led_sp_state = self._led_sp_state_with_offset(sp_state, bpm)
+            self._dispatch_led_automation(
+                active=active,
+                d=d,
+                sp_state=led_sp_state,
+                position_stale=(snap is None or snap.is_stale(MEM_STALE_S)),
+                autoloop_ready=self._led_autoloop_ready(d),
+            )
+        else:
+            self._dispatch_led_idle_ambient(
+                active=active,
+                d=d,
+                reason="paused",
+            )
 
         # BPM: send immediately when last_sent_bpm is 0 (fresh arm / deck switch) so
         # SS autoloop activates on the current tick, not at the next beat boundary.
@@ -1929,21 +2825,46 @@ class StateManager:
                     #   fallback — absolute 32-grid until the first marker is seen
                     marker_crossed = self._pending_phrase_marker
                     self._pending_phrase_marker = False
+                    phrase_anchor_rearmed = bool(smart_rearm_result.phrase_anchor_fired)
                     origin = os.midi_refire_origin_beat
+                    previous_refire_beat = os.last_autoloop_status_phrase_beat
                     refire = False
-                    if marker_crossed:
+                    refire_source = "none"
+                    if phrase_anchor_rearmed:
                         refire = True
+                        refire_source = "phrase_anchor"
+                    elif marker_crossed:
+                        refire = True
+                        refire_source = "marker"
                     elif origin >= 0:
                         refire = (this_beat - origin) >= AUTOLOOP_ARM_PHRASE_BEATS
+                        if refire:
+                            refire_source = "interval"
                     else:
                         refire = (
                             (this_beat // AUTOLOOP_ARM_PHRASE_BEATS)
                             > (last_beat // AUTOLOOP_ARM_PHRASE_BEATS)
                         )
+                        if refire:
+                            refire_source = "fallback_grid"
                     if refire and this_beat != os.last_autoloop_status_phrase_beat:
                         os.midi_refire_origin_beat = this_beat
                         os.last_autoloop_status_phrase_beat = this_beat
                         grid_status = d.meta.beatgrid_source if grid_pos is not None else "fallback"
+                        log.info(
+                            "[SM] midi-refire  deck=%d  beat=%d  source=%s  "
+                            "origin_before=%d  origin_after=%d  previous=%d  "
+                            "interval=%d  marker_latched=%s  grid=%s",
+                            active,
+                            this_beat,
+                            refire_source,
+                            origin,
+                            os.midi_refire_origin_beat,
+                            previous_refire_beat,
+                            AUTOLOOP_ARM_PHRASE_BEATS,
+                            marker_crossed,
+                            grid_status,
+                        )
                         self._autoloop.log_autoloop_tick(
                             active, elapsed_ms, beatpos_out, bpm, d.meta.bpm, grid_status
                         )
@@ -2089,7 +3010,25 @@ class StateManager:
         _sp_result = self._smart_phrasing_engine.update(_sp_snapshot)
         sp_state = _sp_result.state
         self._last_sp_state = sp_state
+        self._last_sp_snapshot = _sp_snapshot
         return sp_state
+
+    def _led_sp_state_with_offset(
+        self,
+        sp_state: SmartPhrasingState,
+        bpm: float,
+    ) -> SmartPhrasingState:
+        offset_s = self._led_automation_offset_s
+        if offset_s <= 0.0 or bpm <= 0.0 or self._last_sp_snapshot is None:
+            return sp_state
+        snapshot = self._last_sp_snapshot
+        if snapshot.abs_beat is None or not snapshot.is_playing:
+            return sp_state
+        offset_beats = (bpm / 60.0) * offset_s
+        return self._smart_phrasing_engine.preview_with_beat_offset(
+            snapshot,
+            offset_beats,
+        )
 
     def _clear_phrase_segment_cache(self, deck: int) -> None:
         self._phrase_segments_cache.pop(deck, None)
@@ -2207,6 +3146,9 @@ class StateManager:
         os.autoloop_arm_bpm       = 0.0
         os.autoloop_arm_deck      = 0
         os.last_autoloop_status_phrase_beat = 0
+        self._led_last_auto_role_key = ""
+        self._led_last_idle_role_key = ""
+        self._led_smart_drop_blackout_key = ""
         self._clear_smart_rearm_state()
         self._autoloop.clear_arm_phrase_lock()
         self._autoloop.clear_live_bpm_follow()
@@ -2234,6 +3176,9 @@ class StateManager:
         self._os.last_sent_bpm        = 0.0
         self._os.last_beat_elapsed_ms = elapsed_ms
         self._os.last_autoloop_status_phrase_beat = 0
+        self._led_last_auto_role_key = ""
+        self._led_last_idle_role_key = ""
+        self._led_smart_drop_blackout_key = ""
         self._log_status()
 
     def _clear_smart_rearm_state(self) -> None:

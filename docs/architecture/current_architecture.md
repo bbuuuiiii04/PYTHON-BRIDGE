@@ -46,6 +46,8 @@ These defaults are present in `scripts/ss_bridge_watcher.sh`.
 | `SmartPhrasingEngine` | pure musical phrasing engine (no OS2L sends, no `OutputState` writes) | yes | called by `StateManager` thread | per-tick `SmartPhrasingSnapshot` | immutable `SmartPhrasingState` intents |
 | `LaserDirector` | laser scene/role policy only | yes | called by `StateManager` thread | `LaserContext` (including `SmartPhrasingState`) | `LaserSceneDecision` |
 | `LaserSceneExecutor` | laser trigger execution only (MIDI/blackout/cooldown/transition-mask) | yes | called by `StateManager` thread | `LaserSceneDecision`, `LaserContext` | MIDI triggers and executor blackout state |
+| `LEDLookDirector` | LED room-look policy only | yes | called by `StateManager` thread | manual/emergency LED context and `SmartPhrasingState`-derived role | `LEDLookDecision` |
+| `GoveeSceneAdapter` | LED transport queue/worker | no hot-path I/O | public trigger called by `StateManager`; worker owns Govee transport | `LEDLookDecision` | bounded queue commands and sanitized adapter status |
 | `SoundSwitchEngine` | SoundSwitch output-intent fanout helper | yes | called by `StateManager` thread | active deck routing and send intents from `StateManager` | routed OS2L sends for scripted/autoloop/smart-transition/live-BPM-follow helpers |
 | `beat_math.py` | pure beat and beatgrid math helper | yes | called in hot path from `StateManager` | elapsed ms, bpm, beatgrid markers | computed beat positions / target elapsed |
 | `OS2LConnection` / `OS2LOutput` | output transport authority | yes | sender/reconnect threads own sockets | SoundSwitch DNS-SD, send queue | TCP OS2L messages |
@@ -97,6 +99,29 @@ direct path inactive while MTC/current state fallbacks continue where available.
   scene policy decisions only.
 - `LaserSceneExecutor` consumes those decisions and handles laser MIDI output,
   role cooldown/rotation, blackout latching, and transition-mask cleanup.
+
+## LED Look Director
+
+- `StateManager` owns LED manual override, emergency blackout, enable, and
+  automation gate state.
+- Manual LED runtime commands flow through the existing command pattern:
+  `CommandReader` parses JSONL, `__main__.py` enqueues `BridgeEvent`s with
+  `put_nowait`, and `StateManager._handle_event` owns the durable state.
+- Automatic LED role-entry consumes already-computed `SmartPhrasingState` and is
+  role-entry/transition keyed. It does not duplicate SmartPhrasing logic and
+  must not command every tick or every beat.
+- `LEDLookDirector` chooses configured LED looks from role banks. LED banks are
+  separate from laser banks.
+- `GoveeSceneAdapter` keeps public trigger handoff bounded/non-blocking; slow
+  Govee transport belongs to its worker.
+- Current automatic role-entry is dry-run/config-gated. Live automation,
+  event-facing use, and Smart Drop blackout coupling remain later gates.
+
+Supporting LED operator docs:
+
+- `docs/led_look_director_design.md`
+- `docs/led_look_mapping_workflow.md`
+- `docs/govee_capability_notes.md`
 
 ## Current Direct Paths
 

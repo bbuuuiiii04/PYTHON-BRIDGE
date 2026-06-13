@@ -331,6 +331,21 @@ class TickEventTests(unittest.TestCase):
         ]
         self.assertEqual(transitions, [])
 
+    def test_startup_already_moving_emits_initial_play(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[0],
+            payload=(1000).to_bytes(8, "little"))
+        for pos in (1000, 45100, 90200, 135300, 180400, 225500):
+            self.mem.update_leaf(endpoint, pos.to_bytes(8, "little"))
+            self.reader._tick(0xCAFE, self.base)
+
+        transitions = [
+            (e.kind, e.deck) for e in _drain(self.q)
+            if e.kind in (Ev.PLAY, Ev.PAUSE)
+        ]
+        self.assertEqual(transitions, [(Ev.PLAY, 1)])
+
     def test_missing_position_read_resets_baseline_before_recovery(self) -> None:
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
         endpoint = self.mem.install_chain(

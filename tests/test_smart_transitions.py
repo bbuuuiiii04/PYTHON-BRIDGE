@@ -384,7 +384,7 @@ class SmartRearmFlagTests(unittest.TestCase):
         self.assertFalse(sm._smart_drop_enabled)
         self.assertFalse(sm._phrase_anchor_enabled)
 
-    def test_global_switch_on_enables_defaults(self) -> None:
+    def test_global_switch_on_with_anchor_opt_in_enables_all(self) -> None:
         sm = _manager({
             "RBSS_SMART_REARM_EXPERIMENT": "1",
             "RBSS_SMART_DROP": "1",
@@ -393,6 +393,21 @@ class SmartRearmFlagTests(unittest.TestCase):
         self.assertTrue(sm._smart_rearm_experiment)
         self.assertTrue(sm._smart_drop_enabled)
         self.assertTrue(sm._phrase_anchor_enabled)
+
+    def test_phrase_anchor_defaults_off_when_experiment_on(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "RBSS_SMART_REARM_EXPERIMENT": "1",
+                "RBSS_SMART_DROP": "1",
+            },
+            clear=True,
+        ):
+            sm = StateManager(queue.Queue(), PositionCache(), Mock())
+
+        self.assertTrue(sm._smart_rearm_experiment)
+        self.assertTrue(sm._smart_drop_enabled)
+        self.assertFalse(sm._phrase_anchor_enabled)
 
     def test_experiment_off_skips_anlz_worker(self) -> None:
         sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "0"})

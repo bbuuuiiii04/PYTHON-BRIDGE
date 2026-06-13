@@ -216,6 +216,34 @@ class PersonalityResolverTests(unittest.TestCase):
         self.assertEqual(cache.get("track-1"), frozenset({"Dubstep"}))
         self.assertEqual(cache.get("missing"), frozenset())
 
+    def test_playlist_cache_logs_configured_folder_label(self) -> None:
+        from rb_ss_bridge_v2.personality_resolver import PlaylistCache
+
+        class FakeDb:
+            def __init__(self, _path: str, *, unlock: bool) -> None:
+                self.unlock = unlock
+
+            def get_playlist(self):  # type: ignore[no-untyped-def]
+                return (
+                    SimpleNamespace(ID="folder-1", Name="PER GENRE", ParentID=""),
+                )
+
+            def close(self) -> None:
+                pass
+
+        pyrekordbox = ModuleType("pyrekordbox")
+        db6 = ModuleType("pyrekordbox.db6")
+        db6.Rekordbox6Database = FakeDb  # type: ignore[attr-defined]
+        cache = PlaylistCache(Path("/tmp/fake.db"), folder_name="BY GENRE")
+
+        with patch.dict(sys.modules, {"pyrekordbox": pyrekordbox, "pyrekordbox.db6": db6}):
+            with self.assertLogs("personality_resolver", level="WARNING") as captured:
+                self.assertEqual(cache.refresh(), 0)
+
+        output = "\n".join(captured.output)
+        self.assertIn("playlist-cache folder='BY GENRE' not found", output)
+        self.assertNotIn("PER GENRE folder not found", output)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,7 @@ BACKOFF_VALUES=(3 10 30 60)
 STARTED_AT=0
 WARNED_MULTIPLE=0
 MONITOR_OPENED=0
+GOVEE_ENV_FILE="$HOME/Library/Application Support/RBSS Bridge/govee.env"
 
 ss_running() {
     pgrep -x "SoundSwitch" > /dev/null 2>&1
@@ -80,6 +81,12 @@ start_bridge() {
     (
         cd "$BRIDGE_DIR" || exit 1
         ensure_laser_config
+        if [ -f "$GOVEE_ENV_FILE" ]; then
+            set -a
+            # shellcheck disable=SC1090
+            . "$GOVEE_ENV_FILE"
+            set +a
+        fi
         echo "Laser Director config: $LASER_CONFIG_PATH"
         echo "Laser Director mode: enabled=true dry_run=true"
         exec env \

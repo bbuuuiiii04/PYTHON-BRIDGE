@@ -415,6 +415,23 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertEqual(len(midi.calls), 3)
         self.assertEqual(midi.calls[-1][1], "normal")
 
+    def test_same_scene_phrase_refire_logs_skip_bypass(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx(abs_beat=64.0))
+
+        with self.assertLogs("laser_executor", level="INFO") as captured:
+            ex.on_decision(
+                _decision("phrase_a", "phrase_boundary", "phrase"),
+                _ctx(abs_beat=96.0, autoloop_tick_just_fired=True),
+            )
+
+        output = "\n".join(captured.output)
+        self.assertIn("same-scene-refire", output)
+        self.assertIn("role=phrase", output)
+        self.assertIn("scene=phrase_a", output)
+        self.assertEqual(len(midi.calls), 2)
+
     def test_high_impact_blocked_when_personality_disallows(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
         personality = _personality(allow_high_impact=False)
@@ -1370,6 +1387,33 @@ class LaserSceneExecutorTests(unittest.TestCase):
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=320.0))
         self.assertEqual(len(midi.calls), 2)
         self.assertEqual(ex.status()["last_error"], "role_cooldown_blocked")
+
+    def test_same_scene_buildup_refire_bypasses_role_cooldown(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        cfg = _config_with_role_cooldowns(dry_run=False)
+        scenes = dict(cfg.scenes)
+        scenes["buildup_a"] = replace(scenes["buildup_a"], cooldown_beats=32.0)
+        ex = LaserSceneExecutor(
+            config=replace(cfg, scenes=scenes),
+            midi_output=midi,
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _ctx(abs_beat=72.0),
+        )
+
+        with self.assertLogs("laser_executor", level="INFO") as captured:
+            ex.on_decision(
+                _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+                _ctx(abs_beat=88.0, autoloop_tick_just_fired=True),
+            )
+
+        output = "\n".join(captured.output)
+        self.assertIn("same-scene-refire", output)
+        self.assertIn("role=buildup", output)
+        self.assertEqual([call[0].note for call in midi.calls], [39, 39])
+        self.assertNotEqual(ex.status()["last_error"], "role_cooldown_blocked")
 
     def test_drop_crossing_not_blocked_on_role_transition(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)

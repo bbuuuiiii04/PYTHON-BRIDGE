@@ -4,7 +4,7 @@ import json
 import copy
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from difflib import get_close_matches
 from pathlib import Path
@@ -1432,17 +1432,35 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
             )
         beat += 64.0
 
-    cooldown_scene = cfg.scenes.get(personality.phrase_scene)
-    if cooldown_scene is None or cooldown_scene.cooldown_beats <= 0:
+    cooldown_target: Optional[tuple[str, str, str, Any]] = None
+    for candidate_role, candidate_scene_name, candidate_reason in (
+        ("buildup", personality.buildup_scene, "buildup_to_drop_window"),
+        ("breakdown", personality.breakdown_scene, "breakdown_hold"),
+    ):
+        candidate_scene = cfg.scenes.get(candidate_scene_name)
+        if (
+            candidate_scene is not None
+            and candidate_scene.scene_type == "autoloop"
+            and candidate_scene.cooldown_beats > 0
+        ):
+            cooldown_target = (
+                candidate_role,
+                candidate_scene_name,
+                candidate_reason,
+                candidate_scene,
+            )
+            break
+    if cooldown_target is None:
         add_check(
             "cooldown enforcement",
             False,
             "NOT IMPLEMENTED",
             personality_name=cfg.default_personality or "",
-            role="groove",
-            scene_name=personality.phrase_scene,
+            role="",
+            scene_name="",
         )
         return checks
+    cooldown_role, cooldown_scene_name, cooldown_reason, cooldown_scene = cooldown_target
     midi2 = _DryCheckMidiOutput()
     ex2 = LaserSceneExecutor(
         config=cfg,
@@ -1452,23 +1470,23 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
     )
     ex2.on_decision(
         LaserSceneDecision(
-            scene=personality.phrase_scene,
-            reason="default_init",
+            scene=cooldown_scene_name,
+            reason=cooldown_reason,
             priority=10,
             source="policy",
-            role="phrase",
+            role=cooldown_role,
         ),
-        _verify_ctx(500.0, autoloop_tick_just_fired=True),
+        _verify_ctx(500.0),
     )
     ex2.on_decision(
         LaserSceneDecision(
-            scene=personality.phrase_scene,
-            reason="phrase_boundary",
+            scene=cooldown_scene_name,
+            reason=cooldown_reason,
             priority=10,
             source="policy",
-            role="phrase",
+            role=cooldown_role,
         ),
-        _verify_ctx(500.0 + max(0.0, cooldown_scene.cooldown_beats - 1.0), autoloop_tick_just_fired=True),
+        _verify_ctx(500.0 + max(0.0, cooldown_scene.cooldown_beats - 1.0)),
     )
     blocked = len(midi2.calls) == 1 and ex2.status().get("last_error") == "role_cooldown_blocked"
     add_check(
@@ -1476,9 +1494,65 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
         blocked,
         "role_cooldown_blocked" if blocked else "cooldown not enforced",
         personality_name=cfg.default_personality or "",
-        role="groove",
-        scene_name=personality.phrase_scene,
+        role=cooldown_role,
+        scene_name=cooldown_scene_name,
         channel=cooldown_scene.midi.channel,
         note=cooldown_scene.midi.note,
+    )
+    phrase_scene = cfg.scenes.get(personality.phrase_scene)
+    if phrase_scene is None:
+        add_check(
+            "autoloop refire bypass",
+            False,
+            "missing phrase scene",
+            personality_name=cfg.default_personality or "",
+            role="groove",
+            scene_name=personality.phrase_scene,
+        )
+        return checks
+    midi3 = _DryCheckMidiOutput()
+    refire_personality = replace(
+        personality,
+        phrase_bank=(personality.phrase_scene,),
+    )
+    ex3 = LaserSceneExecutor(
+        config=cfg,
+        midi_output=midi3,
+        personality=refire_personality,
+        randomize_cursors=False,
+    )
+    ex3.on_decision(
+        LaserSceneDecision(
+            scene=personality.phrase_scene,
+            reason="default_init",
+            priority=10,
+            source="policy",
+            role="phrase",
+        ),
+        _verify_ctx(600.0, autoloop_tick_just_fired=True),
+    )
+    ex3.on_decision(
+        LaserSceneDecision(
+            scene=personality.phrase_scene,
+            reason="phrase_boundary",
+            priority=10,
+            source="policy",
+            role="phrase",
+        ),
+        _verify_ctx(
+            600.0 + max(0.0, phrase_scene.cooldown_beats - 1.0),
+            autoloop_tick_just_fired=True,
+        ),
+    )
+    refired = len(midi3.calls) == 2 and ex3.status().get("last_error") != "role_cooldown_blocked"
+    add_check(
+        "autoloop refire bypass",
+        refired,
+        "same scene refired on autoloop boundary" if refired else "autoloop boundary refire blocked",
+        personality_name=cfg.default_personality or "",
+        role="groove",
+        scene_name=personality.phrase_scene,
+        channel=phrase_scene.midi.channel,
+        note=phrase_scene.midi.note,
     )
     return checks

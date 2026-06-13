@@ -194,6 +194,43 @@ class StateManagerPersonalityTests(unittest.TestCase):
         self.assertEqual(cache.refresh_count, 0)
         self.assertEqual(resolver.playlists, frozenset())
 
+    def test_resolve_personality_recaches_timing_before_boundary_apply(self) -> None:
+        director = MagicMock()
+        house = LaserPersonality(
+            name="house",
+            safe_scene="safe_static",
+            default_scene="d",
+            phrase_scene="p",
+            buildup_scene="up",
+            pre_drop_scene="pre",
+            drop_scene="drop",
+            post_drop_scene="post",
+            breakdown_scene="bd",
+            transition_scene="t",
+            pre_drop_blackout_beats=6,
+            post_drop_hold_beats=16,
+            breakdown_default_restore_beats=48,
+            buildup_lookahead_beats=40,
+        )
+        sm = _make_sm(director, provider=lambda _name: house)
+        sm.attach_personality_resolver(_Resolver())  # type: ignore[arg-type]
+        sm.attach_personality_playlist_cache(_Cache())  # type: ignore[arg-type]
+        sm._os.active_deck = 1
+        sm._sp_post_drop = 8.0
+        sm._sp_drop_window = 4.0
+        sm._sp_breakdown_default_restore = 16
+
+        sm._on_filepath_resolved(1, _payload(ssid=""))
+
+        director.queue_personality_change.assert_called_once()
+        director.set_personality_config.assert_not_called()
+        self.assertEqual(sm._sp_post_drop, 16.0)
+        self.assertEqual(sm._sp_drop_window, 6.0)
+        self.assertEqual(sm._sp_transition_window, 6.0)
+        self.assertEqual(sm._sp_breakdown_default_restore, 48)
+        self.assertEqual(sm._sp_phrase_lookahead, 40.0)
+        self.assertIs(sm._active_personality_for_timing, house)
+
     def test_apply_personality_change_updates_director_executor_and_timing_cache(self) -> None:
         director = MagicMock()
         executor = MagicMock()

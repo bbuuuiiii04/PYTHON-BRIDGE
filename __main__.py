@@ -62,6 +62,10 @@ from .laser_director import LaserDirector
 from .laser_executor import LaserSceneExecutor
 from .laser_models import LaserPersonality
 from .midi_output import MidiOutput
+from .led_config import LEDConfigResult, load_led_look_director_config
+from .led_look_director import LEDLookDirector
+from .govee_scene_adapter import GoveeSceneAdapter
+from .govee_runtime_sender import GoveeRuntimeSender
 from .personality_resolver import PersonalityResolver, PlaylistCache
 from .runtime_status import CommandReader, StatusWriter
 from .validation_runner import ValidationRunner
@@ -259,6 +263,13 @@ class LaserStartupBundle:
     personality_provider: Optional[Callable[[str], Optional[LaserPersonality]]]
 
 
+@dataclass(frozen=True)
+class LEDStartupBundle:
+    led_director: Optional[LEDLookDirector]
+    led_adapter: Optional[GoveeSceneAdapter]
+    status_provider: Optional[Callable[[], dict]]
+
+
 def _build_personality_resolver(cfg: LaserConfig) -> PersonalityResolver:
     alias_index = {
         alias: name
@@ -344,6 +355,57 @@ def _build_laser_startup_wiring(
         status_provider=_status,
         personality_provider=_personality_provider,
     )
+
+
+def _build_led_startup_wiring(
+    cfg_result: LEDConfigResult,
+) -> LEDStartupBundle:
+    """Build optional LED director/adapter startup wiring."""
+    if not cfg_result.available or cfg_result.config is None:
+        if cfg_result.reason == "invalid_config":
+            errors = [str(err) for err in cfg_result.errors]
+
+            def _invalid_status() -> dict:
+                return {
+                    "available": False,
+                    "enabled": False,
+                    "reason": "invalid_config",
+                    "errors": errors,
+                }
+
+            return LEDStartupBundle(None, None, _invalid_status)
+        return LEDStartupBundle(None, None, None)
+
+    cfg = cfg_result.config
+    try:
+        led_director = LEDLookDirector(cfg, shuffled_roles=("drop",))
+        govee_sender = None
+        if not cfg.dry_run:
+            govee_sender = GoveeRuntimeSender(cfg)
+        led_adapter = GoveeSceneAdapter(
+            cfg,
+            send_command=govee_sender.send if govee_sender is not None else None,
+            status_provider=govee_sender.status if govee_sender is not None else None,
+        )
+    except Exception as exc:
+        log.warning("[MAIN] led-startup-failed  err=%s", exc)
+
+        def _failed_status() -> dict:
+            return {
+                "available": False,
+                "enabled": False,
+                "reason": "startup_error",
+                "last_error": f"{type(exc).__name__}: {exc}",
+            }
+
+        return LEDStartupBundle(None, None, _failed_status)
+
+    def _status() -> dict:
+        payload = led_director.status()
+        payload["adapter"] = led_adapter.status()
+        return payload
+
+    return LEDStartupBundle(led_director, led_adapter, _status)
 
 _LOCK_FD = None
 _LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
@@ -555,6 +617,21 @@ def main() -> None:
             else False
         ),
     )
+    led_cfg_result = load_led_look_director_config()
+    led_bundle = _build_led_startup_wiring(led_cfg_result)
+    led_look_director = led_bundle.led_director
+    led_scene_adapter = led_bundle.led_adapter
+    led_status_provider = led_bundle.status_provider
+    log.info(
+        "[MAIN] led-config  reason=%s  available=%s  enabled=%s",
+        led_cfg_result.reason,
+        led_cfg_result.available,
+        (
+            led_cfg_result.config.enabled
+            if led_cfg_result.config is not None
+            else False
+        ),
+    )
 
     # Startup: resolve any scripted tracks already registered by bridge config/tests.
     resolve_filepaths()
@@ -609,6 +686,8 @@ def main() -> None:
         laser_director=laser_director,
         laser_executor=laser_executor,
         laser_personality_provider=laser_personality_provider,
+        led_look_director=led_look_director,
+        led_scene_adapter=led_scene_adapter,
     )
     if laser_cfg_result.available and laser_cfg_result.config is not None:
         cfg = laser_cfg_result.config
@@ -731,6 +810,79 @@ def main() -> None:
             log.warning("[MAIN] queue-full  event=laser-clear-scene-override")
             return False
 
+    def _set_led_look_director(enabled: bool) -> bool:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LED_SET_ENABLED,
+                deck=0,
+                payload={"enabled": bool(enabled)},
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=led-set-enabled")
+            return False
+
+    def _led_scene(look: str, ttl_s: float | None, target: str | None = None) -> bool:
+        payload: dict[str, object] = {"look": look}
+        if ttl_s is not None:
+            payload["ttl_s"] = float(ttl_s)
+        if target:
+            payload["target"] = target
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LED_SCENE,
+                deck=0,
+                payload=payload,
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=led-scene")
+            return False
+
+    def _led_blackout(reason: str | None, target: str | None = None) -> bool:
+        payload: dict[str, object] = {}
+        if reason:
+            payload["reason"] = reason
+        if target:
+            payload["target"] = target
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LED_BLACKOUT,
+                deck=0,
+                payload=payload,
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=led-blackout")
+            return False
+
+    def _led_clear_blackout() -> bool:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LED_CLEAR_BLACKOUT,
+                deck=0,
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=led-clear-blackout")
+            return False
+
+    def _led_clear_scene_override() -> bool:
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=Ev.LED_CLEAR_SCENE_OVERRIDE,
+                deck=0,
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=led-clear-scene-override")
+            return False
+
     def _toggle_record_session(path: Optional[str], dedup: bool) -> bool:
         if not path:
             path = f"/tmp/rbss-session-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
@@ -746,8 +898,16 @@ def main() -> None:
         laser_clear_blackout_callback=_laser_clear_blackout,
         laser_scene_callback=_laser_scene,
         laser_clear_scene_override_callback=_laser_clear_scene_override,
+        led_set_enabled_callback=_set_led_look_director,
+        led_scene_callback=_led_scene,
+        led_blackout_callback=_led_blackout,
+        led_clear_blackout_callback=_led_clear_blackout,
+        led_clear_scene_override_callback=_led_clear_scene_override,
         record_session_toggle_callback=_toggle_record_session,
     )
+    sm_led_status_provider = getattr(sm, "led_status_provider", None)
+    if not callable(sm_led_status_provider):
+        sm_led_status_provider = led_status_provider
     status_writer = StatusWriter(
         sm,
         live_bpm,
@@ -756,6 +916,7 @@ def main() -> None:
         validation_runner,
         command_reader,
         laser_status_provider=laser_status_provider,
+        led_status_provider=sm_led_status_provider,
     )
 
     # Initialize master deck from guarded direct read when available, otherwise deck 1.
@@ -1020,6 +1181,8 @@ def main() -> None:
         injector.stop()
         if midi_output is not None:
             midi_output.stop()
+        if led_scene_adapter is not None:
+            led_scene_adapter.shutdown()
         discovery.stop()
         conn.stop()
         sys.exit(0)

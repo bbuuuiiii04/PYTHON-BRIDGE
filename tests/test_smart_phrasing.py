@@ -167,6 +167,36 @@ class TestSmartPhrasing(unittest.TestCase):
         res = self.engine.update(replace(snap, abs_beat=64.0))
         self.assertTrue(res.state.smart_drop_crossing)
 
+    def test_preview_with_beat_offset_detects_drop_crossing_early(self) -> None:
+        snap = self._default_snap(smart_drop_beats=(64.0,))
+        self.engine.update(replace(snap, abs_beat=61.9))
+
+        live = self.engine.update(replace(snap, abs_beat=62.0))
+        self.assertFalse(live.state.smart_drop_crossing)
+
+        preview = self.engine.preview_with_beat_offset(
+            replace(snap, abs_beat=62.0),
+            offset_beats=2.0,
+        )
+        self.assertTrue(preview.smart_drop_crossing)
+
+    def test_preview_with_beat_offset_arms_transition_window_early(self) -> None:
+        snap = self._default_snap(smart_drop_beats=(64.0,), transition_window_beats=4.0)
+        self.engine.update(replace(snap, abs_beat=57.0))
+
+        live = self.engine.update(replace(snap, abs_beat=58.0))
+        preview = self.engine.preview_with_beat_offset(
+            replace(snap, abs_beat=58.0),
+            offset_beats=2.0,
+        )
+        self.assertFalse(live.state.transition_window_active)
+        self.assertTrue(preview.transition_window_active)
+        self.assertTrue(
+            preview.transition_mask_should_arm
+            or preview.transition_mask_arm_latched
+            or preview.transition_window_active
+        )
+
     def test_buildup_only_in_up_phrase_before_future_drop(self):
         snap = self._default_snap(
             smart_drop_beats=(64.0,),

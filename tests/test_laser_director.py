@@ -524,6 +524,17 @@ class PhraseSceneTests(unittest.TestCase):
         self.assertEqual(ld.status()["last_reason"], "phrase_boundary")
         self.assertFalse(ld.status()["phrase_trigger_pending"])
 
+    def test_autoloop_refire_edge_returns_phrase_scene_without_pending_latch(self) -> None:
+        ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
+        ld.tick(_ctx(abs_beat=1.0), now=_now())
+        self.assertEqual(ld.status()["last_reason"], "default_init")
+
+        ld.tick(_ctx(abs_beat=33.0, autoloop_tick_just_fired=True), now=_now())
+
+        self.assertEqual(ld.status()["current_scene"], "p")
+        self.assertEqual(ld.status()["last_reason"], "phrase_boundary")
+        self.assertFalse(ld.status()["phrase_trigger_pending"])
+
     def test_not_playing_clears_phrase_trigger_pending(self) -> None:
         ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
         ld.tick(_ctx(abs_beat=31.0), now=_now())
@@ -849,6 +860,46 @@ class SmartObservationTests(unittest.TestCase):
         )
         self.assertEqual(ld.status()["current_scene"], "d")
         self.assertEqual(ld.status()["last_reason"], "default")
+
+    def test_buildup_gate_logs_allowed_decision(self) -> None:
+        ld = _director(default_scene="d", buildup_scene="up", buildup_lookahead_beats=32)
+        ld.tick(_ctx(abs_beat=1.0), now=_now())
+
+        with self.assertLogs("laser_director", level="INFO") as captured:
+            ld.tick(
+                _ctx(
+                    abs_beat=40.0,
+                    smart_drops=(64,),
+                    current_phrase_is_up=True,
+                    current_phrase_is_chorus=False,
+                ),
+                now=_now(),
+            )
+
+        output = "\n".join(captured.output)
+        self.assertIn("buildup-gate", output)
+        self.assertIn("decision=allowed", output)
+        self.assertIn("reason=up_phrase", output)
+
+    def test_buildup_gate_logs_blocked_decision(self) -> None:
+        ld = _director(default_scene="d", buildup_scene="up", buildup_lookahead_beats=32)
+        ld.tick(_ctx(abs_beat=1.0), now=_now())
+
+        with self.assertLogs("laser_director", level="INFO") as captured:
+            ld.tick(
+                _ctx(
+                    abs_beat=40.0,
+                    smart_drops=(64,),
+                    current_phrase_is_up=True,
+                    current_phrase_is_chorus=True,
+                ),
+                now=_now(),
+            )
+
+        output = "\n".join(captured.output)
+        self.assertIn("buildup-gate", output)
+        self.assertIn("decision=blocked", output)
+        self.assertIn("reason=chorus", output)
 
     def test_anlz_buildups_alone_do_not_trigger_buildup(self) -> None:
         ld = _director(default_scene="d", buildup_scene="up")

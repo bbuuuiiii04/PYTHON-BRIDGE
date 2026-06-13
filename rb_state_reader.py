@@ -370,6 +370,12 @@ class RBStateReader(threading.Thread):
 
         if was_playing is None:
             self._last_playing[d] = is_playing
+            if is_playing:
+                self._enqueue(BridgeEvent(
+                    kind=Ev.PLAY,
+                    deck=bridge,
+                    source='rb_state',
+                ))
             return
         if was_playing != is_playing:
             self._last_playing[d] = is_playing

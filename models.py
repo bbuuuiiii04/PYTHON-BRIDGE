@@ -220,3 +220,10 @@ class Ev:
     LASER_CLEAR_BLACKOUT       = "laser_clear_blackout"       # clear emergency blackout
     LASER_CLEAR_SCENE_OVERRIDE = "laser_clear_scene_override" # clear manual scene only
     LASER_SET_PERSONALITY      = "laser_set_personality"      # internal/test only; payload={personality: str}
+    # LED Look Director events — all global (deck=0). Payload-only contracts
+    # for later StateManager ownership.
+    LED_SET_ENABLED            = "led_set_enabled"            # payload={enabled: bool}
+    LED_SCENE                  = "led_scene"                  # payload={look: str, ttl_s?: float}
+    LED_BLACKOUT               = "led_blackout"               # payload={reason?: str}
+    LED_CLEAR_BLACKOUT         = "led_clear_blackout"         # clear emergency blackout
+    LED_CLEAR_SCENE_OVERRIDE   = "led_clear_scene_override"   # clear manual scene only
