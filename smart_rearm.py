@@ -254,6 +254,26 @@ class SmartRearmCoordinator:
                     os.breakdown_active = False
                     os.breakdown_restore_beat = 0
                     return True
+                return False
+            # The breakdown blackout mask (note 0 held) is released ONLY by the
+            # forward end-crossing above. If the playhead leaves the breakdown
+            # window any other way — track loop/restart, backward scrub, or a
+            # skipped tick that jumps past the segment end — that crossing never
+            # fires and the mask sticks on forever (lasers stay blacked out).
+            # smart_breakdown_active is True only while the playhead sits inside
+            # a breakdown segment, so "latched but no longer active and not a
+            # clean end-crossing" is exactly the leaked-window case. Release the
+            # mask and clear the latch; the rearm is meaningless here because the
+            # deck has already moved elsewhere (drop/phrase-anchor handle it).
+            if not sp_state.smart_breakdown_active:
+                log.info(
+                    "[SM] smart-breakdown-abort  deck=%d  beat=%d  reason=left_window",
+                    active,
+                    ctx.this_beat,
+                )
+                self._release_blackout_mask("breakdown")
+                os.breakdown_active = False
+                os.breakdown_restore_beat = 0
             return False
 
         if (
