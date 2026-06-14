@@ -148,6 +148,10 @@ class LEDLookDirector:
             dry_run=self._config.dry_run,
             automation_enabled=self._config.automation_enabled,
             automation_offset_s=float(self._config.automation.offset_s),
+            automation_cloud_offset_s=float(self._config.automation.cloud_offset_s),
+            automation_realtime_offset_s=float(
+                self._config.automation.realtime_offset_s
+            ),
             scripted_mode_automation=self._config.safety.scripted_mode_automation,
             current_look=current_look,
             last_reason=self._last_reason,
@@ -157,6 +161,28 @@ class LEDLookDirector:
             role_cursors=dict(self._role_cursors),
         )
         return asdict(payload)
+
+    def preview_role(self, role: str) -> LEDLookDecision | None:
+        """Return the next automation decision for a role without advancing it."""
+        if role not in _AUTOMATION_ROLES:
+            return None
+        bank = self._config.banks.get("default")
+        if bank is None:
+            return None
+        look_names = getattr(bank, role, ())
+        if not look_names:
+            return None
+        cursor = self._role_cursors.get(role, 0)
+        look_name = self._look_name_for_role(role, look_names, cursor)
+        if look_name not in self._config.looks:
+            return None
+        return self._decision_for_look(
+            look_name,
+            reason=f"role_preview:{role}",
+            source="automation",
+            priority=2,
+            role=role,
+        )
 
     def _automation_decision_for_role(self, role: str) -> LEDLookDecision | None:
         if role not in _AUTOMATION_ROLES:
@@ -217,6 +243,8 @@ class LEDLookDirector:
             source=source,
             priority=priority,
             role=role,
+            backend=look.backend,
+            params=look.params,
         )
 
     def _record_decision(self, decision: LEDLookDecision) -> None:

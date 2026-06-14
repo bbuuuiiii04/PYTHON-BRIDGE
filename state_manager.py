@@ -57,7 +57,7 @@ from .models import (
     ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot,
     SmartDropEnergyShadow, TrackMetadata,
 )
-from .led_models import LEDContext
+from .led_models import BeatAnchor, LEDContext
 from .laser_models import LaserContext, LaserPersonality
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
@@ -334,7 +334,11 @@ class StateManager:
         self._led_automation_gated_count = 0
         self._led_smart_drop_blackout_key = ""
         self._led_automation_offset_s = 0.0
+        self._led_cloud_automation_offset_s = 0.0
+        self._led_realtime_automation_offset_s = 0.0
         self._led_last_idle_role_key = ""
+        self._led_rt_permitted = False
+        self._led_rt_beat: tuple[int, float, float, float, bool] | None = None
         self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
         if self._led_look_director is not None:
             try:
@@ -347,10 +351,19 @@ class StateManager:
                 self._led_scripted_mode_automation_latch = bool(
                     status_payload.get("scripted_mode_automation", False)
                 )
-                self._led_automation_offset_s = max(
-                    0.0,
-                    float(status_payload.get("automation_offset_s", 0.0)),
+                cloud_offset = float(
+                    status_payload.get(
+                        "automation_cloud_offset_s",
+                        status_payload.get("automation_offset_s", 0.0),
+                    )
                 )
+                realtime_offset = float(
+                    status_payload.get("automation_realtime_offset_s", 0.0)
+                )
+                self._led_cloud_automation_offset_s = max(0.0, cloud_offset)
+                self._led_realtime_automation_offset_s = max(0.0, realtime_offset)
+                # Backward-compatible status alias; cloud keeps the legacy lead.
+                self._led_automation_offset_s = self._led_cloud_automation_offset_s
                 self._led_automation_gate_reason = (
                     "" if self._led_automation_enabled_latch else "automation_disabled"
                 )
@@ -578,6 +591,10 @@ class StateManager:
             "automation_trigger_count": int(self._led_automation_trigger_count),
             "automation_gated_count": int(self._led_automation_gated_count),
             "automation_offset_s": float(self._led_automation_offset_s),
+            "automation_cloud_offset_s": float(self._led_cloud_automation_offset_s),
+            "automation_realtime_offset_s": float(
+                self._led_realtime_automation_offset_s
+            ),
             "smart_drop_blackout_active": bool(self._led_smart_drop_blackout_key),
         }
 
@@ -590,6 +607,15 @@ class StateManager:
                         "enabled": bool(raw_director.get("enabled", False)),
                         "dry_run": bool(raw_director.get("dry_run", True)),
                         "automation_enabled": bool(raw_director.get("automation_enabled", False)),
+                        "automation_offset_s": float(
+                            raw_director.get("automation_offset_s", 0.0)
+                        ),
+                        "automation_cloud_offset_s": float(
+                            raw_director.get("automation_cloud_offset_s", 0.0)
+                        ),
+                        "automation_realtime_offset_s": float(
+                            raw_director.get("automation_realtime_offset_s", 0.0)
+                        ),
                         "scripted_mode_automation": bool(
                             raw_director.get("scripted_mode_automation", False)
                         ),
@@ -613,6 +639,22 @@ class StateManager:
 
         return payload
 
+    def get_active_beat_anchor(self) -> Optional[BeatAnchor]:
+        """Return the LED realtime beat snapshot when automation is permitted."""
+        if not self._led_rt_permitted or self._led_rt_beat is None:
+            return None
+        deck, abs_beat_pos, bpm, captured_monotonic, playing = self._led_rt_beat
+        if not playing or bpm <= 0.0:
+            return None
+        return BeatAnchor(
+            deck=deck,
+            abs_beat_pos=abs_beat_pos,
+            bpm=bpm,
+            captured_monotonic=captured_monotonic,
+            playing=playing,
+            permitted=True,
+        )
+
     def _sanitize_led_adapter_status(self, raw_status: Any) -> dict[str, Any]:
         if not isinstance(raw_status, dict):
             return {}
@@ -632,6 +674,44 @@ class StateManager:
                     provider_safe[key] = value
             if provider_safe:
                 safe["provider"] = provider_safe
+        realtime = raw_status.get("realtime")
+        if isinstance(realtime, dict):
+            realtime_safe: dict[str, Any] = {}
+            for key in (
+                "owner",
+                "active",
+                "provider_bound",
+                "desired_effect",
+                "active_effect",
+                "frame_index",
+                "idle_since",
+                "last_error",
+                "realtime_trigger_count",
+                "tactical_blackout_count",
+            ):
+                value = realtime.get(key)
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    realtime_safe[key] = value
+            transport = realtime.get("transport")
+            if isinstance(transport, dict):
+                transport_safe: dict[str, Any] = {}
+                for key in (
+                    "ip",
+                    "port",
+                    "segments",
+                    "frames_sent",
+                    "command_count",
+                    "send_error_count",
+                    "last_error",
+                    "last_payload_bytes",
+                ):
+                    value = transport.get(key)
+                    if isinstance(value, (str, int, float, bool)) or value is None:
+                        transport_safe[key] = value
+                if transport_safe:
+                    realtime_safe["transport"] = transport_safe
+            if realtime_safe:
+                safe["realtime"] = realtime_safe
         return safe
 
     def _sanitize_led_scene_ref(self, scene_ref: Any) -> str:
@@ -1257,6 +1337,68 @@ class StateManager:
         if blackout_key == self._led_smart_drop_blackout_key:
             return
 
+        drop_preview = self._preview_led_drop_decision()
+        tactical_blackout = getattr(self._led_scene_adapter, "tactical_blackout", None)
+        if (
+            drop_preview is not None
+            and str(getattr(drop_preview, "backend", "")) == "realtime_razer"
+            and callable(tactical_blackout)
+        ):
+            self._led_last_auto_role_key = blackout_key
+            self._led_last_event = f"automation:smart_drop_blackout:{phase}:realtime"
+            try:
+                accepted = bool(tactical_blackout(drop_preview))
+            except Exception as exc:
+                self._led_last_error = f"adapter_error:{type(exc).__name__}"
+                self._led_rejected_count += 1
+                self._led_automation_gated_count += 1
+                self._set_led_automation_gate_reason(
+                    "adapter_error",
+                    active_deck=active,
+                    role="smart_drop_blackout",
+                    role_key=blackout_key,
+                )
+                log.warning(
+                    "[RGB] tactical-blackout-error phase=%s look=%s role_key=%s active_deck=%d err=%s",
+                    phase,
+                    str(getattr(drop_preview, "look", "")) or "-",
+                    blackout_key,
+                    active,
+                    type(exc).__name__,
+                )
+                return
+            if accepted:
+                self._led_trigger_count += 1
+                self._led_automation_trigger_count += 1
+                self._led_smart_drop_blackout_key = blackout_key
+                self._led_last_error = ""
+                self._led_last_look = "realtime_blackout"
+                self._set_led_automation_gate_reason(
+                    "",
+                    active_deck=active,
+                    role="smart_drop_blackout",
+                    role_key=blackout_key,
+                )
+                log.info(
+                    "[RGB] tactical-blackout-accepted phase=%s next_drop=%s role_key=%s trigger_count=%d active_deck=%d",
+                    phase,
+                    str(getattr(drop_preview, "look", "")) or "-",
+                    blackout_key,
+                    self._led_automation_trigger_count,
+                    active,
+                )
+                return
+            self._led_rejected_count += 1
+            self._led_automation_gated_count += 1
+            self._led_last_error = "adapter_rejected"
+            self._set_led_automation_gate_reason(
+                "adapter_rejected",
+                active_deck=active,
+                role="smart_drop_blackout",
+                role_key=blackout_key,
+            )
+            return
+
         context = LEDContext(
             role="pre_drop",
             manual_look=None,
@@ -1414,6 +1556,7 @@ class StateManager:
             self._gate_led_automation("autoloop_not_ready", active_deck=active)
             return
 
+        self._led_rt_permitted = True
         self._led_last_idle_role_key = ""
         if sp_state.smart_drop_crossing:
             # Pre-drop blackout may already be active; at the crossing beat fire the
@@ -1561,6 +1704,7 @@ class StateManager:
         d: DeckState,
         reason: str,
     ) -> None:
+        self._led_rt_permitted = False
         self._led_smart_drop_blackout_key = ""
 
         role_key = f"{active}:{d.load_gen}:idle_ambient:{bool(d.meta.filepath)}"
@@ -1682,6 +1826,7 @@ class StateManager:
         role: str = "",
         role_key: str = "",
     ) -> None:
+        self._led_rt_permitted = False
         if reason != self._led_automation_gate_reason:
             self._led_automation_gated_count += 1
         self._set_led_automation_gate_reason(
@@ -1709,6 +1854,18 @@ class StateManager:
             or sp_state.transition_mask_should_arm
             or sp_state.transition_window_active
         )
+
+    def _preview_led_drop_decision(self) -> Any:
+        return self._preview_led_decision_for_role("drop")
+
+    def _preview_led_decision_for_role(self, role: str) -> Any:
+        preview_role = getattr(self._led_look_director, "preview_role", None)
+        if not callable(preview_role):
+            return None
+        try:
+            return preview_role(role)
+        except Exception:
+            return None
 
     def _led_role_from_smart_phrasing(self, sp_state: SmartPhrasingState) -> str:
         if sp_state.smart_drop_crossing:
@@ -2585,6 +2742,14 @@ class StateManager:
             if grid_pos is not None:
                 beat_pos, abs_beat_pos = grid_pos
 
+        self._led_rt_beat = (
+            active,
+            float(abs_beat_pos),
+            float(bpm),
+            float(now),
+            bool(d.playing),
+        )
+
         # Arm guard recomputed here so it reflects any arm fired by _update_lighting.
         arm_guard = (now - os.last_arm_mono) < ARM_GUARD_S
 
@@ -2696,7 +2861,7 @@ class StateManager:
         if sp_state.phrase_anchor_requested:
             self._pending_phrase_marker = True
         if d.playing:
-            led_sp_state = self._led_sp_state_with_offset(sp_state, bpm)
+            led_sp_state = self._led_sp_state_for_next_backend(sp_state, bpm)
             self._dispatch_led_automation(
                 active=active,
                 d=d,
@@ -3017,8 +3182,10 @@ class StateManager:
         self,
         sp_state: SmartPhrasingState,
         bpm: float,
+        offset_s: float | None = None,
     ) -> SmartPhrasingState:
-        offset_s = self._led_automation_offset_s
+        if offset_s is None:
+            offset_s = self._led_automation_offset_s
         if offset_s <= 0.0 or bpm <= 0.0 or self._last_sp_snapshot is None:
             return sp_state
         snapshot = self._last_sp_snapshot
@@ -3029,6 +3196,50 @@ class StateManager:
             snapshot,
             offset_beats,
         )
+
+    def _led_sp_state_for_next_backend(
+        self,
+        sp_state: SmartPhrasingState,
+        bpm: float,
+    ) -> SmartPhrasingState:
+        cloud_offset_s = self._led_cloud_automation_offset_s
+        realtime_offset_s = self._led_realtime_automation_offset_s
+        if cloud_offset_s == realtime_offset_s:
+            return self._led_sp_state_with_offset(sp_state, bpm, cloud_offset_s)
+
+        cloud_sp_state = self._led_sp_state_with_offset(sp_state, bpm, cloud_offset_s)
+        if self._led_should_smart_drop_blackout(cloud_sp_state):
+            drop_preview = self._preview_led_drop_decision()
+            if (
+                drop_preview is not None
+                and str(getattr(drop_preview, "backend", "cloud_diy") or "cloud_diy")
+                == "realtime_razer"
+            ):
+                return self._led_sp_state_with_offset(sp_state, bpm, realtime_offset_s)
+            return cloud_sp_state
+
+        cloud_role = self._led_role_from_smart_phrasing(cloud_sp_state)
+        cloud_preview = self._preview_led_decision_for_role(cloud_role)
+        if cloud_preview is not None:
+            backend = str(getattr(cloud_preview, "backend", "cloud_diy") or "cloud_diy")
+            if backend == "realtime_razer":
+                return self._led_sp_state_with_offset(sp_state, bpm, realtime_offset_s)
+            return cloud_sp_state
+
+        realtime_sp_state = self._led_sp_state_with_offset(
+            sp_state,
+            bpm,
+            realtime_offset_s,
+        )
+        realtime_role = self._led_role_from_smart_phrasing(realtime_sp_state)
+        realtime_preview = self._preview_led_decision_for_role(realtime_role)
+        if (
+            realtime_preview is not None
+            and str(getattr(realtime_preview, "backend", "cloud_diy") or "cloud_diy")
+            == "realtime_razer"
+        ):
+            return realtime_sp_state
+        return cloud_sp_state
 
     def _clear_phrase_segment_cache(self, deck: int) -> None:
         self._phrase_segments_cache.pop(deck, None)

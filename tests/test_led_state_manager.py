@@ -124,6 +124,32 @@ class _StubLEDAdapter:
         }
 
 
+class _TacticalLEDAdapter(_StubLEDAdapter):
+    def __init__(self) -> None:
+        super().__init__(accept=True)
+        self.tactical_calls: list[LEDLookDecision] = []
+
+    def tactical_blackout(self, decision: LEDLookDecision) -> bool:
+        self.tactical_calls.append(decision)
+        return True
+
+    def status(self) -> dict:
+        payload = super().status()
+        payload["realtime"] = {
+            "owner": "realtime_razer",
+            "active": bool(self.tactical_calls),
+            "provider_bound": True,
+            "desired_effect": "blackout" if self.tactical_calls else "",
+            "active_effect": "blackout" if self.tactical_calls else "",
+            "transport": {
+                "ip": "192.168.0.219",
+                "frames_sent": len(self.tactical_calls),
+                "send_error_count": 0,
+            },
+        }
+        return payload
+
+
 class _ExplodingAdapter:
     def __init__(self) -> None:
         self.trigger_called = 0
@@ -151,6 +177,8 @@ class _AutomationLEDLookDirector:
         self._dry_run = dry_run
         self._automation_enabled = automation_enabled
         self._scripted_mode_automation = scripted_mode_automation
+        self.preview_decision: LEDLookDecision | None = None
+        self.preview_decisions: dict[str, LEDLookDecision] = {}
         self._manual_override = ""
         self._emergency_blackout = False
         self.status_calls = 0
@@ -219,6 +247,13 @@ class _AutomationLEDLookDirector:
             priority=2,
             role=role,
         )
+
+    def preview_role(self, role: str) -> LEDLookDecision | None:
+        if role in self.preview_decisions:
+            return self.preview_decisions[role]
+        if role == "drop" and self.preview_decision is not None:
+            return self.preview_decision
+        return None
 
 
 def _make_sm(*, director=None, adapter=None) -> StateManager:
@@ -465,6 +500,63 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(adapter.trigger_calls[0].action, "diy_scene")
         self.assertTrue(sm.led_status_provider()["smart_drop_blackout_active"])
 
+    def test_realtime_drop_uses_tactical_blackout_not_cloud_blackout(self) -> None:
+        director = _AutomationLEDLookDirector()
+        director.preview_decision = LEDLookDecision(
+            look="rt_drop_blue",
+            target="room_perimeter",
+            action="realtime",
+            scene_ref="drop_chase_blue",
+            reason="role_preview:drop",
+            source="automation",
+            priority=2,
+            role="drop",
+            backend="realtime_razer",
+            params={},
+        )
+        adapter = _TacticalLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(
+            sm,
+            SmartPhrasingState(
+                transition_mask_arm_latched=True,
+                transition_window_active=True,
+                next_smart_drop_beat=64.0,
+            ),
+        )
+
+        sm._push_tick()
+
+        self.assertEqual(len(adapter.trigger_calls), 0)
+        self.assertEqual(len(adapter.tactical_calls), 1)
+        self.assertEqual(adapter.tactical_calls[0].look, "rt_drop_blue")
+        status = sm.led_status_provider()
+        self.assertTrue(status["smart_drop_blackout_active"])
+        self.assertEqual(status["adapter"]["realtime"]["desired_effect"], "blackout")
+
+    def test_beat_anchor_requires_realtime_permission(self) -> None:
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
+        sm._led_rt_beat = (1, 64.5, 128.0, 1000.0, True)
+
+        self.assertIsNone(sm.get_active_beat_anchor())
+
+        sm._led_rt_permitted = True
+        anchor = sm.get_active_beat_anchor()
+
+        self.assertIsNotNone(anchor)
+        self.assertEqual(anchor.deck, 1)
+        self.assertEqual(anchor.abs_beat_pos, 64.5)
+        self.assertEqual(anchor.bpm, 128.0)
+
+    def test_gate_clears_realtime_permission(self) -> None:
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
+        sm._led_rt_permitted = True
+        sm._led_rt_beat = (1, 64.5, 128.0, 1000.0, True)
+
+        sm._gate_led_automation("manual_override", active_deck=1)
+
+        self.assertIsNone(sm.get_active_beat_anchor())
+
     def test_smart_drop_blackout_arms_early_with_automation_offset(self) -> None:
         director = _AutomationLEDLookDirector()
         adapter = _StubLEDAdapter()
@@ -489,6 +581,66 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(len(adapter.trigger_calls), 1)
         self.assertEqual(adapter.trigger_calls[0].look, "room_blackout")
         self.assertTrue(director.tick_calls[0].emergency_blackout)
+
+    def test_cloud_drop_uses_cloud_automation_offset(self) -> None:
+        director = _AutomationLEDLookDirector()
+        director.preview_decision = LEDLookDecision(
+            look="cloud_drop",
+            target="room_perimeter",
+            action="diy_scene",
+            scene_ref="23254201",
+            reason="role_preview:drop",
+            source="automation",
+            priority=2,
+            role="drop",
+            backend="cloud_diy",
+        )
+        sm = _make_sm(director=director, adapter=_StubLEDAdapter())
+        sm._led_automation_offset_s = 1.0
+        sm._led_cloud_automation_offset_s = 1.0
+        sm._led_realtime_automation_offset_s = 0.0
+        d = sm._deck[1]
+        d.playing = True
+        d.meta.filepath = "/tracks/current.wav"
+        d.meta.smart_drops = [64]
+        d.meta.beatgrid_times_ms = list(range(0, 200 * 500, 500))
+
+        sm._update_smart_phrasing_state(1, d, 57.0, 120.0)
+        live_sp = sm._update_smart_phrasing_state(1, d, 58.0, 120.0)
+        selected_sp = sm._led_sp_state_for_next_backend(live_sp, 120.0)
+
+        self.assertFalse(sm._led_should_smart_drop_blackout(live_sp))
+        self.assertTrue(sm._led_should_smart_drop_blackout(selected_sp))
+
+    def test_realtime_drop_uses_realtime_automation_offset(self) -> None:
+        director = _AutomationLEDLookDirector()
+        director.preview_decision = LEDLookDecision(
+            look="rt_drop",
+            target="room_perimeter",
+            action="realtime",
+            scene_ref="drop_chase_blue",
+            reason="role_preview:drop",
+            source="automation",
+            priority=2,
+            role="drop",
+            backend="realtime_razer",
+        )
+        sm = _make_sm(director=director, adapter=_StubLEDAdapter())
+        sm._led_automation_offset_s = 1.0
+        sm._led_cloud_automation_offset_s = 1.0
+        sm._led_realtime_automation_offset_s = 0.0
+        d = sm._deck[1]
+        d.playing = True
+        d.meta.filepath = "/tracks/current.wav"
+        d.meta.smart_drops = [64]
+        d.meta.beatgrid_times_ms = list(range(0, 200 * 500, 500))
+
+        sm._update_smart_phrasing_state(1, d, 57.0, 120.0)
+        live_sp = sm._update_smart_phrasing_state(1, d, 58.0, 120.0)
+        selected_sp = sm._led_sp_state_for_next_backend(live_sp, 120.0)
+
+        self.assertFalse(sm._led_should_smart_drop_blackout(live_sp))
+        self.assertFalse(sm._led_should_smart_drop_blackout(selected_sp))
 
     def test_pause_dispatches_idle_ambient_once(self) -> None:
         director = _AutomationLEDLookDirector()

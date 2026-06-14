@@ -6,7 +6,24 @@ transport layers can exchange immutable decisions without runtime-side mutation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Mapping, Optional
+
+
+@dataclass(frozen=True)
+class LEDRealtimeConfig:
+    enabled: bool = False
+    protocol: str = ""
+    ip: str = ""
+    port: int = 4003
+    segments: int = 20
+    header: str = ""
+    header_bytes: tuple[int, ...] = field(default_factory=tuple)
+    stretch: bool = False
+    fps: int = 30
+    activate_pt: str = ""
+    deactivate_pt: str = ""
+    proof_status: str = "not_proven"
+    proof_date: str = ""
 
 
 @dataclass(frozen=True)
@@ -18,6 +35,8 @@ class LEDTarget:
     control_route: str
     capabilities: tuple[str, ...] = field(default_factory=tuple)
     mirror_targets: tuple[str, ...] = field(default_factory=tuple)
+    backend: str = "cloud_diy"
+    realtime: LEDRealtimeConfig = field(default_factory=LEDRealtimeConfig)
 
 
 @dataclass(frozen=True)
@@ -30,6 +49,8 @@ class LEDLook:
     safety_class: str = "safe"
     brightness: int = 100
     allow_strobe: bool = False
+    backend: str = "cloud_diy"
+    params: Mapping[str, Any] = field(default_factory=dict, compare=False)
 
 
 @dataclass(frozen=True)
@@ -56,6 +77,8 @@ class LEDRateLimits:
 @dataclass(frozen=True)
 class LEDAutomation:
     offset_s: float = 0.0
+    cloud_offset_s: float = 0.0
+    realtime_offset_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -115,6 +138,18 @@ class LEDLookDecision:
     source: str
     priority: int
     role: str
+    backend: str = "cloud_diy"
+    params: Mapping[str, Any] = field(default_factory=dict, compare=False)
+
+
+@dataclass(frozen=True)
+class BeatAnchor:
+    deck: int
+    abs_beat_pos: float
+    bpm: float
+    captured_monotonic: float
+    playing: bool
+    permitted: bool
 
 
 @dataclass(frozen=True)
@@ -124,6 +159,8 @@ class LEDLookDirectorStatus:
     dry_run: bool
     automation_enabled: bool
     automation_offset_s: float
+    automation_cloud_offset_s: float
+    automation_realtime_offset_s: float
     scripted_mode_automation: bool
     current_look: str
     last_reason: str

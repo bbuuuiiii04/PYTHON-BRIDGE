@@ -185,6 +185,56 @@ class LEDLookDirectorPriorityTests(unittest.TestCase):
         self.assertTrue(status["emergency_blackout"])
         self.assertEqual(status["current_look"], "room_blackout")
 
+    def test_preview_role_does_not_advance_cursor(self) -> None:
+        cfg = _director_config()
+        cfg["automation_enabled"] = True
+        cfg["targets"]["room_perimeter"]["realtime"] = {
+            "enabled": True,
+            "protocol": "razer_dreamview",
+            "ip": "192.168.0.219",
+            "port": 4003,
+            "segments": 20,
+            "header_bytes": [187, 0, 250, 176, 0],
+            "fps": 30,
+            "activate_pt": "uwABsQEK",
+            "deactivate_pt": "uwABsQAL",
+        }
+        cfg["looks"]["rt_drop_blue"] = {
+            "target": "room_perimeter",
+            "action": "realtime",
+            "scene_ref": "drop_chase_blue",
+            "fallback": "rt_blackout",
+            "safety_class": "drop",
+            "brightness": 100,
+            "allow_strobe": True,
+            "backend": "realtime_razer",
+            "params": {},
+        }
+        cfg["looks"]["rt_blackout"] = {
+            "target": "room_perimeter",
+            "action": "realtime",
+            "scene_ref": "blackout",
+            "fallback": "",
+            "safety_class": "blackout",
+            "brightness": 0,
+            "allow_strobe": False,
+            "backend": "realtime_razer",
+            "params": {},
+        }
+        cfg["banks"]["default"]["drop"] = ["rt_drop_blue", "room_manual"]
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        director = LEDLookDirector(result.config)
+
+        preview = director.preview_role("drop")
+        decision = director.tick(LEDContext(role="drop"))
+
+        self.assertIsNotNone(preview)
+        self.assertIsNotNone(decision)
+        self.assertEqual(preview.look, "rt_drop_blue")
+        self.assertEqual(decision.look, "rt_drop_blue")
+        self.assertEqual(decision.backend, "realtime_razer")
+
 
 if __name__ == "__main__":
     unittest.main()

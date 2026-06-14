@@ -288,6 +288,8 @@ class RateLimitDefaultAndBoundsTests(unittest.TestCase):
         result = load_led_look_director_config_from_dict(cfg)
         self.assertTrue(result.available, msg=result.errors)
         self.assertEqual(result.config.automation.offset_s, 0.0)
+        self.assertEqual(result.config.automation.cloud_offset_s, 0.0)
+        self.assertEqual(result.config.automation.realtime_offset_s, 0.0)
 
     def test_automation_offset_s_parsed_when_configured(self) -> None:
         cfg = _live_ready_base_config()
@@ -295,6 +297,20 @@ class RateLimitDefaultAndBoundsTests(unittest.TestCase):
         result = load_led_look_director_config_from_dict(cfg)
         self.assertTrue(result.available, msg=result.errors)
         self.assertEqual(result.config.automation.offset_s, 1.0)
+        self.assertEqual(result.config.automation.cloud_offset_s, 1.0)
+        self.assertEqual(result.config.automation.realtime_offset_s, 0.0)
+
+    def test_split_automation_offsets_parse_when_configured(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["automation"] = {
+            "cloud_offset_s": 0.6,
+            "realtime_offset_s": 0.0,
+        }
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.config.automation.offset_s, 0.6)
+        self.assertEqual(result.config.automation.cloud_offset_s, 0.6)
+        self.assertEqual(result.config.automation.realtime_offset_s, 0.0)
 
     def test_automation_offset_s_rejects_negative(self) -> None:
         cfg = _live_ready_base_config()
@@ -302,6 +318,17 @@ class RateLimitDefaultAndBoundsTests(unittest.TestCase):
         result = load_led_look_director_config_from_dict(cfg)
         self.assertFalse(result.available)
         self.assertTrue(any("automation.offset_s" in err for err in result.errors))
+
+    def test_split_automation_offsets_reject_negative(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["automation"] = {
+            "cloud_offset_s": -0.5,
+            "realtime_offset_s": -0.1,
+        }
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("automation.cloud_offset_s" in err for err in result.errors))
+        self.assertTrue(any("automation.realtime_offset_s" in err for err in result.errors))
 
     def test_supports_high_impact_cooldown_12_when_configured(self) -> None:
         cfg = _live_ready_base_config()
@@ -323,6 +350,112 @@ class RateLimitDefaultAndBoundsTests(unittest.TestCase):
         result = load_led_look_director_config_from_dict(cfg)
         self.assertFalse(result.available)
         self.assertTrue(any("drop_flash_duration_ms" in err for err in result.errors))
+
+
+class RealtimeConfigTests(unittest.TestCase):
+    def _realtime_config(self) -> dict:
+        cfg = _live_ready_base_config()
+        cfg["targets"]["room_perimeter"]["capabilities"].append("diy_scene")
+        cfg["targets"]["room_perimeter"]["realtime"] = {
+            "enabled": True,
+            "protocol": "razer_dreamview",
+            "ip": "192.168.0.219",
+            "port": 4003,
+            "segments": 20,
+            "header": "dreams",
+            "header_bytes": [187, 0, 250, 176, 0],
+            "stretch": False,
+            "fps": 30,
+            "activate_pt": "uwABsQEK",
+            "deactivate_pt": "uwABsQAL",
+            "proof_status": "confirmed_visual_pass",
+        }
+        cfg["looks"]["rt_groove_chase_blue"] = {
+            "target": "room_perimeter",
+            "action": "realtime",
+            "scene_ref": "groove_chase_blue",
+            "fallback": "rt_blackout",
+            "safety_class": "groove",
+            "brightness": 100,
+            "allow_strobe": False,
+            "backend": "realtime_razer",
+            "params": {},
+        }
+        cfg["looks"]["rt_drop_chase_blue"] = {
+            "target": "room_perimeter",
+            "action": "realtime",
+            "scene_ref": "drop_chase_blue",
+            "fallback": "rt_blackout",
+            "safety_class": "drop",
+            "brightness": 100,
+            "allow_strobe": True,
+            "backend": "realtime_razer",
+            "params": {},
+        }
+        cfg["looks"]["rt_blackout"] = {
+            "target": "room_perimeter",
+            "action": "realtime",
+            "scene_ref": "blackout",
+            "fallback": "",
+            "safety_class": "blackout",
+            "brightness": 0,
+            "allow_strobe": False,
+            "backend": "realtime_razer",
+            "params": {},
+        }
+        cfg["banks"]["default"]["groove"].append("rt_groove_chase_blue")
+        cfg["banks"]["default"]["drop"].append("rt_drop_chase_blue")
+        return cfg
+
+    def test_realtime_config_loads_and_preserves_backend_fields(self) -> None:
+        cfg = self._realtime_config()
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+        target = result.config.targets["room_perimeter"]
+        self.assertTrue(target.realtime.enabled)
+        self.assertEqual(target.realtime.header_bytes, (187, 0, 250, 176, 0))
+        self.assertEqual(result.config.looks["rt_groove_chase_blue"].backend, "realtime_razer")
+        self.assertEqual(result.config.looks["rt_drop_chase_blue"].scene_ref, "drop_chase_blue")
+
+    def test_mixed_cloud_and_realtime_role_lists_are_valid(self) -> None:
+        cfg = self._realtime_config()
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertIn("room_safe_default", result.config.banks["default"].groove)
+        self.assertIn("rt_groove_chase_blue", result.config.banks["default"].groove)
+        self.assertIn("room_drop", result.config.banks["default"].drop)
+        self.assertIn("rt_drop_chase_blue", result.config.banks["default"].drop)
+
+    def test_realtime_look_requires_realtime_enabled_target(self) -> None:
+        cfg = self._realtime_config()
+        cfg["targets"]["room_perimeter"]["realtime"]["enabled"] = False
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("realtime.enabled=false" in err for err in result.errors))
+
+    def test_realtime_params_reject_unknown_keys(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"colour": [1, 2, 3]}
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("params.colour" in err for err in result.errors))
+
+    def test_safety_blackout_must_remain_cloud(self) -> None:
+        cfg = self._realtime_config()
+        cfg["blackout"] = "rt_blackout"
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("'blackout' must reference a cloud_diy look" in err for err in result.errors))
 
 
 if __name__ == "__main__":

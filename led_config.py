@@ -6,8 +6,14 @@ import math
 import os
 import re
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Iterable
 
+from .govee_frame_renderer import (
+    REALTIME_EFFECT_NAMES,
+    REALTIME_EFFECT_PARAM_KEYS,
+    REALTIME_STROBE_EFFECTS,
+)
 from .led_models import (
     LEDAutomation,
     LEDBank,
@@ -15,6 +21,7 @@ from .led_models import (
     LEDConfigResult,
     LEDLook,
     LEDRateLimits,
+    LEDRealtimeConfig,
     LEDSafety,
     LEDTarget,
 )
@@ -44,7 +51,8 @@ _PLACEHOLDER_TOKENS = (
     "replace_me",
     "changeme",
 )
-_LOOK_ACTIONS = frozenset({"scene", "music_mode", "diy_scene", "off", "unmapped"})
+_LOOK_ACTIONS = frozenset({"scene", "music_mode", "diy_scene", "off", "unmapped", "realtime"})
+_LOOK_BACKENDS = frozenset({"cloud_diy", "realtime_razer"})
 _MUSIC_MODE_NAMES = frozenset({"rhythm", "sprouting", "shiny"})
 _BANK_ROLES = (
     "ambient",
@@ -245,6 +253,8 @@ def _validate(data: dict[str, Any], errors: list[str]) -> None:
     else:
         _validate_automation(automation, errors)
 
+    _validate_realtime_cross_checks(data, errors)
+
     if isinstance(dry_run, bool) and not dry_run:
         _validate_live_ready(data, errors)
 
@@ -267,6 +277,43 @@ def _validate_target(name: str, target: Any, errors: list[str]) -> None:
                 errors.append(
                     f"{prefix} field 'capabilities[{index}]' must be a non-empty string"
                 )
+    backend = target.get("backend", "cloud_diy")
+    if not isinstance(backend, str) or backend not in _LOOK_BACKENDS:
+        errors.append(f"{prefix} field 'backend' must be one of {sorted(_LOOK_BACKENDS)}")
+    realtime = target.get("realtime", {})
+    if realtime is None:
+        realtime = {}
+    if not isinstance(realtime, dict):
+        errors.append(f"{prefix} field 'realtime' must be an object")
+        return
+    if not bool(realtime.get("enabled", False)):
+        return
+    protocol = realtime.get("protocol", "")
+    if protocol and protocol != "razer_dreamview":
+        errors.append(f"{prefix} realtime.protocol must be 'razer_dreamview'")
+    ip = realtime.get("ip", "")
+    if not isinstance(ip, str) or not _is_dotted_quad(ip):
+        errors.append(f"{prefix} realtime.ip must be a dotted-quad IPv4 address")
+    port = realtime.get("port", 4003)
+    if not isinstance(port, int) or isinstance(port, bool) or port < 1 or port > 65535:
+        errors.append(f"{prefix} realtime.port must be between 1 and 65535")
+    segments = realtime.get("segments", 20)
+    if not isinstance(segments, int) or isinstance(segments, bool) or segments < 1:
+        errors.append(f"{prefix} realtime.segments must be an integer >= 1")
+    fps = realtime.get("fps", 30)
+    if not isinstance(fps, int) or isinstance(fps, bool) or fps < 1 or fps > 120:
+        errors.append(f"{prefix} realtime.fps must be between 1 and 120")
+    header_bytes = realtime.get("header_bytes", [])
+    if not isinstance(header_bytes, list) or not header_bytes:
+        errors.append(f"{prefix} realtime.header_bytes must be a non-empty list")
+    else:
+        for index, value in enumerate(header_bytes):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0 or value > 255:
+                errors.append(f"{prefix} realtime.header_bytes[{index}] must be 0..255")
+    for field_name in ("activate_pt", "deactivate_pt"):
+        value = realtime.get(field_name, "")
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"{prefix} realtime.{field_name} must be a non-empty string")
 
 
 def _validate_look(name: str, look: Any, errors: list[str]) -> None:
@@ -283,6 +330,9 @@ def _validate_look(name: str, look: Any, errors: list[str]) -> None:
         errors.append(
             f"{prefix} field 'action' must be one of {sorted(_LOOK_ACTIONS)}"
         )
+    backend = look.get("backend", "cloud_diy")
+    if not isinstance(backend, str) or backend not in _LOOK_BACKENDS:
+        errors.append(f"{prefix} field 'backend' must be one of {sorted(_LOOK_BACKENDS)}")
     elif action in {"scene", "music_mode", "diy_scene"}:
         scene_ref = look.get("scene_ref")
         if not isinstance(scene_ref, str) or not scene_ref.strip():
@@ -291,6 +341,31 @@ def _validate_look(name: str, look: Any, errors: list[str]) -> None:
             _validate_music_mode_ref(prefix, scene_ref, errors)
         elif action == "diy_scene":
             _validate_diy_scene_ref(prefix, scene_ref, errors)
+    if action == "realtime":
+        scene_ref = look.get("scene_ref")
+        if backend != "realtime_razer":
+            errors.append(f"{prefix} action='realtime' requires backend='realtime_razer'")
+        if not isinstance(scene_ref, str) or not scene_ref.strip():
+            errors.append(f"{prefix} requires non-empty 'scene_ref' for action='realtime'")
+        elif scene_ref not in REALTIME_EFFECT_NAMES:
+            errors.append(f"{prefix} scene_ref references unknown realtime effect '{scene_ref}'")
+        params = look.get("params", {})
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            errors.append(f"{prefix} field 'params' must be an object")
+        elif isinstance(scene_ref, str):
+            allowed = REALTIME_EFFECT_PARAM_KEYS.get(scene_ref, frozenset())
+            for key in params:
+                if key not in allowed:
+                    errors.append(f"{prefix} params.{key} is not valid for effect '{scene_ref}'")
+            _validate_realtime_params(prefix, scene_ref, params, errors)
+    elif backend == "realtime_razer":
+        errors.append(f"{prefix} backend='realtime_razer' requires action='realtime'")
+    else:
+        params = look.get("params", {})
+        if params is not None and not isinstance(params, dict):
+            errors.append(f"{prefix} field 'params' must be an object")
 
     safety_class = look.get("safety_class", "")
     if not isinstance(safety_class, str) or not safety_class.strip():
@@ -335,6 +410,104 @@ def _validate_bank(
                 errors.append(
                     f"{prefix} role '{role}' references unknown look '{look_name}'"
                 )
+
+
+def _is_dotted_quad(value: str) -> bool:
+    parts = value.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        return all(0 <= int(part) <= 255 and str(int(part)) == part for part in parts)
+    except ValueError:
+        return False
+
+
+def _validate_realtime_params(
+    prefix: str,
+    effect_name: str,
+    params: dict[str, Any],
+    errors: list[str],
+) -> None:
+    for field_name in ("color", "bg", "color_a", "color_b"):
+        if field_name in params and not _is_rgb(params[field_name]):
+            errors.append(f"{prefix} params.{field_name} must be an RGB list")
+    if "trail" in params:
+        value = params["trail"]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            errors.append(f"{prefix} params.trail must be an integer >= 0")
+    for field_name in ("span_beats", "decay", "period_beats", "floor", "speed", "density", "duration_beats", "duty"):
+        if field_name in params:
+            _validate_non_negative_number(f"{prefix} params.{field_name}", params[field_name], errors)
+    if "subdivision" in params and params["subdivision"] not in {1, 2, 4, 8}:
+        errors.append(f"{prefix} params.subdivision must be one of [1, 2, 4, 8]")
+    if effect_name == "beat_strobe" and "duty" in params:
+        value = params["duty"]
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if value < 0 or value > 1:
+                errors.append(f"{prefix} params.duty must be between 0 and 1")
+
+
+def _is_rgb(value: Any) -> bool:
+    if not isinstance(value, list) or len(value) != 3:
+        return False
+    return all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255 for v in value)
+
+
+def _validate_realtime_cross_checks(data: dict[str, Any], errors: list[str]) -> None:
+    targets = data.get("targets", {})
+    looks = data.get("looks", {})
+    banks = data.get("banks", {})
+    safety = data.get("safety", {})
+    if not isinstance(targets, dict) or not isinstance(looks, dict):
+        return
+
+    def _backend_for(look_name: str) -> str:
+        look = looks.get(look_name)
+        if not isinstance(look, dict):
+            return "cloud_diy"
+        return str(look.get("backend", "cloud_diy") or "cloud_diy")
+
+    for name, look in looks.items():
+        if not isinstance(look, dict):
+            continue
+        backend = _backend_for(name)
+        target_ref = look.get("target")
+        target = targets.get(target_ref) if isinstance(target_ref, str) else None
+        if backend == "realtime_razer":
+            if not isinstance(target, dict):
+                continue
+            realtime = target.get("realtime", {})
+            if not isinstance(realtime, dict) or not bool(realtime.get("enabled", False)):
+                errors.append(
+                    f"look '{name}' uses realtime backend but target '{target_ref}' has realtime.enabled=false"
+                )
+            if str(look.get("scene_ref", "")) in REALTIME_STROBE_EFFECTS:
+                if not bool(look.get("allow_strobe", False)):
+                    errors.append(f"look '{name}' realtime strobe effect requires allow_strobe=true")
+                if isinstance(safety, dict) and not bool(safety.get("allow_strobe", False)):
+                    errors.append(f"look '{name}' realtime strobe effect requires safety.allow_strobe=true")
+        fallback = look.get("fallback", "")
+        if isinstance(fallback, str) and fallback:
+            if fallback in looks and _backend_for(fallback) != backend:
+                errors.append(f"look '{name}' fallback must use the same backend")
+
+    for key_name in ("safe_default", "blackout"):
+        look_name = data.get(key_name)
+        if isinstance(look_name, str) and look_name in looks and _backend_for(look_name) != "cloud_diy":
+            errors.append(f"'{key_name}' must reference a cloud_diy look")
+
+    if not isinstance(banks, dict):
+        return
+    for bank_name, bank in banks.items():
+        if not isinstance(bank, dict):
+            continue
+        for role in ("ambient", "utility"):
+            values = bank.get(role, [])
+            if not isinstance(values, list):
+                continue
+            for look_name in values:
+                if isinstance(look_name, str) and look_name in looks and _backend_for(look_name) != "cloud_diy":
+                    errors.append(f"bank '{bank_name}' role '{role}' must contain only cloud_diy looks")
 
 
 def _validate_rate_limits(rate_limits: dict[str, Any], errors: list[str]) -> None:
@@ -382,6 +555,27 @@ def _validate_automation(automation: dict[str, Any], errors: list[str]) -> None:
         if float(offset_s) > _MAX_AUTOMATION_OFFSET_S:
             errors.append(
                 f"'automation.offset_s' must be <= {_MAX_AUTOMATION_OFFSET_S:g}"
+            )
+    cloud_offset_s = automation.get("cloud_offset_s", offset_s)
+    _validate_non_negative_number("automation.cloud_offset_s", cloud_offset_s, errors)
+    if isinstance(cloud_offset_s, (int, float)) and not isinstance(cloud_offset_s, bool):
+        if float(cloud_offset_s) > _MAX_AUTOMATION_OFFSET_S:
+            errors.append(
+                f"'automation.cloud_offset_s' must be <= {_MAX_AUTOMATION_OFFSET_S:g}"
+            )
+    realtime_offset_s = automation.get(
+        "realtime_offset_s",
+        _AUTOMATION_DEFAULTS.realtime_offset_s,
+    )
+    _validate_non_negative_number(
+        "automation.realtime_offset_s",
+        realtime_offset_s,
+        errors,
+    )
+    if isinstance(realtime_offset_s, (int, float)) and not isinstance(realtime_offset_s, bool):
+        if float(realtime_offset_s) > _MAX_AUTOMATION_OFFSET_S:
+            errors.append(
+                f"'automation.realtime_offset_s' must be <= {_MAX_AUTOMATION_OFFSET_S:g}"
             )
 
 
@@ -544,6 +738,8 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
             control_route=str(target.get("control_route", "")),
             capabilities=tuple(str(v) for v in target.get("capabilities", []) or ()),
             mirror_targets=tuple(str(v) for v in target.get("mirror_targets", []) or ()),
+            backend=str(target.get("backend", "cloud_diy")),
+            realtime=_build_realtime_config(target.get("realtime", {})),
         )
 
     looks: dict[str, LEDLook] = {}
@@ -557,6 +753,8 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
             safety_class=str(look.get("safety_class", "safe")),
             brightness=int(look.get("brightness", 100)),
             allow_strobe=bool(look.get("allow_strobe", False)),
+            backend=str(look.get("backend", "cloud_diy")),
+            params=MappingProxyType(dict(look.get("params", {}) or {})),
         )
 
     banks: dict[str, LEDBank] = {}
@@ -572,6 +770,17 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
             utility=_to_tuple(bank.get("utility", [])),
         )
 
+    legacy_offset_s = float(
+        automation_raw.get("offset_s", _AUTOMATION_DEFAULTS.offset_s)
+    )
+    cloud_offset_s = float(automation_raw.get("cloud_offset_s", legacy_offset_s))
+    realtime_offset_s = float(
+        automation_raw.get(
+            "realtime_offset_s",
+            _AUTOMATION_DEFAULTS.realtime_offset_s,
+        )
+    )
+
     return LEDConfig(
         schema_version=int(data["schema_version"]),
         enabled=bool(data["enabled"]),
@@ -583,9 +792,9 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
         safe_default=str(data["safe_default"]),
         blackout=str(data["blackout"]),
         automation=LEDAutomation(
-            offset_s=float(
-                automation_raw.get("offset_s", _AUTOMATION_DEFAULTS.offset_s)
-            ),
+            offset_s=cloud_offset_s,
+            cloud_offset_s=cloud_offset_s,
+            realtime_offset_s=realtime_offset_s,
         ),
         rate_limits=LEDRateLimits(
             queue_maxsize=int(
@@ -629,3 +838,25 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
 
 def _to_tuple(values: Iterable[Any]) -> tuple[str, ...]:
     return tuple(str(v) for v in values)
+
+
+def _build_realtime_config(raw: Any) -> LEDRealtimeConfig:
+    data = raw if isinstance(raw, dict) else {}
+    header_bytes = data.get("header_bytes", ())
+    if not isinstance(header_bytes, list):
+        header_bytes = ()
+    return LEDRealtimeConfig(
+        enabled=bool(data.get("enabled", False)),
+        protocol=str(data.get("protocol", "")),
+        ip=str(data.get("ip", "")),
+        port=int(data.get("port", 4003)),
+        segments=int(data.get("segments", 20)),
+        header=str(data.get("header", "")),
+        header_bytes=tuple(int(v) & 0xFF for v in header_bytes),
+        stretch=bool(data.get("stretch", False)),
+        fps=int(data.get("fps", 30)),
+        activate_pt=str(data.get("activate_pt", "")),
+        deactivate_pt=str(data.get("deactivate_pt", "")),
+        proof_status=str(data.get("proof_status", "not_proven")),
+        proof_date=str(data.get("proof_date", "")),
+    )

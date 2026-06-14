@@ -22,7 +22,7 @@ import time
 import threading
 import fcntl
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .config import OSC_LISTEN_PORT, RB_DB_PATH
 from .filepath_resolver import (
@@ -66,10 +66,17 @@ from .led_config import LEDConfigResult, load_led_look_director_config
 from .led_look_director import LEDLookDirector
 from .govee_scene_adapter import GoveeSceneAdapter
 from .govee_runtime_sender import GoveeRuntimeSender
+from .govee_frame_renderer import GoveeFrameRenderer
+from .govee_owner_state import GoveeOwnerStateMachine
+from .govee_realtime_runner import GoveeRealtimeRunner
+from .govee_realtime_transport import GoveeRealtimeDryRunTransport, GoveeRealtimeTransport
+from .led_dispatch_coordinator import LEDDispatchCoordinator
 from .personality_resolver import PersonalityResolver, PlaylistCache
 from .runtime_status import CommandReader, StatusWriter
 from .validation_runner import ValidationRunner
 from .tools.config_reloader import ConfigReloader, HOT_RELOAD_DISABLE_ENV
+
+GOVEE_REALTIME_ENV = "RBSS_GOVEE_REALTIME"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -266,8 +273,9 @@ class LaserStartupBundle:
 @dataclass(frozen=True)
 class LEDStartupBundle:
     led_director: Optional[LEDLookDirector]
-    led_adapter: Optional[GoveeSceneAdapter]
+    led_adapter: Optional[Any]
     status_provider: Optional[Callable[[], dict]]
+    realtime_runner: Optional[GoveeRealtimeRunner] = None
 
 
 def _build_personality_resolver(cfg: LaserConfig) -> PersonalityResolver:
@@ -382,11 +390,51 @@ def _build_led_startup_wiring(
         govee_sender = None
         if not cfg.dry_run:
             govee_sender = GoveeRuntimeSender(cfg)
-        led_adapter = GoveeSceneAdapter(
+        cloud_adapter = GoveeSceneAdapter(
             cfg,
             send_command=govee_sender.send if govee_sender is not None else None,
             status_provider=govee_sender.status if govee_sender is not None else None,
         )
+        led_adapter: Any = cloud_adapter
+        realtime_runner: GoveeRealtimeRunner | None = None
+        realtime_enabled = (
+            os.environ.get(GOVEE_REALTIME_ENV) == "1"
+            and any(target.realtime.enabled for target in cfg.targets.values())
+        )
+        if realtime_enabled:
+            realtime_target = next(
+                target for target in cfg.targets.values() if target.realtime.enabled
+            )
+            rt = realtime_target.realtime
+            if cfg.dry_run:
+                transport = GoveeRealtimeDryRunTransport(
+                    ip=rt.ip,
+                    port=rt.port,
+                    segments=rt.segments,
+                )
+            else:
+                transport = GoveeRealtimeTransport(
+                    rt.ip,
+                    port=rt.port,
+                    segments=rt.segments,
+                    header_bytes=rt.header_bytes,
+                    stretch=rt.stretch,
+                    activate_pt=rt.activate_pt,
+                    deactivate_pt=rt.deactivate_pt,
+                )
+                transport.deactivate()
+            realtime_runner = GoveeRealtimeRunner(
+                transport,
+                GoveeFrameRenderer(),
+                segments=rt.segments,
+                fps=rt.fps,
+            )
+            led_adapter = LEDDispatchCoordinator(
+                cloud_adapter,
+                realtime_runner,
+                GoveeOwnerStateMachine(),
+                cfg,
+            )
     except Exception as exc:
         log.warning("[MAIN] led-startup-failed  err=%s", exc)
 
@@ -405,7 +453,7 @@ def _build_led_startup_wiring(
         payload["adapter"] = led_adapter.status()
         return payload
 
-    return LEDStartupBundle(led_director, led_adapter, _status)
+    return LEDStartupBundle(led_director, led_adapter, _status, realtime_runner)
 
 _LOCK_FD = None
 _LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
@@ -689,6 +737,9 @@ def main() -> None:
         led_look_director=led_look_director,
         led_scene_adapter=led_scene_adapter,
     )
+    if led_bundle.realtime_runner is not None:
+        led_bundle.realtime_runner.set_beat_provider(sm.get_active_beat_anchor)
+        led_bundle.realtime_runner.start()
     if laser_cfg_result.available and laser_cfg_result.config is not None:
         cfg = laser_cfg_result.config
         personality_resolver = _build_personality_resolver(cfg)
