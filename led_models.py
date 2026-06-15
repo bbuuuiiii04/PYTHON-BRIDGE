@@ -79,6 +79,13 @@ class LEDRateLimits:
     high_impact_cooldown_s: float = 12.0
     request_timeout_s: float = 2.0
     worker_shutdown_timeout_s: float = 1.0
+    # WI-3: same-role min dwell gate in the coordinator
+    min_look_dwell_s: float = 1.5
+    # WI-5: hard floor on DIY↔RT transport flips (default OFF, flag-guarded)
+    transport_switch_cooldown_s: float = 2.0
+    # WI-6: RT reconcile window and interval after a cloud DIY dispatch
+    rt_reconcile_window_s: float = 5.0
+    rt_reconcile_interval_s: float = 1.0
 
 
 @dataclass(frozen=True)

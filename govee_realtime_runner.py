@@ -1,6 +1,8 @@
 """Actor thread that sustains Govee realtime frames off the bridge hot path."""
 from __future__ import annotations
 
+import logging
+import os as _os
 import threading
 import time
 from dataclasses import dataclass
@@ -71,6 +73,15 @@ class GoveeRealtimeRunner:
         self._frame_index = 0
         self._last_error = ""
 
+        # WI-6 reconcile: track when a cloud DIY dispatch may have displaced razer mode
+        self._reconcile_enabled: bool = _os.environ.get("RBSS_LED_RT_RECONCILE", "1") != "0"
+        self._reconcile_window_s: float = 5.0  # overridden by note_cloud_dispatch caller
+        self._reconcile_interval_s: float = 1.0  # overridden by note_cloud_dispatch caller
+        self._cloud_suspect_until: float = 0.0
+        self._last_activate_mono: float = 0.0
+        self._rt_reconcile_count: int = 0
+        self._log = logging.getLogger("govee_realtime_runner")
+
     def set_beat_provider(self, provider: Callable[[], Optional[BeatAnchor]] | None) -> None:
         with self._lock:
             self._beat_provider = provider
@@ -84,6 +95,21 @@ class GoveeRealtimeRunner:
     def fire_trigger(self) -> None:
         with self._lock:
             self._pending_manual = min(self._pending_manual + 1, MAX_MANUAL_PENDING)
+
+    def note_cloud_dispatch(self, now: float, *, window_s: float = 5.0, interval_s: float = 1.0) -> None:
+        """Signal that a cloud DIY command was just dispatched.
+
+        Opens a reconcile window during which _tick_once will periodically
+        re-assert razer activate() to self-heal from a late cloud command that
+        might flip the strip out of razer mode.
+
+        Only takes effect when RBSS_LED_RT_RECONCILE=1 (default).
+        """
+        with self._lock:
+            self._reconcile_window_s = float(window_s)
+            self._reconcile_interval_s = max(0.01, float(interval_s))
+            self._cloud_suspect_until = float(now) + self._reconcile_window_s
+
 
     def emergency_stop(self) -> None:
         self._emergency.set()
@@ -149,6 +175,7 @@ class GoveeRealtimeRunner:
             last_error = self._last_error
             engine_status = dict(self._engine_status)
             pending_manual = self._pending_manual
+            rt_reconcile_count = self._rt_reconcile_count
         transport_status = {}
         status = getattr(self._transport, "status", None)
         if callable(status):
@@ -164,6 +191,7 @@ class GoveeRealtimeRunner:
             "transport": transport_status,
             **engine_status,
             "pending_manual": pending_manual,
+            "rt_reconcile_count": rt_reconcile_count,
         }
 
     def _loop(self) -> None:
@@ -186,6 +214,21 @@ class GoveeRealtimeRunner:
         if self._emergency.is_set():
             self._emergency_teardown()
             return
+
+        # WI-6 reconcile: if a cloud DIY may have flipped the device out of razer
+        # mode, periodically re-assert activate() while we are still active.
+        # Gated by RBSS_LED_RT_RECONCILE (default ON).
+        if (
+            self._active and self._desired_spec is not None
+            and self._reconcile_enabled
+            and now < self._cloud_suspect_until
+            and (now - self._last_activate_mono) >= self._reconcile_interval_s
+        ):
+            self._transport.activate()
+            self._last_activate_mono = now
+            with self._lock:
+                self._rt_reconcile_count += 1
+            self._log.info("[RT] reconcile-reactivate now=%.3f", now)
 
         with self._lock:
             spec = self._desired_spec
@@ -249,6 +292,7 @@ class GoveeRealtimeRunner:
         if not self._active:
             self._transport.activate()
             self._transport.set_brightness(100)
+            self._last_activate_mono = now
             with self._lock:
                 self._active = True
 

@@ -1,6 +1,7 @@
 """Isolated Govee transport adapter for LED look decisions (Phase 5)."""
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
@@ -8,6 +9,8 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable, Mapping
 
 from .led_models import LEDAdapterCommand, LEDAdapterStatus, LEDConfig, LEDLookDecision
+
+log = logging.getLogger("govee_scene_adapter")
 
 _QUEUE_MAXSIZE_HARD_CAP = 16
 _DEDUPE_RECENT_WINDOW_S = 0.5
@@ -201,6 +204,29 @@ class GoveeSceneAdapter:
             self._pending_keys.discard(queued.dedupe_key)
         self._queue.task_done()
         return queued.command
+
+    def cancel_pending(self) -> int:
+        """Drain queued-but-unsent cloud commands.
+
+        Thread-safe: acquires _lock and uses get_nowait() so it never blocks
+        while holding the lock. The in-flight HTTP request (if any) cannot be
+        cancelled at this layer; WI-6 RT reconcile covers that residual race.
+
+        Returns the number of commands drained.
+        """
+        drained = 0
+        with self._lock:
+            while True:
+                try:
+                    queued = self._queue.get_nowait()
+                except queue.Empty:
+                    break
+                self._pending_keys.discard(queued.dedupe_key)
+                self._queue.task_done()
+                drained += 1
+        if drained:
+            log.info("[RGB] cancel-pending drained=%d", drained)
+        return drained
 
     def shutdown(self) -> bool:
         """Stop worker with bounded join timeout."""

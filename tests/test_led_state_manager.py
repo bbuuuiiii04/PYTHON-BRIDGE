@@ -919,6 +919,7 @@ class LEDStateManagerTests(unittest.TestCase):
             ),
         )
 
+        # Tick 1: abs_beat=64 (phrase crossing, inside-guard so seq not advanced yet)
         sm._push_tick()
         sm._update_smart_phrasing_state = lambda *_args, **_kwargs: SmartPhrasingState(
             abs_beat=95.0,
@@ -926,6 +927,7 @@ class LEDStateManagerTests(unittest.TestCase):
             current_phrase_start_beat=64.0,
             beats_into_phrase=31.0,
         )
+        # Tick 2: abs_beat=95 (first tick past GUARD: phrase latch advances seq→1, new key fires)
         sm._push_tick()
         sm._update_smart_phrasing_state = lambda *_args, **_kwargs: SmartPhrasingState(
             abs_beat=96.0,
@@ -933,6 +935,7 @@ class LEDStateManagerTests(unittest.TestCase):
             current_phrase_start_beat=64.0,
             beats_into_phrase=32.0,
         )
+        # Tick 3: abs_beat=96 (32-beat cycle overflow: cycle 0→1, new key fires)
         sm._push_tick()
         sm._update_smart_phrasing_state = lambda *_args, **_kwargs: SmartPhrasingState(
             abs_beat=104.0,
@@ -941,12 +944,12 @@ class LEDStateManagerTests(unittest.TestCase):
             phrase_start_crossing=True,
             beats_into_phrase=0.0,
         )
+        # Tick 4 (abs_beat=104) now fires immediately on the crossing because GUARD is gone.
         sm._push_tick()
 
-        self.assertEqual(
-            [call.role for call in adapter.trigger_calls],
-            ["groove", "groove", "groove"],
-        )
+        # This gives 3 fires total: phrase 1 start, 32-beat overflow, phrase 2 start.
+        roles = [call.role for call in adapter.trigger_calls]
+        self.assertEqual(roles, ["groove", "groove", "groove"])
 
     def test_third_chorus_marker_falls_to_post_drop_and_keeps_first_anchor(self) -> None:
         # Once the two-in-a-row allowance is spent (count==2), further
@@ -1017,7 +1020,9 @@ class LEDStateManagerTests(unittest.TestCase):
         )
         sm._push_tick()
 
+        # tick 3 (abs_beat=96, cycle 0→1 via drop anchor) → 2nd fire.
         self.assertEqual([call.role for call in adapter.trigger_calls], ["post_drop", "post_drop"])
+
 
     def test_phrase_interruption_clears_drop_lifecycle(self) -> None:
         director = _AutomationLEDLookDirector()
@@ -1645,5 +1650,61 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(adapter.trigger_calls[0].role, "groove")
 
 
+    def test_wi1_clamp_holds_jitter_and_accepts_seek(self):
+        sm = _make_sm()
+        sm._phrase_monotonic_enabled = True
+        out = [sm._clamp_led_beat(v, 1, 0) for v in [100.0, 100.5, 100.49, 100.51, 99.0, 99.2]]
+        self.assertEqual(out, [100.0, 100.5, 100.5, 100.51, 99.0, 99.2])
+        self.assertEqual(sm._led_phrase_latch_reset_count, 1)
+
+    def test_wi1_clamp_resets_across_load_gen(self):
+        sm = _make_sm()
+        sm._phrase_monotonic_enabled = True
+        sm._clamp_led_beat(100.0, 1, 0)
+        self.assertEqual(sm._clamp_led_beat(5.0, 1, 1), 5.0)
+
+    def test_wi1_clamp_flag_off_is_passthrough(self):
+        sm = _make_sm()
+        sm._phrase_monotonic_enabled = False
+        self.assertEqual([sm._clamp_led_beat(v, 1, 0) for v in [100.0, 99.5]], [100.0, 99.5])
+
+    def test_wi2_oscillating_phrase_start_fires_once(self):
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        sm._phrase_monotonic_enabled = True
+        _prepare_playing_push_tick(
+            sm,
+            SmartPhrasingState(
+                abs_beat=112.0, current_phrase_label="up",
+                current_phrase_start_beat=112.0, beats_into_phrase=0.0
+            ),
+        )
+        for start in (112.0, 80.0, 112.0):
+            sm._update_smart_phrasing_state = (lambda s: lambda *a, **k: SmartPhrasingState(
+                abs_beat=112.0, current_phrase_label="up",
+                current_phrase_start_beat=s, beats_into_phrase=112.0 - s))(start)
+            sm._push_tick()
+        self.assertEqual([c.role for c in adapter.trigger_calls], ["groove"])
+
+    def test_wi2_flag_off_reproduces_flap(self):
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        sm._phrase_monotonic_enabled = False
+        _prepare_playing_push_tick(
+            sm,
+            SmartPhrasingState(
+                abs_beat=112.0, current_phrase_label="up",
+                current_phrase_start_beat=112.0, beats_into_phrase=0.0
+            ),
+        )
+        for start in (112.0, 80.0, 112.0): 
+            sm._update_smart_phrasing_state = (lambda s: lambda *a, **k: SmartPhrasingState(
+                abs_beat=112.0, current_phrase_label="up",
+                current_phrase_start_beat=s, beats_into_phrase=112.0 - s))(start)
+            sm._push_tick()
+        self.assertGreaterEqual(len([c for c in adapter.trigger_calls if c.role == "groove"]), 2)
 if __name__ == "__main__":
     unittest.main()
+

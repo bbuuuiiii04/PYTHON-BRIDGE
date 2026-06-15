@@ -315,6 +315,42 @@ class GoveeSceneAdapterTests(unittest.TestCase):
         self.assertEqual(adapter.status()["last_error"], "circuit_open")
         self.assertTrue(adapter.trigger(self._blackout_decision()))
 
+    def test_cancel_pending_drains_queued_commands_without_blocking(self) -> None:
+        """WI-4: cancel_pending() must drain all queued-but-unsent commands,
+        return the count drained, and leave the queue empty and pending_keys clear."""
+        adapter = self._build_adapter(
+            queue_maxsize=8,
+            scene_retrigger_cooldown_s=0.0,
+            high_impact_cooldown_s=0.0,
+        )
+        # Enqueue 3 different decisions (worker is not running in test)
+        for scene_ref in ("Release-A", "Release-B", "Release-C"):
+            adapter.trigger(
+                LEDLookDecision(
+                    look="room_safe_default",
+                    target="room_perimeter",
+                    action="scene",
+                    scene_ref=scene_ref,
+                    reason="role_entry:groove",
+                    source="automation",
+                    priority=2,
+                    role="groove",
+                )
+            )
+        self.assertEqual(adapter.status()["queue_depth"], 3)
+
+        drained = adapter.cancel_pending()
+
+        self.assertEqual(drained, 3)
+        self.assertIsNone(adapter.pop_next_command())
+        with adapter._lock:
+            self.assertEqual(len(adapter._pending_keys), 0)
+
+    def test_cancel_pending_on_empty_queue_returns_zero(self) -> None:
+        """WI-4: cancel_pending() on an already-empty queue returns 0."""
+        adapter = self._build_adapter()
+        self.assertEqual(adapter.cancel_pending(), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

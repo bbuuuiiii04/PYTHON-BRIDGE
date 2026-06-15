@@ -595,6 +595,26 @@ def _validate_realtime_cross_checks(data: dict[str, Any], errors: list[str]) -> 
     for bank_name, bank in banks.items():
         if not isinstance(bank, dict):
             continue
+        # WI-7 warn-only: detect mixed backends in any role bank.
+        # This is a warning (not an error) so the current live JSON keeps loading.
+        # Promote to a hard error in a later pass once banks are split per transport.
+        import logging as _logging
+        _wl = _logging.getLogger("led_config")
+        for role in _BANK_ROLES:
+            values = bank.get(role, [])
+            if not isinstance(values, list):
+                continue
+            backends_in_role = set()
+            for look_name in values:
+                if isinstance(look_name, str) and look_name in looks:
+                    backends_in_role.add(_backend_for(look_name))
+            if len(backends_in_role) > 1:
+                _wl.warning(
+                    "[RGB] config-warn bank '%s' role '%s' mixes backends %s "
+                    "(WI-7: split into per-transport banks to eliminate transport thrash)",
+                    bank_name, role, sorted(backends_in_role),
+                )
+        # Hard error only for utility (existing rule)
         for role in ("utility",):
             values = bank.get(role, [])
             if not isinstance(values, list):
@@ -637,6 +657,34 @@ def _validate_rate_limits(rate_limits: dict[str, Any], errors: list[str]) -> Non
         rate_limits.get(
             "worker_shutdown_timeout_s",
             _RATE_LIMIT_DEFAULTS.worker_shutdown_timeout_s,
+        ),
+        errors,
+    )
+    # WI-3 dwell tunable
+    _validate_non_negative_number(
+        "rate_limits.min_look_dwell_s",
+        rate_limits.get("min_look_dwell_s", _RATE_LIMIT_DEFAULTS.min_look_dwell_s),
+        errors,
+    )
+    # WI-5 transport cooldown tunable
+    _validate_non_negative_number(
+        "rate_limits.transport_switch_cooldown_s",
+        rate_limits.get(
+            "transport_switch_cooldown_s",
+            _RATE_LIMIT_DEFAULTS.transport_switch_cooldown_s,
+        ),
+        errors,
+    )
+    # WI-6 reconcile tunables
+    _validate_non_negative_number(
+        "rate_limits.rt_reconcile_window_s",
+        rate_limits.get("rt_reconcile_window_s", _RATE_LIMIT_DEFAULTS.rt_reconcile_window_s),
+        errors,
+    )
+    _validate_non_negative_number(
+        "rate_limits.rt_reconcile_interval_s",
+        rate_limits.get(
+            "rt_reconcile_interval_s", _RATE_LIMIT_DEFAULTS.rt_reconcile_interval_s
         ),
         errors,
     )
@@ -929,6 +977,26 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
                 rate_limits_raw.get(
                     "worker_shutdown_timeout_s",
                     _RATE_LIMIT_DEFAULTS.worker_shutdown_timeout_s,
+                )
+            ),
+            min_look_dwell_s=float(
+                rate_limits_raw.get("min_look_dwell_s", _RATE_LIMIT_DEFAULTS.min_look_dwell_s)
+            ),
+            transport_switch_cooldown_s=float(
+                rate_limits_raw.get(
+                    "transport_switch_cooldown_s",
+                    _RATE_LIMIT_DEFAULTS.transport_switch_cooldown_s,
+                )
+            ),
+            rt_reconcile_window_s=float(
+                rate_limits_raw.get(
+                    "rt_reconcile_window_s", _RATE_LIMIT_DEFAULTS.rt_reconcile_window_s
+                )
+            ),
+            rt_reconcile_interval_s=float(
+                rate_limits_raw.get(
+                    "rt_reconcile_interval_s",
+                    _RATE_LIMIT_DEFAULTS.rt_reconcile_interval_s,
                 )
             ),
         ),
