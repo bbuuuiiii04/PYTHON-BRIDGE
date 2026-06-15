@@ -131,17 +131,21 @@ class TestSmartPhrasing(unittest.TestCase):
         res = self.engine.update(replace(snap, abs_beat=16.0))
         self.assertEqual(res.state.current_phrase_label, "up")
         self.assertTrue(res.state.current_phrase_is_up)
+        self.assertEqual(res.state.beats_into_phrase, 16.0)
         
         res = self.engine.update(replace(snap, abs_beat=32.0))
         self.assertEqual(res.state.current_phrase_label, "chorus")
         self.assertTrue(res.state.current_phrase_is_chorus)
+        self.assertEqual(res.state.beats_into_phrase, 0.0)
         
         res = self.engine.update(replace(snap, abs_beat=65.0))
         self.assertEqual(res.state.current_phrase_label, "low")
         self.assertTrue(res.state.current_phrase_is_low)
+        self.assertEqual(res.state.beats_into_phrase, 1.0)
         
         res = self.engine.update(replace(snap, abs_beat=100.0))
         self.assertEqual(res.state.current_phrase_label, "other")
+        self.assertIsNone(res.state.beats_into_phrase)
         self.assertTrue(not res.state.current_phrase_is_up and not res.state.current_phrase_is_chorus and not res.state.current_phrase_is_low)
 
     def test_computes_next_drop_and_beats_to_drop(self):
@@ -1027,6 +1031,22 @@ class TestSmartPhrasing(unittest.TestCase):
         self.engine.update(replace(snap, abs_beat=63.0))
         res = self.engine.update(replace(snap, abs_beat=64.0))
         self.assertTrue(res.state.phrase_anchor_requested)
+        self.assertTrue(res.state.phrase_start_crossing)
+        self.assertEqual(res.state.current_phrase_start_beat, 64.0)
+        self.assertEqual(res.state.previous_phrase_label, "up")
+
+    def test_repeated_chorus_marker_exposes_previous_chorus_label(self):
+        snap = self._default_snap(phrase_segments=(
+            PhraseSegment(start_beat=64.0, end_beat=80.0, label="chorus"),
+            PhraseSegment(start_beat=80.0, end_beat=96.0, label="chorus"),
+        ))
+        self.engine.update(replace(snap, abs_beat=79.0))
+
+        res = self.engine.update(replace(snap, abs_beat=80.0))
+
+        self.assertTrue(res.state.phrase_start_crossing)
+        self.assertEqual(res.state.current_phrase_label, "chorus")
+        self.assertEqual(res.state.previous_phrase_label, "chorus")
 
     def test_phrase_anchor_requested_fires_when_jumping_over_start(self):
         """jumping over a phrase segment start fires the anchor intent."""

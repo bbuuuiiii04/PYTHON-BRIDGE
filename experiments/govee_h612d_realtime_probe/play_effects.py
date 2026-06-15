@@ -10,10 +10,15 @@ import argparse
 import base64
 import json
 import math
+import os
 import random
 import socket
 import sys
 import time
+
+# Add root folder to sys.path to import production govee_frame_renderer
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+from govee_frame_renderer import GoveeFrameRenderer
 
 # Target configuration from proof
 DEFAULT_IP = "192.168.0.219"
@@ -120,14 +125,18 @@ EDM_BUILDS = {
     "groove_chase_cyan": "32-beat smooth cyan dual-head chase.",
     "groove_chase_red": "32-beat smooth red dual-head chase.",
     "groove_chase_green": "32-beat smooth green dual-head chase.",
-    "groove_freestyle_nebula": "32-beat smooth freestyle groove: opposite comets + breathing purple/magenta bg.",
     "groove_chase_cyan_white": "32-beat smooth alternating cyan/white dual-head chase.",
+    "groove_freestyle_nebula": "32-beat smooth freestyle groove: opposite comets + breathing purple/magenta bg.",
     "drop_chase_blue": "32-beat drop: 8-beat sparkle strobe burst + 2-beat blue chase strobe.",
     "drop_chase_cyan": "32-beat drop: 8-beat sparkle strobe burst + 2-beat cyan chase strobe.",
     "drop_chase_red": "32-beat drop: 8-beat sparkle strobe burst + 2-beat red chase strobe.",
     "drop_chase_green": "32-beat drop: 8-beat sparkle strobe burst + 2-beat green chase strobe.",
     "drop_chase_freestyle_nebula": "32-beat freestyle drop: 8-beat sparkle strobe burst + 2-beat opposite comets strobe.",
     "drop_chase_cyan_white": "32-beat drop: 8-beat sparkle strobe burst + 2-beat cyan/white chase strobe.",
+    "drop_white_aggressive": "Drop: full-strip pure-white 16th-note strobe (bridge-owned duration).",
+    "post_drop_white_shatter": "Post-drop: per-frame full-white stroboscopic static dissolving 13->3 over 4 beats then held low.",
+    "twinkle_blue": "32-beat super twinkly blue cyan look that pulses on beat.",
+    "test_combo": "Native 32-beat combo of aggressive strobe -> white shatter",
 }
 
 
@@ -551,6 +560,42 @@ def generate_buildup_frame(
                 for idx in range(start_seg, start_seg + 5):
                     frame[idx] = (255, 255, 255)
             return frame
+
+    elif look in ("twinkle_blue", "drop_white_aggressive", "post_drop_white_shatter", "test_combo"):
+        renderer = GoveeFrameRenderer()
+        frame_idx = int(elapsed * 40.0)
+        return renderer.render(
+            look,
+            beat_pos=current_beat,
+            local_t=elapsed,
+            frame_index=frame_idx,
+            params={},
+            segments=num_segs,
+            seed=42,
+        )
+    elif look == "test_combo":
+        renderer = GoveeFrameRenderer()
+        frame_idx = int(elapsed * 40.0)
+        if current_beat < 16.0:
+            return renderer.render(
+                "drop_white_aggressive",
+                beat_pos=current_beat,
+                local_t=elapsed,
+                frame_index=frame_idx,
+                params={},
+                segments=num_segs,
+                seed=42,
+            )
+        else:
+            return renderer.render(
+                "post_drop_white_shatter",
+                beat_pos=current_beat - 16.0,
+                local_t=elapsed,
+                frame_index=frame_idx,
+                params={},
+                segments=num_segs,
+                seed=42,
+            )
 
     elif look == "buildup_ramp_3":
         # 1. Strobe frequency starts at 4Hz and accelerates to 16Hz

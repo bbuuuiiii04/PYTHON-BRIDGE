@@ -67,6 +67,69 @@ def _distance_on_ring(index: int, pos: float, segments: int) -> float:
     return min(diff, max(0.0, float(segments) - diff))
 
 
+COMET_MIN_HEAD_SOFT = 1.0   # one/two segment anti-aliased head
+COMET_MIN_TRAIL_LEDS = 0.0  # default comet is a tight dot, not a long tail
+COMET_TAIL_SCALE = 0.35
+COMET_INTENSITY_FLOOR = 0.04
+
+
+def _comet_frame(progress: float, segments: int, color: RGB, head_soft: float,
+                 trail_len: float, direction: int) -> Frame:
+    """A compact comet head with an optional trailing fade.
+
+    The default is intentionally tiny: a one/two segment normalized head.  A
+    longer tail appears only when callers explicitly pass a positive
+    ``trail_beats`` value.
+    """
+    if segments <= 0:
+        return []
+    pos = progress * segments if direction >= 0 else (1.0 - progress) * segments
+    head_soft = max(0.5, float(head_soft))
+    trail_len = max(0.0, float(trail_len))
+    acc = [[0.0, 0.0, 0.0] for _ in range(segments)]
+    head_weights: list[tuple[int, float]] = []
+    for idx in range(segments):
+        intensity = max(0.0, 1.0 - abs(float(idx) - pos) / head_soft)
+        if intensity > 0.0:
+            head_weights.append((idx, intensity))
+    total_head = sum(weight for _, weight in head_weights)
+    if total_head > 0.0:
+        for idx, weight in head_weights:
+            amount = weight / total_head
+            acc[idx][0] += color[0] * amount
+            acc[idx][1] += color[1] * amount
+            acc[idx][2] += color[2] * amount
+
+    if trail_len > 0.0:
+        for idx in range(segments):
+            # d > 0 => this LED is behind the head, opposite the travel direction.
+            d = (pos - idx) if direction >= 0 else (idx - pos)
+            if d <= head_soft:
+                continue
+            intensity = COMET_TAIL_SCALE * math.exp(-(d - head_soft) / trail_len)
+            if intensity < COMET_INTENSITY_FLOOR:
+                continue
+            acc[idx][0] += color[0] * intensity
+            acc[idx][1] += color[1] * intensity
+            acc[idx][2] += color[2] * intensity
+    return [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in acc]
+
+
+def _ring_head_frame(pos: float, segments: int, color: RGB) -> Frame:
+    """Single head that interpolates around the ring instead of snapping to an index."""
+    if segments <= 0:
+        return []
+    pos = float(pos) % float(segments)
+    lower = int(math.floor(pos)) % segments
+    upper = (lower + 1) % segments
+    frac = pos - math.floor(pos)
+    frame = _empty(segments)
+    frame[lower] = _scale(color, 1.0 - frac)
+    if frac > 0.0:
+        frame[upper] = _scale(color, frac)
+    return frame
+
+
 def _dual_chase(
     *,
     beat: float,
@@ -253,7 +316,7 @@ def _groove_chase(name: str, beat: float, segments: int) -> Frame:
         offset_beats=2.0,
         color1=color1,
         color2=color2,
-    )
+
 
 
 def _groove_nebula(beat: float, segments: int) -> Frame:
@@ -287,14 +350,110 @@ def _drop_chase(name: str, beat: float, local_t: float, frame_index: int, params
             frame_index=frame_index,
             beat_bucket=int(beat * 16.0),
         )
-    return _dual_chase(
-        beat=beat - 8.0,
-        segments=segments,
-        loop_beats=2.0,
-        offset_beats=1.0,
-        color1=color1,
-        color2=color2,
+    return _drop_chase_comets(name, beat, segments, color1, color2)
+
+
+def _post_drop_chase(name: str, beat: float, segments: int) -> Frame:
+    color1, color2 = _edm_color_for_look(name, beat)
+    strobe_on = (int(beat * 16.0) % 2) == 0
+    if not strobe_on:
+        return _empty(segments)
+    # Standalone post-drop chase: comets begin at beat 0 (no sparkle intro) and
+    # keep spawning across the full cue. Unlike the drop chase, it does not
+    # borrow the drop's 8-beat-offset timeline, so it has no dark tail near the
+    # end of the cycle.
+    return _drop_chase_comets(name, beat, segments, color1, color2, start=0.0)
+
+
+def _post_drop_nebula(beat: float, segments: int) -> Frame:
+    strobe_on = (int(beat * 16.0) % 2) == 0
+    if not strobe_on:
+        return _empty(segments)
+    return _drop_chase_comets(
+        "drop_chase_freestyle_nebula",
+        beat,
+        segments,
+        (0, 255, 255),
+        (255, 255, 255),
+        start=0.0,
     )
+
+
+def _drop_white_aggressive(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    # Full-strip pure-white 16th-note strobe with a sharp ~25% duty cycle (1 frame ON).
+    # To prevent dropped frames at 40fps, we use a 16th-note cycle (0.25 beats) 
+    # and keep the ON time very short (0.0625 beats, which is ~1 frame).
+    # This guarantees a reliable, punchy, dark strobe effect.
+    # Cue length is owned by the bridge's drop window.
+    strobe_on = (beat % 0.25) < 0.0625
+    return _empty(segments, (255, 255, 255) if strobe_on else (0, 0, 0))
+
+
+def _post_drop_white_shatter(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    # Per-frame full-white stroboscopic static. Each pixel is independently
+    # re-randomized every render frame (keyed on frame_index) for a true
+    # 1-frame lifespan. The spawn rate dissolves 13 -> 3 over the look's first
+    # 4 beats, then holds at the ~3 floor for the rest of the post-drop window.
+    # `beat` is the post_drop look's own local beat (starts ~0 at trigger), so
+    # there is no -16 offset like the single-timeline sandbox prototype.
+    progress = min(1.0, max(0.0, beat / 4.0))
+    spawn_rate = 10.0 * (1.0 - progress) + 3.0
+    density = min(1.0, spawn_rate / float(max(1, segments)))
+    frame: Frame = []
+    for idx in range(max(0, segments)):
+        lit = _rng(seed, frame_index, idx).random() < density
+        frame.append((255, 255, 255) if lit else (0, 0, 0))
+    return frame
+
+
+def _drop_chase_spawn_times(beat: float, *, start: float = 8.0) -> list[tuple[float, int]]:
+    interval = 1.0
+    travel_beats = 2.0
+    if beat < start:
+        return []
+    last_spawn = min(float(beat), _EDM_DURATION_BEATS - interval)
+    out: list[tuple[float, int]] = []
+    spawn_idx = 0
+    spawn_at = start
+    while spawn_at <= last_spawn + 1e-9:
+        age = float(beat) - spawn_at
+        if 0.0 <= age <= travel_beats:
+            out.append((spawn_at, spawn_idx))
+        spawn_idx += 1
+        spawn_at = start + spawn_idx * interval
+    return out
+
+
+def _drop_chase_comets(
+    name: str,
+    beat: float,
+    segments: int,
+    color1: RGB,
+    color2: RGB,
+    *,
+    start: float = 8.0,
+) -> Frame:
+    renderer = GoveeFrameRenderer()
+    frames = []
+    for spawn_at, spawn_idx in _drop_chase_spawn_times(beat, start=start):
+        color = color1 if spawn_idx % 2 == 0 else color2
+        frames.append(
+            renderer.render_comet(
+                name,
+                progress=(float(beat) - spawn_at) / 2.0,
+                segments=segments,
+                width=0.8,
+                direction=1,
+                params={
+                    "color": color,
+                    "travel_beats": 2.0,
+                    "trail_beats": 0.0,
+                },
+            )
+        )
+    if not frames:
+        return _empty(segments)
+    return GoveeFrameRenderer.fold_additive(frames, segments)
 
 
 def _drop_nebula(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
@@ -312,17 +471,12 @@ def _drop_nebula(beat: float, local_t: float, frame_index: int, params: Mapping[
             frame_index=frame_index,
             beat_bucket=int(beat * 16.0),
         )
-    breath = 0.5 + 0.5 * math.sin((beat - 8.0) * math.pi)
-    bg = (int(15 * breath), 0, int(50 * breath))
-    return _dual_chase(
-        beat=beat - 8.0,
-        segments=segments,
-        loop_beats=2.0,
-        offset_beats=1.0,
-        color1=(0, 255, 255),
-        color2=(255, 255, 255),
-        reverse_second=True,
-        bg=bg,
+    return _drop_chase_comets(
+        "drop_chase_freestyle_nebula",
+        beat,
+        segments,
+        (0, 255, 255),
+        (255, 255, 255),
     )
 
 
@@ -410,16 +564,52 @@ def _buildup_half_strobe(beat: float, local_t: float, frame_index: int, params: 
     return frame
 
 
+def _buildup_ramp_3_spawn_times(beat: float) -> list[tuple[float, float]]:
+    phases = (
+        (0.0, 16.0, 1.0, 2.0),
+        (16.0, 24.0, 0.5, 1.0),
+        (24.0, _EDM_DURATION_BEATS, 0.25, 1.0),
+    )
+    out: list[tuple[float, float]] = []
+    for start, end, interval, travel_beats in phases:
+        if beat < start:
+            continue
+        last_spawn = min(float(beat), end - interval)
+        spawn_idx = 0
+        spawn_at = start
+        while spawn_at <= last_spawn + 1e-9:
+            age = float(beat) - spawn_at
+            if 0.0 <= age <= travel_beats:
+                out.append((spawn_at, travel_beats))
+            spawn_idx += 1
+            spawn_at = start + spawn_idx * interval
+    return out
+
+
 def _buildup_ramp_3(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
-    progress = min(1.0, beat / _EDM_DURATION_BEATS)
-    strobe_freq = 4.0 + 12.0 * progress
-    strobe_on = 1.0 if math.sin(2.0 * math.pi * strobe_freq * local_t) > 0.0 else 0.0
-    gate = (1.0 - min(1.0, progress * 2.0)) + min(1.0, progress * 2.0) * strobe_on
-    frame = _empty(segments)
-    if segments > 0:
-        pos = int((35.0 * local_t) % segments)
-        frame[pos] = _scale((255, 255, 255), gate)
-    return frame
+    if beat >= 24.0 and beat % 0.25 >= 0.125:
+        return _empty(segments)
+
+    renderer = GoveeFrameRenderer()
+    frames = []
+    for spawn_at, travel_beats in _buildup_ramp_3_spawn_times(beat):
+        frames.append(
+            renderer.render_comet(
+                "buildup_ramp_3",
+                progress=(float(beat) - spawn_at) / travel_beats,
+                segments=segments,
+                width=0.8,
+                direction=1,
+                params={
+                    "color": (255, 255, 255),
+                    "travel_beats": travel_beats,
+                    "trail_beats": 0.0,
+                },
+            )
+        )
+    if not frames:
+        return _empty(segments)
+    return GoveeFrameRenderer.fold_additive(frames, segments)
 
 
 def _buildup_ramp_2(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
@@ -449,6 +639,58 @@ def _buildup_ramp_1(beat: float, local_t: float, frame_index: int, params: Mappi
     )
 
 
+def _twinkle_blue(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    macro_phase = beat / 32.0
+    macro_swell = 0.25 + 0.75 * math.sin(macro_phase * math.pi)
+
+    beat_phase = beat % 1.0
+    # Beat pulse: smooth exponential decay on each beat
+    beat_pulse = 0.15 + 0.85 * math.exp(-3.5 * beat_phase)
+
+    frame = [(0, 0, 0)] * segments
+    for idx in range(segments):
+        # Create a stable timeline for this segment
+        star_rng = _rng(seed, "star_timeline", idx)
+        
+        # Period: how often this segment twinkles (e.g. between 18 and 36 beats)
+        period = 18.0 + star_rng.random() * 18.0
+        # Phase offset: when it starts twinkling
+        phi = star_rng.random() * period
+        
+        # Local time in this segment's lifecycle
+        t_cycle = (beat + phi) % period
+        
+        # Active twinkle window (2.0 beats long)
+        if t_cycle >= 2.0:
+            continue
+            
+        # Envelope: fade-in for 0.5 beats, fade-out for 1.5 beats
+        if t_cycle < 0.5:
+            envelope = t_cycle / 0.5
+        else:
+            envelope = (2.0 - t_cycle) / 1.5
+
+        # Get color
+        choice = star_rng.randint(0, 3)
+        if choice == 0:
+            c = (0, 0, 255)       # deep blue
+        elif choice == 1:
+            c = (0, 128, 255)     # medium blue
+        elif choice == 2:
+            c = (30, 144, 255)    # dodger blue
+        else:
+            c = (0, 255, 255)     # vibrant cyan
+
+        # Gentle individual twinkle (sine wave, ~2.4Hz) - no strobing
+        twinkle = 0.6 + 0.4 * math.sin(local_t * 15.0 + idx * 3.7)
+
+        # Scale intensity: keep it smaller and more delicate (0.70 max scale)
+        intensity = envelope * beat_pulse * twinkle * macro_swell * 0.70
+        frame[idx] = _scale(c, intensity)
+
+    return frame
+
+
 def _edm_dispatch(name: str, beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
     cue_beat = _edm_beat(beat, params)
     if name.startswith("groove_chase_"):
@@ -457,6 +699,14 @@ def _edm_dispatch(name: str, beat: float, local_t: float, frame_index: int, para
         return _groove_nebula(cue_beat, segments)
     if name.startswith("drop_chase_") and name != "drop_chase_freestyle_nebula":
         return _drop_chase(name, cue_beat, local_t, frame_index, params, segments, seed)
+    if name.startswith("post_drop_chase_"):
+        return _post_drop_chase(name, cue_beat, segments)
+    if name == "post_drop_freestyle_nebula":
+        return _post_drop_nebula(cue_beat, segments)
+    if name == "drop_white_aggressive":
+        return _drop_white_aggressive(cue_beat, local_t, frame_index, params, segments, seed)
+    if name == "post_drop_white_shatter":
+        return _post_drop_white_shatter(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "drop_chase_freestyle_nebula":
         return _drop_nebula(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "buildup_freestyle_nebula":
@@ -469,6 +719,8 @@ def _edm_dispatch(name: str, beat: float, local_t: float, frame_index: int, para
         return _buildup_ramp_3(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "buildup_ramp_2":
         return _buildup_ramp_2(cue_beat, local_t, frame_index, params, segments, seed)
+    if name == "twinkle_blue":
+        return _twinkle_blue(cue_beat, local_t, frame_index, params, segments, seed)
     return _buildup_ramp_1(cue_beat, local_t, frame_index, params, segments, seed)
 
 
@@ -504,6 +756,15 @@ EDM_BUILDS: dict[str, str] = {
     "drop_chase_green": "32-beat drop: 8-beat sparkle strobe burst + 2-beat green chase strobe.",
     "drop_chase_cyan_white": "32-beat drop: 8-beat sparkle strobe burst + 2-beat cyan/white chase strobe.",
     "drop_chase_freestyle_nebula": "32-beat freestyle drop: 8-beat sparkle strobe burst + 2-beat opposite comets strobe.",
+    "post_drop_chase_blue": "32-beat post-drop: immediate 2-beat blue comet chase strobe.",
+    "post_drop_chase_cyan": "32-beat post-drop: immediate 2-beat cyan comet chase strobe.",
+    "post_drop_chase_red": "32-beat post-drop: immediate 2-beat red comet chase strobe.",
+    "post_drop_chase_green": "32-beat post-drop: immediate 2-beat green comet chase strobe.",
+    "post_drop_chase_cyan_white": "32-beat post-drop: immediate alternating cyan/white comet chase strobe.",
+    "post_drop_freestyle_nebula": "32-beat post-drop: immediate cyan/white freestyle comet chase strobe.",
+    "drop_white_aggressive": "Drop: full-strip pure-white 32nd-note strobe (bridge-owned duration).",
+    "post_drop_white_shatter": "Post-drop: per-frame full-white stroboscopic static dissolving 13->3 over 4 beats then held low.",
+    "twinkle_blue": "32-beat super twinkly blue cyan look that pulses on beat.",
 }
 
 _EFFECTS: dict[str, EffectFn] = dict(_GENERIC_EFFECTS)
@@ -535,6 +796,15 @@ REALTIME_STROBE_EFFECTS = frozenset(
         "drop_chase_green",
         "drop_chase_cyan_white",
         "drop_chase_freestyle_nebula",
+        "post_drop_chase_blue",
+        "post_drop_chase_cyan",
+        "post_drop_chase_red",
+        "post_drop_chase_green",
+        "post_drop_chase_cyan_white",
+        "post_drop_freestyle_nebula",
+        "drop_white_aggressive",
+        "post_drop_white_shatter",
+        "twinkle_blue",
     }
 )
 REALTIME_EFFECT_PARAM_KEYS: dict[str, frozenset[str]] = {
@@ -552,9 +822,70 @@ REALTIME_EFFECT_PARAM_KEYS: dict[str, frozenset[str]] = {
 for _name in EDM_BUILDS:
     REALTIME_EFFECT_PARAM_KEYS[_name] = frozenset({"duration_beats"})
 
+_SYNC_PARAM_KEYS = frozenset({
+    "sync_mode", "beat_division", "travel_beats", "width",
+    "trail_beats", "heads", "max_pulses", "spawn_on_wrap", "reverse",
+})
+for _k in list(REALTIME_EFFECT_PARAM_KEYS):
+    REALTIME_EFFECT_PARAM_KEYS[_k] = REALTIME_EFFECT_PARAM_KEYS[_k] | _SYNC_PARAM_KEYS
+# Allow explicit color override on the comet (overlap) chases.
+for _k in ("groove_chase_blue", "groove_chase_cyan", "groove_chase_red",
+           "groove_chase_green", "groove_chase_cyan_white"):
+    REALTIME_EFFECT_PARAM_KEYS[_k] = REALTIME_EFFECT_PARAM_KEYS[_k] | frozenset({"color"})
+
+_OVERLAP_EFFECTS = frozenset({
+    "groove_chase_blue", "groove_chase_cyan", "groove_chase_red",
+    "groove_chase_green", "groove_chase_cyan_white",
+})
+_RETRIGGER_EFFECTS = frozenset({
+    "beat_chase", "beat_strobe", "drop_burst", "color_pulse", "bar_wipe", "sparkle",
+})
+
+def is_comet_effect(name: str) -> bool:
+    """True for effects whose realtime render is the traveling comet primitive."""
+    return str(name) in _OVERLAP_EFFECTS
+
+def default_sync_mode(name: str) -> str:
+    name = str(name)
+    if name in _OVERLAP_EFFECTS:
+        return "overlap"
+    if name in _RETRIGGER_EFFECTS:
+        return "retrigger"
+    return "continuous"
+
+def default_beat_division(name: str) -> float:
+    return 1.0
+
 
 class GoveeFrameRenderer:
     """Stateless renderer. Unknown effect names fail dark."""
+
+    def blank(self, segments: int) -> Frame:
+        return _empty(max(0, int(segments)))
+
+    def render_comet(self, name: str, *, progress: float, segments: int,
+                     width: float, direction: int, params: Mapping[str, Any] | None) -> Frame:
+        seg = max(0, int(segments))
+        safe = params if isinstance(params, Mapping) else {}
+        color = _color(safe.get("color"), _edm_color_for_look(str(name), 0.0)[0])
+        travel = max(1e-3, float(safe.get("travel_beats", 1.0)))
+        trail_beats = max(0.0, float(safe.get("trail_beats", 0.0)))
+        head_soft = max(COMET_MIN_HEAD_SOFT, float(width))
+        trail_len = max(COMET_MIN_TRAIL_LEDS, (trail_beats / travel) * seg)
+        frame = _comet_frame(float(progress), seg, color, head_soft, trail_len, int(direction))
+        clamped = [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in frame[:seg]]
+        if len(clamped) < seg:
+            clamped.extend([(0, 0, 0)] * (seg - len(clamped)))
+        return clamped
+
+    @staticmethod
+    def fold_additive(frames: list[Frame], segments: int) -> Frame:
+        seg = max(0, int(segments))
+        acc = [[0, 0, 0] for _ in range(seg)]
+        for f in frames:
+            for i in range(min(seg, len(f))):
+                acc[i][0] += f[i][0]; acc[i][1] += f[i][1]; acc[i][2] += f[i][2]
+        return [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in acc]
 
     def render(
         self,
@@ -571,12 +902,22 @@ class GoveeFrameRenderer:
         if effect is None:
             return _empty(segments)
         safe_params: Mapping[str, Any] = params if isinstance(params, Mapping) else {}
+        seg_count = max(0, int(segments))
         frame = effect(
             float(beat_pos),
             max(0.0, float(local_t)),
             int(frame_index),
             safe_params,
-            max(0, int(segments)),
+            seg_count,
             int(seed),
         )
-        return [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in frame[: max(0, int(segments))]]
+        clamped = [
+            (_clamp_channel(r), _clamp_channel(g), _clamp_channel(b))
+            for r, g, b in frame[:seg_count]
+        ]
+        # Defensive: an effect that returns fewer pixels than requested would be
+        # rejected by the transport's segment-count check. Pad dark so the frame
+        # is always exactly `segments` long.
+        if len(clamped) < seg_count:
+            clamped.extend([(0, 0, 0)] * (seg_count - len(clamped)))
+        return clamped

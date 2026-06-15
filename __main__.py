@@ -63,12 +63,13 @@ from .laser_executor import LaserSceneExecutor
 from .laser_models import LaserPersonality
 from .midi_output import MidiOutput
 from .led_config import LEDConfigResult, load_led_look_director_config
-from .led_look_director import LEDLookDirector
+from .led_look_director import LEDLookDirector, LED_AUTOMATION_ROLE_ORDER
 from .govee_scene_adapter import GoveeSceneAdapter
 from .govee_runtime_sender import GoveeRuntimeSender
 from .govee_frame_renderer import GoveeFrameRenderer
 from .govee_owner_state import GoveeOwnerStateMachine
 from .govee_realtime_runner import GoveeRealtimeRunner
+from .govee_lan_discovery import resolve_realtime_ip
 from .govee_realtime_transport import GoveeRealtimeDryRunTransport, GoveeRealtimeTransport
 from .led_dispatch_coordinator import LEDDispatchCoordinator
 from .personality_resolver import PersonalityResolver, PlaylistCache
@@ -386,7 +387,7 @@ def _build_led_startup_wiring(
 
     cfg = cfg_result.config
     try:
-        led_director = LEDLookDirector(cfg, shuffled_roles=("drop",))
+        led_director = LEDLookDirector(cfg, shuffled_roles=LED_AUTOMATION_ROLE_ORDER)
         govee_sender = None
         if not cfg.dry_run:
             govee_sender = GoveeRuntimeSender(cfg)
@@ -406,6 +407,7 @@ def _build_led_startup_wiring(
                 target for target in cfg.targets.values() if target.realtime.enabled
             )
             rt = realtime_target.realtime
+            resolved_ip = rt.ip
             if cfg.dry_run:
                 transport = GoveeRealtimeDryRunTransport(
                     ip=rt.ip,
@@ -413,8 +415,25 @@ def _build_led_startup_wiring(
                     segments=rt.segments,
                 )
             else:
-                transport = GoveeRealtimeTransport(
+                # DHCP drifts the strip's IP; multicast-discover the live address
+                # so a stale config IP no longer silently dark-outs realtime.
+                resolved_ip, ip_source = resolve_realtime_ip(
                     rt.ip,
+                    device_ref=realtime_target.device_ref,
+                    expected_sku=realtime_target.expected_model,
+                    timeout_s=3.0,
+                )
+                if resolved_ip != rt.ip:
+                    log.info(
+                        "[MAIN] govee realtime ip via %s: config=%s -> %s",
+                        ip_source, rt.ip, resolved_ip,
+                    )
+                else:
+                    log.info(
+                        "[MAIN] govee realtime ip source=%s ip=%s", ip_source, resolved_ip
+                    )
+                transport = GoveeRealtimeTransport(
+                    resolved_ip,
                     port=rt.port,
                     segments=rt.segments,
                     header_bytes=rt.header_bytes,
@@ -1106,6 +1125,7 @@ def main() -> None:
     command_reader.start()
     status_writer.start()
 
+
     # OSC listener (scripted arm triggers)
     start_osc_listener(
         event_queue,
@@ -1234,6 +1254,8 @@ def main() -> None:
             midi_output.stop()
         if led_scene_adapter is not None:
             led_scene_adapter.shutdown()
+        if led_bundle.realtime_runner is not None:
+            led_bundle.realtime_runner.stop()
         discovery.stop()
         conn.stop()
         sys.exit(0)

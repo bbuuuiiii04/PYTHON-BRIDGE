@@ -66,6 +66,13 @@ class LEDBank:
 
 
 @dataclass(frozen=True)
+class LEDDropPair:
+    drop: str
+    post_drop: str
+    duration_beats: float = 8.0
+
+
+@dataclass(frozen=True)
 class LEDRateLimits:
     queue_maxsize: int = 8
     scene_retrigger_cooldown_s: float = 4.0
@@ -106,6 +113,8 @@ class LEDConfig:
     automation: LEDAutomation
     rate_limits: LEDRateLimits
     safety: LEDSafety
+    drop_pairs: dict[str, LEDDropPair] = field(default_factory=dict)
+    post_drop_cycle_beats: float = 32.0
 
 
 @dataclass(frozen=True)

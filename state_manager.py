@@ -110,6 +110,14 @@ WIDE_WINDOW_ENV = "RBSS_DROP_WIDE_WINDOW"
 SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
 STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
+LED_DEFAULT_DROP_IMPACT_BEATS = 8.0
+LED_DEFAULT_GROOVE_CYCLE_BEATS = 32.0
+LED_DEFAULT_POST_DROP_CYCLE_BEATS = 32.0
+_LED_DROP_IMPACT_PREDECESSORS = frozenset({"up", "low", "buildup", "breakdown"})
+# Max drop impacts per drop lifecycle. The first fires off an Up/Low buildup;
+# this allows one extra back-to-back Chorus->Chorus drop before settling into
+# post_drop (i.e. up to two drop hits in a row, then post_drop).
+LED_MAX_DROP_IMPACTS = 2
 _PROFILE_SUMMARY_INTERVAL_S = 10.0
 _PROFILE_WINDOW = 2048
 _LED_ADAPTER_STATUS_SAFE_KEYS = {
@@ -333,6 +341,13 @@ class StateManager:
         self._led_automation_trigger_count = 0
         self._led_automation_gated_count = 0
         self._led_smart_drop_blackout_key = ""
+        self._led_first_drop_anchor_beat: float | None = None
+        self._led_drop_impact_until_beat: float | None = None
+        self._led_drop_impact_count = 0
+        self._led_active_drop_look = ""
+        self._led_committed_drop_anchor_beat: float | None = None
+        self._led_committed_drop_decision: Any | None = None
+        self._led_drop_look_fired_anchor: float | None = None
         self._led_automation_offset_s = 0.0
         self._led_cloud_automation_offset_s = 0.0
         self._led_realtime_automation_offset_s = 0.0
@@ -1333,11 +1348,14 @@ class StateManager:
             marker = f"{sp_state.active_drop_beat:.3f}"
         elif sp_state.next_smart_drop_beat is not None:
             marker = f"{sp_state.next_smart_drop_beat:.3f}"
+        drop_anchor = self._led_drop_anchor_for_blackout(sp_state)
+        if self._led_same_drop_anchor(drop_anchor, self._led_drop_look_fired_anchor):
+            return
         blackout_key = f"{active}:{d.load_gen}:smart_drop_blackout:{phase}:{marker}"
         if blackout_key == self._led_smart_drop_blackout_key:
             return
 
-        drop_preview = self._preview_led_drop_decision()
+        drop_preview = self._led_drop_decision_for_anchor(sp_state, commit=True)
         tactical_blackout = getattr(self._led_scene_adapter, "tactical_blackout", None)
         if (
             drop_preview is not None
@@ -1523,7 +1541,6 @@ class StateManager:
         d: DeckState,
         sp_state: SmartPhrasingState,
         position_stale: bool = False,
-        autoloop_ready: bool = True,
     ) -> None:
         if self._led_look_director is None or self._led_scene_adapter is None:
             self._gate_led_automation("not_configured", active_deck=active)
@@ -1537,30 +1554,35 @@ class StateManager:
         if self._led_emergency_blackout:
             self._gate_led_automation("emergency_blackout", active_deck=active)
             return
-        if self._led_manual_override:
-            self._gate_led_automation("manual_override", active_deck=active)
-            return
-        if d.scripted_id and not self._led_scripted_mode_automation_latch:
-            self._gate_led_automation("scripted_mode", active_deck=active)
-            return
         if not d.playing or not d.meta.filepath:
             self._gate_led_automation("not_ready", active_deck=active)
             return
         if position_stale:
             self._gate_led_automation("position_stale", active_deck=active)
             return
+
+        if self._led_manual_override:
+            self._gate_led_automation("manual_override", active_deck=active, rt_permitted=True)
+            return
+        if d.scripted_id and not self._led_scripted_mode_automation_latch:
+            self._gate_led_automation("scripted_mode", active_deck=active, rt_permitted=True)
+            return
+
         if self._os.lighting_mode != "autoloop":
             self._gate_led_automation("not_autoloop", active_deck=active)
             return
-        if not autoloop_ready:
-            self._gate_led_automation("autoloop_not_ready", active_deck=active)
-            return
+        # NOTE: LED automation is intentionally NOT gated on the SoundSwitch
+        # autoloop *arm* completion. Govee looks are a separate path from SS
+        # scenes, so a freshly-playing track lights immediately instead of
+        # waiting for the SS arm (which only completes on a phrase boundary).
+        # The laser director keeps its own autoloop_ready coupling separately.
 
         self._led_rt_permitted = True
         self._led_last_idle_role_key = ""
         if sp_state.smart_drop_crossing:
-            # Pre-drop blackout may already be active; at the crossing beat fire the
-            # drop look (laser parity) instead of re-asserting room_blackout.
+            # Pre-drop blackout may already be active; at the crossing beat the
+            # state-aware LED role resolver decides whether this is an impact or
+            # an immediate post-drop continuation.
             self._led_smart_drop_blackout_key = ""
         elif self._led_should_smart_drop_blackout(sp_state):
             self._dispatch_led_smart_drop_blackout(
@@ -1571,7 +1593,8 @@ class StateManager:
             )
             return
 
-        role = self._led_role_from_smart_phrasing(sp_state)
+        role = self._led_role_from_smart_phrasing(sp_state, mutate=True)
+        role = self._led_effective_role_for_dispatch(role)
         role_key = self._led_automation_role_key(active, d, sp_state, role)
         if role_key == self._led_last_auto_role_key:
             return
@@ -1585,8 +1608,12 @@ class StateManager:
             lighting_mode=self._os.lighting_mode,
             scripted_id=d.scripted_id,
         )
+        decision = None
+        if role == "drop":
+            decision = self._consume_led_committed_drop_decision(sp_state)
         try:
-            decision = self._led_look_director.tick(context)
+            if decision is None:
+                decision = self._led_look_director.tick(context)
         except Exception as exc:
             self._led_last_error = f"director_error:{type(exc).__name__}"
             self._led_rejected_count += 1
@@ -1660,6 +1687,8 @@ class StateManager:
             self._led_last_error = ""
             self._led_last_look = look
             self._led_smart_drop_blackout_key = ""
+            if role == "drop":
+                self._led_note_drop_decision_accepted(decision, sp_state)
             self._set_led_automation_gate_reason(
                 "",
                 active_deck=active,
@@ -1825,8 +1854,9 @@ class StateManager:
         active_deck: Optional[int] = None,
         role: str = "",
         role_key: str = "",
+        rt_permitted: bool = False,
     ) -> None:
-        self._led_rt_permitted = False
+        self._led_rt_permitted = rt_permitted
         if reason != self._led_automation_gate_reason:
             self._led_automation_gated_count += 1
         self._set_led_automation_gate_reason(
@@ -1837,16 +1867,6 @@ class StateManager:
         )
         self._led_last_auto_role_key = ""
 
-    def _led_autoloop_ready(self, d: DeckState) -> bool:
-        os = self._os
-        return bool(
-            os.lighting_mode == "autoloop"
-            and not os.autoloop_arm_pending
-            and os.pending_autoloop_arm_meta is None
-            and d.meta.filepath
-            and os.last_armed_filepath == d.meta.filepath
-        )
-
     def _led_should_smart_drop_blackout(self, sp_state: SmartPhrasingState) -> bool:
         """True when Govee should be in pre-drop blackout for Smart Drop."""
         return bool(
@@ -1855,7 +1875,12 @@ class StateManager:
             or sp_state.transition_window_active
         )
 
-    def _preview_led_drop_decision(self) -> Any:
+    def _preview_led_drop_decision(
+        self,
+        sp_state: SmartPhrasingState | None = None,
+    ) -> Any:
+        if sp_state is not None:
+            return self._led_drop_decision_for_anchor(sp_state, commit=False)
         return self._preview_led_decision_for_role("drop")
 
     def _preview_led_decision_for_role(self, role: str) -> Any:
@@ -1867,20 +1892,116 @@ class StateManager:
         except Exception:
             return None
 
-    def _led_role_from_smart_phrasing(self, sp_state: SmartPhrasingState) -> str:
-        if sp_state.smart_drop_crossing:
-            return "drop"
+    def _led_drop_anchor_for_blackout(
+        self,
+        sp_state: SmartPhrasingState,
+    ) -> float | None:
+        if sp_state.active_drop_beat is not None:
+            return float(sp_state.active_drop_beat)
+        if sp_state.next_smart_drop_beat is not None:
+            return float(sp_state.next_smart_drop_beat)
+        return self._led_drop_marker_anchor(sp_state)
+
+    def _led_same_drop_anchor(
+        self,
+        left: float | None,
+        right: float | None,
+    ) -> bool:
+        if left is None or right is None:
+            return False
+        return float(left) == float(right)
+
+    def _led_drop_decision_for_anchor(
+        self,
+        sp_state: SmartPhrasingState,
+        *,
+        commit: bool,
+    ) -> Any:
+        anchor = self._led_drop_anchor_for_blackout(sp_state)
+        if (
+            self._led_same_drop_anchor(anchor, self._led_committed_drop_anchor_beat)
+            and self._led_committed_drop_decision is not None
+        ):
+            return self._led_committed_drop_decision
+        if not commit or anchor is None:
+            return self._preview_led_decision_for_role("drop")
+
+        commit_role = getattr(self._led_look_director, "commit_role", None)
+        decision = None
+        if callable(commit_role):
+            try:
+                decision = commit_role("drop")
+            except Exception:
+                decision = None
+        if decision is None:
+            decision = self._preview_led_decision_for_role("drop")
+        if decision is not None:
+            self._led_committed_drop_anchor_beat = float(anchor)
+            self._led_committed_drop_decision = decision
+        return decision
+
+    def _consume_led_committed_drop_decision(
+        self,
+        sp_state: SmartPhrasingState,
+    ) -> Any:
+        anchor = self._led_drop_anchor_for_blackout(sp_state)
+        if not self._led_same_drop_anchor(anchor, self._led_committed_drop_anchor_beat):
+            return None
+        decision = self._led_committed_drop_decision
+        self._led_committed_drop_anchor_beat = None
+        self._led_committed_drop_decision = None
+        return decision
+
+    def _led_effective_role_for_dispatch(self, role: str) -> str:
+        return role
+
+    def _led_role_has_mapped_look(self, role: str) -> bool:
+        has_role_look = getattr(self._led_look_director, "has_role_look", None)
+        if callable(has_role_look):
+            try:
+                return bool(has_role_look(role))
+            except Exception:
+                return False
+        return self._preview_led_decision_for_role(role) is not None
+
+    def _led_role_from_smart_phrasing(
+        self,
+        sp_state: SmartPhrasingState,
+        *,
+        mutate: bool = False,
+    ) -> str:
+        if mutate and self._led_drop_lifecycle_should_clear(sp_state):
+            self._clear_led_drop_lifecycle()
+
+        drop_anchor = self._led_drop_marker_anchor(sp_state)
+        if drop_anchor is not None:
+            if self._led_drop_impact_allowed(sp_state):
+                if mutate:
+                    self._led_arm_drop_lifecycle(drop_anchor)
+                return "drop"
+            if mutate and self._led_first_drop_anchor_beat is None:
+                self._led_first_drop_anchor_beat = drop_anchor
+            return "post_drop"
+
         if sp_state.smart_breakdown_active or sp_state.breakdown_start_crossing:
             return "breakdown"
-        if sp_state.smart_post_drop_active:
-            return "post_drop"
         if sp_state.transition_window_active:
             return "pre_drop"
         if self._led_buildup_active(sp_state):
             return "buildup"
-        if sp_state.current_phrase_is_chorus:
-            return "groove"
-        return "ambient"
+
+        if sp_state.current_phrase_is_chorus or sp_state.smart_post_drop_active:
+            abs_beat = self._led_abs_beat(sp_state)
+            if (
+                abs_beat is not None
+                and self._led_drop_impact_until_beat is not None
+                and abs_beat < self._led_drop_impact_until_beat
+            ):
+                return "drop"
+            return "post_drop"
+        if sp_state.current_phrase_is_low:
+            return "breakdown"
+        return "groove"
 
     def _led_buildup_active(self, sp_state: SmartPhrasingState) -> bool:
         """Match laser_director: buildup only in up phrase within lookahead of next drop."""
@@ -1894,6 +2015,119 @@ class StateManager:
             and not sp_state.current_phrase_is_chorus
         )
 
+    def _led_drop_marker_anchor(self, sp_state: SmartPhrasingState) -> float | None:
+        if sp_state.current_phrase_is_chorus and sp_state.phrase_start_crossing:
+            if sp_state.current_phrase_start_beat is not None:
+                return float(sp_state.current_phrase_start_beat)
+        if sp_state.smart_drop_crossing:
+            if sp_state.active_drop_beat is not None:
+                return float(sp_state.active_drop_beat)
+            return self._led_abs_beat(sp_state)
+        return None
+
+    def _led_drop_impact_allowed(self, sp_state: SmartPhrasingState) -> bool:
+        previous = str(sp_state.previous_phrase_label or "other")
+        if previous in _LED_DROP_IMPACT_PREDECESSORS:
+            return True
+        if sp_state.smart_drop_crossing:
+            # Fallback smart-drop tracks may not have an explicit chorus marker;
+            # keep the impact when the current phrase context is already Up/Low.
+            current = str(sp_state.current_phrase_label or "other")
+            if current in _LED_DROP_IMPACT_PREDECESSORS:
+                return True
+        if previous == "chorus":
+            # Once a chorus/drop lifecycle exists, allow up to two
+            # Chorus->Chorus impacts before settling into post_drop. This also
+            # covers tracks whose first chorus marker only anchored post_drop
+            # and did not itself fire an impact.
+            if (
+                self._led_first_drop_anchor_beat is not None
+                and self._led_drop_impact_count < LED_MAX_DROP_IMPACTS
+            ):
+                return True
+        return False
+
+    def _led_drop_lifecycle_should_clear(self, sp_state: SmartPhrasingState) -> bool:
+        if sp_state.smart_drop_crossing:
+            return False
+        if sp_state.current_phrase_is_chorus or sp_state.smart_post_drop_active:
+            return False
+        return self._led_first_drop_anchor_beat is not None
+
+    def _led_arm_drop_lifecycle(self, anchor_beat: float) -> None:
+        if self._led_first_drop_anchor_beat is None:
+            self._led_first_drop_anchor_beat = float(anchor_beat)
+        self._led_drop_impact_until_beat = (
+            float(anchor_beat) + LED_DEFAULT_DROP_IMPACT_BEATS
+        )
+        self._led_drop_impact_count += 1
+        self._led_active_drop_look = ""
+
+    def _led_note_drop_decision_accepted(
+        self,
+        decision: Any,
+        sp_state: SmartPhrasingState,
+    ) -> None:
+        look = str(getattr(decision, "look", "") or "")
+        anchor = self._led_drop_marker_anchor(sp_state)
+        if anchor is None:
+            anchor = self._led_first_drop_anchor_beat
+        if anchor is None:
+            anchor = self._led_abs_beat(sp_state)
+        if anchor is None:
+            return
+        duration = LED_DEFAULT_DROP_IMPACT_BEATS
+        duration_fn = getattr(self._led_look_director, "drop_duration_beats", None)
+        if callable(duration_fn):
+            try:
+                duration = float(duration_fn(look))
+            except Exception:
+                duration = LED_DEFAULT_DROP_IMPACT_BEATS
+        duration = max(0.001, duration)
+        if self._led_first_drop_anchor_beat is None:
+            self._led_first_drop_anchor_beat = float(anchor)
+        self._led_drop_impact_until_beat = float(anchor) + duration
+        self._led_active_drop_look = look
+        self._led_drop_look_fired_anchor = float(anchor)
+
+    def _clear_led_drop_lifecycle(self) -> None:
+        self._led_first_drop_anchor_beat = None
+        self._led_drop_impact_until_beat = None
+        self._led_drop_impact_count = 0
+        self._led_active_drop_look = ""
+        self._led_committed_drop_anchor_beat = None
+        self._led_committed_drop_decision = None
+        self._led_drop_look_fired_anchor = None
+        clear_queued = getattr(
+            self._led_look_director, "clear_queued_post_drop", None
+        )
+        if callable(clear_queued):
+            try:
+                clear_queued()
+            except Exception:
+                pass
+
+    def _led_abs_beat(self, sp_state: SmartPhrasingState) -> float | None:
+        if sp_state.abs_beat is not None:
+            return float(sp_state.abs_beat)
+        if (
+            sp_state.current_phrase_start_beat is not None
+            and sp_state.beats_into_phrase is not None
+        ):
+            return float(sp_state.current_phrase_start_beat) + float(sp_state.beats_into_phrase)
+        if sp_state.active_drop_beat is not None:
+            return float(sp_state.active_drop_beat)
+        return None
+
+    def _led_post_drop_cycle_beats(self) -> float:
+        cycle_fn = getattr(self._led_look_director, "post_drop_cycle_beats", None)
+        if callable(cycle_fn):
+            try:
+                return max(0.001, float(cycle_fn()))
+            except Exception:
+                pass
+        return LED_DEFAULT_POST_DROP_CYCLE_BEATS
+
     def _led_automation_role_key(
         self,
         active: int,
@@ -1902,13 +2136,44 @@ class StateManager:
         role: str,
     ) -> str:
         marker = ""
-        if role in {"drop", "post_drop"} and sp_state.active_drop_beat is not None:
-            marker = f"{sp_state.active_drop_beat:.3f}"
+        if role == "drop":
+            anchor = self._led_drop_marker_anchor(sp_state)
+            if anchor is None:
+                anchor = self._led_first_drop_anchor_beat
+            if anchor is not None:
+                marker = f"{float(anchor):.3f}"
+        elif role == "post_drop":
+            anchor = self._led_first_drop_anchor_beat
+            if anchor is None:
+                anchor = (
+                    sp_state.current_phrase_start_beat
+                    if sp_state.current_phrase_start_beat is not None
+                    else sp_state.active_drop_beat
+                )
+            if anchor is not None:
+                abs_beat = self._led_abs_beat(sp_state)
+                elapsed = max(0.0, float(abs_beat or anchor) - float(anchor))
+                cycle = int(elapsed // self._led_post_drop_cycle_beats())
+                marker = f"{float(anchor):.3f}:c{cycle}"
+            else:
+                marker = str(sp_state.current_phrase_label)
         elif role in {"buildup", "pre_drop"} and sp_state.next_smart_drop_beat is not None:
             marker = f"{sp_state.next_smart_drop_beat:.3f}"
         elif role == "breakdown" and sp_state.breakdown_restore_beat is not None:
             marker = f"{sp_state.breakdown_restore_beat:.3f}"
-        elif role in {"ambient", "groove"}:
+        elif role == "groove":
+            anchor = sp_state.current_phrase_start_beat
+            abs_beat = self._led_abs_beat(sp_state)
+            if anchor is not None and abs_beat is not None:
+                elapsed = max(0.0, float(abs_beat) - float(anchor))
+                cycle = int(elapsed // LED_DEFAULT_GROOVE_CYCLE_BEATS)
+                marker = (
+                    f"{sp_state.current_phrase_label}:"
+                    f"{float(anchor):.3f}:c{cycle}"
+                )
+            else:
+                marker = str(sp_state.current_phrase_label)
+        elif role == "ambient":
             marker = str(sp_state.current_phrase_label)
         return f"{active}:{d.load_gen}:{role}:{marker}"
 
@@ -1957,6 +2222,7 @@ class StateManager:
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
+        self._clear_led_drop_lifecycle()
         self._clear_smart_rearm_state()
         self._autoloop.clear_arm_phrase_lock()
         self._autoloop.clear_live_bpm_follow()
@@ -1984,6 +2250,7 @@ class StateManager:
         d.load_gen += 1
         self._loaded_anlz_path.pop(deck, None)
         if deck == self._os.active_deck:
+            self._clear_led_drop_lifecycle()
             self._clear_smart_rearm_state()
             self._autoloop.clear_arm_phrase_lock()
             self._autoloop.clear_live_bpm_follow()
@@ -2867,7 +3134,6 @@ class StateManager:
                 d=d,
                 sp_state=led_sp_state,
                 position_stale=(snap is None or snap.is_stale(MEM_STALE_S)),
-                autoloop_ready=self._led_autoloop_ready(d),
             )
         else:
             self._dispatch_led_idle_ambient(
@@ -3209,7 +3475,10 @@ class StateManager:
 
         cloud_sp_state = self._led_sp_state_with_offset(sp_state, bpm, cloud_offset_s)
         if self._led_should_smart_drop_blackout(cloud_sp_state):
-            drop_preview = self._preview_led_drop_decision()
+            drop_preview = self._led_drop_decision_for_anchor(
+                cloud_sp_state,
+                commit=True,
+            )
             if (
                 drop_preview is not None
                 and str(getattr(drop_preview, "backend", "cloud_diy") or "cloud_diy")
@@ -3219,7 +3488,13 @@ class StateManager:
             return cloud_sp_state
 
         cloud_role = self._led_role_from_smart_phrasing(cloud_sp_state)
-        cloud_preview = self._preview_led_decision_for_role(cloud_role)
+        if cloud_role == "drop":
+            cloud_preview = self._led_drop_decision_for_anchor(
+                cloud_sp_state,
+                commit=True,
+            )
+        else:
+            cloud_preview = self._preview_led_decision_for_role(cloud_role)
         if cloud_preview is not None:
             backend = str(getattr(cloud_preview, "backend", "cloud_diy") or "cloud_diy")
             if backend == "realtime_razer":
@@ -3232,7 +3507,13 @@ class StateManager:
             realtime_offset_s,
         )
         realtime_role = self._led_role_from_smart_phrasing(realtime_sp_state)
-        realtime_preview = self._preview_led_decision_for_role(realtime_role)
+        if realtime_role == "drop":
+            realtime_preview = self._led_drop_decision_for_anchor(
+                realtime_sp_state,
+                commit=True,
+            )
+        else:
+            realtime_preview = self._preview_led_decision_for_role(realtime_role)
         if (
             realtime_preview is not None
             and str(getattr(realtime_preview, "backend", "cloud_diy") or "cloud_diy")
@@ -3360,6 +3641,7 @@ class StateManager:
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
+        self._clear_led_drop_lifecycle()
         self._clear_smart_rearm_state()
         self._autoloop.clear_arm_phrase_lock()
         self._autoloop.clear_live_bpm_follow()
@@ -3390,6 +3672,7 @@ class StateManager:
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
+        self._clear_led_drop_lifecycle()
         self._log_status()
 
     def _clear_smart_rearm_state(self) -> None:
@@ -3410,6 +3693,7 @@ class StateManager:
         os.phrase_anchor_last_beat = -1
         os.midi_refire_origin_beat = -1
         self._pending_phrase_marker = False
+        self._clear_led_drop_lifecycle()
 
     def toggle_smart_drop(self) -> None:
         """Toggle smart drop on/off at runtime. Must run in StateManager thread."""

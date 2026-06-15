@@ -39,15 +39,6 @@
       "brightness": 0,
       "allow_strobe": false
     },
-    "groove_christmas_b": {
-      "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Christmas-B",
-      "fallback": "room_blackout",
-      "safety_class": "groove",
-      "brightness": 100,
-      "allow_strobe": true
-    },
     "groove_release_a": {
       "target": "room_perimeter",
       "action": "scene",
@@ -251,7 +242,6 @@
     "default": {
       "ambient": [],
       "groove": [
-        "groove_christmas_b",
         "groove_release_a",
         "groove_diy_groove",
         "groove_diy_groove_2",

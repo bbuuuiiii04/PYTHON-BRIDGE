@@ -41,8 +41,14 @@ class _Runner:
     def set_desired(self, spec) -> None:  # type: ignore[no-untyped-def]
         self.desired.append(spec)
 
+    def fire_trigger(self) -> None:
+        pass
+
     def emergency_stop(self) -> None:
         self.emergency_count += 1
+
+    def force_deactivate(self) -> None:
+        self.desired.append(None)
 
     def status(self) -> dict:
         return {"active": bool(self.desired), "last_error": ""}

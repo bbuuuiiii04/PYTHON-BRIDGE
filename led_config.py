@@ -19,6 +19,7 @@ from .led_models import (
     LEDBank,
     LEDConfig,
     LEDConfigResult,
+    LEDDropPair,
     LEDLook,
     LEDRateLimits,
     LEDRealtimeConfig,
@@ -166,16 +167,25 @@ def _validate(data: dict[str, Any], errors: list[str]) -> None:
         for name, target in targets_raw.items():
             _validate_target(name, target, errors)
 
+    param_profiles_raw = data.get("realtime_param_profiles", {})
+    if param_profiles_raw is None:
+        param_profiles_raw = {}
+    if not isinstance(param_profiles_raw, dict):
+        errors.append("'realtime_param_profiles' must be an object")
+        param_profiles_raw = {}
+
     looks_raw = data.get("looks")
     if not isinstance(looks_raw, dict) or not looks_raw:
         errors.append("'looks' must be a non-empty object")
         looks_raw = {}
     else:
         for name, look in looks_raw.items():
-            _validate_look(name, look, errors)
+            _validate_look(name, look, param_profiles_raw, errors)
 
     look_names = set(looks_raw.keys())
     target_names = set(targets_raw.keys())
+    _validate_drop_pairs(data, look_names, errors)
+    _validate_post_drop_cycle_beats(data, errors)
     for name, target in targets_raw.items():
         if not isinstance(target, dict):
             continue
@@ -307,6 +317,8 @@ def _validate_target(name: str, target: Any, errors: list[str]) -> None:
     if not isinstance(header_bytes, list) or not header_bytes:
         errors.append(f"{prefix} realtime.header_bytes must be a non-empty list")
     else:
+        if len(header_bytes) != 5:
+            errors.append(f"{prefix} realtime.header_bytes must be exactly 5 bytes")
         for index, value in enumerate(header_bytes):
             if not isinstance(value, int) or isinstance(value, bool) or value < 0 or value > 255:
                 errors.append(f"{prefix} realtime.header_bytes[{index}] must be 0..255")
@@ -316,7 +328,12 @@ def _validate_target(name: str, target: Any, errors: list[str]) -> None:
             errors.append(f"{prefix} realtime.{field_name} must be a non-empty string")
 
 
-def _validate_look(name: str, look: Any, errors: list[str]) -> None:
+def _validate_look(
+    name: str,
+    look: Any,
+    param_profiles: dict[str, Any],
+    errors: list[str],
+) -> None:
     prefix = f"look '{name}'"
     if not isinstance(look, dict):
         errors.append(f"{prefix} must be an object")
@@ -349,12 +366,24 @@ def _validate_look(name: str, look: Any, errors: list[str]) -> None:
             errors.append(f"{prefix} requires non-empty 'scene_ref' for action='realtime'")
         elif scene_ref not in REALTIME_EFFECT_NAMES:
             errors.append(f"{prefix} scene_ref references unknown realtime effect '{scene_ref}'")
+        profile_name = look.get("param_profile", "")
+        profile_params: dict[str, Any] = {}
+        if profile_name:
+            if not isinstance(profile_name, str):
+                errors.append(f"{prefix} field 'param_profile' must be a string")
+            elif profile_name not in param_profiles:
+                errors.append(f"{prefix} param_profile references unknown profile '{profile_name}'")
+            elif not isinstance(param_profiles[profile_name], dict):
+                errors.append(f"realtime_param_profiles.{profile_name} must be an object")
+            else:
+                profile_params = dict(param_profiles[profile_name])
         params = look.get("params", {})
         if params is None:
             params = {}
         if not isinstance(params, dict):
             errors.append(f"{prefix} field 'params' must be an object")
         elif isinstance(scene_ref, str):
+            params = {**profile_params, **params}
             allowed = REALTIME_EFFECT_PARAM_KEYS.get(scene_ref, frozenset())
             for key in params:
                 if key not in allowed:
@@ -412,6 +441,46 @@ def _validate_bank(
                 )
 
 
+def _validate_drop_pairs(
+    data: dict[str, Any],
+    look_names: set[str],
+    errors: list[str],
+) -> None:
+    pairs = data.get("drop_pairs", {})
+    if pairs is None:
+        return
+    if not isinstance(pairs, dict):
+        errors.append("'drop_pairs' must be an object")
+        return
+    for drop_name, raw_pair in pairs.items():
+        if not isinstance(drop_name, str) or not drop_name:
+            errors.append("'drop_pairs' keys must be non-empty look names")
+            continue
+        if drop_name not in look_names:
+            errors.append(f"drop_pairs references unknown drop look '{drop_name}'")
+        if not isinstance(raw_pair, dict):
+            errors.append(f"drop_pairs.{drop_name} must be an object")
+            continue
+        post_drop = raw_pair.get("post_drop")
+        if not isinstance(post_drop, str) or not post_drop:
+            errors.append(f"drop_pairs.{drop_name}.post_drop must be a non-empty string")
+        elif post_drop not in look_names:
+            errors.append(
+                f"drop_pairs.{drop_name}.post_drop references unknown look '{post_drop}'"
+            )
+        duration = raw_pair.get("duration_beats", 8.0)
+        _validate_positive_number(
+            f"drop_pairs.{drop_name}.duration_beats",
+            duration,
+            errors,
+        )
+
+
+def _validate_post_drop_cycle_beats(data: dict[str, Any], errors: list[str]) -> None:
+    value = data.get("post_drop_cycle_beats", 32.0)
+    _validate_positive_number("post_drop_cycle_beats", value, errors)
+
+
 def _is_dotted_quad(value: str) -> bool:
     parts = value.split(".")
     if len(parts) != 4:
@@ -440,11 +509,36 @@ def _validate_realtime_params(
             _validate_non_negative_number(f"{prefix} params.{field_name}", params[field_name], errors)
     if "subdivision" in params and params["subdivision"] not in {1, 2, 4, 8}:
         errors.append(f"{prefix} params.subdivision must be one of [1, 2, 4, 8]")
-    if effect_name == "beat_strobe" and "duty" in params:
-        value = params["duty"]
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            if value < 0 or value > 1:
-                errors.append(f"{prefix} params.duty must be between 0 and 1")
+    # Unit-interval params: the renderer clamps these to [0, 1], so reject
+    # out-of-range config values up front rather than silently clamping.
+    for field_name in ("floor", "duty", "density"):
+        if field_name in params:
+            value = params[field_name]
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if value < 0 or value > 1:
+                    errors.append(f"{prefix} params.{field_name} must be between 0 and 1")
+    if "sync_mode" in params and params["sync_mode"] not in ("retrigger", "overlap", "continuous"):
+        errors.append(f"{prefix} params.sync_mode must be one of [retrigger, overlap, continuous]")
+    if "beat_division" in params:
+        value = params["beat_division"]
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+            errors.append(f"{prefix} params.beat_division must be a number > 0")
+    if "trail_beats" in params:
+        _validate_non_negative_number(f"{prefix} params.trail_beats", params["trail_beats"], errors)
+    for field_name in ("travel_beats", "width"):  # divisors in the engine -> must be > 0
+        if field_name in params:
+            value = params[field_name]
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                errors.append(f"{prefix} params.{field_name} must be a number > 0")
+    for field_name in ("heads", "max_pulses"):
+        if field_name in params:
+            value = params[field_name]
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                errors.append(f"{prefix} params.{field_name} must be an integer >= 1")
+    if "spawn_on_wrap" in params and not isinstance(params["spawn_on_wrap"], bool):
+        errors.append(f"{prefix} params.spawn_on_wrap must be a boolean")
+    if "reverse" in params and not isinstance(params["reverse"], bool):
+        errors.append(f"{prefix} params.reverse must be a boolean")
 
 
 def _is_rgb(value: Any) -> bool:
@@ -501,7 +595,7 @@ def _validate_realtime_cross_checks(data: dict[str, Any], errors: list[str]) -> 
     for bank_name, bank in banks.items():
         if not isinstance(bank, dict):
             continue
-        for role in ("ambient", "utility"):
+        for role in ("utility",):
             values = bank.get(role, [])
             if not isinstance(values, list):
                 continue
@@ -721,6 +815,12 @@ def _validate_diy_scene_ref(prefix: str, scene_ref: str, errors: list[str]) -> N
 def _build_config(data: dict[str, Any]) -> LEDConfig:
     targets_raw = data["targets"]
     looks_raw = data["looks"]
+    param_profiles_raw = data.get("realtime_param_profiles", {})
+    if not isinstance(param_profiles_raw, dict):
+        param_profiles_raw = {}
+    drop_pairs_raw = data.get("drop_pairs", {})
+    if not isinstance(drop_pairs_raw, dict):
+        drop_pairs_raw = {}
     banks_raw = data["banks"]
     rate_limits_raw = data["rate_limits"]
     safety_raw = data["safety"]
@@ -754,7 +854,7 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
             brightness=int(look.get("brightness", 100)),
             allow_strobe=bool(look.get("allow_strobe", False)),
             backend=str(look.get("backend", "cloud_diy")),
-            params=MappingProxyType(dict(look.get("params", {}) or {})),
+            params=MappingProxyType(_build_look_params(look, param_profiles_raw)),
         )
 
     banks: dict[str, LEDBank] = {}
@@ -768,6 +868,16 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
             post_drop=_to_tuple(bank.get("post_drop", [])),
             breakdown=_to_tuple(bank.get("breakdown", [])),
             utility=_to_tuple(bank.get("utility", [])),
+        )
+
+    drop_pairs: dict[str, LEDDropPair] = {}
+    for drop_name, raw_pair in drop_pairs_raw.items():
+        if not isinstance(drop_name, str) or not isinstance(raw_pair, dict):
+            continue
+        drop_pairs[drop_name] = LEDDropPair(
+            drop=drop_name,
+            post_drop=str(raw_pair.get("post_drop", "")),
+            duration_beats=float(raw_pair.get("duration_beats", 8.0)),
         )
 
     legacy_offset_s = float(
@@ -833,7 +943,18 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
             ),
             scripted_mode_automation=bool(safety_raw["scripted_mode_automation"]),
         ),
+        drop_pairs=drop_pairs,
+        post_drop_cycle_beats=float(data.get("post_drop_cycle_beats", 32.0)),
     )
+
+
+def _build_look_params(look: dict[str, Any], param_profiles: dict[str, Any]) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    profile_name = look.get("param_profile", "")
+    if isinstance(profile_name, str) and isinstance(param_profiles.get(profile_name), dict):
+        params.update(param_profiles[profile_name])
+    params.update(dict(look.get("params", {}) or {}))
+    return params
 
 
 def _to_tuple(values: Iterable[Any]) -> tuple[str, ...]:

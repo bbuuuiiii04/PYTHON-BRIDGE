@@ -16,7 +16,7 @@ from .led_models import (
     LEDLookDirectorStatus,
 )
 
-_AUTOMATION_ROLE_ORDER = (
+LED_AUTOMATION_ROLE_ORDER = (
     "ambient",
     "groove",
     "buildup",
@@ -26,6 +26,7 @@ _AUTOMATION_ROLE_ORDER = (
     "breakdown",
     "utility",
 )
+_AUTOMATION_ROLE_ORDER = LED_AUTOMATION_ROLE_ORDER
 _AUTOMATION_ROLES = frozenset(_AUTOMATION_ROLE_ORDER)
 
 
@@ -48,9 +49,15 @@ class LEDLookDirector:
         self._last_decision: LEDLookDecision | None = None
         self._last_reason: str = "not_started"
         self._last_source: str = "policy"
-        self._role_cursors: dict[str, int] = {
-            role: 0 for role in _AUTOMATION_ROLE_ORDER
-        }
+        self._role_cursors: dict[str, int] = {}
+        self._queued_post_drop_look: str = ""
+        bank = self._config.banks.get("default")
+        for role in _AUTOMATION_ROLE_ORDER:
+            look_names = getattr(bank, role, ()) if bank else ()
+            if look_names:
+                self._role_cursors[role] = self._rng.randrange(len(look_names))
+            else:
+                self._role_cursors[role] = 0
 
     def set_manual_override(self, look_name: str | None) -> bool:
         """Set or clear manual override. Returns False when unknown look."""
@@ -160,7 +167,19 @@ class LEDLookDirector:
             emergency_blackout=self._emergency_blackout,
             role_cursors=dict(self._role_cursors),
         )
-        return asdict(payload)
+        status = asdict(payload)
+        status["queued_post_drop_look"] = self._queued_post_drop_look
+        status["post_drop_cycle_beats"] = float(self._config.post_drop_cycle_beats)
+        return status
+
+    def has_role_look(self, role: str) -> bool:
+        if role not in _AUTOMATION_ROLES:
+            return False
+        bank = self._config.banks.get("default")
+        if bank is None:
+            return False
+        look_names = getattr(bank, role, ())
+        return any(look_name in self._config.looks for look_name in look_names)
 
     def preview_role(self, role: str) -> LEDLookDecision | None:
         """Return the next automation decision for a role without advancing it."""
@@ -169,11 +188,19 @@ class LEDLookDirector:
         bank = self._config.banks.get("default")
         if bank is None:
             return None
+        if role == "post_drop" and self._queued_post_drop_look in self._config.looks:
+            return self._decision_for_look(
+                self._queued_post_drop_look,
+                reason="role_preview:paired_post_drop",
+                source="automation",
+                priority=2,
+                role=role,
+            )
         look_names = getattr(bank, role, ())
         if not look_names:
             return None
         cursor = self._role_cursors.get(role, 0)
-        look_name = self._look_name_for_role(role, look_names, cursor)
+        look_name = self._look_name_for_role(role, look_names, cursor, peek=True)
         if look_name not in self._config.looks:
             return None
         return self._decision_for_look(
@@ -184,6 +211,36 @@ class LEDLookDirector:
             role=role,
         )
 
+    def commit_role(self, role: str) -> LEDLookDecision | None:
+        """Select the next automation look for a role and advance once."""
+        if not self._config.enabled or not self._config.automation_enabled:
+            return None
+        return self._automation_decision_for_role(role)
+
+    def clear_queued_post_drop(self) -> None:
+        """Drop any pending paired post_drop look.
+
+        Called when the drop lifecycle is torn down (track/deck change, stop,
+        resume, phrase interruption) so a paired post_drop queued for one drop
+        cannot leak across the teardown and fire on the next track/deck.
+        """
+        self._queued_post_drop_look = ""
+
+    def paired_post_drop_look(self, drop_look: str) -> str:
+        pair = self._config.drop_pairs.get(str(drop_look))
+        if pair is None:
+            return ""
+        return pair.post_drop if pair.post_drop in self._config.looks else ""
+
+    def drop_duration_beats(self, drop_look: str) -> float:
+        pair = self._config.drop_pairs.get(str(drop_look))
+        if pair is None:
+            return 8.0
+        return max(0.001, float(pair.duration_beats))
+
+    def post_drop_cycle_beats(self) -> float:
+        return max(0.001, float(self._config.post_drop_cycle_beats))
+
     def _automation_decision_for_role(self, role: str) -> LEDLookDecision | None:
         if role not in _AUTOMATION_ROLES:
             return None
@@ -191,6 +248,17 @@ class LEDLookDirector:
         bank = self._config.banks.get("default")
         if bank is None:
             return None
+        if normalized_role == "post_drop" and self._queued_post_drop_look:
+            look_name = self._queued_post_drop_look
+            self._queued_post_drop_look = ""
+            if look_name in self._config.looks:
+                return self._decision_for_look(
+                    look_name,
+                    reason="paired_post_drop",
+                    source="automation",
+                    priority=2,
+                    role=normalized_role,
+                )
         look_names = getattr(bank, normalized_role, ())
         if not look_names:
             return None
@@ -205,6 +273,8 @@ class LEDLookDirector:
             priority=2,
             role=normalized_role,
         )
+        if normalized_role == "drop":
+            self._queue_paired_post_drop(look_name)
         self._role_cursors[normalized_role] = cursor + 1
         return decision
 
@@ -213,11 +283,23 @@ class LEDLookDirector:
         role: str,
         look_names: tuple[str, ...],
         cursor: int,
+        *,
+        peek: bool = False,
     ) -> str:
         if role not in self._shuffled_roles or len(look_names) <= 1:
             return look_names[cursor % len(look_names)]
         bag = self._role_shuffle_bags.get(role, ())
         if cursor % len(look_names) == 0 or not bag:
+            if peek:
+                # Preview the would-be shuffled bag while restoring RNG state so
+                # the next real selection builds the exact same bag.
+                state = self._rng.getstate()
+                try:
+                    shuffled = list(look_names)
+                    self._rng.shuffle(shuffled)
+                finally:
+                    self._rng.setstate(state)
+                return tuple(shuffled)[cursor % len(look_names)]
             shuffled = list(look_names)
             self._rng.shuffle(shuffled)
             bag = tuple(shuffled)
@@ -248,9 +330,15 @@ class LEDLookDirector:
         )
 
     def _record_decision(self, decision: LEDLookDecision) -> None:
+        if decision.role in {"drop", "manual"}:
+            self._queue_paired_post_drop(decision.look)
         self._last_decision = decision
         self._last_reason = decision.reason
         self._last_source = decision.source
+
+    def _queue_paired_post_drop(self, drop_look: str) -> None:
+        paired = self.paired_post_drop_look(drop_look)
+        self._queued_post_drop_look = paired
 
     def _apply_target_override(
         self,

@@ -41,10 +41,15 @@ class SmartPhrasingSnapshot:
 
 @dataclass(frozen=True)
 class SmartPhrasingState:
+    abs_beat: Optional[float] = None
     current_phrase_label: PhraseLabel = "other"
+    current_phrase_start_beat: Optional[float] = None
+    phrase_start_crossing: bool = False
+    previous_phrase_label: PhraseLabel = "other"
     current_phrase_is_up: bool = False
     current_phrase_is_chorus: bool = False
     current_phrase_is_low: bool = False
+    beats_into_phrase: Optional[float] = None
     next_smart_drop_beat: Optional[float] = None
     beats_to_next_drop: Optional[float] = None
     smart_drop_window_active: bool = False
@@ -202,7 +207,7 @@ class SmartPhrasingEngine:
         elif snapshot.track_id != self._last_track_id:
             needs_reset = True
             reset_reason = "track_change"
-        elif self._previous_abs_beat is not None and abs_beat < self._previous_abs_beat:
+        elif self._previous_abs_beat is not None and abs_beat < self._previous_abs_beat - 0.1:
             needs_reset = True
             reset_reason = "playhead_jump_backward"
             
@@ -265,19 +270,36 @@ class SmartPhrasingEngine:
     ) -> SmartPhrasingState:
         # 1. Resolve current phrase and crossings
         current_phrase_label: PhraseLabel = "other"
+        current_phrase_start_beat: Optional[float] = None
+        current_phrase_index: Optional[int] = None
         phrase_anchor_requested = False
 
-        for seg in snapshot.phrase_segments:
+        for index, seg in enumerate(snapshot.phrase_segments):
             if prev_abs_beat is not None and prev_abs_beat < seg.start_beat <= abs_beat:
                 phrase_anchor_requested = True
 
             if seg.start_beat <= abs_beat < seg.end_beat:
                 current_phrase_label = seg.label
+                current_phrase_start_beat = seg.start_beat
+                current_phrase_index = index
                 break
+
+        previous_phrase_label: PhraseLabel = "other"
+        if current_phrase_index is not None and current_phrase_index > 0:
+            previous_phrase_label = snapshot.phrase_segments[current_phrase_index - 1].label
+        phrase_start_crossing = bool(
+            prev_abs_beat is not None
+            and current_phrase_start_beat is not None
+            and prev_abs_beat < current_phrase_start_beat <= abs_beat
+        )
 
         current_phrase_is_up = current_phrase_label == "up"
         current_phrase_is_chorus = current_phrase_label == "chorus"
         current_phrase_is_low = current_phrase_label == "low"
+        beats_into_phrase = (
+            abs_beat - current_phrase_start_beat
+            if current_phrase_start_beat is not None else None
+        )
 
         # 2. Drop crossing
         smart_drop_crossing = False
@@ -411,10 +433,15 @@ class SmartPhrasingEngine:
                 phrase_anchor_rearm_requested = this_beat_int >= target_beat
 
         return SmartPhrasingState(
+            abs_beat=abs_beat,
             current_phrase_label=current_phrase_label,
+            current_phrase_start_beat=current_phrase_start_beat,
+            phrase_start_crossing=phrase_start_crossing,
+            previous_phrase_label=previous_phrase_label,
             current_phrase_is_up=current_phrase_is_up,
             current_phrase_is_chorus=current_phrase_is_chorus,
             current_phrase_is_low=current_phrase_is_low,
+            beats_into_phrase=beats_into_phrase,
             next_smart_drop_beat=next_smart_drop_beat,
             beats_to_next_drop=beats_to_next_drop,
             smart_drop_window_active=smart_drop_window_active,

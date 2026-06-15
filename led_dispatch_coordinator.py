@@ -5,6 +5,7 @@ import hashlib
 import time
 from typing import Any
 
+from .govee_frame_renderer import default_sync_mode, default_beat_division
 from .govee_owner_state import GoveeOwnerStateMachine, OwnerState
 from .govee_realtime_runner import EffectSpec, GoveeRealtimeRunner
 from .led_models import LEDConfig, LEDLookDecision
@@ -48,11 +49,12 @@ class LEDDispatchCoordinator:
             if not self._owner.acquire(OwnerState.REALTIME_RAZER):
                 return False
             self._runner.set_desired(self._spec_from_decision(decision))
+            self._runner.fire_trigger()
             self._realtime_trigger_count += 1
             return True
 
         if self._owner.current() == OwnerState.REALTIME_RAZER:
-            self._runner.set_desired(None)
+            self._runner.force_deactivate()
             self._owner.release(OwnerState.REALTIME_RAZER)
         accepted = bool(self._adapter.trigger(decision))
         if accepted:
@@ -106,9 +108,15 @@ class LEDDispatchCoordinator:
         )
 
     def _spec_from_decision(self, decision: LEDLookDecision) -> EffectSpec:
+        scene_ref = str(getattr(decision, "scene_ref", ""))
+        params = dict(getattr(decision, "params", {}) or {})
+        sync_mode = str(params.get("sync_mode") or default_sync_mode(scene_ref))
+        beat_division = float(params.get("beat_division") or default_beat_division(scene_ref))
         return EffectSpec(
-            effect_name=str(getattr(decision, "scene_ref", "")),
-            params=dict(getattr(decision, "params", {}) or {}),
+            effect_name=scene_ref,
+            params=params,
             seed=_stable_seed(str(getattr(decision, "look", ""))),
             applied_monotonic=self._time_fn(),
+            sync_mode=sync_mode,
+            beat_division=beat_division,
         )

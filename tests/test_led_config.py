@@ -9,6 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from rb_ss_bridge_v2.govee_frame_renderer import REALTIME_EFFECT_NAMES  # noqa: E402
+from rb_ss_bridge_v2.govee_frame_renderer import REALTIME_STROBE_EFFECTS  # noqa: E402
 from rb_ss_bridge_v2.led_config import (  # noqa: E402
     load_led_look_director_config,
     load_led_look_director_config_from_dict,
@@ -419,6 +421,97 @@ class RealtimeConfigTests(unittest.TestCase):
         self.assertEqual(result.config.looks["rt_groove_chase_blue"].backend, "realtime_razer")
         self.assertEqual(result.config.looks["rt_drop_chase_blue"].scene_ref, "drop_chase_blue")
 
+    def test_realtime_param_profile_expands_into_look_params(self) -> None:
+        cfg = self._realtime_config()
+        cfg["realtime_param_profiles"] = {
+            "beat_chase_reset": {
+                "sync_mode": "retrigger",
+                "beat_division": 1.0,
+                "travel_beats": 1.0,
+                "trail_beats": 0.25,
+                "width": 0.8,
+            }
+        }
+        cfg["looks"]["rt_groove_chase_blue"]["param_profile"] = "beat_chase_reset"
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"travel_beats": 2.0}
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+        params = result.config.looks["rt_groove_chase_blue"].params
+        self.assertEqual(params["sync_mode"], "retrigger")
+        self.assertEqual(params["beat_division"], 1.0)
+        self.assertEqual(params["travel_beats"], 2.0)
+        self.assertEqual(params["trail_beats"], 0.25)
+        self.assertEqual(params["width"], 0.8)
+
+    def test_drop_pair_config_loads_duration_and_post_drop(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_post_drop_chase_blue"] = {
+            "target": "room_perimeter",
+            "action": "realtime",
+            "scene_ref": "post_drop_chase_blue",
+            "fallback": "rt_blackout",
+            "safety_class": "post_drop",
+            "brightness": 100,
+            "allow_strobe": True,
+            "backend": "realtime_razer",
+            "params": {},
+        }
+        cfg["banks"]["default"]["post_drop"] = ["rt_post_drop_chase_blue"]
+        cfg["drop_pairs"] = {
+            "rt_drop_chase_blue": {
+                "post_drop": "rt_post_drop_chase_blue",
+                "duration_beats": 8.0,
+            }
+        }
+        cfg["post_drop_cycle_beats"] = 32.0
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+        pair = result.config.drop_pairs["rt_drop_chase_blue"]
+        self.assertEqual(pair.post_drop, "rt_post_drop_chase_blue")
+        self.assertEqual(pair.duration_beats, 8.0)
+        self.assertEqual(result.config.post_drop_cycle_beats, 32.0)
+
+    def test_drop_pair_unknown_post_drop_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["drop_pairs"] = {
+            "rt_drop_chase_blue": {
+                "post_drop": "missing_post_drop",
+                "duration_beats": 8.0,
+            }
+        }
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("missing_post_drop" in err for err in result.errors))
+
+    def test_drop_pair_duration_must_be_positive(self) -> None:
+        cfg = self._realtime_config()
+        cfg["drop_pairs"] = {
+            "rt_drop_chase_blue": {
+                "post_drop": "rt_drop_chase_blue",
+                "duration_beats": 0,
+            }
+        }
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("duration_beats" in err for err in result.errors))
+
+    def test_unknown_realtime_param_profile_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["param_profile"] = "missing_profile"
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("unknown profile 'missing_profile'" in err for err in result.errors))
+
     def test_mixed_cloud_and_realtime_role_lists_are_valid(self) -> None:
         cfg = self._realtime_config()
 
@@ -448,6 +541,25 @@ class RealtimeConfigTests(unittest.TestCase):
         self.assertFalse(result.available)
         self.assertTrue(any("params.colour" in err for err in result.errors))
 
+    def test_realtime_header_bytes_must_be_five_long(self) -> None:
+        cfg = self._realtime_config()
+        cfg["targets"]["room_perimeter"]["realtime"]["header_bytes"] = [187, 0, 250, 176]
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("header_bytes must be exactly 5 bytes" in err for err in result.errors))
+
+    def test_realtime_floor_param_above_one_is_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["scene_ref"] = "breathe"
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"floor": 2.0}
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("params.floor must be between 0 and 1" in err for err in result.errors))
+
     def test_safety_blackout_must_remain_cloud(self) -> None:
         cfg = self._realtime_config()
         cfg["blackout"] = "rt_blackout"
@@ -456,6 +568,91 @@ class RealtimeConfigTests(unittest.TestCase):
 
         self.assertFalse(result.available)
         self.assertTrue(any("'blackout' must reference a cloud_diy look" in err for err in result.errors))
+
+    def test_sync_params_accepted_on_all_realtime_effects(self) -> None:
+        sync_params = {
+            "sync_mode": "continuous",
+            "beat_division": 1.0,
+            "travel_beats": 1.0,
+            "width": 0.8,
+            "trail_beats": 0.25,
+            "heads": 1,
+            "max_pulses": 8,
+            "spawn_on_wrap": False,
+            "reverse": False,
+        }
+        for effect_name in sorted(REALTIME_EFFECT_NAMES):
+            cfg = self._realtime_config()
+            cfg["looks"]["rt_groove_chase_blue"]["scene_ref"] = effect_name
+            cfg["looks"]["rt_groove_chase_blue"]["params"] = dict(sync_params)
+            if effect_name in REALTIME_STROBE_EFFECTS:
+                cfg["looks"]["rt_groove_chase_blue"]["allow_strobe"] = True
+            result = load_led_look_director_config_from_dict(cfg)
+            self.assertTrue(result.available, msg=f"{effect_name}: {result.errors}")
+
+    def test_sync_mode_bogus_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"sync_mode": "bogus"}
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("sync_mode must be one of" in err for err in result.errors))
+
+    def test_beat_division_zero_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"beat_division": 0}
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("beat_division must be a number > 0" in err for err in result.errors))
+
+    def test_travel_beats_zero_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"travel_beats": 0}
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("travel_beats must be a number > 0" in err for err in result.errors))
+
+    def test_width_zero_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"width": 0}
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("width must be a number > 0" in err for err in result.errors))
+
+    def test_max_pulses_zero_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"max_pulses": 0}
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("max_pulses must be an integer >= 1" in err for err in result.errors))
+
+    def test_spawn_on_wrap_non_bool_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"spawn_on_wrap": "yes"}
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("spawn_on_wrap must be a boolean" in err for err in result.errors))
+
+    def test_reverse_non_bool_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"reverse": 1}
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("reverse must be a boolean" in err for err in result.errors))
+
+    def test_live_json_still_validates_clean(self) -> None:
+        live_path = Path(__file__).resolve().parents[1] / "config" / "led_look_director.json"
+        if not live_path.is_file():
+            self.skipTest("live config not present in this checkout")
+        result = load_led_look_director_config(str(live_path))
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(
+            result.config.drop_pairs["rt_drop_chase_freestyle_nebula"].post_drop,
+            "rt_post_drop_freestyle_nebula",
+        )
+        self.assertIn(
+            "rt_post_drop_freestyle_nebula",
+            result.config.banks["default"].post_drop,
+        )
 
 
 if __name__ == "__main__":
