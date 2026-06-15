@@ -657,6 +657,28 @@
       "allow_strobe": true,
       "backend": "realtime_razer",
       "params": {}
+    },
+    "rt_drop_center_burst_blue_cyan": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "drop_center_burst_blue_cyan",
+      "fallback": "rt_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_post_drop_center_comet_blue_cyan": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "post_drop_center_comet_blue_cyan",
+      "fallback": "rt_blackout",
+      "safety_class": "post_drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
     }
   },
   "banks": {
