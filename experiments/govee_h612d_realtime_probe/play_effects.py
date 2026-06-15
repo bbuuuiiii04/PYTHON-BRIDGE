@@ -129,6 +129,8 @@ EDM_BUILDS = {
     "groove_freestyle_nebula": "32-beat smooth freestyle groove: opposite comets + breathing purple/magenta bg.",
     "drop_chase_blue": "32-beat drop: 8-beat sparkle strobe burst + 2-beat blue chase strobe.",
     "drop_chase_cyan": "32-beat drop: 8-beat sparkle strobe burst + 2-beat cyan chase strobe.",
+    "drop_center_burst_blue_cyan": "32-beat drop: half-beat bursts from center to edges.",
+    "post_drop_center_comet_blue_cyan": "32-beat post-drop: strobing dual comets chasing outward from center.",
     "drop_chase_red": "32-beat drop: 8-beat sparkle strobe burst + 2-beat red chase strobe.",
     "drop_chase_green": "32-beat drop: 8-beat sparkle strobe burst + 2-beat green chase strobe.",
     "drop_chase_freestyle_nebula": "32-beat freestyle drop: 8-beat sparkle strobe burst + 2-beat opposite comets strobe.",
@@ -561,7 +563,7 @@ def generate_buildup_frame(
                     frame[idx] = (255, 255, 255)
             return frame
 
-    elif look in ("twinkle_blue", "drop_white_aggressive", "post_drop_white_shatter", "test_combo"):
+    elif look in ("twinkle_blue", "drop_white_aggressive", "post_drop_white_shatter", "test_combo", "drop_center_burst_blue_cyan", "post_drop_center_comet_blue_cyan"):
         renderer = GoveeFrameRenderer()
         frame_idx = int(elapsed * 40.0)
         return renderer.render(

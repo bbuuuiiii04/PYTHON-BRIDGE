@@ -316,7 +316,7 @@ def _groove_chase(name: str, beat: float, segments: int) -> Frame:
         offset_beats=2.0,
         color1=color1,
         color2=color2,
-
+    )
 
 
 def _groove_nebula(beat: float, segments: int) -> Frame:
@@ -332,6 +332,68 @@ def _groove_nebula(beat: float, segments: int) -> Frame:
         reverse_second=True,
         bg=bg,
     )
+
+
+def _drop_center_burst_blue_cyan(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    frame = [(0, 0, 0)] * segments
+    center = segments / 2.0
+    
+    # Phase 1: Burst every half beat from the physical center to both ends
+    pulse_phase = (beat % 0.5) / 0.5
+    pulse_width = 1.0  # Smallest possible sharp burst
+    current_dist = pulse_phase * (center + pulse_width)
+    
+    # 3 out of 4 bursts are pure deep blue, 1 out of 4 is cyan
+    burst_idx = int((beat % 8.0) * 2.0)
+    is_blue_burst = (burst_idx % 4) != 3
+    g_base = 0 if is_blue_burst else 200
+    
+    for idx in range(segments):
+        if idx % 2 != 0:
+            continue
+        dist_from_center = abs(idx - center)
+        dist_from_pulse = abs(dist_from_center - current_dist)
+        intensity = max(0.0, 1.0 - (dist_from_pulse / pulse_width))
+        if intensity > 0:
+            frame[idx] = (0, int(g_base * intensity), int(255 * intensity))
+    return frame
+
+def _post_drop_center_comet_blue_cyan(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    frame = [(0, 0, 0)] * segments
+    center = segments / 2.0
+    
+    # Phase 2: Dual comets spawning in the middle and chasing outward on the beat + strobing
+    strobe_on = (int(beat * 16.0) % 2) == 0
+    if not strobe_on:
+        return frame
+        
+    comet_width = 1.0  # Extremely small comet tail
+    
+    for age in [beat % 1.0, (beat % 1.0) + 1.0]:
+        if age > 2.0:
+            continue
+            
+        comet_head_dist = age * center
+        
+        # 3 out of 4 comets are pure deep blue, 1 out of 4 is cyan
+        spawn_beat = beat - age
+        spawn_idx = int(round(spawn_beat))
+        is_blue_comet = (spawn_idx % 4) != 3
+        g_base = 0 if is_blue_comet else 200
+        
+        for idx in range(segments):
+            dist_from_center = abs(idx - center)
+            
+            if comet_head_dist - comet_width <= dist_from_center <= comet_head_dist:
+                intensity = 1.0 - ((comet_head_dist - dist_from_center) / comet_width)
+                r = 0
+                g = int(g_base * intensity)
+                b = int(255 * intensity)
+                
+                old_r, old_g, old_b = frame[idx]
+                frame[idx] = (min(255, old_r + r), min(255, old_g + g), min(255, old_b + b))
+                
+    return frame
 
 
 def _drop_chase(name: str, beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
@@ -699,8 +761,12 @@ def _edm_dispatch(name: str, beat: float, local_t: float, frame_index: int, para
         return _groove_nebula(cue_beat, segments)
     if name.startswith("drop_chase_") and name != "drop_chase_freestyle_nebula":
         return _drop_chase(name, cue_beat, local_t, frame_index, params, segments, seed)
+    if name == "drop_center_burst_blue_cyan":
+        return _drop_center_burst_blue_cyan(cue_beat, local_t, frame_index, params, segments, seed)
     if name.startswith("post_drop_chase_"):
         return _post_drop_chase(name, cue_beat, segments)
+    if name == "post_drop_center_comet_blue_cyan":
+        return _post_drop_center_comet_blue_cyan(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "post_drop_freestyle_nebula":
         return _post_drop_nebula(cue_beat, segments)
     if name == "drop_white_aggressive":
@@ -752,6 +818,8 @@ EDM_BUILDS: dict[str, str] = {
     "groove_freestyle_nebula": "32-beat smooth freestyle groove: opposite comets + breathing purple/magenta bg.",
     "drop_chase_blue": "32-beat drop: 8-beat sparkle strobe burst + 2-beat blue chase strobe.",
     "drop_chase_cyan": "32-beat drop: 8-beat sparkle strobe burst + 2-beat cyan chase strobe.",
+    "drop_center_burst_blue_cyan": "32-beat drop: half-beat bursts from center to edges.",
+    "post_drop_center_comet_blue_cyan": "32-beat post-drop: strobing dual comets chasing outward from center.",
     "drop_chase_red": "32-beat drop: 8-beat sparkle strobe burst + 2-beat red chase strobe.",
     "drop_chase_green": "32-beat drop: 8-beat sparkle strobe burst + 2-beat green chase strobe.",
     "drop_chase_cyan_white": "32-beat drop: 8-beat sparkle strobe burst + 2-beat cyan/white chase strobe.",
