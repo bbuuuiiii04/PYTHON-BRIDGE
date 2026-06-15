@@ -57,12 +57,16 @@ def binary_split(segment_count):
     return pattern
 
 def sentinel(segment_count):
-    """First segment green, last segment red, middle off."""
+    """First few segments are distinct markers, rest off."""
     pattern = [(0, 0, 0)] * segment_count
     if segment_count > 0:
-        pattern[0] = (0, 200, 0)
+        pattern[0] = (200, 0, 0)
     if segment_count > 1:
-        pattern[-1] = (200, 0, 0)
+        pattern[1] = (0, 200, 0)
+    if segment_count > 2:
+        pattern[2] = (0, 0, 200)
+    if segment_count > 3:
+        pattern[3] = (120, 120, 120)
     return pattern
 
 def unique_bands(segment_count):
