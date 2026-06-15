@@ -6,7 +6,7 @@ transport layers can exchange immutable decisions without runtime-side mutation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional, Dict, Tuple
+from typing import Any, Callable, Mapping, Optional, Dict, Tuple
 
 
 @dataclass(frozen=True)
@@ -204,6 +204,9 @@ class LEDContext:
     playing: bool = False
     lighting_mode: str = ""
     scripted_id: int = 0
+    # M1b WI-3: optional DIY-eligibility predicate supplied by the color engine.
+    # When None (engine off), the director applies no palette filtering.
+    diy_eligible: Optional[Callable[[str], bool]] = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -218,6 +221,8 @@ class LEDLookDecision:
     role: str
     backend: str = "cloud_diy"
     params: Mapping[str, Any] = field(default_factory=dict, compare=False)
+    # M1b WI-5: per-look color source ("engine" → injectable, "baked" → never recolored).
+    color_source: str = field(default="engine", compare=False)
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,7 @@ from __future__ import annotations
 import os as _os
 import random
 from dataclasses import asdict, replace
-from typing import Iterable
+from typing import Callable, Iterable, Optional
 
 from .led_models import (
     LEDConfig,
@@ -133,7 +133,10 @@ class LEDLookDirector:
             return None
 
         if self._config.automation_enabled:
-            decision = self._automation_decision_for_role(role)
+            decision = self._automation_decision_for_role(
+                role,
+                diy_eligible=(context.diy_eligible if context is not None else None),
+            )
             if decision is None:
                 self._last_decision = None
                 reason_role = role if role else "empty_role"
@@ -250,7 +253,12 @@ class LEDLookDirector:
     def post_drop_cycle_beats(self) -> float:
         return max(0.001, float(self._config.post_drop_cycle_beats))
 
-    def _automation_decision_for_role(self, role: str) -> LEDLookDecision | None:
+    def _automation_decision_for_role(
+        self,
+        role: str,
+        *,
+        diy_eligible: Optional[Callable[[str], bool]] = None,
+    ) -> LEDLookDecision | None:
         if role not in _AUTOMATION_ROLES:
             return None
         normalized_role = role
@@ -273,6 +281,15 @@ class LEDLookDirector:
         look_names = getattr(bank, normalized_role, ())
         if not look_names:
             return None
+        # M1b WI-3: filter the bank by the color engine's DIY-eligibility
+        # predicate.  Realtime/untagged looks are recolored, so the engine
+        # returns True for them; only off-palette DIY looks are dropped.
+        # Empty subset ⇒ keep the full bank (the C4 breakdown invariant: a
+        # DIY-only bank must never be emptied by a non-matching palette).
+        if diy_eligible is not None:
+            eligible = tuple(n for n in look_names if diy_eligible(n))
+            if eligible:
+                look_names = eligible
         cursor = self._role_cursors.get(normalized_role, 0)
         # WI-7 transport-sticky: when flag is ON, prefer looks whose backend
         # matches the last dispatched backend for this role.
@@ -355,6 +372,7 @@ class LEDLookDirector:
             role=role,
             backend=look.backend,
             params=look.params,
+            color_source=look.color_source,
         )
 
     def _record_decision(self, decision: LEDLookDecision) -> None:

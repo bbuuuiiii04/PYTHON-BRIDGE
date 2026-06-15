@@ -398,6 +398,8 @@ def _post_drop_center_comet_blue_cyan(beat: float, local_t: float, frame_index: 
 
 def _drop_chase(name: str, beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
     color1, color2 = _edm_color_for_look(name, beat)
+    # M1b WI-4: prefer an engine-injected color; fall back to the suffix color.
+    color1 = _color(params.get("color"), color1)
     strobe_on = (int(beat * 16.0) % 2) == 0
     if not strobe_on:
         return _empty(segments)
@@ -415,8 +417,10 @@ def _drop_chase(name: str, beat: float, local_t: float, frame_index: int, params
     return _drop_chase_comets(name, beat, segments, color1, color2)
 
 
-def _post_drop_chase(name: str, beat: float, segments: int) -> Frame:
+def _post_drop_chase(name: str, beat: float, params: Mapping[str, Any], segments: int) -> Frame:
     color1, color2 = _edm_color_for_look(name, beat)
+    # M1b WI-4: prefer an engine-injected color; fall back to the suffix color.
+    color1 = _color(params.get("color"), color1)
     strobe_on = (int(beat * 16.0) % 2) == 0
     if not strobe_on:
         return _empty(segments)
@@ -764,7 +768,7 @@ def _edm_dispatch(name: str, beat: float, local_t: float, frame_index: int, para
     if name == "drop_center_burst_blue_cyan":
         return _drop_center_burst_blue_cyan(cue_beat, local_t, frame_index, params, segments, seed)
     if name.startswith("post_drop_chase_"):
-        return _post_drop_chase(name, cue_beat, segments)
+        return _post_drop_chase(name, cue_beat, params, segments)
     if name == "post_drop_center_comet_blue_cyan":
         return _post_drop_center_comet_blue_cyan(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "post_drop_freestyle_nebula":

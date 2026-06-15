@@ -59,6 +59,7 @@ from .models import (
     SmartDropEnergyShadow, TrackMetadata,
 )
 from .led_models import BeatAnchor, LEDContext
+from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS
 from .laser_models import LaserContext, LaserPersonality
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
@@ -317,6 +318,7 @@ class StateManager:
         laser_personality_provider: Optional[Callable[[str], Optional[LaserPersonality]]] = None,
         led_look_director=None,
         led_scene_adapter=None,
+        led_color_engine=None,
         os2l_connected_provider=None,
         recorder: Optional[SessionRecorder] = None,
     ) -> None:
@@ -332,6 +334,8 @@ class StateManager:
         self._laser_personality_provider = laser_personality_provider
         self._led_look_director = led_look_director
         self._led_scene_adapter = led_scene_adapter
+        # M1b WI-1: optional LED color engine (None ⇒ no color injection).
+        self._led_color_engine = led_color_engine
         self._led_manual_override = ""
         self._led_manual_target_override = ""
         self._led_emergency_blackout = False
@@ -345,6 +349,10 @@ class StateManager:
         self._led_automation_enabled_latch = False
         self._led_scripted_mode_automation_latch = False
         self._led_last_auto_role_key = ""
+        # M1b WI-2: structured (section_id, cycle) published alongside the
+        # string role_key so the color engine seeds on stable fields without
+        # parsing the marker text.
+        self._led_last_section_cycle: tuple[str, int] = ("", 0)
         self._led_automation_gate_reason = "not_configured"
         self._led_automation_trigger_count = 0
         self._led_automation_gated_count = 0
@@ -1626,6 +1634,27 @@ class StateManager:
         if role_key == self._led_last_auto_role_key:
             return
 
+        # M1b WI-5: structured section/cycle published by the role_key builder.
+        section_id, cycle = self._led_last_section_cycle
+
+        # M1b WI-1/WI-5: advance the color engine's journey state.  Guarded so a
+        # missing/disabled engine is a complete no-op, and any engine exception
+        # is swallowed (behave as engine-off for this tick — never crash dispatch).
+        engine = self._led_color_engine
+        if engine is not None and engine.enabled:
+            try:
+                engine.begin_dispatch(
+                    active_deck=active,
+                    load_gen=d.load_gen,
+                    content_id=str(d.meta.content_id or ""),
+                    filepath=str(d.meta.filepath or ""),
+                    role=role,
+                    section_id=section_id,
+                    cycle=cycle,
+                )
+            except Exception as exc:
+                self._led_last_error = f"color_engine_error:{type(exc).__name__}"
+
         context = LEDContext(
             role=role,
             manual_look=None,
@@ -1634,6 +1663,11 @@ class StateManager:
             playing=d.playing,
             lighting_mode=self._os.lighting_mode,
             scripted_id=d.scripted_id,
+            diy_eligible=(
+                engine.diy_eligible
+                if (engine is not None and engine.enabled)
+                else None
+            ),
         )
         decision = None
         if role == "drop":
@@ -1680,6 +1714,43 @@ class StateManager:
                 active,
             )
             return
+
+        # M1b WI-5: inject the engine-resolved color into the finalized decision
+        # (merge, never replace — preserves sync_mode/beat_division and any other
+        # static params).  Exempt/baked looks and disabled engine inject nothing.
+        # Any engine error leaves the decision unmodified (engine-off behavior).
+        if engine is not None and engine.enabled:
+            try:
+                scene_ref_for_multi = str(getattr(decision, "scene_ref", ""))
+                multi = "color_a" in REALTIME_EFFECT_PARAM_KEYS.get(
+                    scene_ref_for_multi, frozenset()
+                )
+                computed = engine.resolve_color(
+                    role=role,
+                    section_id=section_id,
+                    cycle=cycle,
+                    look_name=decision.look,
+                    color_source=getattr(decision, "color_source", "engine"),
+                    multi=multi,
+                )
+                if computed:
+                    decision = replace(
+                        decision,
+                        params={**decision.params, **computed},
+                    )
+                    # M1b debug: one line per actual color injection so the
+                    # live dry-run is observable in the log (the color is NOT
+                    # otherwise logged or visible in dry-run frames).
+                    log.info(
+                        "[RGB] color-inject look=%s palette=%s color=%s role=%s role_key=%s",
+                        decision.look,
+                        engine.snapshot().get("current_palette", ""),
+                        computed.get("color"),
+                        role,
+                        role_key,
+                    )
+            except Exception as exc:
+                self._led_last_error = f"color_engine_error:{type(exc).__name__}"
 
         look = str(getattr(decision, "look", ""))
         scene_ref = self._sanitize_led_scene_ref(getattr(decision, "scene_ref", ""))
@@ -2216,6 +2287,10 @@ class StateManager:
         role: str,
     ) -> str:
         marker = ""
+        # M1b WI-2: structured section/cycle derived from the SAME source
+        # expressions that build `marker` (never by parsing the marker string).
+        section_id = ""
+        cycle = 0
         if role == "drop":
             anchor = self._led_drop_marker_anchor(sp_state)
             if anchor is None:
@@ -2238,10 +2313,13 @@ class StateManager:
                     # WI-2: embed phrase_seq instead of raw anchor to prevent
                     # A→B→A oscillation from different phrase start reads.
                     marker = f"seq{self._led_phrase_seq}:c{cycle}"
+                    section_id = f"seq{self._led_phrase_seq}"
                 else:
                     marker = f"{float(anchor):.3f}:c{cycle}"
+                    section_id = f"{float(anchor):.3f}"
             else:
                 marker = str(sp_state.current_phrase_label)
+                section_id = marker
         elif role in {"buildup", "pre_drop"} and sp_state.next_smart_drop_beat is not None:
             marker = f"{sp_state.next_smart_drop_beat:.3f}"
         elif role == "breakdown" and sp_state.breakdown_restore_beat is not None:
@@ -2271,8 +2349,13 @@ class StateManager:
                         f"{sp_state.current_phrase_label}:"
                         f"seq{self._led_phrase_seq}:c{cycle}"
                     )
+                    section_id = (
+                        f"{sp_state.current_phrase_label}:"
+                        f"seq{self._led_phrase_seq}"
+                    )
                 else:
                     marker = str(sp_state.current_phrase_label)
+                    section_id = marker
             else:
                 anchor = sp_state.current_phrase_start_beat
                 if anchor is not None and abs_beat is not None:
@@ -2282,14 +2365,23 @@ class StateManager:
                         f"{sp_state.current_phrase_label}:"
                         f"{float(anchor):.3f}:c{cycle}"
                     )
+                    section_id = (
+                        f"{sp_state.current_phrase_label}:"
+                        f"{float(anchor):.3f}"
+                    )
                 else:
                     marker = str(sp_state.current_phrase_label)
+                    section_id = marker
         elif role == "ambient":
             if self._phrase_monotonic_enabled:
                 # WI-2: use phrase_seq for ambient too — same class of oscillation risk
                 marker = f"{sp_state.current_phrase_label}:seq{self._led_phrase_seq}"
             else:
                 marker = str(sp_state.current_phrase_label)
+        # M1b WI-2: publish structured section/cycle for the color engine.
+        # `section_id or marker` keeps the unlisted branches (drop, buildup,
+        # pre_drop, breakdown, ambient) on section_id = marker / cycle = 0.
+        self._led_last_section_cycle = (section_id or marker, cycle)
         return f"{active}:{d.load_gen}:{role}:{marker}"
 
     # ── Deck switch ───────────────────────────────────────────────────────────
