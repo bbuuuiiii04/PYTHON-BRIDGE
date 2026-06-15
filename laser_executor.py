@@ -178,13 +178,29 @@ class LaserSceneExecutor:
                 self._resolve_pending_blackout(reason="drop_crossing_high_impact_blocked")
             return
 
+        refire_roles = ("phrase", "buildup", "breakdown")
+        with self._lock:
+            last_role_trigger_beat = float(self._role_last_trigger_beat.get(role, -1.0))
+            refire_allowed = (
+                ctx.autoloop_tick_just_fired
+                and role in refire_roles
+                and scene_def.scene_type == "autoloop"
+                and (last_role_trigger_beat < 0.0 or float(ctx.abs_beat) > last_role_trigger_beat)
+            )
+            same_scene_candidate = (
+                role not in ("manual", "emergency")
+                and not is_drop_crossing
+                and selected_scene == self._last_triggered_scene
+            )
+            same_scene_refire = same_scene_candidate and refire_allowed
+
         if self._is_role_cooldown_blocked(
             role,
             scene_def.cooldown_beats,
             ctx.abs_beat,
             role_changed=role_changed,
             previous_role=previous_role,
-        ):
+        ) and not same_scene_refire:
             self._restore_role_state(role, cursor_before, active_before)
             self._record_gate("role_cooldown_blocked")
             if is_drop_crossing:
@@ -192,17 +208,10 @@ class LaserSceneExecutor:
             return
 
         same_scene_skip = False
-        refire_roles = ("phrase", "buildup", "breakdown")
         with self._lock:
             if (
-                role not in ("manual", "emergency")
-                and not is_drop_crossing
-                and selected_scene == self._last_triggered_scene
-                and not (
-                    ctx.autoloop_tick_just_fired
-                    and role in refire_roles
-                    and scene_def.scene_type == "autoloop"
-                )
+                same_scene_candidate
+                and not refire_allowed
             ):
                 self._same_scene_skip_count += 1
                 same_scene_skip = True
@@ -210,6 +219,14 @@ class LaserSceneExecutor:
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_same_scene_skip")
             return
+        if same_scene_refire:
+            log.info(
+                "[LX] same-scene-refire  role=%s  scene=%s  reason=%s  beat=%.2f",
+                role,
+                selected_scene,
+                decision.reason,
+                ctx.abs_beat,
+            )
 
         priority = self._priority_for_role(role)
         midi_message = self._materialize_midi(

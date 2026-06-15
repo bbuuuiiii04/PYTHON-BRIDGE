@@ -41,10 +41,15 @@ class SmartPhrasingSnapshot:
 
 @dataclass(frozen=True)
 class SmartPhrasingState:
+    abs_beat: Optional[float] = None
     current_phrase_label: PhraseLabel = "other"
+    current_phrase_start_beat: Optional[float] = None
+    phrase_start_crossing: bool = False
+    previous_phrase_label: PhraseLabel = "other"
     current_phrase_is_up: bool = False
     current_phrase_is_chorus: bool = False
     current_phrase_is_low: bool = False
+    beats_into_phrase: Optional[float] = None
     next_smart_drop_beat: Optional[float] = None
     beats_to_next_drop: Optional[float] = None
     smart_drop_window_active: bool = False
@@ -90,6 +95,33 @@ class SmartPhrasingDiagnostic:
 class SmartPhrasingResult:
     state: SmartPhrasingState
     diagnostics: tuple[SmartPhrasingDiagnostic, ...]
+
+
+@dataclass
+class _EngineScratch:
+    active_drop_beat: Optional[float]
+    smart_drop_window_active: bool
+    transition_window_active: bool
+    transition_window_arm_suppressed: bool
+    blackout_arm_latched: bool
+
+    @classmethod
+    def from_engine(cls, engine: "SmartPhrasingEngine") -> "_EngineScratch":
+        return cls(
+            active_drop_beat=engine._active_drop_beat,
+            smart_drop_window_active=engine._smart_drop_window_active,
+            transition_window_active=engine._transition_window_active,
+            transition_window_arm_suppressed=engine._transition_window_arm_suppressed,
+            blackout_arm_latched=engine._blackout_arm_latched,
+        )
+
+    def apply_to_engine(self, engine: "SmartPhrasingEngine") -> None:
+        engine._active_drop_beat = self.active_drop_beat
+        engine._smart_drop_window_active = self.smart_drop_window_active
+        engine._transition_window_active = self.transition_window_active
+        engine._transition_window_arm_suppressed = self.transition_window_arm_suppressed
+        engine._blackout_arm_latched = self.blackout_arm_latched
+
 
 class SmartPhrasingEngine:
     def __init__(self) -> None:
@@ -175,7 +207,7 @@ class SmartPhrasingEngine:
         elif snapshot.track_id != self._last_track_id:
             needs_reset = True
             reset_reason = "track_change"
-        elif self._previous_abs_beat is not None and abs_beat < self._previous_abs_beat:
+        elif self._previous_abs_beat is not None and abs_beat < self._previous_abs_beat - 0.1:
             needs_reset = True
             reset_reason = "playhead_jump_backward"
             
@@ -193,36 +225,96 @@ class SmartPhrasingEngine:
             
         self._last_deck_id = snapshot.deck_id
         self._last_track_id = snapshot.track_id
-        
+
         prev_abs_beat = self._previous_abs_beat
-        
+        scratch = _EngineScratch.from_engine(self)
+        state = self._compute_tick_state(
+            snapshot,
+            snapshot.abs_beat,
+            prev_abs_beat,
+            scratch=scratch,
+            mutate=True,
+        )
+        scratch.apply_to_engine(self)
+        self._previous_abs_beat = snapshot.abs_beat
+
+        return SmartPhrasingResult(state=state, diagnostics=tuple(diagnostics))
+
+    def preview_with_beat_offset(
+        self,
+        snapshot: SmartPhrasingSnapshot,
+        offset_beats: float,
+    ) -> SmartPhrasingState:
+        """Read-only SmartPhrasing state at abs_beat + offset_beats for LED lead time."""
+        if snapshot.abs_beat is None or offset_beats <= 0.0:
+            return SmartPhrasingState(reason="preview_unavailable")
+        abs_beat = snapshot.abs_beat + offset_beats
+        prev_abs_beat = self._previous_abs_beat
+        scratch = _EngineScratch.from_engine(self)
+        return self._compute_tick_state(
+            snapshot,
+            abs_beat,
+            prev_abs_beat,
+            scratch=scratch,
+            mutate=False,
+        )
+
+    def _compute_tick_state(
+        self,
+        snapshot: SmartPhrasingSnapshot,
+        abs_beat: float,
+        prev_abs_beat: Optional[float],
+        *,
+        scratch: _EngineScratch,
+        mutate: bool,
+    ) -> SmartPhrasingState:
         # 1. Resolve current phrase and crossings
         current_phrase_label: PhraseLabel = "other"
+        current_phrase_start_beat: Optional[float] = None
+        current_phrase_index: Optional[int] = None
         phrase_anchor_requested = False
-        
-        for seg in snapshot.phrase_segments:
+
+        for index, seg in enumerate(snapshot.phrase_segments):
             if prev_abs_beat is not None and prev_abs_beat < seg.start_beat <= abs_beat:
                 phrase_anchor_requested = True
-                
+
             if seg.start_beat <= abs_beat < seg.end_beat:
                 current_phrase_label = seg.label
+                current_phrase_start_beat = seg.start_beat
+                current_phrase_index = index
                 break
-                
+
+        previous_phrase_label: PhraseLabel = "other"
+        if current_phrase_index is not None and current_phrase_index > 0:
+            previous_phrase_label = snapshot.phrase_segments[current_phrase_index - 1].label
+        phrase_start_crossing = bool(
+            prev_abs_beat is not None
+            and current_phrase_start_beat is not None
+            and prev_abs_beat < current_phrase_start_beat <= abs_beat
+        )
+
         current_phrase_is_up = current_phrase_label == "up"
         current_phrase_is_chorus = current_phrase_label == "chorus"
         current_phrase_is_low = current_phrase_label == "low"
-        
+        beats_into_phrase = (
+            abs_beat - current_phrase_start_beat
+            if current_phrase_start_beat is not None else None
+        )
+
         # 2. Drop crossing
-        # Drop crossing is detected first so already-fired drops are excluded from the next future drop selection.
         smart_drop_crossing = False
         if prev_abs_beat is not None:
             for drop_beat in sorted(snapshot.smart_drop_beats):
-                if prev_abs_beat < drop_beat <= abs_beat and drop_beat not in self._fired_drop_beats:
+                if (
+                    prev_abs_beat < drop_beat <= abs_beat
+                    and drop_beat not in self._fired_drop_beats
+                ):
                     smart_drop_crossing = True
-                    self._fired_drop_beats.add(drop_beat)
-                    self._active_drop_beat = drop_beat
+                    if mutate:
+                        self._fired_drop_beats.add(drop_beat)
+                    scratch.active_drop_beat = drop_beat
                     break
-                    
+
         # 3. Resolve next Smart Drop
         next_smart_drop_beat = None
         beats_to_next_drop = None
@@ -231,41 +323,48 @@ class SmartPhrasingEngine:
                 next_smart_drop_beat = drop_beat
                 beats_to_next_drop = drop_beat - abs_beat
                 break
-                
+
         # 4. Drop window and Preclear Intent
         smart_drop_window_active = False
         if next_smart_drop_beat is not None and beats_to_next_drop is not None:
             smart_drop_window_active = beats_to_next_drop <= snapshot.drop_window_beats
 
         smart_drop_preclear_requested = False
-        if smart_drop_window_active and not self._smart_drop_window_active:
+        if smart_drop_window_active and not scratch.smart_drop_window_active:
             smart_drop_preclear_requested = True
-            
-        self._smart_drop_window_active = smart_drop_window_active
-        
+
+        scratch.smart_drop_window_active = smart_drop_window_active
+
         # 4b. Rearm Intent
         smart_drop_rearm_requested = smart_drop_crossing
 
         # 5. Post-drop
         smart_post_drop_active = False
-        if self._active_drop_beat is not None:
-            if abs_beat >= self._active_drop_beat and abs_beat < self._active_drop_beat + snapshot.post_drop_beats:
+        if scratch.active_drop_beat is not None:
+            if (
+                abs_beat >= scratch.active_drop_beat
+                and abs_beat < scratch.active_drop_beat + snapshot.post_drop_beats
+            ):
                 smart_post_drop_active = True
-            else:
-                self._active_drop_beat = None
-                
+            elif mutate:
+                scratch.active_drop_beat = None
+
         # 6. Buildup
         smart_buildup_active = False
-        if current_phrase_is_up and next_smart_drop_beat is not None and beats_to_next_drop is not None:
+        if (
+            current_phrase_is_up
+            and next_smart_drop_beat is not None
+            and beats_to_next_drop is not None
+        ):
             if beats_to_next_drop <= snapshot.phrase_lookahead_beats:
                 smart_buildup_active = True
-                
+
         # 7. Breakdown
         smart_breakdown_active = False
         breakdown_start_crossing = False
         breakdown_end_crossing = False
         breakdown_restore_beat: Optional[float] = None
-        
+
         for seg in snapshot.breakdown_segments:
             if seg.start_beat <= abs_beat < seg.end_beat:
                 smart_breakdown_active = True
@@ -288,7 +387,7 @@ class SmartPhrasingEngine:
         if next_smart_drop_beat is not None and beats_to_next_drop is not None:
             if beats_to_next_drop <= snapshot.transition_window_beats:
                 new_transition_window_active = True
-        
+
         transition_mask_should_arm = False
         transition_mask_should_clear = False
 
@@ -301,23 +400,23 @@ class SmartPhrasingEngine:
         )
 
         if new_transition_window_active:
-            rising_edge = not self._transition_window_active
+            rising_edge = not scratch.transition_window_active
             suppressed = smart_breakdown_active or breakdown_between
-            if (rising_edge or self._transition_window_arm_suppressed) and not suppressed:
+            if (rising_edge or scratch.transition_window_arm_suppressed) and not suppressed:
                 transition_mask_should_arm = True
-                self._transition_window_arm_suppressed = False
+                scratch.transition_window_arm_suppressed = False
             elif rising_edge and suppressed:
-                self._transition_window_arm_suppressed = True
-        elif self._transition_window_active:
+                scratch.transition_window_arm_suppressed = True
+        elif scratch.transition_window_active:
             transition_mask_should_clear = True
-            self._transition_window_arm_suppressed = False
+            scratch.transition_window_arm_suppressed = False
 
         if transition_mask_should_arm:
-            self._blackout_arm_latched = True
+            scratch.blackout_arm_latched = True
         if smart_drop_crossing or transition_mask_should_clear:
-            self._blackout_arm_latched = False
-            
-        self._transition_window_active = new_transition_window_active
+            scratch.blackout_arm_latched = False
+
+        scratch.transition_window_active = new_transition_window_active
 
         # 9. Periodic phrase-anchor intents (pure function of snapshot state).
         phrase_anchor_preclear_requested = False
@@ -325,17 +424,24 @@ class SmartPhrasingEngine:
         phrase_anchor_target_beat: Optional[int] = None
         this_beat_int = int(abs_beat)
         if snapshot.phrase_anchor_last_beat >= 0 and snapshot.phrase_anchor_period_beats > 0:
-            target_beat = int(snapshot.phrase_anchor_last_beat) + int(snapshot.phrase_anchor_period_beats)
+            target_beat = int(snapshot.phrase_anchor_last_beat) + int(
+                snapshot.phrase_anchor_period_beats
+            )
             phrase_anchor_target_beat = target_beat
             if this_beat_int <= target_beat + 8:
                 phrase_anchor_preclear_requested = this_beat_int == (target_beat - 1)
                 phrase_anchor_rearm_requested = this_beat_int >= target_beat
-        
-        state = SmartPhrasingState(
+
+        return SmartPhrasingState(
+            abs_beat=abs_beat,
             current_phrase_label=current_phrase_label,
+            current_phrase_start_beat=current_phrase_start_beat,
+            phrase_start_crossing=phrase_start_crossing,
+            previous_phrase_label=previous_phrase_label,
             current_phrase_is_up=current_phrase_is_up,
             current_phrase_is_chorus=current_phrase_is_chorus,
             current_phrase_is_low=current_phrase_is_low,
+            beats_into_phrase=beats_into_phrase,
             next_smart_drop_beat=next_smart_drop_beat,
             beats_to_next_drop=beats_to_next_drop,
             smart_drop_window_active=smart_drop_window_active,
@@ -343,7 +449,7 @@ class SmartPhrasingEngine:
             smart_drop_preclear_requested=smart_drop_preclear_requested,
             smart_drop_rearm_requested=smart_drop_rearm_requested,
             smart_post_drop_active=smart_post_drop_active,
-            active_drop_beat=self._active_drop_beat,
+            active_drop_beat=scratch.active_drop_beat,
             smart_buildup_active=smart_buildup_active,
             smart_breakdown_active=smart_breakdown_active,
             breakdown_start_crossing=breakdown_start_crossing,
@@ -354,19 +460,13 @@ class SmartPhrasingEngine:
             transition_mask_should_arm=transition_mask_should_arm,
             transition_mask_should_clear=transition_mask_should_clear,
             transition_window_active=new_transition_window_active,
-            transition_mask_arm_latched=self._blackout_arm_latched,
+            transition_mask_arm_latched=scratch.blackout_arm_latched,
             phrase_anchor_requested=phrase_anchor_requested,
             phrase_anchor_preclear_requested=phrase_anchor_preclear_requested,
             phrase_anchor_rearm_requested=phrase_anchor_rearm_requested,
             phrase_anchor_target_beat=phrase_anchor_target_beat,
-            reason="tick",
+            reason="preview" if not mutate else "tick",
         )
-        
-        self._last_deck_id = snapshot.deck_id
-        self._last_track_id = snapshot.track_id
-        self._previous_abs_beat = snapshot.abs_beat
-        
-        return SmartPhrasingResult(state=state, diagnostics=tuple(diagnostics))
 
 
 def _latest_marker_beat_at_or_before(abs_beat: float, beats: list[int]) -> Optional[int]:

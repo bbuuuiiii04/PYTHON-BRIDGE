@@ -334,6 +334,46 @@ class SmartRearmBreakdownTests(unittest.TestCase):
             [((1, 2, 128.0, 32_000, "smart-breakdown"), {"target_beat": 64})],
         )
 
+    def test_breakdown_abort_releases_mask_when_window_left_without_end_crossing(
+        self,
+    ) -> None:
+        # Track loop/restart or backward scrub: the latched breakdown is no
+        # longer active and no forward end-crossing fires. The blackout mask
+        # must still be released (else note 0 sticks on) and the latch cleared,
+        # but no autoloop rearm should be sent for the stale restore beat.
+        h = _Harness()
+        h.os.breakdown_active = True
+        h.os.breakdown_restore_beat = 608
+
+        result = h.tick(
+            _sp_state(smart_breakdown_active=False, breakdown_end_crossing=False),
+            h.ctx(smart_breakdown_enabled=True, this_beat=46, elapsed_ms=23_000),
+        )
+
+        self.assertFalse(result.breakdown_fired)
+        self.assertFalse(h.os.breakdown_active)
+        self.assertEqual(h.os.breakdown_restore_beat, 0)
+        self.assertEqual(h.release_calls, ["breakdown"])
+        self.assertEqual(h.direct_calls, [])
+
+    def test_breakdown_stays_latched_while_playhead_inside_segment(self) -> None:
+        # While still inside the breakdown segment (no end-crossing yet), the
+        # mask must remain held and the latch must persist — no spurious abort.
+        h = _Harness()
+        h.os.breakdown_active = True
+        h.os.breakdown_restore_beat = 608
+
+        result = h.tick(
+            _sp_state(smart_breakdown_active=True, breakdown_end_crossing=False),
+            h.ctx(smart_breakdown_enabled=True, this_beat=560, elapsed_ms=30_000),
+        )
+
+        self.assertFalse(result.breakdown_fired)
+        self.assertTrue(h.os.breakdown_active)
+        self.assertEqual(h.os.breakdown_restore_beat, 608)
+        self.assertEqual(h.release_calls, [])
+        self.assertEqual(h.direct_calls, [])
+
     def test_breakdown_start_is_blocked_by_drop_arm(self) -> None:
         h = _Harness()
         h.os.drop_cut_armed = True

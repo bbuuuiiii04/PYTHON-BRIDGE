@@ -252,13 +252,22 @@ class MidiOutput:
         note = int(msg.note)
         try:
             if msg.kind == "cc":
+                control = int(msg.cc)
+                value = int(msg.value)
                 outport.send(
                     mido.Message(
                         "control_change",
                         channel=channel,
-                        control=int(msg.cc),
-                        value=int(msg.value),
+                        control=control,
+                        value=value,
                     )
+                )
+                log.info(
+                    "[MIDI] tx  type=control_change  port=%r  channel=%d  control=%d  value=%d",
+                    self._port_name,
+                    channel + 1,
+                    control,
+                    value,
                 )
                 with self._lock:
                     self._sent_count += 1
@@ -323,6 +332,13 @@ class MidiOutput:
         if self._is_note_held(key):
             self._send_note_off(channel=channel, note=note)
         outport.send(mido.Message("note_on", channel=channel, note=note, velocity=velocity))
+        log.info(
+            "[MIDI] tx  type=note_on  port=%r  channel=%d  note=%d  velocity=%d",
+            self._port_name,
+            channel + 1,
+            note,
+            velocity,
+        )
 
     def _send_note_off(self, *, channel: int, note: int) -> None:
         with self._lock:
@@ -331,6 +347,12 @@ class MidiOutput:
         if outport is None or mido is None:
             return
         outport.send(mido.Message("note_off", channel=channel, note=note, velocity=0))
+        log.info(
+            "[MIDI] tx  type=note_off  port=%r  channel=%d  note=%d  velocity=0",
+            self._port_name,
+            channel + 1,
+            note,
+        )
         with self._lock:
             self._active_held_notes.pop((channel, note), None)
 

@@ -579,6 +579,24 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
         self.assertEqual(sm._os.phrase_anchor_last_beat, 64)
         sm._sse.send_autoloop_deck_load.assert_called_once()
 
+    def test_midi_refire_logs_marker_source_and_origin(self):
+        sm = self._prepare_manager(drop_beat=256)
+        sm._pending_phrase_marker = True
+        sm._os.midi_refire_origin_beat = 32
+        sm._os.last_autoloop_status_phrase_beat = 32
+        sm._os.last_beat_elapsed_ms = int(63 * 500)
+
+        with self.assertLogs("state_manager", level="INFO") as captured:
+            self._push_ctx(sm, 64)
+
+        output = "\n".join(captured.output)
+        self.assertIn("[SM] midi-refire", output)
+        self.assertIn("source=marker", output)
+        self.assertIn("origin_before=32", output)
+        self.assertIn("origin_after=64", output)
+        self.assertIn("previous=32", output)
+        self.assertIn("marker_latched=True", output)
+
     def test_arm_matches_legacy_normal_window(self):
         sm = self._prepare_manager(drop_beat=64)
         contexts = [self._push_ctx(sm, beat) for beat in (59, 60, 61, 62, 63, 64)]

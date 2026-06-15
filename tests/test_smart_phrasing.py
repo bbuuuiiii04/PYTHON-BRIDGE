@@ -131,17 +131,21 @@ class TestSmartPhrasing(unittest.TestCase):
         res = self.engine.update(replace(snap, abs_beat=16.0))
         self.assertEqual(res.state.current_phrase_label, "up")
         self.assertTrue(res.state.current_phrase_is_up)
+        self.assertEqual(res.state.beats_into_phrase, 16.0)
         
         res = self.engine.update(replace(snap, abs_beat=32.0))
         self.assertEqual(res.state.current_phrase_label, "chorus")
         self.assertTrue(res.state.current_phrase_is_chorus)
+        self.assertEqual(res.state.beats_into_phrase, 0.0)
         
         res = self.engine.update(replace(snap, abs_beat=65.0))
         self.assertEqual(res.state.current_phrase_label, "low")
         self.assertTrue(res.state.current_phrase_is_low)
+        self.assertEqual(res.state.beats_into_phrase, 1.0)
         
         res = self.engine.update(replace(snap, abs_beat=100.0))
         self.assertEqual(res.state.current_phrase_label, "other")
+        self.assertIsNone(res.state.beats_into_phrase)
         self.assertTrue(not res.state.current_phrase_is_up and not res.state.current_phrase_is_chorus and not res.state.current_phrase_is_low)
 
     def test_computes_next_drop_and_beats_to_drop(self):
@@ -166,6 +170,36 @@ class TestSmartPhrasing(unittest.TestCase):
         self.engine.update(replace(snap, abs_beat=63.5))
         res = self.engine.update(replace(snap, abs_beat=64.0))
         self.assertTrue(res.state.smart_drop_crossing)
+
+    def test_preview_with_beat_offset_detects_drop_crossing_early(self) -> None:
+        snap = self._default_snap(smart_drop_beats=(64.0,))
+        self.engine.update(replace(snap, abs_beat=61.9))
+
+        live = self.engine.update(replace(snap, abs_beat=62.0))
+        self.assertFalse(live.state.smart_drop_crossing)
+
+        preview = self.engine.preview_with_beat_offset(
+            replace(snap, abs_beat=62.0),
+            offset_beats=2.0,
+        )
+        self.assertTrue(preview.smart_drop_crossing)
+
+    def test_preview_with_beat_offset_arms_transition_window_early(self) -> None:
+        snap = self._default_snap(smart_drop_beats=(64.0,), transition_window_beats=4.0)
+        self.engine.update(replace(snap, abs_beat=57.0))
+
+        live = self.engine.update(replace(snap, abs_beat=58.0))
+        preview = self.engine.preview_with_beat_offset(
+            replace(snap, abs_beat=58.0),
+            offset_beats=2.0,
+        )
+        self.assertFalse(live.state.transition_window_active)
+        self.assertTrue(preview.transition_window_active)
+        self.assertTrue(
+            preview.transition_mask_should_arm
+            or preview.transition_mask_arm_latched
+            or preview.transition_window_active
+        )
 
     def test_buildup_only_in_up_phrase_before_future_drop(self):
         snap = self._default_snap(
@@ -997,6 +1031,22 @@ class TestSmartPhrasing(unittest.TestCase):
         self.engine.update(replace(snap, abs_beat=63.0))
         res = self.engine.update(replace(snap, abs_beat=64.0))
         self.assertTrue(res.state.phrase_anchor_requested)
+        self.assertTrue(res.state.phrase_start_crossing)
+        self.assertEqual(res.state.current_phrase_start_beat, 64.0)
+        self.assertEqual(res.state.previous_phrase_label, "up")
+
+    def test_repeated_chorus_marker_exposes_previous_chorus_label(self):
+        snap = self._default_snap(phrase_segments=(
+            PhraseSegment(start_beat=64.0, end_beat=80.0, label="chorus"),
+            PhraseSegment(start_beat=80.0, end_beat=96.0, label="chorus"),
+        ))
+        self.engine.update(replace(snap, abs_beat=79.0))
+
+        res = self.engine.update(replace(snap, abs_beat=80.0))
+
+        self.assertTrue(res.state.phrase_start_crossing)
+        self.assertEqual(res.state.current_phrase_label, "chorus")
+        self.assertEqual(res.state.previous_phrase_label, "chorus")
 
     def test_phrase_anchor_requested_fires_when_jumping_over_start(self):
         """jumping over a phrase segment start fires the anchor intent."""

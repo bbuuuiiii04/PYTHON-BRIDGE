@@ -117,6 +117,7 @@ class PlaylistCache:
 
     def __init__(self, db_path: Path, *, folder_name: str = "PER GENRE") -> None:
         self._db_path = Path(db_path)
+        self._folder_label = str(folder_name or "").strip() or "PER GENRE"
         self._folder_name = canonicalize_text(folder_name)
         self._by_content_id: dict[str, frozenset[str]] = {}
         self._loaded = False
@@ -155,7 +156,10 @@ class PlaylistCache:
                     if canonicalize_text(getattr(playlist, "Name", "")) == self._folder_name
                 }
                 if not parent_ids:
-                    log.warning("[PERSONALITY] PER GENRE folder not found in Rekordbox DB")
+                    log.warning(
+                        "[PERSONALITY] playlist-cache folder=%r not found in Rekordbox DB",
+                        self._folder_label,
+                    )
                     self._by_content_id = {}
                     self._loaded = True
                     return 0
@@ -165,7 +169,10 @@ class PlaylistCache:
                     if str(getattr(playlist, "ParentID", "")) in parent_ids
                 ]
                 if not genre_playlists:
-                    log.warning("[PERSONALITY] PER GENRE folder has no child playlists")
+                    log.warning(
+                        "[PERSONALITY] playlist-cache folder=%r has no child playlists",
+                        self._folder_label,
+                    )
 
                 total_skipped = 0
                 for playlist in genre_playlists:
@@ -176,7 +183,11 @@ class PlaylistCache:
                     for content_id in content_ids:
                         next_cache.setdefault(str(content_id), set()).add(playlist_name)
             except Exception:
-                log.warning("[PERSONALITY] PER GENRE cache refresh failed", exc_info=True)
+                log.warning(
+                    "[PERSONALITY] playlist-cache folder=%r refresh failed",
+                    self._folder_label,
+                    exc_info=True,
+                )
                 return len(self._by_content_id)
             finally:
                 if db is not None:
@@ -197,7 +208,8 @@ class PlaylistCache:
                 or new_playlist_count != self._last_logged_playlist_count
             ):
                 log.info(
-                    "[PERSONALITY] PER GENRE cache refreshed tracks=%d playlists=%d skipped_rows=%d",
+                    "[PERSONALITY] playlist-cache folder=%r refreshed tracks=%d playlists=%d skipped_rows=%d",
+                    self._folder_label,
                     new_track_count,
                     new_playlist_count,
                     total_skipped,

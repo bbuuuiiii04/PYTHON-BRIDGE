@@ -7,4 +7,5 @@ __pycache__/
 .hypothesis/
 .claude/
 config/laser_director.json
+config/led_look_director.json
 spec/*.npy

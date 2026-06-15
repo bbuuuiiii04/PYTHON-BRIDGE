@@ -26,6 +26,28 @@ Audited against the current checkout on 2026-06-11.
 - `beat_math.py` helpers remain pure computation utilities (no runtime state or
   I/O side effects).
 
+## LED Look Director Ownership
+
+- `StateManager` owns LED enabled/manual override/emergency blackout latches and
+  the sanitized LED runtime status surface.
+- `LEDLookDirector` is policy-only. It may choose configured looks from manual
+  override, emergency blackout, or LED role banks, but it must not perform
+  Govee transport I/O.
+- `GoveeSceneAdapter.trigger(...)` is the only bridge-side LED output handoff.
+  It must remain bounded and non-blocking; worker-side transport owns slow Govee
+  API/LAN/cloud behavior.
+- Automatic LED role-entry is transition/role-keyed only. It must not emit
+  commands every tick or every beat.
+- Emergency blackout beats manual override; manual override beats automation.
+- Phase 8 automatic LED role-entry is dry-run/config-gated. Live automation,
+  event-facing use, and Smart Drop blackout coupling require later explicit
+  gates.
+- `StateManager._push_tick` must not perform LED config parsing, discovery,
+  DNS/network calls, sleeps, retries, blocking queue operations, or status
+  provider calls.
+- LED status must not expose `GOVEE_API_KEY`, full device IDs, raw Govee
+  request/response bodies, or headers.
+
 ## Direct Authority
 
 - A direct flag alone must not mark a direct path ready.

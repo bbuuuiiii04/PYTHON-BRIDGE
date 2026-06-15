@@ -1,0 +1,304 @@
+{
+  "schema_version": 1,
+  "enabled": false,
+  "dry_run": true,
+  "automation_enabled": false,
+  "automation": {
+    "offset_s": 0.0
+  },
+  "targets": {
+    "room_perimeter": {
+      "label": "Strip Light",
+      "device_ref": "redacted-operator-local-strip-light-id",
+      "expected_model": "H612D",
+      "control_route": "govee_platform_dynamic_scene",
+      "capabilities": [
+        "scene",
+        "diy_scene",
+        "off",
+        "on_off::powerSwitch"
+      ]
+    }
+  },
+  "looks": {
+    "room_safe_default": {
+      "target": "room_perimeter",
+      "action": "unmapped",
+      "scene_ref": "unmapped",
+      "fallback": "room_blackout",
+      "safety_class": "safe",
+      "brightness": 35,
+      "allow_strobe": false
+    },
+    "room_blackout": {
+      "target": "room_perimeter",
+      "action": "diy_scene",
+      "scene_ref": "BLACKOUT SCENE",
+      "fallback": "",
+      "safety_class": "blackout",
+      "brightness": 0,
+      "allow_strobe": false
+    },
+    "groove_release_a": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "Release-A",
+      "fallback": "room_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "groove_diy_groove": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "GROOVE from DIY",
+      "fallback": "room_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "groove_diy_groove_2": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "GROOVE 2 from DIY",
+      "fallback": "room_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "groove_diy_groove_3": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "GROOVE 3 from DIY",
+      "fallback": "room_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "groove_ghost_b": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "Ghost-B",
+      "fallback": "room_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "groove_tension_a": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "Tension-A",
+      "fallback": "room_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "buildup_disco_a": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "Disco-A",
+      "fallback": "room_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "buildup_excited_b": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "Excited-B",
+      "fallback": "room_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "buildup_flash": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "Flash",
+      "fallback": "room_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "buildup_music_mode_separation": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "Separation from Music Mode",
+      "fallback": "room_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "buildup_diy_white_sparse": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "BUILDUP WHITE SPARSE from DIY",
+      "fallback": "room_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "buildup_diy_2": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "BUILDUP 2 from DIY",
+      "fallback": "room_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_lightning_a": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "Lightning-A",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_music_mode_rolling": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "Rolling from Music Mode",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_diy_1_red_white_chase": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "DROP 1 RED/WHITE CHASE from DIY",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_diy_2_cyan": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "DROP 2 CYAN from DIY",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_diy_3": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "DROP 3 from DIY",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_disco_a": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "Disco-A",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_diy_4_blue_cyan": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "DROP 4 BLUE/CYAN from DIY",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_diy_5_red": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "DROP 5 RED from DIY",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "breakdown_1_red": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "BREAKDOWN 1 RED",
+      "fallback": "room_blackout",
+      "safety_class": "breakdown",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "breakdown_cyan_stack": {
+      "target": "room_perimeter",
+      "action": "scene",
+      "scene_ref": "BREAKDOWN CYAN STACK",
+      "fallback": "room_blackout",
+      "safety_class": "breakdown",
+      "brightness": 100,
+      "allow_strobe": true
+    }
+  },
+  "banks": {
+    "default": {
+      "ambient": [],
+      "groove": [
+        "groove_release_a",
+        "groove_diy_groove",
+        "groove_diy_groove_2",
+        "groove_diy_groove_3",
+        "groove_ghost_b",
+        "groove_tension_a"
+      ],
+      "buildup": [
+        "buildup_disco_a",
+        "buildup_excited_b",
+        "buildup_flash",
+        "buildup_music_mode_separation",
+        "buildup_diy_white_sparse",
+        "buildup_diy_2"
+      ],
+      "pre_drop": [],
+      "drop": [
+        "drop_lightning_a",
+        "drop_music_mode_rolling",
+        "drop_diy_1_red_white_chase",
+        "drop_diy_2_cyan",
+        "drop_diy_3",
+        "drop_disco_a",
+        "drop_diy_4_blue_cyan",
+        "drop_diy_5_red"
+      ],
+      "post_drop": [],
+      "breakdown": [
+        "breakdown_1_red",
+        "breakdown_cyan_stack"
+      ],
+      "utility": [
+        "room_blackout"
+      ]
+    }
+  },
+  "safe_default": "room_blackout",
+  "blackout": "room_blackout",
+  "rate_limits": {
+    "queue_maxsize": 8,
+    "scene_retrigger_cooldown_s": 4.0,
+    "high_impact_cooldown_s": 12.0,
+    "request_timeout_s": 2.0,
+    "worker_shutdown_timeout_s": 1.0
+  },
+  "safety": {
+    "max_brightness": 100,
+    "allow_strobe": true,
+    "max_strobe_duration_ms": 750,
+    "high_impact_cooldown_s": 12.0,
+    "drop_flash_duration_ms": 750,
+    "emergency_blackout_always_available": true,
+    "scripted_mode_automation": false
+  },
+  "metadata": {
+    "future_requirements": [
+      "smart_drop_blackout_coupling_deferred_until_later_phase"
+    ]
+  }
+}

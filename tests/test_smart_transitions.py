@@ -176,6 +176,7 @@ def _legacy_sp_state_for_breakdown(sm, active: int, this_beat: int) -> SmartPhra
     if os.breakdown_active:
         return _sp_state(
             breakdown_end_crossing=this_beat >= os.breakdown_restore_beat,
+            smart_breakdown_active=this_beat < os.breakdown_restore_beat,
         )
 
     for bd_beat in d.meta.smart_breakdowns:
@@ -384,7 +385,7 @@ class SmartRearmFlagTests(unittest.TestCase):
         self.assertFalse(sm._smart_drop_enabled)
         self.assertFalse(sm._phrase_anchor_enabled)
 
-    def test_global_switch_on_enables_defaults(self) -> None:
+    def test_global_switch_on_with_anchor_opt_in_enables_all(self) -> None:
         sm = _manager({
             "RBSS_SMART_REARM_EXPERIMENT": "1",
             "RBSS_SMART_DROP": "1",
@@ -393,6 +394,21 @@ class SmartRearmFlagTests(unittest.TestCase):
         self.assertTrue(sm._smart_rearm_experiment)
         self.assertTrue(sm._smart_drop_enabled)
         self.assertTrue(sm._phrase_anchor_enabled)
+
+    def test_phrase_anchor_defaults_off_when_experiment_on(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "RBSS_SMART_REARM_EXPERIMENT": "1",
+                "RBSS_SMART_DROP": "1",
+            },
+            clear=True,
+        ):
+            sm = StateManager(queue.Queue(), PositionCache(), Mock())
+
+        self.assertTrue(sm._smart_rearm_experiment)
+        self.assertTrue(sm._smart_drop_enabled)
+        self.assertFalse(sm._phrase_anchor_enabled)
 
     def test_experiment_off_skips_anlz_worker(self) -> None:
         sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "0"})
@@ -1717,7 +1733,9 @@ class SmartBreakdownTests(unittest.TestCase):
             130.0,
             40,
             20_000,
-            sp_state=_sp_state(breakdown_end_crossing=False),
+            sp_state=_sp_state(
+                smart_breakdown_active=True, breakdown_end_crossing=False
+            ),
         )
         self.assertTrue(sm._os.breakdown_active)
         _smart_breakdown_tick(
@@ -1731,6 +1749,29 @@ class SmartBreakdownTests(unittest.TestCase):
         )
         self.assertFalse(sm._os.breakdown_active)
         sm._sse.send_autoloop_deck_load.assert_called_once()
+
+    def test_breakdown_aborts_and_releases_mask_on_loop_back(self):
+        # Same-track loop/scrub away from the breakdown window: no forward
+        # end-crossing fires and the playhead is no longer inside the segment.
+        # The blackout mask must be released so note 0 does not stick on.
+        sm = _sm()
+        sm._os.breakdown_active = True
+        sm._os.breakdown_restore_beat = 608
+        _smart_breakdown_tick(
+            sm,
+            1,
+            2,
+            130.0,
+            46,
+            23_000,
+            sp_state=_sp_state(
+                smart_breakdown_active=False, breakdown_end_crossing=False
+            ),
+        )
+        self.assertFalse(sm._os.breakdown_active)
+        self.assertEqual(sm._os.breakdown_restore_beat, 0)
+        sm._laser_executor.release_blackout_mask.assert_called_once_with("breakdown")
+        sm._sse.send_autoloop_deck_load.assert_not_called()
 
     def test_breakdown_suppression_gates_still_apply_with_sp_state(self):
         sm = _sm()

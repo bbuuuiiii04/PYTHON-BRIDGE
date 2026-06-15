@@ -121,6 +121,7 @@ class LaserDirector:
         self._post_drop_start_abs_beat: float = -1.0
         self._last_smart_abs_beat: Optional[float] = None
         self._phrase_trigger_pending: bool = False
+        self._last_buildup_gate_log_key: Optional[tuple[object, ...]] = None
         self._smart_drop_blackout_active: bool = False
         self._decision_log = LaserDecisionLog()
 
@@ -482,15 +483,26 @@ class LaserDirector:
 
         current_phrase_is_up = sp.current_phrase_is_up
         current_phrase_is_chorus = sp.current_phrase_is_chorus
-
-        if (
-            self._buildup_scene
-            and not in_post_drop_hold
-            and current_phrase_is_up
-            and not current_phrase_is_chorus
+        in_buildup_window = (
+            bool(self._buildup_scene)
             and self._buildup_lookahead_beats > 0
             and 0 < beats_to_next_drop <= self._buildup_lookahead_beats
+        )
+
+        if in_buildup_window and (
+            not in_post_drop_hold
+            and current_phrase_is_up
+            and not current_phrase_is_chorus
         ):
+            self._log_buildup_gate(
+                decision="allowed",
+                reason="up_phrase",
+                abs_beat=abs_beat,
+                beats_to_next_drop=beats_to_next_drop,
+                current_phrase_is_up=current_phrase_is_up,
+                current_phrase_is_chorus=current_phrase_is_chorus,
+                in_post_drop_hold=in_post_drop_hold,
+            )
             self._last_smart_abs_beat = abs_beat
             return LaserSceneDecision(
                 scene=self._buildup_scene,
@@ -498,6 +510,22 @@ class LaserDirector:
                 priority=11,
                 source="policy",
                 role="buildup",
+            )
+        if in_buildup_window:
+            if in_post_drop_hold:
+                buildup_gate_reason = "post_drop_hold"
+            elif current_phrase_is_chorus:
+                buildup_gate_reason = "chorus"
+            else:
+                buildup_gate_reason = "not_up"
+            self._log_buildup_gate(
+                decision="blocked",
+                reason=buildup_gate_reason,
+                abs_beat=abs_beat,
+                beats_to_next_drop=beats_to_next_drop,
+                current_phrase_is_up=current_phrase_is_up,
+                current_phrase_is_chorus=current_phrase_is_chorus,
+                in_post_drop_hold=in_post_drop_hold,
             )
 
         self._last_smart_abs_beat = abs_beat
@@ -512,6 +540,43 @@ class LaserDirector:
             first_playing_tick=first_playing_tick,
             phrase_changed=phrase_changed,
             effective_phrase_scene=effective_phrase_scene,
+        )
+
+    def _log_buildup_gate(
+        self,
+        *,
+        decision: str,
+        reason: str,
+        abs_beat: float,
+        beats_to_next_drop: float,
+        current_phrase_is_up: bool,
+        current_phrase_is_chorus: bool,
+        in_post_drop_hold: bool,
+    ) -> None:
+        beat_bucket = int(max(abs_beat, 0.0))
+        key = (
+            beat_bucket,
+            decision,
+            reason,
+            bool(current_phrase_is_up),
+            bool(current_phrase_is_chorus),
+            bool(in_post_drop_hold),
+        )
+        if key == self._last_buildup_gate_log_key:
+            return
+        self._last_buildup_gate_log_key = key
+        log.info(
+            "[LASER] buildup-gate  decision=%s  reason=%s  beat=%.2f  "
+            "drop_in=%.2f  lookahead=%d  up=%s  chorus=%s  post_hold=%s  scene=%s",
+            decision,
+            reason,
+            abs_beat,
+            beats_to_next_drop,
+            self._buildup_lookahead_beats,
+            current_phrase_is_up,
+            current_phrase_is_chorus,
+            in_post_drop_hold,
+            self._buildup_scene,
         )
 
     def _apply_pending_personality(self, ctx: LaserContext) -> None:
@@ -571,7 +636,7 @@ class LaserDirector:
             # same-tick autoloop_tick_just_fired emits a phrase_boundary fire.
             self._phrase_trigger_pending = True
 
-        if self._phrase_trigger_pending and ctx.autoloop_tick_just_fired:
+        if ctx.autoloop_tick_just_fired:
             self._phrase_trigger_pending = False
             return self._gate_normal_change(
                 ctx=ctx,
@@ -622,6 +687,7 @@ class LaserDirector:
         self._last_smart_abs_beat = None
         self._smart_drop_blackout_active = False
         self._phrase_trigger_pending = False
+        self._last_buildup_gate_log_key = None
 
     def _effective_phrase_scene(self) -> str:
         return self._phrase_scene or self._default_scene
