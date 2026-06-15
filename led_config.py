@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
+
+_log = logging.getLogger(__name__)
 
 from .govee_frame_renderer import (
     REALTIME_EFFECT_NAMES,
@@ -15,6 +18,7 @@ from .govee_frame_renderer import (
     REALTIME_STROBE_EFFECTS,
 )
 from .led_models import (
+    ColorEngineConfig,
     LEDAutomation,
     LEDBank,
     LEDConfig,
@@ -25,6 +29,8 @@ from .led_models import (
     LEDRealtimeConfig,
     LEDSafety,
     LEDTarget,
+    Palette,
+    _DEFAULT_SCALE_STOPS,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parent
@@ -860,6 +866,295 @@ def _validate_diy_scene_ref(prefix: str, scene_ref: str, errors: list[str]) -> N
         errors.append(f"{prefix} diy_scene scene_ref must be a positive Govee DIY scene value")
 
 
+def _validate_color_engine(data: dict[str, Any]) -> list[str]:
+    """Validate the color_engine config block per §15.5 rules.
+
+    Returns a list of human-readable error strings; empty list = valid.
+    """
+    errors: list[str] = []
+
+    # enabled must be bool
+    enabled = data.get("enabled")
+    if not isinstance(enabled, bool):
+        errors.append("color_engine.enabled must be a boolean")
+
+    # scale_stops: must be a dict of str → [r,g,b]
+    scale_stops_raw = data.get("scale_stops", dict(_DEFAULT_SCALE_STOPS))
+    if not isinstance(scale_stops_raw, dict):
+        errors.append("color_engine.scale_stops must be an object")
+        scale_stops_raw = dict(_DEFAULT_SCALE_STOPS)
+    else:
+        for stop_name, stop_val in scale_stops_raw.items():
+            if not isinstance(stop_val, (list, tuple)) or len(stop_val) != 3:
+                errors.append(
+                    f"color_engine.scale_stops.{stop_name} must be an RGB list of 3 integers"
+                )
+            elif not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255 for v in stop_val):
+                errors.append(
+                    f"color_engine.scale_stops.{stop_name} RGB values must be integers 0..255"
+                )
+    valid_stop_keys = set(scale_stops_raw.keys()) if isinstance(scale_stops_raw, dict) else set()
+
+    # palette_dwell_tracks >= 1
+    palette_dwell_tracks = data.get("palette_dwell_tracks", 4)
+    if not isinstance(palette_dwell_tracks, int) or isinstance(palette_dwell_tracks, bool):
+        errors.append("color_engine.palette_dwell_tracks must be an integer")
+    elif palette_dwell_tracks < 1:
+        errors.append("color_engine.palette_dwell_tracks must be >= 1")
+
+    # snap_eligible_drop_indices: list of ints >= 1
+    snap_indices = data.get("snap_eligible_drop_indices", [2, 3])
+    if not isinstance(snap_indices, list):
+        errors.append("color_engine.snap_eligible_drop_indices must be a list")
+    else:
+        for i, idx in enumerate(snap_indices):
+            if not isinstance(idx, int) or isinstance(idx, bool):
+                errors.append(
+                    f"color_engine.snap_eligible_drop_indices[{i}] must be an integer"
+                )
+            elif idx < 1:
+                errors.append(
+                    f"color_engine.snap_eligible_drop_indices[{i}] must be >= 1"
+                )
+
+    # big_shift_chance in [0, 1]
+    big_shift_chance = data.get("big_shift_chance", 0.25)
+    if not isinstance(big_shift_chance, (int, float)) or isinstance(big_shift_chance, bool):
+        errors.append("color_engine.big_shift_chance must be a number")
+    elif not (0.0 <= float(big_shift_chance) <= 1.0):
+        errors.append("color_engine.big_shift_chance must be in [0, 1]")
+
+    # big_shift_weight_bias: number
+    big_shift_weight_bias = data.get("big_shift_weight_bias", 1.0)
+    if not isinstance(big_shift_weight_bias, (int, float)) or isinstance(big_shift_weight_bias, bool):
+        errors.append("color_engine.big_shift_weight_bias must be a number")
+
+    # drama_by_role: bool
+    drama_by_role = data.get("drama_by_role", True)
+    if not isinstance(drama_by_role, bool):
+        errors.append("color_engine.drama_by_role must be a boolean")
+
+    # role_spread: dict of str → number
+    role_spread = data.get("role_spread", {})
+    if not isinstance(role_spread, dict):
+        errors.append("color_engine.role_spread must be an object")
+    else:
+        for role_name, spread_val in role_spread.items():
+            if not isinstance(spread_val, (int, float)) or isinstance(spread_val, bool):
+                errors.append(f"color_engine.role_spread.{role_name} must be a number")
+
+    # step_within_section: dict of str → bool
+    step_within_section = data.get("step_within_section", {})
+    if not isinstance(step_within_section, dict):
+        errors.append("color_engine.step_within_section must be an object")
+    else:
+        for role_name, step_val in step_within_section.items():
+            if not isinstance(step_val, bool):
+                errors.append(f"color_engine.step_within_section.{role_name} must be a boolean")
+
+    # fade_beats_by_role: dict of str → number
+    fade_beats_by_role = data.get("fade_beats_by_role", {})
+    if not isinstance(fade_beats_by_role, dict):
+        errors.append("color_engine.fade_beats_by_role must be an object")
+    else:
+        for role_name, fade_val in fade_beats_by_role.items():
+            if not isinstance(fade_val, (int, float)) or isinstance(fade_val, bool):
+                errors.append(f"color_engine.fade_beats_by_role.{role_name} must be a number")
+
+    # exempt_looks: list of strings
+    exempt_looks = data.get("exempt_looks", [])
+    if not isinstance(exempt_looks, list):
+        errors.append("color_engine.exempt_looks must be a list")
+    else:
+        for i, name in enumerate(exempt_looks):
+            if not isinstance(name, str):
+                errors.append(f"color_engine.exempt_looks[{i}] must be a string")
+
+    # diy_color_tags: dict of str → str
+    diy_color_tags = data.get("diy_color_tags", {})
+    if not isinstance(diy_color_tags, dict):
+        errors.append("color_engine.diy_color_tags must be an object")
+    else:
+        for look_name, tag_val in diy_color_tags.items():
+            if not isinstance(tag_val, str):
+                errors.append(f"color_engine.diy_color_tags.{look_name} must be a string")
+
+    # set_seed_mode: string
+    set_seed_mode = data.get("set_seed_mode", "random")
+    if not isinstance(set_seed_mode, str):
+        errors.append("color_engine.set_seed_mode must be a string")
+
+    # palettes: non-empty dict
+    palettes = data.get("palettes")
+    if not isinstance(palettes, dict) or not palettes:
+        errors.append("color_engine.palettes must be a non-empty object")
+        return errors  # can't validate palette contents
+
+    # Validate each palette
+    weight_sum = 0.0
+    for palette_name, palette_data in palettes.items():
+        if not isinstance(palette_data, dict):
+            errors.append(f"color_engine.palettes.{palette_name} must be an object")
+            continue
+        p_prefix = f"color_engine.palettes.{palette_name}"
+
+        # range: list of 2 strings, each must be a valid scale_stop key
+        p_range = palette_data.get("range")
+        if not isinstance(p_range, (list, tuple)) or len(p_range) != 2:
+            errors.append(f"{p_prefix}.range must be a list of 2 stop names")
+        else:
+            for endpoint in p_range:
+                if not isinstance(endpoint, str):
+                    errors.append(f"{p_prefix}.range endpoints must be strings")
+                elif endpoint not in valid_stop_keys:
+                    errors.append(
+                        f"{p_prefix}.range endpoint '{endpoint}' is not a key in scale_stops"
+                    )
+
+        # white in [0, 1]
+        white = palette_data.get("white", 0.0)
+        if not isinstance(white, (int, float)) or isinstance(white, bool):
+            errors.append(f"{p_prefix}.white must be a number")
+        elif not (0.0 <= float(white) <= 1.0):
+            errors.append(f"{p_prefix}.white must be in [0, 1]")
+
+        # spread >= 0
+        spread = palette_data.get("spread", 0.10)
+        if not isinstance(spread, (int, float)) or isinstance(spread, bool):
+            errors.append(f"{p_prefix}.spread must be a number")
+        elif float(spread) < 0.0:
+            errors.append(f"{p_prefix}.spread must be >= 0")
+
+        # weight >= 0
+        weight = palette_data.get("weight", 1.0)
+        if not isinstance(weight, (int, float)) or isinstance(weight, bool):
+            errors.append(f"{p_prefix}.weight must be a number")
+        elif float(weight) < 0.0:
+            errors.append(f"{p_prefix}.weight must be >= 0")
+        else:
+            weight_sum += float(weight)
+
+        # dwell: optional int
+        dwell = palette_data.get("dwell")
+        if dwell is not None:
+            if not isinstance(dwell, int) or isinstance(dwell, bool) or dwell < 1:
+                errors.append(f"{p_prefix}.dwell must be a positive integer")
+
+        # focus_modes: dict of str → number, with positive sum if present
+        focus_modes = palette_data.get("focus_modes")
+        if focus_modes is not None:
+            if not isinstance(focus_modes, dict):
+                errors.append(f"{p_prefix}.focus_modes must be an object")
+            else:
+                fm_sum = 0.0
+                for mode_name, mode_weight in focus_modes.items():
+                    if not isinstance(mode_weight, (int, float)) or isinstance(mode_weight, bool):
+                        errors.append(f"{p_prefix}.focus_modes.{mode_name} must be a number")
+                    elif float(mode_weight) < 0.0:
+                        errors.append(f"{p_prefix}.focus_modes.{mode_name} must be >= 0")
+                    else:
+                        fm_sum += float(mode_weight)
+                if focus_modes and fm_sum <= 0.0:
+                    errors.append(
+                        f"{p_prefix}.focus_modes weights must sum to > 0"
+                    )
+
+    # Check total palette weight > 0 (guards div-by-zero)
+    if weight_sum <= 0.0:
+        errors.append("color_engine.palettes: sum of all palette weights must be > 0")
+
+    return errors
+
+
+def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
+    """Parse and return a ColorEngineConfig, or None if absent or invalid.
+
+    Validation errors disable only the color engine (never the whole LED config).
+    """
+    raw = data.get("color_engine")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        _log.warning("[RGB] color_engine block is not an object — engine disabled")
+        return None
+
+    errs = _validate_color_engine(raw)
+    if errs:
+        _log.warning(
+            "[RGB] color_engine config invalid — engine disabled. Errors: %s",
+            "; ".join(errs),
+        )
+        return None
+
+    # Build scale_stops
+    scale_stops_raw = raw.get("scale_stops", dict(_DEFAULT_SCALE_STOPS))
+    scale_stops: dict[str, tuple[int, int, int]] = {
+        k: (int(v[0]), int(v[1]), int(v[2])) for k, v in scale_stops_raw.items()
+    }
+
+    # Build palettes
+    palettes_raw = raw["palettes"]
+    palettes: dict[str, Palette] = {}
+    for name, p in palettes_raw.items():
+        p_range_raw = p["range"]
+        p_range: tuple[str, str] = (str(p_range_raw[0]), str(p_range_raw[1]))
+        focus_modes_raw = p.get("focus_modes") or {}
+        focus_modes: dict[str, float] = {k: float(v) for k, v in focus_modes_raw.items()}
+        dwell_raw = p.get("dwell")
+        palettes[name] = Palette(
+            range=p_range,
+            white=float(p.get("white", 0.0)),
+            spread=float(p.get("spread", 0.10)),
+            weight=float(p.get("weight", 1.0)),
+            dwell=int(dwell_raw) if dwell_raw is not None else None,
+            focus_modes=focus_modes,
+        )
+
+    # Build snap_eligible_drop_indices
+    snap_indices = raw.get("snap_eligible_drop_indices", [2, 3])
+    snap_tuple: tuple[int, ...] = tuple(int(i) for i in snap_indices)
+
+    # Build exempt_looks
+    exempt_looks_raw = raw.get("exempt_looks", [])
+    exempt_looks: tuple[str, ...] = tuple(str(s) for s in exempt_looks_raw)
+
+    # Build role_spread
+    role_spread_raw = raw.get("role_spread", {"drop": 0.35, "groove": 0.12, "ambient": 0.10})
+    role_spread: dict[str, float] = {k: float(v) for k, v in role_spread_raw.items()}
+
+    # Build step_within_section
+    step_raw = raw.get("step_within_section", {"drop": False, "post_drop": True, "groove": True})
+    step_within_section: dict[str, bool] = {k: bool(v) for k, v in step_raw.items()}
+
+    # Build fade_beats_by_role
+    fade_raw = raw.get(
+        "fade_beats_by_role",
+        {"drop": 0.0, "buildup": 0.0, "breakdown": 4.0, "post_drop": 2.0, "groove": 2.0, "ambient": 4.0},
+    )
+    fade_beats_by_role: dict[str, float] = {k: float(v) for k, v in fade_raw.items()}
+
+    # Build diy_color_tags
+    diy_color_tags_raw = raw.get("diy_color_tags", {})
+    diy_color_tags: dict[str, str] = {k: str(v) for k, v in diy_color_tags_raw.items()}
+
+    return ColorEngineConfig(
+        enabled=bool(raw.get("enabled", True)),
+        scale_stops=scale_stops,
+        palette_dwell_tracks=int(raw.get("palette_dwell_tracks", 4)),
+        snap_eligible_drop_indices=snap_tuple,
+        big_shift_chance=float(raw.get("big_shift_chance", 0.25)),
+        big_shift_weight_bias=float(raw.get("big_shift_weight_bias", 1.0)),
+        drama_by_role=bool(raw.get("drama_by_role", True)),
+        role_spread=role_spread,
+        step_within_section=step_within_section,
+        fade_beats_by_role=fade_beats_by_role,
+        exempt_looks=exempt_looks,
+        diy_color_tags=diy_color_tags,
+        set_seed_mode=str(raw.get("set_seed_mode", "random")),
+        palettes=palettes,
+    )
+
+
 def _build_config(data: dict[str, Any]) -> LEDConfig:
     targets_raw = data["targets"]
     looks_raw = data["looks"]
@@ -903,6 +1198,8 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
             allow_strobe=bool(look.get("allow_strobe", False)),
             backend=str(look.get("backend", "cloud_diy")),
             params=MappingProxyType(_build_look_params(look, param_profiles_raw)),
+            color_source=str(look.get("color_source", "engine")),
+            diy_color=str(look.get("diy_color", "")),
         )
 
     banks: dict[str, LEDBank] = {}
@@ -1013,6 +1310,7 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
         ),
         drop_pairs=drop_pairs,
         post_drop_cycle_beats=float(data.get("post_drop_cycle_beats", 32.0)),
+        color_engine=_parse_color_engine(data),
     )
 
 
