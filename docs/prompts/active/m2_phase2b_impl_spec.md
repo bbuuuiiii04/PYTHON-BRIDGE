@@ -1,5 +1,34 @@
 # M2 Phase 2b — implementation spec (slot_colors injection + config looks)
 
+## ⛔ GEMINI SCOPE LOCK (read this + the REVIEWER PATCHES below before the body)
+> Read `m2_continuation_handoff.md` FIRST (preflight + stop conditions). Then this spec. The REVIEWER
+> PATCHES block (just below) OVERRIDES the body where they conflict. **If unsure, STOP and report.**
+
+- **GOAL:** the 5 existing engine slot cues become palette-colored through the LIVE dispatch path, and the
+  6 new looks become *definable* (selection in live banks is a separate, operator-gated step).
+- **NON-GOALS (do NOT do):** no fades; no `step_within_section`; no `govee_realtime_runner` edits; no
+  renderer/cue edits; no BeatSyncEngine changes; do NOT recolor the baked sand cue; do NOT "fix"
+  `BIG_DROP_SIGNATURE`; do NOT touch cloud/DIY routing, laser, RB, or SoundSwitch; do NOT add the looks to
+  the LIVE `config/led_look_director.json` or to any bank without explicit operator sign-off.
+- **EXACT FILES THAT MAY CHANGE:** `state_manager.py` (the seam at `:1728` ONLY) + a NEW
+  `tests/test_led_color_engine_m2_phase2b.py`. (Step B, gated separately:
+  `config/led_look_director.example.json`.) Need any other file? STOP and justify first.
+- **REQUIRED BEHAVIOR (code step):** at the seam, branch `slot_based = str(getattr(decision,"scene_ref",""))
+  in SLOT_EFFECTS`; if slot_based → `engine.resolve_slot_colors(...)` merged into `decision.params` (same
+  `replace(...)` pattern as `resolve_color`), and do NOT also call `resolve_color`; else → existing path
+  unchanged. Keep the try/except guard (exception ⇒ set `_led_last_error`, leave decision UNMODIFIED).
+  Extend the `[RGB] color-inject` log to show `slot_colors` for slot looks. `resolve_slot_colors` must use
+  `slot_count=MAX_SLOTS` (=6). Baked sand stays out of `SLOT_EFFECTS` and is NOT slot-colored.
+- **EXACT TESTS (new file):** slot look → `decision.params["slot_colors"]` len 6, slot5==(255,255,255);
+  non-slot look → still the `color` path; `enabled:false` / exempt / baked ⇒ NO `slot_colors` (byte-
+  identical); engine exception ⇒ decision unmodified + `_led_last_error` set; sand scene_ref NOT in
+  `SLOT_EFFECTS`; cloud/DIY decisions get no slot coloring; Phase 1/2a tests still pass.
+- **TEST COMMANDS:** targeted — `pytest tests/test_led_color_engine_m2_phase1.py
+  tests/test_led_color_engine_m2_phase2a.py tests/test_led_color_engine_m2_phase2b.py -q`; then full suite
+  `pytest -q` (baseline 1661 passed / 0 failed + your new tests).
+- **REPORT:** per handoff §5 (files changed, behavior, test output, not-run, risks, non-goals untouched,
+  nothing committed, next step). For step B, list the PROPOSED config look definitions; do NOT apply them.
+
 > Author: M2 orchestration session (Claude/Opus), 2026-06-15. Branch `m2-phase2-cues`.
 > Builds on Phase 1 (resolve_slot_colors, universal_colorizer) + Phase 2a (6 cue effects registered in
 > SLOT_EFFECTS/_EFFECTS). This phase makes the cues SELECTABLE + PALETTE-COLORED. It touches the LIVE
