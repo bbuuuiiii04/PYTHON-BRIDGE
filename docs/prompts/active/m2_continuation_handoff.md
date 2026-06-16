@@ -52,7 +52,7 @@ Confirmed from code 2026-06-16:
   to banks. Read its **GEMINI SCOPE LOCK** + **REVIEWER PATCHES** blocks — they override the body.
 - **Phase 3** → `docs/prompts/active/m2_phase3_impl_spec.md`. Deterministic color fades +
   `step_within_section` WITHOUT motion resets. Riskier. Read its **GEMINI SCOPE LOCK** + **REVIEWER
-  PATCHES**. Two-patch split is MANDATORY (code+tests with fades=0 first; activation later, gated).
+  PATCHES**. Two-patch split is MANDATORY. Patch 1 implements fades in code whenever params present; config/bank activation is step B, gated.
 - **Then** M1 live-validation on the rig (operator runs a show; `grep color-inject /tmp/bridge.log`).
 
 ## 4. FILES THAT MAY CHANGE / MUST NOT CHANGE
@@ -61,7 +61,7 @@ and (step B, gated) `config/led_look_director.example.json`. Must NOT change: re
 `govee_realtime_runner.py`, cloud/DIY logic, laser/RB/SS, the live `config/led_look_director.json` (operator's).
 Phase 3 — may change: `govee_realtime_runner.py`, `govee_frame_renderer.py` (add pure `resolve_fade` helper
 only; do NOT change `render`/`render_comet`/`_comet_frame`/`universal_colorizer` signatures),
-`led_color_engine.py` (fade endpoints + previous-color memory), NEW test file. Must NOT change: motion
+`led_color_engine.py` (fade endpoints + previous-color memory), `state_manager.py` (NARROW EXCEPTION ONLY to call/add a LedColorEngine fade-memory reset hook from existing LED realtime teardown / idle / emergency / force-deactivate paths), NEW test file. Must NOT change: motion
 geometry, BeatSyncEngine semantics, baked sand, unrelated systems.
 **If you think you need to edit a file not listed, STOP and justify it to the operator first.**
 

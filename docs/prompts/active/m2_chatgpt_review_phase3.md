@@ -15,9 +15,8 @@ config (that's Patch 2, gated), OR changes the signature of `render`/`render_com
 `universal_colorizer`.
 
 ## Motion vs color signature checks
-- Motion signature EXCLUDES all 11 color keys: `color, color2, color_a, color_b, color_from, color_to,
-  fade_beats, gradient_stops, slot_colors, slot_colors_from, slot_colors_to`.
-- Color signature = EXACTLY those 11. The two partition cleanly (no key in both, none missing).
+- Motion signature EXCLUDES all 15 color keys: `color, color2, color_a, color_b, color_from, color_to, color_a_from, color_a_to, color_b_from, color_b_to, fade_beats, gradient_stops, slot_colors, slot_colors_from, slot_colors_to`.
+- Color signature = EXACTLY those 15. The two partition cleanly (no key in both, none missing).
 - `slot_colors_from`/`slot_colors_to` are present in the exclusion list (the common omission).
 
 ## configure-call checks (the core safety property)
@@ -48,10 +47,15 @@ config (that's Patch 2, gated), OR changes the signature of `render`/`render_com
 - Tests: color-only≠configure, motion=configure, signature partition, fade_beats=0 byte-identical,
   enabled:false byte-identical, deterministic interpolation, full reset matrix, step determinism,
   no-motion-reset-on-color-change. Full suite green (baseline + Phase 2b additions, 0 failed).
+  - require tests proving each color/fade key does not call configure
+  - require tests proving motion param changes still call configure
+  - require true dual-color fade tests for color_a and color_b
+  - require LedColorEngine previous-color memory reset through the approved StateManager hook
+  - require render/render_comet/_comet_frame/universal_colorizer signatures unchanged
 - No new per-frame allocation/lock on the 40fps path that wasn't there before (perf regression).
-- CONFIRM config fades are still 0 (Patch 1 is inert) — activation is Patch 2, requires dry-run + sign-off.
+- CONFIRM Patch 1 implements deterministic fades in code whenever fade params are present. Existing looks without fade params preserve existing behavior. Config/bank activation is Patch 2, requires dry-run + sign-off.
 
 ## Claims Gemini is NOT allowed to make
 - "Fades validated on the rig." (Dry-run + operator sign-off is a separate gate.)
-- "Activated live." (Patch 1 must keep fades=0.)
+- "Activated live." (Patch 1 enables behavior only when params present; config/bank activation is Patch 2).
 - "Motion behavior verified unchanged" without the configure-call-count test proving it.

@@ -11,26 +11,23 @@
   `BeatSyncEngine.configure` on color-only changes; do not reset motion on color changes; do not enable
   nonzero fades in live config in the same patch (that is Patch 2, gated); do not touch baked sand,
   cloud/DIY, laser, RB, or SoundSwitch.
-- **MANDATORY TWO-PATCH SPLIT:** Patch 1 = code + tests, `fade_beats` stays 0 in config (inert). Patch 2 =
-  nonzero `fade_beats_by_role`/`step_within_section` activation — ONLY after a rig dry-run + operator
-  sign-off. Ship them separately.
+- **MANDATORY TWO-PATCH SPLIT:** Patch 1 = code + tests. Patch 1 implements deterministic fades in code whenever fade params are present. Existing looks without fade params preserve existing behavior. Live config/bank activation remains operator-gated. No rig-validated/live-ready/show-ready claim is allowed without physical LED dry-run. Patch 2 = nonzero `fade_beats_by_role`/`step_within_section` activation. Ship them separately.
 - **EXACT FILES THAT MAY CHANGE (Patch 1) — see ROUND-2 PATCH 8:** `govee_realtime_runner.py` (motion/
   color signature split via key-filter in `_signature`; anchor capture; call `resolve_fade` in
   `_compose_frame` at BOTH call sites :252/:306), `govee_frame_renderer.py` (add ONE pure helper
   `resolve_fade(params, abs_pos, anchor_beat)` next to `_lerp`/`_color` — do NOT change `render_comet`,
   `_comet_frame`, or `universal_colorizer` signatures), `led_color_engine.py` (emit
-  `color_from`/`color_to`/`fade_beats` + slot variants + previous-color memory), NEW test file. Nothing
+  `color_from`/`color_to`/`fade_beats` + slot variants + previous-color memory), `state_manager.py` (NARROW EXCEPTION ONLY to call/add a LedColorEngine fade-memory reset hook from existing LED realtime teardown / idle / emergency / force-deactivate paths), NEW test file. Nothing
   else.
-- **PARTITION (exact):** motion signature = everything EXCEPT the 11 color keys; color signature = EXACTLY
-  `{color, color2, color_a, color_b, color_from, color_to, fade_beats, gradient_stops, slot_colors,
+- **PARTITION (exact):** motion signature = everything EXCEPT the 15 color keys; color signature = EXACTLY
+  `{color, color2, color_a, color_b, color_from, color_to, color_a_from, color_a_to, color_b_from, color_b_to, fade_beats, gradient_stops, slot_colors,
   slot_colors_from, slot_colors_to}`. They must partition cleanly. Only motion-signature changes call
   `configure` (`_signature` at `govee_realtime_runner.py:403`).
 - **PREVIOUS-COLOR MEMORY KEY (exact):** `(track_key, role, section_id, look_name, color_shape)` —
   `cycle` EXCLUDED (so consecutive cycles chain target→target). `color_shape ∈ {color, color_a/color_b,
   slot_colors}`. A smaller key ONLY with tests proving no cross-look contamination.
-- **RESET MATRIX (exact):** reset `_color_signature` + `_color_applied_abs_beat` + engine previous-color
-  memory on: `_idle_tick` deactivation (`:368`), `_emergency_teardown` (`:389`), `force_deactivate`
-  (`:117`), `stop` (`:153`), new audible track, and color-SHAPE change. NOT on mere motion/effect change.
+- **RESET MATRIX (exact):** reset `_color_signature` + `_color_applied_abs_beat` on: `_idle_tick` deactivation (`:368`), `_emergency_teardown` (`:389`), `force_deactivate`
+  (`:117`), `stop` (`:153`), new audible track, and color-SHAPE change. Reset engine previous-color memory via StateManager hook on idle/teardown/stop.
 - **DETERMINISM:** `t = clamp((abs_pos - color_applied_abs_beat)/fade_beats, 0, 1)`; `fade_beats<=0` ⇒ t=1
   (instant, byte-identical to Phase 2). `step_within_section` uses `step_index = cycle` (already wired) —
   NO wall-clock randomness. `fade_beats_by_role[role]` MUST be < the role's re-dispatch cadence (≥32-beat
@@ -48,11 +45,9 @@
 
 ## REVIEWER PATCHES — APPLY THESE BEFORE IMPLEMENTING (Claude review, 2026-06-15, grounded vs merge/main 214e206)
 These supersede the body where they conflict. Code citations verified against the merged tree.
-1. **Motion-signature exclusion in §2 is INCOMPLETE.** §4 introduces the slot fade endpoints
-   `slot_colors_from`/`slot_colors_to`, but §2's exclusion list omits them — so a slot-color fade would
-   change `_signature` and reset motion every endpoint change. Exclude ALL of, and the COLOR signature is
-   EXACTLY this set: `{color, color2, color_a, color_b, color_from, color_to, fade_beats, gradient_stops,
-   slot_colors, slot_colors_from, slot_colors_to}` (11 keys). The two signatures must partition cleanly:
+1. **Motion-signature exclusion in §2 is INCOMPLETE.** Exclude ALL color keys, and the COLOR signature is
+   EXACTLY this set: `{color, color2, color_a, color_b, color_from, color_to, color_a_from, color_a_to, color_b_from, color_b_to, fade_beats, gradient_stops,
+   slot_colors, slot_colors_from, slot_colors_to}` (15 keys). The two signatures must partition cleanly:
    motion = everything NOT in this set; color = exactly this set.
 2. **Previous-color memory key (§5) must be exact, not "per role or per section."** Use
    `(track_key, role, section_id, look_name, color_shape)` — and DELIBERATELY exclude `cycle` so
@@ -75,9 +70,7 @@ These supersede the body where they conflict. Code citations verified against th
 5. **Keep BeatSyncEngine ownership clean (already in §2/§5, reaffirmed).** Color params are render-owned;
    they update via the latest `spec.params` each tick (`set_desired`/`_tick_once` read at ~:233-234) WITHOUT
    calling `BeatSyncEngine.configure`. Only motion-signature changes call `configure` (~:281).
-6. **Two-patch split is MANDATORY (reaffirm §8).** Patch 1 = code support + tests, fades stay 0 in live
-   config. Patch 2 = nonzero `fade_beats_by_role` / `step_within_section` activation, ONLY after a dry-run
-   watch + operator sign-off. Do not ship both in one change.
+6. **Two-patch split is MANDATORY (reaffirm §8).** Patch 1 = code support + tests. Patch 1 implements deterministic fades in code whenever fade params are present. Existing looks without fade params preserve existing behavior. Patch 2 = live config/bank activation, ONLY after a dry-run watch + operator sign-off. Do not ship both in one change.
 7. **Stale baseline.** "~1658 + Phase 2b additions; 3 pre-existing test_led_config failures" is stale.
    Pre-Phase-3 merged baseline: **1661 passed, 3 skipped, 1 xfailed, 0 failed**; `test_led_config.py`
    passes clean. Use that + Phase 2b's additions as the regression baseline.
@@ -124,12 +117,11 @@ fade anchor.** Resolution = a SEPARATE color-anchor clock (below).
 
 ## 2. Runner: two signatures (govee_realtime_runner.py)
 - **Motion signature** = the existing `_signature` (~:403-406) with color/fade keys EXCLUDED. CORRECTED
-  full list (Reviewer Patch 1 — `slot_colors_from`/`slot_colors_to` were missing):
-  `{color, color2, color_a, color_b, color_from, color_to, fade_beats, gradient_stops, slot_colors,
-  slot_colors_from, slot_colors_to}` (11 keys).
+  full list: `{color, color2, color_a, color_b, color_from, color_to, color_a_from, color_a_to, color_b_from, color_b_to, fade_beats, gradient_stops, slot_colors,
+  slot_colors_from, slot_colors_to}` (15 keys).
   (NOTE color_a/color_b ARE excluded — M1 injects them into the two generic dual effects.) This gates
   `self._engine.configure` (motion reset). Color-only changes no longer reset motion.
-- **Color signature** = ONLY those 11 excluded keys (must partition cleanly vs the motion signature).
+- **Color signature** = ONLY those 15 excluded keys (must partition cleanly vs the motion signature).
   Maintain `self._color_signature`. When it changes,
   capture `self._color_applied_abs_beat = abs_pos` (the live abs beat at the moment the new color took
   effect). This is the fade anchor. Initialize to the first abs_pos seen; reset semantics in §5.
@@ -154,9 +146,7 @@ ONCE, before any render path runs — never inside the colorizer:
 `resolve_fade(params, abs_pos, anchor_beat)` returns a params copy with the CURRENT faded color written in:
 - If no `*_from`/`*_to`/`fade_beats`, or `abs_pos is None`, or `anchor_beat is None` ⇒ return params
   UNCHANGED (no fade).
-- Else `t = clamp((abs_pos - anchor_beat)/fade_beats, 0, 1)`, then write the lerped CURRENT value:
-  `params["color"] = lerp(color_from, color_to, t)` (and `color_a`/`color_b`, and `slot_colors` from
-  `slot_colors_from`/`slot_colors_to`). Plain RGB lerp via `_clamp_channel`; orange pass-through OK (A6).
+- Else `t = clamp((abs_pos - anchor_beat)/fade_beats, 0, 1)`, then write the lerped CURRENT value. True dual-color fades are in scope for Patch 1: color_from -> color_to lerps into color; color_a_from -> color_a_to lerps into color_a; color_b_from -> color_b_to lerps into color_b; slot_colors_from -> slot_colors_to lerps into slot_colors.
 - `fade_beats<=0` ⇒ t=1 ⇒ instant (drops snap; low-energy roles fade) ⇒ byte-identical to Phase 2.
 - PURE: reads only its args; no live-engine/global state; never stamps an absolute `fade_start_beat`.
 - The faded `color`/`slot_colors` change every tick, so those keys MUST be in `_COLOR_SIG_KEYS` (§2) or
@@ -171,9 +161,8 @@ ONCE, before any render path runs — never inside the colorizer:
 - `step_within_section`: already wired in `resolve_color`/`resolve_slot_colors` via
   `step_index = cycle if use_step else 0`. Turning a role TRUE makes color re-roll each cycle; the fade
   then smooths the re-roll. Drops stay step=False/fade=0 (snap).
-- **Reset matrix (exact):** reset `_color_signature`, `_color_applied_abs_beat`, AND the engine's
-  previous-color memory on: `_idle_tick` deactivation (`:368`), `_emergency_teardown` (`:389`),
-  `force_deactivate` (`:117`), `stop` (`:153`), a new audible track, and a color-SHAPE change. Do NOT
+- **Reset matrix (exact):** reset `_color_signature`, `_color_applied_abs_beat` on: `_idle_tick` deactivation (`:368`), `_emergency_teardown` (`:389`),
+  `force_deactivate` (`:117`), `stop` (`:153`), a new audible track, and a color-SHAPE change. Engine's previous-color memory must be reset via StateManager hook on idle/teardown/stop. Do NOT
   reset on a mere motion/effect change unless the color shape changes. A new color signature stamps a
   fresh `_color_applied_abs_beat = abs_pos`.
 
