@@ -185,8 +185,18 @@ def test_state_manager_fade_memory_reset():
     sm._led_color_engine = color_engine_mock
     sm._led_rt_permitted = True
     
-    # 1. Manual blackout command DOES call reset
+    # 1. Manual commands: set_enabled, clear_blackout, clear_scene_override DO NOT reset
+    sm._dispatch_led_manual_command(reason="set_enabled")
+    sm._dispatch_led_manual_command(reason="clear_blackout")
+    sm._dispatch_led_manual_command(reason="clear_scene_override")
+    assert color_engine_mock.reset_fade_memory.call_count == 0
+    
+    # blackout and manual_scene DO reset
     sm._dispatch_led_manual_command(reason="blackout")
+    assert color_engine_mock.reset_fade_memory.call_count == 1
+    color_engine_mock.reset_fade_memory.reset_mock()
+    
+    sm._dispatch_led_manual_command(reason="manual_scene")
     assert color_engine_mock.reset_fade_memory.call_count == 1
     color_engine_mock.reset_fade_memory.reset_mock()
     
@@ -205,7 +215,6 @@ def test_state_manager_fade_memory_reset():
     assert color_engine_mock.reset_fade_memory.call_count == 0
     
     # 4. Idle transition DOES call reset, but not on duplicate tick
-    # Need to give it a mock look director to avoid it gate-short-circuiting
     sm._led_look_director = Mock()
     sm._led_scene_adapter = Mock()
     sm._led_enabled_latch = True

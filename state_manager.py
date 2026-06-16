@@ -1307,7 +1307,7 @@ class StateManager:
         return target_name in targets
 
     def _dispatch_led_manual_command(self, *, reason: str) -> None:
-        if self._led_color_engine is not None:
+        if self._led_color_engine is not None and reason in ("blackout", "manual_scene"):
             self._led_color_engine.reset_fade_memory()
         self._led_last_event = reason
         self._led_last_auto_role_key = ""
