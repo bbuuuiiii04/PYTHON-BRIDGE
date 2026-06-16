@@ -85,7 +85,11 @@ def run_lan_discovery():
             pass
     recv_sock.bind(("", LISTEN_PORT))
     
-    mreq = struct.pack("4sl", socket.inet_aton(MULTICAST_GROUP), socket.INADDR_ANY)
+    mreq = struct.pack(
+        "4s4s",
+        socket.inet_aton(MULTICAST_GROUP),
+        socket.inet_aton("0.0.0.0"),
+    )
     try:
         recv_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     except Exception:

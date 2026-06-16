@@ -127,6 +127,10 @@ def main():
     
     args = parser.parse_args()
 
+    if args.dry_run and args.live:
+        print("ERROR: Conflicting flags. Cannot use --dry-run and --live together.")
+        sys.exit(1)
+
     is_live = args.live
     
     if is_live and not args.i_am_watching_the_strip:

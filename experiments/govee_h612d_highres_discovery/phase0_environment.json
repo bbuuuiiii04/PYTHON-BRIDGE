@@ -1,0 +1,62 @@
+{
+  "repo_path": "/Users/bbui/rb_ss_bridge_v2",
+  "branch": "codex/led-doc-cleanup-gates",
+  "git_status_summary": "dirty",
+  "config_exists": true,
+  "configured_ip": "192.168.0.216",
+  "configured_device_ref": "C1:0A:DA:B9:81:C6:3C:02",
+  "configured_expected_sku": "H612D",
+  "config_paths": {
+    "device_ref": "$.targets.room_perimeter",
+    "sku": "$.targets.room_perimeter",
+    "ip": "$.targets.room_perimeter.realtime"
+  },
+  "discovered_devices": [
+    {
+      "ip": "192.168.0.216",
+      "cmd": "scan",
+      "device": "C1:0A:DA:B9:81:C6:3C:02",
+      "sku": "H612D",
+      "bleVersionHard": "3.05.00",
+      "bleVersionSoft": "1.03.01",
+      "wifiVersionHard": "1.04.01",
+      "wifiVersionSoft": "1.03.08",
+      "raw": {
+        "msg": {
+          "cmd": "scan",
+          "data": {
+            "ip": "192.168.0.216",
+            "device": "C1:0A:DA:B9:81:C6:3C:02",
+            "sku": "H612D",
+            "bleVersionHard": "3.05.00",
+            "bleVersionSoft": "1.03.01",
+            "wifiVersionHard": "1.04.01",
+            "wifiVersionSoft": "1.03.08"
+          }
+        }
+      }
+    }
+  ],
+  "discovery_ambiguous": false,
+  "resolved_live_ip": "192.168.0.216",
+  "resolution_source": "configured_device_ref",
+  "resolved_device_id": "C1:0A:DA:B9:81:C6:3C:02",
+  "resolved_sku": "H612D",
+  "firmware_fields": {
+    "bleVersionHard": "3.05.00",
+    "bleVersionSoft": "1.03.01",
+    "wifiVersionHard": "1.04.01",
+    "wifiVersionSoft": "1.03.08"
+  },
+  "competing_processes": [
+    "1370 /Applications/Antigravity IDE.app/Contents/Resources/app/extensions/antigravity/bin/language_server_macos_arm --enable_lsp --csrf_token ef58b120-9290-44ea-bd9e-6ea818481607 --extension_server_port 57420 --extension_server_csrf_token 693b0ea0-e322-475c-8452-1fcf597256a3 --https_server_port 57421 --lsp_port 57433 --workspace_id file_Users_bbui_rb_ss_bridge_v2 --cloud_code_endpoint https://daily-cloudcode-pa.googleapis.com --subclient_type ide --app_data_dir antigravity-ide --parent_pipe_path /var/folders/mn/6rmbfb6540n4q_gpx_qfqrgw0000gn/T/server_45f050e760fa07ab",
+    "22308 /Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python -m rb_ss_bridge_v2.scripts.laser_pad --host 127.0.0.1 --port 8765",
+    "22309 /opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar.py",
+    "95439 /Applications/Corsair iCUE5 Software/iCUE.app/Contents/Services/iCUEUpdateService -exec"
+  ],
+  "warnings": [
+    "Found 4 competing processes. Close them before fuzzing."
+  ],
+  "safe_to_fuzz": false,
+  "reason": "Found 4 competing processes. Close them before fuzzing."
+}
