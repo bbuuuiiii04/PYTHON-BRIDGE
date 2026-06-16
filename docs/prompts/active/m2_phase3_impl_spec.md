@@ -101,9 +101,9 @@ These are DECISIVE and supersede §3/§4, the body, AND the GEMINI SCOPE LOCK wh
    beat_division. So motion signature = that comprehension with `if k not in _COLOR_SIG_KEYS`.
    `_COLOR_SIG_KEYS` MUST include the resolved-color keys the fade WRITES — `color, color_a, color_b,
    slot_colors` — AND the endpoints — `color2, color_from, color_to, fade_beats, gradient_stops,
-   slot_colors_from, slot_colors_to`. (Patch 1's 11-key list omitted the standalone resolved `color` —
-   include it; a per-frame faded `color` would otherwise flip the motion signature and reset motion every
-   tick.) Color signature = `_COLOR_SIG_KEYS ∩ spec.params`.
+   slot_colors_from, slot_colors_to`. (`_COLOR_SIG_KEYS` = the canonical 11-key set defined in §2; it ALREADY
+   includes both the resolved keys `color/color_a/color_b/slot_colors` AND the endpoints, so a per-frame
+   faded `color` does NOT flip the motion signature.) Color signature = `_COLOR_SIG_KEYS ∩ spec.params`.
 10. **Two `_compose_frame` call sites; respect `abs_pos` ordering.** Verified: `_compose_frame` is called
    at `:252` AND `:306`; `abs_pos` (a BEAT: `float(anchor.abs_beat_pos)+…`) is computed at `:268`, i.e.
    AFTER `:252`. Thread `abs_pos`+anchor_beat into BOTH sites. The `:252` site has no `abs_pos` yet → pass
@@ -112,7 +112,8 @@ These are DECISIVE and supersede §3/§4, the body, AND the GEMINI SCOPE LOCK wh
 
 ## 0. Mission (§15.4 + §15.7 M2 tail)
 1. A DEDICATED color-anchor clock in the runner so color-only changes can fade without a motion reset.
-2. Thread `abs_pos` + the anchor into the colorize path; make the colorizer fade-aware (pure).
+2. Resolve faded params in `_compose_frame` via a pure `resolve_fade(...)` helper BEFORE any render path
+   consumes them — the colorizer is NOT made fade-aware (see ROUND-2 PATCH 8 / §3–§4).
 3. Turn on `step_within_section` (per-role) + `fade_beats_by_role` (config already carries both).
 
 ## 1. The §15.4 correction (read TWICE — the naive approach is WRONG)
@@ -135,21 +136,31 @@ fade anchor.** Resolution = a SEPARATE color-anchor clock (below).
 - `set_desired` already propagates new params each tick regardless of motion signature (~:89-91, read
   ~:233), so color updates render every tick without a motion reconfigure — keep that.
 
-## 3. Plumb abs_pos + anchor into the colorize path
-`_tick_once` computes `abs_pos` and calls `frame = self._compose_frame(spec, instances)` (~:306).
-- Pass `abs_pos` and `self._color_applied_abs_beat` into `_compose_frame` (~:318) and on into BOTH
-  `render(...)` and `render_comet(...)` (the two branches at ~:330 and ~:342).
-- `render`/`render_comet`/`universal_colorizer` gain optional `abs_pos`/`color_applied_abs_beat` kwargs;
-  when absent (Phase 1/2 callers, tests) behavior is unchanged (no fade). The colorizer stays PURE — it
-  receives the two scalars as inputs; the runner owns the tiny capture state.
+## 3. Resolve faded params in `_compose_frame` (NOT in the colorizer — ROUND-2 PATCH 8)
+`render_comet` reads `params["color"]` → `_comet_frame`; slot looks render via `render`→`universal_colorizer`;
+non-slot color effects read `params["color"]`/`color_a`/`color_b`. So the fade is resolved into `params`
+ONCE, before any render path runs — never inside the colorizer:
+- Add ONE pure helper in `govee_frame_renderer.py`: `resolve_fade(params, abs_pos, anchor_beat) -> params'`
+  (place it next to `_lerp`/`_color`).
+- In `_compose_frame`, call `resolve_fade(...)` to get faded params, then pass those to `render(...)` /
+  `render_comet(...)` exactly as today.
+- **Do NOT change the signatures of `render`, `render_comet`, `_comet_frame`, or `universal_colorizer`.**
+- Both `_compose_frame` call sites (PATCH 10): the paused/comet-continuation path (before `abs_pos` exists)
+  calls `resolve_fade(params, abs_pos=None, anchor_beat=None)` ⇒ no-op/instant; the normal active path
+  (after `abs_pos`) passes the real `abs_pos` and `self._color_applied_abs_beat`.
+- Result: comet, slot, and non-slot effects ALL consume already-faded params transparently.
 
-## 4. Fade-aware colorizer (pure)
-When `decision.params` carries `color_from`/`color_to`/`fade_beats` (slot variant: `slot_colors_from`/
-`slot_colors_to`), the colorizer computes `t = clamp((abs_pos - color_applied_abs_beat)/fade_beats, 0, 1)`
-and lerps each (slot) color `from→to` by `t` (plain RGB lerp via `_clamp_channel`, orange pass-through OK
-per A6) BEFORE the existing `Σ slot_color·intensity`. `fade_beats<=0` ⇒ instant (t=1) ⇒ identical to
-Phase 2 (drops snap; low-energy roles fade). No absolute `fade_start_beat` is ever stamped (avoids
-cross-component frame mismatch).
+## 4. The `resolve_fade` helper (pure; no colorizer/comet changes)
+`resolve_fade(params, abs_pos, anchor_beat)` returns a params copy with the CURRENT faded color written in:
+- If no `*_from`/`*_to`/`fade_beats`, or `abs_pos is None`, or `anchor_beat is None` ⇒ return params
+  UNCHANGED (no fade).
+- Else `t = clamp((abs_pos - anchor_beat)/fade_beats, 0, 1)`, then write the lerped CURRENT value:
+  `params["color"] = lerp(color_from, color_to, t)` (and `color_a`/`color_b`, and `slot_colors` from
+  `slot_colors_from`/`slot_colors_to`). Plain RGB lerp via `_clamp_channel`; orange pass-through OK (A6).
+- `fade_beats<=0` ⇒ t=1 ⇒ instant (drops snap; low-energy roles fade) ⇒ byte-identical to Phase 2.
+- PURE: reads only its args; no live-engine/global state; never stamps an absolute `fade_start_beat`.
+- The faded `color`/`slot_colors` change every tick, so those keys MUST be in `_COLOR_SIG_KEYS` (§2) or
+  motion resets every frame.
 
 ## 5. Engine: emit fade params + previous-color tracking (led_color_engine.py)
 - The engine must remember the PREVIOUS resolved color/slot_colors — keyed
@@ -159,10 +170,11 @@ cross-component frame mismatch).
 - `step_within_section`: already wired in `resolve_color`/`resolve_slot_colors` via
   `step_index = cycle if use_step else 0`. Turning a role TRUE makes color re-roll each cycle; the fade
   then smooths the re-roll. Drops stay step=False/fade=0 (snap).
-- **gap #2 — every transition path:** define where `_color_applied_abs_beat` and the engine's
-  previous-color memory reset (new audible track? role change? section change?). A stale anchor =
-  a fade that never completes or starts mid-way. Enumerate: track change resets memory; a new color
-  signature re-stamps the anchor; effect (motion) change does NOT by itself reset the color anchor.
+- **Reset matrix (exact):** reset `_color_signature`, `_color_applied_abs_beat`, AND the engine's
+  previous-color memory on: `_idle_tick` deactivation (`:368`), `_emergency_teardown` (`:389`),
+  `force_deactivate` (`:117`), `stop` (`:153`), a new audible track, and a color-SHAPE change. Do NOT
+  reset on a mere motion/effect change unless the color shape changes. A new color signature stamps a
+  fresh `_color_applied_abs_beat = abs_pos`.
 
 ## 6. Coordinator cadence (do not fight WI-3)
 The coordinator's WI-3 min-dwell gate (`led_dispatch_coordinator.py:74-87`, 1.5s) suppresses same-role

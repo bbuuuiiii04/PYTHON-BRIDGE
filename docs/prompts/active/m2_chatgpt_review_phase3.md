@@ -6,11 +6,13 @@ against `main`; demand actual test output.
 
 ## Files that should appear in the diff (Patch 1 only — ONLY these)
 - `govee_realtime_runner.py` (signature split, anchor capture, abs_pos threading, reset matrix).
-- `govee_frame_renderer.py` (colorizer gains OPTIONAL fade kwargs; absent ⇒ unchanged).
+- `govee_frame_renderer.py` (adds pure `resolve_fade(params, abs_pos, anchor_beat)` helper ONLY;
+  `render`/`render_comet`/`_comet_frame`/`universal_colorizer` signatures UNCHANGED).
 - `led_color_engine.py` (emit `color_from`/`color_to`/`fade_beats` + previous-color memory).
 - new test file.
-RED FLAG if it touches motion geometry, baked sand, cloud/DIY, laser/RB/SS, or enables nonzero fades in
-config (that's Patch 2, gated).
+RED FLAG if it touches motion geometry, baked sand, cloud/DIY, laser/RB/SS, enables nonzero fades in
+config (that's Patch 2, gated), OR changes the signature of `render`/`render_comet`/`_comet_frame`/
+`universal_colorizer`.
 
 ## Motion vs color signature checks
 - Motion signature EXCLUDES all 11 color keys: `color, color2, color_a, color_b, color_from, color_to,
@@ -26,7 +28,8 @@ config (that's Patch 2, gated).
 ## Fade determinism checks
 - `t = clamp((abs_pos - color_applied_abs_beat)/fade_beats, 0, 1)`; monotonic from→to; clamps at both ends.
 - `fade_beats <= 0` ⇒ t=1 ⇒ output byte-identical to Phase 2 (no-fade).
-- Colorizer stays PURE: takes `abs_pos`/`anchor` as args; reads no live engine/global state.
+- `resolve_fade` stays PURE: takes `params` + `abs_pos` + `anchor_beat`; reads no live engine/global
+  state; makes NO `render`/`render_comet`/`_comet_frame`/`universal_colorizer` signature changes.
 - No absolute `fade_start_beat` stamped anywhere.
 
 ## Reset matrix checks

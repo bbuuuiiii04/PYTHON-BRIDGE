@@ -70,7 +70,8 @@ These supersede the body where they conflict. Code citations verified against th
 
 ## 0. Mission
 1. Inject `slot_colors` at the dispatch seam for slot-based looks (engine recolors them to the palette).
-2. Add the 6 new looks to the live config + their bank membership, color_source, eligibility.
+2. Prepare the 6 new look DEFINITIONS; live config + bank membership is a SEPARATE, operator-gated step
+   (propose only — do NOT edit the live config or add to banks without explicit sign-off).
 
 ## 1. Live-safety invariants (NON-NEGOTIABLE)
 - **`color_engine.enabled:false` (or no block) ⇒ byte-identical legacy behavior.** No slot injection.
@@ -105,7 +106,7 @@ slot_based = str(getattr(decision, "scene_ref", "")) in SLOT_EFFECTS   # import 
   effect in `_EFFECTS`, NOT a slot effect; confirm sand's scene_ref is NOT in SLOT_EFFECTS so it takes the
   plain render path untouched).
 
-## 3. Config additions (config/led_look_director.json — REQUIRES OPERATOR APPROVAL TO APPLY)
+## 3. Config additions (config/led_look_director.example.json PROPOSAL ONLY — editing the live config/led_look_director.json is FORBIDDEN unless explicitly approved)
 Add 6 looks under `looks` (mirror the shape of existing realtime looks — `target: room_perimeter`,
 `action: realtime`, `backend: realtime_razer`, `scene_ref: <effect>`, `fallback`, `safety_class`,
 `brightness`, `allow_strobe`, plus new `color_source`). Locked role mapping (NO ambient):

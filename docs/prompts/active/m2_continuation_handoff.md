@@ -59,7 +59,8 @@ Confirmed from code 2026-06-16:
 Phase 2b — may change: `state_manager.py` (the seam only), a NEW `tests/test_led_color_engine_m2_phase2b.py`,
 and (step B, gated) `config/led_look_director.example.json`. Must NOT change: renderer cues,
 `govee_realtime_runner.py`, cloud/DIY logic, laser/RB/SS, the live `config/led_look_director.json` (operator's).
-Phase 3 — may change: `govee_realtime_runner.py`, `govee_frame_renderer.py` (colorizer fade kwargs only),
+Phase 3 — may change: `govee_realtime_runner.py`, `govee_frame_renderer.py` (add pure `resolve_fade` helper
+only; do NOT change `render`/`render_comet`/`_comet_frame`/`universal_colorizer` signatures),
 `led_color_engine.py` (fade endpoints + previous-color memory), NEW test file. Must NOT change: motion
 geometry, BeatSyncEngine semantics, baked sand, unrelated systems.
 **If you think you need to edit a file not listed, STOP and justify it to the operator first.**
