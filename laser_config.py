@@ -469,26 +469,29 @@ def _validate_manual_commands(data: dict[str, Any], *, smart_drop_mode: str) -> 
 
     has_blackout_on = isinstance(blackout_on, dict)
     has_blackout_off = isinstance(blackout_off, dict)
-    if smart_drop_mode == "blackout_mask" and has_blackout_on != has_blackout_off:
+
+    if has_blackout_off and not has_blackout_on:
         errors.append(
-            "'manual_commands.blackout_on' and 'manual_commands.blackout_off' must both be configured when smart_drop_mode='blackout_mask'"
+            "'manual_commands.blackout_on' must be configured if 'manual_commands.blackout_off' is configured"
         )
 
     if smart_drop_mode == "blackout_mask" and has_blackout_on:
         assert isinstance(blackout_on, dict)
         blackout_on_behavior = _resolved_behavior(blackout_on)
-        if blackout_on_behavior != "note_on":
+        if blackout_on_behavior not in ("note_on", "pulse"):
             errors.append(
-                "'manual_commands.blackout_on' must resolve to behavior='note_on' (set kind='note_on' or behavior='note_on') so Smart Drop blackout stays held across the pre-drop window"
+                "'manual_commands.blackout_on' must resolve to behavior='note_on' or 'pulse'"
             )
 
-    if smart_drop_mode == "blackout_mask" and has_blackout_off:
-        assert isinstance(blackout_off, dict)
-        blackout_off_behavior = _resolved_behavior(blackout_off)
-        if blackout_off_behavior != "note_off":
-            errors.append(
-                "'manual_commands.blackout_off' must resolve to behavior='note_off' (set kind='note_off' or behavior='note_off') so Smart Drop blackout clears deterministically at crossing"
-            )
+        if blackout_on_behavior == "note_on":
+            if not has_blackout_off:
+                errors.append(
+                    "'manual_commands.blackout_off' must be configured when 'blackout_on' is a hold (note_on)"
+                )
+            elif _resolved_behavior(blackout_off) != "note_off":
+                errors.append(
+                    "'manual_commands.blackout_off' must resolve to behavior='note_off' to clear the note_on hold"
+                )
 
     return errors
 

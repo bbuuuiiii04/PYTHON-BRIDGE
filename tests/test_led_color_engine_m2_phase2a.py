@@ -25,6 +25,7 @@ Covers (per spec §5):
 """
 from __future__ import annotations
 
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
@@ -438,7 +439,13 @@ class Phase1GateStillGreenTests(unittest.TestCase):
     )
 
     def test_phase1_byte_identical_methods_still_pass(self):
-        from tests import test_led_color_engine_m2_phase1 as p1
+        phase1_path = Path(__file__).resolve().with_name("test_led_color_engine_m2_phase1.py")
+        spec = importlib.util.spec_from_file_location("test_led_color_engine_m2_phase1_local", phase1_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        p1 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(p1)
+
         suite = unittest.TestSuite()
         for method in self._BYTE_IDENTICAL_METHODS:
             suite.addTest(p1.RendererByteIdenticalTests(method))
