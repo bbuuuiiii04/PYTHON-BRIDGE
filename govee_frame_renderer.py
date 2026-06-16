@@ -71,6 +71,32 @@ def _lerp(a: RGB, b: RGB, t: float) -> RGB:
     )
 
 
+def resolve_fade(params: Mapping[str, Any], abs_pos: float | None, anchor_beat: float | None) -> dict[str, Any]:
+    if abs_pos is None or anchor_beat is None:
+        return dict(params)
+    try:
+        fade_beats = float(params.get("fade_beats", 0.0))
+    except (TypeError, ValueError):
+        fade_beats = 0.0
+    if fade_beats <= 0.0:
+        return dict(params)
+    t = (abs_pos - anchor_beat) / fade_beats
+    t = max(0.0, min(1.0, t))
+    out = dict(params)
+    if "color_from" in params and "color_to" in params:
+        out["color"] = _lerp(_color(params["color_from"]), _color(params["color_to"]), t)
+    if "color_a_from" in params and "color_a_to" in params:
+        out["color_a"] = _lerp(_color(params["color_a_from"]), _color(params["color_a_to"]), t)
+    if "color_b_from" in params and "color_b_to" in params:
+        out["color_b"] = _lerp(_color(params["color_b_from"]), _color(params["color_b_to"]), t)
+    if "slot_colors_from" in params and "slot_colors_to" in params:
+        s_from = _slots(params["slot_colors_from"])
+        s_to = _slots(params["slot_colors_to"])
+        if s_from and s_to and len(s_from) == len(s_to):
+            out["slot_colors"] = [_lerp(a, b, t) for a, b in zip(s_from, s_to)]
+    return out
+
+
 def _scale(c: RGB, amount: float) -> RGB:
     return (
         _clamp_channel(c[0] * amount),

@@ -14,8 +14,18 @@ from .govee_frame_renderer import (
     default_sync_mode,
     default_beat_division,
     is_comet_effect,
+    resolve_fade,
 )
 from .led_models import BeatAnchor
+
+_COLOR_SIG_KEYS = frozenset({
+    "color", "color2", "color_a", "color_b",
+    "color_from", "color_to",
+    "color_a_from", "color_a_to",
+    "color_b_from", "color_b_to",
+    "fade_beats", "gradient_stops",
+    "slot_colors", "slot_colors_from", "slot_colors_to"
+})
 
 RGB = tuple[int, int, int]
 
@@ -66,6 +76,8 @@ class GoveeRealtimeRunner:
 
         self._active = False
         self._active_signature: tuple[Any, ...] | None = None
+        self._color_signature: tuple[Any, ...] | None = None
+        self._color_applied_abs_beat: float | None = None
         self._active_origin_beat = 0.0
         self._active_applied_monotonic = 0.0
         self._idle_since: float | None = None
@@ -134,6 +146,8 @@ class GoveeRealtimeRunner:
             with self._lock:
                 self._active = False
                 self._active_signature = None
+                self._color_signature = None
+                self._color_applied_abs_beat = None
                 self._idle_since = None
                 self._pending_manual = 0
                 self._engine_status = {"sync_mode": "", "beat_division": 0.0, "instance_count": 0, "spawn_count": 0}
@@ -249,7 +263,7 @@ class GoveeRealtimeRunner:
             # spawns while paused. When the last comet expires, fall through to idle.
             if self._active and is_comet_effect(spec.effect_name) and self._engine.instance_count > 0:
                 instances = self._engine.animate(float(now))
-                frame = self._compose_frame(spec, instances)
+                frame = self._compose_frame(spec, instances, abs_pos=None, anchor_beat=None)
                 if self._emergency.is_set():
                     self._emergency_teardown()
                     return
@@ -270,12 +284,12 @@ class GoveeRealtimeRunner:
             * (float(anchor.bpm) / 60.0)
         )
 
-        signature = self._signature(spec)
-        if signature != self._active_signature:
+        motion_sig, color_sig = self._signature(spec)
+        if motion_sig != self._active_signature:
             mode = spec.sync_mode or default_sync_mode(spec.effect_name)
             division = spec.beat_division if spec.beat_division > 0 else default_beat_division(spec.effect_name)
             with self._lock:
-                self._active_signature = signature
+                self._active_signature = motion_sig
                 self._active_applied_monotonic = float(now)
                 self._idle_since = None
             self._engine.configure(
@@ -288,6 +302,10 @@ class GoveeRealtimeRunner:
                 abs_beat=abs_pos,
                 bpm=float(anchor.bpm),
             )
+
+        if color_sig != self._color_signature:
+            self._color_signature = color_sig
+            self._color_applied_abs_beat = abs_pos
 
         if not self._active:
             self._transport.activate()
@@ -303,7 +321,7 @@ class GoveeRealtimeRunner:
             self._engine.fire_manual(float(now), abs_pos, float(anchor.bpm))
 
         instances = self._engine.on_tick(abs_pos, float(now), float(anchor.bpm))
-        frame = self._compose_frame(spec, instances)
+        frame = self._compose_frame(spec, instances, abs_pos=abs_pos, anchor_beat=self._color_applied_abs_beat)
 
         if self._emergency.is_set():
             self._emergency_teardown()
@@ -315,16 +333,17 @@ class GoveeRealtimeRunner:
             self._frame_index += 1
         self._publish_engine_status(cleared=False)
 
-    def _compose_frame(self, spec: EffectSpec, instances: list) -> list[RGB]:
+    def _compose_frame(self, spec: EffectSpec, instances: list, abs_pos: float | None = None, anchor_beat: float | None = None) -> list[RGB]:
         # Runs on the runner thread; reading self._engine here is safe.
         segments = self._segments
         if not instances:
             return self._renderer.blank(segments)
+        params = resolve_fade(spec.params, abs_pos, anchor_beat)
         if is_comet_effect(spec.effect_name):
             # Comet effects always render through the traveling-head primitive.
             # In retrigger/continuous there is only one instance; overlap folds
             # the active comet heads together.
-            width = float(spec.params.get("width", 0.8))
+            width = float(params.get("width", 0.8))
             direction = self._engine.direction
             frames = [
                 self._renderer.render_comet(
@@ -333,7 +352,7 @@ class GoveeRealtimeRunner:
                     segments=segments,
                     width=width,
                     direction=direction,
-                    params=spec.params,
+                    params=params,
                 )
                 for ir in instances
             ]
@@ -344,7 +363,7 @@ class GoveeRealtimeRunner:
             beat_pos=ir.local_beat,
             local_t=ir.local_t,
             frame_index=self._frame_index,
-            params=spec.params,
+            params=params,
             segments=segments,
             seed=spec.seed ^ ir.bucket,
         )
@@ -378,6 +397,8 @@ class GoveeRealtimeRunner:
             with self._lock:
                 self._active = False
                 self._active_signature = None
+                self._color_signature = None
+                self._color_applied_abs_beat = None
                 self._idle_since = None
                 self._pending_manual = 0
             self._engine.reset()
@@ -394,13 +415,17 @@ class GoveeRealtimeRunner:
         with self._lock:
             self._active = False
             self._active_signature = None
+            self._color_signature = None
+            self._color_applied_abs_beat = None
             self._idle_since = None
             self._desired_spec = None
             self._pending_manual = 0
         self._engine.reset()
         self._publish_engine_status(cleared=True)
 
-    def _signature(self, spec: EffectSpec) -> tuple[Any, ...]:
-        params_key = tuple(sorted((str(k), repr(v)) for k, v in dict(spec.params).items()))
-        return (str(spec.effect_name), params_key, int(spec.seed),
+    def _signature(self, spec: EffectSpec) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+        motion_params = tuple(sorted((str(k), repr(v)) for k, v in dict(spec.params).items() if k not in _COLOR_SIG_KEYS))
+        color_params = tuple(sorted((str(k), repr(v)) for k, v in dict(spec.params).items() if k in _COLOR_SIG_KEYS))
+        motion_sig = (str(spec.effect_name), motion_params, int(spec.seed),
                 str(spec.sync_mode), float(spec.beat_division))
+        return motion_sig, color_params

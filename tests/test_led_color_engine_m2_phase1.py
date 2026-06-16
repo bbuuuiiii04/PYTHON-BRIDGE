@@ -330,8 +330,8 @@ class ResolveSlotColorsTests(unittest.TestCase):
         first = self._resolve(eng)
         second = self._resolve(eng)
         third = self._resolve(eng)
-        self.assertEqual(first, second)
-        self.assertEqual(second, third)
+        self.assertEqual(first["slot_colors"], second["slot_colors"])
+        self.assertEqual(second["slot_colors"], third["slot_colors"])
 
     def test_does_not_advance_per_cue_rng_vs_resolve_color(self):
         # resolve_slot_colors must not perturb resolve_color's deterministic
@@ -346,7 +346,7 @@ class ResolveSlotColorsTests(unittest.TestCase):
             role="groove", section_id="s1", cycle=0,
             look_name="x", color_source="engine",
         )
-        self.assertEqual(c1, c2)
+        self.assertEqual(c1["color"], c2["color"])
 
     def test_custom_slot_count(self):
         eng = _engine()

@@ -311,6 +311,9 @@ class LedColorEngine:
         self._drop_section_index: int = 0
         self._last_drop_section_id: str = ""
 
+        # Phase 3: previous color tracking for fades
+        self._prev_color: dict[tuple[Any, ...], dict[str, Any]] = {}
+
     # ------------------------------------------------------------------
     # Public properties
     # ------------------------------------------------------------------
@@ -355,6 +358,9 @@ class LedColorEngine:
             # Reset drop tracking for this track
             self._drop_section_index = 0
             self._last_drop_section_id = ""
+            
+            # Reset previous color memory
+            self._prev_color.clear()
 
             # Advance dwell (only when not locked)
             if not self._lock:
@@ -556,6 +562,23 @@ class LedColorEngine:
             result["color_a"] = rgb_a
             result["color_b"] = rgb_b
 
+        color_shape = "color_a/color_b" if multi else "color"
+        mem_key = (self._current_track_key, role, section_id, look_name, color_shape)
+        prev = self._prev_color.get(mem_key)
+        self._prev_color[mem_key] = dict(result)
+
+        if prev:
+            result["color_from"] = prev["color"]
+            result["color_to"] = result["color"]
+            if multi:
+                result["color_a_from"] = prev["color_a"]
+                result["color_a_to"] = result["color_a"]
+                result["color_b_from"] = prev["color_b"]
+                result["color_b_to"] = result["color_b"]
+            fade_beats = float(self._config.fade_beats_by_role.get(role, 0.0))
+            if fade_beats > 0.0:
+                result["fade_beats"] = fade_beats
+
         return result
 
     def resolve_slot_colors(
@@ -619,7 +642,19 @@ class LedColorEngine:
         # Reserved white slot (pure white, not blended, not palette-derived).
         slots.append((255, 255, 255))
 
-        return {"slot_colors": slots}
+        result: dict[str, Any] = {"slot_colors": slots}
+        mem_key = (self._current_track_key, role, section_id, look_name, "slot_colors")
+        prev = self._prev_color.get(mem_key)
+        self._prev_color[mem_key] = dict(result)
+
+        if prev:
+            result["slot_colors_from"] = prev["slot_colors"]
+            result["slot_colors_to"] = result["slot_colors"]
+            fade_beats = float(self._config.fade_beats_by_role.get(role, 0.0))
+            if fade_beats > 0.0:
+                result["fade_beats"] = fade_beats
+
+        return result
 
     # ------------------------------------------------------------------
     # Live-control stubs (§8, §15.6 M3 precedence)
