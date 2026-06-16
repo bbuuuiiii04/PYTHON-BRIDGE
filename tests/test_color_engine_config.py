@@ -440,8 +440,8 @@ class TestExampleConfigRegression(unittest.TestCase):
         """
         import json
         data = json.loads(_EXAMPLE_PATH.read_text(encoding="utf-8"))
-        # Confirm example has no color_engine block
-        self.assertNotIn("color_engine", data)
+        # Strip color_engine block to simulate legacy config
+        data.pop("color_engine", None)
         result = load_led_look_director_config_from_dict(data)
         self.assertTrue(result.available, msg=result.errors)
         self.assertIsNone(result.config.color_engine)

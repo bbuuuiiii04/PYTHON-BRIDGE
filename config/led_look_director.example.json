@@ -1,8 +1,167 @@
 {
   "schema_version": 1,
-  "enabled": true,
-  "dry_run": false,
+  "enabled": false,
+  "dry_run": true,
   "automation_enabled": true,
+  "color_engine": {
+    "enabled": true,
+    "palette_dwell_tracks": 3,
+    "snap_eligible_drop_indices": [
+      2,
+      3
+    ],
+    "big_shift_chance": 0.3,
+    "big_shift_weight_bias": 1.5,
+    "drama_by_role": true,
+    "role_spread": {
+      "drop": 0.35,
+      "groove": 0.12,
+      "ambient": 0.1
+    },
+    "step_within_section": {
+      "drop": false,
+      "post_drop": false,
+      "groove": false,
+      "ambient": false,
+      "buildup": false,
+      "breakdown": false
+    },
+    "fade_beats_by_role": {
+      "drop": 0.0,
+      "post_drop": 0.0,
+      "groove": 0.0,
+      "ambient": 0.0
+    },
+    "exempt_looks": [
+      "room_blackout",
+      "rt_blackout",
+      "ambient_pb_halves",
+      "groove_diy_groove",
+      "groove_diy_groove_2",
+      "groove_diy_groove_3",
+      "groove_diy_groove_5",
+      "groove_diy_red_chasing",
+      "groove_diy_blue_sparkle",
+      "groove_diy_bright_white_chase",
+      "buildup_diy_white_sparse",
+      "buildup_diy_2",
+      "buildup_diy_3_white_chase",
+      "buildup_diy_white_chasing",
+      "buildup_diy_sparse",
+      "buildup_diy_b1",
+      "buildup_diy_red_sparkle_dim",
+      "drop_diy_1_red_white_chase",
+      "drop_diy_2_cyan",
+      "drop_diy_3",
+      "drop_diy_4_blue_cyan",
+      "drop_diy_5_red",
+      "drop_diy_green_sparkle",
+      "drop_diy_pink_red_sparkle",
+      "drop_diy_rainbow_sparkle",
+      "breakdown_1_red",
+      "breakdown_cyan_stack",
+      "breakdown_green_snake",
+      "rt_buildup_ramp_1",
+      "rt_buildup_ramp_2",
+      "rt_buildup_ramp_3",
+      "rt_buildup_white_zone_strobe",
+      "rt_buildup_white_half_strobe",
+      "rt_buildup_freestyle_nebula",
+      "rt_groove_freestyle_nebula",
+      "rt_drop_chase_freestyle_nebula",
+      "rt_drop_white_aggressive",
+      "rt_post_drop_freestyle_nebula",
+      "rt_post_drop_white_shatter",
+      "rt_twinkle_blue",
+      "rt_drop_center_burst_blue_cyan",
+      "rt_post_drop_center_comet_blue_cyan"
+    ],
+    "diy_color_tags": {
+      "groove_diy_groove": "cyan",
+      "groove_diy_groove_2": "blue",
+      "groove_diy_groove_3": "cyan",
+      "groove_diy_groove_5": "cyan",
+      "groove_diy_red_chasing": "red",
+      "groove_diy_blue_sparkle": "blue",
+      "groove_diy_bright_white_chase": "white",
+      "buildup_diy_white_sparse": "white",
+      "buildup_diy_2": "white",
+      "buildup_diy_3_white_chase": "white",
+      "buildup_diy_white_chasing": "white",
+      "buildup_diy_sparse": "white",
+      "buildup_diy_b1": "white",
+      "buildup_diy_red_sparkle_dim": "red",
+      "drop_diy_1_red_white_chase": "red",
+      "drop_diy_2_cyan": "cyan",
+      "drop_diy_3": "white",
+      "drop_diy_4_blue_cyan": "cyan",
+      "drop_diy_5_red": "red",
+      "drop_diy_green_sparkle": "green",
+      "drop_diy_pink_red_sparkle": "red",
+      "breakdown_1_red": "red",
+      "breakdown_cyan_stack": "cyan",
+      "breakdown_green_snake": "green",
+      "ambient_pb_halves": "blue"
+    },
+    "set_seed_mode": "random",
+    "palettes": {
+      "blue_cyan": {
+        "range": [
+          "cyan",
+          "blue"
+        ],
+        "weight": 10,
+        "spread": 0.1,
+        "white": 0.0,
+        "focus_modes": {
+          "full": 2,
+          "lean": 2,
+          "mono": 1
+        }
+      },
+      "deep_ocean": {
+        "range": [
+          "green",
+          "blue"
+        ],
+        "weight": 4,
+        "spread": 0.1,
+        "white": 0.0
+      },
+      "indigo": {
+        "range": [
+          "blue",
+          "purple"
+        ],
+        "weight": 6,
+        "spread": 0.1,
+        "white": 0.0,
+        "focus_modes": {
+          "full": 2,
+          "lean": 2,
+          "mono": 1
+        }
+      },
+      "violet": {
+        "range": [
+          "purple",
+          "magenta"
+        ],
+        "weight": 3,
+        "spread": 0.1,
+        "white": 0.0
+      },
+      "crimson": {
+        "range": [
+          "magenta",
+          "red"
+        ],
+        "weight": 2,
+        "spread": 0.08,
+        "white": 0.0
+      }
+    }
+  },
   "automation": {
     "cloud_offset_s": 0.6,
     "realtime_offset_s": 0.0
@@ -52,7 +211,7 @@
   "targets": {
     "room_perimeter": {
       "label": "Bui light test",
-      "device_ref": "C1:0A:DA:B9:81:C6:3C:02",
+      "device_ref": "redacted-operator-local-strip-light-id",
       "expected_model": "H612D",
       "control_route": "govee_platform_dynamic_scene",
       "capabilities": [
@@ -66,9 +225,9 @@
       "realtime": {
         "enabled": true,
         "protocol": "razer_dreamview",
-        "ip": "192.168.0.219",
+        "ip": "192.168.1.100",
         "port": 4003,
-        "segments": 20,
+        "segments": 60,
         "header": "dreams",
         "header_bytes": [
           187,
@@ -90,7 +249,7 @@
     },
     "strip_light_mirror": {
       "label": "Strip Light",
-      "device_ref": "54:2C:DA:B9:81:C6:3C:38",
+      "device_ref": "redacted-operator-local-strip-light-id",
       "expected_model": "H612D",
       "control_route": "govee_platform_dynamic_scene",
       "capabilities": [
@@ -370,7 +529,9 @@
       "brightness": 100,
       "allow_strobe": false,
       "backend": "realtime_razer",
-      "params": {"travel_beats": 2}
+      "params": {
+        "travel_beats": 2
+      }
     },
     "rt_buildup_ramp_2": {
       "target": "room_perimeter",
@@ -436,7 +597,9 @@
       "brightness": 100,
       "allow_strobe": false,
       "backend": "realtime_razer",
-      "params": {"travel_beats": 2}
+      "params": {
+        "travel_beats": 4
+      }
     },
     "rt_groove_chase_cyan": {
       "target": "room_perimeter",
@@ -447,7 +610,9 @@
       "brightness": 100,
       "allow_strobe": false,
       "backend": "realtime_razer",
-      "params": {"travel_beats": 2}
+      "params": {
+        "travel_beats": 4
+      }
     },
     "rt_groove_chase_red": {
       "target": "room_perimeter",
@@ -458,7 +623,9 @@
       "brightness": 100,
       "allow_strobe": false,
       "backend": "realtime_razer",
-      "params": {"travel_beats": 2}
+      "params": {
+        "travel_beats": 4
+      }
     },
     "rt_groove_chase_green": {
       "target": "room_perimeter",
@@ -469,7 +636,9 @@
       "brightness": 100,
       "allow_strobe": false,
       "backend": "realtime_razer",
-      "params": {"travel_beats": 2}
+      "params": {
+        "travel_beats": 4
+      }
     },
     "rt_groove_chase_cyan_white": {
       "target": "room_perimeter",
@@ -480,7 +649,9 @@
       "brightness": 100,
       "allow_strobe": false,
       "backend": "realtime_razer",
-      "params": {"travel_beats": 2}
+      "params": {
+        "travel_beats": 4
+      }
     },
     "rt_groove_freestyle_nebula": {
       "target": "room_perimeter",
@@ -491,7 +662,9 @@
       "brightness": 100,
       "allow_strobe": false,
       "backend": "realtime_razer",
-      "params": {}
+      "params": {
+        "travel_beats": 4
+      }
     },
     "rt_drop_chase_blue": {
       "target": "room_perimeter",
