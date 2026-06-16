@@ -166,7 +166,8 @@ ONCE, before any render path runs — never inside the colorizer:
 - The engine must remember the PREVIOUS resolved color/slot_colors — keyed
   `(track_key, role, section_id, look_name, color_shape)`, `cycle` EXCLUDED (Reviewer Patch 2) — to emit
   `color_from` (previous TARGET) + `color_to` (new) + `fade_beats` (= `fade_beats_by_role[role]`, default 0).
-  Keep this PURE-by-value: the engine computes both endpoints; the colorizer interpolates.
+  Keep this PURE-by-value: the engine computes both endpoints; `resolve_fade(...)` interpolates the
+  current params inside `_compose_frame` (§3/§4).
 - `step_within_section`: already wired in `resolve_color`/`resolve_slot_colors` via
   `step_index = cycle if use_step else 0`. Turning a role TRUE makes color re-roll each cycle; the fade
   then smooths the re-roll. Drops stay step=False/fade=0 (snap).
@@ -179,16 +180,19 @@ ONCE, before any render path runs — never inside the colorizer:
 ## 6. Coordinator cadence (do not fight WI-3)
 The coordinator's WI-3 min-dwell gate (`led_dispatch_coordinator.py:74-87`, 1.5s) suppresses same-role
 re-dispatch. Discrete `step_within_section` re-rolls ride on `role_key`'s `:c{cycle}` (≥32-beat cadence
-≫ 1.5s) so they are NOT suppressed; fades do not re-dispatch at all (single trigger, colorizer-
-interpolated). The min-dwell gate is keyed on `role` (NOT role_key) with `min_look_dwell_s` default 1.5s
+≫ 1.5s) so they are NOT suppressed; fades do not re-dispatch at all (single trigger; resolved by
+`resolve_fade(...)` inside `_compose_frame` after one dispatch — no per-frame re-dispatch). The min-dwell
+gate is keyed on `role` (NOT role_key) with `min_look_dwell_s` default 1.5s
 (`led_dispatch_coordinator.py:74-87`): a `step_within_section` re-roll IS a new same-role dispatch, so its
 cadence MUST exceed 1.5s or it is silently dwell-suppressed (and the color update never propagates). At
 ≥32-beat section cadence this holds at every realistic BPM. Add a test asserting a step re-roll is NOT
-dwell-suppressed and that no per-frame re-dispatch occurs (fades are single-trigger, colorizer-interpolated).
+dwell-suppressed and that no per-frame re-dispatch occurs (fades are resolved by `resolve_fade(...)` inside
+`_compose_frame` after one dispatch; no per-frame re-dispatch).
 
 ## 7. Tests (§15.7 M2 acceptance)
-- **Fade determinism:** for fixed (color_from, color_to, fade_beats, anchor), the colorizer output at a
-  given abs_pos is exact and monotonic from→to across the interval; t clamps at the ends.
+- **Fade determinism:** for fixed `params`, `abs_pos`, and `anchor_beat`, the `resolve_fade(...)` output
+  (and/or the final rendered frame) is deterministic — exact and monotonic from→to across the interval;
+  t clamps at the ends.
 - **fade_beats=0 ⇒ instant**, byte-identical to Phase 2 (no-fade) output.
 - **Dual-signature:** a color-only param change does NOT trigger `configure` (motion not reset); a motion
   param change does. Assert via a spy/counter on configure.
@@ -201,7 +205,8 @@ dwell-suppressed and that no per-frame re-dispatch occurs (fades are single-trig
 ## 8. Verify + report
 LED suites + whole suite green (CORRECTED baseline: 1661 passed, 3 skipped, 1 xfailed, 0 failed +
 Phase 2b additions; `test_led_config.py` passes clean — the "3 pre-existing failures" are stale).
-Confirm: motion bit-exactness preserved when no fade; colorizer still pure; 40fps path has no
+Confirm: motion bit-exactness preserved when no fade; `resolve_fade` stays pure and `render`/`render_comet`/
+`_comet_frame`/`universal_colorizer` signatures are unchanged; 40fps path has no
 new per-frame allocation/locking regressions; nothing committed. Call out any §15.4 ambiguity. Recommend
 a live dry-run watch (color-inject + no stutter) before enabling fades on the rig.
 ```
