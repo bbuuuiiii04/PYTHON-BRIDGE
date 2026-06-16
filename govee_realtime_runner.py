@@ -21,8 +21,6 @@ from .led_models import BeatAnchor
 _COLOR_SIG_KEYS = frozenset({
     "color", "color2", "color_a", "color_b",
     "color_from", "color_to",
-    "color_a_from", "color_a_to",
-    "color_b_from", "color_b_to",
     "fade_beats", "gradient_stops",
     "slot_colors", "slot_colors_from", "slot_colors_to"
 })
@@ -136,21 +134,23 @@ class GoveeRealtimeRunner:
         """
         with self._lock:
             self._desired_spec = None
-        self._emergency.set()
         # Synchronously stop the transport so no more frames leak out while
         # the runner thread processes the emergency on its next tick.
         if self._active:
             self._transport.blackout()
             self._transport.deactivate()
-            self._last_frame = None
-            with self._lock:
-                self._active = False
-                self._active_signature = None
-                self._color_signature = None
-                self._color_applied_abs_beat = None
-                self._idle_since = None
-                self._pending_manual = 0
-                self._engine_status = {"sync_mode": "", "beat_division": 0.0, "instance_count": 0, "spawn_count": 0}
+        with self._lock:
+            self._active = False
+            self._active_signature = None
+            self._color_signature = None
+            self._color_applied_abs_beat = None
+            self._idle_since = None
+            self._pending_manual = 0
+            self._engine_status = {"sync_mode": "", "beat_division": 0.0, "instance_count": 0, "spawn_count": 0}
+            self._desired_spec = None
+        self._last_frame = None
+        self._engine.reset()
+        self._publish_engine_status(cleared=True)
 
     def start(self) -> None:
         with self._lock:
@@ -172,6 +172,18 @@ class GoveeRealtimeRunner:
         self._transport.blackout()
         self._transport.deactivate()
         self._transport.close()
+        with self._lock:
+            self._active = False
+            self._active_signature = None
+            self._color_signature = None
+            self._color_applied_abs_beat = None
+            self._idle_since = None
+            self._pending_manual = 0
+            self._engine_status = {"sync_mode": "", "beat_division": 0.0, "instance_count": 0, "spawn_count": 0}
+            self._desired_spec = None
+        self._last_frame = None
+        self._engine.reset()
+        self._publish_engine_status(cleared=True)
         return thread is None or not thread.is_alive()
 
     def status(self) -> dict[str, Any]:

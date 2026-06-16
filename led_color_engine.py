@@ -570,11 +570,6 @@ class LedColorEngine:
         if prev:
             result["color_from"] = prev["color"]
             result["color_to"] = result["color"]
-            if multi:
-                result["color_a_from"] = prev["color_a"]
-                result["color_a_to"] = result["color_a"]
-                result["color_b_from"] = prev["color_b"]
-                result["color_b_to"] = result["color_b"]
             fade_beats = float(self._config.fade_beats_by_role.get(role, 0.0))
             if fade_beats > 0.0:
                 result["fade_beats"] = fade_beats

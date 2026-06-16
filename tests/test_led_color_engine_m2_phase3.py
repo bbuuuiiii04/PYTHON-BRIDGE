@@ -32,17 +32,13 @@ def test_resolve_fade_pure_helper():
     out_over = resolve_fade(params, 15.0, 10.0)
     assert out_over["color"] == (0, 0, 255)
     
-    # 5. Dual colors and slots
+    # 5. Slots
     dual_params = {
-        "color_a_from": (100, 100, 100), "color_a_to": (200, 200, 200),
-        "color_b_from": (0, 100, 0), "color_b_to": (0, 200, 0),
         "slot_colors_from": [(10, 10, 10), (255, 255, 255)],
         "slot_colors_to": [(20, 20, 20), (255, 255, 255)],
         "fade_beats": 1.0,
     }
     out_dual = resolve_fade(dual_params, 10.5, 10.0)
-    assert out_dual["color_a"] == (150, 150, 150)
-    assert out_dual["color_b"] == (0, 150, 0)
     assert out_dual["slot_colors"] == [(15, 15, 15), (255, 255, 255)]
 
 
