@@ -93,8 +93,8 @@ These are DECISIVE and supersede §3/§4, the body, AND the GEMINI SCOPE LOCK wh
    `tuple(sorted((str(k),repr(v)) for k,v in dict(spec.params).items()))` + effect_name/seed/sync_mode/
    beat_division. So motion signature = that comprehension with `if k not in _COLOR_SIG_KEYS`.
    `_COLOR_SIG_KEYS` MUST include the resolved-color keys the fade WRITES — `color, color_a, color_b,
-   slot_colors` — AND the endpoints — `color2, color_from, color_to, fade_beats, gradient_stops,
-   slot_colors_from, slot_colors_to`. (`_COLOR_SIG_KEYS` = the canonical 11-key set defined in §2; it ALREADY
+   slot_colors` — AND the endpoints — `color2, color_from, color_to, color_a_from, color_a_to, color_b_from, color_b_to, fade_beats, gradient_stops,
+   slot_colors_from, slot_colors_to`. (`_COLOR_SIG_KEYS` = the canonical 15-key set defined in §2; it ALREADY
    includes both the resolved keys `color/color_a/color_b/slot_colors` AND the endpoints, so a per-frame
    faded `color` does NOT flip the motion signature.) Color signature = `_COLOR_SIG_KEYS ∩ spec.params`.
 10. **Two `_compose_frame` call sites; respect `abs_pos` ordering.** Verified: `_compose_frame` is called

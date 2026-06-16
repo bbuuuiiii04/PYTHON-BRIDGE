@@ -9,9 +9,9 @@ against `main`; demand actual test output.
 - `govee_frame_renderer.py` (adds pure `resolve_fade(params, abs_pos, anchor_beat)` helper ONLY;
   `render`/`render_comet`/`_comet_frame`/`universal_colorizer` signatures UNCHANGED).
 - `led_color_engine.py` (emit `color_from`/`color_to`/`fade_beats` + previous-color memory).
+- `state_manager.py` may appear ONLY for LedColorEngine fade-memory reset hook wiring from existing realtime teardown / idle / emergency / force-deactivate paths.
 - new test file.
-RED FLAG if it touches motion geometry, baked sand, cloud/DIY, laser/RB/SS, enables nonzero fades in
-config (that's Patch 2, gated), OR changes the signature of `render`/`render_comet`/`_comet_frame`/
+Red flag any dispatch refactor, config/bank edit, cloud/DIY/RB/SoundSwitch/laser edit, or unrelated behavior change, OR changes the signature of `render`/`render_comet`/`_comet_frame`/
 `universal_colorizer`.
 
 ## Motion vs color signature checks
