@@ -78,3 +78,10 @@ PLAY_SETTLE_MS         = 400    # delay before flash-arm after resume (BPM settl
 # ── BPM send thresholds ──────────────────────────────────────────────────────
 BPM_THRESHOLD_UNSCRIPTED = 0.1  # send get_bpm when change exceeds this (autoloop)
 BPM_THRESHOLD_SCRIPTED   = 2.0  # larger threshold for scripted shows (prevent jitter)
+
+# ── LED monotonic clamp (WI-1) ───────────────────────────────────────────────
+# A backward delta >= this many beats is a real seek/cue/reload; anything
+# smaller is sub-beat jitter and is clamped forward.
+# LABEL: ASSUMED — confirm that no live maneuver legitimately steps back by
+# <1 beat. If 1-beat tight loops are used live, lower to 0.75.
+LED_BACKSTEP_SEEK_BEATS = 1.0

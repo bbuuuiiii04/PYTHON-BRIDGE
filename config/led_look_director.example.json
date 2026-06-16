@@ -2,12 +2,252 @@
   "schema_version": 1,
   "enabled": false,
   "dry_run": true,
-  "automation_enabled": false,
-  "automation": {
-    "offset_s": 0.0
+  "automation_enabled": true,
+  "color_engine": {
+    "enabled": true,
+    "palette_dwell_tracks": 3,
+    "snap_eligible_drop_indices": [
+      2,
+      3
+    ],
+    "big_shift_chance": 0.3,
+    "big_shift_weight_bias": 1.5,
+    "drama_by_role": true,
+    "role_spread": {
+      "drop": 0.35,
+      "groove": 0.12,
+      "ambient": 0.1
+    },
+    "step_within_section": {
+      "drop": false,
+      "post_drop": false,
+      "groove": false,
+      "ambient": false,
+      "buildup": false,
+      "breakdown": false
+    },
+    "fade_beats_by_role": {
+      "drop": 0.0,
+      "post_drop": 0.0,
+      "groove": 0.0,
+      "ambient": 0.0
+    },
+    "exempt_looks": [
+      "room_blackout",
+      "rt_blackout",
+      "ambient_pb_halves",
+      "groove_diy_groove",
+      "groove_diy_groove_2",
+      "groove_diy_groove_3",
+      "groove_diy_groove_5",
+      "groove_diy_red_chasing",
+      "groove_diy_blue_sparkle",
+      "groove_diy_bright_white_chase",
+      "buildup_diy_white_sparse",
+      "buildup_diy_2",
+      "buildup_diy_3_white_chase",
+      "buildup_diy_white_chasing",
+      "buildup_diy_sparse",
+      "buildup_diy_b1",
+      "buildup_diy_red_sparkle_dim",
+      "drop_diy_1_red_white_chase",
+      "drop_diy_2_cyan",
+      "drop_diy_3",
+      "drop_diy_4_blue_cyan",
+      "drop_diy_5_red",
+      "drop_diy_green_sparkle",
+      "drop_diy_pink_red_sparkle",
+      "drop_diy_rainbow_sparkle",
+      "breakdown_1_red",
+      "breakdown_cyan_stack",
+      "breakdown_green_snake",
+      "rt_buildup_ramp_1",
+      "rt_buildup_ramp_2",
+      "rt_buildup_ramp_3",
+      "rt_buildup_white_zone_strobe",
+      "rt_buildup_white_half_strobe",
+      "rt_buildup_freestyle_nebula",
+      "rt_groove_freestyle_nebula",
+      "rt_drop_chase_freestyle_nebula",
+      "rt_drop_white_aggressive",
+      "rt_post_drop_freestyle_nebula",
+      "rt_post_drop_white_shatter",
+      "rt_twinkle_blue",
+      "rt_drop_center_burst_blue_cyan",
+      "rt_post_drop_center_comet_blue_cyan"
+    ],
+    "diy_color_tags": {
+      "groove_diy_groove": "cyan",
+      "groove_diy_groove_2": "blue",
+      "groove_diy_groove_3": "cyan",
+      "groove_diy_groove_5": "cyan",
+      "groove_diy_red_chasing": "red",
+      "groove_diy_blue_sparkle": "blue",
+      "groove_diy_bright_white_chase": "white",
+      "buildup_diy_white_sparse": "white",
+      "buildup_diy_2": "white",
+      "buildup_diy_3_white_chase": "white",
+      "buildup_diy_white_chasing": "white",
+      "buildup_diy_sparse": "white",
+      "buildup_diy_b1": "white",
+      "buildup_diy_red_sparkle_dim": "red",
+      "drop_diy_1_red_white_chase": "red",
+      "drop_diy_2_cyan": "cyan",
+      "drop_diy_3": "white",
+      "drop_diy_4_blue_cyan": "cyan",
+      "drop_diy_5_red": "red",
+      "drop_diy_green_sparkle": "green",
+      "drop_diy_pink_red_sparkle": "red",
+      "breakdown_1_red": "red",
+      "breakdown_cyan_stack": "cyan",
+      "breakdown_green_snake": "green",
+      "ambient_pb_halves": "blue"
+    },
+    "set_seed_mode": "random",
+    "palettes": {
+      "blue_cyan": {
+        "range": [
+          "cyan",
+          "blue"
+        ],
+        "weight": 10,
+        "spread": 0.1,
+        "white": 0.0,
+        "focus_modes": {
+          "full": 2,
+          "lean": 2,
+          "mono": 1
+        }
+      },
+      "deep_ocean": {
+        "range": [
+          "green",
+          "blue"
+        ],
+        "weight": 4,
+        "spread": 0.1,
+        "white": 0.0
+      },
+      "indigo": {
+        "range": [
+          "blue",
+          "purple"
+        ],
+        "weight": 6,
+        "spread": 0.1,
+        "white": 0.0,
+        "focus_modes": {
+          "full": 2,
+          "lean": 2,
+          "mono": 1
+        }
+      },
+      "violet": {
+        "range": [
+          "purple",
+          "magenta"
+        ],
+        "weight": 3,
+        "spread": 0.1,
+        "white": 0.0
+      },
+      "crimson": {
+        "range": [
+          "magenta",
+          "red"
+        ],
+        "weight": 2,
+        "spread": 0.08,
+        "white": 0.0
+      }
+    }
   },
+  "automation": {
+    "cloud_offset_s": 0.6,
+    "realtime_offset_s": 0.0
+  },
+  "realtime_param_profiles": {
+    "beat_chase_reset": {
+      "sync_mode": "retrigger",
+      "beat_division": 1.0,
+      "travel_beats": 1.0,
+      "trail_beats": 0.25,
+      "width": 0.8
+    }
+  },
+  "drop_pairs": {
+    "rt_drop_chase_blue": {
+      "post_drop": "rt_post_drop_chase_blue",
+      "duration_beats": 8.0
+    },
+    "rt_drop_chase_cyan": {
+      "post_drop": "rt_post_drop_chase_cyan",
+      "duration_beats": 8.0
+    },
+    "rt_drop_chase_red": {
+      "post_drop": "rt_post_drop_chase_red",
+      "duration_beats": 8.0
+    },
+    "rt_drop_chase_green": {
+      "post_drop": "rt_post_drop_chase_green",
+      "duration_beats": 8.0
+    },
+    "rt_drop_chase_cyan_white": {
+      "post_drop": "rt_post_drop_chase_cyan_white",
+      "duration_beats": 8.0
+    },
+    "rt_drop_chase_freestyle_nebula": {
+      "post_drop": "rt_post_drop_freestyle_nebula",
+      "duration_beats": 8.0
+    },
+    "rt_drop_white_aggressive": {
+      "post_drop": "rt_post_drop_white_shatter"
+    },
+    "rt_drop_center_burst_blue_cyan": {
+      "post_drop": "rt_post_drop_center_comet_blue_cyan"
+    }
+  },
+  "post_drop_cycle_beats": 32.0,
   "targets": {
     "room_perimeter": {
+      "label": "Bui light test",
+      "device_ref": "redacted-operator-local-strip-light-id",
+      "expected_model": "H612D",
+      "control_route": "govee_platform_dynamic_scene",
+      "capabilities": [
+        "scene",
+        "diy_scene",
+        "realtime_razer",
+        "off",
+        "on_off::powerSwitch"
+      ],
+      "backend": "cloud_diy",
+      "realtime": {
+        "enabled": true,
+        "protocol": "razer_dreamview",
+        "ip": "192.168.1.100",
+        "port": 4003,
+        "segments": 60,
+        "header": "dreams",
+        "header_bytes": [
+          187,
+          0,
+          250,
+          176,
+          0
+        ],
+        "stretch": false,
+        "fps": 60,
+        "activate_pt": "uwABsQEK",
+        "deactivate_pt": "uwABsQAL",
+        "proof_status": "confirmed_visual_pass",
+        "proof_date": "2026-06-13"
+      },
+      "mirror_targets": [
+        "strip_light_mirror"
+      ]
+    },
+    "strip_light_mirror": {
       "label": "Strip Light",
       "device_ref": "redacted-operator-local-strip-light-id",
       "expected_model": "H612D",
@@ -17,41 +257,48 @@
         "diy_scene",
         "off",
         "on_off::powerSwitch"
-      ]
+      ],
+      "backend": "cloud_diy",
+      "realtime": {
+        "enabled": false,
+        "proof_status": "not_proven"
+      }
     }
   },
   "looks": {
-    "room_safe_default": {
-      "target": "room_perimeter",
-      "action": "unmapped",
-      "scene_ref": "unmapped",
-      "fallback": "room_blackout",
-      "safety_class": "safe",
-      "brightness": 35,
-      "allow_strobe": false
-    },
     "room_blackout": {
       "target": "room_perimeter",
       "action": "diy_scene",
-      "scene_ref": "BLACKOUT SCENE",
+      "scene_ref": "23259104",
       "fallback": "",
       "safety_class": "blackout",
       "brightness": 0,
       "allow_strobe": false
     },
-    "groove_release_a": {
+    "rt_blackout": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Release-A",
+      "action": "realtime",
+      "scene_ref": "blackout",
+      "fallback": "",
+      "safety_class": "blackout",
+      "brightness": 0,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "ambient_pb_halves": {
+      "target": "room_perimeter",
+      "action": "diy_scene",
+      "scene_ref": "23261172",
       "fallback": "room_blackout",
-      "safety_class": "groove",
+      "safety_class": "ambient",
       "brightness": 100,
-      "allow_strobe": true
+      "allow_strobe": false
     },
     "groove_diy_groove": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "GROOVE from DIY",
+      "action": "diy_scene",
+      "scene_ref": "23254272",
       "fallback": "room_blackout",
       "safety_class": "groove",
       "brightness": 100,
@@ -59,8 +306,8 @@
     },
     "groove_diy_groove_2": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "GROOVE 2 from DIY",
+      "action": "diy_scene",
+      "scene_ref": "23254524",
       "fallback": "room_blackout",
       "safety_class": "groove",
       "brightness": 100,
@@ -68,71 +315,53 @@
     },
     "groove_diy_groove_3": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "GROOVE 3 from DIY",
+      "action": "diy_scene",
+      "scene_ref": "23254671",
       "fallback": "room_blackout",
       "safety_class": "groove",
       "brightness": 100,
       "allow_strobe": true
     },
-    "groove_ghost_b": {
+    "groove_diy_groove_5": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Ghost-B",
+      "action": "diy_scene",
+      "scene_ref": "23254528",
       "fallback": "room_blackout",
       "safety_class": "groove",
       "brightness": 100,
       "allow_strobe": true
     },
-    "groove_tension_a": {
+    "groove_diy_red_chasing": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Tension-A",
+      "action": "diy_scene",
+      "scene_ref": "23261559",
       "fallback": "room_blackout",
       "safety_class": "groove",
       "brightness": 100,
       "allow_strobe": true
     },
-    "buildup_disco_a": {
+    "groove_diy_blue_sparkle": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Disco-A",
+      "action": "diy_scene",
+      "scene_ref": "23261619",
       "fallback": "room_blackout",
-      "safety_class": "buildup",
+      "safety_class": "groove",
       "brightness": 100,
       "allow_strobe": true
     },
-    "buildup_excited_b": {
+    "groove_diy_bright_white_chase": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Excited-B",
+      "action": "diy_scene",
+      "scene_ref": "23261681",
       "fallback": "room_blackout",
-      "safety_class": "buildup",
-      "brightness": 100,
-      "allow_strobe": true
-    },
-    "buildup_flash": {
-      "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Flash",
-      "fallback": "room_blackout",
-      "safety_class": "buildup",
-      "brightness": 100,
-      "allow_strobe": true
-    },
-    "buildup_music_mode_separation": {
-      "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Separation from Music Mode",
-      "fallback": "room_blackout",
-      "safety_class": "buildup",
+      "safety_class": "groove",
       "brightness": 100,
       "allow_strobe": true
     },
     "buildup_diy_white_sparse": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "BUILDUP WHITE SPARSE from DIY",
+      "action": "diy_scene",
+      "scene_ref": "23254214",
       "fallback": "room_blackout",
       "safety_class": "buildup",
       "brightness": 100,
@@ -140,35 +369,62 @@
     },
     "buildup_diy_2": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "BUILDUP 2 from DIY",
+      "action": "diy_scene",
+      "scene_ref": "23254614",
       "fallback": "room_blackout",
       "safety_class": "buildup",
       "brightness": 100,
       "allow_strobe": true
     },
-    "drop_lightning_a": {
+    "buildup_diy_3_white_chase": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Lightning-A",
+      "action": "diy_scene",
+      "scene_ref": "23259350",
       "fallback": "room_blackout",
-      "safety_class": "drop",
+      "safety_class": "buildup",
       "brightness": 100,
       "allow_strobe": true
     },
-    "drop_music_mode_rolling": {
+    "buildup_diy_white_chasing": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Rolling from Music Mode",
+      "action": "diy_scene",
+      "scene_ref": "23261590",
       "fallback": "room_blackout",
-      "safety_class": "drop",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "buildup_diy_sparse": {
+      "target": "room_perimeter",
+      "action": "diy_scene",
+      "scene_ref": "23260856",
+      "fallback": "room_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "buildup_diy_b1": {
+      "target": "room_perimeter",
+      "action": "diy_scene",
+      "scene_ref": "23260845",
+      "fallback": "room_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "buildup_diy_red_sparkle_dim": {
+      "target": "room_perimeter",
+      "action": "diy_scene",
+      "scene_ref": "23261623",
+      "fallback": "room_blackout",
+      "safety_class": "buildup",
       "brightness": 100,
       "allow_strobe": true
     },
     "drop_diy_1_red_white_chase": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "DROP 1 RED/WHITE CHASE from DIY",
+      "action": "diy_scene",
+      "scene_ref": "23254201",
       "fallback": "room_blackout",
       "safety_class": "drop",
       "brightness": 100,
@@ -176,8 +432,8 @@
     },
     "drop_diy_2_cyan": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "DROP 2 CYAN from DIY",
+      "action": "diy_scene",
+      "scene_ref": "23254521",
       "fallback": "room_blackout",
       "safety_class": "drop",
       "brightness": 100,
@@ -185,17 +441,8 @@
     },
     "drop_diy_3": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "DROP 3 from DIY",
-      "fallback": "room_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true
-    },
-    "drop_disco_a": {
-      "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "Disco-A",
+      "action": "diy_scene",
+      "scene_ref": "23254535",
       "fallback": "room_blackout",
       "safety_class": "drop",
       "brightness": 100,
@@ -203,8 +450,8 @@
     },
     "drop_diy_4_blue_cyan": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "DROP 4 BLUE/CYAN from DIY",
+      "action": "diy_scene",
+      "scene_ref": "23254626",
       "fallback": "room_blackout",
       "safety_class": "drop",
       "brightness": 100,
@@ -212,8 +459,35 @@
     },
     "drop_diy_5_red": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "DROP 5 RED from DIY",
+      "action": "diy_scene",
+      "scene_ref": "23254640",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_diy_green_sparkle": {
+      "target": "room_perimeter",
+      "action": "diy_scene",
+      "scene_ref": "23255361",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_diy_pink_red_sparkle": {
+      "target": "room_perimeter",
+      "action": "diy_scene",
+      "scene_ref": "23261508",
+      "fallback": "room_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "drop_diy_rainbow_sparkle": {
+      "target": "room_perimeter",
+      "action": "diy_scene",
+      "scene_ref": "23261537",
       "fallback": "room_blackout",
       "safety_class": "drop",
       "brightness": 100,
@@ -221,8 +495,8 @@
     },
     "breakdown_1_red": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "BREAKDOWN 1 RED",
+      "action": "diy_scene",
+      "scene_ref": "23254680",
       "fallback": "room_blackout",
       "safety_class": "breakdown",
       "brightness": 100,
@@ -230,48 +504,424 @@
     },
     "breakdown_cyan_stack": {
       "target": "room_perimeter",
-      "action": "scene",
-      "scene_ref": "BREAKDOWN CYAN STACK",
+      "action": "diy_scene",
+      "scene_ref": "23254693",
       "fallback": "room_blackout",
       "safety_class": "breakdown",
       "brightness": 100,
       "allow_strobe": true
+    },
+    "breakdown_green_snake": {
+      "target": "room_perimeter",
+      "action": "diy_scene",
+      "scene_ref": "23255585",
+      "fallback": "room_blackout",
+      "safety_class": "breakdown",
+      "brightness": 100,
+      "allow_strobe": true
+    },
+    "rt_buildup_ramp_1": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "buildup_ramp_1",
+      "fallback": "rt_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "params": {
+        "travel_beats": 2
+      }
+    },
+    "rt_buildup_ramp_2": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "buildup_ramp_2",
+      "fallback": "rt_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_buildup_ramp_3": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "buildup_ramp_3",
+      "fallback": "rt_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_buildup_white_zone_strobe": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "buildup_white_zone_strobe",
+      "fallback": "rt_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_buildup_white_half_strobe": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "buildup_white_half_strobe",
+      "fallback": "rt_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_buildup_freestyle_nebula": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "buildup_freestyle_nebula",
+      "fallback": "rt_blackout",
+      "safety_class": "buildup",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_groove_chase_blue": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "groove_chase_blue",
+      "fallback": "rt_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "params": {
+        "travel_beats": 4
+      }
+    },
+    "rt_groove_chase_cyan": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "groove_chase_cyan",
+      "fallback": "rt_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "params": {
+        "travel_beats": 4
+      }
+    },
+    "rt_groove_chase_red": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "groove_chase_red",
+      "fallback": "rt_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "params": {
+        "travel_beats": 4
+      }
+    },
+    "rt_groove_chase_green": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "groove_chase_green",
+      "fallback": "rt_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "params": {
+        "travel_beats": 4
+      }
+    },
+    "rt_groove_chase_cyan_white": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "groove_chase_cyan_white",
+      "fallback": "rt_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "params": {
+        "travel_beats": 4
+      }
+    },
+    "rt_groove_freestyle_nebula": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "groove_freestyle_nebula",
+      "fallback": "rt_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "params": {
+        "travel_beats": 4
+      }
+    },
+    "rt_drop_chase_blue": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "drop_chase_blue",
+      "fallback": "rt_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_drop_chase_cyan": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "drop_chase_cyan",
+      "fallback": "rt_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_drop_chase_red": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "drop_chase_red",
+      "fallback": "rt_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_drop_chase_green": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "drop_chase_green",
+      "fallback": "rt_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_drop_chase_cyan_white": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "drop_chase_cyan_white",
+      "fallback": "rt_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_drop_chase_freestyle_nebula": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "drop_chase_freestyle_nebula",
+      "fallback": "rt_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_drop_white_aggressive": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "drop_white_aggressive",
+      "fallback": "rt_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_post_drop_chase_blue": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "post_drop_chase_blue",
+      "fallback": "rt_blackout",
+      "safety_class": "post_drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_post_drop_chase_cyan": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "post_drop_chase_cyan",
+      "fallback": "rt_blackout",
+      "safety_class": "post_drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_post_drop_chase_red": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "post_drop_chase_red",
+      "fallback": "rt_blackout",
+      "safety_class": "post_drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_post_drop_chase_green": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "post_drop_chase_green",
+      "fallback": "rt_blackout",
+      "safety_class": "post_drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_post_drop_chase_cyan_white": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "post_drop_chase_cyan_white",
+      "fallback": "rt_blackout",
+      "safety_class": "post_drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_post_drop_freestyle_nebula": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "post_drop_freestyle_nebula",
+      "fallback": "rt_blackout",
+      "safety_class": "post_drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_post_drop_white_shatter": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "post_drop_white_shatter",
+      "fallback": "rt_blackout",
+      "safety_class": "post_drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_twinkle_blue": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "twinkle_blue",
+      "fallback": "rt_blackout",
+      "safety_class": "ambient",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_drop_center_burst_blue_cyan": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "drop_center_burst_blue_cyan",
+      "fallback": "rt_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
+    },
+    "rt_post_drop_center_comet_blue_cyan": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "post_drop_center_comet_blue_cyan",
+      "fallback": "rt_blackout",
+      "safety_class": "post_drop",
+      "brightness": 100,
+      "allow_strobe": true,
+      "backend": "realtime_razer",
+      "params": {}
     }
   },
   "banks": {
     "default": {
-      "ambient": [],
+      "ambient": [
+        "ambient_pb_halves",
+        "rt_twinkle_blue"
+      ],
       "groove": [
-        "groove_release_a",
         "groove_diy_groove",
         "groove_diy_groove_2",
         "groove_diy_groove_3",
-        "groove_ghost_b",
-        "groove_tension_a"
+        "groove_diy_groove_5",
+        "groove_diy_red_chasing",
+        "groove_diy_blue_sparkle",
+        "groove_diy_bright_white_chase",
+        "rt_groove_chase_blue",
+        "rt_groove_chase_cyan",
+        "rt_groove_chase_red",
+        "rt_groove_chase_green",
+        "rt_groove_chase_cyan_white",
+        "rt_groove_freestyle_nebula"
       ],
       "buildup": [
-        "buildup_disco_a",
-        "buildup_excited_b",
-        "buildup_flash",
-        "buildup_music_mode_separation",
         "buildup_diy_white_sparse",
-        "buildup_diy_2"
+        "buildup_diy_2",
+        "buildup_diy_3_white_chase",
+        "buildup_diy_white_chasing",
+        "buildup_diy_sparse",
+        "buildup_diy_b1",
+        "buildup_diy_red_sparkle_dim",
+        "rt_buildup_ramp_1",
+        "rt_buildup_ramp_2",
+        "rt_buildup_ramp_3",
+        "rt_buildup_white_zone_strobe",
+        "rt_buildup_white_half_strobe",
+        "rt_buildup_freestyle_nebula"
       ],
       "pre_drop": [],
       "drop": [
-        "drop_lightning_a",
-        "drop_music_mode_rolling",
         "drop_diy_1_red_white_chase",
         "drop_diy_2_cyan",
         "drop_diy_3",
-        "drop_disco_a",
         "drop_diy_4_blue_cyan",
-        "drop_diy_5_red"
+        "drop_diy_5_red",
+        "drop_diy_green_sparkle",
+        "drop_diy_pink_red_sparkle",
+        "drop_diy_rainbow_sparkle",
+        "rt_drop_chase_blue",
+        "rt_drop_chase_cyan",
+        "rt_drop_chase_red",
+        "rt_drop_chase_green",
+        "rt_drop_chase_cyan_white",
+        "rt_drop_chase_freestyle_nebula",
+        "rt_drop_white_aggressive",
+        "rt_drop_center_burst_blue_cyan"
       ],
-      "post_drop": [],
+      "post_drop": [
+        "rt_post_drop_chase_blue",
+        "rt_post_drop_chase_cyan",
+        "rt_post_drop_chase_red",
+        "rt_post_drop_chase_green",
+        "rt_post_drop_chase_cyan_white",
+        "rt_post_drop_freestyle_nebula",
+        "rt_post_drop_center_comet_blue_cyan"
+      ],
       "breakdown": [
         "breakdown_1_red",
-        "breakdown_cyan_stack"
+        "breakdown_cyan_stack",
+        "breakdown_green_snake"
       ],
       "utility": [
         "room_blackout"
@@ -283,7 +933,7 @@
   "rate_limits": {
     "queue_maxsize": 8,
     "scene_retrigger_cooldown_s": 4.0,
-    "high_impact_cooldown_s": 12.0,
+    "high_impact_cooldown_s": 1.0,
     "request_timeout_s": 2.0,
     "worker_shutdown_timeout_s": 1.0
   },
@@ -297,8 +947,6 @@
     "scripted_mode_automation": false
   },
   "metadata": {
-    "future_requirements": [
-      "smart_drop_blackout_coupling_deferred_until_later_phase"
-    ]
+    "future_requirements": []
   }
 }

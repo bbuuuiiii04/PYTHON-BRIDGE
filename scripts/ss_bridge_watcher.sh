@@ -103,6 +103,12 @@ start_bridge() {
             RBSS_SMART_REARM_EXPERIMENT=1 \
             RBSS_SMART_DROP=1 \
             RBSS_SMART_BREAKDOWN=1 \
+            RBSS_LED_PHRASE_MONOTONIC=1 \
+            RBSS_LED_MIN_DWELL=1 \
+            RBSS_LED_CANCEL_PENDING=1 \
+            RBSS_LED_RT_RECONCILE=1 \
+            RBSS_LED_TRANSPORT_STICKY=1 \
+            RBSS_LED_TRANSPORT_COOLDOWN=0 \
             RBSS_LASER_CONFIG="$LASER_CONFIG_PATH" \
             "$PYTHON" -m rb_ss_bridge_v2
     ) > "$LOG_FILE" 2>&1 &

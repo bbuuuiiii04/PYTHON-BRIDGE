@@ -64,6 +64,7 @@ from .laser_models import LaserPersonality
 from .midi_output import MidiOutput
 from .led_config import LEDConfigResult, load_led_look_director_config
 from .led_look_director import LEDLookDirector, LED_AUTOMATION_ROLE_ORDER
+from .led_color_engine import LedColorEngine
 from .govee_scene_adapter import GoveeSceneAdapter
 from .govee_runtime_sender import GoveeRuntimeSender
 from .govee_frame_renderer import GoveeFrameRenderer
@@ -277,6 +278,7 @@ class LEDStartupBundle:
     led_adapter: Optional[Any]
     status_provider: Optional[Callable[[], dict]]
     realtime_runner: Optional[GoveeRealtimeRunner] = None
+    led_color_engine: Optional[Any] = None
 
 
 def _build_personality_resolver(cfg: LaserConfig) -> PersonalityResolver:
@@ -388,6 +390,14 @@ def _build_led_startup_wiring(
     cfg = cfg_result.config
     try:
         led_director = LEDLookDirector(cfg, shuffled_roles=LED_AUTOMATION_ROLE_ORDER)
+        # M1b WI-1: instantiate the color engine ONLY when a color_engine config
+        # block parsed successfully.  Live config has no block ⇒ None ⇒ no engine
+        # ⇒ zero behavior change.
+        engine = (
+            LedColorEngine(cfg.color_engine)
+            if cfg.color_engine is not None
+            else None
+        )
         govee_sender = None
         if not cfg.dry_run:
             govee_sender = GoveeRuntimeSender(cfg)
@@ -472,7 +482,9 @@ def _build_led_startup_wiring(
         payload["adapter"] = led_adapter.status()
         return payload
 
-    return LEDStartupBundle(led_director, led_adapter, _status, realtime_runner)
+    return LEDStartupBundle(
+        led_director, led_adapter, _status, realtime_runner, engine
+    )
 
 _LOCK_FD = None
 _LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
@@ -755,6 +767,7 @@ def main() -> None:
         laser_personality_provider=laser_personality_provider,
         led_look_director=led_look_director,
         led_scene_adapter=led_scene_adapter,
+        led_color_engine=led_bundle.led_color_engine,
     )
     if led_bundle.realtime_runner is not None:
         led_bundle.realtime_runner.set_beat_provider(sm.get_active_beat_anchor)

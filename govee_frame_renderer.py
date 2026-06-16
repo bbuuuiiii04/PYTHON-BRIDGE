@@ -10,6 +10,14 @@ RGB = tuple[int, int, int]
 Frame = list[RGB]
 EffectFn = Callable[[float, float, int, Mapping[str, Any], int, int], Frame]
 
+# M2: slot-based effects.  A MotionField is a per-pixel slot-intensity matrix
+# (segment-major); universal_colorizer turns it into a Frame given slot_colors.
+MAX_SLOTS = 6
+MotionField = list[list[float]]   # [segment][slot] intensity 0..1+ (unclamped pre-colorize)
+# Slot effects share EffectFn's arg order but return a MotionField; the render()
+# slot path colorizes it with the injected slot_colors palette.
+SlotEffectFn = Callable[[float, float, int, Mapping[str, Any], int, int], MotionField]
+
 _EDM_DURATION_BEATS = 32.0
 
 
@@ -29,6 +37,29 @@ def _color(value: Any, default: RGB = (255, 255, 255)) -> RGB:
         _clamp_channel(value[1]),
         _clamp_channel(value[2]),
     )
+
+
+def _slots(value: Any) -> list[RGB] | None:
+    """Validate a runtime slot_colors param: a list of 3-int RGB triples.
+
+    Mirrors _color's strictness (per-channel clamp via _clamp_channel).  Returns
+    None on any malformed input so the caller can substitute its own default.
+    An empty list is malformed (a slot effect with zero colors is unusable).
+    """
+    if not isinstance(value, (list, tuple)) or len(value) == 0:
+        return None
+    out: list[RGB] = []
+    for entry in value:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 3:
+            return None
+        out.append(
+            (
+                _clamp_channel(entry[0]),
+                _clamp_channel(entry[1]),
+                _clamp_channel(entry[2]),
+            )
+        )
+    return out
 
 
 def _lerp(a: RGB, b: RGB, t: float) -> RGB:
@@ -316,7 +347,7 @@ def _groove_chase(name: str, beat: float, segments: int) -> Frame:
         offset_beats=2.0,
         color1=color1,
         color2=color2,
-
+    )
 
 
 def _groove_nebula(beat: float, segments: int) -> Frame:
@@ -334,8 +365,72 @@ def _groove_nebula(beat: float, segments: int) -> Frame:
     )
 
 
+def _drop_center_burst_blue_cyan(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    frame = [(0, 0, 0)] * segments
+    center = segments / 2.0
+    
+    # Phase 1: Burst every half beat from the physical center to both ends
+    pulse_phase = (beat % 0.5) / 0.5
+    pulse_width = 1.0  # Smallest possible sharp burst
+    current_dist = pulse_phase * (center + pulse_width)
+    
+    # 3 out of 4 bursts are pure deep blue, 1 out of 4 is cyan
+    burst_idx = int((beat % 8.0) * 2.0)
+    is_blue_burst = (burst_idx % 4) != 3
+    g_base = 0 if is_blue_burst else 200
+    
+    for idx in range(segments):
+        if idx % 2 != 0:
+            continue
+        dist_from_center = abs(idx - center)
+        dist_from_pulse = abs(dist_from_center - current_dist)
+        intensity = max(0.0, 1.0 - (dist_from_pulse / pulse_width))
+        if intensity > 0:
+            frame[idx] = (0, int(g_base * intensity), int(255 * intensity))
+    return frame
+
+def _post_drop_center_comet_blue_cyan(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    frame = [(0, 0, 0)] * segments
+    center = segments / 2.0
+    
+    # Phase 2: Dual comets spawning in the middle and chasing outward on the beat + strobing
+    strobe_on = (int(beat * 16.0) % 2) == 0
+    if not strobe_on:
+        return frame
+        
+    comet_width = 1.0  # Extremely small comet tail
+    
+    for age in [beat % 1.0, (beat % 1.0) + 1.0]:
+        if age > 2.0:
+            continue
+            
+        comet_head_dist = age * center
+        
+        # 3 out of 4 comets are pure deep blue, 1 out of 4 is cyan
+        spawn_beat = beat - age
+        spawn_idx = int(round(spawn_beat))
+        is_blue_comet = (spawn_idx % 4) != 3
+        g_base = 0 if is_blue_comet else 200
+        
+        for idx in range(segments):
+            dist_from_center = abs(idx - center)
+            
+            if comet_head_dist - comet_width <= dist_from_center <= comet_head_dist:
+                intensity = 1.0 - ((comet_head_dist - dist_from_center) / comet_width)
+                r = 0
+                g = int(g_base * intensity)
+                b = int(255 * intensity)
+                
+                old_r, old_g, old_b = frame[idx]
+                frame[idx] = (min(255, old_r + r), min(255, old_g + g), min(255, old_b + b))
+                
+    return frame
+
+
 def _drop_chase(name: str, beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
     color1, color2 = _edm_color_for_look(name, beat)
+    # M1b WI-4: prefer an engine-injected color; fall back to the suffix color.
+    color1 = _color(params.get("color"), color1)
     strobe_on = (int(beat * 16.0) % 2) == 0
     if not strobe_on:
         return _empty(segments)
@@ -353,8 +448,10 @@ def _drop_chase(name: str, beat: float, local_t: float, frame_index: int, params
     return _drop_chase_comets(name, beat, segments, color1, color2)
 
 
-def _post_drop_chase(name: str, beat: float, segments: int) -> Frame:
+def _post_drop_chase(name: str, beat: float, params: Mapping[str, Any], segments: int) -> Frame:
     color1, color2 = _edm_color_for_look(name, beat)
+    # M1b WI-4: prefer an engine-injected color; fall back to the suffix color.
+    color1 = _color(params.get("color"), color1)
     strobe_on = (int(beat * 16.0) % 2) == 0
     if not strobe_on:
         return _empty(segments)
@@ -699,8 +796,12 @@ def _edm_dispatch(name: str, beat: float, local_t: float, frame_index: int, para
         return _groove_nebula(cue_beat, segments)
     if name.startswith("drop_chase_") and name != "drop_chase_freestyle_nebula":
         return _drop_chase(name, cue_beat, local_t, frame_index, params, segments, seed)
+    if name == "drop_center_burst_blue_cyan":
+        return _drop_center_burst_blue_cyan(cue_beat, local_t, frame_index, params, segments, seed)
     if name.startswith("post_drop_chase_"):
-        return _post_drop_chase(name, cue_beat, segments)
+        return _post_drop_chase(name, cue_beat, params, segments)
+    if name == "post_drop_center_comet_blue_cyan":
+        return _post_drop_center_comet_blue_cyan(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "post_drop_freestyle_nebula":
         return _post_drop_nebula(cue_beat, segments)
     if name == "drop_white_aggressive":
@@ -752,6 +853,8 @@ EDM_BUILDS: dict[str, str] = {
     "groove_freestyle_nebula": "32-beat smooth freestyle groove: opposite comets + breathing purple/magenta bg.",
     "drop_chase_blue": "32-beat drop: 8-beat sparkle strobe burst + 2-beat blue chase strobe.",
     "drop_chase_cyan": "32-beat drop: 8-beat sparkle strobe burst + 2-beat cyan chase strobe.",
+    "drop_center_burst_blue_cyan": "32-beat drop: half-beat bursts from center to edges.",
+    "post_drop_center_comet_blue_cyan": "32-beat post-drop: strobing dual comets chasing outward from center.",
     "drop_chase_red": "32-beat drop: 8-beat sparkle strobe burst + 2-beat red chase strobe.",
     "drop_chase_green": "32-beat drop: 8-beat sparkle strobe burst + 2-beat green chase strobe.",
     "drop_chase_cyan_white": "32-beat drop: 8-beat sparkle strobe burst + 2-beat cyan/white chase strobe.",
@@ -857,6 +960,453 @@ def default_beat_division(name: str) -> float:
     return 1.0
 
 
+# ---------------------------------------------------------------------------
+# M2 slot-color colorizer (pure; runs on the 40fps runner thread)
+# ---------------------------------------------------------------------------
+
+def universal_colorizer(field: MotionField, slot_colors: list[RGB]) -> Frame:
+    """Colorize a per-pixel slot-intensity ``MotionField`` into a ``Frame``.
+
+    ``rgb[px] = clamp( Σ_slot slot_color[slot] · intensity[px][slot] )``
+
+    - Pad ``slot_colors`` shorter than MAX_SLOTS with (0,0,0); slots at index
+      >= len(slot_colors) or >= MAX_SLOTS are ignored (contribute nothing).
+    - Accumulate per channel in float, then clamp ONCE at the end with
+      _clamp_channel (which ROUNDS via int(round(...)) — matching every other
+      renderer path; do NOT truncate).
+    - intensity <= 0 contributes nothing (skip the multiply; result unchanged).
+    - Empty field → empty frame.
+    """
+    frame: Frame = []
+    n_colors = len(slot_colors)
+    for intensities in field:
+        r = 0.0
+        g = 0.0
+        b = 0.0
+        # Cap slot iteration at MAX_SLOTS and at the available colors.
+        upper = min(len(intensities), n_colors, MAX_SLOTS)
+        for slot in range(upper):
+            intensity = intensities[slot]
+            if intensity <= 0:
+                continue
+            color = slot_colors[slot]
+            r += color[0] * intensity
+            g += color[1] * intensity
+            b += color[2] * intensity
+        frame.append((_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)))
+    return frame
+
+
+# ---------------------------------------------------------------------------
+# M2 Phase 2a slot cues (ported VERBATIM from the operator's motion_skeletons.py
+# prototype).  The geometric timing / constants are owned by the operator and
+# are NOT altered here — only the signature + bridge beat convention are
+# adapted: each engine cue computes cue_beat = _edm_beat(beat, params) first
+# (mirroring _edm_dispatch) and then runs the prototype's modulo math on
+# cue_beat.  Motion stays fully fractional / sub-pixel anti-aliased; the only
+# int() calls preserved are the prototype's floor/ceil slot-coordinate splits
+# and array indexing.
+# ---------------------------------------------------------------------------
+
+
+def _empty_motion_field(segments: int) -> MotionField:
+    """All-zero MotionField with MAX_SLOTS columns (matches the prototype)."""
+    return [[0.0] * MAX_SLOTS for _ in range(max(0, int(segments)))]
+
+
+def _slot_groove_center_chase(beat: float, local_t: float, frame_index: int,
+                              params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Dual-head comet from center outward, gradient across slots 0-4.
+
+    Ported from prototype ``groove_center_chase``.
+    """
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+    center = segments / 2.0
+
+    # Comet tail length (e.g. 15% of the half-strip)
+    comet_width = max(2.0, center * 0.15)
+
+    travel_beats = 1.0
+
+    # Comets spawn every 1 beat. Travel time is 1 beat.
+    for age_offset in range(int(math.ceil(travel_beats))):
+        age = (cue_beat % 1.0) + age_offset
+        if age > travel_beats:
+            continue
+
+        # Position of the comet head from the center
+        comet_head_dist = (age / travel_beats) * center
+
+        for idx in range(segments):
+            dist_from_center = abs(idx - center)
+
+            # Sub-pixel Spatial Anti-Aliasing
+            offset = comet_head_dist - dist_from_center
+
+            if 0 <= offset <= comet_width:
+                relative_pos = 1.0 - (offset / comet_width)
+                base_intensity = relative_pos
+            elif -1.0 < offset < 0:
+                base_intensity = 1.0 + offset
+                relative_pos = 1.0
+            else:
+                continue
+
+            # Multi-color mapping: Map the comet body across slots 0-4.
+            # (slot 5 is reserved for pure white fireworks)
+            slot_coord = relative_pos * 4.0
+
+            slot_below = int(math.floor(slot_coord))
+            slot_above = int(math.ceil(slot_coord))
+            weight_above = slot_coord - slot_below
+            weight_below = 1.0 - weight_above
+
+            if slot_below == slot_above:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + base_intensity)
+            else:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + base_intensity * weight_below)
+                field[idx][slot_above] = min(1.0, field[idx][slot_above] + base_intensity * weight_above)
+
+    return field
+
+
+def _slot_post_drop_firework_chase(beat: float, local_t: float, frame_index: int,
+                                   params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Intense post-drop center chase + pure-white firework bursts on slot 5.
+
+    Ported from prototype ``post_drop_center_chase`` (renamed).  The comet base
+    rides slots 0-4; firework white bursts go to slot 5 and fire ONLY on the 4th
+    beat of the 4-beat cycle (cue_beat % 4 >= 3).  Single palette-driven look.
+    """
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+    center = segments / 2.0
+
+    # Comet tail length (e.g. 15% of the half-strip)
+    comet_width = max(2.0, center * 0.15)
+
+    travel_beats = 1.0
+
+    # Comets spawn every 1 beat. Travel time is 1 beat.
+    for age_offset in range(int(math.ceil(travel_beats))):
+        age = (cue_beat % 1.0) + age_offset
+        if age > travel_beats:
+            continue
+
+        # Position of the comet head from the center
+        comet_head_dist = (age / travel_beats) * center
+
+        for idx in range(segments):
+            dist_from_center = abs(idx - center)
+
+            # Sub-pixel Spatial Anti-Aliasing
+            offset = comet_head_dist - dist_from_center
+
+            if 0 <= offset <= comet_width:
+                relative_pos = 1.0 - (offset / comet_width)
+                base_intensity = relative_pos
+            elif -1.0 < offset < 0:
+                base_intensity = 1.0 + offset
+                relative_pos = 1.0
+            else:
+                continue
+
+            # Multi-color mapping: Map the comet body across slots 0-4
+            slot_coord = relative_pos * 4.0
+
+            slot_below = int(math.floor(slot_coord))
+            slot_above = int(math.ceil(slot_coord))
+            weight_above = slot_coord - slot_below
+            weight_below = 1.0 - weight_above
+
+            if slot_below == slot_above:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + base_intensity)
+            else:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + base_intensity * weight_below)
+                field[idx][slot_above] = min(1.0, field[idx][slot_above] + base_intensity * weight_above)
+
+    # LAYER 3: Firework bursts across the 1 beat event (slot 5 = pure white)
+    if (cue_beat % 4.0) >= 3.0:
+        beat_fraction = cue_beat % 1.0
+
+        for idx in range(segments):
+            # Deterministic pattern per 4-beat block. Thread-safe local RNG:
+            # random.Random(s) yields the same Mersenne-Twister sequence as the
+            # global random.seed(s), so this is byte-identical and avoids
+            # reseeding the process-wide RNG on the 40fps render thread.
+            rng = random.Random(idx + int(cue_beat / 4.0))
+
+            # High density participation (80% of pixels)
+            if rng.random() > 0.20:
+                # Each participating pixel fires off 2 rapid bursts during this beat
+                for burst in range(2):
+                    pulse_phase = (rng.random() + (burst * 0.5)) % 1.0
+
+                    # Firework burst is extremely short-lived (0.1 beats total width)
+                    dist = abs(beat_fraction - pulse_phase)
+                    if dist < 0.05:
+                        twinkle_intensity = 1.0 - (dist / 0.05)
+                        field[idx][5] = min(1.0, field[idx][5] + twinkle_intensity * 2.0)
+
+    return field
+
+
+def _slot_groove_center_burst_retract(beat: float, local_t: float, frame_index: int,
+                                      params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Volume-bar burst out / retract, multi-colored across slots.
+
+    Ported from prototype ``groove_center_burst_retract``.
+    """
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+
+    center = segments / 2.0
+
+    burst_beats = params.get('burst_beats', 1.0)
+    fraction = (cue_beat % burst_beats) / burst_beats
+
+    # Envelope:
+    # 0.0 -> 0.60 : Attack (burst outward slower)
+    # 0.60 -> 0.85 : Decay (retract inward)
+    # 0.85 -> 1.0 : Black
+
+    max_length = center * 0.8  # Make the physical length slightly shorter
+
+    if fraction < 0.60:
+        progress = fraction / 0.60
+        # Linear sweep instead of fast ease out so you can see the animation
+        comet_head_dist = max_length * progress
+    elif fraction < 0.85:
+        progress = (fraction - 0.60) / 0.25
+        # Fast ease-in for retraction
+        comet_head_dist = max_length * (1.0 - progress**2)
+    else:
+        # Black for the rest of the beat
+        return field
+
+    comet_width = comet_head_dist
+    if comet_width <= 0.01:
+        return field
+
+    for idx in range(segments):
+        dist_from_center = abs(idx - center)
+
+        # If pixel is inside the volume bar
+        if dist_from_center <= comet_head_dist:
+            relative_pos = dist_from_center / comet_head_dist
+
+            # Map head to slot 4, center to slot 0. Palette slots 0-4 ONLY;
+            # slot 5 is reserved for white. (Operator decision 2026-06-15.)
+            slot_coord = relative_pos * 4.0
+
+            slot_below = int(math.floor(slot_coord))
+            slot_above = int(math.ceil(slot_coord))
+            weight_above = slot_coord - slot_below
+            weight_below = 1.0 - weight_above
+
+            # Solid intensity, fading as it retracts
+            base_intensity = 1.0
+            if fraction >= 0.60:
+                base_intensity *= (1.0 - progress)
+
+            if slot_below == slot_above:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + base_intensity)
+            else:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + base_intensity * weight_below)
+                field[idx][slot_above] = min(1.0, field[idx][slot_above] + base_intensity * weight_above)
+
+    return field
+
+
+def _slot_breakdown_full_breathing(beat: float, local_t: float, frame_index: int,
+                                   params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Full-strip sine breathing + color drift across slots.
+
+    Ported from prototype ``breakdown_full_breathing``.
+    """
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+
+    breath_beats = params.get('breath_beats', 8.0)
+    drift_beats = params.get('drift_beats', 32.0)
+
+    # Breathing Intensity Envelope
+    breath_fraction = (cue_beat % breath_beats) / breath_beats
+
+    if breath_fraction <= 0.5:
+        intensity = (breath_fraction / 0.5) * 0.50
+    elif breath_fraction <= 0.75:
+        progress = (breath_fraction - 0.5) / 0.25
+        intensity = (1.0 - progress) * 0.50
+    else:
+        intensity = 0.0
+
+    # Color Drift across palette slots 0-4 using half a sine wave. Slot 5 is
+    # reserved for white, so clamp to 4.0. (Operator decision 2026-06-15.)
+    drift_fraction = (cue_beat % drift_beats) / drift_beats
+    color_phase = math.sin(drift_fraction * math.pi)
+    slot_coord = color_phase * 4.0
+
+    slot_below = int(math.floor(slot_coord))
+    slot_above = int(math.ceil(slot_coord))
+    weight_above = slot_coord - slot_below
+    weight_below = 1.0 - weight_above
+
+    # Apply to entire strip uniformly
+    for idx in range(segments):
+        if slot_below == slot_above:
+            field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
+        else:
+            field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
+            field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+
+    return field
+
+
+def _slot_breakdown_star_twinkle(beat: float, local_t: float, frame_index: int,
+                                 params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Per-pixel breathing stars across slots, 30% cap.
+
+    Ported from prototype ``breakdown_star_twinkle``.  Per-pixel seeding uses a
+    thread-safe ``random.Random(idx)`` (same MT sequence as the prototype's global
+    ``random.seed(idx)``, so byte-identical) for deterministic per-pixel star
+    properties; the bridge seed is intentionally NOT substituted.
+    """
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+
+    for idx in range(segments):
+        # Deterministic per-pixel RNG (thread-safe local instance; same MT
+        # sequence as global seed(idx) -> byte-identical).
+        rng = random.Random(idx)
+
+        lifespan_beats = rng.uniform(1.0, 4.0)
+        # Sleep for a long time so the majority of the strip is dim/off
+        sleep_beats = rng.uniform(4.0, 12.0)
+        total_cycle = lifespan_beats + sleep_beats
+
+        # Random starting phase so they all breathe at different times
+        phase_offset = rng.uniform(0.0, 100.0)
+        # Randomly assign this star to one of the color slots
+        color_slot = rng.randint(0, MAX_SLOTS - 1)
+
+        # Where are we in this pixel's personal lifecycle?
+        cycle_pos = (cue_beat + phase_offset) % total_cycle
+
+        if cycle_pos < lifespan_beats:
+            # It's alive! Smooth sine wave breathing
+            fraction = cycle_pos / lifespan_beats
+            intensity = math.sin(fraction * math.pi)
+
+            # Cap max brightness at 30% so it stays truly ambient
+            intensity *= 0.3
+
+            field[idx][color_slot] = min(1.0, field[idx][color_slot] + intensity)
+
+    return field
+
+
+def _baked_breakdown_star_twinkle_sand(beat: float, local_t: float, frame_index: int,
+                                       params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    """Hardcoded Dune Sand twinkle, 30% cap; BYPASSES the colorizer.
+
+    Ported from prototype ``breakdown_star_twinkle_sand``.  Returns a Frame, so
+    it registers as a normal baked Frame effect in _EFFECTS — never routed
+    through the palette engine (the warm sand palette deliberately violates the
+    cool corridor).
+    """
+    cue_beat = _edm_beat(beat, params)
+    frame: Frame = [(0, 0, 0) for _ in range(max(0, int(segments)))]
+
+    sand_palette = [
+        (255, 140, 50),   # Deep Dune Spice
+        (255, 180, 100),  # Warm Desert Sand
+        (255, 210, 150),  # Pale Sunlit Sand
+        (255, 235, 200),  # Warm Ivory
+        (255, 250, 235),  # Soft Warm White
+    ]
+
+    for idx in range(segments):
+        # Thread-safe local RNG (same MT sequence as global seed(idx)).
+        rng = random.Random(idx)
+        lifespan_beats = rng.uniform(1.0, 4.0)
+        sleep_beats = rng.uniform(4.0, 12.0)
+        total_cycle = lifespan_beats + sleep_beats
+        phase_offset = rng.uniform(0.0, 100.0)
+
+        # Hardcode selection from the sand palette
+        color_rgb = sand_palette[rng.randint(0, len(sand_palette) - 1)]
+
+        cycle_pos = (cue_beat + phase_offset) % total_cycle
+        if cycle_pos < lifespan_beats:
+            fraction = cycle_pos / lifespan_beats
+            intensity = math.sin(fraction * math.pi)
+            intensity *= 0.3  # 30% max brightness
+
+            frame[idx] = (
+                int(color_rgb[0] * intensity),
+                int(color_rgb[1] * intensity),
+                int(color_rgb[2] * intensity),
+            )
+
+    return frame
+
+
+# Slot effects return a MotionField (per-pixel slot intensities) instead of a
+# Frame.  render() routes these through universal_colorizer with the injected
+# slot_colors palette.  Phase 2a populates the 5 engine cues below.
+SLOT_EFFECTS: dict[str, SlotEffectFn] = {
+    "groove_center_chase": _slot_groove_center_chase,
+    "groove_center_burst_retract": _slot_groove_center_burst_retract,
+    "post_drop_firework_chase": _slot_post_drop_firework_chase,
+    "breakdown_full_breathing": _slot_breakdown_full_breathing,
+    "breakdown_star_twinkle": _slot_breakdown_star_twinkle,
+}
+
+# ---------------------------------------------------------------------------
+# M2 Phase 2a registration (ADDITIVE & C5-aware).  Runs after SLOT_EFFECTS and
+# the baked sand cue are defined so the module-level registry blocks above stay
+# untouched.  Nothing here references a config look yet (Phase 2b), so there is
+# ZERO live behavior change.
+# ---------------------------------------------------------------------------
+
+# The Dune Sand twinkle is BAKED (returns a Frame, bypasses the colorizer) so it
+# registers as a normal Frame effect, NOT in SLOT_EFFECTS.
+_EFFECTS["breakdown_star_twinkle_sand"] = _baked_breakdown_star_twinkle_sand
+
+# Phase-2b config validation must accept slot cues + the baked sand name.
+REALTIME_EFFECT_NAMES = frozenset(_EFFECTS.keys() | SLOT_EFFECTS.keys())
+
+# The firework chase strobes (slot 5 white bursts).
+REALTIME_STROBE_EFFECTS = REALTIME_STROBE_EFFECTS | frozenset({"post_drop_firework_chase"})
+
+# Param allowlist for each new name = standard EDM keys (duration_beats +
+# _SYNC_PARAM_KEYS) PLUS the per-cue runtime knobs each cue reads from params.
+# REQUIRED for C5: a Phase-2b look with an un-allowlisted static param disables
+# ALL LED.  slot_colors is RUNTIME-injected, NOT a static config key, so it is
+# deliberately NOT allowlisted.
+_M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
+    "groove_center_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "groove_center_burst_retract": (
+        frozenset({"duration_beats", "burst_beats"}) | _SYNC_PARAM_KEYS
+    ),
+    "post_drop_firework_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "breakdown_full_breathing": (
+        frozenset({"duration_beats", "breath_beats", "drift_beats"}) | _SYNC_PARAM_KEYS
+    ),
+    "breakdown_star_twinkle": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "breakdown_star_twinkle_sand": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+}
+for _name, _keys in _M2_PHASE2A_PARAM_KEYS.items():
+    REALTIME_EFFECT_PARAM_KEYS[_name] = _keys
+
+# Default slot_colors when a slot effect runs without an injected palette: a
+# single white slot, so a misconfigured slot effect fails bright-white (never
+# crashes).  Unused in Phase 1 because SLOT_EFFECTS is empty.
+_DEFAULT_SLOT_COLORS: list[RGB] = [(255, 255, 255)]
+
+
 class GoveeFrameRenderer:
     """Stateless renderer. Unknown effect names fail dark."""
 
@@ -898,19 +1448,36 @@ class GoveeFrameRenderer:
         segments: int,
         seed: int,
     ) -> Frame:
-        effect = _EFFECTS.get(str(name))
-        if effect is None:
-            return _empty(segments)
         safe_params: Mapping[str, Any] = params if isinstance(params, Mapping) else {}
         seg_count = max(0, int(segments))
-        frame = effect(
-            float(beat_pos),
-            max(0.0, float(local_t)),
-            int(frame_index),
-            safe_params,
-            seg_count,
-            int(seed),
-        )
+
+        # M2 slot-effect dispatch (no-op in Phase 1: SLOT_EFFECTS is empty).
+        slot_effect = SLOT_EFFECTS.get(str(name))
+        if slot_effect is not None:
+            field = slot_effect(
+                float(beat_pos),
+                max(0.0, float(local_t)),
+                int(frame_index),
+                safe_params,
+                seg_count,
+                int(seed),
+            )
+            slot_colors = _slots(safe_params.get("slot_colors"))
+            if slot_colors is None:
+                slot_colors = _DEFAULT_SLOT_COLORS
+            frame = universal_colorizer(field, slot_colors)
+        else:
+            effect = _EFFECTS.get(str(name))
+            if effect is None:
+                return _empty(segments)
+            frame = effect(
+                float(beat_pos),
+                max(0.0, float(local_t)),
+                int(frame_index),
+                safe_params,
+                seg_count,
+                int(seed),
+            )
         clamped = [
             (_clamp_channel(r), _clamp_channel(g), _clamp_channel(b))
             for r, g, b in frame[:seg_count]

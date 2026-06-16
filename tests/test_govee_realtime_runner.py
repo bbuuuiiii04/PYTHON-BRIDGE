@@ -484,6 +484,57 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         runner._tick_once(_anchor(), 100.01)
         self.assertEqual(runner.status()["instance_count"], 0)
 
+    def test_reconcile_reactivates_within_cloud_suspect_window(self) -> None:
+        """WI-6: after note_cloud_dispatch(), _tick_once re-sends activate()
+        at approximately rt_reconcile_interval_s cadence within the window."""
+        import os as _os
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        runner.set_desired(
+            EffectSpec("solid", {"color": [1, 2, 3]}, 1, 100.0)
+        )
+        # Bring runner to active state
+        runner._tick_once(_anchor(100.0), 100.0)
+        pre_reconcile_activates = transport.calls.count("activate")
+        self.assertEqual(pre_reconcile_activates, 1)
+
+        # Simulate a cloud DIY dispatch with a 5-second window, 1-second interval
+        t = 101.0
+        runner.note_cloud_dispatch(t, window_s=5.0, interval_s=1.0)
+
+        # Tick at t+1.1 (inside window, interval elapsed): reconcile fires
+        runner._tick_once(_anchor(t + 1.1), t + 1.1)
+        self.assertEqual(transport.calls.count("activate"), 2)
+        self.assertEqual(runner.status()["rt_reconcile_count"], 1)
+
+        # Tick at t+2.2 (another interval): reconcile fires again
+        runner._tick_once(_anchor(t + 2.2), t + 2.2)
+        self.assertEqual(transport.calls.count("activate"), 3)
+        self.assertEqual(runner.status()["rt_reconcile_count"], 2)
+
+        # Tick past window: no extra activate
+        activates_before = transport.calls.count("activate")
+        runner._tick_once(_anchor(t + 6.0), t + 6.0)
+        self.assertEqual(transport.calls.count("activate"), activates_before)
+
+    def test_reconcile_does_not_fire_when_not_active(self) -> None:
+        """WI-6: reconcile must not fire activate() when the runner is inactive."""
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        # Don't tick to active state
+        t = 100.0
+        runner.note_cloud_dispatch(t, window_s=5.0, interval_s=0.1)
+        runner._tick_once(None, t + 0.2)
+        self.assertEqual(transport.calls.count("activate"), 0)
+        self.assertEqual(runner.status()["rt_reconcile_count"], 0)
+
+    def test_reconcile_status_counter_in_status_dict(self) -> None:
+        """WI-8: rt_reconcile_count must appear in status()."""
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        self.assertIn("rt_reconcile_count", runner.status())
+        self.assertEqual(runner.status()["rt_reconcile_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

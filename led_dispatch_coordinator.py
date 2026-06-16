@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import os as _os
 import time
 from typing import Any
 
@@ -9,6 +11,8 @@ from .govee_frame_renderer import default_sync_mode, default_beat_division
 from .govee_owner_state import GoveeOwnerStateMachine, OwnerState
 from .govee_realtime_runner import EffectSpec, GoveeRealtimeRunner
 from .led_models import LEDConfig, LEDLookDecision
+
+log = logging.getLogger("led_dispatch_coordinator")
 
 
 def _stable_seed(value: str) -> int:
@@ -36,21 +40,99 @@ class LEDDispatchCoordinator:
         self._tactical_blackout_count = 0
         self._realtime_trigger_count = 0
 
+        # WI-3 min-dwell: suppress same-role re-picks inside the dwell window
+        self._min_dwell_enabled: bool = _os.environ.get("RBSS_LED_MIN_DWELL", "1") != "0"
+        self._last_dispatch_mono: float = 0.0
+        self._last_dispatch_role: str = ""
+
+        # WI-4 cancel-pending: drain queued cloud DIY on RT acquire
+        self._cancel_pending_enabled: bool = _os.environ.get("RBSS_LED_CANCEL_PENDING", "1") != "0"
+
+        # WI-5 transport-switch cooldown (default OFF — WI-1/2/3 already eliminate the flap)
+        self._transport_cooldown_enabled: bool = _os.environ.get("RBSS_LED_TRANSPORT_COOLDOWN", "0") == "1"
+        self._last_transport: str = ""
+        self._last_transport_mono: float = 0.0
+
+        # WI-8 observability counters
+        self._dwell_suppressed_count: int = 0
+        self._cancel_pending_total: int = 0
+        self._transport_cooldown_count: int = 0
+
     def trigger(self, decision: LEDLookDecision) -> bool:
+        # Operator blackout is unconditionally first — bypasses ALL gates.
         if self._is_operator_blackout(decision):
             self._runner.emergency_stop()
             self._owner.force_release()
             return bool(self._adapter.trigger(decision))
 
         backend = str(getattr(decision, "backend", "cloud_diy") or "cloud_diy")
+        role = str(getattr(decision, "role", ""))
+        now = self._time_fn()
+
+        # WI-3 min-dwell gate: suppress same-role re-picks within the dwell window.
+        # Keyed on role so groove→buildup→drop is never throttled (role changes pass).
+        if self._min_dwell_enabled:
+            dwell_s = float(getattr(getattr(self._config, "rate_limits", None), "min_look_dwell_s", 1.5) or 1.5)
+            if (
+                role == self._last_dispatch_role
+                and (now - self._last_dispatch_mono) < dwell_s
+            ):
+                log.debug(
+                    "[RGB] dwell-suppressed role=%s look=%s dt=%.3f",
+                    role,
+                    getattr(decision, "look", ""),
+                    now - self._last_dispatch_mono,
+                )
+                self._dwell_suppressed_count += 1
+                return False
+
+        # WI-5 transport-switch cooldown (default OFF).
+        # Exempts: role changes, drop/pre_drop/breakdown, operator blackout (handled above).
+        _EXEMPT_ROLES = frozenset({"drop", "pre_drop", "breakdown"})
+        if self._transport_cooldown_enabled and role not in _EXEMPT_ROLES:
+            cooldown_s = float(
+                getattr(
+                    getattr(self._config, "rate_limits", None),
+                    "transport_switch_cooldown_s",
+                    2.0,
+                ) or 2.0
+            )
+            if (
+                self._last_transport
+                and backend != self._last_transport
+                and role == self._last_dispatch_role
+                and (now - self._last_transport_mono) < cooldown_s
+            ):
+                log.debug(
+                    "[RGB] transport-cooldown role=%s look=%s backend=%s last=%s dt=%.3f",
+                    role,
+                    getattr(decision, "look", ""),
+                    backend,
+                    self._last_transport,
+                    now - self._last_transport_mono,
+                )
+                self._transport_cooldown_count += 1
+                return False
+
         if backend == "realtime_razer":
             if self._owner.current() == OwnerState.CLOUD_DIY:
+                # WI-4: drain queued cloud commands before acquiring RT so a late
+                # cloud response cannot land and flip the device out of razer mode.
+                if self._cancel_pending_enabled:
+                    cancel = getattr(self._adapter, "cancel_pending", None)
+                    if callable(cancel):
+                        n = cancel()
+                        self._cancel_pending_total += n
                 self._owner.force_release()
             if not self._owner.acquire(OwnerState.REALTIME_RAZER):
                 return False
             self._runner.set_desired(self._spec_from_decision(decision))
             self._runner.fire_trigger()
             self._realtime_trigger_count += 1
+            self._last_dispatch_mono = now
+            self._last_dispatch_role = role
+            self._last_transport = backend
+            self._last_transport_mono = now
             return True
 
         if self._owner.current() == OwnerState.REALTIME_RAZER:
@@ -60,6 +142,18 @@ class LEDDispatchCoordinator:
         if accepted:
             if self._owner.current() == OwnerState.NONE:
                 self._owner.acquire(OwnerState.CLOUD_DIY)
+            self._last_dispatch_mono = now
+            self._last_dispatch_role = role
+            self._last_transport = backend
+            self._last_transport_mono = now
+            # WI-6: notify runner that a cloud DIY was dispatched so it can
+            # reconcile if a late response flips the strip out of razer mode.
+            rate_limits = getattr(self._config, "rate_limits", None)
+            window_s = float(getattr(rate_limits, "rt_reconcile_window_s", 5.0) or 5.0)
+            interval_s = float(getattr(rate_limits, "rt_reconcile_interval_s", 1.0) or 1.0)
+            note = getattr(self._runner, "note_cloud_dispatch", None)
+            if callable(note):
+                note(now, window_s=window_s, interval_s=interval_s)
         return accepted
 
     def tactical_blackout(self, decision: LEDLookDecision | None = None) -> bool:
@@ -88,6 +182,10 @@ class LEDDispatchCoordinator:
             "owner": self._owner.current().value,
             "realtime_trigger_count": self._realtime_trigger_count,
             "tactical_blackout_count": self._tactical_blackout_count,
+            # WI-8 observability counters
+            "dwell_suppressed_count": self._dwell_suppressed_count,
+            "cancel_pending_total": self._cancel_pending_total,
+            "transport_cooldown_count": self._transport_cooldown_count,
             **self._runner.status(),
         }
         return payload

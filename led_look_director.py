@@ -5,9 +5,10 @@ configured look should be active given manual and emergency policy inputs.
 """
 from __future__ import annotations
 
+import os as _os
 import random
 from dataclasses import asdict, replace
-from typing import Iterable
+from typing import Callable, Iterable, Optional
 
 from .led_models import (
     LEDConfig,
@@ -51,6 +52,10 @@ class LEDLookDirector:
         self._last_source: str = "policy"
         self._role_cursors: dict[str, int] = {}
         self._queued_post_drop_look: str = ""
+        # WI-7 transport-sticky: remember the last dispatched backend per role
+        # so consecutive same-role selections stay on the same transport.
+        self._transport_sticky_enabled: bool = _os.environ.get("RBSS_LED_TRANSPORT_STICKY", "1") != "0"
+        self._last_role_backend: dict[str, str] = {}  # role → last backend
         bank = self._config.banks.get("default")
         for role in _AUTOMATION_ROLE_ORDER:
             look_names = getattr(bank, role, ()) if bank else ()
@@ -58,6 +63,10 @@ class LEDLookDirector:
                 self._role_cursors[role] = self._rng.randrange(len(look_names))
             else:
                 self._role_cursors[role] = 0
+
+    def reset_for_track(self) -> None:
+        """Clear sticky staleness on track load."""
+        self._last_role_backend.clear()
 
     def set_manual_override(self, look_name: str | None) -> bool:
         """Set or clear manual override. Returns False when unknown look."""
@@ -124,7 +133,10 @@ class LEDLookDirector:
             return None
 
         if self._config.automation_enabled:
-            decision = self._automation_decision_for_role(role)
+            decision = self._automation_decision_for_role(
+                role,
+                diy_eligible=(context.diy_eligible if context is not None else None),
+            )
             if decision is None:
                 self._last_decision = None
                 reason_role = role if role else "empty_role"
@@ -241,7 +253,12 @@ class LEDLookDirector:
     def post_drop_cycle_beats(self) -> float:
         return max(0.001, float(self._config.post_drop_cycle_beats))
 
-    def _automation_decision_for_role(self, role: str) -> LEDLookDecision | None:
+    def _automation_decision_for_role(
+        self,
+        role: str,
+        *,
+        diy_eligible: Optional[Callable[[str], bool]] = None,
+    ) -> LEDLookDecision | None:
         if role not in _AUTOMATION_ROLES:
             return None
         normalized_role = role
@@ -252,18 +269,45 @@ class LEDLookDirector:
             look_name = self._queued_post_drop_look
             self._queued_post_drop_look = ""
             if look_name in self._config.looks:
-                return self._decision_for_look(
+                decision = self._decision_for_look(
                     look_name,
                     reason="paired_post_drop",
                     source="automation",
                     priority=2,
                     role=normalized_role,
                 )
+                self._last_role_backend[normalized_role] = decision.backend
+                return decision
         look_names = getattr(bank, normalized_role, ())
         if not look_names:
             return None
+        # M1b WI-3: filter the bank by the color engine's DIY-eligibility
+        # predicate.  Realtime/untagged looks are recolored, so the engine
+        # returns True for them; only off-palette DIY looks are dropped.
+        # Empty subset ⇒ keep the full bank (the C4 breakdown invariant: a
+        # DIY-only bank must never be emptied by a non-matching palette).
+        if diy_eligible is not None:
+            eligible = tuple(n for n in look_names if diy_eligible(n))
+            if eligible:
+                look_names = eligible
         cursor = self._role_cursors.get(normalized_role, 0)
-        look_name = self._look_name_for_role(normalized_role, look_names, cursor)
+        # WI-7 transport-sticky: when flag is ON, prefer looks whose backend
+        # matches the last dispatched backend for this role.
+        if self._transport_sticky_enabled and normalized_role in self._last_role_backend:
+            sticky_backend = self._last_role_backend[normalized_role]
+            sticky_names = tuple(
+                n for n in look_names
+                if n in self._config.looks
+                and self._config.looks[n].backend == sticky_backend
+            )
+            if sticky_names:
+                # Select within the sticky subset using the cursor modulo its length
+                look_name = self._look_name_for_role(normalized_role, sticky_names, cursor)
+            else:
+                # Fallback: no matching-backend candidates; use the full bank
+                look_name = self._look_name_for_role(normalized_role, look_names, cursor)
+        else:
+            look_name = self._look_name_for_role(normalized_role, look_names, cursor)
         if look_name not in self._config.looks:
             return None
         decision = self._decision_for_look(
@@ -276,6 +320,7 @@ class LEDLookDirector:
         if normalized_role == "drop":
             self._queue_paired_post_drop(look_name)
         self._role_cursors[normalized_role] = cursor + 1
+        self._last_role_backend[normalized_role] = decision.backend
         return decision
 
     def _look_name_for_role(
@@ -327,6 +372,7 @@ class LEDLookDirector:
             role=role,
             backend=look.backend,
             params=look.params,
+            color_source=look.color_source,
         )
 
     def _record_decision(self, decision: LEDLookDecision) -> None:

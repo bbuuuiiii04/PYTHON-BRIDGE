@@ -134,18 +134,23 @@ class ExampleConfigTests(unittest.TestCase):
         self.assertTrue(result.available, msg=result.errors)
         self.assertEqual(result.reason, "ok")
 
-    def test_example_defaults_are_phase_3_safe(self) -> None:
+    def test_example_defaults_support_color_engine_automation(self) -> None:
+        """The example config now enables automation by default for the color-engine."""
         result = load_led_look_director_config(str(_EXAMPLE_PATH))
         self.assertTrue(result.available, msg=result.errors)
         self.assertFalse(result.config.enabled)
         self.assertTrue(result.config.dry_run)
-        self.assertFalse(result.config.automation_enabled)
-        self.assertEqual(result.config.looks["room_safe_default"].action, "unmapped")
+        self.assertTrue(result.config.automation_enabled)
+        self.assertNotIn("room_safe_default", result.config.looks)
 
-    def test_example_does_not_map_meteor_or_ambient(self) -> None:
+    def test_example_maps_ambient_for_color_engine(self) -> None:
+        """The example config now maps ambient roles for color-engine support."""
         result = load_led_look_director_config(str(_EXAMPLE_PATH))
         self.assertTrue(result.available, msg=result.errors)
-        self.assertEqual(result.config.banks["default"].ambient, ())
+        self.assertEqual(
+            result.config.banks["default"].ambient,
+            ("ambient_pb_halves", "rt_twinkle_blue")
+        )
         self.assertEqual(result.config.safe_default, "room_blackout")
         self.assertNotIn("groove_meteor", result.config.looks)
         self.assertFalse(
@@ -254,6 +259,8 @@ class LiveModeValidationTests(unittest.TestCase):
         cfg["enabled"] = True
         cfg["dry_run"] = False
         cfg["targets"]["room_perimeter"]["device_ref"] = "local-device-ref-123"
+        # Force safe_default to be unmapped to test the rejection logic
+        cfg["looks"][cfg["safe_default"]]["action"] = "unmapped"
         result = load_led_look_director_config_from_dict(cfg)
         self.assertFalse(result.available)
         self.assertTrue(any("safe_default" in err for err in result.errors))

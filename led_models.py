@@ -6,7 +6,7 @@ transport layers can exchange immutable decisions without runtime-side mutation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, Dict, Tuple
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,67 @@ class LEDLook:
     allow_strobe: bool = False
     backend: str = "cloud_diy"
     params: Mapping[str, Any] = field(default_factory=dict, compare=False)
+    color_source: str = "engine"
+    diy_color: str = ""
+
+
+@dataclass(frozen=True)
+class Palette:
+    """A named palette entry in the color engine library (§7a)."""
+    range: Tuple[str, str] = ("blue", "cyan")
+    white: float = 0.0
+    spread: float = 0.10
+    weight: float = 1.0
+    dwell: Optional[int] = None  # None → use global palette_dwell_tracks
+    focus_modes: Dict[str, float] = field(default_factory=dict)  # empty → full-range roam
+
+
+# Canonical default scale stops (6 stops from §7/§15.5).
+_DEFAULT_SCALE_STOPS: Dict[str, Tuple[int, int, int]] = {
+    "green":   (0, 255, 0),
+    "cyan":    (0, 255, 255),
+    "blue":    (0, 0, 255),
+    "purple":  (160, 0, 255),
+    "magenta": (255, 0, 160),
+    "red":     (255, 0, 0),
+}
+
+
+@dataclass(frozen=True)
+class ColorEngineConfig:
+    """Typed container for the color_engine config block (§7, §15.5).
+
+    This is pure model/config plumbing — no engine runtime logic.
+    """
+    enabled: bool = True
+    scale_stops: Dict[str, Tuple[int, int, int]] = field(
+        default_factory=lambda: dict(_DEFAULT_SCALE_STOPS)
+    )
+    palette_dwell_tracks: int = 4
+    snap_eligible_drop_indices: Tuple[int, ...] = (2, 3)
+    big_shift_chance: float = 0.25
+    big_shift_weight_bias: float = 1.0
+    drama_by_role: bool = True
+    role_spread: Dict[str, float] = field(
+        default_factory=lambda: {"drop": 0.35, "groove": 0.12, "ambient": 0.10}
+    )
+    step_within_section: Dict[str, bool] = field(
+        default_factory=lambda: {"drop": False, "post_drop": True, "groove": True}
+    )
+    fade_beats_by_role: Dict[str, float] = field(
+        default_factory=lambda: {
+            "drop": 0.0,
+            "buildup": 0.0,
+            "breakdown": 4.0,
+            "post_drop": 2.0,
+            "groove": 2.0,
+            "ambient": 4.0,
+        }
+    )
+    exempt_looks: Tuple[str, ...] = field(default_factory=tuple)
+    diy_color_tags: Dict[str, str] = field(default_factory=dict)
+    set_seed_mode: str = "random"
+    palettes: Dict[str, Palette] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -79,6 +140,13 @@ class LEDRateLimits:
     high_impact_cooldown_s: float = 12.0
     request_timeout_s: float = 2.0
     worker_shutdown_timeout_s: float = 1.0
+    # WI-3: same-role min dwell gate in the coordinator
+    min_look_dwell_s: float = 1.5
+    # WI-5: hard floor on DIY↔RT transport flips (default OFF, flag-guarded)
+    transport_switch_cooldown_s: float = 2.0
+    # WI-6: RT reconcile window and interval after a cloud DIY dispatch
+    rt_reconcile_window_s: float = 5.0
+    rt_reconcile_interval_s: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -115,6 +183,7 @@ class LEDConfig:
     safety: LEDSafety
     drop_pairs: dict[str, LEDDropPair] = field(default_factory=dict)
     post_drop_cycle_beats: float = 32.0
+    color_engine: Optional[ColorEngineConfig] = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +204,9 @@ class LEDContext:
     playing: bool = False
     lighting_mode: str = ""
     scripted_id: int = 0
+    # M1b WI-3: optional DIY-eligibility predicate supplied by the color engine.
+    # When None (engine off), the director applies no palette filtering.
+    diy_eligible: Optional[Callable[[str], bool]] = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -149,6 +221,8 @@ class LEDLookDecision:
     role: str
     backend: str = "cloud_diy"
     params: Mapping[str, Any] = field(default_factory=dict, compare=False)
+    # M1b WI-5: per-look color source ("engine" → injectable, "baked" → never recolored).
+    color_source: str = field(default="engine", compare=False)
 
 
 @dataclass(frozen=True)

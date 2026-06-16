@@ -40,6 +40,7 @@ from .config import (
     SMART_DROP_IGNORE_OUTRO_BEATS, PHRASE_ANCHOR_BEATS,
     SMART_BREAKDOWN_DEFAULT_DURATION_BEATS,
     SMART_BREAKDOWN_IGNORE_INTRO_BEATS, SMART_BREAKDOWN_IGNORE_OUTRO_BEATS,
+    LED_BACKSTEP_SEEK_BEATS,
 )
 
 from .beat_math import (
@@ -58,6 +59,7 @@ from .models import (
     SmartDropEnergyShadow, TrackMetadata,
 )
 from .led_models import BeatAnchor, LEDContext
+from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS
 from .laser_models import LaserContext, LaserPersonality
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
@@ -109,6 +111,13 @@ SPECTRAL_ENABLE_ENV = "RBSS_SPECTRAL_ENABLE"
 WIDE_WINDOW_ENV = "RBSS_DROP_WIDE_WINDOW"
 SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
 STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
+# WI-1/2/3/4/5/6/7 kill-switches (read once at startup; default ON except cooldown)
+LED_PHRASE_MONOTONIC_ENV   = "RBSS_LED_PHRASE_MONOTONIC"
+LED_MIN_DWELL_ENV          = "RBSS_LED_MIN_DWELL"
+LED_CANCEL_PENDING_ENV     = "RBSS_LED_CANCEL_PENDING"
+LED_RT_RECONCILE_ENV       = "RBSS_LED_RT_RECONCILE"
+LED_TRANSPORT_STICKY_ENV   = "RBSS_LED_TRANSPORT_STICKY"
+LED_TRANSPORT_COOLDOWN_ENV = "RBSS_LED_TRANSPORT_COOLDOWN"  # default OFF
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 LED_DEFAULT_DROP_IMPACT_BEATS = 8.0
 LED_DEFAULT_GROOVE_CYCLE_BEATS = 32.0
@@ -309,6 +318,7 @@ class StateManager:
         laser_personality_provider: Optional[Callable[[str], Optional[LaserPersonality]]] = None,
         led_look_director=None,
         led_scene_adapter=None,
+        led_color_engine=None,
         os2l_connected_provider=None,
         recorder: Optional[SessionRecorder] = None,
     ) -> None:
@@ -324,6 +334,8 @@ class StateManager:
         self._laser_personality_provider = laser_personality_provider
         self._led_look_director = led_look_director
         self._led_scene_adapter = led_scene_adapter
+        # M1b WI-1: optional LED color engine (None ⇒ no color injection).
+        self._led_color_engine = led_color_engine
         self._led_manual_override = ""
         self._led_manual_target_override = ""
         self._led_emergency_blackout = False
@@ -337,6 +349,10 @@ class StateManager:
         self._led_automation_enabled_latch = False
         self._led_scripted_mode_automation_latch = False
         self._led_last_auto_role_key = ""
+        # M1b WI-2: structured (section_id, cycle) published alongside the
+        # string role_key so the color engine seeds on stable fields without
+        # parsing the marker text.
+        self._led_last_section_cycle: tuple[str, int] = ("", 0)
         self._led_automation_gate_reason = "not_configured"
         self._led_automation_trigger_count = 0
         self._led_automation_gated_count = 0
@@ -355,6 +371,17 @@ class StateManager:
         self._led_rt_permitted = False
         self._led_rt_beat: tuple[int, float, float, float, bool] | None = None
         self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
+        # WI-1 monotonic beat clamp state
+        self._led_beat_monotonic: Optional[float] = None
+        self._led_beat_monotonic_key: Optional[tuple[int, int]] = None
+        self._phrase_monotonic_enabled: bool = (
+            _os.environ.get(LED_PHRASE_MONOTONIC_ENV, "1") != "0"
+        )
+        # WI-2 phrase latch state
+        self._led_phrase_seq: int = 0
+        self._led_phrase_committed_start: Optional[float] = None
+        # WI-8 observability counters
+        self._led_phrase_latch_reset_count: int = 0
         if self._led_look_director is not None:
             try:
                 status_payload = self._led_look_director.status()
@@ -611,6 +638,9 @@ class StateManager:
                 self._led_realtime_automation_offset_s
             ),
             "smart_drop_blackout_active": bool(self._led_smart_drop_blackout_key),
+            # WI-8 observability
+            "phrase_latch_seq": int(self._led_phrase_seq),
+            "phrase_latch_reset_count": int(self._led_phrase_latch_reset_count),
         }
 
         if self._led_look_director is not None:
@@ -1593,11 +1623,37 @@ class StateManager:
             )
             return
 
+        # WI-2: advance the phrase latch before building role_key so the seq is
+        # current when groove/ambient/post_drop embed it into their marker.
+        if self._phrase_monotonic_enabled:
+            self._advance_led_phrase_latch(sp_state)
+
         role = self._led_role_from_smart_phrasing(sp_state, mutate=True)
         role = self._led_effective_role_for_dispatch(role)
         role_key = self._led_automation_role_key(active, d, sp_state, role)
         if role_key == self._led_last_auto_role_key:
             return
+
+        # M1b WI-5: structured section/cycle published by the role_key builder.
+        section_id, cycle = self._led_last_section_cycle
+
+        # M1b WI-1/WI-5: advance the color engine's journey state.  Guarded so a
+        # missing/disabled engine is a complete no-op, and any engine exception
+        # is swallowed (behave as engine-off for this tick — never crash dispatch).
+        engine = self._led_color_engine
+        if engine is not None and engine.enabled:
+            try:
+                engine.begin_dispatch(
+                    active_deck=active,
+                    load_gen=d.load_gen,
+                    content_id=str(d.meta.content_id or ""),
+                    filepath=str(d.meta.filepath or ""),
+                    role=role,
+                    section_id=section_id,
+                    cycle=cycle,
+                )
+            except Exception as exc:
+                self._led_last_error = f"color_engine_error:{type(exc).__name__}"
 
         context = LEDContext(
             role=role,
@@ -1607,6 +1663,11 @@ class StateManager:
             playing=d.playing,
             lighting_mode=self._os.lighting_mode,
             scripted_id=d.scripted_id,
+            diy_eligible=(
+                engine.diy_eligible
+                if (engine is not None and engine.enabled)
+                else None
+            ),
         )
         decision = None
         if role == "drop":
@@ -1653,6 +1714,43 @@ class StateManager:
                 active,
             )
             return
+
+        # M1b WI-5: inject the engine-resolved color into the finalized decision
+        # (merge, never replace — preserves sync_mode/beat_division and any other
+        # static params).  Exempt/baked looks and disabled engine inject nothing.
+        # Any engine error leaves the decision unmodified (engine-off behavior).
+        if engine is not None and engine.enabled:
+            try:
+                scene_ref_for_multi = str(getattr(decision, "scene_ref", ""))
+                multi = "color_a" in REALTIME_EFFECT_PARAM_KEYS.get(
+                    scene_ref_for_multi, frozenset()
+                )
+                computed = engine.resolve_color(
+                    role=role,
+                    section_id=section_id,
+                    cycle=cycle,
+                    look_name=decision.look,
+                    color_source=getattr(decision, "color_source", "engine"),
+                    multi=multi,
+                )
+                if computed:
+                    decision = replace(
+                        decision,
+                        params={**decision.params, **computed},
+                    )
+                    # M1b debug: one line per actual color injection so the
+                    # live dry-run is observable in the log (the color is NOT
+                    # otherwise logged or visible in dry-run frames).
+                    log.info(
+                        "[RGB] color-inject look=%s palette=%s color=%s role=%s role_key=%s",
+                        decision.look,
+                        engine.snapshot().get("current_palette", ""),
+                        computed.get("color"),
+                        role,
+                        role_key,
+                    )
+            except Exception as exc:
+                self._led_last_error = f"color_engine_error:{type(exc).__name__}"
 
         look = str(getattr(decision, "look", ""))
         scene_ref = self._sanitize_led_scene_ref(getattr(decision, "scene_ref", ""))
@@ -2128,6 +2226,59 @@ class StateManager:
                 pass
         return LED_DEFAULT_POST_DROP_CYCLE_BEATS
 
+    # ── WI-1/2 phrase latch helpers ───────────────────────────────────────────
+
+    def _reset_led_phrase_latch(self, reason: str) -> None:
+        """Clear the phrase-start latch on a genuine backward seek.
+
+        Called by the WI-1 monotonic clamp when a real seek (delta >=
+        LED_BACKSTEP_SEEK_BEATS beats backward) is detected.  Bumps the
+        reset counter for WI-8 observability.
+        """
+        self._led_phrase_committed_start = None
+        self._led_phrase_latch_reset_count += 1
+        log.debug("[RGB] phrase-latch reset reason=%s", reason)
+
+    def _clamp_led_beat(self, abs_beat_pos: float, active: int, load_gen: int) -> float:
+        """WI-1 monotonic LED/phrasing playhead clamp.
+        
+        Sub-beat backward jitter (delta in (-LED_BACKSTEP_SEEK_BEATS, 0)) is held to
+        the previous value so phrasing never crosses a segment boundary backwards.
+        A backstep >= LED_BACKSTEP_SEEK_BEATS is a real seek/cue/reload: accept it and
+        reset the phrase latch. Keyed on (active, load_gen) so a reload/deck-switch
+        resets cleanly. No-op (pass-through) when the flag is off.
+        """
+        key = (active, load_gen)
+        if key != self._led_beat_monotonic_key:
+            self._led_beat_monotonic_key = key
+            self._led_beat_monotonic = abs_beat_pos
+            return abs_beat_pos
+        prev = self._led_beat_monotonic
+        if self._phrase_monotonic_enabled and prev is not None:
+            delta = abs_beat_pos - prev
+            if -LED_BACKSTEP_SEEK_BEATS < delta < 0.0:
+                log.debug("[RGB] beat-clamp deck=%d abs=%.3f→%.3f delta=%.4f", active, abs_beat_pos, prev, delta)
+                abs_beat_pos = prev
+            elif delta <= -LED_BACKSTEP_SEEK_BEATS:
+                log.debug("[RGB] beat-seek deck=%d abs=%.3f→%.3f delta=%.4f", active, prev, abs_beat_pos, delta)
+                self._reset_led_phrase_latch("seek")
+        self._led_beat_monotonic = abs_beat_pos
+        return abs_beat_pos
+
+    def _advance_led_phrase_latch(self, sp_state: SmartPhrasingState) -> None:
+        """Advance the phrase-seq latch on a forward phrase change. WI-1 guarantees
+        abs_beat (and thus current_phrase_start_beat) is monotonic, so this fires
+        exactly once per phrase entry. Never retreats; retreat only via
+        _reset_led_phrase_latch on a real seek."""
+        start = sp_state.current_phrase_start_beat
+        if start is None:
+            return
+        committed = self._led_phrase_committed_start
+        if committed is None or start > committed:
+            self._led_phrase_committed_start = start
+            self._led_phrase_seq += 1
+            log.debug("[RGB] phrase-latch advance seq=%d start=%.3f", self._led_phrase_seq, start)
+
     def _led_automation_role_key(
         self,
         active: int,
@@ -2136,6 +2287,10 @@ class StateManager:
         role: str,
     ) -> str:
         marker = ""
+        # M1b WI-2: structured section/cycle derived from the SAME source
+        # expressions that build `marker` (never by parsing the marker string).
+        section_id = ""
+        cycle = 0
         if role == "drop":
             anchor = self._led_drop_marker_anchor(sp_state)
             if anchor is None:
@@ -2154,27 +2309,79 @@ class StateManager:
                 abs_beat = self._led_abs_beat(sp_state)
                 elapsed = max(0.0, float(abs_beat or anchor) - float(anchor))
                 cycle = int(elapsed // self._led_post_drop_cycle_beats())
-                marker = f"{float(anchor):.3f}:c{cycle}"
+                if self._phrase_monotonic_enabled:
+                    # WI-2: embed phrase_seq instead of raw anchor to prevent
+                    # A→B→A oscillation from different phrase start reads.
+                    marker = f"seq{self._led_phrase_seq}:c{cycle}"
+                    section_id = f"seq{self._led_phrase_seq}"
+                else:
+                    marker = f"{float(anchor):.3f}:c{cycle}"
+                    section_id = f"{float(anchor):.3f}"
             else:
                 marker = str(sp_state.current_phrase_label)
+                section_id = marker
         elif role in {"buildup", "pre_drop"} and sp_state.next_smart_drop_beat is not None:
             marker = f"{sp_state.next_smart_drop_beat:.3f}"
         elif role == "breakdown" and sp_state.breakdown_restore_beat is not None:
             marker = f"{sp_state.breakdown_restore_beat:.3f}"
         elif role == "groove":
-            anchor = sp_state.current_phrase_start_beat
             abs_beat = self._led_abs_beat(sp_state)
-            if anchor is not None and abs_beat is not None:
-                elapsed = max(0.0, float(abs_beat) - float(anchor))
-                cycle = int(elapsed // LED_DEFAULT_GROOVE_CYCLE_BEATS)
-                marker = (
-                    f"{sp_state.current_phrase_label}:"
-                    f"{float(anchor):.3f}:c{cycle}"
-                )
+            if self._phrase_monotonic_enabled:
+                # WI-2: embed monotonically-advancing seq instead of raw
+                # current_phrase_start_beat.  The cycle still uses abs_beat
+                # (which is itself clamped by WI-1) so a 112→80→112 wobble
+                # maps to a single seq and the key does not change.
+                if abs_beat is not None:
+                    # When the latch hasn't been advanced yet (committed_start is
+                    # None), fall back to current_phrase_start_beat so the cycle
+                    # is still computed correctly.  The seq already disambiguates
+                    # which phrase we are in; the committed_start only anchors the
+                    # intra-phrase cycle offset.
+                    committed = self._led_phrase_committed_start
+                    if committed is None:
+                        committed = sp_state.current_phrase_start_beat
+                    elapsed_from_seq = max(
+                        0.0,
+                        float(abs_beat) - float(committed or 0.0),
+                    )
+                    cycle = int(elapsed_from_seq // LED_DEFAULT_GROOVE_CYCLE_BEATS)
+                    marker = (
+                        f"{sp_state.current_phrase_label}:"
+                        f"seq{self._led_phrase_seq}:c{cycle}"
+                    )
+                    section_id = (
+                        f"{sp_state.current_phrase_label}:"
+                        f"seq{self._led_phrase_seq}"
+                    )
+                else:
+                    marker = str(sp_state.current_phrase_label)
+                    section_id = marker
+            else:
+                anchor = sp_state.current_phrase_start_beat
+                if anchor is not None and abs_beat is not None:
+                    elapsed = max(0.0, float(abs_beat) - float(anchor))
+                    cycle = int(elapsed // LED_DEFAULT_GROOVE_CYCLE_BEATS)
+                    marker = (
+                        f"{sp_state.current_phrase_label}:"
+                        f"{float(anchor):.3f}:c{cycle}"
+                    )
+                    section_id = (
+                        f"{sp_state.current_phrase_label}:"
+                        f"{float(anchor):.3f}"
+                    )
+                else:
+                    marker = str(sp_state.current_phrase_label)
+                    section_id = marker
+        elif role == "ambient":
+            if self._phrase_monotonic_enabled:
+                # WI-2: use phrase_seq for ambient too — same class of oscillation risk
+                marker = f"{sp_state.current_phrase_label}:seq{self._led_phrase_seq}"
             else:
                 marker = str(sp_state.current_phrase_label)
-        elif role == "ambient":
-            marker = str(sp_state.current_phrase_label)
+        # M1b WI-2: publish structured section/cycle for the color engine.
+        # `section_id or marker` keeps the unlisted branches (drop, buildup,
+        # pre_drop, breakdown, ambient) on section_id = marker / cycle = 0.
+        self._led_last_section_cycle = (section_id or marker, cycle)
         return f"{active}:{d.load_gen}:{role}:{marker}"
 
     # ── Deck switch ───────────────────────────────────────────────────────────
@@ -2258,6 +2465,8 @@ class StateManager:
             self._autoloop.clear_pending_master_phrase_arm()
             if self._laser_executor is not None:
                 self._laser_executor.reset_runtime_state(reason="active_track_loaded")
+            if self._led_look_director is not None:
+                self._led_look_director.reset_for_track()
         d.track_title_hint = title
         self._last_loaded_deck = deck
         trace_id = str(ev.payload.get("__trace_id", ""))
@@ -3008,6 +3217,9 @@ class StateManager:
             grid_pos = _compute_beatgrid_position(elapsed_ms, d.meta.beatgrid_times_ms)
             if grid_pos is not None:
                 beat_pos, abs_beat_pos = grid_pos
+
+        # ── WI-1 monotonic LED/phrasing playhead clamp ────────────────────────
+        abs_beat_pos = self._clamp_led_beat(abs_beat_pos, active, d.load_gen)
 
         self._led_rt_beat = (
             active,
