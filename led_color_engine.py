@@ -460,6 +460,40 @@ class LedColorEngine:
     # Color resolution (§2 Layer 1 spread + white)
     # ------------------------------------------------------------------
 
+    def _focus_window(self, role: str) -> tuple[float, float]:
+        """Compute the [focus_lo, focus_hi] p-window for the current palette.
+
+        Shared by resolve_color and resolve_slot_colors so the focus math is
+        defined exactly once.  Mirrors the original inline computation:
+        the current palette p-interval, widened by the effective spread
+        (role-spread widening when drama_by_role), clamped to the interval,
+        with a lo>hi safety fallback to the full interval.
+
+        Precondition: self._current_palette is a valid palette (callers verify
+        ``palette is not None`` before calling).
+        """
+        lo_p, hi_p = self._palette_p_interval(self._current_palette)
+        palette = self._config.palettes[self._current_palette]
+
+        # Determine effective spread (widened for drops if drama_by_role)
+        base_spread = palette.spread
+        if self._config.drama_by_role:
+            role_spread = self._config.role_spread.get(role, base_spread)
+            effective_spread = max(base_spread, role_spread)
+        else:
+            effective_spread = base_spread
+
+        # Focus window, clamped to palette interval
+        fc = self._focus_fc
+        fw = self._focus_fw
+
+        focus_lo = max(lo_p, fc - fw - effective_spread)
+        focus_hi = min(hi_p, fc + fw + effective_spread)
+        # Ensure lo <= hi
+        if focus_lo > focus_hi:
+            focus_lo, focus_hi = lo_p, hi_p
+        return (focus_lo, focus_hi)
+
     def resolve_color(
         self,
         *,
@@ -492,25 +526,7 @@ class LedColorEngine:
         if palette is None:
             return {}
 
-        lo_p, hi_p = self._palette_p_interval(self._current_palette)
-
-        # Determine effective spread (widened for drops if drama_by_role)
-        base_spread = palette.spread
-        if self._config.drama_by_role:
-            role_spread = self._config.role_spread.get(role, base_spread)
-            effective_spread = max(base_spread, role_spread)
-        else:
-            effective_spread = base_spread
-
-        # Focus window, clamped to palette interval
-        fc = self._focus_fc
-        fw = self._focus_fw
-
-        focus_lo = max(lo_p, fc - fw - effective_spread)
-        focus_hi = min(hi_p, fc + fw + effective_spread)
-        # Ensure lo <= hi
-        if focus_lo > focus_hi:
-            focus_lo, focus_hi = lo_p, hi_p
+        focus_lo, focus_hi = self._focus_window(role)
 
         # Per-cue seed (deterministic per section / step)
         use_step = self._config.step_within_section.get(role, False)
@@ -541,6 +557,69 @@ class LedColorEngine:
             result["color_b"] = rgb_b
 
         return result
+
+    def resolve_slot_colors(
+        self,
+        *,
+        role: str,
+        section_id: str,
+        cycle: int,
+        look_name: str,
+        color_source: str,
+        slot_count: int = 6,
+    ) -> dict[str, Any]:
+        """Resolve a slot-color palette vector for slot-based effects (§15.1).
+
+        Returns {} (inject nothing) under the SAME early-returns as
+        resolve_color: engine disabled, color_source != "engine", or the look
+        is exempt.
+
+        Otherwise returns ``{"slot_colors": [rgb0, ..., rgbN-1]}`` of length
+        ``slot_count``:
+          - slots ``0 .. slot_count-2`` are sampled EVENLY across the current
+            focus window ``[focus_lo, focus_hi]`` via _p_to_rgb + _blend_white,
+          - slot ``slot_count-1`` is reserved pure white (255,255,255), NOT
+            white-blended and NOT palette-derived (firework/twinkle white).
+
+        Pure & deterministic over the current palette/focus state and
+        ``slot_count``: it does NOT consume the per-cue RNG.  ``role``,
+        ``section_id`` and ``cycle`` are accepted to mirror resolve_color's
+        signature (focus widening uses ``role``); they do not seed any RNG here.
+        """
+        if not self._config.enabled:
+            return {}
+        if color_source != "engine":
+            return {}
+        if look_name in self._config.exempt_looks:
+            return {}
+
+        palette = self._config.palettes.get(self._current_palette)
+        if palette is None:
+            return {}
+
+        focus_lo, focus_hi = self._focus_window(role)
+
+        n = int(slot_count)
+        if n <= 0:
+            return {"slot_colors": []}
+
+        slots: list[tuple[int, int, int]] = []
+        gradient_count = n - 1  # last slot reserved for pure white
+        for i in range(gradient_count):
+            if gradient_count <= 1:
+                p = focus_lo
+            else:
+                t = i / (gradient_count - 1)
+                p = focus_lo + t * (focus_hi - focus_lo)
+            p = max(0.0, min(1.0, p))
+            rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
+            rgb = _blend_white(rgb, palette.white)
+            slots.append(rgb)
+
+        # Reserved white slot (pure white, not blended, not palette-derived).
+        slots.append((255, 255, 255))
+
+        return {"slot_colors": slots}
 
     # ------------------------------------------------------------------
     # Live-control stubs (§8, §15.6 M3 precedence)
