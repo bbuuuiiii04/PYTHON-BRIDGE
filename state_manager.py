@@ -59,7 +59,7 @@ from .models import (
     SmartDropEnergyShadow, TrackMetadata,
 )
 from .led_models import BeatAnchor, LEDContext
-from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS
+from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS, MAX_SLOTS
 from .laser_models import LaserContext, LaserPersonality
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
@@ -1722,33 +1722,58 @@ class StateManager:
         if engine is not None and engine.enabled:
             try:
                 scene_ref_for_multi = str(getattr(decision, "scene_ref", ""))
-                multi = "color_a" in REALTIME_EFFECT_PARAM_KEYS.get(
-                    scene_ref_for_multi, frozenset()
-                )
-                computed = engine.resolve_color(
-                    role=role,
-                    section_id=section_id,
-                    cycle=cycle,
-                    look_name=decision.look,
-                    color_source=getattr(decision, "color_source", "engine"),
-                    multi=multi,
-                )
-                if computed:
-                    decision = replace(
-                        decision,
-                        params={**decision.params, **computed},
+                slot_based = scene_ref_for_multi in SLOT_EFFECTS
+                
+                if slot_based:
+                    computed = engine.resolve_slot_colors(
+                        role=role,
+                        section_id=section_id,
+                        cycle=cycle,
+                        look_name=decision.look,
+                        color_source=getattr(decision, "color_source", "engine"),
+                        slot_count=MAX_SLOTS,
                     )
-                    # M1b debug: one line per actual color injection so the
-                    # live dry-run is observable in the log (the color is NOT
-                    # otherwise logged or visible in dry-run frames).
-                    log.info(
-                        "[RGB] color-inject look=%s palette=%s color=%s role=%s role_key=%s",
-                        decision.look,
-                        engine.snapshot().get("current_palette", ""),
-                        computed.get("color"),
-                        role,
-                        role_key,
+                    if computed:
+                        decision = replace(
+                            decision,
+                            params={**decision.params, **computed},
+                        )
+                        log.info(
+                            "[RGB] color-inject look=%s palette=%s slot_colors=%d role=%s role_key=%s",
+                            decision.look,
+                            engine.snapshot().get("current_palette", ""),
+                            len(computed.get("slot_colors", [])),
+                            role,
+                            role_key,
+                        )
+                else:
+                    multi = "color_a" in REALTIME_EFFECT_PARAM_KEYS.get(
+                        scene_ref_for_multi, frozenset()
                     )
+                    computed = engine.resolve_color(
+                        role=role,
+                        section_id=section_id,
+                        cycle=cycle,
+                        look_name=decision.look,
+                        color_source=getattr(decision, "color_source", "engine"),
+                        multi=multi,
+                    )
+                    if computed:
+                        decision = replace(
+                            decision,
+                            params={**decision.params, **computed},
+                        )
+                        # M1b debug: one line per actual color injection so the
+                        # live dry-run is observable in the log (the color is NOT
+                        # otherwise logged or visible in dry-run frames).
+                        log.info(
+                            "[RGB] color-inject look=%s palette=%s color=%s role=%s role_key=%s",
+                            decision.look,
+                            engine.snapshot().get("current_palette", ""),
+                            computed.get("color"),
+                            role,
+                            role_key,
+                        )
             except Exception as exc:
                 self._led_last_error = f"color_engine_error:{type(exc).__name__}"
 
