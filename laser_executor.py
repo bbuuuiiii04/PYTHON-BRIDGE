@@ -278,7 +278,6 @@ class LaserSceneExecutor:
         if msg is None:
             log.debug("[LX] blackout_on skipped: manual_blackout_on not configured")
             return
-        msg = replace(msg, kind="note_on", behavior="note_on")
         if self._midi_output.trigger(msg, priority="high"):
             with self._lock:
                 self._blackout_pending_for_drop_window = True
@@ -299,7 +298,6 @@ class LaserSceneExecutor:
         msg = self._config.manual_blackout_off
         if msg is None:
             return
-        msg = replace(msg, kind="note_off", behavior="note_off")
         if not self._midi_output.trigger(msg, priority="high"):
             self._record_gate("manual_blackout_off_rejected")
 
@@ -315,7 +313,6 @@ class LaserSceneExecutor:
             self._mask_owners.add(owner)
         if already_dark:
             return
-        msg = replace(msg, kind="note_on", behavior="note_on")
         if self._midi_output.trigger(msg, priority="high"):
             log.info("[LX] mask_on  owner=%s  note=%s", owner, msg.note)
             return
@@ -336,7 +333,6 @@ class LaserSceneExecutor:
         msg = self._config.manual_blackout_off
         if msg is None:
             return
-        msg = replace(msg, kind="note_off", behavior="note_off")
         if not self._midi_output.trigger(msg, priority="high"):
             self._record_gate("manual_blackout_off_rejected")
 

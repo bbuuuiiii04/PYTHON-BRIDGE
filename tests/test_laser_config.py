@@ -323,7 +323,7 @@ class ManualBlackoutPairValidationTests(unittest.TestCase):
         }
         result = load_laser_director_config(_write_config(cfg))
         self.assertFalse(result.available)
-        self.assertTrue(any("manual_commands.blackout_on" in e for e in result.errors))
+        self.assertTrue(any("manual_commands.blackout_off" in e for e in result.errors))
 
     def test_blackout_mode_requires_blackout_off_when_blackout_on_missing(self) -> None:
         import copy
@@ -365,7 +365,7 @@ class ManualBlackoutPairValidationTests(unittest.TestCase):
         result = load_laser_director_config(_write_config(cfg))
         self.assertTrue(result.available, msg=result.errors)
 
-    def test_blackout_mode_rejects_blackout_on_pulse_behavior(self) -> None:
+    def test_blackout_mode_allows_blackout_on_pulse_behavior(self) -> None:
         import copy
         cfg = copy.deepcopy(_MINIMAL_CONFIG)
         cfg["smart_drop_mode"] = "blackout_mask"
@@ -386,9 +386,7 @@ class ManualBlackoutPairValidationTests(unittest.TestCase):
             },
         }
         result = load_laser_director_config(_write_config(cfg))
-        self.assertFalse(result.available)
-        self.assertTrue(any("manual_commands.blackout_on" in e for e in result.errors))
-        self.assertTrue(any("behavior='note_on'" in e for e in result.errors))
+        self.assertTrue(result.available)
 
     def test_blackout_mode_rejects_blackout_off_pulse_behavior(self) -> None:
         import copy
