@@ -381,6 +381,80 @@ class SlotInjectionTests(unittest.TestCase):
         # Error logged in sm before cleared
         self.assertEqual(captured_error[0], "color_engine_error:ValueError")
 
+    def test_exception_during_snapshot_leaves_decision_unmodified(self) -> None:
+        engine = _engine()
+        engine.resolve_slot_colors = Mock(return_value={"slot_colors": [[10, 10, 10]] * 6})
+        engine.snapshot = Mock(side_effect=RuntimeError("Test snapshot error"))
+        
+        dec = _decision(
+            "rt_groove_center_chase",
+            scene_ref="groove_center_chase",
+            params={"sync_mode": "beat"},
+        )
+        director = _DispatchDirector(dec)
+        
+        captured_error = []
+        
+        class _TestAdapter:
+            def __init__(self, sm_ref):
+                self.sm_ref = sm_ref
+                self.trigger_calls = []
+            def trigger(self, decision):
+                captured_error.append(self.sm_ref._led_last_error)
+                self.trigger_calls.append(decision)
+                return True
+            def status(self):
+                return {"available": True}
+
+        sm = _make_sm(director=director, adapter=None, engine=engine)
+        adapter = _TestAdapter(sm)
+        sm._led_scene_adapter = adapter
+
+        _arm_automation(sm)
+        sm._dispatch_led_automation(active=1, d=_playing_deck(sm), sp_state=SmartPhrasingState())
+        
+        # Decision must be unmodified
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        dispatched = adapter.trigger_calls[0]
+        params = dict(dispatched.params)
+        self.assertNotIn("slot_colors", params)
+        self.assertEqual(params, {"sync_mode": "beat"})
+        # Error logged in sm before cleared
+        self.assertEqual(captured_error[0], "color_engine_error:RuntimeError")
+
+    def test_end_to_end_slot_render_with_palette(self) -> None:
+        dec = _decision(
+            "rt_groove_center_chase",
+            scene_ref="groove_center_chase",
+            params={"sync_mode": "beat"},
+        )
+        dispatched = self._dispatch(dec, engine=_engine())
+        params = dict(dispatched.params)
+        
+        # Assert slot_colors length 6
+        self.assertIn("slot_colors", params)
+        slot_colors = params["slot_colors"]
+        self.assertEqual(len(slot_colors), 6)
+        
+        # Assert slot 5 is (255,255,255)
+        self.assertEqual(tuple(slot_colors[5]), (255, 255, 255))
+        
+        # Assert slots 0-4 are not all default white/black and include palette-derived non-white values
+        non_default = [c for c in slot_colors[:5] if tuple(c) not in ((0, 0, 0), (255, 255, 255))]
+        self.assertTrue(len(non_default) > 0, "Slots 0-4 must contain palette-derived colors")
+        
+        # Call GoveeFrameRenderer.render(...)
+        r = GoveeFrameRenderer()
+        frame = r.render(
+            "groove_center_chase",
+            beat_pos=1.0, local_t=1.0, frame_index=0,
+            params=params, segments=20, seed=1,
+        )
+        
+        # Assert rendered frame contains non-black, non-default-white palette-colored pixels
+        non_default_pixels = [px for px in frame if tuple(px) not in ((0, 0, 0), (255, 255, 255))]
+        self.assertTrue(len(non_default_pixels) > 0, "Rendered frame must contain palette colors")
+
 class ConfigLoadTests(unittest.TestCase):
     def test_config_load_success(self) -> None:
         cfg = _base_config()

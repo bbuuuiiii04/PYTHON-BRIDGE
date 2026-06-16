@@ -1734,17 +1734,28 @@ class StateManager:
                         slot_count=MAX_SLOTS,
                     )
                     if computed:
+                        palette_name = engine.snapshot().get("current_palette", "")
+                        slot_colors = computed.get("slot_colors", [])
+                        slot_count = len(slot_colors)
+                        if slot_count >= 6:
+                            first_rgb = tuple(slot_colors[0])
+                            last_grad = tuple(slot_colors[4])
+                            slot5_white = (tuple(slot_colors[5]) == (255, 255, 255))
+                            log_msg = f"first={first_rgb} last_grad={last_grad} slot5_white={slot5_white}"
+                        else:
+                            log_msg = f"slot_colors={slot_count}"
+                        
+                        log.info(
+                            "[RGB] color-inject look=%s palette=%s %s role=%s role_key=%s",
+                            decision.look,
+                            palette_name,
+                            log_msg,
+                            role,
+                            role_key,
+                        )
                         decision = replace(
                             decision,
                             params={**decision.params, **computed},
-                        )
-                        log.info(
-                            "[RGB] color-inject look=%s palette=%s slot_colors=%d role=%s role_key=%s",
-                            decision.look,
-                            engine.snapshot().get("current_palette", ""),
-                            len(computed.get("slot_colors", [])),
-                            role,
-                            role_key,
                         )
                 else:
                     multi = "color_a" in REALTIME_EFFECT_PARAM_KEYS.get(
@@ -1759,20 +1770,18 @@ class StateManager:
                         multi=multi,
                     )
                     if computed:
-                        decision = replace(
-                            decision,
-                            params={**decision.params, **computed},
-                        )
-                        # M1b debug: one line per actual color injection so the
-                        # live dry-run is observable in the log (the color is NOT
-                        # otherwise logged or visible in dry-run frames).
+                        palette_name = engine.snapshot().get("current_palette", "")
                         log.info(
                             "[RGB] color-inject look=%s palette=%s color=%s role=%s role_key=%s",
                             decision.look,
-                            engine.snapshot().get("current_palette", ""),
+                            palette_name,
                             computed.get("color"),
                             role,
                             role_key,
+                        )
+                        decision = replace(
+                            decision,
+                            params={**decision.params, **computed},
                         )
             except Exception as exc:
                 self._led_last_error = f"color_engine_error:{type(exc).__name__}"
