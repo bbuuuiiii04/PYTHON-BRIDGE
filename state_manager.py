@@ -1867,8 +1867,6 @@ class StateManager:
         d: DeckState,
         reason: str,
     ) -> None:
-        if self._led_color_engine is not None:
-            self._led_color_engine.reset_fade_memory()
         self._led_rt_permitted = False
         self._led_smart_drop_blackout_key = ""
 
@@ -1890,6 +1888,9 @@ class StateManager:
             return
         if role_key == self._led_last_idle_role_key:
             return
+
+        if self._led_color_engine is not None:
+            self._led_color_engine.reset_fade_memory()
 
         context = LEDContext(
             role="ambient",
@@ -1992,11 +1993,11 @@ class StateManager:
         role_key: str = "",
         rt_permitted: bool = False,
     ) -> None:
-        if self._led_color_engine is not None:
-            self._led_color_engine.reset_fade_memory()
         self._led_rt_permitted = rt_permitted
         if reason != self._led_automation_gate_reason:
             self._led_automation_gated_count += 1
+            if self._led_color_engine is not None and reason in ("emergency_blackout", "manual_override"):
+                self._led_color_engine.reset_fade_memory()
         self._set_led_automation_gate_reason(
             reason,
             active_deck=active_deck,

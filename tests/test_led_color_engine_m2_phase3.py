@@ -185,13 +185,37 @@ def test_state_manager_fade_memory_reset():
     sm._led_color_engine = color_engine_mock
     sm._led_rt_permitted = True
     
-    sm._dispatch_led_manual_command(reason="test")
-    assert color_engine_mock.reset_fade_memory.call_count >= 1
+    # 1. Manual blackout command DOES call reset
+    sm._dispatch_led_manual_command(reason="blackout")
+    assert color_engine_mock.reset_fade_memory.call_count == 1
+    color_engine_mock.reset_fade_memory.reset_mock()
     
+    # 2. Gate with ordinary transient reason does NOT call reset
+    sm._gate_led_automation(reason="position_stale", active_deck=1)
+    sm._gate_led_automation(reason="not_autoloop", active_deck=1)
+    assert color_engine_mock.reset_fade_memory.call_count == 0
+    
+    # 3. Gate with emergency_blackout DOES call reset (on edge transition)
+    sm._gate_led_automation(reason="emergency_blackout", active_deck=1)
+    assert color_engine_mock.reset_fade_memory.call_count == 1
     color_engine_mock.reset_fade_memory.reset_mock()
-    sm._dispatch_led_idle_ambient(active=1, d=Mock(), reason="test")
-    assert color_engine_mock.reset_fade_memory.call_count >= 1
-
+    
+    # It does NOT call it on duplicate tick
+    sm._gate_led_automation(reason="emergency_blackout", active_deck=1)
+    assert color_engine_mock.reset_fade_memory.call_count == 0
+    
+    # 4. Idle transition DOES call reset, but not on duplicate tick
+    # Need to give it a mock look director to avoid it gate-short-circuiting
+    sm._led_look_director = Mock()
+    sm._led_scene_adapter = Mock()
+    sm._led_enabled_latch = True
+    sm._led_automation_enabled_latch = True
+    sm._led_emergency_blackout = False
+    
+    d = Mock(load_gen=1, meta=Mock(filepath="path"), scripted_id="")
+    sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+    assert color_engine_mock.reset_fade_memory.call_count == 1
     color_engine_mock.reset_fade_memory.reset_mock()
-    sm._gate_led_automation(reason="test", active_deck=1)
-    assert color_engine_mock.reset_fade_memory.call_count >= 1
+    
+    sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+    assert color_engine_mock.reset_fade_memory.call_count == 0
