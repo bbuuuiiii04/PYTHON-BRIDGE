@@ -21,6 +21,8 @@ from .led_models import BeatAnchor
 _COLOR_SIG_KEYS = frozenset({
     "color", "color2", "color_a", "color_b",
     "color_from", "color_to",
+    "color_a_from", "color_a_to",
+    "color_b_from", "color_b_to",
     "fade_beats", "gradient_stops",
     "slot_colors", "slot_colors_from", "slot_colors_to"
 })

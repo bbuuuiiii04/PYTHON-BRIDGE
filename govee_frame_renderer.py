@@ -85,6 +85,10 @@ def resolve_fade(params: Mapping[str, Any], abs_pos: float | None, anchor_beat: 
     out = dict(params)
     if "color_from" in params and "color_to" in params:
         out["color"] = _lerp(_color(params["color_from"]), _color(params["color_to"]), t)
+    if "color_a_from" in params and "color_a_to" in params:
+        out["color_a"] = _lerp(_color(params["color_a_from"]), _color(params["color_a_to"]), t)
+    if "color_b_from" in params and "color_b_to" in params:
+        out["color_b"] = _lerp(_color(params["color_b_from"]), _color(params["color_b_to"]), t)
     if "slot_colors_from" in params and "slot_colors_to" in params:
         s_from = _slots(params["slot_colors_from"])
         s_to = _slots(params["slot_colors_to"])

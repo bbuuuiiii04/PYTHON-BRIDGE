@@ -139,3 +139,59 @@ def test_step_within_section_deterministic():
     # Because step_within_section is True for drop, cycle matters, color should be different
     # (assuming rng produces different values and spread is > 0)
     assert res_c0["color"] != res_c1["color"]
+
+def test_resolve_fade_dual_color():
+    params = {
+        "color_a_from": (255, 0, 0), "color_a_to": (0, 0, 255),
+        "color_b_from": (0, 255, 0), "color_b_to": (255, 0, 255),
+        "fade_beats": 2.0
+    }
+    out = resolve_fade(params, 11.0, 10.0) # halfway
+    assert out["color_a"] == (128, 0, 128)
+    assert out["color_b"] == (128, 128, 128)
+
+def test_runner_all_color_keys_no_motion_reset():
+    engine_mock = Mock()
+    transport_mock = Mock()
+    runner = GoveeRealtimeRunner(transport_mock, Mock())
+    runner._engine = engine_mock
+    
+    spec1 = EffectSpec("eff", {"speed": 1.0, "color": (255, 0, 0)}, 1, 0.0)
+    
+    # 15 keys
+    all_color_keys = {k: (0, 0, 0) if "color" in k else 1.0 for k in _COLOR_SIG_KEYS}
+    all_color_keys["speed"] = 1.0 # keep motion same
+    
+    spec2 = EffectSpec("eff", all_color_keys, 1, 0.0)
+    
+    runner._active = True
+    runner._active_signature, runner._color_signature = runner._signature(spec1)
+    
+    runner.set_desired(spec2)
+    anchor = Mock(permitted=True, playing=True, bpm=120.0, abs_beat_pos=10.0, captured_monotonic=0.0)
+    ir_mock = Mock(local_beat=0, local_t=0, bucket=0)
+    engine_mock.on_tick.return_value = [ir_mock]
+    runner._renderer = Mock()
+    runner._renderer.render.return_value = []
+    
+    runner._tick_once(anchor, 0.0)
+    engine_mock.configure.assert_not_called()
+
+def test_state_manager_fade_memory_reset():
+    from rb_ss_bridge_v2.state_manager import StateManager
+    
+    sm = StateManager(Mock(), Mock(), Mock())
+    color_engine_mock = Mock()
+    sm._led_color_engine = color_engine_mock
+    sm._led_rt_permitted = True
+    
+    sm._dispatch_led_manual_command(reason="test")
+    assert color_engine_mock.reset_fade_memory.call_count >= 1
+    
+    color_engine_mock.reset_fade_memory.reset_mock()
+    sm._dispatch_led_idle_ambient(active=1, d=Mock(), reason="test")
+    assert color_engine_mock.reset_fade_memory.call_count >= 1
+
+    color_engine_mock.reset_fade_memory.reset_mock()
+    sm._gate_led_automation(reason="test", active_deck=1)
+    assert color_engine_mock.reset_fade_memory.call_count >= 1
