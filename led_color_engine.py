@@ -630,21 +630,40 @@ class LedColorEngine:
         if n <= 0:
             return {"slot_colors": []}
 
-        slots: list[tuple[int, int, int]] = []
-        gradient_count = n - 1  # last slot reserved for pure white
-        for i in range(gradient_count):
-            if gradient_count <= 1:
-                p = focus_lo
-            else:
-                t = i / (gradient_count - 1)
-                p = focus_lo + t * (focus_hi - focus_lo)
-            p = max(0.0, min(1.0, p))
-            rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
-            rgb = _blend_white(rgb, palette.white)
-            slots.append(rgb)
+        strategy = (
+            self._config.slot_fill_strategy_by_look.get(look_name)
+            or self._config.slot_fill_strategy_by_role.get(role)
+            or "gradient_even"
+        )
 
-        # Reserved white slot (pure white, not blended, not palette-derived).
-        slots.append((255, 255, 255))
+        slots: list[tuple[int, int, int]] = []
+        if strategy == "gradient_even":
+            gradient_count = n - 1  # last slot reserved for pure white
+            for i in range(gradient_count):
+                if gradient_count <= 1:
+                    p = focus_lo
+                else:
+                    t = i / (gradient_count - 1)
+                    p = focus_lo + t * (focus_hi - focus_lo)
+                p = max(0.0, min(1.0, p))
+                rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
+                rgb = _blend_white(rgb, palette.white)
+                slots.append(rgb)
+    
+            # Reserved white slot (pure white, not blended, not palette-derived).
+            slots.append((255, 255, 255))
+        elif strategy == "random_with_replacement":
+            use_step = self._config.step_within_section.get(role, False)
+            step_index = cycle if use_step else 0
+            fill_seed = _blake2b_int(f"{self._current_track_seed}:{section_id}:{step_index}:slotfill:v1")
+            fill_rng = _rng_from_seed(fill_seed)
+            for i in range(n - 1):
+                p = fill_rng.uniform(focus_lo, focus_hi)
+                p = max(0.0, min(1.0, p))
+                rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
+                rgb = _blend_white(rgb, palette.white)
+                slots.append(rgb)
+            slots.append((255, 255, 255))
 
         result: dict[str, Any] = {"slot_colors": slots}
         mem_key = (self._current_track_key, role, section_id, look_name, "slot_colors")

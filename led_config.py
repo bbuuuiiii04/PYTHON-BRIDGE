@@ -952,6 +952,24 @@ def _validate_color_engine(data: dict[str, Any]) -> list[str]:
             if not isinstance(step_val, bool):
                 errors.append(f"color_engine.step_within_section.{role_name} must be a boolean")
 
+    # slot_fill_strategy_by_look: dict of str -> str
+    slot_fill_strategy_by_look = data.get("slot_fill_strategy_by_look", {})
+    if not isinstance(slot_fill_strategy_by_look, dict):
+        errors.append("color_engine.slot_fill_strategy_by_look must be an object")
+    else:
+        for look_name, strategy_val in slot_fill_strategy_by_look.items():
+            if strategy_val not in ("gradient_even", "random_with_replacement"):
+                errors.append(f"color_engine.slot_fill_strategy_by_look.{look_name} must be 'gradient_even' or 'random_with_replacement'")
+
+    # slot_fill_strategy_by_role: dict of str -> str
+    slot_fill_strategy_by_role = data.get("slot_fill_strategy_by_role", {})
+    if not isinstance(slot_fill_strategy_by_role, dict):
+        errors.append("color_engine.slot_fill_strategy_by_role must be an object")
+    else:
+        for role_name, strategy_val in slot_fill_strategy_by_role.items():
+            if strategy_val not in ("gradient_even", "random_with_replacement"):
+                errors.append(f"color_engine.slot_fill_strategy_by_role.{role_name} must be 'gradient_even' or 'random_with_replacement'")
+
     # fade_beats_by_role: dict of str → number
     fade_beats_by_role = data.get("fade_beats_by_role", {})
     if not isinstance(fade_beats_by_role, dict):
@@ -1126,6 +1144,14 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
     step_raw = raw.get("step_within_section", {"drop": False, "post_drop": True, "groove": True})
     step_within_section: dict[str, bool] = {k: bool(v) for k, v in step_raw.items()}
 
+    # Build slot_fill_strategy_by_look
+    sfs_look_raw = raw.get("slot_fill_strategy_by_look", {})
+    slot_fill_strategy_by_look: dict[str, str] = {k: str(v) for k, v in sfs_look_raw.items()}
+
+    # Build slot_fill_strategy_by_role
+    sfs_role_raw = raw.get("slot_fill_strategy_by_role", {})
+    slot_fill_strategy_by_role: dict[str, str] = {k: str(v) for k, v in sfs_role_raw.items()}
+
     # Build fade_beats_by_role
     fade_raw = raw.get(
         "fade_beats_by_role",
@@ -1148,6 +1174,8 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
         role_spread=role_spread,
         step_within_section=step_within_section,
         fade_beats_by_role=fade_beats_by_role,
+        slot_fill_strategy_by_look=slot_fill_strategy_by_look,
+        slot_fill_strategy_by_role=slot_fill_strategy_by_role,
         exempt_looks=exempt_looks,
         diy_color_tags=diy_color_tags,
         set_seed_mode=str(raw.get("set_seed_mode", "random")),
