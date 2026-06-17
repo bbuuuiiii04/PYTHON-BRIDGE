@@ -103,10 +103,17 @@ If the change has no matching contract, **add/extend the contract first**, then 
 ## 8. Checks before committing docs- or agent-routing changes
 
 ```bash
-python3 tools/check_docs_metadata.py    # required docs + status headers exist
-python3 tools/check_agent_contracts.py  # routing/cards/contracts reference real files & symbols
+python3 tools/check_docs_metadata.py     # required docs + status headers exist
+python3 tools/check_agent_contracts.py   # routing/cards/contracts reference real files & symbols
 python3 tools/check_docs_drift.py        # runtime command surface & status strings match code
+python3 tools/check_docs_staleness.py --report   # advisory: impl changed since docs were verified
 ```
+
+The first three are hard checks (CI fails on them). Staleness is advisory — when it flags a
+contract, re-verify the listed docs against code and bump `last_verified_commit`.
+
+Optional local gate (runs the hard checks before every commit): `git config core.hooksPath tools/git-hooks`
+(skip once with `git commit --no-verify`; disable with `git config --unset core.hooksPath`).
 
 Run software tests when practical (some need optional deps; none prove hardware):
 

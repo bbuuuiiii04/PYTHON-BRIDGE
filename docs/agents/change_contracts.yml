@@ -253,6 +253,7 @@ contracts:
       - tools/check_docs_metadata.py
       - tools/check_agent_contracts.py
       - tools/check_docs_drift.py
+      - tools/check_docs_staleness.py
     inspect:
       - docs/architecture/doc_index.md
       - docs/agents/drift_detection.md

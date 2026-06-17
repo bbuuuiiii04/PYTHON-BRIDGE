@@ -118,10 +118,14 @@ See `docs/setup/runtime_commands.md` and `docs/subsystems/runtime_commands.md` f
 Run these before committing docs or agent-routing changes:
 
 ```bash
-python tools/check_docs_metadata.py
-python tools/check_agent_contracts.py
-python tools/check_docs_drift.py
+python3 tools/check_docs_metadata.py
+python3 tools/check_agent_contracts.py
+python3 tools/check_docs_drift.py
+python3 tools/check_docs_staleness.py --report   # advisory: impl changed since docs were verified
 ```
+
+The first three are hard checks (CI enforces them on every PR). Staleness is advisory. An optional
+local pre-commit gate is available: `git config core.hooksPath tools/git-hooks`.
 
 These checks are lightweight. They do not replace tests or hardware validation, because apparently reality still requires being tested in reality.
 
