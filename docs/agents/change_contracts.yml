@@ -1,0 +1,268 @@
+# Machine-readable change contracts — the single subsystem map for agents.
+# If code in code_globs changes, update every doc in docs_update and run the checks.
+# key_symbols are verified to exist in code by tools/check_agent_contracts.py.
+version: 2
+last_verified_commit: c678788
+last_verified_date: 2026-06-17
+contracts:
+  core_bridge:
+    code_globs:
+      - __main__.py
+      - state_manager.py
+      - models.py
+      - config.py
+    key_symbols:
+      - StateManager
+      - BridgeEvent
+      - DeckState
+    inspect:
+      - docs/subsystems/core_bridge.md
+      - docs/architecture/current_architecture.md
+      - docs/architecture/runtime_invariants.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/subsystems/core_bridge.md
+      - docs/architecture/current_architecture.md
+      - docs/architecture/runtime_invariants.md
+    forbidden_assumptions:
+      - StateManager is the only writer of DeckState; readers publish events/snapshots
+      - the 200 Hz push loop must not gain blocking I/O
+
+  runtime_commands:
+    code_globs:
+      - runtime_status.py
+      - __main__.py
+      - validation_runner.py
+    key_symbols:
+      - parse_command
+      - StatusWriter
+      - CommandReader
+      - STATUS_PATH
+      - COMMANDS_PATH
+    inspect:
+      - runtime_status.py
+      - __main__.py
+      - validation_runner.py
+      - docs/subsystems/runtime_commands.md
+      - docs/setup/runtime_commands.md
+    tests:
+      - python3 tools/check_docs_drift.py
+      - python3 -m unittest discover tests
+    docs_update:
+      - docs/setup/runtime_commands.md
+      - docs/subsystems/runtime_commands.md
+      - docs/status/feature_status_matrix.md
+      - docs/status/validation_matrix.md
+      - docs/validation/software_test_inventory.md
+      - docs/agents/task_playbooks/change_runtime_command.md
+    forbidden_assumptions:
+      - accepted command does not prove callback wiring
+      - callback wiring does not prove hardware-visible behavior
+
+  led_govee:
+    code_globs:
+      - led_config.py
+      - led_models.py
+      - led_look_director.py
+      - led_color_engine.py
+      - led_dispatch_coordinator.py
+      - govee_scene_adapter.py
+      - govee_runtime_sender.py
+      - govee_realtime_runner.py
+      - govee_realtime_transport.py
+      - govee_frame_renderer.py
+      - govee_owner_state.py
+      - govee_lan_discovery.py
+      - beat_sync_engine.py
+      - config/led_look_director.example.json
+    key_symbols:
+      - LEDConfig
+      - LEDLookDirector
+      - LedColorEngine
+      - LEDDispatchCoordinator
+      - GoveeSceneAdapter
+      - GoveeRuntimeSender
+      - GoveeRealtimeRunner
+      - GoveeRealtimeTransport
+      - GoveeFrameRenderer
+      - BeatSyncEngine
+    inspect:
+      - docs/subsystems/led_govee.md
+      - docs/status/feature_status_matrix.md
+      - docs/status/support_matrix.md
+      - docs/status/validation_matrix.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/subsystems/led_govee.md
+      - docs/status/feature_status_matrix.md
+      - docs/status/support_matrix.md
+      - docs/status/validation_matrix.md
+      - docs/validation/hardware_validation_log.md
+      - docs/status/active_work_registry.md
+      - docs/agents/task_playbooks/change_led_govee_behavior.md
+    forbidden_assumptions:
+      - H612D behavior does not imply all Govee devices work
+      - software tests do not prove device compatibility
+
+  laser:
+    code_globs:
+      - laser_config.py
+      - laser_models.py
+      - laser_director.py
+      - laser_executor.py
+      - laser_decision_log.py
+      - midi_output.py
+      - personality_resolver.py
+      - config/laser_director.example.json
+    key_symbols:
+      - LaserDirector
+      - LaserSceneExecutor
+      - LaserConfig
+      - load_laser_director_config
+    inspect:
+      - docs/subsystems/laser.md
+      - docs/architecture/laser_director_design.md
+      - docs/status/feature_status_matrix.md
+      - docs/status/validation_matrix.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/subsystems/laser.md
+      - docs/status/feature_status_matrix.md
+      - docs/status/support_matrix.md
+      - docs/status/validation_matrix.md
+      - docs/validation/hardware_validation_log.md
+      - docs/agents/task_playbooks/change_laser_behavior.md
+    forbidden_assumptions:
+      - MIDI dry-run does not prove laser safety
+      - mapped scene does not imply arbitrary fixture support
+
+  rekordbox_readers:
+    code_globs:
+      - rb_memory.py
+      - rb_state_reader.py
+      - live_bpm.py
+      - rb_offsets.py
+      - mtc_reader.py
+      - docs/data/offsets-macos.yaml
+    key_symbols:
+      - RBStateReader
+      - RBMemoryReader
+      - LiveBPMService
+      - PositionCache
+    inspect:
+      - docs/subsystems/rekordbox_readers.md
+      - docs/status/support_matrix.md
+      - docs/status/known_limitations.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/subsystems/rekordbox_readers.md
+      - docs/status/support_matrix.md
+      - docs/status/feature_status_matrix.md
+      - docs/status/validation_matrix.md
+      - docs/validation/software_test_inventory.md
+      - docs/agents/task_playbooks/change_rekordbox_reader.md
+    forbidden_assumptions:
+      - one Rekordbox version does not imply broad version support
+      - macOS memory reader logic does not imply Windows/Linux support
+
+  soundswitch_output:
+    code_globs:
+      - osl_output.py
+      - sound_switch_engine.py
+      - os2l_injector.py
+    key_symbols:
+      - OS2LOutput
+      - OS2LConnection
+    inspect:
+      - docs/subsystems/soundswitch_output.md
+      - docs/status/feature_status_matrix.md
+      - docs/status/support_matrix.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/subsystems/soundswitch_output.md
+      - docs/status/feature_status_matrix.md
+      - docs/status/support_matrix.md
+      - docs/status/validation_matrix.md
+    forbidden_assumptions:
+      - OS2L generation does not prove every SoundSwitch version works
+
+  config_schema:
+    code_globs:
+      - config.py
+      - laser_config.py
+      - led_config.py
+      - config/*.example.json
+    key_symbols:
+      - load_laser_director_config
+      - load_led_look_director_config
+      - LaserConfig
+      - LEDConfig
+    inspect:
+      - docs/subsystems/config.md
+      - docs/setup/configuration.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/subsystems/config.md
+      - docs/setup/configuration.md
+      - docs/status/feature_status_matrix.md
+      - docs/agents/task_playbooks/update_config_schema.md
+    forbidden_assumptions:
+      - do not commit secrets, local IPs, API keys, or backup files
+
+  tests:
+    code_globs:
+      - tests/**
+    inspect:
+      - docs/subsystems/tests.md
+      - docs/validation/software_test_inventory.md
+      - docs/status/validation_matrix.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/subsystems/tests.md
+      - docs/validation/software_test_inventory.md
+      - docs/status/validation_matrix.md
+    forbidden_assumptions:
+      - software tests do not prove hardware behavior
+
+  docs:
+    code_globs:
+      - README.md
+      - AGENTS.md
+      - docs/**
+      - .github/**
+      - tools/check_docs_metadata.py
+      - tools/check_agent_contracts.py
+      - tools/check_docs_drift.py
+    inspect:
+      - docs/architecture/doc_index.md
+      - docs/agents/drift_detection.md
+    tests:
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
+    docs_update:
+      - docs/architecture/doc_index.md
+      - docs/status/active_work_registry.md
+    forbidden_assumptions:
+      - do not make alpha software look mature
+      - do not claim hardware validation without evidence

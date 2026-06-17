@@ -1,0 +1,37 @@
+name: Bug report
+description: Report a reproducible bug without making compatibility assumptions.
+title: "[Bug report] "
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is early alpha. Do not use this template to imply broad support unless evidence is provided.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened or what evidence are you recording?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rekordbox version, SoundSwitch version, device models, commit SHA.
+    validations:
+      required: false
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Logs, commands, status JSON, config notes with secrets redacted, screenshots, or manual test steps.
+    validations:
+      required: false
+  - type: textarea
+    id: caveats
+    attributes:
+      label: Caveats and uncertainty
+      description: What is still unknown?
+    validations:
+      required: false
