@@ -1097,6 +1097,60 @@ def _slot_groove_center_chase(beat: float, local_t: float, frame_index: int,
     return field
 
 
+def _slot_groove_chase(beat: float, local_t: float, frame_index: int,
+                       params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Generic slotized groove chase.
+
+    Ported from prototype ``_groove_chase``.
+    """
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+
+    loop_beats = 4.0
+    offset_beats = 2.0
+    width = 0.8
+
+    pos1 = ((cue_beat / loop_beats) % 1.0) * segments
+    pos2 = (((cue_beat + offset_beats) / loop_beats) % 1.0) * segments
+
+    for idx in range(segments):
+        dist1 = _distance_on_ring(idx, pos1, segments)
+        dist2 = _distance_on_ring(idx, pos2, segments)
+
+        intensity1 = max(0.0, 1.0 - (dist1 / max(0.001, width)))
+        intensity2 = max(0.0, 1.0 - (dist2 / max(0.001, width)))
+
+        # Apply head 1 across slots 0-4
+        if intensity1 > 0.0:
+            slot_coord1 = intensity1 * 4.0
+            s_below1 = int(math.floor(slot_coord1))
+            s_above1 = int(math.ceil(slot_coord1))
+            w_above1 = slot_coord1 - s_below1
+            w_below1 = 1.0 - w_above1
+
+            if s_below1 == s_above1:
+                field[idx][s_below1] = min(1.0, field[idx][s_below1] + intensity1)
+            else:
+                field[idx][s_below1] = min(1.0, field[idx][s_below1] + intensity1 * w_below1)
+                field[idx][s_above1] = min(1.0, field[idx][s_above1] + intensity1 * w_above1)
+
+        # Apply head 2 across slots 0-4
+        if intensity2 > 0.0:
+            slot_coord2 = intensity2 * 4.0
+            s_below2 = int(math.floor(slot_coord2))
+            s_above2 = int(math.ceil(slot_coord2))
+            w_above2 = slot_coord2 - s_below2
+            w_below2 = 1.0 - w_above2
+
+            if s_below2 == s_above2:
+                field[idx][s_below2] = min(1.0, field[idx][s_below2] + intensity2)
+            else:
+                field[idx][s_below2] = min(1.0, field[idx][s_below2] + intensity2 * w_below2)
+                field[idx][s_above2] = min(1.0, field[idx][s_above2] + intensity2 * w_above2)
+
+    return field
+
+
 def _slot_post_drop_firework_chase(beat: float, local_t: float, frame_index: int,
                                    params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
     """Intense post-drop center chase + pure-white firework bursts on slot 5.
@@ -1383,6 +1437,7 @@ def _baked_breakdown_star_twinkle_sand(beat: float, local_t: float, frame_index:
 # Frame.  render() routes these through universal_colorizer with the injected
 # slot_colors palette.  Phase 2a populates the 5 engine cues below.
 SLOT_EFFECTS: dict[str, SlotEffectFn] = {
+    "rt_groove_chase": _slot_groove_chase,
     "groove_center_chase": _slot_groove_center_chase,
     "groove_center_burst_retract": _slot_groove_center_burst_retract,
     "post_drop_firework_chase": _slot_post_drop_firework_chase,
@@ -1423,6 +1478,7 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
     ),
     "breakdown_star_twinkle": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "breakdown_star_twinkle_sand": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_groove_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
 }
 for _name, _keys in _M2_PHASE2A_PARAM_KEYS.items():
     REALTIME_EFFECT_PARAM_KEYS[_name] = _keys

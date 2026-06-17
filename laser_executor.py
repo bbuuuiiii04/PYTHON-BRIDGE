@@ -464,6 +464,7 @@ class LaserSceneExecutor:
         with self._lock:
             self._gated_count += 1
             self._last_error = reason
+        log.debug("[LX] gate-block  reason=%s", reason)
 
     def _is_role_cooldown_blocked(
         self,

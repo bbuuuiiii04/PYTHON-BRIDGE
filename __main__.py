@@ -113,6 +113,37 @@ class _ColorFormatter(logging.Formatter):
         ("[main] laser-config",     _BPINK),
         ("[sm] energy-suggest",     _LIME),
 
+        # ── Laser / LED / Govee subsystem tags (bridge log visibility) ──────────
+        # First-match-wins: each specific state line MUST stay above its generic
+        # tag fallback. Do not reorder.
+        ("[laser] personality",       _BGREEN),
+        ("[laser] buildup-gate",      _BCYAN),
+        ("[laser]",                   _BPINK),
+        ("[lx] fired",                _BGREEN),
+        ("[lx] same-scene-refire",    _BGREEN),
+        ("[lx] blackout_on sent",     _BGREEN),
+        ("[lx] mask_on",              _BGREEN),
+        ("[lx] mask_off",             _BGREEN),
+        ("[lx] blackout_on rejected", _BRED),
+        ("[lx] gate-block",           _GREY),
+        ("[lx] blackout skipped",     _GREY),
+        ("[lx] blackout arming",      _GREY),
+        ("[lx]",                      _BCYAN),
+        ("[led] blackout",            _BRED),
+        ("[led] override",            _YELLOW),
+        ("[led] look",                _BGREEN),
+        ("[led]",                     _BCYAN),
+        ("[color] queue",             _YELLOW),
+        ("[color] palette",           _BGREEN),
+        ("[color]",                   _BCYAN),
+        ("[rgb] connected",           _BGREEN),
+        ("[rgb] error",               _BRED),
+        ("[rgb] disconnect",          _BRED),
+        ("[rgb] drop",                _ORANGE),
+        ("[rgb] retry",               _ORANGE),
+        ("[rgb] summary",             _BCYAN),
+        ("[rgb]",                     _BCYAN),
+
         # Red: requires attention / playback stopped.
         ("rb-restart",              _BRED),
         ("stop-stale",              _BRED),

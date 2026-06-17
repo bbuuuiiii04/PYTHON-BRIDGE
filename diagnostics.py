@@ -169,7 +169,15 @@ def enable_debug() -> None:
     """Set all bridge loggers to DEBUG level."""
     for name in ("rb_memory", "filepath_resolver",
                  "scripted_tracks", "osl_output", "state_manager",
-                 "diagnostics", "bridge", "logging_manager"):
+                 "diagnostics", "bridge", "logging_manager",
+                 # Laser
+                 "laser_director", "laser_executor", "laser_config",
+                 # LED / Govee
+                 "led_look_director", "led_color_engine", "beat_sync_engine",
+                 "led_dispatch_coordinator", "govee_scene_adapter",
+                 "govee_runtime_sender", "govee_realtime_runner",
+                 "govee_realtime_transport", "govee_frame_renderer",
+                 "govee_owner_state"):
         logging.getLogger(name).setLevel(logging.DEBUG)
     log.info("Verbose debug mode enabled")
 

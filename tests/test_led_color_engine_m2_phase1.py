@@ -475,6 +475,7 @@ class RendererByteIdenticalTests(unittest.TestCase):
             "post_drop_firework_chase",
             "breakdown_full_breathing",
             "breakdown_star_twinkle",
+            "rt_groove_chase",
         }
         self.assertEqual(set(SLOT_EFFECTS), expected)
         # The baked sand twinkle is a Frame effect, NOT a slot effect.

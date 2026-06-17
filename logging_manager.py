@@ -252,6 +252,21 @@ _DIAG_MODULES: dict[str, str] = {
     "mtc":  "mtc_reader",
     "rsr":  "rb_state_reader",
     "main": "bridge",
+    # Laser
+    "laser": "laser_director",
+    "lx":    "laser_executor",
+    "lcfg":  "laser_config",
+    # LED / Govee (forward references: some of these loggers do not emit yet)
+    "led":   "led_look_director",
+    "color": "led_color_engine",
+    "bsync": "beat_sync_engine",
+    "disp":  "led_dispatch_coordinator",
+    "scene": "govee_scene_adapter",
+    "rgb":   "govee_runtime_sender",
+    "rtrun": "govee_realtime_runner",
+    "rtx":   "govee_realtime_transport",
+    "frame": "govee_frame_renderer",
+    "owner": "govee_owner_state",
 }
 
 

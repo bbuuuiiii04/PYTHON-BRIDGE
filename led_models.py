@@ -108,6 +108,8 @@ class ColorEngineConfig:
             "ambient": 4.0,
         }
     )
+    slot_fill_strategy_by_look: Dict[str, str] = field(default_factory=dict)
+    slot_fill_strategy_by_role: Dict[str, str] = field(default_factory=dict)
     exempt_looks: Tuple[str, ...] = field(default_factory=tuple)
     diy_color_tags: Dict[str, str] = field(default_factory=dict)
     set_seed_mode: str = "random"

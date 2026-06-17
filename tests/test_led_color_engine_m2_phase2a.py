@@ -378,7 +378,7 @@ class PostDropChaseUntouchedTests(unittest.TestCase):
 
 class RegistrationTests(unittest.TestCase):
     def test_slot_effects_has_five_engine_cues(self):
-        self.assertEqual(set(SLOT_EFFECTS), set(_ENGINE_CUES))
+        self.assertEqual(set(SLOT_EFFECTS), set(_ENGINE_CUES) | {"rt_groove_chase"})
 
     def test_sand_baked_in_effects_not_slots(self):
         self.assertIn(_SAND, _EFFECTS)

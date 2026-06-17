@@ -1012,6 +1012,111 @@ class TestLiveControlStubs(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# resolve_slot_colors tests
+# ---------------------------------------------------------------------------
+
+class TestResolveSlotColors(unittest.TestCase):
+
+    def test_gradient_even_returns_6_slots_with_white_tail(self) -> None:
+        cfg = _make_config()
+        e = LedColorEngine(cfg, set_seed=42)
+        _dispatch(e, load_gen=1)
+        
+        # Test default slot_count=6
+        res = e.resolve_slot_colors(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="some_look",
+            color_source="engine",
+            slot_count=6,
+        )
+        slots = res.get("slot_colors", [])
+        self.assertEqual(len(slots), 6)
+        self.assertEqual(slots[5], (255, 255, 255))
+
+        # Test arbitrary slot_count=10 (should be ignored, exactly 6 slots returned)
+        res_large = e.resolve_slot_colors(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="some_look",
+            color_source="engine",
+            slot_count=10,
+        )
+        self.assertEqual(len(res_large.get("slot_colors", [])), 6)
+        self.assertEqual(res_large.get("slot_colors", [])[5], (255, 255, 255))
+        
+        # Test arbitrary slot_count=0 (should be ignored, exactly 6 slots returned)
+        res_zero = e.resolve_slot_colors(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="some_look",
+            color_source="engine",
+            slot_count=0,
+        )
+        self.assertEqual(len(res_zero.get("slot_colors", [])), 6)
+        self.assertEqual(res_zero.get("slot_colors", [])[5], (255, 255, 255))
+
+    def test_random_with_replacement_determinism(self) -> None:
+        cfg = _make_config(
+            slot_fill_strategy_by_look={"rt_groove_chase": "random_with_replacement"},
+            # Force a single wide palette to ensure random draws are noticeably different
+            palettes={
+                "wide": Palette(range=("cyan", "red"), weight=1.0)
+            }
+        )
+        
+        def run_once(section_id: str, cycle: int) -> list:
+            e = LedColorEngine(cfg, set_seed=42)
+            _dispatch(e, load_gen=1)
+            return e.resolve_slot_colors(
+                role="groove",
+                section_id=section_id,
+                cycle=cycle,
+                look_name="rt_groove_chase",
+                color_source="engine",
+                slot_count=6,
+            )["slot_colors"]
+
+        # 1. Determinism: same inputs -> same output
+        res1 = run_once("s1", 0)
+        res2 = run_once("s1", 0)
+        self.assertEqual(res1, res2)
+
+        # 2. Output length is strictly 6 with slot 5 white
+        self.assertEqual(len(res1), 6)
+        self.assertEqual(res1[5], (255, 255, 255))
+
+        # 3. Different section_id -> different output
+        res3 = run_once("s2", 0)
+        self.assertNotEqual(res1, res3)
+
+        # 4. Different step_index (cycle) -> different output
+        # groove has step_within_section=True in _make_config
+        res4 = run_once("s1", 1)
+        self.assertNotEqual(res1, res4)
+
+    def test_random_with_replacement_ignores_slot_count(self) -> None:
+        cfg = _make_config(
+            slot_fill_strategy_by_look={"rt_groove_chase": "random_with_replacement"}
+        )
+        e = LedColorEngine(cfg, set_seed=42)
+        _dispatch(e, load_gen=1)
+        res = e.resolve_slot_colors(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="rt_groove_chase",
+            color_source="engine",
+            slot_count=10,
+        )
+        slots = res.get("slot_colors", [])
+        self.assertEqual(len(slots), 6)
+        self.assertEqual(slots[5], (255, 255, 255))
+
+# ---------------------------------------------------------------------------
 # Module-level import sanity
 # ---------------------------------------------------------------------------
 

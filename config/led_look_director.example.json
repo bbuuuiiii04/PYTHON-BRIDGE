@@ -34,6 +34,9 @@
       "buildup": 0.0,
       "breakdown": 4.0
     },
+    "slot_fill_strategy_by_look": {
+      "rt_groove_chase": "random_with_replacement"
+    },
     "exempt_looks": [
       "room_blackout",
       "rt_blackout",
@@ -655,6 +658,18 @@
         "travel_beats": 4
       }
     },
+    "rt_groove_chase": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "rt_groove_chase",
+      "fallback": "rt_blackout",
+      "safety_class": "groove",
+      "brightness": 100,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "color_source": "engine",
+      "params": {}
+    },
     "rt_groove_freestyle_nebula": {
       "target": "room_perimeter",
       "action": "realtime",
@@ -947,6 +962,7 @@
         "rt_groove_chase_red",
         "rt_groove_chase_green",
         "rt_groove_chase_cyan_white",
+        "rt_groove_chase",
         "rt_groove_freestyle_nebula",
         "rt_groove_center_chase",
         "rt_groove_center_burst_retract"
