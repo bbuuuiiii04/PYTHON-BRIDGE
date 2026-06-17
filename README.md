@@ -8,7 +8,7 @@ It works in my current local setup, but the repo must not be read as production-
 
 > **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**
 
-That means local operation exists, but the repository does not yet contain enough repeatable hardware-validation evidence to claim broad hardware support. Tiny wording difference, enormous future-debugging difference. Software loves punishing optimism.
+That means local operation exists, but the repository does not yet contain enough repeatable hardware-validation evidence to claim broad hardware support.
 
 ## Fast path for AI agents
 
