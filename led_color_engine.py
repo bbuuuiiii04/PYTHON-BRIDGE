@@ -622,9 +622,7 @@ class LedColorEngine:
 
         focus_lo, focus_hi = self._focus_window(role)
 
-        n = int(slot_count)
-        if n <= 0:
-            return {"slot_colors": []}
+        n = 6  # M2.5 slot invariant ignores caller slot_count
 
         strategy = (
             self._config.slot_fill_strategy_by_look.get(look_name)

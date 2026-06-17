@@ -1021,6 +1021,8 @@ class TestResolveSlotColors(unittest.TestCase):
         cfg = _make_config()
         e = LedColorEngine(cfg, set_seed=42)
         _dispatch(e, load_gen=1)
+        
+        # Test default slot_count=6
         res = e.resolve_slot_colors(
             role="groove",
             section_id="s1",
@@ -1032,6 +1034,30 @@ class TestResolveSlotColors(unittest.TestCase):
         slots = res.get("slot_colors", [])
         self.assertEqual(len(slots), 6)
         self.assertEqual(slots[5], (255, 255, 255))
+
+        # Test arbitrary slot_count=10 (should be ignored, exactly 6 slots returned)
+        res_large = e.resolve_slot_colors(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="some_look",
+            color_source="engine",
+            slot_count=10,
+        )
+        self.assertEqual(len(res_large.get("slot_colors", [])), 6)
+        self.assertEqual(res_large.get("slot_colors", [])[5], (255, 255, 255))
+        
+        # Test arbitrary slot_count=0 (should be ignored, exactly 6 slots returned)
+        res_zero = e.resolve_slot_colors(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="some_look",
+            color_source="engine",
+            slot_count=0,
+        )
+        self.assertEqual(len(res_zero.get("slot_colors", [])), 6)
+        self.assertEqual(res_zero.get("slot_colors", [])[5], (255, 255, 255))
 
     def test_random_with_replacement_determinism(self) -> None:
         cfg = _make_config(
