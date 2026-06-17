@@ -12,7 +12,7 @@ not include.
 
 Read the full implementation spec at:
 ```
-/Users/bbui/rb_ss_bridge_v2/docs/plans/completed/autoloop_codex_spec.md
+/Users/bbui/rb_ss_bridge_v2/docs/archive/plans/autoloop_codex_spec.md
 ```
 
 Part A is audit context. Part B (Tasks 1–10) is what you implement.

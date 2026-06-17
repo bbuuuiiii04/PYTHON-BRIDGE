@@ -1,0 +1,25 @@
+name: Docs
+
+# Runs on every PR and push so that code-only changes (e.g. a new accepted
+# runtime command) still trigger the drift check that compares docs to code.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so the staleness baseline commit is reachable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python3 tools/check_docs_metadata.py
+      - run: python3 tools/check_agent_contracts.py
+      - run: python3 tools/check_docs_drift.py
+      # Advisory: surfaces docs whose implementation changed since last verification.
+      - run: python3 tools/check_docs_staleness.py --report

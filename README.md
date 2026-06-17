@@ -1,121 +1,149 @@
 # rb_ss_bridge_v2
 
-Status: CURRENT AUTHORITATIVE
+**Status: extreme early alpha.**
 
-Audited against the current checkout on 2026-06-11.
+This is my Python bridge for reading Rekordbox / DJ runtime state and driving lighting systems such as SoundSwitch, MIDI-controlled lasers, LEDs, and Govee-style realtime lighting.
 
-`rb_ss_bridge_v2` is a realtime Rekordbox to SoundSwitch bridge. It reads
-Rekordbox state through guarded direct-memory readers, uses MTC as a position
-fallback, and speaks VirtualDJ-shaped OS2L to SoundSwitch.
+It works in my current local setup, but the repo must not be read as production-ready, show-ready, plug-and-play, broadly compatible, generally supported, or hardware-validated. The accepted public repo status is:
 
-AI agents and automated contributors should read `AGENTS.md` first.
+> **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**
 
-Start here:
+That means local operation exists, but the repository does not yet contain enough repeatable hardware-validation evidence to claim broad hardware support. Tiny wording difference, enormous future-debugging difference. Software loves punishing optimism.
 
-1. `AGENTS.md` - AI agent orientation and source map.
-2. `docs/architecture/current_architecture.md` - 15-minute current-state overview.
-3. `docs/architecture/runtime_invariants.md` - rules that should not be broken during code
-   changes.
-4. `docs/architecture/bridge_design.md` - detailed current design and invariants.
-5. `docs/architecture/doc_index.md` - classification of every markdown file.
+## Fast path for AI agents
 
-Offline ANLZ energy tooling:
+AI coding agents must start with:
 
-- `docs/research/anlz_energy_project.md` - canonical overview of the bridge-local ANLZ
-  energy investigation toolkit, labels, limits, and validation framing.
-- `docs/research/anlz_waveform_tag_inventory.md` - observed ANLZ waveform/beatgrid/tag
-  inventory.
-- `docs/validation/anlz_energy_evaluation_guide.md` - practical small-corpus
-  human validation workflow.
+1. `AGENTS.md` — single entrypoint: router, source map, invariants, and the token budget.
+2. `docs/agents/change_contracts.yml` — what must update when code changes.
+3. The relevant task playbook in `docs/agents/task_playbooks/`
+4. The relevant subsystem card in `docs/subsystems/`
 
-## Subsystem map (one-line each)
+Do **not** start by reading every historical prompt, old plan, or rollout note. That is how token budgets go to die in a ditch.
 
-- `SmartPhrasingEngine` - pure musical phrasing engine; emits smart-drop,
-  smart-breakdown, and phrase-anchor intents.
-- `LaserDirector` - laser role/scene policy from `LaserContext` and
-  `SmartPhrasingState`.
-- `LaserSceneExecutor` - laser MIDI output, blackout/cooldown gates, and
-  transition-mask cleanup.
-- `SoundSwitchEngine` - OS2L/SoundSwitch intent fanout helpers over canonical
-  4-deck routing.
-- `StateManager` - coordinator/event-loop owner; owns `DeckState`, most
-  `OutputState`, runtime timing, and decision logs.
+## What this project does right now
 
-Historical rollout notes and investigation logs are preserved under
-`docs/history/` and `docs/validation/`. They are evidence, not the primary
-description of current behavior.
+At a high level, the bridge:
 
-Run:
+1. Reads Rekordbox state from guarded local runtime sources.
+2. Uses a central `StateManager` event loop to own bridge state.
+3. Sends VirtualDJ-shaped OS2L messages to SoundSwitch.
+4. Supports optional laser policy and MIDI execution.
+5. Supports optional LED / Govee look selection, cloud scene dispatch, and realtime frame output.
+6. Writes local runtime status and accepts local JSONL runtime commands.
 
-```bash
-cd /Users/bbui
-python3 -m rb_ss_bridge_v2
-```
+## Current known working scope
 
-The local launcher scripts currently default to guarded direct B1-B6 paths with
-MTC retained as the timecode fallback.
+The current real scope is my local macOS setup. Anything outside that should be treated as unvalidated until it is entered in the support and validation matrices.
 
-## Watcher Laser Director Config
+| Area | Current public status |
+| --- | --- |
+| Project maturity | Extreme early alpha |
+| Primary OS | macOS local setup only |
+| Rekordbox support | Current local setup only; other versions unvalidated |
+| SoundSwitch output | Implemented through OS2L path |
+| Laser output | Implemented through config-driven policy plus MIDI execution |
+| LED / Govee output | Implemented paths exist, including Govee cloud and realtime modules |
+| Hardware validation | Not documented as repeatable repo evidence |
+| General compatibility | Not claimed |
 
-The watcher launcher `scripts/ss_bridge_watcher.sh` now sets
-`RBSS_LASER_CONFIG` automatically to:
+## What not to assume
 
-`$REPO_ROOT/config/laser_director.json`
+Do not assume:
 
-When that local file is missing, the watcher copies
-`config/laser_director.example.json` to `config/laser_director.json` before
-launching the bridge, then enforces:
+- another Rekordbox version works
+- another operating system works
+- another Govee device works
+- another laser fixture works
+- another SoundSwitch version works
+- another machine can clone and run this without local setup work
+- tests prove live hardware behavior
+- old prompts or plans describe current behavior
 
-- `enabled=true`
-- `dry_run=true`
+## Start here
 
-`config/laser_director.json` is local-only and ignored by git.
-`config/laser_director.example.json` remains the tracked template.
+Read these in order:
 
-Verify Laser Director status after launch:
+1. `AGENTS.md` - source-of-truth rules and AI-agent workflow.
+2. `docs/architecture/current_architecture.md` - human/system overview.
+3. `docs/status/project_status.md` - current project truth.
+4. `docs/status/feature_status_matrix.md` - implemented, partial, experimental, planned, unknown.
+5. `docs/status/support_matrix.md` - Rekordbox, OS, lighting, and hardware support boundaries.
+6. `docs/status/validation_matrix.md` - software validation versus hardware validation.
+7. `docs/agents/change_contracts.md` - what must update when code changes.
+8. `docs/agents/task_playbooks/` - task-specific reading routes.
+9. `docs/subsystems/` - concise subsystem cards.
+10. `docs/architecture/doc_index.md` - which docs are current, supporting, active, or archived.
 
-```bash
-cat /tmp/rb_ss_bridge_v2_status.json | jq .laser_director
-```
+## Development install
 
-## Laser Pad (web mapping UI)
-
-Run the in-repo Laser Pad server:
-
-```bash
-cd /Users/bbui
-python3 -m rb_ss_bridge_v2.scripts.laser_pad --host 127.0.0.1 --port 8765
-```
-
-> **iPad on LAN** (optional): for operator access from another device on the same Wi-Fi,
-> edit `launchagents/com.bbui.laser-pad.plist` and change `--host 127.0.0.1` to
-> `--host 0.0.0.0`, then `launchctl unload` + `launchctl load` the plist. Treat this as
-> a deliberate exposure — anyone on your LAN can write the laser config draft.
-
-Then open:
-
-- `http://127.0.0.1:8765` on desktop
-
-Laser Pad is now the canonical mapping surface.
-
-Detailed workflow and API notes are in `docs/guides/laser_pad.md`.
-
-## Development
-
-Install the project with test dependencies:
+From the repository root:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-Run the test suite:
+Run the software tests:
 
 ```bash
 python -m unittest discover tests
 ```
 
-Check the Laser Pad frontend syntax before merging UI changes:
+Some tests may require optional dependencies. Hardware behavior is not proven by these tests.
+
+## Runtime entrypoint
+
+From an editable install or configured local environment:
 
 ```bash
-node --check tools/laser_pad_assets/pad.js
+python -m rb_ss_bridge_v2
 ```
+
+Runtime status is written to:
+
+```text
+/tmp/rb_ss_bridge_v2_status.json
+```
+
+Runtime commands are read from:
+
+```text
+/tmp/rb_ss_bridge_v2_commands.jsonl
+```
+
+See `docs/setup/runtime_commands.md` and `docs/subsystems/runtime_commands.md` for the command surface.
+
+## Documentation and drift checks
+
+Run these before committing docs or agent-routing changes:
+
+```bash
+python3 tools/check_docs_metadata.py
+python3 tools/check_agent_contracts.py
+python3 tools/check_docs_drift.py
+python3 tools/check_docs_staleness.py --report   # advisory: impl changed since docs were verified
+```
+
+The first three are hard checks (CI enforces them on every PR). Staleness is advisory. An optional
+local pre-commit gate is available: `git config core.hooksPath tools/git-hooks`.
+
+These checks are lightweight. They do not replace tests or hardware validation, because apparently reality still requires being tested in reality.
+
+## Repository map
+
+| Area | Location |
+| --- | --- |
+| Current project status | `docs/status/` |
+| Architecture | `docs/architecture/` |
+| AI-agent workflow | `AGENTS.md`, `docs/agents/` |
+| Task playbooks | `docs/agents/task_playbooks/` |
+| Change contracts | `docs/agents/change_contracts.md`, `docs/agents/change_contracts.yml` |
+| Setup and usage | `docs/setup/` |
+| Subsystem navigation | `docs/subsystems/` |
+| Validation | `docs/validation/` |
+| Active unfinished work | `docs/status/active_work_registry.md` |
+| Historical docs | `docs/archive/` and existing classified historical docs |
+
+## Safety note
+
+This project can drive lights, lasers, and network-connected devices. The repo documentation must stay conservative. If a feature is not validated in current repo evidence, it must be labeled unvalidated, unknown, experimental, partial, planned, or unsupported. Optimism is not a test result.

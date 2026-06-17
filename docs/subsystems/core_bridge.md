@@ -1,0 +1,58 @@
+---
+doc_status: current
+truth_level: code-verified
+last_verified_commit: c678788
+last_verified_date: 2026-06-17
+validation_scope: software-only
+---
+
+# Core Bridge
+
+Status:
+- implementation: alpha
+- software-tested: partial
+- hardware-validated: no repo evidence
+- compatibility: my local setup only
+
+Purpose:
+- Own startup wiring, bridge state, event handling, timing, and top-level coordination.
+
+Authoritative code:
+- `__main__.py`
+- `state_manager.py`
+- `models.py`
+- `config.py`
+- `runtime_status.py`
+
+Key symbols:
+- `main`
+- `StateManager`
+- `DeckState`
+- `OutputState`
+- `BridgeEvent`
+- `Ev`
+
+Runtime flow:
+- inputs: Rekordbox reader events, MTC fallback, runtime command events, position snapshots, config bundles
+- decisions: active deck state, phrase/role state, lighting dispatch timing
+- outputs: OS2L sends, laser decisions, LED decisions, status snapshots
+
+Config:
+- `config.py`
+- environment flags used by startup and state manager
+- local ignored config files for laser/LED bundles
+
+Tests:
+- inspect `tests/` for state manager, runtime status, smart phrasing, and integration tests
+- recommended broad command: `python -m unittest discover tests`
+
+Change contract:
+- If modifying startup, also inspect `runtime_status.py`, subsystem bundle builders, and status docs.
+- If modifying `StateManager`, inspect relevant subsystem director/executor docs and tests.
+- Update `docs/architecture/current_architecture.md`, `docs/architecture/runtime_invariants.md`, and this card.
+
+Known risks:
+- blocking the hot path
+- creating competing state writers
+- treating fallback readers as always authoritative
+- documenting local setup as broad support

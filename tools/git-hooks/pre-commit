@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Optional local pre-commit gate for the agent documentation system.
+#
+# Enable (opt-in, version-controlled):   git config core.hooksPath tools/git-hooks
+# Disable:                               git config --unset core.hooksPath
+# Skip once:                             git commit --no-verify
+#
+# Blocks the commit if any of the three hard doc checkers fail. Runs the
+# staleness checker as a non-blocking advisory. Fast (<1s) and zero-dependency.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+PY="$(command -v python3 || true)"
+if [[ -z "$PY" ]]; then
+  echo "pre-commit: python3 not found; skipping doc checks (commit allowed)." >&2
+  exit 0
+fi
+
+fail=0
+for check in check_docs_metadata check_agent_contracts check_docs_drift; do
+  if ! "$PY" "tools/${check}.py"; then
+    fail=1
+  fi
+done
+
+if [[ "$fail" -ne 0 ]]; then
+  echo "" >&2
+  echo "pre-commit: doc checks failed. Fix them, or bypass with: git commit --no-verify" >&2
+  exit 1
+fi
+
+# Advisory only — never blocks the commit.
+"$PY" tools/check_docs_staleness.py || true
+
+exit 0
