@@ -17,6 +17,7 @@ from .govee_frame_renderer import (
     resolve_fade,
 )
 from .led_models import BeatAnchor
+from .bridge_fmt import log_throttled
 
 _COLOR_SIG_KEYS = frozenset({
     "color", "color2", "color_a", "color_b",
@@ -141,6 +142,7 @@ class GoveeRealtimeRunner:
         if self._active:
             self._transport.blackout()
             self._transport.deactivate()
+            self._log.info("[RGB] deactivate reason=handoff_to_cloud")
         with self._lock:
             self._active = False
             self._active_signature = None
@@ -256,7 +258,7 @@ class GoveeRealtimeRunner:
             self._last_activate_mono = now
             with self._lock:
                 self._rt_reconcile_count += 1
-            self._log.info("[RT] reconcile-reactivate now=%.3f", now)
+            self._log.info("[RGB] reconcile-reactivate now=%.3f", now)
 
         with self._lock:
             spec = self._desired_spec
@@ -327,6 +329,7 @@ class GoveeRealtimeRunner:
             self._last_activate_mono = now
             with self._lock:
                 self._active = True
+            self._log.info("[RGB] activate effect=%s", spec.effect_name)
 
         with self._lock:
             pending = self._pending_manual
@@ -346,6 +349,11 @@ class GoveeRealtimeRunner:
             self._last_error = "" if sent_ok else "transport_send_failed"
             self._frame_index += 1
         self._publish_engine_status(cleared=False)
+        if log_throttled("rgb_rt_summary", 1.0, now):
+            self._log.info(
+                "[RGB] summary effect=%s frames=%d err=%s",
+                spec.effect_name, self._frame_index, self._last_error or "none",
+            )
 
     def _compose_frame(self, spec: EffectSpec, instances: list, abs_pos: float | None = None, anchor_beat: float | None = None) -> list[RGB]:
         # Runs on the runner thread; reading self._engine here is safe.
@@ -417,6 +425,7 @@ class GoveeRealtimeRunner:
                 self._pending_manual = 0
             self._engine.reset()
             self._publish_engine_status(cleared=True)
+            self._log.info("[RGB] deactivate reason=idle_grace")
             return
         if self._last_frame is not None:
             self._transport.send_frame(self._last_frame)
