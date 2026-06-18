@@ -3,7 +3,7 @@
 Covers:
 - _slot_twinkle unit tests (shape, ambient slot use, no white-slot writes)
 - Config: rt_twinkle generic look is available in the ambient bank
-- Regression: legacy rt_twinkle_blue remains registered and exempt
+- Regression: legacy rt_twinkle_blue remains registered, stored, and exempt
 """
 from __future__ import annotations
 
@@ -132,7 +132,8 @@ class PatchE3ConfigTests(unittest.TestCase):
         self.assertTrue(result.available, f"config not available: {result.reason}")
         legacy = result.config.looks["rt_twinkle_blue"]
         self.assertEqual(legacy.scene_ref, "twinkle_blue")
-        self.assertIn("rt_twinkle_blue", result.config.banks["default"].ambient)
+        self.assertNotIn("rt_twinkle_blue", result.config.banks["default"].ambient)
+        self.assertIn("rt_twinkle_blue", result.config.banks["legacy_color_suffix"].ambient)
         self.assertIn("rt_twinkle_blue", result.config.color_engine.exempt_looks)
 
 

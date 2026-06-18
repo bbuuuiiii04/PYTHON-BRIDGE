@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 9ed183f
+last_verified_commit: 51367a1
 last_verified_date: 2026-06-18
 validation_scope: software-only
 ---
@@ -16,12 +16,12 @@ Each item points at an on-disk spec. **A spec is a plan, not proof of implementa
 
 | ID | Area | Spec | Verify |
 | --- | --- | --- | --- |
-| AWR-101 | LED color engine M2.5 (slotize hardcoded Frame cues + random_with_replacement fill) | `docs/plans/active/led_color_engine_m2_5_spec.md` | partial; A-D plus Patch E1 nebula, Patch E2 center-comet, and Patch E3 ambient twinkle slot cues are software-tested in current worktree, verify remaining Patch F cleanup and runtime behavior against `led_color_engine.py`, `govee_frame_renderer.py`, and tests; Patch D/E visuals still need operator hardware sign-off |
+| AWR-101 | LED color engine M2.5 (slotize hardcoded Frame cues + random_with_replacement fill) | `docs/plans/active/led_color_engine_m2_5_spec.md` | partial; A-D plus Patch E1 nebula, Patch E2 center-comet, Patch E3 ambient twinkle slot cues, and Patch F tracked-example bank cleanup are software-tested in current worktree; runtime behavior still needs operator hardware sign-off |
 | AWR-102 | LED color engine core (decoupled color, drift + drop-snap) | `docs/plans/active/led_color_engine_spec.md` | confirm which milestones are landed in `led_color_engine.py` |
 | AWR-103 | Realtime comet stutter / smoothness / pause | `docs/plans/active/rt_comet_stutter_fix_spec.md`, `rt_comet_smoothness_fix_spec.md`, `rt_comet_pause_continuation_spec.md` | confirm landed vs pending in `govee_realtime_*`/`beat_sync_engine.py` |
 | AWR-104 | Beat-sync runtime | `docs/plans/active/beat_sync_runtime_spec.md` | confirm against `beat_sync_engine.py` |
 | AWR-105 | LED role mapping v2 | `docs/plans/active/led_role_mapping_v2_spec.md` | confirm against `led_look_director.py`/`led_models.py` |
-| AWR-106 | LED color engine M2.5 solid-color strategy + Patch F cleanup | `docs/plans/active/led_color_engine_solid_color_and_patch_f_spec.md` | Patch S `random_with_mono_chance` is implemented and software-tested only; Patch F bank cleanup remains gated on operator hardware dry-run of C-E plus Patch S landing, and live-config mirror remains operator-gated; all hardware behavior remains unvalidated |
+| AWR-106 | LED color engine M2.5 solid-color strategy + Patch F cleanup | `docs/plans/active/led_color_engine_solid_color_and_patch_f_spec.md` | Patch S `random_with_mono_chance` and Patch F tracked-example bank cleanup are implemented and software-tested only; live-config mirror remains operator-gated; all hardware behavior remains unvalidated |
 
 ## Documentation system follow-ups
 

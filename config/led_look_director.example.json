@@ -202,6 +202,10 @@
       "post_drop": "rt_post_drop_chase_cyan_white",
       "duration_beats": 8.0
     },
+    "rt_drop_chase": {
+      "post_drop": "rt_post_drop_chase",
+      "duration_beats": 8.0
+    },
     "rt_drop_chase_freestyle_nebula": {
       "post_drop": "rt_post_drop_freestyle_nebula",
       "duration_beats": 8.0
@@ -1051,7 +1055,6 @@
     "default": {
       "ambient": [
         "ambient_pb_halves",
-        "rt_twinkle_blue",
         "rt_twinkle"
       ],
       "groove": [
@@ -1062,11 +1065,6 @@
         "groove_diy_red_chasing",
         "groove_diy_blue_sparkle",
         "groove_diy_bright_white_chase",
-        "rt_groove_chase_blue",
-        "rt_groove_chase_cyan",
-        "rt_groove_chase_red",
-        "rt_groove_chase_green",
-        "rt_groove_chase_cyan_white",
         "rt_groove_chase",
         "rt_groove_nebula",
         "rt_groove_freestyle_nebula",
@@ -1098,28 +1096,16 @@
         "drop_diy_green_sparkle",
         "drop_diy_pink_red_sparkle",
         "drop_diy_rainbow_sparkle",
-        "rt_drop_chase_blue",
-        "rt_drop_chase_cyan",
-        "rt_drop_chase_red",
-        "rt_drop_chase_green",
-        "rt_drop_chase_cyan_white",
         "rt_drop_chase",
         "rt_drop_nebula",
         "rt_drop_chase_freestyle_nebula",
         "rt_drop_white_aggressive",
-        "rt_drop_center_burst_blue_cyan",
         "rt_drop_center_burst"
       ],
       "post_drop": [
-        "rt_post_drop_chase_blue",
-        "rt_post_drop_chase_cyan",
-        "rt_post_drop_chase_red",
-        "rt_post_drop_chase_green",
-        "rt_post_drop_chase_cyan_white",
         "rt_post_drop_chase",
         "rt_post_drop_nebula",
         "rt_post_drop_freestyle_nebula",
-        "rt_post_drop_center_comet_blue_cyan",
         "rt_post_drop_center_comet",
         "rt_post_drop_firework_chase"
       ],
@@ -1134,6 +1120,38 @@
       "utility": [
         "room_blackout"
       ]
+    },
+    "legacy_color_suffix": {
+      "ambient": [
+        "rt_twinkle_blue"
+      ],
+      "groove": [
+        "rt_groove_chase_blue",
+        "rt_groove_chase_cyan",
+        "rt_groove_chase_red",
+        "rt_groove_chase_green",
+        "rt_groove_chase_cyan_white"
+      ],
+      "buildup": [],
+      "pre_drop": [],
+      "drop": [
+        "rt_drop_chase_blue",
+        "rt_drop_chase_cyan",
+        "rt_drop_chase_red",
+        "rt_drop_chase_green",
+        "rt_drop_chase_cyan_white",
+        "rt_drop_center_burst_blue_cyan"
+      ],
+      "post_drop": [
+        "rt_post_drop_chase_blue",
+        "rt_post_drop_chase_cyan",
+        "rt_post_drop_chase_red",
+        "rt_post_drop_chase_green",
+        "rt_post_drop_chase_cyan_white",
+        "rt_post_drop_center_comet_blue_cyan"
+      ],
+      "breakdown": [],
+      "utility": []
     }
   },
   "safe_default": "room_blackout",

@@ -1,8 +1,10 @@
 # Codex Implementation Spec — M2.5 Solid-Color (`random_with_mono_chance`) + Patch F Bank Cleanup
 
-**Status:** SPEC — code-grounded, verified against current HEAD `c9db322` on `main` (read 2026-06-18). **Implementation: NOT STARTED.**
+**Status:** SPEC — code-grounded, verified against current HEAD `c9db322` on `main` (read 2026-06-18). **Implementation: Patch S and tracked-example Patch F implemented/software-tested; live-config mirror not applied; hardware-unvalidated.**
 **Validation gate:** `SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED`. Do **not** claim live-ready / hardware-validated.
 **Roles:** Claude authored this spec; **Codex implements** (one patch per session). Standing M2.5 exception (Claude-implemented) does not change the per-patch accept-list discipline.
+
+Implementation note (2026-06-18): the operator explicitly overrode the Patch F hardware dry-run gate for software implementation. This does not create hardware validation evidence and does not authorize editing ignored live config.
 
 > Two patches, **in order**: **Patch S** (solid-color strategy + plumbing — pure software, inert by default) then **Patch F** (bank cleanup — **GATED**, see §6/§9-D). Do **not** start F until (1) operator hardware dry-run validates C–E on a real rig, **and** (2) Patch S has landed. Implement exactly one patch per session.
 
@@ -12,14 +14,14 @@
 
 The slot engine (`LedColorEngine.resolve_slot_colors`, `led_color_engine.py:588`) today supports exactly two fill strategies — `gradient_even` and `random_with_replacement`. The operator wants a third, **`random_with_mono_chance`**: with probability `p`, one hue fills palette slots 0–4 (a true solid look); otherwise it behaves byte-for-byte like `random_with_replacement`. Slot 5 stays pure white in every case; the 6-slot model and the seam are unchanged.
 
-Separately, the default look bank still mixes legacy per-color realtime looks (`rt_*_chase_{blue,cyan,red,green,cyan_white}`, the `*_blue_cyan` center cues, `rt_twinkle_blue`) with the new generic engine-colored slot looks. **Patch F** moves (never deletes) the legacy color-suffix looks into a new `legacy_color_suffix` bank and collapses the default bank onto the generic slotized looks, without making solid outcomes unreachable.
+Before Patch F, the default look bank mixed legacy per-color realtime looks (`rt_*_chase_{blue,cyan,red,green,cyan_white}`, the `*_blue_cyan` center cues, `rt_twinkle_blue`) with the new generic engine-colored slot looks. **Patch F** moves (never deletes) the legacy color-suffix looks into a new `legacy_color_suffix` bank and collapses the default bank onto the generic slotized looks, without making solid outcomes unreachable.
 
 - **Patch S** = `led_models.py` + `led_config.py` + `led_color_engine.py` + tracked example config + tests. Default mono probability is **0.0** (opt-in by look), so landing S changes **no observable behavior** until the operator configures a probability. **Not hardware-gated.**
 - **Patch F** = config-only (tracked `config/led_look_director.example.json`; live config mirror is operator-gated). **No code changes.** **Hardware-gated.**
 
 ---
 
-## Part A — Context & root cause (verified; read, do NOT implement)
+## Part A — Context & root cause (pre-implementation baseline; read, do NOT implement)
 
 ### A.1 Current slot engine (CONFIRMED — `led_color_engine.py`)
 
@@ -73,7 +75,7 @@ Helpers reused verbatim (do not re-derive): `_blake2b_int` (`:118`), `_rng_from_
 
 The director reads **only `self._config.banks.get("default")`** (`:59, :190, :200, :265`). **[confirmed]** ⇒ any non-`default` bank (e.g. `legacy_color_suffix`) is **never selected at runtime** — it is pure storage that preserves definitions while removing them from rotation. Bank schema supports arbitrary bank names (`banks: Dict[str, LEDBank]`, `led_models.py:180`; `_validate_bank` `led_config.py:420-447`).
 
-### A.6 LIVE vs EXAMPLE config divergence (CONFIRMED — read both 2026-06-18)
+### A.6 LIVE vs EXAMPLE config divergence (PRE-PATCH BASELINE — read both 2026-06-18)
 
 | Axis | `config/led_look_director.json` (LIVE; `enabled:true,dry_run:false`) | `config/led_look_director.example.json` (tracked; `enabled:false,dry_run:true`) |
 |---|---|---|
@@ -92,14 +94,14 @@ The strategy was capped at two by the M2.5 master spec (Rule 3) on purpose. Addi
 
 ---
 
-## 1. Confirmed current code state (audit answers)
+## 1. Confirmed pre-implementation code state (audit answers)
 
 | Question | Answer |
 |---|---|
 | Which M2.5 pieces are implemented? | A (engine strategy + 6-slot invariant + plumbing), B (`_slot_groove_chase`), C (`_slot_post_drop_chase`), D (`_slot_drop_chase`, `_slot_drop_center_burst`), E1 (nebula family: `_slot_groove_nebula` + `rt_drop_nebula`/`rt_post_drop_nebula`), E2 (`_slot_post_drop_center_comet`), E3 (`_slot_twinkle`). **[confirmed via `SLOT_EFFECTS` + test files]** |
 | C/D/E looks in `SLOT_EFFECTS`? | `rt_post_drop_chase`, `rt_drop_chase`, `rt_drop_nebula`, `rt_drop_center_burst`, `rt_post_drop_center_comet`, `rt_groove_nebula`, `rt_post_drop_nebula`, `rt_twinkle` (+ B's `rt_groove_chase`). **[confirmed]** |
 | New generic looks in config (example)? | `rt_groove_chase`, `rt_drop_chase`, `rt_post_drop_chase`, `rt_drop_center_burst`, `rt_post_drop_center_comet`, `rt_groove_nebula`, `rt_drop_nebula`, `rt_post_drop_nebula`, `rt_twinkle`, `rt_post_drop_firework_chase`, `rt_groove_center_chase`, `rt_groove_center_burst_retract`, `rt_breakdown_full_breathing`, `rt_breakdown_star_twinkle`. **[confirmed]** |
-| Legacy looks still in default rotation? | `rt_{groove,drop,post_drop}_chase_{blue,cyan,red,green,cyan_white}`, `rt_drop_center_burst_blue_cyan`, `rt_post_drop_center_comet_blue_cyan`, `rt_twinkle_blue`, plus the three `*_freestyle_nebula`. **[confirmed]** |
+| Legacy looks still in default rotation? | **Pre-Patch F:** `rt_{groove,drop,post_drop}_chase_{blue,cyan,red,green,cyan_white}`, `rt_drop_center_burst_blue_cyan`, `rt_post_drop_center_comet_blue_cyan`, `rt_twinkle_blue`, plus the three `*_freestyle_nebula`. **Post-Patch F tracked example:** color-suffix looks moved to `legacy_color_suffix`; the three `*_freestyle_nebula` remain in `default`. |
 | Legacy looks exempt/baked? | All `*_freestyle_nebula`, `rt_twinkle_blue`, `rt_drop_center_burst_blue_cyan`, `rt_post_drop_center_comet_blue_cyan`, white utility/strobe looks, and all DIY/cloud looks are in `exempt_looks` (engine injects nothing). `rt_breakdown_star_twinkle_sand` is `color_source:"baked"`. **[confirmed]** |
 | Tests for A–E? | `test_color_engine_config.py`, `test_led_color_engine.py`, `test_led_color_engine_m2_phase2b.py`, `test_led_color_engine_m2_patch_{b,c,d,e1,e2,e3}.py`, `test_govee_frame_renderer.py`. **[confirmed present]** |
 | Can the code import/run (static read)? | Yes — imports + registries are internally consistent; `random_with_mono_chance` is simply absent. **[confirmed by reading]** **[unknown]** — not executed; Codex must run the suite. |

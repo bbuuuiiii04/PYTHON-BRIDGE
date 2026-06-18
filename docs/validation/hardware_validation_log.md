@@ -1,7 +1,7 @@
 ---
 doc_status: current-incomplete
 truth_level: code-and-config-grounded
-last_verified_commit: 9ed183f
+last_verified_commit: 51367a1
 last_verified_date: 2026-06-18
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -38,7 +38,7 @@ Rollback notes:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | pending | SoundSwitch | pending | pending | pending | pending | pending | no repeatable repo evidence yet |
 | pending | Laser MIDI | pending | pending | pending | pending | pending | no repeatable repo evidence yet |
-| pending | Govee/LED | pending | pending | pending | pending | pending | no repeatable repo evidence yet; slot-color strategy, Patch S probabilistic solid-color outcomes, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, and Patch E3 ambient twinkle slot cue are software-tested only; Patch D stable-hue sparkle, center-burst 0-2 / 2-4 accent band split, Patch E1/E2/E3 visuals, and Patch S solid outcomes need operator visual sign-off |
+| pending | Govee/LED | pending | pending | pending | pending | pending | no repeatable repo evidence yet; slot-color strategy, Patch S probabilistic solid-color outcomes, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, Patch E3 ambient twinkle slot cue, and Patch F default-bank cleanup are software-tested only; Patch D stable-hue sparkle, center-burst 0-2 / 2-4 accent band split, Patch E1/E2/E3 visuals, Patch S solid outcomes, and Patch F generic-default rotation need operator visual sign-off |
 
 ## Claim rule
 
