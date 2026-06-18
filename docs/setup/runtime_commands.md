@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: eff532e
+last_verified_date: 2026-06-18
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -17,6 +17,15 @@ The parser, not this document, is authoritative. If this document and `parse_com
 | --- | --- | --- |
 | Status JSON | `/tmp/rb_ss_bridge_v2_status.json` | Written by `StatusWriter`; includes process, state manager, deck runtime, SoundSwitch, validation, command, laser, and LED sections. |
 | Command JSONL | `/tmp/rb_ss_bridge_v2_commands.jsonl` | Created/truncated by `CommandReader` at startup with mode `0600`; append one JSON object per line. |
+
+The status JSON also includes a compact `heartbeat` object. `StatusWriter` logs the same operator
+summary as one throttled `[BEAT]` line: deck/master, BPM, phrase, laser scene, LED look, palette, and
+RGB health. The heartbeat is status-only observability; it does not send SoundSwitch, laser, LED, or
+Govee commands.
+
+If an optional status provider fails, the status snapshot falls back to provider-error fields instead
+of crashing the status thread. Repeated provider-failure warnings are throttled for live-watch
+readability.
 
 Example command append:
 

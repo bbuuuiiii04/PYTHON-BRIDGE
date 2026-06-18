@@ -53,6 +53,7 @@ contracts:
     docs_update:
       - docs/setup/runtime_commands.md
       - docs/subsystems/runtime_commands.md
+      - docs/subsystems/logging.md
       - docs/status/feature_status_matrix.md
       - docs/status/validation_matrix.md
       - docs/validation/software_test_inventory.md
@@ -60,6 +61,34 @@ contracts:
     forbidden_assumptions:
       - accepted command does not prove callback wiring
       - callback wiring does not prove hardware-visible behavior
+
+  logging_visibility:
+    code_globs:
+      - bridge_fmt.py
+      - logging_manager.py
+      - diagnostics.py
+      - runtime_status.py
+      - docs/setup/logging_live_watch.json
+    key_symbols:
+      - LoggingManager
+      - log_changed
+      - log_throttled
+    inspect:
+      - docs/subsystems/logging.md
+      - docs/setup/logging_live_watch.json
+      - docs/subsystems/runtime_commands.md
+    tests:
+      - python3 -m unittest tests.test_bridge_fmt_rate tests.test_logging_diag_coverage
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/subsystems/logging.md
+      - docs/status/feature_status_matrix.md
+      - docs/status/validation_matrix.md
+      - docs/validation/software_test_inventory.md
+      - docs/subsystems/tests.md
+    forbidden_assumptions:
+      - filtered log visibility does not prove hardware-visible lighting behavior
+      - hot-path logging helpers must not add blocking I/O or per-frame INFO spam
 
   led_govee:
     code_globs:

@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-06-11.
+Audited against the current checkout on 2026-06-18.
 
 ## State Ownership
 
@@ -28,8 +28,9 @@ Audited against the current checkout on 2026-06-11.
 
 ## LED Look Director Ownership
 
-- `StateManager` owns LED enabled/manual override/emergency blackout latches and
-  the sanitized LED runtime status surface.
+- `StateManager` owns LED enabled/manual override/emergency blackout latches,
+  the sanitized LED runtime status surface, and copied LED color-engine status
+  for status readers.
 - `LEDLookDirector` is policy-only. It may choose configured looks from manual
   override, emergency blackout, or LED role banks, but it must not perform
   Govee transport I/O.

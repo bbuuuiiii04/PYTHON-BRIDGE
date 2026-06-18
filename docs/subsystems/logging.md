@@ -2,11 +2,15 @@
 
 Status: CURRENT SUPPORTING
 
-Audited against the current checkout on 2026-06-11.
+Audited against the current checkout on 2026-06-18.
 
 This is the canonical runtime logging guide. Historical implementation context
 is retained in `docs/history/logging_implementation_handoff.md`, but current
 runtime behavior should be documented here.
+
+Current repo-facing status remains:
+
+> **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**
 
 The bridge keeps normal logs readable by default:
 
@@ -52,6 +56,49 @@ The bridge watches this file and reloads it automatically:
 Use `BRIDGE_LOG_CONTROL=/path/to/file.json` before launch to choose a different
 control file. `SIGHUP` still works as a manual reload fallback, but it is not
 needed for normal use.
+
+## Live Watch Preset
+
+For a clean operator watch stream, use the checked-in preset:
+
+```bash
+cp docs/setup/logging_live_watch.json /tmp/rb_ss_bridge_v2_logging.json
+```
+
+If the bridge is already running with the default control path, the logging
+watcher reloads the file automatically. If the bridge was launched with a
+different path, copy the preset there or launch with:
+
+```bash
+BRIDGE_LOG_CONTROL=/path/to/logging_live_watch.json python -m rb_ss_bridge_v2
+```
+
+The preset uses the existing control-file schema only. It filters to the
+operator-facing runtime loggers for:
+
+- `runtime_status` for the throttled `[BEAT]` heartbeat.
+- `state_manager`, `rb_state`, `rb_memory`, and `live_bpm` for deck/master and
+  Rekordbox reader visibility.
+- `osl_output` and `os2l_injector` for SoundSwitch routing/output visibility.
+- `laser_director`, `laser_executor`, and `laser_config` for laser policy and
+  MIDI execution visibility.
+- `led_look_director`, `led_color_engine`, `led_dispatch_coordinator`,
+  `govee_scene_adapter`, `govee_runtime_sender`, `govee_realtime_runner`,
+  `govee_realtime_transport`, and `govee_owner_state` for current and
+  forward-referenced LED/Govee logger coverage. Current direct emitted lines
+  primarily come from dispatch, scene, and realtime runner paths; LED/color
+  current state is also visible through `[BEAT]`.
+
+The preset sets these loggers to `INFO` and leaves `debug` and `anomalies`
+disabled, so it should not turn on broad DEBUG noise. Errors still pass through
+even when their logger is not in the filtered module list.
+
+Healthy watch output should include a throttled `[BEAT]` line with deck/master,
+BPM, phrase, laser scene, LED look, palette, and RGB health, plus transition
+lines such as `[LASER]`, `[LX]`, `[LED] look=...`, `[RGB] activate`,
+`[RGB] summary`, `[OS2L]`, and StateManager master/play/load lines when those
+subsystems actually emit them. The preset does not send commands, change
+runtime state, or validate hardware-visible behavior.
 
 Programmatic output:
 

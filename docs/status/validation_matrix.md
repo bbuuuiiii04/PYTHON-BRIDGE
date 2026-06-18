@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 51367a1
+last_verified_commit: eff532e
 last_verified_date: 2026-06-18
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -31,6 +31,8 @@ Current repo-facing status remains:
 | --- | --- | --- | --- |
 | Core runtime/event/state | partial | unvalidated | Tests exist across state snapshots and runtime behavior, but hardware is separate. |
 | Runtime command docs | docs-checkable | not applicable | `tools/check_docs_drift.py` checks command docs against `runtime_status.py`. |
+| Runtime `[BEAT]` heartbeat | partial | unvalidated | `tests/test_runtime_status.py` covers heartbeat payload/log assembly and suppression, StateManager-published color-engine status, fail-soft provider handling, and throttled provider-failure warnings; no hardware behavior changes are implied. |
+| Logging visibility live watch | partial | unvalidated | `tests/test_logging_diag_coverage.py` covers preset parseability, heartbeat visibility, module filtering, and error pass-through. `tests/test_bridge_fmt_rate.py` covers throttle/change primitives, including a small threaded throttle check. |
 | Agent routing/contracts | docs-checkable | not applicable | `tools/check_agent_contracts.py` checks key routes and referenced files. |
 | Rekordbox readers | partial | unvalidated | Reader correctness depends on live app/version/permissions. |
 | SoundSwitch OS2L | partial | unvalidated | OS2L output code exists; hardware/app validation log needed. |

@@ -522,7 +522,12 @@ output, and anything that did not match an `OLD` block exactly.
 
 ---
 
-## Deferred to Phase 3 (NOT in this spec — do not implement here)
+## Deferred to Phase 3 (implemented separately in runtime status)
+
+Phase 3 landed as a status-writer heartbeat in `runtime_status.StatusWriter`: status JSON now
+contains `heartbeat`, and the status thread logs one throttled `[BEAT]` line. It reads
+`StateManager.snapshot()`, laser status, LED status, and `LedColorEngine.snapshot()` provider
+surfaces; it does not add work to the 200 Hz push loop.
 
 - **`[COLOR]` palette visibility** and **current-look summary** must come from a heartbeat that
   reads `LedColorEngine.snapshot()` and `LEDLookDirector.status()` — NOT from log calls inside those

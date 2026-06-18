@@ -1022,6 +1022,9 @@ def main() -> None:
     sm_led_status_provider = getattr(sm, "led_status_provider", None)
     if not callable(sm_led_status_provider):
         sm_led_status_provider = led_status_provider
+    sm_color_status_provider = getattr(sm, "color_engine_status_provider", None)
+    if not callable(sm_color_status_provider):
+        sm_color_status_provider = None
     status_writer = StatusWriter(
         sm,
         live_bpm,
@@ -1031,6 +1034,7 @@ def main() -> None:
         command_reader,
         laser_status_provider=laser_status_provider,
         led_status_provider=sm_led_status_provider,
+        color_engine_status_provider=sm_color_status_provider,
     )
 
     # Initialize master deck from guarded direct read when available, otherwise deck 1.

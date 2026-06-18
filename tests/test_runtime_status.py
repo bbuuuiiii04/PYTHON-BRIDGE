@@ -1,4 +1,5 @@
 import json
+import logging
 import sys
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.runtime_status import (  # noqa: E402
     CommandReader,
     StatusWriter,
+    _safe_provider_snapshot,
     parse_command,
 )
 
@@ -304,7 +306,17 @@ class LEDCommandCallbackTests(unittest.TestCase):
 
 
 class RuntimeStatusWriterTests(unittest.TestCase):
-    def _make_writer(self, *, sm_snapshot, laser_status, led_status=None, led_provider=None):
+    def _make_writer(
+        self,
+        *,
+        sm_snapshot,
+        laser_status,
+        laser_provider=None,
+        led_status=None,
+        led_provider=None,
+        color_status=None,
+        color_provider=None,
+    ):
         sm = Mock()
         sm.snapshot.return_value = sm_snapshot
         live_bpm = Mock()
@@ -335,6 +347,14 @@ class RuntimeStatusWriterTests(unittest.TestCase):
                 if led_status is not None
                 else None
             )
+        if color_provider is None:
+            color_provider = (
+                (lambda: color_status)
+                if color_status is not None
+                else None
+            )
+        if laser_provider is None:
+            laser_provider = lambda: laser_status
         return StatusWriter(
             sm,
             live_bpm,
@@ -342,8 +362,9 @@ class RuntimeStatusWriterTests(unittest.TestCase):
             conn,
             validation_runner,
             command_reader,
-            laser_status_provider=lambda: laser_status,
+            laser_status_provider=laser_provider,
             led_status_provider=led_provider,
+            color_engine_status_provider=color_provider,
         )
 
     def test_status_writer_emits_smart_phrasing_block(self) -> None:
@@ -406,6 +427,223 @@ class RuntimeStatusWriterTests(unittest.TestCase):
         self.assertFalse(snap["led_look_director"]["available"])
         self.assertEqual(snap["led_look_director"]["reason"], "provider_error")
         self.assertIn("RuntimeError", snap["led_look_director"]["last_error"])
+
+    def test_status_writer_emits_beat_heartbeat_payload(self) -> None:
+        writer = self._make_writer(
+            sm_snapshot={
+                "active_deck": 2,
+                "deck": {"1": {}, "2": {"bpm": 126.25}},
+                "smart_phrasing": {"phrase_label": "chorus"},
+            },
+            laser_status={
+                "available": True,
+                "enabled": True,
+                "current_scene": "house_chorus",
+            },
+            led_status={
+                "available": True,
+                "enabled": True,
+                "reason": "ok",
+                "last_look": "rt_groove_chase",
+                "adapter": {
+                    "realtime": {
+                        "active": True,
+                        "transport": {"send_error_count": 0},
+                    },
+                },
+            },
+            color_status={"current_palette": "cyan_lime"},
+        )
+
+        snap = writer.snapshot()
+
+        self.assertEqual(
+            snap["heartbeat"],
+            {
+                "deck": 2,
+                "master": 2,
+                "bpm": "126.2",
+                "bpm_source": "deck",
+                "phrase": "chorus",
+                "laser_scene": "house_chorus",
+                "led_look": "rt_groove_chase",
+                "palette": "cyan_lime",
+                "rgb_health": "realtime_active",
+            },
+        )
+
+    def test_status_writer_logs_throttled_beat_heartbeat(self) -> None:
+        writer = self._make_writer(
+            sm_snapshot={
+                "active_deck": 1,
+                "deck": {"1": {"bpm": 128.0}, "2": {}},
+                "smart_phrasing": {"phrase_label": "up"},
+            },
+            laser_status={
+                "available": True,
+                "enabled": True,
+                "current_scene": "house_up",
+            },
+            led_status={
+                "available": True,
+                "enabled": True,
+                "reason": "ok",
+                "director": {"current_look": "rt_twinkle"},
+            },
+            color_status={"current_palette": "blue_green"},
+        )
+
+        with self.assertLogs("runtime_status", level="INFO") as captured:
+            writer.snapshot()
+
+        line = "\n".join(captured.output)
+        self.assertIn("[BEAT] deck=1 master=1 bpm=128.0", line)
+        self.assertIn("phrase=up", line)
+        self.assertIn("laser=house_up", line)
+        self.assertIn("led=rt_twinkle", line)
+        self.assertIn("palette=blue_green", line)
+
+    def test_status_writer_suppresses_immediate_beat_heartbeat_repeat(self) -> None:
+        writer = self._make_writer(
+            sm_snapshot={
+                "active_deck": 1,
+                "deck": {"1": {"bpm": 128.0}, "2": {}},
+                "smart_phrasing": {"phrase_label": "up"},
+            },
+            laser_status={
+                "available": True,
+                "enabled": True,
+                "current_scene": "house_up",
+            },
+            led_status={
+                "available": True,
+                "enabled": True,
+                "reason": "ok",
+                "director": {"current_look": "rt_twinkle"},
+            },
+            color_status={"current_palette": "blue_green"},
+        )
+
+        with self.assertLogs("runtime_status", level="INFO") as captured:
+            writer.snapshot()
+            writer.snapshot()
+
+        messages = [record for record in captured.output if "[BEAT]" in record]
+        self.assertEqual(len(messages), 1)
+
+    def test_status_writer_uses_published_color_engine_status(self) -> None:
+        writer = self._make_writer(
+            sm_snapshot={
+                "active_deck": 1,
+                "deck": {"1": {"bpm": 128.0}, "2": {}},
+                "smart_phrasing": {"phrase_label": "up"},
+                "led_color_engine": {"current_palette": "published_palette"},
+            },
+            laser_status={"available": False, "enabled": False, "reason": "not_configured"},
+            led_status={"available": False, "enabled": False, "reason": "not_configured"},
+        )
+
+        snap = writer.snapshot()
+
+        self.assertEqual(snap["heartbeat"]["palette"], "published_palette")
+
+    def test_status_writer_color_provider_failure_is_fail_soft(self) -> None:
+        def _boom():
+            raise RuntimeError("color engine unavailable")
+
+        writer = self._make_writer(
+            sm_snapshot={"active_deck": 1, "deck": {"1": {}, "2": {}}},
+            laser_status={"available": False, "enabled": False, "reason": "not_configured"},
+            led_status={"available": False, "enabled": False, "reason": "not_configured"},
+            color_provider=_boom,
+        )
+
+        snap = writer.snapshot()
+
+        self.assertEqual(snap["heartbeat"]["palette"], "none")
+        self.assertEqual(snap["heartbeat"]["rgb_health"], "not_configured")
+
+    def test_safe_provider_failure_warning_is_throttled(self) -> None:
+        records: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        def _boom():
+            raise RuntimeError("provider unavailable")
+
+        logger = logging.getLogger("runtime_status")
+        handler = _Capture()
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            provider_name = f"unit_provider_{id(self)}"
+            _safe_provider_snapshot(
+                _boom,
+                provider_name=provider_name,
+                default={"available": False, "reason": "not_configured"},
+            )
+            _safe_provider_snapshot(
+                _boom,
+                provider_name=provider_name,
+                default={"available": False, "reason": "not_configured"},
+            )
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+
+        messages = [record.getMessage() for record in records]
+        self.assertEqual(len(messages), 1)
+        self.assertIn("unit_provider_", messages[0])
+
+    def test_status_provider_failure_warnings_are_throttled(self) -> None:
+        records: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        def _boom():
+            raise RuntimeError("provider unavailable")
+
+        logger = logging.getLogger("runtime_status")
+        handler = _Capture()
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            laser_writer = self._make_writer(
+                sm_snapshot={"active_deck": 1, "deck": {"1": {}, "2": {}}},
+                laser_status={},
+                laser_provider=_boom,
+            )
+            laser_writer.snapshot()
+            laser_writer.snapshot()
+
+            led_writer = self._make_writer(
+                sm_snapshot={"active_deck": 1, "deck": {"1": {}, "2": {}}},
+                laser_status={"available": False, "enabled": False, "reason": "not_configured"},
+                led_provider=_boom,
+            )
+            led_writer.snapshot()
+            led_writer.snapshot()
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+
+        messages = [record.getMessage() for record in records]
+        laser_messages = [
+            message for message in messages
+            if "laser_status_provider_failed" in message
+        ]
+        led_messages = [
+            message for message in messages
+            if "led_status_provider_failed" in message
+        ]
+        self.assertEqual(len(laser_messages), 1)
+        self.assertEqual(len(led_messages), 1)
 
 
 if __name__ == "__main__":

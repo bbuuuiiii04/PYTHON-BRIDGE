@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 51367a1
+last_verified_commit: eff532e
 last_verified_date: 2026-06-18
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -26,6 +26,8 @@ Status vocabulary:
 | --- | --- | --- | --- | --- |
 | Core startup | implemented | software-tested indirectly | local setup | `__main__.py` wires the runtime components. |
 | StateManager event/push loop | implemented | software-tested indirectly | local setup | Central owner for deck/runtime/lighting state. |
+| Runtime `[BEAT]` heartbeat | implemented | software-tested partially | local setup | `StatusWriter` emits a throttled status-only heartbeat and writes the same summary into status JSON. Hardware-visible output is unchanged and unvalidated. |
+| Logging visibility live watch | implemented | software-tested partially | local setup | `docs/setup/logging_live_watch.json` provides a curated control-file preset for `[BEAT]`, laser, LED/Govee, SoundSwitch, and master/deck logs using existing `LoggingManager` filters. It changes logging visibility only and remains hardware-unvalidated. |
 | SoundSwitch OS2L output | implemented | software-tested partially | local setup | Uses OS2L TCP and VirtualDJ-shaped messages. |
 | Rekordbox memory position reader | implemented | software-tested partially | macOS local setup | macOS Mach APIs. Other OSes unsupported/unknown. |
 | Rekordbox direct state reader | implemented | software-tested partially | current local Rekordbox only | Offset/version assumptions require validation per version. |

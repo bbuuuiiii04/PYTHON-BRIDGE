@@ -56,6 +56,7 @@ Update:
 
 - `docs/setup/runtime_commands.md`
 - `docs/subsystems/runtime_commands.md`
+- `docs/subsystems/logging.md` if status or heartbeat logging changed
 - `docs/status/feature_status_matrix.md` if behavior/status changed
 - `docs/status/validation_matrix.md` if tests/evidence changed
 - `docs/validation/software_test_inventory.md` if test coverage changed
@@ -66,6 +67,42 @@ Forbidden assumptions:
 - Accepted parser command does not mean callback is wired.
 - Callback wired does not prove hardware-visible behavior.
 - A new command is not documented until both runtime command docs mention it.
+
+## Logging visibility changes
+
+Triggered by changes to:
+
+- `bridge_fmt.py`
+- `logging_manager.py`
+- `diagnostics.py`
+- `runtime_status.py` when changing status or heartbeat log visibility
+- `docs/setup/logging_live_watch.json`
+
+Inspect:
+
+- `docs/subsystems/logging.md`
+- `docs/setup/logging_live_watch.json`
+- `docs/subsystems/runtime_commands.md` when heartbeat/status logs are involved
+
+Run:
+
+```bash
+python -m unittest tests.test_bridge_fmt_rate tests.test_logging_diag_coverage
+python tools/check_agent_contracts.py
+```
+
+Update:
+
+- `docs/subsystems/logging.md`
+- `docs/status/feature_status_matrix.md` if operator-visible logging behavior changed
+- `docs/status/validation_matrix.md` if tests/evidence changed
+- `docs/validation/software_test_inventory.md` if test coverage changed
+- `docs/subsystems/tests.md` if test routing changed
+
+Forbidden assumptions:
+
+- Filtered logs do not prove SoundSwitch, laser, LED, Govee, or Rekordbox hardware behavior.
+- Hot-path logging helpers must stay cheap and must not add blocking I/O or per-frame INFO spam.
 
 ## LED / Govee changes
 

@@ -9,10 +9,13 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from .bridge_fmt import log_throttled
+
 
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
 log = logging.getLogger("runtime_status")
+HEARTBEAT_LOG_INTERVAL_S = 2.0
 
 
 _DEFAULT_LASER_STATUS: dict[str, Any] = {
@@ -33,6 +36,12 @@ _DEFAULT_LED_STATUS: dict[str, Any] = {
     "rejected_count": 0,
 }
 
+_DEFAULT_COLOR_STATUS: dict[str, Any] = {
+    "available": False,
+    "enabled": False,
+    "reason": "not_configured",
+}
+
 
 class StatusWriter(threading.Thread):
     def __init__(
@@ -46,6 +55,8 @@ class StatusWriter(threading.Thread):
         *,
         laser_status_provider: Optional[Callable[[], dict]] = None,
         led_status_provider: Optional[Callable[[], dict]] = None,
+        color_engine_status_provider: Optional[Callable[[], dict]] = None,
+        heartbeat_interval_s: float = HEARTBEAT_LOG_INTERVAL_S,
     ) -> None:
         super().__init__(name="runtime-status", daemon=True)
         self._sm = sm
@@ -56,6 +67,8 @@ class StatusWriter(threading.Thread):
         self._command_reader = command_reader
         self._laser_status_provider = laser_status_provider
         self._led_status_provider = led_status_provider
+        self._color_engine_status_provider = color_engine_status_provider
+        self._heartbeat_interval_s = max(0.5, float(heartbeat_interval_s))
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
@@ -92,7 +105,7 @@ class StatusWriter(threading.Thread):
             if self._led_status_provider is None
             else self._safe_led_status()
         )
-        return {
+        data = {
             "schema": 1,
             "written_at": time.time(),
             "process": {"state": "on", "pid": os.getpid()},
@@ -105,26 +118,61 @@ class StatusWriter(threading.Thread):
             "led_look_director": led,
             "recent_errors": [],
         }
+        state_color = _dict_or_empty(state.get("led_color_engine"))
+        color = (
+            state_color
+            if self._color_engine_status_provider is None and state_color
+            else _safe_provider_snapshot(
+                self._color_engine_status_provider,
+                provider_name="color_engine_status_provider",
+                default=_DEFAULT_COLOR_STATUS,
+            )
+        )
+        heartbeat = _heartbeat_payload(
+            state=state,
+            deck_runtime=decks,
+            laser=laser,
+            led=led,
+            color=color,
+        )
+        data["heartbeat"] = heartbeat
+        self._maybe_log_heartbeat(heartbeat)
+        return data
 
     def _safe_laser_status(self) -> dict[str, Any]:
-        try:
-            return self._laser_status_provider()
-        except Exception as exc:
-            log.warning("[STATUS] laser_status_provider_failed err=%s", exc)
-            fallback = dict(_DEFAULT_LASER_STATUS)
-            fallback["reason"] = "provider_error"
-            fallback["last_error"] = f"{type(exc).__name__}: {exc}"
-            return fallback
+        return _safe_provider_snapshot(
+            self._laser_status_provider,
+            provider_name="laser_status_provider",
+            throttle_key=f"laser_status_provider.{id(self)}",
+            default=_DEFAULT_LASER_STATUS,
+        )
+
+    def _maybe_log_heartbeat(self, heartbeat: dict[str, Any]) -> None:
+        if not log_throttled(
+            f"runtime_status.beat_heartbeat.{id(self)}",
+            self._heartbeat_interval_s,
+            time.monotonic(),
+        ):
+            return
+        log.info(
+            "[BEAT] deck=%s master=%s bpm=%s phrase=%s laser=%s led=%s palette=%s rgb=%s",
+            heartbeat["deck"],
+            heartbeat["master"],
+            heartbeat["bpm"],
+            heartbeat["phrase"],
+            heartbeat["laser_scene"],
+            heartbeat["led_look"],
+            heartbeat["palette"],
+            heartbeat["rgb_health"],
+        )
 
     def _safe_led_status(self) -> dict[str, Any]:
-        try:
-            return self._led_status_provider()
-        except Exception as exc:
-            log.warning("[STATUS] led_status_provider_failed err=%s", exc)
-            fallback = dict(_DEFAULT_LED_STATUS)
-            fallback["reason"] = "provider_error"
-            fallback["last_error"] = f"{type(exc).__name__}: {exc}"
-            return fallback
+        return _safe_provider_snapshot(
+            self._led_status_provider,
+            provider_name="led_status_provider",
+            throttle_key=f"led_status_provider.{id(self)}",
+            default=_DEFAULT_LED_STATUS,
+        )
 
 
 class CommandReader(threading.Thread):
@@ -484,6 +532,118 @@ def _prepare_command_file() -> None:
         os.chmod(COMMANDS_PATH, 0o600)
     except OSError:
         pass
+
+
+def _safe_provider_snapshot(
+    provider: Optional[Callable[[], dict]],
+    *,
+    provider_name: str,
+    default: dict[str, Any],
+    throttle_key: Optional[str] = None,
+) -> dict[str, Any]:
+    if provider is None:
+        return dict(default)
+    try:
+        payload = provider()
+        if isinstance(payload, dict):
+            return payload
+        fallback = dict(default)
+        fallback["reason"] = "provider_error"
+        fallback["last_error"] = f"{provider_name} returned {type(payload).__name__}"
+        return fallback
+    except Exception as exc:
+        key = throttle_key or provider_name
+        if log_throttled(f"runtime_status.provider_failure.{key}", 5.0):
+            log.warning("[STATUS] %s_failed err=%s", provider_name, exc)
+        fallback = dict(default)
+        fallback["reason"] = "provider_error"
+        fallback["last_error"] = f"{type(exc).__name__}: {exc}"
+        return fallback
+
+
+def _heartbeat_payload(
+    *,
+    state: dict[str, Any],
+    deck_runtime: dict[str, Any],
+    laser: dict[str, Any],
+    led: dict[str, Any],
+    color: dict[str, Any],
+) -> dict[str, Any]:
+    active_deck = _as_int(state.get("active_deck"), default=1)
+    deck_key = str(active_deck)
+    deck_state = _dict_or_empty(_dict_or_empty(state.get("deck")).get(deck_key))
+    deck_status = _dict_or_empty(deck_runtime.get(deck_key))
+    live_bpm = _dict_or_empty(deck_status.get("live_bpm"))
+    smart_phrasing = _dict_or_empty(state.get("smart_phrasing"))
+
+    bpm_value = live_bpm.get("bpm") if live_bpm.get("valid") else None
+    bpm_source = "live" if bpm_value is not None else "deck"
+    if bpm_value is None:
+        bpm_value = deck_state.get("bpm")
+
+    laser_scene = str(laser.get("current_scene") or "")
+    executor = _dict_or_empty(laser.get("executor"))
+    if not laser_scene:
+        laser_scene = str(executor.get("last_scene") or "")
+
+    led_look = str(led.get("last_look") or "")
+    director = _dict_or_empty(led.get("director"))
+    if not led_look:
+        led_look = str(director.get("current_look") or "")
+
+    return {
+        "deck": active_deck,
+        "master": active_deck,
+        "bpm": _fmt_float(bpm_value),
+        "bpm_source": bpm_source,
+        "phrase": str(smart_phrasing.get("phrase_label") or "unknown"),
+        "laser_scene": laser_scene or "none",
+        "led_look": led_look or "none",
+        "palette": str(color.get("current_palette") or "none"),
+        "rgb_health": _rgb_health(led),
+    }
+
+
+def _rgb_health(led: dict[str, Any]) -> str:
+    if not bool(led.get("available", False)):
+        return str(led.get("reason") or "not_configured")
+    if not bool(led.get("enabled", False)):
+        return "disabled"
+    if led.get("last_error"):
+        return "degraded"
+    adapter = _dict_or_empty(led.get("adapter"))
+    realtime = _dict_or_empty(adapter.get("realtime"))
+    if adapter.get("last_error") or realtime.get("last_error"):
+        return "degraded"
+    if realtime:
+        active = bool(realtime.get("active", False))
+        transport = _dict_or_empty(realtime.get("transport"))
+        send_errors = _as_int(transport.get("send_error_count"), default=0)
+        if send_errors > 0:
+            return "degraded"
+        return "realtime_active" if active else "realtime_idle"
+    return str(led.get("reason") or "ok")
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_int(value: Any, *, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _fmt_float(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "unknown"
+    if not math.isfinite(number) or number <= 0:
+        return "unknown"
+    return f"{number:.1f}"
 
 
 def _position_snapshot(pos) -> Optional[dict[str, Any]]:

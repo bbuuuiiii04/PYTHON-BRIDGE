@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: eff532e
+last_verified_date: 2026-06-18
 validation_scope: software-only
 ---
 
@@ -35,6 +35,8 @@ Forbidden changes:
 
 Implementation notes:
 - Inspect `runtime_status.py`, `__main__.py`.
+- For `StatusWriter` heartbeat/status changes, verify the `heartbeat` JSON payload and the
+  throttled `[BEAT]` log path in `tests/test_runtime_status.py`.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
 

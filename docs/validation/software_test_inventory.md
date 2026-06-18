@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 51367a1
+last_verified_commit: eff532e
 last_verified_date: 2026-06-18
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -28,6 +28,7 @@ python -m pytest tests
 | --- | --- | --- |
 | Core bridge | state manager, models, smart phrasing, integration tests | verifies software behavior only |
 | Runtime commands | parser/handler/status writer tests | needed before command changes |
+| Logging visibility | bridge formatting/rate helpers and logging diagnostic coverage tests | verifies software-only log filtering and spam-control behavior |
 | Rekordbox readers | reader, offset, live BPM tests | cannot prove all app versions |
 | SoundSwitch | OS2L/output helper tests | cannot prove all SoundSwitch versions |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety |
@@ -62,3 +63,19 @@ Hardware behavior still needs manual validation logs.
 | tests/test_led_color_engine_m2_patch_f.py | Patch F default-bank cleanup, legacy_color_suffix storage bank, scene_ref registration, generic drop pairing, no static slot_colors params, solid reachability through default generics | Patch F |
 
 All M2.5 slot cue and strategy tests: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
+## Runtime Status Heartbeat
+
+`tests/test_runtime_status.py` covers the status JSON `heartbeat` payload, the throttled `[BEAT]`
+log line and immediate repeat suppression, StateManager-published color-engine status, fail-soft
+provider behavior, and throttling for repeated provider-failure warnings. This is software-only
+observability coverage and does not validate SoundSwitch, laser, LED, Govee, or Rekordbox hardware
+behavior.
+
+## Logging Visibility
+
+`tests/test_bridge_fmt_rate.py` covers `log_changed()` and `log_throttled()` spam-control behavior,
+including a threaded independent-key throttle check. `tests/test_logging_diag_coverage.py` covers
+laser/LED/Govee debug coverage and the `docs/setup/logging_live_watch.json` preset, including
+`runtime_status` heartbeat visibility and error pass-through. This is software-only observability
+coverage and does not validate physical outputs.

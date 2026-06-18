@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-06-11. Treat code as the source of
+Audited against the current checkout on 2026-06-18. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -37,7 +37,7 @@ These defaults are present in `scripts/ss_bridge_watcher.sh`.
 
 | Subsystem | Authority status | Hot path | Thread ownership | Inputs | Outputs |
 | --- | --- | --- | --- | --- | --- |
-| `StateManager` | live authority after source selection | yes | owns `DeckState`, most `OutputState`, lighting state | `BridgeEvent`s, `PositionCache`, `LiveBPMService` | OS2L sends, snapshots |
+| `StateManager` | live authority after source selection | yes | owns `DeckState`, most `OutputState`, lighting state | `BridgeEvent`s, `PositionCache`, `LiveBPMService` | OS2L sends, copied snapshots |
 | `RBStateReader` | guarded live authority for ANLZ, play/pause, track load, runtime master when enabled and ready | yes | `rb-state-reader` thread | Rekordbox offset-table chains | authoritative events and readiness callbacks |
 | `RBMemoryReader` | live position authority when direct chain or validated memory snapshot is fresh; fallback scanner retained | yes | memory reader thread writes `PositionCache` | Rekordbox memory, offset tables, vmmap | `PositionSnapshot`s, `RB_RESTARTED` |
 | `MTCReader` | position fallback only | yes | MTC thread | IAC Bus 1 MTC | `TC_UPDATE` |
@@ -102,8 +102,9 @@ direct path inactive while MTC/current state fallbacks continue where available.
 
 ## LED Look Director
 
-- `StateManager` owns LED manual override, emergency blackout, enable, and
-  automation gate state.
+- `StateManager` owns LED manual override, emergency blackout, enable,
+  automation gate state, and the copied LED color-engine status published for
+  status readers.
 - Manual LED runtime commands flow through the existing command pattern:
   `CommandReader` parses JSONL, `__main__.py` enqueues `BridgeEvent`s with
   `put_nowait`, and `StateManager._handle_event` owns the durable state.

@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 51367a1
+last_verified_commit: eff532e
 last_verified_date: 2026-06-18
 validation_scope: software-only
 ---
@@ -30,6 +30,10 @@ Common commands:
 Coverage expectations:
 - Core/state changes need state manager or integration tests.
 - Runtime command changes need parser/handler tests.
+- Runtime status heartbeat changes need `tests/test_runtime_status.py` coverage for payload shape,
+  log formatting, throttling seam, StateManager-published color status, and fail-soft provider behavior.
+- Logging visibility changes need `tests/test_bridge_fmt_rate.py` for spam-control primitives and
+  `tests/test_logging_diag_coverage.py` for diagnostic coverage and the live-watch preset.
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.

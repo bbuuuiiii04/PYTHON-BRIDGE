@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: eff532e
+last_verified_date: 2026-06-18
 validation_scope: software-only
 ---
 
@@ -35,7 +35,7 @@ Key symbols:
 Runtime flow:
 - inputs: Rekordbox reader events, MTC fallback, runtime command events, position snapshots, config bundles
 - decisions: active deck state, phrase/role state, lighting dispatch timing
-- outputs: OS2L sends, laser decisions, LED decisions, status snapshots
+- outputs: OS2L sends, laser decisions, LED decisions, copied status snapshots
 
 Config:
 - `config.py`

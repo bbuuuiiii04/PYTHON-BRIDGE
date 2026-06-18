@@ -370,6 +370,11 @@ class StateManager:
         self._led_last_idle_role_key = ""
         self._led_rt_permitted = False
         self._led_rt_beat: tuple[int, float, float, float, bool] | None = None
+        self._led_color_engine_status: dict[str, Any] = {
+            "available": bool(led_color_engine is not None),
+            "enabled": bool(getattr(led_color_engine, "enabled", False)),
+            "reason": "ok" if led_color_engine is not None else "not_configured",
+        }
         self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
         # WI-1 monotonic beat clamp state
         self._led_beat_monotonic: Optional[float] = None
@@ -684,6 +689,11 @@ class StateManager:
 
         return payload
 
+    def color_engine_status_provider(self) -> dict[str, Any]:
+        """Return the latest StateManager-published color engine status copy."""
+        with self._snapshot_lock:
+            return dict(self._led_color_engine_status)
+
     def get_active_beat_anchor(self) -> Optional[BeatAnchor]:
         """Return the LED realtime beat snapshot when automation is permitted."""
         if not self._led_rt_permitted or self._led_rt_beat is None:
@@ -865,6 +875,11 @@ class StateManager:
     def _publish_snapshot(self) -> None:
         os = self._os
         executor_blackout_pending = False
+        color_engine_status = {
+            "available": False,
+            "enabled": False,
+            "reason": "not_configured",
+        }
         sp = self._last_sp_state
         if self._laser_executor is not None:
             try:
@@ -873,6 +888,26 @@ class StateManager:
                 )
             except Exception:
                 executor_blackout_pending = False
+        if self._led_color_engine is not None:
+            try:
+                raw_color_status = self._led_color_engine.snapshot()
+                color_engine_status = {
+                    **(
+                        raw_color_status
+                        if isinstance(raw_color_status, dict)
+                        else {}
+                    ),
+                    "available": True,
+                    "enabled": bool(getattr(self._led_color_engine, "enabled", False)),
+                    "reason": "ok",
+                }
+            except Exception as exc:
+                color_engine_status = {
+                    "available": True,
+                    "enabled": bool(getattr(self._led_color_engine, "enabled", False)),
+                    "reason": "provider_error",
+                    "last_error": f"{type(exc).__name__}: {exc}",
+                }
         deck = {}
         for num, state in self._deck.items():
             deck[str(num)] = {
@@ -931,10 +966,12 @@ class StateManager:
                 }
             ),
             "recording": self.recording_status(),
+            "led_color_engine": color_engine_status,
             "deck": deck,
         }
         with self._snapshot_lock:
             self._published_snapshot = snapshot
+            self._led_color_engine_status = dict(color_engine_status)
 
     def start_session_recording(self, path: str, *, dedup: bool = False) -> bool:
         if self._recorder:

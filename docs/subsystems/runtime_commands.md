@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: eff532e
+last_verified_date: 2026-06-18
 validation_scope: software-only
 ---
 
@@ -15,7 +15,7 @@ Status:
 - compatibility: local setup only
 
 Purpose:
-- Own local status snapshots and append-only JSONL runtime command handling.
+- Own local status snapshots, the throttled `[BEAT]` operator heartbeat, and append-only JSONL runtime command handling.
 
 Authoritative code:
 - `runtime_status.py`
@@ -32,6 +32,13 @@ Key symbols:
 
 Runtime flow:
 - `StatusWriter` periodically writes `/tmp/rb_ss_bridge_v2_status.json`.
+- Each status snapshot includes a compact `heartbeat` block, and `StatusWriter` logs one throttled
+  `[BEAT]` line with deck/master, BPM, phrase, laser scene, LED look, color palette, and RGB health.
+  This reads existing status/snapshot provider surfaces from the status thread; it does not run in
+  the 200 Hz StateManager push loop.
+- Optional status provider failures are fail-soft. The status JSON falls back to unavailable/provider
+  error fields, and repeated provider-failure warnings are throttled so a persistent provider
+  failure does not flood the live-watch stream.
 - `CommandReader` creates/truncates `/tmp/rb_ss_bridge_v2_commands.jsonl` at startup with mode `0600`.
 - Operators append one JSON object per line.
 - `parse_command()` validates command shape and payloads.
@@ -59,6 +66,8 @@ Detailed command table:
 
 Tests:
 - inspect `tests/` for runtime command parser/handler coverage
+- `tests/test_runtime_status.py` covers the heartbeat payload, throttled log line, and fail-soft
+  color-engine provider handling.
 - run `python -m unittest discover tests`
 - run `python tools/check_docs_drift.py` after command changes
 
