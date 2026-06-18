@@ -1,7 +1,7 @@
 ---
 doc_status: current-incomplete
 truth_level: code-and-config-grounded
-last_verified_commit: c9db322
+last_verified_commit: 9ed183f
 last_verified_date: 2026-06-18
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
