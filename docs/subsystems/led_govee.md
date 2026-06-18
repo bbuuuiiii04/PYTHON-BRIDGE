@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: ca3a74b
-last_verified_date: 2026-06-17
+last_verified_commit: c9db322
+last_verified_date: 2026-06-18
 validation_scope: software-only
 ---
 
@@ -52,13 +52,14 @@ Config:
 - local ignored `config/led_look_director.json`
 - env secrets such as `GOVEE_API_KEY`
 - realtime enable flag if present in startup
-- `color_engine.slot_fill_strategy_by_look` and `color_engine.slot_fill_strategy_by_role` are optional objects; values must be `gradient_even` or `random_with_replacement`.
+- `color_engine.slot_fill_strategy_by_look` and `color_engine.slot_fill_strategy_by_role` are optional objects; values must be `gradient_even`, `random_with_replacement`, or `random_with_mono_chance`.
+- `color_engine.slot_mono_chance_by_look` is an optional object mapping look names to numeric probabilities in `[0, 1]`; it defaults to `{}` and only affects looks using `random_with_mono_chance`.
 - `LedColorEngine.resolve_slot_colors()` returns exactly six slot colors for slot effects; caller `slot_count` is ignored and slot index 5 is reserved as pure white.
-- Solid palette slots remain possible for every slot cue: a point/mono palette can collapse slots 0-4 to one RGB while slot 5 remains pure white.
+- Solid palette slots remain possible for every slot cue: a point/mono palette can collapse slots 0-4 to one RGB while slot 5 remains pure white, and `random_with_mono_chance` can opt individual looks into probabilistic solid slots 0-4 without changing the white slot.
 
 Tests:
 - inspect `tests/` for LED color engine, Govee realtime runner, frame renderer, state manager LED integration, and config tests
-- slot-color coverage lives in `tests/test_led_color_engine.py`, `tests/test_led_color_engine_m2_phase1.py`, `tests/test_led_color_engine_m2_patch_b.py`, `tests/test_led_color_engine_m2_patch_c.py`, `tests/test_led_color_engine_m2_patch_d.py`, `tests/test_led_color_engine_m2_patch_e1.py`, `tests/test_led_color_engine_m2_patch_e2.py`, `tests/test_led_color_engine_m2_patch_e3.py`, and config validation coverage in `tests/test_color_engine_config.py`
+- slot-color coverage lives in `tests/test_led_color_engine.py`, `tests/test_led_color_engine_m2_phase1.py`, `tests/test_led_color_engine_m2_patch_b.py`, `tests/test_led_color_engine_m2_patch_c.py`, `tests/test_led_color_engine_m2_patch_d.py`, `tests/test_led_color_engine_m2_patch_e1.py`, `tests/test_led_color_engine_m2_patch_e2.py`, `tests/test_led_color_engine_m2_patch_e3.py`, `tests/test_led_color_engine_m2_patch_s.py`, and config validation coverage in `tests/test_color_engine_config.py`
 - broad command: `python -m unittest discover tests`
 
 Change contract:
@@ -90,8 +91,8 @@ Patch E pairings:
 - rt_drop_nebula pairs explicitly to rt_post_drop_nebula through `drop_pairs`.
 - rt_drop_center_burst pairs explicitly to rt_post_drop_center_comet through `drop_pairs`.
 
-All slot cues: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
-The stable-hue sparkle (rt_drop_chase), center-burst 0-2/2-4 accent band split (rt_drop_center_burst), Patch E1 looks (rt_groove_nebula, rt_drop_nebula, rt_post_drop_nebula), Patch E2 center-comet (rt_post_drop_center_comet), and Patch E3 ambient twinkle (rt_twinkle) still need operator hardware visual sign-off.
+All slot cues and `random_with_mono_chance`: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+The stable-hue sparkle (rt_drop_chase), center-burst 0-2/2-4 accent band split (rt_drop_center_burst), Patch E1 looks (rt_groove_nebula, rt_drop_nebula, rt_post_drop_nebula), Patch E2 center-comet (rt_post_drop_center_comet), Patch E3 ambient twinkle (rt_twinkle), and Patch S probabilistic solid-color outcomes still need operator hardware visual sign-off.
 
 Known risks:
 - API/cloud rate limits

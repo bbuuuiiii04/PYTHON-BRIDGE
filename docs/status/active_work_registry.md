@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: c9db322
+last_verified_date: 2026-06-18
 validation_scope: software-only
 ---
 
@@ -21,6 +21,7 @@ Each item points at an on-disk spec. **A spec is a plan, not proof of implementa
 | AWR-103 | Realtime comet stutter / smoothness / pause | `docs/plans/active/rt_comet_stutter_fix_spec.md`, `rt_comet_smoothness_fix_spec.md`, `rt_comet_pause_continuation_spec.md` | confirm landed vs pending in `govee_realtime_*`/`beat_sync_engine.py` |
 | AWR-104 | Beat-sync runtime | `docs/plans/active/beat_sync_runtime_spec.md` | confirm against `beat_sync_engine.py` |
 | AWR-105 | LED role mapping v2 | `docs/plans/active/led_role_mapping_v2_spec.md` | confirm against `led_look_director.py`/`led_models.py` |
+| AWR-106 | LED color engine M2.5 solid-color strategy + Patch F cleanup | `docs/plans/active/led_color_engine_solid_color_and_patch_f_spec.md` | Patch S `random_with_mono_chance` is implemented and software-tested only; Patch F bank cleanup remains gated on operator hardware dry-run of C-E plus Patch S landing, and live-config mirror remains operator-gated; all hardware behavior remains unvalidated |
 
 ## Documentation system follow-ups
 

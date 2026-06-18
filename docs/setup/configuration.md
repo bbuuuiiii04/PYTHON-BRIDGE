@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: c9db322
+last_verified_date: 2026-06-18
 validation_scope: software-only
 ---
 
@@ -39,6 +39,7 @@ Use `docs/agents/task_playbooks/update_config_schema.md` before changing config 
 ## LED color-engine notes
 
 - `color_engine.slot_fill_strategy_by_look` and `color_engine.slot_fill_strategy_by_role` default to empty objects when absent.
-- Strategy maps accept only `gradient_even` and `random_with_replacement`; invalid values disable the color engine while keeping the LED config loadable.
+- Strategy maps accept only `gradient_even`, `random_with_replacement`, and `random_with_mono_chance`; invalid values disable the color engine while keeping the LED config loadable.
+- `color_engine.slot_mono_chance_by_look` defaults to `{}` and accepts per-look numeric probabilities in `[0, 1]`; bools, non-numbers, out-of-range values, and non-object values disable only the color engine.
 - M2.5 slot cues always resolve six slot colors; slot 5 is reserved pure white.
-- Point or mono palette selections can make slots 0-4 one solid RGB for any slot cue, including realtime chase/comet/twinkle cues.
+- Point or mono palette selections can make slots 0-4 one solid RGB for any slot cue, including realtime chase/comet/twinkle cues. `random_with_mono_chance` can opt individual looks into probabilistic solid slots 0-4 without changing shipped behavior when its chance map is empty or zero.

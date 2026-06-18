@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: c9db322
+last_verified_date: 2026-06-18
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -36,7 +36,7 @@ Current repo-facing status remains:
 | SoundSwitch OS2L | partial | unvalidated | OS2L output code exists; hardware/app validation log needed. |
 | Laser policy/executor | partial | unvalidated | MIDI path exists; fixture validation must be recorded separately. |
 | LED/Govee cloud | partial | unvalidated | Cloud path exists; device behavior must be logged. |
-| LED/Govee realtime | partial/experimental | unvalidated | Realtime path exists; slot-color strategy behavior, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, and Patch E3 ambient twinkle slot cue have software tests, but repeatable H612D validation record is still needed. Patch D/E remain SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
+| LED/Govee realtime | partial/experimental | unvalidated | Realtime path exists; slot-color strategy behavior, Patch S `random_with_mono_chance`, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, and Patch E3 ambient twinkle slot cue have software tests, but repeatable H612D validation record is still needed. Patch D/E/S remain SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
 | Laser Pad/frontend | partial | unvalidated | Syntax/frontend smoke tests do not prove live safety. |
 
 ## Required hardware validation record

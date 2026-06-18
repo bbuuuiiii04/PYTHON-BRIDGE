@@ -958,8 +958,8 @@ def _validate_color_engine(data: dict[str, Any]) -> list[str]:
         errors.append("color_engine.slot_fill_strategy_by_look must be an object")
     else:
         for look_name, strategy_val in slot_fill_strategy_by_look.items():
-            if strategy_val not in ("gradient_even", "random_with_replacement"):
-                errors.append(f"color_engine.slot_fill_strategy_by_look.{look_name} must be 'gradient_even' or 'random_with_replacement'")
+            if strategy_val not in ("gradient_even", "random_with_replacement", "random_with_mono_chance"):
+                errors.append(f"color_engine.slot_fill_strategy_by_look.{look_name} must be 'gradient_even', 'random_with_replacement', or 'random_with_mono_chance'")
 
     # slot_fill_strategy_by_role: dict of str -> str
     slot_fill_strategy_by_role = data.get("slot_fill_strategy_by_role", {})
@@ -967,8 +967,19 @@ def _validate_color_engine(data: dict[str, Any]) -> list[str]:
         errors.append("color_engine.slot_fill_strategy_by_role must be an object")
     else:
         for role_name, strategy_val in slot_fill_strategy_by_role.items():
-            if strategy_val not in ("gradient_even", "random_with_replacement"):
-                errors.append(f"color_engine.slot_fill_strategy_by_role.{role_name} must be 'gradient_even' or 'random_with_replacement'")
+            if strategy_val not in ("gradient_even", "random_with_replacement", "random_with_mono_chance"):
+                errors.append(f"color_engine.slot_fill_strategy_by_role.{role_name} must be 'gradient_even', 'random_with_replacement', or 'random_with_mono_chance'")
+
+    # slot_mono_chance_by_look: dict of str -> number in [0, 1]
+    slot_mono_chance_by_look = data.get("slot_mono_chance_by_look", {})
+    if not isinstance(slot_mono_chance_by_look, dict):
+        errors.append("color_engine.slot_mono_chance_by_look must be an object")
+    else:
+        for look_name, chance_val in slot_mono_chance_by_look.items():
+            if not isinstance(chance_val, (int, float)) or isinstance(chance_val, bool):
+                errors.append(f"color_engine.slot_mono_chance_by_look.{look_name} must be a number")
+            elif not (0.0 <= float(chance_val) <= 1.0):
+                errors.append(f"color_engine.slot_mono_chance_by_look.{look_name} must be in [0, 1]")
 
     # fade_beats_by_role: dict of str → number
     fade_beats_by_role = data.get("fade_beats_by_role", {})
@@ -1152,6 +1163,10 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
     sfs_role_raw = raw.get("slot_fill_strategy_by_role", {})
     slot_fill_strategy_by_role: dict[str, str] = {k: str(v) for k, v in sfs_role_raw.items()}
 
+    # Build slot_mono_chance_by_look
+    mono_chance_raw = raw.get("slot_mono_chance_by_look", {})
+    slot_mono_chance_by_look: dict[str, float] = {k: float(v) for k, v in mono_chance_raw.items()}
+
     # Build fade_beats_by_role
     fade_raw = raw.get(
         "fade_beats_by_role",
@@ -1176,6 +1191,7 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
         fade_beats_by_role=fade_beats_by_role,
         slot_fill_strategy_by_look=slot_fill_strategy_by_look,
         slot_fill_strategy_by_role=slot_fill_strategy_by_role,
+        slot_mono_chance_by_look=slot_mono_chance_by_look,
         exempt_looks=exempt_looks,
         diy_color_tags=diy_color_tags,
         set_seed_mode=str(raw.get("set_seed_mode", "random")),

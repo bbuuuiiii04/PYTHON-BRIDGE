@@ -2,8 +2,8 @@
 # If code in code_globs changes, update every doc in docs_update and run the checks.
 # key_symbols are verified to exist in code by tools/check_agent_contracts.py.
 version: 2
-last_verified_commit: ca3a74b
-last_verified_date: 2026-06-17
+last_verified_commit: c9db322
+last_verified_date: 2026-06-18
 contracts:
   core_bridge:
     code_globs:

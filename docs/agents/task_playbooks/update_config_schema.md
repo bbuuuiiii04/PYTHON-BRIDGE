@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: c9db322
+last_verified_date: 2026-06-18
 validation_scope: software-only
 ---
 
@@ -37,7 +37,7 @@ Implementation notes:
 - Inspect `config.py`, `laser_config.py`, `led_config.py`, `config/*.example.json`.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
-- For LED `color_engine` strategy fields, document defaults, accepted values, and invalid-config behavior in the setup and subsystem docs.
+- For LED `color_engine` strategy fields, document defaults, accepted values, `slot_mono_chance_by_look` range validation when relevant, and invalid-config behavior in the setup and subsystem docs.
 - For M2.5 slot-cue example changes, keep legacy color-suffix looks defined until the gated cleanup patch and document that solid slots 0-4 remain possible through point/mono palettes.
 
 Required tests:

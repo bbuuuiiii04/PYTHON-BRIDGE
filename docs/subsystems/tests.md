@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: c9db322
+last_verified_date: 2026-06-18
 validation_scope: software-only
 ---
 
@@ -39,7 +39,7 @@ Change contract:
 - If tests cannot run due local environment or optional dependencies, report that explicitly.
 - Hardware behavior requires validation logs/checklists, not only unit tests.
 
-M2.5 LED slot-color workstream adds patch-specific tests through `tests/test_led_color_engine_m2_patch_e3.py`.
+M2.5 LED slot-color workstream adds patch-specific tests through `tests/test_led_color_engine_m2_patch_s.py`.
 Focused M2.5 subsets should include the color config test, `tests/test_led_color_engine.py`, the phase tests, and every existing `tests/test_led_color_engine_m2_patch_*.py` file.
 
 Known risks:

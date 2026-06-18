@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: c9db322
+last_verified_date: 2026-06-18
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -37,7 +37,7 @@ This matrix is deliberately conservative. If evidence is missing, the answer is 
 | SoundSwitch OS2L | implemented | code path exists | Exact SoundSwitch version support unknown. |
 | Laser MIDI | implemented | code path exists | Broad fixture/safety validation not documented. |
 | LED/Govee cloud scene | implemented | code path exists | Device support not generalized. |
-| LED/Govee realtime | implemented/experimental | code path exists | Slot-color strategy behavior and generic M2.5 groove/post_drop/drop/Patch E1 nebula/Patch E2 center-comet/Patch E3 twinkle cues are software-tested only; current H612D setup must be validated through hardware log before broad claims. |
+| LED/Govee realtime | implemented/experimental | code path exists | Slot-color strategy behavior, Patch S `random_with_mono_chance`, and generic M2.5 groove/post_drop/drop/Patch E1 nebula/Patch E2 center-comet/Patch E3 twinkle cues are software-tested only; current H612D setup must be validated through hardware log before broad claims. |
 
 ## Hardware validation state
 

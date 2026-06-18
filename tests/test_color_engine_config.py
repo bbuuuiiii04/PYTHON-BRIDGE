@@ -186,6 +186,7 @@ class TestColorEngineConfigDataclass(unittest.TestCase):
         self.assertAlmostEqual(cfg.big_shift_chance, 0.25)
         self.assertTrue(cfg.drama_by_role)
         self.assertEqual(cfg.set_seed_mode, "random")
+        self.assertEqual(cfg.slot_mono_chance_by_look, {})
         self.assertEqual(cfg.exempt_looks, ())
         self.assertEqual(cfg.diy_color_tags, {})
         self.assertEqual(cfg.palettes, {})
@@ -326,18 +327,22 @@ class TestColorEngineValid(unittest.TestCase):
         ce = result.config.color_engine
         self.assertEqual(ce.slot_fill_strategy_by_look, {})
         self.assertEqual(ce.slot_fill_strategy_by_role, {})
+        self.assertEqual(ce.slot_mono_chance_by_look, {})
 
     def test_slot_fill_strategy_valid_values_carried(self) -> None:
-        # M2.5 §6: validation accepts {gradient_even, random_with_replacement}.
+        # M2.5 Patch S: validation accepts the two original strategies plus
+        # random_with_mono_chance.
         cfg_data = _base_config()
         block = _valid_color_engine_block()
         block["slot_fill_strategy_by_look"] = {
             "rt_groove_chase": "random_with_replacement",
             "rt_other": "gradient_even",
+            "rt_solid": "random_with_mono_chance",
         }
         block["slot_fill_strategy_by_role"] = {
             "groove": "random_with_replacement",
             "ambient": "gradient_even",
+            "post_drop": "random_with_mono_chance",
         }
         cfg_data["color_engine"] = block
         result = load_led_look_director_config_from_dict(cfg_data)
@@ -347,8 +352,26 @@ class TestColorEngineValid(unittest.TestCase):
             ce.slot_fill_strategy_by_look["rt_groove_chase"], "random_with_replacement"
         )
         self.assertEqual(ce.slot_fill_strategy_by_look["rt_other"], "gradient_even")
+        self.assertEqual(ce.slot_fill_strategy_by_look["rt_solid"], "random_with_mono_chance")
         self.assertEqual(ce.slot_fill_strategy_by_role["groove"], "random_with_replacement")
         self.assertEqual(ce.slot_fill_strategy_by_role["ambient"], "gradient_even")
+        self.assertEqual(ce.slot_fill_strategy_by_role["post_drop"], "random_with_mono_chance")
+
+    def test_slot_mono_chance_valid_values_carried(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["slot_mono_chance_by_look"] = {
+            "rt_groove_chase": 0.0,
+            "rt_x": 1.0,
+            "rt_y": 0.15,
+        }
+        cfg_data["color_engine"] = block
+        result = load_led_look_director_config_from_dict(cfg_data)
+        self.assertTrue(result.available, msg=result.errors)
+        ce = result.config.color_engine
+        self.assertEqual(ce.slot_mono_chance_by_look["rt_groove_chase"], 0.0)
+        self.assertEqual(ce.slot_mono_chance_by_look["rt_x"], 1.0)
+        self.assertAlmostEqual(ce.slot_mono_chance_by_look["rt_y"], 0.15)
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +419,41 @@ class TestColorEngineInvalidDoesNotDisableLED(unittest.TestCase):
         block["slot_fill_strategy_by_role"] = {"groove": "weighted_random"}
         cfg_data["color_engine"] = block
         self._assert_engine_off_led_up(cfg_data, "invalid by_role strategy 'weighted_random'")
+
+    def test_slot_mono_chance_negative_engine_off(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["slot_mono_chance_by_look"] = {"rt_groove_chase": -0.01}
+        cfg_data["color_engine"] = block
+        self._assert_engine_off_led_up(cfg_data, "slot_mono_chance < 0")
+
+    def test_slot_mono_chance_above_one_engine_off(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["slot_mono_chance_by_look"] = {"rt_groove_chase": 1.01}
+        cfg_data["color_engine"] = block
+        self._assert_engine_off_led_up(cfg_data, "slot_mono_chance > 1")
+
+    def test_slot_mono_chance_non_number_engine_off(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["slot_mono_chance_by_look"] = {"rt_groove_chase": "high"}
+        cfg_data["color_engine"] = block
+        self._assert_engine_off_led_up(cfg_data, "slot_mono_chance non-number")
+
+    def test_slot_mono_chance_bool_engine_off(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["slot_mono_chance_by_look"] = {"rt_groove_chase": True}
+        cfg_data["color_engine"] = block
+        self._assert_engine_off_led_up(cfg_data, "slot_mono_chance bool")
+
+    def test_slot_mono_chance_not_object_engine_off(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["slot_mono_chance_by_look"] = ["rt_groove_chase"]
+        cfg_data["color_engine"] = block
+        self._assert_engine_off_led_up(cfg_data, "slot_mono_chance not object")
 
     def test_range_endpoint_not_in_scale_stops(self) -> None:
         """range endpoint referencing a non-existent scale_stop → engine None, LED available."""
@@ -482,6 +540,13 @@ class TestColorEngineInvalidDoesNotDisableLED(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestExampleConfigRegression(unittest.TestCase):
+    def test_example_loads_with_empty_slot_mono_chance(self) -> None:
+        result = load_led_look_director_config(_EXAMPLE_PATH)
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.errors, ())
+        self.assertIsNotNone(result.config.color_engine)
+        self.assertEqual(result.config.color_engine.slot_mono_chance_by_look, {})
+
     def test_example_loads_with_color_engine_none(self) -> None:
         """The existing example config (no color_engine key) loads as before:
         available=True, color_engine=None.

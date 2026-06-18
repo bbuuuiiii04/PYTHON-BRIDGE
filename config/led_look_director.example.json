@@ -37,6 +37,7 @@
     "slot_fill_strategy_by_look": {
       "rt_groove_chase": "random_with_replacement"
     },
+    "slot_mono_chance_by_look": {},
     "exempt_looks": [
       "room_blackout",
       "rt_blackout",

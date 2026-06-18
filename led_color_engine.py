@@ -606,6 +606,8 @@ class LedColorEngine:
           - `gradient_even` is deterministic and RNG-free. It ignores cycle/section_id.
           - `random_with_replacement` uses a fresh local RNG with exact salt:
             `f"{self._current_track_seed}:{section_id}:{step_index}:slotfill:v1"`.
+          - `random_with_mono_chance` uses a separate mono roll stream; a miss
+            reuses the exact random_with_replacement fill stream.
           - `step_index` is derived from `cycle` only when `step_within_section[role]`
             is true, otherwise 0.
         """
@@ -630,11 +632,11 @@ class LedColorEngine:
             or "gradient_even"
         )
         # Defensive: config validation (§2.D / led_config) rejects any strategy
-        # other than these two, so this is only reachable if a malformed config
+        # outside this allowlist, so this is only reachable if a malformed config
         # bypassed validation. Fail safe to the documented default rather than
         # fall through to an empty (length-0) slot vector that would break the
         # fixed 6-slot invariant downstream. RNG-free; gradient output unchanged.
-        if strategy not in ("gradient_even", "random_with_replacement"):
+        if strategy not in ("gradient_even", "random_with_replacement", "random_with_mono_chance"):
             strategy = "gradient_even"
 
         slots: list[tuple[int, int, int]] = []
@@ -665,6 +667,36 @@ class LedColorEngine:
                 rgb = _blend_white(rgb, palette.white)
                 slots.append(rgb)
             slots.append((255, 255, 255))
+        elif strategy == "random_with_mono_chance":
+            use_step = self._config.step_within_section.get(role, False)
+            step_index = cycle if use_step else 0
+            mono_chance = self._config.slot_mono_chance_by_look.get(look_name, 0.0)
+            # Dedicated mono stream: chance==0.0 must miss without perturbing the
+            # existing :slotfill:v1 stream used by random_with_replacement.
+            mono_seed = _blake2b_int(
+                f"{self._current_track_seed}:{section_id}:{step_index}:slotfill:mono:v1"
+            )
+            mono_rng = _rng_from_seed(mono_seed)
+            if mono_rng.random() < mono_chance:
+                p = mono_rng.uniform(focus_lo, focus_hi)
+                p = max(0.0, min(1.0, p))
+                rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
+                rgb = _blend_white(rgb, palette.white)
+                for _ in range(5):
+                    slots.append(rgb)
+                slots.append((255, 255, 255))
+            else:
+                fill_seed = _blake2b_int(
+                    f"{self._current_track_seed}:{section_id}:{step_index}:slotfill:v1"
+                )
+                fill_rng = _rng_from_seed(fill_seed)
+                for _ in range(5):
+                    p = fill_rng.uniform(focus_lo, focus_hi)
+                    p = max(0.0, min(1.0, p))
+                    rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
+                    rgb = _blend_white(rgb, palette.white)
+                    slots.append(rgb)
+                slots.append((255, 255, 255))
 
         result: dict[str, Any] = {"slot_colors": slots}
         mem_key = (self._current_track_key, role, section_id, look_name, "slot_colors")
