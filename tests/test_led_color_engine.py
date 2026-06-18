@@ -1116,6 +1116,29 @@ class TestResolveSlotColors(unittest.TestCase):
         self.assertEqual(len(slots), 6)
         self.assertEqual(slots[5], (255, 255, 255))
 
+    def test_unknown_strategy_fails_safe_to_gradient(self) -> None:
+        # Defensive guard: a strategy string that bypassed config validation
+        # must fail safe to gradient_even (6 slots, slot 5 white), NEVER an
+        # empty vector. Proven by matching the gradient_even output for the
+        # same context.
+        cfg = _make_config(
+            slot_fill_strategy_by_look={"bogus_look": "weighted_random"}
+        )
+        e = LedColorEngine(cfg, set_seed=42)
+        _dispatch(e, load_gen=1)
+        bogus = e.resolve_slot_colors(
+            role="groove", section_id="s1", cycle=0,
+            look_name="bogus_look", color_source="engine", slot_count=6,
+        )["slot_colors"]
+        gradient = e.resolve_slot_colors(
+            role="groove", section_id="s1", cycle=0,
+            look_name="plain_look", color_source="engine", slot_count=6,
+        )["slot_colors"]
+        self.assertEqual(len(bogus), 6)
+        self.assertEqual(bogus[5], (255, 255, 255))
+        # Fell back to gradient_even, not random and not empty.
+        self.assertEqual(bogus, gradient)
+
 # ---------------------------------------------------------------------------
 # Module-level import sanity
 # ---------------------------------------------------------------------------

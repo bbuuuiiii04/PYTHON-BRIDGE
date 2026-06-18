@@ -629,6 +629,13 @@ class LedColorEngine:
             or self._config.slot_fill_strategy_by_role.get(role)
             or "gradient_even"
         )
+        # Defensive: config validation (§2.D / led_config) rejects any strategy
+        # other than these two, so this is only reachable if a malformed config
+        # bypassed validation. Fail safe to the documented default rather than
+        # fall through to an empty (length-0) slot vector that would break the
+        # fixed 6-slot invariant downstream. RNG-free; gradient output unchanged.
+        if strategy not in ("gradient_even", "random_with_replacement"):
+            strategy = "gradient_even"
 
         slots: list[tuple[int, int, int]] = []
         if strategy == "gradient_even":

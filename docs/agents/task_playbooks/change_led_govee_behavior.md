@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
+last_verified_commit: 0675a31
 last_verified_date: 2026-06-17
 validation_scope: software-only
 ---
@@ -37,14 +37,23 @@ Implementation notes:
 - Inspect `led_*`, `govee_*`, `beat_sync_engine.py`, `state_manager.py` dispatch seam.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
+- For color-engine slot behavior, verify `resolve_slot_colors()` invariants and slot strategy config validation before updating setup/status docs.
+- For M2.5 slotized cues, keep `SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED` language until operator hardware visual sign-off covers sparkle hue stability, center-burst band split, strobe gating, drop snap behavior, and Patch E visual balance.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.
 - Run `python -m unittest discover tests` when practical for cross-subsystem changes.
 - Run docs checks for docs changes.
+- For M2.5 slot-cue work, include every existing `tests/test_led_color_engine_m2_patch_*.py` file, including the newest Patch E file when present.
 
 Required docs updates:
-- `docs/subsystems/led_govee.md`, feature/validation matrices, active work registry
+- `docs/subsystems/led_govee.md`
+- `docs/status/feature_status_matrix.md`
+- `docs/status/support_matrix.md`
+- `docs/status/validation_matrix.md`
+- `docs/validation/hardware_validation_log.md`
+- `docs/status/active_work_registry.md`
+- `docs/agents/task_playbooks/change_led_govee_behavior.md` if workflow guidance changes
 
 Stop and report if:
 - code and docs disagree

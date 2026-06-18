@@ -149,8 +149,9 @@ class ExampleConfigTests(unittest.TestCase):
         self.assertTrue(result.available, msg=result.errors)
         self.assertEqual(
             result.config.banks["default"].ambient,
-            ("ambient_pb_halves", "rt_twinkle_blue")
+            ("ambient_pb_halves", "rt_twinkle_blue", "rt_twinkle")
         )
+        self.assertEqual(result.config.looks["rt_twinkle"].color_source, "engine")
         self.assertEqual(result.config.safe_default, "room_blackout")
         self.assertNotIn("groove_meteor", result.config.looks)
         self.assertFalse(

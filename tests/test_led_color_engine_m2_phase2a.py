@@ -377,8 +377,21 @@ class PostDropChaseUntouchedTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class RegistrationTests(unittest.TestCase):
-    def test_slot_effects_has_five_engine_cues(self):
-        self.assertEqual(set(SLOT_EFFECTS), set(_ENGINE_CUES) | {"rt_groove_chase"})
+    def test_slot_effects_has_engine_and_m2_5_cues(self):
+        self.assertEqual(
+            set(SLOT_EFFECTS),
+            set(_ENGINE_CUES) | {
+                "rt_groove_chase",
+                "rt_groove_nebula",
+                "rt_post_drop_chase",
+                "rt_post_drop_nebula",
+                "rt_drop_chase",
+                "rt_drop_nebula",
+                "rt_drop_center_burst",
+                "rt_post_drop_center_comet",
+                "rt_twinkle",
+            },
+        )
 
     def test_sand_baked_in_effects_not_slots(self):
         self.assertIn(_SAND, _EFFECTS)

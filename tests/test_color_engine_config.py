@@ -318,6 +318,38 @@ class TestColorEngineValid(unittest.TestCase):
         ce = result.config.color_engine
         self.assertIn("rt_drop_white_aggressive", ce.exempt_looks)
 
+    def test_slot_fill_strategy_defaults_empty(self) -> None:
+        # M2.5 §2.D: absent strategy keys default to empty dicts.
+        cfg_data = _base_config()
+        cfg_data["color_engine"] = _valid_color_engine_block()
+        result = load_led_look_director_config_from_dict(cfg_data)
+        ce = result.config.color_engine
+        self.assertEqual(ce.slot_fill_strategy_by_look, {})
+        self.assertEqual(ce.slot_fill_strategy_by_role, {})
+
+    def test_slot_fill_strategy_valid_values_carried(self) -> None:
+        # M2.5 §6: validation accepts {gradient_even, random_with_replacement}.
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["slot_fill_strategy_by_look"] = {
+            "rt_groove_chase": "random_with_replacement",
+            "rt_other": "gradient_even",
+        }
+        block["slot_fill_strategy_by_role"] = {
+            "groove": "random_with_replacement",
+            "ambient": "gradient_even",
+        }
+        cfg_data["color_engine"] = block
+        result = load_led_look_director_config_from_dict(cfg_data)
+        self.assertTrue(result.available, msg=result.errors)
+        ce = result.config.color_engine
+        self.assertEqual(
+            ce.slot_fill_strategy_by_look["rt_groove_chase"], "random_with_replacement"
+        )
+        self.assertEqual(ce.slot_fill_strategy_by_look["rt_other"], "gradient_even")
+        self.assertEqual(ce.slot_fill_strategy_by_role["groove"], "random_with_replacement")
+        self.assertEqual(ce.slot_fill_strategy_by_role["ambient"], "gradient_even")
+
 
 # ---------------------------------------------------------------------------
 # Tests for invalid color_engine blocks → engine=None, LED still available
@@ -348,6 +380,22 @@ class TestColorEngineInvalidDoesNotDisableLED(unittest.TestCase):
         block["palettes"] = {}
         cfg_data["color_engine"] = block
         self._assert_engine_off_led_up(cfg_data, "empty palettes")
+
+    def test_invalid_slot_fill_strategy_by_look_engine_off(self) -> None:
+        """Unknown slot_fill_strategy_by_look value → engine None, LED available (Rule 3)."""
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["slot_fill_strategy_by_look"] = {"rt_groove_chase": "mono"}
+        cfg_data["color_engine"] = block
+        self._assert_engine_off_led_up(cfg_data, "invalid by_look strategy 'mono'")
+
+    def test_invalid_slot_fill_strategy_by_role_engine_off(self) -> None:
+        """Unknown slot_fill_strategy_by_role value → engine None, LED available (Rule 3)."""
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["slot_fill_strategy_by_role"] = {"groove": "weighted_random"}
+        cfg_data["color_engine"] = block
+        self._assert_engine_off_led_up(cfg_data, "invalid by_role strategy 'weighted_random'")
 
     def test_range_endpoint_not_in_scale_stops(self) -> None:
         """range endpoint referencing a non-existent scale_stop → engine None, LED available."""

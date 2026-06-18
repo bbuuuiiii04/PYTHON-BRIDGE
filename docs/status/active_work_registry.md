@@ -16,7 +16,7 @@ Each item points at an on-disk spec. **A spec is a plan, not proof of implementa
 
 | ID | Area | Spec | Verify |
 | --- | --- | --- | --- |
-| AWR-101 | LED color engine M2.5 (slotize hardcoded Frame cues + random_with_replacement fill) | `docs/plans/active/led_color_engine_m2_5_spec.md` | spec'd, not yet implemented per spec notes |
+| AWR-101 | LED color engine M2.5 (slotize hardcoded Frame cues + random_with_replacement fill) | `docs/plans/active/led_color_engine_m2_5_spec.md` | partial; A-D plus Patch E1 nebula, Patch E2 center-comet, and Patch E3 ambient twinkle slot cues are software-tested in current worktree, verify remaining Patch F cleanup and runtime behavior against `led_color_engine.py`, `govee_frame_renderer.py`, and tests; Patch D/E visuals still need operator hardware sign-off |
 | AWR-102 | LED color engine core (decoupled color, drift + drop-snap) | `docs/plans/active/led_color_engine_spec.md` | confirm which milestones are landed in `led_color_engine.py` |
 | AWR-103 | Realtime comet stutter / smoothness / pause | `docs/plans/active/rt_comet_stutter_fix_spec.md`, `rt_comet_smoothness_fix_spec.md`, `rt_comet_pause_continuation_spec.md` | confirm landed vs pending in `govee_realtime_*`/`beat_sync_engine.py` |
 | AWR-104 | Beat-sync runtime | `docs/plans/active/beat_sync_runtime_spec.md` | confirm against `beat_sync_engine.py` |

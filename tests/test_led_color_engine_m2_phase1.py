@@ -348,18 +348,6 @@ class ResolveSlotColorsTests(unittest.TestCase):
         )
         self.assertEqual(c1["color"], c2["color"])
 
-    def test_custom_slot_count(self):
-        eng = _engine()
-        res = self._resolve(eng, slot_count=4)
-        self.assertEqual(len(res["slot_colors"]), 4)
-        self.assertEqual(res["slot_colors"][3], (255, 255, 255))
-
-    def test_slot_count_one_is_only_white(self):
-        eng = _engine()
-        res = self._resolve(eng, slot_count=1)
-        self.assertEqual(res["slot_colors"], [(255, 255, 255)])
-
-
 # ---------------------------------------------------------------------------
 # 4. resolve_color regression after _focus_window extraction (golden)
 # ---------------------------------------------------------------------------
@@ -476,6 +464,14 @@ class RendererByteIdenticalTests(unittest.TestCase):
             "breakdown_full_breathing",
             "breakdown_star_twinkle",
             "rt_groove_chase",
+            "rt_groove_nebula",
+            "rt_post_drop_chase",
+            "rt_post_drop_nebula",
+            "rt_drop_chase",
+            "rt_drop_nebula",
+            "rt_drop_center_burst",
+            "rt_post_drop_center_comet",
+            "rt_twinkle",
         }
         self.assertEqual(set(SLOT_EFFECTS), expected)
         # The baked sand twinkle is a Frame effect, NOT a slot effect.

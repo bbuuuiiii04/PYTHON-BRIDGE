@@ -1,0 +1,123 @@
+"""Tests for M2.5 Patch C: Slotize post-drop chase."""
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
+    _EFFECTS,
+    MAX_SLOTS,
+    REALTIME_EFFECT_NAMES,
+    REALTIME_EFFECT_PARAM_KEYS,
+    REALTIME_STROBE_EFFECTS,
+    SLOT_EFFECTS,
+    _M2_PHASE2A_PARAM_KEYS,
+    _slot_post_drop_chase,
+)
+from rb_ss_bridge_v2.led_color_engine import LedColorEngine  # noqa: E402
+from rb_ss_bridge_v2.led_config import load_led_look_director_config  # noqa: E402
+
+
+class PatchCTests(unittest.TestCase):
+    def _field(self, beat: float, segments: int = 30):
+        return _slot_post_drop_chase(
+            beat=beat,
+            local_t=0.0,
+            frame_index=0,
+            params={},
+            segments=segments,
+            seed=42,
+        )
+
+    def test_slot_post_drop_chase_returns_segments_x_6(self) -> None:
+        for beat in (0.0, 0.5, 1.0, 2.25, 4.0):
+            field = self._field(beat, segments=24)
+            self.assertEqual(len(field), 24)
+            for row in field:
+                self.assertEqual(len(row), MAX_SLOTS)
+
+    def test_slots_0_to_4_receive_nonzero_intensity(self) -> None:
+        used_slots: set[int] = set()
+        for tick in range(160):
+            field = self._field(tick / 20.0, segments=36)
+            for row in field:
+                for slot_idx, intensity in enumerate(row):
+                    if intensity > 0.0:
+                        used_slots.add(slot_idx)
+        for expected_slot in range(5):
+            self.assertIn(expected_slot, used_slots)
+
+    def test_slot_5_remains_zero_no_firework_accent(self) -> None:
+        for tick in range(160):
+            field = self._field(tick / 20.0, segments=36)
+            for row in field:
+                self.assertEqual(row[5], 0.0)
+
+    def test_strobe_off_frames_are_dark(self) -> None:
+        field = self._field(beat=0.07, segments=20)
+        self.assertTrue(all(all(value == 0.0 for value in row) for row in field))
+
+    def test_rt_post_drop_chase_registrations(self) -> None:
+        self.assertIn("rt_post_drop_chase", SLOT_EFFECTS)
+        self.assertIn("rt_post_drop_chase", REALTIME_EFFECT_NAMES)
+        self.assertIn("rt_post_drop_chase", REALTIME_STROBE_EFFECTS)
+        keys = _M2_PHASE2A_PARAM_KEYS.get("rt_post_drop_chase", frozenset())
+        all_keys = REALTIME_EFFECT_PARAM_KEYS.get("rt_post_drop_chase", frozenset())
+        self.assertNotIn("slot_colors", keys)
+        self.assertNotIn("slot_colors", all_keys)
+
+    def test_legacy_post_drop_chase_names_still_resolve(self) -> None:
+        legacy_names = [
+            "post_drop_chase_blue",
+            "post_drop_chase_cyan",
+            "post_drop_chase_red",
+            "post_drop_chase_green",
+            "post_drop_chase_cyan_white",
+        ]
+        for name in legacy_names:
+            self.assertIn(name, REALTIME_EFFECT_NAMES)
+            self.assertIn(name, _EFFECTS)
+
+    def test_tracked_and_live_configs_validate(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
+            result = load_led_look_director_config(str(root / rel))
+            self.assertEqual(tuple(result.errors), (), f"{rel}: {result.errors}")
+            self.assertIn("rt_post_drop_chase", result.config.looks)
+            look = result.config.looks["rt_post_drop_chase"]
+            self.assertEqual(look.scene_ref, "rt_post_drop_chase")
+            self.assertEqual(look.color_source, "engine")
+            self.assertEqual(look.params, {})
+            self.assertIn("rt_post_drop_chase", result.config.banks["default"].post_drop)
+
+    def test_live_config_slot_color_smoke(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        result = load_led_look_director_config(str(root / "config/led_look_director.json"))
+        self.assertEqual(tuple(result.errors), ())
+        engine = LedColorEngine(result.config.color_engine, set_seed=123)
+        engine.begin_dispatch(
+            active_deck=1,
+            load_gen=7,
+            content_id="patch-c",
+            filepath="/tracks/patch-c.wav",
+            role="post_drop",
+            section_id="pd-1",
+            cycle=0,
+        )
+        slots = engine.resolve_slot_colors(
+            role="post_drop",
+            section_id="pd-1",
+            cycle=0,
+            look_name="rt_post_drop_chase",
+            color_source="engine",
+        )["slot_colors"]
+        self.assertEqual(len(slots), MAX_SLOTS)
+        self.assertEqual(slots[5], (255, 255, 255))
+        self.assertGreater(len(set(slots[:5])), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

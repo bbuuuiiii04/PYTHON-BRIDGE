@@ -46,3 +46,17 @@ When adding or changing tests, update:
 - relevant task playbook if test workflow changed
 
 Hardware behavior still needs manual validation logs.
+
+## M2.5 LED slot-color workstream test files
+
+| File | Covers | Added in |
+|---|---|---|
+| tests/test_led_color_engine_m2_phase1.py | Phase 2a/b engine cues, renderer byte-identity, resolve_slot_colors | Phase 1 |
+| tests/test_led_color_engine_m2_patch_b.py | rt_groove_chase slotization | Patch B |
+| tests/test_led_color_engine_m2_patch_c.py | rt_post_drop_chase slotization | Patch C |
+| tests/test_led_color_engine_m2_patch_d.py | rt_drop_chase, rt_drop_center_burst slotization | Patch D |
+| tests/test_led_color_engine_m2_patch_e1.py | rt_groove_nebula, rt_drop_nebula, rt_post_drop_nebula slot fns plus rt_drop_nebula pairing | Patch E1 |
+| tests/test_led_color_engine_m2_patch_e2.py | rt_post_drop_center_comet slot fn, rt_drop_center_burst pairing, legacy center-comet regression, solid slot-color selection for slot cues | Patch E2 |
+| tests/test_led_color_engine_m2_patch_e3.py | rt_twinkle slot fn, generic ambient config, legacy twinkle_blue regression, solid slot-color selection for rt_twinkle | Patch E3 |
+
+All M2.5 slot cue tests: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.

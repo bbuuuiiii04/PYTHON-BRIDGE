@@ -37,6 +37,8 @@ Implementation notes:
 - Inspect `config.py`, `laser_config.py`, `led_config.py`, `config/*.example.json`.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
+- For LED `color_engine` strategy fields, document defaults, accepted values, and invalid-config behavior in the setup and subsystem docs.
+- For M2.5 slot-cue example changes, keep legacy color-suffix looks defined until the gated cleanup patch and document that solid slots 0-4 remain possible through point/mono palettes.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.
@@ -44,7 +46,12 @@ Required tests:
 - Run docs checks for docs changes.
 
 Required docs updates:
-- `docs/subsystems/config.md`, `docs/setup/configuration.md`, examples, config tests
+- `docs/subsystems/config.md`
+- `docs/setup/configuration.md`
+- `docs/status/feature_status_matrix.md`
+- tracked config examples
+- config tests
+- `docs/agents/task_playbooks/update_config_schema.md` if workflow guidance changes
 
 Stop and report if:
 - code and docs disagree

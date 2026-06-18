@@ -38,7 +38,7 @@ Rollback notes:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | pending | SoundSwitch | pending | pending | pending | pending | pending | no repeatable repo evidence yet |
 | pending | Laser MIDI | pending | pending | pending | pending | pending | no repeatable repo evidence yet |
-| pending | Govee/LED | pending | pending | pending | pending | pending | no repeatable repo evidence yet |
+| pending | Govee/LED | pending | pending | pending | pending | pending | no repeatable repo evidence yet; slot-color strategy, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, and Patch E3 ambient twinkle slot cue are software-tested only; Patch D stable-hue sparkle, center-burst 0-2 / 2-4 accent band split, and Patch E1/E2/E3 visuals need operator visual sign-off |
 
 ## Claim rule
 

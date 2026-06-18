@@ -808,10 +808,43 @@ def _twinkle_blue(beat: float, local_t: float, frame_index: int, params: Mapping
         twinkle = 0.6 + 0.4 * math.sin(local_t * 15.0 + idx * 3.7)
 
         # Scale intensity: keep it smaller and more delicate (0.70 max scale)
-        intensity = envelope * beat_pulse * twinkle * macro_swell * 0.70
+        intensity = max(0.0, envelope * beat_pulse * twinkle * macro_swell * 0.70)
         frame[idx] = _scale(c, intensity)
 
     return frame
+
+
+def _slot_twinkle(beat: float, local_t: float, frame_index: int,
+                  params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Per-pixel ambient twinkle across engine color slots."""
+    cue_beat = _edm_beat(beat, params)
+    macro_phase = cue_beat / 32.0
+    macro_swell = 0.25 + 0.75 * math.sin(macro_phase * math.pi)
+
+    beat_phase = cue_beat % 1.0
+    beat_pulse = 0.15 + 0.85 * math.exp(-3.5 * beat_phase)
+
+    field = _empty_motion_field(segments)
+    for idx in range(max(0, int(segments))):
+        star_rng = _rng(seed, "star_timeline", idx)
+
+        period = 18.0 + star_rng.random() * 18.0
+        phi = star_rng.random() * period
+        t_cycle = (cue_beat + phi) % period
+        if t_cycle >= 2.0:
+            continue
+
+        if t_cycle < 0.5:
+            envelope = t_cycle / 0.5
+        else:
+            envelope = (2.0 - t_cycle) / 1.5
+
+        color_slot = star_rng.randint(0, 4)
+        twinkle = 0.6 + 0.4 * math.sin(local_t * 15.0 + idx * 3.7)
+        intensity = max(0.0, envelope * beat_pulse * twinkle * macro_swell * 0.70)
+        field[idx][color_slot] = min(1.0, field[idx][color_slot] + intensity)
+
+    return field
 
 
 def _edm_dispatch(name: str, beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
@@ -1151,6 +1184,329 @@ def _slot_groove_chase(beat: float, local_t: float, frame_index: int,
     return field
 
 
+def _slot_groove_nebula(beat: float, local_t: float, frame_index: int,
+                        params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Generic slotized groove nebula — opposing dual-head chase, no strobe gate.
+
+    Ported geometry from ``_groove_nebula``: head 1 forward, head 2 reverse.
+    No background layer (dropped per operator decision 2026-06-17).
+    """
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+
+    loop_beats = 4.0
+    width = 0.8
+
+    pos1 = ((cue_beat / loop_beats) % 1.0) * segments
+    pos2 = ((1.0 - (cue_beat / loop_beats)) % 1.0) * segments
+
+    for idx in range(segments):
+        dist1 = _distance_on_ring(idx, pos1, segments)
+        dist2 = _distance_on_ring(idx, pos2, segments)
+
+        intensity1 = max(0.0, 1.0 - (dist1 / max(0.001, width)))
+        intensity2 = max(0.0, 1.0 - (dist2 / max(0.001, width)))
+
+        if intensity1 > 0.0:
+            slot_coord = intensity1 * 4.0
+            s_below = int(math.floor(slot_coord))
+            s_above = int(math.ceil(slot_coord))
+            w_above = slot_coord - s_below
+            w_below = 1.0 - w_above
+            if s_below == s_above:
+                field[idx][s_below] = min(1.0, field[idx][s_below] + intensity1)
+            else:
+                field[idx][s_below] = min(1.0, field[idx][s_below] + intensity1 * w_below)
+                field[idx][s_above] = min(1.0, field[idx][s_above] + intensity1 * w_above)
+
+        if intensity2 > 0.0:
+            slot_coord = intensity2 * 4.0
+            s_below = int(math.floor(slot_coord))
+            s_above = int(math.ceil(slot_coord))
+            w_above = slot_coord - s_below
+            w_below = 1.0 - w_above
+            if s_below == s_above:
+                field[idx][s_below] = min(1.0, field[idx][s_below] + intensity2)
+            else:
+                field[idx][s_below] = min(1.0, field[idx][s_below] + intensity2 * w_below)
+                field[idx][s_above] = min(1.0, field[idx][s_above] + intensity2 * w_above)
+
+    return field
+
+
+def _slot_post_drop_chase(beat: float, local_t: float, frame_index: int,
+                          params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Generic slotized post-drop chase.
+
+    Preserves the legacy immediate strobing comet timing from
+    ``_post_drop_chase`` while moving color choice to runtime slot injection.
+    """
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+
+    strobe_on = (int(cue_beat * 16.0) % 2) == 0
+    if not strobe_on:
+        return field
+
+    width = 0.8
+    travel_beats = 2.0
+    for spawn_at, _spawn_idx in _drop_chase_spawn_times(cue_beat, start=0.0):
+        progress = (cue_beat - spawn_at) / travel_beats
+        pos = progress * segments
+        for idx in range(max(0, int(segments))):
+            dist = _distance_on_ring(idx, pos, segments)
+            intensity = max(0.0, 1.0 - (dist / max(0.001, width)))
+            if intensity <= 0.0:
+                continue
+
+            slot_coord = intensity * 4.0
+            slot_below = int(math.floor(slot_coord))
+            slot_above = int(math.ceil(slot_coord))
+            weight_above = slot_coord - slot_below
+            weight_below = 1.0 - weight_above
+
+            if slot_below == slot_above:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
+            else:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
+                field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+
+    return field
+
+
+def _slot_post_drop_nebula(beat: float, local_t: float, frame_index: int,
+                           params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Slotized post-drop nebula; alternating palette comets and white comets."""
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+
+    strobe_on = (int(cue_beat * 16.0) % 2) == 0
+    if not strobe_on:
+        return field
+
+    width = 0.8
+    travel_beats = 2.0
+    for spawn_at, spawn_idx in _drop_chase_spawn_times(cue_beat, start=0.0):
+        progress = (cue_beat - spawn_at) / travel_beats
+        pos = progress * segments
+        use_white_slot = (spawn_idx % 2) == 1
+        for idx in range(max(0, int(segments))):
+            dist = _distance_on_ring(idx, pos, segments)
+            intensity = max(0.0, 1.0 - (dist / max(0.001, width)))
+            if intensity <= 0.0:
+                continue
+
+            if use_white_slot:
+                field[idx][5] = min(1.0, field[idx][5] + intensity)
+                continue
+
+            slot_coord = intensity * 4.0
+            slot_below = int(math.floor(slot_coord))
+            slot_above = int(math.ceil(slot_coord))
+            weight_above = slot_coord - slot_below
+            weight_below = 1.0 - weight_above
+
+            if slot_below == slot_above:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
+            else:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
+                field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+
+    return field
+
+
+def _slot_drop_chase(beat: float, local_t: float, frame_index: int,
+                     params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Generic slotized drop chase with the legacy sparkle intro."""
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+
+    strobe_on = (int(cue_beat * 16.0) % 2) == 0
+    if not strobe_on:
+        return field
+
+    if cue_beat < 8.0:
+        progress = cue_beat / 8.0
+        density = max(0.02, min(1.0, (4.0 * (1.0 - progress) + 0.5) / max(1.0, segments)))
+        beat_bucket = int(cue_beat * 16.0)
+        for idx in range(max(0, int(segments))):
+            color_slot = random.Random(idx).randint(0, 4)
+            rng = _rng(seed, frame_index, beat_bucket, idx)
+            if rng.random() >= density:
+                continue
+            intensity = rng.random() ** 1.5
+            field[idx][color_slot] = min(1.0, field[idx][color_slot] + intensity)
+        return field
+
+    width = 0.8
+    travel_beats = 2.0
+    for spawn_at, _spawn_idx in _drop_chase_spawn_times(cue_beat, start=8.0):
+        progress = (cue_beat - spawn_at) / travel_beats
+        pos = progress * segments
+        for idx in range(max(0, int(segments))):
+            dist = _distance_on_ring(idx, pos, segments)
+            intensity = max(0.0, 1.0 - (dist / max(0.001, width)))
+            if intensity <= 0.0:
+                continue
+
+            slot_coord = intensity * 4.0
+            slot_below = int(math.floor(slot_coord))
+            slot_above = int(math.ceil(slot_coord))
+            weight_above = slot_coord - slot_below
+            weight_below = 1.0 - weight_above
+
+            if slot_below == slot_above:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
+            else:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
+                field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+
+    return field
+
+
+def _slot_drop_nebula(beat: float, local_t: float, frame_index: int,
+                      params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Slotized drop nebula with sparkle intro plus alternating palette/white comets."""
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+
+    strobe_on = (int(cue_beat * 16.0) % 2) == 0
+    if not strobe_on:
+        return field
+
+    if cue_beat < 8.0:
+        progress = cue_beat / 8.0
+        density = max(0.02, min(1.0, (4.0 * (1.0 - progress) + 0.5) / max(1.0, segments)))
+        beat_bucket = int(cue_beat * 16.0)
+        for idx in range(max(0, int(segments))):
+            rng = _rng(seed, frame_index, beat_bucket, idx)
+            if rng.random() >= density:
+                continue
+            intensity = rng.random() ** 1.5
+            if idx % 2 == 0:
+                color_slot = random.Random(idx).randint(0, 4)
+            else:
+                color_slot = 5
+            field[idx][color_slot] = min(1.0, field[idx][color_slot] + intensity)
+        return field
+
+    width = 0.8
+    travel_beats = 2.0
+    for spawn_at, spawn_idx in _drop_chase_spawn_times(cue_beat, start=8.0):
+        progress = (cue_beat - spawn_at) / travel_beats
+        pos = progress * segments
+        use_white_slot = (spawn_idx % 2) == 1
+        for idx in range(max(0, int(segments))):
+            dist = _distance_on_ring(idx, pos, segments)
+            intensity = max(0.0, 1.0 - (dist / max(0.001, width)))
+            if intensity <= 0.0:
+                continue
+
+            if use_white_slot:
+                field[idx][5] = min(1.0, field[idx][5] + intensity)
+                continue
+
+            slot_coord = intensity * 4.0
+            slot_below = int(math.floor(slot_coord))
+            slot_above = int(math.ceil(slot_coord))
+            weight_above = slot_coord - slot_below
+            weight_below = 1.0 - weight_above
+
+            if slot_below == slot_above:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
+            else:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
+                field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+
+    return field
+
+
+def _slot_drop_center_burst(beat: float, local_t: float, frame_index: int,
+                            params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Generic slotized drop center burst; main pulses use slots 0-2, accent slots 2-4."""
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+    center = segments / 2.0
+
+    pulse_phase = (cue_beat % 0.5) / 0.5
+    pulse_width = 1.0
+    current_dist = pulse_phase * (center + pulse_width)
+    burst_idx = int((cue_beat % 8.0) * 2.0)
+    is_accent = (burst_idx % 4) == 3
+
+    for idx in range(max(0, int(segments))):
+        if idx % 2 != 0:
+            continue
+        dist_from_center = abs(idx - center)
+        intensity = max(0.0, 1.0 - abs(dist_from_center - current_dist) / pulse_width)
+        if intensity <= 0.0:
+            continue
+
+        if is_accent:
+            slot_coord = 2.0 + intensity * 2.0
+        else:
+            slot_coord = intensity * 2.0
+        slot_below = int(math.floor(slot_coord))
+        slot_above = int(math.ceil(slot_coord))
+        weight_above = slot_coord - slot_below
+        weight_below = 1.0 - weight_above
+
+        if slot_below == slot_above:
+            field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
+        else:
+            field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
+            field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+
+    return field
+
+
+def _slot_post_drop_center_comet(beat: float, local_t: float, frame_index: int,
+                                 params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """Generic slotized center-out post-drop comet.
+
+    Ported from ``_post_drop_center_comet_blue_cyan``: two center-out comet
+    passes on a 16th-note strobe gate. Color comes only from injected slots 0-4;
+    slot 5 stays reserved for cues with intentional white accents.
+    """
+    cue_beat = _edm_beat(beat, params)
+    field = _empty_motion_field(segments)
+
+    strobe_on = (int(cue_beat * 16.0) % 2) == 0
+    if not strobe_on:
+        return field
+
+    center = segments / 2.0
+    comet_width = 1.0
+
+    for age in (cue_beat % 1.0, (cue_beat % 1.0) + 1.0):
+        if age > 2.0:
+            continue
+
+        comet_head_dist = age * center
+        for idx in range(max(0, int(segments))):
+            dist_from_center = abs(idx - center)
+            if not (comet_head_dist - comet_width <= dist_from_center <= comet_head_dist):
+                continue
+
+            intensity = 1.0 - ((comet_head_dist - dist_from_center) / comet_width)
+            if intensity <= 0.0:
+                continue
+
+            slot_coord = intensity * 4.0
+            slot_below = int(math.floor(slot_coord))
+            slot_above = int(math.ceil(slot_coord))
+            weight_above = slot_coord - slot_below
+            weight_below = 1.0 - weight_above
+
+            if slot_below == slot_above:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
+            else:
+                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
+                field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+
+    return field
+
+
 def _slot_post_drop_firework_chase(beat: float, local_t: float, frame_index: int,
                                    params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
     """Intense post-drop center chase + pure-white firework bursts on slot 5.
@@ -1435,9 +1791,18 @@ def _baked_breakdown_star_twinkle_sand(beat: float, local_t: float, frame_index:
 
 # Slot effects return a MotionField (per-pixel slot intensities) instead of a
 # Frame.  render() routes these through universal_colorizer with the injected
-# slot_colors palette.  Phase 2a populates the 5 engine cues below.
+# slot_colors palette.  M2.5 adds generic slotized realtime cues alongside the
+# Phase 2a engine cues.
 SLOT_EFFECTS: dict[str, SlotEffectFn] = {
     "rt_groove_chase": _slot_groove_chase,
+    "rt_groove_nebula": _slot_groove_nebula,
+    "rt_post_drop_chase": _slot_post_drop_chase,
+    "rt_post_drop_nebula": _slot_post_drop_nebula,
+    "rt_drop_chase": _slot_drop_chase,
+    "rt_drop_nebula": _slot_drop_nebula,
+    "rt_drop_center_burst": _slot_drop_center_burst,
+    "rt_post_drop_center_comet": _slot_post_drop_center_comet,
+    "rt_twinkle": _slot_twinkle,
     "groove_center_chase": _slot_groove_center_chase,
     "groove_center_burst_retract": _slot_groove_center_burst_retract,
     "post_drop_firework_chase": _slot_post_drop_firework_chase,
@@ -1460,7 +1825,14 @@ _EFFECTS["breakdown_star_twinkle_sand"] = _baked_breakdown_star_twinkle_sand
 REALTIME_EFFECT_NAMES = frozenset(_EFFECTS.keys() | SLOT_EFFECTS.keys())
 
 # The firework chase strobes (slot 5 white bursts).
-REALTIME_STROBE_EFFECTS = REALTIME_STROBE_EFFECTS | frozenset({"post_drop_firework_chase"})
+REALTIME_STROBE_EFFECTS = REALTIME_STROBE_EFFECTS | frozenset({
+    "post_drop_firework_chase",
+    "rt_post_drop_chase",
+    "rt_post_drop_nebula",
+    "rt_drop_chase",
+    "rt_drop_nebula",
+    "rt_post_drop_center_comet",
+})
 
 # Param allowlist for each new name = standard EDM keys (duration_beats +
 # _SYNC_PARAM_KEYS) PLUS the per-cue runtime knobs each cue reads from params.
@@ -1479,6 +1851,14 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
     "breakdown_star_twinkle": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "breakdown_star_twinkle_sand": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "rt_groove_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_groove_nebula": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_post_drop_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_post_drop_nebula": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_drop_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_drop_nebula": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_drop_center_burst": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_post_drop_center_comet": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_twinkle": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
 }
 for _name, _keys in _M2_PHASE2A_PARAM_KEYS.items():
     REALTIME_EFFECT_PARAM_KEYS[_name] = _keys
