@@ -11,6 +11,7 @@ from .govee_frame_renderer import default_sync_mode, default_beat_division
 from .govee_owner_state import GoveeOwnerStateMachine, OwnerState
 from .govee_realtime_runner import EffectSpec, GoveeRealtimeRunner
 from .led_models import LEDConfig, LEDLookDecision
+from .bridge_fmt import log_changed
 
 log = logging.getLogger("led_dispatch_coordinator")
 
@@ -133,6 +134,11 @@ class LEDDispatchCoordinator:
             self._last_dispatch_role = role
             self._last_transport = backend
             self._last_transport_mono = now
+            if log_changed("led_live", (getattr(decision, "look", ""), "realtime", role)):
+                log.info(
+                    "[LED] look=%s role=%s via=realtime",
+                    getattr(decision, "look", ""), role,
+                )
             return True
 
         if self._owner.current() == OwnerState.REALTIME_RAZER:
@@ -146,6 +152,11 @@ class LEDDispatchCoordinator:
             self._last_dispatch_role = role
             self._last_transport = backend
             self._last_transport_mono = now
+            if log_changed("led_live", (getattr(decision, "look", ""), "cloud", role)):
+                log.info(
+                    "[LED] look=%s role=%s via=cloud",
+                    getattr(decision, "look", ""), role,
+                )
             # WI-6: notify runner that a cloud DIY was dispatched so it can
             # reconcile if a late response flips the strip out of razer mode.
             rate_limits = getattr(self._config, "rate_limits", None)
