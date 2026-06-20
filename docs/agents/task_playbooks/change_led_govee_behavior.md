@@ -37,7 +37,7 @@ Implementation notes:
 - Inspect `led_*`, `govee_*`, `beat_sync_engine.py`, `state_manager.py` dispatch seam.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
-- For scripted-track LED automation, preserve the split between `safety.scripted_mode_automation` as the default-off master switch and the top-level `scripted_mode` role-remap policy. `utility` is a blackout destination only; verify active and off role transitions separately.
+- For scripted-track LED automation, preserve the split between `safety.scripted_mode_automation` as the master switch (the shipped example config enables it; the `LEDSafety` dataclass default stays `false`) and the top-level `scripted_mode` role-remap policy. `utility` is a blackout destination only; verify active and off role transitions separately.
 - For color-engine slot behavior, verify `resolve_slot_colors()` invariants and slot strategy config validation before updating setup/status docs.
 - For M2.5 slotized cues, keep `SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED` language until operator hardware visual sign-off covers sparkle hue stability, center-burst band split, strobe gating, drop snap behavior, Patch E visual balance, Patch S probabilistic solid-color outcomes, and Patch F generic-default bank rotation.
 

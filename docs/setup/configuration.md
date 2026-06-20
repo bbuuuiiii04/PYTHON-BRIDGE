@@ -48,7 +48,7 @@ Use `docs/agents/task_playbooks/update_config_schema.md` before changing config 
 
 ## LED scripted-mode notes
 
-- `safety.scripted_mode_automation` is the master enable switch for automatic LED output during SoundSwitch scripted tracks and defaults to `false`.
+- `safety.scripted_mode_automation` is the master enable switch for automatic LED output during SoundSwitch scripted tracks. The shipped `config/led_look_director.example.json` enables it (`true`) paired with the conservative blackout `scripted_mode` policy, so out-of-box scripted tracks black out LEDs except during buildup/pre-drop and breakdown. Set it to `false` to keep LEDs fully inert during scripted tracks. (The code-level `LEDSafety` dataclass default in `led_models.py` is still `false`, but the loader requires the JSON key, so the example value governs.)
 - The top-level `scripted_mode` block controls role remapping when that master switch is enabled. Source roles and `default_role` exclude `utility`; `role_map` destinations may use `utility` to select the configured blackout bank.
 - If `scripted_mode` is absent, the loader maps `groove`, `drop`, and `post_drop` to `utility` (off), `buildup` and `pre_drop` to `buildup`, and `ambient` and `breakdown` to `breakdown`.
 - A present partial `role_map` is operator opt-in. Missing roles fall back to `default_role`, which defaults to `breakdown`.

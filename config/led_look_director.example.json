@@ -1170,7 +1170,7 @@
     "high_impact_cooldown_s": 12.0,
     "drop_flash_duration_ms": 750,
     "emergency_blackout_always_available": true,
-    "scripted_mode_automation": false
+    "scripted_mode_automation": true
   },
   "scripted_mode": {
     "default_role": "breakdown",
