@@ -348,6 +348,8 @@ class StateManager:
         self._led_dry_run_latch = True
         self._led_automation_enabled_latch = False
         self._led_scripted_mode_automation_latch = False
+        self._led_scripted_default_role = "breakdown"
+        self._led_scripted_role_map: dict[str, str] = {}
         self._led_last_auto_role_key = ""
         # M1b WI-2: structured (section_id, cycle) published alongside the
         # string role_key so the color engine seeds on stable fields without
@@ -398,6 +400,13 @@ class StateManager:
                 self._led_scripted_mode_automation_latch = bool(
                     status_payload.get("scripted_mode_automation", False)
                 )
+                sm_policy = status_payload.get("scripted_mode", {}) or {}
+                if not isinstance(sm_policy, dict):
+                    sm_policy = {}
+                self._led_scripted_default_role = str(
+                    sm_policy.get("default_role", "breakdown")
+                )
+                self._led_scripted_role_map = dict(sm_policy.get("role_map", {}))
                 cloud_offset = float(
                     status_payload.get(
                         "automation_cloud_offset_s",
@@ -419,6 +428,8 @@ class StateManager:
                 self._led_dry_run_latch = True
                 self._led_automation_enabled_latch = False
                 self._led_scripted_mode_automation_latch = False
+                self._led_scripted_default_role = "breakdown"
+                self._led_scripted_role_map = {}
                 self._led_automation_gate_reason = "status_unavailable"
         # Constant-time connectivity check; must not build a dict or call status().
         self._os2l_connected_provider = os2l_connected_provider
@@ -1633,11 +1644,16 @@ class StateManager:
         if self._led_manual_override:
             self._gate_led_automation("manual_override", active_deck=active, rt_permitted=True)
             return
+        scripted_led_mode = bool(
+            d.scripted_id
+            and self._os.lighting_mode == "scripted"
+            and self._led_scripted_mode_automation_latch
+        )
         if d.scripted_id and not self._led_scripted_mode_automation_latch:
             self._gate_led_automation("scripted_mode", active_deck=active, rt_permitted=True)
             return
 
-        if self._os.lighting_mode != "autoloop":
+        if self._os.lighting_mode != "autoloop" and not scripted_led_mode:
             self._gate_led_automation("not_autoloop", active_deck=active)
             return
         # NOTE: LED automation is intentionally NOT gated on the SoundSwitch
@@ -1668,8 +1684,9 @@ class StateManager:
             self._advance_led_phrase_latch(sp_state)
 
         role = self._led_role_from_smart_phrasing(sp_state, mutate=True)
-        role = self._led_effective_role_for_dispatch(role)
-        role_key = self._led_automation_role_key(active, d, sp_state, role)
+        original_role = role
+        role = self._led_effective_role_for_dispatch(role, scripted=scripted_led_mode)
+        role_key = self._led_automation_role_key(active, d, sp_state, original_role)
         if role_key == self._led_last_auto_role_key:
             return
 
@@ -2128,8 +2145,15 @@ class StateManager:
         self._led_committed_drop_decision = None
         return decision
 
-    def _led_effective_role_for_dispatch(self, role: str) -> str:
-        return role
+    def _led_effective_role_for_dispatch(
+        self,
+        role: str,
+        *,
+        scripted: bool = False,
+    ) -> str:
+        if not scripted:
+            return role
+        return self._led_scripted_role_map.get(role, self._led_scripted_default_role)
 
     def _led_role_has_mapped_look(self, role: str) -> bool:
         has_role_look = getattr(self._led_look_director, "has_role_look", None)
@@ -3069,6 +3093,10 @@ class StateManager:
         self._os.last_arm_mono = time.monotonic()
 
         if mode == "scripted":
+            self._led_last_auto_role_key = ""
+            self._led_last_idle_role_key = ""
+            self._led_smart_drop_blackout_key = ""
+            self._clear_led_drop_lifecycle()
             self._clear_smart_rearm_state()
             self._os.autoloop_arm_after_master_change = False
             self._os.autoloop_master_change_source = ""

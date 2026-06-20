@@ -38,6 +38,7 @@ Current repo-facing status remains:
 | SoundSwitch OS2L | partial | unvalidated | OS2L output code exists; hardware/app validation log needed. |
 | Laser policy/executor | partial | unvalidated | MIDI path exists; fixture validation must be recorded separately. |
 | LED/Govee cloud | partial | unvalidated | Cloud path exists; device behavior must be logged. |
+| LED scripted-track automation policy | partial | unvalidated | `tests/test_led_config.py` covers the JSON blackout defaults and `utility` destination validation; `tests/test_led_state_manager.py` covers groove/drop/post-drop blackout mapping, active buildup/breakdown, opt-in overrides, and non-scripted identity behavior. This does not prove room-visible Govee behavior during scripted SoundSwitch tracks. |
 | LED/Govee realtime | partial/experimental | unvalidated | Realtime path exists; slot-color strategy behavior, Patch S `random_with_mono_chance`, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, Patch E3 ambient twinkle slot cue, and Patch F default-bank cleanup have software tests, but repeatable H612D validation record is still needed. Patch D/E/S/F remain SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
 | Laser Pad/frontend | partial | unvalidated | Syntax/frontend smoke tests do not prove live safety. |
 

@@ -172,11 +172,26 @@ class _AutomationLEDLookDirector:
         dry_run: bool = True,
         automation_enabled: bool = True,
         scripted_mode_automation: bool = False,
+        scripted_default_role: str = "breakdown",
+        scripted_role_map: dict[str, str] | None = None,
+        mapped_roles: set[str] | None = None,
     ) -> None:
         self._enabled = enabled
         self._dry_run = dry_run
         self._automation_enabled = automation_enabled
         self._scripted_mode_automation = scripted_mode_automation
+        self._scripted_default_role = scripted_default_role
+        if scripted_role_map is None:
+            scripted_role_map = {
+                "ambient": "breakdown",
+                "groove": "utility",
+                "buildup": "buildup",
+                "pre_drop": "buildup",
+                "drop": "utility",
+                "post_drop": "utility",
+                "breakdown": "breakdown",
+            }
+        self._scripted_role_map = dict(scripted_role_map)
         self.preview_decision: LEDLookDecision | None = None
         self.preview_decisions: dict[str, LEDLookDecision] = {}
         self.role_decisions: dict[str, LEDLookDecision] = {}
@@ -185,7 +200,7 @@ class _AutomationLEDLookDirector:
         self._emergency_blackout = False
         self.status_calls = 0
         self.tick_calls: list[LEDContext] = []
-        self.mapped_roles = {"ambient", "groove", "buildup", "drop", "breakdown", "utility"}
+        self.mapped_roles = mapped_roles or {"ambient", "groove", "buildup", "drop", "breakdown", "utility"}
 
     def status(self) -> dict:
         self.status_calls += 1
@@ -195,6 +210,10 @@ class _AutomationLEDLookDirector:
             "dry_run": self._dry_run,
             "automation_enabled": self._automation_enabled,
             "scripted_mode_automation": self._scripted_mode_automation,
+            "scripted_mode": {
+                "default_role": self._scripted_default_role,
+                "role_map": dict(self._scripted_role_map),
+            },
             "current_look": "",
             "last_reason": "",
             "last_source": "",
@@ -247,6 +266,17 @@ class _AutomationLEDLookDirector:
         return self._default_automation_decision(role)
 
     def _default_automation_decision(self, role: str) -> LEDLookDecision:
+        if role == "utility":
+            return LEDLookDecision(
+                look="room_blackout",
+                target="room_perimeter",
+                action="off",
+                scene_ref="",
+                reason="role_entry:utility",
+                source="automation",
+                priority=2,
+                role=role,
+            )
         return LEDLookDecision(
             look=f"room_{role}",
             target="room_perimeter",
@@ -1546,6 +1576,143 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(len(adapter.trigger_calls), 0)
         self.assertEqual(sm.led_status_provider()["automation_gate_reason"], "scripted_mode")
 
+    def test_scripted_mode_enabled_bypasses_not_autoloop_gate(self) -> None:
+        director = _AutomationLEDLookDirector(scripted_mode_automation=True)
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(sm, SmartPhrasingState(), scripted=True)
+
+        sm._push_tick()
+
+        self.assertNotEqual(sm.led_status_provider()["automation_gate_reason"], "not_autoloop")
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(adapter.trigger_calls[0].role, "utility")
+        self.assertEqual(adapter.trigger_calls[0].look, "room_blackout")
+
+    def test_scripted_mode_default_role_map_at_dispatch_seam(self) -> None:
+        cases = [
+            (
+                SmartPhrasingState(
+                    current_phrase_is_up=True,
+                    beats_to_next_drop=16.0,
+                ),
+                "buildup",
+            ),
+            (
+                SmartPhrasingState(
+                    smart_drop_crossing=True,
+                    active_drop_beat=64.0,
+                    current_phrase_label="up",
+                ),
+                "utility",
+            ),
+            (SmartPhrasingState(current_phrase_is_chorus=True), "utility"),
+            (SmartPhrasingState(), "utility"),
+            (SmartPhrasingState(smart_breakdown_active=True), "breakdown"),
+        ]
+        for sp_state, expected_role in cases:
+            with self.subTest(expected_role=expected_role, sp_state=sp_state):
+                director = _AutomationLEDLookDirector(scripted_mode_automation=True)
+                adapter = _StubLEDAdapter()
+                sm = _make_sm(director=director, adapter=adapter)
+                _prepare_playing_push_tick(sm, sp_state, scripted=True)
+
+                sm._push_tick()
+
+                self.assertEqual(len(adapter.trigger_calls), 1)
+                self.assertEqual(adapter.trigger_calls[0].role, expected_role)
+                if expected_role == "utility":
+                    self.assertEqual(adapter.trigger_calls[0].look, "room_blackout")
+
+    def test_scripted_mode_override_allows_groove(self) -> None:
+        director = _AutomationLEDLookDirector(
+            scripted_mode_automation=True,
+            scripted_role_map={"groove": "groove"},
+        )
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(sm, SmartPhrasingState(), scripted=True)
+
+        sm._push_tick()
+
+        self.assertEqual(len(director.tick_calls), 1)
+        self.assertEqual(director.tick_calls[0].role, "groove")
+        self.assertEqual(adapter.trigger_calls[0].role, "groove")
+
+    def test_scripted_mode_override_allows_post_drop(self) -> None:
+        director = _AutomationLEDLookDirector(
+            scripted_mode_automation=True,
+            scripted_role_map={"post_drop": "post_drop"},
+            mapped_roles={"ambient", "groove", "buildup", "drop", "post_drop", "breakdown", "utility"},
+        )
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(
+            sm,
+            SmartPhrasingState(current_phrase_is_chorus=True),
+            scripted=True,
+        )
+
+        sm._push_tick()
+
+        self.assertEqual(len(director.tick_calls), 1)
+        self.assertEqual(director.tick_calls[0].role, "post_drop")
+        self.assertEqual(adapter.trigger_calls[0].role, "post_drop")
+
+    def test_scripted_mode_remap_does_not_apply_outside_scripted_lighting(self) -> None:
+        director = _AutomationLEDLookDirector(
+            scripted_mode_automation=True,
+            scripted_role_map={"groove": "breakdown"},
+        )
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(sm, SmartPhrasingState())
+        sm._deck[1].scripted_id = 7
+        sm._os.lighting_mode = "autoloop"
+
+        sm._push_tick()
+
+        self.assertEqual(len(director.tick_calls), 1)
+        self.assertEqual(director.tick_calls[0].role, "groove")
+        self.assertEqual(adapter.trigger_calls[0].role, "groove")
+
+    def test_scripted_mode_role_helper_uses_policy_only_when_scripted(self) -> None:
+        director = _AutomationLEDLookDirector(scripted_mode_automation=True)
+        sm = _make_sm(director=director, adapter=_StubLEDAdapter())
+
+        self.assertEqual(sm._led_effective_role_for_dispatch("ambient", scripted=True), "breakdown")
+        self.assertEqual(sm._led_effective_role_for_dispatch("buildup", scripted=True), "buildup")
+        self.assertEqual(sm._led_effective_role_for_dispatch("pre_drop", scripted=True), "buildup")
+        self.assertEqual(sm._led_effective_role_for_dispatch("groove", scripted=True), "utility")
+        self.assertEqual(sm._led_effective_role_for_dispatch("drop", scripted=True), "utility")
+        self.assertEqual(sm._led_effective_role_for_dispatch("post_drop", scripted=True), "utility")
+        self.assertEqual(sm._led_effective_role_for_dispatch("groove", scripted=False), "groove")
+
+    def test_scripted_mode_dispatch_smoke_covers_multiple_phrase_states(self) -> None:
+        states = [
+            SmartPhrasingState(),
+            SmartPhrasingState(current_phrase_is_chorus=True),
+            SmartPhrasingState(
+                current_phrase_is_up=True,
+                beats_to_next_drop=16.0,
+            ),
+            SmartPhrasingState(
+                smart_drop_crossing=True,
+                active_drop_beat=64.0,
+                current_phrase_label="up",
+            ),
+        ]
+        for sp_state in states:
+            with self.subTest(sp_state=sp_state):
+                director = _AutomationLEDLookDirector(scripted_mode_automation=True)
+                adapter = _StubLEDAdapter()
+                sm = _make_sm(director=director, adapter=adapter)
+                _prepare_playing_push_tick(sm, sp_state, scripted=True)
+
+                sm._push_tick()
+
+                self.assertGreaterEqual(len(director.tick_calls), 1)
+
     def test_automation_disabled_is_inert_in_push_tick(self) -> None:
         director = _AutomationLEDLookDirector(automation_enabled=False)
         adapter = _StubLEDAdapter()
@@ -1707,4 +1874,3 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertGreaterEqual(len([c for c in adapter.trigger_calls if c.role == "groove"]), 2)
 if __name__ == "__main__":
     unittest.main()
-

@@ -163,6 +163,84 @@ class ExampleConfigTests(unittest.TestCase):
         )
 
 
+class ScriptedModePolicyConfigTests(unittest.TestCase):
+    def test_absent_scripted_mode_uses_conservative_default(self) -> None:
+        cfg = _live_ready_base_config()
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.config.scripted_mode.default_role, "breakdown")
+        self.assertEqual(result.config.scripted_mode.role_map["groove"], "utility")
+        self.assertEqual(result.config.scripted_mode.role_map["drop"], "utility")
+        self.assertEqual(result.config.scripted_mode.role_map["post_drop"], "utility")
+        self.assertEqual(result.config.scripted_mode.role_map["buildup"], "buildup")
+
+    def test_scripted_mode_must_be_object(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["scripted_mode"] = 5
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("'scripted_mode' must be an object" in err for err in result.errors))
+
+    def test_scripted_mode_rejects_utility_default_role(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["scripted_mode"] = {"default_role": "utility"}
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("must be one of" in err for err in result.errors))
+
+    def test_scripted_mode_role_map_must_be_object(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["scripted_mode"] = {"role_map": []}
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("'scripted_mode.role_map' must be an object" in err for err in result.errors))
+
+    def test_scripted_mode_rejects_invalid_source_role(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["scripted_mode"] = {"role_map": {"chorus": "breakdown"}}
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("invalid source role" in err for err in result.errors))
+
+    def test_scripted_mode_accepts_utility_as_off_destination(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["scripted_mode"] = {"role_map": {"groove": "utility"}}
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.config.scripted_mode.role_map["groove"], "utility")
+
+    def test_scripted_mode_rejects_invalid_destination_role(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["scripted_mode"] = {"role_map": {"groove": "chorus"}}
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("invalid destination role" in err for err in result.errors))
+
+    def test_scripted_mode_rejects_utility_source_role(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["scripted_mode"] = {"role_map": {"utility": "breakdown"}}
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("invalid source role" in err for err in result.errors))
+
+    def test_scripted_mode_partial_map_is_allowed(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["scripted_mode"] = {"role_map": {"groove": "groove"}}
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.config.scripted_mode.default_role, "breakdown")
+        self.assertEqual(dict(result.config.scripted_mode.role_map), {"groove": "groove"})
+
+
 class SecretKeyValidationTests(unittest.TestCase):
     def test_rejects_secret_like_top_level_key(self) -> None:
         cfg = _example_config()

@@ -39,6 +39,10 @@ Audited against the current checkout on 2026-06-18.
   API/LAN/cloud behavior.
 - Automatic LED role-entry is transition/role-keyed only. It must not emit
   commands every tick or every beat.
+- Scripted-track LED automation must stay behind the existing
+  `safety.scripted_mode_automation` master switch and the `lighting_mode ==
+  "scripted"` gate. Role remapping is a latched policy lookup, not config
+  parsing or transport I/O in `_push_tick`.
 - Emergency blackout beats manual override; manual override beats automation.
 - Phase 8 automatic LED role-entry is dry-run/config-gated. Live automation,
   event-facing use, and Smart Drop blackout coupling require later explicit
@@ -92,6 +96,9 @@ Audited against the current checkout on 2026-06-18.
   filepath/play/loop sequences in `_apply_lighting`.
 - Scripted/autoloop arms, clears, BPM, beat, elapsed, and beatpos sends must
   cover active, mirror, 3, and 4 as appropriate.
+- Enabling scripted-track LED automation must not change SoundSwitch scripted
+  arm/clear routing; it only allows the separate LED dispatch path to run after
+  the scripted LED policy remap.
 - Autoloop arms send an empty SoundSwitch ID.
 - `OS2LConnection` owns socket I/O on sender/reconnect threads; the push loop
   should only enqueue sends.

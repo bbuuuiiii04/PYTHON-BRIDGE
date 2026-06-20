@@ -36,7 +36,7 @@ This matrix is deliberately conservative. If evidence is missing, the answer is 
 | --- | --- | --- | --- |
 | SoundSwitch OS2L | implemented | code path exists | Exact SoundSwitch version support unknown. |
 | Laser MIDI | implemented | code path exists | Broad fixture/safety validation not documented. |
-| LED/Govee cloud scene | implemented | code path exists | Device support not generalized. |
+| LED/Govee cloud scene | implemented | code path exists | Scripted groove/drop/post-drop blackout mapping is software-tested and the tracked master switch remains default-off; device support and room-visible behavior are not generalized. |
 | LED/Govee realtime | implemented/experimental | code path exists | Slot-color strategy behavior, Patch S `random_with_mono_chance`, generic M2.5 groove/post_drop/drop/Patch E1 nebula/Patch E2 center-comet/Patch E3 twinkle cues, and Patch F default-bank cleanup are software-tested only; current H612D setup must be validated through hardware log before broad claims. |
 
 ## Hardware validation state

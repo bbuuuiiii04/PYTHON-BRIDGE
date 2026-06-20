@@ -182,6 +182,10 @@ class LEDLookDirector:
         status = asdict(payload)
         status["queued_post_drop_look"] = self._queued_post_drop_look
         status["post_drop_cycle_beats"] = float(self._config.post_drop_cycle_beats)
+        status["scripted_mode"] = {
+            "default_role": self._config.scripted_mode.default_role,
+            "role_map": dict(self._config.scripted_mode.role_map),
+        }
         return status
 
     def has_role_look(self, role: str) -> bool:

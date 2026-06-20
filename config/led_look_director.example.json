@@ -1172,6 +1172,18 @@
     "emergency_blackout_always_available": true,
     "scripted_mode_automation": false
   },
+  "scripted_mode": {
+    "default_role": "breakdown",
+    "role_map": {
+      "ambient": "breakdown",
+      "groove": "utility",
+      "buildup": "buildup",
+      "pre_drop": "buildup",
+      "drop": "utility",
+      "post_drop": "utility",
+      "breakdown": "breakdown"
+    }
+  },
   "metadata": {
     "future_requirements": []
   }

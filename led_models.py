@@ -171,6 +171,13 @@ class LEDSafety:
 
 
 @dataclass(frozen=True)
+class LEDScriptedModePolicy:
+    """Scripted-track LED role remap policy."""
+    default_role: str = "breakdown"
+    role_map: Mapping[str, str] = field(default_factory=dict, compare=False)
+
+
+@dataclass(frozen=True)
 class LEDConfig:
     schema_version: int
     enabled: bool
@@ -187,6 +194,7 @@ class LEDConfig:
     drop_pairs: dict[str, LEDDropPair] = field(default_factory=dict)
     post_drop_cycle_beats: float = 32.0
     color_engine: Optional[ColorEngineConfig] = None
+    scripted_mode: LEDScriptedModePolicy = field(default_factory=LEDScriptedModePolicy)
 
 
 @dataclass(frozen=True)

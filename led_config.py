@@ -28,6 +28,7 @@ from .led_models import (
     LEDRateLimits,
     LEDRealtimeConfig,
     LEDSafety,
+    LEDScriptedModePolicy,
     LEDTarget,
     Palette,
     _DEFAULT_SCALE_STOPS,
@@ -71,6 +72,19 @@ _BANK_ROLES = (
     "breakdown",
     "utility",
 )
+# Scripted source/default roles exclude utility; utility is an off destination.
+_SCRIPTED_REMAP_ROLES = tuple(role for role in _BANK_ROLES if role != "utility")
+_SCRIPTED_REMAP_DESTINATION_ROLES = _BANK_ROLES
+_SCRIPTED_MODE_DEFAULT_ROLE = "breakdown"
+_SCRIPTED_MODE_DEFAULT_ROLE_MAP = MappingProxyType({
+    "ambient": "breakdown",
+    "groove": "utility",
+    "buildup": "buildup",
+    "pre_drop": "buildup",
+    "drop": "utility",
+    "post_drop": "utility",
+    "breakdown": "breakdown",
+})
 _RATE_LIMIT_DEFAULTS = LEDRateLimits()
 _AUTOMATION_DEFAULTS = LEDAutomation()
 _MAX_AUTOMATION_OFFSET_S = 10.0
@@ -260,6 +274,8 @@ def _validate(data: dict[str, Any], errors: list[str]) -> None:
         errors.append("'safety' must be an object")
     else:
         _validate_safety(safety, errors)
+
+    _validate_scripted_mode(data.get("scripted_mode"), errors)
 
     automation = data.get("automation", {})
     if automation is None:
@@ -767,6 +783,36 @@ def _validate_safety(safety: dict[str, Any], errors: list[str]) -> None:
         errors.append("'safety.scripted_mode_automation' must be a boolean")
 
 
+def _validate_scripted_mode(raw: Any, errors: list[str]) -> None:
+    """Validate the optional scripted_mode block."""
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        errors.append("'scripted_mode' must be an object")
+        return
+
+    default_role = raw.get("default_role", _SCRIPTED_MODE_DEFAULT_ROLE)
+    if not isinstance(default_role, str) or default_role not in _SCRIPTED_REMAP_ROLES:
+        errors.append(
+            f"'scripted_mode.default_role' must be one of {list(_SCRIPTED_REMAP_ROLES)}"
+        )
+
+    role_map = raw.get("role_map", {})
+    if not isinstance(role_map, dict):
+        errors.append("'scripted_mode.role_map' must be an object")
+        return
+
+    for src, dst in role_map.items():
+        if not isinstance(src, str) or src not in _SCRIPTED_REMAP_ROLES:
+            errors.append(
+                f"'scripted_mode.role_map' has invalid source role '{src}'"
+            )
+        if not isinstance(dst, str) or dst not in _SCRIPTED_REMAP_DESTINATION_ROLES:
+            errors.append(
+                f"'scripted_mode.role_map.{src}' has invalid destination role '{dst}'"
+            )
+
+
 def _validate_non_negative_number(field: str, value: Any, errors: list[str]) -> None:
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         errors.append(f"'{field}' must be a number")
@@ -1199,6 +1245,27 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
     )
 
 
+def _build_scripted_mode(raw: Any) -> LEDScriptedModePolicy:
+    """Build the conservative scripted-mode role remap policy."""
+    if not isinstance(raw, dict):
+        return LEDScriptedModePolicy(
+            default_role=_SCRIPTED_MODE_DEFAULT_ROLE,
+            role_map=MappingProxyType(dict(_SCRIPTED_MODE_DEFAULT_ROLE_MAP)),
+        )
+
+    default_role = str(raw.get("default_role", _SCRIPTED_MODE_DEFAULT_ROLE))
+    role_map_raw = raw.get("role_map", {})
+    role_map = (
+        {str(k): str(v) for k, v in role_map_raw.items()}
+        if isinstance(role_map_raw, dict)
+        else {}
+    )
+    return LEDScriptedModePolicy(
+        default_role=default_role,
+        role_map=MappingProxyType(role_map),
+    )
+
+
 def _build_config(data: dict[str, Any]) -> LEDConfig:
     targets_raw = data["targets"]
     looks_raw = data["looks"]
@@ -1355,6 +1422,7 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
         drop_pairs=drop_pairs,
         post_drop_cycle_beats=float(data.get("post_drop_cycle_beats", 32.0)),
         color_engine=_parse_color_engine(data),
+        scripted_mode=_build_scripted_mode(data.get("scripted_mode")),
     )
 
 

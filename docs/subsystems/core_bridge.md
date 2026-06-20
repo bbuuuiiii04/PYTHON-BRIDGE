@@ -36,6 +36,7 @@ Runtime flow:
 - inputs: Rekordbox reader events, MTC fallback, runtime command events, position snapshots, config bundles
 - decisions: active deck state, phrase/role state, lighting dispatch timing
 - outputs: OS2L sends, laser decisions, LED decisions, copied status snapshots
+- scripted-track LED automation is still StateManager-gated: `safety.scripted_mode_automation` must be true, `lighting_mode` must be `scripted`, and the smart-phrasing role is remapped through the latched LED `scripted_mode` policy before dispatch
 
 Config:
 - `config.py`

@@ -108,6 +108,7 @@ contracts:
       - config/led_look_director.example.json
     key_symbols:
       - LEDConfig
+      - LEDScriptedModePolicy
       - LEDLookDirector
       - LedColorEngine
       - LEDDispatchCoordinator
@@ -228,6 +229,41 @@ contracts:
       - docs/status/validation_matrix.md
     forbidden_assumptions:
       - OS2L generation does not prove every SoundSwitch version works
+
+  soundswitch_research:
+    code_globs:
+      - tools/ssfmt/re/*.py
+    inspect:
+      - docs/research/soundswitch_ssfile_format.md
+      - docs/plans/active/soundswitch_stage2_research_findings.md
+      - docs/plans/active/soundswitch_validation_matrix.md
+      - docs/plans/active/soundswitch_decode_export_codex_spec.md
+      - docs/plans/active/soundswitch_stage3_handoff.md
+      - docs/plans/active/soundswitch_exporter_renderer_full_plan.md
+      - docs/status/active_work_registry.md
+      - docs/architecture/doc_index.md
+      - tools/ssfmt/re/README.md
+    tests:
+      - python3 -m py_compile tools/ssfmt/re/*.py
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
+      - python3 tools/check_docs_staleness.py --report
+      - git diff --check
+    docs_update:
+      - docs/research/soundswitch_ssfile_format.md
+      - docs/plans/active/soundswitch_stage2_research_findings.md
+      - docs/plans/active/soundswitch_validation_matrix.md
+      - docs/plans/active/soundswitch_decode_export_codex_spec.md
+      - docs/plans/active/soundswitch_stage3_handoff.md
+      - docs/plans/active/soundswitch_exporter_renderer_full_plan.md
+      - docs/status/active_work_registry.md
+      - docs/architecture/doc_index.md
+      - tools/ssfmt/re/README.md
+    forbidden_assumptions:
+      - passive captures validate software-visible wire evidence, not physical fixtures
+      - unsupported layouts, missing cues, and unresolved render layers must fail closed
+      - research helpers are not production exporter or bridge runtime modules
 
   config_schema:
     code_globs:

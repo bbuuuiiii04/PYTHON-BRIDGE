@@ -37,6 +37,7 @@ Implementation notes:
 - Inspect `config.py`, `laser_config.py`, `led_config.py`, `config/*.example.json`.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
+- For LED `scripted_mode`, document that source/default roles exclude `utility`, destinations may use `utility` for blackout, absent-block defaults turn groove/drop/post-drop off, and `safety.scripted_mode_automation` remains the separate default-off master switch.
 - For LED `color_engine` strategy fields, document defaults, accepted values, `slot_mono_chance_by_look` range validation when relevant, and invalid-config behavior in the setup and subsystem docs.
 - For M2.5 slot-cue example changes, keep legacy color-suffix looks defined until the gated cleanup patch and document that solid slots 0-4 remain possible through point/mono palettes.
 

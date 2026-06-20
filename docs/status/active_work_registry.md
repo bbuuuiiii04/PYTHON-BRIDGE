@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 51367a1
-last_verified_date: 2026-06-18
+last_verified_commit: fd40843
+last_verified_date: 2026-06-20
 validation_scope: software-only
 ---
 
@@ -20,8 +20,9 @@ Each item points at an on-disk spec. **A spec is a plan, not proof of implementa
 | AWR-102 | LED color engine core (decoupled color, drift + drop-snap) | `docs/plans/active/led_color_engine_spec.md` | confirm which milestones are landed in `led_color_engine.py` |
 | AWR-103 | Realtime comet stutter / smoothness / pause | `docs/plans/active/rt_comet_stutter_fix_spec.md`, `rt_comet_smoothness_fix_spec.md`, `rt_comet_pause_continuation_spec.md` | confirm landed vs pending in `govee_realtime_*`/`beat_sync_engine.py` |
 | AWR-104 | Beat-sync runtime | `docs/plans/active/beat_sync_runtime_spec.md` | confirm against `beat_sync_engine.py` |
-| AWR-105 | LED role mapping v2 | `docs/plans/active/led_role_mapping_v2_spec.md` | confirm against `led_look_director.py`/`led_models.py` |
+| AWR-105 | LED role mapping v2 | `docs/plans/active/led_role_mapping_v2_spec.md` | scripted groove/drop/post-drop blackout remap is implemented and software-tested in current worktree; broader role-mapping-v2 scope still needs verification against `led_look_director.py`/`led_models.py` |
 | AWR-106 | LED color engine M2.5 solid-color strategy + Patch F cleanup | `docs/plans/active/led_color_engine_solid_color_and_patch_f_spec.md` | Patch S `random_with_mono_chance` and Patch F tracked-example bank cleanup are implemented and software-tested only; live-config mirror remains operator-gated; all hardware behavior remains unvalidated |
+| AWR-107 | SoundSwitch static export / bridge import reverse engineering | `docs/plans/active/soundswitch_decode_export_codex_spec.md`, `soundswitch_stage2_research_findings.md`, `soundswitch_validation_matrix.md`, `soundswitch_stage3_handoff.md`, `soundswitch_exporter_renderer_full_plan.md` | research only; 42/42 autoloops and 44/45 scripted files structurally parsed, A5 plus two captured autoloop files byte-exact; auxiliary/control, fixture patch, ownership, transport, and representative wire coverage block implementation; no live change authorized |
 
 ## Documentation system follow-ups
 

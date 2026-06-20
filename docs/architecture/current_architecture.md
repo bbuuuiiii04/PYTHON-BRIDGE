@@ -111,6 +111,10 @@ direct path inactive while MTC/current state fallbacks continue where available.
 - Automatic LED role-entry consumes already-computed `SmartPhrasingState` and is
   role-entry/transition keyed. It does not duplicate SmartPhrasing logic and
   must not command every tick or every beat.
+- Scripted-track LED automation is an explicit opt-in path: StateManager only
+  bypasses the non-autoloop gate when `safety.scripted_mode_automation` is true,
+  the deck has a scripted id, and `lighting_mode` is `scripted`; the role is
+  remapped through the latched LED `scripted_mode` policy before dispatch.
 - `LEDLookDirector` chooses configured LED looks from role banks. LED banks are
   separate from laser banks.
 - `GoveeSceneAdapter` keeps public trigger handoff bounded/non-blocking; slow
