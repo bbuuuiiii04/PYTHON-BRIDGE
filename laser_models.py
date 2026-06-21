@@ -36,6 +36,9 @@ class LaserMidiMessage:
     hold_ms     — explicit hold duration for hold_ms behavior; validated 10–30000.
     hold_beats  — beat-relative hold duration for hold_beats behavior; validated
                   0.25–128 and materialized by LaserSceneExecutor using ctx.bpm.
+    scene_name  — identity of the scene that produced this message; used by
+                  PackOutputBackend to resolve pack selection. Inert for MIDI
+                  output. Defaults empty.
     """
     kind: str = "note_pulse"
     channel: int = 1
@@ -47,6 +50,7 @@ class LaserMidiMessage:
     behavior: str = "pulse"
     hold_ms: int = 0
     hold_beats: float = 0.0
+    scene_name: str = ""
 
 
 @dataclass(frozen=True)

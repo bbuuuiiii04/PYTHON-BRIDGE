@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.laser_config import LaserConfig  # noqa: E402
 from rb_ss_bridge_v2.laser_director import LaserDirector  # noqa: E402
 from rb_ss_bridge_v2.laser_executor import LaserSceneExecutor  # noqa: E402
+from rb_ss_bridge_v2.laser_output_backend import MidiOutputBackend  # noqa: E402
 from rb_ss_bridge_v2.laser_models import (  # noqa: E402
     LaserContext,
     LaserMidiMessage,
@@ -227,7 +228,7 @@ class _GoldenHarness:
         self._midi = _FakeMidiOutput(dry_run=True)
         self._executor = LaserSceneExecutor(
             config=cfg,
-            midi_output=self._midi,
+            backend=MidiOutputBackend(self._midi),
             personality=personality,
             rng=random.Random(2),
         )

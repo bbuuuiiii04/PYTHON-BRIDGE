@@ -10,6 +10,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.laser_config import LaserConfig  # noqa: E402
 from rb_ss_bridge_v2.laser_executor import LaserSceneExecutor  # noqa: E402
+from rb_ss_bridge_v2.laser_output_backend import (  # noqa: E402
+    MidiOutputBackend,
+    NoneBackend,
+    PackOutputBackend,
+)
 from rb_ss_bridge_v2.laser_models import (  # noqa: E402
     LaserContext,
     LaserMidiMessage,
@@ -303,12 +308,12 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=True)
         ex_blackout_dry = LaserSceneExecutor(
             config=_config(dry_run=True, smart_drop_mode="blackout_mask"),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex_legacy_live = LaserSceneExecutor(
             config=_config(dry_run=False, smart_drop_mode="legacy_rearm"),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         self.assertTrue(ex_blackout_dry.smart_drop_blackout_enabled())
@@ -316,13 +321,13 @@ class LaserSceneExecutorTests(unittest.TestCase):
 
     def test_scene_empty_never_triggers(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(_decision("", "not_playing", "idle"), _ctx())
         self.assertEqual(midi.calls, [])
 
     def test_dry_run_false_triggers_once_on_valid_transition(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
         ex.on_decision(_decision("phrase_a", "phrase_hold", "phrase"), _ctx())
         self.assertEqual(len(midi.calls), 1)
@@ -330,7 +335,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
 
     def test_automatic_gates_block_stopped_no_track_stale_scripted_not_ready(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         decision = _decision("phrase_a", "default_init", "phrase")
         ex.on_decision(decision, _ctx(playing=False))
         ex.on_decision(decision, _ctx(active_track_loaded=False))
@@ -341,7 +346,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
 
     def test_missing_scene_mapping_safe_noop_records_error(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(
             LaserSceneDecision(
                 scene="missing_scene",
@@ -360,21 +365,21 @@ class LaserSceneExecutorTests(unittest.TestCase):
     def test_trigger_false_is_handled_safely(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
         midi.trigger_result = False
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
         self.assertEqual(len(midi.calls), 1)
         self.assertEqual(ex.status()["last_error"], "midi_trigger_rejected")
 
     def test_same_scene_reason_only_update_does_not_retrigger(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
         ex.on_decision(_decision("phrase_a", "phrase_hold", "phrase"), _ctx())
         self.assertEqual(len(midi.calls), 1)
 
     def test_buildup_bank_holds_through_countdown(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         for _ in range(20):
             ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), _ctx())
         self.assertEqual(len(midi.calls), 1)
@@ -383,7 +388,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(rotating_banks=True),
             rng=random.Random(2),
         )
@@ -399,14 +404,14 @@ class LaserSceneExecutorTests(unittest.TestCase):
 
     def test_post_drop_triggers_once(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(_decision("post_a", "post_drop_hold", "post_drop"), _ctx())
         ex.on_decision(_decision("post_a", "post_drop_hold", "post_drop"), _ctx())
         self.assertEqual(len(midi.calls), 1)
 
     def test_phrase_waits_for_boundary_not_immediate_after_post_drop(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
         ex.on_decision(_decision("post_a", "post_drop_hold", "post_drop"), _ctx())
         ex.on_decision(_decision("phrase_a", "default", "phrase"), _ctx(autoloop_tick_just_fired=False))
@@ -417,7 +422,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
 
     def test_same_scene_phrase_refire_logs_skip_bypass(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx(abs_beat=64.0))
 
         with self.assertLogs("laser_executor", level="INFO") as captured:
@@ -435,7 +440,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
     def test_high_impact_blocked_when_personality_disallows(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
         personality = _personality(allow_high_impact=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=personality)
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=personality)
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
         self.assertEqual(len(midi.calls), 0)
         self.assertEqual(ex.status()["last_error"], "high_impact_blocked")
@@ -443,7 +448,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
     def test_emergency_bypasses_high_impact_block(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
         personality = _personality(allow_high_impact=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=personality)
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=personality)
         ex.on_decision(
             LaserSceneDecision(
                 scene="drop_a",
@@ -462,7 +467,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         cfg, personality = _five_drop_config()
         ex = LaserSceneExecutor(
             config=cfg,
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=personality,
             rng=random.Random(0),
         )
@@ -489,7 +494,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         cfg, personality = _five_drop_config()
         ex = LaserSceneExecutor(
             config=cfg,
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=personality,
             rng=random.Random(0),
         )
@@ -505,7 +510,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_single_drop_scene_personality(),
             rng=random.Random(5),
         )
@@ -534,7 +539,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
             ),
         )
         cfg = replace(cfg, scenes=scenes)
-        ex = LaserSceneExecutor(config=cfg, midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=cfg, backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx())
         self.assertEqual(len(midi.calls), 1)
         rendered = midi.calls[0][0]
@@ -543,7 +548,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
 
     def test_drop_crossing_enforces_minimum_pulse_duration(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)
-        ex = LaserSceneExecutor(config=_config(dry_run=False), midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=250.0))
         self.assertEqual(len(midi.calls), 1)
         rendered = midi.calls[0][0]
@@ -572,7 +577,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
                 manual_blackout_on=blackout_on,
                 manual_blackout_off=unblack,
             ),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.trigger_blackout_on(_ctx(abs_beat=319.0))
@@ -598,7 +603,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
 
@@ -634,7 +639,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
                 manual_blackout_on=blackout_on,
                 manual_blackout_off=blackout_off,
             ),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
 
@@ -667,7 +672,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.trigger_blackout_on(_ctx(abs_beat=319.0))
@@ -690,7 +695,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.trigger_blackout_on(_ctx())
@@ -704,7 +709,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.trigger_blackout_on(_ctx())
@@ -716,7 +721,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_tick(_ctx(smart_phrasing=None))
@@ -728,7 +733,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ctx = _ctx(smart_phrasing=_smart_phrasing_state(transition_mask_should_clear=True))
@@ -744,7 +749,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ctx = _ctx(smart_phrasing=_smart_phrasing_state(transition_mask_should_clear=True))
@@ -772,7 +777,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         # First tick: buildup scene fires (no arm yet, mid-window).
@@ -814,7 +819,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=replace(cfg, scenes=scenes),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -854,7 +859,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=replace(cfg, scenes=scenes),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(allow_high_impact=False),
         )
         ex.on_decision(
@@ -888,7 +893,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
             midi = _FakeMidiOutput(dry_run=False)
             ex = LaserSceneExecutor(
                 config=_config(dry_run=False, manual_blackout_on=blackout_on),
-                midi_output=midi,
+                backend=MidiOutputBackend(midi),
                 personality=_personality(),
             )
             ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), case_ctx)
@@ -914,7 +919,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -948,7 +953,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=personality,
         )
         ex.on_decision(
@@ -971,7 +976,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -992,7 +997,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -1013,7 +1018,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -1035,7 +1040,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -1064,7 +1069,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -1085,7 +1090,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         for beat in (200.0, 201.0, 202.0):
@@ -1109,7 +1114,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -1130,7 +1135,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -1151,7 +1156,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(None, _ctx(smart_drop_blackout_arm=True))
@@ -1189,7 +1194,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.trigger_blackout_on(_ctx())
@@ -1214,7 +1219,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
                 smart_drop_mode="legacy_rearm",
                 manual_blackout_on=blackout_on,
             ),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.trigger_blackout_on(_ctx())
@@ -1225,7 +1230,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=None, manual_blackout_off=None),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.trigger_blackout_on(_ctx())
@@ -1239,7 +1244,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(allow_high_impact=False),
         )
         ex.trigger_blackout_on(_ctx())
@@ -1258,7 +1263,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
                 manual_blackout_on=blackout_on,
                 manual_blackout_off=blackout_off,
             ),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=300.0))
@@ -1274,7 +1279,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=None,
         )
         ex.trigger_blackout_on(_ctx())
@@ -1289,7 +1294,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.trigger_blackout_on(_ctx())
@@ -1308,7 +1313,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
         ex = LaserSceneExecutor(
             config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.trigger_blackout_on(_ctx())
@@ -1327,7 +1332,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
                 manual_blackout_on=blackout_on,
                 manual_blackout_off=blackout_off,
             ),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=300.0))
@@ -1349,7 +1354,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
                 manual_blackout_on=blackout_on,
                 manual_blackout_off=blackout_off,
             ),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_drop_mode_personality(),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=500.0))
@@ -1362,7 +1367,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(rotating_banks=True),
             rng=random.Random(2),
         )
@@ -1377,7 +1382,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), _ctx(abs_beat=200.0))
@@ -1395,7 +1400,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         scenes["buildup_a"] = replace(scenes["buildup_a"], cooldown_beats=32.0)
         ex = LaserSceneExecutor(
             config=replace(cfg, scenes=scenes),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -1419,7 +1424,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), _ctx(abs_beat=100.0))
@@ -1444,7 +1449,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         cfg = replace(cfg, scenes=scenes)
         ex = LaserSceneExecutor(
             config=cfg,
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_single_drop_scene_personality(),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=64.0))
@@ -1460,7 +1465,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(rotating_banks=True),
             rng=random.Random(2),
         )
@@ -1478,7 +1483,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_single_drop_scene_personality(),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=300.0))
@@ -1493,7 +1498,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(rotating_banks=True),
             rng=random.Random(2),
         )
@@ -1510,7 +1515,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_drop_mode_personality(),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=400.0))
@@ -1523,7 +1528,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=500.0))
@@ -1536,7 +1541,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), _ctx(abs_beat=600.0))
@@ -1550,7 +1555,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=400.0))
@@ -1563,7 +1568,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx(abs_beat=700.0))
@@ -1575,7 +1580,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(_decision("drop_a", "drop_crossing", "drop"), _ctx(abs_beat=500.0))
@@ -1607,7 +1612,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
                 manual_blackout_on=blackout_on,
                 manual_blackout_off=blackout_off,
             ),
-            midi_output=midi_dry,
+            backend=MidiOutputBackend(midi_dry),
             personality=_personality(),
         )
         # --- live executor ---
@@ -1619,7 +1624,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
                 manual_blackout_on=blackout_on,
                 manual_blackout_off=blackout_off,
             ),
-            midi_output=midi_live,
+            backend=MidiOutputBackend(midi_live),
             personality=_personality(),
         )
         # Arm blackout in both.
@@ -1653,7 +1658,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         ex = LaserSceneExecutor(
             config=_config_with_role_cooldowns(dry_run=False),
-            midi_output=midi,
+            backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
         ex.on_decision(
@@ -1684,7 +1689,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
             ),
         )
         cfg = replace(cfg, scenes=scenes)
-        ex = LaserSceneExecutor(config=cfg, midi_output=midi, personality=_personality())
+        ex = LaserSceneExecutor(config=cfg, backend=MidiOutputBackend(midi), personality=_personality())
         # BPM=0 — executor must not raise and must use safe minimum.
         ex.on_decision(
             _decision("drop_a", "drop_crossing", "drop"),
@@ -1716,6 +1721,100 @@ class LaserSceneExecutorTests(unittest.TestCase):
         # _MIN_HOLD_MS is 10 in laser_executor.py.
         self.assertEqual(rendered.hold_ms, 10)
         self.assertGreater(rendered.hold_ms, 0)
+
+
+class _SpyBackend:
+    """Records every message handed to the backend; no physical output."""
+
+    def __init__(self, *, trigger_result: bool = True) -> None:
+        self.calls: list[tuple[LaserMidiMessage, str]] = []
+        self.trigger_result = trigger_result
+
+    def trigger(self, msg: LaserMidiMessage, priority: str = "normal") -> bool:
+        self.calls.append((msg, priority))
+        return self.trigger_result
+
+    def submit_frame(self, frame: tuple[int, ...]) -> None:
+        pass
+
+    def status(self) -> dict:
+        return {"backend": "spy", "available": True}
+
+    def reset(self) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        pass
+
+
+class BackendInjectionTests(unittest.TestCase):
+    def test_none_backend_emits_no_midi_to_underlying_output(self) -> None:
+        # With a NoneBackend injected, the executor routes solely through that
+        # single backend (there is no MIDI path). NoneBackend accepts the
+        # trigger so selection advances, but it emits no physical output.
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False),
+            backend=NoneBackend(),
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
+        self.assertEqual(ex.status()["triggered_count"], 1)
+        self.assertEqual(ex._backend.status()["backend"], "none")
+        self.assertFalse(hasattr(ex, "_midi_output"))
+
+    def test_scene_name_populated_on_fired_message(self) -> None:
+        spy = _SpyBackend()
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False),
+            backend=spy,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
+        self.assertEqual(len(spy.calls), 1)
+        fired_msg, _priority = spy.calls[0]
+        self.assertEqual(fired_msg.scene_name, "phrase_a")
+
+    def test_pack_backend_learned_scene_advances_selection(self) -> None:
+        backend = PackOutputBackend(scene_to_identity={"phrase_a": "ssid-7"})
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False),
+            backend=backend,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
+        # Learned scene -> PackOutputBackend.trigger returns True -> executor
+        # advances _last_triggered_scene and counts the trigger.
+        self.assertEqual(ex.status()["triggered_count"], 1)
+        self.assertEqual(ex._last_triggered_scene, "phrase_a")
+        self.assertEqual(backend.status()["trigger_count"], 1)
+
+    def test_pack_backend_unlearned_scene_does_not_advance_selection(self) -> None:
+        backend = PackOutputBackend(scene_to_identity={})  # nothing learned
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False),
+            backend=backend,
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
+        # Unlearned scene -> PackOutputBackend.trigger returns False -> the
+        # executor must NOT advance _last_triggered_scene (rejected scene).
+        self.assertEqual(ex._last_triggered_scene, "")
+        self.assertEqual(ex.status()["triggered_count"], 0)
+        self.assertEqual(ex.status()["last_error"], "midi_trigger_rejected")
+        self.assertEqual(backend.status()["no_op_count"], 1)
+
+    def test_single_backend_slot_no_secondary_midi_path(self) -> None:
+        # Mutual exclusivity at the object: constructing with one backend holds
+        # exactly that backend in the single slot and wires no MIDI path.
+        spy = _SpyBackend()
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False),
+            backend=spy,
+            personality=_personality(),
+        )
+        self.assertIs(ex._backend, spy)
+        # No second backend / midi attribute exists to bypass the single slot.
+        self.assertFalse(hasattr(ex, "_midi_output"))
 
 
 if __name__ == "__main__":

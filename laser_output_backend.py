@@ -143,9 +143,9 @@ class PackOutputBackend:
     sender (injected in T6).  Absent a sender, frames are counted but
     not transmitted.
 
-    T7 pre-condition: ``LaserMidiMessage`` has no ``scene_name`` field; the
-    ``scene_to_identity`` lookup will always miss until T7 adds ``scene_name``
-    to the message or changes the trigger signature to carry it separately.
+    ``LaserMidiMessage.scene_name`` (added in T7.1) carries the fired scene's
+    identity; ``trigger`` resolves it via ``scene_to_identity``. An unmapped
+    scene is a no-op selection (returns False) so the executor does not advance.
     """
 
     def __init__(

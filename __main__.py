@@ -60,6 +60,7 @@ from .logging_manager import get_logging_manager
 from .laser_config import LaserConfig, LaserConfigResult, load_laser_director_config
 from .laser_director import LaserDirector
 from .laser_executor import LaserSceneExecutor
+from .laser_output_backend import MidiOutputBackend
 from .laser_models import LaserPersonality
 from .midi_output import MidiOutput
 from .led_config import LEDConfigResult, load_led_look_director_config
@@ -376,9 +377,10 @@ def _build_laser_startup_wiring(
         dry_run=cfg.dry_run,
     )
     midi_output.start()
+    laser_backend = MidiOutputBackend(midi_output)
     laser_executor = LaserSceneExecutor(
         config=cfg,
-        midi_output=midi_output,
+        backend=laser_backend,
         personality=initial_personality,
     )
 

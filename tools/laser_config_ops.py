@@ -16,6 +16,7 @@ from ..laser_config import (
     load_laser_director_config,
 )
 from ..laser_executor import LaserSceneExecutor
+from ..laser_output_backend import MidiOutputBackend
 from ..laser_models import LaserContext, LaserMidiMessage, LaserSceneDecision
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1322,7 +1323,7 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
     midi = _DryCheckMidiOutput()
     ex = LaserSceneExecutor(
         config=cfg,
-        midi_output=midi,
+        backend=MidiOutputBackend(midi),
         personality=personality,
         randomize_cursors=False,
     )
@@ -1464,7 +1465,7 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
     midi2 = _DryCheckMidiOutput()
     ex2 = LaserSceneExecutor(
         config=cfg,
-        midi_output=midi2,
+        backend=MidiOutputBackend(midi2),
         personality=personality,
         randomize_cursors=False,
     )
@@ -1517,7 +1518,7 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
     )
     ex3 = LaserSceneExecutor(
         config=cfg,
-        midi_output=midi3,
+        backend=MidiOutputBackend(midi3),
         personality=refire_personality,
         randomize_cursors=False,
     )

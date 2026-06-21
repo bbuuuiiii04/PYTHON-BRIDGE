@@ -4,7 +4,7 @@ This module intentionally keeps policy selection in LaserDirector while owning:
 - role bank rotation (deterministic round-robin),
 - scene lookup in validated LaserConfig,
 - execution gates for live-safe triggering, and
-- delegation to MidiOutput.trigger().
+- delegation to the injected LaserOutputBackend.trigger().
 """
 from __future__ import annotations
 
@@ -17,8 +17,7 @@ from typing import Optional
 
 from .laser_config import LaserConfig
 from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
-from .laser_output_backend import MidiOutputBackend
-from .midi_output import MidiOutput
+from .laser_output_backend import LaserOutputBackend
 
 log = logging.getLogger("laser_executor")
 
@@ -36,13 +35,13 @@ class LaserSceneExecutor:
         self,
         *,
         config: LaserConfig,
-        midi_output: MidiOutput,
+        backend: LaserOutputBackend,
         personality: Optional[LaserPersonality],
         rng: Optional[random.Random] = None,
         randomize_cursors: bool = True,
     ) -> None:
         self._config = config
-        self._backend = MidiOutputBackend(midi_output)
+        self._backend = backend
         self._personality = personality
         self._rng = rng if rng is not None else random.Random()
         self._randomize_cursors = bool(randomize_cursors)
@@ -234,6 +233,7 @@ class LaserSceneExecutor:
             scene_def.midi,
             ctx,
             reason=decision.reason,
+            scene_name=selected_scene,
         )
         if not self._backend.trigger(midi_message, priority=priority):
             self._record_gate("midi_trigger_rejected")
@@ -512,7 +512,7 @@ class LaserSceneExecutor:
             return "high"
         return "normal"
 
-    def _materialize_midi(self, msg, ctx: LaserContext, *, reason: str):
+    def _materialize_midi(self, msg, ctx: LaserContext, *, reason: str, scene_name: str = ""):
         behavior = (msg.behavior or "").strip().lower()
         if behavior == "hold_beats":
             bpm = float(ctx.bpm) if ctx.bpm else 0.0
@@ -521,9 +521,9 @@ class LaserSceneExecutor:
             else:
                 hold_ms = int(round((60000.0 * float(msg.hold_beats)) / bpm))
             hold_ms = max(_MIN_HOLD_MS, min(_MAX_HOLD_MS, hold_ms))
-            return replace(msg, behavior="hold_ms", hold_ms=hold_ms)
+            return replace(msg, behavior="hold_ms", hold_ms=hold_ms, scene_name=scene_name)
         if behavior == "pulse" and reason == "drop_crossing":
             duration_ms = int(getattr(msg, "duration_ms", 0))
             if duration_ms < _DROP_CROSSING_MIN_PULSE_MS:
-                return replace(msg, duration_ms=_DROP_CROSSING_MIN_PULSE_MS)
-        return msg
+                return replace(msg, duration_ms=_DROP_CROSSING_MIN_PULSE_MS, scene_name=scene_name)
+        return replace(msg, scene_name=scene_name)
