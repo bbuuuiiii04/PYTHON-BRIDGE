@@ -253,6 +253,7 @@ contracts:
       - tests/test_soundswitch_midi_input*.py
       - tests/test_soundswitch_frame_sender*.py
       - tests/test_enttec*.py
+      - tests/test_prove_soundswitch_pack_generation.py
     inspect:
       - docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md
       - docs/subsystems/soundswitch_output.md
