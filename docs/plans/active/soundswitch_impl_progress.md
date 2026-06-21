@@ -49,6 +49,31 @@ from authoritative state and submits frames nonblocking:
   (the `soundswitch_frame_sender = None` placeholder), BEFORE `StateManager(...)`
   (~794) and `sm.start()` (~1175).
 
+### BLOCKER found during mechanism extraction (verified at `f7ae38d`)
+Task 7 is NOT thin glue. Determinable-from-code: config+loader, startup wiring,
+scripted-mode integration, status, commands, scene_to_identity, fixture_map. But:
+- **[BLOCKER — autoloop phase_tick]** `render_autoloop_frame(loop, phase_tick)`
+  (`soundswitch_laser_player.py:118`) needs `phase_tick` in SoundSwitch internal
+  ANIMATION-TICK units (cycle = `AUTOLOOP_CYCLE_TICKS=19_200`, loader:19), wrapped
+  `% 19200`. The beat→tick scaling (`TICKS_PER_BEAT`) AND the phase ORIGIN (must
+  align tick-0 to `os.autoloop_arm_sync_beat`, not track start) are SS-internal
+  conventions ABSENT from code. 19200/`AUTOLOOP_ARM_PHRASE_BEATS`(=32, config.py:8)
+  = 600 is a plausible but UNPROVEN guess; the arm-phrase ≠ proven animation cycle.
+  In the existing OS2L path SS advances the animation itself — pack/DMX mode must
+  replicate it. Pinning needs CAPTURE-CORPUS evidence (autoloop DMX vs beat pos).
+  DO NOT GUESS (live rig). → autoloop-DMX integration gated on an evidence pass.
+- **[bug — T5/T6 stub]** `PackOutputBackend.submit_frame(frame)` calls
+  `frame_sender.submit(frame)` but `SoundSwitchFrameSender.submit` needs
+  `(frame_19, fixture_map)` — arg mismatch. fixture_map must be baked into the
+  sender/backend at construction. Live-safety (wrong map = wrong DMX addresses).
+- **[design]** `select_scripted` flags transport/authority/metadata_ready/
+  source_errored/elapsed_discontinuous/track_changed have NO direct DeckState
+  source — derive each per-tick from existing scripted prior art (each gates
+  render-vs-ZERO). Player test = usage contract (`tests/test_soundswitch_laser_player.py`).
+- **[glue]** `scene_to_identity` not exposed by LoadedPack — join
+  `selection_map.json` `bridge_scenes[].policy_name → target_identity`
+  (resolution=project_target, classification=pack_selection); extend loader or read raw.
+
 Mechanisms to PIN during spec authoring (verify against current code, no guessing):
 1. `phase_tick` source for `select_autoloop` (beat/autoloop-tick authority var —
    check the autoloop controller + `abs_beat_pos`/`autoloop_tick_just_fired`).
@@ -67,10 +92,14 @@ pack reload, worker error, shutdown) must clear held/pending state and resolve Z
 
 ## Next action
 
-> TASK 7 IN PROGRESS (PR #116): authoring Part A–E implementer spec
-> (`docs/plans/active/soundswitch_task7_runtime_integration_spec.md`) via codex-spec,
-> then opus-high implement → opus-xhigh review (full "Gate — before-T7"). Subtasks:
-> config `soundswitch_pack_player.example.json`
+> SPEC-FIRST (operator directive 2026-06-21): no subagent implementation; spec the
+> remaining work out and group the docs. DONE — combined Part A–E spec authored:
+> `docs/plans/active/soundswitch_t7_t8_t9_implementation_spec.md` (T7a–e + T8 + T9),
+> grouped via `docs/plans/active/soundswitch_README.md`. T7.0 + T7.1 already
+> implemented+reviewed on PR #116 (revertible if a pure spec-first pass is preferred).
+> Autoloop phase_tick scaling+origin remains an [unknown] blocker (capture-evidence
+> pass required before T7d). Next: operator review of the spec, then decide
+> implement-path. Subtasks specced: config `soundswitch_pack_player.example.json`
 > + validated loader; load/verify pack+config before workers; StateManager calls
 > only pure player methods + nonblocking submit; output_backend port selection;
 > all transitions resolve safe frames; sanitized status; no implicit hot enable
