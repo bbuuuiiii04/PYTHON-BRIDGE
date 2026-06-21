@@ -902,15 +902,15 @@ def check_fail_closed(proof: Proof, project: Path, venue_data: bytes, inventory:
 
     # F10 unsupported active MIDI semantic (active CC/pitch static-override).
     cc_distinguished = _decode_distinguishes_cc()
+    f10 = _prove_cc_export_fail()
     proof.record(
         "F10-active-cc-override", "Active Static Override learned to CC/pitch must fail export",
-        False, foundation=False, incomplete=True,
+        f10["ok"], foundation=False,
         expected="a render-affecting override on CC/pitch fails export with a relearn instruction",
-        actual={"decoder_distinguishes_note_vs_cc": cc_distinguished,
-                "export_fail_path": "not implemented (Task 4 MIDI input adapter)"},
-        evidence="inventory decoder classifies message_type note/control_change; export-fail path is unbuilt",
-        sources=[_rel(RE_DIR / "inventory_project_artifacts.py"),
-                 "docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md (Task 4)"],
+        actual={"decoder_distinguishes_note_vs_cc": cc_distinguished, **f10},
+        evidence="compile_pack_artifacts raises SoundSwitchPackCompileError with relearn instruction "
+                 "when an enabled CC/pitch binding targets static_look or autoloop",
+        sources=["soundswitch_pack.py", _rel(RE_DIR / "inventory_project_artifacts.py")],
         remediation="Implement Task 4 so an active CC/pitch render control fails export until relearned to note.",
     )
 
@@ -928,6 +928,87 @@ def _decode_distinguishes_cc() -> bool:
     data += _sig(0x01380306) + struct.pack("<Q", 0) + _sig(0xDEADBEEF)
     decoded = inventory_project_artifacts._decode_recordable_control_map(bytes(data))
     return decoded["bindings"][0]["message_type"] == "control_change"
+
+
+def _prove_cc_export_fail() -> dict[str, Any]:
+    """Verify that compile_pack_artifacts raises on an active CC/pitch render binding."""
+    from rb_ss_bridge_v2.soundswitch_pack import (
+        SoundSwitchPackCompileError,
+        compile_pack_artifacts,
+    )
+    from rb_ss_bridge_v2.soundswitch_pack_models import (
+        DecodedSoundSwitchProject,
+        MidiBinding,
+        MidiCollection,
+        MidiDevice,
+        LearnedMidiMap,
+        ProjectIdentity,
+        ResolvedControlBinding,
+    )
+    from rb_ss_bridge_v2.soundswitch_project_decoder import (
+        CANONICAL_CONTAINER_VERSION,
+        CANONICAL_PROJECT_UUID,
+        CANONICAL_SOUNDSWITCH_VERSION,
+        CANONICAL_VENUE_GUID,
+    )
+
+    binding = MidiBinding(
+        source_offset=0,
+        device_name="DDJ-800",
+        collection_id=0,
+        message_type="control_change",
+        message_type_raw=1,
+        data_byte=106,
+        channel_zero_based=6,
+        control_path="SoundSwitch.Controls.StaticOverride16",
+        enabled=True,
+    )
+    resolved = ResolvedControlBinding(
+        binding=binding,
+        target_kind="static_look",
+        target_identity="SoundSwitch.Controls.StaticOverride16",
+        target_index=16,
+        target_name="Static Override 16",
+    )
+    midi_map = LearnedMidiMap(
+        relative_path="SoundSwitchMIDIMap.bin",
+        source_sha256="0" * 64,
+        version=1,
+        status=0,
+        devices=(MidiDevice(
+            name="DDJ-800",
+            collections=(MidiCollection(collection_id=0, bindings=(binding,)),),
+            feedback_bytes=b"",
+        ),),
+    )
+    project = DecodedSoundSwitchProject(
+        identity=ProjectIdentity(
+            project_uuid=CANONICAL_PROJECT_UUID,
+            soundswitch_version=CANONICAL_SOUNDSWITCH_VERSION,
+            container_version=CANONICAL_CONTAINER_VERSION,
+            venue_guid=CANONICAL_VENUE_GUID,
+            venue_name="RAVE Venue",
+        ),
+        source_inventory=(), fixture_channels=(), attribute_cues=(),
+        static_looks=(), autoloop_catalogs=(), autoloops=(),
+        scripted_tracks=(), scripted_track_classifications=(), track_map=(),
+        learned_midi_maps=(midi_map,),
+        resolved_controls=(resolved,),
+        no_target_policy_inputs=(), diagnostics=(),
+    )
+    try:
+        compile_pack_artifacts(project, generator_commit="proof_gate",
+                               enforce_pinned_totals=False)
+        return {"ok": False, "raised": False,
+                "error": "compile_pack_artifacts did not raise for active CC binding"}
+    except SoundSwitchPackCompileError as exc:
+        msg = str(exc)
+        has_relearn = "relearn" in msg
+        return {"ok": has_relearn, "raised": True,
+                "has_relearn_instruction": has_relearn, "error_prefix": msg[:120]}
+    except Exception as exc:
+        return {"ok": False, "raised": False,
+                "error": f"unexpected exception: {type(exc).__name__}: {exc}"}
 
 
 def _prove_pack_mutation(project: Path) -> dict[str, Any]:

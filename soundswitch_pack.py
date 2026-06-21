@@ -271,6 +271,18 @@ def compile_pack_artifacts(
         raise SoundSwitchPackCompileError("source identity is outside the pinned boundary")
     if any(row.active for row in project.diagnostics):
         raise SoundSwitchPackCompileError("active unsupported diagnostics block publication")
+    # F10: active render-affecting controls must use the "note" message type.
+    # CC/pitch-bend bindings on static_look or autoloop targets are unsupported;
+    # the operator must relearn the control to a note-capable mapping in SoundSwitch.
+    for row in project.resolved_controls:
+        b = row.binding
+        if b.enabled and row.target_kind in ("static_look", "autoloop") and b.message_type != "note":
+            raise SoundSwitchPackCompileError(
+                f"active render-affecting control uses unsupported MIDI message type "
+                f"{b.message_type!r} at {b.device_name!r} ch{b.channel_zero_based} "
+                f"data_byte={b.data_byte} path={b.control_path!r}: "
+                "relearn to a note-capable control in SoundSwitch, save, and re-export"
+            )
     cues = {row.cue_guid: row for row in project.render_cues}
     active_scripts = _active_script_paths(project)
     union, union_sha = _active_union(project, active_scripts)
