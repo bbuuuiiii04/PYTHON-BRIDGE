@@ -103,6 +103,10 @@ class SoundSwitchMidiInputAdapter:
         self._mailbox: collections.deque = collections.deque(maxlen=_MAILBOX_MAXLEN)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        # Pack device identity this port corresponds to; set by start().
+        # Only messages whose binding.device_name matches are dispatched.
+        # None means "accept from any device" (used in tests without a port).
+        self._connected_device: str | None = None
 
     # ------------------------------------------------------------------
     # Hot-path API (no MIDI API calls, no locks held for duration)
@@ -127,13 +131,20 @@ class SoundSwitchMidiInputAdapter:
         self,
         port_name: str,
         *,
+        device_name: str | None = None,
         _message_source: Callable[[], Iterator[tuple[int, int, int] | None]] | None = None,
     ) -> None:
         """Start the MIDI worker thread.
 
-        _message_source is an injectable factory for tests (returns an
-        iterator of (status_byte, data1, data2) tuples or None on timeout).
-        In production a real MIDI port is opened.
+        device_name: the pack device identity this port corresponds to
+            (e.g. "DDJ-800").  When provided, only MIDI messages whose
+            binding's device_name matches are dispatched; messages from any
+            other device on the same port are silently ignored.  Omit in
+            tests that inject events without a real port.
+
+        _message_source: injectable factory for tests (returns an iterator
+            of (status_byte, data1, data2) tuples or None on timeout).
+            In production a real MIDI port is opened.
         """
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
@@ -141,6 +152,7 @@ class SoundSwitchMidiInputAdapter:
             self._stop_event.clear()
             self._worker_alive = False
             self._error = None
+            self._connected_device = device_name
 
         source = _message_source or self._make_real_source(port_name)
         t = threading.Thread(
@@ -158,6 +170,13 @@ class SoundSwitchMidiInputAdapter:
         t = self._thread
         if t is not None:
             t.join(timeout=2.0)
+            if t.is_alive():
+                # Worker did not exit within the timeout.  The stop_event is
+                # set so it will exit on the next poll interval (~250 ms), but
+                # we cannot guarantee it has stopped now.  State is cleared
+                # below; the zombie thread can still race, but snapshot() will
+                # reflect worker_alive=False for the hot path to gate on.
+                log.warning("[SS-MIDI] worker did not exit within stop timeout; state cleared")
         self._clear_held("stop")
 
     def panic(self) -> None:
@@ -172,13 +191,14 @@ class SoundSwitchMidiInputAdapter:
     # Internal state mutation (always called under _lock or via _clear_held)
     # ------------------------------------------------------------------
 
-    def _clear_held(self, reason: str) -> None:
+    def _clear_held(self, reason: str, *, error_msg: str | None = None) -> None:
+        """Clear held state; error is set to error_msg if given, else reason."""
         with self._lock:
             changed = self._held_static_slot is not None or self._blackout_held
             self._held_static_slot = None
             self._blackout_held = False
             self._worker_alive = False
-            self._error = reason
+            self._error = error_msg if error_msg is not None else reason
         if changed:
             log.info("[SS-MIDI] held state cleared: reason=%s", reason)
 
@@ -249,11 +269,14 @@ class SoundSwitchMidiInputAdapter:
         else:
             return
 
-        # All bound devices share the same message bus in the adapter; the
-        # binding key includes device_name but we match only on
-        # (message_type, channel, data_byte) here for simplicity.  A future
-        # multi-device adapter would include device_name in the dispatch key.
+        # Dispatch only to bindings whose device_name matches the connected
+        # device (spec: "exact device identity, message type, zero-based
+        # channel, and data byte").  When _connected_device is None (test
+        # injection without a real port) all device names are accepted.
+        connected = self._connected_device
         for key, binding in self._bindings.items():
+            if connected is not None and key[0] != connected:
+                continue
             if key[1] == msg_type_str and key[2] == channel and key[3] == data_byte:
                 if is_note_on:
                     self._process_note_on(binding, data2)
@@ -309,11 +332,10 @@ class SoundSwitchMidiInputAdapter:
                 status, data1, data2 = msg
                 self._feed_raw_message(status, data1, data2)
         except Exception as exc:
-            err = f"worker_error:{exc}"
-            with self._lock:
-                self._error = err
             log.warning("[SS-MIDI] worker died: %s", exc)
-            self._clear_held("worker_death")
+            # Preserve the specific exception in error_msg; _clear_held sets
+            # it rather than the generic "worker_death" reason string.
+            self._clear_held("worker_death", error_msg=f"worker_error:{exc}")
         finally:
             with self._lock:
                 self._worker_alive = False

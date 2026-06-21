@@ -272,6 +272,32 @@ class TestClearOnEvent(unittest.TestCase):
 # Disabled bindings / unknown messages
 # ---------------------------------------------------------------------------
 
+class TestDeviceNameDispatch(unittest.TestCase):
+    """Device-name filtering: spec requires exact device identity match."""
+
+    def test_connected_device_filters_other_devices(self):
+        """Messages from a device other than connected_device must be ignored."""
+        # Binding is for DDJ-800 but we tell adapter we're connected to IAC.
+        a = SoundSwitchMidiInputAdapter([_SLOT8])
+        a._connected_device = IAC  # simulate start(device_name=IAC)
+        _note_on(a, _SLOT8)  # _SLOT8 is DDJ-800 → should be ignored
+        self.assertIsNone(a.snapshot().held_static_slot)
+
+    def test_connected_device_accepts_matching_device(self):
+        """Messages from the connected device are processed normally."""
+        a = SoundSwitchMidiInputAdapter([_SLOT8])
+        a._connected_device = DDJ  # _SLOT8 is DDJ-800
+        _note_on(a, _SLOT8)
+        self.assertEqual(a.snapshot().held_static_slot, 8)
+
+    def test_no_connected_device_accepts_all(self):
+        """None connected device accepts all devices (test-injection mode)."""
+        a = SoundSwitchMidiInputAdapter([_SLOT8])
+        # _connected_device stays None (default)
+        _note_on(a, _SLOT8)
+        self.assertEqual(a.snapshot().held_static_slot, 8)
+
+
 class TestDisabledAndUnknown(unittest.TestCase):
     def test_unregistered_note_is_silently_ignored(self):
         a = _adapter(_SLOT8)
@@ -308,7 +334,7 @@ def _minimal_project_identity() -> ProjectIdentity:
     )
 
 
-def _make_binding(message_type: str, target_kind: str) -> MidiBinding:
+def _make_binding(message_type: str) -> MidiBinding:
     msg_raw = {"note": 0, "control_change": 1, "pitch_bend": 2}[message_type]
     return MidiBinding(
         source_offset=0,
@@ -324,7 +350,7 @@ def _make_binding(message_type: str, target_kind: str) -> MidiBinding:
 
 
 def _project_with_binding(message_type: str, target_kind: str) -> DecodedSoundSwitchProject:
-    binding = _make_binding(message_type, target_kind)
+    binding = _make_binding(message_type)
     midi_map = LearnedMidiMap(
         relative_path="SoundSwitchMIDIMap.bin",
         source_sha256="0" * 64,
