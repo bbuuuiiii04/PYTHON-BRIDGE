@@ -1,15 +1,21 @@
 ---
-doc_status: active-session-handoff
+doc_status: historical-evidence
 truth_level: byte-and-capture-grounded
-last_verified_commit: 2c71a2e
-last_verified_date: 2026-06-20
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
 validation_scope: read-only SoundSwitch research tooling, passive wire captures, and docs; no bridge runtime implementation; hardware-unvalidated
 ---
 
 # Codex Implementation Spec - Close Scripted-Track Renderer Verification
 
+> **Completed/superseded 2026-06-21.** Corrected physical parsing, the cold-open
+> runtime capture, binary readers/writers, and bridge single-owner boundary
+> close the scripted product gate. All 32 current existing-path scripts are
+> clean-byte exportable. Use `soundswitch_re_closure_report.md`; do not resume
+> this historical capture handoff.
+
 > **Superseded as a completion gate.** Use
-> `docs/research/soundswitch_re_closure_report.md` for the current verdict and
+> `docs/research/soundswitch/soundswitch_re_closure_report.md` for the current verdict and
 > exact blockers. This file remains supporting capture/research history. It does
 > not authorize the exporter, player, runtime integration, MIDI, DMX, or the
 > final importer/exporter/player implementation spec.
@@ -396,9 +402,9 @@ After the model fits all existing evidence:
 
 Update every `soundswitch_research.docs_update` file, especially:
 
-- `docs/research/soundswitch_ssfile_format.md`;
-- `docs/plans/active/soundswitch_validation_matrix.md`;
-- `docs/plans/active/soundswitch_standalone_laser_exporter_spec.md`;
+- `docs/research/soundswitch/soundswitch_ssfile_format.md`;
+- `docs/research/soundswitch/soundswitch_validation_matrix.md`;
+- `docs/research/soundswitch/soundswitch_standalone_laser_exporter_spec.md`;
 - this handoff;
 - `docs/status/active_work_registry.md`;
 - `docs/agents/change_contracts.yml` if tool/docs routing changes.

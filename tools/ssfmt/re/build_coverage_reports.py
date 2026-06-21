@@ -115,9 +115,46 @@ def autoloop_report(
         catalog = entries_by_file[file_number]
         path = project_dir / f"SSAutoLoop{file_number}.ssfile"
         data = path.read_bytes()
-        # PROVISIONAL one_based: provenance-dependent, not wire-anchored (see
-        # soundswitch_ssfile_format.md); off-by-one for direct/mixed autoloops.
-        parsed = parse_autoloop_structure(data, "one_based")
+        capture = _capture_summary(capture_by_file.get(path.name, []))
+        # SoundSwitch 2.10.3 runtime playback is wire-proven one_based across
+        # legacy autoloops and a cold-open newly authored scripted track.
+        try:
+            parsed = parse_autoloop_structure(data, "one_based")
+        except ValueError as error:
+            rows.append(
+                {
+                    "file": path.name,
+                    "path": str(path),
+                    "size": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "version": int.from_bytes(data[4:8], "little") if len(data) >= 8 else None,
+                    "app_log_index": catalog["app_log_index"],
+                    "file_number": file_number,
+                    "catalog_ordering": catalog["ordering"],
+                    "catalog_name": catalog["display_name"],
+                    "catalog_category": catalog["category"],
+                    "catalog_enabled": catalog["enabled"],
+                    "event_count_offset": None,
+                    "event_count": None,
+                    "cue_count_offset": None,
+                    "cue_count": None,
+                    "timeline_count_offset": None,
+                    "timeline_count": None,
+                    "declared_timeline_count": None,
+                    "continuation_timeline_count": 0,
+                    "negative_record_count": None,
+                    "ref_zero_count": None,
+                    "nonzero_auxiliary_values": [],
+                    "referenced_missing_guids": [],
+                    "unused_stale_guids": [],
+                    "trailer_offset": None,
+                    "trailer_hex": None,
+                    **capture,
+                    "status": "unsupported_corrupt_artifact",
+                    "blocker": str(error),
+                }
+            )
+            continue
         dictionary_by_index = {entry["cue_index"]: entry for entry in parsed["cues"]}
         referenced_indices = {
             row["resolved_dictionary_index"]
@@ -133,14 +170,24 @@ def autoloop_report(
         missing_referenced = sorted(referenced_guids - venue_guids)
         stale_unused = sorted((dictionary_guids - venue_guids) - referenced_guids)
         timeline = parsed["timeline"]
-        capture = _capture_summary(capture_by_file.get(path.name, []))
-        blocker = None
-        if missing_referenced:
-            blocker = "referenced cue GUID is absent from current Venue"
-        elif capture["capture_status"] not in {"byte_exact_static_render", "no_capture_evidence"}:
-            blocker = "captured output retains unresolved layer/control/ownership state"
+        blocker = (
+            "referenced cue GUID is absent from current Venue"
+            if missing_referenced
+            else None
+        )
+        validation_note = None
+        if capture["capture_status"] not in {
+            "byte_exact_static_render",
+            "no_capture_evidence",
+        }:
+            validation_note = (
+                "capture is confounded by another deck or runtime override; the source "
+                "structure and binary-backed renderer remain independently exportable"
+            )
         elif capture["capture_status"] == "no_capture_evidence":
-            blocker = "no clean captured segment for byte comparison"
+            validation_note = (
+                "no per-file capture; capture is validation coverage, not a parser rule"
+            )
         rows.append(
             {
                 "file": path.name,
@@ -164,25 +211,40 @@ def autoloop_report(
                 "continuation_timeline_count": parsed["continuation_timeline_count"],
                 "negative_record_count": sum(row["time"] < 0 for row in timeline),
                 "ref_zero_count": sum(row["raw_cue_reference"] == 0 for row in timeline),
-                "nonzero_auxiliary_values": sorted(
-                    {row["auxiliary"] for row in parsed["events"] if row["auxiliary"] != 0}
+                "nonzero_intensity_attribute_values": sorted(
+                    {
+                        row["attribute_value"]
+                        for row in parsed["events"]
+                        if row["attribute_value"] != 0
+                    }
                 ),
+                "referenced_cue_guids": sorted(referenced_guids),
                 "referenced_missing_guids": missing_referenced,
                 "unused_stale_guids": stale_unused,
                 "trailer_offset": parsed["trailer_offset"],
                 "trailer_hex": parsed["trailer_hex"],
                 **capture,
                 "status": (
-                    "byte_exact_captured"
-                    if capture["capture_status"] == "byte_exact_static_render" and not missing_referenced
-                    else "structurally_parsed_blocked"
+                    "referenced_cue_missing"
+                    if missing_referenced
+                    else "byte_exact_captured"
+                    if capture["capture_status"] == "byte_exact_static_render"
+                    else "structurally_parsed_no_per_file_capture"
+                    if capture["capture_status"] == "no_capture_evidence"
+                    else "structurally_parsed_capture_confounded"
                 ),
                 "blocker": blocker,
+                "validation_note": validation_note,
             }
         )
     status_counts = Counter(row["status"] for row in rows)
+    blocking_statuses = {"unsupported_corrupt_artifact", "referenced_cue_missing"}
     return {
-        "status": "partial",
+        "status": (
+            "complete_bounded_inventory"
+            if not any(row["status"] in blocking_statuses for row in rows)
+            else "partial_fail_closed"
+        ),
         "project_dir": str(project_dir),
         "venue": {
             "path": str(venue_path),
@@ -192,14 +254,16 @@ def autoloop_report(
         },
         "catalogs": catalogs,
         "file_count": len(rows),
-        "structurally_parsed_count": len(rows),
+        "structurally_parsed_count": sum(
+            row["status"] != "unsupported_corrupt_artifact" for row in rows
+        ),
         "byte_exact_captured_file_count": sum(row["status"] == "byte_exact_captured" for row in rows),
         "captured_file_count": sum(row["captured_segment_count"] > 0 for row in rows),
         "uncaptured_file_count": sum(row["captured_segment_count"] == 0 for row in rows),
         "status_counts": dict(sorted(status_counts.items())),
         "unsupported_reason": (
-            "control/effect and deck-ownership semantics remain unresolved for captured residuals; "
-            "uncaptured files have no byte-exact wire evidence"
+            "unsupported/corrupt artifacts and missing active cues fail closed; capture residuals "
+            "are validation evidence and do not change the binary-backed source grammar"
         ),
         "files": rows,
     }
@@ -210,6 +274,7 @@ def scripted_report(
     autoloop_reference: Path,
     track_map_path: Path,
     validation: dict[str, Any] | None,
+    venue_path: Path | None = None,
 ) -> dict[str, Any]:
     paths = sorted(project_dir.glob("{*.ssfile"))
     layouts = analyze_scripted_layouts(paths, autoloop_reference)
@@ -218,6 +283,11 @@ def scripted_report(
     for mapping in track_map["mappings"]:
         mappings_by_id[mapping["soundswitch_id"]].append(mapping)
     validated_id = None
+    venue_guids = (
+        {cue["cue_guid"] for cue in parse_venue_cues(venue_path.read_bytes())}
+        if venue_path is not None
+        else set()
+    )
     if validation:
         name = Path(validation["scripted_file"]).name
         validated_id = name[1:-8].upper() if name.startswith("{") and name.endswith("}.ssfile") else None
@@ -230,6 +300,11 @@ def scripted_report(
         row["track_map_titles"] = sorted({item["title"] for item in mappings if item["title"]})
         row["track_map_filepaths"] = sorted({item["filepath"] for item in mappings})
         row["track_map_existing_filepath_count"] = sum(item["filepath_exists"] for item in mappings)
+        active_existing_path = row["track_map_existing_filepath_count"] > 0
+        missing_referenced = sorted(
+            set(row.get("referenced_cue_guids", [])) - venue_guids
+        ) if venue_path is not None else []
+        row["referenced_missing_guids"] = missing_referenced
         if ssid == validated_id and validation is not None:
             row["wire_validation"] = {
                 key: validation[key]
@@ -245,29 +320,68 @@ def scripted_report(
                     "max_abs_transition_residual_ms",
                 )
             }
-            row["coverage_status"] = "byte_exact_captured"
-            row["blocker"] = None
+            row["coverage_status"] = (
+                "referenced_cue_missing"
+                if missing_referenced and active_existing_path
+                else "inactive_orphan_referenced_cue_missing"
+                if missing_referenced
+                else "byte_exact_captured"
+            )
+            row["blocker"] = (
+                "referenced cue GUID is absent from current Venue"
+                if missing_referenced and active_existing_path
+                else None
+            )
         elif row["status"] == "unsupported":
             row["wire_validation"] = None
-            row["coverage_status"] = "unsupported"
-            row["blocker"] = row["unsupported_reason"]
+            row["coverage_status"] = (
+                "unsupported" if active_existing_path else "inactive_unsupported"
+            )
+            row["blocker"] = (
+                row["unsupported_reason"] if active_existing_path else None
+            )
+            row["validation_note"] = (
+                None
+                if active_existing_path
+                else "unsupported artifact has no current existing TrackMap path"
+            )
         else:
             row["wire_validation"] = None
-            row["coverage_status"] = "structurally_parsed_not_wire_validated"
-            row["blocker"] = "no representative wire capture for this file/layout"
+            row["coverage_status"] = (
+                "referenced_cue_missing"
+                if missing_referenced and active_existing_path
+                else "inactive_orphan_referenced_cue_missing"
+                if missing_referenced
+                else "clean_byte_exportable_representative_model"
+            )
+            row["blocker"] = (
+                "referenced cue GUID is absent from current Venue"
+                if missing_referenced and active_existing_path
+                else None
+            )
+            row["validation_note"] = (
+                "no per-file capture; shared physical timeline grammar and the "
+                "version-locked runtime renderer are independently proven"
+            )
         rows.append(row)
+    blocking_statuses = {"unsupported", "referenced_cue_missing"}
     return {
-        "status": "partial",
+        "status": (
+            "complete_bounded_inventory"
+            if not any(row["coverage_status"] in blocking_statuses for row in rows)
+            else "partial_fail_closed"
+        ),
         "file_count": len(rows),
         "structurally_parsed_count": sum(row["status"] != "unsupported" for row in rows),
         "byte_exact_captured_file_count": sum(row["coverage_status"] == "byte_exact_captured" for row in rows),
-        "unsupported_file_count": sum(row["coverage_status"] == "unsupported" for row in rows),
+        "unsupported_file_count": sum(row["status"] == "unsupported" for row in rows),
         "layout_counts": layouts["layout_counts"],
         "track_map_mapped_script_count": sum(row["track_map_mapping_count"] > 0 for row in rows),
         "track_map_unmapped_script_count": sum(row["track_map_mapping_count"] == 0 for row in rows),
         "unsupported_reason": (
-            "44 files are structurally parsed but only A5 has byte-exact wire validation; one "
-            "demo layout and all transport semantics remain unsupported"
+            "44 files are clean-byte parsed under the version-locked runtime model; per-file "
+            "capture is confidence coverage, not an export requirement. The inactive demo "
+            "layout remains visible and unsupported."
         ),
         "files": rows,
     }
@@ -299,6 +413,7 @@ def main() -> None:
             args.autoloop_reference,
             args.track_map,
             _load(args.scripted_validation),
+            args.venue,
         ),
     }
     print(json.dumps(output, indent=2, sort_keys=True))

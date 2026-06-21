@@ -661,7 +661,7 @@ def _static_looks(blobs: dict[str, bytes]) -> dict[str, dict[str, Any]]:
             "offset": look["offset"],
             "end_offset": look["end_offset"],
             "name": look["name"],
-            "enabled": look["enabled"],
+            "record_version": look["record_version"],
             "fixture_instance_ids": look["fixture_instance_ids"],
             "primary_values": [
                 {
@@ -677,13 +677,12 @@ def _static_looks(blobs: dict[str, bytes]) -> dict[str, dict[str, Any]]:
                 }
                 for row in look["secondary_values"]
             ],
-            "states": [
+            "colour_values": [
                 {
                     "fixture_instance_id": row["fixture_instance_id"],
-                    "state": row["state"],
-                    "reserved": row["reserved"],
+                    "colour_value_raw_hex": row["colour_value_raw_hex"],
                 }
-                for row in look["states"]
+                for row in look["colour_values"]
             ],
             "positions": [
                 {

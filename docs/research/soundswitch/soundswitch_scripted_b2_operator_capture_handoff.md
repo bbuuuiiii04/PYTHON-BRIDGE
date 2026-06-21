@@ -1,16 +1,21 @@
 ---
-doc_status: active-session-handoff
+doc_status: historical-evidence
 truth_level: capture-protocol-only
-last_verified_commit: c6d1a50
-last_verified_date: 2026-06-20
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
 validation_scope: read-only research + operator-orchestrated passive captures; no bridge runtime, no SoundSwitch project mutation by the agent; hardware-unvalidated
 ---
 
 # Codex/Agent Handoff — B2: Operator-Ping Capture Campaign for Scripted-Renderer Closure
 
+> **Campaign completed/superseded 2026-06-21.** The decisive cold-open new-track
+> and Autoloop captures are complete. Current 2.10.3 runtime is positive
+> `raw-1`, and ordinary active/new supported scripted tracks do not require a
+> per-file oracle. No operator task in this file remains blocking.
+
 Paste this whole file into a fresh session opened at `/Users/bbui/rb_ss_bridge_v2`.
 This is the **B2** follow-on to
-`docs/plans/active/soundswitch_scripted_renderer_closure_handoff_spec.md`
+`docs/research/soundswitch/soundswitch_scripted_renderer_closure_handoff_spec.md`
 (read that spec's Part A–E and its "Session Progress and Blockers" section first).
 B1 (offline analysis) is exhausted; the remaining work needs live evidence that
 **only the operator can produce**.

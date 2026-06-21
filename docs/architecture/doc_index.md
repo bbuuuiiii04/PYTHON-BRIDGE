@@ -62,7 +62,8 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/guides/*.md` (4) | CURRENT SUPPORTING — laser MIDI mapping, rollout checklist, Laser Pad. |
 | `docs/subsystems/logging.md` | CURRENT SUPPORTING — matches `logging_manager.py`. |
 | `docs/data/offsets-*.yaml` (3) | CURRENT SUPPORTING — Rekordbox offset reference data. |
-| `docs/research/*.md` | RESEARCH — ANLZ energy, waveform tags, SS memory discovery, and SoundSwitch v3 evidence. `soundswitch_re_closure_report.md` is the current AWR-107 readiness verdict and overrides older SoundSwitch plans when they conflict. |
+| `docs/research/*.md` | RESEARCH — ANLZ energy and waveform-tag evidence. |
+| `docs/research/soundswitch/*.md` | SOUNDSWITCH RE AUTHORITY — all SoundSwitch RE findings, validation, historical handoffs, tool guide, and implementation specs are grouped here. Start with `README.md`; `soundswitch_re_closure_report.md` is the readiness verdict. |
 | `docs/validation/anlz_energy_corpus_report.md`, `anlz_energy_evaluation_guide.md`, `autoloop_beatphase_findings.md`, `smart_drop_synthetic_corpus.yaml` | VALIDATION EVIDENCE. |
 
 ## Active plans & prompts — VALIDATE against code before executing
@@ -76,9 +77,9 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/active/beat_sync_runtime_spec.md` | PLAN / SPEC (ACTIVE) | Beat-sync runtime. |
 | `docs/plans/active/led_role_mapping_v2_spec.md` | PLAN / SPEC (ACTIVE) | Verify status against code. |
 | `docs/plans/active/rt_comet_*.md` (3) | PLAN / SPEC (ACTIVE) | Realtime comet stutter/smoothness/pause work; verify which are landed. |
-| `docs/plans/active/soundswitch_{stage2_research_findings,validation_matrix,decode_export_codex_spec,stage3_handoff,exporter_renderer_full_plan,authoring_mutation_matrix,reverse_engineering_session_handoff,standalone_laser_exporter_spec,scripted_renderer_closure_handoff_spec}.md` | PLAN / SPEC / VALIDATION / SESSION HANDOFF (ACTIVE SUPPORTING EVIDENCE) | AWR-107 historical/continuation evidence. The current verdict is `docs/research/soundswitch_re_closure_report.md`: RE remains incomplete, and exporter/player/runtime implementation is not authorized. |
+| `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE SPEC POINTER | Symlink to the authoritative grouped spec. RE is complete for its bounded scope; implementation remains unstarted/default-off/hardware-unvalidated. |
 | `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |
-| `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | M2 phase1–3 prompts/handoffs likely **completed** (Phase 2b/3 committed at HEAD) — verify and archive what is done. `codex_ss_catalog_handoff.md` validate API paths. |
+| `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | M2 phase1–3 prompts/handoffs likely **completed** (Phase 2b/3 committed at HEAD) — verify and archive what is done. SoundSwitch handoffs are grouped under `docs/research/soundswitch/`. |
 | `docs/plans/completed/govee_realtime_codex_spec.md` | PLAN / SPEC | **Untracked local file** — classify (completed vs awaiting-build) and commit or archive separately. |
 
 ## Archive / historical — evidence only

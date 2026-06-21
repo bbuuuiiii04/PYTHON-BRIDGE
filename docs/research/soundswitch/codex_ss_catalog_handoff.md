@@ -1,4 +1,18 @@
+---
+doc_status: historical-evidence
+truth_level: superseded-implementation-handoff
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
+validation_scope: historical catalog-import planning only; no current implementation authority; hardware-unvalidated
+---
+
 # Codex Handoff — SoundSwitch Catalog Importer + Per-Personality Enforcement Gate
+
+> **Superseded 2026-06-21.** Do not implement the three-PR plan below. Current
+> RE decodes catalog category order, all learned IAC Autoloop bindings, all 32
+> primary-Venue Static Looks, and four DDJ-800 Static Overrides. The final
+> implementation authority is gated by `soundswitch_re_closure_report.md` and
+> its grouped importer/exporter/player spec.
 
 ## What you're building
 

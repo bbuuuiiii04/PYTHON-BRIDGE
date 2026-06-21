@@ -1,12 +1,18 @@
 ---
-doc_status: active-operator-handoff
+doc_status: historical-evidence
 truth_level: evidence-constrained-procedure
-last_verified_commit: a5f7ced
-last_verified_date: 2026-06-20
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
 validation_scope: operator procedure only; no live commands executed; hardware-unvalidated
 ---
 
 # SoundSwitch Stage 3 Operator Handoff
+
+> **Completed/superseded 2026-06-21.** The required fixture-bearing mutation
+> corpus, Autoloop capture, cold newly authored track capture, static-look
+> diffs, and binary reader/writer work are complete. No operator action in this
+> historical handoff remains a product blocker. Current authority is
+> `soundswitch_re_closure_report.md`.
 
 > **2026-06-20 update.** The controlled scratch-project authoring corpus is now
 > captured (`/tmp/soundswitch_finish_IiVlD1`), including the legacy scripted-edit
@@ -15,7 +21,7 @@ validation_scope: operator procedure only; no live commands executed; hardware-u
 > non-uniform/unproven). Remaining operator-gated blockers below still require
 > explicit per-run approval: playback/wire captures (esp. an autoloop wire anchor
 > to settle the autoloop convention and the CH11=227 layer), restarts/toggles,
-> and any hardware check. See `docs/research/soundswitch_ssfile_format.md` and
+> and any hardware check. See `docs/research/soundswitch/soundswitch_ssfile_format.md` and
 > `soundswitch_authoring_mutation_matrix.md`.
 
 ## Purpose and approval boundary
@@ -105,7 +111,7 @@ settle, freeze the complete after state and stop for comparison. Do not combine
 creation, editing, naming, playing, or triggering in one experiment.
 
 Use the read-only freezer/comparator commands in
-`tools/ssfmt/re/README.md`. A source that changes during read, an unsupported or
+`docs/research/soundswitch/research_tools.md`. A source that changes during read, an unsupported or
 opaque changed source, an unresolved reference, or an unexplained consistency
 failure invalidates the experiment and stops the sequence.
 

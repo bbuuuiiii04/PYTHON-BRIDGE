@@ -1,12 +1,18 @@
 ---
-doc_status: active-deferred-plan
+doc_status: historical-evidence
 truth_level: evidence-constrained-plan
-last_verified_commit: a5f7ced
-last_verified_date: 2026-06-20
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
 validation_scope: planning only; no exporter/renderer implementation; hardware-unvalidated
 ---
 
 # SoundSwitch Exporter / Renderer Full Plan
+
+> **Historical plan, superseded 2026-06-21.** The mixed/provenance and active
+> coverage blockers described below are closed for the bounded 2.10.3 product.
+> The final scope now also requires all 32 Static Looks and learned DDJ/IAC
+> mappings. Use `soundswitch_re_closure_report.md` and the final grouped
+> importer/exporter/player implementation spec.
 
 > **2026-06-20 correction (authoritative).** A newly identified hard blocker:
 > cue-reference resolution is provenance-dependent and NOT byte-deterministic
@@ -15,10 +21,10 @@ validation_scope: planning only; no exporter/renderer implementation; hardware-u
 > cue identities for edited/mixed files from bytes alone — it must fail closed or
 > consume an external wire/playback oracle or provenance. Exporter readiness and
 > renderer readiness are reported separately and both remain NOT ready. See
-> `docs/research/soundswitch_ssfile_format.md`. The concrete implementation spec
+> `docs/research/soundswitch/soundswitch_ssfile_format.md`. The concrete implementation spec
 > for the standalone laser path (exporter + byte-exact renderer + Enttec output
 > via VLN `dmx_pro.py`) is
-> `docs/plans/active/soundswitch_standalone_laser_exporter_spec.md`.
+> `docs/research/soundswitch/soundswitch_standalone_laser_exporter_spec.md`.
 
 ## Current decision
 

@@ -32,9 +32,12 @@ def _u32be(data: bytes, offset: int) -> int:
 
 def _dictionary_timeline_candidates(data: bytes) -> list[dict[str, Any]]:
     candidates = []
-    for cue_count_offset in range(max(0, len(data) - 28)):
-        cue_count = _u32be(data, cue_count_offset)
-        if not 1 <= cue_count <= 255:
+    for cue_map_version_offset in range(max(0, len(data) - 32)):
+        if _u32le(data, cue_map_version_offset) != 1:
+            continue
+        cue_count_offset = cue_map_version_offset + 4
+        cue_count = _u32le(data, cue_count_offset)
+        if not 1 <= cue_count <= 10000:
             continue
         entries_offset = cue_count_offset + 4
         entries_end = entries_offset + cue_count * 20
@@ -44,20 +47,18 @@ def _dictionary_timeline_candidates(data: bytes) -> list[dict[str, Any]]:
         indices = []
         for cue_index in range(cue_count):
             offset = entries_offset + cue_index * 20
-            if data[offset : offset + 3] != b"\0\0\0":
-                break
-            indices.append(data[offset + 19])
+            indices.append(_u32le(data, offset + 16))
             cues.append(
                 {
                     "offset": offset,
-                    "guid": data[offset + 3 : offset + 19].hex(),
-                    "cue_index": data[offset + 19],
+                    "guid": data[offset : offset + 16].hex(),
+                    "cue_index": _u32le(data, offset + 16),
                 }
             )
         else:
             if len(indices) != len(set(indices)):
                 continue
-            timeline_count = _u32be(data, entries_end)
+            timeline_count = _u32le(data, entries_end)
             timeline_offset = entries_end + 4
             timeline_end = timeline_offset + timeline_count * 16
             if not 1 <= timeline_count <= 10000 or timeline_end > len(data):
@@ -66,8 +67,8 @@ def _dictionary_timeline_candidates(data: bytes) -> list[dict[str, Any]]:
             valid = True
             for record_index in range(timeline_count):
                 try:
-                    # PROVISIONAL one_based for fallback candidate validation
-                    # (provenance-dependent; see soundswitch_ssfile_format.md).
+                    # Version-locked SoundSwitch 2.10.3 runtime rule; generic
+                    # structural parsers still retain both candidates elsewhere.
                     record = timeline_record(data, timeline_offset + record_index * 16, "one_based")
                 except ValueError:
                     valid = False
@@ -83,6 +84,7 @@ def _dictionary_timeline_candidates(data: bytes) -> list[dict[str, Any]]:
             if valid:
                 candidates.append(
                     {
+                        "cue_map_version_offset": cue_map_version_offset,
                         "cue_count_offset": cue_count_offset,
                         "cue_count": cue_count,
                         "cues": cues,
@@ -129,6 +131,20 @@ def _timeline_summary(timeline: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _referenced_cue_guids(
+    cues: list[dict[str, Any]], timeline: list[dict[str, Any]]
+) -> list[str]:
+    by_index = {row["cue_index"]: row["guid"] for row in cues}
+    return sorted(
+        {
+            by_index[row["resolved_dictionary_index"]]
+            for row in timeline
+            if row["resolved_dictionary_index"] is not None
+            and row["resolved_dictionary_index"] in by_index
+        }
+    )
+
+
 def _base(path: Path, data: bytes) -> dict[str, Any]:
     match = _SCRIPT_FILENAME.match(path.name)
     return {
@@ -151,8 +167,7 @@ def analyze_file(path: Path, shared_table: bytes) -> dict[str, Any]:
     if data[:4] != MAGIC:
         return {**row, "status": "unsupported", "unsupported_reason": "not a SoundSwitch container"}
     try:
-        # PROVISIONAL one_based; scripted convention is provenance-dependent
-        # (legacy=one_based wire-proven, new=direct, edited=MIXED). See ssfile_format doc.
+        # Version-locked SoundSwitch 2.10.3 runtime playback rule.
         parsed = parse_scripted_structure(data, shared_table, "one_based")
     except ValueError as shared_error:
         try:
@@ -196,10 +211,13 @@ def analyze_file(path: Path, shared_table: bytes) -> dict[str, Any]:
             "footer_offset": footer_offset,
             "footer_size": len(data) - footer_offset if footer_offset is not None else 0,
             "footer_hex": data[footer_offset:].hex() if footer_offset is not None else "",
-            "reference_rule": "PROVENANCE-DEPENDENT (not byte-determinable): legacy records one-based (raw-1, wire-proven for scripted), new records direct (raw), edited-legacy files MIXED; raw 0 is clear/control. Resolved here under provisional one_based.",
+            "reference_rule": "SoundSwitch 2.10.3 runtime playback: positive raw resolves to stored key raw-1; raw 0 is clear/control. Cold-open new and legacy captures are wire-proven.",
             "reference_evidence": (
                 "same packed 16-byte record grammar and bounded references as the wire-validated "
                 "A5 layout; this layout itself has no representative wire capture"
+            ),
+            "referenced_cue_guids": _referenced_cue_guids(
+                candidate["cues"], timeline
             ),
             **_timeline_summary(timeline),
         }
@@ -220,8 +238,9 @@ def analyze_file(path: Path, shared_table: bytes) -> dict[str, Any]:
         "trailer_offset": parsed["trailer_offset"],
         "trailer_hex": parsed["trailer_hex"],
         "extra_size": parsed["extra_size"],
-        "reference_rule": "positive raw reference resolves to dictionary index raw - 1; raw 0 is clear/control",
-        "reference_evidence": "wire-validated for A5 only; structural for other files",
+        "reference_rule": "SoundSwitch 2.10.3 runtime playback: positive raw resolves to dictionary index raw - 1; raw 0 is clear/control",
+        "reference_evidence": "wire-validated for legacy A5, legacy autoloops, and a cold-open newly authored scripted track; structural for other files",
+        "referenced_cue_guids": _referenced_cue_guids(parsed["cues"], timeline),
         **_timeline_summary(timeline),
     }
 

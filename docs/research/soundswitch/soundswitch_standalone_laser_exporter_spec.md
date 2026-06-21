@@ -1,15 +1,21 @@
 ---
-doc_status: active-implementation-spec
+doc_status: historical-evidence
 truth_level: evidence-constrained-spec
-last_verified_commit: a5f7ced
-last_verified_date: 2026-06-20
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
 validation_scope: spec only; no implementation; software+wire-grounded; hardware-unvalidated
 ---
 
 # Codex Implementation Spec — SoundSwitch Standalone Laser Exporter + Renderer + Enttec Output
 
+> **Historical draft, superseded 2026-06-21.** This draft predates closure of
+> the runtime reference rule, Static Looks, DDJ learned mappings, and current
+> active inventory. It must not be implemented. Physical Enttec output remains
+> separately approval-gated; use the final grouped importer/exporter/player
+> spec after `soundswitch_re_closure_report.md`.
+
 > Scripted byte-parity is currently blocked. Execute
-> `docs/plans/active/soundswitch_scripted_renderer_closure_handoff_spec.md`
+> `docs/research/soundswitch/soundswitch_scripted_renderer_closure_handoff_spec.md`
 > before implementing this runtime spec.
 
 ## Part A — Context & root cause (verified; read, do not implement)
@@ -39,7 +45,7 @@ selection; SoundSwitch is purely the laser DMX renderer being replaced.
   wire segments show ~4–9 distinct frames over ~500 captured frames (~33 fps). This model is NOT
   general scripted-track truth: the 2026-06-20 TITANIUM, Opalite, and New Sky captures are only
   16/64, 23/39, and 304/367 event samples exact. Documented in
-  `docs/research/soundswitch_ssfile_format.md` ("Layered laser render model"). Current hypothesis:
+  `docs/research/soundswitch/soundswitch_ssfile_format.md` ("Layered laser render model"). Current hypothesis:
   - **Position layer** = captured legacy timeline cues resolved **ONE-BASED**. Autoloop and A5 wire
     evidence support this convention, while representative scripted tracks retain layer/mask
     residuals.

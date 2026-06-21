@@ -10,9 +10,17 @@ from pathlib import Path
 
 
 MAGIC = b"\xaa\xaa\x09\x55"
-EVENT_COUNT_OFFSET = 2255
+INTENSITY_TRACK_TYPE = 1
+INTENSITY_TRACK_NODE_COUNT_OFFSET = 2255
+# Compatibility alias for older research consumers. The 17-byte records were
+# initially labeled generic events; binary analysis identifies them as the
+# type-1 (intensity) AttributeTrack nodes.
+EVENT_COUNT_OFFSET = INTENSITY_TRACK_NODE_COUNT_OFFSET
 POST_EVENTS_SHARED_SIZE = 441
-TRAILER_SIZE = 13
+# Physical SoundSwitchDocData v12 trailer: u32, bool, u32, bool. Older research
+# reported 13 bytes because its three-byte-shifted view included the trailing
+# bytes of the final timeline raw-reference word.
+TRAILER_SIZE = 10
 MINIMAL_SHARED_BLOCK_OFFSET = 87
 OBSERVED_SHARED_BLOCK_SHA256 = (
     "ef84f0902fac69c8836cab500cee88b61b71ce13f3bf544d8c3f9ecfb6e73fd1"
@@ -35,12 +43,17 @@ def decode_timeline_time(high_time_bytes: int, low_time_byte: int) -> int:
 
 
 def _timeline_record(data: bytes, offset: int, reference_rule: str) -> dict:
-    field_a, field_b, low_time_byte = struct.unpack_from(">III", data, offset)
-    if low_time_byte > 255:
-        raise ValueError(f"timeline low-time byte exceeds 255 at byte {offset}")
-    packed = _u32le(data, offset + 12)
-    high_time_bytes = packed & 0x00FFFFFF
-    raw_reference = packed >> 24
+    field_a, field_b, elapsed, raw_reference = struct.unpack_from(
+        "<IIiI", data, offset
+    )
+    if field_a > 1:
+        raise ValueError(
+            f"timeline entry version {field_a} is unsupported at byte {offset}"
+        )
+    if field_b != 1:
+        raise ValueError(
+            f"timeline entry constant is {field_b}, expected 1 at byte {offset}"
+        )
     direct_index = raw_reference if raw_reference > 0 else None
     one_based_index = raw_reference - 1 if raw_reference > 0 else None
     resolved_index = {
@@ -52,8 +65,8 @@ def _timeline_record(data: bytes, offset: int, reference_rule: str) -> dict:
         "offset": offset,
         "field_a": field_a,
         "field_b": field_b,
-        "low_time_byte": low_time_byte,
-        "time": decode_timeline_time(high_time_bytes, low_time_byte),
+        "low_time_byte": elapsed & 0xFF,
+        "time": elapsed,
         "raw_cue_reference": raw_reference,
         "direct_dictionary_index": direct_index,
         "one_based_dictionary_index": one_based_index,
@@ -75,7 +88,7 @@ def _parse_legacy_autoloop_structure(data: bytes, reference_rule: str) -> dict:
     for index in range(event_count):
         if offset + 17 > len(data):
             raise ValueError(f"truncated event record {index}")
-        record_type, tick_a, tick_b, auxiliary = struct.unpack_from(
+        record_type, tick_a, tick_b, attribute_value = struct.unpack_from(
             "<IIII", data, offset
         )
         trailer = data[offset + 16]
@@ -87,31 +100,38 @@ def _parse_legacy_autoloop_structure(data: bytes, reference_rule: str) -> dict:
                 "type": record_type,
                 "tick_a": tick_a,
                 "tick_b": tick_b,
-                "auxiliary": auxiliary,
+                "attribute_value": attribute_value,
+                "attribute_value_percent": attribute_value / 0xFFFFFFFF * 100.0,
+                "auxiliary": attribute_value,
                 "trailer": trailer,
             }
         )
         offset += 17
 
     shared_block_offset = offset
-    offset += POST_EVENTS_SHARED_SIZE
-    if offset + 4 > len(data):
+    offset += POST_EVENTS_SHARED_SIZE - 1
+    if offset + 8 > len(data):
         raise ValueError("missing cue dictionary")
 
+    cue_map_version_offset = offset
+    cue_map_version = _u32le(data, offset)
+    if cue_map_version != 1:
+        raise ValueError(
+            f"cue-map version is {cue_map_version}, expected 1 at byte {offset}"
+        )
+    offset += 4
     cue_count_offset = offset
-    cue_count = _u32be(data, offset)
+    cue_count = _u32le(data, offset)
     offset += 4
     cues = []
     for index in range(cue_count):
         if offset + 20 > len(data):
             raise ValueError(f"truncated cue-dictionary entry {index}")
-        if data[offset : offset + 3] != b"\0\0\0":
-            raise ValueError(f"unexpected cue-dictionary prefix at byte {offset}")
         cues.append(
             {
                 "offset": offset,
-                "guid": data[offset + 3 : offset + 19].hex(),
-                "cue_index": data[offset + 19],
+                "guid": data[offset : offset + 16].hex(),
+                "cue_index": _u32le(data, offset + 16),
             }
         )
         offset += 20
@@ -122,7 +142,7 @@ def _parse_legacy_autoloop_structure(data: bytes, reference_rule: str) -> dict:
     if offset + 4 > len(data):
         raise ValueError("missing timeline count")
     timeline_count_offset = offset
-    declared_timeline_count = _u32be(data, offset)
+    declared_timeline_count = _u32le(data, offset)
     offset += 4
     timeline = []
     for index in range(declared_timeline_count):
@@ -134,16 +154,11 @@ def _parse_legacy_autoloop_structure(data: bytes, reference_rule: str) -> dict:
     if len(data) - offset < TRAILER_SIZE:
         raise ValueError("missing observed 13-byte trailer")
     extra = data[offset : len(data) - TRAILER_SIZE]
-    continuation = []
-    if extra and len(extra) % 16 == 0:
-        continuation_offset = offset
-        while offset < len(data) - TRAILER_SIZE:
-            continuation.append(_timeline_record(data, offset, reference_rule))
-            offset += 16
-        if any(row["field_b"] != 1 for row in continuation):
-            continuation = []
-            offset = continuation_offset
-    timeline.extend(continuation)
+    if extra:
+        raise ValueError(
+            f"{len(extra)} undeclared byte(s) remain between the declared timeline "
+            f"and document trailer at byte {offset}"
+        )
 
     return {
         "layout": "embedded_fixture_groups_events_shared441",
@@ -154,19 +169,23 @@ def _parse_legacy_autoloop_structure(data: bytes, reference_rule: str) -> dict:
         "event_count_offset": EVENT_COUNT_OFFSET,
         "event_count": event_count,
         "events": events,
+        "attribute_track_type": INTENSITY_TRACK_TYPE,
+        "attribute_track_role": "intensity",
         "shared_block_offset": shared_block_offset,
         "shared_block_size": POST_EVENTS_SHARED_SIZE,
+        "cue_map_version_offset": cue_map_version_offset,
+        "cue_map_version": cue_map_version,
         "cue_count_offset": cue_count_offset,
         "cue_count": cue_count,
         "cues": cues,
         "timeline_count_offset": timeline_count_offset,
         "declared_timeline_count": declared_timeline_count,
-        "continuation_timeline_count": len(continuation),
+        "continuation_timeline_count": 0,
         "timeline_count": len(timeline),
         "timeline": timeline,
         "extra_offset": offset,
-        "extra_size": 0 if continuation else len(extra),
-        "extra_hex": "" if continuation else extra.hex(),
+        "extra_size": 0,
+        "extra_hex": "",
         "trailer_offset": len(data) - TRAILER_SIZE,
         "trailer_hex": data[-TRAILER_SIZE:].hex(),
     }
@@ -184,9 +203,14 @@ def _parse_minimal_autoloop_structure(data: bytes, reference_rule: str) -> dict:
             "compact autoloop shared-table hash is not the observed v3 table"
         )
 
-    offset = shared_end
+    offset = shared_end - 1
+    cue_map_version_offset = offset
+    cue_map_version = _u32le(data, offset)
+    if cue_map_version != 1:
+        raise ValueError("compact autoloop cue-map version is not 1")
+    offset += 4
     cue_count_offset = offset
-    cue_count = _u32be(data, offset)
+    cue_count = _u32le(data, offset)
     if not 1 <= cue_count <= 255:
         raise ValueError("compact autoloop cue count is outside 1..255")
     offset += 4
@@ -194,13 +218,11 @@ def _parse_minimal_autoloop_structure(data: bytes, reference_rule: str) -> dict:
     for index in range(cue_count):
         if offset + 20 > len(data):
             raise ValueError(f"truncated compact cue-dictionary entry {index}")
-        if data[offset : offset + 3] != b"\0\0\0":
-            raise ValueError(f"unexpected compact cue prefix at byte {offset}")
         cues.append(
             {
                 "offset": offset,
-                "guid": data[offset + 3 : offset + 19].hex(),
-                "cue_index": data[offset + 19],
+                "guid": data[offset : offset + 16].hex(),
+                "cue_index": _u32le(data, offset + 16),
             }
         )
         offset += 20
@@ -211,7 +233,7 @@ def _parse_minimal_autoloop_structure(data: bytes, reference_rule: str) -> dict:
     if offset + 4 > len(data):
         raise ValueError("missing compact autoloop timeline count")
     timeline_count_offset = offset
-    timeline_count = _u32be(data, offset)
+    timeline_count = _u32le(data, offset)
     if timeline_count > 10000:
         raise ValueError("compact autoloop timeline count exceeds 10000")
     offset += 4
@@ -255,8 +277,12 @@ def _parse_minimal_autoloop_structure(data: bytes, reference_rule: str) -> dict:
         "event_count_offset": None,
         "event_count": 0,
         "events": [],
+        "attribute_track_type": None,
+        "attribute_track_role": "not_embedded_in_compact_layout",
         "shared_block_offset": shared_block_offset,
         "shared_block_size": POST_EVENTS_SHARED_SIZE,
+        "cue_map_version_offset": cue_map_version_offset,
+        "cue_map_version": cue_map_version,
         "cue_count_offset": cue_count_offset,
         "cue_count": cue_count,
         "cues": cues,
@@ -276,21 +302,17 @@ def _parse_minimal_autoloop_structure(data: bytes, reference_rule: str) -> dict:
 def parse_autoloop_structure(data: bytes, reference_rule: str = "ambiguous") -> dict:
     """Parse an autoloop .ssfile.
 
-    Cue references are an index into a GUID-sorted dictionary whose entries carry
-    an explicit stored ``cue_index`` byte (positional order != stored byte).
-    The raw->cue resolution convention is PROVENANCE-DEPENDENT and is NOT
-    determinable from bytes alone:
+    Cue references index a GUID/key dictionary whose physical entries are
+    ``guid[16], u32le key``. SoundSwitch 2.10.3 playback is wire-proven to resolve
+    positive references one-based (``key = raw - 1``) for legacy autoloops,
+    legacy scripted tracks, and a cold-open newly authored scripted track. Raw
+    zero is the clear/control sentinel. Current editor writes can still have a
+    direct relation to the cue the operator selected; the cold-open capture proves
+    that relation does not describe the emitted runtime frame.
 
-    - Newly written records (current SoundSwitch) use DIRECT (raw == cue_index byte).
-    - Legacy records use ONE-BASED (raw == cue_index byte + 1).
-    - The autoloop corpus contains BOTH (e.g. RED encoded as raw 21 in some files
-      and raw 22 in others); editing a legacy file yields a MIXED file. The prior
-      "autoloops are direct" claim was a self-consistency artifact and is unproven
-      by wire. (Scripted one-based is wire-proven; see analyze_scripted_ssfile.)
-
-    Therefore the default is ``ambiguous`` (preserve both candidate indices; never
-    silently assert a convention). Callers that need a single resolved index must
-    pass an explicit rule and treat the result as provisional unless wire-anchored.
+    The default remains ``ambiguous`` because this is a generic structural
+    research parser, not a version-locked player. The bounded 2.10.3 exporter must
+    pass ``one_based`` explicitly and retain the capture/version evidence.
     """
     if data[:4] != MAGIC:
         raise ValueError("not a SoundSwitch container")
@@ -319,6 +341,14 @@ def summary(path: Path, parsed: dict) -> dict:
         "fixture_profile_guid": parsed["fixture_profile_guid"],
         "event_count_offset": parsed["event_count_offset"],
         "event_count": parsed["event_count"],
+        "attribute_track_type": parsed["attribute_track_type"],
+        "attribute_track_role": parsed["attribute_track_role"],
+        "nonzero_intensity_node_count": sum(
+            row["attribute_value"] != 0 for row in parsed["events"]
+        ),
+        "intensity_attribute_values": sorted(
+            {row["attribute_value"] for row in parsed["events"]}
+        ),
         "nonzero_auxiliary_count": sum(
             row["auxiliary"] != 0 for row in parsed["events"]
         ),
@@ -345,10 +375,9 @@ def main() -> None:
         "--reference-rule",
         choices=REFERENCE_RULES,
         default="ambiguous",
-        help="convention is provenance-dependent and not byte-determinable; "
-        "default 'ambiguous' preserves both candidates. Only pass one_based/direct "
-        "for an artifact whose provenance you can justify (legacy=one_based is "
-        "wire-proven for scripted; new=direct).",
+        help="default 'ambiguous' preserves both candidates; SoundSwitch 2.10.3 "
+        "runtime playback is wire-proven one_based for legacy and cold-open new "
+        "content, while direct remains available for controlled structural analysis",
     )
     parser.add_argument("--full", action="store_true")
     args = parser.parse_args()

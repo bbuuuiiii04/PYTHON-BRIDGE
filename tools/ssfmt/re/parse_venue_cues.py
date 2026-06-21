@@ -14,6 +14,54 @@ CHANNEL_BY_ID = {channel_id: index + 1 for index, channel_id in enumerate(CHANNE
 KNOWN_FIXTURE_GROUPS = {0x493, 0x494, 0x496, 0x497}
 
 
+def parse_fixture_profile_channels(data: bytes) -> list[dict]:
+    """Decode the first current-profile channel-definition set.
+
+    The observed Venue embeds a complete 19-channel RAVE fixture profile before
+    the cue catalog. Each definition begins with version 2, a channel ID, a
+    present flag, and a UTF-16LE name. A second mode-specific subset follows;
+    selecting the earliest valid definition for every known channel ID retains
+    the complete primary profile without conflating the subset.
+    """
+    by_id: dict[int, dict] = {}
+    scan_end = min(len(data), 8192)
+    for offset in range(0, max(0, scan_end - 16)):
+        version, channel_id, present, name_length = struct.unpack_from(
+            "<IIII", data, offset
+        )
+        if (
+            version != 2
+            or channel_id not in CHANNEL_BY_ID
+            or present != 1
+            or not 2 <= name_length <= 64
+            or channel_id in by_id
+        ):
+            continue
+        name_offset = offset + 16
+        name_end = name_offset + name_length * 2
+        if name_end > scan_end:
+            continue
+        try:
+            decoded = data[name_offset:name_end].decode("utf-16le")
+        except UnicodeDecodeError:
+            continue
+        if not decoded.endswith("\0") or "\0" in decoded[:-1]:
+            continue
+        name = decoded[:-1]
+        if not name or not all(32 <= ord(character) < 127 for character in name):
+            continue
+        by_id[channel_id] = {
+            "offset": offset,
+            "record_version": version,
+            "channel_id": channel_id,
+            "dmx_channel": CHANNEL_BY_ID[channel_id],
+            "name": name,
+            "name_offset": name_offset,
+            "name_end_offset": name_end,
+        }
+    return [by_id[channel_id] for channel_id in CHANNEL_IDS if channel_id in by_id]
+
+
 def cue_at(data: bytes, name_offset: int) -> dict | None:
     if name_offset + 4 > len(data):
         return None
@@ -193,6 +241,7 @@ def main() -> None:
     args = parser.parse_args()
     data = args.venue.read_bytes()
     cues = parse_venue_cues(data)
+    fixture_profile_channels = parse_fixture_profile_channels(data)
     output = cues if args.full else [
         {key: value for key, value in cue.items() if key != "entries"} for cue in cues
     ]
@@ -207,9 +256,16 @@ def main() -> None:
                 "cue_count": len(cues),
                 "first_cue_offset": cues[0]["offset"] if cues else None,
                 "last_cue_end_offset": cues[-1]["entries_end_offset"] if cues else None,
+                "fixture_profile_channels": fixture_profile_channels,
+                "fixture_profile_channel_count": len(fixture_profile_channels),
+                "fixture_profile_has_intensity_channel": any(
+                    channel["name"].casefold() == "intensity"
+                    for channel in fixture_profile_channels
+                ),
                 "unsupported_reason": (
-                    "attribute cue records are decoded; venue fixture patch, positions, "
-                    "categories, and remaining top-level objects are outside this parser"
+                    "attribute cue records and the primary fixture-profile channel names are "
+                    "decoded; venue fixture instances, positions, categories, and remaining "
+                    "top-level objects are outside this parser"
                 ),
                 "cues": output,
             },

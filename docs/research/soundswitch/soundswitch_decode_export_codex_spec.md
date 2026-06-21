@@ -1,12 +1,18 @@
 ---
-doc_status: active-blocked-spec
+doc_status: historical-evidence
 truth_level: evidence-constrained-plan
-last_verified_commit: a5f7ced
-last_verified_date: 2026-06-20
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
 validation_scope: specification only; no exporter/importer implementation; hardware-unvalidated
 ---
 
 # Deferred SoundSwitch Decode / Export / Bridge-Import Spec
+
+> **Historical draft, superseded 2026-06-21.** The former provenance blocker is
+> closed by cold-open wire evidence: bounded 2.10.3 runtime behavior is
+> positive `raw-1`. Current active content, learned MIDI maps, and DDJ-800
+> Static Overrides are export-safe. Do not implement this draft; use the final
+> importer/exporter/player spec authorized by `soundswitch_re_closure_report.md`.
 
 > **2026-06-20 correction (authoritative).** Cue-reference resolution is
 > provenance-dependent and NOT byte-deterministic (legacy scripted=one-based,
@@ -14,7 +20,7 @@ validation_scope: specification only; no exporter/importer implementation; hardw
 > The decode contract MUST default to ambiguous and **fail closed** on
 > mixed/ambiguous files; it must not assume a uniform convention. This is a hard
 > blocker for deterministic decode. See
-> `docs/research/soundswitch_ssfile_format.md`.
+> `docs/research/soundswitch/soundswitch_ssfile_format.md`.
 
 ## 1. Decision and scope
 

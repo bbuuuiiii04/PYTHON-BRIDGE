@@ -1,15 +1,21 @@
 ---
-doc_status: active-session-handoff
+doc_status: historical-evidence
 truth_level: evidence-constrained-continuation
-last_verified_commit: a5f7ced
-last_verified_date: 2026-06-20
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
 validation_scope: scratch-project authoring diffs and passive software evidence; hardware-unvalidated
 ---
 
 # Codex Session Handoff — Finish SoundSwitch Reverse Engineering
 
+> **Mission completed 2026-06-21.** Do not resume the operator campaign or the
+> stale blocker list in this handoff. The bounded verdict is `RE COMPLETE`, and
+> current findings include clean active Autoloops/scripts, exact Static Look
+> slots, DDJ-800 mappings, learned-map save/load behavior, and stateless
+> blackout/restore. See `soundswitch_re_closure_report.md`.
+
 > **Current scripted-renderer closure handoff:**
-> `docs/plans/active/soundswitch_scripted_renderer_closure_handoff_spec.md`
+> `docs/research/soundswitch/soundswitch_scripted_renderer_closure_handoff_spec.md`
 > supersedes this file's older scripted-capture task ordering. Use this broader
 > handoff for historical authoring/catalog context only where the closure spec
 > explicitly routes to it.
@@ -129,15 +135,15 @@ Current unstaged/untracked research work includes:
 
 - `docs/agents/change_contracts.yml`
 - `docs/architecture/doc_index.md`
-- `docs/research/soundswitch_ssfile_format.md`
-- `docs/plans/active/soundswitch_stage2_research_findings.md`
-- `docs/plans/active/soundswitch_validation_matrix.md`
-- `docs/plans/active/soundswitch_stage3_handoff.md`
-- `docs/plans/active/soundswitch_decode_export_codex_spec.md`
-- `docs/plans/active/soundswitch_exporter_renderer_full_plan.md`
-- `docs/plans/active/soundswitch_authoring_mutation_matrix.md`
+- `docs/research/soundswitch/soundswitch_ssfile_format.md`
+- `docs/research/soundswitch/soundswitch_stage2_research_findings.md`
+- `docs/research/soundswitch/soundswitch_validation_matrix.md`
+- `docs/research/soundswitch/soundswitch_stage3_handoff.md`
+- `docs/research/soundswitch/soundswitch_decode_export_codex_spec.md`
+- `docs/research/soundswitch/soundswitch_exporter_renderer_full_plan.md`
+- `docs/research/soundswitch/soundswitch_authoring_mutation_matrix.md`
 - `docs/status/active_work_registry.md`
-- `tools/ssfmt/re/README.md`
+- `docs/research/soundswitch/research_tools.md`
 - `tools/ssfmt/re/analyze_ssfile_structure.py`
 - `tools/ssfmt/re/analyze_scripted_ssfile.py`
 - `tools/ssfmt/re/parse_venue_cues.py`
@@ -146,7 +152,7 @@ Current unstaged/untracked research work includes:
 - `tools/ssfmt/re/freeze_project_snapshot.py`
 
 Do not reconstruct the absent
-`docs/plans/active/soundswitch_exporter_phase1_2_spec.md` blindly.
+`docs/research/soundswitch/soundswitch_exporter_phase1_2_spec.md` blindly.
 
 ### Current live scratch state
 

@@ -9,7 +9,7 @@ Problem it solves
 Edited/legacy SoundSwitch ``.ssfile`` timelines are MIXED: the per-record cue
 reference convention (one-based vs direct) varies with no per-record byte
 discriminator, so ``raw_ref -> cue`` cannot be resolved from the stored file
-alone (see docs/research/soundswitch_re_closure_report.md, claim 10/12).
+alone (see docs/research/soundswitch/soundswitch_re_closure_report.md, claim 10/12).
 
 This module bypasses that ambiguity using an **observed-wire oracle**: for each
 captured event it finds the Venue cue composition (layered render model:

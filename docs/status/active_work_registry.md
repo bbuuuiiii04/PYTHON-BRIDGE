@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 2c71a2e
-last_verified_date: 2026-06-20
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
 
@@ -22,7 +22,7 @@ Each item points at an on-disk spec. **A spec is a plan, not proof of implementa
 | AWR-104 | Beat-sync runtime | `docs/plans/active/beat_sync_runtime_spec.md` | confirm against `beat_sync_engine.py` |
 | AWR-105 | LED role mapping v2 | `docs/plans/active/led_role_mapping_v2_spec.md` | scripted groove/drop/post-drop blackout remap is implemented and software-tested in current worktree; broader role-mapping-v2 scope still needs verification against `led_look_director.py`/`led_models.py` |
 | AWR-106 | LED color engine M2.5 solid-color strategy + Patch F cleanup | `docs/plans/active/led_color_engine_solid_color_and_patch_f_spec.md` | Patch S `random_with_mono_chance` and Patch F tracked-example bank cleanup are implemented and software-tested only; live-config mirror remains operator-gated; all hardware behavior remains unvalidated |
-| AWR-107 | SoundSwitch static export / bridge import reverse engineering | `docs/research/soundswitch_re_closure_report.md` (current verdict), `docs/research/soundswitch_ghidra_addendum.md`, `docs/research/soundswitch_ssfile_format.md`, `docs/plans/active/soundswitch_authoring_mutation_matrix.md`, `docs/plans/active/soundswitch_scripted_renderer_closure_handoff_spec.md` | **RE NOT COMPLETE: EXACT BLOCKERS REMAIN.** Oracle packs preserve the exact captured A5/New Sky/Opalite/TITANIUM versions, but final implementation/spec work remains blocked by the direct-loader vs A5 one-based wire contradiction, 17 unresolved automatic autoloops, 28 uncaptured active scripted tracks, note-41/static-utility bindings, blackout restore precedence, and multi-deck ownership. Earlier plans/handoffs are supporting evidence only when they conflict with the closure report. No exporter/player/runtime implementation is authorized; software/wire-validated only, hardware-unvalidated. |
+| AWR-107 | SoundSwitch static exporter / bridge-native player | `docs/research/soundswitch/README.md` (directory authority), `docs/research/soundswitch/soundswitch_re_closure_report.md` (RE verdict), `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` (implementation spec) | **RE COMPLETE: READY FOR PERFECT EXPORTER SPEC** for SoundSwitch 2.10.3/current RAVE profile. Implementation is not started. It must include complete rescans, 19 IAC Autoloop bindings, 32 active scripts, 232 Attribute Cues, all 32 Static Looks, four DDJ overrides, learned-map updates, and default-off/shadow/hardware gates. No runtime, restart, MIDI/DMX, Enttec, or hardware action is authorized by the research result; software/wire-validated only, hardware-unvalidated. |
 
 ## Documentation system follow-ups
 

@@ -1,4 +1,18 @@
+---
+doc_status: historical-evidence
+truth_level: read-only-memory-research-notebook
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
+validation_scope: historical read-only process-memory investigation; not required by static exporter/player; hardware-unvalidated
+---
+
 # SoundSwitch Memory Discovery — Notebook
+
+> **Historical notebook.** The final bounded exporter/player does not depend on
+> SoundSwitch process memory: `.ssfile`, Venue, catalog, TrackMap, Static Look,
+> and learned MIDI-map bytes are sufficient after save. Do not revive memory
+> probing as an exporter dependency. Current authority is
+> `soundswitch_re_closure_report.md`.
 
 Running notebook for the PR-F memory-read investigation (see
 `/Users/bbui/.claude/plans/ss-memory-discovery.md`). Read-only,

@@ -35,20 +35,25 @@ def shared_table_from_autoloop(path: Path) -> bytes:
 def timeline_record(
     data: bytes, offset: int, reference_rule: str = "ambiguous"
 ) -> dict:
-    field_a, field_b, low_time_byte = struct.unpack_from(">III", data, offset)
-    if low_time_byte > 255:
-        raise ValueError(f"scripted low-time byte exceeds 255 at byte {offset}")
-    packed = u32le(data, offset + 12)
-    high_time_bytes = packed & 0x00FFFFFF
-    raw_reference = packed >> 24
+    field_a, field_b, elapsed, raw_reference = struct.unpack_from(
+        "<IIiI", data, offset
+    )
+    if field_a > 1:
+        raise ValueError(
+            f"scripted timeline entry version {field_a} is unsupported at byte {offset}"
+        )
+    if field_b != 1:
+        raise ValueError(
+            f"scripted timeline constant is {field_b}, expected 1 at byte {offset}"
+        )
     direct_index = raw_reference if raw_reference > 0 else None
     one_based_index = raw_reference - 1 if raw_reference > 0 else None
     return {
         "offset": offset,
         "field_a": field_a,
         "field_b": field_b,
-        "low_time_byte": low_time_byte,
-        "elapsed": decode_timeline_time(high_time_bytes, low_time_byte),
+        "low_time_byte": elapsed & 0xFF,
+        "elapsed": elapsed,
         "raw_cue_reference": raw_reference,
         "direct_dictionary_index": direct_index,
         "one_based_dictionary_index": one_based_index,
@@ -67,17 +72,14 @@ def parse_scripted_structure(
 ) -> dict:
     """Parse a scripted-track .ssfile.
 
-    WIRE-PROVEN provenance facts (A5/SANFRANDISCO Art-Net capture, 14/14 exact):
-    - Legacy scripted records are ONE-BASED (raw == cue_index byte + 1).
-    - Newly written records (current SoundSwitch) are DIRECT (raw == cue_index byte).
-    - Editing a legacy file appends the new record DIRECT without renormalizing the
-      old one-based records => MIXED file with no byte-level disambiguator
-      (version 3, field_a=field_b=1, elapsed-sorted).
+    SoundSwitch 2.10.3 runtime playback is wire-proven one-based for both legacy
+    A5 and a cold-open newly authored three-cue track. The current editor wrote
+    raw keys matching the selected cue's stored key, but cold playback emitted
+    ``raw - 1`` frames for all three records. Raw zero is clear/control.
 
-    Resolution is therefore not deterministic from bytes alone for the general
-    corpus. Default is ``ambiguous`` (both candidate indices preserved). Pass an
-    explicit rule only with justified provenance (e.g. one_based for an untouched
-    legacy file; direct for a freshly created file); mixed files must fail closed.
+    Default remains ``ambiguous`` for generic structural inspection. The bounded
+    2.10.3 product path passes ``one_based`` explicitly and version/hash-locks its
+    source. ``direct`` remains useful for controlled writer-byte comparisons.
     """
     if data[:4] != MAGIC:
         raise ValueError("not a SoundSwitch container")
@@ -97,23 +99,28 @@ def parse_scripted_structure(
         raise ValueError(f"expected one observed shared table, found {len(locations)}")
 
     shared_block_offset = locations[0]
-    offset = shared_block_offset + len(shared_table)
-    if offset + 4 > len(data):
+    offset = shared_block_offset + len(shared_table) - 1
+    if offset + 8 > len(data):
         raise ValueError("missing scripted cue dictionary")
+    cue_map_version_offset = offset
+    cue_map_version = u32le(data, offset)
+    if cue_map_version != 1:
+        raise ValueError(
+            f"scripted cue-map version is {cue_map_version}, expected 1 at byte {offset}"
+        )
+    offset += 4
     cue_count_offset = offset
-    cue_count = u32be(data, offset)
+    cue_count = u32le(data, offset)
     offset += 4
     cues = []
     for index in range(cue_count):
         if offset + 20 > len(data):
             raise ValueError(f"truncated scripted cue entry {index}")
-        if data[offset : offset + 3] != b"\0\0\0":
-            raise ValueError(f"unexpected scripted cue prefix at byte {offset}")
         cues.append(
             {
                 "offset": offset,
-                "guid": data[offset + 3 : offset + 19].hex(),
-                "cue_index": data[offset + 19],
+                "guid": data[offset : offset + 16].hex(),
+                "cue_index": u32le(data, offset + 16),
             }
         )
         offset += 20
@@ -121,7 +128,7 @@ def parse_scripted_structure(
     if offset + 4 > len(data):
         raise ValueError("missing scripted timeline count")
     timeline_count_offset = offset
-    declared_timeline_count = u32be(data, offset)
+    declared_timeline_count = u32le(data, offset)
     offset += 4
     timeline = []
     for index in range(declared_timeline_count):
@@ -133,16 +140,11 @@ def parse_scripted_structure(
     if len(data) - offset < TRAILER_SIZE:
         raise ValueError("missing scripted trailer")
     extra = data[offset : len(data) - TRAILER_SIZE]
-    continuation = []
-    if extra and len(extra) % 16 == 0:
-        continuation_offset = offset
-        while offset < len(data) - TRAILER_SIZE:
-            continuation.append(timeline_record(data, offset, reference_rule))
-            offset += 16
-        if any(row["field_b"] != 1 for row in continuation):
-            continuation = []
-            offset = continuation_offset
-    timeline.extend(continuation)
+    if extra:
+        raise ValueError(
+            f"{len(extra)} undeclared scripted byte(s) remain between the declared "
+            f"timeline and trailer at byte {offset}"
+        )
 
     return {
         "size": len(data),
@@ -150,17 +152,19 @@ def parse_scripted_structure(
         "reference_rule": reference_rule,
         "shared_block_offset": shared_block_offset,
         "shared_block_size": len(shared_table),
+        "cue_map_version_offset": cue_map_version_offset,
+        "cue_map_version": cue_map_version,
         "cue_count_offset": cue_count_offset,
         "cue_count": cue_count,
         "cues": cues,
         "timeline_count_offset": timeline_count_offset,
         "declared_timeline_count": declared_timeline_count,
-        "continuation_timeline_count": len(continuation),
+        "continuation_timeline_count": 0,
         "timeline_count": len(timeline),
         "timeline": timeline,
         "extra_offset": offset,
-        "extra_size": 0 if continuation else len(extra),
-        "extra_hex": "" if continuation else extra.hex(),
+        "extra_size": 0,
+        "extra_hex": "",
         "trailer_offset": len(data) - TRAILER_SIZE,
         "trailer_hex": data[-TRAILER_SIZE:].hex(),
     }
@@ -208,9 +212,9 @@ def main() -> None:
         "--reference-rule",
         choices=REFERENCE_RULES,
         default="ambiguous",
-        help="convention is provenance-dependent; default 'ambiguous' preserves both "
-        "candidates. legacy=one_based is wire-proven; new=direct; edited legacy=MIXED "
-        "(fail closed). Pass one_based/direct only with justified provenance.",
+        help="default 'ambiguous' preserves both candidates; SoundSwitch 2.10.3 "
+        "runtime playback is wire-proven one_based for legacy and cold-open new "
+        "content; direct is retained for writer-byte analysis",
     )
     parser.add_argument("--full", action="store_true")
     args = parser.parse_args()

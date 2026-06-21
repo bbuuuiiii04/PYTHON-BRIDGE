@@ -1,15 +1,23 @@
 ---
-doc_status: active-research
+doc_status: historical-evidence
 truth_level: byte-and-capture-grounded
-last_verified_commit: 2c71a2e
-last_verified_date: 2026-06-20
+last_verified_commit: 8ca5875
+last_verified_date: 2026-06-21
 validation_scope: passive software and wire capture only; hardware-unvalidated
 ---
 
 # SoundSwitch Stage 2 Research Findings
 
+> **Superseded 2026-06-21.** Reverse engineering is complete for the bounded
+> SoundSwitch 2.10.3/current-RAVE-profile product. Runtime positive references
+> are wire-proven `raw-1` for legacy and cold newly authored content; all active
+> Autoloops/scripts are clean-byte exportable; 32 Static Look slots and the
+> learned IAC/DDJ map are decoded. Use `soundswitch_re_closure_report.md` and
+> `soundswitch_ssfile_format.md`. The older blocker narrative below is retained
+> only as evidence history.
+
 > **Readiness supersession (2026-06-20).** The current implementation-readiness
-> verdict is `docs/research/soundswitch_re_closure_report.md`: **RE NOT COMPLETE:
+> verdict is `docs/research/soundswitch/soundswitch_re_closure_report.md`: **RE NOT COMPLETE:
 > EXACT BLOCKERS REMAIN**. The ARM64 and x86_64 2.10.3 loader/writer use direct
 > stored-key lookup, which conflicts with the A5 one-based wire capture. Treat
 > the provenance statements below as historical evidence, not a closed export
@@ -20,7 +28,7 @@ validation_scope: passive software and wire capture only; hardware-unvalidated
 > (wire-proven, A5 14/14), newly created = direct, edited-legacy = MIXED,
 > autoloops non-uniform/unproven. Any statement below asserting a uniform
 > one-based (or direct) convention is superseded by
-> `docs/research/soundswitch_ssfile_format.md` ("Reference resolution is
+> `docs/research/soundswitch/soundswitch_ssfile_format.md` ("Reference resolution is
 > PROVENANCE-DEPENDENT"). Negative timeline ticks decode as full signed 32-bit
 > (no `-1` sentinel). Controlled authoring evidence now exists
 > (`/tmp/soundswitch_finish_IiVlD1`).
@@ -73,7 +81,7 @@ Status is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 | TrackMap mapping records | 95 | 95 repeated subrecords | n/a | 61/61 comparable audio tags agree |
 
 The full one-row-per-file coverage is in
-`docs/plans/active/soundswitch_validation_matrix.md` and is reproducible with
+`docs/research/soundswitch/soundswitch_validation_matrix.md` and is reproducible with
 `tools/ssfmt/re/build_coverage_reports.py`.
 
 ## A5 proof

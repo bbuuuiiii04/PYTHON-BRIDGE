@@ -1,11 +1,12 @@
-"""Focused tests for SoundSwitch .ssfile timeline decoding and the
-provenance-dependent cue-reference convention.
+"""Focused tests for physical SoundSwitch .ssfile timeline decoding and safe
+cue-reference candidate handling.
 
-These lock in the session findings (see docs/research/soundswitch_ssfile_format.md
+These lock in the session findings (see docs/research/soundswitch/soundswitch_ssfile_format.md
 and memory project_ss_ref_convention):
   - timeline time is a full signed 32-bit value (negative pre-roll preserved);
   - timeline records expose direct AND one-based candidate indices;
-  - resolution defaults to ``ambiguous`` (never silently assert a convention).
+  - generic parser resolution defaults to ``ambiguous``; the bounded 2.10.3
+    runtime/export path selects the wire-proven one-based rule.
 
 The research tools live in tools/ssfmt/re and import each other by bare module
 name, so that directory is added to sys.path here.
@@ -41,6 +42,7 @@ def _load(module_name: str):
 
 autoloop = _load("analyze_ssfile_structure")
 scripted = _load("analyze_scripted_ssfile")
+scripted_layouts = _load("analyze_scripted_layouts")
 layered = _load("layered_renderer")
 _load("parse_artnet_pcap")
 _load("parse_venue_cues")
@@ -49,12 +51,7 @@ scripted_validator = _load("validate_scripted_capture")
 
 def _make_record(elapsed: int, raw_reference: int) -> bytes:
     """Build one 16-byte timeline record (field_a=field_b=1)."""
-    encoded = elapsed & 0xFFFFFFFF
-    low_time_byte = encoded & 0xFF
-    high_time_bytes = (encoded >> 8) & 0x00FFFFFF
-    head = struct.pack(">III", 1, 1, low_time_byte)
-    packed = (raw_reference << 24) | high_time_bytes
-    return head + struct.pack("<I", packed)
+    return struct.pack("<IIiI", 1, 1, elapsed, raw_reference)
 
 
 class DecodeTimelineTimeTests(unittest.TestCase):
@@ -105,9 +102,66 @@ class TimelineRecordCandidateTests(unittest.TestCase):
         rec = scripted.timeline_record(_make_record(-76, 21), 0, "ambiguous")
         self.assertEqual(rec["elapsed"], -76)
 
+    def test_autoloop_rejects_unsupported_entry_version(self):
+        malformed = bytearray(_make_record(0, 1))
+        malformed[:4] = struct.pack("<I", 0x01000001)
+        with self.assertRaisesRegex(ValueError, "entry version"):
+            autoloop._timeline_record(bytes(malformed), 0, "ambiguous")
+
+    def test_autoloop_does_not_promote_undeclared_tail_to_timeline(self):
+        data = bytearray(autoloop.EVENT_COUNT_OFFSET)
+        data[:4] = autoloop.MAGIC
+        data[4:8] = struct.pack("<I", 3)
+        data += struct.pack("<I", 0)  # intensity-node count
+        data += bytes(autoloop.POST_EVENTS_SHARED_SIZE - 1)
+        data += struct.pack("<I", 1)  # cue-map version (first byte overlaps anchor)
+        data += struct.pack("<I", 0)  # cue dictionary count
+        data += struct.pack("<I", 0)  # declared timeline count
+        data += _make_record(0, 1)  # undeclared but record-shaped tail
+        data += bytes.fromhex("08000000010000000001")
+
+        with self.assertRaisesRegex(ValueError, "undeclared byte"):
+            autoloop._parse_legacy_autoloop_structure(bytes(data), "ambiguous")
+
+    def test_autoloop_reads_full_little_endian_timeline_count(self):
+        data = bytearray(autoloop.EVENT_COUNT_OFFSET)
+        data[:4] = autoloop.MAGIC
+        data[4:8] = struct.pack("<I", 3)
+        data += struct.pack("<I", 0)
+        data += bytes(autoloop.POST_EVENTS_SHARED_SIZE - 1)
+        data += struct.pack("<I", 1)  # cue-map version
+        data += struct.pack("<I", 1)  # one dictionary entry
+        data += bytes.fromhex("00112233445566778899aabbccddeeff")
+        data += struct.pack("<I", 0)
+        data += struct.pack("<I", 257)
+        data += b"".join(_make_record(index, 0) for index in range(257))
+        data += bytes.fromhex("08000000010000000001")
+
+        parsed = autoloop._parse_legacy_autoloop_structure(
+            bytes(data), "one_based"
+        )
+        self.assertEqual(parsed["declared_timeline_count"], 257)
+        self.assertEqual(parsed["timeline_count"], 257)
+        self.assertEqual(parsed["continuation_timeline_count"], 0)
+        self.assertEqual(parsed["timeline"][-1]["time"], 256)
+
+    def test_scripted_referenced_guids_follow_resolved_dictionary_keys(self):
+        cues = [
+            {"cue_index": 0, "guid": "zero"},
+            {"cue_index": 1, "guid": "one"},
+        ]
+        timeline = [
+            {"resolved_dictionary_index": 1},
+            {"resolved_dictionary_index": None},
+            {"resolved_dictionary_index": 1},
+        ]
+        self.assertEqual(
+            scripted_layouts._referenced_cue_guids(cues, timeline), ["one"]
+        )
+
 
 class SafeDefaultRegressionTests(unittest.TestCase):
-    """The convention is provenance-dependent; parsers must default to ambiguous."""
+    """Generic tools preserve candidates; the version-locked product is explicit."""
 
     def test_autoloop_parser_defaults_to_ambiguous(self):
         sig = inspect.signature(autoloop.parse_autoloop_structure)
