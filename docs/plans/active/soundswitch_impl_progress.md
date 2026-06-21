@@ -1,6 +1,6 @@
 # SoundSwitch implementation — progress ledger
 
-last_updated: 2026-06-21T18:47:36Z   last_session_model: gpt-5
+last_updated: 2026-06-21T18:48:06Z   last_session_model: gpt-5
 
 ## Proof gate
 
@@ -11,7 +11,7 @@ last_updated: 2026-06-21T18:47:36Z   last_session_model: gpt-5
 
 ## Next action
 
-> Task 1: commit and push the approved decoder checkpoint; then begin Task 2 deterministic exporter and verifier.
+> Task 2: implement the deterministic exporter, canonical pack, and independent verifier with F9 mutation rejection.
 
 ## Task status (0–9)
 
@@ -19,7 +19,7 @@ last_updated: 2026-06-21T18:47:36Z   last_session_model: gpt-5
 | ---- | ----- | ---- | ------ | ----- | -- | ----- |
 | 0 | change contract | done | done | green | #115 | Review approved; hard checks green; full suite `Ran 1881`, `OK` (3 skipped, 1 expected failure). |
 | 1 | project decoder | done | done | green | #115 | Review approved; 17 targeted tests; proof 27/0/2 PASS; full suite `Ran 1898`, `OK` (3 skipped, 1 expected failure). |
-| 2 | exporter and verifier | todo | — | — | — | |
+| 2 | exporter and verifier | wip | — | — | #115 | Task 1 approved and pushed; implementation starting. |
 | 3 | pure renderer/player | todo | — | — | — | |
 | 4 | MIDI input adapter | todo | — | — | — | |
 | 5 | output backend | todo | — | — | — | |
