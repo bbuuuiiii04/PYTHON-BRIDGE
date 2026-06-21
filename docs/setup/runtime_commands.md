@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: eff532e
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -10,6 +10,8 @@ validation_scope: software-validated only; hardware-unvalidated in repo evidence
 
 Runtime commands are append-only JSONL records read by `CommandReader` in `runtime_status.py`.
 The parser, not this document, is authoritative. If this document and `parse_command()` disagree, `parse_command()` wins, because apparently even documentation needs a leash.
+
+Tasks 1–2 add no command or status field for offline SoundSwitch decode, deterministic export, canonical-pack generation, or independent verification. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec controls remain planned and unimplemented; all existing command behavior is unchanged.
 
 ## Runtime files
 

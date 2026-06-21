@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: eff532e
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
 
@@ -16,6 +16,10 @@ Status:
 
 Purpose:
 - Own startup wiring, bridge state, event handling, timing, and top-level coordination.
+
+Task 2 boundary:
+- The strict SoundSwitch 2.10.3 decoder, deterministic exporter, canonical 95-artifact pack, and independent verifier are read-only/offline and are not imported, started, or owned by `StateManager` or `__main__.py`.
+- No live bridge behavior changed: OS2L, MIDI lasers, LED/Govee, Rekordbox readers, runtime status, config, and runtime commands retain their existing paths. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec integration remain planned and unimplemented.
 
 Authoritative code:
 - `__main__.py`

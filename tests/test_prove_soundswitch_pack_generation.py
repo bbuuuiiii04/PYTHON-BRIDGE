@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests.test_static_looks import venue_fixture
 
@@ -115,6 +116,20 @@ class CanonicalConstantsTests(unittest.TestCase):
     def test_ddj_golden_frames_are_19_bytes(self):
         for slot, (_note, _control, _name, hex_frame) in prove.GOLDEN_DDJ.items():
             self.assertEqual(len(hex_frame), 38, slot)  # 19 bytes
+
+
+class PackMutationGateTests(unittest.TestCase):
+    def test_f9_requires_fresh_verify_and_mutation_rejection(self):
+        def fake_export(_project, pack):
+            pack.mkdir()
+            (pack / "static_looks.json").write_bytes(b'{"x":1}\n')
+            return {"verified": True}
+        with mock.patch.object(prove, "export_pack", side_effect=fake_export), \
+                mock.patch.object(prove, "verify_pack", side_effect=[
+                    {"verified": True}, prove.SoundSwitchPackVerificationError("mutation")]):
+            result = prove._prove_pack_mutation(Path("unused"))
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["one_byte_mutation_rejected"])
 
 
 class ExitCodeTests(unittest.TestCase):

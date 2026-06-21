@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-06-18. Treat code as the source of
+Audited against the current checkout on 2026-06-21. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -32,6 +32,8 @@ RBSS_SMART_BREAKDOWN=1
 ```
 
 These defaults are present in `scripts/ss_bridge_watcher.sh`.
+
+Tasks 1–2 add a separate offline SoundSwitch lane: frozen source models, strict read-only decode, deterministic canonical-pack export, and an independent verifier for the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile. The 95-artifact pack preserves exact 232 render + 1 catalog-tail cues, 32 Static Looks, 42 autoloops, 45 scripted inventory records, and the seven-class F-3 crosswalk; F9 mutation rejection passes. These tools are not startup/runtime subsystems, do not mutate the project, and do not connect to `StateManager`, OS2L, MIDI lasers, LED/Govee, Rekordbox readers, status, config, or commands. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec/hardware work remain planned and unimplemented.
 
 ## Runtime Subsystems
 

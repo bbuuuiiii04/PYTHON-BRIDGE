@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-and-config-grounded
 last_verified_commit: eff532e
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -29,6 +29,8 @@ Status vocabulary:
 | Runtime `[BEAT]` heartbeat | implemented | software-tested partially | local setup | `StatusWriter` emits a throttled status-only heartbeat and writes the same summary into status JSON. Hardware-visible output is unchanged and unvalidated. |
 | Logging visibility live watch | implemented | software-tested partially | local setup | `docs/setup/logging_live_watch.json` provides a curated control-file preset for `[BEAT]`, laser, LED/Govee, SoundSwitch, and master/deck logs using existing `LoggingManager` filters. It changes logging visibility only and remains hardware-unvalidated. |
 | SoundSwitch OS2L output | implemented | software-tested partially | local setup | Uses OS2L TCP and VirtualDJ-shaped messages. |
+| SoundSwitch offline decoder/exporter/pack/verifier | implemented | software-tested | pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile only | Strict read-only decode, deterministic canonical 95-artifact export, and independent verification. Exact inventory is 232 render + 1 catalog-tail cues, 32 Static Looks, 42 autoloops, and 45 scripted records; seven-class F-3 crosswalk and F9 mutation rejection pass. No project mutation or live bridge integration. |
+| SoundSwitch loader/player/MIDI/runtime/backend/Enttec | planned | unvalidated | unsupported currently | Task 3 loader/player and Task 4+ config/commands, `StateManager`/runtime integration, MIDI/backend selection, Enttec output, and hardware validation are not implemented. |
 | Rekordbox memory position reader | implemented | software-tested partially | macOS local setup | macOS Mach APIs. Other OSes unsupported/unknown. |
 | Rekordbox direct state reader | implemented | software-tested partially | current local Rekordbox only | Offset/version assumptions require validation per version. |
 | Live BPM | implemented | software-tested partially | current local Rekordbox only | Direct offset-table path plus discovery fallback. |
@@ -42,6 +44,6 @@ Status vocabulary:
 | LED color engine M2 work | implemented/partial | software-tested partially | local setup | Current code includes color engine paths, fixed six-slot slot-color output, configurable slot-fill strategies including Patch S `random_with_mono_chance`, software-tested generic groove/post_drop/drop chase, drop center-burst, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, Patch E3 ambient twinkle slot cue, and Patch F default-bank cleanup into generic slot looks plus `legacy_color_suffix` storage. Patch D/E/S/F remain SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
 | Govee cloud scene adapter | implemented | software-tested partially | local setup | Single API-key path, device compatibility not generalized. |
 | Govee realtime runner/transport | implemented/experimental | software-tested partially | local setup | H612D evidence exists in config examples, broad Govee support unknown. |
-| SoundSwitch catalog/import/UI | uncertain/active-work | unknown | unknown | Must be verified against current main before claiming current support. |
+| SoundSwitch catalog/import/UI | partial/planned | offline export software-tested; other pieces unvalidated | pinned offline pack only | Tasks 1–2 decode and deterministically export/verify the canonical saved project offline; loader/player/UI behavior remains planned and unimplemented. |
 | Multi-Rekordbox-version support | unknown | unvalidated | unknown | Needs explicit compatibility expansion tasks. |
 | Windows/Linux support | unsupported/unknown | unvalidated | unsupported currently | Current reader architecture is macOS-bound. |

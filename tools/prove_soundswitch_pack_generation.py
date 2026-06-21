@@ -45,6 +45,9 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PACKAGE_PARENT = REPO_ROOT.parent
+if str(PACKAGE_PARENT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_PARENT))
 RE_DIR = REPO_ROOT / "tools" / "ssfmt" / "re"
 # Strict, test-covered, read-only research parsers import each other by bare
 # module name, so the research directory must be importable.
@@ -59,6 +62,11 @@ import build_coverage_reports  # noqa: E402
 import inventory_project_artifacts  # noqa: E402
 import layered_renderer  # noqa: E402
 import parse_venue_cues  # noqa: E402
+from rb_ss_bridge_v2.soundswitch_pack_verifier import (  # noqa: E402
+    SoundSwitchPackVerificationError,
+    verify_pack,
+)
+from rb_ss_bridge_v2.tools.export_soundswitch_pack import export_pack  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Canonical bounded source identity (closure report + verified live bytes).
@@ -879,28 +887,30 @@ def check_fail_closed(proof: Proof, project: Path, venue_data: bytes, inventory:
             remediation="Production decoder (Task 1.9) must apply this reject-symlink guard.",
         )
 
-    # F9 one-byte pack-artifact mutation -> DEFERRED (pack + verifier are unbuilt, Task 2).
+    # F9 is a real Task-2 gate: export, independently verify, then mutate one
+    # byte in a hashed artifact and require rejection.
+    f9 = _prove_pack_mutation(project)
     proof.record(
         "F9-pack-one-byte-mutation", "Independent verifier rejects a one-byte pack-artifact mutation",
-        False, foundation=False, incomplete=True,
-        expected="verifier re-hash rejects any one-byte pack mutation",
-        actual="pack format + soundswitch_pack_verifier are not implemented yet (Task 2)",
-        evidence="no pack artifact exists to mutate in this pre-implementation pass",
-        sources=["docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md (Task 2)"],
-        remediation="Implement Task 2 pack + verifier; this proof becomes a mandatory Task 2/8 acceptance test.",
+        f9["ok"], foundation=True,
+        expected="fresh export verifies; one-byte hashed-artifact mutation is rejected",
+        actual=f9,
+        evidence="export_pack to a temporary new directory + independent verify_pack before/after mutation",
+        sources=["tools/export_soundswitch_pack.py", "soundswitch_pack_verifier.py"],
+        remediation="Fix deterministic export/hash coverage/verifier rejection before Task 2 can pass.",
     )
 
     # F10 unsupported active MIDI semantic (active CC/pitch static-override).
     cc_distinguished = _decode_distinguishes_cc()
+    f10 = _prove_cc_export_fail()
     proof.record(
         "F10-active-cc-override", "Active Static Override learned to CC/pitch must fail export",
-        False, foundation=False, incomplete=True,
+        f10["ok"], foundation=False,
         expected="a render-affecting override on CC/pitch fails export with a relearn instruction",
-        actual={"decoder_distinguishes_note_vs_cc": cc_distinguished,
-                "export_fail_path": "not implemented (Task 4 MIDI input adapter)"},
-        evidence="inventory decoder classifies message_type note/control_change; export-fail path is unbuilt",
-        sources=[_rel(RE_DIR / "inventory_project_artifacts.py"),
-                 "docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md (Task 4)"],
+        actual={"decoder_distinguishes_note_vs_cc": cc_distinguished, **f10},
+        evidence="compile_pack_artifacts raises SoundSwitchPackCompileError with relearn instruction "
+                 "when an enabled CC/pitch binding targets static_look or autoloop",
+        sources=["soundswitch_pack.py", _rel(RE_DIR / "inventory_project_artifacts.py")],
         remediation="Implement Task 4 so an active CC/pitch render control fails export until relearned to note.",
     )
 
@@ -918,6 +928,109 @@ def _decode_distinguishes_cc() -> bool:
     data += _sig(0x01380306) + struct.pack("<Q", 0) + _sig(0xDEADBEEF)
     decoded = inventory_project_artifacts._decode_recordable_control_map(bytes(data))
     return decoded["bindings"][0]["message_type"] == "control_change"
+
+
+def _prove_cc_export_fail() -> dict[str, Any]:
+    """Verify that compile_pack_artifacts raises on an active CC/pitch render binding."""
+    from rb_ss_bridge_v2.soundswitch_pack import (
+        SoundSwitchPackCompileError,
+        compile_pack_artifacts,
+    )
+    from rb_ss_bridge_v2.soundswitch_pack_models import (
+        DecodedSoundSwitchProject,
+        MidiBinding,
+        MidiCollection,
+        MidiDevice,
+        LearnedMidiMap,
+        ProjectIdentity,
+        ResolvedControlBinding,
+    )
+    from rb_ss_bridge_v2.soundswitch_project_decoder import (
+        CANONICAL_CONTAINER_VERSION,
+        CANONICAL_PROJECT_UUID,
+        CANONICAL_SOUNDSWITCH_VERSION,
+        CANONICAL_VENUE_GUID,
+    )
+
+    binding = MidiBinding(
+        source_offset=0,
+        device_name="DDJ-800",
+        collection_id=0,
+        message_type="control_change",
+        message_type_raw=1,
+        data_byte=106,
+        channel_zero_based=6,
+        control_path="SoundSwitch.Controls.StaticOverride16",
+        enabled=True,
+    )
+    resolved = ResolvedControlBinding(
+        binding=binding,
+        target_kind="static_look",
+        target_identity="SoundSwitch.Controls.StaticOverride16",
+        target_index=16,
+        target_name="Static Override 16",
+    )
+    midi_map = LearnedMidiMap(
+        relative_path="SoundSwitchMIDIMap.bin",
+        source_sha256="0" * 64,
+        version=1,
+        status=0,
+        devices=(MidiDevice(
+            name="DDJ-800",
+            collections=(MidiCollection(collection_id=0, bindings=(binding,)),),
+            feedback_bytes=b"",
+        ),),
+    )
+    project = DecodedSoundSwitchProject(
+        identity=ProjectIdentity(
+            project_uuid=CANONICAL_PROJECT_UUID,
+            soundswitch_version=CANONICAL_SOUNDSWITCH_VERSION,
+            container_version=CANONICAL_CONTAINER_VERSION,
+            venue_guid=CANONICAL_VENUE_GUID,
+            venue_name="RAVE Venue",
+        ),
+        source_inventory=(), fixture_channels=(), attribute_cues=(),
+        static_looks=(), autoloop_catalogs=(), autoloops=(),
+        scripted_tracks=(), scripted_track_classifications=(), track_map=(),
+        learned_midi_maps=(midi_map,),
+        resolved_controls=(resolved,),
+        no_target_policy_inputs=(), diagnostics=(),
+    )
+    try:
+        compile_pack_artifacts(project, generator_commit="proof_gate",
+                               enforce_pinned_totals=False)
+        return {"ok": False, "raised": False,
+                "error": "compile_pack_artifacts did not raise for active CC binding"}
+    except SoundSwitchPackCompileError as exc:
+        msg = str(exc)
+        has_relearn = "relearn" in msg
+        return {"ok": has_relearn, "raised": True,
+                "has_relearn_instruction": has_relearn, "error_prefix": msg[:120]}
+    except Exception as exc:
+        return {"ok": False, "raised": False,
+                "error": f"unexpected exception: {type(exc).__name__}: {exc}"}
+
+
+def _prove_pack_mutation(project: Path) -> dict[str, Any]:
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack = Path(tmp) / "pack"
+            exported = export_pack(project, pack)
+            verified = verify_pack(pack, source_project=project)
+            target = pack / "static_looks.json"
+            data = bytearray(target.read_bytes())
+            data[len(data) // 2] ^= 1
+            target.write_bytes(data)
+            rejected = False
+            try:
+                verify_pack(pack)
+            except SoundSwitchPackVerificationError:
+                rejected = True
+            return {"ok": bool(exported.get("verified") and verified.get("verified") and rejected),
+                    "fresh_export_verified": bool(verified.get("verified")),
+                    "mutated_artifact": "static_looks.json", "one_byte_mutation_rejected": rejected}
+    except Exception as exc:  # noqa: BLE001 - proof records fail-closed detail
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 # --------------------------------------------------------------------------- #

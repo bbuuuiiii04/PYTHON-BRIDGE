@@ -2,13 +2,15 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: 51367a1
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
 
 # Configuration Setup
 
 This repo uses tracked example configs plus local ignored configs. Do not commit local device secrets, local IPs, API keys, or backup files.
+
+The Task 1–2 SoundSwitch frozen models, strict decoder, deterministic exporter, canonical 95-artifact pack, and independent verifier add no config keys or example files. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec configuration remain planned and unimplemented; existing SoundSwitch OS2L, laser, LED/Govee, Rekordbox, and status configuration is unchanged.
 
 ## Tracked examples
 

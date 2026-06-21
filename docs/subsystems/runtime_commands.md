@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: eff532e
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
 
@@ -16,6 +16,10 @@ Status:
 
 Purpose:
 - Own local status snapshots, the throttled `[BEAT]` operator heartbeat, and append-only JSONL runtime command handling.
+
+Task 2 boundary:
+- The offline SoundSwitch decoder/exporter/verifier and canonical pack add no runtime command and no status field. Loader/player, MIDI/runtime/backend selection, and Enttec controls remain planned and unimplemented.
+- Existing SoundSwitch, laser, LED/Govee, Rekordbox, and bridge status/command behavior is unchanged.
 
 Authoritative code:
 - `runtime_status.py`

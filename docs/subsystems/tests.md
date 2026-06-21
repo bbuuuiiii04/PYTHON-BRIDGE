@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: eff532e
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
 
@@ -37,6 +37,7 @@ Coverage expectations:
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.
+- `tests/test_soundswitch_project_decoder.py` covers the strict decoder/frozen models. `tests/test_soundswitch_pack.py` covers deterministic export, the canonical 95-artifact pack, independent verification, exact 232+1/32/42/45 inventory, the seven-class F-3 crosswalk, byte-identical repeat export, and mutation rejection. `tests/test_prove_soundswitch_pack_generation.py` covers the F9 proof-gate seam. The current proof is 28 PASS / 0 FAIL / 1 INCOMPLETE with foundation 27/27 PASS; only F10 is deferred to Task 4. These are software/wire tests only, not loader/player, runtime, Enttec, or hardware validation.
 
 Change contract:
 - Do not modify tests just to make docs changes pass.
