@@ -230,6 +230,77 @@ contracts:
     forbidden_assumptions:
       - OS2L generation does not prove every SoundSwitch version works
 
+  soundswitch_pack_player:
+    code_globs:
+      - soundswitch_pack*.py
+      - soundswitch_project_*.py
+      - soundswitch_laser_player*.py
+      - soundswitch_midi_input*.py
+      - laser_output_backend*.py
+      - soundswitch_frame_sender*.py
+      - enttec_*.py
+      - tools/*soundswitch*pack*.py
+      - config/soundswitch_pack_player*.json
+      - __main__.py
+      - state_manager.py
+      - laser_executor.py
+      - midi_output.py
+      - runtime_status.py
+      - config.py
+      - tests/test_soundswitch_pack*.py
+      - tests/test_soundswitch_project*.py
+      - tests/test_soundswitch_laser_player*.py
+      - tests/test_soundswitch_midi_input*.py
+      - tests/test_soundswitch_frame_sender*.py
+      - tests/test_enttec*.py
+    inspect:
+      - docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md
+      - docs/subsystems/soundswitch_output.md
+      - docs/subsystems/core_bridge.md
+      - docs/subsystems/runtime_commands.md
+      - docs/subsystems/laser.md
+      - docs/subsystems/config.md
+      - docs/subsystems/tests.md
+      - docs/architecture/current_architecture.md
+      - docs/architecture/runtime_invariants.md
+      - docs/architecture/laser_director_design.md
+      - docs/setup/configuration.md
+      - docs/setup/runtime_commands.md
+      - docs/status/known_limitations.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
+      - python3 tools/check_docs_staleness.py --report
+      - git diff --check
+    docs_update:
+      - docs/subsystems/soundswitch_output.md
+      - docs/subsystems/core_bridge.md
+      - docs/subsystems/runtime_commands.md
+      - docs/subsystems/laser.md
+      - docs/subsystems/config.md
+      - docs/subsystems/tests.md
+      - docs/architecture/current_architecture.md
+      - docs/architecture/runtime_invariants.md
+      - docs/architecture/laser_director_design.md
+      - docs/setup/configuration.md
+      - docs/setup/runtime_commands.md
+      - docs/status/feature_status_matrix.md
+      - docs/status/support_matrix.md
+      - docs/status/validation_matrix.md
+      - docs/status/known_limitations.md
+      - docs/validation/software_test_inventory.md
+      - docs/validation/hardware_validation_log.md
+    forbidden_assumptions:
+      - other SoundSwitch versions or profiles behave like SoundSwitch 2.10.3
+      - a project that matches the RAVE Venue GUID is automatically the right project; the canonical project UUID must also match because a scratch corpus shares the GUID
+      - passive Art-Net proves physical fixtures
+      - display name, file order, or cue index is durable identity
+      - absent channel-2 utility notes imply hidden SoundSwitch targets
+      - a missing MIDI note-off is safe
+      - Enttec process death clears its last frame
+
   soundswitch_research:
     code_globs:
       - tools/ssfmt/re/*.py
