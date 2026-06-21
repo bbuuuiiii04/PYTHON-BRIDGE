@@ -189,10 +189,12 @@ is **confirmed** by the WHYB before→after pair under `/tmp/soundswitch_finish_
   and the only pure-direct files are freshly *created* ones (ST-ADD/SCRIPT-CREATE),
   not existing-unmodified. Per Task 4.4, report the blocker; do not modify a live
   project to manufacture one.
-- **Capture 4 (holdout BLACKPINK/JUMP `{1FD042ED…}`):** one_based expected-frame
-  oracle + structural-cleanliness check staged in `/tmp/b2_capture4_blackpink.py`
-  (writes `/tmp/b2_capture4_blackpink_prediction.json`) — **re-run it to finish**
-  computing the prediction, then request a single full-track passive playback.
+- **Capture 4 (holdout BLACKPINK/JUMP `{1FD042ED…}` sha `cc59b3d1…`):** prediction
+  **COMPUTED** (`/tmp/b2_capture4_blackpink_prediction.json`, via
+  `/tmp/b2_capture4_blackpink.py`): dict 119, timeline 112, **structurally clean
+  one_based — all 91 cue-refs resolve, 0 unresolved** (contrast New Sky), both
+  groups `0x493`/`0x496` mirror, 112 event frames oracled. Only the live
+  full-track passive playback remains (operator-gated) to confirm wire parity.
 
 ### Exact next operator actions (all use the LIVE project; no scratch)
 
