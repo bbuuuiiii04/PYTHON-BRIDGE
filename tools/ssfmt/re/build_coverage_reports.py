@@ -115,7 +115,9 @@ def autoloop_report(
         catalog = entries_by_file[file_number]
         path = project_dir / f"SSAutoLoop{file_number}.ssfile"
         data = path.read_bytes()
-        parsed = parse_autoloop_structure(data)
+        # PROVISIONAL one_based: provenance-dependent, not wire-anchored (see
+        # soundswitch_ssfile_format.md); off-by-one for direct/mixed autoloops.
+        parsed = parse_autoloop_structure(data, "one_based")
         dictionary_by_index = {entry["cue_index"]: entry for entry in parsed["cues"]}
         referenced_indices = {
             row["resolved_dictionary_index"]

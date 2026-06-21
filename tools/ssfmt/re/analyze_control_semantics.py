@@ -90,7 +90,9 @@ def analyze(
     strobe_dictionary_rows = []
     for path in sorted(project_dir.glob("SSAutoLoop*.ssfile")):
         data = path.read_bytes()
-        parsed = parse_autoloop_structure(data)
+        # PROVISIONAL one_based: autoloop convention is provenance-dependent and not
+        # wire-anchored; off-by-one for direct/mixed files. See soundswitch_ssfile_format.md.
+        parsed = parse_autoloop_structure(data, "one_based")
         parsed_files[path.name] = parsed
         dictionary_by_index = {entry["cue_index"]: entry for entry in parsed["cues"]}
         shared = data[

@@ -40,7 +40,7 @@ def cue_at(data: bytes, name_offset: int) -> dict | None:
     flag_c, flag_d, entry_count = struct.unpack_from("<III", data, name_end + 48)
     if (flag_a, flag_b, flag_c, flag_d) != (1, 1, 1, 1):
         return None
-    if not 1 <= entry_count <= 1024:
+    if not 0 <= entry_count <= 1024:
         return None
 
     entries_offset = name_end + 60
@@ -62,19 +62,44 @@ def cue_at(data: bytes, name_offset: int) -> dict | None:
         entries.append(
             {
                 "offset": offset,
+                "raw_hex": data[offset : offset + 16].hex(),
+                "unknown_u32_0x00": present,
                 "fixture_group": fixture_group,
                 "channel_id": channel_id,
                 "channel": channel,
                 "value": value,
+                "repeated_value_raw_hex": repeated_value.hex(),
             }
         )
         groups.setdefault(hex(fixture_group), {})[str(channel)] = value
 
     return {
+        "record_kind": "fixture_payload",
         "offset": name_offset,
         "name": name,
         "name_end_offset": name_end,
         "marker_hex": data[name_end : name_end + 4].hex(),
+        "header_offset": name_end,
+        "header_end_offset": header_end,
+        "header_raw_hex": data[name_end:header_end].hex(),
+        "header_fields": {
+            **{
+                f"unknown_u8_0x{relative:02x}": {
+                    "offset": name_end + relative,
+                    "value": data[name_end + relative],
+                }
+                for relative in range(4)
+            },
+            "unknown_u32_0x14": {"offset": name_end + 20, "value": unknown_u32},
+            "unknown_u32_0x18": {"offset": name_end + 24, "value": flag_a},
+            "unknown_u32_0x1c": {"offset": name_end + 28, "value": flag_b},
+            "unknown_u32_0x30": {"offset": name_end + 48, "value": flag_c},
+            "unknown_u32_0x34": {"offset": name_end + 52, "value": flag_d},
+            "entry_count_u32_0x38": {
+                "offset": name_end + 56,
+                "value": entry_count,
+            },
+        },
         "cue_guid": cue_guid.hex(),
         "unknown_u32": unknown_u32,
         "fixture_profile_guid": fixture_profile_guid.hex(),
@@ -86,16 +111,78 @@ def cue_at(data: bytes, name_offset: int) -> dict | None:
     }
 
 
+def minimal_tail_cue_at(data: bytes, name_offset: int) -> dict | None:
+    """Parse the default/empty cue record observed immediately before the cue index."""
+    if name_offset + 4 > len(data):
+        return None
+    name_length = struct.unpack_from("<I", data, name_offset)[0]
+    if not 2 <= name_length <= 96:
+        return None
+    name_end = name_offset + 4 + 2 * name_length
+    record_end = name_end + 28
+    if record_end > len(data):
+        return None
+    try:
+        decoded_name = data[name_offset + 4 : name_end].decode("utf-16le")
+    except UnicodeDecodeError:
+        return None
+    if not decoded_name.endswith("\0"):
+        return None
+    name = decoded_name[:-1]
+    if not name or not all(32 <= ord(character) < 127 for character in name):
+        return None
+
+    marker = data[name_end : name_end + 4]
+    cue_guid = data[name_end + 4 : name_end + 20]
+    if data[name_end + 20 : name_end + 24] != b"\xff\xff\xff\xff":
+        return None
+    catalog_count = struct.unpack_from("<I", data, name_end + 24)[0]
+    # The controlled Attribute Cue catalog contained 233+ identities. A
+    # structurally similar 12-position fixture list exists earlier in Venue;
+    # exclude that different object class rather than mislabeling it as a cue.
+    if not 64 <= catalog_count <= 1024:
+        return None
+    catalog_end = record_end + 4 * catalog_count
+    if catalog_end > len(data):
+        return None
+    catalog_indices = list(
+        struct.unpack_from(f"<{catalog_count}I", data, record_end)
+    )
+    if catalog_indices != list(range(catalog_count)):
+        return None
+
+    return {
+        "record_kind": "minimal_default_catalog_tail",
+        "offset": name_offset,
+        "name": name,
+        "name_end_offset": name_end,
+        "marker_hex": marker.hex(),
+        "cue_guid": cue_guid.hex(),
+        "unknown_u32": None,
+        "fixture_profile_guid": None,
+        "entry_count": 0,
+        "entries_offset": None,
+        "entries_end_offset": name_end + 24,
+        "entries": [],
+        "groups": {},
+        "catalog_count": catalog_count,
+        "catalog_indices_offset": record_end,
+        "catalog_indices_end_offset": catalog_end,
+    }
+
+
 def parse_venue_cues(data: bytes) -> list[dict]:
     cues = []
     offset = 0
     while offset + 4 <= len(data):
         cue = cue_at(data, offset)
         if cue is None:
+            cue = minimal_tail_cue_at(data, offset)
+        if cue is None:
             offset += 1
             continue
         cues.append(cue)
-        offset = cue["entries_end_offset"]
+        offset = cue.get("catalog_indices_end_offset", cue["entries_end_offset"])
     return cues
 
 

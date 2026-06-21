@@ -136,7 +136,9 @@ def build_render_events(
     control_channels: tuple[int, ...],
     owner_deck: int,
 ) -> tuple[list[dict], list[str]]:
-    parsed = parse_autoloop_structure(ssfile.read_bytes())
+    # PROVISIONAL one_based (preserves prior behavior); autoloop convention is
+    # provenance-dependent and unproven by wire. See soundswitch_ssfile_format.md.
+    parsed = parse_autoloop_structure(ssfile.read_bytes(), "one_based")
     first_pass = render_timeline(
         parsed,
         cue_records,
@@ -411,7 +413,7 @@ def main() -> None:
     for filename in sorted({segment["ssfile"] for segment in segments}):
         path = args.proj / filename
         data = path.read_bytes()
-        parsed = parse_autoloop_structure(data)
+        parsed = parse_autoloop_structure(data, "one_based")  # PROVISIONAL; see ssfile_format doc
         source_files.append(
             {
                 "path": str(path),

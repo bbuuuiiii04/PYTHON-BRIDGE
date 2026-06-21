@@ -1,12 +1,22 @@
 ---
 doc_status: active-research
 truth_level: byte-and-capture-grounded
-last_verified_commit: fd40843
+last_verified_commit: a5f7ced
 last_verified_date: 2026-06-20
 validation_scope: passive software and wire capture only; hardware-unvalidated
 ---
 
 # SoundSwitch Stage 2 Research Findings
+
+> **2026-06-20 correction (authoritative).** The cue-reference convention is
+> provenance-dependent and NOT byte-deterministic: legacy scripted = one-based
+> (wire-proven, A5 14/14), newly created = direct, edited-legacy = MIXED,
+> autoloops non-uniform/unproven. Any statement below asserting a uniform
+> one-based (or direct) convention is superseded by
+> `docs/research/soundswitch_ssfile_format.md` ("Reference resolution is
+> PROVENANCE-DEPENDENT"). Negative timeline ticks decode as full signed 32-bit
+> (no `-1` sentinel). Controlled authoring evidence now exists
+> (`/tmp/soundswitch_finish_IiVlD1`).
 
 ## Decision
 
@@ -15,9 +25,11 @@ exactly, all 42 autoloops parse structurally, 44/45 scripted files are
 structurally classified, TrackMap identity subrecords are decoded, and A5 renders
 16/16 captured events byte-exact.
 
-The exporter/importer is still deferred. Control layers, fixture patching,
-transport, deck ownership, one scripted demo layout, and representative capture
-coverage remain blocking.
+The exporter/importer is still deferred. Control layers, fixture routing (or an
+explicit external fixture-map contract), position-evaluation transport
+semantics, bridge deck composition, one scripted demo layout, representative
+semantic/layout capture coverage, and valid authoring-mutation evidence remain
+blocking.
 
 Status is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
@@ -39,8 +51,9 @@ Status is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 7. Earlier “nine unsupported scripted layouts” was too pessimistic. Strict
    boundary discovery now parses eight without the shared-table anchor. Only
    the In-App Demo file remains structurally unsupported.
-8. `SoundSwitchVenues.bin.backup` is not identical to the current Venue and is
-   never source truth.
+8. `SoundSwitchVenues.bin.backup` is never source truth. Opening the real
+   project rewrote it from frozen `521cc9...` bytes to exact current Venue
+   bytes (`f34bfc...`); no restore or substitution was performed.
 
 ## Confirmed corpus totals
 
@@ -92,11 +105,12 @@ captured occurrences. A wire-seeded segment is labeled transition-only and is
 never counted as a static-render proof.
 
 The earlier 2,308.840-second `artnet_lo.pcap` is also exhausted. Its frozen
-manifest proves all 42 autoloop files remain byte-identical and its Venue
-snapshot has the same 232 parsed cue semantics as current. A surviving derived
-library names 41/42 indices, but omits index 6, accounts for 82,212 of 84,275
-Universe-0 frames, and contains no segment timestamps. It proves historical
-coverage/sample states, not byte-exact segments.
+manifest now matches 96/99 paths and proves all 42 autoloop files remain
+byte-identical. The three drifts are current Venue, its rewritten backup, and
+A5. Its Venue snapshot has the same 232 parsed cue semantics as current. A
+surviving derived library names 41/42 indices, but omits index 6, accounts for
+82,212 of 84,275 Universe-0 frames, and contains no segment timestamps. It
+proves historical coverage/sample states, not byte-exact segments.
 
 ## Strobe/control result
 
@@ -138,10 +152,33 @@ that only Universe-0 CH1-CH19 becomes nonzero and Universe 1 stays entirely
 zero. The software-visible byte address is therefore explicit; the physical
 four-fixture mirror patch is not.
 
+[assumed] A narrow pack could keep authored output deterministic at the
+confirmed CH1-CH19 software boundary while taking physical instance routing from
+an explicit, versioned bridge fixture-map input. That would be a declared
+product input, not a decoded SoundSwitch fact, and it would not establish
+hardware validation.
+
 The project manifest and four recordable control-mapping files are classified.
 The `.ssa` and automation preset payloads remain opaque. The bundled MP4 is
-media, not authored lighting. The Venue backup differs from current and is
-report-only.
+media, not authored lighting. The Venue backup currently equals current Venue
+after the observed project-open rewrite, but remains report-only.
+
+## Authoring mutation and verifier result
+
+[confirmed] The new snapshot freezer and comparator deterministically inventory every
+regular project file, reject changing/symlinked sources, compare byte ranges,
+retain unsupported and opaque sources, and cross-check catalog, cue, fixture,
+script, and TrackMap identities. Repeated no-change reports are byte-identical.
+[confirmed] Offline adversarial variants confirm fail-closed detection for source and
+identity failures; they do not prove SoundSwitch UI semantics.
+
+[confirmed] The attempted AL-ADD run is invalid. The operator-created scratch had no fixture
+access, produced no new cataloged autoloop, changed unrelated Venue/TrackMap
+artifacts, and used an unsupported fixtureless layout for all 128 autoloop
+files. No mutation matrix row is closed. Further UI work requires a
+fixture-bearing duplicate and new explicit approval because opening the real
+project already rewrote its backup file. Valid mutation behavior remains
+[unknown].
 
 ## Deck/transport result
 
@@ -150,9 +187,20 @@ not Universe ownership. It contains 97 Deck-0 and 156 Deck-1 events; 65/68
 validation segments overlap another-deck events, including 16 exact segments.
 This makes simple temporal attribution invalid.
 
-Master deck, crossfader, stop, unload, seek, pause/resume, end, transfer,
-scripted/autoloop overlap, and Decks 3/4 remain unsupported. The bounded
-operator protocol is in `soundswitch_stage3_handoff.md`.
+Master deck, crossfader, transfer, scripted/autoloop overlap, and Decks 3/4
+remain unsupported. Stop, unload, seek, pause/resume, loop, end, and refire now
+have one bounded Opalite wire run, but only within the captured Deck-1 scope.
+
+The pure `render_at_elapsed` seam is now paired with bridge-anchored event and
+position comparison plus `render_playback_state` for ended/unloaded all-zero
+policy. Three representative tracks are not fully byte-exact: TITANIUM 16/64,
+Opalite 23/39, and New Sky 304/367 event samples. The Opalite transport run has
+an exact backward seek, an exact forward seek, 22/22 exact loop samples, exact
+playing re-fire samples, and 2/2 confirmed-stop zero frames. A first forward
+seek/pause landed in an independently known base-render residual interval;
+wire stayed stable through pause and returned to exact after resume. New Sky
+falsifies universal scripted CH8 persistence. Evidence summary:
+`/tmp/ss_scripted_validation_summary_20260620.json`.
 
 ## Stage 2 exit assessment
 
@@ -162,6 +210,9 @@ operator protocol is in `soundswitch_stage3_handoff.md`.
 | A5 raw-zero clear/control | Pass, single-file provisional layer rule |
 | A5 16/16 exact | Pass |
 | Layer-aware research renderer | Pass for A5 and clean autoloops; incomplete globally |
+| Representative scripted multi-track parity | Fail; 16/64, 23/39, 304/367 |
+| Transport-at-position | Partial; exact on captured seek/loop/refire intervals, base-render residual remains |
+| Scripted decoupled CH8/CH9 persistence | Fail; New Sky clears CH8 |
 | Every mismatch named | Pass at blocker-class level; field semantics unresolved |
 | 42 structural inventory | Pass |
 | Every captured current look byte-exact | Fail |
@@ -169,8 +220,11 @@ operator protocol is in `soundswitch_stage3_handoff.md`.
 | Representative wire proof for every layout | Fail |
 | Catalogs complete | Pass |
 | Track identity deterministic | Partial; repeated records complete, top-level graph and six orphans remain |
+| Full-rescan mutation detection | Pass for deterministic tooling and synthetic adversarial cases; no valid SoundSwitch UI mutation corpus |
+| Authoring add/edit/rename/remove semantics | Fail; fixtureless AL-ADD attempt is invalid setup evidence |
 | Fixture patch explicit | Fail |
-| Multi-deck/transport deterministic | Fail |
+| Position-evaluation transport semantics | Partial software seam; wire gate still fails |
+| Bridge deck precedence/composition | Not specified; exact SoundSwitch owner parity is optional |
 | Export/import implementation ready | **No** |
 
 No production exporter, pack, importer, or bridge runtime work should start

@@ -1,7 +1,7 @@
 ---
 doc_status: research-tool-guide
 truth_level: byte-and-capture-grounded
-last_verified_commit: fd40843
+last_verified_commit: a5f7ced
 last_verified_date: 2026-06-20
 validation_scope: read-only research helpers; no production or hardware authority
 ---
@@ -12,6 +12,9 @@ These helpers inspect current project bytes and passive captures. They are not a
 production exporter/parser, are not imported by bridge runtime code, and must
 never write into `~/Music/SoundSwitch`.
 
+Current scripted byte-parity continuation:
+`docs/plans/active/soundswitch_scripted_renderer_closure_handoff_spec.md`.
+
 Do not use them to start/stop/signal/restart the bridge or send MIDI, OS2L,
 Art-Net, serial, Enttec, or physical DMX. Capture commands and SoundSwitch UI
 operations are operator-owned. Status remains **SOFTWARE-VALIDATED ONLY /
@@ -19,6 +22,19 @@ HARDWARE-UNVALIDATED**.
 
 `WORKING_NOTES.md` is retained historical Stage-1 scratch. Its model and paths
 are stale; use the current docs and tools instead.
+
+## Cue-reference convention (read before resolving any timeline)
+
+The raw cue reference → dictionary `cue_index` byte relation is
+**provenance-dependent and NOT byte-determinable** (corrected 2026-06-20):
+legacy scripted = one-based (wire-proven), newly created = direct, edited-legacy
+files = MIXED, autoloops = non-uniform/unproven. Both `analyze_ssfile_structure`
+and `analyze_scripted_ssfile` therefore **default to `--reference-rule
+ambiguous`** (both candidate indices preserved; nothing silently asserted). Pass
+`one_based`/`direct` only for an artifact whose provenance you can justify, and
+fail closed on mixed/ambiguous files. Full detail and the wire proof are in
+`docs/research/soundswitch_ssfile_format.md`. Convention math is regression-
+tested by `tests/test_ssfile_reference_convention.py`.
 
 ## Tool map
 
@@ -28,7 +44,7 @@ are stale; use the current docs and tools instead.
 | `analyze_scripted_ssfile.py` | Strict shared-441 scripted layout parse. |
 | `analyze_scripted_layouts.py` | 45-file layout classifier and strict fallback dictionary/timeline boundary discovery. |
 | `parse_venue_cues.py` | Current Venue attribute-cue records and sparse group patches. |
-| `layered_renderer.py` | Pure research state model: inherited/main/control layers and clear events. |
+| `layered_renderer.py` | Pure research state model: inherited/main/control layers, clear events, and history-independent scripted `render_at_elapsed`. |
 | `parse_artnet_pcap.py` | Classic-pcap/ArtDmx passive decoder. |
 | `validate_scripted_capture.py` | A5 event/frame equality and timing residuals. |
 | `validate_autoloop_capture.py` | Segment phase fitting with static and explicitly transition-only modes. |
@@ -40,6 +56,8 @@ are stale; use the current docs and tools instead.
 | `analyze_deck_ownership.py` | Per-deck AppLog versus passive Universe-0 correlation and blockers. |
 | `audit_legacy_capture.py` | Older pcap, frozen hashes, Venue snapshot, and derived index-library audit. |
 | `build_coverage_reports.py` | Deterministic 42-row autoloop and 45-row scripted JSON report. |
+| `freeze_project_snapshot.py` | Stable, read-only full-project copy to a new path outside `~/Music/SoundSwitch`. |
+| `compare_project_snapshots.py` | Full relative-path/hash diff plus parsed identity and cross-source consistency diagnostics. |
 | `ssparse.py` | Heuristic discovery token viewer only; never format authority. |
 
 Four Stage-1 sources were reconstructed from surviving ignored Python bytecode
@@ -65,6 +83,38 @@ VENUE="$PROJ/SoundSwitchVenues.bin"
 ```
 
 Commands below read the project and write derived JSON only to `/tmp`.
+
+## Stable project snapshots and authoring diffs
+
+Freeze before and after copies outside the SoundSwitch project tree, then
+compare the frozen copies:
+
+```bash
+python3 tools/ssfmt/re/freeze_project_snapshot.py \
+  <scratch.ssproj> /tmp/<new-before>.ssproj \
+  > /tmp/<new-before>-manifest.json
+
+python3 tools/ssfmt/re/freeze_project_snapshot.py \
+  <scratch.ssproj> /tmp/<new-after>.ssproj \
+  > /tmp/<new-after>-manifest.json
+
+python3 tools/ssfmt/re/compare_project_snapshots.py \
+  /tmp/<new-before>.ssproj /tmp/<new-after>.ssproj \
+  --metadata <experiment.json> \
+  > /tmp/<experiment>-comparison.json
+```
+
+The freezer refuses an existing destination, a destination inside the source,
+and any destination below `~/Music/SoundSwitch`. The comparator rejects a
+source that changes while being read, retains unsupported/opaque paths, and
+fails closed for source changes or fatal cross-source inconsistencies. Its
+catalog index/file number, SSID, and Venue cue GUID identities are authoritative
+for comparison; hashes are integrity evidence only.
+
+The 2026-06-20 AL-ADD attempt used a fixtureless scratch project and is not a
+valid mutation oracle. It changed Venue/TrackMap artifacts without creating a
+cataloged autoloop, and all 128 scratch autoloops used an unsupported layout.
+See `docs/plans/active/soundswitch_authoring_mutation_matrix.md`.
 
 ## Structural corpus
 
@@ -92,13 +142,35 @@ python3 tools/ssfmt/re/validate_scripted_capture.py \
   "$PROJ/{A5B0ACD1-D426-4BDB-9C8C-D05EA084F9CF}.ssfile" \
   --autoloop-reference "$PROJ/SSAutoLoop5.ssfile" \
   --venue "$VENUE" \
-  --control-channels 11 \
+  --reference-rule one_based \
+  --control-channels 8,9,11 \
   > /tmp/a5_validation.json
 ```
 
-Expected: fit mode `exact_layered_state_anchor`, 16/16 event frames, 14/14
+Expected: exploratory fit mode `exploratory_exact_layered_state_fit`, 16/16 event frames, 14/14
 positive references, and 2/2 raw-zero events exact. Captured frames are not
-renderer input.
+renderer input. Use `--bridge-log <copied-log>` or `--start-epoch` for evidence
+claims; unconstrained wire fitting is only an exploratory convenience.
+Newly-created scripted files require explicit provenance rather than a filename
+heuristic.
+The validator rejects its default `ambiguous` rule and explicit `mixed` input;
+provenance must be supplied and edited-legacy files fail closed.
+
+`layered_renderer.render_at_elapsed(...)` rebuilds the scripted state from an
+explicit initial frame for every query, orders records by elapsed then stored
+source order, and uses `control_channels=(8,9,11)` for the current persistence
+hypothesis. `render_playback_state(...)` adds explicit playing/paused versus
+ended/unloaded all-zero policy. The validator samples expected state at
+`event_elapsed + sample_delay`, chooses the nearest copied `arm-scripted`
+observation, reports bridge-position comparisons and stop/idle zero markers,
+and rejects ambiguous/mixed provenance.
+
+The 2026-06-20 representative results are intentionally blocked: TITANIUM
+16/64, Opalite 23/39, and New Sky 304/367 event samples exact. New Sky falsifies
+universal scripted CH8 persistence. A dedicated Opalite run validates exact
+representative seek/loop/refire positions and confirmed-stop clears, but not the
+base-render residual interval. See
+`/tmp/ss_scripted_validation_summary_20260620.json` and the validation matrix.
 
 ## Combined autoloop validation
 
@@ -178,8 +250,10 @@ python3 tools/ssfmt/re/audit_legacy_capture.py \
 ```
 
 The derived library covers 41/42 catalog indices and all 42 frozen autoloop
-hashes still match, but it retains only one sample state per index and no raw
-segment timestamps. It is coverage evidence, not per-frame validation evidence.
+hashes still match. The full frozen manifest now matches 96/99 paths: the
+current Venue, its rewritten backup, and A5 differ from the old manifest. The
+library retains only one sample state per index and no raw segment timestamps.
+It is coverage evidence, not per-frame validation evidence.
 
 ## Coverage report
 
@@ -208,6 +282,7 @@ Expected current summary:
 
 ```bash
 python3 -m py_compile tools/ssfmt/re/*.py
+python3 -m unittest tests.test_ssfile_reference_convention
 python3 tools/check_docs_metadata.py
 python3 tools/check_agent_contracts.py
 python3 tools/check_docs_drift.py

@@ -1,12 +1,22 @@
 ---
 doc_status: active-operator-handoff
 truth_level: evidence-constrained-procedure
-last_verified_commit: fd40843
+last_verified_commit: a5f7ced
 last_verified_date: 2026-06-20
 validation_scope: operator procedure only; no live commands executed; hardware-unvalidated
 ---
 
 # SoundSwitch Stage 3 Operator Handoff
+
+> **2026-06-20 update.** The controlled scratch-project authoring corpus is now
+> captured (`/tmp/soundswitch_finish_IiVlD1`), including the legacy scripted-edit
+> experiment. Key result: cue-reference convention is provenance-dependent (legacy
+> scripted=one-based wire-proven, new=direct, edited-legacy=MIXED, autoloops
+> non-uniform/unproven). Remaining operator-gated blockers below still require
+> explicit per-run approval: playback/wire captures (esp. an autoloop wire anchor
+> to settle the autoloop convention and the CH11=227 layer), restarts/toggles,
+> and any hardware check. See `docs/research/soundswitch_ssfile_format.md` and
+> `soundswitch_authoring_mutation_matrix.md`.
 
 ## Purpose and approval boundary
 
@@ -74,7 +84,32 @@ Never edit the real project. The operator creates a scratch/duplicate project
 and changes one property at a time. Preserve before/after file hashes and a copy
 of every changed source file.
 
-Run these as separate experiments:
+Current evidence and gate:
+
+- [confirmed] A blank operator-created scratch did not expose the fixtures. Its
+  attempted AL-ADD run produced no cataloged autoloop and is invalid setup
+  evidence.
+- [confirmed] Opening `default.ssproj` rewrote only its non-authoritative Venue
+  backup to equal current Venue bytes. No authoritative Venue/cue/catalog/script
+  change was observed, and no restore was performed.
+- [assumed] SoundSwitch `Save Project As` is the next candidate for a
+  fixture-bearing duplicate, but it is not authorized by this handoff.
+- [unknown] Before any further UI step, the operator must explicitly accept the
+  possibility of another application-managed backup write and identify the new
+  duplicate path. Codex must freeze and compare the project before requesting
+  the next one-action audible ping.
+
+For an authorized run, request exactly one UI action at a time. An audible ping
+is the execution signal; the operator need not type a response. After the files
+settle, freeze the complete after state and stop for comparison. Do not combine
+creation, editing, naming, playing, or triggering in one experiment.
+
+Use the read-only freezer/comparator commands in
+`tools/ssfmt/re/README.md`. A source that changes during read, an unsupported or
+opaque changed source, an unresolved reference, or an unexplained consistency
+failure invalidates the experiment and stops the sequence.
+
+Once a fixture-bearing duplicate exists, run these as separate experiments:
 
 1. Same cue, CH11 changed only.
 2. Same timeline, one raw-reference-zero event added/removed.
@@ -108,6 +143,21 @@ single-variable change shows a plausible project reference or output effect.
 
 ## Priority 4: scripted layouts and transport
 
+TITANIUM (`FC10FC02`), Opalite (`74044FA4`), and New Sky (`AE9E3C61`) plus a
+dedicated Opalite transport run were captured on 2026-06-20. Both mirrored Venue
+groups compare identically. Results are blocked, not complete: 16/64, 23/39,
+and 304/367 event samples are exact. Opalite behaves one-based on default-project
+wire despite its earlier “new direct” provenance label. New Sky's decoded
+decoupled-color case clears CH8 instead of persisting it. The transport run has
+exact representative seek/loop/refire samples and exact confirmed-stop clears,
+but a known base-render residual remains. Summary:
+`/tmp/ss_scripted_validation_summary_20260620.json`.
+
+BLACKPINK/JUMP (`1FD042ED`) and restored clean Where Have You Been (`528E8B22`,
+hash `1f740632…`) remain optional follow-up captures; they cannot by themselves
+clear the current renderer gate. The archived `WHYB-AFTER.ssproj` copy
+(`63302346…`) remains the edited-legacy MIXED negative control and fails closed.
+
 Choose one safe representative from each structurally distinct layout:
 
 - shared 441-byte layout (A5 is already the baseline);
@@ -136,7 +186,10 @@ be statically imported.
 
 ## Priority 5: deck ownership and composition
 
-The combined capture is not an ownership oracle. Use one-variable runs:
+The future bridge importer should take deck selection and transport from bridge
+state; reproducing SoundSwitch's internal master/crossfader owner is not a
+static-export gate. Run these one-variable captures only if SoundSwitch parity
+is explicitly desired or if they are needed to isolate a current wire residual:
 
 1. Hold Deck 1 selection/transport constant; change only Deck 0 selection.
 2. Hold Deck 0 constant; change only Deck 1.
@@ -193,6 +246,7 @@ A changed real-project hash invalidates the run.
 - Do not enable a physical output merely to satisfy this research.
 - Do not modify `~/Music/SoundSwitch/default.ssproj/`.
 - Do not substitute the Venue backup or a similarly named cue.
+- Do not restore or overwrite an application-managed backup automatically.
 - Do not call a visual impression byte-exact.
 
 The next agent session should first verify hashes and read the new capture

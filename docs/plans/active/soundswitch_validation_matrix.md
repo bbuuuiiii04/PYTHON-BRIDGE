@@ -1,7 +1,7 @@
 ---
 doc_status: active-validation-evidence
 truth_level: byte-and-capture-grounded
-last_verified_commit: fd40843
+last_verified_commit: a5f7ced
 last_verified_date: 2026-06-20
 validation_scope: passive software and wire capture only; hardware-unvalidated
 ---
@@ -27,13 +27,18 @@ HARDWARE-UNVALIDATED**.
 | --- | --- | --- |
 | A5 scripted capture | 16/16 exact; 14/14 positive; 2/2 raw-zero | One file/layout; CH11 layer provisional. |
 | Combined autoloop capture | 68 segments; 17 exact segments; 51 unresolved | 19/42 files represented; two decks overlap. |
-| Legacy `artnet_lo` capture | 41/42 indices in derived library; 42/42 frozen autoloop hashes still current | No raw segment timestamps/AppLogs; sample-state coverage only. |
+| Legacy `artnet_lo` capture | 41/42 indices in derived library; 42/42 frozen autoloop hashes still current; 96/99 full-manifest paths match | No raw segment timestamps/AppLogs; current Venue, rewritten backup, and A5 drift; sample-state coverage only. |
 | Autoloop structure | 42/42 parsed | Control semantics unresolved. |
-| Scripted structure | 44/45 parsed | Only A5 wire validated; demo unsupported. |
+| Scripted structure | 44/45 parsed | A5 plus three representative tracks captured; demo unsupported. |
 | Base/extended catalogs | 42/42 entries; zero trailing bytes | Current v3 files only. |
 | TrackMap repeated records | 95 records; 61/61 comparable tags agree | Top-level object graph unnamed; six current scripts unmapped. |
 | Fixture prefix | 42/42 share six-group block; all pcaps use only Universe-0 CH1-CH19 and keep Universe 1 zero | Physical four-fixture membership/mirror routing unresolved. |
 | Deck correlation | Decks 0 and 1 independently logged | Owner/master/crossfader not logged. |
+| Snapshot comparator | Repeated reports byte-identical; adversarial add/remove/change/rename/relocate/reference/profile/unsupported/race cases fail closed | Synthetic verifier evidence only; does not prove SoundSwitch UI mutation behavior. |
+| AL-ADD authoring attempt | No cataloged autoloop added; Venue/TrackMap artifacts changed; 128 fixtureless autoloops unsupported | Invalid fixtureless scratch setup; mutation row remains unknown. |
+| Scripted multi-track capture | TITANIUM 16/64, Opalite 23/39, New Sky 304/367 event samples exact; both 0x493/0x496 comparisons identical | Representative wire evidence now exists, but all three fail full-frame byte exactness. One-based beats direct 16–0, 23–0, and 304–45 respectively. |
+| Scripted decoupled color | New Sky WHITE CH8/CH9=`172/255` exact; following decoded CH15-only record emits `0/255/0` on CH8/CH9/CH15 instead of `172/255/207` | Scripted CH8 persistence hypothesis falsified; exact missing mask/layer semantics unknown. |
+| Scripted render-at-elapsed/transport seam | 21 focused tests pass; dedicated Opalite run has exact backward seek, exact second forward seek, 22/22 loop samples, exact playing re-fire samples, and 2/2 confirmed-stop zero frames | First forward seek/pause lands in a known base-render residual interval; unload resets position but bridge filename/mode remains stale. Transport reconstruction is partial, not a renderer pass. |
 
 ## Autoloop coverage: 42 rows
 
@@ -145,14 +150,54 @@ timeline followed by a 13-byte trailer and header-addressed footer; `no-anchor`
 
 ## Explicit fail gates
 
-- Files 47, 48, and 55 retain CH11=227 instead of the STROBE cue's CH11=0.
-- Auxiliary and negative-time semantics are not uniquely decoded.
-- Only A5 has representative scripted wire validation.
+- **Cue-reference convention is provenance-dependent and NOT byte-deterministic
+  (2026-06-20).** Legacy scripted = one-based (wire-proven, A5 14/14); newly
+  created = direct; editing a legacy file yields a MIXED file (old one-based +
+  new direct, no disambiguator). **Legacy autoloops = one-based is now ALSO
+  WIRE-PROVEN** (see next gate). Resolution must still fail closed on
+  mixed/ambiguous/edited files because a single file can carry both conventions.
+  See `docs/research/soundswitch_ssfile_format.md`.
+- **[resolved 2026-06-20] Legacy autoloop convention = ONE-BASED, wire-proven.**
+  The OLD autoloop pcap (`bridge_driven_autoloops_20260619.pcap`) was
+  convention-insensitive (one_based and direct both give 17 exact / 51 unresolved
+  because the unresolved segments are animated). A new operator-gated capture
+  (`autoloop_probe.pcap`, scratch project, fixtures confirmed safe) settled it at
+  the per-record color level: one-based-rendered cue states appear on the wire 17×
+  vs direct 4×, and for every color-discriminating file (SSAutoLoop50/52/53)
+  one-based matches byte-exact while direct matches 0 (e.g. SSAutoLoop52 raw 27 →
+  byte 26 GREEN = wire exact).
+- **CH11=227 (files 47/48/55) remains a separate render-LAYER unknown.** It is no
+  longer a reference-convention question (autoloops are proven one-based). CH11 is
+  handled by the renderer as a control channel and appears in captured wire frames
+  (e.g. CH11=214); its exact layer/activation semantics are still undecoded and
+  must fail closed.
+- Auxiliary and negative-time activation semantics are not uniquely decoded
+  (negative ticks themselves now decode correctly as full signed 32-bit).
+- A5 remains the only fully byte-exact scripted capture. TITANIUM (`FC10FC02`),
+  Opalite (`74044FA4`), and New Sky (`AE9E3C61`) are now representative blocked
+  captures at 16/64, 23/39, and 304/367 event samples exact. Opalite's live
+  default-project bytes behave one-based (23/39 vs direct 0/39), contradicting
+  the earlier “new direct” provenance label; do not use that label as a resolver.
+  BLACKPINK/JUMP and clean Where Have You Been remain uncaptured follow-ups.
+  The archived edited `WHYB-AFTER.ssproj` copy (`63302346…`) remains the MIXED
+  negative control and the validator rejects it before rendering.
 - The In-App Demo scripted layout is unsupported.
-- Seek/pause/resume/refire/end/unload/transfer behavior is untested.
+- Seek/pause/resume/loop/refire/end/unload now have one operator-gated Opalite
+  capture. Position reconstruction is exact on the backward seek, the second
+  forward seek, all 22 loop samples, and playing re-fire samples. Pause holds the
+  wire frame stable, but its selected interval shares the same base-render
+  residual as uninterrupted playback. Confirmed stop clears are exact; unload
+  adds no wire transition after stop and exposes stale bridge metadata. Deck
+  transfer remains wire-untested.
 - The wire address is Universe-0 CH1-CH19, but physical four-fixture
   membership/mirror routing is not decoded.
-- Universe-0 deck ownership is not deterministic from current logs.
+- SoundSwitch Universe-0 deck ownership is not deterministic from current logs;
+  this blocks exact SoundSwitch parity only, not bridge-owned deck selection.
+- [resolved 2026-06-20] A fixture-bearing scratch corpus
+  (`codex fixture research real.ssproj`, evidence `/tmp/soundswitch_finish_IiVlD1`)
+  now proves the supported authoring add/edit/rename/remove behavior; see
+  `soundswitch_authoring_mutation_matrix.md`. The fixtureless AL-ADD attempt
+  remains invalid setup evidence.
 
 No exporter or importer may turn `structural only`, `blocked`, `uncaptured`, or
 `unsupported` into a supported result without new evidence.

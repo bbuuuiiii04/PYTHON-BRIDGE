@@ -12,6 +12,7 @@ from typing import Iterable
 
 
 CHANNEL_COUNT = 19
+TRANSPORT_STATES = {"playing", "paused", "ended", "unloaded"}
 
 
 @dataclass
@@ -123,6 +124,7 @@ def render_timeline(
         rows.append(
             {
                 "sequence": sequence,
+                "source_sequence": event.get("source_sequence", sequence),
                 "record_offset": event["offset"],
                 "time": event[time_key],
                 "time_field": time_key,
@@ -146,3 +148,135 @@ def render_timeline(
         )
         previous = rendered
     return rows
+
+
+def render_at_elapsed(
+    parsed: dict,
+    cue_records: dict[str, dict],
+    elapsed_ms: int | float,
+    *,
+    initial_state: tuple[int, ...] = (0,) * CHANNEL_COUNT,
+    initial_state_policy: str = "all_zero",
+    control_channels: Iterable[int] = (),
+    owner_deck: int | None = None,
+) -> dict:
+    """Rebuild a scripted frame as a pure function of playback elapsed.
+
+    Scripted records are ordered by elapsed time and then by their stored source
+    order. Replaying from the explicit initial state on every call makes seeks,
+    pause/resume samples, and loop-back queries independent of prior calls. The
+    ordering policy is wire-supported for specific Opalite seek/loop/refire
+    samples, but remains a research hypothesis outside the captured base-render
+    scope.
+    """
+    if elapsed_ms < 0:
+        raise ValueError("scripted elapsed_ms must be non-negative")
+    reference_rule = parsed.get("reference_rule")
+    if reference_rule not in {"direct", "one_based"}:
+        raise ValueError(
+            "scripted render requires explicit direct or one_based provenance; "
+            f"got {reference_rule or 'unspecified'}"
+        )
+
+    eligible = []
+    for source_sequence, event in enumerate(parsed["timeline"]):
+        event_time = event["elapsed"]
+        if 0 <= event_time <= elapsed_ms:
+            eligible.append(
+                (
+                    event_time,
+                    source_sequence,
+                    {**event, "source_sequence": source_sequence},
+                )
+            )
+    eligible.sort(key=lambda row: (row[0], row[1]))
+    selected = [row[2] for row in eligible]
+    rows = render_timeline(
+        {**parsed, "timeline": selected},
+        cue_records,
+        time_key="elapsed",
+        initial_state=initial_state,
+        initial_state_policy=initial_state_policy,
+        control_channels=control_channels,
+        owner_deck=owner_deck,
+    )
+    if rows:
+        state = rows[-1]["state"]
+    else:
+        state = LayeredState(inherited=initial_state).snapshot()
+    return {
+        "elapsed_ms": elapsed_ms,
+        "reference_rule": reference_rule,
+        "timeline_order_policy": "elapsed_then_source_sequence",
+        "initial_state_policy": initial_state_policy,
+        "applied_event_count": len(rows),
+        "active_event": rows[-1] if rows else None,
+        "state": state,
+        "source_decode_errors": sorted(
+            {
+                row["source_decode_error"]
+                for row in rows
+                if row["source_decode_error"] is not None
+            }
+        ),
+    }
+
+
+def render_playback_state(
+    parsed: dict,
+    cue_records: dict[str, dict],
+    elapsed_ms: int | float,
+    transport_state: str,
+    *,
+    initial_state: tuple[int, ...] = (0,) * CHANNEL_COUNT,
+    initial_state_policy: str = "all_zero",
+    control_channels: Iterable[int] = (),
+    owner_deck: int | None = None,
+) -> dict:
+    """Render a transport-aware scripted frame without mutable history.
+
+    Playing and paused states are both pure render-at-elapsed queries. A seek,
+    loop-back, or re-fire is therefore just another query at its new elapsed
+    position. Ended and unloaded states explicitly clear every channel rather
+    than retaining timeline layers. The policy is research-only until each edge
+    has passive wire evidence. The current evidence covers representative
+    Opalite edges but does not make the underlying scripted renderer complete.
+    """
+    if transport_state not in TRANSPORT_STATES:
+        raise ValueError(
+            f"transport_state must be one of {sorted(TRANSPORT_STATES)}; "
+            f"got {transport_state!r}"
+        )
+    reference_rule = parsed.get("reference_rule")
+    if reference_rule not in {"direct", "one_based"}:
+        raise ValueError(
+            "scripted render requires explicit direct or one_based provenance; "
+            f"got {reference_rule or 'unspecified'}"
+        )
+    if transport_state in {"ended", "unloaded"}:
+        return {
+            "elapsed_ms": elapsed_ms,
+            "reference_rule": reference_rule,
+            "transport_state": transport_state,
+            "transport_output_policy": "all_zero_idle",
+            "timeline_order_policy": "elapsed_then_source_sequence",
+            "initial_state_policy": initial_state_policy,
+            "applied_event_count": 0,
+            "active_event": None,
+            "state": LayeredState(inherited=(0,) * CHANNEL_COUNT).snapshot(),
+            "source_decode_errors": [],
+        }
+    rendered = render_at_elapsed(
+        parsed,
+        cue_records,
+        elapsed_ms,
+        initial_state=initial_state,
+        initial_state_policy=initial_state_policy,
+        control_channels=control_channels,
+        owner_deck=owner_deck,
+    )
+    return {
+        **rendered,
+        "transport_state": transport_state,
+        "transport_output_policy": "render_at_elapsed",
+    }

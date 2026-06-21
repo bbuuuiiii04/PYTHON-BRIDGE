@@ -8,7 +8,13 @@ import json
 import struct
 from pathlib import Path
 
-from analyze_ssfile_structure import MAGIC, TRAILER_SIZE, parse_autoloop_structure
+from analyze_ssfile_structure import (
+    MAGIC,
+    REFERENCE_RULES,
+    TRAILER_SIZE,
+    decode_timeline_time,
+    parse_autoloop_structure,
+)
 
 
 def u32be(data: bytes, offset: int) -> int:
@@ -26,30 +32,53 @@ def shared_table_from_autoloop(path: Path) -> bytes:
     return data[start : start + parsed["shared_block_size"]]
 
 
-def timeline_record(data: bytes, offset: int) -> dict:
+def timeline_record(
+    data: bytes, offset: int, reference_rule: str = "ambiguous"
+) -> dict:
     field_a, field_b, low_time_byte = struct.unpack_from(">III", data, offset)
     if low_time_byte > 255:
         raise ValueError(f"scripted low-time byte exceeds 255 at byte {offset}")
     packed = u32le(data, offset + 12)
     high_time_bytes = packed & 0x00FFFFFF
     raw_reference = packed >> 24
+    direct_index = raw_reference if raw_reference > 0 else None
+    one_based_index = raw_reference - 1 if raw_reference > 0 else None
     return {
         "offset": offset,
         "field_a": field_a,
         "field_b": field_b,
         "low_time_byte": low_time_byte,
-        "elapsed": (
-            -1
-            if high_time_bytes == 0x00FFFFFF
-            else (high_time_bytes << 8) | low_time_byte
-        ),
+        "elapsed": decode_timeline_time(high_time_bytes, low_time_byte),
         "raw_cue_reference": raw_reference,
-        "resolved_dictionary_index": raw_reference - 1 if raw_reference > 0 else None,
+        "direct_dictionary_index": direct_index,
+        "one_based_dictionary_index": one_based_index,
+        "reference_rule": reference_rule,
+        "resolved_dictionary_index": {
+            "direct": direct_index,
+            "one_based": one_based_index,
+            "ambiguous": None,
+        }[reference_rule],
         "reference_kind": "cue" if raw_reference > 0 else "clear_control",
     }
 
 
-def parse_scripted_structure(data: bytes, shared_table: bytes) -> dict:
+def parse_scripted_structure(
+    data: bytes, shared_table: bytes, reference_rule: str = "ambiguous"
+) -> dict:
+    """Parse a scripted-track .ssfile.
+
+    WIRE-PROVEN provenance facts (A5/SANFRANDISCO Art-Net capture, 14/14 exact):
+    - Legacy scripted records are ONE-BASED (raw == cue_index byte + 1).
+    - Newly written records (current SoundSwitch) are DIRECT (raw == cue_index byte).
+    - Editing a legacy file appends the new record DIRECT without renormalizing the
+      old one-based records => MIXED file with no byte-level disambiguator
+      (version 3, field_a=field_b=1, elapsed-sorted).
+
+    Resolution is therefore not deterministic from bytes alone for the general
+    corpus. Default is ``ambiguous`` (both candidate indices preserved). Pass an
+    explicit rule only with justified provenance (e.g. one_based for an untouched
+    legacy file; direct for a freshly created file); mixed files must fail closed.
+    """
     if data[:4] != MAGIC:
         raise ValueError("not a SoundSwitch container")
     if len(data) < 8:
@@ -98,7 +127,7 @@ def parse_scripted_structure(data: bytes, shared_table: bytes) -> dict:
     for index in range(declared_timeline_count):
         if offset + 16 > len(data):
             raise ValueError(f"truncated scripted timeline record {index}")
-        timeline.append(timeline_record(data, offset))
+        timeline.append(timeline_record(data, offset, reference_rule))
         offset += 16
 
     if len(data) - offset < TRAILER_SIZE:
@@ -108,7 +137,7 @@ def parse_scripted_structure(data: bytes, shared_table: bytes) -> dict:
     if extra and len(extra) % 16 == 0:
         continuation_offset = offset
         while offset < len(data) - TRAILER_SIZE:
-            continuation.append(timeline_record(data, offset))
+            continuation.append(timeline_record(data, offset, reference_rule))
             offset += 16
         if any(row["field_b"] != 1 for row in continuation):
             continuation = []
@@ -118,6 +147,7 @@ def parse_scripted_structure(data: bytes, shared_table: bytes) -> dict:
     return {
         "size": len(data),
         "version": version,
+        "reference_rule": reference_rule,
         "shared_block_offset": shared_block_offset,
         "shared_block_size": len(shared_table),
         "cue_count_offset": cue_count_offset,
@@ -141,6 +171,7 @@ def summary(parsed: dict) -> dict:
     return {
         "size": parsed["size"],
         "version": parsed["version"],
+        "reference_rule": parsed["reference_rule"],
         "shared_block_offset": parsed["shared_block_offset"],
         "cue_count_offset": parsed["cue_count_offset"],
         "cue_count": parsed["cue_count"],
@@ -173,6 +204,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("files", nargs="+", type=Path)
     parser.add_argument("--autoloop-reference", required=True, type=Path)
+    parser.add_argument(
+        "--reference-rule",
+        choices=REFERENCE_RULES,
+        default="ambiguous",
+        help="convention is provenance-dependent; default 'ambiguous' preserves both "
+        "candidates. legacy=one_based is wire-proven; new=direct; edited legacy=MIXED "
+        "(fail closed). Pass one_based/direct only with justified provenance.",
+    )
     parser.add_argument("--full", action="store_true")
     args = parser.parse_args()
     shared_table = shared_table_from_autoloop(args.autoloop_reference)
@@ -180,7 +219,7 @@ def main() -> None:
     for path in args.files:
         data = path.read_bytes()
         try:
-            parsed = parse_scripted_structure(data, shared_table)
+            parsed = parse_scripted_structure(data, shared_table, args.reference_rule)
             row = (
                 {"path": str(path), "status": "parsed", **parsed}
                 if args.full

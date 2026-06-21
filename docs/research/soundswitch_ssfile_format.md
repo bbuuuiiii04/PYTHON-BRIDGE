@@ -1,7 +1,7 @@
 ---
 doc_status: research-current
 truth_level: byte-and-capture-grounded
-last_verified_commit: fd40843
+last_verified_commit: a5f7ced
 last_verified_date: 2026-06-20
 validation_scope: passive software and wire capture only; hardware-unvalidated
 ---
@@ -19,9 +19,13 @@ Accepted status remains:
 
 > **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**
 
-The local project under `~/Music/SoundSwitch/default.ssproj/` was never modified.
-All claims below come from current file bytes, passive pcaps, copied SoundSwitch
-AppLogs, copied bridge logs, and research helpers under `tools/ssfmt/re/`.
+No agent command modified the authoritative files under
+`~/Music/SoundSwitch/default.ssproj/`. Opening that project in SoundSwitch did,
+however, rewrite `SoundSwitchVenues.bin.backup` to equal the current Venue.
+This observed application side effect is retained as evidence and no restore or
+substitution was performed. All claims below come from current file bytes,
+frozen pre-open bytes, passive pcaps, copied SoundSwitch AppLogs, copied bridge
+logs, and research helpers under `tools/ssfmt/re/`.
 
 ## Frozen evidence
 
@@ -38,13 +42,14 @@ Capture validation proves bytes visible on the wire. It does not prove any
 fixture, laser, LED/Govee device, Enttec interface, or physical DMX behavior.
 
 The older `artnet_lo.pcap` is fully audited rather than silently discarded. Its
-frozen hash manifest has 99 entries: 97 still match, including all 42 autoloop
-files. Only current Venue and A5 differ. Snapshot/current Venue cue GUIDs and all
-232 parsed cue semantics are identical, so the hash drift is outside parsed cue
-patches. Its surviving derived library covers 41/42 AppLog indices (missing 6),
-but stores only one sample state per index and no raw segment timestamps; copied
-AppLogs are absent. It cannot be promoted to per-frame exact validation without
-inventing boundaries.
+frozen hash manifest has 99 entries: 96 still match, including all 42 autoloop
+files. Current Venue, the now-rewritten Venue backup, and A5 differ. The old
+snapshot, frozen pre-open Venue/backup, and current Venue have identical cue
+GUID sets and all 232 parsed cue semantics, so the Venue hash drift is outside
+parsed cue patches. Its surviving derived library covers 41/42 AppLog indices
+(missing 6), but stores only one sample state per index and no raw segment
+timestamps; copied AppLogs are absent. It cannot be promoted to per-frame exact
+validation without inventing boundaries.
 
 ## Common container encoding
 
@@ -158,18 +163,63 @@ repeat count:
 ```
 
 `packed >> 24` is the raw cue reference. The low 24 bits are the high time
-bytes. Time is `(high_time_bytes << 8) | low_time_byte`, except high time
-`0xFFFFFF` means the sentinel time `-1`.
+bytes. Time is the **full signed 32-bit value** reassembled as
+`(high_time_bytes << 8) | low_time_byte`, then sign-extended. (Corrected
+2026-06-20: the older claim that high time `0xFFFFFF` is a `-1` sentinel was a
+decoder bug — `0xFFFFFF`+low is just a small negative, e.g. low `0xAA` → `-86`,
+low `0xB4` → `-76`. Negative pre-roll times are real and must be preserved.)
 
-Reference resolution is:
+The key lookup is `{entry.cue_index: entry}`, not `cues[raw - 1]` — the
+dictionary is GUID-sorted and physically permuted, so the stored `cue_index`
+byte is the key, not the entry's position.
+
+#### Reference resolution is PROVENANCE-DEPENDENT (corrected 2026-06-20)
+
+There is **no single byte-determinable convention**. The relation between the
+raw reference and the stored `cue_index` byte depends on which SoundSwitch wrote
+each record:
 
 ```text
-raw_reference > 0: cue_index = raw_reference - 1
-raw_reference == 0: clear/control event, not cue_index 0
+legacy record (older SoundSwitch):   cue_index_byte = raw_reference - 1   (ONE-BASED)
+new record   (current SoundSwitch):  cue_index_byte = raw_reference       (DIRECT)
+raw_reference == 0:                  clear/control event (not cue_index 0)
 ```
 
-The key lookup is `{entry.cue_index: entry}`, not `cues[raw - 1]`. This
-distinction is load-bearing because dictionary records are physically permuted.
+- **Legacy scripted = ONE-BASED is WIRE-PROVEN** (A5/SANFRANDISCO Art-Net
+  capture, 14/14 byte-exact: raw 91 → cue_index_byte 90 = "RED BOX SWAY DROP";
+  raw 22 → cue_index_byte 21 = "RED" = `a554afd8…`).
+- **Newly created scripted = DIRECT** (Opalite; new RED = raw 21 → byte 21).
+- **Editing a legacy scripted file = MIXED.** Appending a cue leaves the old
+  records ONE-BASED and writes the new record DIRECT, with no renormalization
+  and no structural disambiguator (version 3, all `field_a=field_b=1`,
+  elapsed-sorted). Wire-confirmed on edited A5: legacy RED stays raw 22
+  (one-based) while the new RED is raw 21 (direct) — same target cue, two
+  encodings, one file.
+- **Autoloops: legacy records = ONE-BASED (WIRE-PROVEN 2026-06-20); new records =
+  DIRECT; edited-legacy = MIXED** — i.e. identical to the scripted path. New
+  placements use direct (controlled authoring: RED 21, BLUE 22, GREEN 26). The
+  earlier "autoloops are uniformly direct" claim was a self-consistency artifact
+  and is withdrawn. The legacy=one-based result was confirmed by a dedicated
+  operator-gated Art-Net capture (`autoloop_probe.pcap`, scratch project, fixtures
+  confirmed safe): rendering each captured autoloop through the layered renderer,
+  one-based-rendered cue states appear on the wire 17× vs direct 4×, and for every
+  file with a color-discriminating record (SSAutoLoop50/52/53) one-based matches
+  byte-exact while direct matches 0. Decisive example: SSAutoLoop52 raw 27 at tick
+  2325 renders one-based → byte 26 GREEN
+  `{1:41,3:48,4:14,6:117,7:145,8:21,11:214,15:159}` = the captured wire frame
+  byte-exact; direct → byte 27 CYAN `{1:28,4:255,…,15:255}` never appears.
+  (Context: all BYTE-ONLY tests are convention-insensitive — the RED scan is
+  circular and the dictionary-coverage test passes under both because dictionaries
+  now hold the full 233-cue bank — and the OLD autoloop pcap was also insensitive
+  because its discriminating cues were animated; the new capture's per-record
+  color match is what settled it.)
+
+**Exporter/importer consequence:** cue-reference resolution cannot be made
+deterministic from `.ssfile` bytes for the general/edited corpus. Tools default
+to `ambiguous` (both candidate indices preserved) and must **fail closed** on
+mixed/ambiguous files or resolve only with an external wire/playback oracle or
+known provenance. Untouched files that are internally uniform (all-legacy =
+one-based, all-new = direct) are resolvable once their provenance is known.
 
 Most timeline records use `(field_a, field_b) == (1, 1)`. One file-13 sentinel
 record at byte 8,082 uses `(0x01000001, 1)`. The meaning of that high bit is
@@ -190,10 +240,10 @@ File 36 also contains two unused stale GUIDs:
 - `7d75b0dadaee454b9950f23297de0360`
 - `a2fde79e40a58743b21b08c412e64ddb`
 
-The non-authoritative Venue backup also contains 232 parsed cues and contains
-none of these three stale GUIDs. It does contain the current `473758...` cue.
-There is therefore no deleted cue payload to recover from that backup, and none
-is needed for files 16/54.
+Both the frozen pre-open and current non-authoritative Venue backups contain 232
+parsed cues and none of these three stale GUIDs. They contain the current
+`473758...` cue. There is therefore no deleted cue payload to recover from a
+backup, and none is needed for files 16/54.
 
 An exporter must still report unused stale entries, but must not fabricate or
 substitute cue data.
@@ -241,8 +291,16 @@ records plus a fully decoded 256-record continuation (367 total); no trailing
 bytes are silently skipped.
 
 Positive references in every structurally parsed layout use the same packed
-record grammar and resolve against stored `cue_index = raw - 1`. Only A5 has
-wire evidence; the other layouts remain structural-only.
+record grammar, but the raw→`cue_index` relation is **provenance-dependent, not
+universal** (see "Reference resolution is PROVENANCE-DEPENDENT" above). Legacy
+records resolve `cue_index = raw - 1` (one-based: A5 fully wire-proven and
+strongly preferred by the three new representative comparisons); controlled
+newly written records resolve `cue_index = raw` (direct); edited-legacy files are
+mixed. `cue_index = raw - 1` must therefore NOT be applied uniformly. The live
+default-project Opalite bytes contradict their earlier “new direct” provenance
+label, so a title/SSID label is not a resolver. Uncaptured layouts remain
+structural-only and all files require explicit trustworthy provenance or must
+fail closed.
 
 ## A5 scripted correction and wire proof
 
@@ -395,9 +453,33 @@ still unnamed, so the TrackMap parser reports `partial`, not complete.
 | `automation_presets/*.sspreset` | One 161-byte opaque binary preset. | Hash/report; do not interpret without a controlled diff. |
 | `recordable/*.dat` | Four `0xDEADBEEF` structured binaries containing 9, 24, 114, and 96 `SoundSwitch.Controls.*` strings. | Treat as external-control mapping data, separate from authored static render input. |
 | `In App Demo.mp4` | 44,701,022-byte `mp42` media. | Ignore as authored lighting source; optionally hash/report. |
-| `SoundSwitchVenues.bin.backup` | Same size as current Venue but different hash (`521cc9...`). | Hash/report only; never source truth. |
+| `SoundSwitchVenues.bin.backup` | Opening the project rewrote it from frozen `521cc9...` bytes to the current Venue hash `f34bfc...`; current size and bytes now equal current Venue. | Hash/report side effects only; never source truth and never auto-restore. |
 
 `.ssa`, `.sspreset`, and recordable numeric binding semantics remain opaque.
+
+## Authoring mutation and rescan result
+
+[confirmed] The read-only `freeze_project_snapshot.py` and
+`compare_project_snapshots.py` helpers now provide complete relative-path
+inventory, stable reads, hashes, byte-diff ranges, parsed identity diffs, and
+cross-source consistency diagnostics. Repeated no-change reports are
+byte-identical. [confirmed] Offline adversarial copies prove the comparator fails closed for
+add/remove/replace/rename, case-only relocation, unresolved/missing references,
+duplicate cue indices, fixture-profile mismatch, unsupported/opaque changes,
+and concurrent source mutation.
+
+[confirmed] Those verifier tests are not SoundSwitch authoring evidence. The only attempted
+AL-ADD run used an operator-created `CODEX MUTATION SCRATCH.ssproj` with no
+fixtures. It produced no new cataloged autoloop, changed Venue/TrackMap
+artifacts, and exposed 128 fixtureless autoloop files in an unsupported layout.
+[confirmed] The run is invalid setup evidence and leaves AL-ADD [unknown]. No valid
+add/edit/rename/remove UI mutation has been isolated.
+
+[assumed] Creating a fixture-bearing duplicate is the next research prerequisite. No
+further SoundSwitch UI action is authorized by this document because merely
+opening the real project already rewrote its backup file. Any future play or
+static-look trigger also requires separate per-run approval and recorded
+fixture-disconnected/safe confirmation. Those future results remain [unknown].
 
 ## Deck ownership and transport blockers
 
@@ -408,10 +490,50 @@ or Universe-0 ownership. Of 167 event clusters, 39 contain Deck 0 only, 83 Deck
 changes, including 16 byte-exact segments. Temporal proximity therefore does
 not identify output ownership.
 
-No evidence yet establishes scripted initial load, play from zero, seek forward
-or backward, pause, resume, refire, deck transfer, end-of-track, unload, Decks 3
-and 4, or deterministic scripted/autoloop overlap. These are implementation
-blockers, not optional polish.
+The 2026-06-20 operator-gated run captured three additional real scripted tracks
+plus a dedicated transport run. Canonical summary:
+`/tmp/ss_scripted_validation_summary_20260620.json` (SHA-256 `9ec44192…`).
+Both Venue fixture groups `0x493` and `0x496` produced identical comparisons.
+
+| Track | Convention comparison at bridge-anchored time | One-based full-frame samples | Arbitrary bridge-position samples | Result |
+| --- | --- | ---: | ---: | --- |
+| TITANIUM `FC10FC02` | one-based 16/64 vs direct 0/64 event samples | 16/64 | 21/57 | blocked; many channel residuals |
+| Opalite `74044FA4` | one-based 23/39 vs direct 0/39 event samples | 23/39 | 48/57 | blocked; its previous “new direct” provenance label is contradicted by default-project wire evidence |
+| New Sky `AE9E3C61` | one-based 304/367 vs direct 45/367 event samples | 304/367 | 53/71 | blocked; representative but not byte-exact |
+
+The validator now anchors elapsed zero to the nearest copied bridge
+`arm-scripted` observation; unconstrained wire fitting remains explicitly
+exploratory. Expected event samples are rendered at
+`event_elapsed + sample_delay`, so 1–2 ms compound cue pairs are compared to the
+same settled instant as the wire. `render_at_elapsed` rebuilds from project bytes
+for every query, and `render_playback_state` adds explicit playing/paused versus
+ended/unloaded policy. Both fail closed unless provenance is explicitly
+`one_based` or `direct`.
+
+The New Sky decoupled-color candidate falsifies the current persistence rule.
+`WHITE` at 214.807 s sets CH8/CH9=`172/255` byte-exact. The following decoded
+CH15-only `BUILDUP SPEEDUP` record at 215.483 s was expected to retain those
+bytes and set CH15=207; wire instead emitted CH8/CH9/CH15=`0/255/0`. The same
+result repeats at 217.137/217.387 s. Therefore a Venue patch that omits CH8/CH9
+cannot yet be treated as proof that both bytes persist on scripted tracks.
+
+The dedicated Opalite transport capture
+`/tmp/ss_scripted_transport_74044FA4-45A5-4FE6-85ED-F8D8698A346A.pcap`
+(SHA-256 `ac6c8d99…`) demonstrates position-based evaluation without mutable
+history where the underlying static model is already correct: the backward seek
+sample and the second forward seek sample are byte-exact; all 22 logged loop
+window samples are byte-exact; and re-fire is byte-exact from the first actually
+playing sample at 1.978 s. The first forward seek and pause landed in Opalite's
+independently observed 116–133 s static-render residual interval. Wire held the
+same frame through pause, then returned to an exact rendered frame after resume
+at 133.887 s. Both confirmed stop markers are all-zero byte-exact. Unload caused
+a bridge position reset to zero but left stale filename/mode status; wire was
+already zero and made no additional transition. Deck transfer, Decks 3/4, and
+scripted/autoloop overlap remain uncaptured.
+
+The archived edited copy (`WHYB-AFTER.ssproj`, hash `63302346…`) remains the
+MIXED negative control. `validate_scripted_capture.py --reference-rule mixed`
+fails closed with exit status 2 before rendering.
 
 ## Readiness decision
 
@@ -420,12 +542,75 @@ further along, but the following render-affecting unknowns remain:
 
 - auxiliary values and negative-time activation semantics;
 - shared-table and independent control/effect layers, including CH11=227;
-- 43 scripted files without representative wire proof and one unsupported demo layout;
-- transport and multi-deck composition;
+- the newly captured scripted classes outside A5 have representative wire proof
+  but retain full-frame residuals, plus one unsupported demo layout;
+- position-evaluation transport semantics and bridge-owned multi-deck
+  composition;
 - top-level TrackMap completeness;
 - `.ssa`/preset semantics when active;
+- complete authoring add/edit/rename/remove mutation evidence from a
+  fixture-bearing scratch duplicate;
 - physical fixture membership/mirroring beyond the confirmed Universe-0
-  CH1-CH19 wire surface.
+  CH1-CH19 wire surface, unless deliberately supplied by a versioned external
+  fixture-map input.
 
 All unsupported cases must remain visible and fail closed. The controlled
 operator procedures are in `docs/plans/active/soundswitch_stage3_handoff.md`.
+
+## 2026-06-20 legacy scripted-edit experiment (RED pre-roll)
+
+Two controlled operator edits added the global **RED** Attribute Cue before the
+first beat of two legacy scripted tracks and saved (evidence under
+`/tmp/soundswitch_finish_IiVlD1`: A5/SANFRANDISCO `84f6bf72…`→`addd777d…`;
+"Where Have You Been" `528E8B22` `1f740632…`→`63302346…`). Confirmed findings:
+
+- **Edited legacy scripted files become MIXED** (old records one-based, new
+  record direct; no byte disambiguator). This is the central reference-convention
+  result — see "Reference resolution is PROVENANCE-DEPENDENT" above.
+- **The dictionary is expanded to the full current Attribute-Cue bank on edit**
+  (WHYB 196→233 cue entries, +37 GUIDs, 0 removed) and re-normalized (two
+  `cue_index` bytes swapped with the matching timeline raw refs rewritten to keep
+  the GUID stable under its own convention). Full-project rescan stays mandatory.
+- **Pre-first-beat scripted placement stores `elapsed = 0`**, not a negative
+  time. The track's beatgrid begins at the first beat (`elapsed` of the first
+  existing cue, e.g. 60064); "before the first beat" maps to absolute elapsed 0.
+  This differs from autoloop pre-roll, which uses signed-negative ticks (−86/−76)
+  because the loop origin is the grid start. [operator-confirmed] No track exposes
+  a beat *before* the first beat, so "exactly one beat before" is not authorable
+  in either editor; the earliest UI-allowed pre-roll is the observable bound.
+- **Lazy scripted-track rediscovery** [operator-confirmed]: a project duplicated
+  from `default.ssproj` does not show the scripted icon in music search until the
+  operator opens a track whose timeline contains attribute cues. A deterministic
+  rescan must therefore detect scripted tracks from `{SSID}.ssfile` bytes + the
+  TrackMap, never from a UI/project "scripted" flag.
+
+## Layered laser render model (autoloop-verified; scripted scope falsified 2026-06-20)
+
+In this rig SoundSwitch's Universe-0 CH1-19 output IS the laser fixture; the
+bridge owns decks/transport/selection. The autoloop evidence supports a layered
+persistent buffer of static snapshots (segments show ~4-9 distinct frames over
+~500 captured, not hundreds). The three new scripted captures show that this
+model is **not yet general enough for scripted tracks**. A standalone renderer
+still only needs to replicate the byte-exact frame, but the missing scripted
+layer/mask semantics must be decoded first.
+
+Autoloop composition rule (derived from `autoloop_probe.pcap` + venue cue patches):
+
+- **Position/pattern layer** = the captured autoloop timeline cue resolved
+  ONE-BASED. Sets its patch channels; leaves CH8/CH9 open in that capture scope.
+- **Color layer** = an independently bridge-selected color Attribute Cue, driving
+  CH8 (color/effects) and CH9 (color speed).
+- **Persist/control channels** CH8, CH9, CH11(strobe) hold their last value until
+  a cue sets them; a raw-0 (clear) event zeroes the main/position channels but
+  NOT these persist channels.
+- Idle/transition between looks = all-zero (bridge domain).
+
+Autoloop verification: across the full bridge-used autoloop corpus captured (SSAutoLoop
+3/5/18/50/52/53/54), **29/30 distinct wire frames are full-frame byte-exact**
+under `position-cue(one-based) ⊕ color-cue(CH8/9) ⊕ persist(CH8,9,11)`; the color
+layer matches a known cue 30/30; the lone position miss is the all-zero blackout
+frame. Render config that reproduces this autoloop scope:
+`control_channels=(8,9,11)` with a steady-loop inherited initial state. It does
+not establish scripted parity: TITANIUM, Opalite, and New Sky are respectively
+16/64, 23/39, and 304/367 exact under the current scripted hypothesis, and the
+New Sky decoupled-color case specifically clears CH8 instead of persisting it.

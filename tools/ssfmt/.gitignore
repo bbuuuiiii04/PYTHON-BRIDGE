@@ -1,0 +1,14 @@
+# NOTE: recreated 2026-06-20 after the original was lost to `git clean -fd`.
+# Original content was unrecoverable; this restores the documented intent
+# (README: passive capture corpora are never committed).
+
+# Passive capture corpora and derived artifacts — large/transient, never committed.
+# (pcaps, AppLogs, bridge logs, frame dumps, reference bins, baseline hashes)
+captures/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store

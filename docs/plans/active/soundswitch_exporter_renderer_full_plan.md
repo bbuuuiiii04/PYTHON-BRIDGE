@@ -1,12 +1,24 @@
 ---
 doc_status: active-deferred-plan
 truth_level: evidence-constrained-plan
-last_verified_commit: fd40843
+last_verified_commit: a5f7ced
 last_verified_date: 2026-06-20
 validation_scope: planning only; no exporter/renderer implementation; hardware-unvalidated
 ---
 
 # SoundSwitch Exporter / Renderer Full Plan
+
+> **2026-06-20 correction (authoritative).** A newly identified hard blocker:
+> cue-reference resolution is provenance-dependent and NOT byte-deterministic
+> (legacy scripted=one-based wire-proven; new=direct; edited-legacy=MIXED;
+> captured legacy autoloops=one-based wire-proven). The exporter cannot deterministically resolve
+> cue identities for edited/mixed files from bytes alone — it must fail closed or
+> consume an external wire/playback oracle or provenance. Exporter readiness and
+> renderer readiness are reported separately and both remain NOT ready. See
+> `docs/research/soundswitch_ssfile_format.md`. The concrete implementation spec
+> for the standalone laser path (exporter + byte-exact renderer + Enttec output
+> via VLN `dmx_pro.py`) is
+> `docs/plans/active/soundswitch_standalone_laser_exporter_spec.md`.
 
 ## Current decision
 
@@ -27,6 +39,11 @@ The future bridge-import path must preserve SoundSwitch as a supported existing
 authoring/runtime route. No implementation may remove, bypass, or silently alter
 the current OS2L/SoundSwitch path.
 
+SoundSwitch is the continuing authoring source. Every export performs a complete
+stable rescan of the named project. Frozen copies and passive captures are
+independent test oracles; users do not need a new capture for each ordinary edit
+once that mutation/layout/semantic class is supported.
+
 ## Phase 0 — close research blockers
 
 Required before code design:
@@ -34,12 +51,22 @@ Required before code design:
 - isolate CH11=227 control ownership;
 - name auxiliary and negative-time semantics or exclude affected files;
 - prove shared-table role or prove it non-rendering for declared scope;
-- capture every supported autoloop byte-exact from known state;
-- capture one representative per supported scripted layout;
-- define seek/pause/resume/refire/end/unload state transitions;
-- define multi-deck ownership/composition;
-- decode universe/address/mirror routing;
+- capture at least one repeated, known-state, byte-exact representative per
+  supported autoloop semantic/layout class and every outlier/new residual;
+- decode and recapture the residuals in the three representative scripted
+  captures (TITANIUM 16/64, Opalite 23/39, New Sky 304/367); merely adding more
+  tracks does not clear this gate;
+- extend the captured Opalite transport result beyond its current partial gate:
+  representative seek/loop/refire positions are exact and confirmed stops clear
+  to zero, but one seek/pause interval inherits a known base-render residual and
+  unload leaves stale bridge metadata;
+- define bridge-owned deck precedence/composition; SoundSwitch master/crossfader
+  parity is required only if explicitly included in product scope;
+- decode universe/address/mirror routing or define a versioned external bridge
+  fixture-map input with explicit provenance and hashing;
 - choose a bounded TrackMap source rule and classify sidecar/preset effects.
+- complete the authoring mutation matrix on a fixture-bearing duplicate so a
+  full rescan proves create/edit/rename/remove behavior.
 
 Gate: the pack contract can be filled without `unknown`, guessed fields, or
 wire-seeded production state.
@@ -53,6 +80,9 @@ Create a read-only frozen test corpus outside the live project, with:
   files, classified sidecars, and passive captures/logs;
 - controlled before/after diffs;
 - expected parser JSON generated from reviewed evidence.
+
+The frozen corpus is a verifier oracle, not the exporter's normal input
+authority. Production export always rescans the named current project.
 
 Implement an independent verifier before the exporter. It must reject:
 
@@ -80,6 +110,8 @@ Promote only byte-verified research seams into production-quality modules:
 
 Requirements:
 
+- complete start/end project inventory on every export, including added,
+  removed, opaque, and unsupported paths;
 - no dependency on `tools/ssfmt/re/` at runtime;
 - typed models and bounded lengths/counts;
 - exact EOF/trailer/continuation validation;
@@ -148,8 +180,12 @@ Specify and implement the offline state machine for:
 - load/play/seek/pause/resume/refire/end/unload;
 - autoloop phase and scripted elapsed time;
 - clear/inherited control state;
-- master/crossfader/deck transfer;
+- bridge-declared deck selection, precedence, and transfer;
 - supported deck combinations.
+
+SoundSwitch master/crossfader behavior is an optional parity extension. It does
+not block static project export or a bridge-owned transport model unless exact
+SoundSwitch multi-deck parity is declared in scope.
 
 Gate: replayed controlled captures choose one deterministic state at every
 event boundary, including backward seeks and deck changes.

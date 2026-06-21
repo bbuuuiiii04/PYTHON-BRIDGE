@@ -2,8 +2,8 @@
 # If code in code_globs changes, update every doc in docs_update and run the checks.
 # key_symbols are verified to exist in code by tools/check_agent_contracts.py.
 version: 2
-last_verified_commit: 9ed183f
-last_verified_date: 2026-06-18
+last_verified_commit: a5f7ced
+last_verified_date: 2026-06-20
 contracts:
   core_bridge:
     code_globs:
@@ -240,11 +240,16 @@ contracts:
       - docs/plans/active/soundswitch_decode_export_codex_spec.md
       - docs/plans/active/soundswitch_stage3_handoff.md
       - docs/plans/active/soundswitch_exporter_renderer_full_plan.md
+      - docs/plans/active/soundswitch_authoring_mutation_matrix.md
+      - docs/plans/active/soundswitch_reverse_engineering_session_handoff.md
+      - docs/plans/active/soundswitch_standalone_laser_exporter_spec.md
+      - docs/plans/active/soundswitch_scripted_renderer_closure_handoff_spec.md
       - docs/status/active_work_registry.md
       - docs/architecture/doc_index.md
       - tools/ssfmt/re/README.md
     tests:
       - python3 -m py_compile tools/ssfmt/re/*.py
+      - python3 -m unittest tests.test_ssfile_reference_convention
       - python3 tools/check_docs_metadata.py
       - python3 tools/check_agent_contracts.py
       - python3 tools/check_docs_drift.py
@@ -257,6 +262,10 @@ contracts:
       - docs/plans/active/soundswitch_decode_export_codex_spec.md
       - docs/plans/active/soundswitch_stage3_handoff.md
       - docs/plans/active/soundswitch_exporter_renderer_full_plan.md
+      - docs/plans/active/soundswitch_authoring_mutation_matrix.md
+      - docs/plans/active/soundswitch_reverse_engineering_session_handoff.md
+      - docs/plans/active/soundswitch_standalone_laser_exporter_spec.md
+      - docs/plans/active/soundswitch_scripted_renderer_closure_handoff_spec.md
       - docs/status/active_work_registry.md
       - docs/architecture/doc_index.md
       - tools/ssfmt/re/README.md
@@ -264,6 +273,11 @@ contracts:
       - passive captures validate software-visible wire evidence, not physical fixtures
       - unsupported layouts, missing cues, and unresolved render layers must fail closed
       - research helpers are not production exporter or bridge runtime modules
+      - frozen snapshots and captures are verifier oracles, not the ongoing SoundSwitch authoring source
+      - a complete rescan must retain added, removed, opaque, unsupported, and changing sources
+      - cue reference convention is provenance-dependent (legacy scripted one-based wire-proven, controlled new direct, edited-legacy mixed, captured legacy autoloops one-based); never assume a uniform convention, default to ambiguous and fail closed on mixed/ambiguous or unproven provenance
+      - autoloop/A5 layered persistence evidence does not establish representative scripted-track byte parity; the 2026-06-20 scripted captures retain layer/mask residuals
+      - synthetic render-at-elapsed tests alone do not prove transport behavior; only explicitly captured seek, pause, loop, refire, stop, and unload observations may be claimed, within their base-render scope
 
   config_schema:
     code_globs:

@@ -66,7 +66,9 @@ def _dictionary_timeline_candidates(data: bytes) -> list[dict[str, Any]]:
             valid = True
             for record_index in range(timeline_count):
                 try:
-                    record = timeline_record(data, timeline_offset + record_index * 16)
+                    # PROVISIONAL one_based for fallback candidate validation
+                    # (provenance-dependent; see soundswitch_ssfile_format.md).
+                    record = timeline_record(data, timeline_offset + record_index * 16, "one_based")
                 except ValueError:
                     valid = False
                     break
@@ -149,7 +151,9 @@ def analyze_file(path: Path, shared_table: bytes) -> dict[str, Any]:
     if data[:4] != MAGIC:
         return {**row, "status": "unsupported", "unsupported_reason": "not a SoundSwitch container"}
     try:
-        parsed = parse_scripted_structure(data, shared_table)
+        # PROVISIONAL one_based; scripted convention is provenance-dependent
+        # (legacy=one_based wire-proven, new=direct, edited=MIXED). See ssfile_format doc.
+        parsed = parse_scripted_structure(data, shared_table, "one_based")
     except ValueError as shared_error:
         try:
             candidate = _select_fallback_candidate(data)
@@ -192,7 +196,7 @@ def analyze_file(path: Path, shared_table: bytes) -> dict[str, Any]:
             "footer_offset": footer_offset,
             "footer_size": len(data) - footer_offset if footer_offset is not None else 0,
             "footer_hex": data[footer_offset:].hex() if footer_offset is not None else "",
-            "reference_rule": "positive raw reference resolves to dictionary index raw - 1; raw 0 is clear/control",
+            "reference_rule": "PROVENANCE-DEPENDENT (not byte-determinable): legacy records one-based (raw-1, wire-proven for scripted), new records direct (raw), edited-legacy files MIXED; raw 0 is clear/control. Resolved here under provisional one_based.",
             "reference_evidence": (
                 "same packed 16-byte record grammar and bounded references as the wire-validated "
                 "A5 layout; this layout itself has no representative wire capture"

@@ -1,12 +1,20 @@
 ---
 doc_status: active-blocked-spec
 truth_level: evidence-constrained-plan
-last_verified_commit: fd40843
+last_verified_commit: a5f7ced
 last_verified_date: 2026-06-20
 validation_scope: specification only; no exporter/importer implementation; hardware-unvalidated
 ---
 
 # Deferred SoundSwitch Decode / Export / Bridge-Import Spec
+
+> **2026-06-20 correction (authoritative).** Cue-reference resolution is
+> provenance-dependent and NOT byte-deterministic (legacy scripted=one-based,
+> wire-proven; new=direct; edited-legacy=MIXED; autoloops non-uniform/unproven).
+> The decode contract MUST default to ambiguous and **fail closed** on
+> mixed/ambiguous files; it must not assume a uniform convention. This is a hard
+> blocker for deterministic decode. See
+> `docs/research/soundswitch_ssfile_format.md`.
 
 ## 1. Decision and scope
 
@@ -28,10 +36,24 @@ The first supported scope, if the blockers close, is deliberately narrow:
 Compatibility with other fixture profiles, SoundSwitch versions, projects,
 universes, or hardware is not implied.
 
+Physical fixture routing may come either from fully decoded SoundSwitch project
+fields or from an explicit, versioned external bridge fixture-map input. The
+pack must name which authority supplied each routing field and hash that input.
+It must never infer physical membership from fixture/group names or wire output.
+
+SoundSwitch remains the authoring source. Every export must perform a complete,
+stable rescan of the named current project so ordinary supported edits do not
+require a new capture. Frozen corpora and captures are test/validation oracles,
+not the ongoing authoring source.
+
 ## 2. Source authority
 
 The exporter must read a named project directory only. It must never perform a
-filesystem-wide fuzzy scan.
+filesystem-wide fuzzy scan. At the start and end of every export it must
+inventory every regular project-relative path, reject symlinks and changing
+sources, and account for additions, removals, replacements, and exact-content
+renames. Unsupported or opaque files remain visible even when they are outside
+the currently decoded semantic set.
 
 Source priority within that directory:
 
@@ -45,6 +67,11 @@ Source priority within that directory:
 `SoundSwitchVenues.bin.backup` is report-only and must never replace current
 Venue. Every source receives size and SHA-256 before parsing. A source changed
 during export is a fatal error.
+
+Stable mutation identities are catalog AppLog index/file number for autoloops,
+normalized SSID for scripted tracks, and cue GUID for Venue cues. Display names
+and paths are mutable locators/metadata. Hashes establish integrity and
+exact-content rename evidence, never authored identity.
 
 ## 3. Identity rules
 
@@ -115,6 +142,8 @@ No wall-clock timestamp participates in deterministic content hashing.
 Required fields:
 
 - current Venue hash and profile GUID;
+- routing authority (`soundswitch_project` or `external_fixture_map`) plus source
+  path/version/hash;
 - all fixture instances with stable IDs, universe, base address, footprint, and
   enabled state;
 - six group records with source offsets, IDs, parent/owner links, member
@@ -125,9 +154,10 @@ Required fields:
 - unsupported profiles and validation evidence.
 
 Passive evidence fixes the software-visible surface at Universe 0, base channel
-1, footprint 19, with Universe 1 all zero. This artifact still cannot be emitted
-as a physical fixture patch until four-instance membership/mirror fields are
-decoded. Group names and wire address alone are insufficient.
+1, footprint 19, with Universe 1 all zero. A physical fixture patch still cannot
+be emitted until four-instance membership/mirror fields are decoded or supplied
+by the declared external fixture-map input. Group names and wire address alone
+are insufficient.
 
 ### `selection_map.json`
 
@@ -242,7 +272,8 @@ make completeness percentages look better.
 
 ## 8. Import/runtime requirements deferred to a later spec
 
-The future importer must have a deterministic state transition for:
+The future importer must consume bridge-authoritative deck selection and
+transport inputs and have a deterministic state transition for:
 
 - initial load and play from zero;
 - forward/backward seek;
@@ -251,8 +282,15 @@ The future importer must have a deterministic state transition for:
 - deck transfer;
 - end, unload, and stop;
 - scripted/autoloop overlap;
-- master-deck and crossfader changes;
+- bridge-declared deck precedence/composition;
 - Decks 3/4 if declared supported.
+
+It does not need to clone SoundSwitch's internal master-deck or crossfader
+ownership to export authored content. SoundSwitch owner/master/crossfader
+captures become required only if the declared product scope promises exact
+SoundSwitch multi-deck parity. SoundSwitch transport experiments remain useful
+for determining timeline units, layer clearing, and arbitrary-position behavior
+for each supported layout.
 
 It must keep the bridge's 200 Hz push loop free of socket, MIDI, filesystem,
 subprocess, and hardware I/O. Any future output uses a bounded worker/sender
@@ -261,14 +299,20 @@ does not choose or implement that seam.
 
 ## 9. Verification required before implementation
 
-- every supported autoloop captured byte-exact from known state;
+- at least one repeated, known-state, byte-exact capture for every supported
+  autoloop semantic/layout class, expanding for every outlier or new residual;
 - representative capture for each supported scripted layout;
 - repeated runs proving determinism;
+- controlled full-project diffs proving supported create/edit/rename/remove
+  detection under stable catalog/SSID/cue identities;
 - controlled diffs for auxiliary, negative, ref-zero, and control lanes;
-- complete fixture universe/address/mirror decode;
-- isolated owner/master/crossfader/transport captures;
+- complete fixture universe/address/mirror decode or a reviewed explicit
+  external fixture-map schema and input;
+- representative SoundSwitch transport captures sufficient to define time,
+  clear/layer, seek, and arbitrary-position semantics for supported layouts;
 - exact TrackMap top-level inventory or a declared, bounded partial source rule;
-- round-trip deterministic pack generation from a frozen project copy;
+- deterministic pack generation from both a complete current-project rescan and
+  a frozen test copy;
 - independent verifier that rejects a single altered source byte, reference,
   artifact hash, or unsupported-case omission.
 
@@ -278,12 +322,23 @@ does not choose or implement that seam.
 2. Twelve nonzero auxiliary values and 21 negative-time records lack semantics.
 3. Shared 441-byte table semantics are not isolated.
 4. Only files 5/18 and A5 have complete captured byte proof at file level.
+   TITANIUM, Opalite, and New Sky now have representative captures but remain
+   blocked at 16/64, 23/39, and 304/367 exact event samples.
 5. One scripted demo layout remains structurally unsupported.
-6. Other scripted layouts and transport behaviors lack wire proof.
-7. Multi-deck ownership/composition is not deterministic.
-8. Fixture universe/address/mirror behavior is not decoded.
+6. Scripted layer/mask semantics still lack byte parity. A pure
+   `render_at_elapsed`/`render_playback_state` seam now has a dedicated Opalite
+   transport capture: exact backward and forward seek samples, 22/22 exact loop
+   samples, exact playing re-fire samples, and 2/2 confirmed-stop zero frames.
+   A seek/pause interval retains the same base-render residual seen during
+   uninterrupted playback; New Sky also falsifies universal CH8 persistence.
+7. Bridge deck precedence/composition for the future importer is not specified;
+   exact SoundSwitch master/crossfader parity remains optional and unproven.
+8. Fixture universe/address/mirror behavior is not decoded and no explicit
+   external fixture-map contract has been approved.
 9. TrackMap top-level object graph and opaque sidecars/preset fields remain
    partial.
+10. No fixture-bearing scratch corpus proves full-rescan create/edit/rename/
+    remove detection against real SoundSwitch authoring mutations.
 
 Until these close, implementation readiness is **no**. The next authorized work
 is controlled research using the operator handoff, not exporter development.
