@@ -1,6 +1,6 @@
 # SoundSwitch implementation — progress ledger
 
-last_updated: 2026-06-21T18:13:55Z   last_session_model: gpt-5
+last_updated: 2026-06-21T18:47:36Z   last_session_model: gpt-5
 
 ## Proof gate
 
@@ -11,14 +11,14 @@ last_updated: 2026-06-21T18:13:55Z   last_session_model: gpt-5
 
 ## Next action
 
-> Task 1: implement frozen source models and the strict project decoder, then run targeted gates.
+> Task 1: commit and push the approved decoder checkpoint; then begin Task 2 deterministic exporter and verifier.
 
 ## Task status (0–9)
 
 | task | title | impl | review | gates | PR | notes |
 | ---- | ----- | ---- | ------ | ----- | -- | ----- |
 | 0 | change contract | done | done | green | #115 | Review approved; hard checks green; full suite `Ran 1881`, `OK` (3 skipped, 1 expected failure). |
-| 1 | project decoder | wip | — | — | #115 | Contract-first gate satisfied; implementation starting. |
+| 1 | project decoder | done | done | green | #115 | Review approved; 17 targeted tests; proof 27/0/2 PASS; full suite `Ran 1898`, `OK` (3 skipped, 1 expected failure). |
 | 2 | exporter and verifier | todo | — | — | — | |
 | 3 | pure renderer/player | todo | — | — | — | |
 | 4 | MIDI input adapter | todo | — | — | — | |

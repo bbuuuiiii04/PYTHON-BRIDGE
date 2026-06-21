@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: 51367a1
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
 
@@ -16,6 +16,10 @@ Status:
 
 Purpose:
 - Track config sources, config validation, local ignored config behavior, and schema-change obligations.
+
+Task 1 boundary:
+- The strict read-only SoundSwitch decoder has no bridge config schema or tracked example-config keys. Exporter, pack, verifier/player, backend, and Enttec configuration remain planned and unimplemented.
+- Existing OS2L, laser, LED/Govee, Rekordbox, and runtime-status configuration is unchanged.
 
 Authoritative code:
 - `config.py`

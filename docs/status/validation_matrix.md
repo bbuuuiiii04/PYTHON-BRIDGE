@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-and-config-grounded
 last_verified_commit: eff532e
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -36,6 +36,8 @@ Current repo-facing status remains:
 | Agent routing/contracts | docs-checkable | not applicable | `tools/check_agent_contracts.py` checks key routes and referenced files. |
 | Rekordbox readers | partial | unvalidated | Reader correctness depends on live app/version/permissions. |
 | SoundSwitch OS2L | partial | unvalidated | OS2L output code exists; hardware/app validation log needed. |
+| SoundSwitch offline project decoder/models | software-tested | not applicable | Strict read-only decode is pinned to SoundSwitch 2.10.3 plus the canonical UUID/RAVE profile. `tests/test_soundswitch_project_decoder.py` covers synthetic failure boundaries and the available current corpus, including 232 render cues plus one catalog-tail cue. It does not prove exporter/pack/player, project mutation, live runtime, Enttec, or hardware behavior. |
+| SoundSwitch exporter/pack/verifier/player/backend/Enttec | unvalidated/planned | unvalidated | Not implemented; no config, commands, status, `StateManager`, backend, or hardware path exists. |
 | Laser policy/executor | partial | unvalidated | MIDI path exists; fixture validation must be recorded separately. |
 | LED/Govee cloud | partial | unvalidated | Cloud path exists; device behavior must be logged. |
 | LED scripted-track automation policy | partial | unvalidated | `tests/test_led_config.py` covers the JSON blackout defaults and `utility` destination validation; `tests/test_led_state_manager.py` covers groove/drop/post-drop blackout mapping, active buildup/breakdown, opt-in overrides, and non-scripted identity behavior. This does not prove room-visible Govee behavior during scripted SoundSwitch tracks. |

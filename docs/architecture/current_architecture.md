@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-06-18. Treat code as the source of
+Audited against the current checkout on 2026-06-21. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -32,6 +32,8 @@ RBSS_SMART_BREAKDOWN=1
 ```
 
 These defaults are present in `scripts/ss_bridge_watcher.sh`.
+
+Task 1 also adds `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` as a separate offline lane. They provide frozen source models and a strict, read-only decoder gated to the pinned SoundSwitch 2.10.3 canonical project UUID and RAVE Venue profile; current-corpus software coverage includes 232 render cues plus one catalog-tail cue. They are not startup or runtime subsystems, do not mutate the project, and do not connect to `StateManager`, OS2L, MIDI lasers, LED/Govee, Rekordbox readers, status, config, or commands. The exporter, pack builder/verifier/player, backend, and Enttec path remain planned and unimplemented.
 
 ## Runtime Subsystems
 

@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
 
@@ -16,6 +16,10 @@ Status:
 
 Purpose:
 - Choose laser roles/scenes and execute configured MIDI triggers with blackout, cooldown, and override behavior.
+
+Offline SoundSwitch decoder boundary:
+- The Task 1 frozen models and strict read-only decoder can inspect the pinned SoundSwitch 2.10.3 canonical RAVE project, but they do not replace or alter Laser Director policy, MIDI execution, mappings, blackout behavior, or status.
+- A production pack player and Enttec backend remain planned and unimplemented; no laser or Enttec hardware was validated.
 
 Authoritative code:
 - `laser_config.py`

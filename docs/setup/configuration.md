@@ -2,13 +2,15 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: 51367a1
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
 
 # Configuration Setup
 
 This repo uses tracked example configs plus local ignored configs. Do not commit local device secrets, local IPs, API keys, or backup files.
+
+The Task 1 strict, read-only SoundSwitch 2.10.3 decoder and frozen source models add no config keys or example files. Exporter, pack verifier/player, backend, and Enttec configuration remain planned and unimplemented; existing SoundSwitch OS2L, laser, LED/Govee, Rekordbox, and status configuration is unchanged.
 
 ## Tracked examples
 

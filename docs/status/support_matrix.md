@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-and-config-grounded
 last_verified_commit: 51367a1
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -31,6 +31,8 @@ This matrix is deliberately conservative. If evidence is missing, the answer is 
 | Linux | unsupported/unknown | current memory reader is macOS Mach-based | Not current scope. |
 
 ## Lighting outputs
+
+The offline SoundSwitch project decoder is software tooling, not a lighting output. It is supported only for the pinned SoundSwitch 2.10.3 canonical project UUID/RAVE profile and does not mutate projects. Its tests include the current 232 render-cue plus one catalog-tail split. Exporter/pack/verifier/player/backend/Enttec support remains planned and unimplemented.
 
 | Output | Status | Evidence | Notes |
 | --- | --- | --- | --- |

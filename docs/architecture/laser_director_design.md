@@ -10,6 +10,8 @@ Laser Director adds a second output lane: MIDI commands mapped inside SoundSwitc
 
 Implementation must treat code as the source of truth. If this document and current code conflict, update this document before implementing code.
 
+Task 1 offline boundary (verified 2026-06-21): `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` add frozen project-source models and a strict, read-only decoder for the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile. They do not alter this MIDI Laser Director design, learned mappings, runtime commands, `StateManager`, or OS2L. Production exporter/pack/verifier/player integration and an Enttec backend remain planned and unimplemented; no laser or Enttec hardware validation is implied.
+
 ---
 
 ## 1. Current Architecture Facts

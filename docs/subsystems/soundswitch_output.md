@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
 
@@ -16,6 +16,11 @@ Status:
 
 Purpose:
 - Send VirtualDJ-shaped OS2L messages and helper fanout to SoundSwitch.
+
+Offline project decoding:
+- `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` implement frozen source models and a strict, read-only decoder for the pinned SoundSwitch 2.10.3 canonical project UUID and RAVE Venue profile. Software tests cover the current corpus, including the 232 render-cue plus one catalog-tail split.
+- This decoder does not mutate a SoundSwitch project and is not wired to this live OS2L subsystem. The production exporter, pack builder/verifier/player, runtime/backend integration, config and command surfaces, and Enttec output remain planned and unimplemented.
+- Live SoundSwitch OS2L behavior and all other bridge outputs remain unchanged; no hardware validation was performed.
 
 Authoritative code:
 - `osl_output.py`

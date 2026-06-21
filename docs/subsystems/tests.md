@@ -2,7 +2,7 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: eff532e
-last_verified_date: 2026-06-18
+last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
 
@@ -37,6 +37,7 @@ Coverage expectations:
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.
+- `tests/test_soundswitch_project_decoder.py` covers the strict, read-only SoundSwitch 2.10.3 canonical UUID/RAVE decoder and frozen source-model boundary, including malformed-source rejection, inventory drift, MIDI/control reconciliation, the 232 render-cue plus one catalog-tail split, and current-corpus assertions when the canonical local project is available. These are software tests only; they do not validate project mutation, exporter/pack/player behavior, Enttec output, or hardware.
 
 Change contract:
 - Do not modify tests just to make docs changes pass.
