@@ -10,8 +10,9 @@ HARD KILL HAZARD (reproduced verbatim from the VLN reference):
   a HARD-KILLED process leaves the lasers stuck at the last frame — NOT dark.
   Software cannot claim fail-safe for kill -9 / host-death.  A physical kill
   switch / DMX-side power path is the true failsafe.
-  On every catchable exit (SIGTERM / SIGINT / normal stop) this module pushes
-  a real zero packet to the wire before closing.
+  On owner-driven stop() the worker pushes a real zero packet to the wire
+  before closing.  Signal delivery (__main__ _shutdown) is the bridge owner's
+  responsibility — not this module's.
 
 Protocol (confirmed via VLN label-3 round-trip):
   packet = 0x7E | label | len_lsb | len_msb | payload | 0xE7  (len little-endian)
@@ -26,7 +27,6 @@ injectable so tests can substitute a FakeSerial.
 from __future__ import annotations
 
 import logging
-import signal
 import threading
 import time
 from collections import deque
@@ -96,9 +96,9 @@ class SoundSwitchDmxWorker:
     (maxlen=2, latest-frame-only semantics).  The worker drains the deque at
     its own pace, sending only the most-recent frame per iteration.
 
-    On every catchable exit (normal stop / SIGINT / SIGTERM) the worker pushes
-    a zero packet before closing the serial port to reduce the risk of stuck
-    fixtures (see HARD KILL HAZARD above).
+    On owner-driven `stop()` the worker pushes a zero packet before closing
+    the serial port to reduce the risk of stuck fixtures
+    (see HARD KILL HAZARD above).
 
     Args:
         port: Serial port path (e.g. "/dev/cu.usbserial-XXXX").
@@ -136,7 +136,7 @@ class SoundSwitchDmxWorker:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Start the background worker thread and install signal handlers."""
+        """Start the background worker thread."""
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop_event.clear()
@@ -146,7 +146,6 @@ class SoundSwitchDmxWorker:
             daemon=True,
         )
         self._thread.start()
-        self._install_signal_handlers()
         log.info("SoundSwitchDmxWorker started on port %s", self._port)
 
     def stop(self) -> None:
@@ -239,27 +238,6 @@ class SoundSwitchDmxWorker:
         except Exception as exc:
             log.warning("SoundSwitchDmxWorker: serial close failed: %s", exc)
         self._ser = None
-
-    def _install_signal_handlers(self) -> None:
-        """Install SIGINT / SIGTERM handlers that trigger a clean stop.
-
-        Only installed in the main thread to avoid signal-handler restrictions.
-        """
-        if threading.current_thread() is not threading.main_thread():
-            return
-
-        def _handle(signum, _frame):
-            sig_name = signal.Signals(signum).name
-            log.info("SoundSwitchDmxWorker: caught %s — requesting clean stop", sig_name)
-            self.stop()
-
-        try:
-            signal.signal(signal.SIGTERM, _handle)
-            signal.signal(signal.SIGINT, _handle)
-        except (OSError, ValueError) as exc:
-            # Can't set signal handlers from non-main thread or in certain envs.
-            log.debug("SoundSwitchDmxWorker: could not install signal handlers: %s", exc)
-
 
 __all__ = [
     "MSG_START",

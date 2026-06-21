@@ -4,10 +4,10 @@ Bridges the SoundSwitch renderer output (19-channel tuples) to the Enttec DMX
 Pro wire format.  Physical DMX addresses come exclusively from the fixture_map
 argument; addresses are never inferred from channel names.
 
-Idle, stale-input, source/player/verifier error, normal stop, SIGINT, SIGTERM,
-or any sender shutdown sends a zero packet before close, matching the VLN
-catchable-exit blackout convention (see enttec_dmx_pro.py for the HARD KILL
-HAZARD note).
+A zero packet is sent before close on owner-driven stop() / zero_and_stop()
+(idle timeout, stale-input, source/player/verifier error, or shutdown),
+matching the VLN catchable-exit blackout convention (see enttec_dmx_pro.py
+for the HARD KILL HAZARD note).
 
 SoundSwitch pack semantic proof comes from the pack-generation proof gate
 (Task 0.5), not from this module or from VLN.
@@ -159,7 +159,7 @@ class SoundSwitchFrameSender:
     def zero_and_stop(self) -> None:
         """Push a zero packet immediately, then stop the worker.
 
-        Called on idle timeout, error, SIGINT, SIGTERM, or explicit shutdown.
+        Called on idle timeout, error, or owner-driven stop()/shutdown.
         Matches the VLN catchable-exit blackout convention.
         """
         self._worker.put_frame(_ZERO_PACKET)

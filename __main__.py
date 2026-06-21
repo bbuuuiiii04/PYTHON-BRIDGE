@@ -717,6 +717,7 @@ def main() -> None:
     laser_status_provider = laser_bundle.status_provider
     laser_personality_provider = laser_bundle.personality_provider
     midi_output = laser_bundle.midi_output
+    soundswitch_frame_sender = None  # constructed in T7.1/T7; placeholder keeps _shutdown wiring valid
     log.info(
         "[MAIN] laser-config  reason=%s  available=%s  enabled=%s",
         laser_cfg_result.reason,
@@ -1306,6 +1307,8 @@ def main() -> None:
             led_bundle.realtime_runner.stop()
         discovery.stop()
         conn.stop()
+        if soundswitch_frame_sender is not None:
+            soundswitch_frame_sender.stop()   # zero_and_stop(): zero packet, then worker stop()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _shutdown)
