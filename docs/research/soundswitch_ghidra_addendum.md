@@ -1,7 +1,7 @@
 ---
 doc_status: research-current
 truth_level: binary-static-analysis-corroborating
-last_verified_commit: 8697587
+last_verified_commit: 2c71a2e
 last_verified_date: 2026-06-20
 validation_scope: read-only static analysis of the local SoundSwitch.app binary (Ghidra headless + nm/c++filt/otool); no SoundSwitch modification, no live process attach, no bridge/runtime/MIDI/DMX change; hardware-unvalidated
 ---
@@ -37,6 +37,43 @@ was modified or attached.
 
 All addresses below are arm64 vmaddrs (image base `0x100000000`).
 
+## 2026-06-20 closure correction — the packed `.ssfile` loader is identified
+
+The earlier closure report incorrectly treated `AttributeCueTrackEntry::ReadEntry`
+as a different `.ssproj`-internal serialization and left a separate “packed
+`.ssfile` loader” to find. Headless call-chain analysis now contradicts that:
+
+```text
+SoundSwitchDoc::LoadLightingTrack @0x1002e8744
+  -> SoundSwitchDoc::OpenFileOnPlayBack @0x1002f153c
+  -> SoundSwitchDocData::LoadFromFile @0x1003314b4
+  -> SoundSwitchDocData::Read @0x1003318e8
+  -> MainTrack::ReadMain @0x1003cfb8c
+  -> AttributeCueTrack::ReadAttributesCueTrack @0x1003c26e4
+  -> AttributesCueMap::Read @0x1003c0f00
+  -> AttributeCueTrackEntry::ReadEntry @0x1003c16ac
+```
+
+The apparent packed/big-endian representation in the research parser is a
+three-byte-shifted view of the same little-endian CAF fields. For A5, the actual
+first record is `u32_le(1), u32_le(1), u32_le(59088), u32_le(91)`; the shifted
+parser recovers the same elapsed/reference values.
+
+Both ARM64 decompilation and x86_64 disassembly show:
+
+- `AttributesCueMap::Read` reads `[GUID][u32 key]` unchanged;
+- `ReadEntry` reads the timeline key and performs a direct lower-bound/exact-key
+  lookup with no subtract-one branch;
+- `AttributesCueMap::Write` emits the stored key unchanged; and
+- `WriteEntry` writes `AttributesCueMap::Lookup(cue GUID)` unchanged.
+
+Controlled new-object bytes corroborate the direct writer. However, the A5
+capture remains 14/14 positive events exact under `raw-1` and 0/14 under direct,
+even though AppLog says the current file was found after its final mtime. This is
+now an explicit **binary/wire contradiction**, not proof of two numeric loader
+branches. The smallest resolving action is the cold-open controlled capture in
+`soundswitch_re_closure_report.md` §4.3.
+
 ---
 
 ## Finding 1 — Cue/Venue references resolve by **GUID**, not by numeric index
@@ -67,31 +104,34 @@ if (version == 2) { read u32; read u32 index; this->field_0x8 = index; }
 SSAttrValueMap::Read(stream);             // the cue patch (key/value map)
 ```
 
-**Two physical resolution paths exist** (this is the mechanism behind the
-provenance-dependent convention, not a heuristic):
+**Two cue-entry resolution paths exist**, but they do **not** establish a
+one-based/direct numeric-key branch:
 - `AttributeCueTrackEntry::ResolveAttributesCue(AttributesCueLibrary&)` @ `0x3c1550`
   — **legacy**: resolves position/venue by a stored `sys::ClassId` and leaves the
   cue-entry pointer null (numeric index resolved positionally elsewhere).
 - `AttributeCueTrackEntry::ResolveAttributesCueNew(AttributesCueLibrary&, sys::ClassId const&)`
   @ `0x3c150c` — **new/direct**: additionally resolves the cue entry by a passed
   **GUID** via `AttributesCue::GetAttributesCueEntryNew(sys::ClassId const&)`.
-- Same legacy/new split at track level (`AttributeCueTrack::ResolveAttributesCues`
+- Same old/new split at track level (`AttributeCueTrack::ResolveAttributesCues`
   vs `...New`), plus `lxe::AttributeCueEntryDEPRECATED` /
-  `AttributeCueTrackSubRegionDEPRECATED` — direct evidence of format evolution.
+  `AttributeCueTrackSubRegionDEPRECATED` — evidence of format evolution and
+  Venue-entry resolution, but not evidence that the serialized numeric key is
+  adjusted by one.
 
-**Means for parser/exporter:** confirms commit `8697587` and ssfile_format —
-**GUID (`sys::ClassId`) is the stable identity; the numeric `cue_index` byte is
-positional serialization**, and there is **no separate indirection table**. The
-legacy(index) vs new(GUID) code fork is exactly why edited-legacy files are
-**MIXED** with no per-record discriminator. **Fail-closed on MIXED/ambiguous
-provenance remains correct and is now mechanism-grounded.** The per-record
+**Means for parser/exporter:** **GUID (`sys::ClassId`) is the stable identity;
+the numeric `cue_index` is serialized reference metadata**. The old/new
+resolution functions concern Venue/cue-entry resolution; they do not prove a
+numeric one-based/direct branch. Controlled bytes still show MIXED-looking
+legacy/current values with no per-record discriminator. Fail-closed remains the
+correct safety behavior while unresolved, but it is not the final active-content
+answer. The per-record
 `version` byte read by `AttributeCueTrackEntry::Read` is a lead worth checking in
 the parser, **but it does not by itself discriminate MIXED records** (per
 `8697587`, edits renumber `cue_index` while keeping records at the same version),
 so it must not be used to relax fail-closed without byte proof.
 
-**Means for offline renderer:** no change — resolve references by GUID where
-provenance is known; otherwise refuse.
+**Means for offline renderer:** resolve references by GUID only after the source
+record is canonicalized by a validated byte rule or oracle frame sequence.
 
 **Validate:** re-confirm against `8697587`'s WHYB before/after pair and the
 A5 one-based wire proof; check whether the `.ssfile` per-entry `version` byte is
@@ -119,14 +159,11 @@ Decompiled `AttributesCueMap::Read/Write` (`@0x3c0f00`/`0x3c1214`) and
 - **No MIXED discriminator found.** The per-record `version` read by `ReadEntry`
   and the in-`.ssfile` timeline `field_a/field_b` are identical (`1`, `(1,1)`) for
   **both** clean and MIXED New Sky records, so they cannot discriminate edited
-  records. This independently confirms the prior "no per-record discriminator"
-  conclusion → fail-closed on MIXED is final.
-- **Caveat (wire governs):** the decompiled `ReadEntry` lookup reads as an *exact*
-  `cue_index == rawRef` match, which does not by itself reproduce the wire-proven
-  one-based offset for A5. This path may concern the Venue-library
-  `AttributeCueTrackEntry` rather than the scripted-show timeline loader, or the
-  packing differs from the decompiled read. Per AGENTS.md §1 the wire-proven
-  provenance-dependent model governs; this binary read is **not** used to overturn it.
+  records. This confirms the storage-level "no per-record discriminator" result.
+- **Blocking contradiction:** `ReadEntry` is the actual `.ssfile` timeline loader,
+  and both binary slices use direct stored-key lookup. That does not reproduce
+  A5's wire-proven key-minus-one result. Neither source is discarded; the
+  cold-load matrix in the closure report must identify the missing step.
 
 ---
 
@@ -186,21 +223,14 @@ SetStrobe()/SetShutterOpen()/SetShutterClosed();             // CH11 strobe path
 - **Initial state is all-zero** (`AttrValueInitZero`), matching the A5 all-zero
   anchor.
 
-**Consequence for the New Sky residual (re-frames the blocker):** because the
+**Consequence for the New Sky residual (superseded by oracle closure):** because the
 renderer **persists** omitted channels and writes only keys present in the cue's
 map, the wire result `CH8/CH9/CH15 = 0/255/0` for `BUILDUP SPEEDUP` **cannot** be
 a missing render-time mask/reset/layer rule. It is upstream and falls to one of:
-1. **MIXED reference provenance** → the timeline reference resolves to a different
-   cue than the parser assumes (already the B1 fail-closed conclusion); or
-2. **Cue-patch decode error** → `parse_venue_cues.py` mis-reads that cue's
-   `AttKeyValueMap`. The parsed patch `{15:207}` is itself contradicted by the
-   wire (`CH15 = 0`, not 207), so for this cue the decoded key/value map is
-   suspect — i.e. the cue likely carries explicit `CH8=0` / different `CH15` keys
-   the parser missed.
-
-Either way the residual is **parser/resolution-side and byte-validatable without
-a new capture** — it is **not** a renderer-semantics gap. This both supports the
-existing fail-closed posture and gives a concrete next step (below).
+the mismatch is upstream of the persistent renderer. Oracle canonicalization now
+resolves all 367 New Sky event frames with no literal fallback. The earlier
+cue-patch-suspect alternative is weakened; it must not be used to rewrite Venue
+parsing without a controlled byte/capture contradiction for the resolved GUID.
 
 **Validate:**
 - Compare `parse_venue_cues.py`'s `AttKeyValueMap` decode for the New Sky

@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: a5f7ced
+last_verified_commit: 2c71a2e
 last_verified_date: 2026-06-20
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -62,7 +62,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/guides/*.md` (4) | CURRENT SUPPORTING — laser MIDI mapping, rollout checklist, Laser Pad. |
 | `docs/subsystems/logging.md` | CURRENT SUPPORTING — matches `logging_manager.py`. |
 | `docs/data/offsets-*.yaml` (3) | CURRENT SUPPORTING — Rekordbox offset reference data. |
-| `docs/research/*.md` (4) | RESEARCH — ANLZ energy, waveform tags, SS memory discovery, and current SoundSwitch v3 project/format evidence. |
+| `docs/research/*.md` | RESEARCH — ANLZ energy, waveform tags, SS memory discovery, and SoundSwitch v3 evidence. `soundswitch_re_closure_report.md` is the current AWR-107 readiness verdict and overrides older SoundSwitch plans when they conflict. |
 | `docs/validation/anlz_energy_corpus_report.md`, `anlz_energy_evaluation_guide.md`, `autoloop_beatphase_findings.md`, `smart_drop_synthetic_corpus.yaml` | VALIDATION EVIDENCE. |
 
 ## Active plans & prompts — VALIDATE against code before executing
@@ -76,7 +76,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/active/beat_sync_runtime_spec.md` | PLAN / SPEC (ACTIVE) | Beat-sync runtime. |
 | `docs/plans/active/led_role_mapping_v2_spec.md` | PLAN / SPEC (ACTIVE) | Verify status against code. |
 | `docs/plans/active/rt_comet_*.md` (3) | PLAN / SPEC (ACTIVE) | Realtime comet stutter/smoothness/pause work; verify which are landed. |
-| `docs/plans/active/soundswitch_{stage2_research_findings,validation_matrix,decode_export_codex_spec,stage3_handoff,exporter_renderer_full_plan,authoring_mutation_matrix,reverse_engineering_session_handoff,standalone_laser_exporter_spec,scripted_renderer_closure_handoff_spec}.md` | PLAN / SPEC / VALIDATION / SESSION HANDOFF (ACTIVE) | AWR-107 research, full-rescan mutation protocol, continuation state, scripted byte-parity closure handoff, deferred export/import contract, and standalone laser exporter/renderer/Enttec-output spec; multi-track and transport captures exist but retain scripted layer/mask residuals, so runtime implementation remains gated and hardware-unvalidated. |
+| `docs/plans/active/soundswitch_{stage2_research_findings,validation_matrix,decode_export_codex_spec,stage3_handoff,exporter_renderer_full_plan,authoring_mutation_matrix,reverse_engineering_session_handoff,standalone_laser_exporter_spec,scripted_renderer_closure_handoff_spec}.md` | PLAN / SPEC / VALIDATION / SESSION HANDOFF (ACTIVE SUPPORTING EVIDENCE) | AWR-107 historical/continuation evidence. The current verdict is `docs/research/soundswitch_re_closure_report.md`: RE remains incomplete, and exporter/player/runtime implementation is not authorized. |
 | `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |
 | `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | M2 phase1–3 prompts/handoffs likely **completed** (Phase 2b/3 committed at HEAD) — verify and archive what is done. `codex_ss_catalog_handoff.md` validate API paths. |
 | `docs/plans/completed/govee_realtime_codex_spec.md` | PLAN / SPEC | **Untracked local file** — classify (completed vs awaiting-build) and commit or archive separately. |

@@ -1,7 +1,7 @@
 ---
 doc_status: research-current
-truth_level: byte-and-capture-grounded
-last_verified_commit: a5f7ced
+truth_level: byte-capture-and-binary-grounded
+last_verified_commit: 2c71a2e
 last_verified_date: 2026-06-20
 validation_scope: passive software and wire capture only; hardware-unvalidated
 ---
@@ -18,6 +18,12 @@ Art-Net, serial, Enttec, or physical-DMX work.
 Accepted status remains:
 
 > **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**
+
+The final readiness authority is
+`soundswitch_re_closure_report.md`. In particular, the current binary's direct
+loader/writer conflicts with the A5 one-based wire result, so this document's
+legacy/new provenance observations must not be promoted to a general byte-only
+export rule until the cold-load gate in that report is complete.
 
 No agent command modified the authoritative files under
 `~/Music/SoundSwitch/default.ssproj/`. Opening that project in SoundSwitch did,
@@ -138,14 +144,15 @@ identical with SHA-256
 Its controller/effect semantics remain unnamed because the current corpus has no
 variant for a controlled diff.
 
-The cue dictionary begins immediately after the shared block:
+The cue dictionary begins immediately after the shared block. Headless analysis
+of the actual loader establishes the physical CAF layout:
 
 ```text
-u32be cue_count
+u32le dictionary_version = 1
+u32le cue_count
 repeat cue_count:
-    bytes[3] == 00 00 00
     bytes[16] cue_guid
-    u8 cue_index
+    u32le cue_index
 ```
 
 `cue_index` is the dictionary key. It is not the entry's physical order in the
@@ -154,20 +161,19 @@ file. The keys are unique.
 The timeline follows:
 
 ```text
-u32be declared_timeline_count
+u32le declared_timeline_count
 repeat count:
-    u32be field_a
-    u32be field_b
-    u32be low_time_byte   # must be <= 255
-    u32le packed
+    u32le entry_version = 1
+    u32le constant = 1
+    i32le elapsed_ms
+    u32le raw_reference
 ```
 
-`packed >> 24` is the raw cue reference. The low 24 bits are the high time
-bytes. Time is the **full signed 32-bit value** reassembled as
-`(high_time_bytes << 8) | low_time_byte`, then sign-extended. (Corrected
-2026-06-20: the older claim that high time `0xFFFFFF` is a `-1` sentinel was a
-decoder bug — `0xFFFFFF`+low is just a small negative, e.g. low `0xAA` → `-86`,
-low `0xB4` → `-76`. Negative pre-roll times are real and must be preserved.)
+The existing research parser's `[u32be count]`, `[3 zero][GUID][u8]`, and split
+time/reference descriptions are a three-byte-shifted view of these same bytes;
+they recover the same GUID, key, elapsed, and raw-reference values but are not
+the physical serialization. Negative elapsed values are real and must be
+preserved.
 
 The key lookup is `{entry.cue_index: entry}`, not `cues[raw - 1]` — the
 dictionary is GUID-sorted and physically permuted, so the stored `cue_index`
@@ -175,9 +181,9 @@ byte is the key, not the entry's position.
 
 #### Reference resolution is PROVENANCE-DEPENDENT (corrected 2026-06-20)
 
-There is **no single byte-determinable convention**. The relation between the
-raw reference and the stored `cue_index` byte depends on which SoundSwitch wrote
-each record:
+There is **no currently validated single byte-only rule across the active
+corpus**. Controlled current-version writes are direct, while the A5 wire
+capture behaves one-based:
 
 ```text
 legacy record (older SoundSwitch):   cue_index_byte = raw_reference - 1   (ONE-BASED)
@@ -185,18 +191,18 @@ new record   (current SoundSwitch):  cue_index_byte = raw_reference       (DIREC
 raw_reference == 0:                  clear/control event (not cue_index 0)
 ```
 
-- **Legacy scripted = ONE-BASED is WIRE-PROVEN** (A5/SANFRANDISCO Art-Net
+- **A5 behaves ONE-BASED on wire** (SANFRANDISCO Art-Net
   capture, 14/14 byte-exact: raw 91 → cue_index_byte 90 = "RED BOX SWAY DROP";
   raw 22 → cue_index_byte 21 = "RED" = `a554afd8…`).
-- **Newly created scripted = DIRECT** (Opalite; new RED = raw 21 → byte 21).
+- **Newly created scripted records are DIRECT in bytes** (controlled scratch
+  creation; new RED = raw 21 → key 21). Opalite is not creation-proven and its
+  capture must not be used to label all new content.
 - **Editing a legacy scripted file = MIXED.** Appending a cue leaves the old
   records ONE-BASED and writes the new record DIRECT, with no renormalization
   and no structural disambiguator (version 3, all `field_a=field_b=1`,
-  elapsed-sorted). Wire-confirmed on edited A5: legacy RED stays raw 22
-  (one-based) while the new RED is raw 21 (direct) — same target cue, two
-  encodings, one file.
-- **Autoloops: legacy records = ONE-BASED (WIRE-PROVEN 2026-06-20); new records =
-  DIRECT; edited-legacy = MIXED** — i.e. identical to the scripted path. New
+  elapsed-sorted). This storage result is controlled-diff confirmed on WHYB;
+  the edited file itself was not wire-captured.
+- **Autoloops contain legacy-looking one-based and new direct records.** New
   placements use direct (controlled authoring: RED 21, BLUE 22, GREEN 26). The
   earlier "autoloops are uniformly direct" claim was a self-consistency artifact
   and is withdrawn. The legacy=one-based result was confirmed by a dedicated
@@ -214,12 +220,14 @@ raw_reference == 0:                  clear/control event (not cue_index 0)
   because its discriminating cues were animated; the new capture's per-record
   color match is what settled it.)
 
-**Exporter/importer consequence:** cue-reference resolution cannot be made
-deterministic from `.ssfile` bytes for the general/edited corpus. Tools default
-to `ambiguous` (both candidate indices preserved) and must **fail closed** on
-mixed/ambiguous files or resolve only with an external wire/playback oracle or
-known provenance. Untouched files that are internally uniform (all-legacy =
-one-based, all-new = direct) are resolvable once their provenance is known.
+Static analysis now proves that both ARM64 and x86_64 2.10.3 loaders and writers
+use the stored key directly with no subtract-one branch. That contradicts the A5
+wire result and means the earlier claim of two numeric loader paths is withdrawn.
+
+**Exporter/importer consequence:** tools must continue to preserve both
+candidates. The final product cannot stop at fail-closed for active content; it
+must close the binary/wire contradiction, re-author and cold-validate the file,
+or use a complete wire-oracle pack as specified in the closure report.
 
 Most timeline records use `(field_a, field_b) == (1, 1)`. One file-13 sentinel
 record at byte 8,082 uses `(0x01000001, 1)`. The meaning of that high bit is

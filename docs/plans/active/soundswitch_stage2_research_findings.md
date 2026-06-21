@@ -1,14 +1,21 @@
 ---
 doc_status: active-research
 truth_level: byte-and-capture-grounded
-last_verified_commit: a5f7ced
+last_verified_commit: 2c71a2e
 last_verified_date: 2026-06-20
 validation_scope: passive software and wire capture only; hardware-unvalidated
 ---
 
 # SoundSwitch Stage 2 Research Findings
 
-> **2026-06-20 correction (authoritative).** The cue-reference convention is
+> **Readiness supersession (2026-06-20).** The current implementation-readiness
+> verdict is `docs/research/soundswitch_re_closure_report.md`: **RE NOT COMPLETE:
+> EXACT BLOCKERS REMAIN**. The ARM64 and x86_64 2.10.3 loader/writer use direct
+> stored-key lookup, which conflicts with the A5 one-based wire capture. Treat
+> the provenance statements below as historical evidence, not a closed export
+> rule.
+
+> **2026-06-20 earlier correction (now superseded for readiness).** The cue-reference convention is
 > provenance-dependent and NOT byte-deterministic: legacy scripted = one-based
 > (wire-proven, A5 14/14), newly created = direct, edited-legacy = MIXED,
 > autoloops non-uniform/unproven. Any statement below asserting a uniform

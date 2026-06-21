@@ -1,12 +1,18 @@
 ---
 doc_status: active-session-handoff
 truth_level: byte-and-capture-grounded
-last_verified_commit: c6d1a50
+last_verified_commit: 2c71a2e
 last_verified_date: 2026-06-20
 validation_scope: read-only SoundSwitch research tooling, passive wire captures, and docs; no bridge runtime implementation; hardware-unvalidated
 ---
 
 # Codex Implementation Spec - Close Scripted-Track Renderer Verification
+
+> **Superseded as a completion gate.** Use
+> `docs/research/soundswitch_re_closure_report.md` for the current verdict and
+> exact blockers. This file remains supporting capture/research history. It does
+> not authorize the exporter, player, runtime integration, MIDI, DMX, or the
+> final importer/exporter/player implementation spec.
 
 Paste this entire file into a fresh Codex session opened at
 `/Users/bbui/rb_ss_bridge_v2`.
