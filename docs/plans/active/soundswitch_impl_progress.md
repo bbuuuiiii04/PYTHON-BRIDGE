@@ -28,9 +28,49 @@ last_updated: 2026-06-21T23:55:00Z   last_session_model: claude-opus-4-8
      PackOutputBackend; `none`→NoneBackend). T7.1 delivered only the executor-OBJECT
      half. opus-xhigh T7 reviewer must verify port-level mutual exclusivity.
 
+## Task 7 design (verified at HEAD `f7ae38d`; for the implementer spec)
+
+Surfaces mapped (read-only triage). Integration design direction — StateManager
+is the runtime owner; per tick in pack mode it DRIVES the pure `LaserPackPlayer`
+from authoritative state and submits frames nonblocking:
+- mode authority = `os.lighting_mode` (`state_manager.py:3084`; scripted if
+  `d.scripted_id and is_playing`, else autoloop if playing, else idle/debounced).
+- scripted → `player.select_scripted(soundswitch_id=d.meta.soundswitch_id,
+  elapsed_ms=d.elapsed_ms, …)`; autoloop → `player.select_autoloop(identity=
+  <executor-accepted>, phase_tick, …)`; idle/stop/stale → safe/ZERO frame;
+  controller (MIDI-input `snapshot()`, lock-protected nonblocking) →
+  `set_masks(blackout, emergency)` + `hold_static(slot)`.
+- output path: `submit_frame(player.render().frame)` → `frame_sender.submit(...)`
+  (nonblocking deque). `PackOutputBackend.submit_frame` currently has NO caller —
+  StateManager becomes the caller (the spec's "nonblocking frame submission").
+- load/verify ordering: build `SoundSwitchPackPlayerConfig` + `load_pack()` (blocking
+  fs I/O — startup ONLY) + `LaserPackPlayer` + `SoundSwitchMidiInputAdapter` +
+  `PackOutputBackend(scene_to_identity, frame_sender)` at `__main__.py:722`
+  (the `soundswitch_frame_sender = None` placeholder), BEFORE `StateManager(...)`
+  (~794) and `sm.start()` (~1175).
+
+Mechanisms to PIN during spec authoring (verify against current code, no guessing):
+1. `phase_tick` source for `select_autoloop` (beat/autoloop-tick authority var —
+   check the autoloop controller + `abs_beat_pos`/`autoloop_tick_just_fired`).
+2. Routing the executor-accepted autoloop IDENTITY to StateManager (PackOutputBackend
+   exposes last-accepted identity, vs StateManager maps `_last_triggered_scene` via
+   `scene_to_identity`). Decide one; single source of truth.
+3. `select_scripted` arg authority vars: transport / metadata_ready / authority /
+   source_errored / elapsed_discontinuous / track_changed — map from deck state +
+   the player's own tests (`tests/test_soundswitch_laser_player.py` = usage contract).
+4. `scene_to_identity` built from the pack's 19 IAC bindings (loader output).
+5. `fixture_map` (CH1-CH19→512) from `fixture_map_path`; passed to `frame_sender.submit`.
+Live-safety: `_build_laser_context` forbids ALL I/O (`state_manager.py:3896`);
+`load_pack`/config parse are blocking fs — startup only, never tick. Every transition
+path (scripted/autoloop/idle, deck change, track load, stop/stale, config disable,
+pack reload, worker error, shutdown) must clear held/pending state and resolve ZERO.
+
 ## Next action
 
-> TASK 7 IN PROGRESS (PR #116): config `soundswitch_pack_player.example.json`
+> TASK 7 IN PROGRESS (PR #116): authoring Part A–E implementer spec
+> (`docs/plans/active/soundswitch_task7_runtime_integration_spec.md`) via codex-spec,
+> then opus-high implement → opus-xhigh review (full "Gate — before-T7"). Subtasks:
+> config `soundswitch_pack_player.example.json`
 > + validated loader; load/verify pack+config before workers; StateManager calls
 > only pure player methods + nonblocking submit; output_backend port selection;
 > all transitions resolve safe frames; sanitized status; no implicit hot enable
