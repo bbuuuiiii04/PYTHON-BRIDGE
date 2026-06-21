@@ -24,6 +24,9 @@ from rb_ss_bridge_v2.soundswitch_pack_models import (
 from rb_ss_bridge_v2.soundswitch_pack_verifier import (
     SoundSwitchPackVerificationError, verify_pack,
 )
+from rb_ss_bridge_v2.soundswitch_pack_loader import (
+    SoundSwitchPackLoadError, load_pack,
+)
 from rb_ss_bridge_v2 import soundswitch_pack_verifier as verifier_module
 from rb_ss_bridge_v2.tools.export_soundswitch_pack import export_pack
 
@@ -103,6 +106,13 @@ class CurrentProjectPackTests(unittest.TestCase):
     def assertRejected(self, pack: Path):
         with self.assertRaises(SoundSwitchPackVerificationError):
             verify_pack(pack)
+
+    def assertVerifierAndLoaderRejected(self, pack: Path, message: str):
+        with self.assertRaisesRegex(SoundSwitchPackVerificationError, message):
+            verify_pack(pack)
+        with self.assertRaises(SoundSwitchPackLoadError) as raised:
+            load_pack(pack)
+        self.assertIsInstance(raised.exception.__cause__, SoundSwitchPackVerificationError)
 
     def test_current_totals_crosswalk_and_catalog_tail(self):
         result = verify_pack(self.pack, source_project=self.project)
@@ -227,6 +237,143 @@ class CurrentProjectPackTests(unittest.TestCase):
             frame[0] = (frame[0] + 1) % 256
         self._semantic_mutation(static, "static_looks.json", mutate_static)
         self.assertRejected(static)
+
+    def test_catalog_tail_guid_collision_is_rejected_after_canonical_rehash(self):
+        pack = self._copy("mut-catalog-tail-guid-collision")
+        def collide_with_render_cue(value):
+            render_guid = next(row["cue_guid"] for row in value["records"]
+                               if row["record_kind"] == "fixture_payload")
+            tail = next(row for row in value["records"]
+                        if row["record_kind"] == "minimal_default_catalog_tail")
+            tail["cue_guid"] = render_guid
+        self._semantic_mutation(pack, "venue_cues.json", collide_with_render_cue)
+        with self.assertRaisesRegex(SoundSwitchPackVerificationError, "globally unique"):
+            verify_pack(pack)
+
+    def test_active_script_reclassification_is_rejected_after_canonical_rehash(self):
+        track = json.loads((self.pack / "track_map.json").read_text())
+        active = next(row for row in track["scripted_inventory"]
+                      if row["active_existing_path"])
+        relative = f"scripted/{active['soundswitch_id'].lower()}.json"
+        pack = self._copy("mut-active-script-reclassified")
+        self._semantic_mutation(
+            pack, relative,
+            lambda value: value["classification"].__setitem__(
+                "status", "unsupported_inactive_layout"))
+        with self.assertRaisesRegex(SoundSwitchPackVerificationError,
+                                    "does not reconcile to active inventory"):
+            verify_pack(pack)
+
+        coordinated = self._copy("mut-active-script-inventory-and-artifact")
+        def deactivate_inventory(value):
+            row = next(item for item in value["scripted_inventory"]
+                       if item["soundswitch_id"] == active["soundswitch_id"])
+            row["status"] = "unsupported_inactive_layout"
+        self._semantic_mutation(coordinated, "track_map.json", deactivate_inventory)
+        self._semantic_mutation(
+            coordinated, relative,
+            lambda value: value["classification"].__setitem__(
+                "status", "unsupported_inactive_layout"))
+        with self.assertRaisesRegex(SoundSwitchPackVerificationError,
+                                    "unsupported or non-renderable"):
+            verify_pack(coordinated)
+
+    def test_malformed_semantic_rows_and_document_are_typed_rejections_after_rehash(self):
+        venue = self._copy("mut-malformed-venue-row")
+        self._semantic_mutation(
+            venue, "venue_cues.json",
+            lambda value: value["records"].__setitem__(0, "bad"))
+        self.assertVerifierAndLoaderRejected(venue, "Venue cue records")
+
+        static = self._copy("mut-malformed-static-row")
+        self._semantic_mutation(
+            static, "static_looks.json",
+            lambda value: value["records"].__setitem__(0, "bad"))
+        self.assertVerifierAndLoaderRejected(static, "Static Look records")
+
+        inventory = self._copy("mut-malformed-scripted-inventory-row")
+        self._semantic_mutation(
+            inventory, "track_map.json",
+            lambda value: value["scripted_inventory"].__setitem__(0, "bad"))
+        self.assertVerifierAndLoaderRejected(inventory, "scripted inventory")
+
+        autoloop = self._copy("mut-malformed-autoloop-document")
+        self._semantic_mutation(
+            autoloop, "autoloops/1.json",
+            lambda value: value.__setitem__("document", []))
+        self.assertVerifierAndLoaderRejected(autoloop, "SSAutoLoop1.ssfile")
+
+    def test_boolean_cue_attribute_integer_fields_are_rejected_after_rehash(self):
+        for field in ("dmx_channel", "channel_id"):
+            pack = self._copy(f"mut-boolean-cue-{field}")
+            def mutate(value, key=field):
+                render = next(row for row in value["records"]
+                              if row["record_kind"] == "fixture_payload")
+                render["attributes"][0][key] = True
+            self._semantic_mutation(pack, "venue_cues.json", mutate)
+            with self.subTest(field=field):
+                self.assertVerifierAndLoaderRejected(pack, "invalid/duplicate cue attribute")
+
+    def test_loader_primitive_schema_parity_rejects_canonical_rehash_mutations(self):
+        def timeline_field(field, replacement):
+            def mutate(value):
+                value["document"]["timeline"][0][field] = replacement
+            return mutate
+
+        def boundary_field(field, replacement):
+            def mutate(value):
+                value["document"]["pre_rendered_boundaries"][0][field] = replacement
+            return mutate
+
+        def intensity_field(field, replacement):
+            def mutate(value):
+                value["document"]["intensity_nodes"][0][field] = replacement
+            return mutate
+
+        def static_field(field, replacement, *, index=0):
+            def mutate(value):
+                value["records"][index][field] = replacement
+            return mutate
+
+        def retained_field(collection, field, replacement):
+            def mutate(value):
+                row = next(item for item in value["records"] if item[collection])
+                row[collection][0][field] = replacement
+            return mutate
+
+        def add_timeline_field(value):
+            value["document"]["timeline"][0]["invented"] = 1
+
+        cases = (
+            ("timeline-raw-bool", "autoloops/1.json", timeline_field("raw_reference", True),
+             "timeline primitive"),
+            ("timeline-version-bool", "autoloops/1.json", timeline_field("record_version", True),
+             "timeline primitive"),
+            ("timeline-unknown-field", "autoloops/1.json", add_timeline_field,
+             "timeline/boundary field"),
+            ("boundary-order-bool", "autoloops/1.json", boundary_field("source_order", True),
+             "boundary primitive"),
+            ("intensity-offset-bool", "autoloops/1.json", intensity_field("source_offset", True),
+             "intensity node"),
+            ("static-slot-bool", "static_looks.json", static_field("slot_index", True, index=1),
+             "Static Look"),
+            ("static-version-bool", "static_looks.json", static_field("record_version", True),
+             "Static Look"),
+            ("static-frame-bool", "static_looks.json",
+             lambda value: value["records"][8]["pre_rendered_frame_ch1_ch19"].__setitem__(0, True),
+             "Static Look record"),
+            ("static-scalar-bool", "static_looks.json",
+             retained_field("intensity_values", "source_offset", True), "Static Look intensity"),
+            ("static-colour-bool", "static_looks.json",
+             retained_field("colour_values", "fixture_instance_id", True), "Static Look colour"),
+            ("static-position-bool", "static_looks.json",
+             retained_field("position_values", "source_offset", True), "Static Look position"),
+        )
+        for name, relative, mutate, message in cases:
+            pack = self._copy(f"mut-loader-parity-{name}")
+            self._semantic_mutation(pack, relative, mutate)
+            with self.subTest(name=name):
+                self.assertVerifierAndLoaderRejected(pack, message)
 
     def test_midi_registry_removal_binding_mutation_and_crosswalk_classification_are_rejected(self):
         empty = self._copy("mut-midi-empty")

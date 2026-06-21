@@ -20,6 +20,18 @@ ACTIVE_UNION_COUNT = 166
 ACTIVE_UNION_SHA256 = "88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2"
 PRIMARY_FIXTURE_GROUP = 0x493
 CONTROL_CHANNELS = frozenset((8, 9, 11))
+ATTRIBUTE_FIELDS = {"channel_id", "dmx_channel", "fixture_group", "source_offset", "value"}
+TIMELINE_FIELDS = {"raw_reference", "record_version", "reference_kind", "resolved_cue_guid",
+                   "resolved_stored_key", "source_offset", "time"}
+BOUNDARY_FIELDS = {"frame", "source_offset", "source_order", "time"}
+INTENSITY_FIELDS = {"attribute_value", "enabled", "end_tick", "record_version",
+                    "source_offset", "start_tick"}
+STATIC_LOOK_FIELDS = {"colour_values", "end_offset", "generic_attributes", "intensity_values",
+                      "name", "position_values", "pre_rendered_frame_ch1_ch19",
+                      "record_version", "slot_index", "source_offset", "strobe_values"}
+SCALAR_FIELDS = {"fixture_instance_id", "source_offset", "value"}
+COLOUR_FIELDS = {"fixture_instance_id", "raw_value", "source_offset"}
+POSITION_FIELDS = {"fixture_instance_id", "position_guid", "source_offset"}
 CONTROL_CLASSIFICATIONS = {
     "pack_selection", "static_override", "blackout_mask", "bridge_owned_safety",
     "no_project_target", "inactive_report_only", "unsupported_fail_export",
@@ -109,8 +121,14 @@ def _regular_files(root: Path) -> list[str]:
     return sorted(output)
 
 
-def _ordered(rows: list[dict[str, Any]], key, label: str) -> None:
-    if rows != sorted(rows, key=key):
+def _ordered(rows: Any, key, label: str) -> None:
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        _fail(f"malformed rows: {label}")
+    try:
+        expected = sorted(rows, key=key)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise SoundSwitchPackVerificationError(f"malformed ordering key: {label}") from exc
+    if rows != expected:
         _fail(f"noncanonical order: {label}")
 
 
@@ -130,6 +148,8 @@ def _validate_midi_registry(value: dict[str, Any], source_hashes: dict[str, str]
             _fail("unknown/missing learned MIDI map field")
         relative = mapping.get("relative_path")
         if not isinstance(relative, str) or not relative.startswith("recordable/") \
+                or relative not in source_hashes or relative not in source_sizes \
+                or not isinstance(mapping.get("source_sha256"), str) \
                 or mapping.get("source_sha256") != source_hashes.get(relative):
             _fail("learned MIDI map source/hash mismatch")
         if type(mapping.get("version")) is not int or mapping["version"] != 1 \
@@ -207,25 +227,64 @@ def _validate_midi_registry(value: dict[str, Any], source_hashes: dict[str, str]
 
 
 def _apply_patch(frame: list[int], attributes: list[dict[str, Any]], label: str) -> None:
+    if not isinstance(attributes, list) or any(not isinstance(row, dict) for row in attributes):
+        _fail(f"malformed cue attributes in {label}")
     seen: set[tuple[int, int]] = set()
     for attribute in attributes:
+        if set(attribute) != ATTRIBUTE_FIELDS or type(attribute.get("source_offset")) is not int:
+            _fail(f"unknown/missing cue attribute field in {label}")
         group = attribute.get("fixture_group")
         channel = attribute.get("dmx_channel")
         value = attribute.get("value")
         channel_id = attribute.get("channel_id")
+        if type(group) is not int or type(channel_id) is not int \
+                or type(channel) is not int or not 1 <= channel <= 19 \
+                or type(value) is not int or not 0 <= value <= 255:
+            _fail(f"invalid/duplicate cue attribute in {label}")
         key = (group, channel_id)
-        if key in seen or not isinstance(group, int) or not isinstance(channel, int) \
-                or not 1 <= channel <= 19 or not isinstance(value, int) \
-                or isinstance(value, bool) or not 0 <= value <= 255:
+        if key in seen:
             _fail(f"invalid/duplicate cue attribute in {label}")
         seen.add(key)
         if group == PRIMARY_FIXTURE_GROUP:
             frame[channel - 1] = value
 
 
-def _validate_document(doc: dict[str, Any], expected_path: str,
+def _validate_static_scalar(row: Any, label: str) -> None:
+    if not isinstance(row, dict) or set(row) != SCALAR_FIELDS \
+            or type(row.get("source_offset")) is not int \
+            or type(row.get("fixture_instance_id")) is not int \
+            or not isinstance(row.get("value"), (int, float)) \
+            or isinstance(row.get("value"), bool):
+        _fail(f"malformed Static Look {label} row")
+
+
+def _validate_static_colour(row: Any) -> None:
+    if not isinstance(row, dict) or set(row) != COLOUR_FIELDS \
+            or type(row.get("source_offset")) is not int \
+            or type(row.get("fixture_instance_id")) is not int \
+            or not isinstance(row.get("raw_value"), str):
+        _fail("malformed Static Look colour row")
+    try:
+        decoded = bytes.fromhex(row["raw_value"])
+    except ValueError as exc:
+        raise SoundSwitchPackVerificationError("invalid Static Look colour raw_value") from exc
+    if decoded.hex() != row["raw_value"]:
+        _fail("noncanonical Static Look colour raw_value")
+
+
+def _validate_static_position(row: Any) -> None:
+    if not isinstance(row, dict) or set(row) != POSITION_FIELDS \
+            or type(row.get("source_offset")) is not int \
+            or type(row.get("fixture_instance_id")) is not int \
+            or not isinstance(row.get("position_guid"), str):
+        _fail("malformed Static Look position row")
+
+
+def _validate_document(doc: Any, expected_path: str,
                        cue_patches: dict[str, list[dict[str, Any]]],
                        source_hashes: dict[str, str], *, active: bool = True) -> set[str]:
+    if not isinstance(doc, dict):
+        _fail(f"malformed document object for {expected_path}")
     if doc.get("relative_path") != expected_path:
         _fail(f"document identity mismatch for {expected_path}")
     if doc.get("source_sha256") != source_hashes.get(expected_path):
@@ -236,12 +295,19 @@ def _validate_document(doc: dict[str, Any], expected_path: str,
     boundaries = doc.get("pre_rendered_boundaries")
     if not isinstance(timeline, list) or not isinstance(boundaries, list):
         _fail(f"timeline/boundary count mismatch for {expected_path}")
+    if any(not isinstance(row, dict) for row in timeline) or any(
+            not isinstance(row, dict) for row in boundaries):
+        _fail(f"malformed timeline/boundary row for {expected_path}")
+    if any(set(row) != TIMELINE_FIELDS for row in timeline) or any(
+            set(row) != BOUNDARY_FIELDS for row in boundaries):
+        _fail(f"unknown/missing timeline/boundary field for {expected_path}")
     if active and (len(timeline) != len(boundaries) or doc.get("pre_render_status") != "rendered"):
         _fail(f"active document is not completely pre-rendered: {expected_path}")
     if not active and boundaries and len(timeline) != len(boundaries):
         _fail(f"partial inactive boundary render: {expected_path}")
     offsets = [row.get("source_offset") for row in timeline]
-    if offsets != sorted(offsets) or len(offsets) != len(set(offsets)):
+    if any(type(offset) is not int for offset in offsets) \
+            or offsets != sorted(offsets) or len(offsets) != len(set(offsets)):
         _fail(f"noncanonical timeline source order for {expected_path}")
     refs: set[str] = set()
     recomputed = [0] * 19
@@ -250,6 +316,10 @@ def _validate_document(doc: dict[str, Any], expected_path: str,
         guid = row.get("resolved_cue_guid")
         raw = row.get("raw_reference")
         stored = row.get("resolved_stored_key")
+        if type(row.get("time")) is not int or type(row.get("source_offset")) is not int \
+                or type(raw) is not int or type(row.get("record_version")) is not int \
+                or (stored is not None and type(stored) is not int):
+            _fail(f"malformed timeline primitive for {expected_path}")
         if kind == "clear_control":
             if raw != 0 or stored is not None or guid is not None:
                 _fail(f"invalid clear reference for {expected_path}")
@@ -257,6 +327,7 @@ def _validate_document(doc: dict[str, Any], expected_path: str,
                           for channel, value in enumerate(recomputed)]
         elif kind == "cue":
             if not isinstance(raw, int) or raw <= 0 or stored != raw - 1 \
+                    or not isinstance(guid, str) \
                     or (active and guid not in cue_patches):
                 _fail(f"unresolved/stale positive reference for {expected_path}")
             if isinstance(guid, str):
@@ -267,6 +338,10 @@ def _validate_document(doc: dict[str, Any], expected_path: str,
             _fail(f"unknown reference semantics for {expected_path}")
         if boundaries:
             boundary = boundaries[index]
+            if type(boundary.get("source_order")) is not int \
+                    or type(boundary.get("source_offset")) is not int \
+                    or type(boundary.get("time")) is not int:
+                _fail(f"malformed boundary primitive for {expected_path}")
             if boundary.get("source_order") != index or boundary.get("source_offset") != row.get("source_offset") \
                     or boundary.get("time") != row.get("time"):
                 _fail(f"boundary provenance mismatch for {expected_path}")
@@ -277,9 +352,15 @@ def _validate_document(doc: dict[str, Any], expected_path: str,
                 _fail(f"invalid pre-rendered frame for {expected_path}")
             if frame != recomputed:
                 _fail(f"pre-rendered boundary semantic mismatch for {expected_path}")
-    for node in doc.get("intensity_nodes", []):
-        if not all(key in node for key in ("source_offset", "record_version", "start_tick",
-                                           "end_tick", "attribute_value", "enabled")):
+    intensity_nodes = doc.get("intensity_nodes", [])
+    if not isinstance(intensity_nodes, list) or any(
+            not isinstance(node, dict) for node in intensity_nodes):
+        _fail(f"malformed intensity nodes for {expected_path}")
+    for node in intensity_nodes:
+        if set(node) != INTENSITY_FIELDS \
+                or any(type(node.get(key)) is not int for key in (
+                    "source_offset", "record_version", "start_tick", "end_tick", "attribute_value")) \
+                or type(node.get("enabled")) is not bool:
             _fail(f"malformed intensity node for {expected_path}")
     return refs
 
@@ -294,6 +375,8 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
         _fail("manifest artifact type mismatch")
     project = manifest.get("project", {})
     boundary = manifest.get("supported_boundary", {})
+    if not isinstance(project, dict) or not isinstance(boundary, dict):
+        _fail("malformed manifest project/supported boundary")
     if project.get("project_uuid") != PROJECT_UUID or boundary.get("project_uuid") != PROJECT_UUID:
         _fail("canonical project UUID mismatch")
     if project.get("venue_guid") != VENUE_GUID or boundary.get("fixture_profile_guid") != VENUE_GUID:
@@ -306,6 +389,8 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
         _fail("artifact hash table is missing")
     _ordered(hashes, lambda row: row.get("path", ""), "artifact hashes")
     declared = [row.get("path") for row in hashes]
+    if any(not isinstance(path, str) for path in declared):
+        _fail("malformed artifact hash path")
     if files != sorted(["manifest.json", *declared]):
         _fail("missing or extra artifact")
     values: dict[str, dict[str, Any]] = {"manifest.json": manifest}
@@ -326,6 +411,8 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
     if not isinstance(source_rows, list):
         _fail("source inventory missing")
     _ordered(source_rows, lambda row: row.get("path", ""), "source inventory")
+    if any(not isinstance(row.get("path"), str) for row in source_rows):
+        _fail("invalid source inventory path")
     source_hashes = {row.get("path"): row.get("sha256") for row in source_rows}
     source_sizes = {row.get("path"): row.get("size") for row in source_rows}
     if len(source_hashes) != len(source_rows) or any(
@@ -352,28 +439,46 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
         values["midi_mappings.json"], source_hashes, source_sizes)
 
     profile = values["fixture_profile.json"]
+    channels = profile.get("channels")
     if profile.get("fixture_profile_guid") != VENUE_GUID or profile.get("channel_span") != "CH1-CH19" \
-            or profile.get("has_intensity_channel") is not False or len(profile.get("channels", [])) != 19:
+            or profile.get("has_intensity_channel") is not False or not isinstance(channels, list) \
+            or len(channels) != 19 or any(not isinstance(row, dict) for row in channels):
         _fail("fixture profile contents mismatch")
     venue = values["venue_cues.json"]
     records = venue.get("records", [])
+    _ordered(records, lambda row: row.get("source_offset", -1), "Venue cue records")
     render = [row for row in records if row.get("record_kind") == "fixture_payload"]
     tails = [row for row in records if row.get("record_kind") == "minimal_default_catalog_tail"]
     if (len(render), len(tails), len(records)) != (232, 1, 233) or \
             (venue.get("render_cue_count"), venue.get("catalog_tail_count"), venue.get("total_record_count")) != (232, 1, 233):
         _fail("Venue count split mismatch; require 232 render + 1 catalog-tail")
-    _ordered(records, lambda row: row.get("source_offset", -1), "Venue cue records")
+    cue_guids = [row.get("cue_guid") for row in records]
+    if any(not isinstance(guid, str) or re.fullmatch(r"[0-9a-f]{32}", guid) is None
+           for guid in cue_guids) or len(set(cue_guids)) != len(cue_guids):
+        _fail("Venue render/catalog-tail cue GUIDs must be valid and globally unique")
+    if any(row.get("render_bearing") is not True for row in render):
+        _fail("fixture-payload Venue cues must remain render-bearing")
     if any(row.get("render_bearing") is not False or row.get("attributes") for row in tails):
         _fail("catalog-tail must remain distinct and non-render-bearing")
     cue_patches = {row.get("cue_guid"): row.get("attributes") for row in render}
     if len(cue_patches) != 232 or any(not isinstance(rows, list) for rows in cue_patches.values()):
         _fail("duplicate Venue cue GUID")
+    for row in render:
+        _apply_patch([0] * 19, row["attributes"], f"Venue cue {row.get('cue_guid')}")
     looks = values["static_looks.json"].get("records", [])
+    _ordered(looks, lambda row: row.get("slot_index", -1), "Static Look records")
     if values["static_looks.json"].get("count") != 32 or [row.get("slot_index") for row in looks] != list(range(32)):
         _fail("Static Look count/order mismatch")
     for row in looks:
+        if set(row) != STATIC_LOOK_FIELDS or type(row.get("slot_index")) is not int \
+                or type(row.get("record_version")) is not int \
+                or type(row.get("source_offset")) is not int \
+                or type(row.get("end_offset")) is not int \
+                or not isinstance(row.get("name"), str):
+            _fail("malformed Static Look primitive/field schema")
         frame = row.get("pre_rendered_frame_ch1_ch19")
-        if row.get("record_version") != 5 or not isinstance(frame, list) or len(frame) != 19:
+        if row.get("record_version") != 5 or not isinstance(frame, list) or len(frame) != 19 \
+                or any(type(value) is not int or not 0 <= value <= 255 for value in frame):
             _fail("invalid Static Look record")
         recomputed = [0] * 19
         attributes = row.get("generic_attributes")
@@ -382,11 +487,51 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
         _apply_patch(recomputed, attributes, f"Static Look {row.get('slot_index')}")
         if frame != recomputed:
             _fail("pre-rendered Static Look semantic mismatch")
+        intensity_values = row.get("intensity_values")
+        strobe_values = row.get("strobe_values")
+        colour_values = row.get("colour_values")
+        position_values = row.get("position_values")
+        if any(not isinstance(rows, list) for rows in (
+                intensity_values, strobe_values, colour_values, position_values)):
+            _fail("malformed Static Look retained-value container")
+        for scalar in intensity_values:
+            _validate_static_scalar(scalar, "intensity")
+        for scalar in strobe_values:
+            _validate_static_scalar(scalar, "strobe")
+        for colour in colour_values:
+            _validate_static_colour(colour)
+        for position in position_values:
+            _validate_static_position(position)
 
     track = values["track_map.json"]
     inventory = track.get("scripted_inventory", [])
+    track_records = track.get("records", [])
+    if not isinstance(inventory, list) or not isinstance(track_records, list):
+        _fail("scripted inventory/track map missing")
     _ordered(inventory, lambda row: row.get("soundswitch_id", ""), "scripted inventory")
-    active_scripts = {row.get("relative_path") for row in inventory if row.get("active_existing_path")}
+    inventory_fields = {"active_existing_path", "fixture_profile_guid", "relative_path",
+                        "soundswitch_id", "status", "track_map_mapping_count"}
+    inventory_by_ssid: dict[str, dict[str, Any]] = {}
+    mapped_counts: dict[str, int] = {}
+    for record in track_records:
+        if not isinstance(record, dict) or not isinstance(record.get("soundswitch_id"), str):
+            _fail("malformed scripted track-map row")
+        normalized = record["soundswitch_id"].upper()
+        mapped_counts[normalized] = mapped_counts.get(normalized, 0) + 1
+    for row in inventory:
+        if not isinstance(row, dict) or set(row) != inventory_fields:
+            _fail("unknown/missing scripted inventory field")
+        ssid = row.get("soundswitch_id")
+        if not isinstance(ssid, str) or re.fullmatch(r"[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}", ssid) is None \
+                or row.get("relative_path") != "{" + ssid + "}.ssfile" \
+                or type(row.get("active_existing_path")) is not bool \
+                or type(row.get("track_map_mapping_count")) is not int \
+                or row.get("track_map_mapping_count") != mapped_counts.get(ssid, 0) \
+                or ssid in inventory_by_ssid:
+            _fail("scripted inventory does not reconcile to track map")
+        inventory_by_ssid[ssid] = row
+    active_scripts = {row["relative_path"] for row in inventory
+                      if row["active_existing_path"]}
     if len(inventory) != 45 or len(active_scripts) != 32:
         _fail("scripted inventory/active count mismatch")
 
@@ -394,6 +539,8 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
     script_paths = sorted(path for path in values if re.fullmatch(r"scripted/[0-9a-f-]{36}\.json", path))
     if len(autoloop_paths) != 42 or len(script_paths) != 45:
         _fail("Autoloop/scripted artifact count mismatch")
+    if {Path(path).stem.upper() for path in script_paths} != set(inventory_by_ssid):
+        _fail("scripted inventory/artifact identity mismatch")
     refs_by_source: dict[str, set[str]] = {}
     for artifact in autoloop_paths:
         doc = values[artifact].get("document")
@@ -404,17 +551,32 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
         row = values[artifact]
         classification = row.get("classification", {})
         expected_ssid = Path(artifact).stem.upper()
+        if not isinstance(classification, dict):
+            _fail(f"malformed scripted classification: {artifact}")
         if classification.get("soundswitch_id") != expected_ssid:
             _fail("scripted normalized SSID mismatch")
         expected_path = "{" + expected_ssid + "}.ssfile"
+        inventory_row = inventory_by_ssid[expected_ssid]
+        expected_classification = {key: value for key, value in inventory_row.items()
+                                   if key != "active_existing_path"}
+        if classification != expected_classification:
+            _fail("scripted artifact classification does not reconcile to active inventory")
+        active = inventory_row["active_existing_path"]
         doc = row.get("document")
         if doc is None:
-            if row.get("unsupported_inactive") is not True or classification.get("status") == "supported_mapped_primary":
+            if row.get("unsupported_inactive") is not True or active \
+                    or classification.get("status") == "supported_mapped_primary":
                 _fail("unsupported active scripted row")
             unsupported_inactive += 1
         else:
+            if row.get("unsupported_inactive") is not False:
+                _fail("renderable scripted artifact has unsupported marker")
+            if active and (classification.get("status") != "supported_mapped_primary"
+                           or classification.get("fixture_profile_guid") != VENUE_GUID
+                           or classification.get("track_map_mapping_count", 0) <= 0):
+                _fail("active scripted inventory is unsupported or non-renderable")
             refs_by_source[expected_path] = _validate_document(
-                doc, expected_path, cue_patches, source_hashes, active=expected_path in active_scripts)
+                doc, expected_path, cue_patches, source_hashes, active=active)
     if unsupported_inactive != 1:
         _fail("expected exactly one inactive unsupported scripted row")
 
@@ -446,6 +608,8 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
     active_render = [row for row in controls if row.get("active") and row.get("target_kind") in ("autoloop", "static_look")]
     if any(row.get("message_type") != "note" for row in active_render):
         _fail("unsupported active message semantics")
+    if any(not isinstance(row.get("target_identity"), str) for row in active_render):
+        _fail("active selection has malformed target identity")
     iac = [row for row in active_render if row.get("device_name") == "IAC Driver Bus 1" and row.get("target_kind") == "autoloop"]
     ddj = [row for row in active_render if row.get("device_name") == "DDJ-800" and row.get("target_kind") == "static_look"]
     if len(iac) != 19 or len(ddj) != 4 or sorted(row.get("target_index") for row in ddj) != [8, 16, 17, 24]:
@@ -476,7 +640,8 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
     if selection.get("manual_blackout") != expected_blackout:
         _fail("manual blackout F-3 crosswalk mismatch")
     no_targets = selection.get("no_target_policy_inputs")
-    if not isinstance(no_targets, list) or any(
+    if not isinstance(no_targets, list) or any(not isinstance(row, dict) for row in no_targets) \
+            or any(
             row.get("control_classification") != "no_project_target" for row in no_targets):
         _fail("no-target policy classification mismatch")
 
@@ -489,6 +654,8 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
             declared_union != {"count": ACTIVE_UNION_COUNT, "sha256": ACTIVE_UNION_SHA256}:
         _fail("active-cue union count/hash drift")
     totals = manifest.get("totals", {})
+    if not isinstance(totals, dict):
+        _fail("malformed manifest totals")
     expected_totals = {"render_cues": 232, "catalog_tail_records": 1, "total_venue_records": 233,
                        "static_looks": 32, "total_autoloops": 42, "scripted_inventory": 45,
                        "parsed_scripted": 44, "active_existing_path_scripted": 32,
