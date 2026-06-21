@@ -166,8 +166,11 @@ SoundSwitch RE. The targeted SoundSwitch parser/inventory tests
 
 ### Absolute rules
 
-- Do not import production behavior from `tools/ssfmt/re/`. Port reviewed
-  algorithms into typed production modules and test them independently.
+- Do not import production behavior from `tools/ssfmt/re/` into bridge
+  runtime/exporter modules. Port reviewed algorithms into typed production modules
+  and test them independently. This binds production code only; the Task 0.5 proof
+  gate and other research tooling MAY import the `tools/ssfmt/re/` parsers as
+  evidence.
 - Do not write to or mutate any SoundSwitch project. Export is read-only.
 - Do not read project/pack/config files or perform blocking I/O in the 200 Hz
   loop.
@@ -242,10 +245,12 @@ Rules:
   implementation change that touches SoundSwitch-derived semantics.
 - The proof gate proves software/wire decode only. It does **not** validate
   Enttec/fixture physical behavior.
-- Two proof checks are intentionally deferred and become mandatory Task 2 / Task 8
-  acceptance tests once the pack and verifier exist: `F9-pack-one-byte-mutation`
-  (one-byte pack-artifact mutation rejection) and `F10-active-cc-override`
-  (active CC/pitch render-control export failure).
+- Two proof checks are intentionally deferred until the code they exercise exists,
+  then become mandatory acceptance gates: `F9-pack-one-byte-mutation` (one-byte
+  pack-artifact mutation rejection) gates **Task 2** (exporter/pack/verifier) and
+  the Task 8 hardware gate; `F10-active-cc-override` (active CC/pitch
+  render-control export failure) gates **Task 4** (learned-control MIDI input
+  adapter) and the Task 8 hardware gate.
 
 ### Task 1 - Production source models and strict project decoder
 

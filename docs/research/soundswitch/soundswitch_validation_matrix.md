@@ -22,7 +22,7 @@ bytes, references, and active cue dependencies are unambiguous.
 | Active Autoloop selection | 19/19 IAC bindings resolve | pass | 18 automatic + file-3 blackout |
 | Positive reference rule | legacy A5, legacy Autoloop, cold new scripted wire | pass | runtime `raw-1` |
 | Raw zero | A5 2/2 plus current file-3 zero behavior | pass | explicit clear/blackout source |
-| Attribute Cue bank | 232/232 parsed; 166 active referenced, 0 missing | pass | full GUID closure |
+| Attribute Cue bank | 232 render cues + 1 catalog-tail = 233 parsed; 166 active referenced, 0 missing | pass | full GUID closure |
 | Sparse persistent patches | controlled diffs + A5/Autoloop wire + cache binary | pass | omitted channels persist |
 | Intensity metadata | reader/writer + current profile flag absence | pass | preserve; no CH1-CH19 effect |
 | Static Look physical grammar | unique primary GUID collection, 32/32 slots | pass | export full bank |
