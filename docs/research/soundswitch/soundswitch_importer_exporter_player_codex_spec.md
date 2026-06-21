@@ -8,6 +8,79 @@ validation_scope: implementation specification for a SoundSwitch 2.10.3 current-
 
 # Codex Implementation Spec - SoundSwitch Importer, Exporter, and Bridge-Native Laser Player
 
+## Authority, canonical source identity, and corrections (read first)
+
+**This file is the only active implementation authority.**
+`docs/research/soundswitch/soundswitch_static_pack_player_spec.md` is
+`historical-draft` / superseded and MUST NOT be cited as implementation
+authority; it predates the DDJ Static Override closure, the exact 32-slot Static
+Look grammar, and learned-MIDI add/remove behavior.
+
+**Correction provenance (2026-06-21).** This spec was edited after its
+`last_verified_commit` stamp (`8ca5875`). The decode foundation was independently
+re-verified at HEAD `cc526eb` by the pack-generation proof gate
+(`tools/prove_soundswitch_pack_generation.py`,
+`artifacts/soundswitch_pack_generation_proof/latest.json` →
+`final_verdict: PASS_IMPLEMENTATION_MAY_BEGIN`). The committer MUST re-stamp
+`last_verified_commit` to the commit that lands these edits; do not fake
+provenance.
+
+### Canonical bounded source identity (pinned)
+
+| Field | Canonical value |
+| --- | --- |
+| Project UUID | `{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}` |
+| Venue GUID (RAVE) | `b8ad2201b9e4c94696c898a7e8f6a5a9` |
+| SoundSwitch version | `2.10.3` (container v3) |
+| Universe / channels | Universe 0, CH1-CH19, 19-channel no-intensity profile |
+
+**Project UUID pinning is mandatory.** The exporter, verifier, and proof gate
+MUST reject any project whose UUID differs from the canonical UUID **even if the
+RAVE Venue GUID matches**. A mutation/scratch corpus
+(`{E34F6DCD-EBB9-4088-BD28-7BC0272D011A}`) shares the same RAVE GUID; the Venue
+GUID alone is NOT sufficient to authorize export. This is enforced and proven by
+`tools/prove_soundswitch_pack_generation.py` check `F1-reject-wrong-uuid-same-venue`.
+
+### Attribute-cue count is a split, not a bare "232"
+
+The current Venue parses to **232 fixture-payload (render-bearing) Attribute Cues
+plus 1 minimal default catalog-tail record = 233 total parsed Venue records**.
+
+- Only the 232 fixture-payload cues are export/render-bearing.
+- The +1 catalog-tail/default record (`record_kind == "minimal_default_catalog_tail"`)
+  MUST be classified deliberately, MUST NOT crash export/player, and MUST NOT be
+  confused with an active render-bearing cue.
+- All acceptance gates assert the **split (232 + 1 = 233)**, never a bare "232 cues."
+
+### Multi-deck / crossfade scope (intentionally out of scope)
+
+V1 does not emulate SoundSwitch's live multi-deck mixer/crossfader selection
+logic. This is intentional: SoundSwitch is used only as an authoring/export
+source. At runtime, the bridge's existing Rekordbox active-deck authority selects
+the current scripted track, Autoloop, or manual/static override. The pack player
+reproduces exported CH1-CH19 behavior for that selected source.
+
+### VirtualLaserNode (VLN) Enttec transport evidence (scope-limited)
+
+VLN evidence (`~/virtuallasernode/calib/dmx_pro.py`) may be cited as prior proof
+that Python -> Enttec DMX USB Pro -> fixture transport is viable in the VLN
+context. It does **not** prove SoundSwitch pack semantic correctness, exported
+CH1-CH19 frame parity, bridge-runtime pack behavior, or show readiness. The
+SoundSwitch pack implementation must still prove exported CH1-CH19 parity (the
+pack-generation proof gate) before any physical enable. See Task 6.
+
+### Test-suite reporting honesty
+
+Implementation agents MUST report exact current test output and MUST NOT convert
+it into "all passed." For reference, the latest full-suite run was
+`Ran 1866 ... FAILED (failures=1, skipped=3, expected failures=1)`, where the one
+failure is an unrelated order-dependent `test_runtime_status` logging-isolation
+flake (passes in isolation). That flake neither validates nor invalidates the
+SoundSwitch RE. The targeted SoundSwitch parser/inventory tests
+(`tests.test_ssfile_reference_convention`, `tests.test_inventory_project_artifacts`,
+`tests.test_static_looks`, `tests.test_venue_fixture_profile`,
+`tests.test_prove_soundswitch_pack_generation`) pass deterministically.
+
 ## Part A - Context and root cause (verified; read, do not implement)
 
 ### Product outcome
@@ -74,7 +147,7 @@ validation_scope: implementation specification for a SoundSwitch 2.10.3 current-
   (`state_manager.py:300`, `state_manager.py:307`, `state_manager.py:3149`).
 - [confirmed] `DeckState.scripted_id` identifies scripted state and
   `OutputState.lighting_mode` tracks scripted/autoloop/idle
-  (`models.py:75`, `models.py:126`).
+  (`models.py:83`, `models.py:139`; line numbers re-verified at HEAD `cc526eb`).
 - [confirmed] `_update_lighting` derives mode from current authoritative state,
   and `_apply_lighting` owns transitions (`state_manager.py:3035`,
   `state_manager.py:3087`).
@@ -120,11 +193,50 @@ tests, and required subsystem/architecture/setup docs.
 Forbidden assumptions must include:
 
 - other SoundSwitch versions/profiles behave like 2.10.3;
+- a project that matches the RAVE Venue GUID is automatically the right project
+  (the canonical project UUID must also match; a scratch corpus shares the GUID);
 - passive Art-Net proves physical fixtures;
 - display name, file order, or cue index is durable identity;
 - absent channel-2 utility notes imply hidden SoundSwitch targets;
 - a missing MIDI note-off is safe;
 - Enttec process death clears its last frame.
+
+### Task 0.5 - SoundSwitch pack-generation verification gate
+
+A reproducible pre-implementation proof gate already exists and MUST gate
+implementation:
+
+```bash
+python3 tools/prove_soundswitch_pack_generation.py \
+  --project ~/Music/SoundSwitch/default.ssproj \
+  --output-dir artifacts/soundswitch_pack_generation_proof
+```
+
+Artifacts:
+
+- `artifacts/soundswitch_pack_generation_proof/latest.json` (machine-readable);
+- `artifacts/soundswitch_pack_generation_proof/latest.md` (human-readable).
+
+Pure-logic coverage runs in CI without the live project:
+`tests.test_prove_soundswitch_pack_generation`.
+
+Rules:
+
+- Exporter/importer/player implementation MUST NOT begin unless the proof gate
+  `final_verdict` is `PASS_IMPLEMENTATION_MAY_BEGIN`.
+- If `final_verdict` is `PASS_WITH_SPEC_CORRECTIONS_ONLY`, only spec/proof
+  corrections may be made before the gate is rerun.
+- If `final_verdict` is `FAIL_DO_NOT_IMPLEMENT` or `INCOMPLETE_PROOF_BLOCKER`,
+  behavior implementation is blocked until the named blocker is resolved.
+- The proof gate MUST be rerun after: SoundSwitch project edits, source-identity
+  changes, parser changes, pack-schema changes, verifier changes, or any
+  implementation change that touches SoundSwitch-derived semantics.
+- The proof gate proves software/wire decode only. It does **not** validate
+  Enttec/fixture physical behavior.
+- Two proof checks are intentionally deferred and become mandatory Task 2 / Task 8
+  acceptance tests once the pack and verifier exist: `F9-pack-one-byte-mutation`
+  (one-byte pack-artifact mutation rejection) and `F10-active-cc-override`
+  (active CC/pitch render-control export failure).
 
 ### Task 1 - Production source models and strict project decoder
 
@@ -146,8 +258,17 @@ Use frozen/immutable models for:
 
 Decoder requirements:
 
+0. **Source-identity gate first.** Read `<project>/.ssproj` and reject unless the
+   project UUID equals `{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}` AND the version is
+   `2.10.3` AND the primary Venue GUID equals `b8ad2201b9e4c94696c898a7e8f6a5a9`.
+   A matching RAVE Venue GUID with a different project UUID (the scratch corpus)
+   MUST be rejected. No decode proceeds until identity passes.
 1. Bound every count/string/offset; consume exact trailers/EOF; retain source
    offsets; reject duplicate keys and unsupported versions.
+1a. Decode the Venue Attribute Cue bank as **232 fixture-payload render cues + 1
+   minimal default catalog-tail record (233 total parsed records)**. Retain the
+   catalog-tail record classified distinctly; it is never a render-bearing cue,
+   must not crash decode, and must not be counted as one of the 232.
 2. Use only the corrected physical CAF grammar. Do not provide shifted-parser
    compatibility.
 3. Resolve positive references with the explicit 2.10.3 `raw-1` rule after the
@@ -205,15 +326,21 @@ Requirements:
 1. Canonical JSON, stable relative-path ordering, stable diagnostics, preserved
    equal-time source order, no timestamps inside hashed content, and atomic
    publish to a new directory.
-2. Manifest records schema/generator commit, project/version/Venue/profile,
+2. Manifest records schema/generator commit, the **pinned canonical project UUID
+   `{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}`**, project/version/Venue/profile,
    every source path/size/hash/status, every artifact hash, supported boundary,
-   and active/inactive totals.
+   the active-cue union SHA-256
+   `88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2`
+   (166 active referenced GUIDs from the 19 IAC autoloops + 32 existing-path
+   scripted), and active/inactive totals.
 3. Pack records retain raw fields, source offsets, raw/stored references,
    resolved GUIDs, negative/clear classification, intensity nodes, and unused
    static maps. Do not retain only pre-rendered frames.
-4. Include all 232 Attribute Cues, all 32 Static Looks, all learned mappings,
-   all 42 Autoloops, and all scripted inventory rows. Active unsupported rows
-   block publication; inactive unsupported rows remain reported.
+4. Include all **232 fixture-payload Attribute Cues + the 1 default catalog-tail
+   record (233 total)**, all 32 Static Looks, all learned mappings, all 42
+   Autoloops, and all scripted inventory rows. The catalog-tail record is tagged
+   distinctly and never counted among the 232. Active unsupported rows block
+   publication; inactive unsupported rows remain reported.
 5. Generate explicit crosswalks for current bridge scenes, manual blackout,
    IAC selections, and DDJ Static Overrides. Mark unlearned utility events as
    `no_project_target`; do not invent a target.
@@ -222,10 +349,12 @@ Requirements:
 7. Refuse a stale cue reference and report source file, physical record offset,
    elapsed/tick, raw reference, candidate key, and missing GUID. Remediation is
    to remove/replace the placement in SoundSwitch, save, and re-export.
-8. The independent verifier re-hashes every artifact and rejects a one-byte
-   mutation, missing/extra artifact, count mismatch, noncanonical ordering,
-   unresolved active selection, source/profile mismatch, or unsupported active
-   message semantics.
+8. The independent verifier re-hashes every artifact and rejects: a one-byte
+   mutation, missing/extra artifact, count mismatch (including a Venue total that
+   is not 232 render cues + 1 catalog-tail), noncanonical ordering, unresolved
+   active selection, **a project UUID other than the canonical UUID (even when the
+   RAVE Venue GUID matches)**, a drifted active-cue union SHA-256, source/profile
+   mismatch, or unsupported active message semantics.
 9. Two exports from identical saved bytes must be byte-for-byte identical.
 
 ### Task 3 - Pure pack loader and renderer/player
@@ -333,21 +462,60 @@ Create:
 - `tests/test_enttec_dmx_pro.py`
 - `tests/test_soundswitch_frame_sender.py`
 
+**Reference transport (mandatory): existing VirtualLaserNode DMX Pro.** The
+implementation MUST use the existing proven VLN DMX Pro transport
+`~/virtuallasernode/calib/dmx_pro.py` as the reference implementation for Enttec
+packet framing and serial behavior (its `build_dmx_packet` and unit test
+`~/virtuallasernode/calib/test_dmx_pro.py` are the known-good contract:
+`0x7E | label 6 | len_lsb | len_msb | start_code(0x00)+512 | 0xE7`, length 513
+little-endian; blackout `7E 06 01 02 00 <512x00> E7`, 518 bytes; on every
+catchable exit a real zero packet is pushed before close).
+
+- The production bridge module `enttec_dmx_pro.py` MAY port/adapt the proven VLN
+  logic, but MUST preserve the known-good packet semantics. Do NOT import VLN as
+  a runtime dependency, do NOT modify VLN, and do NOT re-derive the framing
+  from scratch while VLN is available.
+- Any divergence from the VLN implementation MUST be justified in the
+  implementation report and covered by tests.
+- VLN evidence proves Python -> Enttec DMX Pro -> fixture transport viability in
+  the VLN context. It does NOT prove SoundSwitch pack semantic correctness,
+  exported CH1-CH19 parity, bridge-runtime safety, or show readiness. SoundSwitch
+  pack semantic proof comes ONLY from the pack-generation proof gate (Task 0.5),
+  never from VLN.
+- If `~/virtuallasernode` is unavailable to the implementing agent, Task 6 is
+  blocked pending a Brandon-provided path or source excerpt; it must NOT proceed
+  as a from-scratch Enttec implementation with the blocker unacknowledged.
+
 Requirements:
 
-1. Pure `build_dmx_packet(frame_512)` uses start `0x7e`, label 6, 513-byte
-   payload (`start_code + 512`), little-endian payload length, and end `0xe7`.
+1. Pure `build_dmx_packet(frame_512)` preserves the VLN-proven framing: start
+   `0x7e`, label 6, 513-byte payload (`start_code + 512`), little-endian payload
+   length, and end `0xe7`. Unit tests assert byte equivalence with the VLN
+   reference packet (or justify any intentional difference).
 2. One worker owns serial I/O. The hot path submits latest-frame-only into a
    bounded nonblocking mailbox.
 3. Expand pack CH1-CH19 into the reviewed fixture-map output. Do not infer
    physical addresses from names.
 4. Idle, stale input, source/player/verifier error, normal stop, SIGINT,
-   SIGTERM, or sender shutdown requests a zero packet before close.
-5. Surface the hard-kill limitation: Enttec may repeat the last frame after
-   process/host death. Software cannot claim fail-safe `kill -9`; a physical
-   kill/power path remains required.
-6. This task initially stops at packet/unit/loopback tests. Opening real serial
-   hardware remains a later explicit operator gate.
+   SIGTERM, or sender shutdown requests a zero packet before close (matching the
+   VLN catchable-exit blackout behavior).
+5. Surface the hard-kill limitation, reproduced verbatim from VLN's verified
+   behavior: the Enttec Pro firmware autonomously repeats the last frame, so a
+   `kill -9`/host-death leaves the lasers stuck on the last frame, NOT dark.
+   Software cannot claim fail-safe `kill -9`; a physical kill/power path remains
+   the true failsafe.
+6. This task initially stops at packet/unit/loopback tests. No serial/Enttec/
+   hardware port is opened during unit tests. Opening real serial hardware remains
+   a later explicit operator gate.
+
+Task 6 acceptance — the implementation agent MUST report:
+
+- the exact VLN transport source file inspected (`~/virtuallasernode/calib/dmx_pro.py`);
+- a packet-framing comparison between VLN and the new `enttec_dmx_pro.py`;
+- tests proving packet byte equivalence (or justified intentional differences);
+- confirmation that no serial/Enttec/hardware port was opened during unit tests;
+- confirmation that SoundSwitch pack semantic proof still comes from the
+  pack-generation proof gate (Task 0.5), not from VLN.
 
 ### Task 7 - Config, startup, StateManager, status, and commands
 
@@ -393,12 +561,22 @@ Requirements:
 
 Before any physical output:
 
+0. Re-run the Task 0.5 pack-generation proof gate and require
+   `final_verdict: PASS_IMPLEMENTATION_MAY_BEGIN`; confirm the pinned project UUID
+   `{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}` and the active-cue union SHA-256
+   `88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2`. Complete
+   the two deferred proof checks here now that the pack/verifier exist:
+   `F9-pack-one-byte-mutation` and `F10-active-cc-override`.
 1. Export the frozen current-project fixture corpus twice and require identical
    bytes.
-2. Independently verify every pack artifact and cross-reference.
+2. Independently verify every pack artifact and cross-reference; reject any
+   project UUID other than the canonical UUID even when the RAVE Venue GUID matches.
 3. Require current totals: 42/42 Autoloops parsed; 44/45 scripted parsed with
    inactive demo visible; 19/19 IAC bindings resolved; 32/32 existing-path
-   scripts exportable; 232 cues; 166 active referenced cues with zero missing;
+   scripts exportable; **232 fixture-payload render cues + 1 default catalog-tail
+   record = 233 total parsed Venue records**; 166 active referenced cues
+   (19 IAC autoloops + 32 existing-path scripted) with zero missing and union
+   SHA-256 `88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2`;
    32/32 primary Static Looks; four/four DDJ overrides; zero learned-event
    collisions.
 4. Replay A5 16/16, the cold new-track 3/3 one-based/0 direct discriminator,
@@ -425,6 +603,84 @@ approval for exact commands. The handoff must name:
 - logs/status/physical behavior that constitute pass/fail.
 
 Do not infer approval from implementation completion.
+
+## Part F - Mandatory hardening requirements
+
+### Must add before implementation
+
+**F-1. Exact scripted/Autoloop timing & phase contract.** Define and test:
+elapsed units (milliseconds, integer) and Autoloop phase units (bridge
+beat/phrase ticks); steady-loop wrap math; equal-time record ordering (stored
+source order is the deterministic tie-break); signed negative pre-roll applied to
+cycle-start state before time zero; seek/backward-seek/pause/resume/refire as
+history-independent recomputation from immutable events; stop/end/unload -> zero.
+Bridge beat/phrase/BPM authority is the only phase source; on stale or missing
+beat/track state the player resolves zero plus a diagnostic, never a guessed phase.
+
+**F-2. Rekordbox -> SoundSwitch identity failure rules.** Each of the following
+resolves to zero output plus a structured diagnostic, never a guess: missing or
+duplicate `soundswitch_id`; no matching scripted pack row for the active
+`soundswitch_id`; unsupported active layout; track metadata not ready; track
+change; elapsed discontinuity/jump beyond tolerance; stale or ambiguous active-deck
+authority. Identity is normalized SSID, cross-validated; the player never
+fuzzy-matches the filesystem.
+
+**F-3. Bridge scene/control crosswalk (classify every current control).** Every
+current bridge control MUST be classified as exactly one of `pack_selection`,
+`static_override`, `blackout_mask`, `bridge_owned_safety`, `no_project_target`,
+`inactive_report_only`, or `unsupported_fail_export`:
+
+| Bridge control | MIDI | Classification |
+| --- | --- | --- |
+| groove / buildup / drop autoloops | IAC notes 32, 64, 96-111 | `pack_selection` (19 IAC autoloops) |
+| DDJ static overrides | CH7 n106, CH10 n122/n123/n127 | `static_override` (slots 16/24/8/17) |
+| momentary blackout | CH1 note 0 (file 3) | `blackout_mask` |
+| safe/static | CH2 note 0 | `bridge_owned_safety` |
+| transition | CH2 note 1 | `bridge_owned_safety` |
+| emergency | CH2 note 2 | `bridge_owned_safety` |
+| breakdown | CH1 note 1 | `no_project_target` (no-op under held note-0 mask) |
+| post-drop | CH1 note 41 | `inactive_report_only` (empty bank) |
+| any future active CC/pitch render control | — | `unsupported_fail_export` |
+
+`bridge_owned_safety`, `no_project_target`, and `inactive_report_only` controls
+are NOT missing-project errors and MUST NOT be given invented SoundSwitch targets.
+
+**F-4. Minimal pack schema rules.** Every pack artifact carries a mandatory
+`schema_version`. The loader rejects an unknown major version and performs NO
+runtime migration. Any future schema migration is offline-only and tested; the
+runtime never migrates a pack in place.
+
+**F-5. Proof-gate golden CH1-CH19 artifacts.** The exporter/player test corpus
+MUST include byte-exact golden CH1-CH19 frames for: representative scripted
+sample positions; Autoloop pre-roll; Autoloop raw-zero; a count>255 Autoloop
+(e.g. `SSAutoLoop13.ssfile`, 257 records); DDJ slots 8/16/17/24 (the four golden
+frames in the closure report, reproduced by the Task 0.5 proof gate); blackout
+press/release; static-override press/release; and stop/unload zero.
+
+### Must add before direct DMX / hardware
+
+**F-6. Fixture-map proof.** Before any direct DMX, prove the universe/address
+mapping and the CH1-CH19 -> 512-byte frame expansion, including one-fixture and
+two-fixture behavior, mirrored/duplicated fixture behavior, and zero-frame
+expansion. Physical addresses come only from the reviewed fixture-map config,
+never inferred from names.
+
+**F-7. Output exclusivity.** Direct DMX and physical MIDI laser output are
+mutually exclusive. There is no silent fallback between them. Invalid or
+contended port ownership fails disabled / zero, never a partial or dual-output state.
+
+### Reinforced existing rules
+
+**F-8. 200 Hz hot path.** `_push_tick` performs no reload, no project/pack/config
+parsing, no hardware/serial/MIDI/network calls, and no locks. The hot path submits
+to a bounded latest-frame-only nonblocking mailbox and exposes stale/drop counters.
+
+**F-9. Saved-project workflow.** The exporter reads saved bytes only; unsaved
+SoundSwitch edits are invisible by design. Concurrent mutation during read fails
+closed with the operator instruction to save/close the edit and re-export.
+
+**F-10. Captures/oracles.** Passive captures and oracles are verifier evidence
+only and are NEVER production pack input or renderer-seeded state.
 
 ## Part C - Invariants that MUST still hold (live safety)
 
@@ -481,9 +737,25 @@ serial, Art-Net, Enttec, or physical DMX.
 
 ## Part E - Acceptance
 
+The implementation agent's report MUST include, verbatim:
+
+- [ ] The pack-generation proof-gate command run
+      (`python3 tools/prove_soundswitch_pack_generation.py --project ... --output-dir ...`).
+- [ ] The JSON report path (`artifacts/soundswitch_pack_generation_proof/latest.json`).
+- [ ] The Markdown report path (`artifacts/soundswitch_pack_generation_proof/latest.md`).
+- [ ] The proof `final_verdict` (must be `PASS_IMPLEMENTATION_MAY_BEGIN` to proceed).
+- [ ] The exact proof pass/fail/incomplete totals.
+
+Acceptance criteria:
+
 - [ ] Production change contract added before behavior code.
+- [ ] Source-identity gate pins project UUID `{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}`
+      and rejects a wrong UUID even when the RAVE Venue GUID matches.
+- [ ] Venue cue handling asserts the split: 232 fixture-payload render cues + 1
+      default catalog-tail record (233 total); the catalog-tail never renders as a cue.
 - [ ] Complete stable rescan with no fuzzy/name/file-order identity.
-- [ ] All current project totals and active crosswalks match the closure report.
+- [ ] All current project totals, the active-cue union SHA-256, and active
+      crosswalks match the closure report and the proof gate.
 - [ ] All 32 Static Looks and every learned mapping are present in the pack.
 - [ ] Channel-2 utilities and breakdown/post-drop unmapped notes remain explicit
       no-target rows, not guessed targets.
@@ -513,13 +785,19 @@ Implementation review must explicitly try to break:
 6. a rejected executor scene—pack selection must not advance;
 7. MIDI-input or Enttec worker death—status must fail and output resolve zero;
 8. process hard kill—documentation must state the unpreventable Enttec last-frame
-   hazard and require a physical kill path.
+   hazard and require a physical kill path;
+9. a project that shares the RAVE Venue GUID but has a different project UUID (the
+   scratch corpus)—export must reject on UUID, not authorize on Venue GUID;
+10. the minimal default catalog-tail Venue record—export/player must classify it
+    distinctly and never render it as one of the 232 fixture-payload cues.
 
 ## When you finish
 
 Report changed files, contract/docs updated, pack schema, source/pack fixture
-hashes, exact test/check results, active/inactive unsupported artifacts, shadow
-parity totals, and adversarial-review results.
+hashes, exact test/check results, the pack-generation proof-gate command +
+`final_verdict` + JSON/Markdown report paths + exact pass/fail/incomplete totals,
+active/inactive unsupported artifacts, shadow parity totals, and adversarial-review
+results.
 
 Include the required plain-language operator summary:
 
