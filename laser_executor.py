@@ -42,7 +42,6 @@ class LaserSceneExecutor:
         randomize_cursors: bool = True,
     ) -> None:
         self._config = config
-        self._midi_output = midi_output  # retained for external type-checks / callers
         self._backend = MidiOutputBackend(midi_output)
         self._personality = personality
         self._rng = rng if rng is not None else random.Random()

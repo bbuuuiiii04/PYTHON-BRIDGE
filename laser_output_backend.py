@@ -42,7 +42,7 @@ from .midi_output import MidiOutput
 class LaserOutputBackend(Protocol):
     """Structural protocol for laser output backends."""
 
-    def trigger(self, msg: LaserMidiMessage, *, priority: str = "normal") -> bool:
+    def trigger(self, msg: LaserMidiMessage, priority: str = "normal") -> bool:
         """Send a scene-trigger message.  Returns True if sent/accepted."""
         ...
 
@@ -80,7 +80,7 @@ class MidiOutputBackend:
     def __init__(self, midi_output: MidiOutput) -> None:
         self._midi_output = midi_output
 
-    def trigger(self, msg: LaserMidiMessage, *, priority: str = "normal") -> bool:
+    def trigger(self, msg: LaserMidiMessage, priority: str = "normal") -> bool:
         return self._midi_output.trigger(msg, priority=priority)
 
     def submit_frame(self, frame: tuple[int, ...]) -> None:
@@ -109,7 +109,7 @@ class NoneBackend:
     before logging "physical output sent".
     """
 
-    def trigger(self, msg: LaserMidiMessage, *, priority: str = "normal") -> bool:
+    def trigger(self, msg: LaserMidiMessage, priority: str = "normal") -> bool:
         return True  # accepted; no physical output.
 
     def submit_frame(self, frame: tuple[int, ...]) -> None:
@@ -142,6 +142,10 @@ class PackOutputBackend:
     submit_frame() delivers rendered CH1-CH19 frames to the Enttec DMX
     sender (injected in T6).  Absent a sender, frames are counted but
     not transmitted.
+
+    T7 pre-condition: ``LaserMidiMessage`` has no ``scene_name`` field; the
+    ``scene_to_identity`` lookup will always miss until T7 adds ``scene_name``
+    to the message or changes the trigger signature to carry it separately.
     """
 
     def __init__(
@@ -156,11 +160,11 @@ class PackOutputBackend:
         self._no_op_count = 0
         self._frame_count = 0
 
-    def trigger(self, msg: LaserMidiMessage, *, priority: str = "normal") -> bool:
+    def trigger(self, msg: LaserMidiMessage, priority: str = "normal") -> bool:
         identity = self._scene_to_identity.get(str(getattr(msg, "scene_name", "")))
         if identity is None:
             self._no_op_count += 1
-            return True  # unlearned → no-op, but executor considers it accepted.
+            return False  # unlearned → no-op; executor must not update _last_triggered_scene.
         self._trigger_count += 1
         return True
 
