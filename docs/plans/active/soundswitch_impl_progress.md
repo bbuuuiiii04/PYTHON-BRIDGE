@@ -4,13 +4,14 @@ last_updated: 2026-06-21T23:55:00Z   last_session_model: claude-opus-4-8
 
 ## Proof gate
 
-- HEAD: `07581ca`
+- HEAD: `f7ae38d`
 - Verdict: `PASS_IMPLEMENTATION_MAY_BEGIN` (exit 0; last proven at `601d8db`)
 - Checks: 29 PASS / 0 FAIL / 0 INCOMPLETE (F10 promoted in Task 4)
 - Foundation: 27/27 PASS
-- Note: T7.0 (`07581ca`) is signal-handler/shutdown wiring only — introduces NO
-  SoundSwitch-semantics change, so the proof gate is unaffected. Rerun at the T7
-  checkpoint and whenever SS decode/export/render changes (T8).
+- Note: T7.0 (`07581ca`) and T7.1 (`f7ae38d`) introduce NO SoundSwitch-semantics
+  change (signal/shutdown wiring; executor backend injection + scene_name), so the
+  proof gate is unaffected. Rerun at the T7 checkpoint and whenever SS
+  decode/export/render changes (T8).
 
 ## Orchestration
 
@@ -19,15 +20,23 @@ last_updated: 2026-06-21T23:55:00Z   last_session_model: claude-opus-4-8
   as the implementer path (sanctioned failover for THIS workstream only — does not
   generalize). Before-T7 operator milestone is satisfied; auto-advance T7→T8.
 - Running PR for the series: **#116** (`soundswitch/impl` → `main`).
-- Carry-forward to T7 author: in `__main__._shutdown`, place the real
-  `soundswitch_frame_sender.stop()` EARLY (not last) so DMX blackout is prompt.
+- Carry-forwards to T7 author:
+  1. In `__main__._shutdown`, place the real `soundswitch_frame_sender.stop()`
+     EARLY (not last) so DMX blackout is prompt.
+  2. T7 owns the `output_backend` config + the __main__ PORT-level selection
+     (don't open IAC when `output_backend=pack`; build SoundSwitchFrameSender →
+     PackOutputBackend; `none`→NoneBackend). T7.1 delivered only the executor-OBJECT
+     half. opus-xhigh T7 reviewer must verify port-level mutual exclusivity.
 
 ## Next action
 
-> T7.1 IN PROGRESS (PR #116): LaserSceneExecutor single-backend injection +
-> port-level MIDI/DMX mutual exclusivity + scene_name on the trigger path.
-> Then complete Task 7, auto-advance to T8, run after-T8 opus-max review, author
-> + review T9 handoff, then AWAITING OPERATOR hardware gate.
+> TASK 7 IN PROGRESS (PR #116): config `soundswitch_pack_player.example.json`
+> + validated loader; load/verify pack+config before workers; StateManager calls
+> only pure player methods + nonblocking submit; output_backend port selection;
+> all transitions resolve safe frames; sanitized status; no implicit hot enable
+> (runtime-command contract). Reviewer: opus xhigh, full "Gate — before-T7".
+> Then auto-advance to T8, run after-T8 opus-max review, author + review T9
+> handoff, then AWAITING OPERATOR hardware gate.
 
 ## Task status (0–9)
 
@@ -40,6 +49,6 @@ last_updated: 2026-06-21T23:55:00Z   last_session_model: claude-opus-4-8
 | 4 | MIDI input adapter | done | done | green | #115 | 32 tests; F10 CC export-fail check; proof 29/0/0; device-name dispatch + error-preservation + zombie-worker fixes post-review. HEAD `6a8ecf2`. |
 | 5 | output backend | done | done | green | #115 | MidiOutputBackend/NoneBackend/PackOutputBackend; priority signature fix; PackOutputBackend unlearned→False; stale attr removed. 70+170 tests pass. HEAD `db7eac2`. |
 | 6 | Enttec sender | done | done | green | #115 | 518-byte VLN-identical framing; bounded non-blocking deque; zero-on-stop; kill-9 hazard documented. 35 new tests; 2009 total. T7 note: remove _install_signal_handlers before wiring into __main__. HEAD `601d8db`. |
-| 7 | runtime integration | wip | — | — | #116 | T7.0 done (`07581ca`): signal handlers removed, __main__ single signal authority; review APPROVE (fresh opus). Next: T7.1 backend mutual-exclusivity, then Task 7 proper. |
+| 7 | runtime integration | wip | — | — | #116 | T7.0 (`07581ca`) + T7.1 (`f7ae38d`) done, both review APPROVE (fresh opus). T7.0: signal handlers removed, __main__ single signal authority. T7.1: executor single-backend injection + scene_name, MIDI byte/order-identical. Next: Task 7 proper (config/loader/StateManager/status/commands + port-level backend selection). |
 | 8 | offline/shadow gates | todo | — | — | — | |
 | 9 | hardware handoff | todo | — | — | — | operator-only; never auto-execute |
