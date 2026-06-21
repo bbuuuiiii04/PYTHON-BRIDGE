@@ -18,7 +18,8 @@ Current SoundSwitch exporter/importer work remains **SOFTWARE/WIRE-VALIDATED ONL
 - Windows and Linux are not current supported targets.
 - SoundSwitch version/interface compatibility is not broadly documented.
 - The offline SoundSwitch decoder is deliberately limited to SoundSwitch 2.10.3, the canonical project UUID, and the RAVE Venue profile. It is read-only; other projects/versions/profiles are unsupported unless explicitly added and tested.
-- Only frozen source models and strict decoding are implemented. Production exporter/pack builder/verifier/player, project mutation, bridge config/commands/status, `StateManager` integration, backend selection, and Enttec output remain planned and unimplemented.
+- Frozen source models, strict decoding, deterministic canonical 95-artifact export, and independent verification are implemented for the pinned project only. Task 3 loader/player and Task 4+ bridge config/commands/status, `StateManager`/runtime integration, MIDI/backend selection, Enttec output, and hardware work remain planned and unimplemented.
+- The Task 2 proof is 28 PASS / 0 FAIL / 1 INCOMPLETE with foundation 27/27 PASS. F9 pack mutation rejection passes; F10 active CC/pitch rejection is the sole deferred check and belongs to Task 4.
 - Laser support depends on local MIDI mapping and fixture behavior.
 - Govee support is not generalized across devices.
 

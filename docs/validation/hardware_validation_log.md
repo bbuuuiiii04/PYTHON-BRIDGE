@@ -14,7 +14,7 @@ Current repo-facing hardware validation status:
 
 The current exporter/importer evidence boundary is **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
-Task 1's strict, read-only SoundSwitch 2.10.3 decoder and frozen models are software-validated only. They do not mutate a project or drive OS2L, MIDI lasers, LED/Govee, Rekordbox, or Enttec hardware. Production exporter/pack/verifier/player/backend integration remains planned and unimplemented. Enttec process death must not be treated as a hard kill because its last frame may remain latched; explicit blackout/hard-kill behavior is future work requiring hardware validation.
+Tasks 1–2 provide strict read-only decode, deterministic canonical 95-artifact export, and independent verification for the pinned SoundSwitch 2.10.3 canonical project. They are software/wire-validated only and do not mutate a project or drive OS2L, MIDI lasers, LED/Govee, Rekordbox, or Enttec hardware. Task 3 loader/player and Task 4+ MIDI/runtime/backend integration remain planned and unimplemented. Enttec process death must not be treated as a hard kill because its last frame may remain latched; explicit blackout/hard-kill behavior is future work requiring hardware validation.
 
 My local setup may be operational, but this repo does not yet contain repeatable hardware-validation records sufficient to claim hardware support.
 

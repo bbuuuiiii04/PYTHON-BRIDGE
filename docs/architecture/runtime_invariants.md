@@ -6,10 +6,10 @@ Audited against the current checkout on 2026-06-21.
 
 ## Offline SoundSwitch Project Boundary
 
-- `soundswitch_pack_models.py` contains frozen saved-project models; `soundswitch_project_decoder.py` is a strict, read-only decoder for the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile.
-- Decoding inventories and hashes source files and must not mutate a source project.
-- The decoder is outside the live runtime: it does not write `DeckState`/`OutputState`, enqueue `BridgeEvent`s, perform OS2L/MIDI/LED/Govee/Enttec output, or add config, commands, and status fields.
-- Exporter, pack builder/verifier/player, bridge/backend integration, and Enttec hard-kill behavior remain future work.
+- `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` provide frozen models and strict read-only decode; `soundswitch_pack.py` and `tools/export_soundswitch_pack.py` deterministically publish a canonical 95-artifact pack; `soundswitch_pack_verifier.py` independently verifies it. All are pinned to SoundSwitch 2.10.3 and the canonical UUID/RAVE profile.
+- Decode/export must not mutate a source project. Pack publication is deterministic and fail-closed; independent verification rejects inventory, hash, canonicalization, semantic, crosswalk, or source-drift changes, including the F9 one-byte mutation.
+- The offline lane is outside live runtime: it does not write `DeckState`/`OutputState`, enqueue `BridgeEvent`s, perform OS2L/MIDI/LED/Govee/Enttec output, or add config, commands, and status fields.
+- Task 3 loader/player and Task 4+ MIDI/runtime/backend integration, Enttec hard-kill behavior, and hardware validation remain future work.
 
 ## State Ownership
 

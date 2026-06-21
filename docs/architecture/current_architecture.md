@@ -33,7 +33,7 @@ RBSS_SMART_BREAKDOWN=1
 
 These defaults are present in `scripts/ss_bridge_watcher.sh`.
 
-Task 1 also adds `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` as a separate offline lane. They provide frozen source models and a strict, read-only decoder gated to the pinned SoundSwitch 2.10.3 canonical project UUID and RAVE Venue profile; current-corpus software coverage includes 232 render cues plus one catalog-tail cue. They are not startup or runtime subsystems, do not mutate the project, and do not connect to `StateManager`, OS2L, MIDI lasers, LED/Govee, Rekordbox readers, status, config, or commands. The exporter, pack builder/verifier/player, backend, and Enttec path remain planned and unimplemented.
+Tasks 1–2 add a separate offline SoundSwitch lane: frozen source models, strict read-only decode, deterministic canonical-pack export, and an independent verifier for the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile. The 95-artifact pack preserves exact 232 render + 1 catalog-tail cues, 32 Static Looks, 42 autoloops, 45 scripted inventory records, and the seven-class F-3 crosswalk; F9 mutation rejection passes. These tools are not startup/runtime subsystems, do not mutate the project, and do not connect to `StateManager`, OS2L, MIDI lasers, LED/Govee, Rekordbox readers, status, config, or commands. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec/hardware work remain planned and unimplemented.
 
 ## Runtime Subsystems
 

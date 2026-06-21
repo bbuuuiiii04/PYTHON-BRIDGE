@@ -10,7 +10,7 @@ validation_scope: software-only
 
 This repo uses tracked example configs plus local ignored configs. Do not commit local device secrets, local IPs, API keys, or backup files.
 
-The Task 1 strict, read-only SoundSwitch 2.10.3 decoder and frozen source models add no config keys or example files. Exporter, pack verifier/player, backend, and Enttec configuration remain planned and unimplemented; existing SoundSwitch OS2L, laser, LED/Govee, Rekordbox, and status configuration is unchanged.
+The Task 1–2 SoundSwitch frozen models, strict decoder, deterministic exporter, canonical 95-artifact pack, and independent verifier add no config keys or example files. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec configuration remain planned and unimplemented; existing SoundSwitch OS2L, laser, LED/Govee, Rekordbox, and status configuration is unchanged.
 
 ## Tracked examples
 

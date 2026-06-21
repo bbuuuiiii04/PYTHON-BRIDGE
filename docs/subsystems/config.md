@@ -17,8 +17,8 @@ Status:
 Purpose:
 - Track config sources, config validation, local ignored config behavior, and schema-change obligations.
 
-Task 1 boundary:
-- The strict read-only SoundSwitch decoder has no bridge config schema or tracked example-config keys. Exporter, pack, verifier/player, backend, and Enttec configuration remain planned and unimplemented.
+Task 2 boundary:
+- The read-only SoundSwitch decoder, deterministic exporter, canonical pack, and independent verifier add no bridge config schema or tracked example-config keys. Loader/player, MIDI/runtime/backend, and Enttec configuration remain planned and unimplemented.
 - Existing OS2L, laser, LED/Govee, Rekordbox, and runtime-status configuration is unchanged.
 
 Authoritative code:

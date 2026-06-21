@@ -37,7 +37,7 @@ Coverage expectations:
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.
-- `tests/test_soundswitch_project_decoder.py` covers the strict, read-only SoundSwitch 2.10.3 canonical UUID/RAVE decoder and frozen source-model boundary, including malformed-source rejection, inventory drift, MIDI/control reconciliation, the 232 render-cue plus one catalog-tail split, and current-corpus assertions when the canonical local project is available. These are software tests only; they do not validate project mutation, exporter/pack/player behavior, Enttec output, or hardware.
+- `tests/test_soundswitch_project_decoder.py` covers the strict decoder/frozen models. `tests/test_soundswitch_pack.py` covers deterministic export, the canonical 95-artifact pack, independent verification, exact 232+1/32/42/45 inventory, the seven-class F-3 crosswalk, byte-identical repeat export, and mutation rejection. `tests/test_prove_soundswitch_pack_generation.py` covers the F9 proof-gate seam. The current proof is 28 PASS / 0 FAIL / 1 INCOMPLETE with foundation 27/27 PASS; only F10 is deferred to Task 4. These are software/wire tests only, not loader/player, runtime, Enttec, or hardware validation.
 
 Change contract:
 - Do not modify tests just to make docs changes pass.

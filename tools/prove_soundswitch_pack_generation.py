@@ -45,6 +45,9 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PACKAGE_PARENT = REPO_ROOT.parent
+if str(PACKAGE_PARENT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_PARENT))
 RE_DIR = REPO_ROOT / "tools" / "ssfmt" / "re"
 # Strict, test-covered, read-only research parsers import each other by bare
 # module name, so the research directory must be importable.
@@ -59,6 +62,11 @@ import build_coverage_reports  # noqa: E402
 import inventory_project_artifacts  # noqa: E402
 import layered_renderer  # noqa: E402
 import parse_venue_cues  # noqa: E402
+from rb_ss_bridge_v2.soundswitch_pack_verifier import (  # noqa: E402
+    SoundSwitchPackVerificationError,
+    verify_pack,
+)
+from rb_ss_bridge_v2.tools.export_soundswitch_pack import export_pack  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Canonical bounded source identity (closure report + verified live bytes).
@@ -879,15 +887,17 @@ def check_fail_closed(proof: Proof, project: Path, venue_data: bytes, inventory:
             remediation="Production decoder (Task 1.9) must apply this reject-symlink guard.",
         )
 
-    # F9 one-byte pack-artifact mutation -> DEFERRED (pack + verifier are unbuilt, Task 2).
+    # F9 is a real Task-2 gate: export, independently verify, then mutate one
+    # byte in a hashed artifact and require rejection.
+    f9 = _prove_pack_mutation(project)
     proof.record(
         "F9-pack-one-byte-mutation", "Independent verifier rejects a one-byte pack-artifact mutation",
-        False, foundation=False, incomplete=True,
-        expected="verifier re-hash rejects any one-byte pack mutation",
-        actual="pack format + soundswitch_pack_verifier are not implemented yet (Task 2)",
-        evidence="no pack artifact exists to mutate in this pre-implementation pass",
-        sources=["docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md (Task 2)"],
-        remediation="Implement Task 2 pack + verifier; this proof becomes a mandatory Task 2/8 acceptance test.",
+        f9["ok"], foundation=True,
+        expected="fresh export verifies; one-byte hashed-artifact mutation is rejected",
+        actual=f9,
+        evidence="export_pack to a temporary new directory + independent verify_pack before/after mutation",
+        sources=["tools/export_soundswitch_pack.py", "soundswitch_pack_verifier.py"],
+        remediation="Fix deterministic export/hash coverage/verifier rejection before Task 2 can pass.",
     )
 
     # F10 unsupported active MIDI semantic (active CC/pitch static-override).
@@ -918,6 +928,28 @@ def _decode_distinguishes_cc() -> bool:
     data += _sig(0x01380306) + struct.pack("<Q", 0) + _sig(0xDEADBEEF)
     decoded = inventory_project_artifacts._decode_recordable_control_map(bytes(data))
     return decoded["bindings"][0]["message_type"] == "control_change"
+
+
+def _prove_pack_mutation(project: Path) -> dict[str, Any]:
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack = Path(tmp) / "pack"
+            exported = export_pack(project, pack)
+            verified = verify_pack(pack, source_project=project)
+            target = pack / "static_looks.json"
+            data = bytearray(target.read_bytes())
+            data[len(data) // 2] ^= 1
+            target.write_bytes(data)
+            rejected = False
+            try:
+                verify_pack(pack)
+            except SoundSwitchPackVerificationError:
+                rejected = True
+            return {"ok": bool(exported.get("verified") and verified.get("verified") and rejected),
+                    "fresh_export_verified": bool(verified.get("verified")),
+                    "mutated_artifact": "static_looks.json", "one_byte_mutation_rejected": rejected}
+    except Exception as exc:  # noqa: BLE001 - proof records fail-closed detail
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 # --------------------------------------------------------------------------- #

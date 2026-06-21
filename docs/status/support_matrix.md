@@ -32,7 +32,7 @@ This matrix is deliberately conservative. If evidence is missing, the answer is 
 
 ## Lighting outputs
 
-The offline SoundSwitch project decoder is software tooling, not a lighting output. It is supported only for the pinned SoundSwitch 2.10.3 canonical project UUID/RAVE profile and does not mutate projects. Its tests include the current 232 render-cue plus one catalog-tail split. Exporter/pack/verifier/player/backend/Enttec support remains planned and unimplemented.
+The offline SoundSwitch project tooling is not a lighting output. For the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile, strict decode, deterministic canonical 95-artifact export, and independent verification are software-tested with exact 232+1/32/42/45 inventory, seven-class F-3 crosswalk, and F9 mutation rejection. It does not mutate projects. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec support remain planned and unimplemented.
 
 | Output | Status | Evidence | Notes |
 | --- | --- | --- | --- |

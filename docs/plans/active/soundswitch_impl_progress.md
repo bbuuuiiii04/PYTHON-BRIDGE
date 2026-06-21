@@ -1,17 +1,17 @@
 # SoundSwitch implementation — progress ledger
 
-last_updated: 2026-06-21T18:48:06Z   last_session_model: gpt-5
+last_updated: 2026-06-21T19:20:18Z   last_session_model: gpt-5
 
 ## Proof gate
 
-- HEAD: `4873a94`
+- HEAD: working tree based on `7721df3` (rerun after Task 2 commit)
 - Verdict: `PASS_IMPLEMENTATION_MAY_BEGIN`
-- Checks: 27 PASS / 0 FAIL / 2 INCOMPLETE
-- Foundation: 26/26 PASS
+- Checks: 28 PASS / 0 FAIL / 1 INCOMPLETE
+- Foundation: 27/27 PASS
 
 ## Next action
 
-> Task 2: implement the deterministic exporter, canonical pack, and independent verifier with F9 mutation rejection.
+> Task 2: commit and push the approved exporter/verifier, rerun proof at committed HEAD, then begin Task 3.
 
 ## Task status (0–9)
 
@@ -19,7 +19,7 @@ last_updated: 2026-06-21T18:48:06Z   last_session_model: gpt-5
 | ---- | ----- | ---- | ------ | ----- | -- | ----- |
 | 0 | change contract | done | done | green | #115 | Review approved; hard checks green; full suite `Ran 1881`, `OK` (3 skipped, 1 expected failure). |
 | 1 | project decoder | done | done | green | #115 | Review approved; 17 targeted tests; proof 27/0/2 PASS; full suite `Ran 1898`, `OK` (3 skipped, 1 expected failure). |
-| 2 | exporter and verifier | wip | — | — | #115 | Task 1 approved and pushed; implementation starting. |
+| 2 | exporter and verifier | done | done | green | #115 | Review approved; 31 targeted tests; F9 PASS; full suite `Ran 1914`, `OK` (3 skipped, 1 expected failure). |
 | 3 | pure renderer/player | todo | — | — | — | |
 | 4 | MIDI input adapter | todo | — | — | — | |
 | 5 | output backend | todo | — | — | — | |
