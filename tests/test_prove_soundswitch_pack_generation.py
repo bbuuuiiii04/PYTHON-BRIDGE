@@ -117,5 +117,16 @@ class CanonicalConstantsTests(unittest.TestCase):
             self.assertEqual(len(hex_frame), 38, slot)  # 19 bytes
 
 
+class ExitCodeTests(unittest.TestCase):
+    def test_pass_exits_zero(self):
+        self.assertEqual(prove.verdict_exit_code("PASS_IMPLEMENTATION_MAY_BEGIN"), 0)
+
+    def test_incomplete_blocker_fails_closed(self):
+        self.assertNotEqual(prove.verdict_exit_code("INCOMPLETE_PROOF_BLOCKER"), 0)
+
+    def test_fail_fails_closed(self):
+        self.assertNotEqual(prove.verdict_exit_code("FAIL_DO_NOT_IMPLEMENT"), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

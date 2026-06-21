@@ -45,7 +45,7 @@ implemented by this research change. Status remains
 | Existing-path scripted tracks | 32 | all clean-byte exportable | TrackMap + physical `.ssfile` parser |
 | Primary-Venue Static Look slots | 32 | all parsed | Venue GUID-keyed `StaticLooks` collection |
 | DDJ-800 learned Static Look overrides | 4 | all resolved to exact slots/frames | recordable map + Static Look parser + binary |
-| Venue Attribute Cues | 232 | all parsed | Venue parser |
+| Venue Attribute Cues | 232 render-bearing + 1 catalog-tail = 233 parsed | all parsed | Venue parser |
 | Cues referenced by active Autoloops/scripts | 166 | all present; none missing | GUID union across active files |
 
 The sorted 166-GUID active cue union has SHA-256

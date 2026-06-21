@@ -934,6 +934,16 @@ def compute_verdict(checks: list[dict[str, Any]]) -> str:
     return "PASS_IMPLEMENTATION_MAY_BEGIN"
 
 
+def verdict_exit_code(verdict: str) -> int:
+    """Process exit code for the gate. Exit 0 ONLY when implementation may begin.
+    Every blocking verdict — FAIL_DO_NOT_IMPLEMENT and INCOMPLETE_PROOF_BLOCKER (a
+    foundation check that could not be proven, e.g. the project or the scratch
+    corpus was unavailable) — exits nonzero so an exit-code-based CI/hook gate
+    fails closed. Deferred non-foundation INCOMPLETE (F9/F10) leaves the verdict at
+    PASS_IMPLEMENTATION_MAY_BEGIN, which exits 0."""
+    return 0 if verdict == "PASS_IMPLEMENTATION_MAY_BEGIN" else 1
+
+
 def counts(checks: list[dict[str, Any]]) -> dict[str, int]:
     return {
         "total": len(checks),
@@ -1111,8 +1121,10 @@ def main() -> int:
           f"(foundation {c['foundation_pass']}/{c['foundation_total']})")
     print(f"json: {_rel(output_dir / 'latest.json')}")
     print(f"md:   {_rel(output_dir / 'latest.md')}")
-    # Exit nonzero only on a hard FAIL so CI can gate without blocking on deferred INCOMPLETE.
-    return 1 if report["final_verdict"] == "FAIL_DO_NOT_IMPLEMENT" else 0
+    # Exit 0 only when implementation may begin; FAIL_DO_NOT_IMPLEMENT and
+    # INCOMPLETE_PROOF_BLOCKER both fail closed (see verdict_exit_code). Deferred
+    # non-foundation INCOMPLETE (F9/F10) stays PASS and still exits 0.
+    return verdict_exit_code(report["final_verdict"])
 
 
 if __name__ == "__main__":
