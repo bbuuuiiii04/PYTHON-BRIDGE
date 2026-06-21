@@ -17,6 +17,7 @@ from typing import Optional
 
 from .laser_config import LaserConfig
 from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
+from .laser_output_backend import MidiOutputBackend
 from .midi_output import MidiOutput
 
 log = logging.getLogger("laser_executor")
@@ -41,7 +42,8 @@ class LaserSceneExecutor:
         randomize_cursors: bool = True,
     ) -> None:
         self._config = config
-        self._midi_output = midi_output
+        self._midi_output = midi_output  # retained for external type-checks / callers
+        self._backend = MidiOutputBackend(midi_output)
         self._personality = personality
         self._rng = rng if rng is not None else random.Random()
         self._randomize_cursors = bool(randomize_cursors)
@@ -234,7 +236,7 @@ class LaserSceneExecutor:
             ctx,
             reason=decision.reason,
         )
-        if not self._midi_output.trigger(midi_message, priority=priority):
+        if not self._backend.trigger(midi_message, priority=priority):
             self._record_gate("midi_trigger_rejected")
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_midi_trigger_rejected")
@@ -278,7 +280,7 @@ class LaserSceneExecutor:
         if msg is None:
             log.debug("[LX] blackout_on skipped: manual_blackout_on not configured")
             return
-        if self._midi_output.trigger(msg, priority="high"):
+        if self._backend.trigger(msg, priority="high"):
             with self._lock:
                 self._blackout_pending_for_drop_window = True
             log.info("[LX] blackout_on sent  note=%s  channel=%s", msg.note, msg.channel)
@@ -298,7 +300,7 @@ class LaserSceneExecutor:
         msg = self._config.manual_blackout_off
         if msg is None:
             return
-        if not self._midi_output.trigger(msg, priority="high"):
+        if not self._backend.trigger(msg, priority="high"):
             self._record_gate("manual_blackout_off_rejected")
 
     def hold_blackout_mask(self, owner: str) -> None:
@@ -313,7 +315,7 @@ class LaserSceneExecutor:
             self._mask_owners.add(owner)
         if already_dark:
             return
-        if self._midi_output.trigger(msg, priority="high"):
+        if self._backend.trigger(msg, priority="high"):
             log.info("[LX] mask_on  owner=%s  note=%s", owner, msg.note)
             return
         with self._lock:
@@ -333,7 +335,7 @@ class LaserSceneExecutor:
         msg = self._config.manual_blackout_off
         if msg is None:
             return
-        if not self._midi_output.trigger(msg, priority="high"):
+        if not self._backend.trigger(msg, priority="high"):
             self._record_gate("manual_blackout_off_rejected")
 
     def _release_all_masks(self) -> None:
@@ -368,7 +370,7 @@ class LaserSceneExecutor:
                 "role_cursors": role_cursors,
                 "role_active_scenes": active_scenes,
                 "role_last_trigger_beat": last_trigger_beats,
-                "midi": self._midi_output.status(),
+                "midi": self._backend.status(),
             }
 
     def _select_scene(
