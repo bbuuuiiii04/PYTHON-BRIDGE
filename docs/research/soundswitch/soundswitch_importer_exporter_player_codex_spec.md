@@ -18,12 +18,13 @@ Look grammar, and learned-MIDI add/remove behavior.
 
 **Correction provenance (2026-06-21).** This spec was edited after its
 `last_verified_commit` stamp (`8ca5875`). The decode foundation was independently
-re-verified at HEAD `cc526eb` by the pack-generation proof gate
-(`tools/prove_soundswitch_pack_generation.py`,
-`artifacts/soundswitch_pack_generation_proof/latest.json` →
-`final_verdict: PASS_IMPLEMENTATION_MAY_BEGIN`). The committer MUST re-stamp
-`last_verified_commit` to the commit that lands these edits; do not fake
-provenance.
+re-verified by the pack-generation proof gate
+(`tools/prove_soundswitch_pack_generation.py`); its locally generated
+`artifacts/soundswitch_pack_generation_proof/latest.json` reported
+`final_verdict: PASS_IMPLEMENTATION_MAY_BEGIN` at repo HEAD `cc526eb`. The proof
+reports are generated locally and are gitignored (never committed); regenerate the
+gate to reproduce the verdict. The committer MUST re-stamp `last_verified_commit`
+to the commit that lands these edits; do not fake provenance.
 
 ### Canonical bounded source identity (pinned)
 
@@ -72,7 +73,7 @@ pack-generation proof gate) before any physical enable. See Task 6.
 ### Test-suite reporting honesty
 
 Implementation agents MUST report exact current test output and MUST NOT convert
-it into "all passed." For reference, the latest full-suite run was
+it into "all passed." For reference, a prior full-suite run was
 `Ran 1866 ... FAILED (failures=1, skipped=3, expected failures=1)`, where the one
 failure is an unrelated order-dependent `test_runtime_status` logging-isolation
 flake (passes in isolation). That flake neither validates nor invalidates the
@@ -212,10 +213,18 @@ python3 tools/prove_soundswitch_pack_generation.py \
   --output-dir artifacts/soundswitch_pack_generation_proof
 ```
 
-Artifacts:
+Artifacts (generated locally; gitignored; never committed):
 
 - `artifacts/soundswitch_pack_generation_proof/latest.json` (machine-readable);
 - `artifacts/soundswitch_pack_generation_proof/latest.md` (human-readable).
+
+These reports are environment-specific — they record the operator's absolute
+project path, a generation timestamp, and the repo HEAD at run time — so they are
+**not** committed (`.gitignore` excludes
+`artifacts/soundswitch_pack_generation_proof/latest.*`). Each implementing agent
+MUST regenerate them on its own machine and paste the exact JSON/Markdown paths,
+the `final_verdict`, and the PASS/FAIL/INCOMPLETE totals into its implementation
+handoff (see Part E). A committed or copied-in report is never accepted as proof.
 
 Pure-logic coverage runs in CI without the live project:
 `tests.test_prove_soundswitch_pack_generation`.

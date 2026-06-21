@@ -9,3 +9,5 @@ __pycache__/
 config/laser_director.json
 config/led_look_director.json
 spec/*.npy
+# Generated, environment-specific proof reports (regenerate locally; never commit)
+artifacts/soundswitch_pack_generation_proof/latest.*
