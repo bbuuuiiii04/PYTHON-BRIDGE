@@ -65,6 +65,7 @@ from .soundswitch_laser_player import (
     ZERO_FRAME as _PACK_ZERO_FRAME,
     normalize_soundswitch_id as _pack_normalize_id,
 )
+from .soundswitch_pack_runtime import PackRuntime, DISABLED_PACK_RUNTIME
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
@@ -329,9 +330,7 @@ class StateManager:
         led_color_engine=None,
         os2l_connected_provider=None,
         recorder: Optional[SessionRecorder] = None,
-        soundswitch_pack_player=None,
-        soundswitch_midi_input=None,
-        soundswitch_pack_backend=None,
+        soundswitch_pack_runtime=None,
     ) -> None:
         self._eq    = event_queue
         self._cache = position_cache
@@ -345,12 +344,11 @@ class StateManager:
         self._laser_personality_provider = laser_personality_provider
         # T7c SoundSwitch pack driver (None ⇒ neutral; existing path unchanged).
         # The driver READS DeckState; StateManager remains the only DeckState writer.
-        self._pack_player = soundswitch_pack_player
-        self._pack_input = soundswitch_midi_input
-        self._pack_backend = soundswitch_pack_backend
-        self._pack_enabled = (
-            soundswitch_pack_player is not None and soundswitch_pack_backend is not None
-        )
+        # T7e: one immutable runtime bundle, published atomically by the command
+        # thread (set_pack_runtime) and read once per tick by the push loop, so the
+        # driver never sees a mixed old/new runtime. Default = disabled (neutral).
+        self._pack_runtime: PackRuntime = soundswitch_pack_runtime or DISABLED_PACK_RUNTIME
+        # Push-thread-owned driver trackers (NOT part of the swappable bundle).
         self._pack_last_load_gen: tuple[int, int] | None = None   # (active, load_gen)
         self._pack_last_elapsed_ms: int | None = None
         self._pack_last_static_slot: int | None = None
@@ -3177,36 +3175,52 @@ class StateManager:
         direct ZERO frame (NOT the normal driver, which would read possibly-partial
         state) so a crash can never retain non-zero DMX, then re-raise.
         """
+        rt = self._pack_runtime
         try:
             self._push_tick_inner()
         except BaseException:
-            if self._pack_enabled and self._pack_backend is not None:
+            if rt is not None and rt.active and rt.backend is not None:
                 try:
-                    self._pack_backend.submit_frame(_PACK_ZERO_FRAME)
+                    rt.backend.submit_frame(_PACK_ZERO_FRAME)
                 except Exception:
                     pass
             raise
-        if self._pack_enabled:
+        if rt is not None and rt.active:
             self._drive_pack_output()
 
+    def set_pack_runtime(self, runtime: PackRuntime) -> None:
+        """Atomically publish a new pack runtime bundle (command thread → push loop).
+
+        A single attribute assignment; the push loop reads one reference per tick, so
+        it never sees a mixed old/new runtime. All blocking work (load_pack, serial
+        open/close, old-sender zero_and_stop) must already be done by the caller.
+        """
+        self._pack_runtime = runtime or DISABLED_PACK_RUNTIME
+
+    def get_pack_status(self) -> dict[str, Any]:
+        """Sanitized pack status for the runtime status surface (no paths/ports/etc.)."""
+        rt = self._pack_runtime
+        return rt.sanitized_status() if rt is not None else DISABLED_PACK_RUNTIME.sanitized_status()
+
     def _drive_pack_output(self) -> None:
-        """T7c: drive the pack player from authoritative deck state; submit one
+        """T7c/T7e: drive the pack player from authoritative deck state; submit one
         CH1-CH19 frame. READ-ONLY w.r.t. DeckState; fail-safe to ZERO; never raises
         into the tick. Automatic base ZEROs on any non-happy-path (stop/stale/error/
         track-change/discontinuity) via clear_selection() so a held manual Static
         Override stands alone while idle. See
         docs/plans/active/soundswitch_t7c_pack_driver_spec.md."""
-        player, backend = self._pack_player, self._pack_backend
-        if player is None or backend is None:
+        rt = self._pack_runtime
+        if rt is None or not rt.active:
             return
+        player, backend, midi_input = rt.player, rt.backend, rt.midi_input
         try:
             active = self._os.active_deck
             d = self._deck[active]
             snap = self._cache.get(active)
 
             # 1. Controller masks + static overrides (in-memory snapshot; no I/O).
-            if self._pack_input is not None:
-                s = self._pack_input.snapshot()
+            if midi_input is not None:
+                s = midi_input.snapshot()
                 player.set_masks(blackout=bool(s.blackout_held), emergency=False)
                 slot = s.held_static_slot
                 if slot != self._pack_last_static_slot:

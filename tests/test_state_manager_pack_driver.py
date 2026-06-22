@@ -24,6 +24,7 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (
     LoadedAttribute, LoadedDocument, LoadedPack, LoadedStaticLook, LoadedScalarValue,
     LoadedTimelineEvent,
 )
+from rb_ss_bridge_v2.soundswitch_pack_runtime import PackRuntime
 SSID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 FRESH = SimpleNamespace(is_stale=lambda _s: False)
 STALE = SimpleNamespace(is_stale=lambda _s: True)
@@ -87,11 +88,14 @@ class _FakeInput:
         return self._snap
 
 
-def _make_sm(*, player=None, backend=None, midi_input=None):
+def _make_sm(*, player=None, backend=None, midi_input=None, enabled=None):
+    if enabled is None:
+        enabled = player is not None and backend is not None
+    rt = PackRuntime(
+        enabled=enabled, reason="pack" if enabled else "disabled",
+        player=player, midi_input=midi_input, backend=backend)
     return StateManager(
-        queue.Queue(), PositionCache(), mock.Mock(),
-        soundswitch_pack_player=player, soundswitch_midi_input=midi_input,
-        soundswitch_pack_backend=backend)
+        queue.Queue(), PositionCache(), mock.Mock(), soundswitch_pack_runtime=rt)
 
 
 def _set(sm, *, ssid="", elapsed_ms=0, playing=False, load_gen=1, snap=FRESH, active=1):
@@ -105,9 +109,9 @@ def _set(sm, *, ssid="", elapsed_ms=0, playing=False, load_gen=1, snap=FRESH, ac
 class PackDriverTests(unittest.TestCase):
     # D1
     def test_default_off_is_neutral(self):
-        sm = _make_sm()  # no pack params
-        self.assertFalse(sm._pack_enabled)
-        sm._drive_pack_output()  # player/backend None -> no-op, no raise
+        sm = _make_sm()  # no pack params -> disabled runtime
+        self.assertFalse(sm._pack_runtime.active)
+        sm._drive_pack_output()  # inactive -> no-op, no raise
 
     # D2
     def test_scripted_playing_fresh_submits_nonzero(self):
@@ -160,10 +164,9 @@ class PackDriverTests(unittest.TestCase):
     # D7
     def test_pack_disabled_emits_no_dmx(self):
         be = _FakeBackend()
-        sm = _make_sm()  # disabled (no player/backend)
-        self.assertFalse(sm._pack_enabled)
-        # Even if a backend existed but player is None, nothing is submitted.
-        sm._pack_backend = be
+        # A disabled runtime (player+backend present but enabled=False) drives nothing.
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, enabled=False)
+        self.assertFalse(sm._pack_runtime.active)
         sm._drive_pack_output()
         self.assertEqual(be.frames, [])
 
@@ -218,7 +221,7 @@ class PackDriverTests(unittest.TestCase):
         be = _FakeBackend()
         inp = _FakeInput(held_static_slot=8)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
-        sm._pack_player = None  # simulate disable/rollback to NoneBackend path
+        sm.set_pack_runtime(PackRuntime())  # simulate disable/rollback (inactive)
         _set(sm, ssid="", playing=False, snap=FRESH)
         sm._drive_pack_output()
         self.assertEqual(be.frames, [])

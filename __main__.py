@@ -73,6 +73,7 @@ from .soundswitch_frame_sender import SoundSwitchFrameSender
 from .soundswitch_laser_player import LaserPackPlayer
 from .soundswitch_midi_input import SoundSwitchMidiInputGroup
 from .soundswitch_pack_loader import LoadedPack, load_pack
+from .soundswitch_pack_runtime import PackRuntime
 from .soundswitch_pack_player_config import (
     SoundSwitchPackPlayerConfigResult,
     load_soundswitch_pack_player_config,
@@ -919,6 +920,18 @@ def main() -> None:
     soundswitch_frame_sender = soundswitch_pack_bundle.frame_sender
     soundswitch_midi_input = soundswitch_pack_bundle.midi_input
     soundswitch_pack_player = soundswitch_pack_bundle.player
+    # T7e: one immutable runtime bundle published to StateManager. enabled only when
+    # the pack workers actually started (reason == "pack"); a *_failed/none bundle is
+    # disabled (driver inert, no DMX).
+    soundswitch_pack_runtime = PackRuntime(
+        enabled=(soundswitch_pack_bundle.reason == "pack"),
+        reason=soundswitch_pack_bundle.reason,
+        player=soundswitch_pack_player,
+        midi_input=soundswitch_midi_input,
+        backend=soundswitch_pack_bundle.laser_backend,
+        frame_sender=soundswitch_frame_sender,
+        pack_sha12=(getattr(soundswitch_pack_bundle.pack, "manifest_sha256", "") or "")[:12],
+    )
     log.info(
         "[MAIN] soundswitch-pack-config  reason=%s  available=%s  enabled=%s  startup=%s",
         soundswitch_pack_cfg_result.reason,
@@ -1012,9 +1025,7 @@ def main() -> None:
         led_look_director=led_look_director,
         led_scene_adapter=led_scene_adapter,
         led_color_engine=led_bundle.led_color_engine,
-        soundswitch_pack_player=soundswitch_pack_player,
-        soundswitch_midi_input=soundswitch_midi_input,
-        soundswitch_pack_backend=soundswitch_pack_bundle.laser_backend,
+        soundswitch_pack_runtime=soundswitch_pack_runtime,
     )
     if led_bundle.realtime_runner is not None:
         led_bundle.realtime_runner.set_beat_provider(sm.get_active_beat_anchor)
