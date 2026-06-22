@@ -1,10 +1,27 @@
 # SoundSwitch implementation — progress ledger
 
-last_updated: 2026-06-22T00:35:04Z   last_session_model: gpt-5.5-codex
+last_updated: 2026-06-22T05:00:00Z   last_session_model: claude-opus-4-8 (finisher)
+
+## Finisher log (Opus 4.8, 2026-06-22)
+
+- **Step 0 — CI red fixed (head `42bc654`).** Root cause: the `unit` CI job runs
+  Python **3.11** (PR-only; `main` runs `perf` only, so the full unit suite had
+  never run on `main` and several failures were latent). Local dev runs 3.14,
+  masking a PR regression: `LoadedPack` used bare `MappingProxyType({})` dataclass
+  defaults, which 3.11 rejects ("use default_factory") — fixed via
+  `field(default_factory=...)`. Latent pre-existing failures also greened:
+  PatchC/D live-config tests now skip when the gitignored
+  `config/led_look_director.json` is absent; phase3 dead `import pytest` removed;
+  runtime_status heartbeat de-flaked via `bridge_fmt.reset_rate_state()` in
+  `setUp` (id(self)-keyed throttle leaked across tests); midi_output worker-timing
+  waits scaled for CI contention. **CI `unit` job: green at `42bc654`.**
+- Review-prompt target corrected: `97f2553` → `d1d952a` (review head; this ledger
+  is the live current-commit source).
 
 ## Proof gate
 
-- HEAD: `b7e0e66` plus the reviewed T7a worktree
+- HEAD: `b7e0e66` plus the reviewed T7a worktree; re-verified PASS at finisher
+  head `42bc654` (29/0/0, foundation 27/27).
 - Verdict: `PASS_IMPLEMENTATION_MAY_BEGIN` (exit 0; proven at `b7e0e66`)
 - Checks: 29 PASS / 0 FAIL / 0 INCOMPLETE (F10 promoted in Task 4)
 - Foundation: 27/27 PASS
