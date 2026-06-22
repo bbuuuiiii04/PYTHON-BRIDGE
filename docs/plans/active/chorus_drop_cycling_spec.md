@@ -67,22 +67,19 @@ The LED engine already implements exactly the requested lifecycle, in **`state_m
   role has no mapped look. Mirror as: post_drop with no mapped look → keep cycling `drop`.
 
 ### A3. MIDI mapping must stay synced — BACKEND + FRONTEND (verified; operator-critical)
-Rotating drop/post_drop banks only works if **every note sent is mapped to the intended
-autoloop on every surface**. Today they are NOT consistent:
-- [confirmed] **Backend — scene catalog** `config/laser_director.json` `scenes`: autoloop
-  drop scenes `house_drop_2..16` (notes 97–111) **plus a one-shot `house_drop_1`**
-  (`scene_type:"static"`, note 96). `post_drop` autoloops exist (`house_post_drop_1` note 41).
-- [confirmed] **Backend — per-personality banks**: `house` `drop_bank` lists 16 entries but
-  **entry 0 is the static `house_drop_1`** and `house_drop_2/3` are `high_impact`;
-  `dubstep` `drop_bank` is **only `["house_drop_1"]`** (the static hit). `post_drop_bank`:
-  `house` has entries, `dubstep` is **empty `[]`** — so dubstep would exercise the
-  no-post_drop fallback.
+The operator explicitly requires the laser MIDI mapping stay synced across backend and
+frontend. The cyclable banks are the operator's to define; the code must work with them as
+configured and the mapping must be consistent across all surfaces:
+- [confirmed] **Backend — scene catalog** `config/laser_director.json` `scenes`: contains
+  both `autoloop` drop/post_drop scenes (cyclable) and `static` ones (one-shot hits), each
+  with its own MIDI note. A bank may legitimately contain a mix; the cycler uses only the
+  autoloop/allowed entries (see Task 4) — **the operator's bank membership is not changed.**
 - [confirmed] The executor gates a refire on `scene_def.scene_type=="autoloop"`
-  (`laser_executor.py:187`) and `allow_high_impact` (`:172-179`) → static/high-impact bank
-  entries are **silently skipped**.
+  (`laser_executor.py:187`) and `allow_high_impact` (`:172-179`); some personalities have an
+  empty `post_drop_bank`, which is fine — it routes to the no-post_drop fallback (cycle drops).
 - [confirmed] **Frontend (a) — laser_pad UI**: `config/laser_director.json` `_pad_meta`
-  (`banks`, `note_labels`, `ui`) — note labels must match the scenes.
-- [confirmed] **Frontend (b) — SoundSwitch project**: each drop/post_drop note must map to
+  (`banks`, `note_labels`, `ui`) — note labels must match the scene catalog notes.
+- [confirmed] **Frontend (b) — SoundSwitch project**: each note a bank can send must map to
   the intended autoloop in the bounded RAVE project and be in the exported pack.
   `~/vln_ss_analysis/soundswitch_laser_cues.json` is keyed by cue/fixture/dmx, **not** MIDI
   note, so this check is in SoundSwitch's MIDI mapping / the pack, not that file.
@@ -105,6 +102,9 @@ autoloop on every surface**. Today they are NOT consistent:
 - New behavior **OFF by default**; with it off, laser output is byte-for-byte unchanged.
 - **Do not** change LED runtime behavior. (Task 1 extracts a pure resolver and proves it
   equals today's LED logic; the live LED path keeps working.)
+- **Do not** modify the operator's `personalities` / `drop_bank` / `post_drop_bank` /
+  `scenes` / `_pad_meta` in `config/laser_director.json`. The code must work with the banks
+  **as they are**; never auto-curate, reorder, or repopulate the operator's banks.
 - **Do not** modify `smart_phrasing.py`, `autoloop_controller.py`, `smart_rearm.py`, the
   push loop's threading, SoundSwitch pack code, or Govee modules.
 - Follow AGENTS.md §7: this is the `laser` (and touches `led_govee`) change-contract — update
@@ -177,33 +177,42 @@ types/ranges, every referenced look exists in `scenes`, positive beats. Unknown 
    fire **only** on `ctx.autoloop_tick_just_fired` and **rotate** the role's bank via
    `_choose_bank_scene_locked(role=role, fallback_scene=decision.scene)` (mirror the phrase
    branch). Leave `drop_crossing`/`drop_hold` paths (flag-off) untouched.
+   **Skip non-cyclable bank entries at runtime — do NOT require the operator to curate banks.**
+   A bank may contain `static` or high-impact-disallowed scenes; when rotating, advance the
+   cursor past any entry whose `scenes` def is not `scene_type=="autoloop"` (or is high-impact
+   while `allow_high_impact` is false) and pick the next usable one, bounded by one full pass
+   over the bank. If no usable scene exists in the bank this tick, no-op (no MIDI) and let the
+   no-post_drop fallback / next tick handle it — never send an unmapped/one-shot note as a
+   cycle.
    The 32-beat rotation cadence comes from `autoloop_tick_just_fired` (interval=
    `AUTOLOOP_ARM_PHRASE_BEATS=32`, `state_manager.py:3756`) plus marker boundaries — both
    are the requested cadence; no new timer.
 
 ### Task 5 — Keep the laser MIDI mapping synced (BACKEND + FRONTEND)
-5a. **Curate banks for cycling** (`config/laser_director.json`, `house` + `dubstep`):
-`drop_bank` and `post_drop_bank` used while cycling must contain **only
-`scene_type:"autoloop"`** scenes allowed under `allow_high_impact`. Remove the static
-`house_drop_1` from cyclable `drop_bank` (it stays as the drop-crossing one-shot
-`drop_scene`); populate `dubstep` (its `drop_bank` is just the static hit and its
-`post_drop_bank` is empty → it will hit the no-post_drop fallback).
-5b. **Config validation** (`laser_config.py`): when `drop_lifecycle_mirror` is on for a
-personality, every `drop_bank`/`post_drop_bank` entry must resolve to a `scenes` entry with
-a MIDI note; the cyclable set must contain ≥1 `autoloop`+allowed scene. Emit a **loud config
-error** listing static / high-impact-not-allowed / missing-note / missing-from-`scenes`
-entries (fail at load, never silently not cycle).
-5c. **Frontend (a) — `_pad_meta`**: keep `note_labels`/`banks` in sync with any scene/note
-change in the same commit.
-5d. **Frontend (b) — sync checker** `tools/check_laser_midi_sync.py` (new, pure core +
-CLI): print every drop/post_drop bank note → bridge scene (type/safety) → pad label →
-SoundSwitch autoloop, and **exit non-zero** on: bank note not mapped in SoundSwitch, note
-collision across banks, bank entry missing from `scenes`, or static/high-impact entry in a
-cyclable bank. Pure `reconcile(config_dict, ss_map) -> list[issue]` unit-tested with
-fixtures. Read-only; never mutates SoundSwitch.
-5e. **Operator step (doc, not code)**: in the bounded SoundSwitch project confirm each
-drop/post_drop note triggers the intended autoloop, and re-export the pack (exporter pins
-the project UUID — adding/renaming autoloops needs a re-export).
+> **Do not curate, reorder, or repopulate the operator's banks/personalities.** The operator
+> defines bank membership; the runtime handles whatever is there (Task 4 skips non-cyclable
+> entries; an empty `post_drop_bank` uses the no-post_drop fallback). Task 5 is about keeping
+> the **note mapping consistent**, not about changing what's in the banks.
+5a. **Mapping integrity validation** (`laser_config.py`): when `drop_lifecycle_mirror` is on,
+verify every scene **referenced by** `drop_bank`/`post_drop_bank`/`drop_pairs` exists in
+`scenes` with a MIDI note, and that there are **no note collisions** across banks. Surface a
+clear error for a truly broken mapping (missing scene / missing note / collision). For a bank
+that simply contains non-cyclable entries (static / high-impact-disallowed) or an empty
+`post_drop_bank`, **do not error** — that is a valid operator choice handled at runtime; at
+most emit an informational log noting which entries won't cycle. Never block load over bank
+composition.
+5b. **Frontend (a) — `_pad_meta`**: if Codex changes any scene's note (it should not need
+to), update `_pad_meta` `note_labels`/`banks` in the same commit. Otherwise leave as-is.
+5c. **Frontend (b) — sync checker** `tools/check_laser_midi_sync.py` (new, pure core + CLI,
+read-only): print every drop/post_drop bank note → bridge scene (type/safety) → pad label →
+SoundSwitch autoloop, and **exit non-zero** only on a genuine mapping break: a bank note not
+mapped in SoundSwitch, a note collision across banks, or a bank entry missing from `scenes`.
+A non-cyclable (static/high-impact) entry is reported as **info**, not a failure. Pure
+`reconcile(config_dict, ss_map) -> list[issue]` unit-tested with fixtures. Never mutates
+SoundSwitch or the config. This is the operator-facing backend↔frontend sync check.
+5d. **Operator step (doc, not code)**: in the bounded SoundSwitch project confirm each
+drop/post_drop note triggers the intended autoloop, and re-export the pack (exporter pins the
+project UUID — adding/renaming autoloops needs a re-export). Operator-run, optional.
 
 ## Part C — Invariants that MUST still hold (live safety)
 1. **Default-off = no change.** `drop_lifecycle_mirror=False` → identical laser output/MIDI.
@@ -220,9 +229,11 @@ the project UUID — adding/renaming autoloops needs a re-export).
    scripted, idle (mirror `_led_drop_lifecycle_should_clear` / `clear_queued_post_drop`); no
    leak across tracks. `role_changed` clears the previous role's active scene.
 8. **Don't touch arm/BPM.** `autoloop_controller` arm/sync/BPM-follow untouched.
-9. **MIDI-mapping integrity.** Every cyclable note maps end-to-end (catalog ↔ `_pad_meta` ↔
-   SoundSwitch); mis-synced/static/high-impact banks fail Task 5b at load, never send a
-   wrong/unmapped note live; no cross-bank note collisions.
+9. **MIDI-mapping integrity (no curation).** The operator's banks/personalities are never
+   modified. Every note a bank can send maps end-to-end (catalog ↔ `_pad_meta` ↔ SoundSwitch);
+   a genuine mapping break (missing scene/note, cross-bank collision) is surfaced, but a
+   non-cyclable entry or empty `post_drop_bank` is valid and handled at runtime, never an
+   error. The runtime never sends a wrong/unmapped note as a cycle.
 10. **LED unchanged.** The live LED path keeps its current behavior; the shared resolver is
     proven equal by the Task-D parity test.
 
@@ -252,10 +263,10 @@ the project UUID — adding/renaming autoloops needs a re-export).
       (2) drops in a row; drops rotate every `drop_cycle_beats` (32); no-post_drop → cycle
       drops. All values configurable.
 - [ ] Smart Drop blackout + real drop_crossing/post_drop_hold behavior unchanged.
-- [ ] **MIDI synced (backend+frontend):** cyclable `drop_bank`/`post_drop_bank` are
-      autoloop-only/allowed with mapped, collision-free notes; `dubstep` handled;
-      `_pad_meta` matches; `tools/check_laser_midi_sync.py` exits 0 vs SoundSwitch; bad banks
-      fail Task 5b loudly.
+- [ ] **MIDI synced (backend+frontend), banks untouched:** operator personalities/banks are
+      not modified; runtime skips non-cyclable entries and uses the no-post_drop fallback;
+      every bank note maps end-to-end with no collisions; `tools/check_laser_midi_sync.py`
+      exits 0 vs SoundSwitch (non-cyclable entries reported as info, not failure).
 - [ ] A4 assumptions confirmed in writing.
 - [ ] `python3 -m unittest discover tests` green; AGENTS.md §8 hard checks green; `laser`
       (+`led_govee`) change-contract docs updated. No push/tick-path I/O added.
