@@ -37,6 +37,11 @@ def _green_obs(**over):
         "pcap_universe0_frames": 5000,
         "recorder_drops": 0,
         "timed_out": False,
+        # phase-trace gates (proof the deck played through the window)
+        "phase_footer_clean": True,
+        "playing_phase_rows": 5000,
+        "playing_phase_beat_span": 64.0,
+        "min_window_beats": 48,
     }
     obs.update(over)
     return obs
@@ -106,6 +111,95 @@ class ClassifyGateTests(unittest.TestCase):
             ),
             "FAIL",
         )
+
+
+class PhaseTraceGateTests(unittest.TestCase):
+    """The capture is only ACCEPTED if the phase trace proves real playback
+    through the window. These guard against the empty-trace rubber-stamp bug."""
+
+    def test_empty_trace_is_incomplete(self):
+        # No playing rows, no clean footer -> the original arm bug.
+        obs = _green_obs(
+            phase_footer_clean=False, playing_phase_rows=0, playing_phase_beat_span=0.0
+        )
+        self.assertEqual(cc.classify_gate(obs), "INCOMPLETE")
+
+    def test_dirty_footer_is_incomplete(self):
+        self.assertEqual(
+            cc.classify_gate(_green_obs(phase_footer_clean=False)), "INCOMPLETE"
+        )
+
+    def test_too_few_playing_rows_is_incomplete(self):
+        self.assertEqual(
+            cc.classify_gate(_green_obs(playing_phase_rows=10)), "INCOMPLETE"
+        )
+
+    def test_short_beat_span_is_incomplete(self):
+        # Played, but not through the required window.
+        self.assertEqual(
+            cc.classify_gate(
+                _green_obs(playing_phase_beat_span=12.0, min_window_beats=48)
+            ),
+            "INCOMPLETE",
+        )
+
+    def test_full_playthrough_is_accepted(self):
+        self.assertEqual(cc.classify_gate(_green_obs()), "ACCEPTED")
+
+
+class PhaseTraceHelperTests(unittest.TestCase):
+    GOOD = "\n".join([
+        json.dumps({"kind": "header", "schema": 2}),
+        json.dumps({"kind": "position", "data": {"playing": True}}),
+        json.dumps({"kind": "autoloop_phase", "playing": True, "abs_beat_pos": 4.0}),
+        json.dumps({"kind": "autoloop_phase", "playing": True, "abs_beat_pos": 52.0}),
+        json.dumps({"kind": "autoloop_phase", "playing": False, "abs_beat_pos": 99.0}),
+        json.dumps({
+            "kind": "phase_trace_footer", "close_ok": True, "dropped": 0,
+            "undrained": 0, "writer_error": None, "timed_out": False,
+        }),
+    ])
+    # The actual arm failure: many position rows, zero playing phase rows, footer clean.
+    EMPTY = "\n".join([
+        json.dumps({"kind": "header", "schema": 2}),
+        json.dumps({"kind": "position", "data": {"playing": False}}),
+        json.dumps({
+            "kind": "phase_trace_footer", "close_ok": True, "dropped": 0,
+            "undrained": 0, "writer_error": None, "timed_out": False,
+        }),
+    ])
+
+    def test_count_playing_phase_rows(self):
+        self.assertEqual(cc.count_playing_phase_rows(self.GOOD), 2)
+        self.assertEqual(cc.count_playing_phase_rows(self.EMPTY), 0)
+
+    def test_playing_phase_beat_span(self):
+        self.assertEqual(cc.playing_phase_beat_span(self.GOOD), 48.0)  # 52-4
+        self.assertEqual(cc.playing_phase_beat_span(self.EMPTY), 0.0)
+
+    def test_phase_footer_clean(self):
+        self.assertTrue(cc.phase_footer_clean(self.GOOD))
+        self.assertTrue(cc.phase_footer_clean(self.EMPTY))  # footer itself is clean
+        dirty = self.GOOD.replace('"dropped": 0', '"dropped": 2')
+        self.assertFalse(cc.phase_footer_clean(dirty))
+        self.assertFalse(cc.phase_footer_clean("{}"))  # no footer
+
+    def test_phase_footer_drops(self):
+        self.assertEqual(cc.phase_footer_drops(self.GOOD), 0)
+        self.assertEqual(cc.phase_footer_drops("no footer here"), 1)
+
+    def test_new_markers_present_ignores_stale(self):
+        log = "OLD [LX] fired stale\n"
+        offset = len(log)
+        log2 = log + "NEW unrelated line\n"
+        # marker only in the stale prefix -> not present in the window
+        self.assertFalse(cc.new_markers_present(log2, offset, ["[LX] fired"]))
+        log3 = log + "fresh [LX] fired now\n"
+        self.assertTrue(cc.new_markers_present(log3, offset, ["[LX] fired"]))
+
+    def test_new_markers_offset_clamped_on_rotation(self):
+        # offset beyond current length (log rotated) -> search whole text
+        self.assertTrue(cc.new_markers_present("[LX] fired\n", 9999, ["[LX] fired"]))
 
 
 class SanitizeTests(unittest.TestCase):

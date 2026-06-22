@@ -41,6 +41,14 @@ DEFAULT_CAPTURE_ROOT = REPO_ROOT / "tools" / "ssfmt" / "captures" / "t7d"
 
 HARDWARE_STATUS = "SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED"
 MIN_UNIVERSE0_FRAMES = 20
+# A capture is only usable if the deck actually played through the scenario
+# window: the schema-2 phase trace must carry real *playing* autoloop_phase rows
+# spanning at least the scenario's min_window_beats, with a clean integrity
+# footer. Without this, a run where the operator never started playback (or
+# started it after the window closed) would be rubber-stamped ACCEPTED with an
+# empty trace. MIN_PLAYING_PHASE_ROWS is a floor; the beat-span check is the real
+# gate (BPM/tick-rate independent).
+MIN_PLAYING_PHASE_ROWS = 100
 
 # Required bridge-log markers per scenario are sourced from capture plan §B3.
 # They are presence checks; the operator/next agent confirms exact log strings
@@ -148,6 +156,16 @@ def classify_gate(obs: dict) -> str:
         return "INCOMPLETE"
     if obs.get("pcap_universe0_frames", 0) < MIN_UNIVERSE0_FRAMES:
         return "INCOMPLETE"
+    # The phase trace must prove real playback through the window: a clean
+    # integrity footer + enough *playing* autoloop_phase rows spanning at least
+    # the scenario's min_window_beats. A run with no detected playback (empty
+    # trace) is INCOMPLETE, never ACCEPTED.
+    if not obs.get("phase_footer_clean", False):
+        return "INCOMPLETE"
+    if obs.get("playing_phase_rows", 0) < MIN_PLAYING_PHASE_ROWS:
+        return "INCOMPLETE"
+    if obs.get("playing_phase_beat_span", 0.0) < obs.get("min_window_beats", 0):
+        return "INCOMPLETE"
     return "ACCEPTED"
 
 
@@ -181,6 +199,86 @@ def sanitize_summary(obj):
 
 def markers_present(log_text: str, required) -> bool:
     return all(marker in log_text for marker in required)
+
+
+def new_markers_present(log_text: str, start_offset: int, required) -> bool:
+    """Markers must appear in the suffix written AFTER the recorder started.
+
+    Searching the whole bridge.log matches stale pre-run lines (the log
+    accumulates across the session), so a run can falsely pass on markers from an
+    earlier track. Clamp the offset if the log rotated/shrank.
+    """
+    offset = start_offset if 0 <= start_offset <= len(log_text) else 0
+    return markers_present(log_text[offset:], required)
+
+
+def parse_session_rows(session_text: str) -> list:
+    rows = []
+    for line in session_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            continue
+    return rows
+
+
+def count_playing_phase_rows(session_text: str) -> int:
+    """Number of schema-2 autoloop_phase rows emitted while a deck was playing."""
+    return sum(
+        1
+        for r in parse_session_rows(session_text)
+        if r.get("kind") == "autoloop_phase" and r.get("playing")
+    )
+
+
+def playing_phase_beat_span(session_text: str) -> float:
+    """Beat span covered by *playing* autoloop_phase rows (max-min abs_beat_pos).
+
+    BPM/tick-rate independent proof that playback ran through the window.
+    """
+    bp = [
+        r.get("abs_beat_pos")
+        for r in parse_session_rows(session_text)
+        if r.get("kind") == "autoloop_phase"
+        and r.get("playing")
+        and isinstance(r.get("abs_beat_pos"), (int, float))
+    ]
+    if len(bp) < 2:
+        return 0.0
+    return float(max(bp) - min(bp))
+
+
+def _phase_footer(session_text: str):
+    foots = [
+        r for r in parse_session_rows(session_text)
+        if r.get("kind") == "phase_trace_footer"
+    ]
+    return foots[0] if len(foots) == 1 else None
+
+
+def phase_footer_clean(session_text: str) -> bool:
+    """Exactly one footer, clean close, no dropped/undrained rows, no writer error."""
+    f = _phase_footer(session_text)
+    if f is None:
+        return False
+    return (
+        f.get("close_ok") is True
+        and f.get("dropped", 1) == 0
+        and f.get("undrained", 1) == 0
+        and f.get("writer_error") is None
+        and f.get("timed_out") is False
+    )
+
+
+def phase_footer_drops(session_text: str) -> int:
+    """dropped + undrained from the footer (a missing footer counts as a drop)."""
+    f = _phase_footer(session_text)
+    if f is None:
+        return 1
+    return int(f.get("dropped", 0) or 0) + int(f.get("undrained", 0) or 0)
 
 
 def build_manifest(scenario: str, run_id: str, *, created_epoch: float) -> dict:
@@ -407,8 +505,14 @@ def cmd_run_scenario(args) -> int:
 
     pcap = run_dir / "artnet.pcap"
     session = run_dir / "session.jsonl"
+    need_beats = spec["min_window_beats"]
 
-    # Safe runtime command: start the schema-2 session recorder (no output path).
+    # Snapshot the bridge.log length so marker checks see only window-new lines
+    # (the log accumulates across the session; whole-log matching false-passes on
+    # stale markers from an earlier track).
+    log_start_offset = len(_read(BRIDGE_LOG))
+
+    # Safe runtime command: start the schema-2 session recorder.
     append_command({"cmd": "toggle_record_session", "path": str(session), "dedup": False})
 
     ping(
@@ -425,14 +529,23 @@ def cmd_run_scenario(args) -> int:
         label="capture start (pcap+session)",
     )
 
-    markers_seen = False
+    played_through = False
     if started:
-        # ACTIVE WAIT 2: the scenario's required markers appear in the bridge log.
-        def _markers():
-            return markers_present(_read(BRIDGE_LOG), spec["required_markers"])
+        # ACTIVE WAIT 2: a deck must actually play through the window -- the phase
+        # trace must accumulate playing rows spanning >= min_window_beats AND the
+        # window-new markers must appear. Waiting on whole-log markers alone
+        # false-completes instantly on stale lines (the original defect).
+        def _played():
+            stext = _read(session)
+            return (
+                playing_phase_beat_span(stext) >= need_beats
+                and new_markers_present(_read(BRIDGE_LOG), log_start_offset, spec["required_markers"])
+            )
 
-        markers_seen = poll_until(
-            _markers, timeout_s=args.window_timeout_s, label=f"{scenario} markers"
+        played_through = poll_until(
+            _played,
+            timeout_s=args.window_timeout_s,
+            label=f"{scenario} playback through {need_beats} beats + markers",
         )
 
     ping(
@@ -441,18 +554,27 @@ def cmd_run_scenario(args) -> int:
     )
     append_command({"cmd": "toggle_record_session"})  # stop recorder
 
-    # ACTIVE WAIT 3: artifacts settle (pcap stops growing).
+    # ACTIVE WAIT 3: artifacts settle (pcap AND session stop growing so the
+    # footer is flushed before we read it).
     poll_until(_settled(pcap), timeout_s=30, interval_s=3, label="pcap settle")
+    poll_until(_settled(session), timeout_s=30, interval_s=3, label="session settle")
 
     _copy(BRIDGE_LOG, run_dir / "logs" / "bridge.log")
+    session_text = _read(session)
+    log_text = _read(BRIDGE_LOG)
+    markers_seen = new_markers_present(log_text, log_start_offset, spec["required_markers"])
     obs = {
         "bridge_process_count": core_bridge_process_count(),
         "pack_output_disabled": pack_output_disabled(read_status()),
         "project_hash_matched": True,  # operator hashes before/after per plan B4
-        "timed_out": not (started and markers_seen),
+        "timed_out": not (started and played_through),
         "required_markers_present": markers_seen,
         "pcap_universe0_frames": count_universe0_frames(pcap),
-        "recorder_drops": 0,
+        "recorder_drops": phase_footer_drops(session_text),
+        "playing_phase_rows": count_playing_phase_rows(session_text),
+        "playing_phase_beat_span": round(playing_phase_beat_span(session_text), 3),
+        "phase_footer_clean": phase_footer_clean(session_text),
+        "min_window_beats": need_beats,
     }
     verdict = _finalize(run_dir, manifest, obs)
     ping(f"T7d {scenario}: classified {verdict}. See {run_dir}/summary.json")
@@ -465,14 +587,24 @@ def cmd_validate_scenario(args) -> int:
     spec = SCENARIOS[manifest["scenario"]]
     pcap = run_dir / "artnet.pcap"
     log_text = _read(run_dir / "logs" / "bridge.log")
+    session_text = _read(run_dir / "session.jsonl")
+    need_beats = spec["min_window_beats"]
+    span = playing_phase_beat_span(session_text)
     obs = {
         "bridge_process_count": 1,
         "pack_output_disabled": True,
         "project_hash_matched": _project_hashes_match(run_dir),
-        "timed_out": False,
+        # Re-validation cannot recover a window offset, so require markers in the
+        # full copied log AND a phase trace that proves playback through the
+        # window -- the latter is what actually guards against an empty capture.
+        "timed_out": span < need_beats,
         "required_markers_present": markers_present(log_text, spec["required_markers"]),
         "pcap_universe0_frames": count_universe0_frames(pcap),
-        "recorder_drops": 0,
+        "recorder_drops": phase_footer_drops(session_text),
+        "playing_phase_rows": count_playing_phase_rows(session_text),
+        "playing_phase_beat_span": round(span, 3),
+        "phase_footer_clean": phase_footer_clean(session_text),
+        "min_window_beats": need_beats,
     }
     verdict = _finalize(run_dir, manifest, obs)
     print(verdict)
