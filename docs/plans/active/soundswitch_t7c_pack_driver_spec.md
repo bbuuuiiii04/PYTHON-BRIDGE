@@ -1,231 +1,273 @@
 # Implementation Spec — T7c StateManager scripted-mode pack driver
 
-status: planned — **PENDING REVIEW (ChatGPT), NOT YET IMPLEMENTED**
+status: planned — **REVISION 2 (review corrections applied); ready to implement**
 last_updated: 2026-06-22
 implementer: Claude (Opus 4.8) — per operator override for this task (NOT Codex)
-target branch/PR: `soundswitch/impl` / #116 (current head `490f1ab`)
+target branch/PR: `soundswitch/impl` / #116 (current head `419a044`)
 
-> **Review gate:** This plan must be reviewed before implementation begins. A spike was
-> written then **fully reverted** (`git checkout state_manager.py`) so the branch carries the
-> plan only. The verified findings from that spike are folded in below (see "Spike findings").
-> Operator decision captured: an operator-held Static Override **persists across a deck stop**
-> (matches the player's emergency/blackout > static > base precedence); the driver does NOT
-> force-ZERO a held static on stop.
+> **Revision 2** folds in the ChatGPT review + operator corrections:
+> 1. metadata head `419a044`;
+> 2. **held-static model corrected** — SoundSwitch shows manual Static Looks even with no track
+>    playing, so manual static must stay visible while idle; automatic base must ZERO on
+>    stop/stale/error/track-change; static still loses to blackout/emergency/pack-disabled/shutdown;
+> 3. `_drive_pack_output(self)` takes **no args**, re-derives `active/d/snap/now` itself (wrap pattern
+>    only — no `(self, active, d, snap, now)`);
+> 4. **inner-exception safety**: a plain `finally` does NOT guarantee ZERO — if `_push_tick_inner`
+>    raises, submit `ZERO_FRAME` directly to the backend, then **re-raise**; do not run the normal
+>    driver after an inner exception;
+> 5. C4 rewritten (below).
 
 ## Part A — Context & root cause (verified; read, do not implement)
 
-T7b builds the pack player/controller/backend at startup but never wires them into the
-runtime tick, so `PackOutputBackend.submit_frame` has **no caller** — pack mode produces
-no DMX.
+T7b builds the pack player/controller/backend at startup but never wires them into the runtime tick,
+so `PackOutputBackend.submit_frame` has **no caller** — pack mode produces no DMX.
 
-- [confirmed] `__main__.py:919-921` builds `soundswitch_frame_sender`, `soundswitch_midi_input`,
-  `soundswitch_pack_player`; `__main__.py:1004-1015` constructs `StateManager(...)` **without**
-  passing any of them. The backend (`soundswitch_pack_bundle.laser_backend`) is only handed to the
-  laser-executor wiring (`__main__.py:912`).
-- [confirmed] `PackOutputBackend` (`laser_output_backend.py:132-204`) has two independent paths:
-  `trigger(msg)` (executor scene-SELECTION; records `last_accepted_identity`, **no DMX**) and
-  `submit_frame(frame)` → `frame_sender.submit(frame)` (the DMX path). `grep submit_frame` shows
-  **no production caller today**. So adding a StateManager `submit_frame` caller cannot collide with
-  the executor's `trigger` path — they are complementary, not competing.
-- [confirmed] `LaserPackPlayer` (`soundswitch_laser_player.py:180-360`) is a pure state controller.
-  `select_scripted(soundswitch_id, elapsed_ms, *, transport, metadata_ready, authority,
-  source_errored, elapsed_discontinuous, track_changed)` (213-224), `select_autoloop` (226-232),
-  `hold_static(slot)` (234-239), `release_static(slot)` (241-245), `set_masks(*, blackout, emergency)`
-  (253-258), `render()` (334-360). `reload(pack)` (203-211) clears all state and latches
-  `_waiting_after_reload` (renders a diagnostic until the next `select_*`).
-- [confirmed — KEY SAFETY FACT] **Every non-output path already renders `ZERO_FRAME`.**
-  `_diagnostic()` returns `PlayerResult(ZERO_FRAME, ...)` (`:65-67`); `render()` returns `ZERO_FRAME`
-  on emergency/blackout (`:335-336`) and on `missing_selection` (`:340-342`). Scripted diagnostics
-  cover `transport_{stopped,ended,unloaded}`, `metadata_not_ready`, `source_error`, `track_change`,
-  `elapsed_discontinuity`, `stale_authority`, `ambiguous_authority`, `missing_identity`,
-  `scripted_not_found`, `unsupported_*`, `player_error` (`:260-304`). Therefore
-  `player.render().frame` is **always safe to submit**: a valid scripted frame, or ZERO on any
-  idle/stop/stale/error/mask condition. The driver does not need its own ZERO logic — it must only
-  (a) feed correct inputs, and (b) **fail conservative**: when a flag is uncertain, set it to the
-  ZERO-producing value (e.g. `authority="stale"`, `metadata_ready=False`).
+- [confirmed] `__main__.py:919-921` builds the player/controller/sender; `__main__.py:1004-1015`
+  constructs `StateManager(...)` WITHOUT passing them. Backend goes only to the laser wiring (`:912`).
+- [confirmed] `PackOutputBackend` (`laser_output_backend.py:132-204`): `trigger(msg)` = executor
+  scene-SELECTION (records `last_accepted_identity`, **no DMX**); `submit_frame(frame)` →
+  `frame_sender.submit(frame)` (the DMX path, **no production caller today**). So a StateManager
+  `submit_frame` caller cannot collide with the executor's `trigger` path.
+- [confirmed] `LaserPackPlayer` (`soundswitch_laser_player.py:180-362`) is a pure state controller:
+  `select_scripted(...)` (213-224), `select_autoloop(...)` (226-232), `hold_static(slot)` (234-239),
+  `release_static(slot)` (241-245), `set_masks(*, blackout, emergency)` (253-258), `render()`
+  (334-362), `reload(pack)` (203-211, clears all state + latches `_waiting_after_reload`).
+  There is currently **no** public way to clear the automatic base selection without clearing static
+  (Task 1 adds one).
+- [confirmed — KEY SAFETY FACTS in `render()`]:
+  - emergency/blackout ⇒ `ZERO_FRAME` BEFORE static (`:335-336`) → **static loses to masks**.
+  - `_waiting_after_reload` ⇒ reload diagnostic ZERO (`:337-339`).
+  - `_selection is None` ⇒ base = `missing_selection` (`:340-342`); this is the ONLY base diagnostic
+    that does NOT early-return (`:350` returns early only when `code != "missing_selection"`).
+  - With base `missing_selection` AND `_active_static_slot is not None`, render applies the static
+    look via `resolve_frame(...)` and returns the static frame (`:352-362`).
+  - Every other non-output condition (`transport_stopped`, `stale_authority`, `metadata_not_ready`,
+    `source_error`, `track_change`, `elapsed_discontinuity`, `missing_identity`, `scripted_not_found`,
+    `unsupported_*`, `player_error`) returns its `_diagnostic()` result, which is
+    `PlayerResult(ZERO_FRAME, …)` (`:65-67`) and **suppresses static** (early-return at `:350`).
+  - **Consequence:** to show a standalone manual static while idle, the driver must put the player in
+    the `missing_selection` state (i.e. `_selection = None`) — NOT call `select_scripted(transport=
+    "stopped")` (that yields `transport_stopped` → ZERO, static suppressed).
 - [confirmed] `MidiInputSnapshot` (`soundswitch_midi_input.py:36-44`): `held_static_slot: int|None`,
-  `blackout_held: bool`. `snapshot()` (`:100-118`) self-expires stale holds; **non-blocking**.
-- [confirmed] `_push_tick` (`state_manager.py:3149`) is the 200 Hz loop body. Per tick it sets
-  `active = os.active_deck`, `d = self._deck[active]` (the authoritative `DeckState`), `mirror`,
-  `snap = self._cache.get(active)`. The laser decision path runs in several branches via
-  `self._laser_executor.on_tick/on_decision` (3197-3198, 3235-3236, 3432-3433, 3673-3674). The
-  stale path is `snap is None or snap.is_stale(MEM_STALE_S)` (3182-…).
+  `blackout_held: bool`. `snapshot()` (`:100-118`) self-expires stale holds; in-memory, non-blocking.
+- [confirmed] `_push_tick` (`state_manager.py:3164` after the reverted-spike line shift; re-verify):
+  the 200 Hz loop. Sets `active = self._os.active_deck`, `d = self._deck[active]`,
+  `snap = self._cache.get(active)`. Laser path runs via `self._laser_executor.on_tick/on_decision`.
+  Stale check: `snap is None or snap.is_stale(MEM_STALE_S)`. **`_push_tick` has 5 early `return`s** —
+  a single end-of-method call would miss branches; use the wrap pattern (Task 4).
 - [confirmed] Authoritative deck fields: `d.elapsed_ms`, `d.playing`, `d.meta.soundswitch_id`,
-  `d.load_gen` (incremented on track load, `state_manager.py:2559`; echoed via FILEPATH_RESOLVED).
-- [confirmed] Constructor `StateManager.__init__` (`state_manager.py:309-324`) is all-keyword with
-  defaults; storing `self._laser_*`/`self._led_*` at 332-338 is the established pattern.
-- [confirmed] Invariant (AGENTS.md §6): `_push_tick` must not gain blocking network/socket/MIDI/
-  filesystem/subprocess I/O. `submit_frame` is a bounded non-blocking mailbox
-  (`laser_output_backend.py:178-181` → `frame_sender.submit`); `snapshot()` is in-memory. Both are
-  tick-safe. `StateManager` is the only `DeckState` writer — the driver READS deck state, never
-  mutates it.
+  `d.load_gen` (incremented on track load, `:2559`). `MEM_STALE_S` already imported (`:39`).
+- [confirmed] Invariant (AGENTS.md §6): `_push_tick` must not gain blocking I/O. `submit_frame` is a
+  bounded non-blocking mailbox; `snapshot()` is in-memory. The driver READS `DeckState`; StateManager
+  remains the only writer.
+- [confirmed] No circular import: `from .soundswitch_laser_player import ZERO_FRAME as
+  _PACK_ZERO_FRAME, normalize_soundswitch_id` is safe at the top of `state_manager.py`.
 
-### Derived-flag sourcing (label per flag)
-- `soundswitch_id` ← `d.meta.soundswitch_id` [confirmed]
-- `elapsed_ms` ← `d.elapsed_ms` (int, ≥0) [confirmed]
-- `transport` ← `"playing"` if `d.playing` else `"stopped"`; stop-stale branch ⇒ `"stopped"` [confirmed]
-- `authority` ← `"stale"` when `snap is None or snap.is_stale(MEM_STALE_S)`, else `"fresh"`;
-  `"ambiguous"` reserved (see unknown below) [confirmed for fresh/stale]
-- `track_changed` ← driver-local: `True` when `(active, d.load_gen)` differs from the value the
-  driver saw last tick [confirmed signal: load_gen at :2559]
-- `metadata_ready` ← [assumed] `bool(normalize_soundswitch_id(d.meta.soundswitch_id))` i.e. an exact
-  UUID is resolved. Conservative: unresolved ⇒ False ⇒ ZERO. VERIFY no separate "resolution pending"
-  flag is more correct during impl.
-- `source_errored` ← [unknown] no single SM field confirmed. Default `False`; if a reader/resolver
-  error flag exists, wire it. Safe either way (a missed error still ZEROs via stale/identity paths).
-- `elapsed_discontinuous` ← [assumed] driver-local: large backward/forward jump in `d.elapsed_ms`
-  within the same `(active, load_gen)` vs last tick. SM has a seek concept for LED
-  (`_clamp_led_beat`/`_reset_led_phrase_latch`, :2334-2374) but that is LED-beat, not pack-elapsed.
-  Implement a local monotonic check; VERIFY threshold during impl. Conservative: on detected jump ⇒
-  one ZERO tick, then resume.
-- `ambiguous` ← [unknown] no confirmed SM signal in scope; leave as `"fresh"`/`"stale"` only for T7c.
+### Accepted held-static / idle model (operator-corrected)
+- Automatic scripted/autoloop **base** ⇒ ZERO when stopped / no track / no valid playback authority
+  (stale/error/track-change/discontinuity/metadata-not-ready). The driver expresses this by calling
+  `clear_selection()` (base → `missing_selection`), NOT `select_scripted(transport="stopped")`.
+- Manual **Static Override** is operator-controlled and MAY visibly output even with no track playing
+  (stands alone via the `missing_selection` base).
+- Manual static still LOSES to: blackout, emergency, pack disabled, shutdown, explicit output stop.
+- Autoloop DMX stays **safe-zero** (driver never calls `select_autoloop`) until T7d.
+- Known T7c limitation (acceptable): while a deck is *playing a valid-UUID track that is not a pack
+  scripted row* (`scripted_not_found`) the held static is suppressed (base diagnostic ≠
+  missing_selection). Idle/stopped/stale/error all show standalone static correctly. Revisit only if
+  the operator needs static over non-scripted playback.
 
-### Spike findings (verified during the reverted spike — load-bearing for impl)
-- [confirmed] `_push_tick` has **5 early `return`s** (now ~3219, 3258, 3398, 3428, 3449). A single
-  end-of-method driver call would MISS those branches. **Use the wrap pattern:** rename the current
-  body to `_push_tick_inner`, and a new `_push_tick` does
-  `try: self._push_tick_inner()` / `finally: if self._pack_enabled: self._drive_pack_output()`.
-  The `finally` guarantees once-per-tick driving across all returns AND drives ZERO even if the inner
-  tick raised (supports C7). `_push_tick` is the public name called from prod (`state_manager.py`
-  ~863/870), `session_replayer.py`, and ~150 test sites — the wrap keeps that name, and those callers
-  are neutral because `_pack_enabled` is False without pack params.
-- [confirmed] `_drive_pack_output(self)` should take **no args** and re-derive
-  `active = self._os.active_deck`, `d = self._deck[active]`, `snap = self._cache.get(active)`
-  itself (cheap dict reads) — decouples it from the inner tick's locals.
-- [confirmed] **No mode branch needed.** The driver always calls `select_scripted(...)`. Autoloop is
-  safe-zero *by omission*: `select_autoloop` is simply never called, and a non-scripted
-  `soundswitch_id` yields the player's `scripted_not_found` → ZERO.
-- [confirmed] Imports are safe at top of `state_manager.py` (no circular):
-  `from .soundswitch_laser_player import ZERO_FRAME as _PACK_ZERO_FRAME,
-  normalize_soundswitch_id`. `soundswitch_laser_player` does not import `state_manager`.
-- [confirmed] `MEM_STALE_S` is already imported (`state_manager.py:39`); reuse it for the stale check.
-- [proposed] Module constant `_PACK_SEEK_JUMP_MS = 2000` for the `elapsed_discontinuous` threshold
-  (err HIGH — a missed discontinuity just renders at the new position; a false one ZEROs a tick).
+### Derived-flag sourcing
+- `soundswitch_id` ← `d.meta.soundswitch_id` [confirmed]; `elapsed_ms` ← `max(0, int(d.elapsed_ms or 0))` [confirmed]
+- `playing` ← `bool(d.playing)` [confirmed]; `fresh` ← `not (snap is None or snap.is_stale(MEM_STALE_S))` [confirmed]
+- `metadata_ready` ← `normalize_soundswitch_id(soundswitch_id) is not None` [assumed; conservative]
+- `track_changed` ← driver-local `(active, d.load_gen)` change [confirmed signal]
+- `elapsed_discontinuous` ← driver-local jump ≥ `_PACK_SEEK_JUMP_MS` within same `(active, load_gen)` [assumed]
+- `source_errored` ← [unknown] no confirmed SM field; default `False` (safe — other gates ZERO)
 
 ## Part B — Tasks (implement exactly, in order; commit after each)
 
 ### Absolute rules
-- Do NOT modify: `laser_executor.py`, `laser_director.py`, `soundswitch_laser_player.py`,
-  `soundswitch_midi_input.py`, `laser_output_backend.py`, the OS2L path, or any reader. T7c is
-  injection + a read-only driver in `state_manager.py` plus the `__main__` wiring.
-- No behavior change when all three pack params are `None` (default) — byte/order-neutral, the
-  existing MIDI/laser path must be identical.
-- Autoloop pack mode stays **safe-zero or held-static only** (T7d unproven). Do NOT call
-  `select_autoloop`.
+- Touch only: `soundswitch_laser_player.py` (Task 1, additive method + test), `state_manager.py`
+  (Tasks 2-4), `__main__.py` (Task 5), and new/updated tests. Do NOT modify `laser_executor.py`,
+  `laser_director.py`, `soundswitch_midi_input.py`, `laser_output_backend.py`, the OS2L path, readers.
+- All three pack params `None` (default) ⇒ byte/order-neutral; existing MIDI/laser/LED path identical.
+- Never call `select_autoloop`. Never reach into the player's private `_selection` from StateManager.
 
-### Task 1 — `state_manager.py`: inject pack deps (default None, neutral)
-Add to `__init__` signature (after `led_color_engine=None`, keyword, defaulted):
+### Task 1 — `soundswitch_laser_player.py`: add `clear_selection()`
+Additive public method on `LaserPackPlayer` (does not change any existing path):
 ```python
-        soundswitch_pack_player=None,
-        soundswitch_midi_input=None,
-        soundswitch_pack_backend=None,
+    def clear_selection(self) -> PlayerResult:
+        """Clear the automatic scripted/autoloop base WITHOUT touching held static or masks.
+
+        render() then yields a ``missing_selection`` base (ZERO), so a held Static Override
+        stands alone — matching SoundSwitch showing a manual Static Look while idle. Static
+        still loses to blackout/emergency and to the post-reload wait latch.
+        """
+        self._selection = None
+        return self.render()
 ```
-Store alongside the laser attrs (near :333):
+Tests (extend `tests/test_soundswitch_laser_player.py`): (a) `clear_selection` with a held static ⇒
+returns the static frame; (b) `clear_selection` with no static ⇒ ZERO; (c) `clear_selection` while
+blackout held ⇒ ZERO (static loses to mask); (d) `clear_selection` does not clear `_active_static_slot`.
+
+### Task 2 — `state_manager.py`: inject pack deps (default None, neutral)
+Add to `__init__` (keyword, after `recorder=...`): `soundswitch_pack_player=None`,
+`soundswitch_midi_input=None`, `soundswitch_pack_backend=None`. Store near the laser attrs:
 ```python
         self._pack_player = soundswitch_pack_player
         self._pack_input = soundswitch_midi_input
         self._pack_backend = soundswitch_pack_backend
-        self._pack_enabled = (
-            soundswitch_pack_player is not None
-            and soundswitch_pack_backend is not None
-        )
-        self._pack_last_load_gen: tuple[int, int] | None = None   # (active, load_gen)
+        self._pack_enabled = (soundswitch_pack_player is not None
+                              and soundswitch_pack_backend is not None)
+        self._pack_last_load_gen: tuple[int, int] | None = None
         self._pack_last_elapsed_ms: int | None = None
         self._pack_last_static_slot: int | None = None
+        self._pack_logged_error = False
 ```
-(Controller/`_pack_input` may be None even when player+backend exist — controller is optional.)
+Add module constant near `_LATENCY_WARN_MS`: `_PACK_SEEK_JUMP_MS = 2000`. Add the top import noted in
+Part A.
 
-### Task 2 — `state_manager.py`: the driver method (read-only)
-Add `_drive_pack_output(self, active, d, snap, now)` and call it ONCE at the END of `_push_tick`
-(after every laser branch has run), guarded by `if self._pack_enabled:`. The method:
-1. If `self._pack_player is None or self._pack_backend is None`: return (defensive; never raises).
-2. Controller masks/static FIRST (if `self._pack_input is not None`):
-   `s = self._pack_input.snapshot()`; `self._pack_player.set_masks(blackout=s.blackout_held,
-   emergency=False)`; reconcile static: if `s.held_static_slot != self._pack_last_static_slot`:
-   call `hold_static(s.held_static_slot)` when not None else `release_static(self._pack_last_static_slot)`;
-   update `self._pack_last_static_slot`.
-3. Derive flags per Part A (track_changed via `_pack_last_load_gen`; elapsed_discontinuous via
-   `_pack_last_elapsed_ms`; transport/authority from `d.playing`/`snap`). Update the two trackers.
-4. Selection:
-   - scripted/idle/stopped/stale/error/deck-change/track-change → always
-     `self._pack_player.select_scripted(soundswitch_id=d.meta.soundswitch_id,
-     elapsed_ms=max(0, int(d.elapsed_ms or 0)), transport=…, metadata_ready=…, authority=…,
-     source_errored=…, elapsed_discontinuous=…, track_changed=…)`. The player ZEROs all
-     non-playing/uncertain cases — no separate idle branch needed.
-   - autoloop → DO NOT call `select_autoloop`. Leave/clear the scripted selection so `render()`
-     yields ZERO (plus any held static). (T7d gate.)
-5. `self._pack_backend.submit_frame(self._pack_player.render().frame)`.
-6. Wrap the whole method body in `try/except Exception` → log once + `submit_frame(ZERO_FRAME)`;
-   never propagate into the tick.
+### Task 3 — `state_manager.py`: `_drive_pack_output(self)` (no args; read-only)
+```python
+    def _drive_pack_output(self) -> None:
+        player, backend = self._pack_player, self._pack_backend
+        if player is None or backend is None:
+            return
+        try:
+            active = self._os.active_deck
+            d = self._deck[active]
+            snap = self._cache.get(active)
 
-### Task 3 — `__main__.py`: pass the deps to StateManager
-At the `StateManager(...)` call (`:1004`), add:
+            # 1. Controller masks + static overrides (in-memory snapshot; no I/O).
+            if self._pack_input is not None:
+                s = self._pack_input.snapshot()
+                player.set_masks(blackout=bool(s.blackout_held), emergency=False)
+                slot = s.held_static_slot
+                if slot != self._pack_last_static_slot:
+                    if slot is not None:
+                        player.hold_static(int(slot))
+                    elif self._pack_last_static_slot is not None:
+                        player.release_static(int(self._pack_last_static_slot))
+                    self._pack_last_static_slot = slot
+
+            # 2. Derive happy-path gate (fail-conservative; uncertain ⇒ clear_selection ⇒ ZERO base).
+            load_key = (active, int(getattr(d, "load_gen", 0)))
+            track_changed = (self._pack_last_load_gen is not None
+                             and load_key != self._pack_last_load_gen)
+            self._pack_last_load_gen = load_key
+            elapsed_ms = max(0, int(getattr(d, "elapsed_ms", 0) or 0))
+            discont = (not track_changed and self._pack_last_elapsed_ms is not None
+                       and abs(elapsed_ms - self._pack_last_elapsed_ms) >= _PACK_SEEK_JUMP_MS)
+            self._pack_last_elapsed_ms = elapsed_ms
+            fresh = not (snap is None or snap.is_stale(MEM_STALE_S))
+            playing = bool(getattr(d, "playing", False))
+            ssid = getattr(getattr(d, "meta", None), "soundswitch_id", "") or ""
+            metadata_ready = _pack_normalize_id(ssid) is not None
+
+            # 3. Automatic base: scripted only on the full happy path; else clear (static stands alone).
+            if playing and fresh and metadata_ready and not track_changed and not discont:
+                player.select_scripted(
+                    soundswitch_id=ssid, elapsed_ms=elapsed_ms, transport="playing",
+                    metadata_ready=True, authority="fresh", source_errored=False,
+                    elapsed_discontinuous=False, track_changed=False)
+            else:
+                player.clear_selection()
+
+            # 4. Submit exactly one frame.
+            backend.submit_frame(player.render().frame)
+        except Exception:
+            if not self._pack_logged_error:
+                log.exception("[SM] pack driver error; resolving ZERO")
+                self._pack_logged_error = True
+            try:
+                backend.submit_frame(_PACK_ZERO_FRAME)
+            except Exception:
+                pass
+```
+
+### Task 4 — `state_manager.py`: wrap `_push_tick` (covers 5 early returns + inner-exception ZERO)
+Rename the current `def _push_tick(self) -> None:` body to `def _push_tick_inner(self) -> None:`.
+Add a new wrapper (keep the public name — prod, replayer, ~150 tests call it):
+```python
+    def _push_tick(self) -> None:
+        try:
+            self._push_tick_inner()
+        except BaseException:
+            # An inner crash must not retain non-zero DMX. Submit ZERO directly
+            # (NOT via _drive_pack_output, which reads possibly-partial state), then re-raise.
+            if self._pack_enabled and self._pack_backend is not None:
+                try:
+                    self._pack_backend.submit_frame(_PACK_ZERO_FRAME)
+                except Exception:
+                    pass
+            raise
+        if self._pack_enabled:
+            self._drive_pack_output()
+```
+
+### Task 5 — `__main__.py`: pass the deps to StateManager (`:1004`)
 ```python
         soundswitch_pack_player=soundswitch_pack_player,
         soundswitch_midi_input=soundswitch_midi_input,
         soundswitch_pack_backend=soundswitch_pack_bundle.laser_backend,
 ```
-Only the `PackOutputBackend` actually submits frames; `NoneBackend.submit_frame` is a no-op, so
-dry-run/none/disabled remain output-free automatically.
+`NoneBackend.submit_frame` is a no-op ⇒ dry-run/none/disabled stay output-free automatically.
 
 ## Part C — Invariants that MUST still hold (live safety)
-- C1 default-off neutrality: all three params None ⇒ `_pack_enabled` False ⇒ `_drive_pack_output`
-  returns immediately ⇒ existing MIDI/laser/LED behavior byte/order-identical.
-- C2 no new tick I/O: only `snapshot()` (in-memory) + `submit_frame()` (bounded mailbox). No fs/MIDI/
-  serial/net/subprocess in `_push_tick`. (AGENTS.md §6.)
-- C3 StateManager remains the only `DeckState` writer — the driver READS `d`, never mutates it.
-- C4 every stop/stale/error/reload/disable/deck-change/track-change/mode-transition/shutdown path
-  resolves **ZERO**, never retained non-zero DMX. (Player guarantees this; driver must not bypass it
-  with a stale held-static — reconcile static every tick.)
-- C5 autoloop pack output is safe-zero/held-static only until T7d proves ticks/beat + universal phase
-  origin.
-- C6 `dry_run`/`output_backend=none`/disabled open neither MIDI nor serial and emit no DMX.
-- C7 fail-conservative: any uncertain flag ⇒ ZERO-producing value; any exception ⇒ ZERO + log, never
-  raise into the tick.
+- C1 default-off neutrality: all params None ⇒ `_pack_enabled` False ⇒ no driver; existing behavior
+  byte/order-identical (wrapper's normal branch just returns).
+- C2 no new tick I/O: only `snapshot()` (in-memory) + `submit_frame()` (bounded mailbox).
+- C3 StateManager remains the only `DeckState` writer; driver READS `d`.
+- **C4 (rewritten):** every stop / stale / error / reload / disable / deck-change / track-change /
+  mode-transition / shutdown path must produce **ZERO automatic base output**. Held static STATE may
+  remain stored internally, but must NOT visibly override a known stop/stale/error diagnostic — the
+  driver enforces this by calling `clear_selection()` (base → `missing_selection` ⇒ ZERO base; a held
+  static stands alone only because it is operator-controlled and idle is not an error). A genuine
+  blackout/emergency/pack-disabled/shutdown still ZEROs even a held static.
+- C5 autoloop output is safe-zero (never `select_autoloop`) until T7d.
+- C6 dry-run/`output_backend=none`/disabled open neither MIDI nor serial and emit no DMX.
+- C7 inner `_push_tick_inner` exception ⇒ ZERO submitted directly + original exception re-raised;
+  any driver exception ⇒ ZERO + log-once, never raised into the tick.
 
-## Part D — Tests (`tests/test_state_manager_pack_driver.py`, new)
-Pure/seam tests with fakes — NO real MIDI/serial/Enttec/DMX/network. Use a fake player recording
-`select_scripted`/`set_masks`/`hold_static`/`release_static` calls and a fake backend recording
-`submit_frame` frames; drive `_drive_pack_output` directly with synthetic `d`/`snap`.
-1. default-off: player/backend None ⇒ `_drive_pack_output` no-ops; no submit_frame; existing tick
-   unaffected (smoke).
-2. scripted playing fresh ⇒ `select_scripted(..., transport="playing", authority="fresh",
-   metadata_ready=True)`; backend gets a non-ZERO frame for a known id (use a tiny synthetic pack).
-3. metadata_not_ready / source_error / track_change / elapsed_discontinuity / stale / ambiguous each
-   ⇒ submitted frame == ZERO_FRAME (assert diagnostic code via player or ZERO frame).
-4. transitions → ZERO: scripted→autoloop, deck change, track load (load_gen bump), stop, stale,
-   pack reload (`reload()` then no select ⇒ ZERO), backend/player exception, shutdown.
-5. autoloop mode ⇒ `select_autoloop` NEVER called; submitted frame ZERO (or held static only).
-6. controller: blackout_held ⇒ `set_masks(blackout=True,...)` ⇒ ZERO; held_static_slot set/clear ⇒
-   `hold_static`/`release_static` reconciled exactly once per change; submit reflects static.
-7. exception in snapshot/render/submit ⇒ caught, ZERO submitted, no raise.
-8. no-I/O assertion: monkeypatch `open`/socket/serial to fail; one driver tick must not touch them.
+## Part D — Tests (`tests/test_state_manager_pack_driver.py`, new) + Task-1 player tests
+No real MIDI/serial/Enttec/DMX/network. Use a real `LaserPackPlayer` + tiny synthetic pack
+(`_document`/`_look`/`_pack` in `tests/test_soundswitch_laser_player.py`), a fake backend recording
+`submit_frame` frames, an optional fake input returning a `MidiInputSnapshot`, and synthetic
+`d`/`snap` (SimpleNamespace) — drive via `sm._drive_pack_output()` / `sm._push_tick()`.
+1. default-off: player/backend None ⇒ no `submit_frame`; existing tick unaffected.
+2. scripted playing+fresh+valid id ⇒ `select_scripted(...)`; non-ZERO frame for a known scripted id.
+3. **no track playing + held static ⇒ static frame submitted** (driver used `clear_selection`).
+4. **no track playing + no held static ⇒ ZERO.**
+5. **stopped automatic base does not retain old scripted frame** (play→stop ⇒ ZERO base next tick).
+6. **blackout held + static held ⇒ ZERO.**
+7. **pack disabled / shutdown ⇒ no DMX / ZERO** as appropriate.
+8. **stale/error automatic authority does not retain old scripted frame** (⇒ `clear_selection` base ZERO).
+9. track-change / deck-change ⇒ automatic base ZERO (clear_selection) for that tick.
+10. **autoloop never calls `select_autoloop`.**
+11. once-per-tick through early returns: `_push_tick()` with each early-return branch still drives once.
+12. no `submit_frame` double-writer (driver is the only caller; executor uses `trigger`).
+13. **inner `_push_tick_inner` exception ⇒ ZERO submitted directly AND original exception re-raised.**
+14. no blocking I/O in the driver path (monkeypatch `open`/socket/serial to fail; one tick must not hit them).
 
 ## Part E — Acceptance (definition of done)
-- [ ] Tasks 1-3 implemented; `python3 -m unittest discover tests` green on **3.11 and 3.14**.
-- [ ] New test file covers D1-D8; default-off neutrality proven.
-- [ ] Autoloop path proven to never call `select_autoloop` and to ZERO.
-- [ ] No new I/O in `_push_tick` (D8 + code review of the method).
-- [ ] `tools/check_docs_metadata.py` / `check_agent_contracts.py` / `check_docs_drift.py` pass;
-      update `docs/subsystems/soundswitch_output.md` + change-contract `soundswitch_output` if the
-      contract lists docs for a StateManager wiring change.
-- [ ] Proof gate still `PASS_IMPLEMENTATION_MAY_BEGIN`; CI `unit` job green.
-- [ ] Ledger updated with commit + gate outputs. Status stays SOFTWARE-VALIDATED / HARDWARE-UNVALIDATED.
+- [ ] Tasks 1-5 done; `python3 -m unittest discover tests` green on **3.11 and 3.14**.
+- [ ] D1-D14 + Task-1 player tests pass; default-off neutrality proven.
+- [ ] No new I/O in `_push_tick`/driver (D14 + review). Driver is the sole `submit_frame` caller.
+- [ ] Hard checks pass; update `docs/subsystems/soundswitch_output.md` + `soundswitch_output`
+      contract (note: `submit_frame` has exactly one owner — the StateManager pack driver).
+- [ ] Proof gate still PASS; CI `unit` job green. Ledger updated with commit + gate outputs.
+- [ ] Status stays SOFTWARE-VALIDATED / HARDWARE-UNVALIDATED.
 
 ## Adversarial self-review (checklist item 9)
-- "Double-write to Enttec?" — No: executor uses `trigger` (selection only); driver uses `submit_frame`
-  (sole caller). Confirmed by grep. BUT: if a future change makes the executor call `submit_frame`,
-  this driver would conflict — note in `soundswitch_output.md` that `submit_frame` has exactly one
-  owner (the StateManager pack driver).
-- "Held static survives a stop and keeps lights on?" — Risk if static reconciled only on change.
-  Mitigation: player applies emergency/blackout > static > base each `render()`, and a stop/stale
-  selection still renders ZERO base; a *held static with no mask* WOULD persist by design (operator
-  intent). C4 covers selection ZERO; document that an operator-held static is intentional and cleared
-  only by controller release or `reload()`. VERIFY this matches operator intent before shipping.
-- "elapsed_discontinuous false-positives on normal playback?" — A per-tick monotonic check with too
-  tight a threshold could ZERO mid-track. Use the same seek semantics as LED
-  (`LED_BACKSTEP_SEEK_BEATS` analog) and only flag genuine jumps; one ZERO tick then resume.
-- "load_gen tracker stale across deck switch?" — Track `(active, load_gen)` as a tuple so a deck
-  switch (active change) counts as track_changed ⇒ ZERO for one tick. Confirmed needed.
-- "Pack reload mid-show?" — `reload()` latches `_waiting_after_reload` ⇒ ZERO until next `select_*`;
-  driver calls `select_scripted` next tick ⇒ resumes only with fresh authority. Safe.
+- "Idle held static never shows?" — Fixed by Task 1 `clear_selection()` (base `missing_selection` ⇒
+  static stands alone). Verified against `render()` :350-362.
+- "Stopped/stale retains last scripted frame?" — No: driver calls `clear_selection()` (base ZERO) on
+  any non-happy-path; `submit_frame` is called every tick with the fresh `render()`.
+- "Inner tick crash leaves lights on?" — No: wrapper submits ZERO directly then re-raises (C7); the
+  normal driver is NOT run after an inner crash (it reads possibly-partial state).
+- "Double-write to Enttec?" — No: executor `trigger` (selection only) vs driver `submit_frame` (sole
+  caller). Document the single-owner rule in `soundswitch_output.md`.
+- "elapsed_discontinuous false-positives?" — `_PACK_SEEK_JUMP_MS=2000` errs HIGH; a missed jump just
+  renders at the new position, a false one ZEROs one tick.
+- "Static suppressed over a non-scripted playing track" — known acceptable T7c limitation (documented
+  in Part A); idle/stopped/stale/error all show standalone static correctly.
