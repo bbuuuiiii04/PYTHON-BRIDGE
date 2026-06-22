@@ -174,3 +174,33 @@ captures, or the `session.jsonl` will lack `autoloop_phase` rows.
 
 Repo status stays **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED**
 throughout the capture pass; a software/wire pass never upgrades it.
+
+## 6. Session log — 2026-06-22 (prep done, capture not yet run)
+
+Operator was **not yet set up** for the live pass, so no scenarios ran. All
+automatable prep is done; resume goes straight to §3 scenario captures.
+
+- **Restart gate CLEARED.** The core bridge was restarted onto the B1 wiring
+  (core start `14:14:57` > `state_manager.py` mtime `14:00:04`). Phase-trace
+  rows emit only during an active recording while *playing*. **Re-verify B1 is
+  live before trusting any capture** — preferred smoke test (definitive, beats
+  the start-time heuristic): with the operator playing a deck, append
+  `{"cmd":"toggle_record_session","path":"/tmp/t7d_smoke.jsonl","dedup":false}`
+  to `/tmp/rb_ss_bridge_v2_commands.jsonl`, wait a few playing seconds, toggle
+  again to stop, and confirm `/tmp/t7d_smoke.jsonl` contains `autoloop_phase`
+  rows + a `phase_trace_footer`. If it does not, the running core predates the
+  wiring — operator must restart (menubar toggle) and re-verify `prepare`.
+- **Conductor blocker FIXED (commit `f66b69f`).** `core_bridge_process_count()`
+  counted the menubar's `python -m rb_ss_bridge_v2 ... | tee /tmp/bridge.log`
+  shell wrapper as a second core, so `prepare`/run-scenario baselines
+  permanently failed `count==1` under the real launch method. Now a pure
+  `is_core_bridge_line()` requires an exact `-m rb_ss_bridge_v2` module and
+  drops shell-wrapper lines; a genuine second python core still reports 2
+  (safety preserved). `prepare` is now green (1 core, pack disabled).
+  `tests/test_t7d_capture_conductor.py::CoreProcessLineTests` covers it.
+- **Resume command (operator says "go"):** `python3
+  tools/t7d_capture_conductor.py prepare` (expect green) → run the smoke test
+  above → `python3 tools/t7d_capture_conductor.py run-scenario arm --run-stamp
+  <YYYYmmdd_HHMMSS>`. `phrase-anchor` still needs an operator restart with
+  `RBSS_SMART_REARM_EXPERIMENT=1 RBSS_PHRASE_ANCHOR=1` (current launch has
+  REARM but not PHRASE_ANCHOR).
