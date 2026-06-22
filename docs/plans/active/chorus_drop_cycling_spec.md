@@ -276,8 +276,13 @@ project UUID — adding/renaming autoloops needs a re-export). Operator-run, opt
   resolved A4 answers, the sync-checker output, and confirmation flag-off is a no-op.
 
 ## Note — T7d capture interaction (operator, not Codex)
-This adds new transition patterns (drop/post_drop cycling in chorus). The **live
-SoundSwitch-rendered path is unaffected**. The future **native-DMX (T7d)** path has no
-phase-contract evidence for these patterns yet, so it will **safe-zero** them until captured
-(never renders them wrong). Add a `drop-cycle`/`post_drop-cycle` capture scenario before T7d
-native DMX drives those cases.
+This changes only **which note** fires on existing autoloop ticks; it does **not** introduce a
+new transition *type*. The autoloop arm/refire timing that sets the phase origin is computed
+**independent of lighting role/scene/note** (`autoloop_controller.py` has no role/scene refs;
+arm sync = `next_arm_phrase(abs_beat_pos)` `:571`; refire origin from markers/intervals
+`state_manager.py:3747-3768`). Therefore the **refire phase contract covers drop/post_drop
+cycling** — no separate `drop-cycle` capture is needed for the origin *rule*. The only
+per-autoloop datum to confirm is loop **length** (carried by the T7d contract as
+TICKS_PER_BEAT + loop length), not a role-dependent origin. The **live SoundSwitch-rendered
+path is unaffected** regardless; native-DMX (T7d) renders cycling on the proven refire
+contract and safe-zeros only genuinely unproven transition *types*.
