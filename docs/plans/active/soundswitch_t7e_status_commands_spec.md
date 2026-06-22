@@ -1,13 +1,24 @@
 # Implementation Spec — T7e SoundSwitch pack sanitized status + validate-first runtime commands
 
-status: planned — **PENDING REVIEW (ChatGPT), NOT YET IMPLEMENTED**
+status: planned — **REVISION 2 (ChatGPT review corrections applied); ready to implement**
 last_updated: 2026-06-22
 implementer: Claude (Opus 4.8) — per operator override for this task (NOT Codex)
-target branch/PR: `soundswitch/impl` / #116 (current head `6178795`, CI green)
+target branch/PR: `soundswitch/impl` / #116 (current head `212cb50`, CI green)
 
-> **Review gate:** author + commit this spec, then PAUSE for ChatGPT review before any code.
 > Live-critical: T7e adds the operator's only hot path to reload/enable/swap the pack runtime, so a
 > bad swap can blackout or double-open the Enttec serial port mid-show.
+>
+> **Revision 2** folds in the ChatGPT review of `212cb50`:
+> 1. head metadata → `212cb50`;
+> 2. **runtime `backend=midi` deferred** — `parse_command` accepts it syntactically but the callback
+>    rejects it with a sanitized `unsupported_action`; no runtime command opens IAC/MidiOutput; pack
+>    failure still falls back to NoneBackend only;
+> 3. **callback-error sanitization** — pack-command failures must store only a sanitized class/category
+>    in `CommandReader._last_error` (the generic `_invoke_callback` returns `f"{type}: {exc}"`
+>    (`runtime_status.py:516`) which leaks paths/ports);
+> 4. **physical zeroing** — `NoneBackend.submit_frame` is a no-op, so disabling/swapping must
+>    explicitly `frame_sender.zero_and_stop()` the OLD sender, not merely publish NoneBackend;
+> 5. T7c manual-static policy preserved verbatim.
 
 ## A. Current code surfaces to inspect (verified; read, do not implement)
 
@@ -77,11 +88,18 @@ token, `enttec`, `port`, an alias/device name, `pack_path`, `fixture_map`, or a 
 ```
 `parse_command` validation (validate-FIRST; reject ⇒ `ValueError` ⇒ `last_error`, NO state change):
 - `action` ∈ {`reload`,`backend`,`enable`}; else reject.
-- `backend` action requires `backend` ∈ {`pack`,`none`,`midi`}; else reject.
+- `backend` action requires `backend` ∈ {`pack`,`none`,`midi`}; else reject. (`midi` is accepted
+  syntactically but **deferred at runtime** — see below.)
 - `enable` action requires `enabled` is a real `bool`; else reject.
 - unknown extra keys ⇒ reject (strict).
 Dispatch in `handle_command`: `set_soundswitch_pack` → a single injected
-`pack_command_callback(action, **kwargs)` that returns `(ok, detail)` like the existing callbacks.
+`pack_command_callback(action, **kwargs)` returning `(ok, sanitized_detail)`.
+
+**Runtime `backend=midi` is DEFERRED (C-mutual-exclusion):** the callback rejects it with a sanitized
+`"set_soundswitch_pack: unsupported_action"` (no raw detail) and changes NO state. Runtime MIDI would
+require a full MidiOutput/IAC-open + live `LaserSceneExecutor` backend-replacement lifecycle that T7e
+does not implement. `midi` stays startup-config-only. **No T7e runtime command ever opens
+IAC/MidiOutput**, and pack failure falls back to NoneBackend only (C4).
 
 ## C. Safety invariants (Part C)
 - C1 **No implicit hot-enable.** `reload` and `backend` actions NEVER enable pack mode if it was
@@ -91,10 +109,20 @@ Dispatch in `handle_command`: `set_soundswitch_pack` → a single injected
   (unstarted) backend BEFORE touching the live one. Any failure ⇒ keep the OLD verified pack/backend
   (or, if none, force safe no-output / NoneBackend) and record `last_error`. Never a half-swapped
   state visible to the driver.
-- C3 **Stop-before-start on the shared serial port.** The Enttec port can be opened only once, so a
-  reload/backend swap that rebuilds the sender MUST stop the old sender (and old input) before
-  starting the new ones. To avoid a window where the driver submits to a stopped sender, publish a
-  safe NoneBackend bundle FIRST (driver → ZERO), THEN stop old → build/start new → publish new.
+- C3 **Stop-before-start on the shared serial port + physical zero.** The Enttec port can be opened
+  only once, so a reload/backend swap that rebuilds the sender MUST stop the old sender (and old
+  input) before starting the new ones. Order: validate/build new (unstarted) → publish a
+  disabled/no-output bundle so the driver stops submitting to the old sender → **`old_sender
+  .zero_and_stop()`** (physical CH1–CH19 zero THEN port release; `soundswitch_frame_sender.py:182`)
+  and stop old input → start new (input first, sender second) → publish the new bundle.
+  **`NoneBackend.submit_frame` is a no-op — publishing NoneBackend alone does NOT send a DMX zero;
+  the explicit `zero_and_stop()` on the OLD sender is what darkens the rig.**
+- C10 **Sanitized callback errors.** `set_soundswitch_pack` failures must NOT store the generic
+  `_invoke_callback` detail (`f"{type(exc).__name__}: {exc}"`, `runtime_status.py:516`) — `{exc}` can
+  contain paths/ports/aliases/verifier text. The pack dispatch stores only a sanitized
+  class/category, e.g. `"set_soundswitch_pack callback failed: SoundSwitchPackVerificationError"` or
+  `"...: pack_reload_failed"`, into `CommandReader._last_error`. No raw message reaches
+  `CommandReader.status()`, `RuntimeStatusWriter`, or pack status.
 - C4 **Pack failure never falls back to MIDI.** On any pack build/start/reload failure the safe
   fallback is NoneBackend (ZERO), never MidiOutput — preserves DMX/MIDI mutual exclusivity and never
   opens IAC after pack was selected.
@@ -113,36 +141,45 @@ Dispatch in `handle_command`: `set_soundswitch_pack` → a single injected
   path; `set_soundswitch_pack` is inert (callback None) when no pack runtime exists.
 
 ## D. Test plan (`tests/test_soundswitch_pack_commands.py` + status tests)
-Pure/seam tests; NO real MIDI/serial/Enttec/network. Fake sender/backends record start/stop/submit.
-1. status sanitization: provider output contains none of the forbidden tokens (B1) across enabled,
-   disabled, none, dry-run, and post-error states (parametrized substring assertions).
-2. `parse_command` accepts the three valid forms; rejects bad `action`, bad `backend`, non-bool
-   `enabled`, extra keys ⇒ `ValueError`, and proves NO callback fires on reject.
-3. enable: `enabled=false` ⇒ driver output ZERO/none; `enabled=true` on an already-built+verified
-   runtime ⇒ output resumes. Reload/backend alone do NOT enable (C1).
-4. reload success: new verified pack swapped in atomically; old workers stopped before new started
-   (assert call order on the fakes); driver sees the new pack.
-5. reload failure (verify raises): old verified pack retained; `last_error_class` set; output never
-   half-swapped; if no old pack, output forced NoneBackend/ZERO.
-6. backend swap pack→none ⇒ no MIDI/serial opened, output ZERO; none→pack rebuilds via stop-before-
-   start; pack failure ⇒ NoneBackend fallback, NEVER MidiOutput (C4).
-7. stop-before-start ordering + safe-gap: a NoneBackend is published before old stop; assert the
-   driver never submits to a stopped sender.
-8. atomic publish: concurrent-ish read (call driver between swap phases) only ever sees a consistent
-   bundle (old-complete or new-complete), never mixed.
-9. no blocking I/O in `_push_tick`: the swap path runs on the command thread; a driver tick during a
-   swap performs no fs/serial/MIDI (monkeypatch open/socket/serial to fail).
-10. autoloop still safe-zero under every backend/enable combination (no `select_autoloop`).
-11. default-off neutrality: no pack runtime ⇒ `set_soundswitch_pack` is inert; existing behavior
-    byte/order-identical.
+Pure/seam tests; NO real MIDI/serial/Enttec/network. Fake sender records `submit`/`zero_and_stop`/
+`stop` calls + order; fake backends record submit/shutdown. (ChatGPT minimum set, 1–14.)
+1. `parse_command` accepts `reload`, `backend pack`, `backend none`, `enable true`, `enable false`.
+2. `parse_command` rejects bad `action`, bad `backend`, non-bool `enabled`, extra keys ⇒ `ValueError`
+   (and `backend midi` is accepted by parse but rejected at the callback — see 13).
+3. rejected command invokes NO callback and mutates NO state.
+4. `CommandReader` stores only a sanitized pack-command failure detail (class/category), never a raw
+   `{exc}` message (C10) — assert no path/port/alias substrings in `CommandReader.status()`.
+5. `RuntimeStatusWriter` pack status contains none of the forbidden substrings: `"/"`, `"tty"`,
+   `"cu."`, `"COM"`, `"enttec"`, `"port"`, `"alias"`, `"device"`, `"fixture_map"`, `"pack_path"`, a
+   raw UUID-like identity, or a raw exception fragment — across enabled/disabled/none/dry-run/error.
+6. `enable=false` publishes a disabled/no-output runtime AND actively `zero_and_stop()`s the old
+   sender/backend (assert the old sender received zero/stop before being discarded).
+7. reload success: new pack built + `verify_pack`'d BEFORE the old runtime is touched, then published
+   atomically; driver sees the new pack.
+8. reload failure (verify raises): old verified runtime retained; if none exists, publishes safe
+   no-output; never half-swapped; sanitized error only.
+9. backend `pack→none`: old sender `zero_and_stop()`'d; opens NO MIDI/serial.
+10. backend `none→pack`: follows stop-before-start; no partial swap.
+11. driver tick during a swap sees either old-complete or new-complete bundle — never mixed
+    player/backend/input (atomic single-reference publish).
+12. no blocking I/O in `_push_tick` during swaps (swap runs on the command thread; monkeypatch
+    open/socket/serial to fail; a driver tick must not hit them).
+13. `backend midi` ⇒ callback rejects with sanitized `unsupported_action`; opens no IAC/MidiOutput;
+    state unchanged.
+14. default-off neutrality intact: no pack runtime ⇒ `set_soundswitch_pack` inert; existing behavior
+    byte/order-identical. (Plus: no `select_autoloop` under any T7e command/status/backend — C8.)
 
 ## E. Acceptance criteria
-- [ ] Status provider + `_safe_pack_status` wired; D1 proves zero sensitive leakage.
-- [ ] `parse_command` validate-first for all three actions; D2 proves reject-without-side-effect.
-- [ ] reload/backend/enable implemented with C1–C9 held; D3–D11 green on **3.11 and 3.14**.
-- [ ] No new blocking I/O in `_push_tick`; pack runtime published as one atomic bundle.
-- [ ] Hard checks pass; update `docs/subsystems/soundswitch_output.md` + `runtime_commands.md` +
-      the relevant change-contracts; proof gate PASS; CI `unit` green; ledger updated.
+- [ ] Frozen `_pack_runtime` bundle introduced; StateManager reads exactly one reference per tick;
+      command thread publishes by assigning one new bundle.
+- [ ] Status provider + `_safe_pack_status` wired; D4/D5 prove zero sensitive leakage (incl. errors).
+- [ ] `parse_command` validate-first; D2/D3 prove reject-without-side-effect; `backend midi` deferred.
+- [ ] reload/backend/enable implemented with C1–C10 held; D1–D14 green on **3.11 and 3.14**.
+- [ ] No blocking fs/serial/MIDI/network/subprocess/sleep in `_push_tick`; old sender physically
+      `zero_and_stop()`'d on disable/swap/failed-reload (not merely NoneBackend).
+- [ ] Hard checks pass; update `soundswitch_output.md`, `docs/setup/runtime_commands.md`,
+      `docs/subsystems/runtime_commands.md`, `feature_status_matrix.md`/validation docs as needed,
+      and `change_contracts.yml`; proof gate PASS; CI `unit` green; ledger updated.
 - [ ] Status stays SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
 ## F. Adversarial self-review
@@ -155,9 +192,14 @@ Pure/seam tests; NO real MIDI/serial/Enttec/network. Fake sender/backends record
 - "A failed reload silently enables a broken pack" — prevented by C1 (no implicit enable) + C2
   (validate-first, old retained).
 - "Pack failure falls back to MIDI and double-drives lasers" — prevented by C4 (NoneBackend only).
-- "Status leaks the serial port / live config path" — prevented by C7 + D1 forbidden-token asserts;
+- "Status leaks the serial port / live config path" — prevented by C7 + D5 forbidden-token asserts;
   note `enttec_port` and `midi_input_aliases` are the highest-risk fields.
-- "enable=false leaves the last frame lit" — `enable=false` must publish a NoneBackend/disabled
-  bundle so the driver submits ZERO (or stops submitting), not retain the last frame. Add to D3.
+- "Status leaks via a callback error message" — prevented by C10 + D4; the generic `_invoke_callback`
+  format `f"{type}: {exc}"` is NOT used for pack commands.
+- "Publishing NoneBackend = dark rig" — FALSE: `NoneBackend.submit_frame` is a no-op, so the last
+  physical frame stays lit until the OLD sender is `zero_and_stop()`'d. C3/C6 + D6/D9 require the
+  explicit `zero_and_stop()` on disable/swap/failed-reload; the bundle swap alone is not enough.
+- "Runtime backend=midi opens IAC and double-drives lasers" — prevented by deferring `backend=midi`
+  (callback rejects, sanitized `unsupported_action`); no T7e command opens IAC/MidiOutput (D13, C4).
 - "Blocking load_pack stalls the 200 Hz loop" — prevented by C5 (all blocking work on the command
-  thread); D9 asserts no fs/serial in a driver tick.
+  thread); D12 asserts no fs/serial in a driver tick.
