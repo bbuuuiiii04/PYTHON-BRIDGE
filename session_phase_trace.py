@@ -10,8 +10,12 @@ Hot-path contract (the part that, once reviewed, runs inside the 200 Hz
 which performs ONLY a bounded ``put_nowait``. No file, socket, MIDI, serial,
 subprocess, sleep, or contended lock touches the tick path. A dedicated writer
 thread performs all file I/O. When the bounded mailbox is full, samples are
-dropped and counted; a dropped sample invalidates any segment spanning the gap
-(enforced by the offline oracle, not here).
+dropped and counted; because there are no timestamped drop ranges, ANY nonzero
+dropped/undrained count invalidates the ENTIRE capture run (fail-closed,
+enforced by the offline oracle via the recorder's integrity footer, not here).
+:meth:`AutoloopPhaseTracer.close` returns a :class:`PhaseTracerCloseResult` so a
+non-clean shutdown (writer error / undrained rows / join timeout) likewise
+invalidates the capture.
 
 :func:`build_autoloop_phase_row` is a pure function (primitive reads only) so the
 exact set of captured fields is unit-testable without a running bridge.
@@ -20,7 +24,8 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import Callable
+from dataclasses import dataclass
+from typing import Callable, Optional
 
 # Primitive fields captured in the StateManager tick that owns a transition.
 # All are plain scalars/strings already owned by StateManager; mapping scene ->
@@ -67,6 +72,24 @@ def build_autoloop_phase_row(*, mono_ns: int, epoch_ns: int, **fields) -> dict:
     return row
 
 
+@dataclass(frozen=True)
+class PhaseTracerCloseResult:
+    """Outcome of :meth:`AutoloopPhaseTracer.close`.
+
+    ``ok`` is True only for a fully clean shutdown: the writer thread drained
+    every queued row before the sentinel, no row was dropped on the hot path
+    (queue overflow), no writer exception occurred, and the join did not time
+    out. A non-clean close MUST invalidate the whole capture run (there are no
+    timestamped drop ranges, so per-segment salvage is not possible).
+    """
+
+    ok: bool
+    timed_out: bool
+    undrained: int
+    dropped: int
+    writer_error: Optional[str]
+
+
 class AutoloopPhaseTracer:
     """Bounded nonblocking mailbox + writer thread for phase rows.
 
@@ -86,8 +109,11 @@ class AutoloopPhaseTracer:
     ) -> None:
         self._writer = writer
         self._queue: "queue.Queue" = queue.Queue(maxsize=maxsize)
-        self.dropped = 0
+        self.dropped = 0          # hot-path overflow (emit could not enqueue)
+        self._undrained = 0       # rows discarded after a writer failure
+        self._writer_error: Optional[str] = None
         self._closed = False
+        self._close_result: Optional[PhaseTracerCloseResult] = None
         self._thread = threading.Thread(
             target=self._run, name="autoloop-phase-writer", daemon=True
         )
@@ -117,15 +143,46 @@ class AutoloopPhaseTracer:
             if row is self._SENTINEL:
                 self._queue.task_done()
                 return
-            try:
-                self._writer(row)
-            finally:
-                self._queue.task_done()
+            # A writer exception must not kill the thread (that would hang close()
+            # and silently lose the sentinel). Capture the first error, then keep
+            # draining to the sentinel, counting the remainder as undrained.
+            if self._writer_error is None:
+                try:
+                    self._writer(row)
+                except BaseException as exc:  # noqa: BLE001 - record, keep draining
+                    self._writer_error = repr(exc)
+                    self._undrained += 1
+            else:
+                self._undrained += 1
+            self._queue.task_done()
 
-    def close(self) -> None:
+    def close(self, *, timeout: float = 10.0) -> PhaseTracerCloseResult:
+        """Deterministically drain and stop the writer thread, then report.
+
+        Enqueues a sentinel; because the queue is FIFO, the writer processes every
+        previously-queued row before the sentinel, so a clean join is a guaranteed
+        drain. A writer exception is captured (see :meth:`_run`) so this never
+        hangs. The returned :class:`PhaseTracerCloseResult` says whether the close
+        was clean; a non-clean result must invalidate the capture. Idempotent.
+        """
         if self._closed:
-            return
+            return self._close_result  # type: ignore[return-value]
         self._closed = True
+        timed_out = False
         if self._started:
             self._queue.put(self._SENTINEL)
-            self._thread.join(timeout=5.0)
+            self._thread.join(timeout=timeout)
+            timed_out = self._thread.is_alive()
+        self._close_result = PhaseTracerCloseResult(
+            ok=(
+                not timed_out
+                and self._writer_error is None
+                and self._undrained == 0
+                and self.dropped == 0
+            ),
+            timed_out=timed_out,
+            undrained=self._undrained,
+            dropped=self.dropped,
+            writer_error=self._writer_error,
+        )
+        return self._close_result

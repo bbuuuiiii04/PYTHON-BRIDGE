@@ -108,6 +108,33 @@ class SessionRecorder:
         """
         self._append(row)
 
+    def write_phase_trace_footer(
+        self,
+        *,
+        dropped: int,
+        undrained: int,
+        close_ok: bool,
+        timed_out: bool,
+        writer_error: Optional[str],
+    ) -> None:
+        """Persist a schema-2 ``phase_trace_footer`` integrity record.
+
+        Written once, from the command thread, AFTER the tracer has drained and
+        BEFORE the recorder closes. Lets the offline oracle fail closed: any
+        nonzero dropped/undrained count, an unclean close, or a writer error
+        invalidates the entire capture run (no timestamped drop ranges exist).
+        """
+        self._append(
+            {
+                "kind": "phase_trace_footer",
+                "dropped": int(dropped),
+                "undrained": int(undrained),
+                "close_ok": bool(close_ok),
+                "timed_out": bool(timed_out),
+                "writer_error": writer_error,
+            }
+        )
+
     def stats(self) -> dict[str, int]:
         with self._lock:
             return dict(self._counts)

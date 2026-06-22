@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot  # noqa: E402
 from rb_ss_bridge_v2.session_phase_trace import (  # noqa: E402
     AutoloopPhaseTracer,
+    PhaseTracerCloseResult,
     build_autoloop_phase_row,
 )
 from rb_ss_bridge_v2.session_recorder import SessionRecorder  # noqa: E402
@@ -115,6 +116,54 @@ class TracerHotPathTests(unittest.TestCase):
         finally:
             builtins.open = real_open
         tracer.close()
+
+
+class TracerCloseResultTests(unittest.TestCase):
+    def test_clean_close_drains_all_and_reports_ok(self):
+        written = []
+        tracer = AutoloopPhaseTracer(written.append, maxsize=64)
+        for i in range(20):
+            tracer.emit(_row(accepted_trigger_gen=i))
+        result = tracer.close()
+        self.assertIsInstance(result, PhaseTracerCloseResult)
+        self.assertTrue(result.ok)
+        self.assertFalse(result.timed_out)
+        self.assertEqual(result.dropped, 0)
+        self.assertEqual(result.undrained, 0)
+        self.assertIsNone(result.writer_error)
+        # deterministic drain: every emitted row was written before close returned
+        self.assertEqual(len(written), 20)
+
+    def test_close_is_idempotent(self):
+        tracer = AutoloopPhaseTracer(lambda r: None, maxsize=8)
+        first = tracer.close()
+        second = tracer.close()
+        self.assertIs(first, second)
+
+    def test_writer_exception_does_not_hang_and_marks_not_ok(self):
+        def boom(_row):
+            raise RuntimeError("disk full")
+
+        tracer = AutoloopPhaseTracer(boom, maxsize=64)
+        for i in range(5):
+            tracer.emit(_row(accepted_trigger_gen=i))
+        result = tracer.close(timeout=5.0)  # must not hang
+        self.assertFalse(result.ok)
+        self.assertFalse(result.timed_out)
+        self.assertIsNotNone(result.writer_error)
+        self.assertIn("disk full", result.writer_error)
+        self.assertGreaterEqual(result.undrained, 1)
+
+    def test_dropped_rows_make_close_not_ok(self):
+        # Writer paused so the bounded queue overflows on the hot path.
+        tracer = AutoloopPhaseTracer(lambda r: None, maxsize=2, autostart=False)
+        for i in range(6):
+            tracer.emit(_row(accepted_trigger_gen=i))
+        self.assertEqual(tracer.dropped, 4)
+        tracer.start()
+        result = tracer.close()
+        self.assertFalse(result.ok)
+        self.assertEqual(result.dropped, 4)
 
 
 class Schema2RoundTripTests(unittest.TestCase):

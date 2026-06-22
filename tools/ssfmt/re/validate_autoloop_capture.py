@@ -322,6 +322,46 @@ def load_phase_trace(path: Path) -> list[dict]:
     return rows
 
 
+PHASE_FOOTER_KIND = "phase_trace_footer"
+
+
+def load_phase_trace_footer(path: Path) -> dict | None:
+    """Return the last ``phase_trace_footer`` integrity record in the trace, or None."""
+    footer = None
+    with path.open(errors="replace") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            if row.get("kind") == PHASE_FOOTER_KIND:
+                footer = row
+    return footer
+
+
+def evaluate_phase_trace_integrity(footer: dict | None) -> tuple[bool, str]:
+    """Pure, fail-closed integrity check for one B1 phase-trace capture.
+
+    A missing footer, an unclean tracer close, or any nonzero dropped/undrained
+    count invalidates the ENTIRE capture run. There are no timestamped drop
+    ranges, so per-segment salvage is impossible (possible future work if drop
+    timestamps are ever added). Returns ``(ok, reason)``.
+    """
+    if footer is None:
+        return (False, "missing phase_trace_footer (cannot prove zero dropped rows)")
+    if not footer.get("close_ok", False):
+        return (False, f"phase-trace close not clean: {footer}")
+    dropped = int(footer.get("dropped", 0) or 0)
+    undrained = int(footer.get("undrained", 0) or 0)
+    if dropped or undrained:
+        return (
+            False,
+            f"phase-trace lost rows (dropped={dropped}, undrained={undrained}); "
+            "whole capture invalid",
+        )
+    return (True, "ok")
+
+
 def _beat_at_epoch(phase_rows: list[dict], epoch_s: float, clock_offset_s: float) -> float | None:
     if not phase_rows:
         return None
@@ -382,6 +422,13 @@ def run_t7d(args) -> None:
     phase_rows = load_phase_trace(args.phase_trace)
     if not phase_rows:
         raise SystemExit("no schema-2 autoloop_phase rows in trace")
+    # Fail closed on capture integrity: any dropped/undrained row or unclean
+    # tracer close invalidates the entire run (no timestamped drop ranges).
+    integrity_ok, integrity_reason = evaluate_phase_trace_integrity(
+        load_phase_trace_footer(args.phase_trace)
+    )
+    if not integrity_ok:
+        raise SystemExit(f"INCOMPLETE_T7D_EVIDENCE: {integrity_reason}")
 
     control_channels = tuple(
         sorted({int(v) for v in args.control_channels.split(",") if v.strip()})

@@ -73,6 +73,7 @@ from .logging_manager import get_logging_manager
 from .filepath_resolver import has_soundswitch_scripted_id
 from .personality_resolver import PersonalityResolver, PlaylistCache
 from .session_recorder import SessionRecorder
+from .session_phase_trace import AutoloopPhaseTracer, build_autoloop_phase_row
 from .sound_switch_engine import SoundSwitchEngine
 from . import spectral_cache
 from .audio_spectral_features import extract_spectral_features
@@ -337,6 +338,11 @@ class StateManager:
         self._out   = output
         self._live_bpm = live_bpm
         self._recorder = recorder if recorder is not None else SessionRecorder.from_env()
+        # B1 evidence-only autoloop phase tracer (schema-2). Attached ONLY while a
+        # session recording started via the runtime command is active; None ⇒ the
+        # tick emits no phase rows (zero overhead beyond one truth test). NOT a T7d
+        # runtime/output feature — preparatory capture tooling only.
+        self._phase_tracer: Optional[AutoloopPhaseTracer] = None
         # Optional Laser Director — None means disabled/not configured.
         # Mutated only from this thread after start().
         self._laser_director = laser_director
@@ -1008,14 +1014,42 @@ class StateManager:
     def start_session_recording(self, path: str, *, dedup: bool = False) -> bool:
         if self._recorder:
             return False
-        self._recorder = SessionRecorder(path, dedup=dedup)
-        log.info("[SM] record-session-start  path=%s  dedup=%s", path, "on" if dedup else "off")
+        # schema=2 so the session carries B1 autoloop_phase rows + an integrity
+        # footer. The tracer is attached ONLY here (recording explicitly enabled);
+        # the env/from_env construction path stays schema-1 with no tracer.
+        self._recorder = SessionRecorder(path, dedup=dedup, schema=2)
+        self._phase_tracer = AutoloopPhaseTracer(self._recorder.write_phase_row)
+        log.info(
+            "[SM] record-session-start  path=%s  dedup=%s  phase_trace=on",
+            path, "on" if dedup else "off",
+        )
         return True
 
     def stop_session_recording(self) -> bool:
         if not self._recorder:
             return False
         path = str(self._recorder.path)
+        # Tear down the phase tracer FIRST: stop new emits, drain the writer into
+        # the still-open recorder, write an integrity footer, THEN close the
+        # recorder. Closing the recorder first would make write_phase_row a silent
+        # no-op and lose queued rows.
+        tracer = self._phase_tracer
+        self._phase_tracer = None
+        if tracer is not None:
+            result = tracer.close()
+            self._recorder.write_phase_trace_footer(
+                dropped=result.dropped,
+                undrained=result.undrained,
+                close_ok=result.ok,
+                timed_out=result.timed_out,
+                writer_error=result.writer_error,
+            )
+            if not result.ok:
+                log.warning(
+                    "[SM] phase-trace close NOT clean (capture invalid)  dropped=%d  "
+                    "undrained=%d  timed_out=%s  writer_error=%s",
+                    result.dropped, result.undrained, result.timed_out, result.writer_error,
+                )
         self._recorder.close()
         self._recorder = None
         log.info("[SM] record-session-stop  path=%s", path)
@@ -3826,6 +3860,49 @@ class StateManager:
         # OS2L timing while leaving beat events unchanged for isolation.
         for dk in self._sse.deck_route(active):
             self._out.send_elapsed(dk, elapsed_ms, beatpos_out)
+
+        # ── B1 evidence-only autoloop phase trace (schema-2) ──────────────────
+        # Active ONLY while a session recording is running. Hot-path cost when
+        # inactive: one attribute load + truth test. When active: two non-blocking
+        # clock reads + a primitive dict build + one bounded put_nowait. NO file/
+        # socket/MIDI/serial/subprocess/sleep/contended-lock I/O on the tick (the
+        # tracer's daemon writer thread owns all I/O). Read-only w.r.t. DeckState/
+        # OutputState. emit() never blocks or raises. Reached only on the full
+        # playing path (every non-playing/stale/stop branch returned earlier), so
+        # rows are dense across the captured window and absent when not playing.
+        tracer = self._phase_tracer
+        if tracer is not None and d.playing:
+            tracer.emit(build_autoloop_phase_row(
+                mono_ns=time.monotonic_ns(),
+                epoch_ns=time.time_ns(),
+                active_deck=active,
+                load_gen=int(d.load_gen),
+                playing=bool(d.playing),
+                position_stale=bool(snap is None or snap.is_stale(MEM_STALE_S)),
+                elapsed_ms=int(elapsed_ms),
+                bpm=float(bpm),
+                abs_beat_pos=float(abs_beat_pos),
+                beatgrid_source=d.meta.beatgrid_source,
+                lighting_mode=os.lighting_mode,
+                autoloop_arm_pending=bool(os.autoloop_arm_pending),
+                autoloop_arm_sync_beat=int(os.autoloop_arm_sync_beat),
+                autoloop_arm_target_elapsed_ms=int(os.autoloop_arm_target_elapsed_ms),
+                pending_autoloop_arm_reason=os.pending_autoloop_arm_reason,
+                midi_refire_origin_beat=int(os.midi_refire_origin_beat),
+                last_autoloop_status_phrase_beat=int(os.last_autoloop_status_phrase_beat),
+                phrase_anchor_last_beat=int(os.phrase_anchor_last_beat),
+                drop_cut_armed=bool(os.drop_cut_armed),
+                autoloop_tick_just_fired=bool(autoloop_tick_just_fired),
+                # Reserved diagnostics: no cheap authoritative tick-local source
+                # today, and the oracle does not consume them. Do NOT call
+                # status()/executor/backend or heavy joins from the tick to fill
+                # these — leave None (see spec §A / Part B absolute rules).
+                role=None,
+                reason=None,
+                accepted_scene=None,
+                accepted_note=None,
+                accepted_trigger_gen=None,
+            ))
 
     def _maybe_log_energy_suggest_would_fire(
         self, active: int, prev_elapsed_ms: float, elapsed_ms: float, d: DeckState

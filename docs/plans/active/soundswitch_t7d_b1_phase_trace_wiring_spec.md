@@ -1,13 +1,13 @@
 ---
 doc_status: active-plan
 truth_level: code-grounded
-last_verified_commit: 37fffa4
+last_verified_commit: HEAD
 last_verified_date: 2026-06-22
-validation_scope: spec only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
-implementer: Codex
+validation_scope: spec + implementation; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+implementer: Opus (operator override)
 ---
 
-# Codex Implementation Spec — B1 phase-trace tick wiring
+# B1 phase-trace tick wiring — spec + implementation record
 
 Wire the already-built, already-tested `AutoloopPhaseTracer` into the live
 `StateManager` 200 Hz tick so that **while a session recording is active** the
@@ -17,9 +17,53 @@ capture is useless: the oracle `validate_autoloop_capture.py` hard-exits with
 be produced. This is the §4 prerequisite called out in
 `docs/plans/active/soundswitch_t7d_capture_gate_handoff.md`.
 
-This is a **live-critical 200 Hz hot-path edit**. It is plan-first by policy
-(`feedback_plan_first_live_critical`). Implement exactly as written; do not
-expand scope.
+This is a **live-critical 200 Hz hot-path edit**. It was plan-first by policy
+(`feedback_plan_first_live_critical`).
+
+## IMPLEMENTATION STATUS — DONE 2026-06-22 (Opus, operator override)
+
+**Opus implemented this pass directly** under an explicit, task-scoped operator
+override of the usual "Codex implements" rule (consistent with the standing SS
+exception). What this changes vs the original plan below:
+
+- **`session_phase_trace.py`** — `AutoloopPhaseTracer.close()` is now
+  **deterministic** (option A): it enqueues a sentinel, joins, and returns a
+  frozen `PhaseTracerCloseResult(ok, timed_out, undrained, dropped,
+  writer_error)`. A writer exception is captured in `_run` (the remaining queue
+  is drained and counted as `undrained`) so close never hangs and never silently
+  loses the sentinel.
+- **`session_recorder.py`** — new `write_phase_trace_footer(...)` writes a
+  schema-2 `phase_trace_footer` integrity record.
+- **`state_manager.py`** — import + `self._phase_tracer`; `start_session_recording`
+  opens the recorder at **schema=2** and attaches the tracer;
+  `stop_session_recording` closes the tracer, writes the footer, **then** closes
+  the recorder; the tick emits one row at the **end of `_push_tick_inner`**,
+  **gated on `d.playing`** (non-playing/stale/stop paths emit nothing).
+- **`tools/ssfmt/re/validate_autoloop_capture.py`** — `load_phase_trace_footer`
+  + pure `evaluate_phase_trace_integrity`; `run_t7d` raises
+  `INCOMPLETE_T7D_EVIDENCE` if the footer is missing/unclean or any
+  dropped/undrained count is nonzero.
+
+**Drop / integrity policy (fix #2):** there are no timestamped drop ranges, so
+**any nonzero `dropped` OR `undrained`, an unclean close, or a missing footer
+invalidates the ENTIRE capture run.** Per-segment salvage is explicitly future
+work, possible only if drop timestamps/ranges are added later.
+
+**Scope guardrails honored:** B1 is **evidence tooling only**. T7d runtime
+autoloop DMX is **still not implemented**; the live pack driver still resolves
+safe-zero and **never calls `select_autoloop`**; **no phase mapping is selected**;
+**`600` ticks/beat remains unproven**; no MIDI/serial/Enttec/DMX opened; bridge
+not restarted; no SoundSwitch project mutated; no production value seeded from
+captures. **Repo status stays SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED.**
+
+Tests: `tests/replay/test_phase_trace.py` (+close-result/writer-exception),
+`tests/replay/test_phase_trace_wiring.py` (new), `tests/test_t7d_capture_integrity.py`
+(new). Full suite **2176 OK** (skipped 3, xfail 1); doc hard checks green;
+`git diff --check` clean.
+
+> The Part A–E sections below are the original pre-implementation plan, retained
+> as the design record. Where they describe close()/drop semantics or "Codex
+> implements," the IMPLEMENTATION STATUS block above supersedes them.
 
 ---
 
@@ -242,14 +286,21 @@ Notes for the implementer:
 4. **Crash-safety unchanged.** The emit cannot retain DMX: it never touches the
    pack runtime, and `_push_tick`'s ZERO-on-exception wrapper (`:3170-3189`) is
    untouched.
-5. **Teardown ordering guarantees no lost rows and no write-after-close.**
-   `tracer.close()` (drain + join) runs before `recorder.close()`; and
-   `SessionRecorder._append` is lock-guarded and no-ops after close
-   (`session_recorder.py:141-148`), so even a stray late write cannot crash.
-6. **Drop accounting is fail-closed for evidence.** Queue overflow increments
-   `tracer.dropped` (logged on stop); the offline oracle invalidates any segment
-   spanning a gap — never reinterpret a drop as evidence. (Enforced offline, not
-   here.)
+5. **Teardown ordering + deterministic close.** `tracer.close()` enqueues a
+   sentinel and joins (FIFO ⇒ guaranteed drain of all prior rows), returning a
+   `PhaseTracerCloseResult`; it runs before `recorder.close()`. A writer
+   exception is captured and the rest of the queue is drained (counted
+   `undrained`) so close never hangs and the sentinel is never lost.
+   `SessionRecorder._append` is lock-guarded and no-ops after close, so a stray
+   late write cannot crash. `stop_session_recording` writes the integrity footer
+   from the close result before closing the recorder.
+6. **Drop/integrity is fail-closed and whole-run.** Hot-path overflow increments
+   `tracer.dropped`; writer failures increment `undrained`. The footer records
+   both plus close cleanliness. The offline oracle
+   (`evaluate_phase_trace_integrity`) invalidates the **entire capture run** on
+   any nonzero dropped/undrained, an unclean close, or a missing footer — there
+   are no timestamped drop ranges, so no per-segment salvage. Never reinterpret a
+   drop as evidence.
 7. **Abrupt process exit is safe.** The writer is a daemon thread; the recorder's
    `atexit` close no-ops late writes (invariant 5). Trailing queued rows may be
    lost on a hard kill — acceptable for evidence tooling, never a crash.
