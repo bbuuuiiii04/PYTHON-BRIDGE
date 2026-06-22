@@ -266,24 +266,48 @@ def pack_output_disabled(status: dict | None) -> bool:
     return str(pack.get("backend", "")).lower() in ("", "none", "midi")
 
 
+# A real core bridge runs the package as `python -m rb_ss_bridge_v2` (exact
+# module, not a submodule like `rb_ss_bridge_v2.scripts.laser_pad`).
+_CORE_MODULE_RE = re.compile(r"-m\s+rb_ss_bridge_v2(\s|$)")
+# Non-core lines that also match `pgrep -f rb_ss_bridge_v2`.
+_CORE_EXCLUDE_TOKENS = ("bridge_menubar", "laser_pad", "t7d_capture_conductor", "ssfmt", "pgrep")
+# The menubar starts the core via `... python -m rb_ss_bridge_v2 ... | tee
+# /tmp/bridge.log`; that shell wrapper ALSO matches the module string but is not
+# a second core. The wrapped python interpreter is a separate process and is
+# still counted, so a genuine second core is never hidden by this filter.
+_CORE_SHELL_HINTS = ("bash ", "/bash", " -lc ", "| tee", " tee /", "zsh ", "/sh ")
+
+
+def is_core_bridge_line(line: str) -> bool:
+    """True iff a ``pgrep -fl rb_ss_bridge_v2`` line is a real Python core bridge.
+
+    Excludes the menubar app, the laser pad, this conductor / analysis tools, and
+    the menubar's ``... | tee /tmp/bridge.log`` shell wrapper. The wrapper matches
+    the module string but is not a core; its wrapped python interpreter is a
+    distinct process that still counts, so two genuine cores still report 2.
+    """
+    s = line.strip()
+    if not s:
+        return False
+    parts = s.split(None, 1)  # drop the leading PID; inspect the command
+    cmd = parts[1] if len(parts) > 1 else parts[0]
+    if any(tok in cmd for tok in _CORE_EXCLUDE_TOKENS):
+        return False
+    if any(hint in cmd for hint in _CORE_SHELL_HINTS):
+        return False
+    return bool(_CORE_MODULE_RE.search(cmd))
+
+
 def core_bridge_process_count() -> int:
-    """Count core bridge processes, excluding the menubar shell, laser pad, and
-    this conductor / analysis tools."""
+    """Count core bridge processes, excluding the menubar shell + tee wrapper,
+    the laser pad, and this conductor / analysis tools. See is_core_bridge_line."""
     try:
         out = subprocess.run(
             ["pgrep", "-fl", "rb_ss_bridge_v2"], capture_output=True, text=True, timeout=10
         ).stdout
     except Exception:
         return -1
-    exclude = ("bridge_menubar", "laser_pad", "t7d_capture_conductor", "ssfmt", "pgrep")
-    count = 0
-    for line in out.splitlines():
-        if not line.strip():
-            continue
-        if any(token in line for token in exclude):
-            continue
-        count += 1
-    return count
+    return sum(1 for line in out.splitlines() if is_core_bridge_line(line))
 
 
 def file_size(path: Path) -> int:

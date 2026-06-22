@@ -152,6 +152,51 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(json.loads(p.read_text())["scenario"], "refire")
 
 
+class CoreProcessLineTests(unittest.TestCase):
+    """The core-process counter must see exactly one core under the operator's
+    real menubar launch (python core + its `| tee /tmp/bridge.log` wrapper)."""
+
+    CORE = (
+        "82615 /opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/"
+        "Versions/3.14/Resources/Python.app/Contents/MacOS/Python -u -m rb_ss_bridge_v2"
+    )
+    TEE_WRAPPER = (
+        '82612 bash -lc printf "x"; cd /Users/bbui; env RBSS_SMART_DROP=1 '
+        "/opt/homebrew/bin/python3 -u -m rb_ss_bridge_v2 2>&1 | tee /tmp/bridge.log MON"
+    )
+    MENUBAR = (
+        "22309 /opt/homebrew/.../Python /Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar.py"
+    )
+    LASER_PAD = (
+        "24202 /Library/.../Python -m rb_ss_bridge_v2.scripts.laser_pad --host 127.0.0.1"
+    )
+
+    def test_real_python_core_counts(self):
+        self.assertTrue(cc.is_core_bridge_line(self.CORE))
+
+    def test_tee_shell_wrapper_excluded(self):
+        self.assertFalse(cc.is_core_bridge_line(self.TEE_WRAPPER))
+
+    def test_menubar_excluded(self):
+        self.assertFalse(cc.is_core_bridge_line(self.MENUBAR))
+
+    def test_laser_pad_submodule_excluded(self):
+        self.assertFalse(cc.is_core_bridge_line(self.LASER_PAD))
+
+    def test_blank_line_excluded(self):
+        self.assertFalse(cc.is_core_bridge_line("   "))
+
+    def test_single_core_under_full_menubar_launch(self):
+        lines = [self.MENUBAR, self.LASER_PAD, self.TEE_WRAPPER, self.CORE]
+        self.assertEqual(sum(1 for ln in lines if cc.is_core_bridge_line(ln)), 1)
+
+    def test_two_genuine_cores_still_report_two(self):
+        # The safety case: a second real python core must NOT be hidden.
+        second = self.CORE.replace("82615", "99999")
+        lines = [self.TEE_WRAPPER, self.CORE, second]
+        self.assertEqual(sum(1 for ln in lines if cc.is_core_bridge_line(ln)), 2)
+
+
 class CountFramesTests(unittest.TestCase):
     def test_missing_pcap_counts_zero(self):
         self.assertEqual(cc.count_universe0_frames(Path("/tmp/does-not-exist.pcap")), 0)
