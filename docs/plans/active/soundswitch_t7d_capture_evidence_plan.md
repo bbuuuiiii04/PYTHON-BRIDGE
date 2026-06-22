@@ -130,6 +130,26 @@ The capture request is blocked until this seam and its tests are reviewed. A
 2 Hz status-file scrape or inferred log timestamp is not precise enough to prove
 same-tick reset behavior.
 
+> **B1 implementation status (software-only; hot-path wiring NOT applied).**
+> The schema-2 seam is built and unit-tested as standalone tooling:
+> `session_phase_trace.py` (`build_autoloop_phase_row` pure builder +
+> `AutoloopPhaseTracer` bounded `put_nowait` mailbox and writer thread with
+> dropped-sample accounting), schema-2 support in `session_recorder.py`
+> (`write_phase_row`, `schema=` header) and `session_replayer.py`
+> (`SUPPORTED_SCHEMAS = (1, 2)`, `autoloop_phase` rows; schema 1 byte-compatible).
+> Tests: `tests/replay/test_phase_trace.py` (ordering, bounded-drop accounting,
+> hot-path `emit()` performs no file I/O even with `open` patched to raise,
+> schema-2 round trip, schema-1 compatibility). **The 200 Hz
+> `StateManager._push_tick` call-site is intentionally NOT wired in this pass.**
+> That single edit is live-critical hot-path bridge code; per the repo rule
+> (Codex implements bridge code; plan-first review for live-critical) it requires
+> its own reviewed integration before any live capture. The reviewed call-site
+> contract: read only the §B1 primitive scalars already owned by `StateManager`,
+> call `tracer.emit(build_autoloop_phase_row(...))` (bounded nonblocking enqueue
+> only), emit on relevant edge changes plus a 50 Hz ceiling, and never call
+> `backend.status()`, executor `status()`, filesystem, network, MIDI, serial,
+> subprocess, sleep, or a contended lock from the tick.
+
 ### B2. Replace the circular autoloop oracle with a falsifiable T7d mode
 
 `tools/ssfmt/re/validate_autoloop_capture.py` already exists, so extend or replace
@@ -156,6 +176,29 @@ its phase-fit path rather than adding a second similarly named authority.
 - [assumed] Oracle verdicts are `PASS_T7D_PHASE_CONTRACT`,
   `FAIL_T7D_PHASE_CONTRACT`, or `INCOMPLETE_T7D_EVIDENCE`. Only the first can
   unblock a T7d implementation spec.
+
+> **B2 implementation status (software-only; verified on synthetic data).**
+> The falsifiable core is built and unit-tested as a pure module:
+> `tools/ssfmt/re/t7d_phase_contract.py` (`phase_tick_for_beat`,
+> `predicted_frame_at`, `compare_wire_frames`, `fit_phase_contract`). The
+> circular `rate = bpm * 10.0` premise is gone; ticks/beat is a searched
+> hypothesis set (600 always included, never assumed) and the result states
+> whether 600 passed. Origins come only from recorded-state hypotheses; there is
+> no free-offset code path. Value parity is byte-exact; wire-timing tolerance is
+> separate (`compare_wire_frames`). Verdicts: PASS (unique scale+quantizer+origin
+> with >=4 discriminating transitions), FAIL (>=2 contracts reproduce, or rich
+> data nothing reproduces -- includes blackout/zero contamination), INCOMPLETE
+> (too few frames/transitions). Tests: `tests/test_t7d_phase_contract.py` (16
+> cases incl. true-600, true-non-600 rejecting 600, two-BPM beat-domain
+> invariance, continuous/snap/arm-sync origin selection, floor-vs-round
+> quantizer determination, integer-beat aliasing -> FAIL, blackout -> mismatch,
+> too-few/missing-sample -> INCOMPLETE). The capture-side CLI
+> (`validate_autoloop_capture.py --t7d`, with `--phase-trace`/`--t7d-ssfile`)
+> wires real pcap + schema-2 trace into the pure oracle; that I/O glue is
+> exercised only against real captures and does not upgrade hardware status.
+> Documented limitation: at realistic Art-Net sample spacing the quantizer and
+> any two origins separated by a 32-beat multiple at tpb=600 may be
+> undetermined; the oracle reports such ambiguity as FAIL rather than guessing.
 
 ### B3. Capture matrix
 
@@ -244,6 +287,85 @@ playback, a bridge restart, or a hardware action.
    project hashes change, recorder drops occur, or AppLog/phase markers are missing,
    stop. Do not restart, toggle, repair, or reinterpret the run. Record it as
    `INCOMPLETE_T7D_EVIDENCE` and obtain separate approval for the exact live change.
+
+### B4.5 Operator ping + active-wait automation workflow
+
+The manual back-and-forth of §B4 is automated by the **T7d capture conductor**
+(`tools/t7d_capture_conductor.py`). The conductor is an observer and an
+operator-instruction emitter only: it never connects fixtures, opens
+Enttec/serial/DMX, enables the bridge-native pack backend, mutates the
+SoundSwitch project, or restarts the bridge. The only things it writes are an
+ignored per-run capture directory, a scenario manifest, sanitized summaries, and
+the safe `toggle_record_session` runtime command.
+
+**Cardinal rule: "OPERATOR ACTION" is an active-wait gate, not a stopping
+point.** When the conductor needs a physical action it cannot perform safely, it
+**pings** the operator (audible `say` + a desktop notification + a printed
+instruction), then **keeps running and polls** for the expected
+artifact/marker/state until the condition is detected or a hard timeout is
+reached. The agent driving the conductor MUST NOT end its turn at a gate, MUST
+NOT print "awaiting operator action" and stop, MUST NOT ask the operator to paste
+any intermediate instruction back into the agent, and MUST NOT mark the task
+complete because an operator action is pending. It resumes automatically the
+instant the polled condition appears, and it pings again only when *another*
+physical action is required.
+
+Conductor subcommands:
+
+```bash
+python3 tools/t7d_capture_conductor.py prepare
+python3 tools/t7d_capture_conductor.py run-scenario <name> --run-stamp <YYYYmmdd_HHMMSS>
+python3 tools/t7d_capture_conductor.py validate-scenario <run_dir>
+python3 tools/t7d_capture_conductor.py summarize-corpus
+```
+
+Per-scenario conductor protocol (one named scenario per run):
+
+1. **Manifest + run dir (automated).** Create the ignored run directory under
+   `tools/ssfmt/captures/t7d/<run_id>` and write `manifest.json` (scenario,
+   required markers, min window, restart/startup-flag requirements,
+   `pack_output_enabled=false`, hardware-unvalidated status).
+2. **Baseline verification (automated, fail-closed).** Confirm exactly one core
+   bridge process and that the pack backend is disabled (`soundswitch_pack` null
+   or `enabled=false`/`backend in {none, midi}`). If either fails, ping the
+   operator and stop the run *for this scenario* with an INCOMPLETE/FAIL record;
+   do not start a capture against an unsafe baseline.
+3. **Restart gate (automated ping; operator-approved).** If the scenario needs
+   startup flags (phrase-anchor; correction may), the conductor pings the
+   operator with the exact flags and the reason, and does **not** restart. It
+   waits for the operator to approve + perform the exact restart, then re-runs.
+   A missing-flag run is recorded INCOMPLETE, never substituted with a synthetic
+   event.
+4. **Safety ping (automated).** Audibly/visibly ping: SoundSwitch open on the
+   saved bounded project, all fixtures/Enttec disconnected and safe, no live
+   audience, pack disabled, one bridge.
+5. **Recorder start (automated, safe).** Append `toggle_record_session` to the
+   runtime command file (records inputs only; not an output path).
+6. **Operator action + capture start (ping, then ACTIVE WAIT).** Ping the
+   operator to start `sudo tcpdump -i lo0 ... udp port 6454` and perform the one
+   named scenario action. The conductor then **polls** until both the pcap and
+   the session file are growing (`--start-timeout-s`, default 180 s).
+7. **Window completion (ACTIVE WAIT).** Poll the bridge log until the scenario's
+   required markers appear (`--window-timeout-s`, default 420 s).
+8. **Stop + settle (ping, then ACTIVE WAIT).** Ping the operator to stop tcpdump
+   (Ctrl-C — the conductor cannot stop a `sudo` process it did not own), stop
+   the recorder itself (`toggle_record_session`), and poll until the pcap size
+   settles.
+9. **Artifact validation + classification (automated).** Copy the bridge log,
+   count Universe-0 frames, check markers, check project before/after hashes,
+   and classify the gate as **ACCEPTED / INCOMPLETE / FAIL** via fail-closed
+   rules (FAIL = pack enabled, not exactly one bridge, or project bytes changed;
+   INCOMPLETE = timeout, recorder drops, missing markers, or too few Universe-0
+   frames; ACCEPTED = all green). Write a sanitized `summary.json`.
+10. **Continue (automated).** Move to the next required repetition/scenario.
+    `summarize-corpus` reports which scenarios have the two accepted repetitions
+    and which still block. Two accepted repetitions per scenario, plus the
+    identity/BPM coverage of §A4/§B6, are required before B6 can pass.
+
+**Timeout policy.** Every active wait fails closed: on timeout the conductor
+records an INCOMPLETE capture and never reinterprets the missing artifact as
+negative or positive evidence. The agent re-pings and re-runs the scenario if an
+operator action can correct it; otherwise it records the precise hard blocker.
 
 ### B5. Derivation and holdout method
 

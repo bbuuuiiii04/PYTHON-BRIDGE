@@ -21,19 +21,33 @@ RECORD_DEDUP_ENV = "RBSS_RECORD_DEDUP"
 class SessionRecorder:
     """Thread-safe JSONL recorder for pre-tick StateManager inputs."""
 
-    def __init__(self, path: str | os.PathLike[str], *, dedup: bool = False) -> None:
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        dedup: bool = False,
+        schema: int = 1,
+    ) -> None:
         self.path = Path(path)
         self.dedup = dedup
+        self.schema = schema
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._fh = self.path.open("w", encoding="utf-8", buffering=1024 * 1024)
         self._closed = False
-        self._counts: dict[str, int] = {"event": 0, "position": 0, "live_bpm": 0}
+        # "autoloop_phase" rows (schema 2) are written from a dedicated tracer
+        # thread via write_phase_row; the tick path never calls the recorder.
+        self._counts: dict[str, int] = {
+            "event": 0,
+            "position": 0,
+            "live_bpm": 0,
+            "autoloop_phase": 0,
+        }
         self._position_seen: dict[int, tuple[int, bool, int]] = {}
         self._write_locked(
             {
                 "kind": "header",
-                "schema": 1,
+                "schema": schema,
                 "started_at": time.time(),
                 "started_mono": time.monotonic(),
             }
@@ -85,6 +99,14 @@ class SessionRecorder:
                 },
             }
         )
+
+    def write_phase_row(self, row: dict) -> None:
+        """Persist one schema-2 ``autoloop_phase`` row.
+
+        Called only from the AutoloopPhaseTracer writer thread (never the tick
+        path). Takes the file lock like the other row writers.
+        """
+        self._append(row)
 
     def stats(self) -> dict[str, int]:
         with self._lock:
