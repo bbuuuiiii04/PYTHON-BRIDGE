@@ -4,7 +4,10 @@
 
 > **Status:** review prompt / non-authoritative artifact (per AGENTS.md §9). Repo status stays
 > **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED**. Target of review: branch
-> `soundswitch/impl`, PR #116, commit `97f2553`. Authoring model: Opus 4.8.
+> `soundswitch/impl`, PR #116, commit `d1d952a` (the readiness review was authored against this
+> head; `97f2553` is its parent and has no CI runs). The branch head advances as finisher work
+> lands (CI-green fix, T7c, T7e, Task 8/9); the live current commit is recorded in
+> `docs/plans/active/soundswitch_impl_progress.md`. Authoring model: Opus 4.8.
 
 ---
 
@@ -20,7 +23,8 @@ Cite `file:line` for everything. If you cannot verify something from the repo, s
 ## REPO / WHERE THE WORK IS
 
 - Repo: `github.com/bbuuuiiii04/PYTHON-BRIDGE` (local: `/Users/bbui/rb_ss_bridge_v2`)
-- Branch/PR under review: `soundswitch/impl` → PR #116 (base `main`), latest commit `97f2553`.
+- Branch/PR under review: `soundswitch/impl` → PR #116 (base `main`), review head `d1d952a`
+  (`97f2553` is its parent; current head advances with finisher commits — see the progress ledger).
 - Pinned identity to confirm everywhere: project UUID `{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}`,
   active-cue union SHA-256 `88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2`.
 

@@ -14,8 +14,17 @@ from rb_ss_bridge_v2.laser_models import LaserMidiMessage  # noqa: E402
 from rb_ss_bridge_v2.midi_output import MidiOutput  # noqa: E402
 
 
+# Note-off scheduling runs on a worker thread, so these tests are inherently
+# timing-dependent.  Per-call timeouts are sized for an idle dev machine; on a
+# contended CI runner executing the full suite the worker can be starved past
+# those deadlines (observed flake: test_process_due_note_offs_*).  Scale every
+# wait up for tolerance — the predicate is polled and returns as soon as it is
+# satisfied, so the happy path is unaffected; only genuine failures wait longer.
+_WAIT_SCALE = 8.0
+
+
 def _wait_until(predicate, timeout_s: float = 0.75, step_s: float = 0.01) -> bool:
-    deadline = time.monotonic() + timeout_s
+    deadline = time.monotonic() + timeout_s * _WAIT_SCALE
     while time.monotonic() < deadline:
         if predicate():
             return True
