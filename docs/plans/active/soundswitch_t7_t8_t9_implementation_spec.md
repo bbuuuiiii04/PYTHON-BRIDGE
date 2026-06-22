@@ -216,7 +216,10 @@ submit: backend.submit_frame(player.render().frame)   # non-blocking deque → D
       `LaserPackPlayer(pack)` + `SoundSwitchMidiInputAdapter(bindings, …).start(...)`. Set the
       module-level `soundswitch_frame_sender` (activates the T7.0 `_shutdown` stop wiring; also
       apply the T7.0 carry-forward: move `sender.stop()` early in `_shutdown`).
-    - `none` / dry-run / disabled: `NoneBackend`; open neither MIDI nor serial.
+    - An **enabled** pack config selecting `none`, or any enabled pack config with
+      `dry_run:true`: `NoneBackend`; open neither MIDI nor serial.
+    - An absent or disabled pack config preserves the existing MIDI startup path exactly;
+      it does not silently replace the current laser backend with `NoneBackend`.
   - Inject the chosen backend into `LaserSceneExecutor` (single slot, T7.1) and pass the
     player + midi-input adapter to `StateManager` (new ctor params, default `None`).
 - **Fix gap #2:** bake `fixture_map` into `SoundSwitchFrameSender.__init__` (store as

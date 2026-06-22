@@ -33,7 +33,9 @@ RBSS_SMART_BREAKDOWN=1
 
 These defaults are present in `scripts/ss_bridge_watcher.sh`.
 
-Tasks 1–2 add a separate offline SoundSwitch lane: frozen source models, strict read-only decode, deterministic canonical-pack export, and an independent verifier for the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile. The 95-artifact pack preserves exact 232 render + 1 catalog-tail cues, 32 Static Looks, 42 autoloops, 45 scripted inventory records, and the seven-class F-3 crosswalk; F9 mutation rejection passes. These tools are not startup/runtime subsystems, do not mutate the project, and do not connect to `StateManager`, OS2L, MIDI lasers, LED/Govee, Rekordbox readers, status, config, or commands. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec/hardware work remain planned and unimplemented.
+The SoundSwitch pack lane now contains frozen source models, strict read-only decode, deterministic canonical-pack export, independent verification, an immutable pack loader/player, a MIDI-input adapter, an output-backend abstraction, and an Enttec frame sender. The proof gate is 29 PASS / 0 FAIL / 0 INCOMPLETE, including F9 and F10. T7a adds a startup-only validated config loader whose tracked example is disabled, dry-run, and `output_backend=none`.
+
+This component lane is not a second live authority: `__main__` does not load the T7a config, and `StateManager` does not own or drive the pack player. Pack controller input, direct DMX, pack status, and pack commands are not started or wired. Existing OS2L, MIDI-laser, LED/Govee, Rekordbox, and command behavior remains unchanged and hardware-unvalidated.
 
 ## Runtime Subsystems
 

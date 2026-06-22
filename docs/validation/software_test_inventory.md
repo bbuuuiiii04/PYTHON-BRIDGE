@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: eff532e
+last_verified_commit: b7e0e66
 last_verified_date: 2026-06-21
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -30,7 +30,7 @@ python -m pytest tests
 | Runtime commands | parser/handler/status writer tests | needed before command changes |
 | Logging visibility | bridge formatting/rate helpers and logging diagnostic coverage tests | verifies software-only log filtering and spam-control behavior |
 | Rekordbox readers | reader, offset, live BPM tests | cannot prove all app versions |
-| SoundSwitch | OS2L/output helper tests; `test_soundswitch_project_decoder.py` | decoder coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; cannot prove other versions or hardware |
+| SoundSwitch | OS2L/output helpers; project/pack/player/MIDI/backend/Enttec tests; `test_soundswitch_pack_player_config.py` | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; T7a config tests do not prove runtime wiring or hardware |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety |
 | LED/Govee | LED config/director/color/realtime/renderer tests | cannot prove device compatibility |
 | Replay/session tooling | replay format and smoke tests | software-only |
@@ -48,9 +48,9 @@ When adding or changing tests, update:
 
 `tests/test_soundswitch_project_decoder.py` covers frozen source-model use and strict, read-only decoding: physical document bounds/trailers, venue/static-look parsing, canonical identity and stable inventory gates, learned MIDI/control reconciliation, catalog/script classification, malformed and unsupported-source rejection, and the 232 render-cue plus one catalog-tail split. When the canonical local project is available, the current-corpus test also verifies its expected decoded counts and classifications.
 
-`tests/test_soundswitch_pack.py` covers deterministic export, the canonical 95-artifact pack, independent verification, exact 232+1/32/42/45 inventory, byte-identical repeat export, atomic publish, source/inventory/hash/canonicalization/semantic mutation rejection, and the seven-class F-3 crosswalk. `tests/test_prove_soundswitch_pack_generation.py` covers the F9 gate seam. The current proof result is 28 PASS / 0 FAIL / 1 INCOMPLETE with foundation 27/27 PASS; F9 passes and only F10 remains deferred to Task 4.
+`tests/test_soundswitch_pack.py` covers deterministic export, the canonical 95-artifact pack, independent verification, exact 232+1/32/42/45 inventory, byte-identical repeat export, atomic publish, source/inventory/hash/canonicalization/semantic mutation rejection, and the seven-class F-3 crosswalk. `tests/test_prove_soundswitch_pack_generation.py` covers the proof-gate seams. The current proof result is 29 PASS / 0 FAIL / 0 INCOMPLETE with foundation 27/27 PASS; F9 and F10 pass.
 
-This is software/wire validation only. It does not test project mutation, Task 3 loader/player, Task 4+ MIDI/runtime config/commands/status, `StateManager` or backend integration, Enttec output/hard kill, or physical fixtures.
+This is software validation only. Separate focused suites cover the immutable pack loader/player, MIDI adapter, backend abstraction, Enttec framing/sender, and the T7a pack-player config loader. T7a config tests exercise defaults, explicit/env/default path precedence, inline and external fixture maps, invalid schemas, and never-raising failure results. They do not test startup/`StateManager`/commands/status integration, open devices, prove Enttec hardware behavior, or validate physical fixtures.
 - relevant subsystem card
 - relevant task playbook if test workflow changed
 

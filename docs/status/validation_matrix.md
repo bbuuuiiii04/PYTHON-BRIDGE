@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: eff532e
+last_verified_commit: b7e0e66
 last_verified_date: 2026-06-21
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -36,8 +36,8 @@ Current repo-facing status remains:
 | Agent routing/contracts | docs-checkable | not applicable | `tools/check_agent_contracts.py` checks key routes and referenced files. |
 | Rekordbox readers | partial | unvalidated | Reader correctness depends on live app/version/permissions. |
 | SoundSwitch OS2L | partial | unvalidated | OS2L output code exists; hardware/app validation log needed. |
-| SoundSwitch offline decoder/exporter/pack/verifier | software-tested | not applicable | Pinned to SoundSwitch 2.10.3 plus the canonical UUID/RAVE profile. Tests verify deterministic 95-artifact export, independent semantic verification, exact 232+1/32/42/45 inventory, seven-class F-3 crosswalk, and F9 mutation rejection. Current proof: 28 PASS / 0 FAIL / 1 INCOMPLETE, foundation 27/27 PASS; only F10 is deferred to Task 4. No project mutation or live output. |
-| SoundSwitch loader/player/MIDI/runtime/backend/Enttec | unvalidated/planned | unvalidated | Task 3 and Task 4+ are not implemented; no config, commands, status, `StateManager`, backend, Enttec, or hardware path exists. |
+| SoundSwitch offline decoder/exporter/pack/verifier | software-tested | not applicable | Pinned to SoundSwitch 2.10.3 plus the canonical UUID/RAVE profile. Tests verify deterministic export, independent semantic verification, exact 232+1/32/42/45 inventory, and the seven-class F-3 crosswalk. Current proof: 29 PASS / 0 FAIL / 0 INCOMPLETE, foundation 27/27 PASS; F9 and F10 pass. No project mutation or live output. |
+| SoundSwitch loader/player/MIDI/runtime/backend/Enttec | partial software-tested | unvalidated | Immutable loader/player, MIDI-input adapter, backend abstraction, Enttec sender, and T7a config loader have focused tests. Config is not startup-wired; no pack `StateManager`, command, status, direct-DMX, or hardware path is active. |
 | Laser policy/executor | partial | unvalidated | MIDI path exists; fixture validation must be recorded separately. |
 | LED/Govee cloud | partial | unvalidated | Cloud path exists; device behavior must be logged. |
 | LED scripted-track automation policy | partial | unvalidated | `tests/test_led_config.py` covers the JSON blackout defaults and `utility` destination validation; `tests/test_led_state_manager.py` covers groove/drop/post-drop blackout mapping, active buildup/breakdown, opt-in overrides, and non-scripted identity behavior. This does not prove room-visible Govee behavior during scripted SoundSwitch tracks. |

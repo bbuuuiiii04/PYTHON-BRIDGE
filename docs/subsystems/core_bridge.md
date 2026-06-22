@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: eff532e
+last_verified_commit: b7e0e66
 last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
@@ -17,9 +17,10 @@ Status:
 Purpose:
 - Own startup wiring, bridge state, event handling, timing, and top-level coordination.
 
-Task 2 boundary:
-- The strict SoundSwitch 2.10.3 decoder, deterministic exporter, canonical 95-artifact pack, and independent verifier are read-only/offline and are not imported, started, or owned by `StateManager` or `__main__.py`.
-- No live bridge behavior changed: OS2L, MIDI lasers, LED/Govee, Rekordbox readers, runtime status, config, and runtime commands retain their existing paths. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec integration remain planned and unimplemented.
+SoundSwitch pack-player boundary:
+- The strict decoder/exporter/verifier and immutable pack loader/player remain outside `StateManager`. MIDI-input, backend, and Enttec components exist but are not pack-wired by startup.
+- T7.0 keeps process signal ownership in `__main__`; T7.1 routes the existing laser executor through one injected backend while retaining the MIDI default path.
+- T7a adds only a validated, default-off config loader and tracked example. `__main__` does not load it, and no pack-player, Enttec, status, or command integration exists yet. OS2L, MIDI lasers, LED/Govee, Rekordbox readers, and runtime behavior remain unchanged.
 
 Authoritative code:
 - `__main__.py`

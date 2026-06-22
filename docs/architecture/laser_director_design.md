@@ -10,7 +10,7 @@ Laser Director adds a second output lane: MIDI commands mapped inside SoundSwitc
 
 Implementation must treat code as the source of truth. If this document and current code conflict, update this document before implementing code.
 
-Tasks 1–2 offline boundary (verified 2026-06-21): the frozen models/strict decoder now feed a deterministic exporter and independent verifier for a canonical 95-artifact pack pinned to SoundSwitch 2.10.3 and the canonical UUID/RAVE profile. The pack records the seven-class F-3 crosswalk but does not alter this MIDI Laser Director design, learned mappings, runtime commands, `StateManager`, or OS2L. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec integration remain planned and unimplemented; no laser or Enttec hardware validation is implied.
+SoundSwitch pack boundary (verified 2026-06-21 at `b7e0e66`): the deterministic pack, immutable loader/player, MIDI-input adapter, output backends, and Enttec sender exist as software-tested components. `LaserSceneExecutor` uses one injected backend slot; startup still selects the existing MIDI backend, preserving MIDI behavior. T7a adds a validated default-off config loader/example but does not load it or select a pack/Enttec backend. `StateManager`, OS2L, runtime commands, and status remain unchanged; no laser or Enttec hardware validation is implied.
 
 ---
 

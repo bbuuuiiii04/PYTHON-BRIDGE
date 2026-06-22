@@ -1,21 +1,22 @@
 # SoundSwitch pack-player — planning & spec doc set (grouped index)
 
-> **Status:** ACTIVE INDEX (AWR-107). Repo status **SOFTWARE/WIRE-VALIDATED ONLY /
+> **Status:** ACTIVE INDEX (AWR-107). Repo status **SOFTWARE-VALIDATED ONLY /
 > HARDWARE-UNVALIDATED**. This index groups every SoundSwitch pack-player planning/spec doc so
 > they are read together, not scattered. It grants **no runtime or hardware authorization**.
 > If a doc conflicts with code, **code wins**.
 
-## Current state (verified at HEAD `f7ae38d`, 2026-06-21)
+## Current state (verified at HEAD `b7e0e66`, 2026-06-21)
 
 - Tasks **0–6**: merged (PR #115). Deterministic export + independent verification of the
   canonical pack; loader/player/MIDI-input/backends/Enttec sender all software/wire-validated.
 - Task **7.0** (`07581ca`) + **7.1** (`f7ae38d`): implemented + fresh-opus review APPROVE, on
   **PR #116** (open). Signal-authority fix + executor single-backend injection + `scene_name`.
-- Tasks **7 (rest) / 8 / 9**: **spec-only** per operator directive (2026-06-21) — "do not use
-  subagents to implement; spec everything out first and group the docs." See the combined spec.
-- **Open blocker:** autoloop `phase_tick` beat→tick scaling + phase origin is an `[unknown]`
-  requiring a capture-evidence pass before the autoloop-DMX path (T7d) can be implemented. Do
-  not guess it (live rig).
+- Task **7a**: implemented and fresh-context review **APPROVE** in the current PR worktree;
+  validated config loader/example remain default-off and are not runtime-wired yet.
+- Tasks **7b–e / 8 / 9**: in progress under the combined implementation/orchestration specs.
+- **Open blocker:** capture evidence proves 600 animation ticks/beat, but does not prove a
+  universal phase origin across every arm/refire path. T7d and autoloop shadow parity therefore
+  remain blocked; pack autoloop output must stay safe/zero rather than guess.
 
 ## Read in this order
 
@@ -33,7 +34,7 @@ Historical / superseded: `soundswitch_t4_t6_handoff.md` (T4–T6 handoff; those 
 
 ## What "done" looks like for the remaining work
 The combined spec (#2) Part E is the definition of done. In short: T7a–c+e are determinable from
-current code now; **T7d (autoloop DMX) and autoloop shadow coverage in T8 are gated on the
-`phase_tick` evidence pass**; T9 is an operator hardware-gate handoff **document** (author only,
-never executed). No physical output, bridge restart, or device-open is authorized by any doc in
-this set — that is the Task 9 operator gate only.
+current code now; **T7d (autoloop DMX) and autoloop shadow coverage in T8 remain gated on a
+universal phase-origin proof**. T9 starts as an operator hardware-gate handoff document. The
+operator has separately authorized controlled device/restart validation after the offline,
+shadow, review, zero-frame, rollback, and single-process gates pass.

@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: eff532e
+last_verified_commit: b7e0e66
 last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
@@ -17,9 +17,9 @@ Status:
 Purpose:
 - Own local status snapshots, the throttled `[BEAT]` operator heartbeat, and append-only JSONL runtime command handling.
 
-Task 2 boundary:
-- The offline SoundSwitch decoder/exporter/verifier and canonical pack add no runtime command and no status field. Loader/player, MIDI/runtime/backend selection, and Enttec controls remain planned and unimplemented.
-- Existing SoundSwitch, laser, LED/Govee, Rekordbox, and bridge status/command behavior is unchanged.
+SoundSwitch pack-player boundary:
+- Pack loader/player, MIDI-input, backend, and Enttec components exist, and T7a adds a validated default-off config loader. None adds a runtime command or status field yet.
+- `set_soundswitch_pack` is not accepted by `parse_command()` and no pack-player callback is wired. Existing SoundSwitch, laser, LED/Govee, Rekordbox, status, and command behavior is unchanged.
 
 Authoritative code:
 - `runtime_status.py`

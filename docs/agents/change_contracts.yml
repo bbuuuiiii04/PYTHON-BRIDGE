@@ -232,6 +232,7 @@ contracts:
 
   soundswitch_pack_player:
     code_globs:
+      - soundswitch_pack_player_config.py
       - soundswitch_pack*.py
       - soundswitch_project_*.py
       - soundswitch_laser_player*.py
@@ -241,6 +242,7 @@ contracts:
       - enttec_*.py
       - tools/*soundswitch*pack*.py
       - config/soundswitch_pack_player*.json
+      - tests/test_soundswitch_pack_player_config.py
       - __main__.py
       - state_manager.py
       - laser_executor.py

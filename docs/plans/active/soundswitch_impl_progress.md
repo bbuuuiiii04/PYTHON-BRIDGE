@@ -1,11 +1,11 @@
 # SoundSwitch implementation — progress ledger
 
-last_updated: 2026-06-21T23:55:00Z   last_session_model: claude-opus-4-8
+last_updated: 2026-06-22T00:35:04Z   last_session_model: gpt-5.5-codex
 
 ## Proof gate
 
-- HEAD: `f7ae38d`
-- Verdict: `PASS_IMPLEMENTATION_MAY_BEGIN` (exit 0; last proven at `601d8db`)
+- HEAD: `b7e0e66` plus the reviewed T7a worktree
+- Verdict: `PASS_IMPLEMENTATION_MAY_BEGIN` (exit 0; proven at `b7e0e66`)
 - Checks: 29 PASS / 0 FAIL / 0 INCOMPLETE (F10 promoted in Task 4)
 - Foundation: 27/27 PASS
 - Note: T7.0 (`07581ca`) and T7.1 (`f7ae38d`) introduce NO SoundSwitch-semantics
@@ -15,10 +15,10 @@ last_updated: 2026-06-21T23:55:00Z   last_session_model: claude-opus-4-8
 
 ## Orchestration
 
-- Operator (2026-06-21) put a Claude session in charge of T7+T8+T9-handoff per
-  `soundswitch_t7_t8_orchestration.md`; chose **Claude-subagents-per-effort-table**
-  as the implementer path (sanctioned failover for THIS workstream only — does not
-  generalize). Before-T7 operator milestone is satisfied; auto-advance T7→T8.
+- Operator (2026-06-21) selected Codex orchestration with effort-tiered subagents for
+  T7+T8+T9 and separately authorized controlled Enttec/MIDI/bridge validation after
+  the required offline/shadow/review and rollback gates. Before-T7 design review is
+  satisfied; auto-advance T7→T8.
 - Running PR for the series: **#116** (`soundswitch/impl` → `main`).
 - Carry-forwards to T7 author:
   1. In `__main__._shutdown`, place the real `soundswitch_frame_sender.stop()`
@@ -28,7 +28,7 @@ last_updated: 2026-06-21T23:55:00Z   last_session_model: claude-opus-4-8
      PackOutputBackend; `none`→NoneBackend). T7.1 delivered only the executor-OBJECT
      half. opus-xhigh T7 reviewer must verify port-level mutual exclusivity.
 
-## Task 7 design (verified at HEAD `f7ae38d`; for the implementer spec)
+## Task 7 design (verified through HEAD `b7e0e66`; for the implementer spec)
 
 Surfaces mapped (read-only triage). Integration design direction — StateManager
 is the runtime owner; per tick in pack mode it DRIVES the pure `LaserPackPlayer`
@@ -49,7 +49,19 @@ from authoritative state and submits frames nonblocking:
   (the `soundswitch_frame_sender = None` placeholder), BEFORE `StateManager(...)`
   (~794) and `sm.start()` (~1175).
 
-### BLOCKER found during mechanism extraction (verified at `f7ae38d`)
+### T7d phase evidence result (verified 2026-06-21; still blocked)
+
+- Controlled authoring evidence stores the next beat at tick 601 and a three-beat move at
+  tick 1800. An independent rate sweep over captured `SSAutoLoop13.ssfile` segment 49 uniquely
+  favored 600 ticks/beat (445/453 matching frames; 599→407, 601→420).
+- The universal origin is **not proven**. `autoloop_arm_sync_beat` is transient and clears
+  after arm lock, while captured phrase-marker output aligns near tick zero at the latest
+  accepted MIDI/refire beat (`midi_refire_origin_beat`). Existing captures do not cover every
+  initial-arm, master-switch, drop-hold, buildup, phrase-anchor, and correction path.
+- Decision: T7d and T8 autoloop shadow parity stay blocked. Runtime integration must resolve
+  autoloop pack mode to safe zero (or a held static override) until a universal origin is proven.
+
+### BLOCKER found during mechanism extraction (originally verified at `f7ae38d`)
 Task 7 is NOT thin glue. Determinable-from-code: config+loader, startup wiring,
 scripted-mode integration, status, commands, scene_to_identity, fixture_map. But:
 - **[BLOCKER — autoloop phase_tick]** `render_autoloop_frame(loop, phase_tick)`
@@ -92,20 +104,10 @@ pack reload, worker error, shutdown) must clear held/pending state and resolve Z
 
 ## Next action
 
-> SPEC-FIRST (operator directive 2026-06-21): no subagent implementation; spec the
-> remaining work out and group the docs. DONE — combined Part A–E spec authored:
-> `docs/plans/active/soundswitch_t7_t8_t9_implementation_spec.md` (T7a–e + T8 + T9),
-> grouped via `docs/plans/active/soundswitch_README.md`. T7.0 + T7.1 already
-> implemented+reviewed on PR #116 (revertible if a pure spec-first pass is preferred).
-> Autoloop phase_tick scaling+origin remains an [unknown] blocker (capture-evidence
-> pass required before T7d). Next: operator review of the spec, then decide
-> implement-path. Subtasks specced: config `soundswitch_pack_player.example.json`
-> + validated loader; load/verify pack+config before workers; StateManager calls
-> only pure player methods + nonblocking submit; output_backend port selection;
-> all transitions resolve safe frames; sanitized status; no implicit hot enable
-> (runtime-command contract). Reviewer: opus xhigh, full "Gate — before-T7".
-> Then auto-advance to T8, run after-T8 opus-max review, author + review T9
-> handoff, then AWAITING OPERATOR hardware gate.
+> Task 7b: implement startup/backend port selection, verified-pack crosswalk/bindings,
+> baked fixture-map submission, early sender shutdown, and no-partial-start behavior.
+> Preserve existing MIDI startup exactly when pack config is absent/disabled. An enabled
+> `none`/dry-run config opens neither MIDI nor serial. Keep T7d autoloop output safe/zero.
 
 ## Task status (0–9)
 
@@ -118,6 +120,6 @@ pack reload, worker error, shutdown) must clear held/pending state and resolve Z
 | 4 | MIDI input adapter | done | done | green | #115 | 32 tests; F10 CC export-fail check; proof 29/0/0; device-name dispatch + error-preservation + zombie-worker fixes post-review. HEAD `6a8ecf2`. |
 | 5 | output backend | done | done | green | #115 | MidiOutputBackend/NoneBackend/PackOutputBackend; priority signature fix; PackOutputBackend unlearned→False; stale attr removed. 70+170 tests pass. HEAD `db7eac2`. |
 | 6 | Enttec sender | done | done | green | #115 | 518-byte VLN-identical framing; bounded non-blocking deque; zero-on-stop; kill-9 hazard documented. 35 new tests; 2009 total. T7 note: remove _install_signal_handlers before wiring into __main__. HEAD `601d8db`. |
-| 7 | runtime integration | wip | — | — | #116 | T7.0 (`07581ca`) + T7.1 (`f7ae38d`) done, both review APPROVE (fresh opus). T7.0: signal handlers removed, __main__ single signal authority. T7.1: executor single-backend injection + scene_name, MIDI byte/order-identical. Next: Task 7 proper (config/loader/StateManager/status/commands + port-level backend selection). |
+| 7 | runtime integration | wip | partial | partial | #116 | T7.0 + T7.1 review APPROVE. T7a config/loader: 17 tests OK, hard docs gates pass, fresh review APPROVE. T7d: 600 ticks/beat proven but universal origin not proven; safe-zero remains required. Next: T7b startup/backend wiring. |
 | 8 | offline/shadow gates | todo | — | — | — | |
 | 9 | hardware handoff | todo | — | — | — | operator-only; never auto-execute |

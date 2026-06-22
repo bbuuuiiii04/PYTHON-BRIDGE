@@ -4,12 +4,13 @@ Status: CURRENT AUTHORITATIVE
 
 Audited against the current checkout on 2026-06-21.
 
-## Offline SoundSwitch Project Boundary
+## SoundSwitch Pack Component Boundary
 
 - `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` provide frozen models and strict read-only decode; `soundswitch_pack.py` and `tools/export_soundswitch_pack.py` deterministically publish a canonical 95-artifact pack; `soundswitch_pack_verifier.py` independently verifies it. All are pinned to SoundSwitch 2.10.3 and the canonical UUID/RAVE profile.
 - Decode/export must not mutate a source project. Pack publication is deterministic and fail-closed; independent verification rejects inventory, hash, canonicalization, semantic, crosswalk, or source-drift changes, including the F9 one-byte mutation.
-- The offline lane is outside live runtime: it does not write `DeckState`/`OutputState`, enqueue `BridgeEvent`s, perform OS2L/MIDI/LED/Govee/Enttec output, or add config, commands, and status fields.
-- Task 3 loader/player and Task 4+ MIDI/runtime/backend integration, Enttec hard-kill behavior, and hardware validation remain future work.
+- The immutable pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender exist as software-tested components. T7a adds a never-raising config loader and an inert tracked example; config loading is startup/reload work and must never enter `_push_tick`.
+- `__main__` does not load the T7a config, and `StateManager` does not drive the pack player. No pack controller, direct-DMX, command, or status path is active. Existing OS2L/MIDI/LED/Govee behavior stays unchanged.
+- Direct DMX and physical MIDI output must remain mutually exclusive when later startup wiring lands. Owner-driven Enttec stop sends zero, but process death/`kill -9` can leave the last frame latched; hardware validation remains future work.
 
 ## State Ownership
 

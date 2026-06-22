@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 51367a1
+last_verified_commit: b7e0e66
 last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
@@ -17,14 +17,16 @@ Status:
 Purpose:
 - Track config sources, config validation, local ignored config behavior, and schema-change obligations.
 
-Task 2 boundary:
-- The read-only SoundSwitch decoder, deterministic exporter, canonical pack, and independent verifier add no bridge config schema or tracked example-config keys. Loader/player, MIDI/runtime/backend, and Enttec configuration remain planned and unimplemented.
-- Existing OS2L, laser, LED/Govee, Rekordbox, and runtime-status configuration is unchanged.
+SoundSwitch pack-player boundary:
+- `soundswitch_pack_player_config.py` implements the T7a startup-only, never-raising config loader.
+- `config/soundswitch_pack_player.example.json` is tracked, disabled, dry-run, and `output_backend: "none"` by default. The ignored local copy is `config/soundswitch_pack_player.json`.
+- This config is not wired into startup, `StateManager`, status, commands, MIDI, or Enttec yet. T7a alone causes no runtime or hardware behavior change.
 
 Authoritative code:
 - `config.py`
 - `laser_config.py`
 - `led_config.py`
+- `soundswitch_pack_player_config.py`
 - `config/*.example.json`
 - `.gitignore` for local config expectations
 
@@ -32,6 +34,7 @@ Key symbols:
 - config defaults in `config.py`
 - `load_laser_config`
 - `load_led_config`
+- `load_soundswitch_pack_player_config`
 - schema validation helpers
 
 Runtime flow:
@@ -42,8 +45,10 @@ Runtime flow:
 Config:
 - `config/laser_director.example.json`
 - `config/led_look_director.example.json`
+- `config/soundswitch_pack_player.example.json`
 - local ignored `config/laser_director.json`
 - local ignored `config/led_look_director.json`
+- local ignored `config/soundswitch_pack_player.json`
 - known backup `config/led_look_director.json.backup_1781599611` must not be committed
 - LED `color_engine.slot_fill_strategy_by_look` and `color_engine.slot_fill_strategy_by_role` default to empty objects when absent.
 - Accepted LED slot-fill strategy values are `gradient_even`, `random_with_replacement`, and `random_with_mono_chance`; invalid values disable the color engine while leaving LED config availability intact.
@@ -52,12 +57,18 @@ Config:
 - M2.5 slotized generic LED looks such as `rt_groove_chase`, `rt_post_drop_chase`, Patch E1 nebula looks, Patch E2 `rt_post_drop_center_comet`, and Patch E3 `rt_twinkle` are additive config entries. Patch F moves legacy color-suffix looks out of the tracked example `default` bank into `legacy_color_suffix` storage while keeping their look definitions intact.
 - Local ignored `config/led_look_director.json` can legitimately lag the tracked example; mirror Patch F to live config only with explicit operator approval and a loader check.
 - Point/mono palette ranges can collapse slot-color entries 0-4 to one solid RGB for any slot cue; `random_with_mono_chance` can also opt individual looks into probabilistic solid slots 0-4; slot 5 remains reserved pure white.
+- SoundSwitch pack-player path precedence is explicit argument, then `RBSS_SOUNDSWITCH_PACK_PLAYER_CONFIG`, then `config/soundswitch_pack_player.json`; an absent selected file returns `not_configured`.
+- Pack-player config defaults are `enabled=false`, `dry_run=true`, and `output_backend=none`. Supported backends are `none`, `midi`, and `pack`, but T7a does not activate any backend.
+- `fixture_map` must define exactly CH1 through CH19 with integer DMX addresses 1 through 512. A non-empty `fixture_map_path` is authoritative over the inline map and resolves relative to the containing config file unless absolute.
+- Pack-player timeouts must be positive integers. Paths and the Enttec port field must be strings. `midi_input_aliases` must map non-empty device identity strings to non-empty local port-alias strings.
+- Invalid JSON, unknown keys, duplicate JSON keys, duplicate fixture channels after integer coercion, invalid map files, and invalid field types fail closed as `invalid_config`; the loader never raises.
 
 Tests:
 - inspect `tests/` for laser config and LED config tests
 - run config-specific tests when schema changes
 - `tests/test_color_engine_config.py` covers LED color-engine slot-fill strategy defaults, accepted values, mono-chance parsing, and invalid-value rejection.
 - `tests/test_led_config.py` covers the LED `scripted_mode` blackout defaults, accepted `utility` destinations and partial maps, and invalid role/schema rejection.
+- `tests/test_soundswitch_pack_player_config.py` covers T7a defaults, path precedence, inline/external fixture maps, strict validation, immutability, and the never-raising contract.
 
 Change contract:
 - If schema changes, update loaders, example configs, setup docs, feature/status matrices, and tests.

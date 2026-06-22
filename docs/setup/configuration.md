@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 51367a1
+last_verified_commit: b7e0e66
 last_verified_date: 2026-06-21
 validation_scope: software-only
 ---
@@ -10,12 +10,13 @@ validation_scope: software-only
 
 This repo uses tracked example configs plus local ignored configs. Do not commit local device secrets, local IPs, API keys, or backup files.
 
-The Task 1–2 SoundSwitch frozen models, strict decoder, deterministic exporter, canonical 95-artifact pack, and independent verifier add no config keys or example files. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec configuration remain planned and unimplemented; existing SoundSwitch OS2L, laser, LED/Govee, Rekordbox, and status configuration is unchanged.
+SoundSwitch Task 7a adds a validated, startup-only pack-player config schema and tracked example. It is not wired into bridge startup or runtime yet, so existing SoundSwitch OS2L, laser, LED/Govee, Rekordbox, status, MIDI, and Enttec behavior remains unchanged.
 
 ## Tracked examples
 
 - `config/laser_director.example.json`
 - `config/led_look_director.example.json`
+- `config/soundswitch_pack_player.example.json`
 
 ## Local configs
 
@@ -23,6 +24,7 @@ Expected local files may include:
 
 - `config/laser_director.json`
 - `config/led_look_director.json`
+- `config/soundswitch_pack_player.json`
 
 These are local setup files, not public support evidence.
 
@@ -37,6 +39,24 @@ config/led_look_director.json.backup_1781599611
 ## Schema changes
 
 Use `docs/agents/task_playbooks/update_config_schema.md` before changing config schema or examples.
+
+## SoundSwitch pack-player config
+
+`soundswitch_pack_player_config.py` resolves the selected config in this order:
+
+1. explicit loader path;
+2. `RBSS_SOUNDSWITCH_PACK_PLAYER_CONFIG`;
+3. `config/soundswitch_pack_player.json`.
+
+If the selected file is absent, the result is `available=false`, `reason=not_configured`. Any read, JSON, schema, or fixture-map error returns `reason=invalid_config`; the loader does not raise.
+
+The tracked example is inert: `enabled=false`, `dry_run=true`, and `output_backend=none`. Copy it to the ignored local filename only when preparing a local setup. T7a does not start MIDI, serial, Enttec, DMX, or controller-input workers.
+
+`fixture_map` must contain exactly the string keys `1` through `19`, each mapped to an integer DMX address from 1 through 512. `fixture_map_path` is an optional alternative: when non-empty it takes precedence over the inline map. Relative map paths resolve against the directory containing the selected config file; absolute paths remain absolute. Map files contain the mapping object itself.
+
+Supported `output_backend` values are `none`, `midi`, and `pack`. Both timeout fields must be positive integers. `pack_path`, `fixture_map_path`, and `enttec_port` are strings. `midi_input_aliases` maps non-empty saved device identities to non-empty local port aliases. Do not put actual device identifiers or live port details in the tracked example or docs.
+
+This remains **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**. Backend selection and runtime ownership are later Task 7 work.
 
 ## LED color-engine notes
 

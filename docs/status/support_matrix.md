@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 51367a1
+last_verified_commit: b7e0e66
 last_verified_date: 2026-06-21
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -32,7 +32,7 @@ This matrix is deliberately conservative. If evidence is missing, the answer is 
 
 ## Lighting outputs
 
-The offline SoundSwitch project tooling is not a lighting output. For the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile, strict decode, deterministic canonical 95-artifact export, and independent verification are software-tested with exact 232+1/32/42/45 inventory, seven-class F-3 crosswalk, and F9 mutation rejection. It does not mutate projects. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec support remain planned and unimplemented.
+The SoundSwitch project/pack tooling is not a live lighting-output claim. For the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile, strict decode, deterministic canonical export, independent verification, immutable pack loading/rendering, MIDI-input routing, backend abstraction, and Enttec framing/sending have software tests. The proof gate is 29 PASS / 0 FAIL / 0 INCOMPLETE with F9 and F10 passing. T7a adds a default-off config loader only; pack startup, `StateManager`, status, commands, direct DMX, and hardware support remain unavailable.
 
 | Output | Status | Evidence | Notes |
 | --- | --- | --- | --- |
