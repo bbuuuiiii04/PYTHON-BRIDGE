@@ -584,5 +584,59 @@ class ExportPackLaunchSafetyTests(unittest.TestCase):
             self.assertEqual(self._staging_leftovers(root), [])
 
 
+class ExportDurabilityTests(unittest.TestCase):
+    """export_pack() crash-durability: directory entries and the atomic rename
+    must be fsync'd, not just file contents. Uses mocks so it runs on CI without
+    the real (skip-gated) SoundSwitch project."""
+
+    def test_fsync_dir_syncs_the_directory_fd(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(export_module.os, "fsync") as fsync:
+                export_module._fsync_dir(Path(tmp))
+            self.assertEqual(fsync.call_count, 1)
+
+    def test_fsync_dir_is_best_effort_when_unsupported(self):
+        # On platforms where opening a directory fd is unsupported (e.g. Windows)
+        # the helper must degrade to a no-op, never raise.
+        with mock.patch.object(export_module.os, "open", side_effect=OSError("no dir fd")):
+            export_module._fsync_dir(Path("/nonexistent"))  # must not raise
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(export_module.os, "fsync", side_effect=OSError("fsync fail")):
+                export_module._fsync_dir(Path(tmp))  # must not raise
+
+    def test_export_fsyncs_staging_dirs_then_parent_after_replace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            artifacts = {"manifest.json": b"{}\n", "sub/doc.json": b"[]\n"}
+            calls: list[Path] = []
+            real_replace = export_module.os.replace
+            replaced_at = {"index": None}
+
+            def spy_fsync_dir(path):
+                calls.append(Path(path))
+
+            def tracking_replace(src, dst):
+                replaced_at["index"] = len(calls)
+                return real_replace(src, dst)
+
+            with mock.patch.object(export_module, "decode_project", return_value=object()), \
+                 mock.patch.object(export_module, "compile_pack_artifacts", return_value=artifacts), \
+                 mock.patch.object(export_module, "verify_pack", return_value={"manifest_sha256": "x", "artifact_count": 2}), \
+                 mock.patch.object(export_module, "_fsync_dir", side_effect=spy_fsync_dir), \
+                 mock.patch.object(export_module.os, "replace", side_effect=tracking_replace):
+                export_pack(root / "ignored.ssproj", dest)
+
+            # Parent dir fsync'd AFTER the rename (durable publish).
+            self.assertIn(root, calls)
+            self.assertIsNotNone(replaced_at["index"])
+            self.assertEqual(calls[-1], root)
+            self.assertGreater(len(calls), replaced_at["index"],
+                               "parent dir must be fsync'd after os.replace")
+            # Staging dirs fsync'd BEFORE the rename (durable dir entries).
+            self.assertGreater(replaced_at["index"], 0,
+                               "staging dirs must be fsync'd before os.replace")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -34,6 +34,27 @@ def _generator_commit() -> str:
     return commit
 
 
+def _fsync_dir(directory: Path) -> None:
+    """fsync a directory so prior creates/renames within it survive a crash.
+
+    File *contents* are made durable with ``os.fsync(fd)`` at write time, but the
+    directory entries (and the atomic ``os.replace`` rename) are only durable
+    after the containing directory itself is fsync'd.  Opening a directory fd and
+    fsyncing it is unsupported on some platforms (e.g. Windows raises); treat
+    that as best-effort rather than failing an otherwise-good export.
+    """
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str]) -> dict[str, object]:
     source = Path(project).expanduser()
     destination = Path(output).expanduser()
@@ -46,6 +67,7 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
     artifacts = compile_pack_artifacts(decoded, generator_commit=_generator_commit())
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.tmp-", dir=parent))
     try:
+        written_dirs = {staging}
         for relative, data in artifacts.items():
             path = staging / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,8 +75,14 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
+            written_dirs.add(path.parent)
+        # Persist the staged directory entries before the atomic publish.
+        for directory in written_dirs:
+            _fsync_dir(directory)
         result = verify_pack(staging, source_project=source)
         os.replace(staging, destination)
+        # Persist the rename itself so the published pack survives a crash.
+        _fsync_dir(parent)
         return result
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
