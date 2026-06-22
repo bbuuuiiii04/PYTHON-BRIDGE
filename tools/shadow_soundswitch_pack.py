@@ -13,9 +13,11 @@ sends no output, restarts no bridge, and must never be cited as hardware or show
 validation. Single-process: it constructs a throwaway player and exits; there is no
 state to roll back (no files written, no devices touched).
 
-Autoloop FRAME coverage is DEFERRED — it is gated on the T7d phase-origin proof. The
-report records that deferral explicitly (``autoloop_coverage`` /
-``categories_covered``) so the gap is never silent.
+Autoloop runtime-phase shadow coverage is DEFERRED — the bridge has no proven T7d
+beat-to-animation phase origin yet.  Pure autoloop rendering with an explicitly
+supplied ``phase_tick`` is already covered by ``test_soundswitch_laser_player.py``.
+The report records only the runtime-integration deferral explicitly
+(``autoloop_coverage`` / ``categories_covered``) so that gap is never silent.
 """
 from __future__ import annotations
 
@@ -97,8 +99,9 @@ class ShadowReport:
             "categories_covered": list(self.categories_covered),
             "autoloop_coverage": self.autoloop_coverage,
             "autoloop_coverage_note": (
-                "autoloop frame coverage deferred — gated on the T7d phase-origin "
-                "proof; shadow covers scripted/static/blackout only"),
+                "autoloop runtime-phase shadow coverage deferred — gated on the T7d "
+                "phase-origin proof; pure rendering with an explicit phase_tick is "
+                "covered separately; this harness covers scripted/static/blackout"),
             "steps": [
                 {
                     "label": step.label,
@@ -176,8 +179,9 @@ def build_hermetic_scenario() -> list[ShadowAction]:
     """A self-contained scripted/static/blackout scenario for ``_hermetic_pack``.
 
     Hand-computed expected frames (independent of the player's renderer) let this
-    run with no live project and no hardware.  Autoloop steps are intentionally
-    absent — that coverage is reported deferred, not silently skipped.
+    run with no live project and no hardware.  Runtime-phase autoloop steps are
+    intentionally absent; direct ``phase_tick`` rendering is covered in the player
+    tests, while this harness reports the T7d integration gap explicitly.
     """
     scripted_id = _HERMETIC_SCRIPTED_ID
     scripted_frame = (100, 50) + (0,) * 17
@@ -203,15 +207,11 @@ def build_hermetic_scenario() -> list[ShadowAction]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project", type=Path, default=None,
-                        help="optional exported pack dir; default uses a synthetic pack")
-    args = parser.parse_args(argv)
+    parser.parse_args(argv)
 
-    if args.project is not None:
-        from rb_ss_bridge_v2.soundswitch_pack_loader import load_pack
-        player = LaserPackPlayer(load_pack(args.project))
-    else:
-        player = LaserPackPlayer(_hermetic_pack())
+    # This harness is deliberately hermetic. Real-pack artifacts and renderer
+    # frames are covered by the proof gate and the pack/player test suites.
+    player = LaserPackPlayer(_hermetic_pack())
 
     report = run_shadow(player, build_hermetic_scenario(), backend=NoneBackend())
     print(json.dumps(report.to_dict(), indent=2, sort_keys=True))

@@ -1,6 +1,23 @@
 # SoundSwitch implementation — progress ledger
 
-last_updated: 2026-06-22T05:00:00Z   last_session_model: claude-opus-4-8 (finisher)
+last_updated: 2026-06-22T15:00:00Z   last_session_agent: codex (T7d evidence planning)
+
+## T7d capture-evidence planning (Codex, 2026-06-22)
+
+- **T7d remains planned and BLOCKED on capture evidence.** The complete operator/evidence plan is
+  `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md`. It covers arm, refire,
+  master-switch, drop-hold, buildup, phrase-anchor, and correction; requires a non-circular
+  `validate_autoloop_capture` oracle; and keeps autoloop pack output safe-zero until both scale and
+  the full transition-origin contract pass captured parity.
+- **No phase mapping was selected.** The 600-ticks/beat candidate is explicitly unproven for T7d.
+  The current historical validator hard-codes `rate = bpm * 10.0`, so it cannot serve as independent
+  proof of 600. Existing captures remain useful renderer/corpus evidence.
+- **After-T8 cleanup applied:** the hermetic shadow tool no longer exposes the non-functional
+  `--project` option; its report now distinguishes pure explicit-`phase_tick` renderer coverage from
+  the blocked runtime phase-origin shadow; canonical Task 8 numbering/authority/path were corrected.
+  Verification: shadow 15/15; full suite `Ran 2120, OK` (3 skipped, 1 expected failure); proof gate
+  29/0/0; metadata/contracts/drift hard checks pass; staleness report remains advisory. T8 remains
+  approved in its software/offline scope.
 
 ## Finisher log (Opus 4.8, 2026-06-22)
 
@@ -91,27 +108,29 @@ from authoritative state and submits frames nonblocking:
   (the `soundswitch_frame_sender = None` placeholder), BEFORE `StateManager(...)`
   (~794) and `sm.start()` (~1175).
 
-### T7d phase evidence result (verified 2026-06-21; still blocked)
+### T7d phase evidence status (re-audited 2026-06-22; still blocked)
 
-- Controlled authoring evidence stores the next beat at tick 601 and a three-beat move at
-  tick 1800. An independent rate sweep over captured `SSAutoLoop13.ssfile` segment 49 uniquely
-  favored 600 ticks/beat (445/453 matching frames; 599→407, 601→420).
+- Prior controlled authoring/rate-sweep notes suggest 600 ticks/beat, but that is not accepted as
+  the T7d scale proof. The current `validate_autoloop_capture.py` path hard-codes
+  `rate = bpm * 10.0`, and the required seven-scenario capture matrix has not been run.
 - The universal origin is **not proven**. `autoloop_arm_sync_beat` is transient and clears
   after arm lock, while captured phrase-marker output aligns near tick zero at the latest
   accepted MIDI/refire beat (`midi_refire_origin_beat`). Existing captures do not cover every
   initial-arm, master-switch, drop-hold, buildup, phrase-anchor, and correction path.
-- Decision: T7d and T8 autoloop shadow parity stay blocked. Runtime integration must resolve
-  autoloop pack mode to safe zero (or a held static override) until a universal origin is proven.
+- Decision: T7d runtime-phase shadow parity stays blocked. Runtime integration must resolve
+  autoloop pack mode to safe zero (or a held static override) until the complete deterministic
+  transition-origin contract is proven.
 
 ### BLOCKER found during mechanism extraction (originally verified at `f7ae38d`)
 Task 7 is NOT thin glue. Determinable-from-code: config+loader, startup wiring,
 scripted-mode integration, status, commands, scene_to_identity, fixture_map. But:
 - **[BLOCKER — autoloop phase_tick]** `render_autoloop_frame(loop, phase_tick)`
   (`soundswitch_laser_player.py:118`) needs `phase_tick` in SoundSwitch internal
-  ANIMATION-TICK units (cycle = `AUTOLOOP_CYCLE_TICKS=19_200`, loader:19), wrapped
-  `% 19200`. The beat→tick scaling (`TICKS_PER_BEAT`) AND the phase ORIGIN (must
-  align tick-0 to `os.autoloop_arm_sync_beat`, not track start) are SS-internal
-  conventions ABSENT from code. 19200/`AUTOLOOP_ARM_PHRASE_BEATS`(=32, config.py:8)
+  ANIMATION-TICK units (cycle = `AUTOLOOP_CYCLE_TICKS=19_200`, loader:26), wrapped
+  `% 19200`. The beat→tick scaling (`TICKS_PER_BEAT`) AND the phase ORIGIN (candidate:
+  align tick-0 to `os.autoloop_arm_sync_beat` rather than track start) are SS-internal
+  conventions ABSENT from code. The origin may differ across transition classes.
+  19200/`AUTOLOOP_ARM_PHRASE_BEATS`(=32, config.py:8)
   = 600 is a plausible but UNPROVEN guess; the arm-phrase ≠ proven animation cycle.
   In the existing OS2L path SS advances the animation itself — pack/DMX mode must
   replicate it. Pinning needs CAPTURE-CORPUS evidence (autoloop DMX vs beat pos).
@@ -146,10 +165,10 @@ pack reload, worker error, shutdown) must clear held/pending state and resolve Z
 
 ## Next action
 
-> Task 7b: implement startup/backend port selection, verified-pack crosswalk/bindings,
-> baked fixture-map submission, early sender shutdown, and no-partial-start behavior.
-> Preserve existing MIDI startup exactly when pack config is absent/disabled. An enabled
-> `none`/dry-run config opens neither MIDI nor serial. Keep T7d autoloop output safe/zero.
+> Follow `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md`: first implement/review the
+> evidence-only phase trace and non-circular oracle, then request the operator-owned fixtures-safe
+> captures one scenario at a time. Do not implement T7d, choose 600, restart the bridge, or open a
+> device. T7d stays `planned, blocked on capture evidence`; Task 9 remains an explicit operator gate.
 
 ## Task status (0–9)
 
@@ -162,6 +181,6 @@ pack reload, worker error, shutdown) must clear held/pending state and resolve Z
 | 4 | MIDI input adapter | done | done | green | #115 | 32 tests; F10 CC export-fail check; proof 29/0/0; device-name dispatch + error-preservation + zombie-worker fixes post-review. HEAD `6a8ecf2`. |
 | 5 | output backend | done | done | green | #115 | MidiOutputBackend/NoneBackend/PackOutputBackend; priority signature fix; PackOutputBackend unlearned→False; stale attr removed. 70+170 tests pass. HEAD `db7eac2`. |
 | 6 | Enttec sender | done | done | green | #115 | 518-byte VLN-identical framing; bounded non-blocking deque; zero-on-stop; kill-9 hazard documented. 35 new tests; 2009 total. T7 note: remove _install_signal_handlers before wiring into __main__. HEAD `601d8db`. |
-| 7 | runtime integration | wip | partial | partial | #116 | T7.0/T7.1/T7a/T7b done. **T7c (pack driver) + T7e (sanitized status + validate-first set_soundswitch_pack reload/backend/enable) DONE software.** PackRuntime atomic-swap bundle; controller does stop-before-start + zero_and_stop, no-implicit-enable, pack-fail→none-not-midi, backend=midi deferred; sanitized status/errors. Tests green 3.11+3.14; proof PASS. T7d: autoloop phase origin unproven → autoloop DMX stays safe-zero. Next: T8. |
-| 8 | offline/shadow gates | done (software) | done | green | #116 | Items 0–5 confirmed via existing evidence (proof gate 29/0/0 PASS, canonical UUID + active-cue union SHA `88a2e94…`; F9+F10 PASS; `test_soundswitch_pack.py` twice-export byte-identical + totals 233/232/1/32/42/45/44 + adversarial mutation rejection; DDJ slots 8/16/17/24 render). **New for T8:** `tools/shadow_soundswitch_pack.py` + `tests/test_shadow_soundswitch_pack.py` — physical-backend-`none` shadow proof logging ONLY frame hashes vs independent expected; stop/blackout/emergency/reload-wait→zero; static-stands-alone; twice-run determinism; sanitization; backend-none enforced; slot-7 create/edit (item 6); **autoloop frame coverage reported `deferred_t7d_phase_origin`** (item 7 note). 14 tests green 3.11+3.14. Software/offline only — HARDWARE-UNVALIDATED. Next: T9 (operator-only). |
+| 7 | runtime integration | partial | partial | partial | #116 | T7.0/T7.1/T7a/T7b/T7c/T7e done in software. PackRuntime atomic-swap bundle; validate-first commands; sanitized status/errors. **T7d is planned, blocked on capture evidence** in `soundswitch_t7d_capture_evidence_plan.md`; scale + all seven transition origins remain unproven, so autoloop DMX stays safe-zero. |
+| 8 | offline/shadow gates | done (software) | done | green | #116 | Canonical items 0–6 confirmed: proof gate 29/0/0 with F9+F10; byte-identical double export; independent verification/totals/oracles; static slots 8/16/17/24 + slot-7 create/edit (item 5); hermetic physical-backend-`none` shadow hashes (item 6). Pure explicit-`phase_tick` autoloop rendering is player-tested; runtime beat-to-phase shadow remains explicitly deferred with T7d. Software/offline only — HARDWARE-UNVALIDATED. |
 | 9 | hardware handoff | todo | — | — | — | operator-only; never auto-execute |

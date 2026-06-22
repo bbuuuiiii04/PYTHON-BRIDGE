@@ -5,13 +5,15 @@ verified ``LaserPackPlayer`` through deterministic transition scenarios with the
 physical output backend forced to ``none`` and asserts that the harness records
 ONLY frame SHA-256 hashes, compares each against an INDEPENDENTLY hand-computed
 expected frame, resolves every stop/blackout/emergency path to a zero frame, and
-reports autoloop frame coverage as explicitly DEFERRED (gated on T7d), never
-silently skipped.
+reports runtime-phase autoloop shadow coverage as explicitly DEFERRED (gated on
+T7d), while pure explicit-phase rendering remains covered by player tests.
 """
 from __future__ import annotations
 
 import hashlib
+import io
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from types import MappingProxyType
 
@@ -37,6 +39,7 @@ from rb_ss_bridge_v2.tools.shadow_soundswitch_pack import (
     ShadowReport,
     build_hermetic_scenario,
     frame_sha256,
+    main,
     run_shadow,
 )
 
@@ -171,6 +174,10 @@ class RunShadowTests(unittest.TestCase):
 
 
 class ReportSanitizationTests(unittest.TestCase):
+    def test_removed_project_option_is_rejected(self):
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main(["--project", "/tmp/not-a-shadow-input"])
+
     def test_report_dict_exposes_no_raw_frames_or_identities(self):
         player = LaserPackPlayer(_pack())
         report = run_shadow(
@@ -184,7 +191,7 @@ class ReportSanitizationTests(unittest.TestCase):
         self.assertNotIn(SCRIPTED_ID, blob)
         self.assertNotIn(".ssfile", blob)
 
-    def test_autoloop_coverage_reported_deferred(self):
+    def test_autoloop_runtime_phase_coverage_reported_deferred(self):
         player = LaserPackPlayer(_pack())
         report = run_shadow(player, build_hermetic_scenario(), backend=NoneBackend())
         self.assertNotIn("autoloop", report.categories_covered)

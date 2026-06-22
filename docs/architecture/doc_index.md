@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 2c71a2e
-last_verified_date: 2026-06-21
+last_verified_commit: bc9f7f4
+last_verified_date: 2026-06-22
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -77,8 +77,9 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/active/beat_sync_runtime_spec.md` | PLAN / SPEC (ACTIVE) | Beat-sync runtime. |
 | `docs/plans/active/led_role_mapping_v2_spec.md` | PLAN / SPEC (ACTIVE) | Verify status against code. |
 | `docs/plans/active/rt_comet_*.md` (3) | PLAN / SPEC (ACTIVE) | Realtime comet stutter/smoothness/pause work; verify which are landed. |
-| `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE SPEC POINTER | Symlink to the authoritative grouped spec. Tasks 0–2 are complete through deterministic export and independent verification of the pinned canonical 95-artifact pack; Task 3 loader/player and Task 4+ runtime/backend/hardware work remain planned/default-off/hardware-unvalidated. |
-| `docs/plans/active/soundswitch_impl_progress.md` | ACTIVE RESUME LEDGER | Session-resume and task-progress ledger for AWR-107; verify its next-action/status rows against current code and gates before resuming. It grants no runtime or hardware authorization. |
+| `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE SPEC POINTER | Symlink to the authoritative grouped spec. Tasks 0–8 are software/offline-complete except T7d; T7d remains capture-blocked/default-off and Task 9 remains an explicit hardware gate. |
+| `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` | PLAN / SPEC (ACTIVE) | Current T7d blocker plan: prove ticks/beat plus arm/refire/master/drop/buildup/anchor/correction origin rules from operator-owned captures. It selects no phase mapping and grants no runtime/hardware authorization. |
+| `docs/plans/active/soundswitch_impl_progress.md` | ACTIVE RESUME LEDGER | Session-resume and task-progress ledger for AWR-107; current next action routes to the T7d capture-evidence plan. It grants no runtime or hardware authorization. |
 | `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |
 | `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | M2 phase1–3 prompts/handoffs likely **completed** (Phase 2b/3 committed at HEAD) — verify and archive what is done. SoundSwitch handoffs are grouped under `docs/research/soundswitch/`. |
 | `docs/plans/completed/govee_realtime_codex_spec.md` | PLAN / SPEC | **Untracked local file** — classify (completed vs awaiting-build) and commit or archive separately. |

@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 8ca5875
-last_verified_date: 2026-06-21
+last_verified_commit: bc9f7f4
+last_verified_date: 2026-06-22
 validation_scope: software-only
 ---
 
@@ -22,7 +22,7 @@ Each item points at an on-disk spec. **A spec is a plan, not proof of implementa
 | AWR-104 | Beat-sync runtime | `docs/plans/active/beat_sync_runtime_spec.md` | confirm against `beat_sync_engine.py` |
 | AWR-105 | LED role mapping v2 | `docs/plans/active/led_role_mapping_v2_spec.md` | scripted groove/drop/post-drop blackout remap is implemented and software-tested in current worktree; broader role-mapping-v2 scope still needs verification against `led_look_director.py`/`led_models.py` |
 | AWR-106 | LED color engine M2.5 solid-color strategy + Patch F cleanup | `docs/plans/active/led_color_engine_solid_color_and_patch_f_spec.md` | Patch S `random_with_mono_chance` and Patch F tracked-example bank cleanup are implemented and software-tested only; live-config mirror remains operator-gated; all hardware behavior remains unvalidated |
-| AWR-107 | SoundSwitch static exporter / bridge-native player | `docs/research/soundswitch/README.md` (directory authority), `docs/research/soundswitch/soundswitch_re_closure_report.md` (RE verdict), `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` (implementation spec), `docs/plans/active/soundswitch_impl_progress.md` (active resume ledger) | Tasks 0–2 are complete through deterministic export of an independently verified canonical 95-artifact pack for the pinned SoundSwitch 2.10.3 canonical RAVE project. Exact inventory is 232 render + 1 catalog-tail cues, 32 Static Looks, 42 autoloops, and 45 scripted records; seven-class F-3 crosswalk and F9 mutation rejection pass. Proof: 28 PASS / 0 FAIL / 1 INCOMPLETE, foundation 27/27 PASS; only F10 is deferred to Task 4. Task 3 loader/player and Task 4+ MIDI/runtime/backend/config/commands/`StateManager`/Enttec/hardware work remain planned. No runtime, restart, MIDI/DMX, Enttec, or hardware action is authorized; software/wire-validated only, hardware-unvalidated. |
+| AWR-107 | SoundSwitch static exporter / bridge-native player | `docs/research/soundswitch/README.md` (directory authority), `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` (implementation authority), `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` (current blocker plan), `docs/plans/active/soundswitch_impl_progress.md` (resume ledger) | Tasks 0–8 are software/offline-complete except T7d. Proof gate is 29 PASS / 0 FAIL / 0 INCOMPLETE with F9+F10; T8 shadow is backend-none/frame-hash only. T7d is planned and blocked until captures uniquely prove ticks/beat and reset/continue/snap rules for arm, refire, master-switch, drop-hold, buildup, phrase-anchor, and correction. Current pack autoloop output stays safe-zero; 600 is not accepted as proven. Task 9 is an explicit operator hardware gate. No restart, device output, or hardware validation is authorized; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
 
 ## Documentation system follow-ups
 

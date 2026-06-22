@@ -128,9 +128,10 @@ submit: backend.submit_frame(player.render().frame)   # non-blocking deque → D
 1. **[BLOCKER — autoloop `phase_tick`]** `render_autoloop_frame` wants `phase_tick` in
    SoundSwitch internal ANIMATION-TICK units (cycle = 19_200), wrapped `% 19_200`, applying
    events with `time < 0 or 0 <= time <= wrapped`. The beat→tick scaling (`TICKS_PER_BEAT`) AND
-   the phase ORIGIN (tick-0 must align to the autoloop **arm-sync beat**
-   `os.autoloop_arm_sync_beat`, set `autoloop_controller.py:571`, NOT track start) are
-   SoundSwitch-internal conventions **absent from code**. `AUTOLOOP_CYCLE_TICKS=19_200` /
+   the phase ORIGIN (candidate to falsify: tick-0 aligns to the autoloop **arm-sync beat**
+   `os.autoloop_arm_sync_beat`, set `autoloop_controller.py:571`, rather than track start) are
+   SoundSwitch-internal conventions **absent from code**. The candidate origin is not a fact and
+   may differ for refire/transition classes. `AUTOLOOP_CYCLE_TICKS=19_200` /
    `AUTOLOOP_ARM_PHRASE_BEATS=32` (`config.py:8`) = 600 ticks/beat is **[unknown] — a plausible
    but UNPROVEN guess**; the arm phrase need not equal the animation cycle. In the existing OS2L
    path SoundSwitch advances the animation itself; pack/DMX mode must replicate it. **Wrong value

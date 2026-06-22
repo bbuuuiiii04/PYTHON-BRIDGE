@@ -9,18 +9,20 @@ target branch/PR: `soundswitch/impl` / #116
 > opened, no bridge was restarted, no output was sent. This record never claims hardware, show, or
 > rig readiness. The hardware gate is Task 9 (operator-executed only).
 
-## Item-by-item evidence (spec `soundswitch_t7_t8_t9_implementation_spec.md` Task 8)
+## Item-by-item evidence
+
+Canonical authority: `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
+Task 8. The T7-T9 brief is supporting decomposition, not the Task 8 authority.
 
 | # | Requirement | Evidence | Status |
 |---|---|---|---|
-| 0 | Proof gate PASS; canonical UUID + active-cue union SHA | `prove_soundswitch_pack_generation` → `PASS_IMPLEMENTATION_MAY_BEGIN`, 29 PASS / 0 FAIL / 0 INCOMPLETE (foundation 27/27); UUID `{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}`; union SHA `88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2` | confirmed |
-| 1 | F9 (one-byte pack mutation rejected) + F10 (active CC/pitch override export-fail) | proof gate `F9-pack-one-byte-mutation` PASS, `F10-active-cc-override` PASS | confirmed |
-| 2 | Export twice → byte-identical tree | `test_soundswitch_pack.py::test_two_exports_are_byte_identical` (skips if live project absent) | confirmed (local) |
-| 3 | Independent verifier rejects every adversarial mutation | proof gate `F1–F10`; `test_soundswitch_pack.py` source/inventory/hash/canonicalization/semantic mutation rejection | confirmed |
-| 4 | Totals all hold | `test_soundswitch_pack.py::test_current_totals_crosswalk_and_catalog_tail` (233/232/1/32/42/45/44; DDJ slots 8/16/17/24) | confirmed (local) |
-| 5 | Oracles without contamination | proof gate A5 / cold new-track / legacy-discriminator checks; captures used as oracles only (production modules do not import `tools/ssfmt/re/`) | confirmed |
-| 6 | Static tests slots 8/16/17/24 + controlled slot-7 create/edit | proof gate `check_static_looks` render of 8/16/17/24; `test_shadow_soundswitch_pack.py::StaticSlotCoverageTests` (slot 8 + slot-7 create→edit via reload) | confirmed |
-| 7 | Shadow mode: physical backend `none`, log ONLY frame hashes, compare to independent expected | **new** `tools/shadow_soundswitch_pack.py` + `tests/test_shadow_soundswitch_pack.py` | confirmed (software) |
+| 0 | Proof gate PASS, including F9/F10; canonical UUID + active-cue union SHA | `prove_soundswitch_pack_generation` → `PASS_IMPLEMENTATION_MAY_BEGIN`, 29 PASS / 0 FAIL / 0 INCOMPLETE (foundation 27/27); `F9-pack-one-byte-mutation` PASS; `F10-active-cc-override` PASS; UUID `{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}`; union SHA `88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2` | confirmed |
+| 1 | Export twice → byte-identical tree | `test_soundswitch_pack.py::test_two_exports_are_byte_identical` (skips if live project absent) | confirmed (local) |
+| 2 | Independent verifier rejects every adversarial mutation | proof gate `F1–F10`; `test_soundswitch_pack.py` source/inventory/hash/canonicalization/semantic mutation rejection | confirmed |
+| 3 | Totals all hold | `test_soundswitch_pack.py::test_current_totals_crosswalk_and_catalog_tail` (233/232/1/32/42/45/44; DDJ slots 8/16/17/24) | confirmed (local) |
+| 4 | Oracles without contamination | proof gate A5 / cold new-track / legacy-discriminator checks; captures used as oracles only (production modules do not import `tools/ssfmt/re/`) | confirmed |
+| 5 | Static tests slots 8/16/17/24 + controlled slot-7 create/edit | proof gate `check_static_looks` render of 8/16/17/24; `test_shadow_soundswitch_pack.py::StaticSlotCoverageTests` (slot 8 + slot-7 create→edit via reload) | confirmed |
+| 6 | Shadow mode: physical backend `none`, log ONLY frame hashes, compare to independent expected | `tools/shadow_soundswitch_pack.py` + `tests/test_shadow_soundswitch_pack.py` | confirmed (software) |
 
 ## Shadow harness (`tools/shadow_soundswitch_pack.py`)
 
@@ -38,10 +40,11 @@ target branch/PR: `soundswitch/impl` / #116
   loses to blackout/emergency and to the post-reload wait latch.
 - Twice-run determinism: two passes produce byte-identical report dicts.
 
-## Autoloop coverage — DEFERRED (not skipped silently)
+## Autoloop runtime-phase coverage — DEFERRED (not skipped silently)
 
-Autoloop FRAME shadow coverage is gated on the T7d phase-origin proof (ticks/beat + universal phase
-origin), which remains unproven. The report records this explicitly as
+The pure player already covers autoloop rendering when a caller supplies an explicit `phase_tick` in
+`tests/test_soundswitch_laser_player.py`. What remains gated is shadow coverage of the runtime's
+beat-to-`phase_tick` integration because T7d scaling + origin remain unproven. The report records this as
 `autoloop_coverage = "deferred_t7d_phase_origin"` with a human note, and `categories_covered` never
 contains `autoloop`. The live driver still resolves autoloop output to safe-zero and never calls
 `select_autoloop`.
@@ -58,11 +61,10 @@ contains `autoloop`. The live driver still resolves autoloop output to safe-zero
 
 ## Commands run (results)
 
-- `python3.14 -m unittest tests.test_shadow_soundswitch_pack` → **OK** (14 tests).
-- `python3.11 -m unittest tests.test_shadow_soundswitch_pack` → **OK** (14 tests).
-- `cd /Users/bbui && python3.14 -m rb_ss_bridge_v2.tools.prove_soundswitch_pack_generation` →
+- `python3 -m unittest tests.test_shadow_soundswitch_pack` → **OK** (15 tests; post-review cleanup).
+- `cd ~ && python3.14 -m rb_ss_bridge_v2.tools.prove_soundswitch_pack_generation` →
   **PASS_IMPLEMENTATION_MAY_BEGIN** (29/0/0; foundation 27/27).
-- `python3 -m unittest discover tests` → see PR/CI run.
+- `python3 -m unittest discover tests` → **Ran 2120, OK** (skipped=3, expected failures=1).
 
 ## Remaining (not part of Task 8)
 
