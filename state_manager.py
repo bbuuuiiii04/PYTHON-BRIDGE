@@ -3235,7 +3235,12 @@ class StateManager:
             metadata_ready = _pack_normalize_id(ssid) is not None
 
             # 3. Automatic base: scripted only on the full happy path; else clear it so
-            #    a held static stands alone (idle) and no stale frame is retained.
+            #    a held static stands alone and no stale frame is retained.
+            #    Manual-static policy: a held Static Override is operator-controlled via
+            #    the (independent) MIDI controller, so it stays visible during ANY
+            #    non-happy-path here — idle/stop AND stale/error/track-change/
+            #    discontinuity. It loses only to blackout/emergency (set_masks -> render
+            #    ZERO above) and to pack-disabled/shutdown (driver inert / sender ZERO).
             if playing and fresh and metadata_ready and not track_changed and not discont:
                 player.select_scripted(
                     soundswitch_id=ssid, elapsed_ms=elapsed_ms, transport="playing",

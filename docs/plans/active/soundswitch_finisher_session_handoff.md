@@ -8,7 +8,9 @@ branch/PR: `soundswitch/impl` / #116 → base `main`
 ## TL;DR
 Steps 0 (CI green), 1 (export crash-durability), and **2 / T7c (StateManager pack driver)** are
 **done, committed, pushed, CI-verified**. T7c was implemented from the ChatGPT-reviewed spec rev 2
-(`docs/plans/active/soundswitch_t7c_pack_driver_spec.md`) and is GREEN on CI at `1adbe5c`.
+(`docs/plans/active/soundswitch_t7c_pack_driver_spec.md`); implemented at `1adbe5c`, **current PR
+head `d3a9645`, CI green at that head** (ChatGPT review: ACCEPT as software checkpoint; manual-static
+policy resolved 3a + tested).
 Steps 3 (T7e status/commands), 4 (Task 8 offline/shadow proof), 5 (Task 9 hardware handoff doc) are
 NOT started. T7d still blocks autoloop DMX (safe-zero only). Status stays **SOFTWARE-VALIDATED ONLY /
 HARDWARE-UNVALIDATED**. Do not claim show/rig-ready.
@@ -57,17 +59,9 @@ foundation 27/27) at finisher head.
 - Hard checks pass: `check_docs_metadata.py`, `check_agent_contracts.py`, `check_docs_drift.py`.
 
 ## Remaining work (operator's execution order)
-- **Step 2 — T7c** (live-critical): implement `docs/plans/active/soundswitch_t7c_pack_driver_spec.md`
-  **after review**. Plan summary: inject `soundswitch_pack_player/midi_input/pack_backend` (default
-  None=neutral) into `StateManager.__init__`; add read-only `_drive_pack_output()` driven once per
-  tick via a `_push_tick` wrapper (`try _push_tick_inner / finally drive` — there are 5 early returns
-  in `_push_tick`); the driver is the SOLE `PackOutputBackend.submit_frame` caller (executor uses
-  `trigger`, no collision); wire it in `__main__.py:1004`. Key safety fact: `player.render().frame`
-  is already ZERO on every idle/stop/stale/error path, so the driver just feeds flags + submits and
-  fails-conservative. Autoloop = safe-zero by omission (never call `select_autoloop`; T7d gate).
-  Full TDD test list (D1–D8) is in the spec. Use a real `LaserPackPlayer` + tiny synthetic pack
-  (builders in `tests/test_soundswitch_laser_player.py`: `_document`/`_look`/`_pack`).
-- **Step 3 — T7e**: sanitized pack status (no paths/ports/aliases) + validate-first
+- **Step 2 — T7c — DONE** (implemented `1adbe5c`, CI green at head `d3a9645`; ChatGPT ACCEPT as
+  software checkpoint; manual-static policy resolved 3a + tested). Not remaining.
+- **Step 3 — T7e** (NEXT): sanitized pack status (no paths/ports/aliases) + validate-first
   `set_soundswitch_pack` reload/backend/enable commands (no implicit hot-enable; stop-before-start;
   no partial swap). Lower risk than T7c.
 - **Step 4 — Task 8**: re-run proof gate at final commit; twice-export byte-identity; adversarial
@@ -90,7 +84,7 @@ Every stop/stale/error/reload/disable/deck-change/track-change/mode-transition/s
 ZERO. Never claim hardware/show readiness. Hardware validation is operator-executed only.
 
 ## Immediate next actions for the next session
-1. Pull the branch; confirm CI green at HEAD (T7c green at `1adbe5c`); re-run proof gate (parent dir).
+1. Pull the branch; confirm CI green at HEAD (current PR head `d3a9645`); re-run proof gate (parent dir).
 2. **Step 3 — T7e:** sanitized pack status (no paths/ports/aliases) + validate-first
    `set_soundswitch_pack` reload/backend/enable commands (no implicit hot-enable; stop-before-start;
    no partial swap). Operator wants plan-first review for anything touching live runtime commands.

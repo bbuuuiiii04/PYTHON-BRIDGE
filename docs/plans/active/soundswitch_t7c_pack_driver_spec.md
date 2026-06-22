@@ -1,9 +1,18 @@
 # Implementation Spec — T7c StateManager scripted-mode pack driver
 
-status: planned — **REVISION 2 (review corrections applied); ready to implement**
+status: **implemented / software-accepted** (ChatGPT review ACCEPT as software checkpoint)
 last_updated: 2026-06-22
 implementer: Claude (Opus 4.8) — per operator override for this task (NOT Codex)
-target branch/PR: `soundswitch/impl` / #116 (current head `419a044`)
+implemented at `1adbe5c`; current PR head `d3a9645` (CI green). Spec rev 2 applied + post-accept
+manual-static policy resolved (see below).
+target branch/PR: `soundswitch/impl` / #116
+
+> **Manual-static policy (resolved 3a, tested):** a held Static Override is operator-controlled via
+> the independent MIDI controller, so it stays VISIBLE during any deck-authority problem (idle / stop
+> / stale / error / track-change / discontinuity) — it loses ONLY to blackout, emergency, pack
+> disabled, and shutdown. The controller's own hold-timeout auto-releases it. Tests:
+> `test_state_manager_pack_driver.py::{test_stale_authority_with_held_static_shows_static,
+> test_track_change_with_held_static_shows_static, test_shutdown_style_disable_drops_even_held_static}`.
 
 > **Revision 2** folds in the ChatGPT review + operator corrections:
 > 1. metadata head `419a044`;

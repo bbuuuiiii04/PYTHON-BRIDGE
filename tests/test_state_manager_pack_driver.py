@@ -189,6 +189,40 @@ class PackDriverTests(unittest.TestCase):
         sm._drive_pack_output()  # load_gen changed -> track_changed -> ZERO this tick
         self.assertEqual(be.frames[-1], ZERO_FRAME)
 
+    # Manual-static policy (explicit): manual static is operator-controlled via the
+    # MIDI controller, an independent channel. It stays visible during stale/error/
+    # track-change/discontinuity (deck-authority problems), and loses ONLY to
+    # blackout/emergency/pack-disabled/shutdown. The controller's own hold-timeout
+    # auto-releases it if the operator lets go.
+    def test_stale_authority_with_held_static_shows_static(self):
+        be = _FakeBackend()
+        inp = _FakeInput(held_static_slot=8)
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, snap=STALE)
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1][0], 200)  # static look slot 8 stands alone
+
+    def test_track_change_with_held_static_shows_static(self):
+        be = _FakeBackend()
+        inp = _FakeInput(held_static_slot=8)
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, load_gen=1, snap=FRESH)
+        sm._drive_pack_output()
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, load_gen=2, snap=FRESH)
+        sm._drive_pack_output()  # track changed -> automatic base ZERO, static stands alone
+        self.assertEqual(be.frames[-1][0], 200)
+
+    def test_shutdown_style_disable_drops_even_held_static(self):
+        # Pack disabled (player/backend cleared) -> driver no-ops -> no DMX even with
+        # a (previously) held static. (Shutdown ZEROs via the frame sender at __main__.)
+        be = _FakeBackend()
+        inp = _FakeInput(held_static_slot=8)
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        sm._pack_player = None  # simulate disable/rollback to NoneBackend path
+        _set(sm, ssid="", playing=False, snap=FRESH)
+        sm._drive_pack_output()
+        self.assertEqual(be.frames, [])
+
     # D10
     def test_autoloop_never_called(self):
         be = _FakeBackend()
