@@ -9,7 +9,7 @@ branch/PR: `soundswitch/impl` / #116 → base `main`
 Steps 0 (CI green), 1 (export crash-durability), and **2 / T7c (StateManager pack driver)** are
 **done, committed, pushed, CI-verified**. T7c was implemented from the ChatGPT-reviewed spec rev 2
 (`docs/plans/active/soundswitch_t7c_pack_driver_spec.md`); implemented at `1adbe5c`, **current PR
-head `d3a9645`, CI green at that head** (ChatGPT review: ACCEPT as software checkpoint; manual-static
+head `6178795`, CI green at that head** (ChatGPT review: ACCEPT as software checkpoint; manual-static
 policy resolved 3a + tested).
 Steps 3 (T7e status/commands), 4 (Task 8 offline/shadow proof), 5 (Task 9 hardware handoff doc) are
 NOT started. T7d still blocks autoloop DMX (safe-zero only). Status stays **SOFTWARE-VALIDATED ONLY /
@@ -59,7 +59,7 @@ foundation 27/27) at finisher head.
 - Hard checks pass: `check_docs_metadata.py`, `check_agent_contracts.py`, `check_docs_drift.py`.
 
 ## Remaining work (operator's execution order)
-- **Step 2 — T7c — DONE** (implemented `1adbe5c`, CI green at head `d3a9645`; ChatGPT ACCEPT as
+- **Step 2 — T7c — DONE** (implemented `1adbe5c`, CI green at head `6178795`; ChatGPT ACCEPT as
   software checkpoint; manual-static policy resolved 3a + tested). Not remaining.
 - **Step 3 — T7e** (NEXT): sanitized pack status (no paths/ports/aliases) + validate-first
   `set_soundswitch_pack` reload/backend/enable commands (no implicit hot-enable; stop-before-start;
@@ -81,10 +81,13 @@ phrase-anchor/correction. Not proven. Do not implement autoloop DMX.
 No real MIDI/serial/Enttec/DMX/Art-Net/hardware in tests. Preserve default-off neutrality. No
 blocking I/O in `_push_tick` or the 40 fps Govee path. StateManager is the only DeckState writer.
 Every stop/stale/error/reload/disable/deck-change/track-change/mode-transition/shutdown path resolves
-ZERO. Never claim hardware/show readiness. Hardware validation is operator-executed only.
+the **automatic base** to ZERO. Nuance (resolved in T7c): a held manual Static Override is
+operator-controlled and may visibly stand alone during idle/stop/stale/error/track-change/
+discontinuity; it loses only to blackout/emergency/pack-disabled/shutdown. Never claim hardware/show
+readiness. Hardware validation is operator-executed only.
 
 ## Immediate next actions for the next session
-1. Pull the branch; confirm CI green at HEAD (current PR head `d3a9645`); re-run proof gate (parent dir).
+1. Pull the branch; confirm CI green at HEAD (current PR head `6178795`); re-run proof gate (parent dir).
 2. **Step 3 — T7e:** sanitized pack status (no paths/ports/aliases) + validate-first
    `set_soundswitch_pack` reload/backend/enable commands (no implicit hot-enable; stop-before-start;
    no partial swap). Operator wants plan-first review for anything touching live runtime commands.

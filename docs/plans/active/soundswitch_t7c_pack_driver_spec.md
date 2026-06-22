@@ -3,7 +3,7 @@
 status: **implemented / software-accepted** (ChatGPT review ACCEPT as software checkpoint)
 last_updated: 2026-06-22
 implementer: Claude (Opus 4.8) — per operator override for this task (NOT Codex)
-implemented at `1adbe5c`; current PR head `d3a9645` (CI green). Spec rev 2 applied + post-accept
+implemented at `1adbe5c`; current PR head `6178795` (CI green). Spec rev 2 applied + post-accept
 manual-static policy resolved (see below).
 target branch/PR: `soundswitch/impl` / #116
 
@@ -28,8 +28,11 @@ target branch/PR: `soundswitch/impl` / #116
 
 ## Part A — Context & root cause (verified; read, do not implement)
 
-T7b builds the pack player/controller/backend at startup but never wires them into the runtime tick,
-so `PackOutputBackend.submit_frame` has **no caller** — pack mode produces no DMX.
+Original root cause (now FIXED by T7c): T7b built the pack player/controller/backend at startup but
+did not wire them into the runtime tick, so `PackOutputBackend.submit_frame` had **no caller** and
+pack mode produced no DMX. T7c (this spec) injects the three deps into `StateManager` and adds the
+once-per-tick `_drive_pack_output()` that is now the sole `submit_frame` caller. The verified facts
+below describe the seam as implemented.
 
 - [confirmed] `__main__.py:919-921` builds the player/controller/sender; `__main__.py:1004-1015`
   constructs `StateManager(...)` WITHOUT passing them. Backend goes only to the laser wiring (`:912`).
