@@ -43,7 +43,9 @@ def _green_obs(**over):
 
 
 class ScenarioRegistryTests(unittest.TestCase):
-    def test_all_seven_scenarios_present(self):
+    def test_scenarios_present(self):
+        # phrase-anchor intentionally dropped: it only fires with
+        # RBSS_PHRASE_ANCHOR=1, which the operator's live rig does not set.
         self.assertEqual(
             set(cc.SCENARIOS),
             {
@@ -52,10 +54,12 @@ class ScenarioRegistryTests(unittest.TestCase):
                 "master-switch",
                 "drop-hold",
                 "buildup",
-                "phrase-anchor",
                 "correction",
             },
         )
+
+    def test_phrase_anchor_not_in_capture_pass(self):
+        self.assertNotIn("phrase-anchor", cc.SCENARIOS)
 
     def test_each_scenario_declares_required_markers(self):
         for name, spec in cc.SCENARIOS.items():

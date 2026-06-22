@@ -94,20 +94,14 @@ SCENARIOS: dict[str, dict] = {
         "min_window_beats": 48,
         "restart_required": False,
     },
-    "phrase-anchor": {
-        "operator_action": (
-            "With reviewed startup flags, run from >=16 beats before a 64-beat anchor "
-            "through 40 beats after."
-        ),
-        "required_markers": [
-            "phrase-anchor-clear",
-            "phrase-anchor",
-            "autoloop-rearm reason=phrase-anchor",
-        ],
-        "min_window_beats": 56,
-        "restart_required": True,
-        "startup_flags": ["RBSS_SMART_REARM_EXPERIMENT=1", "RBSS_PHRASE_ANCHOR=1"],
-    },
+    # NOTE: phrase-anchor was intentionally dropped from the capture pass.
+    # _phrase_anchor (smart_rearm.py) only runs when
+    # RBSS_SMART_REARM_EXPERIMENT=1 AND RBSS_PHRASE_ANCHOR=1
+    # (state_manager.py:481, PHRASE_ANCHOR_ENV default "0"). The operator's live
+    # rig sets REARM but not PHRASE_ANCHOR, so the transition never fires in
+    # production -- proving its phase origin would prove a contract the runtime
+    # never exercises. Re-add it here (with restart_required + startup_flags) if
+    # the live launch ever turns RBSS_PHRASE_ANCHOR on.
     "correction": {
         "operator_action": (
             "With master phrase-arm enabled, switch master within 0.25-0.5 beat after a "

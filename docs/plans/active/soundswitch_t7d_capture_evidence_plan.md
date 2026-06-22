@@ -13,6 +13,17 @@ validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HAR
 > Accepted repo status remains **SOFTWARE/WIRE-VALIDATED ONLY /
 > HARDWARE-UNVALIDATED**.
 
+> **SCOPE UPDATE 2026-06-22 — six scenarios, not seven.** `phrase-anchor` was
+> dropped from the capture pass: `_phrase_anchor` only fires when
+> `RBSS_SMART_REARM_EXPERIMENT=1` **and** `RBSS_PHRASE_ANCHOR=1`
+> (`state_manager.py:481`; `PHRASE_ANCHOR_ENV` default `"0"`), and the operator's
+> live launch sets REARM but not PHRASE_ANCHOR — the transition never fires in
+> production, so its phase origin is not part of the runtime contract. Wherever
+> this plan below says "seven scenarios" or lists `phrase-anchor`, read **six**
+> and ignore the phrase-anchor row (its matrix entry is struck through). This also
+> removes the only startup-flag restart from the pass. Re-add phrase-anchor only
+> if the live rig turns `RBSS_PHRASE_ANCHOR` on.
+
 ## Part A - Context and blocker (verified; read, do not implement T7d)
 
 ### A1. Scope and authority
@@ -214,7 +225,7 @@ marker is incomplete, not negative evidence.
 | **master-switch** | [assumed] Play two unscripted, beatgrid-valid decks at a controlled similar BPM; switch master more than one second before the next 32-beat boundary so the scheduled master-arm path is exercised. Keep both transports otherwise unchanged. | [unknown] Whether the previous deck's animation is cut/held, where the new identity starts, whether phase waits for the scheduled boundary, and whether ownership contaminates Universe 0. |
 | **drop-hold** | [assumed] Use a reviewed `drop_mode` personality with nonzero `post_drop_hold_beats`; capture buildup entry, drop crossing, and the entire `drop_hold` window while the accepted drop identity remains unchanged. | [unknown] Whether the held drop animation advances continuously, freezes, or restarts. A same-scene skip without a wire reset falsifies “every decision resets.” |
 | **buildup** | [assumed] Use a track with a curated Smart Drop and an UP phrase. Start more than `buildup_lookahead_beats` before the drop; require `buildup_to_drop_window` and `[LX] fired role=buildup`. | [unknown] Whether the new buildup identity starts at selection beat, snaps to the current global phrase, or inherits the previous animation phase. |
-| **phrase-anchor** | [assumed] With reviewed startup state `RBSS_SMART_REARM_EXPERIMENT=1` and `RBSS_PHRASE_ANCHOR=1`, run from at least 16 beats before a 64-beat anchor through 40 beats after; require `phrase-anchor-clear`, `phrase-anchor`, and `autoloop-rearm reason=phrase-anchor`. | [unknown] Whether the clear/rearm defines tick zero at the 64-beat anchor, at the actual accepted trigger, or continues prior phase. Missing flags require a separately approved restart; do not substitute a synthetic event. |
+| ~~**phrase-anchor**~~ | **DROPPED 2026-06-22** — `_phrase_anchor` is gated on `RBSS_PHRASE_ANCHOR=1` (`state_manager.py:481`), which the operator's live rig does not set, so the transition never fires in production and is not part of the runtime contract. | n/a |
 | **correction** | [assumed] With master phrase-arm enabled, switch master within 0.25-0.5 beat after a 32-beat boundary until the real logs show `arm-grace-late`, `arm-correction-pending`, `arm-correction-clear`, and the later correction lock. Do not inject delay or edit code to force it. | [unknown] Whether the late immediate arm and later correction each reset/continue/snap, and which recorded target is the phase origin after correction. |
 
 ### B4. Operator-only capture protocol

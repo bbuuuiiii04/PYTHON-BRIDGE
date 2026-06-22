@@ -14,10 +14,15 @@ No hardware captures were taken. The bridge core process was not running at the
 start of this session and the runtime status file was stale (frozen at
 2026-06-21 19:53; session date 2026-06-22), so the passive-capture reference
 path (live OS2L → SoundSwitch → Universe-0 Art-Net) could not be observed. The
-seven-scenario capture matrix therefore has **zero accepted, zero rejected, zero
+capture matrix therefore has **zero accepted, zero rejected, zero
 incomplete** real captures. The live capture gate was handed off
 (`docs/plans/active/soundswitch_t7d_capture_gate_handoff.md`) so it runs when the
 operator is physically present at the decks.
+
+**Scope update 2026-06-22:** the pass is **six** scenarios. `phrase-anchor` was
+dropped — `_phrase_anchor` only fires with `RBSS_PHRASE_ANCHOR=1`
+(`state_manager.py:481`), which the operator's live rig does not set, so its
+phase origin is not part of the runtime contract.
 
 This ledger records what is **software-ready** and what real evidence is still
 required. It does not fabricate capture results and it does not upgrade hardware
@@ -32,7 +37,7 @@ status.
 | INCOMPLETE | 0 | — (none attempted; gate handed off) |
 
 Required before B6 can pass (plan §A4/§B6): two ACCEPTED repetitions for each of
-arm, refire, master-switch, drop-hold, buildup, phrase-anchor, correction; ≥3
+arm, refire, master-switch, drop-hold, buildup, correction; ≥3
 verified IAC/bank-4 identities; ≥2 BPM/pitch values; ≥1 full holdout identity.
 
 ## Tooling readiness (software/wire-validated only)
@@ -74,8 +79,8 @@ premise (equivalent to assuming 600) was removed from the fit path.
 | master-switch | UNKNOWN — requires capture |
 | drop-hold | UNKNOWN — requires capture |
 | buildup | UNKNOWN — requires capture |
-| phrase-anchor | UNKNOWN — requires capture (and an approved flag restart) |
 | correction | UNKNOWN — requires capture |
+| ~~phrase-anchor~~ | DROPPED — `RBSS_PHRASE_ANCHOR` off in live rig; not in runtime contract |
 
 The oracle selects the origin **only** from recorded-state hypotheses
 (arm-sync target, MIDI/refire origin, phrase anchor, accepted-selection beat,

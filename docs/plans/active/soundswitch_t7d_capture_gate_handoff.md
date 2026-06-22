@@ -55,9 +55,12 @@ Only these cannot be safely automated; ping for each and poll for the result:
 - start/stop a physical playback/transport action (load + play a deck, switch
   master, etc.) per the scenario;
 - start `sudo tcpdump` (needs sudo) and stop it with Ctrl-C (you cannot stop a
-  sudo process you did not own);
-- approve + perform an exact bridge restart **only** if a scenario needs startup
-  flags (phrase-anchor; possibly correction).
+  sudo process you did not own).
+
+No scenario in the current pass needs a startup-flag restart: phrase-anchor (the
+only flag-gated scenario) was dropped because the operator's live rig does not
+set `RBSS_PHRASE_ANCHOR=1`, and `correction` runs under the default-on master
+phrase arm.
 
 Automated by the conductor: run dir + manifest, one-bridge-process check,
 status/pack-disabled check, project before/after hashing, session-recorder
@@ -96,7 +99,7 @@ growth → **active-wait** for the scenario markers → ping to stop → settle 
 classify → sanitized `summary.json`. It pings at each physical gate and polls in
 between. Do not replace this with manual steps.
 
-Seven scenarios (each needs **two ACCEPTED repetitions**, plus the identity/BPM
+Six scenarios (each needs **two ACCEPTED repetitions**, plus the identity/BPM
 coverage of plan §A4/§B6 — ≥3 verified IAC/bank-4 identities, ≥2 BPM/pitch
 values, ≥1 full holdout identity):
 
@@ -107,19 +110,27 @@ values, ≥1 full holdout identity):
 | `master-switch` | two decks similar BPM; switch master >1s before a 32-beat boundary | `[LX] fired` |
 | `drop-hold` | reviewed drop_mode, nonzero post_drop_hold_beats; capture the whole hold | `[LX] fired` |
 | `buildup` | curated Smart Drop + UP phrase; start before the lookahead | `[LX] fired role=buildup`, `buildup_to_drop_window` |
-| `phrase-anchor` | **needs restart** with `RBSS_SMART_REARM_EXPERIMENT=1 RBSS_PHRASE_ANCHOR=1` | `phrase-anchor-clear`, `phrase-anchor`, `autoloop-rearm reason=phrase-anchor` |
-| `correction` | master phrase-arm on; switch master 0.25–0.5 beat after a 32-beat boundary | `arm-grace-late`, `arm-correction-pending`, `arm-correction-clear` |
+| `correction` | master phrase-arm on (default); switch master 0.25–0.5 beat after a 32-beat boundary | `arm-grace-late`, `arm-correction-pending`, `arm-correction-clear` |
+
+> `phrase-anchor` was dropped from the pass: `_phrase_anchor` only fires when
+> `RBSS_SMART_REARM_EXPERIMENT=1` **and** `RBSS_PHRASE_ANCHOR=1`
+> (`state_manager.py:481`; `PHRASE_ANCHOR_ENV` default `"0"`), and the operator's
+> live launch sets REARM but not PHRASE_ANCHOR — so the transition never fires in
+> production and its phase origin is not part of the runtime contract. Re-add it
+> (it is still documented in the conductor source) only if the live rig turns
+> `RBSS_PHRASE_ANCHOR` on.
 
 > Marker strings are presence checks sourced from plan §B3; confirm them against
 > `bridge_fmt` log output and refine `SCENARIOS[...]["required_markers"]` in the
 > conductor if a real run shows a different exact string. Refining a marker is a
 > tooling change, not evidence reinterpretation.
 
-**Restart gate.** For `phrase-anchor` (and `correction` if it needs flags), the
-conductor pings for an operator-approved restart with the exact flags and does
-**not** restart. Ping Brandon, state the exact command and why, then **poll**
-`prepare` until green and re-run. A missing-flag run is `INCOMPLETE`; never
-substitute a synthetic event.
+**Restart gate.** No scenario in the current six-scenario pass requires a
+startup-flag restart (phrase-anchor, the only flag-gated scenario, was dropped).
+The conductor still fails closed if any future flag-gated scenario is re-added:
+it pings for an operator-approved restart with the exact flags and does **not**
+restart itself. A missing-flag run is `INCOMPLETE`; never substitute a synthetic
+event.
 
 **Fail-closed.** Every active wait times out into an `INCOMPLETE` record. Do not
 reinterpret. Re-ping and re-run if an operator action can fix it; otherwise
@@ -201,6 +212,11 @@ automatable prep is done; resume goes straight to §3 scenario captures.
 - **Resume command (operator says "go"):** `python3
   tools/t7d_capture_conductor.py prepare` (expect green) → run the smoke test
   above → `python3 tools/t7d_capture_conductor.py run-scenario arm --run-stamp
-  <YYYYmmdd_HHMMSS>`. `phrase-anchor` still needs an operator restart with
-  `RBSS_SMART_REARM_EXPERIMENT=1 RBSS_PHRASE_ANCHOR=1` (current launch has
-  REARM but not PHRASE_ANCHOR).
+  <YYYYmmdd_HHMMSS>`. The pass is six scenarios with **no** special-restart
+  scenario.
+- **phrase-anchor DROPPED 2026-06-22 (operator: "I don't use that anymore").**
+  Code-confirmed dead in the live rig (`state_manager.py:481` gates it on
+  `RBSS_PHRASE_ANCHOR=1`, which the launch does not set). Removed from the
+  conductor `SCENARIOS` registry + tests; six scenarios remain (arm, refire,
+  master-switch, drop-hold, buildup, correction). This also removed the only
+  startup-flag restart gate from the pass.
