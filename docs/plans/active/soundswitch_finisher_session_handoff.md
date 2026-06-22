@@ -6,10 +6,19 @@ author: Claude Opus 4.8 (finisher session 1)
 branch/PR: `soundswitch/impl` / #116 → base `main`
 
 ## TL;DR
-Steps 0 (CI green) and 1 (export crash-durability) are **done, committed, pushed, CI-verified**.
-Step 2 (T7c StateManager pack driver) is **planned but NOT implemented** — the plan is written and
-awaiting ChatGPT review; a spike was reverted so the branch carries plan-only. Steps 3–5 not started.
-Status stays **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**. Do not claim show/rig-ready.
+Steps 0 (CI green), 1 (export crash-durability), and **2 / T7c (StateManager pack driver)** are
+**done, committed, pushed, CI-verified**. T7c was implemented from the ChatGPT-reviewed spec rev 2
+(`docs/plans/active/soundswitch_t7c_pack_driver_spec.md`) and is GREEN on CI at `1adbe5c`.
+Steps 3 (T7e status/commands), 4 (Task 8 offline/shadow proof), 5 (Task 9 hardware handoff doc) are
+NOT started. T7d still blocks autoloop DMX (safe-zero only). Status stays **SOFTWARE-VALIDATED ONLY /
+HARDWARE-UNVALIDATED**. Do not claim show/rig-ready.
+
+**T7c shape (implemented):** `LaserPackPlayer.clear_selection()` added; StateManager injects
+`soundswitch_pack_player/midi_input/pack_backend` (default None = neutral); read-only
+`_drive_pack_output()` runs once per tick via a `_push_tick` wrapper (covers 5 early returns; inner
+exception → ZERO direct + re-raise); driver is the SOLE `submit_frame` caller; idle held-static
+stands alone via `clear_selection()`; autoloop safe-zero. Tests: 4 player tests +
+`tests/test_state_manager_pack_driver.py` (D1–D14).
 
 ## Operator working agreement for this task (important)
 - Operator **overrode** the standing "Codex implements bridge code" rule for THIS task: Claude
@@ -81,7 +90,11 @@ Every stop/stale/error/reload/disable/deck-change/track-change/mode-transition/s
 ZERO. Never claim hardware/show readiness. Hardware validation is operator-executed only.
 
 ## Immediate next actions for the next session
-1. Pull the branch; confirm CI green at HEAD; re-run proof gate (from parent dir).
-2. Read the ChatGPT review of `soundswitch_t7c_pack_driver_spec.md`; reconcile findings into the spec.
-3. Implement T7c per the (reviewed) spec with TDD; run on BOTH 3.11 and 3.14; update the ledger.
-4. Then Steps 3 → 4 → 5.
+1. Pull the branch; confirm CI green at HEAD (T7c green at `1adbe5c`); re-run proof gate (parent dir).
+2. **Step 3 — T7e:** sanitized pack status (no paths/ports/aliases) + validate-first
+   `set_soundswitch_pack` reload/backend/enable commands (no implicit hot-enable; stop-before-start;
+   no partial swap). Operator wants plan-first review for anything touching live runtime commands.
+3. **Step 4 — Task 8:** offline/shadow proof (proof gate at final commit; twice-export byte-identity;
+   adversarial mutation rejection; shadow backend physical=none logging frame hashes; pinned totals).
+4. **Step 5 — Task 9:** author the operator hardware-gate handoff doc (review-only; open no devices).
+5. T7d remains blocked → autoloop DMX stays safe-zero. Keep status HARDWARE-UNVALIDATED throughout.
