@@ -4,6 +4,20 @@ last_updated: 2026-06-22T05:00:00Z   last_session_model: claude-opus-4-8 (finish
 
 ## Finisher log (Opus 4.8, 2026-06-22)
 
+- **Step 3 / T7e — sanitized status + validate-first runtime commands DONE (software).** Spec
+  `docs/plans/active/soundswitch_t7e_status_commands_spec.md` rev 2 (ChatGPT-reviewed) implemented:
+  new frozen `soundswitch_pack_runtime.PackRuntime` (atomic single-reference swap; StateManager reads
+  one ref/tick); `SoundSwitchPackController` (`soundswitch_pack_controller.py`) does validate-first
+  reload/backend/enable on the command thread (no implicit hot-enable; stop-before-start with
+  explicit `frame_sender.zero_and_stop()`; no partial swap; pack failure → disabled/none never MIDI;
+  runtime `backend=midi` deferred → sanitized `unsupported_action`). `set_soundswitch_pack` added to
+  `parse_command` (validate-first) + `CommandReader` dispatch (sanitized errors, C10). Sanitized
+  `soundswitch_pack` status provider in `RuntimeStatusWriter`. `__main__` wires controller + status
+  provider. Tests: `test_soundswitch_pack_controller.py` (9), `test_soundswitch_pack_commands.py`
+  (11), migrated driver tests (17). Full suite green on 3.14; T7e + runtime_status + driver green on
+  3.11; proof gate PASS (29/0/0); hard checks pass. **Remaining: Step 4 (Task 8), Step 5 (Task 9);
+  T7d still blocks autoloop DMX.**
+
 - **Step 2 / T7c — StateManager pack driver DONE (software).** Spec
   `docs/plans/active/soundswitch_t7c_pack_driver_spec.md` rev 2 (ChatGPT-reviewed) implemented:
   added `LaserPackPlayer.clear_selection()`; injected `soundswitch_pack_player/midi_input/
@@ -148,6 +162,6 @@ pack reload, worker error, shutdown) must clear held/pending state and resolve Z
 | 4 | MIDI input adapter | done | done | green | #115 | 32 tests; F10 CC export-fail check; proof 29/0/0; device-name dispatch + error-preservation + zombie-worker fixes post-review. HEAD `6a8ecf2`. |
 | 5 | output backend | done | done | green | #115 | MidiOutputBackend/NoneBackend/PackOutputBackend; priority signature fix; PackOutputBackend unlearned→False; stale attr removed. 70+170 tests pass. HEAD `db7eac2`. |
 | 6 | Enttec sender | done | done | green | #115 | 518-byte VLN-identical framing; bounded non-blocking deque; zero-on-stop; kill-9 hazard documented. 35 new tests; 2009 total. T7 note: remove _install_signal_handlers before wiring into __main__. HEAD `601d8db`. |
-| 7 | runtime integration | wip | partial | partial | #116 | T7.0/T7.1/T7a/T7b done. **T7c (StateManager pack driver) DONE software** — driver is sole `submit_frame` caller; idle held-static stands alone via `clear_selection()`; autoloop safe-zero; D1–D14 + player tests green on 3.11+3.14; proof PASS. T7d: 600 ticks/beat proven but universal origin not proven; autoloop stays safe-zero. Next: T7e status/commands. |
+| 7 | runtime integration | wip | partial | partial | #116 | T7.0/T7.1/T7a/T7b done. **T7c (pack driver) + T7e (sanitized status + validate-first set_soundswitch_pack reload/backend/enable) DONE software.** PackRuntime atomic-swap bundle; controller does stop-before-start + zero_and_stop, no-implicit-enable, pack-fail→none-not-midi, backend=midi deferred; sanitized status/errors. Tests green 3.11+3.14; proof PASS. T7d: autoloop phase origin unproven → autoloop DMX stays safe-zero. Next: T8. |
 | 8 | offline/shadow gates | todo | — | — | — | |
 | 9 | hardware handoff | todo | — | — | — | operator-only; never auto-execute |

@@ -3197,6 +3197,10 @@ class StateManager:
         """
         self._pack_runtime = runtime or DISABLED_PACK_RUNTIME
 
+    def get_pack_runtime(self) -> PackRuntime:
+        """Current pack runtime bundle (for the command-thread controller's snapshot)."""
+        return self._pack_runtime
+
     def get_pack_status(self) -> dict[str, Any]:
         """Sanitized pack status for the runtime status surface (no paths/ports/etc.)."""
         rt = self._pack_runtime

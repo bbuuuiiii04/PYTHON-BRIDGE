@@ -54,6 +54,7 @@ echo '{"cmd":"run_validation"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
 | `led_blackout` | none | `reason`, `target` | Rejects unknown fields. `reason` and `target`, when present, must be non-empty strings. | Invokes LED blackout callback if wired. |
 | `led_clear_blackout` | none | none | Rejects all payload fields except `cmd`. | Clears LED blackout callback if wired. |
 | `led_clear_scene_override` | none | none | Rejects all payload fields except `cmd`. | Clears LED scene override callback if wired. |
+| `set_soundswitch_pack` | `action` | `backend`, `enabled` | Rejects unknown fields. `action` must be `reload`\|`backend`\|`enable`. `backend` action requires `backend` ∈ `pack`\|`none`\|`midi`. `enable` action requires boolean `enabled`. | Validate-first pack reload/backend/enable via `SoundSwitchPackController` (command thread). Runtime `backend=midi` is deferred (sanitized `unsupported_action`). No implicit hot-enable; pack failure falls back to disabled/none, never MIDI. Status/errors are sanitized. |
 
 ## Parser behavior
 

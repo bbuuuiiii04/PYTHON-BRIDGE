@@ -74,6 +74,7 @@ from .soundswitch_laser_player import LaserPackPlayer
 from .soundswitch_midi_input import SoundSwitchMidiInputGroup
 from .soundswitch_pack_loader import LoadedPack, load_pack
 from .soundswitch_pack_runtime import PackRuntime
+from .soundswitch_pack_controller import SoundSwitchPackController
 from .soundswitch_pack_player_config import (
     SoundSwitchPackPlayerConfigResult,
     load_soundswitch_pack_player_config,
@@ -1229,6 +1230,27 @@ def main() -> None:
             path = f"/tmp/rbss-session-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
         return sm.toggle_session_recording(path, dedup=dedup)
 
+    def _prepare_pack_runtime() -> PackRuntime:
+        # Validate-first build of a NEW, UNSTARTED pack runtime (load_pack + verify +
+        # construct backend/sender). Raises on failure so the controller keeps the old
+        # runtime. No serial opens here — the controller starts the sender on publish.
+        cfg_result = load_soundswitch_pack_player_config()
+        bundle = _build_soundswitch_pack_startup(cfg_result)
+        if bundle.player is None or bundle.frame_sender is None or bundle.laser_backend is None:
+            raise RuntimeError("pack_prepare_failed")
+        return PackRuntime(
+            enabled=False, reason="prepared", player=bundle.player,
+            midi_input=bundle.midi_input, backend=bundle.laser_backend,
+            frame_sender=bundle.frame_sender,
+            pack_sha12=(getattr(bundle.pack, "manifest_sha256", "") or "")[:12],
+        )
+
+    soundswitch_pack_controller = SoundSwitchPackController(
+        publish=sm.set_pack_runtime,
+        snapshot=lambda: sm.get_pack_runtime(),
+        prepare=_prepare_pack_runtime,
+    )
+
     command_reader = CommandReader(
         validation_runner,
         smart_drop_toggle_callback=_toggle_smart_drop,
@@ -1245,6 +1267,7 @@ def main() -> None:
         led_clear_blackout_callback=_led_clear_blackout,
         led_clear_scene_override_callback=_led_clear_scene_override,
         record_session_toggle_callback=_toggle_record_session,
+        pack_command_callback=soundswitch_pack_controller.handle,
     )
     sm_led_status_provider = getattr(sm, "led_status_provider", None)
     if not callable(sm_led_status_provider):
@@ -1262,6 +1285,7 @@ def main() -> None:
         laser_status_provider=laser_status_provider,
         led_status_provider=sm_led_status_provider,
         color_engine_status_provider=sm_color_status_provider,
+        pack_status_provider=sm.get_pack_status,
     )
 
     # Initialize master deck from guarded direct read when available, otherwise deck 1.
