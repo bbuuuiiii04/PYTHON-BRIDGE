@@ -282,6 +282,57 @@ def phase_footer_drops(session_text: str) -> int:
     return int(f.get("dropped", 0) or 0) + int(f.get("undrained", 0) or 0)
 
 
+def playing_phase_beat_span_within(session_text: str, t0: float, t1: float) -> float:
+    """Beat span of *playing* autoloop_phase rows whose epoch falls in [t0, t1].
+
+    Used to require playback DURING the pcap window: a capture where tcpdump
+    started after playback ended has playing rows but none inside the pcap range,
+    so the oracle could never correlate arm events to Art-Net frames.
+    """
+    if t1 <= t0:
+        return 0.0
+    bp = [
+        r.get("abs_beat_pos")
+        for r in parse_session_rows(session_text)
+        if r.get("kind") == "autoloop_phase"
+        and r.get("playing")
+        and isinstance(r.get("abs_beat_pos"), (int, float))
+        and isinstance(r.get("epoch_ns"), (int, float))
+        and t0 <= r["epoch_ns"] / 1e9 <= t1
+    ]
+    if len(bp) < 2:
+        return 0.0
+    return float(max(bp) - min(bp))
+
+
+def tick_fires_within(session_text: str, t0: float, t1: float) -> int:
+    """Count autoloop tick-fires whose epoch falls in [t0, t1] (pcap window)."""
+    return sum(
+        1
+        for r in parse_session_rows(session_text)
+        if r.get("kind") == "autoloop_phase"
+        and r.get("autoloop_tick_just_fired")
+        and isinstance(r.get("epoch_ns"), (int, float))
+        and t0 <= r["epoch_ns"] / 1e9 <= t1
+    )
+
+
+def pcap_time_range(pcap_path) -> tuple | None:
+    """(first, last) packet epoch seconds, or None if unreadable/empty."""
+    if not Path(pcap_path).exists():
+        return None
+    try:
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "ssfmt" / "re"))
+        from parse_artnet_pcap import read_pcap  # type: ignore
+
+        _net, packets = read_pcap(Path(pcap_path))
+        if not packets:
+            return None
+        return (packets[0][0], packets[-1][0])
+    except Exception:
+        return None
+
+
 def build_manifest(scenario: str, run_id: str, *, created_epoch: float) -> dict:
     if scenario not in SCENARIOS:
         raise ValueError(f"unknown scenario: {scenario!r}")
@@ -537,24 +588,30 @@ def cmd_run_scenario(args) -> int:
         timeout_s=args.start_timeout_s,
         label="capture start (pcap+session)",
     )
+    # Wall-clock when the pcap first had bytes: only playback AFTER this counts,
+    # so the accepted window is guaranteed to overlap the Art-Net capture. (A run
+    # where the operator played first and started tcpdump later has playing rows
+    # but none inside the pcap range -> the oracle could never align them.)
+    pcap_seen_epoch = time.time() if started else 0.0
 
     played_through = False
     if started:
-        # ACTIVE WAIT 2: a deck must actually play through the window -- the phase
-        # trace must accumulate playing rows spanning >= min_window_beats AND the
-        # window-new markers must appear. Waiting on whole-log markers alone
-        # false-completes instantly on stale lines (the original defect).
+        # ACTIVE WAIT 2: the deck must play through the window WHILE tcpdump is
+        # capturing -- playing rows whose epoch is after pcap-start must span
+        # >= min_window_beats, AND the window-new markers must appear. (Whole-log
+        # markers alone false-complete on stale lines; whole-session span
+        # false-completes on pre-pcap playback.)
         def _played():
             stext = _read(session)
             return (
-                playing_phase_beat_span(stext) >= need_beats
+                playing_phase_beat_span_within(stext, pcap_seen_epoch, time.time()) >= need_beats
                 and new_markers_present(_read(BRIDGE_LOG), log_start_offset, spec["required_markers"])
             )
 
         played_through = poll_until(
             _played,
             timeout_s=args.window_timeout_s,
-            label=f"{scenario} playback through {need_beats} beats + markers",
+            label=f"{scenario} playback through {need_beats} beats during pcap + markers",
         )
 
     ping(
@@ -572,6 +629,14 @@ def cmd_run_scenario(args) -> int:
     session_text = _read(session)
     log_text = _read(BRIDGE_LOG)
     markers_seen = new_markers_present(log_text, log_start_offset, spec["required_markers"])
+    # Gate on playback that actually overlaps the captured pcap window.
+    prange = pcap_time_range(pcap)
+    if prange is None:
+        overlap_span = 0.0
+        overlap_ticks = 0
+    else:
+        overlap_span = playing_phase_beat_span_within(session_text, prange[0], prange[1])
+        overlap_ticks = tick_fires_within(session_text, prange[0], prange[1])
     obs = {
         "bridge_process_count": core_bridge_process_count(),
         "pack_output_disabled": pack_output_disabled(read_status()),
@@ -581,7 +646,10 @@ def cmd_run_scenario(args) -> int:
         "pcap_universe0_frames": count_universe0_frames(pcap),
         "recorder_drops": phase_footer_drops(session_text),
         "playing_phase_rows": count_playing_phase_rows(session_text),
-        "playing_phase_beat_span": round(playing_phase_beat_span(session_text), 3),
+        # the gating span is playback DURING the pcap, not total playback
+        "playing_phase_beat_span": round(overlap_span, 3),
+        "playing_phase_beat_span_total": round(playing_phase_beat_span(session_text), 3),
+        "pcap_overlap_tick_fires": overlap_ticks,
         "phase_footer_clean": phase_footer_clean(session_text),
         "min_window_beats": need_beats,
     }
@@ -598,20 +666,28 @@ def cmd_validate_scenario(args) -> int:
     log_text = _read(run_dir / "logs" / "bridge.log")
     session_text = _read(run_dir / "session.jsonl")
     need_beats = spec["min_window_beats"]
-    span = playing_phase_beat_span(session_text)
+    # Re-validate against the captured pcap window: the gating span is playback
+    # that overlaps the pcap (what the oracle can actually align), not total
+    # playback. A run where tcpdump started after playback -> overlap 0 -> INCOMPLETE.
+    prange = pcap_time_range(pcap)
+    if prange is None:
+        overlap_span = 0.0
+        overlap_ticks = 0
+    else:
+        overlap_span = playing_phase_beat_span_within(session_text, prange[0], prange[1])
+        overlap_ticks = tick_fires_within(session_text, prange[0], prange[1])
     obs = {
         "bridge_process_count": 1,
         "pack_output_disabled": True,
         "project_hash_matched": _project_hashes_match(run_dir),
-        # Re-validation cannot recover a window offset, so require markers in the
-        # full copied log AND a phase trace that proves playback through the
-        # window -- the latter is what actually guards against an empty capture.
-        "timed_out": span < need_beats,
+        "timed_out": overlap_span < need_beats,
         "required_markers_present": markers_present(log_text, spec["required_markers"]),
         "pcap_universe0_frames": count_universe0_frames(pcap),
         "recorder_drops": phase_footer_drops(session_text),
         "playing_phase_rows": count_playing_phase_rows(session_text),
-        "playing_phase_beat_span": round(span, 3),
+        "playing_phase_beat_span": round(overlap_span, 3),
+        "playing_phase_beat_span_total": round(playing_phase_beat_span(session_text), 3),
+        "pcap_overlap_tick_fires": overlap_ticks,
         "phase_footer_clean": phase_footer_clean(session_text),
         "min_window_beats": need_beats,
     }

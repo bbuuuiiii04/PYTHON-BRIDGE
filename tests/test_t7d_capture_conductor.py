@@ -202,6 +202,39 @@ class PhaseTraceHelperTests(unittest.TestCase):
         self.assertTrue(cc.new_markers_present("[LX] fired\n", 9999, ["[LX] fired"]))
 
 
+class PcapOverlapTests(unittest.TestCase):
+    """Playback must overlap the pcap window or the oracle can't align it."""
+
+    # playing rows at epochs 100..148s (beats 0..48), one tick at 120s
+    TRACE = "\n".join(
+        [json.dumps({"kind": "autoloop_phase", "playing": True,
+                     "abs_beat_pos": float(b), "epoch_ns": int((100 + b) * 1e9),
+                     "autoloop_tick_just_fired": (b == 20)})
+         for b in range(0, 49, 2)]
+    )
+
+    def test_span_within_pcap_window_full_overlap(self):
+        self.assertEqual(cc.playing_phase_beat_span_within(self.TRACE, 100.0, 148.0), 48.0)
+
+    def test_span_within_pcap_window_no_overlap(self):
+        # pcap started at 200s, long after playback (148s) -> zero usable span
+        self.assertEqual(cc.playing_phase_beat_span_within(self.TRACE, 200.0, 300.0), 0.0)
+
+    def test_span_within_partial_overlap(self):
+        # pcap covers 124..300 -> beats 24..48 -> span 24
+        self.assertEqual(cc.playing_phase_beat_span_within(self.TRACE, 124.0, 300.0), 24.0)
+
+    def test_tick_fires_within_window(self):
+        self.assertEqual(cc.tick_fires_within(self.TRACE, 100.0, 148.0), 1)
+        self.assertEqual(cc.tick_fires_within(self.TRACE, 200.0, 300.0), 0)
+
+    def test_non_overlapping_capture_is_incomplete(self):
+        # The refire-rep2 failure mode: total playback fine, but the gating span
+        # (overlap) is 0 -> INCOMPLETE.
+        obs = _green_obs(playing_phase_beat_span=0.0, playing_phase_beat_span_total=176.0)
+        self.assertEqual(cc.classify_gate(obs), "INCOMPLETE")
+
+
 class SanitizeTests(unittest.TestCase):
     def test_strips_paths_ips_ports_uuids(self):
         raw = {
