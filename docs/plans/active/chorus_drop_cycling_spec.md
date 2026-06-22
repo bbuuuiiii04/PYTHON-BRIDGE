@@ -143,6 +143,42 @@ or a regular groove role,"* especially after a transition. Verified findings:
   "`post_drop_bank` non-empty" fallback test is therefore WRONG (dubstep would go dark). The
   fallback predicate MUST be "has a usable cyclable scene" (Task 3/Task 4).
 
+### A7. ROOT CAUSE of the second live bug (verified) — drop cycling is NOT random
+The operator reports: *"It pretty much just starts at house_drop_12, then every drop for that track
+is house_drop_12, and when I transition to another track every drop becomes house_drop_13."*
+Verified — it is a **persistent-cursor round-robin with a random START only**, not random cycling:
+- [confirmed] `_seed_role_cursors` (`laser_executor.py:415-422`) sets the drop cursor to
+  `rng.randrange(len(bank))` — a random *start index* — but **only at construction / personality
+  change**.
+- [confirmed] `_choose_bank_scene_locked` (`:401-413`) is a deterministic walk:
+  `index = cursor % len(bank); cursor += 1`. Sequential (12, 13, 14…), not random.
+- [confirmed] The cursor **persists across tracks/decks**: `reset_runtime_state` is called on track
+  load (`state_manager.py:2624`) and master change (`:2596`) with `reset_cursors=False`, and only
+  reshuffles the *phrase* bank (`laser_executor.py:90-93`), never drop/post_drop. Cursors reseed
+  ONLY on personality change (`:72`).
+- [confirmed] Today there is ~one drop episode per track (drop is not yet a per-cycle role), so the
+  drop cursor advances **once per track** → same look all track, +1 next track. Exactly the report.
+- [confirmed] **The LEDs already shuffle-bag drop/post_drop.** `LEDLookDirector` is built with
+  `shuffled_roles=LED_AUTOMATION_ROLE_ORDER` (`__main__.py:582`), which includes `"drop"` and
+  `"post_drop"` (`led_look_director.py:20-28`). The LED mechanism `_look_name_for_role`
+  (`:330-356`) is a shuffle-bag with **reshuffle-on-exhaustion**: a monotonic `cursor` (`:326`)
+  walks a shuffled permutation of the role's looks and the bag is **reshuffled every time the
+  cursor wraps a full bank length** (`cursor % len(look_names) == 0`). So all N looks play in a
+  random order, then a fresh shuffle, repeat. (Note: it does NOT guard a same-look repeat exactly
+  at the bag boundary — probability ~1/N; this is accepted LED behavior.)
+- [decision] Operator wants the laser drops to **mirror the LEDs** (confirmed this session ⇒
+  shuffle-bag). Task 4 therefore mirrors LED `_look_name_for_role` exactly — reshuffle on
+  exhaustion, monotonic per-role cursor, per-role bag — NOT the laser phrase bank's weaker
+  per-track-reset shuffle. It **replaces** the round-robin cursor for drop/post_drop only; the
+  phrase bank is unchanged. The laser adds one thing the LED bag lacks: the bag is built from the
+  **usable** entries only (autoloop + allowed), so non-cyclable entries never enter the rotation.
+- [confirmed] **Authoring loop (operator-described, in-scope):** operator authors a new autoloop
+  look in SoundSwitch, maps its note in the laser pad, saves the SS autoloop, exports to the
+  bridge — which lands the scene in `scenes` (with a note) and the personality `drop_bank`. The
+  shuffle-bag is rebuilt from the current bank each pass/reset, so a newly-exported drop look joins
+  the cycle automatically on the next track (no curation). Task 5's checker catches a note mapped
+  in the pad but not in SS (or vice-versa) during this loop.
+
 ## Part B — Tasks (implement exactly, in order; commit after each)
 
 ### Absolute rules
@@ -269,15 +305,42 @@ personality apply (`:2744-2746`). This closes the B3 leak that compounds the A3 
        and (last_role_trigger_beat < 0.0 or float(ctx.abs_beat) > last_role_trigger_beat)
    )
    ```
-2. In `_select_scene` (`:375`), for `role in ("drop","post_drop")` with a cycling reason: fire only
-   on `ctx.autoloop_tick_just_fired` and **rotate** via `_choose_bank_scene_locked(role=role,
-   fallback_scene=decision.scene)` (mirror the phrase branch). Leave the `drop_crossing`/`drop_hold`
-   (flag-off) paths untouched.
-   **Skip non-cyclable bank entries at runtime — do NOT curate banks (A6).** When rotating, advance
-   the cursor past any entry whose `scenes` def is not `scene_type=="autoloop"` (or is high_impact
-   while `allow_high_impact` is false), bounded by **one full pass**. If no usable scene exists this
-   tick → no-op (no MIDI); the Task-3 fallback / next tick handles it. Never send a static/one-shot
-   or unmapped note as a cycle.
+2. **Shuffle-bag selection for drop/post_drop — mirror LED `_look_name_for_role` (A7).** Replace
+   the round-robin cursor for these two roles with a shuffle-bag, used for BOTH the at-anchor
+   `drop_crossing` pick and the cycle ticks (so the fired note is random either way). Add executor
+   state `self._role_bag: dict[str, tuple[str, ...]] = {}` and reuse `self._role_cursors` (monotonic).
+   - **Usable filter (A6, replaces the old "advance past" logic):** define
+     `_usable_bag_entries(role) = [s for s in _bank_for_role(role)
+       if (sd := self._config.scenes.get(s)) and sd.scene_type == "autoloop"
+       and not (sd.safety_class == "high_impact" and not allow_high_impact)]`.
+     Non-cyclable entries never enter the bag, so they are never fired as a cycle.
+   - **Pick (mirror LED `:330-356`):** in a new `_next_shuffled_scene_locked(role)`:
+     ```python
+     usable = self._usable_bag_entries(role)
+     if not usable:
+         self._role_active_scene[role] = ""
+         return ""                                   # → Task-3 fallback / no-op (never dark-send)
+     cursor = self._role_cursors.get(role, 0)
+     bag = self._role_bag.get(role, ())
+     if cursor % len(usable) == 0 or not bag or len(bag) != len(usable):
+         shuffled = list(usable); self._rng.shuffle(shuffled)   # reshuffle on exhaustion / bank change
+         bag = tuple(shuffled); self._role_bag[role] = bag
+     scene = bag[cursor % len(bag)]
+     self._role_cursors[role] = cursor + 1
+     self._role_active_scene[role] = scene
+     return scene
+     ```
+     The `len(bag) != len(usable)` guard rebuilds the bag when the operator exports a new/removed
+     drop look (A7 authoring loop) so it joins the rotation without curation. This mirrors the LED
+     reshuffle-on-exhaustion exactly (incl. the accepted ~1/N bag-boundary repeat — do NOT add a
+     guard the LEDs don't have, to keep parity).
+   - In `_select_scene` (`:375`), for `role in ("drop","post_drop")` with a cycling reason: fire
+     only on `ctx.autoloop_tick_just_fired`, then `return self._next_shuffled_scene_locked(role)`.
+     For the `drop_crossing` reason (flag-on), also route the drop pick through
+     `_next_shuffled_scene_locked("drop")` so the at-anchor look is shuffled too. Leave the
+     flag-off `drop_crossing`/`drop_hold` paths on the existing `_choose_bank_scene_locked`.
+   - **Teardown:** clear `_role_bag` in `reset_runtime_state` alongside `_role_active_scene` so each
+     track starts a fresh shuffle (B3 / Task 3d).
    The 32-beat cadence comes from `autoloop_tick_just_fired` (A5) — **no new timer**. (Documented
    divergence from LED's abs-beat-anchored post_drop cadence; acceptable and renderer-agnostic.)
 
@@ -324,6 +387,10 @@ triggers the intended autoloop, re-export the pack. Operator-run, optional.
 11. **Banks never curated.** Operator personalities/banks unmodified; runtime skips non-cyclable
     entries and uses the fallback. A genuine mapping break is surfaced; a non-cyclable entry / empty
     `post_drop_bank` is valid.
+12. **Random drop/post_drop selection (A7).** Drop/post_drop looks are picked by a shuffle-bag that
+    mirrors the LED `_look_name_for_role` (reshuffle on exhaustion). No persistent round-robin
+    cursor that yields the same look all track / +1 per track. The bag is built from usable entries
+    only and rebuilt when bank membership changes; it resets per track on teardown.
 
 ## Part D — Tests (pure-function seam; no files/subprocess)
 - `tests/test_drop_lifecycle.py` — the resolver, table-driven: drop held `drop_impact_beats` then
@@ -344,10 +411,15 @@ triggers the intended autoloop, re-export the pack. Operator-run, optional.
   with a groove/buildup predecessor (disallowed) → assert the director emits **no** `drop`/`drop_cycle`
   (no drop look in groove/buildup); and a long (32-beat) impact window does not mask a later buildup
   beyond the gate.
-- **Cycling test** — `test_laser_executor*`: `drop_cycle`/`post_drop_cycle` with
-  `autoloop_tick_just_fired=True` rotate the respective bank and fire MIDI each tick, **skipping
-  static/high-impact-disallowed entries**; with it False → no MIDI; a static-only `post_drop_bank`
-  (the `dubstep` case) → drop-cycle fallback, never dark.
+- **Cycling + shuffle-bag test (A7)** — `test_laser_executor*` with a seeded `rng`:
+  `drop_cycle`/`post_drop_cycle` with `autoloop_tick_just_fired=True` fire MIDI each tick and select
+  via the shuffle-bag — assert that over one full pass every **usable** entry appears exactly once
+  (no repeat within a pass), the order is the seeded permutation, and the bag **reshuffles on
+  exhaustion** (second pass order may differ). Assert static/high-impact-disallowed entries
+  **never** appear. With `autoloop_tick_just_fired=False` → no MIDI. A static-only `post_drop_bank`
+  (the `dubstep` case) → drop-cycle fallback, never dark. A bank-membership change (add/remove a
+  scene) rebuilds the bag. Cross-track: assert the per-track pattern is NOT "same look all track,
+  +1 next track" (the regression being fixed).
 - **Teardown test (B3)** — master change with both decks playing, and pause→resume: assert
   director + executor lifecycle state cleared.
 - **Integrated parity caveat** — the parity test covers the resolver; the
@@ -363,6 +435,9 @@ triggers the intended autoloop, re-export the pack. Operator-run, optional.
 - [ ] Default ON: laser fires a **gated** drop (LED parity) → holds `drop_impact_beats` (32) →
       post_drop cycling every autoloop tick within chorus; ≤`max_drops_in_a_row` (2); no-usable-
       post_drop → cycle drops. **No drop look during groove/buildup** (A3 regression test green).
+- [ ] **Drop/post_drop selection is shuffle-bag (A7), mirroring the LED** (`_look_name_for_role`):
+      random order, reshuffle on exhaustion, usable-only, bag resets per track. The old "same look
+      all track, +1 next track" round-robin is gone (regression test green).
 - [ ] **Smart Drop blackout byte-identical** flag-on vs off in both modes (A4 test green).
 - [ ] **Teardown**: director+executor reset on track/deck/stop/resume/scripted/idle/personality (B3).
 - [ ] Banks untouched; runtime skips non-cyclable entries; `dubstep` static-only banks load clean
