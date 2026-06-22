@@ -205,7 +205,7 @@ class ReportSanitizationTests(unittest.TestCase):
 
 
 class StaticSlotCoverageTests(unittest.TestCase):
-    """Item 6: slots 8/16/17/24 render + a controlled slot-7 create/edit."""
+    """Item 5: slots 8/16/17/24 render + a controlled slot-7 create/edit."""
 
     def test_slot_8_renders_expected_independent_frame(self):
         player = LaserPackPlayer(_pack())

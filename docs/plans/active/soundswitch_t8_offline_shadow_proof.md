@@ -68,6 +68,10 @@ contains `autoloop`. The live driver still resolves autoloop output to safe-zero
 
 ## Remaining (not part of Task 8)
 
-- The spec's **after-T8 adversarial review** (opus max) is a separate review step, not executed here.
+- The spec's **after-T8 adversarial review** (opus max) is a separate step that has since **APPROVED**
+  this T8 work at `bc9f7f4` (software/offline scope only — no hardware claim); its low-risk cleanups
+  (hermetic shadow `--project` removal, canonical Task 8 renumbering, `cd ~`) are applied in the
+  follow-up commit. Canonical Task 8 item 7 (code/config/adversarial review + rollback plan +
+  single-process verification) is covered by that approval plus the rollback/single-process section above.
 - **Task 9** — operator hardware-gate handoff DOCUMENT (author only; never execute).
 - **T7d** — autoloop DMX stays blocked until the phase-origin capture proof lands.
