@@ -4,6 +4,17 @@ last_updated: 2026-06-22T05:00:00Z   last_session_model: claude-opus-4-8 (finish
 
 ## Finisher log (Opus 4.8, 2026-06-22)
 
+- **Step 2 / T7c — StateManager pack driver DONE (software).** Spec
+  `docs/plans/active/soundswitch_t7c_pack_driver_spec.md` rev 2 (ChatGPT-reviewed) implemented:
+  added `LaserPackPlayer.clear_selection()`; injected `soundswitch_pack_player/midi_input/
+  pack_backend` into `StateManager` (default None = neutral); added read-only
+  `_drive_pack_output()` run once per tick via a `_push_tick` wrapper (covers 5 early returns; on
+  inner exception submits ZERO directly then re-raises); `__main__` wiring. Driver is the SOLE
+  `submit_frame` caller; automatic base ZEROs on stop/stale/error/track-change via
+  `clear_selection()` so a held manual static stands alone while idle; autoloop safe-zero (never
+  `select_autoloop`). Tests: 4 new player tests + `tests/test_state_manager_pack_driver.py` (D1–D14).
+  Full suite green on 3.14 AND affected modules green on 3.11; proof gate PASS (29/0/0); hard checks
+  pass. **Remaining: Steps 3 (T7e), 4 (Task 8), 5 (Task 9); T7d still blocks autoloop DMX.**
 - **Step 0 — CI red fixed (head `42bc654`).** Root cause: the `unit` CI job runs
   Python **3.11** (PR-only; `main` runs `perf` only, so the full unit suite had
   never run on `main` and several failures were latent). Local dev runs 3.14,
@@ -137,6 +148,6 @@ pack reload, worker error, shutdown) must clear held/pending state and resolve Z
 | 4 | MIDI input adapter | done | done | green | #115 | 32 tests; F10 CC export-fail check; proof 29/0/0; device-name dispatch + error-preservation + zombie-worker fixes post-review. HEAD `6a8ecf2`. |
 | 5 | output backend | done | done | green | #115 | MidiOutputBackend/NoneBackend/PackOutputBackend; priority signature fix; PackOutputBackend unlearned→False; stale attr removed. 70+170 tests pass. HEAD `db7eac2`. |
 | 6 | Enttec sender | done | done | green | #115 | 518-byte VLN-identical framing; bounded non-blocking deque; zero-on-stop; kill-9 hazard documented. 35 new tests; 2009 total. T7 note: remove _install_signal_handlers before wiring into __main__. HEAD `601d8db`. |
-| 7 | runtime integration | wip | partial | partial | #116 | T7.0 + T7.1 review APPROVE. T7a config/loader: 17 tests OK, hard docs gates pass, fresh review APPROVE. T7d: 600 ticks/beat proven but universal origin not proven; safe-zero remains required. Next: T7b startup/backend wiring. |
+| 7 | runtime integration | wip | partial | partial | #116 | T7.0/T7.1/T7a/T7b done. **T7c (StateManager pack driver) DONE software** — driver is sole `submit_frame` caller; idle held-static stands alone via `clear_selection()`; autoloop safe-zero; D1–D14 + player tests green on 3.11+3.14; proof PASS. T7d: 600 ticks/beat proven but universal origin not proven; autoloop stays safe-zero. Next: T7e status/commands. |
 | 8 | offline/shadow gates | todo | — | — | — | |
 | 9 | hardware handoff | todo | — | — | — | operator-only; never auto-execute |

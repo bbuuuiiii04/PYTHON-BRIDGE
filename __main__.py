@@ -1012,6 +1012,9 @@ def main() -> None:
         led_look_director=led_look_director,
         led_scene_adapter=led_scene_adapter,
         led_color_engine=led_bundle.led_color_engine,
+        soundswitch_pack_player=soundswitch_pack_player,
+        soundswitch_midi_input=soundswitch_midi_input,
+        soundswitch_pack_backend=soundswitch_pack_bundle.laser_backend,
     )
     if led_bundle.realtime_runner is not None:
         led_bundle.realtime_runner.set_beat_provider(sm.get_active_beat_anchor)

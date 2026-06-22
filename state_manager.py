@@ -61,6 +61,10 @@ from .models import (
 from .led_models import BeatAnchor, LEDContext
 from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS, MAX_SLOTS
 from .laser_models import LaserContext, LaserPersonality
+from .soundswitch_laser_player import (
+    ZERO_FRAME as _PACK_ZERO_FRAME,
+    normalize_soundswitch_id as _pack_normalize_id,
+)
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
@@ -101,6 +105,10 @@ __all__ = ["StateManager", "SmartDropTickResult"]
 
 _LATENCY_WARN_MS = 50.0
 _TC_LATENCY_WARN_MS = 250.0
+# T7c pack driver: only a genuine seek/cue jump (not normal playback or jitter)
+# should flag elapsed discontinuity. Err HIGH — a missed discontinuity just renders
+# the scripted frame at the new position; a false one ZEROs one tick.
+_PACK_SEEK_JUMP_MS = 2000
 LIVE_BPM_FOLLOW_ENV = "RBSS_LIVE_BPM_FOLLOW"
 AUTOLOOP_MASTER_PHRASE_ARM_ENV = "RBSS_AUTOLOOP_MASTER_PHRASE_ARM"
 SMART_DROP_ENV = "RBSS_SMART_DROP"
@@ -321,6 +329,9 @@ class StateManager:
         led_color_engine=None,
         os2l_connected_provider=None,
         recorder: Optional[SessionRecorder] = None,
+        soundswitch_pack_player=None,
+        soundswitch_midi_input=None,
+        soundswitch_pack_backend=None,
     ) -> None:
         self._eq    = event_queue
         self._cache = position_cache
@@ -332,6 +343,18 @@ class StateManager:
         self._laser_director = laser_director
         self._laser_executor = laser_executor
         self._laser_personality_provider = laser_personality_provider
+        # T7c SoundSwitch pack driver (None ⇒ neutral; existing path unchanged).
+        # The driver READS DeckState; StateManager remains the only DeckState writer.
+        self._pack_player = soundswitch_pack_player
+        self._pack_input = soundswitch_midi_input
+        self._pack_backend = soundswitch_pack_backend
+        self._pack_enabled = (
+            soundswitch_pack_player is not None and soundswitch_pack_backend is not None
+        )
+        self._pack_last_load_gen: tuple[int, int] | None = None   # (active, load_gen)
+        self._pack_last_elapsed_ms: int | None = None
+        self._pack_last_static_slot: int | None = None
+        self._pack_logged_error = False
         self._led_look_director = led_look_director
         self._led_scene_adapter = led_scene_adapter
         # M1b WI-1: optional LED color engine (None ⇒ no color injection).
@@ -3147,6 +3170,93 @@ class StateManager:
     # ── Push loop ─────────────────────────────────────────────────────────────
 
     def _push_tick(self) -> None:
+        """Wrapper: run the tick body, then drive the SoundSwitch pack output once.
+
+        The body has multiple early returns, so the pack driver runs here (not inside
+        the body) to guarantee exactly one drive per tick. If the body raises, submit a
+        direct ZERO frame (NOT the normal driver, which would read possibly-partial
+        state) so a crash can never retain non-zero DMX, then re-raise.
+        """
+        try:
+            self._push_tick_inner()
+        except BaseException:
+            if self._pack_enabled and self._pack_backend is not None:
+                try:
+                    self._pack_backend.submit_frame(_PACK_ZERO_FRAME)
+                except Exception:
+                    pass
+            raise
+        if self._pack_enabled:
+            self._drive_pack_output()
+
+    def _drive_pack_output(self) -> None:
+        """T7c: drive the pack player from authoritative deck state; submit one
+        CH1-CH19 frame. READ-ONLY w.r.t. DeckState; fail-safe to ZERO; never raises
+        into the tick. Automatic base ZEROs on any non-happy-path (stop/stale/error/
+        track-change/discontinuity) via clear_selection() so a held manual Static
+        Override stands alone while idle. See
+        docs/plans/active/soundswitch_t7c_pack_driver_spec.md."""
+        player, backend = self._pack_player, self._pack_backend
+        if player is None or backend is None:
+            return
+        try:
+            active = self._os.active_deck
+            d = self._deck[active]
+            snap = self._cache.get(active)
+
+            # 1. Controller masks + static overrides (in-memory snapshot; no I/O).
+            if self._pack_input is not None:
+                s = self._pack_input.snapshot()
+                player.set_masks(blackout=bool(s.blackout_held), emergency=False)
+                slot = s.held_static_slot
+                if slot != self._pack_last_static_slot:
+                    if slot is not None:
+                        player.hold_static(int(slot))
+                    elif self._pack_last_static_slot is not None:
+                        player.release_static(int(self._pack_last_static_slot))
+                    self._pack_last_static_slot = slot
+
+            # 2. Derive the happy-path gate (fail-conservative; uncertain ⇒ ZERO base).
+            load_key = (active, int(getattr(d, "load_gen", 0)))
+            track_changed = (
+                self._pack_last_load_gen is not None and load_key != self._pack_last_load_gen
+            )
+            self._pack_last_load_gen = load_key
+            elapsed_ms = max(0, int(getattr(d, "elapsed_ms", 0) or 0))
+            discont = (
+                not track_changed
+                and self._pack_last_elapsed_ms is not None
+                and abs(elapsed_ms - self._pack_last_elapsed_ms) >= _PACK_SEEK_JUMP_MS
+            )
+            self._pack_last_elapsed_ms = elapsed_ms
+            fresh = not (snap is None or snap.is_stale(MEM_STALE_S))
+            playing = bool(getattr(d, "playing", False))
+            ssid = getattr(getattr(d, "meta", None), "soundswitch_id", "") or ""
+            metadata_ready = _pack_normalize_id(ssid) is not None
+
+            # 3. Automatic base: scripted only on the full happy path; else clear it so
+            #    a held static stands alone (idle) and no stale frame is retained.
+            if playing and fresh and metadata_ready and not track_changed and not discont:
+                player.select_scripted(
+                    soundswitch_id=ssid, elapsed_ms=elapsed_ms, transport="playing",
+                    metadata_ready=True, authority="fresh", source_errored=False,
+                    elapsed_discontinuous=False, track_changed=False,
+                )
+            else:
+                player.clear_selection()
+
+            # 4. Submit exactly one frame.
+            backend.submit_frame(player.render().frame)
+        except Exception:
+            if not self._pack_logged_error:
+                log.exception("[SM] pack driver error; resolving ZERO")
+                self._pack_logged_error = True
+            try:
+                backend.submit_frame(_PACK_ZERO_FRAME)
+            except Exception:
+                pass
+
+    def _push_tick_inner(self) -> None:
         # FM-1: check two-phase arm timer before any other push logic
         self._check_pending_arm()
 

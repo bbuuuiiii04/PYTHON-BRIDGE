@@ -172,6 +172,29 @@ class PlayerStateTests(unittest.TestCase):
         self.assertEqual(forward, resumed)
         self.assertEqual(forward, refired)
 
+    def test_clear_selection_lets_held_static_stand_alone(self):
+        # SoundSwitch shows a manual Static Look even with no track playing: clearing
+        # the automatic base must leave a held static visible (T7c idle behavior).
+        self.player.hold_static(8)
+        result = self.player.clear_selection()
+        self.assertIsNone(result.diagnostic)
+        self.assertNotEqual(result.frame, ZERO_FRAME)
+        self.assertEqual(self.player.active_static_slot, 8)  # state not cleared
+
+    def test_clear_selection_without_static_is_zero(self):
+        result = self.player.clear_selection()
+        self.assertEqual(result.frame, ZERO_FRAME)
+
+    def test_clear_selection_held_static_still_loses_to_blackout(self):
+        self.player.hold_static(8)
+        self.player.set_masks(blackout=True, emergency=False)
+        self.assertEqual(self.player.clear_selection().frame, ZERO_FRAME)
+
+    def test_clear_selection_zeros_a_prior_scripted_base(self):
+        ssid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        self.assertNotEqual(self.player.select_scripted(ssid, 50).frame, ZERO_FRAME)
+        self.assertEqual(self.player.clear_selection().frame, ZERO_FRAME)
+
     def test_stop_end_unload_and_fail_closed_authority_diagnostics(self):
         ssid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         for transport in ("stopped", "ended", "unloaded"):

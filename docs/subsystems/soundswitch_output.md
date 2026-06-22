@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b7e0e66
-last_verified_date: 2026-06-21
+last_verified_commit: 0f286e5
+last_verified_date: 2026-06-22
 validation_scope: software-only
 ---
 
@@ -20,7 +20,8 @@ Purpose:
 Offline project export:
 - `soundswitch_pack_models.py`, `soundswitch_project_decoder.py`, `soundswitch_pack.py`, `soundswitch_pack_verifier.py`, and `tools/export_soundswitch_pack.py` implement frozen source models, strict read-only decode, deterministic export of a canonical 95-artifact pack, and independent verification for the pinned SoundSwitch 2.10.3 canonical project UUID/RAVE profile. Software tests cover the 232 render + 1 catalog-tail cues, 32 Static Looks, 42 autoloops, 45 scripted inventory records, seven-class F-3 crosswalk, and F9 mutation rejection.
 - The immutable pack loader/player, MIDI-input adapter, output-backend abstraction, and Enttec frame sender are implemented and software-tested components. T7a adds a validated, default-off pack-player config loader and tracked inert example.
-- The T7a config is not loaded by `__main__`; the pack player, controller input, and Enttec sender are not wired into `StateManager`, status, or runtime commands. Existing OS2L and MIDI-laser output remain the live paths.
+- T7b loads the config and builds the pack player/controller/Enttec sender at startup; T7c wires them into `StateManager` (default-off — neutral unless `soundswitch_pack_player`+`soundswitch_pack_backend` are passed). Status surfaces and runtime commands (T7e) are still pending.
+- **T7c pack driver** (`StateManager._drive_pack_output`, run once per tick via the `_push_tick` wrapper): the **sole caller of `PackOutputBackend.submit_frame`** — do not add another. The executor's `backend.trigger()` is scene-SELECTION only and never emits DMX, so the two never collide. The driver READS `DeckState`; `StateManager` remains the only writer. Automatic scripted base ZEROs on stop/stale/error/track-change/discontinuity via `LaserPackPlayer.clear_selection()`, so a held manual Static Override stands alone while idle (SoundSwitch parity); static still loses to blackout/emergency/pack-disabled/shutdown. Autoloop output stays safe-zero (driver never calls `select_autoloop`) until T7d.
 - Live SoundSwitch OS2L behavior and all other bridge outputs remain unchanged; no hardware validation was performed.
 
 Authoritative code:
