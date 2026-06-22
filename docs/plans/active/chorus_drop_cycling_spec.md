@@ -212,14 +212,23 @@ DropLifecycle:
     impact_allowed(sp_like) -> bool                 # mirrors _led_drop_impact_allowed :2283
     should_clear(sp_like) -> bool                   # mirrors _led_drop_lifecycle_should_clear :2305
     arm(anchor_beat) -> None                        # mirrors _led_arm_drop_lifecycle :2312
-    resolve_drop_role(sp_like, *, mutate) -> str    # "drop" | "post_drop" | "none"
-    reset() -> None                                 # clears all three state fields
+    resolve(sp_like, *, mutate) -> DropResult   # the WHOLE LED drop region in ONE call
+    reset() -> None                              # clears all three state fields
 ```
-`resolve_drop_role` returns ONLY the drop-region decision: `"drop"`/`"post_drop"` when the LED
-engine would be in the drop lifecycle (at an anchor, or inside chorus/post_drop), else `"none"`
-(caller falls through to its own breakdown/buildup/phrase logic). It takes a small struct of the
-A5 SmartPhrasing fields; it MUST NOT import bridge runtime modules. Refactoring the live LED path
-to call this is **out of scope** (avoids LED regression); the parity test (Task D) proves equality.
+`resolve` reproduces ONLY the drop-region slices of `_led_role_from_smart_phrasing`: the
+clear-if-`should_clear` + anchor branch (`:2228-2239`) and the chorus/post_drop window
+(`:2248-2256`, `abs_beat < impact_until` → "drop" else "post_drop"). For everything the LED
+function decides as breakdown / pre_drop / buildup / low / groove (`:2241-2247`, `:2257-2259`),
+`resolve` returns `role="none"` — those stay the laser director's own branches; do NOT port
+breakdown/buildup into this resolver. It returns `DropResult(role, armed_this_tick)`:
+- `role`: `"drop"` | `"post_drop"` | `"none"` (`"none"` = not in the drop lifecycle → caller falls
+  through to its own breakdown/buildup/phrase logic).
+- `armed_this_tick`: `True` only on the tick a NEW impact was armed (the impact-start). The director
+  uses this to keep `reason="drop_crossing"` exactly at the anchor (A4 blackout), and `"drop_cycle"`
+  on sustained ticks — so arming happens in exactly ONE place (here), never duplicated in `_decide`.
+It takes a small struct of the A5 SmartPhrasing fields; it MUST NOT import bridge runtime modules.
+Refactoring the live LED path to call this is **out of scope** (avoids LED regression); the parity
+test (Task D) proves equality.
 
 ### Task 2 — `laser_models.py` + `laser_config.py`: configurable knobs (default-on)
 Add to `LaserPersonality` (near `drop_style`, `laser_models.py:~115`):
@@ -239,44 +248,57 @@ must be re-validated to load clean** (run the suite + a load smoke test).
 ### Task 3 — `laser_director.py`: gate the drop role + drive the mirrored lifecycle
 Add `self._drop_lifecycle: Optional[DropLifecycle]` built in `set_personality_config` (`:180`) and
 `__init__` from the new knobs; rebuild it on personality reload. Add
-`reset_runtime_state(reason: str)` (see Task 3b). In `_decide`, when `drop_lifecycle_mirror` is ON:
+`reset_runtime_state(reason: str)` (see Task 3d). In `_decide`, when `drop_lifecycle_mirror` is ON:
 
-3a. **Gate priority-9 `drop_crossing` (the A3 fix), keep its reason/blackout semantics (the A4
-constraint).** Replace the bare `if sp.smart_drop_crossing:` trigger (`:434`) with the gated,
-LED-faithful anchor+allow test:
+3a. **ONE unified block replaces priority-9 `drop_crossing` + priority-10 `drop_hold` ONLY
+(`:432-477`).** This is the A3 fix (gate) + A4 (blackout preserved) in a single resolver call so
+arming happens in exactly one place. **CRITICAL — do NOT extend the replaced range past `:477`:**
+the priority-11 buildup window (`:479-513`), the buildup-gate logging (`:514-529`), the
+`_last_smart_abs_beat`/`_post_drop_start_abs_beat` housekeeping (`:531-536`), and the
+`_decide_phrase_default(...)` call (`:538-543`) are **kept verbatim**. Replace `:432-477` with:
 ```python
-anchor = self._drop_lifecycle.drop_anchor(sp)          # chorus phrase-start OR smart_drop_crossing
-if anchor is not None and self._drop_lifecycle.impact_allowed(sp):
-    self._drop_lifecycle.arm(anchor)                   # sets impact_until, count += 1
-    self._post_drop_start_abs_beat = abs_beat
-    # reason STAYS "drop_crossing" → executor fires immediately + resolves blackout (A4, unchanged)
-    return LaserSceneDecision(scene=self._drop_scene, reason="drop_crossing",
-                              priority=9, source="policy", role="drop")
+if self._drop_lifecycle is not None and drop_lifecycle_mirror_on:
+    res = self._drop_lifecycle.resolve(sp, mutate=True)   # full LED drop region, one call
+    if res.armed_this_tick:
+        # impact START → keep reason="drop_crossing": executor fires immediately AND
+        # resolves the Smart Drop blackout, byte-identical to today (A4). This is also the
+        # GATE (res.armed_this_tick is True only when impact_allowed), so an ungated
+        # smart_drop_crossing in groove/buildup no longer arms a drop (A3 fix).
+        self._post_drop_start_abs_beat = abs_beat
+        self._last_smart_abs_beat = abs_beat
+        return LaserSceneDecision(scene=self._drop_scene, reason="drop_crossing",
+                                  priority=9, source="policy", role="drop")
+    if res.role == "drop":          # sustained inside the impact window
+        self._last_smart_abs_beat = abs_beat
+        return LaserSceneDecision(scene=self._drop_scene, reason="drop_cycle",
+                                  priority=10, role="drop", source="policy")
+    if res.role == "post_drop":
+        self._last_smart_abs_beat = abs_beat
+        if self._has_usable_cyclable_post_drop():     # A6 fallback predicate (Task 3c)
+            return LaserSceneDecision(scene=self._post_drop_scene or self._drop_scene,
+                                      reason="post_drop_cycle", priority=10, role="post_drop",
+                                      source="policy")
+        return LaserSceneDecision(scene=self._drop_scene, reason="drop_cycle",   # never dark
+                                  priority=10, role="drop", source="policy")
+    in_post_drop_hold = False     # res.role == "none": resolver OWNS the post-drop window, so we
+                                  # are NOT in a hold; the preserved buildup gate (:479+) reads this.
+else:
+    # flag OFF: the ORIGINAL :432-477 (smart_drop_crossing drop_crossing + drop_hold) runs verbatim,
+    # including computing `in_post_drop_hold`. Byte-for-byte unchanged.
+    <original :432-477 here>
+# fall through to the UNCHANGED priority-11 buildup window + _decide_phrase_default (:479-543)
 ```
-When `anchor is None` or impact not allowed → do **not** emit a drop; fall through. (This is what
-kills the ungated/groove drop.) When the flag is **off**, the original `:434` path runs unchanged.
-
-3b. **Replace priority-10 `drop_hold` + the chorus fall-through with resolver-driven cycling**
-(`:448` through the `_decide_phrase_default` call at `:538`), flag-ON only:
-```python
-role = self._drop_lifecycle.resolve_drop_role(sp, mutate=True)
-if role == "drop":          # sustained inside impact window
-    return LaserSceneDecision(scene=self._drop_scene, reason="drop_cycle",
-                              priority=10, role="drop", source="policy")
-if role == "post_drop":
-    if self._has_usable_cyclable_post_drop():    # A6 fallback predicate (Task 3c)
-        return LaserSceneDecision(scene=self._post_drop_scene or self._drop_scene,
-                                  reason="post_drop_cycle", priority=10, role="post_drop",
-                                  source="policy")
-    # no usable post_drop look → cycle drops (never go dark)
-    return LaserSceneDecision(scene=self._drop_scene, reason="drop_cycle",
-                              priority=10, role="drop", source="policy")
-# role == "none" → existing buildup-window / phrase-default logic, unchanged
-```
+**Both branches must define `in_post_drop_hold`** (the buildup gate at `:493`/`:515-528` reads it):
+flag-ON "none" path sets it `False`; flag-OFF path computes it as today. Do NOT delete or move the
+buildup window — only `:432-477` changes.
 Breakdown stays at priority 8 (ahead of the lifecycle) — **intentional, documented divergence**
 from LED order; it is strictly safer (no drop during an active breakdown) and matches today's
-laser behavior. `pre_drop`/`low` are not laser roles and remain routed to the existing
-buildup/phrase logic (documented; pre_drop_scene stays inert per `laser_config.py:632`).
+laser behavior. **Documented edge divergence:** if `smart_post_drop_active` is true during an
+up phrase, LED checks buildup (`:2245`) *before* the chorus/post_drop window (`:2248`); the laser
+consults the resolver before its buildup window, so it may emit `post_drop_cycle` where LED would
+emit buildup. Narrow (chorus and up are normally mutually exclusive), accepted, and consistent with
+scoping buildup out of the mirror. `pre_drop`/`low` are not laser roles and remain routed to the
+existing buildup/phrase logic (pre_drop_scene stays inert per `laser_config.py:632`).
 
 3c. **`_has_usable_cyclable_post_drop()`**: true iff `post_drop_bank` (or `post_drop_scene`)
 contains ≥1 scene that is `scene_type=="autoloop"` and not (high_impact while
@@ -398,11 +420,14 @@ triggers the intended autoloop, re-export the pack. Operator-run, optional.
   **disallowed predecessor (groove/other) → NOT drop** (post_drop or none); chorus→chorus capped
   (exercises `first_drop_anchor_beat`); no usable post_drop → drop fallback; lifecycle clears when
   chorus/post-drop ends.
-- **Parity test** — assert the resolver's role sequence equals the LED resolver
+- **Parity test** — assert `resolve(...).role` equals the LED resolver
   (`_led_role_from_smart_phrasing`) for the **drop/post_drop region** across shared timelines with
-  LED-equivalent config (max=2, impact=8, cycle=32). Timelines MUST include: chorus phrase-start
-  anchor; smart_drop_crossing with allowed and **disallowed** predecessors; chorus→chorus cap;
-  lifecycle clear on chorus end.
+  LED-equivalent config (max=2, impact=8, cycle=32), **mapping every LED non-drop role
+  (breakdown/pre_drop/buildup/low/groove) → `"none"`** for the comparison (apples-to-apples, since
+  `resolve` returns "none" for those). Also assert `armed_this_tick` is True on exactly the ticks
+  LED increments `_led_drop_impact_count`. Timelines MUST include: chorus phrase-start anchor;
+  smart_drop_crossing with allowed and **disallowed** predecessors; chorus→chorus cap; lifecycle
+  clear on chorus end.
 - **Blackout-preservation test (A4)** — `test_laser_executor*`: a `drop_crossing` decision still
   arms/resolves the blackout identically with the flag ON vs OFF, in `blackout_mask` AND
   `legacy_rearm` modes; the at-anchor drop fires on the crossing tick even though
