@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -322,7 +323,16 @@ def count_universe0_frames(pcap_path: Path) -> int:
 
 
 def ping(message: str) -> None:
-    """Audibly + visibly ping the operator. Best-effort; never raises."""
+    """Surface an operator action. Best-effort; never raises.
+
+    When T7D_CONDUCTOR_QUIET=1 the audible (`say`) + notification channels are
+    suppressed and only the text is printed -- the caller (the driving agent)
+    then emits its own short spoken alert and the full command in chat, so the
+    operator is not spammed with the entire command read aloud.
+    """
+    print(f"\n*** OPERATOR ACTION ***\n{message}\n", flush=True)
+    if os.environ.get("T7D_CONDUCTOR_QUIET") == "1":
+        return
     short = message if len(message) < 220 else message[:217] + "..."
     for cmd in (
         ["say", short],
@@ -336,7 +346,6 @@ def ping(message: str) -> None:
             subprocess.run(cmd, check=False, timeout=15)
         except Exception:
             pass
-    print(f"\n*** OPERATOR ACTION ***\n{message}\n", flush=True)
 
 
 def read_status() -> dict | None:
