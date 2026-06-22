@@ -13,6 +13,7 @@ Run:
 """
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import queue
@@ -60,9 +61,22 @@ from .logging_manager import get_logging_manager
 from .laser_config import LaserConfig, LaserConfigResult, load_laser_director_config
 from .laser_director import LaserDirector
 from .laser_executor import LaserSceneExecutor
-from .laser_output_backend import MidiOutputBackend
+from .laser_output_backend import (
+    LaserOutputBackend,
+    MidiOutputBackend,
+    NoneBackend,
+    PackOutputBackend,
+)
 from .laser_models import LaserPersonality
 from .midi_output import MidiOutput
+from .soundswitch_frame_sender import SoundSwitchFrameSender
+from .soundswitch_laser_player import LaserPackPlayer
+from .soundswitch_midi_input import SoundSwitchMidiInputGroup
+from .soundswitch_pack_loader import LoadedPack, load_pack
+from .soundswitch_pack_player_config import (
+    SoundSwitchPackPlayerConfigResult,
+    load_soundswitch_pack_player_config,
+)
 from .led_config import LEDConfigResult, load_led_look_director_config
 from .led_look_director import LEDLookDirector, LED_AUTOMATION_ROLE_ORDER
 from .led_color_engine import LedColorEngine
@@ -305,6 +319,18 @@ class LaserStartupBundle:
 
 
 @dataclass(frozen=True)
+class SoundSwitchPackStartupBundle:
+    """Startup-only pack resources; ``laser_backend=None`` means legacy MIDI."""
+
+    laser_backend: Optional[LaserOutputBackend]
+    pack: Optional[LoadedPack]
+    player: Optional[LaserPackPlayer]
+    midi_input: Optional[SoundSwitchMidiInputGroup]
+    frame_sender: Optional[SoundSwitchFrameSender]
+    reason: str
+
+
+@dataclass(frozen=True)
 class LEDStartupBundle:
     led_director: Optional[LEDLookDirector]
     led_adapter: Optional[Any]
@@ -334,6 +360,8 @@ def _build_personality_resolver(cfg: LaserConfig) -> PersonalityResolver:
 
 def _build_laser_startup_wiring(
     cfg_result: LaserConfigResult,
+    *,
+    backend: Optional[LaserOutputBackend] = None,
 ) -> LaserStartupBundle:
     """Build optional LaserDirector and status provider from startup config result."""
     if not cfg_result.available or cfg_result.config is None:
@@ -372,12 +400,15 @@ def _build_laser_startup_wiring(
     if initial_personality is not None:
         laser_director.set_personality_config(initial_personality)
 
-    midi_output = MidiOutput(
-        port_name=cfg.midi_output_port,
-        dry_run=cfg.dry_run,
-    )
-    midi_output.start()
-    laser_backend = MidiOutputBackend(midi_output)
+    midi_output: Optional[MidiOutput] = None
+    laser_backend = backend
+    if laser_backend is None:
+        midi_output = MidiOutput(
+            port_name=cfg.midi_output_port,
+            dry_run=cfg.dry_run,
+        )
+        midi_output.start()
+        laser_backend = MidiOutputBackend(midi_output)
     laser_executor = LaserSceneExecutor(
         config=cfg,
         backend=laser_backend,
@@ -399,6 +430,130 @@ def _build_laser_startup_wiring(
         status_provider=_status,
         personality_provider=_personality_provider,
     )
+
+
+def _build_soundswitch_pack_startup(
+    cfg_result: SoundSwitchPackPlayerConfigResult,
+    *,
+    pack_loader=load_pack,
+    player_factory=LaserPackPlayer,
+    frame_sender_factory=SoundSwitchFrameSender,
+    midi_input_factory=SoundSwitchMidiInputGroup,
+) -> SoundSwitchPackStartupBundle:
+    """Choose pack-vs-legacy output before starting any output worker.
+
+    ``laser_backend=None`` deliberately preserves the existing MIDI startup
+    path.  An explicit enabled none/dry-run config returns ``NoneBackend`` so
+    neither MIDI nor DMX is opened.  Pack construction is complete before the
+    controller group and frame sender start; any start failure rolls both back
+    and remains no-output rather than silently falling back to MIDI.
+    """
+    if not cfg_result.available or cfg_result.config is None:
+        return SoundSwitchPackStartupBundle(
+            None, None, None, None, None,
+            f"legacy_midi_{cfg_result.reason}",
+        )
+    cfg = cfg_result.config
+    if not cfg.enabled:
+        return SoundSwitchPackStartupBundle(
+            None, None, None, None, None, "legacy_midi_disabled",
+        )
+
+    try:
+        pack = pack_loader(cfg.pack_path)
+    except Exception as exc:
+        log.warning(
+            "[MAIN] soundswitch-pack disabled  reason=pack_load_failed  error=%s",
+            type(exc).__name__,
+        )
+        return SoundSwitchPackStartupBundle(
+            NoneBackend(), None, None, None, None, "pack_load_failed",
+        )
+
+    player = player_factory(pack)
+    if cfg.dry_run or cfg.output_backend == "none":
+        return SoundSwitchPackStartupBundle(
+            NoneBackend(), pack, player, None, None,
+            "dry_run" if cfg.dry_run else "none",
+        )
+    if cfg.output_backend == "midi":
+        return SoundSwitchPackStartupBundle(
+            None, pack, player, None, None, "legacy_midi_configured",
+        )
+    if not cfg.enttec_port:
+        log.warning("[MAIN] soundswitch-pack disabled  reason=missing_enttec_port")
+        return SoundSwitchPackStartupBundle(
+            NoneBackend(), pack, player, None, None, "pack_start_failed",
+        )
+
+    midi_input: Optional[SoundSwitchMidiInputGroup] = None
+    frame_sender: Optional[SoundSwitchFrameSender] = None
+    try:
+        midi_input = midi_input_factory(
+            pack.learned_midi_bindings,
+            cfg.midi_input_aliases,
+            stale_timeout_ms=cfg.controller_hold_timeout_ms,
+        )
+        frame_sender = frame_sender_factory(
+            cfg.enttec_port,
+            fixture_map=cfg.fixture_map,
+            idle_blackout_s=cfg.frame_stale_timeout_ms / 1000.0,
+        )
+        backend = PackOutputBackend(
+            scene_to_identity=dict(pack.bridge_scene_crosswalk),
+            frame_sender=frame_sender,
+        )
+    except Exception as exc:
+        if frame_sender is not None:
+            try:
+                frame_sender.stop()
+            except Exception:
+                pass
+        if midi_input is not None:
+            try:
+                midi_input.stop()
+            except Exception:
+                pass
+        log.warning(
+            "[MAIN] soundswitch-pack disabled  reason=worker_start_failed  error=%s",
+            type(exc).__name__,
+        )
+        return SoundSwitchPackStartupBundle(
+            NoneBackend(), pack, player, None, None, "pack_start_failed",
+        )
+    return SoundSwitchPackStartupBundle(
+        backend, pack, player, midi_input, frame_sender, "pack",
+    )
+
+
+def _start_soundswitch_pack_workers(
+    bundle: SoundSwitchPackStartupBundle,
+) -> SoundSwitchPackStartupBundle:
+    """Start a fully constructed pack bundle after cleanup authority exists."""
+    if bundle.reason != "pack" or bundle.midi_input is None or bundle.frame_sender is None:
+        return bundle
+    try:
+        # Controller inputs are confirmed ready first. Direct DMX is the final
+        # exclusive port and must also confirm open before pack mode is live.
+        bundle.midi_input.start()
+        bundle.frame_sender.start()
+    except Exception as exc:
+        try:
+            bundle.frame_sender.stop()
+        except Exception:
+            pass
+        try:
+            bundle.midi_input.stop()
+        except Exception:
+            pass
+        log.warning(
+            "[MAIN] soundswitch-pack disabled  reason=worker_start_failed  error=%s",
+            type(exc).__name__,
+        )
+        return SoundSwitchPackStartupBundle(
+            NoneBackend(), bundle.pack, bundle.player, None, None, "pack_start_failed",
+        )
+    return bundle
 
 
 def _build_led_startup_wiring(
@@ -708,18 +863,73 @@ def main() -> None:
         log.error("another rb_ss_bridge_v2 process is already running; exiting")
         return
 
+    # Install owner cleanup before any pack-controlled port is opened.  The
+    # mutable slots let the handler/atexit path own resources even while the
+    # rest of bridge startup is still in progress.
+    pack_output_owners: dict[str, Any] = {"sender": None, "midi_input": None}
+
+    def _cleanup_pack_outputs() -> None:
+        sender = pack_output_owners.pop("sender", None)
+        midi_input = pack_output_owners.pop("midi_input", None)
+        if sender is not None:
+            try:
+                sender.stop()
+            except Exception:
+                pass
+        if midi_input is not None:
+            try:
+                midi_input.stop()
+            except Exception:
+                pass
+
+    def _early_shutdown(sig, frame):
+        log.info("[MAIN] shutdown  sig=%d  phase=startup", sig)
+        _cleanup_pack_outputs()
+        raise SystemExit(0)
+
+    atexit.register(_cleanup_pack_outputs)
+    signal.signal(signal.SIGTERM, _early_shutdown)
+    signal.signal(signal.SIGINT, _early_shutdown)
+
     if is_debug() or "--debug" in sys.argv:
         enable_debug()
 
     log.info("[MAIN] starting")
     laser_cfg_result = load_laser_director_config()
-    laser_bundle = _build_laser_startup_wiring(laser_cfg_result)
+    soundswitch_pack_cfg_result = load_soundswitch_pack_player_config()
+    soundswitch_pack_bundle = _build_soundswitch_pack_startup(
+        soundswitch_pack_cfg_result,
+    )
+    pack_output_owners["sender"] = soundswitch_pack_bundle.frame_sender
+    pack_output_owners["midi_input"] = soundswitch_pack_bundle.midi_input
+    soundswitch_pack_bundle = _start_soundswitch_pack_workers(
+        soundswitch_pack_bundle,
+    )
+    pack_output_owners["sender"] = soundswitch_pack_bundle.frame_sender
+    pack_output_owners["midi_input"] = soundswitch_pack_bundle.midi_input
+    laser_bundle = _build_laser_startup_wiring(
+        laser_cfg_result,
+        backend=soundswitch_pack_bundle.laser_backend,
+    )
     laser_director = laser_bundle.laser_director
     laser_executor = laser_bundle.laser_executor
     laser_status_provider = laser_bundle.status_provider
     laser_personality_provider = laser_bundle.personality_provider
     midi_output = laser_bundle.midi_output
-    soundswitch_frame_sender = None  # constructed in T7.1/T7; placeholder keeps _shutdown wiring valid
+    soundswitch_frame_sender = soundswitch_pack_bundle.frame_sender
+    soundswitch_midi_input = soundswitch_pack_bundle.midi_input
+    soundswitch_pack_player = soundswitch_pack_bundle.player
+    log.info(
+        "[MAIN] soundswitch-pack-config  reason=%s  available=%s  enabled=%s  startup=%s",
+        soundswitch_pack_cfg_result.reason,
+        soundswitch_pack_cfg_result.available,
+        (
+            soundswitch_pack_cfg_result.config.enabled
+            if soundswitch_pack_cfg_result.config is not None
+            else False
+        ),
+        soundswitch_pack_bundle.reason,
+    )
     log.info(
         "[MAIN] laser-config  reason=%s  available=%s  enabled=%s",
         laser_cfg_result.reason,
@@ -1290,6 +1500,8 @@ def main() -> None:
     # Graceful shutdown on SIGTERM / SIGINT
     def _shutdown(sig, frame):
         log.info("[MAIN] shutdown  sig=%d", sig)
+        # Push direct-DMX zero before any potentially slow watcher/thread joins.
+        _cleanup_pack_outputs()
         LOG.stop_control_watcher()
         config_reloader.stop()
         status_writer.stop()
@@ -1309,8 +1521,6 @@ def main() -> None:
             led_bundle.realtime_runner.stop()
         discovery.stop()
         conn.stop()
-        if soundswitch_frame_sender is not None:
-            soundswitch_frame_sender.stop()   # zero_and_stop(): zero packet, then worker stop()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _shutdown)

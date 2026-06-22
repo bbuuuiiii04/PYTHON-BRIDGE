@@ -159,12 +159,19 @@ class PackOutputBackend:
         self._trigger_count = 0
         self._no_op_count = 0
         self._frame_count = 0
+        self._last_accepted_identity: str | None = None
+
+    @property
+    def last_accepted_identity(self) -> str | None:
+        """Last executor-accepted verified pack identity, or ``None``."""
+        return self._last_accepted_identity
 
     def trigger(self, msg: LaserMidiMessage, priority: str = "normal") -> bool:
         identity = self._scene_to_identity.get(str(getattr(msg, "scene_name", "")))
         if identity is None:
             self._no_op_count += 1
             return False  # unlearned → no-op; executor must not update _last_triggered_scene.
+        self._last_accepted_identity = identity
         self._trigger_count += 1
         return True
 
@@ -181,12 +188,14 @@ class PackOutputBackend:
             "no_op_count": self._no_op_count,
             "frame_count": self._frame_count,
             "has_frame_sender": self._frame_sender is not None,
+            "last_accepted_identity": self._last_accepted_identity or "",
         }
 
     def reset(self) -> None:
-        pass
+        self._last_accepted_identity = None
 
     def shutdown(self) -> None:
+        self._last_accepted_identity = None
         if self._frame_sender is not None:
             try:
                 self._frame_sender.stop()

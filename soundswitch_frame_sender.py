@@ -17,11 +17,12 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Callable
+from typing import Callable, Mapping
 
 from .enttec_dmx_pro import (
     SoundSwitchDmxWorker,
     build_dmx_packet,
+    _open_port,
     _ZERO_PACKET,
 )
 
@@ -36,7 +37,7 @@ _SS_CHANNEL_COUNT = 19  # SoundSwitch fixture channel count (CH1..CH19)
 
 def expand_ch1_ch19_to_512(
     frame_19: tuple[int, ...],
-    fixture_map: dict[int, int],
+    fixture_map: Mapping[int, int],
 ) -> bytearray:
     """Expand a 19-channel SoundSwitch frame into a 512-byte DMX universe.
 
@@ -88,15 +89,32 @@ class SoundSwitchFrameSender:
         self,
         port: str = "",
         *,
+        fixture_map: Mapping[int, int],
         port_factory: Callable | None = None,
         poll_s: float = 0.02,
         idle_blackout_s: float = 0.0,
     ) -> None:
         self._port = port
+        self._fixture_map = _validated_fixture_map(fixture_map)
         self._idle_blackout_s = idle_blackout_s
+        self._ready_event = threading.Event()
+        self._startup_error: str | None = None
+
+        actual_port_factory = port_factory or _open_port
+
+        def _tracked_port_factory(port_name: str, **kwargs):
+            try:
+                handle = actual_port_factory(port_name, **kwargs)
+            except Exception as exc:
+                self._startup_error = type(exc).__name__
+                self._ready_event.set()
+                raise
+            self._ready_event.set()
+            return handle
+
         self._worker = SoundSwitchDmxWorker(
             port,
-            port_factory=port_factory,
+            port_factory=_tracked_port_factory,
             poll_s=poll_s,
         )
         self._last_submit_ts: float = time.monotonic()
@@ -117,12 +135,20 @@ class SoundSwitchFrameSender:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def start(self) -> None:
-        """Start the underlying DMX worker and optional idle watchdog."""
+    def start(self, *, readiness_timeout_s: float = 2.0) -> None:
+        """Start only after the serial port is confirmed open, or raise."""
+        self._ready_event.clear()
+        self._startup_error = None
         self._worker.start()
+        if not self._ready_event.wait(timeout=max(0.01, readiness_timeout_s)):
+            self.stop()
+            raise RuntimeError("SoundSwitch DMX startup readiness timed out")
+        if self._startup_error is not None:
+            self.stop()
+            raise RuntimeError("SoundSwitch DMX port failed to open")
         if self._idle_thread is not None and not self._idle_thread.is_alive():
             self._idle_thread.start()
-        log.info("SoundSwitchFrameSender started (port=%s)", self._port)
+        log.info("SoundSwitchFrameSender started")
 
     def stop(self) -> None:
         """Request a clean shutdown: zero packet sent before serial close."""
@@ -136,21 +162,18 @@ class SoundSwitchFrameSender:
     # Hot path
     # ------------------------------------------------------------------
 
-    def submit(
-        self,
-        frame_19: tuple[int, ...],
-        fixture_map: dict[int, int],
-    ) -> None:
-        """Expand frame_19 via fixture_map and enqueue for DMX output.
+    def submit(self, frame_19: tuple[int, ...]) -> None:
+        """Expand frame_19 via the validated fixture map and enqueue it.
 
         Non-blocking.  The underlying mailbox discards stale frames so
         only the most-recent frame is ever transmitted.
 
-        Physical addresses come from fixture_map ONLY; names are never used.
+        Physical addresses come from the construction-time fixture map ONLY;
+        names are never used.
         """
         if self._stopped:
             return
-        dmx_frame = expand_ch1_ch19_to_512(frame_19, fixture_map)
+        dmx_frame = expand_ch1_ch19_to_512(frame_19, self._fixture_map)
         packet = build_dmx_packet(dmx_frame)
         self._worker.put_frame(packet)
         self._last_submit_ts = time.monotonic()
@@ -175,7 +198,6 @@ class SoundSwitchFrameSender:
         worker_status = self._worker.status()
         return {
             "sender": "SoundSwitchFrameSender",
-            "port": self._port,
             "stopped": self._stopped,
             "submit_count": self._submit_count,
             "zero_count": self._zero_count,
@@ -183,7 +205,13 @@ class SoundSwitchFrameSender:
             "seconds_since_last_submit": round(
                 time.monotonic() - self._last_submit_ts, 3
             ),
-            "worker": worker_status,
+            "worker": {
+                "running": bool(worker_status.get("running", False)),
+                "sent_count": int(worker_status.get("sent_count", 0)),
+                "error_count": int(worker_status.get("error_count", 0)),
+                "has_error": bool(worker_status.get("last_error")),
+                "mailbox_depth": int(worker_status.get("mailbox_depth", 0)),
+            },
         }
 
     # ------------------------------------------------------------------
@@ -207,6 +235,18 @@ class SoundSwitchFrameSender:
                 self._zero_count += 1
                 # Reset timer so we don't spam zero packets.
                 self._last_submit_ts = time.monotonic()
+
+
+def _validated_fixture_map(fixture_map: Mapping[int, int]) -> dict[int, int]:
+    if not isinstance(fixture_map, Mapping):
+        raise ValueError("fixture_map must be a mapping")
+    normalized = dict(fixture_map)
+    if set(normalized) != set(range(1, _SS_CHANNEL_COUNT + 1)):
+        raise ValueError("fixture_map must define exactly CH1..CH19")
+    if any(type(address) is not int or not 1 <= address <= 512
+           for address in normalized.values()):
+        raise ValueError("fixture_map addresses must be integers from 1 to 512")
+    return normalized
 
 
 __all__ = [
