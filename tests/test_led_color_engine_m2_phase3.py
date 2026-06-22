@@ -1,5 +1,4 @@
 """Tests for M2 Phase 3: Deterministic color fades and step_within_section."""
-import pytest
 from unittest.mock import Mock, patch
 
 import sys

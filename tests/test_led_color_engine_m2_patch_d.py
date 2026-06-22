@@ -141,7 +141,12 @@ class PatchDTests(unittest.TestCase):
     def test_tracked_and_live_configs_validate(self) -> None:
         root = Path(__file__).resolve().parents[1]
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
-            result = load_led_look_director_config(str(root / rel))
+            cfg_path = root / rel
+            if not cfg_path.exists():
+                # Live config is gitignored / local-only; absent on CI. The
+                # tracked example.json above still exercises validation.
+                continue
+            result = load_led_look_director_config(str(cfg_path))
             self.assertEqual(tuple(result.errors), (), f"{rel}: {result.errors}")
             for name in ("rt_drop_chase", "rt_drop_center_burst"):
                 self.assertIn(name, result.config.looks)
@@ -154,7 +159,10 @@ class PatchDTests(unittest.TestCase):
 
     def test_drop_slot_color_smoke_and_snap(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        result = load_led_look_director_config(str(root / "config/led_look_director.json"))
+        live = root / "config/led_look_director.json"
+        if not live.exists():
+            self.skipTest("live LED config not present (gitignored; local-only)")
+        result = load_led_look_director_config(str(live))
         self.assertEqual(tuple(result.errors), ())
         self.assertFalse(result.config.color_engine.step_within_section.get("drop", True))
         self.assertEqual(result.config.color_engine.fade_beats_by_role.get("drop"), 0.0)

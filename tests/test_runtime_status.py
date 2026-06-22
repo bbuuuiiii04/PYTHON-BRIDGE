@@ -306,6 +306,14 @@ class LEDCommandCallbackTests(unittest.TestCase):
 
 
 class RuntimeStatusWriterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Heartbeat throttle keys derive from id(self) of the writer, and the
+        # throttle registry is process-global; id() reuse across short-lived
+        # per-test writers otherwise leaks throttle state between tests.
+        from rb_ss_bridge_v2.bridge_fmt import reset_rate_state
+
+        reset_rate_state()
+
     def _make_writer(
         self,
         *,

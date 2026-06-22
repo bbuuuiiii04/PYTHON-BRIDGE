@@ -8,10 +8,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
+
+# Shared immutable empty mapping used as a dataclass default.  A bare
+# ``MappingProxyType({})`` default is rejected by dataclasses on Python 3.11+
+# (unhashable -> treated as a mutable default), so defaults must go through
+# ``field(default_factory=...)``.  The proxy is read-only, so sharing one
+# instance is safe.
+_EMPTY_MAPPING: Mapping[Any, Any] = MappingProxyType({})
 
 from .soundswitch_pack_verifier import SoundSwitchPackVerificationError, verify_pack
 
@@ -143,13 +150,13 @@ class LoadedPack:
     scripted: Mapping[str, LoadedScriptedTrack | LoadedDocument]
     autoloops: Mapping[str, LoadedAutoloop | LoadedDocument]
     static_looks: Mapping[int, LoadedStaticLook]
-    bridge_scene_crosswalk: Mapping[str, str] = MappingProxyType({})
+    bridge_scene_crosswalk: Mapping[str, str] = field(default_factory=lambda: _EMPTY_MAPPING)
     learned_midi_bindings: tuple[PackMidiBinding, ...] = ()
-    project_identity: Mapping[str, str | int] = MappingProxyType({})
-    supported_boundary: Mapping[str, str | int] = MappingProxyType({})
+    project_identity: Mapping[str, str | int] = field(default_factory=lambda: _EMPTY_MAPPING)
+    supported_boundary: Mapping[str, str | int] = field(default_factory=lambda: _EMPTY_MAPPING)
     source_inventory_sha256: str = ""
-    active_cue_union: Mapping[str, str | int] = MappingProxyType({})
-    totals: Mapping[str, int] = MappingProxyType({})
+    active_cue_union: Mapping[str, str | int] = field(default_factory=lambda: _EMPTY_MAPPING)
+    totals: Mapping[str, int] = field(default_factory=lambda: _EMPTY_MAPPING)
     render_cue_guids: frozenset[str] = frozenset()
     catalog_tail_guids: frozenset[str] = frozenset()
 
