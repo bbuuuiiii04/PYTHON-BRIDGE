@@ -2594,6 +2594,8 @@ class StateManager:
         self._autoloop.clear_pending_master_phrase_arm()
         if self._laser_executor is not None:
             self._laser_executor.reset_runtime_state(reason="master_changed")
+        if self._laser_director is not None:
+            self._laser_director.reset_runtime_state(reason="master_changed")
         if (
             self._personality_eligible_deck.get(new_deck, False)
             and new_d.meta.content_id
@@ -2622,6 +2624,8 @@ class StateManager:
             self._autoloop.clear_pending_master_phrase_arm()
             if self._laser_executor is not None:
                 self._laser_executor.reset_runtime_state(reason="active_track_loaded")
+            if self._laser_director is not None:
+                self._laser_director.reset_runtime_state(reason="active_track_loaded")
             if self._led_look_director is not None:
                 self._led_look_director.reset_for_track()
         d.track_title_hint = title
@@ -3152,6 +3156,8 @@ class StateManager:
             self._led_last_idle_role_key = ""
             self._led_smart_drop_blackout_key = ""
             self._clear_led_drop_lifecycle()
+            if self._laser_director is not None:
+                self._laser_director.reset_runtime_state(reason="scripted")
             self._clear_smart_rearm_state()
             self._os.autoloop_arm_after_master_change = False
             self._os.autoloop_master_change_source = ""
@@ -3179,6 +3185,8 @@ class StateManager:
             )
 
         elif mode == "idle":
+            if self._laser_director is not None:
+                self._laser_director.reset_runtime_state(reason="idle")
             self._clear_smart_rearm_state()
             self._pending_arm = None
             self._os.last_armed_filepath = ""
@@ -4178,6 +4186,8 @@ class StateManager:
         os.live_follow_generation += 1
         if self._laser_executor is not None:
             self._laser_executor.reset_runtime_state(reason="stop")
+        if self._laser_director is not None:
+            self._laser_director.reset_runtime_state(reason="stop")
 
     def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
         mirror = 3 - deck
@@ -4201,6 +4211,10 @@ class StateManager:
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
         self._clear_led_drop_lifecycle()
+        if self._laser_director is not None:
+            self._laser_director.reset_runtime_state(reason="resume")
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="resume")
         self._log_status()
 
     def _clear_smart_rearm_state(self) -> None:

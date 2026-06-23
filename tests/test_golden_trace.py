@@ -98,6 +98,7 @@ def _personality() -> LaserPersonality:
         breakdown_bank=("break_a",),
         allow_high_impact=True,
         minimum_scene_hold_beats=8,
+        drop_lifecycle_mirror=False,
         # These scenarios exercise the separate post-drop hold; that is the
         # emphasized_drop behavior. (drop_mode holds the drop look instead.)
         drop_style="emphasized_drop",
@@ -223,6 +224,7 @@ class _GoldenHarness:
             safe_scene=personality.safe_scene,
             default_scene=personality.default_scene,
             emergency_scene=personality.safe_scene,
+            scenes=cfg.scenes,
         )
         self._director.set_personality_config(personality)
         self._midi = _FakeMidiOutput(dry_run=True)

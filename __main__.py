@@ -396,6 +396,7 @@ def _build_laser_startup_wiring(
         safe_scene=cfg.fallback_scene,
         default_scene=default_scene,
         emergency_scene=cfg.emergency_scene,
+        scenes=cfg.scenes,
     )
     if cfg.default_personality:
         laser_director.set_personality(cfg.default_personality)
