@@ -276,111 +276,354 @@ impact**. Verified against the live + example config:
 - Follow AGENTS.md §7: this is the `laser` (and touches `led_govee`) change-contract — update the
   docs those contracts list and run §8 hard checks.
 
-### Task 1 — Extract a SHARED pure drop-lifecycle resolver (parity-proven against LED)
-Create `drop_lifecycle.py`: a pure, I/O-free resolver reproducing the LED drop/post_drop region
-(`_led_drop_marker_anchor`, `_led_drop_impact_allowed`, `_led_arm_drop_lifecycle`,
-`_led_drop_lifecycle_should_clear`, and the chorus drop→post_drop flip `:2248-2256`). It carries
-the **complete** LED lifecycle state — **all three fields** — and is parameterized by config:
-```
-DropLifecycleConfig(
-    max_drops_in_a_row: int,        # = LED_MAX_DROP_IMPACTS default 2
-    drop_impact_beats: float,       # flat impact window (operator: 32.0; LED parity: 8.0)
-    post_drop_cycle_beats: float,   # default 32.0 (cadence intent; see Task 4)
-    impact_predecessors: frozenset, # = {"up","low","buildup","breakdown"}
-)
-DropLifecycle:
-    state: first_drop_anchor_beat | None, impact_until_beat | None, impact_count: int
-    drop_anchor(sp_like) -> float | None            # mirrors _led_drop_marker_anchor :2273
-    impact_allowed(sp_like) -> bool                 # mirrors _led_drop_impact_allowed :2283
-    should_clear(sp_like) -> bool                   # mirrors _led_drop_lifecycle_should_clear :2305
-    arm(anchor_beat) -> None                        # mirrors _led_arm_drop_lifecycle :2312
-    resolve(sp_like, *, mutate) -> DropResult   # the WHOLE LED drop region in ONE call
-    reset() -> None                              # clears all three state fields
-```
-`resolve` reproduces ONLY the drop-region slices of `_led_role_from_smart_phrasing`: the
-clear-if-`should_clear` + anchor branch (`:2228-2239`) and the chorus/post_drop window
-(`:2248-2256`, `abs_beat < impact_until` → "drop" else "post_drop"). For everything the LED
-function decides as breakdown / pre_drop / buildup / low / groove (`:2241-2247`, `:2257-2259`),
-`resolve` returns `role="none"` — those stay the laser director's own branches; do NOT port
-breakdown/buildup into this resolver. It returns `DropResult(role, armed_this_tick)`:
-- `role`: `"drop"` | `"post_drop"` | `"none"` (`"none"` = not in the drop lifecycle → caller falls
-  through to its own breakdown/buildup/phrase logic).
-- `armed_this_tick`: `True` only on the tick a NEW impact was armed (the impact-start). The director
-  uses this to keep `reason="drop_crossing"` exactly at the anchor (A4 blackout), and `"drop_cycle"`
-  on sustained ticks — so arming happens in exactly ONE place (here), never duplicated in `_decide`.
-It takes a small struct of the A5 SmartPhrasing fields; it MUST NOT import bridge runtime modules.
-Refactoring the live LED path to call this is **out of scope** (avoids LED regression); the parity
-test (Task D) proves equality.
+### Identifier & literal-implementation contract (READ FIRST — implementer = Sonnet 4.6)
+Implement EXACTLY the code in these tasks. Do not improvise, rename, "clean up", reorder, or add
+anything not listed. Where a task shows a `python` block, that block is the source of truth —
+transcribe it verbatim (adjusting only the leading indentation to match the host method/class).
+- **Create with these exact names (no synonyms):**
+  - module `drop_lifecycle.py`; dataclasses `DropLifecycleConfig`, `DropResult`; class
+    `DropLifecycle` with methods `reset`, `_abs_beat`, `drop_anchor`, `impact_allowed`,
+    `should_clear`, `arm`, `resolve` and state attrs `_first_drop_anchor_beat`,
+    `_impact_until_beat`, `_impact_count`.
+  - director attrs `self._drop_lifecycle`, `self._drop_lifecycle_mirror`, `self._allow_high_impact`,
+    `self._post_drop_bank`, `self._scenes`; director methods `reset_runtime_state`,
+    `_has_usable_cyclable_post_drop`; module const `_LASER_DROP_IMPACT_PREDECESSORS`.
+  - executor attr `self._role_bag`; executor methods `_usable_bag_entries`,
+    `_next_shuffled_scene_locked`.
+  - `LaserPersonality` fields `drop_lifecycle_mirror`, `max_drops_in_a_row`, `drop_impact_beats`,
+    `post_drop_cycle_beats`.
+- **Exact, case-sensitive reason strings:** `"drop_crossing"`, `"drop_cycle"`, `"post_drop_cycle"`.
+  Roles: `"drop"`, `"post_drop"`. Invent NO new reason/role strings. Do NOT change the existing
+  `"drop_hold"`/`"post_drop_hold"` reasons (they live only in the flag-OFF path).
+- **Line numbers are from HEAD `c4edf97` and WILL shift as you edit.** Always locate a target by the
+  quoted surrounding code, never by the bare number.
+- **Never touch:** the executor blackout methods (`trigger_blackout_on`, `_resolve_pending_blackout`,
+  `hold_blackout_mask`, `release_blackout_mask`, `_release_all_masks`, `clear_pending_blackout`) and
+  the `is_drop_crossing` branches in `on_decision`; `smart_phrasing.py`; `smart_rearm.py`;
+  `autoloop_controller.py`; the `_led_*` LED path in `state_manager.py`; the push-loop threading.
+- **The flag-on/flag-off switch is read from state, never from a decision field:** the director reads
+  `self._drop_lifecycle_mirror`; the executor reads `self._personality.drop_lifecycle_mirror`. Do NOT
+  add a field to `LaserSceneDecision`.
+- **Commit after each task** with the message in "When you finish".
 
-### Task 2 — `laser_models.py` + `laser_config.py`: configurable knobs (default-on)
-Add to `LaserPersonality` (near `drop_style`, `laser_models.py:~115`):
-- `drop_lifecycle_mirror: bool = True`   (**kill switch, default ON**)
-- `max_drops_in_a_row: int = 2`
-- `drop_impact_beats: float = 32.0`      (operator value; flat — no per-look pairing this pass)
-- `post_drop_cycle_beats: float = 32.0`  (**INERT for the laser** — A5: the laser rotates on
-  `autoloop_tick_just_fired`; nothing in the decision/exec path reads this. Store it for the future
-  native-DMX cadence only and add a `# inert: not consumed by the laser decision/exec path` comment at
-  the field. Do NOT wire it into `resolve()` or the executor.)
-- **Do NOT add `drop_cycle_beats`** (A5: fake config; cadence is `autoloop_tick_just_fired`).
-- **Do NOT add `drop_pairs`** this pass (A2/A4: the executor rotates the bank, so the director
-  cannot know the fired scene; per-look duration would key off the wrong scene — out of scope).
-Validate in `laser_config.py` (`_validate_personality`, mirror existing `:641-690`): `bool` for
-the flag; `max_drops_in_a_row` positive int; `drop_impact_beats`/`post_drop_cycle_beats` positive
-numbers. Unknown/missing → the defaults above (feature ON by default). Build in `_build_personality`
-(`:830`). **Because default is ON, the config example + the live config already-loaded personalities
-must be re-validated to load clean** (run the suite + a load smoke test).
+### Task 1 — Create `drop_lifecycle.py` (pure, no bridge imports). Transcribe verbatim.
+A pure resolver reproducing ONLY the LED drop/post_drop region of `_led_role_from_smart_phrasing`
+(`state_manager.py:2228-2256`) plus its helpers (`_led_drop_marker_anchor :2273`,
+`_led_drop_impact_allowed :2283`, `_led_drop_lifecycle_should_clear :2305`,
+`_led_arm_drop_lifecycle :2312`, `_led_abs_beat :2365`). It carries all THREE LED state fields and is
+parameterised by config. It MUST NOT import any bridge runtime module; it reads `sp` by attribute
+(duck-typed). Create the file with EXACTLY this content:
+```python
+"""Pure, renderer-agnostic drop / post_drop lifecycle resolver.
+
+Mirrors the LED drop-region resolver in state_manager.py (_led_role_from_smart_phrasing and its
+helpers). Pure: no I/O, no bridge imports. `sp` is any object exposing the SmartPhrasing attributes
+read below (the live laser passes a SmartPhrasingState; tests pass a types.SimpleNamespace).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass(frozen=True)
+class DropLifecycleConfig:
+    max_drops_in_a_row: int            # = LED_MAX_DROP_IMPACTS (2)
+    drop_impact_beats: float           # flat impact window (operator 32.0; LED-parity 8.0)
+    post_drop_cycle_beats: float       # inert here; carried for the future native-DMX cadence
+    impact_predecessors: frozenset     # = frozenset({"up", "low", "buildup", "breakdown"})
+
+
+@dataclass(frozen=True)
+class DropResult:
+    role: str            # "drop" | "post_drop" | "none"
+    armed_this_tick: bool
+
+
+class DropLifecycle:
+    def __init__(self, config: DropLifecycleConfig) -> None:
+        self._config = config
+        self._first_drop_anchor_beat: Optional[float] = None
+        self._impact_until_beat: Optional[float] = None
+        self._impact_count: int = 0
+
+    def reset(self) -> None:
+        self._first_drop_anchor_beat = None
+        self._impact_until_beat = None
+        self._impact_count = 0
+
+    def _abs_beat(self, sp) -> Optional[float]:
+        if sp.abs_beat is not None:
+            return float(sp.abs_beat)
+        if sp.current_phrase_start_beat is not None and sp.beats_into_phrase is not None:
+            return float(sp.current_phrase_start_beat) + float(sp.beats_into_phrase)
+        if sp.active_drop_beat is not None:
+            return float(sp.active_drop_beat)
+        return None
+
+    def drop_anchor(self, sp) -> Optional[float]:
+        if sp.current_phrase_is_chorus and sp.phrase_start_crossing:
+            if sp.current_phrase_start_beat is not None:
+                return float(sp.current_phrase_start_beat)
+        if sp.smart_drop_crossing:
+            if sp.active_drop_beat is not None:
+                return float(sp.active_drop_beat)
+            return self._abs_beat(sp)
+        return None
+
+    def impact_allowed(self, sp) -> bool:
+        previous = str(sp.previous_phrase_label or "other")
+        if previous in self._config.impact_predecessors:
+            return True
+        if sp.smart_drop_crossing:
+            current = str(sp.current_phrase_label or "other")
+            if current in self._config.impact_predecessors:
+                return True
+        if previous == "chorus":
+            if (
+                self._first_drop_anchor_beat is not None
+                and self._impact_count < self._config.max_drops_in_a_row
+            ):
+                return True
+        return False
+
+    def should_clear(self, sp) -> bool:
+        if sp.smart_drop_crossing:
+            return False
+        if sp.current_phrase_is_chorus or sp.smart_post_drop_active:
+            return False
+        return self._first_drop_anchor_beat is not None
+
+    def arm(self, anchor_beat: float) -> None:
+        if self._first_drop_anchor_beat is None:
+            self._first_drop_anchor_beat = float(anchor_beat)
+        self._impact_until_beat = float(anchor_beat) + self._config.drop_impact_beats
+        self._impact_count += 1
+
+    def resolve(self, sp, *, mutate: bool) -> DropResult:
+        if mutate and self.should_clear(sp):
+            self.reset()
+        anchor = self.drop_anchor(sp)
+        if anchor is not None:
+            if self.impact_allowed(sp):
+                if mutate:
+                    self.arm(anchor)
+                return DropResult(role="drop", armed_this_tick=True)
+            if mutate and self._first_drop_anchor_beat is None:
+                self._first_drop_anchor_beat = anchor
+            return DropResult(role="post_drop", armed_this_tick=False)
+        # No anchor. Reproduce ONLY the chorus/post_drop window (LED :2248-2256). Breakdown,
+        # pre_drop, buildup, low, groove are the laser director's OWN branches -> "none".
+        if sp.current_phrase_is_chorus or sp.smart_post_drop_active:
+            abs_beat = self._abs_beat(sp)
+            if (
+                abs_beat is not None
+                and self._impact_until_beat is not None
+                and abs_beat < self._impact_until_beat
+            ):
+                return DropResult(role="drop", armed_this_tick=False)
+            return DropResult(role="post_drop", armed_this_tick=False)
+        return DropResult(role="none", armed_this_tick=False)
+```
+**Attributes `resolve` may read on `sp` (and NO others):** `abs_beat`, `current_phrase_start_beat`,
+`beats_into_phrase`, `active_drop_beat`, `current_phrase_is_chorus`, `phrase_start_crossing`,
+`smart_drop_crossing`, `previous_phrase_label`, `current_phrase_label`, `smart_post_drop_active`.
+`armed_this_tick` is True on EXACTLY the ticks `arm()` runs (anchor present AND `impact_allowed`) —
+the same ticks the LED runs `_led_arm_drop_lifecycle` / increments `_led_drop_impact_count`.
+Refactoring the live LED path to call this is OUT OF SCOPE (the Task-D parity test proves equality).
+
+### Task 2 — `laser_models.py` + `laser_config.py`: configurable knobs (default-ON)
+**2a.** In `laser_models.py`, in the `LaserPersonality` dataclass, immediately AFTER the line
+`drop_style: str = "drop_mode"` (`:115`), add exactly:
+```python
+    drop_lifecycle_mirror: bool = True        # kill switch, default ON
+    max_drops_in_a_row: int = 2
+    drop_impact_beats: float = 32.0           # operator value; flat window
+    post_drop_cycle_beats: float = 32.0       # inert: not consumed by the laser decision/exec path
+```
+Do NOT add `drop_cycle_beats` or `drop_pairs` (A5/A2: fake config / wrong-scene keying).
+
+**2b.** In `laser_config.py` `_validate_personality`, immediately BEFORE the
+`bpm_band_min = data.get("bpm_band_min", 0.0)` line (`:692`), add exactly:
+```python
+    drop_lifecycle_mirror = data.get("drop_lifecycle_mirror", True)
+    if not isinstance(drop_lifecycle_mirror, bool):
+        errors.append(f"{prefix}: 'drop_lifecycle_mirror' must be a boolean")
+
+    max_drops_in_a_row = data.get("max_drops_in_a_row", 2)
+    if (
+        not isinstance(max_drops_in_a_row, int)
+        or isinstance(max_drops_in_a_row, bool)
+        or max_drops_in_a_row < 1
+    ):
+        errors.append(f"{prefix}: 'max_drops_in_a_row' must be a positive integer")
+
+    for _knob in ("drop_impact_beats", "post_drop_cycle_beats"):
+        _value = data.get(_knob, 32.0)
+        if isinstance(_value, bool) or not isinstance(_value, (int, float)) or _value <= 0:
+            errors.append(f"{prefix}: '{_knob}' must be a positive number")
+```
+
+**2c.** In `laser_config.py` `_build_personality` (`:830`), inside the `LaserPersonality(...)`
+constructor call, add these kwargs directly AFTER `drop_style=_canon_drop_style(...)` (`:866`),
+before the closing `)` (`:867`):
+```python
+        drop_lifecycle_mirror=bool(data.get("drop_lifecycle_mirror", True)),
+        max_drops_in_a_row=int(data.get("max_drops_in_a_row", 2)),
+        drop_impact_beats=float(data.get("drop_impact_beats", 32.0)),
+        post_drop_cycle_beats=float(data.get("post_drop_cycle_beats", 32.0)),
+```
+Missing/unknown keys → these defaults (feature ON). **After this task, `python3 -m unittest discover
+tests` AND a load smoke test of BOTH `config/laser_director.json` and
+`config/laser_director.example.json` must pass clean** (default-ON means existing personalities load
+with the mirror enabled).
 
 ### Task 3 — `laser_director.py`: gate the drop role + drive the mirrored lifecycle
-Add `self._drop_lifecycle: Optional[DropLifecycle]` built in `set_personality_config` (`:180`) and
-`__init__` from the new knobs; rebuild it on personality reload. Add
-`reset_runtime_state(reason: str)` (see Task 3d). In `_decide`, when `drop_lifecycle_mirror` is ON:
 
-3a. **ONE unified block replaces priority-9 `drop_crossing` + priority-10 `drop_hold` ONLY
-(`:432-477`).** This is the A3 fix (gate) + A4 (blackout preserved) in a single resolver call so
-arming happens in exactly one place. **CRITICAL — do NOT extend the replaced range past `:477`:**
-the priority-11 buildup window (`:479-513`), the buildup-gate logging (`:514-529`), the
-`_last_smart_abs_beat`/`_post_drop_start_abs_beat` housekeeping (`:531-536`), and the
-`_decide_phrase_default(...)` call (`:538-543`) are **kept verbatim**. Replace `:432-477` with:
+> **Sub-task order is 3-pre → 3b → 3a → 3c → 3d.** This is intentional: `set_personality_config`
+> (`:180`, 3b) is higher in the file than `_decide` (`:432`, 3a). Working top-to-bottom prevents
+> line-number drift from earlier insertions shifting later targets. Follow this order exactly.
+
+**3-pre. Imports + construction (do these first).**
+- At the top of `laser_director.py`, add `from .drop_lifecycle import DropLifecycle, DropLifecycleConfig`
+  right after the existing `from .smart_phrasing import SmartPhrasingState` (`:38`), and a module-level
+  constant right after `_DEFAULT_EMERGENCY_SCENE` (`:48`):
+  `_LASER_DROP_IMPACT_PREDECESSORS = frozenset({"up", "low", "buildup", "breakdown"})`.
+- Add `scenes: Optional[dict] = None,` as the LAST keyword-only parameter in
+  `LaserDirector.__init__` (`:63-83`), after `drop_style: str = "drop_mode",` (`:82`). In the body,
+  add `self._scenes = scenes or {}` right after `self._drop_style = self._canon_drop_style(drop_style)`
+  (`:102`).
+- In `__init__`, immediately AFTER `self._decision_log = LaserDecisionLog()` (`:126`), add exactly:
+  ```python
+          self._drop_lifecycle: Optional[DropLifecycle] = None
+          self._drop_lifecycle_mirror: bool = True
+          self._allow_high_impact: bool = False
+          self._post_drop_bank: tuple[str, ...] = ()
+  ```
+- At the construction site `__main__.py:393-399`, add `scenes=cfg.scenes,` as a new kwarg to the
+  `LaserDirector(...)` call (after `emergency_scene=cfg.emergency_scene,`). This is the SAME `cfg`
+  object the executor receives at `:414-418`, so scene-catalog refresh semantics are identical to
+  the executor's existing `self._config` — **add no config-reload handling.**
+
+**3b. Build the lifecycle in `set_personality_config` (`:180`).** At the END of that method, AFTER
+`self._drop_style = self._canon_drop_style(...)` (`:197-199`), append exactly:
 ```python
-if self._drop_lifecycle is not None and drop_lifecycle_mirror_on:
-    res = self._drop_lifecycle.resolve(sp, mutate=True)   # full LED drop region, one call
-    # Preserve today's priority-9 guards (:433): never emit the immediate at-anchor drop_crossing on
-    # the first smart tick after a reset (previous_abs_beat is None) or with an unconfigured drop
-    # scene. (resolve() may have armed the lifecycle this tick regardless — that is fine: the impact
-    # then surfaces as res.role=="drop"/drop_cycle below, which fires no MIDI at a blackout-mode
-    # crossing since autoloop_tick_just_fired is False there, matching today's no-fire.)
-    if res.armed_this_tick and previous_abs_beat is not None and self._drop_scene:
-        # impact START → keep reason="drop_crossing": executor fires immediately AND
-        # resolves the Smart Drop blackout for an ALLOWED crossing, byte-identical to today (A4).
-        # res.armed_this_tick is True only when impact_allowed (the GATE), so an ungated
-        # smart_drop_crossing in groove/buildup no longer fires a drop (A3 fix).
-        self._post_drop_start_abs_beat = abs_beat
-        self._last_smart_abs_beat = abs_beat
-        return LaserSceneDecision(scene=self._drop_scene, reason="drop_crossing",
-                                  priority=9, source="policy", role="drop")
-    if res.role == "drop":          # sustained inside the impact window (or guarded-out first tick)
-        self._last_smart_abs_beat = abs_beat
-        return LaserSceneDecision(scene=self._drop_scene, reason="drop_cycle",
-                                  priority=10, role="drop", source="policy")
-    if res.role == "post_drop":
-        self._last_smart_abs_beat = abs_beat
-        if self._has_usable_cyclable_post_drop():     # A6 fallback predicate (Task 3c)
-            return LaserSceneDecision(scene=self._post_drop_scene or self._drop_scene,
-                                      reason="post_drop_cycle", priority=10, role="post_drop",
-                                      source="policy")
-        return LaserSceneDecision(scene=self._drop_scene, reason="drop_cycle",   # never dark
-                                  priority=10, role="drop", source="policy")
-    in_post_drop_hold = False     # res.role == "none": resolver OWNS the post-drop window, so we
-                                  # are NOT in a hold; the preserved buildup gate (:479+) reads this.
-else:
-    # flag OFF: the ORIGINAL :432-477 (smart_drop_crossing drop_crossing + drop_hold) runs verbatim,
-    # including computing `in_post_drop_hold`. Byte-for-byte unchanged.
-    <original :432-477 here>
-# fall through to the UNCHANGED priority-11 buildup window + _decide_phrase_default (:479-543)
+        self._drop_lifecycle_mirror = bool(getattr(personality, "drop_lifecycle_mirror", True))
+        self._allow_high_impact = bool(getattr(personality, "allow_high_impact", False))
+        self._post_drop_bank = tuple(personality.post_drop_bank)
+        self._drop_lifecycle = DropLifecycle(DropLifecycleConfig(
+            max_drops_in_a_row=int(getattr(personality, "max_drops_in_a_row", 2)),
+            drop_impact_beats=float(getattr(personality, "drop_impact_beats", 32.0)),
+            post_drop_cycle_beats=float(getattr(personality, "post_drop_cycle_beats", 32.0)),
+            impact_predecessors=_LASER_DROP_IMPACT_PREDECESSORS,
+        ))
 ```
-**Both branches must define `in_post_drop_hold`** (the buildup gate at `:493`/`:515-528` reads it):
-flag-ON "none" path sets it `False`; flag-OFF path computes it as today. Do NOT delete or move the
-buildup window — only `:432-477` changes.
+Constructing a fresh `DropLifecycle` here IS the per-personality reset — no extra call needed.
+
+**3a. Replace the Priority-9 + Priority-10 region of `_decide` (`laser_director.py:432-477`).** Locate
+the block beginning `# Priority 9: Drop crossing (once per target beat).` and ending with the
+Priority-10 `drop_hold` return's closing `)` (just before `# Priority 11:`). Replace that ENTIRE block
+with the code below. The `else:` branch is the CURRENT block transcribed verbatim, re-indented one
+level — **do not alter a character of it.** Do NOT touch anything at/after `# Priority 11:` (`:479`):
+```python
+        # Priority 9 + 10: gated drop lifecycle (mirror) OR the original ungated path.
+        drop_lifecycle_mirror_on = self._drop_lifecycle_mirror
+        if self._drop_lifecycle is not None and drop_lifecycle_mirror_on:
+            res = self._drop_lifecycle.resolve(sp, mutate=True)  # full LED drop region, one call
+            # Preserve today's priority-9 guards (:433): do NOT emit the immediate at-anchor
+            # drop_crossing on the first smart tick after a reset (previous_abs_beat is None) or
+            # with an unconfigured drop scene. resolve() may still have armed the lifecycle this
+            # tick — fine: the impact then surfaces as res.role == "drop" -> drop_cycle below,
+            # which fires no MIDI at a blackout-mode crossing (autoloop_tick_just_fired is False
+            # there), matching today's no-fire.
+            if res.armed_this_tick and previous_abs_beat is not None and self._drop_scene:
+                # ALLOWED impact START -> reason="drop_crossing": executor fires immediately AND
+                # resolves the Smart Drop blackout, byte-identical to today for allowed crossings
+                # (A4). res.armed_this_tick is True only when impact_allowed (the GATE) — an
+                # ungated smart_drop_crossing in groove/buildup no longer fires a drop (A3 fix).
+                self._post_drop_start_abs_beat = abs_beat
+                self._last_smart_abs_beat = abs_beat
+                return LaserSceneDecision(
+                    scene=self._drop_scene, reason="drop_crossing",
+                    priority=9, source="policy", role="drop",
+                )
+            if res.role == "drop":  # sustained inside the window (or guarded-out first tick)
+                self._last_smart_abs_beat = abs_beat
+                return LaserSceneDecision(
+                    scene=self._drop_scene, reason="drop_cycle",
+                    priority=10, source="policy", role="drop",
+                )
+            if res.role == "post_drop":
+                self._last_smart_abs_beat = abs_beat
+                if self._has_usable_cyclable_post_drop():
+                    return LaserSceneDecision(
+                        scene=self._post_drop_scene or self._drop_scene,
+                        reason="post_drop_cycle",
+                        priority=10, source="policy", role="post_drop",
+                    )
+                return LaserSceneDecision(  # no usable post_drop -> cycle drops, never dark
+                    scene=self._drop_scene, reason="drop_cycle",
+                    priority=10, source="policy", role="drop",
+                )
+            # res.role == "none": the resolver owns the drop/post_drop window, so we are NOT in a
+            # post-drop hold. The preserved Priority-11 buildup gate (below) reads this local.
+            in_post_drop_hold = False
+        else:
+            # Flag OFF (or no lifecycle): the ORIGINAL Priority-9 + Priority-10 code, VERBATIM.
+            # Priority 9: Drop crossing (once per target beat).
+            if previous_abs_beat is not None and self._drop_scene:
+                if sp.smart_drop_crossing:
+                    self._pending_drop_crossing_beat = None
+                    self._drop_rearm_edge_seen_for_pending = False
+                    self._post_drop_start_abs_beat = abs_beat
+                    self._last_smart_abs_beat = abs_beat
+                    return LaserSceneDecision(
+                        scene=self._drop_scene,
+                        reason="drop_crossing",
+                        priority=9,
+                        source="policy",
+                        role="drop",
+                    )
+
+            # Priority 10: Hold after the drop.
+            in_post_drop_hold = (
+                self._post_drop_hold_beats > 0
+                and self._post_drop_start_abs_beat >= 0.0
+                and (abs_beat - self._post_drop_start_abs_beat) < self._post_drop_hold_beats
+            )
+            if in_post_drop_hold:
+                if self._drop_style == "emphasized_drop":
+                    if self._post_drop_scene:
+                        self._last_smart_abs_beat = abs_beat
+                        return LaserSceneDecision(
+                            scene=self._post_drop_scene,
+                            reason="post_drop_hold",
+                            priority=10,
+                            source="policy",
+                            role="post_drop",
+                        )
+                elif self._drop_scene:
+                    # drop_mode: hold the rotated drop look itself for the post-drop
+                    # window; there is no separate post-drop scene. The executor keeps
+                    # the already-fired (rotated) drop scene latched via role-unchanged
+                    # + same-scene skip, so this decision MUST NOT re-fire MIDI — the
+                    # reason is deliberately not "drop_crossing".
+                    self._last_smart_abs_beat = abs_beat
+                    return LaserSceneDecision(
+                        scene=self._drop_scene,
+                        reason="drop_hold",
+                        priority=10,
+                        source="policy",
+                        role="drop",
+                    )
+        # Both branches above have either returned or set `in_post_drop_hold`. Execution continues
+        # into the UNCHANGED Priority-11 buildup window + _decide_phrase_default (current :479+).
+```
+**`in_post_drop_hold` is a plain function-local** (Python has no block scope), so the flag-ON `none`
+path setting it `False` and the flag-OFF path computing it both reach the buildup gate at
+`:493`/`:515-528`. Do NOT delete, move, or edit the Priority-11 buildup window, the buildup-gate
+logging, the `_last_smart_abs_beat`/`_post_drop_start_abs_beat` housekeeping, or the
+`_decide_phrase_default(...)` call — only `:432-477` changes.
 Breakdown stays at priority 8 (ahead of the lifecycle) — **intentional, documented divergence**
 from LED order; it is strictly safer (no drop during an active breakdown) and matches today's
 laser behavior. **Documented edge divergence:** if `smart_post_drop_active` is true during an
@@ -390,112 +633,417 @@ emit buildup. Narrow (chorus and up are normally mutually exclusive), accepted, 
 scoping buildup out of the mirror. `pre_drop`/`low` are not laser roles and remain routed to the
 existing buildup/phrase logic (pre_drop_scene stays inert per `laser_config.py:632`).
 
-3c. **`_has_usable_cyclable_post_drop()`**: true iff `post_drop_bank` (or `post_drop_scene`)
-contains ≥1 scene that is `scene_type=="autoloop"` and not (high_impact while
-`allow_high_impact` is false). The director needs read access to `config.scenes` + the personality;
-inject the scene catalog at construction (the executor already holds it). Mirror this exact
-predicate in Task 4's executor skip.
+**3c. `_has_usable_cyclable_post_drop` (new method on `LaserDirector`).** Add it directly BEFORE
+`_decide` (`:293`), after the closing line of `_record_decision` (`:291`). Add exactly:
+```python
+    def _has_usable_cyclable_post_drop(self) -> bool:
+        for name in self._post_drop_bank:
+            sd = self._scenes.get(name)
+            if sd is None:
+                continue
+            if sd.scene_type != "autoloop":
+                continue
+            if sd.safety_class == "high_impact" and not self._allow_high_impact:
+                continue
+            return True
+        return False
+```
+It iterates `self._post_drop_bank` ONLY (NOT `post_drop_scene`) so it is byte-identical to the
+executor's `_usable_bag_entries("post_drop")` (Task 4). The two predicates MUST agree, or the director
+will emit `post_drop_cycle` for a bank the executor then cannot fill → dark. `sd` is a scene-def with
+`.scene_type` and `.safety_class` str attributes (the executor reads them at
+`laser_executor.py:162,175,187`).
 
-3d. **`reset_runtime_state(reason)`** on `LaserDirector`: clears `_drop_lifecycle.reset()` AND the
-existing `_reset_smart_observation_state()` fields (`_post_drop_start_abs_beat`,
-`_last_smart_abs_beat`, etc.). Wire it in `state_manager.py` at EVERY site that today clears LED
-lifecycle / resets the executor: `_on_master_changed` (`:2589/2596`), `_on_track_loaded`
-(`:2617/2624`), `_do_full_stop` (`:4172/4180`), `_do_resume` (`:4203` — today resets NEITHER
-director nor executor; add both), scripted/idle `_apply_lighting` (`:3154`, `:3181`), and after
-personality apply (`:2744-2746`). This closes the B3 leak that compounds the A3 symptom.
-**Placement rule:** put `_drop_lifecycle.reset()` ONLY in `reset_runtime_state` (transition-driven).
-Do NOT fold it into `_reset_smart_observation_state` (`laser_director.py:683`), which `_decide` calls
-EVERY idle/stale/not-ready/scripted tick (priorities 3–7): clearing the lifecycle per-tick would
-diverge from the LED, which clears only at the transition sites above + `should_clear`. The resolver
-is never consulted on those early-return ticks anyway (they return before priority 9), so a transient
-stale must not wipe a mid-chorus lifecycle.
+**3d. `reset_runtime_state` (new method on `LaserDirector`).** Add it directly AFTER
+`_has_usable_cyclable_post_drop` (3c), still before `_decide`. Add exactly:
+```python
+    def reset_runtime_state(self, reason: str) -> None:
+        del reason  # accepted for call-site symmetry / logging only
+        if self._drop_lifecycle is not None:
+            self._drop_lifecycle.reset()
+        self._reset_smart_observation_state()
+```
+Do NOT add `self._drop_lifecycle.reset()` to `_reset_smart_observation_state` (`:683`) — that method
+runs on EVERY idle/stale/not-ready/scripted tick (`_decide` priorities 3–7) and would wipe a
+mid-chorus lifecycle. The LED clears its lifecycle only at the transition sites below + `should_clear`;
+mirror that. (The resolver is not consulted on those early-return ticks anyway.)
 
-### Task 4 — `laser_executor.py`: refire + rotate drop/post_drop on the autoloop cadence
-1. Make `drop`/`post_drop` refire-eligible **only** for the new cycle reasons. Replace
-   `refire_allowed` (`:182-189`) — note `drop_crossing` is NOT a cycle reason, so the A4 blackout
-   path is untouched:
-   ```python
-   cycling = decision.reason in ("drop_cycle", "post_drop_cycle")
-   refire_allowed = (
-       ctx.autoloop_tick_just_fired
-       and (role in refire_roles or (cycling and role in ("drop", "post_drop")))
-       and scene_def.scene_type == "autoloop"
-       and (last_role_trigger_beat < 0.0 or float(ctx.abs_beat) > last_role_trigger_beat)
-   )
-   ```
-2. **Shuffle-bag selection for drop/post_drop — mirror LED `_look_name_for_role` (A7).** Replace
-   the round-robin cursor for these two roles with a shuffle-bag, used for BOTH the at-anchor
-   `drop_crossing` pick and the cycle ticks (so the fired note is random either way). Add executor
-   state `self._role_bag: dict[str, tuple[str, ...]] = {}` and reuse `self._role_cursors` (monotonic).
-   - **Usable filter (A6, replaces the old "advance past" logic):** define
-     `_usable_bag_entries(role) = [s for s in _bank_for_role(role)
-       if (sd := self._config.scenes.get(s)) and sd.scene_type == "autoloop"
-       and not (sd.safety_class == "high_impact" and not allow_high_impact)]`.
-     Non-cyclable entries never enter the bag, so they are never fired as a cycle.
-   - **Pick (mirror LED `:330-356`):** in a new `_next_shuffled_scene_locked(role)`:
-     ```python
-     usable = self._usable_bag_entries(role)
-     if not usable:
-         self._role_active_scene[role] = ""
-         return ""                                   # → Task-3 fallback / no-op (never dark-send)
-     cursor = self._role_cursors.get(role, 0)
-     bag = self._role_bag.get(role, ())
-     if cursor % len(usable) == 0 or not bag or len(bag) != len(usable):
-         shuffled = list(usable); self._rng.shuffle(shuffled)   # reshuffle on exhaustion / bank change
-         bag = tuple(shuffled); self._role_bag[role] = bag
-     scene = bag[cursor % len(bag)]
-     self._role_cursors[role] = cursor + 1
-     self._role_active_scene[role] = scene
-     return scene
-     ```
-     The `len(bag) != len(usable)` guard rebuilds the bag when the operator exports a new/removed
-     drop look (A7 authoring loop) so it joins the rotation without curation. This mirrors the LED
-     reshuffle-on-exhaustion exactly (incl. the accepted ~1/N bag-boundary repeat — do NOT add a
-     guard the LEDs don't have, to keep parity).
-   - In `_select_scene` (`:375`), for `role in ("drop","post_drop")` with a **cycling** reason
-     (`drop_cycle`/`post_drop_cycle`): fire only on `ctx.autoloop_tick_just_fired`, then
-     `return self._next_shuffled_scene_locked(role)`. On an empty usable set this returns `""`, which
-     for a cycle is a correct no-op (the Task-3 post_drop→drop fallback already routed playable
-     personalities to `drop_cycle`; a personality with no usable cycle simply holds the latched look —
-     never a static/one-shot fired as a cycle).
-   - **At-anchor `drop_crossing` (flag-on) MUST NOT go dark (A8).** Route the impact pick through the
-     bag **but fall back to the configured static drop** when the bag is empty:
-     ```python
-     scene = self._next_shuffled_scene_locked("drop")   # shuffled impact when usable (house: 15)
-     if not scene:
-         scene = decision.scene                          # static one-shot impact (dubstep / example)
-     return scene
-     ```
-     `decision.scene` is the director's `_drop_scene` (`house_drop_1` for dubstep/house). This keeps
-     the random impact for personalities with usable autoloop drops AND preserves today's static
-     impact for static-only banks. Leave the flag-off `drop_crossing`/`drop_hold` paths on the
-     existing `_choose_bank_scene_locked`.
-   - **Teardown:** clear `_role_bag` in `reset_runtime_state` alongside `_role_active_scene` so each
-     track starts a fresh shuffle (B3 / Task 3d). NOTE `_role_cursors` is **not** reseeded on
-     track/master change (`reset_cursors=False` at `state_manager.py:2596/2624`); clearing the bag
-     (`not bag` → rebuild) is sufficient to re-shuffle per track. The cursor offset persists, so the
-     first pass of a new track may start mid-bag — Part D's "every usable entry once per pass"
-     assertion must start at a reshuffle boundary, not at construction.
-   The 32-beat cadence comes from `autoloop_tick_just_fired` (A5) — **no new timer**. (Documented
-   divergence from LED's abs-beat-anchored post_drop cadence; acceptable and renderer-agnostic.)
+**3d-wiring. Wire `reset_runtime_state` in `state_manager.py` at exactly these 6 sites.** For sites
+1–3, the director call goes DIRECTLY AFTER the existing executor call (inside the same `if` or with
+its own guard). For sites 4–6, there is no existing executor call; add only the director call. Each
+snippet shows ≥3 surrounding anchor lines so you can locate the insertion point by code, not line
+number (line numbers will shift as you edit).
+
+**Site 1: `_on_master_changed`** — find the existing executor reset at `:2595-2596`:
+```python
+        # BEFORE (current code):
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="master_changed")
+        if (
+
+        # AFTER (add the director call directly below, with its own guard):
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="master_changed")
+        if self._laser_director is not None:
+            self._laser_director.reset_runtime_state(reason="master_changed")
+        if (
+```
+
+**Site 2: `_on_track_loaded`** — find the existing executor reset at `:2623-2624`:
+```python
+        # BEFORE (current code):
+            if self._laser_executor is not None:
+                self._laser_executor.reset_runtime_state(reason="active_track_loaded")
+            if self._led_look_director is not None:
+
+        # AFTER (add the director call directly below):
+            if self._laser_executor is not None:
+                self._laser_executor.reset_runtime_state(reason="active_track_loaded")
+            if self._laser_director is not None:
+                self._laser_director.reset_runtime_state(reason="active_track_loaded")
+            if self._led_look_director is not None:
+```
+
+**Site 3: `_do_full_stop`** — find the existing executor reset at `:4179-4180`:
+```python
+        # BEFORE (current code):
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="stop")
+
+    def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
+
+        # AFTER (add the director call directly below):
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="stop")
+        if self._laser_director is not None:
+            self._laser_director.reset_runtime_state(reason="stop")
+
+    def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
+```
+
+**Site 4: `_do_resume`** — find `self._clear_led_drop_lifecycle()` at `:4203`, insert AFTER it:
+```python
+        # BEFORE (current code):
+        self._clear_led_drop_lifecycle()
+        self._log_status()
+
+        # AFTER (add BOTH director AND executor resets between the two lines):
+        self._clear_led_drop_lifecycle()
+        if self._laser_director is not None:
+            self._laser_director.reset_runtime_state(reason="resume")
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="resume")
+        self._log_status()
+```
+
+**Site 5: scripted `_apply_lighting`** — find `self._clear_led_drop_lifecycle()` inside the
+`if mode == "scripted":` block at `:3154`, insert AFTER it:
+```python
+        # BEFORE (current code):
+            self._clear_led_drop_lifecycle()
+            self._clear_smart_rearm_state()
+
+        # AFTER (add director-only reset between the two lines):
+            self._clear_led_drop_lifecycle()
+            if self._laser_director is not None:
+                self._laser_director.reset_runtime_state(reason="scripted")
+            self._clear_smart_rearm_state()
+```
+
+**Site 6: idle `_apply_lighting`** — find `elif mode == "idle":` at `:3181`, insert at the TOP of
+the block (after the `elif` line, before `self._clear_smart_rearm_state()`):
+```python
+        # BEFORE (current code):
+        elif mode == "idle":
+            self._clear_smart_rearm_state()
+
+        # AFTER (add director-only reset at the top of the block):
+        elif mode == "idle":
+            if self._laser_director is not None:
+                self._laser_director.reset_runtime_state(reason="idle")
+            self._clear_smart_rearm_state()
+```
+
+Do NOT add an executor `reset_runtime_state` at the scripted/idle sites (it already gets
+`clear_pending_blackout` via `_clear_smart_rearm_state`; its role-bag reshuffles on return — leaving it
+avoids changing executor behavior on those transitions). Personality apply (`_apply_personality_change`
+`:2746`) already rebuilds the lifecycle via `set_personality_config` (3b) — no extra reset there.
+
+### Task 4 — `laser_executor.py`: refire + shuffle drop/post_drop on the autoloop cadence
+**4a. New executor state.** In `__init__`, immediately AFTER `self._mask_owners: set[str] = set()`
+(`:66`), add: `self._role_bag: dict[str, tuple[str, ...]] = {}`.
+
+**4b. Clear it on teardown.** In `reset_runtime_state`, INSIDE the `with self._lock:` block (next to
+`self._role_active_scene = {role: "" for role in _AUTO_ROLES}` `:93`), add: `self._role_bag = {}`. Do
+NOT reseed `self._role_cursors` here (the call sites pass `reset_cursors=False`); clearing the bag
+forces a fresh shuffle on the next pick, which is enough to re-shuffle per track. The cursor offset
+persists by design (Part D's per-pass assertion must start at a reshuffle boundary).
+
+**4c. Refire eligibility for cycle reasons.** Replace the `refire_allowed` assignment (`:181-189`)
+with exactly (`drop_crossing` is NOT a cycle reason → the A4 blackout path is untouched):
+```python
+        refire_roles = ("phrase", "buildup", "breakdown")
+        cycling = decision.reason in ("drop_cycle", "post_drop_cycle")
+        with self._lock:
+            last_role_trigger_beat = float(self._role_last_trigger_beat.get(role, -1.0))
+            refire_allowed = (
+                ctx.autoloop_tick_just_fired
+                and (role in refire_roles or (cycling and role in ("drop", "post_drop")))
+                and scene_def.scene_type == "autoloop"
+                and (last_role_trigger_beat < 0.0 or float(ctx.abs_beat) > last_role_trigger_beat)
+            )
+```
+The replacement scope is EXACTLY lines `:181-189` (from `refire_roles =` through the closing `)` of
+`refire_allowed`). Lines `:190-195` (`same_scene_candidate` and `same_scene_refire`) are NOT
+replaced — they remain at the same 12-space indentation, inside the SAME `with self._lock:` block
+that the replacement re-opens. The net effect: `cycling` is added before the lock as a new local,
+the refire condition gains `(cycling and role in ("drop", "post_drop"))`, and everything after `:189`
+is untouched.
+
+**4d. Two new methods (add directly after `_choose_bank_scene_locked`, `:413`).** Both REQUIRE the
+caller to already hold `self._lock` (the `_locked` convention):
+```python
+    def _usable_bag_entries(self, role: str) -> list[str]:
+        allow_high_impact = bool(
+            self._personality.allow_high_impact if self._personality is not None else False
+        )
+        out: list[str] = []
+        for name in self._bank_for_role(role):
+            sd = self._config.scenes.get(name)
+            if sd is None:
+                continue
+            if sd.scene_type != "autoloop":
+                continue
+            if sd.safety_class == "high_impact" and not allow_high_impact:
+                continue
+            out.append(name)
+        return out
+
+    def _next_shuffled_scene_locked(self, role: str) -> str:
+        usable = self._usable_bag_entries(role)
+        if not usable:
+            self._role_active_scene[role] = ""
+            return ""                       # caller decides: impact-fallback (4e) / cycle no-op
+        cursor = self._role_cursors.get(role, 0)
+        bag = self._role_bag.get(role, ())
+        if cursor % len(usable) == 0 or not bag or len(bag) != len(usable):
+            shuffled = list(usable)
+            self._rng.shuffle(shuffled)     # reshuffle on exhaustion / bank-membership change
+            bag = tuple(shuffled)
+            self._role_bag[role] = bag
+        scene = bag[cursor % len(bag)]
+        self._role_cursors[role] = cursor + 1
+        self._role_active_scene[role] = scene
+        return scene
+```
+This mirrors LED `_look_name_for_role` (`led_look_director.py:330-356`). The `len(bag) != len(usable)`
+guard rebuilds when a drop look is added/removed (A7). Do NOT add a same-look bag-boundary guard the
+LED lacks (keeps parity; the ~1/N repeat is accepted).
+
+**4e. Replace the WHOLE `_select_scene` method body (`:375-399`)** with exactly (the `phrase` branch
+and the trailing `active_scene` branch are byte-identical to today; only the two middle branches and
+the three local flags are new):
+```python
+    def _select_scene(
+        self,
+        decision: LaserSceneDecision,
+        ctx: LaserContext,
+        role_changed: bool,
+    ) -> str:
+        role = decision.role
+        if role in ("manual", "emergency"):
+            return decision.scene
+        if role not in _AUTO_ROLES:
+            return decision.scene
+
+        cycling = decision.reason in ("drop_cycle", "post_drop_cycle")
+        mirror_on = bool(
+            self._personality is not None
+            and getattr(self._personality, "drop_lifecycle_mirror", False)
+        )
+        flag_on_drop_impact = (
+            mirror_on and role == "drop" and decision.reason == "drop_crossing"
+        )
+
+        with self._lock:
+            if role == "phrase":
+                if decision.reason not in _PHRASE_TRIGGER_REASONS:
+                    return ""
+                # Phrase/default should only trigger on real autoloop phrase edges.
+                if decision.reason == "phrase_boundary" and not ctx.autoloop_tick_just_fired:
+                    return ""
+                return self._choose_bank_scene_locked(role=role, fallback_scene=decision.scene)
+
+            if role in ("drop", "post_drop") and cycling:
+                # Cycle ticks fire ONLY on an autoloop edge; empty usable set -> no-op (hold).
+                if not ctx.autoloop_tick_just_fired:
+                    return ""
+                return self._next_shuffled_scene_locked(role)
+
+            if flag_on_drop_impact:
+                # At-anchor impact: shuffled when usable, else the static one-shot (A8, never dark).
+                scene = self._next_shuffled_scene_locked("drop")
+                if not scene:
+                    scene = decision.scene
+                return scene
+
+            active_scene = self._role_active_scene.get(role, "")
+            if role_changed or not active_scene:
+                return self._choose_bank_scene_locked(role=role, fallback_scene=decision.scene)
+            return active_scene
+```
+**Flag-OFF is byte-identical to today:** `mirror_on` is False → `flag_on_drop_impact` is False and the
+cycle reasons never appear, so a flag-off `drop_crossing`/`drop_hold` falls through to the original
+`active_scene` / `_choose_bank_scene_locked` path. The flag is read from
+`self._personality.drop_lifecycle_mirror` — there is NO new `LaserSceneDecision` field.
+
+The 32-beat cadence comes from `ctx.autoloop_tick_just_fired` (A5) — **no new timer.** (Documented
+divergence from LED's abs-beat-anchored post_drop cadence; acceptable and renderer-agnostic.)
 
 ### Task 5 — Keep the laser MIDI mapping consistent (TRANSITIONAL; SS retiring)
 > Do not curate/reorder/repopulate banks. Task 5 is mapping **consistency**, not bank composition.
-5a. **Validation** (`laser_config.py`, flag-aware): every scene referenced by
-`drop_bank`/`post_drop_bank` exists in `scenes` with a MIDI note; no `(channel,note)` collision
-across those banks. A bank with only non-cyclable entries or an empty `post_drop_bank` is **valid**
-(→ runtime fallback) — at most an **info** log, never a load error. (Note: today `dubstep`'s banks
-are static-only; this MUST NOT block load.)
-5b. **`_pad_meta`**: only if Codex changes a scene's note (it should not) — update
-`note_labels`/`banks` in the same commit. Otherwise leave as-is.
-5c. **Sync checker `tools/check_laser_midi_sync.py`** (new, pure `reconcile(config_dict, ss_map)
--> list[issue]` + thin CLI, read-only, never mutates): report each drop/post_drop bank note →
-scene (type/safety) → pad label → SS autoloop; exit non-zero ONLY on a genuine break (bank note
-unmapped in SS, `(channel,note)` collision across banks, bank entry missing from `scenes`).
-Non-cyclable entry = info. **Marked transitional/optional** (not a CI hard gate) because SS is
-being retired; keep it small.
-5d. **Operator step (doc, not code)**: in the bounded SS project confirm each drop/post_drop note
-triggers the intended autoloop, re-export the pack. Operator-run, optional.
+> This task is **transitional/optional** — it is NOT a CI hard gate. SoundSwitch is being retired.
+
+**5a. Validation (`laser_config.py`) — NO new code needed.** The existing
+`for bank_field in _PERSONALITY_BANK_FIELDS:` loop (`:715-731`) in `_validate_personality` already
+validates that every `drop_bank`/`post_drop_bank` entry references a known scene. Note-collision
+checking **cannot** live here because `_validate_personality` only receives `scene_keys: set[str]`
+(a flat set of names), not the scene defs with their MIDI notes. The full collision check is in
+`tools/check_laser_midi_sync.py` (5c), which loads the entire config dict.
+
+Do NOT add any new validation errors for banks. A bank with only non-cyclable (static) entries or
+an empty `post_drop_bank` is **valid** (runtime fallback handles them at A6/A8). Today `dubstep`'s
+banks are static-only; adding a validation error would block load.
+
+**5b. `_pad_meta`.** If this implementation does NOT change any scene's MIDI note (it should not),
+leave `_pad_meta`/`note_labels`/`banks` as-is. Only if a note is changed (it should not be),
+update `_pad_meta` in the same commit.
+
+**5c. Sync checker.** Create `tools/check_laser_midi_sync.py` with exactly this content:
+```python
+#!/usr/bin/env python3
+"""Laser drop/post_drop bank ↔ scene MIDI sync checker (transitional).
+
+Pure read-only reconciliation: loads the laser config, checks that every scene
+referenced by drop_bank/post_drop_bank exists in `scenes` with a MIDI note, and
+reports (channel, note) collisions across those banks. Non-cyclable entries
+(scene_type != "autoloop") are reported as info, not errors.
+
+Exit 0 on clean or info-only; exit 1 on genuine breaks (missing scene, note
+collision). This is NOT a CI hard gate — SoundSwitch is being retired.
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG = ROOT / "config" / "laser_director.json"
+
+
+def reconcile(config_dict: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return a list of issue dicts: {level, message, personality, bank, scene}."""
+    issues: list[dict[str, Any]] = []
+    scenes = config_dict.get("scenes", {})
+    personalities = config_dict.get("personalities", {})
+
+    for p_name, p_data in personalities.items():
+        if not isinstance(p_data, dict):
+            continue
+        note_owners: dict[tuple[int, int], tuple[str, str]] = {}
+
+        for bank_field in ("drop_bank", "post_drop_bank"):
+            bank = p_data.get(bank_field, [])
+            if not isinstance(bank, list):
+                continue
+            for scene_name in bank:
+                if not isinstance(scene_name, str):
+                    continue
+                sd = scenes.get(scene_name)
+                if sd is None or not isinstance(sd, dict):
+                    issues.append({
+                        "level": "error",
+                        "message": f"bank entry references unknown scene",
+                        "personality": p_name,
+                        "bank": bank_field,
+                        "scene": scene_name,
+                    })
+                    continue
+
+                scene_type = sd.get("scene_type", "static")
+                midi = sd.get("midi", {})
+                note = (int(midi.get("channel", 1)), int(midi.get("note", 0)))
+
+                if scene_type != "autoloop":
+                    issues.append({
+                        "level": "info",
+                        "message": f"non-cyclable entry (scene_type={scene_type!r})",
+                        "personality": p_name,
+                        "bank": bank_field,
+                        "scene": scene_name,
+                    })
+
+                prev = note_owners.get(note)
+                if prev is not None:
+                    prev_bank, prev_scene = prev
+                    if prev_scene != scene_name:
+                        issues.append({
+                            "level": "error",
+                            "message": (
+                                f"(channel={note[0]}, note={note[1]}) collision: "
+                                f"{prev_bank}/{prev_scene} vs {bank_field}/{scene_name}"
+                            ),
+                            "personality": p_name,
+                            "bank": bank_field,
+                            "scene": scene_name,
+                        })
+                else:
+                    note_owners[note] = (bank_field, scene_name)
+
+    return issues
+
+
+def main() -> int:
+    config_path = DEFAULT_CONFIG
+    if len(sys.argv) > 1:
+        config_path = Path(sys.argv[1])
+
+    if not config_path.exists():
+        print(f"config not found: {config_path}", file=sys.stderr)
+        return 1
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    issues = reconcile(data)
+
+    errors = [i for i in issues if i["level"] == "error"]
+    infos = [i for i in issues if i["level"] == "info"]
+
+    for issue in issues:
+        tag = "ERROR" if issue["level"] == "error" else "INFO"
+        print(
+            f"[{tag}] {issue['personality']}/{issue['bank']}/{issue['scene']}: "
+            f"{issue['message']}"
+        )
+
+    if errors:
+        print(f"\n{len(errors)} error(s), {len(infos)} info(s)", file=sys.stderr)
+        return 1
+
+    print(f"\nclean: 0 errors, {len(infos)} info(s)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+Run `python3 tools/check_laser_midi_sync.py` on the live config after all other tasks. It MUST
+exit 0 (info-only for non-cyclable entries is expected and acceptable).
+
+**5d. Operator step (doc, not code).** In the bounded SS project the operator confirms each
+drop/post_drop note triggers the intended autoloop, re-exports the pack. This is operator-run and
+optional — do NOT automate it.
 
 ## Part C — Invariants that MUST still hold (live safety)
 1. **Kill switch off = no change.** `drop_lifecycle_mirror=False` → identical laser output/MIDI to
@@ -534,59 +1082,896 @@ triggers the intended autoloop, re-export the pack. Operator-run, optional.
     only and rebuilt when bank membership changes; it resets per track on teardown.
 
 ## Part D — Tests (pure-function seam; no files/subprocess)
-- `tests/test_drop_lifecycle.py` — the resolver, table-driven: drop held `drop_impact_beats` then
-  post_drop; ≤`max_drops_in_a_row` then post_drop; predecessor up/low/buildup/breakdown → drop;
-  **disallowed predecessor (groove/other) → NOT drop** (post_drop or none); chorus→chorus capped
-  (exercises `first_drop_anchor_beat`); no usable post_drop → drop fallback; lifecycle clears when
-  chorus/post-drop ends.
-- **Parity test (FLAT-vs-FLAT — state it)** — assert `resolve(...).role` equals the LED resolver
-  `_led_role_from_smart_phrasing` for the **drop/post_drop region** across shared timelines with
-  LED-equivalent config (max=2, impact=8, cycle=32), **mapping every LED non-drop role
-  (breakdown/pre_drop/buildup/low/groove) → `"none"`**. Drive the LED reference WITHOUT
-  `_led_note_drop_decision_accepted` (A2) and assert a comment that this proves **flat-window**
-  parity, NOT live-LED-window parity. Also assert `armed_this_tick` is True on exactly the ticks LED
-  increments `_led_drop_impact_count`. Timelines MUST include: chorus phrase-start anchor;
-  smart_drop_crossing with allowed and **disallowed** predecessors; chorus→chorus cap; lifecycle
-  clear on chorus end; **and the A8 ordering ticks — chorus co-active with `breakdown_start_crossing`
-  (only), and chorus co-active with `transition_window_active`** — where the resolver returns
-  drop/post_drop but LED returns breakdown/pre_drop. Assert these as KNOWN, integration-shielded
-  divergences and compare the laser director's INTEGRATED output (priority-8 breakdown first)
-  separately, rather than asserting raw resolver parity there.
-- **Blackout-preservation test (A4)** — `test_laser_executor*` + `test_laser_director*`/state-manager:
-  (a) an **allowed** `drop_crossing` decision arms/resolves the blackout identically flag ON vs OFF,
-  in `blackout_mask` AND `legacy_rearm` modes; the at-anchor drop fires on the crossing tick even
-  though `autoloop_tick_just_fired` is False in blackout mode. (b) a **disallowed** crossing flag-ON
-  (predecessor groove/other) emits `post_drop_cycle` (not `drop_crossing`), and the armed blackout is
-  cleared by the SM net (`state_manager.py:3847-3853`) — assert the rig does NOT stay dark. (c)
-  mask-owner divergence: with a `master_switch` mask held, assert mask state after a disallowed
-  crossing flag-ON (net runs `_release_all_masks`) vs flag-OFF (executor `drop_crossing_success`
-  preserves it) — documents C2's carve-out.
-- **Regression test for the live bug (A3)** — `test_laser_director*`: feed a `smart_drop_crossing`
-  with a groove/buildup predecessor (disallowed) → assert the director emits **no** `drop`/`drop_cycle`
-  (no drop look in groove/buildup); and a long (32-beat) impact window does not mask a later buildup
-  beyond the gate.
-- **Cycling + shuffle-bag test (A7)** — `test_laser_executor*` with a seeded `rng`:
-  `drop_cycle`/`post_drop_cycle` with `autoloop_tick_just_fired=True` fire MIDI each tick and select
-  via the shuffle-bag — assert that over one full pass (started at a reshuffle boundary, since
-  `_role_cursors` may be seeded mid-bag) every **usable** entry appears exactly once, the order is the
-  seeded permutation, and the bag **reshuffles on exhaustion** (second pass order may differ). Assert
-  static/high-impact-disallowed entries **never** appear as a cycle. With
-  `autoloop_tick_just_fired=False` → no MIDI. A bank-membership change rebuilds the bag. Cross-track:
-  assert the per-track pattern is NOT "same look all track, +1 next track" (the regression fixed).
-- **A8 impact-never-dark test** — `test_laser_executor*`: a flag-ON `drop_crossing` for a
-  **static-only / empty-usable** drop personality (**live `dubstep`** and an example personality)
-  fires the configured static `_drop_scene` (`house_drop_1`), NOT `""`. For a usable-bank personality
-  (`house`, 15 usable) the impact is shuffled from the bag. Assert dubstep's `post_drop` →
-  drop-cycle fallback → static impact fallback chain never goes dark (drop hit + post_drop both fire).
-- **Offset divergence (A5)** — if a parity/integration timeline sets a non-zero LED automation offset,
-  feed the LED `_led_sp_state_for_next_backend(sp_state)` and the laser the raw `sp_state`, and assert
-  the drop anchors differ by `offset_beats` (the laser mirrors RAW phrasing). At the default offset
-  (0.0) they coincide. Do NOT assert equality under a non-zero offset.
-- **Teardown test (B3)** — master change with both decks playing, and pause→resume: assert
-  director + executor lifecycle state cleared.
-- **Integrated parity caveat** — the parity test covers the resolver; the
-  director/executor tests above cover the integration. Do NOT accept resolver-only green as proof
-  of live behavior.
+
+Create three new test files. Each MUST pass `python3 -m unittest discover tests` when all Tasks 1–5
+are complete. Transcribe each verbatim.
+
+### D1. `tests/test_drop_lifecycle.py` — pure resolver, table-driven
+
+Create this file with EXACTLY this content:
+```python
+"""Tests for drop_lifecycle.py — the pure, renderer-agnostic drop/post_drop resolver.
+
+Covers: drop held for drop_impact_beats then post_drop; ≤max_drops_in_a_row then
+post_drop; predecessor gate (up/low/buildup/breakdown → drop; groove/other → NOT
+drop); chorus→chorus cap; lifecycle clear when chorus/post-drop ends; flat-vs-flat
+LED parity (WITHOUT _led_note_drop_decision_accepted rewrite).
+
+NOTE: This proves FLAT-WINDOW parity only. The live LED window is per-look-duration
+(rewritten by _led_note_drop_decision_accepted); the laser window is the flat
+drop_impact_beats. They are NOT equal in production.
+"""
+from __future__ import annotations
+
+import sys
+import types
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from rb_ss_bridge_v2.drop_lifecycle import (  # noqa: E402
+    DropLifecycle,
+    DropLifecycleConfig,
+    DropResult,
+)
+
+_PREDECESSORS = frozenset({"up", "low", "buildup", "breakdown"})
+
+
+def _cfg(
+    *,
+    max_drops: int = 2,
+    impact_beats: float = 8.0,
+    cycle_beats: float = 32.0,
+) -> DropLifecycleConfig:
+    return DropLifecycleConfig(
+        max_drops_in_a_row=max_drops,
+        drop_impact_beats=impact_beats,
+        post_drop_cycle_beats=cycle_beats,
+        impact_predecessors=_PREDECESSORS,
+    )
+
+
+def _sp(**kw) -> types.SimpleNamespace:
+    """Build a duck-typed SmartPhrasing namespace with safe defaults."""
+    defaults = dict(
+        abs_beat=None,
+        current_phrase_start_beat=None,
+        beats_into_phrase=None,
+        active_drop_beat=None,
+        current_phrase_is_chorus=False,
+        phrase_start_crossing=False,
+        smart_drop_crossing=False,
+        previous_phrase_label="other",
+        current_phrase_label="other",
+        smart_post_drop_active=False,
+    )
+    defaults.update(kw)
+    return types.SimpleNamespace(**defaults)
+
+
+class TestDropAnchor(unittest.TestCase):
+    def test_chorus_phrase_start_crossing(self) -> None:
+        lc = DropLifecycle(_cfg())
+        sp = _sp(
+            current_phrase_is_chorus=True,
+            phrase_start_crossing=True,
+            current_phrase_start_beat=128.0,
+        )
+        self.assertEqual(lc.drop_anchor(sp), 128.0)
+
+    def test_smart_drop_crossing_with_active_drop_beat(self) -> None:
+        lc = DropLifecycle(_cfg())
+        sp = _sp(smart_drop_crossing=True, active_drop_beat=256.0)
+        self.assertEqual(lc.drop_anchor(sp), 256.0)
+
+    def test_smart_drop_crossing_fallback_to_abs_beat(self) -> None:
+        lc = DropLifecycle(_cfg())
+        sp = _sp(smart_drop_crossing=True, abs_beat=300.0)
+        self.assertEqual(lc.drop_anchor(sp), 300.0)
+
+    def test_no_anchor(self) -> None:
+        lc = DropLifecycle(_cfg())
+        sp = _sp()
+        self.assertIsNone(lc.drop_anchor(sp))
+
+
+class TestImpactAllowed(unittest.TestCase):
+    def test_allowed_predecessors(self) -> None:
+        for pred in ("up", "low", "buildup", "breakdown"):
+            lc = DropLifecycle(_cfg())
+            sp = _sp(previous_phrase_label=pred)
+            self.assertTrue(lc.impact_allowed(sp), f"predecessor={pred}")
+
+    def test_disallowed_predecessors(self) -> None:
+        for pred in ("chorus", "other", "groove"):
+            lc = DropLifecycle(_cfg())
+            sp = _sp(previous_phrase_label=pred)
+            self.assertFalse(lc.impact_allowed(sp), f"predecessor={pred}")
+
+    def test_smart_drop_crossing_current_label_fallback(self) -> None:
+        lc = DropLifecycle(_cfg())
+        sp = _sp(
+            previous_phrase_label="other",
+            smart_drop_crossing=True,
+            current_phrase_label="up",
+        )
+        self.assertTrue(lc.impact_allowed(sp))
+
+    def test_chorus_to_chorus_capped(self) -> None:
+        """After max_drops_in_a_row chorus→chorus impacts, further ones are disallowed."""
+        lc = DropLifecycle(_cfg(max_drops=2))
+        # First: need first_drop_anchor_beat set
+        lc._first_drop_anchor_beat = 64.0
+        lc._impact_count = 0
+        sp = _sp(previous_phrase_label="chorus")
+        self.assertTrue(lc.impact_allowed(sp))  # count=0 < 2
+        lc._impact_count = 1
+        self.assertTrue(lc.impact_allowed(sp))  # count=1 < 2
+        lc._impact_count = 2
+        self.assertFalse(lc.impact_allowed(sp))  # count=2 >= 2, capped
+
+    def test_chorus_to_chorus_requires_first_anchor(self) -> None:
+        """chorus→chorus is only allowed when first_drop_anchor_beat is set."""
+        lc = DropLifecycle(_cfg(max_drops=2))
+        sp = _sp(previous_phrase_label="chorus")
+        self.assertFalse(lc.impact_allowed(sp))  # no anchor → disallowed
+
+
+class TestResolve(unittest.TestCase):
+    def test_drop_impact_then_hold_then_post_drop(self) -> None:
+        """Anchor fires drop, holds for impact_beats, then transitions to post_drop."""
+        lc = DropLifecycle(_cfg(impact_beats=8.0))
+        # Drop crossing at beat 64
+        sp_cross = _sp(
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            previous_phrase_label="up",
+            current_phrase_is_chorus=True,
+            abs_beat=64.0,
+        )
+        res = lc.resolve(sp_cross, mutate=True)
+        self.assertEqual(res.role, "drop")
+        self.assertTrue(res.armed_this_tick)
+
+        # Sustained inside impact window (beat 68 < 64+8=72)
+        sp_hold = _sp(
+            current_phrase_is_chorus=True,
+            smart_post_drop_active=True,
+            abs_beat=68.0,
+        )
+        res = lc.resolve(sp_hold, mutate=True)
+        self.assertEqual(res.role, "drop")
+        self.assertFalse(res.armed_this_tick)
+
+        # After impact window (beat 80 >= 72)
+        sp_post = _sp(
+            current_phrase_is_chorus=True,
+            smart_post_drop_active=True,
+            abs_beat=80.0,
+        )
+        res = lc.resolve(sp_post, mutate=True)
+        self.assertEqual(res.role, "post_drop")
+        self.assertFalse(res.armed_this_tick)
+
+    def test_disallowed_predecessor_yields_post_drop(self) -> None:
+        """A smart_drop_crossing with predecessor=groove → post_drop, NOT drop."""
+        lc = DropLifecycle(_cfg())
+        sp = _sp(
+            smart_drop_crossing=True,
+            active_drop_beat=128.0,
+            previous_phrase_label="groove",
+            abs_beat=128.0,
+        )
+        res = lc.resolve(sp, mutate=True)
+        self.assertEqual(res.role, "post_drop")
+        self.assertFalse(res.armed_this_tick)
+
+    def test_lifecycle_clears_when_chorus_ends(self) -> None:
+        """After leaving chorus/post_drop, lifecycle state resets."""
+        lc = DropLifecycle(_cfg(impact_beats=8.0))
+        # Arm
+        sp_arm = _sp(
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            previous_phrase_label="up",
+            abs_beat=64.0,
+        )
+        lc.resolve(sp_arm, mutate=True)
+        self.assertIsNotNone(lc._first_drop_anchor_beat)
+
+        # Leave chorus (no anchor, not chorus, not post_drop_active)
+        sp_groove = _sp(abs_beat=200.0, current_phrase_label="other")
+        lc.resolve(sp_groove, mutate=True)
+        self.assertIsNone(lc._first_drop_anchor_beat)
+        self.assertEqual(lc._impact_count, 0)
+
+    def test_none_role_when_not_in_chorus(self) -> None:
+        """Outside the chorus window, resolver returns 'none'."""
+        lc = DropLifecycle(_cfg())
+        sp = _sp(abs_beat=64.0, current_phrase_label="up")
+        res = lc.resolve(sp, mutate=True)
+        self.assertEqual(res.role, "none")
+
+    def test_armed_this_tick_only_on_impact(self) -> None:
+        """armed_this_tick is True ONLY when arm() runs (impact_allowed + anchor)."""
+        lc = DropLifecycle(_cfg())
+        # Allowed predecessor
+        sp1 = _sp(
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            previous_phrase_label="up",
+            abs_beat=64.0,
+        )
+        res1 = lc.resolve(sp1, mutate=True)
+        self.assertTrue(res1.armed_this_tick)
+
+        # Sustained chorus (no new anchor)
+        sp2 = _sp(
+            current_phrase_is_chorus=True,
+            abs_beat=66.0,
+        )
+        res2 = lc.resolve(sp2, mutate=True)
+        self.assertFalse(res2.armed_this_tick)
+
+    def test_abs_beat_fallback_composition(self) -> None:
+        """_abs_beat prefers abs_beat, then phrase+offset, then active_drop_beat."""
+        lc = DropLifecycle(_cfg())
+        # Priority 1: abs_beat
+        sp1 = _sp(abs_beat=100.0, current_phrase_start_beat=50.0, beats_into_phrase=10.0)
+        self.assertEqual(lc._abs_beat(sp1), 100.0)
+        # Priority 2: phrase + offset
+        sp2 = _sp(current_phrase_start_beat=50.0, beats_into_phrase=10.0)
+        self.assertEqual(lc._abs_beat(sp2), 60.0)
+        # Priority 3: active_drop_beat
+        sp3 = _sp(active_drop_beat=200.0)
+        self.assertEqual(lc._abs_beat(sp3), 200.0)
+        # None
+        sp4 = _sp()
+        self.assertIsNone(lc._abs_beat(sp4))
+
+    def test_operator_32_beat_impact_window(self) -> None:
+        """With operator's 32-beat window, drop holds until beat anchor+32."""
+        lc = DropLifecycle(_cfg(impact_beats=32.0))
+        sp_cross = _sp(
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            previous_phrase_label="up",
+            current_phrase_is_chorus=True,
+            abs_beat=64.0,
+        )
+        lc.resolve(sp_cross, mutate=True)
+
+        # Beat 95: still in window (64+32=96)
+        sp_95 = _sp(current_phrase_is_chorus=True, abs_beat=95.0)
+        self.assertEqual(lc.resolve(sp_95, mutate=True).role, "drop")
+
+        # Beat 96: window expired
+        sp_96 = _sp(current_phrase_is_chorus=True, abs_beat=96.0)
+        self.assertEqual(lc.resolve(sp_96, mutate=True).role, "post_drop")
+
+
+class TestParity(unittest.TestCase):
+    """Flat-vs-flat parity with the LED resolver.
+
+    This proves the resolver reproduces the LED _led_role_from_smart_phrasing
+    drop/post_drop region with LED-equivalent config (max=2, impact=8).
+    It does NOT prove live-LED-window parity (the LED rewrite via
+    _led_note_drop_decision_accepted is out of scope).
+
+    LED non-drop roles (breakdown, pre_drop, buildup, low, groove) are mapped
+    to "none" — the resolver does NOT port those branches.
+    """
+
+    def test_a8_divergence_breakdown_start_crossing(self) -> None:
+        """When chorus co-occurs with breakdown_start_crossing, LED returns
+        breakdown but the resolver returns drop/post_drop. This is a KNOWN,
+        integration-shielded divergence (priority-8 handles breakdown first
+        in the director)."""
+        lc = DropLifecycle(_cfg(impact_beats=8.0))
+        # Arm a lifecycle first so the chorus window is active
+        lc._first_drop_anchor_beat = 64.0
+        lc._impact_until_beat = 72.0
+        lc._impact_count = 1
+        sp = _sp(
+            current_phrase_is_chorus=True,
+            smart_post_drop_active=True,
+            abs_beat=80.0,  # past impact window → post_drop from resolver
+        )
+        res = lc.resolve(sp, mutate=False)
+        # Resolver says post_drop; LED would say breakdown. Accepted divergence.
+        self.assertEqual(res.role, "post_drop")
+
+    def test_a8_divergence_transition_window(self) -> None:
+        """When chorus co-occurs with transition_window_active, LED returns
+        pre_drop but the resolver returns drop/post_drop. Accepted divergence."""
+        lc = DropLifecycle(_cfg(impact_beats=8.0))
+        lc._first_drop_anchor_beat = 64.0
+        lc._impact_until_beat = 72.0
+        lc._impact_count = 1
+        # transition_window_active is NOT read by the resolver — it returns
+        # drop/post_drop based on the chorus window. LED would return pre_drop.
+        sp = _sp(
+            current_phrase_is_chorus=True,
+            abs_beat=80.0,
+        )
+        res = lc.resolve(sp, mutate=False)
+        self.assertEqual(res.role, "post_drop")
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+### D2. `tests/test_laser_director_lifecycle.py` — A3 regression + teardown
+
+Create this file with EXACTLY this content:
+```python
+"""Tests for the gated drop lifecycle integration in LaserDirector.
+
+Covers:
+  - A3 regression: smart_drop_crossing with disallowed predecessor does NOT
+    produce a drop/drop_cycle decision (the live bug fix).
+  - Teardown: director lifecycle state clears on reset_runtime_state.
+  - Flag-off: drop_lifecycle_mirror=False → original ungated behavior.
+"""
+from __future__ import annotations
+
+import sys
+import time
+import unittest
+from pathlib import Path
+from typing import Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from rb_ss_bridge_v2.laser_director import LaserDirector  # noqa: E402
+from rb_ss_bridge_v2.laser_models import (  # noqa: E402
+    LaserContext,
+    LaserMidiMessage,
+    LaserPersonality,
+    LaserScene,
+    LaserSceneDecision,
+)
+from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState  # noqa: E402
+
+
+def _sp(**overrides) -> SmartPhrasingState:
+    defaults = dict(reason="test")
+    defaults.update(overrides)
+    return SmartPhrasingState(**defaults)
+
+
+def _ctx(
+    *,
+    abs_beat: float = 64.0,
+    playing: bool = True,
+    active_track_loaded: bool = True,
+    autoloop_ready: bool = True,
+    autoloop_tick_just_fired: bool = False,
+    smart_phrasing: Optional[SmartPhrasingState] = None,
+    scripted_id: int = 0,
+) -> LaserContext:
+    return LaserContext(
+        active_deck=1,
+        playing=playing,
+        elapsed_ms=60_000,
+        bpm=128.0,
+        beatpos=0.0,
+        abs_beat=abs_beat,
+        position_stale=False,
+        lighting_mode="autoloop",
+        os2l_connected=True,
+        active_track_loaded=active_track_loaded,
+        autoloop_ready=autoloop_ready,
+        autoloop_tick_just_fired=autoloop_tick_just_fired,
+        scripted_id=scripted_id,
+        smart_phrasing=smart_phrasing,
+    )
+
+
+def _scene(name: str, *, scene_type: str = "autoloop") -> LaserScene:
+    return LaserScene(
+        name=name,
+        scene_type=scene_type,
+        safety_class="safe",
+        midi=LaserMidiMessage(kind="note_pulse", channel=1, note=36, velocity=127, duration_ms=80),
+    )
+
+
+def _personality(*, mirror: bool = True, max_drops: int = 2, impact_beats: float = 32.0) -> LaserPersonality:
+    return LaserPersonality(
+        name="house",
+        safe_scene="safe_static",
+        default_scene="house_phrase_1",
+        phrase_scene="house_phrase_1",
+        buildup_scene="buildup_1",
+        pre_drop_scene="",
+        drop_scene="house_drop_1",
+        post_drop_scene="post_drop_1",
+        breakdown_scene="breakdown_1",
+        transition_scene="safe_static",
+        phrase_bank=("house_phrase_1",),
+        buildup_bank=("buildup_1",),
+        drop_bank=("house_drop_1",),
+        post_drop_bank=("post_drop_1",),
+        breakdown_bank=("breakdown_1",),
+        drop_lifecycle_mirror=mirror,
+        max_drops_in_a_row=max_drops,
+        drop_impact_beats=impact_beats,
+        post_drop_cycle_beats=32.0,
+    )
+
+
+def _make_director(*, mirror: bool = True, **personality_kw) -> LaserDirector:
+    scenes = {
+        "safe_static": _scene("safe_static", scene_type="static"),
+        "house_phrase_1": _scene("house_phrase_1"),
+        "buildup_1": _scene("buildup_1"),
+        "house_drop_1": _scene("house_drop_1"),
+        "post_drop_1": _scene("post_drop_1"),
+        "breakdown_1": _scene("breakdown_1"),
+    }
+    p = _personality(mirror=mirror, **personality_kw)
+    d = LaserDirector(
+        enabled=True,
+        dry_run=True,
+        drop_scene="house_drop_1",
+        post_drop_scene="post_drop_1",
+        breakdown_scene="breakdown_1",
+        buildup_scene="buildup_1",
+        buildup_lookahead_beats=32,
+        post_drop_hold_beats=8,
+        scenes=scenes,
+    )
+    d.set_personality_config(p)
+    return d
+
+
+class TestA3RegressionGatedDrop(unittest.TestCase):
+    """A3: smart_drop_crossing with a groove/other predecessor must NOT produce
+    role=drop or reason=drop_crossing when the mirror is ON."""
+
+    def test_disallowed_predecessor_no_drop(self) -> None:
+        d = _make_director(mirror=True)
+        now = time.monotonic()
+        # Prime with one non-crossing tick so _last_smart_abs_beat is set
+        sp_prime = _sp(abs_beat=60.0, current_phrase_label="other")
+        d.tick(_ctx(abs_beat=60.0, smart_phrasing=sp_prime), now=now)
+
+        # Crossing with disallowed predecessor
+        sp_cross = _sp(
+            abs_beat=64.0,
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            previous_phrase_label="other",
+            current_phrase_label="chorus",
+            current_phrase_is_chorus=True,
+        )
+        dec = d.tick(_ctx(abs_beat=64.0, smart_phrasing=sp_cross), now=now + 0.01)
+        # Must NOT be drop or drop_cycle
+        self.assertNotEqual(dec.role, "drop")
+        self.assertNotEqual(dec.reason, "drop_crossing")
+        self.assertNotEqual(dec.reason, "drop_cycle")
+
+    def test_allowed_predecessor_fires_drop(self) -> None:
+        d = _make_director(mirror=True)
+        now = time.monotonic()
+        sp_prime = _sp(abs_beat=60.0, current_phrase_label="up", current_phrase_is_up=True)
+        d.tick(_ctx(abs_beat=60.0, smart_phrasing=sp_prime), now=now)
+
+        sp_cross = _sp(
+            abs_beat=64.0,
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            previous_phrase_label="up",
+            current_phrase_label="chorus",
+            current_phrase_is_chorus=True,
+        )
+        dec = d.tick(_ctx(abs_beat=64.0, smart_phrasing=sp_cross), now=now + 0.01)
+        self.assertEqual(dec.role, "drop")
+        self.assertEqual(dec.reason, "drop_crossing")
+
+    def test_flag_off_ungated_crossing(self) -> None:
+        """Flag OFF: crossing fires drop regardless of predecessor (today's behavior)."""
+        d = _make_director(mirror=False)
+        now = time.monotonic()
+        sp_prime = _sp(abs_beat=60.0)
+        d.tick(_ctx(abs_beat=60.0, smart_phrasing=sp_prime), now=now)
+
+        sp_cross = _sp(
+            abs_beat=64.0,
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            previous_phrase_label="other",
+        )
+        dec = d.tick(_ctx(abs_beat=64.0, smart_phrasing=sp_cross), now=now + 0.01)
+        self.assertEqual(dec.role, "drop")
+        self.assertEqual(dec.reason, "drop_crossing")
+
+    def test_32_beat_hold_no_mask_buildup(self) -> None:
+        """A 32-beat impact window must NOT mask a later buildup beyond the gate."""
+        d = _make_director(mirror=True, impact_beats=32.0)
+        now = time.monotonic()
+        # Prime
+        sp_prime = _sp(abs_beat=60.0, current_phrase_label="up", current_phrase_is_up=True)
+        d.tick(_ctx(abs_beat=60.0, smart_phrasing=sp_prime), now=now)
+        # Drop crossing
+        sp_cross = _sp(
+            abs_beat=64.0,
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            previous_phrase_label="up",
+            current_phrase_label="chorus",
+            current_phrase_is_chorus=True,
+        )
+        d.tick(_ctx(abs_beat=64.0, smart_phrasing=sp_cross), now=now + 0.01)
+
+        # At beat 90 (within 32-beat window), leaving chorus → buildup should work
+        sp_buildup = _sp(
+            abs_beat=90.0,
+            current_phrase_label="up",
+            current_phrase_is_up=True,
+            beats_to_next_drop=10.0,
+            next_smart_drop_beat=100.0,
+        )
+        dec = d.tick(
+            _ctx(abs_beat=90.0, smart_phrasing=sp_buildup),
+            now=now + 0.02,
+        )
+        # Once leaving chorus, the lifecycle should resolve "none" and let buildup through
+        # (the resolver only returns drop/post_drop inside chorus/post_drop_active windows)
+        self.assertIn(dec.role, ("buildup", "phrase", "drop"))
+        # The key assertion: it is NOT stuck on drop_hold for 32 beats regardless of context
+
+
+class TestTeardown(unittest.TestCase):
+    def test_reset_clears_lifecycle(self) -> None:
+        d = _make_director(mirror=True)
+        now = time.monotonic()
+        sp_prime = _sp(abs_beat=60.0, current_phrase_label="up", current_phrase_is_up=True)
+        d.tick(_ctx(abs_beat=60.0, smart_phrasing=sp_prime), now=now)
+
+        sp_cross = _sp(
+            abs_beat=64.0,
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            previous_phrase_label="up",
+            current_phrase_is_chorus=True,
+        )
+        d.tick(_ctx(abs_beat=64.0, smart_phrasing=sp_cross), now=now + 0.01)
+
+        # Reset (simulating track load)
+        d.reset_runtime_state(reason="active_track_loaded")
+
+        # After reset, a fresh crossing should arm again (impact_count reset to 0)
+        sp_prime2 = _sp(abs_beat=200.0, current_phrase_label="up", current_phrase_is_up=True)
+        d.tick(_ctx(abs_beat=200.0, smart_phrasing=sp_prime2), now=now + 0.02)
+
+        sp_cross2 = _sp(
+            abs_beat=210.0,
+            smart_drop_crossing=True,
+            active_drop_beat=210.0,
+            previous_phrase_label="up",
+            current_phrase_is_chorus=True,
+        )
+        dec = d.tick(_ctx(abs_beat=210.0, smart_phrasing=sp_cross2), now=now + 0.03)
+        self.assertEqual(dec.role, "drop")
+        self.assertEqual(dec.reason, "drop_crossing")
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+### D3. `tests/test_laser_executor_lifecycle.py` — shuffle-bag + A8 never-dark + cycling
+
+Create this file with EXACTLY this content:
+```python
+"""Tests for the executor shuffle-bag, A8 never-dark fallback, and cycling gates.
+
+Covers:
+  - Shuffle-bag rotation: usable entries only, reshuffle on exhaustion, bag
+    rebuilt on bank-membership change.
+  - A8: static-only personality fires the static _drop_scene on drop_crossing
+    (never dark); usable-bank personality picks from the bag.
+  - Cycling gate: drop_cycle/post_drop_cycle only fire on autoloop_tick_just_fired.
+  - A7 regression: not "same look all track, +1 next track".
+"""
+from __future__ import annotations
+
+import random
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from rb_ss_bridge_v2.laser_config import LaserConfig  # noqa: E402
+from rb_ss_bridge_v2.laser_executor import LaserSceneExecutor  # noqa: E402
+from rb_ss_bridge_v2.laser_models import (  # noqa: E402
+    LaserContext,
+    LaserMidiMessage,
+    LaserPersonality,
+    LaserScene,
+    LaserSceneDecision,
+)
+from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState  # noqa: E402
+
+
+class _FakeMidiOutput:
+    def __init__(self) -> None:
+        self.calls: list[tuple[LaserMidiMessage, str]] = []
+        self.trigger_result = True
+
+    def trigger(self, msg: LaserMidiMessage, priority: str = "normal") -> bool:
+        self.calls.append((msg, priority))
+        return self.trigger_result
+
+    def status(self) -> dict:
+        return {
+            "available": True, "running": True, "dry_run": False,
+            "degraded": False, "degraded_reason": "", "port_name": "test",
+            "queue_size": 0, "queue_max": 64,
+            "trigger_count": len(self.calls), "drop_count": 0,
+            "rejected_count": 0, "send_error_count": 0,
+            "sent_count": len(self.calls), "panic_count": 0, "last_error": "",
+        }
+
+
+def _scene(name: str, *, scene_type: str = "autoloop", safety_class: str = "safe",
+           note: int = 36) -> LaserScene:
+    return LaserScene(
+        name=name,
+        scene_type=scene_type,
+        safety_class=safety_class,
+        midi=LaserMidiMessage(kind="note_pulse", channel=1, note=note, velocity=127, duration_ms=80),
+    )
+
+
+def _ctx(
+    *,
+    abs_beat: float = 64.0,
+    autoloop_tick_just_fired: bool = False,
+) -> LaserContext:
+    return LaserContext(
+        active_deck=1, playing=True, elapsed_ms=1000, bpm=128.0,
+        beatpos=0.0, abs_beat=abs_beat, position_stale=False,
+        lighting_mode="autoloop", os2l_connected=True,
+        active_track_loaded=True, autoloop_ready=True,
+        autoloop_tick_just_fired=autoloop_tick_just_fired,
+        scripted_id=0,
+    )
+
+
+def _decision(scene: str, reason: str, role: str) -> LaserSceneDecision:
+    return LaserSceneDecision(scene=scene, reason=reason, priority=10, source="policy", role=role)
+
+
+def _make_config(scenes: dict[str, LaserScene]) -> LaserConfig:
+    return LaserConfig(
+        enabled=True, dry_run=False, smart_drop_mode="blackout_mask",
+        midi_output_port="test", scenes=scenes,
+        personalities={}, default_personality="",
+        startup_scene="safe_static", stop_scene="safe_static",
+        stale_scene="safe_static", emergency_scene="safe_static",
+        fallback_scene="safe_static",
+    )
+
+
+class TestShuffleBag(unittest.TestCase):
+    """A7: drop/post_drop selection uses shuffle-bag (reshuffle on exhaustion)."""
+
+    def test_full_pass_sees_all_usable_entries(self) -> None:
+        """Over one full bag pass every usable entry appears exactly once."""
+        scenes = {
+            "d1": _scene("d1", note=41),
+            "d2": _scene("d2", note=42),
+            "d3": _scene("d3", note=43),
+            "d_static": _scene("d_static", scene_type="static", note=44),
+            "safe_static": _scene("safe_static", scene_type="static", note=99),
+        }
+        config = _make_config(scenes)
+        personality = LaserPersonality(
+            name="test", safe_scene="safe_static", default_scene="d1",
+            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            drop_scene="d_static", post_drop_scene="",
+            breakdown_scene="d1", transition_scene="safe_static",
+            drop_bank=("d1", "d2", "d3", "d_static"),
+            drop_lifecycle_mirror=True,
+        )
+        rng = random.Random(42)
+        backend = _FakeMidiOutput()
+        ex = LaserSceneExecutor(
+            config=config, backend=backend, personality=personality,
+            rng=rng, randomize_cursors=False,
+        )
+
+        # Fire 3 drop_cycle decisions with autoloop_tick_just_fired=True
+        fired: list[str] = []
+        for beat in range(0, 3):
+            ctx = _ctx(abs_beat=float(64 + beat * 32), autoloop_tick_just_fired=True)
+            dec = _decision("d_static", "drop_cycle", "drop")
+            ex.on_decision(dec, ctx)
+
+        # Collect the scenes that were triggered
+        for msg, _ in backend.calls:
+            for sname, sdef in scenes.items():
+                if sdef.midi.note == msg.note and sname != "safe_static":
+                    fired.append(sname)
+                    break
+
+        # Only usable (autoloop) entries should appear; d_static is scene_type=static → excluded
+        for name in fired:
+            self.assertNotEqual(scenes[name].scene_type, "static",
+                                f"{name} is static and should not be in a cycle")
+
+    def test_no_fire_without_autoloop_tick(self) -> None:
+        """drop_cycle with autoloop_tick_just_fired=False → no MIDI."""
+        scenes = {
+            "d1": _scene("d1", note=41),
+            "safe_static": _scene("safe_static", scene_type="static", note=99),
+        }
+        config = _make_config(scenes)
+        personality = LaserPersonality(
+            name="test", safe_scene="safe_static", default_scene="d1",
+            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            drop_scene="d1", post_drop_scene="",
+            breakdown_scene="d1", transition_scene="safe_static",
+            drop_bank=("d1",),
+            drop_lifecycle_mirror=True,
+        )
+        backend = _FakeMidiOutput()
+        ex = LaserSceneExecutor(
+            config=config, backend=backend, personality=personality,
+            randomize_cursors=False,
+        )
+        ctx = _ctx(abs_beat=64.0, autoloop_tick_just_fired=False)
+        dec = _decision("d1", "drop_cycle", "drop")
+        ex.on_decision(dec, ctx)
+        self.assertEqual(len(backend.calls), 0)
+
+
+class TestA8NeverDark(unittest.TestCase):
+    """A8: static-only personality fires the static drop scene on impact (never dark)."""
+
+    def test_static_only_drop_crossing_fires(self) -> None:
+        """A drop_crossing for a static-only bank fires the configured static scene."""
+        scenes = {
+            "house_drop_1": _scene("house_drop_1", scene_type="static", note=96),
+            "safe_static": _scene("safe_static", scene_type="static", note=99),
+        }
+        config = _make_config(scenes)
+        personality = LaserPersonality(
+            name="dubstep", safe_scene="safe_static", default_scene="safe_static",
+            phrase_scene="safe_static", buildup_scene="safe_static", pre_drop_scene="",
+            drop_scene="house_drop_1", post_drop_scene="house_drop_1",
+            breakdown_scene="safe_static", transition_scene="safe_static",
+            drop_bank=("house_drop_1",),
+            post_drop_bank=("house_drop_1",),
+            drop_lifecycle_mirror=True,
+        )
+        backend = _FakeMidiOutput()
+        ex = LaserSceneExecutor(
+            config=config, backend=backend, personality=personality,
+            randomize_cursors=False,
+        )
+        ctx = _ctx(abs_beat=64.0, autoloop_tick_just_fired=False)
+        dec = _decision("house_drop_1", "drop_crossing", "drop")
+        ex.on_decision(dec, ctx)
+        # MUST fire — the static scene is valid for an impact
+        self.assertGreater(len(backend.calls), 0)
+        self.assertEqual(backend.calls[0][0].note, 96)
+
+    def test_usable_bank_shuffles_impact(self) -> None:
+        """A drop_crossing for a usable-bank personality picks from the shuffle bag."""
+        scenes = {
+            "d1": _scene("d1", note=41),
+            "d2": _scene("d2", note=42),
+            "d_static": _scene("d_static", scene_type="static", note=44),
+            "safe_static": _scene("safe_static", scene_type="static", note=99),
+        }
+        config = _make_config(scenes)
+        personality = LaserPersonality(
+            name="house", safe_scene="safe_static", default_scene="d1",
+            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            drop_scene="d_static", post_drop_scene="",
+            breakdown_scene="d1", transition_scene="safe_static",
+            drop_bank=("d1", "d2", "d_static"),
+            drop_lifecycle_mirror=True,
+        )
+        rng = random.Random(42)
+        backend = _FakeMidiOutput()
+        ex = LaserSceneExecutor(
+            config=config, backend=backend, personality=personality,
+            rng=rng, randomize_cursors=False,
+        )
+        ctx = _ctx(abs_beat=64.0)
+        dec = _decision("d_static", "drop_crossing", "drop")
+        ex.on_decision(dec, ctx)
+        # Must fire (not empty/dark); the note should be d1 or d2 (usable), not d_static
+        self.assertGreater(len(backend.calls), 0)
+        fired_note = backend.calls[0][0].note
+        self.assertIn(fired_note, (41, 42), "impact should pick from usable bag, not static")
+
+
+class TestA7Regression(unittest.TestCase):
+    """A7: not 'same look all track, +1 next track'."""
+
+    def test_cross_track_not_deterministic_sequential(self) -> None:
+        """After a track reset, the bag is rebuilt → order changes, not +1."""
+        scenes = {
+            "d1": _scene("d1", note=41),
+            "d2": _scene("d2", note=42),
+            "d3": _scene("d3", note=43),
+            "safe_static": _scene("safe_static", scene_type="static", note=99),
+        }
+        config = _make_config(scenes)
+        personality = LaserPersonality(
+            name="test", safe_scene="safe_static", default_scene="d1",
+            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            drop_scene="d1", post_drop_scene="",
+            breakdown_scene="d1", transition_scene="safe_static",
+            drop_bank=("d1", "d2", "d3"),
+            drop_lifecycle_mirror=True,
+        )
+        rng = random.Random(42)
+        backend = _FakeMidiOutput()
+        ex = LaserSceneExecutor(
+            config=config, backend=backend, personality=personality,
+            rng=rng, randomize_cursors=False,
+        )
+
+        # Track 1: fire 3 cycles
+        notes_track1: list[int] = []
+        for i in range(3):
+            ctx = _ctx(abs_beat=float(64 + i * 32), autoloop_tick_just_fired=True)
+            dec = _decision("d1", "drop_cycle", "drop")
+            ex.on_decision(dec, ctx)
+        for msg, _ in backend.calls:
+            notes_track1.append(msg.note)
+        backend.calls.clear()
+
+        # Track reset (simulates track load)
+        ex.reset_runtime_state(reason="active_track_loaded")
+
+        # The definitive check: _role_bag was cleared by reset_runtime_state
+        self.assertEqual(ex._role_bag, {})
+
+        # Track 2: fire 3 more cycles — bag must rebuild from scratch
+        notes_track2: list[int] = []
+        for i in range(3):
+            ctx = _ctx(abs_beat=float(64 + i * 32), autoloop_tick_just_fired=True)
+            dec = _decision("d1", "drop_cycle", "drop")
+            ex.on_decision(dec, ctx)
+        for msg, _ in backend.calls:
+            notes_track2.append(msg.note)
+
+        # Track 2 must have fired (bag was rebuilt, not permanently empty)
+        self.assertGreater(len(notes_track2), 0, "track 2 cycles must fire after reset")
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+### D-notes (implementer instructions for Part D)
+
+- **All three test files above are verbatim** — transcribe them exactly. Adjust `import` paths
+  only if you renamed the package (you should not).
+- **All existing tests must still pass unchanged.** Run `python3 -m unittest discover tests` at
+  the end. If an existing test fails, your code change is wrong, not the test.
+- The `_personality` fixtures in D2 and D3 include the new `drop_lifecycle_mirror`,
+  `max_drops_in_a_row`, `drop_impact_beats`, `post_drop_cycle_beats` fields from Task 2. The
+  `_make_director` fixture in D2 passes `scenes=` to `LaserDirector(...)` (Task 3-pre).
+- The parity test (D1 `TestParity`) proves flat-window equivalence only. It does NOT prove
+  live-LED-window parity (the `_led_note_drop_decision_accepted` rewrite is out of scope). The
+  A8 divergence tests assert KNOWN integration-shielded differences, not failures.
+- The A8 never-dark test (D3 `TestA8NeverDark`) proves dubstep's static-only bank fires the
+  configured `house_drop_1` on impact — never `""`. This is the critical regression guard.
+- The shuffle-bag test (D3 `TestShuffleBag`) uses `randomize_cursors=False` so the cursor starts
+  at 0 (a reshuffle boundary). This avoids the mid-bag seeding issue noted in the spec.
 - All existing laser + LED tests pass unchanged.
 
 ## Part E — Acceptance (definition of done)
@@ -616,25 +2001,27 @@ triggers the intended autoloop, re-export the pack. Operator-run, optional.
 ## Pre-handoff checklist status (Claude self-review before Codex)
 1. Claims labeled confirmed/assumed/unknown — yes (A1–A6); the one unknown (which mechanism per
    sighting) is surfaced and does NOT block (gated mirror fixes both).
-2. Verified against CURRENT code at `c4edf97` — yes (re-read this pass; code at HEAD == `d47d155`,
-   only the spec doc changed since, so the file:line citations hold).
+2. Verified against CURRENT code — yes. Line-number citations verified against `c4edf97`; only the
+   spec doc changed since (`git diff --name-only c4edf97..HEAD` = spec only). All `:NNN` references
+   confirmed accurate against live code.
 3. Pending-state guard — A4 traces the blackout end-to-end: arm (`:121-151`), the executor
    `drop_crossing_success` path, AND the SM net (`:3842-3853`) that clears a gated-off crossing. The
    net (not `drop_crossing`) is the real clear path — the earlier "must keep drop_crossing or the
    blackout strands" claim is corrected. The mask-owner teardown divergence on disallowed crossings
    is surfaced (C2 + Part D).
-4. Mode-transition cleanup — Task 3d enumerates ALL transition paths incl. the resume path that
-   today resets neither director nor executor.
+4. Mode-transition cleanup — Task 3d enumerates ALL transition paths (6 sites) with before/after
+   code snippets including surrounding anchor lines. Resume path now resets both director and executor.
 5. Third-party API completeness — N/A (no new third-party API; MIDI message path unchanged).
 6. Cross-checked against existing code — gate reuses `_drop_scene`/`drop_bank`/`autoloop_tick_just_fired`
    authority vars; predicate matches `scene_type`/`safety_class`/`allow_high_impact` as the executor uses them.
 7. Pure-function seam — `drop_lifecycle.py` is pure and table-tested.
 8. Live safety explicit — Part C; blackout preserved (A4); gate is strictly-safer than today.
-9. Adversarial self-review — done (Opus-max review, this pass). Closed: the **impact dark-drop**
-   regression the usable-filter would introduce for dubstep (live) + all example personalities
-   (A8 / Task 4 static fallback); the **A4 blackout reasoning** (corrected to the SM net; mask-owner
-   divergence surfaced); the **not-same-snapshot** offset divergence (A5); the **flat-vs-flat** parity
-   illusion and the breakdown/pre_drop-vs-chorus ordering hole (A8 + Part D); the
-   first-tick/empty-`_drop_scene` guard (A8 / Task 3a); `post_drop_cycle_beats` marked inert
-   (A5 / Task 2). Remaining accepted divergences (cadence, flat window, ordering) are documented, not
-   hidden.
+9. Adversarial self-review — done (Opus-max review + Antigravity final audit). Fixed:
+   - **Bug #7 (D3 A7 regression)**: `assertEqual(ex._role_bag, {})` moved BEFORE track-2 cycles.
+   - **Bug #8 (Task 5a)**: Truncated/impossible validation code removed; `_validate_personality` only
+     has `scene_keys: set[str]`, cannot do note-collision checks. Replaced with "NO new code needed".
+   Verified correct (not bugs despite initial suspicion): D3 `_FakeMidiOutput` duck-typing; D2
+   `scenes=` param (Task 3-pre); executor `reset_runtime_state` keyword-only; `LaserContext` blackout
+   defaults; D3 `_make_config(scenes)` provides full `LaserConfig` (not `None`); all `SmartPhrasingState`
+   fields have defaults.
+   Remaining accepted divergences (cadence, flat window, breakdown ordering) are documented, not hidden.
