@@ -10,7 +10,7 @@ validation_scope: spec only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 
 > **Live-critical / default-ON.** This ships **on by default** on every set (operator decision:
 > "default on always"). It is therefore NOT behind an opt-out-only flag — it has a **runtime
-> kill switch that defaults ON** so the show can disable it instantly if hardware misbehaves.
+> kill switch that defaults ON** so the show can disable it via personality config update (hot-reload or restart; it is NOT a single runtime command).
 > Implement exactly, commit after each task. The goal: the **laser** drop/post-drop/chorus
 > behavior **mirrors the LED engine's existing, battle-tested, GATED state machine**, with the
 > operator's configurable values, and **fixes a current live bug** where the laser fires/cycles
@@ -27,7 +27,7 @@ Mirror the LED engine for `drop` / `post_drop` / chorus on the **laser**:
 - Operator's laser values: **drop impact = 32 beats** (LED default 8), **post_drop cycle = 32
   beats**. **Everything configurable.**
 - The drop autoloop arm and the laser look are the **same MIDI note** to SoundSwitch.
-- **Default ON**, with a runtime kill switch (`drop_lifecycle_mirror`, default `true`).
+- **Default ON**, with a config-driven kill switch (`drop_lifecycle_mirror`, default `true`) applied on the next personality re-apply via the hot-reloader.
 
 ## Note — SoundSwitch is being retired (native DMX / T7d incoming)
 The lifecycle logic (gated resolver, cycling, fallback) is **renderer-agnostic** and carries
@@ -264,7 +264,7 @@ impact**. Verified against the live + example config:
 ## Part B — Tasks (implement exactly, in order; commit after each)
 
 ### Absolute rules
-- **Default ON** via kill switch `drop_lifecycle_mirror` (default `true`). When **off**, laser
+- **Default ON** via config-driven kill switch `drop_lifecycle_mirror` (default `true`). When **off**, laser
   output is **byte-for-byte identical to today** (existing suite proves it). When **on** (default),
   behavior changes deliberately and safely per A3 (gated) + A4 (blackout preserved).
 - **Do not** change LED runtime behavior. Task 1 extracts a pure resolver; the live LED path keeps
@@ -406,9 +406,11 @@ class DropLifecycle:
         anchor = self.drop_anchor(sp)
         if anchor is not None:
             if self.impact_allowed(sp):
+                armed_this_tick = False
                 if mutate:
                     self.arm(anchor)
-                return DropResult(role="drop", armed_this_tick=True)
+                    armed_this_tick = True
+                return DropResult(role="drop", armed_this_tick=armed_this_tick)
             if mutate and self._first_drop_anchor_beat is None:
                 self._first_drop_anchor_beat = anchor
             return DropResult(role="post_drop", armed_this_tick=False)
@@ -892,7 +894,7 @@ the three local flags are new):
                 return self._choose_bank_scene_locked(role=role, fallback_scene=decision.scene)
             return active_scene
 ```
-**Flag-OFF is byte-identical to today:** `mirror_on` is False → `flag_on_drop_impact` is False and the
+**Flag-OFF is byte-identical to pre-change EXCEPT the resume transition, which now also resets the executor (a benign phrase-bank reshuffle + active-scene clear; no dark, no drop leak):** `mirror_on` is False → `flag_on_drop_impact` is False and the
 cycle reasons never appear, so a flag-off `drop_crossing`/`drop_hold` falls through to the original
 `active_scene` / `_choose_bank_scene_locked` path. The flag is read from
 `self._personality.drop_lifecycle_mirror` — there is NO new `LaserSceneDecision` field.
@@ -1046,8 +1048,7 @@ drop/post_drop note triggers the intended autoloop, re-exports the pack. This is
 optional — do NOT automate it.
 
 ## Part C — Invariants that MUST still hold (live safety)
-1. **Kill switch off = no change.** `drop_lifecycle_mirror=False` → identical laser output/MIDI to
-   today (proven by existing suite). Default is ON.
+1. **Kill switch off = no change.** `drop_lifecycle_mirror=False` → flag-OFF is byte-identical to pre-change EXCEPT the resume transition, which now also resets the executor (a benign phrase-bank reshuffle + active-scene clear; no dark, no drop leak). Default is ON.
 2. **Smart Drop blackout safe (A4).** The executor's blackout arm/resolve code is not modified;
    cycling reasons never enter it. For an **allowed** crossing the at-anchor impact still emits
    `reason="drop_crossing"` and the blackout note-on/off pair is byte-identical (tested). For a
@@ -1978,7 +1979,7 @@ if __name__ == "__main__":
 - [ ] Shared `drop_lifecycle.py` with **all three** state fields; **parity test green** vs the LED
       resolver incl. disallowed-predecessor + chorus→chorus-cap timelines.
 - [ ] Knobs added (`drop_lifecycle_mirror` **default true** + max/impact/cycle); **NO**
-      `drop_cycle_beats`, **NO** `drop_pairs`. Kill switch OFF = byte-identical to today.
+      `drop_cycle_beats`, **NO** `drop_pairs`. Kill switch OFF = byte-identical to pre-change EXCEPT the resume transition.
 - [ ] Default ON: laser fires a **gated** drop (LED parity) → holds `drop_impact_beats` (32) →
       post_drop cycling every autoloop tick within chorus; ≤`max_drops_in_a_row` (2); no-usable-
       post_drop → cycle drops. **No drop look during groove/buildup** (A3 regression test green).

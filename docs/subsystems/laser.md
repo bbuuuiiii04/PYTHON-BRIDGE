@@ -46,7 +46,7 @@ Runtime flow:
 - decisions: role selection, gated drop/post-drop lifecycle, manual override, blackout, cooldown, bank/personality rotation
 - outputs: MIDI note/CC/pulse/hold events through `MidiOutput`
 - `drop_lifecycle_mirror` defaults on. Allowed phrase-context impacts hold for the configured flat `drop_impact_beats`, then `post_drop`/fallback drop cycles fire only on autoloop ticks. Drop and post-drop cycle banks use usable-only shuffle bags that reset per track; a static configured drop scene remains valid for the at-anchor impact so an empty cyclable bank does not make the hit dark.
-- Setting `drop_lifecycle_mirror` to false preserves the previous ungated crossing and fixed post-drop-hold path. Director and executor lifecycle state reset on master/track/stop/resume transitions; director state also resets on scripted/idle transitions and personality application rebuilds it.
+- Setting `drop_lifecycle_mirror` to false preserves the previous ungated crossing and fixed post-drop-hold path (flag-OFF is byte-identical to pre-change EXCEPT the resume transition, which now also resets the executor: a benign phrase-bank reshuffle + active-scene clear; no dark, no drop leak). Director and executor lifecycle state reset on master/track/stop/resume transitions; director state also resets on scripted/idle transitions and personality application rebuilds it.
 
 Config:
 - `config/laser_director.example.json`
