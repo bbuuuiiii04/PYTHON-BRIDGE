@@ -143,6 +143,31 @@ class TestResolve(unittest.TestCase):
         self.assertEqual(lifecycle.resolve(sp, mutate=True).role, "post_drop")
         self.assertFalse(lifecycle._first_drop_anchor_beat is None)
 
+    def test_resolve_no_mutate(self) -> None:
+        """resolve with mutate=False does NOT alter state."""
+        lc = DropLifecycle(_cfg(impact_beats=8.0))
+        sp = _sp(
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            previous_phrase_label="up",
+            current_phrase_is_chorus=True,
+            abs_beat=64.0,
+        )
+        
+        # Initial state
+        self.assertIsNone(lc._first_drop_anchor_beat)
+        self.assertIsNone(lc._impact_until_beat)
+        self.assertEqual(lc._impact_count, 0)
+        
+        # Resolve without mutate
+        res = lc.resolve(sp, mutate=False)
+        self.assertEqual(res.role, "drop")
+        
+        # State should be unchanged
+        self.assertIsNone(lc._first_drop_anchor_beat)
+        self.assertIsNone(lc._impact_until_beat)
+        self.assertEqual(lc._impact_count, 0)
+
     def test_drop_impact_then_hold_then_post_drop(self) -> None:
         """Anchor fires drop, holds for impact_beats, then transitions to post_drop."""
         lc = DropLifecycle(_cfg(impact_beats=8.0))
