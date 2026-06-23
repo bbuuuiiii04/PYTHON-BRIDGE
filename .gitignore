@@ -16,3 +16,8 @@ config/soundswitch_pack_player.json
 spec/*.npy
 # Generated, environment-specific proof reports (regenerate locally; never commit)
 artifacts/soundswitch_pack_generation_proof/latest.*
+
+# Private/Local Agent Profiles
+CLAUDE.local.md
+PRIVATE_OPERATOR_PROFILE.md
+.agent_private_profile.md

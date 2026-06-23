@@ -10,22 +10,47 @@ Accepted repo status — do not upgrade without code/test/config + validation ev
 
 It works in the maintainer's local macOS setup only. It is **not** production-ready, show-ready, plug-and-play, broadly compatible, generally supported, or hardware-validated.
 
-## Brandon Operator Mode
-
-The maintainer/operator is not a software engineer. Communicate in a low-noise, concrete,
-proof-backed way:
-
-- Use tiny checkpoints: say what you checked, what changed, and what is next.
-- Use **GREEN / YELLOW / RED** status for summaries and operator decisions.
-- Put plain-language meaning before technical labels; define each necessary technical term once.
-- Use proof cards for important claims: `Claim`, `Evidence`, `Limit`, `Confidence`.
-- Use decision cards only for real architecture, behavior, safety, or live-operation choices.
-- Ask specific, answerable questions only; do not ask vague questions like "thoughts?"
-- Avoid giant walls of text, raw diffs, and unexplained jargon unless explicitly requested.
-- Do not say "looks good", "done", "fixed", or "robust" without evidence.
-- Validate current repo state before implementation; code and tests beat docs when they conflict.
-
 ---
+
+## 0. Brandon Communication Mode
+
+The maintainer is the project owner/operator, not a software engineer. Agents should communicate in a low-noise, natural, and concrete way that helps direct engineering work on a live-performance bridge safely.
+
+*If a local, gitignored file named `PRIVATE_OPERATOR_PROFILE.md` exists in the repo root, read it for operator communication preferences before starting work.*
+
+### Core communication rules
+
+* **Talk like a human, not a dashboard.**
+* **No robotic `STATUS: GREEN/YELLOW/RED` blocks** for routine updates.
+* **No giant walls of text** and **no narration of every internal step.**
+* **Stay quiet** during routine reading, editing, or test reruns unless something meaningful changes.
+* Provide **short natural updates** only when something meaningful changes (risks, blockers, completed checkpoints).
+* Explain the **plain-language meaning** before technical labels.
+* Define technical terms only when they matter.
+* **No vague questions** like "How would you like to proceed?"
+* **No "looks good," "done," "fixed," or "robust"** without evidence.
+* **No raw diffs** unless explicitly requested.
+* **No implementation** before validating the current repo state.
+* **Code/tests beat docs** when they conflict.
+
+### Proof and decisions
+
+* **Important claims need proof**, but proof should be written naturally in the text, not as formal proof-card templates unless explicitly requested in that format.
+* **Pause for real decisions only**: behavior changes, architecture changes, live-safety risk, code/docs conflict, multiple valid paths, or validation risk. Do not ask for approval on routine mechanical edits.
+
+### Examples
+
+**Good example style:**
+"I checked the repo state. We're on the right branch, and there's one existing `AGENTS.md` change I'm not touching. I'm moving into the requested docs edit now."
+
+**Good example style:**
+"I found the test failure. The runtime behavior looks consistent with the spec; the old harness is missing the new wiring. I'm patching the harness, not production behavior."
+
+**Bad example style:**
+`STATUS: YELLOW`
+`Plain meaning: ...`
+`Risk: ...`
+`Next: ...`
 
 ## 1. Source-of-truth order (use every time)
 

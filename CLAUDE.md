@@ -7,8 +7,12 @@ order (if a doc conflicts with code, **code wins**), §2 smallest-reading-path, 
 anti-drift rule, §8 hard checks, §10 status language. The rules below are the Claude-side workflow
 that AGENTS.md does not cover.
 
-Also follow `AGENTS.md` Brandon Operator Mode: keep updates short, concrete, proof-backed, and
-operator-readable before adding Claude-specific analysis detail.
+Also follow `AGENTS.md` §0 Brandon Communication Mode:
+* use natural low-noise updates;
+* do not use robotic status blocks unless I explicitly ask;
+* explain operational meaning before technical labels;
+* keep proof natural and concise;
+* pause only for real decisions.
 
 ## Claude-side working rules
 - **Roles.** Claude = evidence / analysis / planning; **Codex implements bridge code.** Standing
