@@ -928,7 +928,8 @@ class PublishPackCliTests(unittest.TestCase):
                 "artifact_count": 95,
                 "first_export": False,
             }
-            with mock.patch.object(export_module, "publish_pack", return_value=publish_result):
+            with mock.patch.object(export_module, "publish_pack", return_value=publish_result), \
+                 mock.patch.object(export_module, "_write_source_sidecar"):
                 return_code = export_module.main([
                     "--publish-canonical", "--result-json", str(result_path),
                 ])
@@ -941,6 +942,54 @@ class PublishPackCliTests(unittest.TestCase):
                 "first_export": False,
                 "error_category": "",
             })
+
+    def test_canonical_publish_writes_sibling_source_sidecar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.ssproj"
+            source.mkdir()
+            (source / "project.ssfile").write_bytes(b"source bytes")
+            destination = root / "pack"
+            destination.mkdir()
+            publish_result = {
+                "verified": True,
+                "manifest_sha256": "a" * 64,
+                "artifact_count": 95,
+                "first_export": False,
+            }
+            with mock.patch.object(export_module, "CANONICAL_SOURCE_PROJECT", source), \
+                 mock.patch.object(export_module, "CANONICAL_PACK_DIR", destination), \
+                 mock.patch.object(export_module, "publish_pack", return_value=publish_result), \
+                 mock.patch.object(export_module, "_generator_commit", return_value="b" * 40):
+                result = export_module._canonical_publish_result()
+
+            self.assertTrue(result["ok"])
+            sidecar = export_module._sidecar_path(destination)
+            self.assertEqual(sidecar.parent, destination.parent)
+            self.assertFalse(sidecar.is_relative_to(destination))
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            self.assertEqual(payload, {
+                "source_fingerprint": export_module._source_content_fingerprint(source),
+                "generator_commit": "b" * 40,
+                "pack_manifest_sha256": "a" * 64,
+            })
+            self.assertFalse(any(destination.rglob("*.source.json")))
+            self.assertNotIn(str(Path.home()), sidecar.read_text(encoding="utf-8"))
+
+    def test_source_sidecar_failure_does_not_fail_canonical_publish(self):
+        publish_result = {
+            "verified": True,
+            "manifest_sha256": "a" * 64,
+            "artifact_count": 95,
+            "first_export": False,
+        }
+        with mock.patch.object(export_module, "publish_pack", return_value=publish_result), \
+             mock.patch.object(
+                 export_module, "_write_source_sidecar", side_effect=OSError("disk full"),
+             ):
+            result = export_module._canonical_publish_result()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["manifest_sha256"], "a" * 64)
 
     def test_canonical_cli_failure_exposes_only_category(self):
         with tempfile.TemporaryDirectory() as tmp:

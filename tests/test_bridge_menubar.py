@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -218,23 +219,134 @@ class BridgeMenubarTests(unittest.TestCase):
             "result": {"ok": True},
         })
         self.assertFalse(menu._export_in_progress)
+        self.assertTrue(menu._export_up_to_date)
         self.assertEqual(menu._export_state, "reload_succeeded")
         menu._render_export_state.assert_called_once_with()
 
-    def test_export_display_never_surfaces_paths_or_raw_errors(self) -> None:
+    def test_export_button_text_truth_table(self) -> None:
         bridge_menubar = self._import_module()
-        raw = "/private/project device UUID port raw failure"
-        states = (
-            "idle", "exporting", "published_not_live", "reload_succeeded", "reload_failed",
+        self.assertEqual(bridge_menubar.export_button_text(True, False), "Exporting…")
+        self.assertEqual(bridge_menubar.export_button_text(True, True), "Exporting…")
+        self.assertEqual(bridge_menubar.export_button_text(False, True), "Exported")
+        self.assertEqual(
+            bridge_menubar.export_button_text(False, False), "Export from Soundswitch",
         )
-        for state in states:
-            for text in bridge_menubar.export_display(state, {}):
-                self.assertNotIn("/", text)
-                self.assertNotIn(raw, text)
-        for text in bridge_menubar.export_display("export_failed", {"error_category": raw}):
-            self.assertNotIn("/", text)
-            self.assertNotIn(raw, text)
-            self.assertIn("UnknownError", text)
+
+    def test_export_result_line_truth_table_and_sanitization(self) -> None:
+        bridge_menubar = self._import_module()
+        self.assertEqual(bridge_menubar.export_result_line("idle"), "")
+        self.assertEqual(bridge_menubar.export_result_line("exporting"), "")
+        self.assertEqual(
+            bridge_menubar.export_result_line("published_not_live"),
+            "  saved (loads when pack enabled)",
+        )
+        self.assertEqual(bridge_menubar.export_result_line("reload_succeeded"), "  live now")
+        self.assertEqual(
+            bridge_menubar.export_result_line("reload_failed"),
+            "  saved — live reload not confirmed",
+        )
+        raw = "/private/project device UUID port raw failure"
+        text = bridge_menubar.export_result_line(
+            "export_failed", {"error_category": raw},
+        )
+        self.assertNotIn("/", text)
+        self.assertNotIn(raw, text)
+        self.assertIn("UnknownError", text)
+
+    def test_detect_export_state_requires_positive_proof(self) -> None:
+        bridge_menubar = self._import_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.ssproj"
+            source.mkdir()
+            source_file = source / "project.ssfile"
+            source_file.write_bytes(b"one")
+            pack = root / "pack"
+            pack.mkdir()
+            sidecar = bridge_menubar._sidecar_path(pack)
+            sidecar.write_text(json.dumps({
+                "source_fingerprint": bridge_menubar._source_content_fingerprint(source),
+                "generator_commit": "a" * 40,
+                "pack_manifest_sha256": "b" * 64,
+            }), encoding="utf-8")
+
+            with patch.object(bridge_menubar, "CANONICAL_SOURCE_PROJECT", str(source)), \
+                 patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack), \
+                 patch.object(bridge_menubar, "current_generator_commit", return_value="a" * 40):
+                self.assertEqual(bridge_menubar.detect_export_state(), "up_to_date")
+                source_file.write_bytes(b"two")
+                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
+                source_file.write_bytes(b"one")
+                sidecar.unlink()
+                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
+                sidecar.write_text("not-json", encoding="utf-8")
+                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
+                sidecar.write_text(json.dumps({
+                    "source_fingerprint": bridge_menubar._source_content_fingerprint(source),
+                    "generator_commit": "a" * 40,
+                }), encoding="utf-8")
+                pack.rmdir()
+                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
+                pack.mkdir()
+
+            with patch.object(bridge_menubar, "CANONICAL_SOURCE_PROJECT", str(source)), \
+                 patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack), \
+                 patch.object(bridge_menubar, "current_generator_commit", return_value="c" * 40):
+                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
+            with patch.object(bridge_menubar, "CANONICAL_SOURCE_PROJECT", str(source)), \
+                 patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack), \
+                 patch.object(bridge_menubar, "current_generator_commit", return_value=None):
+                self.assertEqual(bridge_menubar.detect_export_state(), "up_to_date")
+
+            sidecar.write_text(json.dumps({
+                "source_fingerprint": bridge_menubar._source_content_fingerprint(source),
+            }), encoding="utf-8")
+            with patch.object(bridge_menubar, "CANONICAL_SOURCE_PROJECT", str(source)), \
+                 patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack), \
+                 patch.object(bridge_menubar, "current_generator_commit", return_value=None):
+                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
+
+    def test_finish_export_updates_freshness_verdict(self) -> None:
+        bridge_menubar = self._import_module()
+        for state in ("reload_succeeded", "published_not_live", "reload_failed"):
+            with self.subTest(state=state):
+                menu = Mock(_export_in_progress=True, _detect_sig="old")
+                menu._render_export_state = Mock()
+                bridge_menubar.BridgeMenuBar.finishExport_.callable(menu, {
+                    "state": state, "result": {"ok": True},
+                })
+                self.assertTrue(menu._export_up_to_date)
+                self.assertIsNone(menu._detect_sig)
+        menu = Mock(_export_in_progress=True, _detect_sig="old")
+        menu._render_export_state = Mock()
+        bridge_menubar.BridgeMenuBar.finishExport_.callable(menu, {
+            "state": "export_failed", "result": {"ok": False},
+        })
+        self.assertFalse(menu._export_up_to_date)
+        self.assertIsNone(menu._detect_sig)
+
+    def test_maybe_detect_skips_export_and_fresh_unchanged_signature(self) -> None:
+        bridge_menubar = self._import_module()
+        handler = bridge_menubar.BridgeMenuBar._maybe_detect_export_state
+        menu = Mock(
+            _export_in_progress=True,
+            _detect_in_progress=False,
+            _detect_sig=None,
+            _detect_at=0.0,
+        )
+        with patch.object(bridge_menubar, "_source_stat_signature") as signature, \
+             patch.object(bridge_menubar.threading, "Thread") as thread:
+            handler(menu)
+        signature.assert_not_called()
+        thread.assert_not_called()
+
+        menu._export_in_progress = False
+        menu._detect_sig = "same"
+        menu._detect_at = bridge_menubar.time.monotonic()
+        with patch.object(bridge_menubar, "_source_stat_signature", return_value="same"), \
+             patch.object(bridge_menubar.threading, "Thread") as thread:
+            handler(menu)
+        thread.assert_not_called()
 
     def test_worker_subprocess_failure_returns_sanitized_terminal_state(self) -> None:
         bridge_menubar = self._import_module()
