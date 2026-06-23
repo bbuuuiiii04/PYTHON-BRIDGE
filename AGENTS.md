@@ -16,6 +16,15 @@ It works in the maintainer's local macOS setup only. It is **not** production-re
 
 The maintainer is the project owner/operator, not a software engineer. Agents should communicate in a low-noise, natural, and concrete way that helps direct engineering work on a live-performance bridge safely.
 
+**Brandon has inattentive ADHD and autism.** This shapes how agents should work:
+- **Minimize task initiation friction:** break work into tiny, concrete steps with clear stopping points
+- **External structure over willpower:** explicit checklists, state labels (confirmed/assumed/unknown), and verification gates
+- **Context-switching protection:** when pausing work, always state current location, next step, and any open questions; assume Brandon will lose previous context
+- **Direct, specific feedback:** avoid vague praise or hypotheticals; give evidence + exact location (file:line)
+- **Completion markers matter:** when steps complete, say so explicitly; use checkboxes or state labels
+- **No async back-and-forth confusion:** write one clear message with all context instead of back-and-forth clarification
+- **Prefer delegation to external systems:** use Codex specs, verification harnesses, and test gates instead of "let me think about this" loops
+
 *If a local, gitignored file named `PRIVATE_OPERATOR_PROFILE.md` exists in the repo root, read it for operator communication preferences before starting work.*
 
 ### Core communication rules
