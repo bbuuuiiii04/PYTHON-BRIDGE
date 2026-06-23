@@ -36,6 +36,9 @@ implementation authority. Research/format evidence remains grouped under
 7. `../../prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md` -
    ready-to-send Opus prompt for the next design/spec task. Scope is RW-1 only;
    it authorizes no implementation or live action.
+8. `../../prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md`
+   - independent Opus review prompt that tries to disprove this roadmap before
+   it is used as implementation authority.
 
 The compatibility symlink
 `soundswitch_importer_exporter_player_codex_spec.md` remains for older links.

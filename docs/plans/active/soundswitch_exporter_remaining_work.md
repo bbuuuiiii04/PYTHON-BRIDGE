@@ -684,6 +684,9 @@ backend change, bridge start/restart, or hardware open.
 Ready-to-send prompt:
 `docs/prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md`.
 
+Independent roadmap review prompt:
+`docs/prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md`.
+
 ## When this project can be called complete
 
 Do not call the SoundSwitch exporter / bridge-native DMX project complete until:

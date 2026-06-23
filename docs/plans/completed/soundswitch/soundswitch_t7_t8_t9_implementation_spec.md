@@ -20,12 +20,15 @@
    `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` — Part B
    Task 7 (`:534`), Task 8 (`:574`), Task 9 (`:605`); Part C invariants (`:699`).
 2. **This combined T7–T9 spec** (the implementer brief; decomposes + pins the integration).
-3. **Generic orchestration protocol:** `docs/plans/active/soundswitch_orchestration_prompt.md`.
-4. **T7+T8 orchestration prompt:** `docs/plans/active/soundswitch_t7_t8_orchestration.md`.
-5. **Adversarial review gates:** `docs/plans/active/soundswitch_review_pack.md` (Gate before-T7
-   `:168`, Gate T8 `:195`, Gate T9 `:217`).
-6. **Resume ledger:** `docs/plans/active/soundswitch_impl_progress.md`.
-7. **Change contract:** `docs/agents/change_contracts.yml` → `soundswitch_pack_player` (`:233`).
+3. The completed orchestration/review prompts that originally accompanied this
+   spec were deleted as redundant lifecycle artifacts; git history preserves
+   them if provenance is required.
+4. **Historical resume ledger:**
+   `docs/plans/completed/soundswitch/soundswitch_impl_progress.md`.
+5. **Current roadmap:**
+   `docs/plans/active/soundswitch_exporter_remaining_work.md`.
+6. **Change contract:** `docs/agents/change_contracts.yml` →
+   `soundswitch_pack_player`.
 
 If a doc conflicts with code, **code wins**. Every claim below is labeled
 **[confirmed]** (read in current code at HEAD `f7ae38d`), **[assumed]**, or **[unknown]**.
