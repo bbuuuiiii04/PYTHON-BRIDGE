@@ -50,12 +50,13 @@ class _FakeMidiOutput:
 
 
 def _scene(name: str, *, scene_type: str = "autoloop", safety_class: str = "safe",
-           note: int = 36) -> LaserScene:
+           note: int = 36, cooldown: float = 0.0) -> LaserScene:
     return LaserScene(
         name=name,
         scene_type=scene_type,
         safety_class=safety_class,
         midi=LaserMidiMessage(kind="note_pulse", channel=1, note=note, velocity=127, duration_ms=80),
+        cooldown_beats=cooldown,
     )
 
 
@@ -300,7 +301,7 @@ class TestLaserBlackoutEquivalence(unittest.TestCase):
             "safe_static": _scene("safe_static", scene_type="static", note=99),
         }
         config = _make_config(scenes)
-        
+
         # Flag ON
         pers_on = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
@@ -314,7 +315,7 @@ class TestLaserBlackoutEquivalence(unittest.TestCase):
         ctx_on = _ctx(smart_drop_blackout_arm=True)
         ex_on.on_decision(_decision("d1", "drop_crossing", "drop"), ctx_on)
         blackout_on = [m for m, _ in backend_on.calls if m.kind == "manual_blackout"]
-        
+
         # Flag OFF
         pers_off = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
@@ -337,12 +338,20 @@ class TestLaserBlackoutEquivalence(unittest.TestCase):
             self.assertEqual(b_on.velocity, b_off.velocity)
             self.assertEqual(b_on.kind, b_off.kind)
 
-    def test_disallowed_crossing_no_stranded_dark(self) -> None:
+    def test_gated_off_crossing_executor_defers_clear_to_sm_net(self) -> None:
+        """A gated-off crossing reaches the executor as post_drop_cycle/drop_cycle
+        (NOT drop_crossing). The executor keys its blackout clear on is_drop_crossing,
+        so for a cycle reason it deliberately does NOT clear the pending blackout —
+        it leaves that to the StateManager net. The end-to-end no-stranded-dark
+        guarantee is proven in test_smart_transitions.py
+        (test_crossing_clears_pending_blackout_when_non_drop_decision_wins); this test
+        proves the executor-side half: the cycle reason neither fires a scene nor
+        strands a clear of its own."""
         scenes = {
             "d1": _scene("d1", note=41),
             "safe_static": _scene("safe_static", scene_type="static", note=99),
         }
-        pers_on = LaserPersonality(
+        pers = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
             phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
             drop_scene="d1", post_drop_scene="",
@@ -350,19 +359,103 @@ class TestLaserBlackoutEquivalence(unittest.TestCase):
             drop_bank=("d1",), drop_lifecycle_mirror=True,
         )
         backend = _FakeMidiOutput()
-        ex = LaserSceneExecutor(config=_make_config(scenes), backend=backend, personality=pers_on, randomize_cursors=False)
-        
-        # simulated pending state
+        ex = LaserSceneExecutor(config=_make_config(scenes), backend=backend, personality=pers, randomize_cursors=False)
+
+        # A blackout was armed earlier in the drop window; the gated-off crossing tick
+        # arrives as post_drop_cycle with autoloop_tick_just_fired=False (blackout mode).
         ex._blackout_pending_for_drop_window = True
-        ex._mask_owners.add("smart_drop")
-        
-        ctx = _ctx(autoloop_tick_just_fired=False, smart_drop_blackout_arm=True)
-        ex.on_decision(_decision("d1", "post_drop_cycle", "post_drop"), ctx)
-        
-        ex.clear_pending_blackout()
-        
+        ex.on_decision(_decision("d1", "post_drop_cycle", "post_drop"),
+                       _ctx(autoloop_tick_just_fired=False))
+
+        # No scene MIDI fired (no autoloop tick) ...
+        scene_calls = [m for m, _ in backend.calls if m.kind != "manual_blackout"]
+        self.assertEqual(scene_calls, [])
+        # ... and the executor did NOT clear the blackout itself (only drop_crossing does).
+        self.assertTrue(ex._blackout_pending_for_drop_window)
+
+    def test_allowed_crossing_executor_clears_blackout(self) -> None:
+        """Contrast to the gated-off case: an ALLOWED crossing (reason=drop_crossing)
+        DOES resolve the pending blackout via the executor's drop_crossing_success
+        path — so the executor's clear is keyed on is_drop_crossing, which is exactly
+        why the SM net is required for gated-off crossings."""
+        scenes = {
+            "d1": _scene("d1", note=41),
+            "safe_static": _scene("safe_static", scene_type="static", note=99),
+        }
+        pers = LaserPersonality(
+            name="test", safe_scene="safe_static", default_scene="d1",
+            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            drop_scene="d1", post_drop_scene="",
+            breakdown_scene="d1", transition_scene="safe_static",
+            drop_bank=("d1",), drop_lifecycle_mirror=True,
+        )
+        backend = _FakeMidiOutput()
+        ex = LaserSceneExecutor(config=_make_config(scenes), backend=backend, personality=pers, randomize_cursors=False)
+        ex._blackout_pending_for_drop_window = True
+        ex.on_decision(_decision("d1", "drop_crossing", "drop"),
+                       _ctx(autoloop_tick_just_fired=False))
         self.assertFalse(ex._blackout_pending_for_drop_window)
-        self.assertEqual(len(ex._mask_owners), 0)
+
+
+class TestShuffleBagEdgeCases(unittest.TestCase):
+    """Rejection rollback + bank-membership-change rebuild for the shuffle bag."""
+
+    def _make(self, drop_bank, *, cooldown=0.0, seed=1):
+        scenes = {
+            "d1": _scene("d1", note=41, cooldown=cooldown),
+            "d2": _scene("d2", note=42, cooldown=cooldown),
+            "d3": _scene("d3", note=43, cooldown=cooldown),
+            "safe_static": _scene("safe_static", scene_type="static", note=99),
+        }
+        config = _make_config(scenes)
+        personality = LaserPersonality(
+            name="test", safe_scene="safe_static", default_scene="d1",
+            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            drop_scene="d1", post_drop_scene="",
+            breakdown_scene="d1", transition_scene="safe_static",
+            drop_bank=tuple(drop_bank), drop_lifecycle_mirror=True,
+        )
+        backend = _FakeMidiOutput()
+        ex = LaserSceneExecutor(
+            config=config, backend=backend, personality=personality,
+            rng=random.Random(seed), randomize_cursors=False,
+        )
+        return ex, backend
+
+    def test_cooldown_rejection_restores_cursor_no_skip(self) -> None:
+        """A cooldown-blocked drop_cycle rolls the role cursor back, so the look it
+        tentatively picked from the shuffle bag is retried next time, not skipped."""
+        ex, backend = self._make(("d1", "d2", "d3"), cooldown=8.0)
+        # First cycle fires and stamps role_last_trigger_beat["drop"] = 64.
+        ex.on_decision(_decision("d1", "drop_cycle", "drop"),
+                       _ctx(abs_beat=64.0, autoloop_tick_just_fired=True))
+        self.assertEqual(len(backend.calls), 1)
+        cursor_after_first = ex._role_cursors["drop"]
+        # Second cycle at beat 66 is inside the 8-beat cooldown -> blocked -> rollback.
+        ex.on_decision(_decision("d1", "drop_cycle", "drop"),
+                       _ctx(abs_beat=66.0, autoloop_tick_just_fired=True))
+        self.assertEqual(len(backend.calls), 1, "cooldown-blocked cycle must not fire")
+        self.assertEqual(
+            ex._role_cursors["drop"], cursor_after_first,
+            "cursor must roll back on a rejected pick (no skipped look)",
+        )
+
+    def test_bag_rebuilds_when_usable_length_changes(self) -> None:
+        """The len(bag) != len(usable) guard rebuilds the bag when a drop look is
+        added/removed. (The same-length-but-different-membership case is unreachable
+        at runtime: every personality swap calls reset_runtime_state(), which clears
+        _role_bag, and the scene catalog is immutable while the executor runs.)"""
+        ex, _ = self._make(("d1", "d2", "d3"), seed=7)
+        with ex._lock:
+            ex._next_shuffled_scene_locked("drop")          # builds a length-3 bag
+            self.assertEqual(len(ex._role_bag["drop"]), 3)
+            # Shrink the usable set: make d3 non-cyclable in the scene catalog.
+            ex._config.scenes["d3"] = _scene("d3", scene_type="static", note=43)
+            seen = set()
+            for _ in range(6):
+                seen.add(ex._next_shuffled_scene_locked("drop"))
+            self.assertEqual(len(ex._role_bag["drop"]), 2, "bag must rebuild to new length")
+            self.assertNotIn("d3", seen, "the now-unusable look must not be picked")
 
 
 if __name__ == "__main__":

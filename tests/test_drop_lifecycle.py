@@ -153,16 +153,16 @@ class TestResolve(unittest.TestCase):
             current_phrase_is_chorus=True,
             abs_beat=64.0,
         )
-        
+
         # Initial state
         self.assertIsNone(lc._first_drop_anchor_beat)
         self.assertIsNone(lc._impact_until_beat)
         self.assertEqual(lc._impact_count, 0)
-        
+
         # Resolve without mutate
         res = lc.resolve(sp, mutate=False)
         self.assertEqual(res.role, "drop")
-        
+
         # State should be unchanged
         self.assertIsNone(lc._first_drop_anchor_beat)
         self.assertIsNone(lc._impact_until_beat)
@@ -311,18 +311,26 @@ class TestParity(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.lc = DropLifecycle(_cfg(impact_beats=8.0, max_drops=2))
-        
-        # Construct a minimal StateManager for testing the unbound method
+        # Source the flat-window config from the REAL LED module constants so this
+        # comparison stays valid if the LED defaults ever change, and fails loudly
+        # if they ever diverge from the resolver's expectation.
+        from rb_ss_bridge_v2 import state_manager as sm_mod
+        self.assertEqual(sm_mod.LED_MAX_DROP_IMPACTS, 2)
+        self.assertEqual(sm_mod.LED_DEFAULT_DROP_IMPACT_BEATS, 8.0)
+        self.lc = DropLifecycle(_cfg(
+            impact_beats=sm_mod.LED_DEFAULT_DROP_IMPACT_BEATS,
+            max_drops=sm_mod.LED_MAX_DROP_IMPACTS,
+        ))
+
+        # Construct a minimal StateManager to drive the REAL LED resolver
+        # (_led_role_from_smart_phrasing reads the module-level constants above —
+        # NOT instance attributes, so do not try to override them on self.sm).
         from rb_ss_bridge_v2.state_manager import StateManager
         from rb_ss_bridge_v2.rb_memory import PositionCache
         from unittest.mock import Mock
         import queue
-        
+
         self.sm = StateManager(queue.Queue(), PositionCache(), Mock())
-        # mock flat window on LED constants read by _led_role_from_smart_phrasing
-        self.sm.LED_MAX_DROP_IMPACTS = 2
-        self.sm.LED_DROP_IMPACT_BEATS = 8.0
 
     def assertParity(self, sp, msg="") -> None:
         from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState
@@ -332,14 +340,14 @@ class TestParity(unittest.TestCase):
             sp_state = SmartPhrasingState(**sp_kwargs)
         else:
             sp_state = sp
-            
+
         res = self.lc.resolve(sp, mutate=True)
         led_role = self.sm._led_role_from_smart_phrasing(sp_state, mutate=True)
-        
+
         # Map LED non-drop roles to 'none'
         if led_role in ("breakdown", "pre_drop", "buildup", "low", "groove"):
             led_role = "none"
-            
+
         self.assertEqual(res.role, led_role, f"{msg}: pure={res.role}, led={led_role}")
 
     def test_parity_allowed_predecessor_flow(self) -> None:
@@ -362,7 +370,7 @@ class TestParity(unittest.TestCase):
         """chorus -> chorus cap at max=2"""
         sp1 = _sp(smart_drop_crossing=True, active_drop_beat=500.0, previous_phrase_label="up", abs_beat=500.0, current_phrase_is_chorus=True)
         self.assertParity(sp1, "Chorus 1")
-        
+
         sp2 = _sp(smart_drop_crossing=True, active_drop_beat=600.0, previous_phrase_label="chorus", abs_beat=600.0, current_phrase_is_chorus=True)
         self.assertParity(sp2, "Chorus 2")
 
@@ -373,12 +381,10 @@ class TestParity(unittest.TestCase):
         """Lifecycle clears when leaving chorus/post_drop"""
         sp1 = _sp(smart_drop_crossing=True, active_drop_beat=64.0, previous_phrase_label="up", current_phrase_is_chorus=True, abs_beat=64.0)
         self.assertParity(sp1, "Allowed cross")
-        
+
         sp2 = _sp(abs_beat=200.0, current_phrase_label="other")
         self.assertParity(sp2, "Clear leaving")
 
-if __name__ == "__main__":
-    unittest.main()
 
 class TestResolveMutateFalse(unittest.TestCase):
     def test_breakdown_start_crossing_yields_post_drop(self) -> None:
@@ -395,7 +401,7 @@ class TestResolveMutateFalse(unittest.TestCase):
         )
         res = lc.resolve(sp, mutate=False)
         self.assertEqual(res.role, "post_drop")
-        
+
     def test_transition_window_active_yields_post_drop(self) -> None:
         """transition_window_active returns post_drop without mutation."""
         lc = DropLifecycle(_cfg(impact_beats=8.0))
@@ -408,3 +414,7 @@ class TestResolveMutateFalse(unittest.TestCase):
         )
         res = lc.resolve(sp, mutate=False)
         self.assertEqual(res.role, "post_drop")
+
+
+if __name__ == "__main__":
+    unittest.main()
