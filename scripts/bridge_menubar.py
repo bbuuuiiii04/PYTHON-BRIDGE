@@ -156,12 +156,17 @@ def detect_export_state() -> str:
     if current is None or current != sidecar.get("source_fingerprint"):
         return "changes"
     expected_commit = sidecar.get("generator_commit")
+    if (
+        not isinstance(expected_commit, str)
+        or len(expected_commit) != 40
+        or any(c not in "0123456789abcdef" for c in expected_commit)
+    ):
+        return "changes"
     now_commit = current_generator_commit()
     # Only enforce the commit guard when we can actually determine HEAD; an
     # unavailable git must not permanently un-grey the button.
     if (
         now_commit is not None
-        and isinstance(expected_commit, str)
         and now_commit != expected_commit
     ):
         return "changes"
@@ -367,21 +372,22 @@ def evaluate_reload_ack(status: dict, expected_sha12: str) -> str:
     return "pending"
 
 
-def export_display(state: str, result: dict | None = None) -> tuple[str, str]:
+def export_button_text(in_progress: bool, up_to_date: bool) -> str:
+    if in_progress:
+        return "Exporting…"
+    if up_to_date:
+        return "Exported"
+    return "Export from Soundswitch"
+
+
+def export_result_line(state: str, result: dict | None = None) -> str:
     result = result or {}
-    if state == "exporting":
-        text = "Export from SS…  (working)"
-    elif state == "published_not_live":
-        text = "Exported ✓  saved (loads when pack enabled)"
-    elif state == "reload_succeeded":
-        text = "Exported ✓  live now"
-    elif state == "reload_failed":
-        text = "Exported ✓  saved — live reload not confirmed"
-    elif state == "export_failed":
-        text = f"Export failed  ({_safe_error_category(result.get('error_category'))})"
-    else:
-        text = "Export from SS"
-    return text, text
+    return {
+        "published_not_live": "  saved (loads when pack enabled)",
+        "reload_succeeded": "  live now",
+        "reload_failed": "  saved — live reload not confirmed",
+        "export_failed": f"  export failed ({_safe_error_category(result.get('error_category'))})",
+    }.get(state, "")
 
 
 def _export_failure_result(exc: Exception) -> dict:
@@ -617,7 +623,7 @@ class BridgeMenuBar(NSObject):
         self.toggle_item = self._add_action("", "toggleBridge:")
 
         self.export_status_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Export from SS", None, ""
+            "", None, ""
         )
         self.export_status_item.setEnabled_(False)
         self.menu.addItem_(self.export_status_item)
@@ -778,10 +784,12 @@ class BridgeMenuBar(NSObject):
         self._adapt_timer(status)
 
     def _render_export_state(self):
-        action_text, status_text = export_display(self._export_state, self._export_result)
-        self.export_item.setTitle_(action_text)
-        self.export_status_item.setTitle_(status_text)
-        self.export_item.setEnabled_(not self._export_in_progress)
+        self.export_item.setTitle_(
+            export_button_text(self._export_in_progress, self._export_up_to_date))
+        self.export_item.setEnabled_(
+            not self._export_in_progress and not self._export_up_to_date)
+        self.export_status_item.setTitle_(
+            export_result_line(self._export_state, self._export_result))
 
     def _maybe_detect_export_state(self):
         if self._export_in_progress or self._detect_in_progress:
