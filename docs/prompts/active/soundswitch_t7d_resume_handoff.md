@@ -1,7 +1,7 @@
 ---
-doc_status: active-plan
+doc_status: active-prompt
 truth_level: code-grounded
-last_verified_commit: b2ce63d
+last_verified_commit: 0c2ba07
 last_verified_date: 2026-06-23
 validation_scope: next-agent T7d resume handoff prompt; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---

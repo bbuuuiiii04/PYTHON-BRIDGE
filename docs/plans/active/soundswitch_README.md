@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
-last_verified_commit: b2ce63d
+last_verified_commit: 0c2ba07
 last_verified_date: 2026-06-23
 validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -42,6 +42,22 @@ implementation authority. Research/format evidence remains grouped under
 
 The compatibility symlink
 `soundswitch_importer_exporter_player_codex_spec.md` remains for older links.
+
+## Physical document layout
+
+| lifecycle | location | contents |
+| --- | --- | --- |
+| current planning authority | `docs/plans/active/soundswitch_*.md` | roadmap, T7d evidence plan/handoff, compatibility pointers |
+| current task/review prompts | `docs/prompts/active/soundswitch_*.md`, `docs/prompts/reviews/soundswitch_*.md` | RW-1 Opus design prompt, T7d resume prompt, roadmap adversarial-review prompt |
+| material implementation history | `docs/plans/completed/soundswitch/` | old ledger, implemented specs, shadow proof |
+| current RE authority | `docs/research/soundswitch/` | closure report, format/binary findings, evidence matrices, tool guide, product contract |
+| superseded RE history | `docs/research/soundswitch/history/` | intermediate findings, old handoffs, draft specs, Stage-1 scratch |
+| active T7d validation | `docs/validation/soundswitch_t7d_*.md` | evidence ledger and blocked report |
+| cross-subsystem contracts | `docs/subsystems/`, `docs/architecture/`, `docs/setup/`, `docs/status/` | current runtime/config/operator status; these remain in their repo-wide taxonomy |
+| tool-local pointer | `tools/ssfmt/re/README.md` | points to the current research tool guide; not a second authority |
+
+Ignored generated proof reports under `artifacts/` or `/tmp` are execution
+artifacts, not planning documents. They are not moved into the authority tree.
 
 ## Current implementation snapshot
 

@@ -25,7 +25,7 @@ last_updated: 2026-06-22T15:00:00Z   last_session_agent: codex (T7d evidence pla
 ## Finisher log (Opus 4.8, 2026-06-22)
 
 - **Step 3 / T7e — sanitized status + validate-first runtime commands DONE (software).** Spec
-  `docs/plans/active/soundswitch_t7e_status_commands_spec.md` rev 2 (ChatGPT-reviewed) implemented:
+  `docs/plans/completed/soundswitch/soundswitch_t7e_status_commands_spec.md` rev 2 (ChatGPT-reviewed) implemented:
   new frozen `soundswitch_pack_runtime.PackRuntime` (atomic single-reference swap; StateManager reads
   one ref/tick); `SoundSwitchPackController` (`soundswitch_pack_controller.py`) does validate-first
   reload/backend/enable on the command thread (no implicit hot-enable; stop-before-start with
@@ -39,7 +39,7 @@ last_updated: 2026-06-22T15:00:00Z   last_session_agent: codex (T7d evidence pla
   T7d still blocks autoloop DMX.**
 
 - **Step 2 / T7c — StateManager pack driver DONE (software).** Spec
-  `docs/plans/active/soundswitch_t7c_pack_driver_spec.md` rev 2 (ChatGPT-reviewed) implemented:
+  `docs/plans/completed/soundswitch/soundswitch_t7c_pack_driver_spec.md` rev 2 (ChatGPT-reviewed) implemented:
   added `LaserPackPlayer.clear_selection()`; injected `soundswitch_pack_player/midi_input/
   pack_backend` into `StateManager` (default None = neutral); added read-only
   `_drive_pack_output()` run once per tick via a `_push_tick` wrapper (covers 5 early returns; on

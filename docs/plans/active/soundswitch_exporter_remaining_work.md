@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan
 truth_level: code-test-and-current-project-grounded
-last_verified_commit: b2ce63d
+last_verified_commit: 0c2ba07
 last_verified_date: 2026-06-23
 validation_scope: docs-only completion audit and remaining-work roadmap; SoundSwitch 2.10.3 canonical project/RAVE profile; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -52,12 +52,16 @@ Authority order for every task:
 4. runtime command/status surfaces;
 5. current file tree and current saved SoundSwitch project;
 6. current research/validation documents;
-7. completed plans, prompts, and handoffs as historical evidence only.
+7. retained completed implementation records and research history as historical
+   evidence only.
 
 ## 2. Audit snapshot
 
-Audit date: **2026-06-23**. Audited branch/head:
-`soundswitch/impl` at `b2ce63d`. Worktree was clean before this docs-only pass.
+Audit date: **2026-06-23**. The executable implementation baseline was
+`soundswitch/impl` at `b2ce63d`; the initial docs consolidation was auto-synced
+through `0c2ba07`. The intervening commits changed Markdown only (plus an
+unrelated plan file), so the code/test findings remain tied to `b2ce63d`.
+The worktree was clean before the initial docs-only pass.
 
 ### 2.1 Current saved-project proof
 
@@ -106,7 +110,7 @@ OK
 Full suite:
 
 ```text
-Ran 2256 tests in 30.748s
+Ran 2256 tests in 31.117s
 OK (skipped=3, expected failures=1)
 ```
 
@@ -508,8 +512,8 @@ closeout.
 ### RW-11 - Documentation and branch closeout
 
 - [x] This roadmap replaces the stale progress ledger as active status authority.
-- [x] Completed T4-T8 handoffs/prompts are removed from active routing and
-  grouped under completed SoundSwitch planning/prompt history.
+- [x] Material T7/T8 implementation records are grouped under completed
+  SoundSwitch planning history; redundant prompts/handoffs were deleted.
 - [ ] Keep the roadmap, active-work registry, research README, subsystem cards,
   architecture, setup docs, matrices, and validation inventories aligned after
   every behavior patch.
@@ -529,8 +533,9 @@ closeout.
 - [x] verify code/test/project evidence;
 - [x] establish this remaining-work authority;
 - [x] correct stale routing/status claims;
-- [x] archive completed prompts/handoffs from active routing;
-- [ ] run and record final docs checks/diff review.
+- [x] remove redundant completed prompts/handoffs from active routing and group
+  retained implementation/research history by lifecycle;
+- [x] run and record final docs checks/diff review.
 
 ### Milestone M1 - One-click exporter workflow
 

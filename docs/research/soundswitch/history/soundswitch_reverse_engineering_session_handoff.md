@@ -151,8 +151,8 @@ Current unstaged/untracked research work includes:
 - `tools/ssfmt/re/compare_project_snapshots.py`
 - `tools/ssfmt/re/freeze_project_snapshot.py`
 
-Do not reconstruct the absent
-`docs/research/soundswitch/soundswitch_exporter_phase1_2_spec.md` blindly.
+Do not reconstruct the never-landed proposed
+`soundswitch_exporter_phase1_2_spec.md` blindly.
 
 ### Current live scratch state
 

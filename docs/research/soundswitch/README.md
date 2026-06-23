@@ -1,7 +1,7 @@
 ---
 doc_status: research-current
 truth_level: repository-routing-authority
-last_verified_commit: b2ce63d
+last_verified_commit: 0c2ba07
 last_verified_date: 2026-06-23
 validation_scope: SoundSwitch reverse-engineering document routing; software evidence only; hardware-unvalidated
 ---
