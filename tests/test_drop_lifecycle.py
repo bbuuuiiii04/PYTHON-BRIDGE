@@ -128,6 +128,21 @@ class TestImpactAllowed(unittest.TestCase):
 
 
 class TestResolve(unittest.TestCase):
+    def test_baseline_lifecycle(self) -> None:
+        """Cover impact_allowed preventing early armed_this_tick."""
+        lifecycle = DropLifecycle(_cfg(impact_beats=8.0))
+        sp = _sp(
+            smart_drop_crossing=True,
+            active_drop_beat=62.0,
+            current_phrase_is_chorus=False,
+            current_phrase_label="pre_drop",
+            previous_phrase_label="groove",
+            abs_beat=60.0,
+        )
+        # (The anchor is ~2 beats early, but only chorus has impact_allowed)
+        self.assertEqual(lifecycle.resolve(sp, mutate=True).role, "post_drop")
+        self.assertFalse(lifecycle._first_drop_anchor_beat is None)
+
     def test_drop_impact_then_hold_then_post_drop(self) -> None:
         """Anchor fires drop, holds for impact_beats, then transitions to post_drop."""
         lc = DropLifecycle(_cfg(impact_beats=8.0))
