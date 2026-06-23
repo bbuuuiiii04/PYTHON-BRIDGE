@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -43,6 +44,10 @@ EXPORT_PROCESS_TIMEOUT_SECONDS = 120.0
 EXPORT_RELOAD_TIMEOUT_SECONDS = 8.0
 EXPORT_RELOAD_POLL_SECONDS = 0.25
 EXPORT_WORKING_DIRECTORY = str(Path(__file__).resolve().parents[2])
+CANONICAL_SOURCE_PROJECT = str(Path("~/Music/SoundSwitch/default.ssproj").expanduser())
+CANONICAL_PACK_DIR = Path("~/Music/SoundSwitch/rbss_canonical_pack").expanduser()
+DETECT_MAX_AGE_SECONDS = 30.0
+_SIDECAR_SUFFIX = ".source.json"
 
 ICON_DIR = Path("/Users/bbui")
 ICONS = {
@@ -55,6 +60,112 @@ ICONS = {
 _FONT_SZ = 13.0
 _FONT_NORM = None   # resolved lazily
 _FONT_BOLD = None
+
+
+def _source_stat_signature(project: str | os.PathLike[str]) -> str | None:
+    """Cheap change gate: sha256 over sorted (relpath, size, mtime_ns) of every
+    regular file in the bundle. Returns None if the bundle is absent."""
+    base = Path(project).expanduser()
+    if not base.is_dir():
+        return None
+    entries = []
+    for root, dirs, files in os.walk(base, followlinks=False):
+        dirs.sort()
+        for name in sorted(files):
+            path = Path(root) / name
+            try:
+                st = path.lstat()
+            except OSError:
+                continue
+            rel = path.relative_to(base).as_posix()
+            entries.append((rel, st.st_size, st.st_mtime_ns))
+    digest = hashlib.sha256()
+    for rel, size, mtime in sorted(entries):
+        digest.update(f"{rel}\x00{size}\x00{mtime}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _source_content_fingerprint(project: str | os.PathLike[str]) -> str | None:
+    """Exact change signal: sha256 over sorted (relpath, sha256(file bytes)) of
+    every regular file in the bundle. Returns None if the bundle is absent."""
+    base = Path(project).expanduser()
+    if not base.is_dir():
+        return None
+    rows = []
+    for root, dirs, files in os.walk(base, followlinks=False):
+        dirs.sort()
+        for name in sorted(files):
+            path = Path(root) / name
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                data = path.read_bytes()
+            except OSError:
+                return None  # unreadable source -> treat as "cannot prove up-to-date"
+            rel = path.relative_to(base).as_posix()
+            rows.append((rel, hashlib.sha256(data).hexdigest()))
+    digest = hashlib.sha256()
+    for rel, file_hash in sorted(rows):
+        digest.update(f"{rel}\x00{file_hash}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _sidecar_path(destination: Path) -> Path:
+    return destination.parent / f".{destination.name}{_SIDECAR_SUFFIX}"
+
+
+def current_generator_commit() -> str | None:
+    repo = Path(__file__).resolve().parents[1]
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    commit = out.stdout.strip().lower()
+    if (
+        out.returncode != 0
+        or len(commit) != 40
+        or any(c not in "0123456789abcdef" for c in commit)
+    ):
+        return None
+    return commit
+
+
+def read_source_sidecar() -> dict | None:
+    try:
+        with open(_sidecar_path(CANONICAL_PACK_DIR), "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def detect_export_state() -> str:
+    """Returns "up_to_date" only with exact positive proof; else "changes"."""
+    pack = CANONICAL_PACK_DIR
+    if pack.is_symlink() or not pack.is_dir():
+        return "changes"
+    sidecar = read_source_sidecar()
+    if not sidecar:
+        return "changes"
+    current = _source_content_fingerprint(CANONICAL_SOURCE_PROJECT)
+    if current is None or current != sidecar.get("source_fingerprint"):
+        return "changes"
+    expected_commit = sidecar.get("generator_commit")
+    now_commit = current_generator_commit()
+    # Only enforce the commit guard when we can actually determine HEAD; an
+    # unavailable git must not permanently un-grey the button.
+    if (
+        now_commit is not None
+        and isinstance(expected_commit, str)
+        and now_commit != expected_commit
+    ):
+        return "changes"
+    return "up_to_date"
 
 
 def _fonts():
@@ -492,6 +603,10 @@ class BridgeMenuBar(NSObject):
         self._export_in_progress = False
         self._export_state = "idle"
         self._export_result = {}
+        self._export_up_to_date = False
+        self._detect_in_progress = False
+        self._detect_sig = None
+        self._detect_at = 0.0
         self.status_rows = []
         for _ in range(9):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
@@ -610,6 +725,7 @@ class BridgeMenuBar(NSObject):
         else:
             self.toggle_item.setTitle_("Bridge Off  (click to start)")
         self._render_export_state()
+        self._maybe_detect_export_state()
         smart_drop_on = bool(self._snapshot.get("state_manager", {}).get("smart_drop_enabled"))
         self.smart_drop_item.setTitle_("Smart Drops: On" if smart_drop_on else "Smart Drops: Off")
         smart_breakdown_on = bool(self._snapshot.get("state_manager", {}).get("smart_breakdown_enabled"))
@@ -666,6 +782,34 @@ class BridgeMenuBar(NSObject):
         self.export_item.setTitle_(action_text)
         self.export_status_item.setTitle_(status_text)
         self.export_item.setEnabled_(not self._export_in_progress)
+
+    def _maybe_detect_export_state(self):
+        if self._export_in_progress or self._detect_in_progress:
+            return
+        sig = _source_stat_signature(CANONICAL_SOURCE_PROJECT)
+        fresh_enough = (time.monotonic() - self._detect_at) < DETECT_MAX_AGE_SECONDS
+        if sig == self._detect_sig and fresh_enough:
+            return
+        self._detect_in_progress = True
+        self._pending_sig = sig
+        threading.Thread(target=self._run_detect, daemon=True).start()
+
+    def _run_detect(self):
+        try:
+            verdict = detect_export_state()
+        except Exception:
+            verdict = "changes"
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "finishDetect:", {"verdict": verdict, "sig": self._pending_sig}, False,
+        )
+
+    def finishDetect_(self, payload):
+        verdict = payload.get("verdict") if isinstance(payload, dict) else "changes"
+        self._export_up_to_date = verdict == "up_to_date"
+        self._detect_sig = payload.get("sig") if isinstance(payload, dict) else None
+        self._detect_at = time.monotonic()
+        self._detect_in_progress = False
+        self._render_export_state()
 
     def exportFromSS_(self, _sender):
         if self._export_in_progress:
@@ -751,6 +895,8 @@ class BridgeMenuBar(NSObject):
         self._export_state = state if state in allowed_states else "export_failed"
         self._export_result = result if isinstance(result, dict) else {}
         self._export_in_progress = False
+        self._export_up_to_date = state != "export_failed"
+        self._detect_sig = None
         self._render_export_state()
 
     def _adapt_timer(self, status: str) -> None:
