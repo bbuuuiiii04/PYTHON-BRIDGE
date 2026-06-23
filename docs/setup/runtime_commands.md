@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b2ce63d
+last_verified_commit: 38953ca
 last_verified_date: 2026-06-23
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -14,8 +14,11 @@ The parser, not this document, is authoritative. If this document and `parse_com
 SoundSwitch T7e adds the accepted `set_soundswitch_pack` command and a sanitized
 `soundswitch_pack` status block. The callback is wired through
 `SoundSwitchPackController` on the command thread; blocking load/verify/serial
-work never enters the 200 Hz push loop. No menubar `Export from SS` action calls
-this command yet.
+work never enters the 200 Hz push loop. The menubar `Export from SS` action adds
+no command: after a verified publish it reuses only the existing `reload` action
+when the bridge is running and pack output is enabled, and waits for a fresh
+`soundswitch_pack.pack_sha12` match. It never sends `enable` or `backend`; stopped
+or disabled pack runtime receives no reload command.
 
 ## Runtime files
 

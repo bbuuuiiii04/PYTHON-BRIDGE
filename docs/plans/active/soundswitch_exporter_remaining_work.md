@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan
 truth_level: code-test-and-current-project-grounded
-last_verified_commit: 5029ec4
+last_verified_commit: 38953ca
 last_verified_date: 2026-06-23
 validation_scope: docs-only completion audit and remaining-work roadmap; SoundSwitch 2.10.3 canonical project/RAVE profile; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -102,18 +102,25 @@ counts: 29 PASS / 0 FAIL / 0 INCOMPLETE (foundation 27/27)
 
 ### 2.2 Tests and docs checks executed
 
-Focused SoundSwitch/export/pack/player/MIDI/Enttec/T7d tests:
+Focused RW-1 exporter/menubar/config tests:
 
 ```text
-Ran 310 tests in 10.791s
+Ran 83 tests in 7.993s
 OK
 ```
 
 Full suite:
 
 ```text
-Ran 2256 tests in 31.117s
+Ran 2286 tests in 31.993s
 OK (skipped=3, expected failures=1)
+```
+
+Current-project proof gate:
+
+```text
+final_verdict: PASS_IMPLEMENTATION_MAY_BEGIN
+counts: 29 PASS / 0 FAIL / 0 INCOMPLETE (foundation 27/27)
 ```
 
 Hard docs checks:
@@ -124,13 +131,12 @@ agent contract check passed
 docs drift check passed
 ```
 
-The advisory staleness report correctly identified the
-`soundswitch_pack_player` contract and related architecture/status documents as
-stale. This consolidation de-duplicated the routing, but the advisory
-`soundswitch_pack_player` staleness persists at `5029ec4` until every contract
-document is re-verified and the contract's `last_verified_commit` is bumped.
-Hard checks passing did not mean the prose was current; they only proved the
-checker-enforced surfaces.
+The advisory staleness report identified seven contracts as stale from the
+global `a5f7ced` baseline, including the broad `soundswitch_pack_player`
+contract. The RW-1 docs named by the reviewed spec were re-verified, but the
+global baseline was not advanced because unrelated contract docs remain to be
+re-verified. Hard checks passing does not mean every broad contract document is
+current; it proves only the checker-enforced surfaces.
 
 ### 2.3 Live/runtime state observed without mutation
 
@@ -150,8 +156,8 @@ started, stopped, signaled, or restarted.
 | Current-project decoder | **done, software** | Strict read-only full inventory, identity/stability/collision/layout checks. |
 | Canonical pack compiler and independent verifier | **done, software** | Deterministic 95-artifact pack; new-path atomic publish; F9/F10 pass. |
 | Complete rescan semantics | **done inside each export** | Saved add/edit/rename/delete/mapping/static changes are read on the next invocation. |
-| Menubar `Export from SS` workflow | **not implemented** | No menu item/handler, canonical replacement, progress, or chained reload. |
-| Replace one canonical pack in place | **not implemented** | `export_pack()` rejects an existing destination. |
+| Menubar `Export from SS` workflow | **implemented, software-tested; review pending** | Background subprocess, sanitized progress/result, stopped/disabled no-reload path, and fingerprint reload acknowledgement are covered by pure tests. |
+| Replace one canonical pack in place | **implemented, software-tested; review pending** | `publish_pack()` verifies staging before macOS swap or recoverable move-aside fallback; failure-path and real-project byte/load tests pass. |
 | Scripted content support | **done, bounded software/wire** | 32/32 active existing-path scripts supported; inactive demo excluded explicitly. |
 | Pure scripted renderer/player | **done, software/wire** | Sparse persistence, raw-zero, seek/backseek, paused query, stop/unload zero, overrides/masks. |
 | Scripted `StateManager` driver | **partial** | Playing/fresh/valid-SSID path submits frames; runtime pause/mode/input-health gaps remain. |
@@ -254,54 +260,49 @@ scan, or ad-hoc JSON copy pipeline.
 
 ### RW-1 - One-click canonical export/publish/reload workflow
 
-**Status:** [C] not implemented. **Priority:** next design/spec task.
+**Status:** [C] implemented and software-tested on branch
+`soundswitch/rw1-export-from-ss`; independent implementation review is pending.
 
 Evidence:
 
-- `scripts/bridge_menubar.py:377-456` builds the menu without an
-  `Export from SS` action.
-- `scripts/bridge_menubar.py:570-625` has no export handler.
-- `tools/export_soundswitch_pack.py:58-65` rejects an existing destination.
-- `tools/export_soundswitch_pack.py:82-85` only publishes staging into a new
-  path.
-- `set_soundswitch_pack action=reload` exists, but no export path invokes it.
+- commits `bcbb312`, `5d9b59f`, and `38953ca` implement replace publication,
+  the canonical sanitized CLI, and the menubar worker/reload handshake.
+- `PublishPackReplaceTests` plus current-project tests cover first publish,
+  replacement, idempotence, staged verification failure, fallback rollback,
+  symlink/parent rejection, lock recovery, orphan cleanup, and byte-identical
+  loadability of the prior verified pack.
+- `tests/test_bridge_menubar.py` covers exact argv construction, result parsing,
+  reload-ack freshness, stopped/disabled behavior, exact reload command,
+  click concurrency, timeout recovery, and sanitized display strings.
 
 Required behavior:
 
-- [ ] [P] Define one stable canonical pack location. The existing format is a
+- [x] [C] Define one stable canonical pack location. The existing format is a
   directory; “one file” in operator UX means one canonical pack location, not
   multiple timestamped export directories.
-- [ ] [P] Add a replace-capable publication API that builds and verifies a
+- [x] [C] Add a replace-capable publication API that builds and verifies a
   sibling staging directory, preserves the old verified pack through every
   pre-publish failure, atomically swaps only after verification, fsyncs the
   directory entries/rename, and rolls back safely if replacement fails.
-- [ ] [P] Do not follow or replace a symlinked destination or parent.
-- [ ] [P] Serialize concurrent export attempts; a second click must not create
+- [x] [C] Do not follow or replace a symlinked destination or parent.
+- [x] [C] Serialize concurrent export attempts; a second click must not create
   two publishers or race reload.
-- [ ] [P] Add `Export from SS` to the menubar and run blocking decode/export/
+- [x] [C] Add `Export from SS` to the menubar and run blocking decode/export/
   verify work off the AppKit/UI thread.
-- [ ] [P] Show sanitized progress and terminal success/failure without local
+- [x] [C] Show sanitized progress and terminal success/failure without local
   project paths, device names, ports, raw exceptions, or project bytes.
-- [ ] [P] After successful publish, request `set_soundswitch_pack/reload` only
-  when appropriate. Reload must never imply enablement or a backend change.
-  When the runtime is disabled, the existing controller returns
-  `reloaded_disabled` only if `_prepare_pack_runtime()` can build a fully
-  pack-capable bundle: available config, `enabled=true`, `dry_run=false`,
-  `output_backend=pack`, valid pack and CH1-CH19 fixture map, and a configured
-  `enttec_port`. The prepare step constructs but does not start the sender, so it
-  does not open the port. Missing config, `enabled=false`, `dry_run=true`,
-  `output_backend=none`, or pack mode without a port instead returns a sanitized
-  reload failure while remaining off. The documented RW-6 safe posture therefore
-  cannot use reload to confirm publication: export success is a standalone result
-  and must not depend on disabled-runtime reload succeeding.
-- [ ] [P] If the bridge is stopped, complete export successfully and report
+- [x] [C] After successful publish, request `set_soundswitch_pack/reload` only
+  when appropriate. Reload never implies enablement or a backend change. The
+  menubar sends no command when status reports pack output disabled; publication
+  success is standalone and the default-off posture remains unchanged.
+- [x] [C] If the bridge is stopped, complete export successfully and report
   that the pack will load on the next configured startup; do not start or
   restart the bridge.
-- [ ] [P] A failed export or reload must leave a clear operator-visible result;
+- [x] [C] A failed export or reload must leave a clear operator-visible result;
   export success and runtime reload success must be distinguishable.
-- [ ] [P] Keep SoundSwitch save outside the bridge. The UI must state that
-  SoundSwitch changes must be saved before export; do not automate Command-S
-  without separate evidence and approval.
+- [x] [C] Keep SoundSwitch save outside the bridge. SoundSwitch changes remain
+  save-before-export; the bridge does not automate Command-S. The compact menu
+  text does not add instructional copy.
 
 Acceptance gate:
 
@@ -309,12 +310,14 @@ Acceptance gate:
 - the canonical location is the only persistent pack location;
 - successful replacement is independently verified;
 - failed replacement leaves the old verified pack byte-identical and loadable;
-- enabled runtime reloads without a partial bundle; a disabled runtime with a
-  fully pack-capable on-disk config returns `reloaded_disabled`, while a disabled
-  runtime with a non-pack-capable/default-off config returns a sanitized reload
-  failure; both remain disabled, and a stopped bridge stays stopped;
+- enabled runtime requests reload and requires a fresh matching pack fingerprint
+  before reporting live; disabled runtime receives no command and remains
+  disabled, and a stopped bridge stays stopped;
 - no hardware/device is opened by export tests;
 - menubar remains responsive and reports sanitized state.
+
+Implementation evidence satisfies these software gates. Independent review is
+still required before RW-1 is promoted from review-pending to complete.
 
 ### RW-2 - Scripted runtime transport semantics
 
@@ -692,8 +695,10 @@ config prepared but disabled.
 11. Default-off/absent-config behavior remains byte/order-neutral for existing
     OS2L, MIDI lasers, LEDs/Govee, Rekordbox readers, commands, and logs except
     for explicitly added sanitized observability.
-12. No local paths, device IDs, ports, fixture addresses, project bytes,
-    captures, or secrets are committed.
+12. No local path, device ID, port, fixture address, project byte, capture, or
+    secret is surfaced at runtime. The intentional canonical
+    `~/Music/SoundSwitch/...` source/pack constants and tracked example value are
+    the only committed operator paths authorized by RW-1.
 13. Graceful shutdown sends zero (currently guaranteed only for the
     startup-owned sender; runtime-swapped senders require RW-1A); hard-kill
     safety requires a physical kill path and cannot be claimed in software.
@@ -756,19 +761,14 @@ remains active only for the operator capture pass.
 
 ## 10. Next task
 
-The next implementation-design task is **RW-1: one-click canonical
-export/publish/reload**. It is independent of T7d capture, closes Brandon's
-original authoring workflow, and can be fully specified/tested without opening
-hardware or changing live output policy.
-
-Opus must design/spec RW-1 before Codex implements it. The spec must follow the
-repo's Part A-E format, cite current code lines, resolve atomic directory
-replacement and rollback precisely, keep the menubar responsive, distinguish
-export from reload results, and prove that reload never implies enablement,
-backend change, bridge start/restart, or hardware open.
+The next task is an independent implementation review of RW-1. The reviewer
+must attack directory replacement/recovery, UI concurrency, fingerprint reload
+acknowledgement, sanitization, and no-implicit-enable/no-hardware neutrality.
+RW-1 must not be called complete until that review approves the implementation.
 
 Ready-to-send prompt:
-`docs/prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md`.
+the implementing Codex session provides an updated ChatGPT review prompt in its
+final response.
 
 Independent roadmap review prompt:
 `docs/prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md`.

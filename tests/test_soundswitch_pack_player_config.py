@@ -102,6 +102,7 @@ class SoundSwitchPackPlayerConfigTests(unittest.TestCase):
         self.assertFalse(result.config.enabled)
         self.assertTrue(result.config.dry_run)
         self.assertEqual(result.config.output_backend, "none")
+        self.assertEqual(result.config.pack_path, "~/Music/SoundSwitch/rbss_canonical_pack")
         self.assertEqual(result.config.enttec_port, "")
 
     def test_explicit_path_precedes_environment(self) -> None:

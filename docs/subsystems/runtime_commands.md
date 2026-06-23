@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b2ce63d
+last_verified_commit: 38953ca
 last_verified_date: 2026-06-23
 validation_scope: software-only
 ---
@@ -27,11 +27,16 @@ SoundSwitch pack-player boundary (T7c/T7e):
   expose no paths, ports, aliases, device names, fixture maps, UUIDs, or raw exception messages.
 - Runtime `backend=midi` is **deferred** (callback returns sanitized `unsupported_action`); no
   runtime command opens IAC/MidiOutput; pack failure falls back to disabled/none, never MIDI.
+- The menubar `Export from SS` workflow adds no command. After verified disk publication it reuses
+  only `{"cmd":"set_soundswitch_pack","action":"reload"}` when the bridge is running and pack
+  output is enabled, then waits for a fresh `soundswitch_pack.pack_sha12` match. It never sends
+  `enable`/`backend`, and a stopped bridge or disabled pack receives no reload command.
 
 Authoritative code:
 - `runtime_status.py`
 - `validation_runner.py`
 - callback wiring in `__main__.py`
+- menubar caller in `scripts/bridge_menubar.py`
 
 Key symbols:
 - `STATUS_PATH`
@@ -91,5 +96,6 @@ Change contract:
 Known risks:
 - Accepted command names do not prove callbacks are wired.
 - Callback success does not prove hardware-visible behavior.
-- The menubar does not yet call pack reload after export; no `Export from SS` workflow exists.
+- A matching `pack_sha12` proves the running status snapshot references the published content; it
+  does not prove fixture-visible output or hardware safety.
 - Runtime command docs are code-derived; if docs and `runtime_status.py` disagree, code wins.

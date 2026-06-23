@@ -196,6 +196,14 @@ class CurrentProjectPackTests(unittest.TestCase):
         self.assertEqual(list(self.root.glob(".publish-verify-failure.tmp-*")), [])
         self.assertEqual(list(self.root.glob(".publish-verify-failure.bak-*")), [])
 
+    def test_loader_expands_canonical_tilde_path(self):
+        home = self.root / "home"
+        home.mkdir()
+        shutil.copytree(self.pack, home / "canonical-pack")
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            loaded = load_pack("~/canonical-pack")
+        self.assertEqual(loaded.manifest_sha256, verify_pack(self.pack)["manifest_sha256"])
+
     def test_one_byte_artifact_mutation_is_rejected(self):
         pack = self._copy("mut-byte")
         path = pack / "static_looks.json"
@@ -784,6 +792,10 @@ class PublishPackReplaceTests(unittest.TestCase):
             destination.symlink_to(root / "missing")
             with self.assertRaises(ValueError):
                 publish_pack(root / "source.ssproj", destination)
+            destination.unlink()
+            destination.write_text("not a directory")
+            with self.assertRaises(ValueError):
+                publish_pack(root / "source.ssproj", destination)
             with self.assertRaises(ValueError):
                 publish_pack(root / "source.ssproj", root / "missing-parent" / "pack")
             parent_file = root / "parent-file"
@@ -826,6 +838,18 @@ class PublishPackReplaceTests(unittest.TestCase):
             self.assertEqual((root / "pack" / "value").read_text(), "newer")
             self.assertFalse(backup.exists())
 
+    def test_orphan_backup_is_retained_when_destination_is_invalid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            backup = root / ".pack.bak-valid"
+            backup.mkdir()
+            (backup / "manifest.json").write_bytes(b"old\n")
+            destination = root / "pack"
+            destination.symlink_to(root / "missing")
+            with self.assertRaises(ValueError):
+                export_module._recover_orphan_backup(root, "pack")
+            self.assertTrue(backup.is_dir())
+
     def test_lock_rejects_concurrent_export_and_steals_stale_lock(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -848,6 +872,15 @@ class PublishPackReplaceTests(unittest.TestCase):
             (orphan / "partial.json").write_bytes(b"partial\n")
             self._publish_mocked(root, root / "pack")
             self.assertFalse(orphan.exists())
+
+    def test_lock_write_failure_removes_owned_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch.object(export_module.os, "write", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    with export_module._export_lock(root, "pack"):
+                        pass
+            self.assertFalse((root / ".pack.export.lock").exists())
 
     def test_publish_output_contains_no_absolute_source_path(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -3,7 +3,7 @@
   "enabled": false,
   "dry_run": true,
   "output_backend": "none",
-  "pack_path": "",
+  "pack_path": "~/Music/SoundSwitch/rbss_canonical_pack",
   "fixture_map": {
     "1": 1,
     "2": 2,

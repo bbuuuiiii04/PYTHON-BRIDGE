@@ -142,11 +142,13 @@ def _recover_orphan_backup(parent: Path, name: str) -> None:
     backups = sorted(parent.glob(f".{name}.bak-*"), key=_backup_sort_key, reverse=True)
     if not backups:
         return
-    if not destination.exists() and not destination.is_symlink():
+    if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+        raise ValueError("destination must be a real directory")
+    if not destination.exists():
         os.replace(backups[0], destination)
         _fsync_dir(parent)
         backups = backups[1:]
-    if destination.exists() or destination.is_symlink():
+    if destination.is_dir() and not destination.is_symlink():
         for backup in backups:
             _remove_backup(backup)
         _fsync_dir(parent)
@@ -202,12 +204,20 @@ def _export_lock(parent: Path, name: str):
             fd = os.open(lock_path, flags, 0o600)
         except FileExistsError:
             raise ExportAlreadyRunningError("export already running") from None
+    owned_inode = os.fstat(fd).st_ino
     try:
         os.write(fd, f"{os.getpid()}\n{time.monotonic()}\n".encode("ascii"))
         os.fsync(fd)
-        owned_inode = os.fstat(fd).st_ino
-    finally:
+    except BaseException:
         os.close(fd)
+        try:
+            if lock_path.stat().st_ino == owned_inode:
+                lock_path.unlink()
+                _fsync_dir(parent)
+        except OSError:
+            pass
+        raise
+    os.close(fd)
     _fsync_dir(parent)
     try:
         yield
@@ -269,16 +279,16 @@ def publish_pack(
 ) -> dict[str, object]:
     source = Path(project).expanduser()
     destination = Path(destination_path).expanduser()
-    if destination.is_symlink():
-        raise ValueError("destination must not be a symlink")
+    if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+        raise ValueError("destination must be a real directory or absent")
     parent = destination.parent
     if not parent.is_dir() or parent.is_symlink():
         raise ValueError("destination parent must be an existing real directory")
     with _export_lock(parent, destination.name):
         _recover_orphan_backup(parent, destination.name)
         _gc_orphan_staging(parent, destination.name)
-        if destination.is_symlink():
-            raise ValueError("destination must not be a symlink")
+        if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+            raise ValueError("destination must be a real directory or absent")
         first_export = not destination.exists()
         decoded = decode_project(source)
         artifacts = compile_pack_artifacts(decoded, generator_commit=_generator_commit())

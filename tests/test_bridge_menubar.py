@@ -203,6 +203,20 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertEqual(result["error_category"], "TimeoutExpired")
         self.assertNotIn("/private/path", json.dumps(result))
 
+    def test_post_publish_command_failure_remains_saved_not_export_failed(self) -> None:
+        bridge_menubar = self._import_module()
+        worker = self._worker(bridge_menubar)
+        handler = bridge_menubar.BridgeMenuBar._run_export
+        live = {"soundswitch_pack": {"enabled": True, "pack_sha12": "b" * 12}}
+        with patch.object(bridge_menubar.subprocess, "run", side_effect=self._ok_subprocess), \
+             patch.object(bridge_menubar, "read_status", return_value=live), \
+             patch.object(bridge_menubar, "bridge_pids", return_value=["123"]), \
+             patch.object(bridge_menubar, "append_command", side_effect=OSError("write failed")):
+            handler(worker)
+        state, result = worker._marshal_export_result.call_args.args
+        self.assertEqual(state, "reload_failed")
+        self.assertTrue(result["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

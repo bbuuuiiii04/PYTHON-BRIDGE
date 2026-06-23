@@ -491,7 +491,7 @@ def load_pack(pack: str | Path) -> LoadedPack:
     state.  Every artifact is then independently checked for a mandatory,
     supported schema major.  No runtime migration path exists.
     """
-    root = Path(pack)
+    root = Path(pack).expanduser()
     try:
         verification = verify_pack(root)
     except SoundSwitchPackVerificationError as exc:

@@ -678,6 +678,7 @@ class BridgeMenuBar(NSObject):
 
     def _run_export(self):
         result_path = None
+        published_result = None
         try:
             with tempfile.NamedTemporaryFile(prefix="rbss-export-result-", suffix=".json",
                                              delete=False) as result_file:
@@ -694,6 +695,7 @@ class BridgeMenuBar(NSObject):
             if not result.get("ok"):
                 self._marshal_export_result("export_failed", result)
                 return
+            published_result = result
 
             expected_sha12 = result["manifest_sha256"][:12]
             status = read_status()
@@ -710,7 +712,10 @@ class BridgeMenuBar(NSObject):
                 time.sleep(EXPORT_RELOAD_POLL_SECONDS)
             self._marshal_export_result("reload_failed", result)
         except Exception as exc:
-            self._marshal_export_result("export_failed", _export_failure_result(exc))
+            if published_result is None:
+                self._marshal_export_result("export_failed", _export_failure_result(exc))
+            else:
+                self._marshal_export_result("reload_failed", published_result)
         finally:
             if result_path is not None:
                 result_path.unlink(missing_ok=True)

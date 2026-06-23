@@ -241,6 +241,8 @@ contracts:
       - soundswitch_frame_sender*.py
       - enttec_*.py
       - tools/*soundswitch*pack*.py
+      - tools/export_soundswitch_pack.py
+      - scripts/bridge_menubar.py
       - config/soundswitch_pack_player*.json
       - tests/test_soundswitch_pack_player_config.py
       - __main__.py
@@ -250,6 +252,7 @@ contracts:
       - runtime_status.py
       - config.py
       - tests/test_soundswitch_pack*.py
+      - tests/test_bridge_menubar.py
       - tests/test_soundswitch_project*.py
       - tests/test_soundswitch_laser_player*.py
       - tests/test_soundswitch_midi_input*.py
