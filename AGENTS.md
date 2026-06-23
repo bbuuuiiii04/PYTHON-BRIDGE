@@ -36,6 +36,8 @@ Do **not** read the whole repo. Do **not** start with old prompts/plans/history.
 
 If the task is still unclear after the path above, **stop and report uncertainty.** Do not spelunk old prompts to invent context.
 
+For maintainer/operator workflow, prompts, and reusable agent skills, use `docs/agents/operator_workflow.md` and `docs/agents/skills/README.md`. Coding agents should read those only when the task asks for workflow, review, orchestration, validation, or handoff work.
+
 ## 3. Task router
 
 | Task | Playbook | Subsystem card | Contract key |
@@ -49,6 +51,7 @@ If the task is still unclear after the path above, **stop and report uncertainty
 | Add tests | `docs/agents/task_playbooks/add_tests.md` | `docs/subsystems/tests.md` | `tests` |
 | Docs-only work | `docs/agents/task_playbooks/update_docs.md` | `docs/architecture/doc_index.md` | `docs` |
 | Review agent changes | `docs/agents/task_playbooks/review_agent_changes.md` | `docs/agents/change_contracts.md` | — |
+| Maintainer/operator workflow | `docs/agents/operator_workflow.md` | `docs/agents/skills/README.md` | `docs` |
 
 Human + machine change contracts: `docs/agents/change_contracts.md` and `docs/agents/change_contracts.yml`. Drift detection: `docs/agents/drift_detection.md`.
 
