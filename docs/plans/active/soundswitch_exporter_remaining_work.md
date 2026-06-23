@@ -230,6 +230,17 @@ scan, or ad-hoc JSON copy pipeline.
 - [x] [C] Process death/`kill -9` cannot be claimed safe; Enttec may retain the
   last frame and therefore still requires a physical kill method.
 
+> **Forward note — laser transition-blackout migration (cross-subsystem; settle here, not in MIDI):**
+> when the laser-director output migrates to the direct-DMX/`PackOutputBackend` lane, the laser
+> transition blackout — today the MIDI mask (`breakdown`/`master_switch` covers + the Smart-Drop
+> drop-window, the held `manual_blackout_on/off` note refcounted in `LaserSceneExecutor`, cleared by
+> the StateManager SM-net `smart_drop_crossing_without_drop_decision`) — must be reproduced as a
+> frame-level blackout. The held note retires (the pack backend already no-ops `manual_blackout_*`;
+> they carry no `scene_name`), but the masking **decision** (overlapping refcounted owners + teardown
+> timing) ports over. Settle the owner/teardown semantics, including the known **C2** gated-off
+> -crossing edge, here rather than in the outgoing MIDI path. See `docs/subsystems/laser.md`
+> (Blackout-mask migration) and `docs/plans/active/laser_smartnet_mask_preserve_spec.md`.
+
 ## 5. Confirmed remaining implementation gaps
 
 ### RW-1 - One-click canonical export/publish/reload workflow

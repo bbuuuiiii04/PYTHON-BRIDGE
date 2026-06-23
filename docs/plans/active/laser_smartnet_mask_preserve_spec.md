@@ -8,10 +8,35 @@ validation_scope: spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 
 # Codex Implementation Spec — SM-net: a gated-off Smart-Drop crossing must not force-release held blackout masks
 
-> Follow-up hardening from the holistic laser-lifecycle review (head `b2ce63d`). Closes the one
-> laser-internal inconsistency surfaced as accepted-divergence **C2** in
-> `docs/plans/active/chorus_drop_cycling_spec.md`. **This is a small, scoped, low-risk change to live
-> blackout plumbing.** Read Part A fully and do not touch anything outside Part B.
+## STATUS — DEFERRED (decision 2026-06-23): do NOT implement in the MIDI path
+
+The holistic review plus operator discussion concluded this **C2** edge is a **narrow, cosmetic,
+MIDI-only** artifact: a disallowed Smart-Drop crossing landing inside a held `master_switch`
+(deck-switch) cover releases it ~a beat early. It replaces a worse pre-existing bug (a spurious drop
+look), nothing strands (both `breakdown` and `master_switch` covers have their own release paths —
+`smart_rearm.py:244/268-277` and the first autoloop tick `state_manager.py:3797`), and a ~78-minute
+live log showed 48 properly-led-in crossings and **zero** gated-off ones — i.e. C2 was not observed in
+practice. The legitimate up→chorus and chorus→chorus (two-drops-in-a-row, cap 2) drops both emit
+`drop_crossing`, so they never reach this SM-net path.
+
+The blackout mask is also MIDI **actuation** that does not carry to the future output: when the
+bridge-native direct-DMX/`PackOutputBackend` lane becomes the live laser output, the held
+`manual_blackout_*` note retires (DMX blacks out via a zero CH1-CH19 frame; the pack backend already
+no-ops `manual_blackout_*` because they carry no `scene_name`), but the masking **decision**
+(refcounted overlapping owners + teardown timing) must be ported to the frame-level blackout.
+
+**Agreed resolution:** settle the blackout owner/teardown semantics — including this C2 edge — when
+the DMX frame-level blackout is designed, NOT by patching the outgoing MIDI path. The MIDI-path fix
+below (`clear_drop_window_blackout`) is retained as **reference/analysis only** and is **not queued
+for Codex**. Cross-refs: `docs/subsystems/laser.md` (Blackout-mask migration) and
+`docs/plans/active/soundswitch_exporter_remaining_work.md` §4.4.
+
+---
+
+> Original (now-deferred) hardening from the holistic laser-lifecycle review (head `b2ce63d`). Closes
+> the one laser-internal inconsistency surfaced as accepted-divergence **C2** in
+> `docs/plans/active/chorus_drop_cycling_spec.md`. Kept below as the reference design for the eventual
+> DMX-path blackout work — not for the MIDI path.
 
 ## Part A — Context & root cause (verified; read, do not implement)
 
