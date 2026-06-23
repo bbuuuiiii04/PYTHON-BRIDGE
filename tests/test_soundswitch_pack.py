@@ -850,6 +850,31 @@ class PublishPackReplaceTests(unittest.TestCase):
                 export_module._recover_orphan_backup(root, "pack")
             self.assertTrue(backup.is_dir())
 
+    def test_orphan_backup_never_promotes_symlink_or_file_to_canonical(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real = root / ".pack.bak-real"; real.mkdir(); (real / "value").write_text("REAL")
+            target = root / "evil"; target.mkdir(); (target / "x").write_text("evil")
+            sym = root / ".pack.bak-zzz"; sym.symlink_to(target)
+            os.utime(real, (1, 1)); os.utime(sym, (9, 9), follow_symlinks=False)
+            destination = root / "pack"  # missing: simulates a crash mid-swap
+            export_module._recover_orphan_backup(root, "pack")
+            self.assertTrue(destination.is_dir() and not destination.is_symlink())
+            self.assertEqual((destination / "value").read_text(), "REAL")
+            self.assertFalse(sym.exists())            # stray symlink junk removed
+            self.assertTrue(target.is_dir())          # its target untouched
+
+    def test_orphan_backup_with_only_junk_leaves_destination_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stray_file = root / ".pack.bak-file"; stray_file.write_text("not a pack")
+            target = root / "evil"; target.mkdir()
+            stray_link = root / ".pack.bak-link"; stray_link.symlink_to(target)
+            export_module._recover_orphan_backup(root, "pack")
+            self.assertFalse((root / "pack").exists())   # never fabricated from junk
+            self.assertFalse(stray_file.exists())
+            self.assertFalse(stray_link.exists())
+
     def test_lock_rejects_concurrent_export_and_steals_stale_lock(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

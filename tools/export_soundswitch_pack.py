@@ -139,19 +139,26 @@ def _backup_sort_key(path: Path) -> tuple[int, str]:
 
 def _recover_orphan_backup(parent: Path, name: str) -> None:
     destination = parent / name
-    backups = sorted(parent.glob(f".{name}.bak-*"), key=_backup_sort_key, reverse=True)
-    if not backups:
+    candidates = sorted(parent.glob(f".{name}.bak-*"), key=_backup_sort_key, reverse=True)
+    if not candidates:
         return
     if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
         raise ValueError("destination must be a real directory")
-    if not destination.exists():
-        os.replace(backups[0], destination)
+    # A swap backup is ALWAYS created from a real directory (see _atomic_swap_dir),
+    # so only a real directory may ever become the canonical pack. Any symlink/file
+    # ".bak-*" is stray (or hostile) junk and must NEVER be moved into place.
+    real_backups = [p for p in candidates if p.is_dir() and not p.is_symlink()]
+    junk = [p for p in candidates if not (p.is_dir() and not p.is_symlink())]
+    if not destination.exists() and real_backups:
+        os.replace(real_backups[0], destination)
         _fsync_dir(parent)
-        backups = backups[1:]
+        real_backups = real_backups[1:]
     if destination.is_dir() and not destination.is_symlink():
-        for backup in backups:
+        for backup in real_backups:
             _remove_backup(backup)
-        _fsync_dir(parent)
+    for stray in junk:
+        _remove_backup(stray)
+    _fsync_dir(parent)
 
 
 def _gc_orphan_staging(parent: Path, name: str) -> None:
