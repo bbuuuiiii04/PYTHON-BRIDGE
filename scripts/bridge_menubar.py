@@ -698,11 +698,27 @@ class BridgeMenuBar(NSObject):
             published_result = result
 
             expected_sha12 = result["manifest_sha256"][:12]
-            status = read_status()
-            if not bridge_pids() or evaluate_reload_ack(status, expected_sha12) == "not_live":
+            if not bridge_pids():
                 self._marshal_export_result("published_not_live", result)
                 return
+            precheck = evaluate_reload_ack(read_status(), expected_sha12)
+            if precheck == "not_live":
+                # Bridge is up but pack output is disabled: saved to disk, not live.
+                self._marshal_export_result("published_not_live", result)
+                return
+            if precheck == "stale":
+                # Bridge is alive but its status snapshot is not fresh, so we cannot
+                # confirm pack output is enabled. Never fire a blind reload at an
+                # unknown live state; report saved-but-unconfirmed.
+                self._marshal_export_result("reload_failed", result)
+                return
+            if precheck == "succeeded":
+                # The live pack already serves this exact content (e.g. identical
+                # re-export): it is already live, so do not re-send a reload.
+                self._marshal_export_result("reload_succeeded", result)
+                return
 
+            # precheck == "pending": fresh + enabled + sha not yet matching.
             append_command({"cmd": "set_soundswitch_pack", "action": "reload"})
             deadline = time.monotonic() + EXPORT_RELOAD_TIMEOUT_SECONDS
             while time.monotonic() < deadline:

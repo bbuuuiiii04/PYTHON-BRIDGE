@@ -149,6 +149,53 @@ class BridgeMenubarTests(unittest.TestCase):
         )
         self.assertEqual(worker._marshal_export_result.call_args.args[0], "reload_succeeded")
 
+    def test_export_worker_bridge_on_but_stale_does_not_reload(self) -> None:
+        bridge_menubar = self._import_module()
+        worker = self._worker(bridge_menubar)
+        handler = bridge_menubar.BridgeMenuBar._run_export
+        stale = {"stale": True, "stale_age_s": 99,
+                 "soundswitch_pack": {"enabled": True, "pack_sha12": "a" * 12}}
+        with patch.object(bridge_menubar.subprocess, "run", side_effect=self._ok_subprocess), \
+             patch.object(bridge_menubar, "read_status", return_value=stale), \
+             patch.object(bridge_menubar, "bridge_pids", return_value=["123"]), \
+             patch.object(bridge_menubar, "append_command") as append_command, \
+             patch.object(bridge_menubar.time, "sleep"):
+            handler(worker)
+        append_command.assert_not_called()
+        state, result = worker._marshal_export_result.call_args.args
+        self.assertEqual(state, "reload_failed")
+        self.assertTrue(result["ok"])
+
+    def test_export_worker_bridge_on_pack_disabled_publishes_without_reload(self) -> None:
+        bridge_menubar = self._import_module()
+        worker = self._worker(bridge_menubar)
+        handler = bridge_menubar.BridgeMenuBar._run_export
+        disabled = {"soundswitch_pack": {"enabled": False}}
+        with patch.object(bridge_menubar.subprocess, "run", side_effect=self._ok_subprocess), \
+             patch.object(bridge_menubar, "read_status", return_value=disabled), \
+             patch.object(bridge_menubar, "bridge_pids", return_value=["123"]), \
+             patch.object(bridge_menubar, "append_command") as append_command, \
+             patch.object(bridge_menubar.time, "sleep"):
+            handler(worker)
+        append_command.assert_not_called()
+        self.assertEqual(
+            worker._marshal_export_result.call_args.args[0], "published_not_live")
+
+    def test_export_worker_identical_reexport_confirms_without_resending_reload(self) -> None:
+        bridge_menubar = self._import_module()
+        worker = self._worker(bridge_menubar)
+        handler = bridge_menubar.BridgeMenuBar._run_export
+        already = {"soundswitch_pack": {"enabled": True, "pack_sha12": "a" * 12}}
+        with patch.object(bridge_menubar.subprocess, "run", side_effect=self._ok_subprocess), \
+             patch.object(bridge_menubar, "read_status", return_value=already), \
+             patch.object(bridge_menubar, "bridge_pids", return_value=["123"]), \
+             patch.object(bridge_menubar, "append_command") as append_command, \
+             patch.object(bridge_menubar.time, "sleep"):
+            handler(worker)
+        append_command.assert_not_called()
+        self.assertEqual(
+            worker._marshal_export_result.call_args.args[0], "reload_succeeded")
+
     def test_export_handler_ignores_second_click(self) -> None:
         bridge_menubar = self._import_module()
         menu = Mock()
