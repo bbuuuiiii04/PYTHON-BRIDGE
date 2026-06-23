@@ -78,9 +78,9 @@ def _decision(scene: str, reason: str, role: str) -> LaserSceneDecision:
     return LaserSceneDecision(scene=scene, reason=reason, priority=10, source="policy", role=role)
 
 
-def _make_config(scenes: dict[str, LaserScene]) -> LaserConfig:
+def _make_config(scenes: dict[str, LaserScene], smart_drop_mode: str = "blackout_mask") -> LaserConfig:
     return LaserConfig(
-        enabled=True, dry_run=False, smart_drop_mode="blackout_mask",
+        enabled=True, dry_run=False, smart_drop_mode=smart_drop_mode,
         midi_output_port="test", scenes=scenes,
         personalities={}, default_personality="",
         startup_scene="safe_static", stop_scene="safe_static",
@@ -245,6 +245,7 @@ class TestA7Regression(unittest.TestCase):
             drop_bank=("d1", "d2", "d3"),
             drop_lifecycle_mirror=True,
         )
+        # Using a seed that produces a non-sequential shuffle
         rng = random.Random(42)
         backend = _FakeMidiOutput()
         ex = LaserSceneExecutor(
@@ -262,6 +263,11 @@ class TestA7Regression(unittest.TestCase):
             notes_track1.append(msg.note)
         backend.calls.clear()
 
+        # Assert every usable note appears exactly once
+        self.assertEqual(sorted(notes_track1), [41, 42, 43])
+        # Assert sequence is not monotonically-increasing (d1->d2->d3)
+        self.assertNotEqual(notes_track1, [41, 42, 43], "Bag order should be shuffled, not sequential")
+
         # Track reset (simulates track load)
         ex.reset_runtime_state(reason="active_track_loaded")
 
@@ -277,8 +283,10 @@ class TestA7Regression(unittest.TestCase):
         for msg, _ in backend.calls:
             notes_track2.append(msg.note)
 
-        # Track 2 must have fired (bag was rebuilt, not permanently empty)
-        self.assertGreater(len(notes_track2), 0, "track 2 cycles must fire after reset")
+        # Track 2 must have fired and contain all notes
+        self.assertEqual(sorted(notes_track2), [41, 42, 43])
+        # The two passes should not be identical
+        self.assertNotEqual(notes_track1, notes_track2, "Track 2 bag pass should not match Track 1")
 
 
 if __name__ == "__main__":
