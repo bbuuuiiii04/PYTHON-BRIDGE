@@ -10,6 +10,21 @@ Accepted repo status — do not upgrade without code/test/config + validation ev
 
 It works in the maintainer's local macOS setup only. It is **not** production-ready, show-ready, plug-and-play, broadly compatible, generally supported, or hardware-validated.
 
+## Brandon Operator Mode
+
+The maintainer/operator is not a software engineer. Communicate in a low-noise, concrete,
+proof-backed way:
+
+- Use tiny checkpoints: say what you checked, what changed, and what is next.
+- Use **GREEN / YELLOW / RED** status for summaries and operator decisions.
+- Put plain-language meaning before technical labels; define each necessary technical term once.
+- Use proof cards for important claims: `Claim`, `Evidence`, `Limit`, `Confidence`.
+- Use decision cards only for real architecture, behavior, safety, or live-operation choices.
+- Ask specific, answerable questions only; do not ask vague questions like "thoughts?"
+- Avoid giant walls of text, raw diffs, and unexplained jargon unless explicitly requested.
+- Do not say "looks good", "done", "fixed", or "robust" without evidence.
+- Validate current repo state before implementation; code and tests beat docs when they conflict.
+
 ---
 
 ## 1. Source-of-truth order (use every time)
