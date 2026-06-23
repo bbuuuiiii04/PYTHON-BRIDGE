@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import errno
+import hashlib
 import json
 import os
 import secrets
@@ -32,6 +33,8 @@ from rb_ss_bridge_v2.soundswitch_project_decoder import (  # noqa: E402
 
 CANONICAL_SOURCE_PROJECT = Path("~/Music/SoundSwitch/default.ssproj").expanduser()
 CANONICAL_PACK_DIR = Path("~/Music/SoundSwitch/rbss_canonical_pack").expanduser()
+
+_SIDECAR_SUFFIX = ".source.json"  # sibling of the pack dir; NEVER inside it
 
 _RENAME_SWAP = 0x00000002
 _EXPORT_LOCK_TTL_SECONDS = 10 * 60
@@ -61,6 +64,70 @@ def _generator_commit() -> str:
     if len(commit) != 40 or any(char not in "0123456789abcdef" for char in commit):
         raise RuntimeError("generator git commit is not a full SHA-1")
     return commit
+
+
+def _source_stat_signature(project: str | os.PathLike[str]) -> str | None:
+    """Cheap change gate: sha256 over sorted (relpath, size, mtime_ns) of every
+    regular file in the bundle. Returns None if the bundle is absent."""
+    base = Path(project).expanduser()
+    if not base.is_dir():
+        return None
+    entries = []
+    for root, dirs, files in os.walk(base, followlinks=False):
+        dirs.sort()
+        for name in sorted(files):
+            path = Path(root) / name
+            try:
+                st = path.lstat()
+            except OSError:
+                continue
+            rel = path.relative_to(base).as_posix()
+            entries.append((rel, st.st_size, st.st_mtime_ns))
+    digest = hashlib.sha256()
+    for rel, size, mtime in sorted(entries):
+        digest.update(f"{rel}\x00{size}\x00{mtime}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _source_content_fingerprint(project: str | os.PathLike[str]) -> str | None:
+    """Exact change signal: sha256 over sorted (relpath, sha256(file bytes)) of
+    every regular file in the bundle. Returns None if the bundle is absent."""
+    base = Path(project).expanduser()
+    if not base.is_dir():
+        return None
+    rows = []
+    for root, dirs, files in os.walk(base, followlinks=False):
+        dirs.sort()
+        for name in sorted(files):
+            path = Path(root) / name
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                data = path.read_bytes()
+            except OSError:
+                return None  # unreadable source -> treat as "cannot prove up-to-date"
+            rel = path.relative_to(base).as_posix()
+            rows.append((rel, hashlib.sha256(data).hexdigest()))
+    digest = hashlib.sha256()
+    for rel, file_hash in sorted(rows):
+        digest.update(f"{rel}\x00{file_hash}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _sidecar_path(destination: Path) -> Path:
+    return destination.parent / f".{destination.name}{_SIDECAR_SUFFIX}"
+
+
+def _write_source_sidecar(destination: Path, source: Path, manifest_sha256: str) -> None:
+    fingerprint = _source_content_fingerprint(source)
+    if fingerprint is None:
+        return  # cannot fingerprint -> leave no sidecar; detection stays "changes"
+    payload = {
+        "source_fingerprint": fingerprint,
+        "generator_commit": _generator_commit(),
+        "pack_manifest_sha256": manifest_sha256,
+    }
+    _atomic_write_result(_sidecar_path(destination), payload)
 
 
 def _fsync_dir(directory: Path) -> None:
@@ -361,6 +428,14 @@ def _canonical_publish_result() -> dict[str, object]:
             "first_export": False,
             "error_category": type(exc).__name__,
         }
+    try:
+        _write_source_sidecar(
+            CANONICAL_PACK_DIR,
+            CANONICAL_SOURCE_PROJECT,
+            str(result["manifest_sha256"]),
+        )
+    except Exception:
+        pass
     return {
         "ok": True,
         "verdict": "published",
