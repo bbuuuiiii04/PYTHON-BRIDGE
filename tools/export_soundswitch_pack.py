@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import os
+import secrets
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +23,21 @@ if str(PACKAGE_PARENT) not in sys.path:
 from rb_ss_bridge_v2.soundswitch_pack import compile_pack_artifacts  # noqa: E402
 from rb_ss_bridge_v2.soundswitch_pack_verifier import verify_pack  # noqa: E402
 from rb_ss_bridge_v2.soundswitch_project_decoder import decode_project  # noqa: E402
+
+
+CANONICAL_SOURCE_PROJECT = Path("~/Music/SoundSwitch/default.ssproj").expanduser()
+CANONICAL_PACK_DIR = Path("~/Music/SoundSwitch/rbss_canonical_pack").expanduser()
+
+_RENAME_SWAP = 0x00000002
+_EXPORT_LOCK_TTL_SECONDS = 10 * 60
+try:
+    _libc = ctypes.CDLL("libc.dylib", use_errno=True)
+except OSError:
+    _libc = None
+
+
+class ExportAlreadyRunningError(RuntimeError):
+    """Another publisher currently owns the destination lock."""
 
 
 def _generator_commit() -> str:
@@ -55,17 +75,10 @@ def _fsync_dir(directory: Path) -> None:
         os.close(fd)
 
 
-def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str]) -> dict[str, object]:
-    source = Path(project).expanduser()
-    destination = Path(output).expanduser()
-    if destination.exists() or destination.is_symlink():
-        raise FileExistsError(f"output must be a new path: {destination}")
-    parent = destination.parent
-    if not parent.is_dir() or parent.is_symlink():
-        raise ValueError("output parent must be an existing real directory")
-    decoded = decode_project(source)
-    artifacts = compile_pack_artifacts(decoded, generator_commit=_generator_commit())
-    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.tmp-", dir=parent))
+def _stage_artifacts(
+    artifacts: dict[str, bytes], parent: Path, destination_name: str,
+) -> Path:
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination_name}.tmp-", dir=parent))
     try:
         written_dirs = {staging}
         for relative, data in artifacts.items():
@@ -76,9 +89,162 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
                 stream.flush()
                 os.fsync(stream.fileno())
             written_dirs.add(path.parent)
-        # Persist the staged directory entries before the atomic publish.
         for directory in written_dirs:
             _fsync_dir(directory)
+        return staging
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def _renamex_np_swap(a: Path, b: Path, *, libc=None) -> None:
+    handle = _libc if libc is None else libc
+    if handle is None or not hasattr(handle, "renamex_np"):
+        raise NotImplementedError("directory swap is unavailable")
+    renamex_np = handle.renamex_np
+    try:
+        renamex_np.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        renamex_np.restype = ctypes.c_int
+    except AttributeError:
+        pass
+    result = renamex_np(os.fsencode(a), os.fsencode(b), _RENAME_SWAP)
+    if result != 0:
+        error_number = ctypes.get_errno() or errno.EIO
+        raise OSError(error_number, os.strerror(error_number))
+
+
+def _remove_backup(path: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        path.unlink(missing_ok=True)
+    else:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _backup_sort_key(path: Path) -> tuple[int, str]:
+    try:
+        modified = path.stat().st_mtime_ns
+    except OSError:
+        modified = -1
+    return modified, path.name
+
+
+def _recover_orphan_backup(parent: Path, name: str) -> None:
+    destination = parent / name
+    backups = sorted(parent.glob(f".{name}.bak-*"), key=_backup_sort_key, reverse=True)
+    if not backups:
+        return
+    if not destination.exists() and not destination.is_symlink():
+        os.replace(backups[0], destination)
+        _fsync_dir(parent)
+        backups = backups[1:]
+    if destination.exists() or destination.is_symlink():
+        for backup in backups:
+            _remove_backup(backup)
+        _fsync_dir(parent)
+
+
+def _gc_orphan_staging(parent: Path, name: str) -> None:
+    for staging in parent.glob(f".{name}.tmp-*"):
+        if staging.is_symlink() or not staging.is_dir():
+            staging.unlink(missing_ok=True)
+        else:
+            shutil.rmtree(staging, ignore_errors=True)
+    _fsync_dir(parent)
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _lock_is_stale(lock_path: Path) -> bool:
+    try:
+        age = max(0.0, time.time() - lock_path.stat().st_mtime)
+        first_line = lock_path.read_text(encoding="ascii", errors="strict").splitlines()[0]
+        pid = int(first_line)
+    except (OSError, UnicodeError, ValueError, IndexError):
+        return True
+    return age > _EXPORT_LOCK_TTL_SECONDS or not _pid_is_alive(pid)
+
+
+@contextmanager
+def _export_lock(parent: Path, name: str):
+    lock_path = parent / f".{name}.export.lock"
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    try:
+        fd = os.open(lock_path, flags, 0o600)
+    except FileExistsError:
+        if not _lock_is_stale(lock_path):
+            raise ExportAlreadyRunningError("export already running") from None
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            fd = os.open(lock_path, flags, 0o600)
+        except FileExistsError:
+            raise ExportAlreadyRunningError("export already running") from None
+    try:
+        os.write(fd, f"{os.getpid()}\n{time.monotonic()}\n".encode("ascii"))
+        os.fsync(fd)
+        owned_inode = os.fstat(fd).st_ino
+    finally:
+        os.close(fd)
+    _fsync_dir(parent)
+    try:
+        yield
+    finally:
+        try:
+            if lock_path.stat().st_ino == owned_inode:
+                lock_path.unlink()
+                _fsync_dir(parent)
+        except FileNotFoundError:
+            pass
+
+
+def _atomic_swap_dir(staging: Path, destination: Path, parent: Path) -> None:
+    try:
+        _renamex_np_swap(destination, staging)
+    except (OSError, AttributeError, NotImplementedError):
+        backup = parent / f".{destination.name}.bak-{secrets.token_hex(8)}"
+        os.replace(destination, backup)
+        _fsync_dir(parent)
+        try:
+            os.replace(staging, destination)
+        except BaseException:
+            os.replace(backup, destination)
+            _fsync_dir(parent)
+            raise
+        _fsync_dir(parent)
+        _remove_backup(backup)
+        _fsync_dir(parent)
+        return
+    _fsync_dir(parent)
+    shutil.rmtree(staging, ignore_errors=True)
+    _fsync_dir(parent)
+
+
+def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str]) -> dict[str, object]:
+    source = Path(project).expanduser()
+    destination = Path(output).expanduser()
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError(f"output must be a new path: {destination}")
+    parent = destination.parent
+    if not parent.is_dir() or parent.is_symlink():
+        raise ValueError("output parent must be an existing real directory")
+    decoded = decode_project(source)
+    artifacts = compile_pack_artifacts(decoded, generator_commit=_generator_commit())
+    staging = _stage_artifacts(artifacts, parent, destination.name)
+    try:
         result = verify_pack(staging, source_project=source)
         os.replace(staging, destination)
         # Persist the rename itself so the published pack survives a crash.
@@ -87,6 +253,38 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+
+
+def publish_pack(
+    project: str | os.PathLike[str], destination_path: str | os.PathLike[str],
+) -> dict[str, object]:
+    source = Path(project).expanduser()
+    destination = Path(destination_path).expanduser()
+    if destination.is_symlink():
+        raise ValueError("destination must not be a symlink")
+    parent = destination.parent
+    if not parent.is_dir() or parent.is_symlink():
+        raise ValueError("destination parent must be an existing real directory")
+    with _export_lock(parent, destination.name):
+        _recover_orphan_backup(parent, destination.name)
+        _gc_orphan_staging(parent, destination.name)
+        if destination.is_symlink():
+            raise ValueError("destination must not be a symlink")
+        first_export = not destination.exists()
+        decoded = decode_project(source)
+        artifacts = compile_pack_artifacts(decoded, generator_commit=_generator_commit())
+        staging = _stage_artifacts(artifacts, parent, destination.name)
+        try:
+            result = verify_pack(staging, source_project=source)
+            if first_export:
+                os.replace(staging, destination)
+                _fsync_dir(parent)
+            else:
+                _atomic_swap_dir(staging, destination, parent)
+            return {**result, "first_export": first_export}
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
 
 
 def main() -> int:

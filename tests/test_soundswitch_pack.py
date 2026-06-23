@@ -28,7 +28,9 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (
     SoundSwitchPackLoadError, load_pack,
 )
 from rb_ss_bridge_v2 import soundswitch_pack_verifier as verifier_module
-from rb_ss_bridge_v2.tools.export_soundswitch_pack import export_pack
+from rb_ss_bridge_v2.tools.export_soundswitch_pack import (
+    ExportAlreadyRunningError, export_pack, publish_pack,
+)
 from rb_ss_bridge_v2.tools import export_soundswitch_pack as export_module
 from rb_ss_bridge_v2.soundswitch_project_decoder import SoundSwitchDecodeError
 
@@ -165,11 +167,45 @@ class CurrentProjectPackTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             export_pack(self.project, self.pack)
 
+    def test_publish_pack_first_replace_and_repeat_match_fresh_export(self):
+        destination = self.root / "published"
+        first = publish_pack(self.project, destination)
+        self.assertTrue(first["first_export"])
+        self.assertEqual(self._copy_bytes(destination), self._copy_bytes(self.pack))
+
+        (destination / "obsolete.json").write_bytes(b"obsolete\n")
+        second = publish_pack(self.project, destination)
+        self.assertFalse(second["first_export"])
+        self.assertEqual(self._copy_bytes(destination), self._copy_bytes(self.pack))
+
+        before = self._copy_bytes(destination)
+        publish_pack(self.project, destination)
+        self.assertEqual(self._copy_bytes(destination), before)
+
+    def test_publish_verify_failure_preserves_loadable_pack_byte_identical(self):
+        destination = self._copy("publish-verify-failure")
+        before = self._copy_bytes(destination)
+        with mock.patch.object(
+            export_module, "verify_pack",
+            side_effect=SoundSwitchPackVerificationError("synthetic verification failure"),
+        ):
+            with self.assertRaises(SoundSwitchPackVerificationError):
+                publish_pack(self.project, destination)
+        self.assertEqual(self._copy_bytes(destination), before)
+        load_pack(destination)
+        self.assertEqual(list(self.root.glob(".publish-verify-failure.tmp-*")), [])
+        self.assertEqual(list(self.root.glob(".publish-verify-failure.bak-*")), [])
+
     def test_one_byte_artifact_mutation_is_rejected(self):
         pack = self._copy("mut-byte")
         path = pack / "static_looks.json"
         data = bytearray(path.read_bytes()); data[len(data) // 2] ^= 1; path.write_bytes(data)
         self.assertRejected(pack)
+
+    @staticmethod
+    def _copy_bytes(directory: Path) -> dict[str, bytes]:
+        return {path.relative_to(directory).as_posix(): path.read_bytes()
+                for path in directory.rglob("*") if path.is_file()}
 
     def test_one_byte_artifact_mutation_is_rejected_by_the_runtime_loader(self):
         # A corrupted pack must never load into the bridge: load_pack runs the
@@ -636,6 +672,192 @@ class ExportDurabilityTests(unittest.TestCase):
             # Staging dirs fsync'd BEFORE the rename (durable dir entries).
             self.assertGreater(replaced_at["index"], 0,
                                "staging dirs must be fsync'd before os.replace")
+
+
+class PublishPackReplaceTests(unittest.TestCase):
+    def _patch_export(self, artifacts=None):
+        artifacts = artifacts or {"manifest.json": b"{}\n", "old.json": b"old\n"}
+        return (
+            mock.patch.object(export_module, "decode_project", return_value=object()),
+            mock.patch.object(export_module, "_generator_commit", return_value="0" * 40),
+            mock.patch.object(export_module, "compile_pack_artifacts", return_value=artifacts),
+            mock.patch.object(
+                export_module, "verify_pack",
+                return_value={"verified": True, "manifest_sha256": "a" * 64,
+                              "artifact_count": len(artifacts)},
+            ),
+        )
+
+    def _publish_mocked(self, root: Path, destination: Path, artifacts=None):
+        patches = self._patch_export(artifacts)
+        with patches[0], patches[1], patches[2], patches[3]:
+            return publish_pack(root / "source.ssproj", destination)
+
+    def _files(self, directory: Path) -> dict[str, bytes]:
+        return {path.relative_to(directory).as_posix(): path.read_bytes()
+                for path in directory.rglob("*") if path.is_file()}
+
+    def _leftovers(self, root: Path) -> list[Path]:
+        return list(root.glob(".pack.tmp-*")) + list(root.glob(".pack.bak-*"))
+
+    def test_first_publish_matches_new_path_export(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            published = root / "pack"
+            fresh = root / "fresh"
+            patches = self._patch_export()
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = publish_pack(root / "source.ssproj", published)
+                export_pack(root / "source.ssproj", fresh)
+            self.assertTrue(result["first_export"])
+            self.assertEqual(self._files(published), self._files(fresh))
+
+    def test_replace_nonempty_pack_removes_old_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            destination.mkdir()
+            (destination / "obsolete.json").write_bytes(b"obsolete\n")
+            new_artifacts = {"manifest.json": b"{}\n", "new.json": b"new\n"}
+            result = self._publish_mocked(root, destination, new_artifacts)
+            self.assertFalse(result["first_export"])
+            self.assertEqual(self._files(destination), new_artifacts)
+            self.assertEqual(self._leftovers(root), [])
+
+    def test_same_source_twice_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            self._publish_mocked(root, destination)
+            before = self._files(destination)
+            self._publish_mocked(root, destination)
+            self.assertEqual(self._files(destination), before)
+
+    def test_verify_failure_preserves_existing_pack_and_removes_staging(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            destination.mkdir()
+            (destination / "manifest.json").write_bytes(b"old\n")
+            before = self._files(destination)
+            patches = self._patch_export()
+            with patches[0], patches[1], patches[2], \
+                 mock.patch.object(export_module, "verify_pack",
+                                   side_effect=SoundSwitchPackVerificationError("synthetic")):
+                with self.assertRaises(SoundSwitchPackVerificationError):
+                    publish_pack(root / "source.ssproj", destination)
+            self.assertEqual(self._files(destination), before)
+            self.assertEqual(self._leftovers(root), [])
+
+    def test_fallback_second_rename_failure_restores_old_pack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            destination.mkdir()
+            (destination / "manifest.json").write_bytes(b"old\n")
+            before = self._files(destination)
+            real_replace = os.replace
+            replace_count = 0
+
+            def fail_second_swap_rename(source, target):
+                nonlocal replace_count
+                replace_count += 1
+                if replace_count == 2:
+                    raise OSError("synthetic swap failure")
+                return real_replace(source, target)
+
+            patches = self._patch_export({"manifest.json": b"new\n"})
+            with patches[0], patches[1], patches[2], patches[3], \
+                 mock.patch.object(export_module, "_renamex_np_swap",
+                                   side_effect=NotImplementedError), \
+                 mock.patch.object(export_module.os, "replace",
+                                   side_effect=fail_second_swap_rename):
+                with self.assertRaises(OSError):
+                    publish_pack(root / "source.ssproj", destination)
+            self.assertEqual(self._files(destination), before)
+            self.assertEqual(self._leftovers(root), [])
+
+    def test_symlink_destination_and_invalid_parents_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            destination.symlink_to(root / "missing")
+            with self.assertRaises(ValueError):
+                publish_pack(root / "source.ssproj", destination)
+            with self.assertRaises(ValueError):
+                publish_pack(root / "source.ssproj", root / "missing-parent" / "pack")
+            parent_file = root / "parent-file"
+            parent_file.write_text("x")
+            with self.assertRaises(ValueError):
+                publish_pack(root / "source.ssproj", parent_file / "pack")
+            real_parent = root / "real-parent"
+            real_parent.mkdir()
+            linked_parent = root / "linked-parent"
+            linked_parent.symlink_to(real_parent)
+            with self.assertRaises(ValueError):
+                publish_pack(root / "source.ssproj", linked_parent / "pack")
+
+    def test_unavailable_renamex_uses_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            destination.mkdir()
+            (destination / "manifest.json").write_bytes(b"old\n")
+            with mock.patch.object(export_module, "_renamex_np_swap",
+                                   side_effect=AttributeError("unavailable")):
+                self._publish_mocked(root, destination, {"manifest.json": b"new\n"})
+            self.assertEqual((destination / "manifest.json").read_bytes(), b"new\n")
+
+    def test_orphan_backup_recovery_restores_newest_or_discards_when_dest_valid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            older = root / ".pack.bak-older"
+            newer = root / ".pack.bak-newer"
+            older.mkdir(); (older / "value").write_text("older")
+            newer.mkdir(); (newer / "value").write_text("newer")
+            os.utime(older, (1, 1)); os.utime(newer, (2, 2))
+            export_module._recover_orphan_backup(root, "pack")
+            self.assertEqual((root / "pack" / "value").read_text(), "newer")
+            self.assertFalse(older.exists())
+
+            backup = root / ".pack.bak-extra"
+            backup.mkdir(); (backup / "value").write_text("backup")
+            export_module._recover_orphan_backup(root, "pack")
+            self.assertEqual((root / "pack" / "value").read_text(), "newer")
+            self.assertFalse(backup.exists())
+
+    def test_lock_rejects_concurrent_export_and_steals_stale_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with export_module._export_lock(root, "pack"):
+                with self.assertRaises(ExportAlreadyRunningError):
+                    with export_module._export_lock(root, "pack"):
+                        pass
+
+            lock = root / ".pack.export.lock"
+            lock.write_text("999999999\n0\n")
+            with export_module._export_lock(root, "pack"):
+                self.assertTrue(lock.exists())
+            self.assertFalse(lock.exists())
+
+    def test_publish_garbage_collects_orphan_staging(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            orphan = root / ".pack.tmp-orphan"
+            orphan.mkdir()
+            (orphan / "partial.json").write_bytes(b"partial\n")
+            self._publish_mocked(root, root / "pack")
+            self.assertFalse(orphan.exists())
+
+    def test_publish_output_contains_no_absolute_source_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            self._publish_mocked(root, destination)
+            home = str(Path.home()).encode()
+            for path in destination.rglob("*"):
+                if path.is_file():
+                    self.assertNotIn(home, path.read_bytes(), path)
 
 
 if __name__ == "__main__":
