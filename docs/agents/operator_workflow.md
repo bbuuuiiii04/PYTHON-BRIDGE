@@ -8,84 +8,96 @@ validation_scope: workflow-only; software-validated only; hardware-unvalidated i
 
 # AI-only maintainer operator workflow
 
-This file is for the maintainer/operator who uses AI agents and does not want to reason about software engineering internals. It does **not** replace `AGENTS.md`, `docs/agents/change_contracts.yml`, subsystem cards, tests, or validation docs. It is the human-facing operating loop that keeps agents from wandering.
+This file is for the maintainer/operator who uses AI agents and does not want to reason about software engineering internals. It does **not** replace `AGENTS.md`, `docs/agents/change_contracts.yml`, subsystem cards, tests, or validation docs. It is the human-facing prompt pack for getting useful work from agents with fewer prompts and fewer rate-limit hits.
 
 ## Core rule
 
-One task. One branch. One contract. One evidence report.
+One bundled request. One branch. One evidence report.
 
-If a request cannot fit that sentence, split it before implementation. Big vague prompts are how agents create impressive garbage.
+Bundling related changes is allowed and expected. The agent's job is to sort the bundle into safe work units, implement what belongs together, and flag anything that should become a follow-up instead of silently expanding the PR.
 
-## Session types
+A bundle is acceptable when the items share the same goal, subsystem, or validation path. A bundle should be split when it crosses unrelated subsystems, mixes runtime behavior with unrelated cleanup, requires hardware evidence that is not available, or changes architecture without an explicit reason.
 
-| Session | Goal | Agent role | Must produce |
-| --- | --- | --- | --- |
-| Intake | Convert a messy idea into a bounded task | planner | scope, contract key, files to inspect, stop conditions |
-| Implementation | Make the smallest safe change | implementer | changed files, tests run, docs updated, uncertainty |
-| Adversarial review | Try to break the change | reviewer | blocking issues, non-blocking issues, merge recommendation |
-| Repair | Fix review findings only | implementer | focused diff, no scope creep |
-| Operator validation | Prove local/hardware behavior | operator + reviewer | repeatable log entry, status wording, known limits |
+## The useful agent loop
 
-Do not ask one agent to both implement and approve its own risky change. Self-review is useful, but it is not independent review.
+1. **Plan the bundle** — ask the agent to classify the request, name the contracts, find the files, and flag risks before editing.
+2. **Implement the approved bundle** — let the agent make the smallest coherent diff that satisfies the accepted items.
+3. **Review the PR/diff** — ask a fresh reviewer to attack assumptions, missing tests, unsafe hardware claims, and unrelated changes.
+4. **Repair only findings** — fix blocking review findings without adding new feature scope.
+5. **Record evidence** — merge only when the PR says what changed, what was tested, what was not tested, and what remains unknown.
 
-## The default loop
+This does not require five separate chats. A single agent may plan and implement low-risk bundled work, but risky PRs still need fresh-context review before merge.
 
-1. **Intake first** — ask an agent to classify the task and name the contract before editing.
-2. **Implement narrow** — ask for the smallest diff that satisfies the task.
-3. **Run gates** — docs checks always for docs/routing changes; tests named by the contract when practical.
-4. **Fresh-context review** — give a different agent the PR/diff plus the relevant contract and ask it to attack assumptions.
-5. **Merge only after evidence** — merge when the PR says what changed, what was tested, what was not tested, and what remains unvalidated.
+## Standing better-approach clause
 
-## Copy/paste prompt: intake
+Use this in any planning or implementation prompt:
 
 ```text
-You are working in bbuuuiiii04/PYTHON-BRIDGE.
-
-Task idea:
-<PASTE THE FEATURE / BUG / DOC REQUEST HERE>
-
-Before editing anything:
-1. Read AGENTS.md.
-2. Pick the smallest matching task route and change_contracts.yml contract.
-3. Report:
-   - task classification: small / medium / large
-   - contract key
-   - exact files you need to inspect
-   - exact docs/tests that must update
-   - assumptions you refuse to make
-   - stop conditions
-4. Do not edit code yet.
-5. Do not read archive/history/prompts unless you can explain why current code/docs are insufficient.
+You may suggest a better approach before implementation if it materially reduces risk, complexity, future maintenance, token waste, or hardware-safety risk. Limit this to one concise alternative. Do not implement the alternative unless I approve it. If it is outside the current scope, record it as a follow-up instead of expanding the PR.
 ```
 
-Use this when the idea is messy, emotional, or exciting. Especially then. Excitement is not a spec.
+This keeps the agent from becoming a silent code producer, while still preventing architecture side quests.
 
-## Copy/paste prompt: implementation
+## Copy/paste prompt: bundled implementation
+
+Use this when you want fewer prompts and already have a batch of related changes.
 
 ```text
-You are working in bbuuuiiii04/PYTHON-BRIDGE on branch <BRANCH>.
+You are working in bbuuuiiii04/PYTHON-BRIDGE on branch <BRANCH OR NEW BRANCH>.
 
-Implement only this approved scope:
-<PASTE INTAKE SCOPE HERE>
+Bundled request:
+<PASTE THE FULL LIST OF FIXES / FEATURES / DOC UPDATES HERE>
+
+Before editing:
+1. Read AGENTS.md.
+2. Read docs/agents/change_contracts.yml.
+3. Sort the bundle into:
+   - implement now
+   - needs clarification
+   - should be separate follow-up
+   - should not be done
+4. Name the contract key or keys for the implement-now items.
+5. List the exact files you expect to inspect/change.
+6. List required docs/tests/checks.
+7. Apply the better-approach clause: suggest one better approach only if it materially reduces risk, complexity, future maintenance, token waste, or hardware-safety risk.
+
+Then implement only the approved implement-now items.
 
 Rules:
-- Follow AGENTS.md and docs/agents/change_contracts.yml.
-- Make the smallest safe diff.
-- Do not change unrelated runtime behavior.
+- Keep related bundled changes together when that reduces prompting and review overhead.
+- Do not touch unrelated code.
+- Do not reformat or reorganize unrelated files.
 - Do not commit secrets, local IPs, device IDs, live configs, or backup files.
 - Preserve SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED unless validation docs prove otherwise.
-- If the task requires hardware proof, stop at a hardware-validation handoff; do not claim success.
+- If hardware proof is required, create a hardware-validation handoff; do not claim success.
+- If the bundle becomes too broad, stop and recommend a split instead of pushing through.
 
 Final report must include:
+- bundle items completed
+- bundle items not completed and why
 - files changed
 - behavior changed
 - docs updated
 - tests/checks run and exact results
 - tests/checks not run and why
+- follow-ups created
 - remaining uncertainty
 ```
 
+## Copy/paste prompt: quick fix bundle
+
+Use this for small batches of obvious fixes.
+
+```text
+Fix this small bundle with the minimum safe diff:
+<PASTE ITEMS>
+
+Follow AGENTS.md. Do not touch unrelated code. If any item is not obvious, skip it and report why instead of guessing. Suggest one better approach only if it clearly reduces risk, complexity, future maintenance, token waste, or hardware-safety risk. Report changed files, checks run, skipped items, and uncertainty.
+```
+
 ## Copy/paste prompt: adversarial review
+
+Use this before merging a PR, especially a bundled one.
 
 ```text
 You are the reviewer, not the implementer.
@@ -96,22 +108,26 @@ Review PR/diff:
 Read only:
 1. AGENTS.md
 2. docs/agents/change_contracts.yml
-3. the relevant task playbook
-4. the relevant subsystem card
-5. changed files and tests
+3. relevant task playbooks/subsystem cards
+4. changed files and tests
 
 Attack the change:
-- What assumption did the implementer make that may be false?
+- Are the bundled items actually related enough to merge together?
+- Did the diff touch unrelated code or perform opportunistic cleanup?
+- Did the implementer miss a simpler or safer approach?
 - Did the diff violate StateManager ownership, hot-loop I/O, hardware safety, config secrecy, or docs/status wording?
-- Did the required docs update according to change_contracts.yml?
+- Did required docs update according to change_contracts.yml?
 - Are tests meaningful, or did they only prove parser/dry-run behavior?
 - Is there any hardware claim without hardware evidence?
 
 Return:
-- BLOCKING issues
-- NON-BLOCKING issues
-- required repair prompt
 - merge recommendation: approve / hold / reject
+- blocking issues
+- non-blocking issues
+- bundled items that should be split out
+- missing tests/checks
+- unsafe or overclaimed validation language
+- required repair prompt
 ```
 
 ## Copy/paste prompt: repair
@@ -123,7 +139,7 @@ Repair only these reviewer findings:
 Do not add new feature scope.
 Do not clean up unrelated files.
 Do not rewrite docs that are not required by the finding or change contract.
-After repair, report the exact files changed and gates rerun.
+After repair, report exact files changed and gates rerun.
 ```
 
 ## Copy/paste prompt: hardware/operator validation
@@ -154,36 +170,38 @@ Update validation/status docs only if actual evidence is supplied.
 
 These are not medical advice. They are repo-control mechanics.
 
-- Keep a single visible active task: one branch, one PR, one active prompt.
+- Prefer one visible branch and PR per bundle.
+- Bundles are allowed; invisible scope creep is not.
 - Use checkboxes instead of memory.
-- Time-box reading: if an agent asks to read the whole repo, redirect it to AGENTS → contract → playbook → subsystem card.
-- Demand evidence paragraphs, not vibes. “Should work” means “unknown.”
-- Prefer small merges over giant heroic PRs. Big PRs hide bugs and fry attention.
-- Keep a parking lot for cool ideas. Do not let agents implement side quests inside the current PR.
-- When overwhelmed, ask for a `merge / hold / abandon` recommendation with reasons.
+- Demand evidence paragraphs, not vibes. "Should work" means "unknown."
+- Let agents suggest one better path, but do not let them implement unapproved side quests.
+- Keep a parking lot for useful follow-ups.
+- When overwhelmed, ask for a `merge / hold / split / abandon` recommendation with reasons.
 
 ## Hard stop conditions
 
 Stop and get review when any of these appear:
 
-- PR changes more than one subsystem without saying why.
+- PR changes unrelated subsystems without saying why they belong in the same bundle.
 - Runtime hot loop gains file, network, socket, MIDI, serial, subprocess, or blocking work.
 - `StateManager` ownership gets fuzzy.
 - Govee/laser/SoundSwitch behavior is described as validated without operator evidence.
 - Agent edits tests to hide failures.
 - Agent changes live config, secrets, local IPs, device IDs, or backup files.
 - Agent reads old prompts/plans and treats them as current truth.
-- PR grows beyond the original intake scope.
+- Agent implements the better-approach alternative without approval.
 
 ## Definition of done
 
-A software PR is done when:
+A bundled software PR is done when:
 
-- the contract key is named;
-- changed code/docs match that contract;
+- the implemented bundle items are listed;
+- the skipped/deferred bundle items are listed with reasons;
+- the contract key or keys are named;
+- changed code/docs match those contracts;
 - required checks/tests are run or explicitly not run with a reason;
 - status language stays conservative;
-- independent review has no blocking findings;
+- review has no blocking findings;
 - remaining uncertainty is written down.
 
 A hardware claim is done only when `docs/validation/hardware_validation_log.md` contains repeatable operator evidence. Until then, the correct status is hardware-unvalidated, even if the code looks sick.
