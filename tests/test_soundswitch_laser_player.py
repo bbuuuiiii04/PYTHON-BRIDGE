@@ -29,6 +29,7 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (
     LoadedStaticLook,
     LoadedTimelineEvent,
     SoundSwitchPackLoadError,
+    _runtime_metadata,
     load_pack,
 )
 from rb_ss_bridge_v2.tools.export_soundswitch_pack import export_pack
@@ -171,6 +172,29 @@ class PlayerStateTests(unittest.TestCase):
         self.assertEqual(forward, resumed)
         self.assertEqual(forward, refired)
 
+    def test_clear_selection_lets_held_static_stand_alone(self):
+        # SoundSwitch shows a manual Static Look even with no track playing: clearing
+        # the automatic base must leave a held static visible (T7c idle behavior).
+        self.player.hold_static(8)
+        result = self.player.clear_selection()
+        self.assertIsNone(result.diagnostic)
+        self.assertNotEqual(result.frame, ZERO_FRAME)
+        self.assertEqual(self.player.active_static_slot, 8)  # state not cleared
+
+    def test_clear_selection_without_static_is_zero(self):
+        result = self.player.clear_selection()
+        self.assertEqual(result.frame, ZERO_FRAME)
+
+    def test_clear_selection_held_static_still_loses_to_blackout(self):
+        self.player.hold_static(8)
+        self.player.set_masks(blackout=True, emergency=False)
+        self.assertEqual(self.player.clear_selection().frame, ZERO_FRAME)
+
+    def test_clear_selection_zeros_a_prior_scripted_base(self):
+        ssid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        self.assertNotEqual(self.player.select_scripted(ssid, 50).frame, ZERO_FRAME)
+        self.assertEqual(self.player.clear_selection().frame, ZERO_FRAME)
+
     def test_stop_end_unload_and_fail_closed_authority_diagnostics(self):
         ssid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         for transport in ("stopped", "ended", "unloaded"):
@@ -242,6 +266,69 @@ class PlayerStateTests(unittest.TestCase):
 
 
 class LoaderTests(unittest.TestCase):
+    @staticmethod
+    def _runtime_rows():
+        manifest = {
+            "project": {
+                "container_version": 5,
+                "project_uuid": "project",
+                "soundswitch_version": "2.9",
+                "venue_guid": "venue",
+                "sensitive_path": "/private/project",
+            },
+            "supported_boundary": {
+                "channel_span": "CH1-CH19",
+                "fixture_profile_guid": "fixture",
+                "project_uuid": "project",
+                "soundswitch_version": "2.9",
+                "universe": 1,
+            },
+            "source_inventory": [{
+                "path": "safe/relative", "sha256": "a" * 64,
+                "size": 10, "parse_status": "parsed",
+            }],
+            "active_cue_union": {"count": 2, "sha256": "b" * 64},
+            "totals": {"active_autoloops": 1},
+        }
+        selection = {
+            "bridge_scenes": [{
+                "policy_name": "phrase", "resolution": "project_target",
+                "control_classification": "pack_selection",
+                "target_identity": "SSAutoLoop1.ssfile",
+            }],
+            "learned_controls": [{
+                "active": True, "device_name": "DDJ", "message_type": "note",
+                "channel_zero_based": 0, "data_byte": 7,
+                "control_classification": "static_override",
+                "target_kind": "static_look", "target_index": 8,
+            }],
+        }
+        return manifest, selection
+
+    def test_runtime_metadata_is_sanitized_immutable_and_binding_owned_by_loader(self):
+        manifest, selection = self._runtime_rows()
+        crosswalk, bindings, project, boundary, source_hash, union, totals = (
+            _runtime_metadata(manifest, selection)
+        )
+        self.assertEqual(crosswalk["phrase"], "SSAutoLoop1.ssfile")
+        self.assertEqual(bindings[0].target_slot, 8)
+        self.assertNotIn("sensitive_path", project)
+        self.assertEqual(len(source_hash), 64)
+        self.assertEqual(union["count"], 2)
+        self.assertEqual(totals["active_autoloops"], 1)
+        with self.assertRaises(TypeError):
+            crosswalk["phrase"] = "changed"
+
+    def test_runtime_metadata_rejects_duplicate_policy_and_active_event(self):
+        manifest, selection = self._runtime_rows()
+        selection["bridge_scenes"].append(dict(selection["bridge_scenes"][0]))
+        with self.assertRaisesRegex(SoundSwitchPackLoadError, "duplicate bridge"):
+            _runtime_metadata(manifest, selection)
+        manifest, selection = self._runtime_rows()
+        selection["learned_controls"].append(dict(selection["learned_controls"][0]))
+        with self.assertRaisesRegex(SoundSwitchPackLoadError, "duplicate active"):
+            _runtime_metadata(manifest, selection)
+
     def test_schema_is_mandatory_unknown_major_rejected_and_verifier_runs_first(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

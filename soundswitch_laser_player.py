@@ -244,6 +244,17 @@ class LaserPackPlayer:
             self._active_static_slot = None
         return self.render()
 
+    def clear_selection(self) -> PlayerResult:
+        """Clear the automatic scripted/autoloop base WITHOUT touching held static or masks.
+
+        ``render()`` then yields a ``missing_selection`` base (ZERO), so a held Static
+        Override stands alone — matching SoundSwitch showing a manual Static Look while
+        no track is playing.  Static still loses to blackout/emergency and to the
+        post-reload wait latch (both checked before static in ``render()``).
+        """
+        self._selection = None
+        return self.render()
+
     def set_blackout(self, held: bool) -> PlayerResult:
         return self.set_masks(blackout=held, emergency=self._emergency)
 

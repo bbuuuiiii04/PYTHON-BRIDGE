@@ -56,6 +56,7 @@ def _config(*, enabled: bool, dry_run: bool = True, with_personality: bool = Tru
             post_drop_scene="default_scene_cfg",
             breakdown_scene="default_scene_cfg",
             transition_scene="default_scene_cfg",
+            drop_lifecycle_mirror=False,
         )
         default_personality = "house"
 

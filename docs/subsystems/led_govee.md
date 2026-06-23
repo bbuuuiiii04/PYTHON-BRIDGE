@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 51367a1
-last_verified_date: 2026-06-18
+last_verified_commit: 9918dd4
+last_verified_date: 2026-06-22
 validation_scope: software-only
 ---
 
@@ -46,6 +46,7 @@ Runtime flow:
 - inputs: phrase/role state, runtime LED commands, LED config, color engine state, beat/BPM state
 - decisions: manual override, blackout, role-entry look selection, color/slot-color resolution, cloud/realtime ownership, beat sync instances
 - outputs: cloud scene commands or realtime UDP frame packets
+- The live LED drop/post-drop resolver remains in `StateManager` and is unchanged. `drop_lifecycle.py` reproduces its flat-window drop-region state machine for laser use; `tests/test_drop_lifecycle.py` parity-checks that seam without routing LED output through the new module.
 
 Config:
 - `config/led_look_director.example.json`
@@ -64,12 +65,14 @@ Tests:
 - inspect `tests/` for LED color engine, Govee realtime runner, frame renderer, state manager LED integration, and config tests
 - slot-color coverage lives in `tests/test_led_color_engine.py`, `tests/test_led_color_engine_m2_phase1.py`, `tests/test_led_color_engine_m2_patch_b.py`, `tests/test_led_color_engine_m2_patch_c.py`, `tests/test_led_color_engine_m2_patch_d.py`, `tests/test_led_color_engine_m2_patch_e1.py`, `tests/test_led_color_engine_m2_patch_e2.py`, `tests/test_led_color_engine_m2_patch_e3.py`, `tests/test_led_color_engine_m2_patch_s.py`, `tests/test_led_color_engine_m2_patch_f.py`, and config validation coverage in `tests/test_color_engine_config.py`
 - scripted-mode LED policy coverage lives in `tests/test_led_config.py` and `tests/test_led_state_manager.py`, including blackout mapping for groove/drop/post-drop; this is software validation only and does not prove room-visible Govee behavior during scripted SoundSwitch tracks.
+- shared flat-window lifecycle parity coverage lives in `tests/test_drop_lifecycle.py`; live LED per-look duration rewriting and backend latency offsets remain separate by design.
 - broad command: `python -m unittest discover tests`
 
 Change contract:
 - If changing look policy, inspect director, models, config validation, and state manager dispatch seam.
 - If changing realtime output, inspect runner, transport, renderer, owner state, and beat sync engine.
 - If changing cloud output, inspect scene adapter and runtime sender.
+- If changing the shared drop resolver, prove parity against the existing StateManager LED resolver and do not assume that pure-resolver parity changes live LED output.
 - Update this card, feature matrix, validation matrix, active work registry, and config docs.
 
 M2.5 slot cues in SLOT_EFFECTS (govee_frame_renderer.py):

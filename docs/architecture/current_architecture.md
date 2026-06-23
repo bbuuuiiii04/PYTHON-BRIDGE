@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-06-21. Treat code as the source of
+Audited against the current checkout at `b2ce63d` on 2026-06-23. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -33,7 +33,24 @@ RBSS_SMART_BREAKDOWN=1
 
 These defaults are present in `scripts/ss_bridge_watcher.sh`.
 
-Tasks 1–2 add a separate offline SoundSwitch lane: frozen source models, strict read-only decode, deterministic canonical-pack export, and an independent verifier for the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile. The 95-artifact pack preserves exact 232 render + 1 catalog-tail cues, 32 Static Looks, 42 autoloops, 45 scripted inventory records, and the seven-class F-3 crosswalk; F9 mutation rejection passes. These tools are not startup/runtime subsystems, do not mutate the project, and do not connect to `StateManager`, OS2L, MIDI lasers, LED/Govee, Rekordbox readers, status, config, or commands. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec/hardware work remain planned and unimplemented.
+The SoundSwitch pack lane contains frozen source models, strict read-only
+decode, deterministic canonical-pack export, independent verification, an
+immutable pack loader/player, a MIDI-input adapter, an output-backend
+abstraction, an Enttec frame sender, a validated default-off config loader,
+startup wiring, an atomic `PackRuntime`, validate-first runtime controls, and a
+StateManager scripted-frame driver. The current-project proof gate is 29 PASS /
+0 FAIL / 0 INCOMPLETE, including F9 and F10.
+
+This lane remains subordinate to existing bridge authority. `__main__` loads
+the optional config and chooses one physical laser backend before workers start;
+`StateManager` reads authoritative deck state and is the sole per-tick
+`submit_frame` owner. Blocking load/verify/serial work remains on startup or the
+command thread. Absent/disabled config preserves legacy MIDI; dry-run/none opens
+neither physical output path. Confirmed remaining gaps are tracked in
+`docs/plans/active/soundswitch_exporter_remaining_work.md`: one-click canonical
+pack replacement/reload; scripted pause/mode/input-health/status closure; T7d
+capture-derived Autoloop phase integration; and hardware validation. Current
+native Autoloop pack output remains zero-safe.
 
 ## Runtime Subsystems
 
@@ -48,9 +65,12 @@ Tasks 1–2 add a separate offline SoundSwitch lane: frozen source models, stric
 | `SmartPhrasingEngine` | pure musical phrasing engine (no OS2L sends, no `OutputState` writes) | yes | called by `StateManager` thread | per-tick `SmartPhrasingSnapshot` | immutable `SmartPhrasingState` intents |
 | `LaserDirector` | laser scene/role policy only | yes | called by `StateManager` thread | `LaserContext` (including `SmartPhrasingState`) | `LaserSceneDecision` |
 | `LaserSceneExecutor` | laser trigger execution only (MIDI/blackout/cooldown/transition-mask) | yes | called by `StateManager` thread | `LaserSceneDecision`, `LaserContext` | MIDI triggers and executor blackout state |
+| `DropLifecycle` | pure drop/post-drop role resolver | yes | called by `LaserDirector` on the `StateManager` thread | `SmartPhrasingState` fields and immutable config | `DropResult`; no I/O |
 | `LEDLookDirector` | LED room-look policy only | yes | called by `StateManager` thread | manual/emergency LED context and `SmartPhrasingState`-derived role | `LEDLookDecision` |
 | `GoveeSceneAdapter` | LED transport queue/worker | no hot-path I/O | public trigger called by `StateManager`; worker owns Govee transport | `LEDLookDecision` | bounded queue commands and sanitized adapter status |
 | `SoundSwitchEngine` | SoundSwitch output-intent fanout helper | yes | called by `StateManager` thread | active deck routing and send intents from `StateManager` | routed OS2L sends for scripted/autoloop/smart-transition/live-BPM-follow helpers |
+| `LaserPackPlayer` / `PackRuntime` | verified SoundSwitch pack rendering and atomic runtime snapshot | yes, pure/in-memory | player called by `StateManager`; bundle published by command thread | active deck metadata/elapsed, input snapshot, immutable pack | CH1-CH19 frame plus sanitized diagnostics |
+| `SoundSwitchFrameSender` / Enttec worker | mutually exclusive direct-DMX transport | no blocking hot-path I/O | `StateManager` submits to bounded mailbox; worker owns serial | CH1-CH19 frame + validated fixture map | Enttec DMX Pro packets; owner-driven zero/stop |
 | `beat_math.py` | pure beat and beatgrid math helper | yes | called in hot path from `StateManager` | elapsed ms, bpm, beatgrid markers | computed beat positions / target elapsed |
 | `OS2LConnection` / `OS2LOutput` | output transport authority | yes | sender/reconnect threads own sockets | SoundSwitch DNS-SD, send queue | TCP OS2L messages |
 | `StatusWriter` / `CommandReader` | auxiliary operator status/control | auxiliary | status/command threads | snapshots, command JSONL | status JSON, command side effects |
@@ -73,9 +93,10 @@ direct path inactive while MTC/current state fallbacks continue where available.
 
 ## Signal Flow
 
-1. Startup creates the event queue, OS2L connection, resolver, live BPM service,
-   status/command helpers, `StateManager`, optional `RBStateReader`,
-   `RBMemoryReader`, `MTCReader`, and OSC listener.
+1. Startup loads optional pack config, builds/starts exactly one laser output
+   backend when enabled, then creates the event queue, OS2L connection,
+   resolver, live BPM service, status/command helpers, `StateManager`, optional
+   `RBStateReader`, `RBMemoryReader`, `MTCReader`, and OSC listener.
 2. Startup master is seeded from direct master only when
    `RBSS_MASTER_SEED_DIRECT=1` and two direct reads are stable and valid;
    otherwise deck 1 is the default startup deck.
@@ -85,6 +106,10 @@ direct path inactive while MTC/current state fallbacks continue where available.
 5. `StateManager` resolves tracks, selects scripted or autoloop lighting, and
    sends mirrored OS2L updates to active, mirror, 3, and 4 through
    `SoundSwitchEngine`.
+6. When a verified pack runtime is explicitly active, the pack driver submits
+   one nonblocking CH1-CH19 frame per tick. Scripted playback is implemented but
+   has the pause/mode/input-health gaps named in the active roadmap; native
+   Autoloop rendering remains zero-safe pending T7d evidence.
 
 ## Smart-Transition Architecture
 
@@ -98,9 +123,16 @@ direct path inactive while MTC/current state fallbacks continue where available.
 - `SoundSwitchEngine` performs canonical OS2L/SoundSwitch deck-route fanout for
   the sends requested by `StateManager`.
 - `LaserDirector` consumes `SmartPhrasingState` through `LaserContext` to make
-  scene policy decisions only.
+  scene policy decisions only. Its default-on drop lifecycle uses the LED
+  phrase-context gate, a configurable flat impact window, and a capped
+  chorus-to-chorus impact count.
 - `LaserSceneExecutor` consumes those decisions and handles laser MIDI output,
   role cooldown/rotation, blackout latching, and transition-mask cleanup.
+  Drop/post-drop cycles use usable-only shuffle bags and autoloop-tick cadence;
+  static scenes remain valid for the initial impact fallback.
+- `StateManager` resets director/executor lifecycle state at track/deck/stop/
+  resume boundaries. Scripted and idle lighting transitions reset director
+  lifecycle state without adding push-loop I/O.
 
 ## LED Look Director
 
@@ -119,6 +151,9 @@ direct path inactive while MTC/current state fallbacks continue where available.
   remapped through the latched LED `scripted_mode` policy before dispatch.
 - `LEDLookDirector` chooses configured LED looks from role banks. LED banks are
   separate from laser banks.
+- The live LED drop resolver remains StateManager-owned and unchanged. The pure
+  `DropLifecycle` module is parity-tested against its flat-window behavior for
+  laser policy reuse; it does not replace LED look-duration or offset handling.
 - `GoveeSceneAdapter` keeps public trigger handoff bounded/non-blocking; slow
   Govee transport belongs to its worker.
 - Current automatic role-entry is dry-run/config-gated. Live automation,

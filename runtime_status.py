@@ -25,6 +25,19 @@ _DEFAULT_LASER_STATUS: dict[str, Any] = {
 }
 
 
+# Sanitized — no paths/ports/aliases/devices/UUIDs/raw error messages (T7e §B1).
+_DEFAULT_PACK_STATUS: dict[str, Any] = {
+    "available": False,
+    "enabled": False,
+    "backend": "disabled",
+    "pack_loaded": False,
+    "pack_sha12": "",
+    "frame_count": 0,
+    "has_active_identity": False,
+    "reason": "not_configured",
+}
+
+
 _DEFAULT_LED_STATUS: dict[str, Any] = {
     "available": False,
     "enabled": False,
@@ -56,6 +69,7 @@ class StatusWriter(threading.Thread):
         laser_status_provider: Optional[Callable[[], dict]] = None,
         led_status_provider: Optional[Callable[[], dict]] = None,
         color_engine_status_provider: Optional[Callable[[], dict]] = None,
+        pack_status_provider: Optional[Callable[[], dict]] = None,
         heartbeat_interval_s: float = HEARTBEAT_LOG_INTERVAL_S,
     ) -> None:
         super().__init__(name="runtime-status", daemon=True)
@@ -67,6 +81,7 @@ class StatusWriter(threading.Thread):
         self._command_reader = command_reader
         self._laser_status_provider = laser_status_provider
         self._led_status_provider = led_status_provider
+        self._pack_status_provider = pack_status_provider
         self._color_engine_status_provider = color_engine_status_provider
         self._heartbeat_interval_s = max(0.5, float(heartbeat_interval_s))
         self._stop_event = threading.Event()
@@ -116,6 +131,11 @@ class StatusWriter(threading.Thread):
             "commands": self._command_reader.status(),
             "laser_director": laser,
             "led_look_director": led,
+            "soundswitch_pack": (
+                dict(_DEFAULT_PACK_STATUS)
+                if self._pack_status_provider is None
+                else self._safe_pack_status()
+            ),
             "recent_errors": [],
         }
         state_color = _dict_or_empty(state.get("led_color_engine"))
@@ -174,6 +194,14 @@ class StatusWriter(threading.Thread):
             default=_DEFAULT_LED_STATUS,
         )
 
+    def _safe_pack_status(self) -> dict[str, Any]:
+        return _safe_provider_snapshot(
+            self._pack_status_provider,
+            provider_name="pack_status_provider",
+            throttle_key=f"pack_status_provider.{id(self)}",
+            default=_DEFAULT_PACK_STATUS,
+        )
+
 
 class CommandReader(threading.Thread):
     def __init__(
@@ -193,6 +221,7 @@ class CommandReader(threading.Thread):
         led_clear_blackout_callback: Optional[Callable[[], Any]] = None,
         led_clear_scene_override_callback: Optional[Callable[[], Any]] = None,
         record_session_toggle_callback: Optional[Callable[[Optional[str], bool], Any]] = None,
+        pack_command_callback: Optional[Callable[..., Any]] = None,
     ) -> None:
         super().__init__(name="runtime-command-reader", daemon=True)
         self._validation_runner = validation_runner
@@ -210,6 +239,7 @@ class CommandReader(threading.Thread):
         self._led_clear_blackout_callback = led_clear_blackout_callback
         self._led_clear_scene_override_callback = led_clear_scene_override_callback
         self._record_session_toggle_callback = record_session_toggle_callback
+        self._pack_command_callback = pack_command_callback
         self._stop_event = threading.Event()
         self._last_command = ""
         self._last_error = ""
@@ -369,6 +399,22 @@ class CommandReader(threading.Thread):
                     with self._lock:
                         self._last_error = f"led_clear_scene_override callback failed: {detail}"
             return
+        if cmd == "set_soundswitch_pack":
+            if self._pack_command_callback:
+                kwargs = {k: command[k] for k in ("backend", "enabled") if k in command}
+                # SANITIZED: the controller returns (ok, class/category); if it raises we
+                # store ONLY the exception class name. Never a raw message (paths/ports).
+                try:
+                    result = self._pack_command_callback(command["action"], **kwargs)
+                    ok = result[0] if isinstance(result, tuple) else bool(result)
+                    detail = (result[1] if isinstance(result, tuple) and len(result) > 1
+                              else "")
+                except Exception as exc:
+                    ok, detail = False, type(exc).__name__
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"set_soundswitch_pack callback failed: {detail}"
+            return
         raise ValueError(f"unknown command: {cmd}")
 
     def _run_validation_async(self) -> None:
@@ -408,9 +454,23 @@ def parse_command(line: str) -> dict[str, Any]:
         "led_clear_blackout",
         "led_clear_scene_override",
         "set_led_look_director",
+        "set_soundswitch_pack",
     }
     if cmd not in allowed:
         raise ValueError(f"unknown command: {cmd}")
+    if cmd == "set_soundswitch_pack":
+        action = obj.get("action")
+        if action not in {"reload", "backend", "enable"}:
+            raise ValueError("set_soundswitch_pack action must be reload|backend|enable")
+        extra = set(obj) - {"cmd", "action", "backend", "enabled"}
+        if extra:
+            raise ValueError(f"set_soundswitch_pack unexpected keys: {sorted(extra)}")
+        if action == "backend":
+            if obj.get("backend") not in {"pack", "none", "midi"}:
+                raise ValueError("set_soundswitch_pack backend must be pack|none|midi")
+        elif action == "enable":
+            if not isinstance(obj.get("enabled"), bool):
+                raise ValueError("set_soundswitch_pack enabled must be boolean")
     if cmd == "set_laser_director":
         if "enabled" not in obj:
             raise ValueError("set_laser_director requires enabled")

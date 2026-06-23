@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.laser_config import LaserConfig  # noqa: E402
 from rb_ss_bridge_v2.laser_director import LaserDirector  # noqa: E402
 from rb_ss_bridge_v2.laser_executor import LaserSceneExecutor  # noqa: E402
+from rb_ss_bridge_v2.laser_output_backend import MidiOutputBackend  # noqa: E402
 from rb_ss_bridge_v2.laser_models import (  # noqa: E402
     LaserContext,
     LaserMidiMessage,
@@ -97,6 +98,7 @@ def _personality() -> LaserPersonality:
         breakdown_bank=("break_a",),
         allow_high_impact=True,
         minimum_scene_hold_beats=8,
+        drop_lifecycle_mirror=False,
         # These scenarios exercise the separate post-drop hold; that is the
         # emphasized_drop behavior. (drop_mode holds the drop look instead.)
         drop_style="emphasized_drop",
@@ -222,12 +224,13 @@ class _GoldenHarness:
             safe_scene=personality.safe_scene,
             default_scene=personality.default_scene,
             emergency_scene=personality.safe_scene,
+            scenes=cfg.scenes,
         )
         self._director.set_personality_config(personality)
         self._midi = _FakeMidiOutput(dry_run=True)
         self._executor = LaserSceneExecutor(
             config=cfg,
-            midi_output=self._midi,
+            backend=MidiOutputBackend(self._midi),
             personality=personality,
             rng=random.Random(2),
         )

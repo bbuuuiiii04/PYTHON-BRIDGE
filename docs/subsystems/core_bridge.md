@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: eff532e
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-only
 ---
 
@@ -17,9 +17,11 @@ Status:
 Purpose:
 - Own startup wiring, bridge state, event handling, timing, and top-level coordination.
 
-Task 2 boundary:
-- The strict SoundSwitch 2.10.3 decoder, deterministic exporter, canonical 95-artifact pack, and independent verifier are read-only/offline and are not imported, started, or owned by `StateManager` or `__main__.py`.
-- No live bridge behavior changed: OS2L, MIDI lasers, LED/Govee, Rekordbox readers, runtime status, config, and runtime commands retain their existing paths. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec integration remain planned and unimplemented.
+SoundSwitch pack-player boundary:
+- The strict decoder/exporter/verifier and immutable pack loader/player remain outside `StateManager`. Optional MIDI-input, backend, and Enttec components are built by startup/command-thread orchestration and passed to `StateManager` as one immutable runtime bundle.
+- T7.0 keeps process signal ownership in `__main__`; T7.1 routes the existing laser executor through one injected backend while retaining the MIDI default path.
+- T7a/T7b/T7c/T7e are wired: `__main__` loads optional default-off config, chooses one backend, starts verified workers, creates `PackRuntime`, injects it into `StateManager`, and wires sanitized status plus validate-first commands. Absent/disabled config preserves legacy MIDI; dry-run/none opens no pack hardware.
+- The active roadmap records remaining runtime closure: one-click export/publish/reload, scripted pause/mode/input-health/status, T7d Autoloop phase, and hardware validation. Current Autoloop pack output remains zero-safe.
 
 Authoritative code:
 - `__main__.py`
@@ -41,6 +43,7 @@ Runtime flow:
 - decisions: active deck state, phrase/role state, lighting dispatch timing
 - outputs: OS2L sends, laser decisions, LED decisions, copied status snapshots
 - scripted-track LED automation is still StateManager-gated: `safety.scripted_mode_automation` must be true, `lighting_mode` must be `scripted`, and the smart-phrasing role is remapped through the latched LED `scripted_mode` policy before dispatch
+- laser drop-lifecycle state is reset alongside existing lifecycle teardown on master change, active track load, full stop, and resume; director-only resets also run on scripted and idle lighting transitions
 
 Config:
 - `config.py`
@@ -50,6 +53,7 @@ Config:
 Tests:
 - inspect `tests/` for state manager, runtime status, smart phrasing, and integration tests
 - recommended broad command: `python -m unittest discover tests`
+- laser lifecycle integration coverage includes `tests/test_laser_director_lifecycle.py` and `tests/test_laser_executor_lifecycle.py`
 
 Change contract:
 - If modifying startup, also inspect `runtime_status.py`, subsystem bundle builders, and status docs.

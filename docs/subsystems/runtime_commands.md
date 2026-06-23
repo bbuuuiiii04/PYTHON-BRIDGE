@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: eff532e
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-only
 ---
 
@@ -17,9 +17,16 @@ Status:
 Purpose:
 - Own local status snapshots, the throttled `[BEAT]` operator heartbeat, and append-only JSONL runtime command handling.
 
-Task 2 boundary:
-- The offline SoundSwitch decoder/exporter/verifier and canonical pack add no runtime command and no status field. Loader/player, MIDI/runtime/backend selection, and Enttec controls remain planned and unimplemented.
-- Existing SoundSwitch, laser, LED/Govee, Rekordbox, and bridge status/command behavior is unchanged.
+SoundSwitch pack-player boundary (T7c/T7e):
+- T7c wires the pack player into `StateManager` (`_drive_pack_output`); T7e adds the
+  `set_soundswitch_pack` runtime command (`action` = `reload`|`backend`|`enable`) and a sanitized
+  `soundswitch_pack` status block. `parse_command()` validates the command (validate-first);
+  dispatch routes to a `pack_command_callback` backed by `SoundSwitchPackController` on the command
+  thread (all blocking load_pack/serial work off the push loop).
+- **Sanitized only:** the `soundswitch_pack` status and any `set_soundswitch_pack` failure detail
+  expose no paths, ports, aliases, device names, fixture maps, UUIDs, or raw exception messages.
+- Runtime `backend=midi` is **deferred** (callback returns sanitized `unsupported_action`); no
+  runtime command opens IAC/MidiOutput; pack failure falls back to disabled/none, never MIDI.
 
 Authoritative code:
 - `runtime_status.py`
@@ -64,6 +71,7 @@ Accepted commands:
 - `led_blackout`
 - `led_clear_blackout`
 - `led_clear_scene_override`
+- `set_soundswitch_pack`
 
 Detailed command table:
 - `docs/setup/runtime_commands.md`
@@ -83,4 +91,5 @@ Change contract:
 Known risks:
 - Accepted command names do not prove callbacks are wired.
 - Callback success does not prove hardware-visible behavior.
+- The menubar does not yet call pack reload after export; no `Export from SS` workflow exists.
 - Runtime command docs are code-derived; if docs and `runtime_status.py` disagree, code wins.

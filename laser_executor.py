@@ -4,7 +4,7 @@ This module intentionally keeps policy selection in LaserDirector while owning:
 - role bank rotation (deterministic round-robin),
 - scene lookup in validated LaserConfig,
 - execution gates for live-safe triggering, and
-- delegation to MidiOutput.trigger().
+- delegation to the injected LaserOutputBackend.trigger().
 """
 from __future__ import annotations
 
@@ -17,8 +17,7 @@ from typing import Optional
 
 from .laser_config import LaserConfig
 from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
-from .laser_output_backend import MidiOutputBackend
-from .midi_output import MidiOutput
+from .laser_output_backend import LaserOutputBackend
 
 log = logging.getLogger("laser_executor")
 
@@ -36,13 +35,13 @@ class LaserSceneExecutor:
         self,
         *,
         config: LaserConfig,
-        midi_output: MidiOutput,
+        backend: LaserOutputBackend,
         personality: Optional[LaserPersonality],
         rng: Optional[random.Random] = None,
         randomize_cursors: bool = True,
     ) -> None:
         self._config = config
-        self._backend = MidiOutputBackend(midi_output)
+        self._backend = backend
         self._personality = personality
         self._rng = rng if rng is not None else random.Random()
         self._randomize_cursors = bool(randomize_cursors)
@@ -65,6 +64,7 @@ class LaserSceneExecutor:
         # MIDI note is shared with the Smart Drop blackout; note_off is only
         # sent when BOTH the drop-window latch and this set are clear.
         self._mask_owners: set[str] = set()
+        self._role_bag: dict[str, tuple[str, ...]] = {}
 
     def set_personality(self, personality: Optional[LaserPersonality]) -> None:
         """Switch executor personality and reset role-bank execution state."""
@@ -92,6 +92,7 @@ class LaserSceneExecutor:
                 self._role_cursors = self._seed_role_cursors()
             self._reshuffle_phrase_bank_locked()
             self._role_active_scene = {role: "" for role in _AUTO_ROLES}
+            self._role_bag = {}
             self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
         self.clear_pending_blackout(reason=reason)
 
@@ -180,11 +181,12 @@ class LaserSceneExecutor:
             return
 
         refire_roles = ("phrase", "buildup", "breakdown")
+        cycling = decision.reason in ("drop_cycle", "post_drop_cycle")
         with self._lock:
             last_role_trigger_beat = float(self._role_last_trigger_beat.get(role, -1.0))
             refire_allowed = (
                 ctx.autoloop_tick_just_fired
-                and role in refire_roles
+                and (role in refire_roles or (cycling and role in ("drop", "post_drop")))
                 and scene_def.scene_type == "autoloop"
                 and (last_role_trigger_beat < 0.0 or float(ctx.abs_beat) > last_role_trigger_beat)
             )
@@ -234,6 +236,7 @@ class LaserSceneExecutor:
             scene_def.midi,
             ctx,
             reason=decision.reason,
+            scene_name=selected_scene,
         )
         if not self._backend.trigger(midi_message, priority=priority):
             self._record_gate("midi_trigger_rejected")
@@ -384,6 +387,15 @@ class LaserSceneExecutor:
         if role not in _AUTO_ROLES:
             return decision.scene
 
+        cycling = decision.reason in ("drop_cycle", "post_drop_cycle")
+        mirror_on = bool(
+            self._personality is not None
+            and getattr(self._personality, "drop_lifecycle_mirror", False)
+        )
+        flag_on_drop_impact = (
+            mirror_on and role == "drop" and decision.reason == "drop_crossing"
+        )
+
         with self._lock:
             if role == "phrase":
                 if decision.reason not in _PHRASE_TRIGGER_REASONS:
@@ -392,6 +404,19 @@ class LaserSceneExecutor:
                 if decision.reason == "phrase_boundary" and not ctx.autoloop_tick_just_fired:
                     return ""
                 return self._choose_bank_scene_locked(role=role, fallback_scene=decision.scene)
+
+            if role in ("drop", "post_drop") and cycling:
+                # Cycle ticks fire ONLY on an autoloop edge; empty usable set -> no-op (hold).
+                if not ctx.autoloop_tick_just_fired:
+                    return ""
+                return self._next_shuffled_scene_locked(role)
+
+            if flag_on_drop_impact:
+                # At-anchor impact: shuffled when usable, else the static one-shot (A8, never dark).
+                scene = self._next_shuffled_scene_locked("drop")
+                if not scene:
+                    scene = decision.scene
+                return scene
 
             active_scene = self._role_active_scene.get(role, "")
             if role_changed or not active_scene:
@@ -408,6 +433,39 @@ class LaserSceneExecutor:
         cursor = self._role_cursors.get(role, 0)
         index = cursor % len(bank)
         scene = bank[index]
+        self._role_cursors[role] = cursor + 1
+        self._role_active_scene[role] = scene
+        return scene
+
+    def _usable_bag_entries(self, role: str) -> list[str]:
+        allow_high_impact = bool(
+            self._personality.allow_high_impact if self._personality is not None else False
+        )
+        out: list[str] = []
+        for name in self._bank_for_role(role):
+            sd = self._config.scenes.get(name)
+            if sd is None:
+                continue
+            if sd.scene_type != "autoloop":
+                continue
+            if sd.safety_class == "high_impact" and not allow_high_impact:
+                continue
+            out.append(name)
+        return out
+
+    def _next_shuffled_scene_locked(self, role: str) -> str:
+        usable = self._usable_bag_entries(role)
+        if not usable:
+            self._role_active_scene[role] = ""
+            return ""                       # caller decides: impact-fallback (4e) / cycle no-op
+        cursor = self._role_cursors.get(role, 0)
+        bag = self._role_bag.get(role, ())
+        if cursor % len(usable) == 0 or not bag or len(bag) != len(usable):
+            shuffled = list(usable)
+            self._rng.shuffle(shuffled)     # reshuffle on exhaustion / bank-membership change
+            bag = tuple(shuffled)
+            self._role_bag[role] = bag
+        scene = bag[cursor % len(bag)]
         self._role_cursors[role] = cursor + 1
         self._role_active_scene[role] = scene
         return scene
@@ -512,7 +570,7 @@ class LaserSceneExecutor:
             return "high"
         return "normal"
 
-    def _materialize_midi(self, msg, ctx: LaserContext, *, reason: str):
+    def _materialize_midi(self, msg, ctx: LaserContext, *, reason: str, scene_name: str = ""):
         behavior = (msg.behavior or "").strip().lower()
         if behavior == "hold_beats":
             bpm = float(ctx.bpm) if ctx.bpm else 0.0
@@ -521,9 +579,9 @@ class LaserSceneExecutor:
             else:
                 hold_ms = int(round((60000.0 * float(msg.hold_beats)) / bpm))
             hold_ms = max(_MIN_HOLD_MS, min(_MAX_HOLD_MS, hold_ms))
-            return replace(msg, behavior="hold_ms", hold_ms=hold_ms)
+            return replace(msg, behavior="hold_ms", hold_ms=hold_ms, scene_name=scene_name)
         if behavior == "pulse" and reason == "drop_crossing":
             duration_ms = int(getattr(msg, "duration_ms", 0))
             if duration_ms < _DROP_CROSSING_MIN_PULSE_MS:
-                return replace(msg, duration_ms=_DROP_CROSSING_MIN_PULSE_MS)
-        return msg
+                return replace(msg, duration_ms=_DROP_CROSSING_MIN_PULSE_MS, scene_name=scene_name)
+        return replace(msg, scene_name=scene_name)

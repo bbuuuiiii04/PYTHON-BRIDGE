@@ -299,17 +299,220 @@ def fit_phase(
     }
 
 
+def _default_ticks_per_beat() -> list[int]:
+    """Broad rational candidate set: cycle / (integer beats-per-cycle) plus
+    common animation rates. 600 is always included but never assumed."""
+    candidates = {480, 600, 720}
+    for beats in range(8, 129):
+        if LOOP_TICKS % beats == 0:
+            candidates.add(LOOP_TICKS // beats)
+    return sorted(candidates)
+
+
+def load_phase_trace(path: Path) -> list[dict]:
+    rows = []
+    for line in path.open(errors="replace"):
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        if row.get("kind") == "autoloop_phase":
+            rows.append(row)
+    rows.sort(key=lambda r: r.get("mono_ns", 0))
+    return rows
+
+
+PHASE_FOOTER_KIND = "phase_trace_footer"
+
+
+def load_phase_trace_footer(path: Path) -> dict | None:
+    """Return the last ``phase_trace_footer`` integrity record in the trace, or None."""
+    footer = None
+    with path.open(errors="replace") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            if row.get("kind") == PHASE_FOOTER_KIND:
+                footer = row
+    return footer
+
+
+def evaluate_phase_trace_integrity(footer: dict | None) -> tuple[bool, str]:
+    """Pure, fail-closed integrity check for one B1 phase-trace capture.
+
+    A missing footer, an unclean tracer close, or any nonzero dropped/undrained
+    count invalidates the ENTIRE capture run. There are no timestamped drop
+    ranges, so per-segment salvage is impossible (possible future work if drop
+    timestamps are ever added). Returns ``(ok, reason)``.
+    """
+    if footer is None:
+        return (False, "missing phase_trace_footer (cannot prove zero dropped rows)")
+    if not footer.get("close_ok", False):
+        return (False, f"phase-trace close not clean: {footer}")
+    dropped = int(footer.get("dropped", 0) or 0)
+    undrained = int(footer.get("undrained", 0) or 0)
+    if dropped or undrained:
+        return (
+            False,
+            f"phase-trace lost rows (dropped={dropped}, undrained={undrained}); "
+            "whole capture invalid",
+        )
+    return (True, "ok")
+
+
+def _beat_at_epoch(phase_rows: list[dict], epoch_s: float, clock_offset_s: float) -> float | None:
+    if not phase_rows:
+        return None
+    target_ns = (epoch_s + clock_offset_s) * 1e9
+    best = min(phase_rows, key=lambda r: abs(r.get("epoch_ns", 0) - target_ns))
+    return best.get("abs_beat_pos")
+
+
+def _origin_hypotheses(phase_rows: list[dict]) -> list[dict]:
+    """Enumerate phase-origin candidates strictly from recorded state.
+
+    No free fitted offset is ever introduced: every origin is a value the bridge
+    actually recorded (arm-sync target, MIDI/refire origin, phrase anchor,
+    accepted-selection beat) plus the continuous previous-phase (global 0).
+    """
+    origins: list[dict] = [{"beat": 0.0, "kind": "continuous_global"}]
+    seen = {0.0}
+
+    def add(beat, kind):
+        if beat is None:
+            return
+        try:
+            beat = float(beat)
+        except (TypeError, ValueError):
+            return
+        if beat in seen:
+            return
+        seen.add(beat)
+        origins.append({"beat": beat, "kind": kind})
+
+    for row in phase_rows:
+        add(row.get("autoloop_arm_sync_beat"), "arm_sync")
+        add(row.get("midi_refire_origin_beat"), "midi_refire")
+        add(row.get("phrase_anchor_last_beat"), "phrase_anchor")
+        add(row.get("last_autoloop_status_phrase_beat"), "status_phrase")
+        if row.get("autoloop_tick_just_fired"):
+            add(row.get("abs_beat_pos"), "accepted_selection")
+    return origins
+
+
+def run_t7d(args) -> None:
+    """Falsifiable T7d phase-contract fit over one captured scenario segment.
+
+    Inputs are one immutable pack ssfile, the schema-2 phase trace (beat
+    authority), the passive Universe-0 pcap (observed wire frames), and the
+    venue cue library. The contract decision itself is delegated to the
+    unit-tested pure oracle in ``t7d_phase_contract``. This path is exercised
+    only against real captures; the alignment seam (clock offset, segment
+    window) is part of the B5 derivation and must be confirmed on real data --
+    it is NOT validated here and does not upgrade repo hardware status.
+    """
+    from t7d_phase_contract import LOOP_TICKS as ORACLE_CYCLE  # noqa: F401
+    from t7d_phase_contract import QUANTIZERS, fit_phase_contract
+
+    frames = universe_frames(args.pcap)
+    if not frames:
+        raise SystemExit("no Universe-0 ArtDmx frames")
+    phase_rows = load_phase_trace(args.phase_trace)
+    if not phase_rows:
+        raise SystemExit("no schema-2 autoloop_phase rows in trace")
+    # Fail closed on capture integrity: any dropped/undrained row or unclean
+    # tracer close invalidates the entire run (no timestamped drop ranges).
+    integrity_ok, integrity_reason = evaluate_phase_trace_integrity(
+        load_phase_trace_footer(args.phase_trace)
+    )
+    if not integrity_ok:
+        raise SystemExit(f"INCOMPLETE_T7D_EVIDENCE: {integrity_reason}")
+
+    control_channels = tuple(
+        sorted({int(v) for v in args.control_channels.split(",") if v.strip()})
+    )
+    cue_records = venue_cue_records(parse_venue_cues(args.venue.read_bytes()), args.fixture_group)
+    render_events, errors = build_render_events(
+        args.t7d_ssfile, cue_records, (0,) * 19, "all_zero_static_render",
+        control_channels, args.owner_deck,
+    )
+    if errors:
+        raise SystemExit(f"source decode errors: {errors}")
+    events = [
+        {"tick": int(ev["time"]) % LOOP_TICKS, "state": tuple(ev["state"]["rendered_state"])}
+        for ev in render_events
+    ]
+    if not events:
+        raise SystemExit("empty immutable timeline")
+
+    samples = []
+    for epoch_s, state in frames:
+        beat = _beat_at_epoch(phase_rows, epoch_s, args.clock_offset)
+        if beat is None:
+            continue
+        samples.append({"t": epoch_s, "beat": beat, "state": state})
+
+    tpbs = (
+        [int(v) for v in args.ticks_per_beat.split(",") if v.strip()]
+        if args.ticks_per_beat
+        else _default_ticks_per_beat()
+    )
+    if 600 not in tpbs:
+        tpbs.append(600)
+    hypotheses = {
+        "ticks_per_beat": sorted(set(tpbs)),
+        "quantizers": list(QUANTIZERS),
+        "origins": _origin_hypotheses(phase_rows),
+        "cycle_ticks": LOOP_TICKS,
+        "min_discriminating": args.min_discriminating,
+        "min_frames": args.min_frames,
+    }
+    result = fit_phase_contract(samples, events, hypotheses)
+    result["inputs"] = {
+        "pcap": str(args.pcap),
+        "pcap_sha256": hashlib.sha256(args.pcap.read_bytes()).hexdigest(),
+        "phase_trace": str(args.phase_trace),
+        "phase_rows": len(phase_rows),
+        "ssfile": args.t7d_ssfile.name,
+        "frames": len(frames),
+        "aligned_samples": len(samples),
+        "owner_deck": args.owner_deck,
+        "clock_offset_s": args.clock_offset,
+    }
+    result["hardware_status"] = "SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED"
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("pcap", type=Path)
-    parser.add_argument("bridge_log", type=Path)
-    parser.add_argument("app_logs", nargs="+", type=Path)
-    parser.add_argument("--proj", required=True, type=Path)
+    parser.add_argument("bridge_log", nargs="?", type=Path)
+    parser.add_argument("app_logs", nargs="*", type=Path)
+    parser.add_argument("--proj", type=Path)
     parser.add_argument("--venue", required=True, type=Path)
     parser.add_argument("--fixture-group", default="0x493")
     parser.add_argument("--control-channels", default="11")
     parser.add_argument("--owner-deck", type=int, default=1)
+    # Falsifiable T7d phase-contract mode (consumes the schema-2 phase trace):
+    parser.add_argument("--t7d", action="store_true", help="run the falsifiable T7d phase-contract fit")
+    parser.add_argument("--phase-trace", type=Path, help="schema-2 autoloop_phase JSONL")
+    parser.add_argument("--t7d-ssfile", type=Path, help="one immutable pack ssfile for this segment")
+    parser.add_argument("--ticks-per-beat", default="", help="comma list; default = broad rational search")
+    parser.add_argument("--clock-offset", type=float, default=0.0, help="measured dual-timestamp clock residual (s)")
+    parser.add_argument("--min-discriminating", type=int, default=4)
+    parser.add_argument("--min-frames", type=int, default=20)
     args = parser.parse_args()
+
+    if args.t7d:
+        missing = [n for n in ("phase_trace", "t7d_ssfile") if getattr(args, n) is None]
+        if missing:
+            raise SystemExit(f"--t7d requires: {', '.join('--' + m.replace('_', '-') for m in missing)}")
+        run_t7d(args)
+        return
+    if args.bridge_log is None or not args.app_logs or args.proj is None:
+        raise SystemExit("legacy mode requires: bridge_log app_logs... --proj --venue")
 
     control_channels = tuple(
         sorted({int(value) for value in args.control_channels.split(",") if value.strip()})

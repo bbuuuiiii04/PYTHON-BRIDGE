@@ -1,15 +1,15 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: c678788
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
 
 # Known Limitations
 
-Current SoundSwitch exporter/importer work remains **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
+Current SoundSwitch exporter/importer work remains **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
 ## Compatibility limitations
 
@@ -18,8 +18,12 @@ Current SoundSwitch exporter/importer work remains **SOFTWARE/WIRE-VALIDATED ONL
 - Windows and Linux are not current supported targets.
 - SoundSwitch version/interface compatibility is not broadly documented.
 - The offline SoundSwitch decoder is deliberately limited to SoundSwitch 2.10.3, the canonical project UUID, and the RAVE Venue profile. It is read-only; other projects/versions/profiles are unsupported unless explicitly added and tested.
-- Frozen source models, strict decoding, deterministic canonical 95-artifact export, and independent verification are implemented for the pinned project only. Task 3 loader/player and Task 4+ bridge config/commands/status, `StateManager`/runtime integration, MIDI/backend selection, Enttec output, and hardware work remain planned and unimplemented.
-- The Task 2 proof is 28 PASS / 0 FAIL / 1 INCOMPLETE with foundation 27/27 PASS. F9 pack mutation rejection passes; F10 active CC/pitch rejection is the sole deferred check and belongs to Task 4.
+- Frozen source models, strict decoding, deterministic new-path export, independent verification, immutable pack loading/rendering, MIDI-input routing, backend abstraction, Enttec sending, config/startup, `StateManager` scripted frame driving, validate-first commands, and basic sanitized status are implemented for the pinned project boundary.
+- The menubar `Export from SS` action, safe replacement of one canonical pack, automatic post-export reload, and operator result feedback are not implemented.
+- Scripted runtime remains partial: the pure player supports paused rendering, but the StateManager driver collapses pause and stop through `playing=false`; it does not explicitly require scripted mode/id; and it ignores MIDI-input health/error/drop snapshot fields. These are software implementation gaps, not hardware-only caveats.
+- Native-DMX Autoloops remain evidence-blocked and zero-safe. T7d has four conductor-accepted integrity captures (two arm, two refire), but four scenario pairs, identity/holdout reconciliation, and a unique corpus oracle verdict remain; no phase mapping can be implemented honestly yet.
+- The ignored local pack config was absent in the 2026-06-23 audit; no live pack/Enttec setup is claimed.
+- The pack proof is 29 PASS / 0 FAIL / 0 INCOMPLETE with foundation 27/27 PASS; F9 mutation rejection and F10 active CC/pitch rejection both pass.
 - Laser support depends on local MIDI mapping and fixture behavior.
 - Govee support is not generalized across devices.
 
@@ -28,7 +32,7 @@ Current SoundSwitch exporter/importer work remains **SOFTWARE/WIRE-VALIDATED ONL
 - Direct Rekordbox readers depend on app memory layout, permissions, offsets, and platform behavior.
 - Local config and secrets are intentionally not committed.
 - Hardware behavior can drift from software tests.
-- Enttec process death is not a proven hard kill and may leave the last DMX frame latched. A future Enttec backend must implement and hardware-validate an explicit hard-kill/blackout path before use.
+- Enttec owner-driven stop sends a zero packet, but process death/`kill -9` can leave the last DMX frame latched. A physical kill path and explicit hardware gate remain mandatory before use.
 - Old docs and prompts may describe plans that are already stale.
 
 ## Documentation limitations

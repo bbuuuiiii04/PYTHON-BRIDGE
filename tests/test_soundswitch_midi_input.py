@@ -2,6 +2,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -111,6 +112,29 @@ class TestSnapshotImmutable(unittest.TestCase):
         self.assertIsInstance(s, MidiInputSnapshot)
         with self.assertRaises(Exception):
             s.held_static_slot = 99  # type: ignore[misc]
+
+
+class TestStartupReadiness(unittest.TestCase):
+    def test_async_source_open_failure_is_reported_by_start(self):
+        def failed_source():
+            raise OSError("synthetic MIDI open failure")
+            yield None
+
+        a = _adapter(_SLOT8)
+        with self.assertRaisesRegex(RuntimeError, "failed to open"):
+            a.start("fake", _message_source=failed_source, readiness_timeout_s=0.5)
+        self.assertFalse(a.snapshot().worker_alive)
+
+    def test_start_returns_only_after_source_is_alive(self):
+        def live_source():
+            yield None
+            while True:
+                yield None
+
+        a = _adapter(_SLOT8)
+        a.start("fake", _message_source=live_source, readiness_timeout_s=0.5)
+        self.assertTrue(a.snapshot().worker_alive)
+        a.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +255,30 @@ class TestNonRenderControls(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestClearOnEvent(unittest.TestCase):
+    def test_stale_holds_clear_independently_without_killing_worker(self):
+        a = SoundSwitchMidiInputAdapter([_SLOT8, _BLACKOUT], stale_timeout_ms=100)
+        a._worker_alive = True
+        with mock.patch("rb_ss_bridge_v2.soundswitch_midi_input.time.monotonic",
+                        side_effect=(1.0, 1.05, 1.11)):
+            _note_on(a, _SLOT8)
+            _note_on(a, _BLACKOUT)
+            snapshot = a.snapshot()
+        self.assertIsNone(snapshot.held_static_slot)
+        self.assertTrue(snapshot.blackout_held)
+        self.assertEqual(snapshot.error, "stale_hold")
+
+    def test_fresh_matched_input_recovers_stale_error_only_when_worker_healthy(self):
+        a = SoundSwitchMidiInputAdapter([_SLOT8], stale_timeout_ms=100)
+        a._worker_alive = True
+        with mock.patch("rb_ss_bridge_v2.soundswitch_midi_input.time.monotonic",
+                        side_effect=(1.0, 1.2, 1.21, 1.22)):
+            _note_on(a, _SLOT8)
+            self.assertEqual(a.snapshot().error, "stale_hold")
+            _note_on(a, _SLOT8)
+            fresh = a.snapshot()
+        self.assertIsNone(fresh.error)
+        self.assertEqual(fresh.held_static_slot, 8)
+
     def test_panic_clears_static_slot(self):
         a = _adapter(_SLOT8)
         _note_on(a, _SLOT8)
@@ -443,6 +491,14 @@ class TestF10ExportFail(unittest.TestCase):
                                    enforce_pinned_totals=False)
         except SoundSwitchPackCompileError as exc:
             self.assertNotIn("relearn", str(exc), "F10 must not fire for note type")
+
+    def test_live_export_path_enforces_pinned_totals_by_default(self):
+        """export_pack() calls compile_pack_artifacts WITHOUT enforce_pinned_totals,
+        so the default MUST stay True. Otherwise a totals-drifted or empty project
+        could publish a corrupt pack. This pins the fail-closed default."""
+        project = _project_with_binding("note", "static_look")  # valid identity, empty totals
+        with self.assertRaisesRegex(SoundSwitchPackCompileError, "totals drifted"):
+            compile_pack_artifacts(project, generator_commit="test")  # default enforce_pinned_totals=True
 
     def test_disabled_cc_binding_does_not_fail_export(self):
         """Disabled CC binding on static_look must not trigger F10."""

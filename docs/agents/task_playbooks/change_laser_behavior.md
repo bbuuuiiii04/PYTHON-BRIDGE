@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: 9918dd4
+last_verified_date: 2026-06-22
 validation_scope: software-only
 ---
 
@@ -37,11 +37,14 @@ Implementation notes:
 - Inspect `laser_*`, `midi_output.py`, `personality_resolver.py`, `state_manager.py` laser seam.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
+- For drop lifecycle work, keep the phrase-context gate in `DropLifecycle`, cycle selection in `LaserSceneExecutor`, and blackout ownership in the existing executor/StateManager paths. Preserve static one-shot impact fallback and the default-true `drop_lifecycle_mirror` kill switch.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.
 - Run `python -m unittest discover tests` when practical for cross-subsystem changes.
 - Run docs checks for docs changes.
+- Run `python3 -m unittest tests.test_drop_lifecycle tests.test_laser_director_lifecycle tests.test_laser_executor_lifecycle` for lifecycle changes.
+- Run `python3 tools/check_laser_midi_sync.py` when drop/post-drop banks or selection behavior changes.
 
 Required docs updates:
 - `docs/subsystems/laser.md`, feature/validation matrices, hardware validation log if manually tested

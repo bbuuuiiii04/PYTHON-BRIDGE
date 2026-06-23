@@ -24,7 +24,7 @@ validation_scope: planning only; no exporter/renderer implementation; hardware-u
 > `docs/research/soundswitch/soundswitch_ssfile_format.md`. The concrete implementation spec
 > for the standalone laser path (exporter + byte-exact renderer + Enttec output
 > via VLN `dmx_pro.py`) is
-> `docs/research/soundswitch/soundswitch_standalone_laser_exporter_spec.md`.
+> `docs/research/soundswitch/history/soundswitch_standalone_laser_exporter_spec.md`.
 
 ## Current decision
 

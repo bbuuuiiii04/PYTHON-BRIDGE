@@ -29,6 +29,8 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (
 )
 from rb_ss_bridge_v2 import soundswitch_pack_verifier as verifier_module
 from rb_ss_bridge_v2.tools.export_soundswitch_pack import export_pack
+from rb_ss_bridge_v2.tools import export_soundswitch_pack as export_module
+from rb_ss_bridge_v2.soundswitch_project_decoder import SoundSwitchDecodeError
 
 
 def _sha(data: bytes) -> str:
@@ -168,6 +170,16 @@ class CurrentProjectPackTests(unittest.TestCase):
         path = pack / "static_looks.json"
         data = bytearray(path.read_bytes()); data[len(data) // 2] ^= 1; path.write_bytes(data)
         self.assertRejected(pack)
+
+    def test_one_byte_artifact_mutation_is_rejected_by_the_runtime_loader(self):
+        # A corrupted pack must never load into the bridge: load_pack runs the
+        # verifier first and surfaces the rejection as a load error.
+        pack = self._copy("mut-byte-loader")
+        path = pack / "static_looks.json"
+        data = bytearray(path.read_bytes()); data[len(data) // 2] ^= 1; path.write_bytes(data)
+        with self.assertRaises(SoundSwitchPackLoadError) as raised:
+            load_pack(pack)
+        self.assertIsInstance(raised.exception.__cause__, SoundSwitchPackVerificationError)
 
     def test_missing_extra_case_and_symlink_artifacts_are_rejected(self):
         missing = self._copy("mut-missing"); (missing / "fixture_profile.json").unlink(); self.assertRejected(missing)
@@ -421,6 +433,209 @@ class CurrentProjectPackTests(unittest.TestCase):
         home = str(Path.home()).encode()
         for path in self.pack.rglob("*.json"):
             self.assertNotIn(home, path.read_bytes(), path)
+
+
+class ExportPackLaunchSafetyTests(unittest.TestCase):
+    """export_pack() atomic-publish + rollback contract — the launch path.
+
+    These exercise the dangerous paths directly: bad destinations are rejected
+    BEFORE any work, and any failure after staging begins leaves NO destination
+    and NO leftover staging dir (no partial/corrupt output ever published).
+    """
+
+    def _staging_leftovers(self, parent: Path) -> list:
+        # Staging dirs are created as `.{dest.name}.tmp-XXXX` in the parent.
+        return list(parent.glob(".pack.tmp-*"))
+
+    def test_existing_destination_is_rejected_before_any_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            dest.mkdir()
+            with self.assertRaises(FileExistsError):
+                export_pack(root / "ignored.ssproj", dest)
+            self.assertEqual(self._staging_leftovers(root), [])
+
+    def test_dangling_symlink_destination_is_rejected_before_any_work(self):
+        # A dangling symlink reports exists()==False; only the is_symlink()
+        # guard catches it. Publishing onto it would corrupt the link target.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            dest.symlink_to(root / "absent_target")
+            self.assertFalse(dest.exists())
+            self.assertTrue(dest.is_symlink())
+            with self.assertRaises(FileExistsError):
+                export_pack(root / "ignored.ssproj", dest)
+            self.assertEqual(self._staging_leftovers(root), [])
+
+    def test_missing_parent_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "missing_subdir" / "pack"
+            with self.assertRaises(ValueError):
+                export_pack(Path(tmp) / "ignored.ssproj", dest)
+
+    def test_file_as_parent_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent_file = Path(tmp) / "iamafile"
+            parent_file.write_text("not a directory")
+            dest = parent_file / "pack"
+            with self.assertRaises(ValueError):
+                export_pack(Path(tmp) / "ignored.ssproj", dest)
+
+    def test_symlinked_parent_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real_dir = root / "real"
+            real_dir.mkdir()
+            linked_parent = root / "linked"
+            linked_parent.symlink_to(real_dir)
+            dest = linked_parent / "pack"
+            with self.assertRaises(ValueError):
+                export_pack(root / "ignored.ssproj", dest)
+
+    def test_missing_project_file_aborts_with_typed_error_and_no_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            with self.assertRaises(SoundSwitchDecodeError):
+                export_pack(root / "does_not_exist.ssproj", dest)
+            self.assertFalse(dest.exists())
+            self.assertEqual(self._staging_leftovers(root), [])
+
+    def test_generator_commit_failure_aborts_before_any_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            with mock.patch.object(export_module, "decode_project", return_value=object()), \
+                 mock.patch.object(export_module, "_generator_commit",
+                                   side_effect=RuntimeError("cannot determine generator git commit")):
+                with self.assertRaises(RuntimeError):
+                    export_pack(root / "ignored.ssproj", dest)
+            self.assertFalse(dest.exists())
+            self.assertEqual(self._staging_leftovers(root), [])
+
+    def test_verification_failure_rolls_back_and_publishes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            observed = {}
+
+            def _verify_raises(staging, *args, **kwargs):
+                # Prove the pack really was fully staged before the launch is
+                # aborted — then fail verification (the publish gate).
+                staging = Path(staging)
+                observed["staging_existed"] = staging.is_dir()
+                observed["artifact_written"] = (staging / "manifest.json").read_bytes()
+                raise SoundSwitchPackVerificationError("synthetic verification failure")
+
+            with mock.patch.object(export_module, "decode_project", return_value=object()), \
+                 mock.patch.object(export_module, "_generator_commit", return_value="0" * 40), \
+                 mock.patch.object(export_module, "compile_pack_artifacts",
+                                   return_value={"manifest.json": b"{}\n"}), \
+                 mock.patch.object(export_module, "verify_pack", side_effect=_verify_raises):
+                with self.assertRaises(SoundSwitchPackVerificationError):
+                    export_pack(root / "ignored.ssproj", dest)
+
+            self.assertTrue(observed.get("staging_existed"), "pack was never staged")
+            self.assertEqual(observed.get("artifact_written"), b"{}\n")
+            self.assertFalse(dest.exists(), "destination created despite verify failure")
+            self.assertEqual(self._staging_leftovers(root), [], "staging left behind")
+
+    def test_publish_failure_rolls_back_and_publishes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            with mock.patch.object(export_module, "decode_project", return_value=object()), \
+                 mock.patch.object(export_module, "_generator_commit", return_value="0" * 40), \
+                 mock.patch.object(export_module, "compile_pack_artifacts",
+                                   return_value={"manifest.json": b"{}\n"}), \
+                 mock.patch.object(export_module, "verify_pack",
+                                   return_value={"manifest_sha256": "x", "artifact_count": 1}), \
+                 mock.patch.object(export_module.os, "replace",
+                                   side_effect=OSError("synthetic publish failure")):
+                with self.assertRaises(OSError):
+                    export_pack(root / "ignored.ssproj", dest)
+            self.assertFalse(dest.exists(), "destination present after failed publish")
+            self.assertEqual(self._staging_leftovers(root), [], "staging left behind")
+
+    def test_artifact_write_failure_rolls_back_and_publishes_nothing(self):
+        # A mid-write failure (e.g. disk error) must not leave a partial pack
+        # nor reach the verify/publish gates.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            verify_called = {"value": False}
+
+            def _verify_should_not_run(*args, **kwargs):
+                verify_called["value"] = True
+                return {"manifest_sha256": "x", "artifact_count": 1}
+
+            # Second artifact is not bytes -> stream.write() raises TypeError mid-loop.
+            artifacts = {"manifest.json": b"{}\n", "broken.json": "not-bytes"}
+            with mock.patch.object(export_module, "decode_project", return_value=object()), \
+                 mock.patch.object(export_module, "_generator_commit", return_value="0" * 40), \
+                 mock.patch.object(export_module, "compile_pack_artifacts", return_value=artifacts), \
+                 mock.patch.object(export_module, "verify_pack", side_effect=_verify_should_not_run):
+                with self.assertRaises(TypeError):
+                    export_pack(root / "ignored.ssproj", dest)
+            self.assertFalse(verify_called["value"], "verify ran despite a write failure")
+            self.assertFalse(dest.exists())
+            self.assertEqual(self._staging_leftovers(root), [])
+
+
+class ExportDurabilityTests(unittest.TestCase):
+    """export_pack() crash-durability: directory entries and the atomic rename
+    must be fsync'd, not just file contents. Uses mocks so it runs on CI without
+    the real (skip-gated) SoundSwitch project."""
+
+    def test_fsync_dir_syncs_the_directory_fd(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(export_module.os, "fsync") as fsync:
+                export_module._fsync_dir(Path(tmp))
+            self.assertEqual(fsync.call_count, 1)
+
+    def test_fsync_dir_is_best_effort_when_unsupported(self):
+        # On platforms where opening a directory fd is unsupported (e.g. Windows)
+        # the helper must degrade to a no-op, never raise.
+        with mock.patch.object(export_module.os, "open", side_effect=OSError("no dir fd")):
+            export_module._fsync_dir(Path("/nonexistent"))  # must not raise
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(export_module.os, "fsync", side_effect=OSError("fsync fail")):
+                export_module._fsync_dir(Path(tmp))  # must not raise
+
+    def test_export_fsyncs_staging_dirs_then_parent_after_replace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            artifacts = {"manifest.json": b"{}\n", "sub/doc.json": b"[]\n"}
+            calls: list[Path] = []
+            real_replace = export_module.os.replace
+            replaced_at = {"index": None}
+
+            def spy_fsync_dir(path):
+                calls.append(Path(path))
+
+            def tracking_replace(src, dst):
+                replaced_at["index"] = len(calls)
+                return real_replace(src, dst)
+
+            with mock.patch.object(export_module, "decode_project", return_value=object()), \
+                 mock.patch.object(export_module, "compile_pack_artifacts", return_value=artifacts), \
+                 mock.patch.object(export_module, "verify_pack", return_value={"manifest_sha256": "x", "artifact_count": 2}), \
+                 mock.patch.object(export_module, "_fsync_dir", side_effect=spy_fsync_dir), \
+                 mock.patch.object(export_module.os, "replace", side_effect=tracking_replace):
+                export_pack(root / "ignored.ssproj", dest)
+
+            # Parent dir fsync'd AFTER the rename (durable publish).
+            self.assertIn(root, calls)
+            self.assertIsNotNone(replaced_at["index"])
+            self.assertEqual(calls[-1], root)
+            self.assertGreater(len(calls), replaced_at["index"],
+                               "parent dir must be fsync'd after os.replace")
+            # Staging dirs fsync'd BEFORE the rename (durable dir entries).
+            self.assertGreater(replaced_at["index"], 0,
+                               "staging dirs must be fsync'd before os.replace")
 
 
 if __name__ == "__main__":

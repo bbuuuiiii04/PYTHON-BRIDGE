@@ -61,6 +61,11 @@ from .models import (
 from .led_models import BeatAnchor, LEDContext
 from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS, MAX_SLOTS
 from .laser_models import LaserContext, LaserPersonality
+from .soundswitch_laser_player import (
+    ZERO_FRAME as _PACK_ZERO_FRAME,
+    normalize_soundswitch_id as _pack_normalize_id,
+)
+from .soundswitch_pack_runtime import PackRuntime, DISABLED_PACK_RUNTIME
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
@@ -68,6 +73,7 @@ from .logging_manager import get_logging_manager
 from .filepath_resolver import has_soundswitch_scripted_id
 from .personality_resolver import PersonalityResolver, PlaylistCache
 from .session_recorder import SessionRecorder
+from .session_phase_trace import AutoloopPhaseTracer, build_autoloop_phase_row
 from .sound_switch_engine import SoundSwitchEngine
 from . import spectral_cache
 from .audio_spectral_features import extract_spectral_features
@@ -101,6 +107,10 @@ __all__ = ["StateManager", "SmartDropTickResult"]
 
 _LATENCY_WARN_MS = 50.0
 _TC_LATENCY_WARN_MS = 250.0
+# T7c pack driver: only a genuine seek/cue jump (not normal playback or jitter)
+# should flag elapsed discontinuity. Err HIGH — a missed discontinuity just renders
+# the scripted frame at the new position; a false one ZEROs one tick.
+_PACK_SEEK_JUMP_MS = 2000
 LIVE_BPM_FOLLOW_ENV = "RBSS_LIVE_BPM_FOLLOW"
 AUTOLOOP_MASTER_PHRASE_ARM_ENV = "RBSS_AUTOLOOP_MASTER_PHRASE_ARM"
 SMART_DROP_ENV = "RBSS_SMART_DROP"
@@ -321,17 +331,34 @@ class StateManager:
         led_color_engine=None,
         os2l_connected_provider=None,
         recorder: Optional[SessionRecorder] = None,
+        soundswitch_pack_runtime=None,
     ) -> None:
         self._eq    = event_queue
         self._cache = position_cache
         self._out   = output
         self._live_bpm = live_bpm
         self._recorder = recorder if recorder is not None else SessionRecorder.from_env()
+        # B1 evidence-only autoloop phase tracer (schema-2). Attached ONLY while a
+        # session recording started via the runtime command is active; None ⇒ the
+        # tick emits no phase rows (zero overhead beyond one truth test). NOT a T7d
+        # runtime/output feature — preparatory capture tooling only.
+        self._phase_tracer: Optional[AutoloopPhaseTracer] = None
         # Optional Laser Director — None means disabled/not configured.
         # Mutated only from this thread after start().
         self._laser_director = laser_director
         self._laser_executor = laser_executor
         self._laser_personality_provider = laser_personality_provider
+        # T7c SoundSwitch pack driver (None ⇒ neutral; existing path unchanged).
+        # The driver READS DeckState; StateManager remains the only DeckState writer.
+        # T7e: one immutable runtime bundle, published atomically by the command
+        # thread (set_pack_runtime) and read once per tick by the push loop, so the
+        # driver never sees a mixed old/new runtime. Default = disabled (neutral).
+        self._pack_runtime: PackRuntime = soundswitch_pack_runtime or DISABLED_PACK_RUNTIME
+        # Push-thread-owned driver trackers (NOT part of the swappable bundle).
+        self._pack_last_load_gen: tuple[int, int] | None = None   # (active, load_gen)
+        self._pack_last_elapsed_ms: int | None = None
+        self._pack_last_static_slot: int | None = None
+        self._pack_logged_error = False
         self._led_look_director = led_look_director
         self._led_scene_adapter = led_scene_adapter
         # M1b WI-1: optional LED color engine (None ⇒ no color injection).
@@ -987,14 +1014,42 @@ class StateManager:
     def start_session_recording(self, path: str, *, dedup: bool = False) -> bool:
         if self._recorder:
             return False
-        self._recorder = SessionRecorder(path, dedup=dedup)
-        log.info("[SM] record-session-start  path=%s  dedup=%s", path, "on" if dedup else "off")
+        # schema=2 so the session carries B1 autoloop_phase rows + an integrity
+        # footer. The tracer is attached ONLY here (recording explicitly enabled);
+        # the env/from_env construction path stays schema-1 with no tracer.
+        self._recorder = SessionRecorder(path, dedup=dedup, schema=2)
+        self._phase_tracer = AutoloopPhaseTracer(self._recorder.write_phase_row)
+        log.info(
+            "[SM] record-session-start  path=%s  dedup=%s  phase_trace=on",
+            path, "on" if dedup else "off",
+        )
         return True
 
     def stop_session_recording(self) -> bool:
         if not self._recorder:
             return False
         path = str(self._recorder.path)
+        # Tear down the phase tracer FIRST: stop new emits, drain the writer into
+        # the still-open recorder, write an integrity footer, THEN close the
+        # recorder. Closing the recorder first would make write_phase_row a silent
+        # no-op and lose queued rows.
+        tracer = self._phase_tracer
+        self._phase_tracer = None
+        if tracer is not None:
+            result = tracer.close()
+            self._recorder.write_phase_trace_footer(
+                dropped=result.dropped,
+                undrained=result.undrained,
+                close_ok=result.ok,
+                timed_out=result.timed_out,
+                writer_error=result.writer_error,
+            )
+            if not result.ok:
+                log.warning(
+                    "[SM] phase-trace close NOT clean (capture invalid)  dropped=%d  "
+                    "undrained=%d  timed_out=%s  writer_error=%s",
+                    result.dropped, result.undrained, result.timed_out, result.writer_error,
+                )
         self._recorder.close()
         self._recorder = None
         log.info("[SM] record-session-stop  path=%s", path)
@@ -2539,6 +2594,8 @@ class StateManager:
         self._autoloop.clear_pending_master_phrase_arm()
         if self._laser_executor is not None:
             self._laser_executor.reset_runtime_state(reason="master_changed")
+        if self._laser_director is not None:
+            self._laser_director.reset_runtime_state(reason="master_changed")
         if (
             self._personality_eligible_deck.get(new_deck, False)
             and new_d.meta.content_id
@@ -2567,6 +2624,8 @@ class StateManager:
             self._autoloop.clear_pending_master_phrase_arm()
             if self._laser_executor is not None:
                 self._laser_executor.reset_runtime_state(reason="active_track_loaded")
+            if self._laser_director is not None:
+                self._laser_director.reset_runtime_state(reason="active_track_loaded")
             if self._led_look_director is not None:
                 self._led_look_director.reset_for_track()
         d.track_title_hint = title
@@ -3097,6 +3156,8 @@ class StateManager:
             self._led_last_idle_role_key = ""
             self._led_smart_drop_blackout_key = ""
             self._clear_led_drop_lifecycle()
+            if self._laser_director is not None:
+                self._laser_director.reset_runtime_state(reason="scripted")
             self._clear_smart_rearm_state()
             self._os.autoloop_arm_after_master_change = False
             self._os.autoloop_master_change_source = ""
@@ -3124,6 +3185,8 @@ class StateManager:
             )
 
         elif mode == "idle":
+            if self._laser_director is not None:
+                self._laser_director.reset_runtime_state(reason="idle")
             self._clear_smart_rearm_state()
             self._pending_arm = None
             self._os.last_armed_filepath = ""
@@ -3147,6 +3210,118 @@ class StateManager:
     # ── Push loop ─────────────────────────────────────────────────────────────
 
     def _push_tick(self) -> None:
+        """Wrapper: run the tick body, then drive the SoundSwitch pack output once.
+
+        The body has multiple early returns, so the pack driver runs here (not inside
+        the body) to guarantee exactly one drive per tick. If the body raises, submit a
+        direct ZERO frame (NOT the normal driver, which would read possibly-partial
+        state) so a crash can never retain non-zero DMX, then re-raise.
+        """
+        rt = self._pack_runtime
+        try:
+            self._push_tick_inner()
+        except BaseException:
+            if rt is not None and rt.active and rt.backend is not None:
+                try:
+                    rt.backend.submit_frame(_PACK_ZERO_FRAME)
+                except Exception:
+                    pass
+            raise
+        if rt is not None and rt.active:
+            self._drive_pack_output()
+
+    def set_pack_runtime(self, runtime: PackRuntime) -> None:
+        """Atomically publish a new pack runtime bundle (command thread → push loop).
+
+        A single attribute assignment; the push loop reads one reference per tick, so
+        it never sees a mixed old/new runtime. All blocking work (load_pack, serial
+        open/close, old-sender zero_and_stop) must already be done by the caller.
+        """
+        self._pack_runtime = runtime or DISABLED_PACK_RUNTIME
+
+    def get_pack_runtime(self) -> PackRuntime:
+        """Current pack runtime bundle (for the command-thread controller's snapshot)."""
+        return self._pack_runtime
+
+    def get_pack_status(self) -> dict[str, Any]:
+        """Sanitized pack status for the runtime status surface (no paths/ports/etc.)."""
+        rt = self._pack_runtime
+        return rt.sanitized_status() if rt is not None else DISABLED_PACK_RUNTIME.sanitized_status()
+
+    def _drive_pack_output(self) -> None:
+        """T7c/T7e: drive the pack player from authoritative deck state; submit one
+        CH1-CH19 frame. READ-ONLY w.r.t. DeckState; fail-safe to ZERO; never raises
+        into the tick. Automatic base ZEROs on any non-happy-path (stop/stale/error/
+        track-change/discontinuity) via clear_selection() so a held manual Static
+        Override stands alone while idle. See
+        docs/plans/active/soundswitch_t7c_pack_driver_spec.md."""
+        rt = self._pack_runtime
+        if rt is None or not rt.active:
+            return
+        player, backend, midi_input = rt.player, rt.backend, rt.midi_input
+        try:
+            active = self._os.active_deck
+            d = self._deck[active]
+            snap = self._cache.get(active)
+
+            # 1. Controller masks + static overrides (in-memory snapshot; no I/O).
+            if midi_input is not None:
+                s = midi_input.snapshot()
+                player.set_masks(blackout=bool(s.blackout_held), emergency=False)
+                slot = s.held_static_slot
+                if slot != self._pack_last_static_slot:
+                    if slot is not None:
+                        player.hold_static(int(slot))
+                    elif self._pack_last_static_slot is not None:
+                        player.release_static(int(self._pack_last_static_slot))
+                    self._pack_last_static_slot = slot
+
+            # 2. Derive the happy-path gate (fail-conservative; uncertain ⇒ ZERO base).
+            load_key = (active, int(getattr(d, "load_gen", 0)))
+            track_changed = (
+                self._pack_last_load_gen is not None and load_key != self._pack_last_load_gen
+            )
+            self._pack_last_load_gen = load_key
+            elapsed_ms = max(0, int(getattr(d, "elapsed_ms", 0) or 0))
+            discont = (
+                not track_changed
+                and self._pack_last_elapsed_ms is not None
+                and abs(elapsed_ms - self._pack_last_elapsed_ms) >= _PACK_SEEK_JUMP_MS
+            )
+            self._pack_last_elapsed_ms = elapsed_ms
+            fresh = not (snap is None or snap.is_stale(MEM_STALE_S))
+            playing = bool(getattr(d, "playing", False))
+            ssid = getattr(getattr(d, "meta", None), "soundswitch_id", "") or ""
+            metadata_ready = _pack_normalize_id(ssid) is not None
+
+            # 3. Automatic base: scripted only on the full happy path; else clear it so
+            #    a held static stands alone and no stale frame is retained.
+            #    Manual-static policy: a held Static Override is operator-controlled via
+            #    the (independent) MIDI controller, so it stays visible during ANY
+            #    non-happy-path here — idle/stop AND stale/error/track-change/
+            #    discontinuity. It loses only to blackout/emergency (set_masks -> render
+            #    ZERO above) and to pack-disabled/shutdown (driver inert / sender ZERO).
+            if playing and fresh and metadata_ready and not track_changed and not discont:
+                player.select_scripted(
+                    soundswitch_id=ssid, elapsed_ms=elapsed_ms, transport="playing",
+                    metadata_ready=True, authority="fresh", source_errored=False,
+                    elapsed_discontinuous=False, track_changed=False,
+                )
+            else:
+                player.clear_selection()
+
+            # 4. Submit exactly one frame.
+            backend.submit_frame(player.render().frame)
+        except Exception:
+            if not self._pack_logged_error:
+                log.exception("[SM] pack driver error; resolving ZERO")
+                self._pack_logged_error = True
+            try:
+                backend.submit_frame(_PACK_ZERO_FRAME)
+            except Exception:
+                pass
+
+    def _push_tick_inner(self) -> None:
         # FM-1: check two-phase arm timer before any other push logic
         self._check_pending_arm()
 
@@ -3694,6 +3869,49 @@ class StateManager:
         for dk in self._sse.deck_route(active):
             self._out.send_elapsed(dk, elapsed_ms, beatpos_out)
 
+        # ── B1 evidence-only autoloop phase trace (schema-2) ──────────────────
+        # Active ONLY while a session recording is running. Hot-path cost when
+        # inactive: one attribute load + truth test. When active: two non-blocking
+        # clock reads + a primitive dict build + one bounded put_nowait. NO file/
+        # socket/MIDI/serial/subprocess/sleep/contended-lock I/O on the tick (the
+        # tracer's daemon writer thread owns all I/O). Read-only w.r.t. DeckState/
+        # OutputState. emit() never blocks or raises. Reached only on the full
+        # playing path (every non-playing/stale/stop branch returned earlier), so
+        # rows are dense across the captured window and absent when not playing.
+        tracer = self._phase_tracer
+        if tracer is not None and d.playing:
+            tracer.emit(build_autoloop_phase_row(
+                mono_ns=time.monotonic_ns(),
+                epoch_ns=time.time_ns(),
+                active_deck=active,
+                load_gen=int(d.load_gen),
+                playing=bool(d.playing),
+                position_stale=bool(snap is None or snap.is_stale(MEM_STALE_S)),
+                elapsed_ms=int(elapsed_ms),
+                bpm=float(bpm),
+                abs_beat_pos=float(abs_beat_pos),
+                beatgrid_source=d.meta.beatgrid_source,
+                lighting_mode=os.lighting_mode,
+                autoloop_arm_pending=bool(os.autoloop_arm_pending),
+                autoloop_arm_sync_beat=int(os.autoloop_arm_sync_beat),
+                autoloop_arm_target_elapsed_ms=int(os.autoloop_arm_target_elapsed_ms),
+                pending_autoloop_arm_reason=os.pending_autoloop_arm_reason,
+                midi_refire_origin_beat=int(os.midi_refire_origin_beat),
+                last_autoloop_status_phrase_beat=int(os.last_autoloop_status_phrase_beat),
+                phrase_anchor_last_beat=int(os.phrase_anchor_last_beat),
+                drop_cut_armed=bool(os.drop_cut_armed),
+                autoloop_tick_just_fired=bool(autoloop_tick_just_fired),
+                # Reserved diagnostics: no cheap authoritative tick-local source
+                # today, and the oracle does not consume them. Do NOT call
+                # status()/executor/backend or heavy joins from the tick to fill
+                # these — leave None (see spec §A / Part B absolute rules).
+                role=None,
+                reason=None,
+                accepted_scene=None,
+                accepted_note=None,
+                accepted_trigger_gen=None,
+            ))
+
     def _maybe_log_energy_suggest_would_fire(
         self, active: int, prev_elapsed_ms: float, elapsed_ms: float, d: DeckState
     ) -> None:
@@ -3968,6 +4186,8 @@ class StateManager:
         os.live_follow_generation += 1
         if self._laser_executor is not None:
             self._laser_executor.reset_runtime_state(reason="stop")
+        if self._laser_director is not None:
+            self._laser_director.reset_runtime_state(reason="stop")
 
     def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
         mirror = 3 - deck
@@ -3991,6 +4211,10 @@ class StateManager:
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
         self._clear_led_drop_lifecycle()
+        if self._laser_director is not None:
+            self._laser_director.reset_runtime_state(reason="resume")
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason="resume")
         self._log_status()
 
     def _clear_smart_rearm_state(self) -> None:

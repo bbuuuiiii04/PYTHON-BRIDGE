@@ -4,8 +4,10 @@ This is Stage-1 working scratch. Its **AUTOLOOP MODEL IS WRONG/OUTDATED**: it de
 `SSAutoLoop{N}.ssfile` 12-slot table as "attribute-cue / 12 attribute UUIDs." The **corrected**
 finding is that those 12 slots are **POSITION presets** (Disco Ball, Stage L/R, Dance Floor, DJ
 Booth, …). Paths here say `/tmp/ss_re`; tools are now in `tools/ssfmt/re/` + `tools/ssfmt/captures/`.
-**Authoritative now:** `docs/research/soundswitch/soundswitch_stage2_research_findings.md` and the Codex spec
-`soundswitch_decode_export_codex_spec.md`. Kept only as historical scratch — do not rely on it.
+**Authoritative now:** `docs/research/soundswitch/README.md` routes to the current
+closure report, format evidence, and product contract. The former Stage-2
+findings and decode/export draft are retained beside this file as history. Kept
+only as historical scratch — do not rely on it.
 
 # SoundSwitch → Bridge DMX — Working Notes (Stage-1 scratch; may hold GUIDs/IPs)
 Updated 2026-06-19. Tags: [C]=confirmed (evidence)  [A]=assumed  [U]=unknown.

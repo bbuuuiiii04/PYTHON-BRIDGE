@@ -27,7 +27,7 @@ If --project cannot be read, source-dependent checks report INCOMPLETE and the
 final verdict is INCOMPLETE_PROOF_BLOCKER rather than a pretended PASS.
 
 Authority: docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md
-(the historical docs/research/soundswitch/soundswitch_static_pack_player_spec.md
+(the historical docs/research/soundswitch/history/soundswitch_static_pack_player_spec.md
 is superseded and is NOT implementation authority).
 """
 from __future__ import annotations

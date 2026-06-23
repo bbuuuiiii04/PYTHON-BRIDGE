@@ -15,7 +15,7 @@ validation_scope: read-only research + operator-orchestrated passive captures; n
 
 Paste this whole file into a fresh session opened at `/Users/bbui/rb_ss_bridge_v2`.
 This is the **B2** follow-on to
-`docs/research/soundswitch/soundswitch_scripted_renderer_closure_handoff_spec.md`
+`docs/research/soundswitch/history/soundswitch_scripted_renderer_closure_handoff_spec.md`
 (read that spec's Part A–E and its "Session Progress and Blockers" section first).
 B1 (offline analysis) is exhausted; the remaining work needs live evidence that
 **only the operator can produce**.

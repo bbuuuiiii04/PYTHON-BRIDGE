@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: eff532e
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -36,10 +36,11 @@ Current repo-facing status remains:
 | Agent routing/contracts | docs-checkable | not applicable | `tools/check_agent_contracts.py` checks key routes and referenced files. |
 | Rekordbox readers | partial | unvalidated | Reader correctness depends on live app/version/permissions. |
 | SoundSwitch OS2L | partial | unvalidated | OS2L output code exists; hardware/app validation log needed. |
-| SoundSwitch offline decoder/exporter/pack/verifier | software-tested | not applicable | Pinned to SoundSwitch 2.10.3 plus the canonical UUID/RAVE profile. Tests verify deterministic 95-artifact export, independent semantic verification, exact 232+1/32/42/45 inventory, seven-class F-3 crosswalk, and F9 mutation rejection. Current proof: 28 PASS / 0 FAIL / 1 INCOMPLETE, foundation 27/27 PASS; only F10 is deferred to Task 4. No project mutation or live output. |
-| SoundSwitch loader/player/MIDI/runtime/backend/Enttec | unvalidated/planned | unvalidated | Task 3 and Task 4+ are not implemented; no config, commands, status, `StateManager`, backend, Enttec, or hardware path exists. |
-| Laser policy/executor | partial | unvalidated | MIDI path exists; fixture validation must be recorded separately. |
-| LED/Govee cloud | partial | unvalidated | Cloud path exists; device behavior must be logged. |
+| SoundSwitch offline decoder/exporter/pack/verifier | software-tested | not applicable | Pinned to SoundSwitch 2.10.3 plus the canonical UUID/RAVE profile. Tests verify deterministic export, independent semantic verification, exact 232+1/32/42/45 inventory, and the seven-class F-3 crosswalk. Current proof: 29 PASS / 0 FAIL / 0 INCOMPLETE, foundation 27/27 PASS; F9 and F10 pass. No project mutation or live output. |
+| SoundSwitch scripted loader/player/MIDI/runtime/backend/Enttec | substantial partial software/wire-tested | unvalidated | Loader/player, input adapter, backend, sender, default-off config/startup, StateManager driver, commands, and basic status have focused tests. 32/32 active scripts export/render. Runtime pause/mode/input-health/status gaps remain; live config is absent and no physical output is validated. |
+| SoundSwitch native-DMX Autoloops/T7d | evidence partial | unvalidated | Pure Autoloop renderer, phase tracer, conductor, and falsifiable oracle have tests. Two arm and two refire captures pass conductor integrity, but four scenario pairs, identity/holdout reconciliation, and a unique corpus oracle remain. Scale/quantizer/origin are unknown and StateManager intentionally never selects Autoloops. |
+| Laser policy/executor | partial; lifecycle software-tested | unvalidated | Pure flat-window parity, A3 phrase gating, A4 blackout arm/clear preservation, lifecycle teardown, autoloop-tick cycling, usable-only shuffle bags, static-impact fallback, and kill-switch-OFF behavior have deterministic tests. `tools/check_laser_midi_sync.py` reports 0 errors on the live config. Fixture validation must be recorded separately. |
+| LED/Govee cloud | partial | unvalidated | Cloud path exists; device behavior must be logged. The new pure lifecycle resolver does not replace or alter live LED dispatch. |
 | LED scripted-track automation policy | partial | unvalidated | `tests/test_led_config.py` covers the JSON blackout defaults and `utility` destination validation; `tests/test_led_state_manager.py` covers groove/drop/post-drop blackout mapping, active buildup/breakdown, opt-in overrides, and non-scripted identity behavior. This does not prove room-visible Govee behavior during scripted SoundSwitch tracks. |
 | LED/Govee realtime | partial/experimental | unvalidated | Realtime path exists; slot-color strategy behavior, Patch S `random_with_mono_chance`, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, Patch E3 ambient twinkle slot cue, and Patch F default-bank cleanup have software tests, but repeatable H612D validation record is still needed. Patch D/E/S/F remain SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
 | Laser Pad/frontend | partial | unvalidated | Syntax/frontend smoke tests do not prove live safety. |

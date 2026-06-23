@@ -1,8 +1,8 @@
 ---
 doc_status: research-tool-guide
 truth_level: byte-and-capture-grounded
-last_verified_commit: 8ca5875
-last_verified_date: 2026-06-21
+last_verified_commit: 0c2ba07
+last_verified_date: 2026-06-23
 validation_scope: read-only research helpers; no production or hardware authority
 ---
 
@@ -13,15 +13,15 @@ production exporter/parser, are not imported by bridge runtime code, and must
 never write into `~/Music/SoundSwitch`.
 
 Current scripted byte-parity continuation:
-`docs/research/soundswitch/soundswitch_scripted_renderer_closure_handoff_spec.md`.
+`docs/research/soundswitch/history/soundswitch_scripted_renderer_closure_handoff_spec.md`.
 
 Do not use them to start/stop/signal/restart the bridge or send MIDI, OS2L,
 Art-Net, serial, Enttec, or physical DMX. Capture commands and SoundSwitch UI
 operations are operator-owned. Status remains **SOFTWARE-VALIDATED ONLY /
 HARDWARE-UNVALIDATED**.
 
-`WORKING_NOTES.md` is retained historical Stage-1 scratch. Its model and paths
-are stale; use the current docs and tools instead.
+`history/working_notes_stage1.md` retains the old Stage-1 scratch. Its model and
+paths are stale; use the current docs and tools instead.
 
 ## Cue-reference convention (read before resolving any timeline)
 

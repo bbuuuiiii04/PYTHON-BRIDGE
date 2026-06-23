@@ -2,25 +2,54 @@
 
 The loader performs no migration.  It first runs the independent verifier,
 then parses the verified JSON into frozen runtime-neutral models.  It has no
-MIDI, serial, network, project-parser, or research-tool dependency.
+MIDI API, serial, network, project-parser, or research-tool dependency.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
+
+# Shared immutable empty mapping used as a dataclass default.  A bare
+# ``MappingProxyType({})`` default is rejected by dataclasses on Python 3.11+
+# (unhashable -> treated as a mutable default), so defaults must go through
+# ``field(default_factory=...)``.  The proxy is read-only, so sharing one
+# instance is safe.
+_EMPTY_MAPPING: Mapping[Any, Any] = MappingProxyType({})
 
 from .soundswitch_pack_verifier import SoundSwitchPackVerificationError, verify_pack
 
 SUPPORTED_SCHEMA_MAJOR = 1
 AUTOLOOP_CYCLE_TICKS = 19_200
+_CONTROL_CLASSIFICATIONS = frozenset({
+    "pack_selection", "static_override", "blackout_mask",
+    "bridge_owned_safety", "no_project_target", "inactive_report_only",
+    "unsupported_fail_export",
+})
+_MESSAGE_TYPES = frozenset({"note", "control_change", "pitch_bend"})
 
 
 class SoundSwitchPackLoadError(ValueError):
     """A verified pack cannot be represented by the current immutable model."""
+
+
+@dataclass(frozen=True, slots=True)
+class PackMidiBinding:
+    """Verified learned controller binding retained for runtime input routing."""
+
+    device_name: str
+    message_type: Literal["note", "control_change", "pitch_bend"]
+    channel_zero_based: int
+    data_byte: int
+    target_kind: Literal[
+        "static_look", "autoloop", "blackout_mask", "pack_selection",
+        "bridge_owned_safety", "no_project_target", "inactive_report_only",
+    ]
+    target_slot: int | None = None
+    target_identity: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +150,13 @@ class LoadedPack:
     scripted: Mapping[str, LoadedScriptedTrack | LoadedDocument]
     autoloops: Mapping[str, LoadedAutoloop | LoadedDocument]
     static_looks: Mapping[int, LoadedStaticLook]
+    bridge_scene_crosswalk: Mapping[str, str] = field(default_factory=lambda: _EMPTY_MAPPING)
+    learned_midi_bindings: tuple[PackMidiBinding, ...] = ()
+    project_identity: Mapping[str, str | int] = field(default_factory=lambda: _EMPTY_MAPPING)
+    supported_boundary: Mapping[str, str | int] = field(default_factory=lambda: _EMPTY_MAPPING)
+    source_inventory_sha256: str = ""
+    active_cue_union: Mapping[str, str | int] = field(default_factory=lambda: _EMPTY_MAPPING)
+    totals: Mapping[str, int] = field(default_factory=lambda: _EMPTY_MAPPING)
     render_cue_guids: frozenset[str] = frozenset()
     catalog_tail_guids: frozenset[str] = frozenset()
 
@@ -158,6 +194,170 @@ def _integer(value: Any, label: str) -> int:
     if type(value) is not int:
         _fail(f"{label} must be an integer")
     return value
+
+
+def _string(value: Any, label: str, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not allow_empty and not value):
+        _fail(f"{label} must be a {'string' if allow_empty else 'non-empty string'}")
+    return value
+
+
+def _runtime_metadata(
+    manifest: dict[str, Any],
+    selection: dict[str, Any],
+) -> tuple[
+    Mapping[str, str],
+    tuple[PackMidiBinding, ...],
+    Mapping[str, str | int],
+    Mapping[str, str | int],
+    str,
+    Mapping[str, str | int],
+    Mapping[str, int],
+]:
+    """Parse only verified, sanitized runtime metadata; fail closed on drift."""
+    scene_rows = selection.get("bridge_scenes")
+    if not isinstance(scene_rows, list):
+        _fail("bridge scene crosswalk is missing")
+    crosswalk: dict[str, str] = {}
+    seen_policies: set[str] = set()
+    for row in scene_rows:
+        if not isinstance(row, dict):
+            _fail("bridge scene crosswalk row must be an object")
+        policy = _string(row.get("policy_name"), "bridge policy_name")
+        if policy in seen_policies:
+            _fail(f"duplicate bridge policy_name: {policy}")
+        seen_policies.add(policy)
+        resolution = row.get("resolution")
+        classification = row.get("control_classification")
+        target = row.get("target_identity")
+        if resolution not in ("project_target", "no_project_target") \
+                or classification not in _CONTROL_CLASSIFICATIONS:
+            _fail(f"invalid bridge scene semantics for {policy}")
+        if resolution == "project_target":
+            if classification != "pack_selection":
+                _fail(f"project-target bridge scene is not pack_selection: {policy}")
+            crosswalk[policy] = _string(target, f"bridge target_identity for {policy}")
+        elif target is not None:
+            _fail(f"no-target bridge scene carries a target identity: {policy}")
+    if not crosswalk:
+        _fail("bridge scene crosswalk has no project targets")
+
+    control_rows = selection.get("learned_controls")
+    if not isinstance(control_rows, list):
+        _fail("learned controller rows are missing")
+    bindings: list[PackMidiBinding] = []
+    seen_events: set[tuple[str, str, int, int]] = set()
+    for row in control_rows:
+        if not isinstance(row, dict):
+            _fail("learned controller row must be an object")
+        active = row.get("active")
+        if type(active) is not bool:
+            _fail("learned controller active flag must be boolean")
+        device = _string(row.get("device_name"), "learned controller device_name")
+        message_type = row.get("message_type")
+        channel = row.get("channel_zero_based")
+        data_byte = row.get("data_byte")
+        classification = row.get("control_classification")
+        target_kind = row.get("target_kind")
+        if message_type not in _MESSAGE_TYPES \
+                or type(channel) is not int or not 0 <= channel <= 15 \
+                or type(data_byte) is not int or not 0 <= data_byte <= 127 \
+                or classification not in _CONTROL_CLASSIFICATIONS:
+            _fail("malformed learned controller semantics")
+        event_key = (device, message_type, channel, data_byte)
+        if active:
+            if event_key in seen_events:
+                _fail("duplicate active learned controller event")
+            seen_events.add(event_key)
+        if not active or classification not in ("static_override", "blackout_mask"):
+            continue
+        if message_type != "note":
+            _fail("active render controller binding must use a note message")
+        if classification == "static_override":
+            slot = row.get("target_index")
+            if target_kind != "static_look" or type(slot) is not int or not 0 <= slot <= 31:
+                _fail("invalid static_override controller target")
+            bindings.append(PackMidiBinding(
+                device_name=device,
+                message_type="note",
+                channel_zero_based=channel,
+                data_byte=data_byte,
+                target_kind="static_look",
+                target_slot=slot,
+            ))
+        else:
+            identity = row.get("target_identity")
+            if target_kind != "autoloop":
+                _fail("invalid blackout_mask controller target kind")
+            bindings.append(PackMidiBinding(
+                device_name=device,
+                message_type="note",
+                channel_zero_based=channel,
+                data_byte=data_byte,
+                target_kind="blackout_mask",
+                target_identity=_string(identity, "blackout target_identity"),
+            ))
+
+    project = manifest.get("project")
+    boundary = manifest.get("supported_boundary")
+    source_inventory = manifest.get("source_inventory")
+    active_union = manifest.get("active_cue_union")
+    totals = manifest.get("totals")
+    if not isinstance(project, dict) or not isinstance(boundary, dict) \
+            or not isinstance(source_inventory, list) or not isinstance(active_union, dict) \
+            or not isinstance(totals, dict):
+        _fail("manifest runtime metadata is malformed")
+    project_identity: dict[str, str | int] = {
+        "container_version": _integer(project.get("container_version"), "container_version"),
+        "project_uuid": _string(project.get("project_uuid"), "project_uuid"),
+        "soundswitch_version": _string(project.get("soundswitch_version"), "soundswitch_version"),
+        "venue_guid": _string(project.get("venue_guid"), "venue_guid"),
+    }
+    supported_boundary: dict[str, str | int] = {
+        "channel_span": _string(boundary.get("channel_span"), "boundary channel_span"),
+        "fixture_profile_guid": _string(
+            boundary.get("fixture_profile_guid"), "boundary fixture_profile_guid",
+        ),
+        "project_uuid": _string(boundary.get("project_uuid"), "boundary project_uuid"),
+        "soundswitch_version": _string(
+            boundary.get("soundswitch_version"), "boundary soundswitch_version",
+        ),
+        "universe": _integer(boundary.get("universe"), "boundary universe"),
+    }
+    for row in source_inventory:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str) \
+                or not isinstance(row.get("sha256"), str) \
+                or type(row.get("size")) is not int \
+                or not isinstance(row.get("parse_status"), str):
+            _fail("source inventory row is malformed")
+    source_hash = hashlib.sha256(json.dumps(
+        source_inventory,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+    union_count = active_union.get("count")
+    union_hash = active_union.get("sha256")
+    if type(union_count) is not int or not isinstance(union_hash, str):
+        _fail("active cue union metadata is malformed")
+    active_cue_union: dict[str, str | int] = {
+        "count": union_count,
+        "sha256": union_hash,
+    }
+    sanitized_totals: dict[str, int] = {}
+    for key, value in totals.items():
+        if not isinstance(key, str) or type(value) is not int:
+            _fail("manifest totals are malformed")
+        sanitized_totals[key] = value
+    return (
+        MappingProxyType(crosswalk),
+        tuple(bindings),
+        MappingProxyType(project_identity),
+        MappingProxyType(supported_boundary),
+        source_hash,
+        MappingProxyType(active_cue_union),
+        MappingProxyType(sanitized_totals),
+    )
 
 
 def _attribute(row: dict[str, Any]) -> LoadedAttribute:
@@ -444,12 +644,37 @@ def load_pack(pack: str | Path) -> LoadedPack:
     if active_scripts != authorized_scripts:
         _fail("active scripted inventory is missing or classified unsupported")
 
+    (
+        bridge_scene_crosswalk,
+        learned_midi_bindings,
+        project_identity,
+        supported_boundary,
+        source_inventory_sha256,
+        active_cue_union,
+        totals,
+    ) = _runtime_metadata(manifest, selection_value)
+    if not set(bridge_scene_crosswalk.values()).issubset(loops):
+        _fail("bridge scene crosswalk references a missing Autoloop")
+    for binding in learned_midi_bindings:
+        if binding.target_kind == "static_look" and binding.target_slot not in looks:
+            _fail("controller binding references a missing Static Look")
+        if binding.target_kind == "blackout_mask" \
+                and binding.target_identity not in loops:
+            _fail("blackout binding references a missing Autoloop")
+
     return LoadedPack(
         schema_version=schema_version,
         manifest_sha256=str(verification.get("manifest_sha256", "")),
         has_intensity_channel=has_intensity,
         scripted=MappingProxyType(scripts), autoloops=MappingProxyType(loops),
         static_looks=MappingProxyType(looks),
+        bridge_scene_crosswalk=bridge_scene_crosswalk,
+        learned_midi_bindings=learned_midi_bindings,
+        project_identity=project_identity,
+        supported_boundary=supported_boundary,
+        source_inventory_sha256=source_inventory_sha256,
+        active_cue_union=active_cue_union,
+        totals=totals,
         render_cue_guids=frozenset(cue_patches),
         catalog_tail_guids=frozenset(catalog_tail_guids),
     )
@@ -458,6 +683,6 @@ def load_pack(pack: str | Path) -> LoadedPack:
 __all__ = [
     "AUTOLOOP_CYCLE_TICKS", "LoadedAttribute", "LoadedAutoloop", "LoadedColourValue", "LoadedDocument",
     "LoadedIntensityNode", "LoadedPack", "LoadedPositionValue", "LoadedScalarValue",
-    "LoadedScriptedTrack", "LoadedStaticLook", "LoadedTimelineEvent",
+    "LoadedScriptedTrack", "LoadedStaticLook", "LoadedTimelineEvent", "PackMidiBinding",
     "SoundSwitchPackLoadError", "load_pack",
 ]

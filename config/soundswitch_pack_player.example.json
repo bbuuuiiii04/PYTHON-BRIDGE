@@ -1,0 +1,33 @@
+{
+  "_comment": "SoundSwitch pack-player example. Copy to soundswitch_pack_player.json and review every path/alias before enabling. Disabled, dry-run, and no-output by default.",
+  "enabled": false,
+  "dry_run": true,
+  "output_backend": "none",
+  "pack_path": "",
+  "fixture_map": {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "10": 10,
+    "11": 11,
+    "12": 12,
+    "13": 13,
+    "14": 14,
+    "15": 15,
+    "16": 16,
+    "17": 17,
+    "18": 18,
+    "19": 19
+  },
+  "fixture_map_path": "",
+  "midi_input_aliases": {},
+  "enttec_port": "",
+  "frame_stale_timeout_ms": 250,
+  "controller_hold_timeout_ms": 2000
+}

@@ -36,6 +36,13 @@ class CapturedSession:
     positions: dict[int, list[PositionSnapshot]]
     live_bpm: dict[int, list[tuple[float, Optional[float]]]]
     live_bpm_status: dict[int, list[tuple[float, Optional[LiveBPMStatus]]]] = field(default_factory=dict)
+    # schema-2 evidence-only autoloop phase rows (empty for schema-1 sessions)
+    autoloop_phase: list[dict] = field(default_factory=list)
+
+    # Session schemas this replayer can parse. Schema 1 is the historical
+    # event/position/live_bpm format; schema 2 additionally carries
+    # autoloop_phase rows and is byte-compatible for the schema-1 row kinds.
+    SUPPORTED_SCHEMAS = (1, 2)
 
     @classmethod
     def from_jsonl(cls, path: str | Path) -> "CapturedSession":
@@ -43,6 +50,7 @@ class CapturedSession:
         positions: dict[int, list[PositionSnapshot]] = {}
         live_bpm: dict[int, list[tuple[float, Optional[float]]]] = {}
         live_bpm_status: dict[int, list[tuple[float, Optional[LiveBPMStatus]]]] = {}
+        autoloop_phase: list[dict] = []
 
         with Path(path).open("r", encoding="utf-8") as fh:
             for line in fh:
@@ -51,7 +59,7 @@ class CapturedSession:
                 row = json.loads(line)
                 kind = row.get("kind")
                 if kind == "header":
-                    if row.get("schema") != 1:
+                    if row.get("schema") not in cls.SUPPORTED_SCHEMAS:
                         raise ValueError(f"unsupported session schema: {row.get('schema')!r}")
                     continue
                 if kind == "event":
@@ -68,7 +76,10 @@ class CapturedSession:
                     t = float(row["t"])
                     live_bpm.setdefault(deck, []).append((t, bpm))
                     live_bpm_status.setdefault(deck, []).append((t, status))
+                elif kind == "autoloop_phase":
+                    autoloop_phase.append(row)
 
+        autoloop_phase.sort(key=lambda r: r.get("mono_ns", 0))
         events.sort(key=lambda ev: ev.mono)
         for snaps in positions.values():
             snaps.sort(key=lambda snap: snap.updated_at)
@@ -76,7 +87,7 @@ class CapturedSession:
             samples.sort(key=lambda sample: sample[0])
         for samples in live_bpm_status.values():
             samples.sort(key=lambda sample: sample[0])
-        return cls(events, positions, live_bpm, live_bpm_status)
+        return cls(events, positions, live_bpm, live_bpm_status, autoloop_phase)
 
 
 class ReplayPositionCache:

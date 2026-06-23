@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 2c71a2e
-last_verified_date: 2026-06-21
+last_verified_commit: bc9f7f4
+last_verified_date: 2026-06-22
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -63,7 +63,8 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/subsystems/logging.md` | CURRENT SUPPORTING — matches `logging_manager.py`. |
 | `docs/data/offsets-*.yaml` (3) | CURRENT SUPPORTING — Rekordbox offset reference data. |
 | `docs/research/*.md` | RESEARCH — ANLZ energy and waveform-tag evidence. |
-| `docs/research/soundswitch/*.md` | SOUNDSWITCH RE AUTHORITY — all SoundSwitch RE findings, validation, historical handoffs, tool guide, and implementation specs are grouped here. Start with `README.md`; `soundswitch_re_closure_report.md` is the readiness verdict. |
+| `docs/research/soundswitch/*.md` | SOUNDSWITCH RE AUTHORITY — current closure report, format/binary findings, evidence matrices, tool guide, and product contract. Start with `README.md`. |
+| `docs/research/soundswitch/history/*.md` | SOUNDSWITCH RE HISTORY — superseded handoffs, intermediate findings, and draft exporter/player specs. Historical provenance only. |
 | `docs/validation/anlz_energy_corpus_report.md`, `anlz_energy_evaluation_guide.md`, `autoloop_beatphase_findings.md`, `smart_drop_synthetic_corpus.yaml` | VALIDATION EVIDENCE. |
 
 ## Active plans & prompts — VALIDATE against code before executing
@@ -77,10 +78,16 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/active/beat_sync_runtime_spec.md` | PLAN / SPEC (ACTIVE) | Beat-sync runtime. |
 | `docs/plans/active/led_role_mapping_v2_spec.md` | PLAN / SPEC (ACTIVE) | Verify status against code. |
 | `docs/plans/active/rt_comet_*.md` (3) | PLAN / SPEC (ACTIVE) | Realtime comet stutter/smoothness/pause work; verify which are landed. |
-| `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE SPEC POINTER | Symlink to the authoritative grouped spec. Tasks 0–2 are complete through deterministic export and independent verification of the pinned canonical 95-artifact pack; Task 3 loader/player and Task 4+ runtime/backend/hardware work remain planned/default-off/hardware-unvalidated. |
-| `docs/plans/active/soundswitch_impl_progress.md` | ACTIVE RESUME LEDGER | Session-resume and task-progress ledger for AWR-107; verify its next-action/status rows against current code and gates before resuming. It grants no runtime or hardware authorization. |
+| `docs/plans/active/soundswitch_README.md` | ACTIVE PROJECT INDEX | Grouped routing for the SoundSwitch exporter/bridge-native DMX project. |
+| `docs/plans/active/soundswitch_exporter_remaining_work.md` | ACTIVE CHECKLIST / ROADMAP | Current landed-versus-remaining authority. Covers one-click export/publish/reload, scripted runtime closure, T7d, hardware gating, dependencies, invariants, and completion criteria. |
+| `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE CONTRACT POINTER | Symlink to the original product/implementation contract. Read the active remaining-work roadmap for current status. |
+| `docs/plans/active/soundswitch_t7c_pack_driver_spec.md` | COMPATIBILITY POINTER | Preserves code/test links to the completed T7c spec; current status is in the SoundSwitch remaining-work roadmap. |
+| `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` | PLAN / SPEC (ACTIVE) | Current six-scenario T7d blocker plan: prove ticks/beat plus arm/refire/master/drop/buildup/correction origin rules from operator-owned captures. It selects no phase mapping and grants no runtime/hardware authorization. |
+| `docs/prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md` | AGENT PROMPT (ACTIVE) | Opus design/spec prompt for one-click canonical export, safe replacement, menubar execution, and explicit reload acknowledgement. No implementation/live authority. |
+| `docs/prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Independent Opus adversarial review of the authoritative roadmap, code claims, T7d evidence, safety gates, and Markdown lifecycle. Review-only. |
+| `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material T7/T8 implementation specs/proofs and the old progress ledger. Redundant prompts/handoffs were deleted. Historical evidence only. |
 | `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |
-| `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | M2 phase1–3 prompts/handoffs likely **completed** (Phase 2b/3 committed at HEAD) — verify and archive what is done. SoundSwitch handoffs are grouped under `docs/research/soundswitch/`. |
+| `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | Active prompts only; SoundSwitch has the RW-1 design prompt and the operator-presence T7d resume handoff. Obsolete SoundSwitch prompts were deleted. |
 | `docs/plans/completed/govee_realtime_codex_spec.md` | PLAN / SPEC | **Untracked local file** — classify (completed vs awaiting-build) and commit or archive separately. |
 
 ## Archive / historical — evidence only

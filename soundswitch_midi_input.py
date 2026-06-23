@@ -20,36 +20,17 @@ from __future__ import annotations
 import collections
 import logging
 import threading
-from dataclasses import dataclass, field
-from typing import Callable, Iterator, Literal, Sequence
+import time
+from dataclasses import dataclass
+from typing import Callable, Iterator, Mapping, Sequence
+
+from .soundswitch_pack_loader import PackMidiBinding
 
 log = logging.getLogger("soundswitch_midi_input")
 
 # Maximum MIDI messages buffered between worker wake-ups before drops are
 # counted.  Bounded to prevent unbounded memory growth on runaway input.
 _MAILBOX_MAXLEN = 256
-
-
-@dataclass(frozen=True, slots=True)
-class PackMidiBinding:
-    """Minimal learned-control descriptor for MIDI input routing.
-
-    Only note-type bindings are accepted for render-affecting targets (F-10
-    enforces this at export time).  Non-note bindings on non-render targets
-    are still inventoried and passed in so they can be logged but are
-    silently ignored by the state machine.
-    """
-    device_name: str
-    message_type: Literal["note", "control_change", "pitch_bend"]
-    channel_zero_based: int
-    data_byte: int
-    target_kind: Literal[
-        "static_look", "autoloop", "blackout_mask",
-        "pack_selection", "bridge_owned_safety", "no_project_target",
-        "inactive_report_only",
-    ]
-    target_slot: int | None = None      # slot_index for static_look
-    target_identity: str | None = None  # path identity for autoloop
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,12 +77,16 @@ class SoundSwitchMidiInputAdapter:
         self._stale_timeout_ms = int(stale_timeout_ms)
         self._lock = threading.Lock()
         self._held_static_slot: int | None = None
+        self._static_held_at: float | None = None
         self._blackout_held: bool = False
+        self._blackout_held_at: float | None = None
         self._worker_alive: bool = False
         self._error: str | None = None
         self._mail_drop_count: int = 0
         self._mailbox: collections.deque = collections.deque(maxlen=_MAILBOX_MAXLEN)
         self._stop_event = threading.Event()
+        self._ready_event = threading.Event()
+        self._startup_error: str | None = None
         self._thread: threading.Thread | None = None
         # Pack device identity this port corresponds to; set by start().
         # Only messages whose binding.device_name matches are dispatched.
@@ -115,6 +100,19 @@ class SoundSwitchMidiInputAdapter:
     def snapshot(self) -> MidiInputSnapshot:
         """Return current state; safe for the 200 Hz push loop."""
         with self._lock:
+            now = time.monotonic()
+            timeout_s = self._stale_timeout_ms / 1000.0
+            stale = False
+            if self._static_held_at is not None and now - self._static_held_at >= timeout_s:
+                self._held_static_slot = None
+                self._static_held_at = None
+                stale = True
+            if self._blackout_held_at is not None and now - self._blackout_held_at >= timeout_s:
+                self._blackout_held = False
+                self._blackout_held_at = None
+                stale = True
+            if stale:
+                self._error = "stale_hold"
             return MidiInputSnapshot(
                 held_static_slot=self._held_static_slot,
                 blackout_held=self._blackout_held,
@@ -133,6 +131,7 @@ class SoundSwitchMidiInputAdapter:
         *,
         device_name: str | None = None,
         _message_source: Callable[[], Iterator[tuple[int, int, int] | None]] | None = None,
+        readiness_timeout_s: float = 2.0,
     ) -> None:
         """Start the MIDI worker thread.
 
@@ -150,6 +149,8 @@ class SoundSwitchMidiInputAdapter:
             if self._thread is not None and self._thread.is_alive():
                 raise RuntimeError("SoundSwitchMidiInputAdapter already started")
             self._stop_event.clear()
+            self._ready_event.clear()
+            self._startup_error = None
             self._worker_alive = False
             self._error = None
             self._connected_device = device_name
@@ -163,6 +164,12 @@ class SoundSwitchMidiInputAdapter:
         )
         self._thread = t
         t.start()
+        if not self._ready_event.wait(timeout=max(0.01, readiness_timeout_s)):
+            self.stop()
+            raise RuntimeError("controller input startup readiness timed out")
+        if self._startup_error is not None:
+            self.stop()
+            raise RuntimeError("controller input port failed to open")
 
     def stop(self) -> None:
         """Stop worker, clear held state. Safe to call multiple times."""
@@ -196,7 +203,9 @@ class SoundSwitchMidiInputAdapter:
         with self._lock:
             changed = self._held_static_slot is not None or self._blackout_held
             self._held_static_slot = None
+            self._static_held_at = None
             self._blackout_held = False
+            self._blackout_held_at = None
             self._worker_alive = False
             self._error = error_msg if error_msg is not None else reason
         if changed:
@@ -208,6 +217,7 @@ class SoundSwitchMidiInputAdapter:
         with self._lock:
             if kind == "static_look":
                 slot = binding.target_slot
+                self._static_held_at = time.monotonic()
                 if self._held_static_slot == slot:
                     log.debug("[SS-MIDI] note-on idempotent: slot=%s", slot)
                     return
@@ -215,6 +225,7 @@ class SoundSwitchMidiInputAdapter:
                 log.debug("[SS-MIDI] static slot selected: slot=%s", slot)
             elif kind == "blackout_mask":
                 self._blackout_held = True
+                self._blackout_held_at = time.monotonic()
                 log.debug("[SS-MIDI] blackout held")
             # pack_selection / bridge_owned_safety / no_project_target /
             # inactive_report_only — inventoried but do not mutate player state.
@@ -230,6 +241,7 @@ class SoundSwitchMidiInputAdapter:
                 # Releasing an old, non-current note must not clear its replacement.
                 if self._held_static_slot == slot:
                     self._held_static_slot = None
+                    self._static_held_at = None
                     log.debug("[SS-MIDI] static slot released: slot=%s", slot)
                 else:
                     log.debug(
@@ -238,6 +250,7 @@ class SoundSwitchMidiInputAdapter:
                     )
             elif kind == "blackout_mask":
                 self._blackout_held = False
+                self._blackout_held_at = None
                 log.debug("[SS-MIDI] blackout released")
             else:
                 log.debug("[SS-MIDI] note-off for non-render kind=%s (no-op)", kind)
@@ -278,6 +291,9 @@ class SoundSwitchMidiInputAdapter:
             if connected is not None and key[0] != connected:
                 continue
             if key[1] == msg_type_str and key[2] == channel and key[3] == data_byte:
+                with self._lock:
+                    if self._worker_alive and self._error == "stale_hold":
+                        self._error = None
                 if is_note_on:
                     self._process_note_on(binding, data2)
                 elif is_note_off:
@@ -319,12 +335,16 @@ class SoundSwitchMidiInputAdapter:
         self,
         source_factory: Callable[[], Iterator[tuple[int, int, int] | None]],
     ) -> None:
-        with self._lock:
-            self._worker_alive = True
-            self._error = None
-        log.info("[SS-MIDI] worker started")
+        ready = False
         try:
             for msg in source_factory():
+                if not ready:
+                    with self._lock:
+                        self._worker_alive = True
+                        self._error = None
+                    ready = True
+                    self._ready_event.set()
+                    log.info("[SS-MIDI] worker started")
                 if self._stop_event.is_set():
                     break
                 if msg is None:
@@ -332,18 +352,126 @@ class SoundSwitchMidiInputAdapter:
                 status, data1, data2 = msg
                 self._feed_raw_message(status, data1, data2)
         except Exception as exc:
-            log.warning("[SS-MIDI] worker died: %s", exc)
+            self._startup_error = type(exc).__name__
+            self._ready_event.set()
+            log.warning("[SS-MIDI] worker died: error=%s", type(exc).__name__)
             # Preserve the specific exception in error_msg; _clear_held sets
             # it rather than the generic "worker_death" reason string.
-            self._clear_held("worker_death", error_msg=f"worker_error:{exc}")
+            self._clear_held(
+                "worker_death", error_msg=f"worker_error:{type(exc).__name__}",
+            )
         finally:
+            if not ready and self._startup_error is None:
+                self._startup_error = "source_closed"
+                self._ready_event.set()
             with self._lock:
                 self._worker_alive = False
             log.info("[SS-MIDI] worker stopped")
+
+
+class SoundSwitchMidiInputGroup:
+    """Own one input adapter per configured device alias as one lifecycle.
+
+    Construction validates the full device/alias set before any worker starts.
+    ``start()`` is rollback-safe: if any adapter start raises, every adapter is
+    stopped and the group remains unavailable.  Port aliases and device names
+    are intentionally absent from ``status()``.
+    """
+
+    def __init__(
+        self,
+        bindings: Sequence[PackMidiBinding],
+        aliases: Mapping[str, str],
+        *,
+        stale_timeout_ms: int = 2000,
+        adapter_factory=SoundSwitchMidiInputAdapter,
+    ) -> None:
+        binding_devices = {binding.device_name for binding in bindings}
+        if len(set(aliases.values())) != len(aliases):
+            raise ValueError("controller input aliases must own distinct ports")
+        unknown = sorted(set(aliases) - binding_devices)
+        if unknown:
+            raise ValueError("controller input alias has no verified binding")
+        self._entries: tuple[tuple[str, str, SoundSwitchMidiInputAdapter], ...] = tuple(
+            (
+                device_name,
+                aliases[device_name],
+                adapter_factory(
+                    [binding for binding in bindings if binding.device_name == device_name],
+                    stale_timeout_ms=stale_timeout_ms,
+                ),
+            )
+            for device_name in sorted(aliases)
+        )
+        self._started = False
+
+    @property
+    def worker_count(self) -> int:
+        return len(self._entries)
+
+    def start(self) -> None:
+        if self._started:
+            raise RuntimeError("SoundSwitchMidiInputGroup already started")
+        try:
+            for device_name, port_alias, adapter in self._entries:
+                adapter.start(port_alias, device_name=device_name)
+        except Exception as exc:
+            for _device_name, _port_alias, adapter in reversed(self._entries):
+                try:
+                    adapter.stop()
+                except Exception:
+                    pass
+            raise RuntimeError("controller input startup failed") from exc
+        self._started = True
+
+    def stop(self) -> None:
+        for _device_name, _port_alias, adapter in reversed(self._entries):
+            try:
+                adapter.stop()
+            except Exception:
+                pass
+        self._started = False
+
+    def panic(self) -> None:
+        for _device_name, _port_alias, adapter in self._entries:
+            adapter.panic()
+
+    def on_pack_reload(self) -> None:
+        for _device_name, _port_alias, adapter in self._entries:
+            adapter.on_pack_reload()
+
+    def snapshot(self) -> MidiInputSnapshot:
+        snapshots = [adapter.snapshot() for _device, _port, adapter in self._entries]
+        held_slots = {
+            snapshot.held_static_slot
+            for snapshot in snapshots
+            if snapshot.held_static_slot is not None
+        }
+        conflict = len(held_slots) > 1
+        has_error = any(snapshot.error for snapshot in snapshots)
+        return MidiInputSnapshot(
+            held_static_slot=(None if conflict or not held_slots else next(iter(held_slots))),
+            blackout_held=any(snapshot.blackout_held for snapshot in snapshots),
+            worker_alive=(all(snapshot.worker_alive for snapshot in snapshots)
+                          if snapshots else True),
+            error=("conflicting_static_holds" if conflict else
+                   "input_error" if has_error else None),
+            mail_drop_count=sum(snapshot.mail_drop_count for snapshot in snapshots),
+        )
+
+    def status(self) -> dict:
+        snapshot = self.snapshot()
+        return {
+            "configured_inputs": len(self._entries),
+            "worker_alive": snapshot.worker_alive,
+            "has_error": snapshot.error is not None,
+            "mail_drop_count": snapshot.mail_drop_count,
+        }
 
 
 __all__ = [
     "MidiInputSnapshot",
     "PackMidiBinding",
     "SoundSwitchMidiInputAdapter",
+    "SoundSwitchMidiInputGroup",
 ]

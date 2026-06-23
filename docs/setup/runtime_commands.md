@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: eff532e
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -11,7 +11,11 @@ validation_scope: software-validated only; hardware-unvalidated in repo evidence
 Runtime commands are append-only JSONL records read by `CommandReader` in `runtime_status.py`.
 The parser, not this document, is authoritative. If this document and `parse_command()` disagree, `parse_command()` wins, because apparently even documentation needs a leash.
 
-Tasks 1–2 add no command or status field for offline SoundSwitch decode, deterministic export, canonical-pack generation, or independent verification. Task 3 loader/player and Task 4+ MIDI/runtime/backend/Enttec controls remain planned and unimplemented; all existing command behavior is unchanged.
+SoundSwitch T7e adds the accepted `set_soundswitch_pack` command and a sanitized
+`soundswitch_pack` status block. The callback is wired through
+`SoundSwitchPackController` on the command thread; blocking load/verify/serial
+work never enters the 200 Hz push loop. No menubar `Export from SS` action calls
+this command yet.
 
 ## Runtime files
 
@@ -54,6 +58,7 @@ echo '{"cmd":"run_validation"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
 | `led_blackout` | none | `reason`, `target` | Rejects unknown fields. `reason` and `target`, when present, must be non-empty strings. | Invokes LED blackout callback if wired. |
 | `led_clear_blackout` | none | none | Rejects all payload fields except `cmd`. | Clears LED blackout callback if wired. |
 | `led_clear_scene_override` | none | none | Rejects all payload fields except `cmd`. | Clears LED scene override callback if wired. |
+| `set_soundswitch_pack` | `action` | `backend`, `enabled` | Rejects unknown fields. `action` must be `reload`\|`backend`\|`enable`. `backend` action requires `backend` ∈ `pack`\|`none`\|`midi`. `enable` action requires boolean `enabled`. | Validate-first pack reload/backend/enable via `SoundSwitchPackController` (command thread). Runtime `backend=midi` is deferred (sanitized `unsupported_action`). No implicit hot-enable; pack failure falls back to disabled/none, never MIDI. Status/errors are sanitized. |
 
 ## Parser behavior
 

@@ -36,6 +36,7 @@ from typing import Callable, Literal, Optional
 from .laser_decision_log import LaserDecision, LaserDecisionLog
 from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
 from .smart_phrasing import SmartPhrasingState
+from .drop_lifecycle import DropLifecycle, DropLifecycleConfig
 
 log = logging.getLogger("laser_director")
 
@@ -46,6 +47,7 @@ log = logging.getLogger("laser_director")
 _DEFAULT_SAFE_SCENE = "safe_static"
 _DEFAULT_DEFAULT_SCENE = "house_phrase_1"
 _DEFAULT_EMERGENCY_SCENE = "emergency_blackout"
+_LASER_DROP_IMPACT_PREDECESSORS = frozenset({"up", "low", "buildup", "breakdown"})
 
 
 class LaserDirector:
@@ -80,6 +82,7 @@ class LaserDirector:
         buildup_lookahead_beats: int = 32,
         post_drop_hold_beats: int = 8,
         drop_style: str = "drop_mode",
+        scenes: Optional[dict] = None,
     ) -> None:
         self._dry_run = dry_run
         self._enabled = enabled
@@ -100,6 +103,7 @@ class LaserDirector:
         self._buildup_lookahead_beats = max(0, int(buildup_lookahead_beats))
         self._post_drop_hold_beats = max(0, int(post_drop_hold_beats))
         self._drop_style = self._canon_drop_style(drop_style)
+        self._scenes = scenes or {}
 
         # Mutable policy state — written only from the StateManager thread.
         self._emergency: bool = False
@@ -124,6 +128,10 @@ class LaserDirector:
         self._last_buildup_gate_log_key: Optional[tuple[object, ...]] = None
         self._smart_drop_blackout_active: bool = False
         self._decision_log = LaserDecisionLog()
+        self._drop_lifecycle: Optional[DropLifecycle] = None
+        self._drop_lifecycle_mirror: bool = True
+        self._allow_high_impact: bool = False
+        self._post_drop_bank: tuple[str, ...] = ()
 
     # ── Policy commands (called from StateManager._handle_event) ─────────────
 
@@ -197,6 +205,15 @@ class LaserDirector:
         self._drop_style = self._canon_drop_style(
             getattr(personality, "drop_style", "drop_mode")
         )
+        self._drop_lifecycle_mirror = bool(getattr(personality, "drop_lifecycle_mirror", True))
+        self._allow_high_impact = bool(getattr(personality, "allow_high_impact", False))
+        self._post_drop_bank = tuple(personality.post_drop_bank)
+        self._drop_lifecycle = DropLifecycle(DropLifecycleConfig(
+            max_drops_in_a_row=int(getattr(personality, "max_drops_in_a_row", 2)),
+            drop_impact_beats=float(getattr(personality, "drop_impact_beats", 32.0)),
+            post_drop_cycle_beats=float(getattr(personality, "post_drop_cycle_beats", 32.0)),
+            impact_predecessors=_LASER_DROP_IMPACT_PREDECESSORS,
+        ))
 
     @staticmethod
     def _canon_drop_style(value: object) -> str:
@@ -289,6 +306,24 @@ class LaserDirector:
                 triggered_by=triggered_by,
             )
         )
+
+    def _has_usable_cyclable_post_drop(self) -> bool:
+        for name in self._post_drop_bank:
+            sd = self._scenes.get(name)
+            if sd is None:
+                continue
+            if sd.scene_type != "autoloop":
+                continue
+            if sd.safety_class == "high_impact" and not self._allow_high_impact:
+                continue
+            return True
+        return False
+
+    def reset_runtime_state(self, reason: str) -> None:
+        del reason  # accepted for call-site symmetry / logging only
+        if self._drop_lifecycle is not None:
+            self._drop_lifecycle.reset()
+        self._reset_smart_observation_state()
 
     def _decide(self, ctx: LaserContext, *, now: float) -> LaserSceneDecision:
         """Priority-ordered scene selection. Returns a LaserSceneDecision."""
@@ -429,52 +464,98 @@ class LaserDirector:
                 role="breakdown",
             )
 
-        # Priority 9: Drop crossing (once per target beat).
-        if previous_abs_beat is not None and self._drop_scene:
-            if sp.smart_drop_crossing:
-                self._pending_drop_crossing_beat = None
-                self._drop_rearm_edge_seen_for_pending = False
+        # Priority 9 + 10: gated drop lifecycle (mirror) OR the original ungated path.
+        drop_lifecycle_mirror_on = self._drop_lifecycle_mirror
+        if self._drop_lifecycle is not None and drop_lifecycle_mirror_on:
+            res = self._drop_lifecycle.resolve(sp, mutate=True)  # full LED drop region, one call
+            # Preserve today's priority-9 guards (:433): do NOT emit the immediate at-anchor
+            # drop_crossing on the first smart tick after a reset (previous_abs_beat is None) or
+            # with an unconfigured drop scene. resolve() may still have armed the lifecycle this
+            # tick — fine: the impact then surfaces as res.role == "drop" -> drop_cycle below,
+            # which fires no MIDI at a blackout-mode crossing (autoloop_tick_just_fired is False
+            # there), matching today's no-fire.
+            if res.armed_this_tick and previous_abs_beat is not None and self._drop_scene:
+                # ALLOWED impact START -> reason="drop_crossing": executor fires immediately AND
+                # resolves the Smart Drop blackout, byte-identical to today for allowed crossings
+                # (A4). res.armed_this_tick is True only when impact_allowed (the GATE) — an
+                # ungated smart_drop_crossing in groove/buildup no longer fires a drop (A3 fix).
                 self._post_drop_start_abs_beat = abs_beat
                 self._last_smart_abs_beat = abs_beat
                 return LaserSceneDecision(
-                    scene=self._drop_scene,
-                    reason="drop_crossing",
-                    priority=9,
-                    source="policy",
-                    role="drop",
+                    scene=self._drop_scene, reason="drop_crossing",
+                    priority=9, source="policy", role="drop",
                 )
-
-        # Priority 10: Hold after the drop.
-        in_post_drop_hold = (
-            self._post_drop_hold_beats > 0
-            and self._post_drop_start_abs_beat >= 0.0
-            and (abs_beat - self._post_drop_start_abs_beat) < self._post_drop_hold_beats
-        )
-        if in_post_drop_hold:
-            if self._drop_style == "emphasized_drop":
-                if self._post_drop_scene:
-                    self._last_smart_abs_beat = abs_beat
-                    return LaserSceneDecision(
-                        scene=self._post_drop_scene,
-                        reason="post_drop_hold",
-                        priority=10,
-                        source="policy",
-                        role="post_drop",
-                    )
-            elif self._drop_scene:
-                # drop_mode: hold the rotated drop look itself for the post-drop
-                # window; there is no separate post-drop scene. The executor keeps
-                # the already-fired (rotated) drop scene latched via role-unchanged
-                # + same-scene skip, so this decision MUST NOT re-fire MIDI — the
-                # reason is deliberately not "drop_crossing".
+            if res.role == "drop":  # sustained inside the window (or guarded-out first tick)
                 self._last_smart_abs_beat = abs_beat
                 return LaserSceneDecision(
-                    scene=self._drop_scene,
-                    reason="drop_hold",
-                    priority=10,
-                    source="policy",
-                    role="drop",
+                    scene=self._drop_scene, reason="drop_cycle",
+                    priority=10, source="policy", role="drop",
                 )
+            if res.role == "post_drop":
+                self._last_smart_abs_beat = abs_beat
+                if self._has_usable_cyclable_post_drop():
+                    return LaserSceneDecision(
+                        scene=self._post_drop_scene or self._drop_scene,
+                        reason="post_drop_cycle",
+                        priority=10, source="policy", role="post_drop",
+                    )
+                return LaserSceneDecision(  # no usable post_drop -> cycle drops, never dark
+                    scene=self._drop_scene, reason="drop_cycle",
+                    priority=10, source="policy", role="drop",
+                )
+            # res.role == "none": the resolver owns the drop/post_drop window, so we are NOT in a
+            # post-drop hold. The preserved Priority-11 buildup gate (below) reads this local.
+            in_post_drop_hold = False
+        else:
+            # Flag OFF (or no lifecycle): the ORIGINAL Priority-9 + Priority-10 code, VERBATIM.
+            # Priority 9: Drop crossing (once per target beat).
+            if previous_abs_beat is not None and self._drop_scene:
+                if sp.smart_drop_crossing:
+                    self._pending_drop_crossing_beat = None
+                    self._drop_rearm_edge_seen_for_pending = False
+                    self._post_drop_start_abs_beat = abs_beat
+                    self._last_smart_abs_beat = abs_beat
+                    return LaserSceneDecision(
+                        scene=self._drop_scene,
+                        reason="drop_crossing",
+                        priority=9,
+                        source="policy",
+                        role="drop",
+                    )
+
+            # Priority 10: Hold after the drop.
+            in_post_drop_hold = (
+                self._post_drop_hold_beats > 0
+                and self._post_drop_start_abs_beat >= 0.0
+                and (abs_beat - self._post_drop_start_abs_beat) < self._post_drop_hold_beats
+            )
+            if in_post_drop_hold:
+                if self._drop_style == "emphasized_drop":
+                    if self._post_drop_scene:
+                        self._last_smart_abs_beat = abs_beat
+                        return LaserSceneDecision(
+                            scene=self._post_drop_scene,
+                            reason="post_drop_hold",
+                            priority=10,
+                            source="policy",
+                            role="post_drop",
+                        )
+                elif self._drop_scene:
+                    # drop_mode: hold the rotated drop look itself for the post-drop
+                    # window; there is no separate post-drop scene. The executor keeps
+                    # the already-fired (rotated) drop scene latched via role-unchanged
+                    # + same-scene skip, so this decision MUST NOT re-fire MIDI — the
+                    # reason is deliberately not "drop_crossing".
+                    self._last_smart_abs_beat = abs_beat
+                    return LaserSceneDecision(
+                        scene=self._drop_scene,
+                        reason="drop_hold",
+                        priority=10,
+                        source="policy",
+                        role="drop",
+                    )
+        # Both branches above have either returned or set `in_post_drop_hold`. Execution continues
+        # into the UNCHANGED Priority-11 buildup window + _decide_phrase_default (current :479+).
 
         # Priority 11: Smart Drop countdown buildup window.
         beats_to_next_drop = sp.beats_to_next_drop

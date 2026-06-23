@@ -158,8 +158,10 @@ class TestSoundSwitchFrameSender(unittest.TestCase):
     def _make_sender(self, **kwargs) -> tuple["SoundSwitchFrameSender", FakeSerial]:
         fake = FakeSerial()
         kwargs.setdefault("poll_s", 0.005)
+        fixture_map = kwargs.pop("fixture_map", FULL_FIXTURE_MAP)
         sender = SoundSwitchFrameSender(
             port="/dev/fake_test_port",
+            fixture_map=fixture_map,
             port_factory=_fake_factory(fake),
             **kwargs,
         )
@@ -175,6 +177,7 @@ class TestSoundSwitchFrameSender(unittest.TestCase):
 
         sender = SoundSwitchFrameSender(
             port="/dev/should_never_open",
+            fixture_map=FULL_FIXTURE_MAP,
             port_factory=lambda *a, **kw: FakeSerial(),
         )
         sender.start()
@@ -182,14 +185,54 @@ class TestSoundSwitchFrameSender(unittest.TestCase):
         sender.stop()
         self.assertEqual(opened_real, [], "Real serial port was opened — forbidden!")
 
+    def test_async_port_open_failure_is_reported_by_start(self):
+        """start() must not report pack-ready before the worker opens its port."""
+        def _fail_after_thread_starts(_port, **_kw):
+            time.sleep(0.01)
+            raise OSError("synthetic open failure")
+
+        sender = SoundSwitchFrameSender(
+            port="/dev/fake_failure",
+            fixture_map=FULL_FIXTURE_MAP,
+            port_factory=_fail_after_thread_starts,
+        )
+        with self.assertRaisesRegex(RuntimeError, "failed to open"):
+            sender.start(readiness_timeout_s=0.5)
+        self.assertTrue(sender.status()["stopped"])
+        self.assertFalse(sender.status()["worker"]["running"])
+
+    def test_stop_before_start_is_safe_for_startup_rollback(self):
+        """A constructed-but-never-started sender must stop cleanly (no port open).
+
+        This is the partial-start rollback path: when controller input fails to
+        start, __main__ calls frame_sender.stop() on a sender whose worker thread
+        never ran.  It must not open the serial port, hang, or raise.
+        """
+        opened_real = []
+
+        def _tracking_factory(port, **_kw):
+            opened_real.append(port)
+            return FakeSerial()
+
+        sender = SoundSwitchFrameSender(
+            port="/dev/should_never_open",
+            fixture_map=FULL_FIXTURE_MAP,
+            port_factory=_tracking_factory,
+        )
+        sender.stop()  # never started — must be safe and idempotent
+        sender.stop()
+        self.assertEqual(opened_real, [], "Serial port opened during rollback — forbidden!")
+        self.assertTrue(sender.status()["stopped"])
+        self.assertFalse(sender.status()["worker"]["running"])
+
     def test_submit_sends_expanded_frame(self):
         """submit() must expand CH1-CH19 and transmit the correct DMX packet."""
-        sender, fake = self._make_sender()
+        fixture_map = {channel: 100 + channel for channel in range(1, 20)}
+        sender, fake = self._make_sender(fixture_map=fixture_map)
         sender.start()
 
         frame = (200,) + (0,) * 18  # CH1=200
-        fixture_map = {1: 1}
-        sender.submit(frame, fixture_map)
+        sender.submit(frame)
 
         # Wait for worker to drain mailbox.
         deadline = time.monotonic() + 1.0
@@ -234,9 +277,9 @@ class TestSoundSwitchFrameSender(unittest.TestCase):
         pkt_b = build_dmx_packet(expand_ch1_ch19_to_512(frame_b, fm))
         pkt_c = build_dmx_packet(expand_ch1_ch19_to_512(frame_c, fm))
 
-        sender.submit(frame_a, fm)
-        sender.submit(frame_b, fm)
-        sender.submit(frame_c, fm)
+        sender.submit(frame_a)
+        sender.submit(frame_b)
+        sender.submit(frame_c)
 
         time.sleep(0.7)
         sender.stop()
@@ -248,18 +291,21 @@ class TestSoundSwitchFrameSender(unittest.TestCase):
         """status() must return the expected diagnostic keys."""
         sender, _ = self._make_sender()
         s = sender.status()
-        for key in ("sender", "port", "stopped", "submit_count", "zero_count",
+        for key in ("sender", "stopped", "submit_count", "zero_count",
                     "idle_blackout_s", "seconds_since_last_submit", "worker"):
             self.assertIn(key, s, f"Missing status key: {key}")
+        self.assertNotIn("port", s)
+        self.assertNotIn("/dev/fake_test_port", repr(s))
+        self.assertNotIn("last_error", s["worker"])
 
     def test_submit_count_increments(self):
         """status()['submit_count'] increments on each submit() call."""
         sender, fake = self._make_sender()
         sender.start()
         fm = FULL_FIXTURE_MAP
-        sender.submit((0,) * 19, fm)
-        sender.submit((0,) * 19, fm)
-        sender.submit((0,) * 19, fm)
+        sender.submit((0,) * 19)
+        sender.submit((0,) * 19)
+        sender.submit((0,) * 19)
         sender.stop()
         self.assertEqual(sender.status()["submit_count"], 3)
 
@@ -269,7 +315,7 @@ class TestSoundSwitchFrameSender(unittest.TestCase):
         sender.start()
         sender.stop()
         # submit after stop — must not raise
-        sender.submit((50,) + (0,) * 18, FULL_FIXTURE_MAP)
+        sender.submit((50,) + (0,) * 18)
         self.assertEqual(sender.status()["submit_count"], 0)
 
     def test_idle_blackout_fires(self):
@@ -289,6 +335,14 @@ class TestSoundSwitchFrameSender(unittest.TestCase):
         dmx = expand_ch1_ch19_to_512(frame, FULL_FIXTURE_MAP)
         pkt = build_dmx_packet(dmx)
         self.assertEqual(pkt, _ZERO_PACKET)
+
+    def test_constructor_rejects_incomplete_or_invalid_fixture_map(self):
+        with self.assertRaisesRegex(ValueError, "exactly CH1..CH19"):
+            SoundSwitchFrameSender(port="unused", fixture_map={1: 1})
+        invalid = dict(FULL_FIXTURE_MAP)
+        invalid[1] = True
+        with self.assertRaisesRegex(ValueError, "integers from 1 to 512"):
+            SoundSwitchFrameSender(port="unused", fixture_map=invalid)
 
 
 if __name__ == "__main__":

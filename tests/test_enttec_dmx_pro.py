@@ -8,6 +8,7 @@ Byte-equivalence target is the VLN reference (~/virtuallasernode/calib/dmx_pro.p
 confirmed 2026-06-21.  The known-good blackout packet (518 bytes) is:
   7E 06 01 02 00 <512x00> E7
 """
+import signal
 import sys
 import threading
 import time
@@ -257,6 +258,31 @@ class TestSoundSwitchDmxWorker(unittest.TestCase):
         time.sleep(0.05)
         worker.stop()
         self.assertTrue(fake.closed, "Serial port was not closed on stop")
+
+    def test_start_does_not_install_signal_handlers(self):
+        """worker.start() must NOT overwrite process-level SIGTERM/SIGINT handlers.
+
+        The bridge owner (__main__ _shutdown) is the single signal authority.
+        CONFIRMATION: No serial/Enttec/hardware port opened in this test.
+        """
+        worker, _ = self._make_worker(poll_s=0.01)
+        sigterm_before = signal.getsignal(signal.SIGTERM)
+        sigint_before = signal.getsignal(signal.SIGINT)
+        try:
+            worker.start()
+            time.sleep(0.05)
+            sigterm_after = signal.getsignal(signal.SIGTERM)
+            sigint_after = signal.getsignal(signal.SIGINT)
+            self.assertIs(
+                sigterm_after, sigterm_before,
+                "start() must not replace the SIGTERM handler",
+            )
+            self.assertIs(
+                sigint_after, sigint_before,
+                "start() must not replace the SIGINT handler",
+            )
+        finally:
+            worker.stop()
 
 
 if __name__ == "__main__":

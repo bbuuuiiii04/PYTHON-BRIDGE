@@ -87,8 +87,25 @@ class _RateState:
             self._last_value[key] = value
             return True
 
+    def reset(self) -> None:
+        """Clear all throttle/change state. For test isolation only."""
+        with self._lock:
+            self._last_emit.clear()
+            self._last_value.clear()
+
 
 _RATE = _RateState()
+
+
+def reset_rate_state() -> None:
+    """Reset the process-global throttle/change registry.
+
+    Test-support only.  Throttle keys are sometimes derived from ``id(obj)``,
+    which CPython reuses after an object is collected, so without a reset the
+    global registry leaks state across tests that create many short-lived
+    objects (e.g. one status writer per test).  Production never needs this.
+    """
+    _RATE.reset()
 
 
 def log_throttled(key: str, min_interval_s: float, now: Optional[float] = None) -> bool:

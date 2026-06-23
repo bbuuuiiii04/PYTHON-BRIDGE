@@ -2,14 +2,18 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-06-21.
+Audited against the current checkout at `b2ce63d` on 2026-06-23.
 
-## Offline SoundSwitch Project Boundary
+## SoundSwitch Pack Component Boundary
 
 - `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` provide frozen models and strict read-only decode; `soundswitch_pack.py` and `tools/export_soundswitch_pack.py` deterministically publish a canonical 95-artifact pack; `soundswitch_pack_verifier.py` independently verifies it. All are pinned to SoundSwitch 2.10.3 and the canonical UUID/RAVE profile.
 - Decode/export must not mutate a source project. Pack publication is deterministic and fail-closed; independent verification rejects inventory, hash, canonicalization, semantic, crosswalk, or source-drift changes, including the F9 one-byte mutation.
-- The offline lane is outside live runtime: it does not write `DeckState`/`OutputState`, enqueue `BridgeEvent`s, perform OS2L/MIDI/LED/Govee/Enttec output, or add config, commands, and status fields.
-- Task 3 loader/player and Task 4+ MIDI/runtime/backend integration, Enttec hard-kill behavior, and hardware validation remain future work.
+- The immutable pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender are software-tested components. The never-raising config loader is used only during startup/reload; config or pack filesystem work must never enter `_push_tick`.
+- `__main__` loads optional pack config, chooses one backend, starts verified workers, builds one immutable `PackRuntime`, and wires validate-first commands/status. `StateManager` reads one runtime reference per tick and is the sole `submit_frame` caller.
+- Absent/disabled config preserves the legacy MIDI path. Dry-run/none opens no physical pack output. Pack failure falls back to disabled/none, never physical MIDI.
+- Direct DMX and physical MIDI output are mutually exclusive at backend construction and port ownership. Owner-driven Enttec stop sends zero, but process death/`kill -9` can leave the last frame latched; hardware validation remains future work.
+- Native pack Autoloop output remains zero-safe until T7d captures uniquely prove scale, quantizer, and every active transition-origin rule. No agent may assume 600 ticks/beat.
+- The scripted driver is not a completed live contract yet: pause-vs-stop, explicit scripted-mode authority, MIDI-input health fail-to-zero, and complete sanitized operational status remain active gaps in `docs/plans/active/soundswitch_exporter_remaining_work.md`.
 
 ## State Ownership
 
@@ -28,6 +32,14 @@ Audited against the current checkout on 2026-06-21.
   MIDI side effects directly.
 - `LaserSceneExecutor` owns laser MIDI trigger execution, blackout/cooldown,
   and transition-mask cleanup for laser output.
+- `DropLifecycle` is a pure resolver. Default-on laser impacts must pass the
+  LED-equivalent phrase-context gate; sustained drop/post-drop cycles may fire
+  only on autoloop ticks and may select only usable autoloop scenes.
+- An initial laser drop impact may fall back to the configured static drop
+  scene when no usable cyclable entry exists; this prevents a silent dark hit.
+- Setting `drop_lifecycle_mirror` false must retain the pre-mirror director and
+  executor path. Lifecycle state must reset on the documented track/deck/mode
+  teardown boundaries without adding I/O to `_push_tick`.
 - `StateManager` remains the coordinator: event-loop owner, suppression-gate
   owner, `DeckState`/`OutputState` owner, and runtime decision/log owner.
 - `beat_math.py` helpers remain pure computation utilities (no runtime state or
@@ -46,6 +58,9 @@ Audited against the current checkout on 2026-06-21.
   API/LAN/cloud behavior.
 - Automatic LED role-entry is transition/role-keyed only. It must not emit
   commands every tick or every beat.
+- The live LED drop/post-drop resolver remains in `StateManager`; pure
+  `DropLifecycle` parity covers only its flat impact window and must not be
+  treated as live per-look-duration or backend-offset parity.
 - Scripted-track LED automation must stay behind the existing
   `safety.scripted_mode_automation` master switch and the `lighting_mode ==
   "scripted"` gate. Role remapping is a latched policy lookup, not config

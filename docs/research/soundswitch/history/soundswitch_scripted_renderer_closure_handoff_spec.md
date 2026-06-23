@@ -404,7 +404,7 @@ Update every `soundswitch_research.docs_update` file, especially:
 
 - `docs/research/soundswitch/soundswitch_ssfile_format.md`;
 - `docs/research/soundswitch/soundswitch_validation_matrix.md`;
-- `docs/research/soundswitch/soundswitch_standalone_laser_exporter_spec.md`;
+- `docs/research/soundswitch/history/soundswitch_standalone_laser_exporter_spec.md`;
 - this handoff;
 - `docs/status/active_work_registry.md`;
 - `docs/agents/change_contracts.yml` if tool/docs routing changes.

@@ -921,6 +921,63 @@ class PersonalityValidationTests(unittest.TestCase):
         r = load_laser_director_config(_write_config(cfg))
         self.assertIsInstance(r.config.personalities["house"], LaserPersonality)
 
+    # --- drop-lifecycle knob validation (Task 2) ---
+    def test_drop_lifecycle_mirror_must_be_bool(self) -> None:
+        p = self._valid_personality()
+        p["drop_lifecycle_mirror"] = 1  # int, not bool
+        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
+        self.assertFalse(r.available)
+        self.assertTrue(any("drop_lifecycle_mirror" in e for e in r.errors))
+
+    def test_max_drops_in_a_row_must_be_positive(self) -> None:
+        p = self._valid_personality()
+        p["max_drops_in_a_row"] = 0
+        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
+        self.assertFalse(r.available)
+        self.assertTrue(any("max_drops_in_a_row" in e for e in r.errors))
+
+    def test_max_drops_in_a_row_rejects_bool(self) -> None:
+        p = self._valid_personality()
+        p["max_drops_in_a_row"] = True  # bool must NOT count as a valid int
+        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
+        self.assertFalse(r.available)
+        self.assertTrue(any("max_drops_in_a_row" in e for e in r.errors))
+
+    def test_drop_impact_beats_must_be_positive_number(self) -> None:
+        p = self._valid_personality()
+        p["drop_impact_beats"] = -1
+        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
+        self.assertFalse(r.available)
+        self.assertTrue(any("drop_impact_beats" in e for e in r.errors))
+
+    def test_drop_impact_beats_rejects_bool(self) -> None:
+        p = self._valid_personality()
+        p["drop_impact_beats"] = True  # bool must NOT count as a valid number
+        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
+        self.assertFalse(r.available)
+        self.assertTrue(any("drop_impact_beats" in e for e in r.errors))
+
+    def test_post_drop_cycle_beats_must_be_positive(self) -> None:
+        p = self._valid_personality()
+        p["post_drop_cycle_beats"] = 0
+        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
+        self.assertFalse(r.available)
+        self.assertTrue(any("post_drop_cycle_beats" in e for e in r.errors))
+
+    def test_valid_non_default_lifecycle_knobs_ok(self) -> None:
+        p = self._valid_personality()
+        p["drop_lifecycle_mirror"] = False
+        p["max_drops_in_a_row"] = 3
+        p["drop_impact_beats"] = 16
+        p["post_drop_cycle_beats"] = 24.0
+        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
+        self.assertTrue(r.available, msg=r.errors)
+        house = r.config.personalities["house"]
+        self.assertFalse(house.drop_lifecycle_mirror)
+        self.assertEqual(house.max_drops_in_a_row, 3)
+        self.assertEqual(house.drop_impact_beats, 16.0)
+        self.assertEqual(house.post_drop_cycle_beats, 24.0)
+
     def test_phrase_interval_beats_must_be_positive_int(self) -> None:
         p = self._valid_personality()
         p["phrase_interval_beats"] = 0

@@ -274,6 +274,36 @@ Forbidden assumptions:
 - OS2L message generation does not prove every SoundSwitch version works.
 - Catalog/import/UI documents are uncertain unless verified against current code.
 
+## SoundSwitch pack/exporter/player changes
+
+Triggered by changes to the SoundSwitch project decoder, pack compiler/verifier,
+loader/player, MIDI adapter, output backend, Enttec sender, pack config,
+StateManager pack driver, startup/runtime controller, menubar export workflow,
+or their tests.
+
+Inspect first:
+
+- `docs/plans/active/soundswitch_exporter_remaining_work.md`
+- `docs/plans/active/soundswitch_README.md`
+- `docs/prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md`
+- `docs/prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md`
+- `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
+- `docs/subsystems/soundswitch_output.md`
+- the exact code and tests named by the active roadmap item
+
+Update the active roadmap and every document listed under
+`soundswitch_pack_player.docs_update` in `change_contracts.yml`. Run the proof
+gate, affected tests, full suite, hard docs checks, staleness report, and
+`git diff --check` as required by the roadmap.
+
+Forbidden assumptions:
+
+- a successful new-path export proves safe replacement of an existing pack;
+- a pure scripted renderer proves runtime pause/mode/input-health behavior;
+- 600 ticks/beat or one universal Autoloop origin is known before T7d capture;
+- software/wire tests prove Enttec/fixture behavior;
+- reload implies permission to enable output, change backend, or restart.
+
 ## Config schema changes
 
 Triggered by changes to:

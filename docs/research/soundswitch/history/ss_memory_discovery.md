@@ -273,7 +273,7 @@ scope for this investigation.
 - `tools/signed_python/python3_dbg` — ad-hoc-signed python binary (failed test)
 - `tools/signed_python/debugger.entitlements` — entitlements template
   (kept for documentation / future Developer ID use)
-- `docs/ss_memory_discovery.md` — this notebook
+- `docs/research/soundswitch/history/ss_memory_discovery.md` — this notebook
 
 ### Phase 0 — Option A/E test (sudo)
 
@@ -509,7 +509,7 @@ no AMFI work, no Art-Net decoding. Implementation surface is a file watcher
   runtime + cs.debugger (kept for documentation)
 - `tools/signed_python/debugger.entitlements` — entitlements template
   (kept; reusable if Developer ID is ever acquired)
-- `docs/ss_memory_discovery.md` — this notebook
+- `docs/research/soundswitch/history/ss_memory_discovery.md` — this notebook
 
 ### Not done this session
 
@@ -945,7 +945,7 @@ Owned by `bbui:staff` unless noted; safe to keep, none are giant:
 
 **Read these first to recover context:**
 
-1. This file (`docs/ss_memory_discovery.md`) — full investigation log
+1. This file (`docs/research/soundswitch/history/ss_memory_discovery.md`) — full investigation log
 2. Memory entry `~/.claude/projects/-Users-bbui/memory/project_pr_f_blocked_amfi.md`
    (will be renamed `pr_f_phase2_in_progress.md` — see below)
 3. The original plan: `~/.claude/plans/ss-memory-discovery.md`
