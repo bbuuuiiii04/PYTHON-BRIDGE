@@ -62,12 +62,12 @@ Deprecated plans belong in `docs/architecture/doc_index.md` or `docs/archive/` w
 | --- | --- | --- | --- |
 | HW-001 | SoundSwitch OS2L local setup | version, interface, track, expected behavior, result, date | not logged |
 | HW-002 | Laser MIDI path | fixture/mapping, blackout behavior, manual override, safety notes | not logged |
-| HW-003 | Govee realtime path | device model, firmware/app assumptions, effect, result | not logged |
+| HW-003 | Govee realtime path | device model, firmware/app assumptions, effect, expected behavior, result | not logged |
 
 ## Compatibility expansion tasks
 
 | ID | Target | Required proof | Status |
-| --- | --- | --- |
+| --- | --- | --- | --- |
 | COMP-001 | Rekordbox versions beyond my current setup | reader/offset validation plus tests/logs | unknown |
 | COMP-002 | macOS versions beyond my current setup | launch/read/status validation | unknown |
 | COMP-003 | Windows/Linux | architecture decision, not docs optimism | unsupported/unknown |
