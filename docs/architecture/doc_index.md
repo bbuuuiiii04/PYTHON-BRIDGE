@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 2c71a2e
-last_verified_date: 2026-06-21
+last_verified_commit: 87f3e5e
+last_verified_date: 2026-06-23
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -45,6 +45,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | Change contracts | `docs/agents/change_contracts.md`, `docs/agents/change_contracts.yml` | CURRENT AUTHORITATIVE — what must update when code changes; enforced by checkers. |
 | Drift detection | `docs/agents/drift_detection.md` | CURRENT AUTHORITATIVE. |
 | Task playbooks | `docs/agents/task_playbooks/*.md` (8) | CURRENT AUTHORITATIVE — per-task reading routes. |
+| Operator workflow + skills | `docs/agents/operator_workflow.md`, `docs/agents/skills/*.md` | CURRENT SUPPORTING — maintainer-facing AI-only workflow, prompt templates, review gates, and reusable micro-skills. |
 | Subsystem cards | `docs/subsystems/{core_bridge,rekordbox_readers,soundswitch_output,laser,led_govee,runtime_commands,config,tests}.md` | CURRENT — compact, code-verified cards. |
 | Status / truth | `docs/status/*.md` (7) | CURRENT — project status, feature/support/validation matrices, known limitations, active work. |
 | Setup / usage | `docs/setup/*.md` (4) | CURRENT. |
