@@ -36,9 +36,18 @@ Do **not** read the whole repo. Do **not** start with old prompts/plans/history.
 
 If the task is still unclear after the path above, **stop and report uncertainty.** Do not spelunk old prompts to invent context.
 
-For maintainer/operator workflow, prompts, review, orchestration, validation, or handoff work, use `docs/agents/operator_workflow.md`.
+## 3. Maintainer workflow preferences — use every task
 
-## 3. Task router
+The maintainer prefers fewer prompts, bundled related work, and no manual branch juggling.
+
+- Do **not** make the maintainer paste or edit generic workflow templates. Infer the workflow from this file and the task request.
+- Bundled requests are allowed and expected. When a request contains multiple items, sort them before editing into: `implement now`, `needs clarification`, `separate follow-up`, or `should not be done`.
+- Keep related bundled changes together when that reduces prompting and review overhead. Do not silently expand into unrelated cleanup or architecture side quests.
+- You may suggest a better approach before implementation if it materially reduces risk, complexity, future maintenance, token waste, or hardware-safety risk. Limit this to one concise alternative. Do not implement the alternative unless approved. If it is outside the current scope, record it as a follow-up instead of expanding the change.
+- Prefer main/default-branch commits. Do not make the maintainer manage branches. If a branch or PR is unavoidable, manage the lifecycle yourself and clearly report exactly what remains unmerged.
+- Final reports must include: completed items, skipped/deferred items with reasons, files changed, tests/checks run, tests/checks not run, remaining uncertainty, follow-ups, and current repo state (`main/default branch`, `open PR`, `unmerged branch`, or `no changes`).
+
+## 4. Task router
 
 | Task | Playbook | Subsystem card | Contract key |
 |---|---|---|---|
@@ -51,11 +60,10 @@ For maintainer/operator workflow, prompts, review, orchestration, validation, or
 | Add tests | `docs/agents/task_playbooks/add_tests.md` | `docs/subsystems/tests.md` | `tests` |
 | Docs-only work | `docs/agents/task_playbooks/update_docs.md` | `docs/architecture/doc_index.md` | `docs` |
 | Review agent changes | `docs/agents/task_playbooks/review_agent_changes.md` | `docs/agents/change_contracts.md` | — |
-| Maintainer/operator workflow | `docs/agents/operator_workflow.md` | — | `docs` |
 
 Human + machine change contracts: `docs/agents/change_contracts.md` and `docs/agents/change_contracts.yml`. Drift detection: `docs/agents/drift_detection.md`.
 
-## 4. Source map (modules are intentionally flat at repo root)
+## 5. Source map (modules are intentionally flat at repo root)
 
 | Area | Files | Card |
 |---|---|---|
@@ -73,7 +81,7 @@ Human + machine change contracts: `docs/agents/change_contracts.md` and `docs/ag
 
 Entrypoint: `python3 -m rb_ss_bridge_v2` (package name `rb_ss_bridge_v2`). Do not move modules to "fix" imports; use this map.
 
-## 5. Architecture (authoritative detail — verify against code)
+## 6. Architecture (authoritative detail — verify against code)
 
 | Doc | Use |
 |---|---|
@@ -85,7 +93,7 @@ Entrypoint: `python3 -m rb_ss_bridge_v2` (package name `rb_ss_bridge_v2`). Do no
 
 Agent-facing summaries live in the subsystem cards; the four docs above are the deeper authority.
 
-## 6. Invariants agents must not break (verified at the current HEAD)
+## 7. Invariants agents must not break (verified at the current HEAD)
 
 - `StateManager` (`state_manager.py`) is the central runtime owner and the only writer of `DeckState`; it owns the **200 Hz push loop** (`_TICK_INTERVAL = 1.0/200`).
 - Runtime mutations flow through `BridgeEvent`s (`models.py`); events are treated as immutable after creation. Reader threads publish events/snapshots, never mutate `DeckState` directly.
@@ -97,13 +105,13 @@ Agent-facing summaries live in the subsystem cards; the four docs above are the 
 - Secrets (e.g. `GOVEE_API_KEY`), local IPs, device IDs, live config, and backup files must never be committed. Never commit `config/led_look_director.json.backup_1781599611`.
 - Docs-only work must not change runtime behavior. Old prompts/plans are never current truth without code verification.
 
-## 7. The non-negotiable anti-drift rule
+## 8. The non-negotiable anti-drift rule
 
 **Before** changing code: find its contract in `docs/agents/change_contracts.yml`.
 **After** changing code: update **every** doc that contract lists under `docs_update`, and run the checks below.
 If the change has no matching contract, **add/extend the contract first**, then edit code.
 
-## 8. Checks before committing docs- or agent-routing changes
+## 9. Checks before committing docs- or agent-routing changes
 
 ```bash
 python3 tools/check_docs_metadata.py     # required docs + status headers exist
@@ -126,11 +134,11 @@ python3 -m unittest discover tests
 
 Do **not** modify tests to make docs pass.
 
-## 9. Do not trust blindly (evidence, not authority)
+## 10. Do not trust blindly (evidence, not authority)
 
 `docs/prompts/**`, `docs/plans/**`, `docs/history/**`, `docs/archive/**`, any doc without a current status header, and any doc claiming "complete / ready / supported" without matching status-matrix evidence. A doc is **active** only if it is listed in `docs/status/active_work_registry.md` **and** verified against current code.
 
-## 10. Status language
+## 11. Status language
 
 Allowed: `implemented`, `software-tested`, `local-setup-operational`, `hardware-unvalidated`, `experimental`, `partial`, `planned`, `unsupported`, `unknown`, `stale/superseded`.
 
