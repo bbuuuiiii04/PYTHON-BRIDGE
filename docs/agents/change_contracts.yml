@@ -2,7 +2,7 @@
 # If code in code_globs changes, update every doc in docs_update and run the checks.
 # key_symbols are verified to exist in code by tools/check_agent_contracts.py.
 version: 2
-last_verified_commit: ad3b041
+last_verified_commit: 7b88b7f
 last_verified_date: 2026-06-23
 contracts:
   core_bridge:
@@ -253,6 +253,7 @@ contracts:
       - config.py
       - tests/test_soundswitch_pack*.py
       - tests/test_bridge_menubar.py
+      - tests/test_source_fingerprint_parity.py
       - tests/test_soundswitch_project*.py
       - tests/test_soundswitch_laser_player*.py
       - tests/test_soundswitch_midi_input*.py
