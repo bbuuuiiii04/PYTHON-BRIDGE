@@ -1,4 +1,8 @@
-# Codex Implementation Spec — SoundSwitch Tasks 7–9 (runtime integration · offline/shadow gates · hardware handoff)
+# Codex Implementation Spec — SoundSwitch Tasks 7–9 (superseded combined spec)
+
+> T7a/T7b/T7c/T7e and T8 landed. T7d and the hardware gate are now routed by
+> `docs/plans/active/soundswitch_exporter_remaining_work.md`; do not resume from
+> this mixed historical spec.
 
 > **Status:** planned / spec-only. Repo status stays **SOFTWARE/WIRE-VALIDATED ONLY /
 > HARDWARE-UNVALIDATED**. This document specifies the remaining SoundSwitch pack-player work

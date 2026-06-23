@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-06-22. Treat code as the source of
+Audited against the current checkout at `b2ce63d` on 2026-06-23. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -33,9 +33,24 @@ RBSS_SMART_BREAKDOWN=1
 
 These defaults are present in `scripts/ss_bridge_watcher.sh`.
 
-The SoundSwitch pack lane now contains frozen source models, strict read-only decode, deterministic canonical-pack export, independent verification, an immutable pack loader/player, a MIDI-input adapter, an output-backend abstraction, and an Enttec frame sender. The proof gate is 29 PASS / 0 FAIL / 0 INCOMPLETE, including F9 and F10. T7a adds a startup-only validated config loader whose tracked example is disabled, dry-run, and `output_backend=none`.
+The SoundSwitch pack lane contains frozen source models, strict read-only
+decode, deterministic canonical-pack export, independent verification, an
+immutable pack loader/player, a MIDI-input adapter, an output-backend
+abstraction, an Enttec frame sender, a validated default-off config loader,
+startup wiring, an atomic `PackRuntime`, validate-first runtime controls, and a
+StateManager scripted-frame driver. The current-project proof gate is 29 PASS /
+0 FAIL / 0 INCOMPLETE, including F9 and F10.
 
-This component lane is not a second live authority: `__main__` does not load the T7a config, and `StateManager` does not own or drive the pack player. Pack controller input, direct DMX, pack status, and pack commands are not started or wired. Existing OS2L, MIDI-laser, LED/Govee, Rekordbox, and command behavior remains unchanged and hardware-unvalidated.
+This lane remains subordinate to existing bridge authority. `__main__` loads
+the optional config and chooses one physical laser backend before workers start;
+`StateManager` reads authoritative deck state and is the sole per-tick
+`submit_frame` owner. Blocking load/verify/serial work remains on startup or the
+command thread. Absent/disabled config preserves legacy MIDI; dry-run/none opens
+neither physical output path. Confirmed remaining gaps are tracked in
+`docs/plans/active/soundswitch_exporter_remaining_work.md`: one-click canonical
+pack replacement/reload; scripted pause/mode/input-health/status closure; T7d
+capture-derived Autoloop phase integration; and hardware validation. Current
+native Autoloop pack output remains zero-safe.
 
 ## Runtime Subsystems
 
@@ -54,6 +69,8 @@ This component lane is not a second live authority: `__main__` does not load the
 | `LEDLookDirector` | LED room-look policy only | yes | called by `StateManager` thread | manual/emergency LED context and `SmartPhrasingState`-derived role | `LEDLookDecision` |
 | `GoveeSceneAdapter` | LED transport queue/worker | no hot-path I/O | public trigger called by `StateManager`; worker owns Govee transport | `LEDLookDecision` | bounded queue commands and sanitized adapter status |
 | `SoundSwitchEngine` | SoundSwitch output-intent fanout helper | yes | called by `StateManager` thread | active deck routing and send intents from `StateManager` | routed OS2L sends for scripted/autoloop/smart-transition/live-BPM-follow helpers |
+| `LaserPackPlayer` / `PackRuntime` | verified SoundSwitch pack rendering and atomic runtime snapshot | yes, pure/in-memory | player called by `StateManager`; bundle published by command thread | active deck metadata/elapsed, input snapshot, immutable pack | CH1-CH19 frame plus sanitized diagnostics |
+| `SoundSwitchFrameSender` / Enttec worker | mutually exclusive direct-DMX transport | no blocking hot-path I/O | `StateManager` submits to bounded mailbox; worker owns serial | CH1-CH19 frame + validated fixture map | Enttec DMX Pro packets; owner-driven zero/stop |
 | `beat_math.py` | pure beat and beatgrid math helper | yes | called in hot path from `StateManager` | elapsed ms, bpm, beatgrid markers | computed beat positions / target elapsed |
 | `OS2LConnection` / `OS2LOutput` | output transport authority | yes | sender/reconnect threads own sockets | SoundSwitch DNS-SD, send queue | TCP OS2L messages |
 | `StatusWriter` / `CommandReader` | auxiliary operator status/control | auxiliary | status/command threads | snapshots, command JSONL | status JSON, command side effects |
@@ -76,9 +93,10 @@ direct path inactive while MTC/current state fallbacks continue where available.
 
 ## Signal Flow
 
-1. Startup creates the event queue, OS2L connection, resolver, live BPM service,
-   status/command helpers, `StateManager`, optional `RBStateReader`,
-   `RBMemoryReader`, `MTCReader`, and OSC listener.
+1. Startup loads optional pack config, builds/starts exactly one laser output
+   backend when enabled, then creates the event queue, OS2L connection,
+   resolver, live BPM service, status/command helpers, `StateManager`, optional
+   `RBStateReader`, `RBMemoryReader`, `MTCReader`, and OSC listener.
 2. Startup master is seeded from direct master only when
    `RBSS_MASTER_SEED_DIRECT=1` and two direct reads are stable and valid;
    otherwise deck 1 is the default startup deck.
@@ -88,6 +106,10 @@ direct path inactive while MTC/current state fallbacks continue where available.
 5. `StateManager` resolves tracks, selects scripted or autoloop lighting, and
    sends mirrored OS2L updates to active, mirror, 3, and 4 through
    `SoundSwitchEngine`.
+6. When a verified pack runtime is explicitly active, the pack driver submits
+   one nonblocking CH1-CH19 frame per tick. Scripted playback is implemented but
+   has the pause/mode/input-health gaps named in the active roadmap; native
+   Autoloop rendering remains zero-safe pending T7d evidence.
 
 ## Smart-Transition Architecture
 

@@ -1,17 +1,18 @@
 ---
 doc_status: active-plan
 truth_level: code-grounded
-last_verified_commit: ed96b41
-last_verified_date: 2026-06-22
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: next-agent T7d resume handoff prompt; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
-# Next-agent handoff — finish T7d capture pass → derive contract → implement native autoloop DMX
+# Next-agent handoff — finish T7d capture pass → derive contract → spec gate
 
 You are taking over the **T7d** workstream in `/Users/bbui/rb_ss_bridge_v2` (branch
-`soundswitch/impl`, PR #116). **Scope (operator-chosen): (a)** finish the live capture pass,
-derive the proven phase contract, and — only if the evidence passes — implement the native
-autoloop→DMX runtime. (The separate "chorus drop-look cycling" laser spec at
+`soundswitch/impl`, PR #116). **Scope:** finish the live capture pass and derive
+the phase contract. If and only if evidence passes, author a separate Part A-E
+native-Autoloop runtime implementation spec for review. Do not implement that
+spec in this capture/evidence pass. (The separate "chorus drop-look cycling" laser spec at
 `docs/plans/active/chorus_drop_cycling_spec.md` is NOT your job here; it goes to Codex
 separately. It does not change T7d.)
 
@@ -38,8 +39,10 @@ Do not re-derive this from scratch or quiz the operator on it; it is verified ag
 - **The bridge advances the autoloop itself**: it streams `get_beatpos` (= `abs_beat_pos`) **every
   push-loop tick** (`send_elapsed`, `state_manager.py:3862`) + beat events (`send_beat`, `:3729`).
   SS just renders the selected look **at that beat position** — scrubbing the track scrubs the look.
-- **Static looks** are MIDI-note-mapped held DMX. (There are **no** "StaticOverride slots" — ignore
-  any doc that says so.)
+- **Static looks / Static Overrides** are separate held DMX records in the saved
+  project. The current project proof resolves four DDJ-mapped Static Override
+  slots (8, 16, 17, 24); the pack player keeps them as an independently held
+  overlay with blackout precedence.
 - The **SoundSwitch exporter / RE pipeline captures it all** (autoloop catalogs/looks, scripted
   `.ssfile`s, static looks + their DMX) = the pack; the **pack player = native DMX**.
 
@@ -64,17 +67,22 @@ future drop/post_drop cycling.
 
 ## 1. State as of this session
 - **Captures ACCEPTED so far (overlap-valid):** `arm` **2/2** (`t7d_arm_20260622_145840`,
-  `..._150103`), `refire` **2/2** (`t7d_refire_20260622_151420`, `..._151812`). Raw captures live
-  under `tools/ssfmt/captures/t7d/` (gitignored). Coverage so far: BPMs **130 / 138 / 141**.
+  `..._150103`), `refire` **2/2** (`t7d_refire_20260622_151420`, `..._151812`). One earlier arm run
+  failed because its baseline recorded zero bridge processes. Raw captures live
+  under `tools/ssfmt/captures/t7d/` (gitignored). Accepted traces contain observed
+  BPM values **130 / 138 / 141 / 150**, but identity ownership and valid oracle
+  segmentation have not been reconciled.
 - **Remaining scenarios (2 ACCEPTED reps each):** `master-switch`, `drop-hold`, `buildup`,
-  `correction`. (`correction` is provisional — keep it; if its `arm-grace-late`/`arm-correction-*`
-  markers never appear across accepted runs, it doesn't fire in this rig and can be dropped.)
+  `correction`. Do not drop a scenario merely because a marker does not appear;
+  classify the run fail-closed and reconcile the marker/code path before changing scope.
   `phrase-anchor` was **dropped** (dead in the live rig — `RBSS_PHRASE_ANCHOR` off).
-- **Corpus coverage still needed** (plan §A4/§B6): ≥3 verified IAC identities, ≥2 BPM/pitch values
-  (have 3 BPMs), ≥1 full holdout identity.
-- **B1 phase-trace wiring is live in the running bridge** (verified this session via a smoke test:
-  start recorder while playing → `autoloop_phase` rows + clean `phase_trace_footer`). If the bridge
-  is restarted, re-verify (see the smoke test in the capture-gate handoff §6).
+- **Corpus coverage still needed** (plan §A4/§B6): ≥3 verified IAC identities, ≥2
+  validated BPM/pitch values, ≥1 full holdout identity. Observed BPM diversity
+  does not close this gate by itself.
+- **B1 phase-trace wiring is proven in the existing accepted artifacts:** each
+  contains `autoloop_phase` rows + a clean `phase_trace_footer`. Runtime liveness
+  is not a lasting fact; before new captures, re-run `prepare` and the smoke test
+  after any restart (capture-gate handoff §6).
 - **Conductor (`tools/t7d_capture_conductor.py`) was hardened this session** — these fixes are why
   the captures are trustworthy:
   - counts the single **python** core, not the menubar `| tee` shell wrapper (`f66b69f`);
@@ -96,18 +104,21 @@ future drop/post_drop cycling.
 - **Fail-closed:** every timeout/empty/non-overlapping run is INCOMPLETE — re-run, never reinterpret.
 - **Live-safety:** no bridge restart / device output / MIDI-serial-Enttec-DMX open / SoundSwitch
   project mutation by you — operator actions; ping + poll. After any restart verify exactly one core.
-- **Roles:** Codex implements bridge code; you do evidence/analysis/planning + (task-scoped operator
-  override) the T7d runtime once evidence passes. Live-critical runtime work is **plan-first**.
+- **Roles:** this prompt owns evidence capture, offline derivation, and at most
+  the evidence-grounded implementation spec. Runtime implementation is a
+  separate reviewed Codex task. Live-critical runtime work is **plan-first**.
 
 ## 3. Read (smallest path)
 1. `AGENTS.md` (§1 source-of-truth order, §7 change contracts, §8 hard checks, §10 status language);
    `CLAUDE.md`.
-2. `docs/plans/active/soundswitch_t7d_capture_gate_handoff.md` — capture protocol + §6 session log
+2. `docs/plans/active/soundswitch_exporter_remaining_work.md` — current project
+   status, dependencies, and T7d boundary.
+3. `docs/plans/active/soundswitch_t7d_capture_gate_handoff.md` — capture protocol + §6 session log
    (restart gate, B1 smoke test, resume command, six-scenario table).
-3. `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` — scenarios, coverage, B5 derivation,
+4. `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` — scenarios, coverage, B5 derivation,
    B3 markers (scope banner: six scenarios, phrase-anchor dropped).
-4. `docs/validation/soundswitch_t7d_phase_contract_evidence.md` — the evidence ledger you will fill.
-5. `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` — exporter/pack
+5. `docs/validation/soundswitch_t7d_phase_contract_evidence.md` — the evidence ledger you will fill.
+6. `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` — exporter/pack
    authority (what the pack/player captures).
 Tools: `tools/t7d_capture_conductor.py` (prepare / run-scenario / validate-scenario /
 summarize-corpus), `tools/ssfmt/re/validate_autoloop_capture.py` (oracle, `--t7d`),
@@ -131,7 +142,8 @@ Derive `TICKS_PER_BEAT` and the per-transition phase origin on a **holdout** (fi
 identities/BPMs, confirm on held-out ones). **600 must be *earned* by the data** (= 19200/32 over the
 8-bar/32-beat loop), never assumed; `validate_autoloop_capture.py` `rate=bpm*10.0` is circular and is
 NOT proof. Because the origin is role-agnostic (§0), the per-transition-TYPE origins are what matter;
-expect the `refire` origin to also cover future drop/post_drop cycling (verify, don't assume).
+test whether the `refire` origin covers any future drop/post-drop cycling; do not
+carry that conclusion into a spec unless the evidence distinguishes and proves it.
 
 ### Phase 3 — write evidence + decide the gate
 Fill `docs/validation/soundswitch_t7d_phase_contract_evidence.md` (accepted/rejected/incomplete set,
@@ -141,16 +153,13 @@ hypotheses, final verdict). If FAIL/INCOMPLETE: update
 `docs/validation/soundswitch_t7d_phase_contract_blocked.md` and STOP — do not write a runtime spec
 without passing evidence.
 
-### Phase 4 — implement native autoloop DMX (ONLY if verdict == PASS)
+### Phase 4 — author the implementation spec (ONLY if verdict == PASS)
 Write `docs/plans/active/soundswitch_t7d_runtime_autoloop_dmx_implementation_spec.md` grounded
 strictly in the evidence (proven TICKS_PER_BEAT, quantizer, per-transition origin, StateManager
-integration, **safe-zero/precedence**, tests, rollback, sanitization). Then implement in
-`state_manager.py` / pack driver so `_drive_pack_output` (`state_manager.py:~3209`) selects the
-autoloop frame **only on the proven contract** — render the selected look's frames at the tick from
-`abs_beat_pos` within the 8-bar loop. Preserve **safe-zero on every non-happy path**; never seed a
-production constant from a capture/log/pcap. Pure-function seam for the phase math. Live-critical →
-**plan-first** (review the spec before/with implementation). Run focused gates → full suite → doc
-hard checks.
+integration, **safe-zero/precedence**, tests, rollback, sanitization, and
+hardware gate). Stop after the spec and request independent review. The later
+implementation task may change `state_manager.py` / pack driver only under that
+reviewed spec. Never seed a production constant directly from a capture/log/pcap.
 
 ## 5. Hard constraints
 - Active-wait gates; ping + poll; never stop at a gate.
@@ -162,9 +171,8 @@ hard checks.
 - AGENTS.md §7 change contracts + §8 hard checks for every code/doc edit.
 
 ## 6. Definition of done
-Either: a complete evidence doc with verdict **PASS** plus a reviewed+implemented+tested native
-autoloop→DMX behind safe-zero precedence; OR a precise `_blocked.md` stating exactly what
-capture/derivation is still missing. State explicitly at the end whether native autoloop DMX is
-implemented and that hardware remains unvalidated. Do not end with "ready for Codex" / "awaiting
-implementation" for the capture+derivation work — you own that (operator override; live-critical stays
-plan-first).
+Either: a complete evidence doc with verdict **PASS** plus a review-ready Part
+A-E native-Autoloop implementation spec; OR a precise `_blocked.md` stating
+exactly what capture/derivation is still missing. State explicitly that native
+Autoloop DMX remains unimplemented at this gate and hardware remains
+unvalidated. Do not stop before the capture/derivation outcome is documented.

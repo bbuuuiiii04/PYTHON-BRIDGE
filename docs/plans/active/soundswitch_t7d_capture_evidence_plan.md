@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan
 truth_level: code-and-capture-grounded
-last_verified_commit: bc9f7f4
-last_verified_date: 2026-06-22
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -18,11 +18,16 @@ validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HAR
 > `RBSS_SMART_REARM_EXPERIMENT=1` **and** `RBSS_PHRASE_ANCHOR=1`
 > (`state_manager.py:481`; `PHRASE_ANCHOR_ENV` default `"0"`), and the operator's
 > live launch sets REARM but not PHRASE_ANCHOR — the transition never fires in
-> production, so its phase origin is not part of the runtime contract. Wherever
-> this plan below says "seven scenarios" or lists `phrase-anchor`, read **six**
-> and ignore the phrase-anchor row (its matrix entry is struck through). This also
-> removes the only startup-flag restart from the pass. Re-add phrase-anchor only
-> if the live rig turns `RBSS_PHRASE_ANCHOR` on.
+> production, so its phase origin is not part of the current runtime contract.
+> This plan has been normalized to the six active scenarios. This also removes
+> the only startup-flag restart from the pass. Re-add phrase-anchor only if the
+> live rig turns `RBSS_PHRASE_ANCHOR` on.
+
+> **CORPUS UPDATE 2026-06-23.** The conductor reports `arm` 2 ACCEPTED / 1
+> FAIL and `refire` 2 ACCEPTED / 0 FAIL. `master-switch`, `drop-hold`,
+> `buildup`, and `correction` remain at zero attempts. ACCEPTED is an integrity
+> classification, not a phase-contract verdict. Identity/holdout reconciliation
+> and the real-capture oracle are still incomplete.
 
 ## Part A - Context and blocker (verified; read, do not implement T7d)
 
@@ -32,8 +37,8 @@ validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HAR
   `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`,
   Task 7 (`:534`), Task 8 (`:574`), Task 9 (`:605`), and live-safety
   invariants (`:699`).
-- [confirmed] The supporting T7d brief is
-  `docs/plans/active/soundswitch_t7_t8_t9_implementation_spec.md:255-268`.
+- [confirmed] Current task status and dependencies are maintained in
+  `docs/plans/active/soundswitch_exporter_remaining_work.md`, RW-7/RW-8.
 - [confirmed] This document plans the evidence pass only. It authorizes no bridge
   restart, project mutation, MIDI/serial/Enttec/DMX device open, physical output,
   or T7d runtime edit.
@@ -57,7 +62,7 @@ validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HAR
 | Current T7c runtime never calls `select_autoloop`; its non-scripted automatic base clears to zero while a held manual static may remain. | `state_manager.py:3209-3272`; `tests/test_state_manager_pack_driver.py:229-238`. | [confirmed] |
 | The existing research oracle can prove the T7d scale. | `tools/ssfmt/re/validate_autoloop_capture.py:184` hard-codes `rate = bpm * 10.0`, equivalent to 600 ticks/beat, and `fit_phase` permits a fitted offset. It is useful historical render evidence but is circular for this blocker. | [unknown; not accepted] |
 | Existing passive evidence is available. | `tools/ssfmt/captures/bridge_driven_autoloops_20260619.pcap`, copied bridge/AppLogs, and the frozen `snap/` files exist locally. | [confirmed] |
-| Existing `SessionRecorder` captures enough T7d phase authority. | It records events, position snapshots, and live BPM (`session_recorder.py:21-129`) but not `abs_beat_pos`, transient arm/refire anchors, executor-accepted identity, or same-tick transition reason. | [unknown; gap] |
+| The schema-2 recorder captures the planned T7d phase authority. | `session_phase_trace.py` defines the primitive phase row; `StateManager` emits it through a bounded nonblocking tracer; accepted captures contain thousands of `autoloop_phase` rows plus clean integrity footers. Executor scene/note fields were null in the inspected accepted rows, so identity must still be joined offline. | [confirmed seam; identity join pending] |
 
 ### A3. Questions the evidence must answer
 
@@ -65,7 +70,7 @@ validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HAR
    reproduce SoundSwitch's captured CH1-CH19 frames? The fit must explicitly test
    and be able to reject 600.
 2. [unknown] **Origin/reset contract:** for each of arm, refire, master-switch,
-   drop-hold, buildup, phrase-anchor, and correction, does animation phase reset,
+   drop-hold, buildup, and correction, does animation phase reset,
    continue, or snap to a phrase target?
 3. [unknown] **Quantization:** whether the integer phase uses floor/truncation,
    rounding, or another boundary convention. The answer must come from captures
@@ -141,8 +146,8 @@ The capture request is blocked until this seam and its tests are reviewed. A
 2 Hz status-file scrape or inferred log timestamp is not precise enough to prove
 same-tick reset behavior.
 
-> **B1 implementation status (software-only; hot-path wiring NOT applied).**
-> The schema-2 seam is built and unit-tested as standalone tooling:
+> **B1 implementation status (software-only; wired and captured).**
+> The schema-2 seam is built, unit-tested, and wired:
 > `session_phase_trace.py` (`build_autoloop_phase_row` pure builder +
 > `AutoloopPhaseTracer` bounded `put_nowait` mailbox and writer thread with
 > dropped-sample accounting), schema-2 support in `session_recorder.py`
@@ -150,16 +155,11 @@ same-tick reset behavior.
 > (`SUPPORTED_SCHEMAS = (1, 2)`, `autoloop_phase` rows; schema 1 byte-compatible).
 > Tests: `tests/replay/test_phase_trace.py` (ordering, bounded-drop accounting,
 > hot-path `emit()` performs no file I/O even with `open` patched to raise,
-> schema-2 round trip, schema-1 compatibility). **The 200 Hz
-> `StateManager._push_tick` call-site is intentionally NOT wired in this pass.**
-> That single edit is live-critical hot-path bridge code; per the repo rule
-> (Codex implements bridge code; plan-first review for live-critical) it requires
-> its own reviewed integration before any live capture. The reviewed call-site
-> contract: read only the §B1 primitive scalars already owned by `StateManager`,
-> call `tracer.emit(build_autoloop_phase_row(...))` (bounded nonblocking enqueue
-> only), emit on relevant edge changes plus a 50 Hz ceiling, and never call
-> `backend.status()`, executor `status()`, filesystem, network, MIDI, serial,
-> subprocess, sleep, or a contended lock from the tick.
+> schema-2 round trip, schema-1 compatibility). The 200 Hz
+> `StateManager._push_tick` call site reads only the planned primitive scalars
+> and performs the bounded nonblocking enqueue; its writer thread owns file I/O.
+> Existing accepted artifacts contain phase rows and clean footers, which proves
+> the capture seam ran. This is evidence tooling only, not native Autoloop DMX.
 
 ### B2. Replace the circular autoloop oracle with a falsifiable T7d mode
 
@@ -341,12 +341,12 @@ Per-scenario conductor protocol (one named scenario per run):
    or `enabled=false`/`backend in {none, midi}`). If either fails, ping the
    operator and stop the run *for this scenario* with an INCOMPLETE/FAIL record;
    do not start a capture against an unsafe baseline.
-3. **Restart gate (automated ping; operator-approved).** If the scenario needs
-   startup flags (phrase-anchor; correction may), the conductor pings the
-   operator with the exact flags and the reason, and does **not** restart. It
-   waits for the operator to approve + perform the exact restart, then re-runs.
-   A missing-flag run is recorded INCOMPLETE, never substituted with a synthetic
-   event.
+3. **Restart gate (automated ping; operator-approved).** No active scenario
+   needs a special startup flag. If the phase-trace smoke test proves the running
+   bridge predates B1 wiring, the conductor pings the operator with the exact
+   ordinary restart reason and does **not** restart. It waits for the operator to
+   approve + perform the exact restart, then re-runs. A stale-process run is
+   recorded INCOMPLETE, never substituted with a synthetic event.
 4. **Safety ping (automated).** Audibly/visibly ping: SoundSwitch open on the
    saved bounded project, all fixtures/Enttec disconnected and safe, no live
    audience, pack disabled, one bridge.
@@ -393,7 +393,7 @@ operator action can correct it; otherwise it records the precise hard blocker.
    hold out the other repetition, all correction segments, and at least one entire
    identity. Then reverse the train/holdout split. A rule that needs retraining on
    the holdout fails.
-5. [assumed] Evaluate origin/reset hypotheses independently for all seven rows.
+5. [assumed] Evaluate origin/reset hypotheses independently for all six active rows.
    If classes legitimately differ, record an explicit transition-state contract;
    do not force a false “universal” formula. T7d remains blocked until every class
    is deterministic.
@@ -414,7 +414,7 @@ T7d may move from `planned, blocked` to implementation-ready only when all are t
       pass both cross-validation directions; every alternative is rejected with a
       reported margin. The report explicitly states whether 600 passed or failed.
 - [ ] [unknown until captured] Reset/continue/snap behavior is pinned for arm,
-      refire, master-switch, drop-hold, buildup, phrase-anchor, and correction,
+      refire, master-switch, drop-hold, buildup, and correction,
       with two accepted repetitions per class and no per-segment fitted phase offset.
 - [ ] [unknown until captured] At least three current verified bridge-used IAC/
       bank-4 identities and two BPM/pitch values are represented; at least one
@@ -497,7 +497,7 @@ git diff --check
 
 - [x] [confirmed] Both unknowns remain explicitly unknown; no phase mapping or
       `TICKS_PER_BEAT` value is selected.
-- [x] [confirmed] All seven transition scenarios have a reproducible operator
+- [x] [confirmed] All six active transition scenarios have a reproducible operator
       action and a falsifiable question.
 - [x] [confirmed] The plan defines the capture surface, beat/arm/identity sources,
       a non-circular derivation, exact tolerance policy, and safe-zero boundary.
@@ -506,9 +506,11 @@ git diff --check
 
 ### E2. Future evidence-pass completion
 
-- [ ] [unknown] B1/B2 tooling is implemented, reviewed, and green.
-- [ ] [unknown] The operator has supplied two accepted repetitions of all seven
-      scenarios with hashed, unchanged project inputs.
+- [x] [confirmed] B1/B2 tooling is implemented, reviewed, and green in software.
+- [x] [confirmed] The conductor accepted two `arm` and two `refire` repetitions
+      with unchanged project hashes and clean trace integrity.
+- [ ] [unknown] The operator has supplied two accepted repetitions of the four
+      remaining scenarios with hashed, unchanged project inputs.
 - [ ] [unknown] The full oracle returns `PASS_T7D_PHASE_CONTRACT` with unique scale,
       quantization, and complete transition-origin rules.
 - [ ] [confirmed required gate] The ledger and a short sanitized evidence report
@@ -518,11 +520,12 @@ git diff --check
 
 ## Open evidence and operator action items
 
-1. **OPERATOR ACTION (later, not this session):** provide a fixtures-disconnected
-   live SoundSwitch reference session and run the B4 actions one scenario at a time.
-2. **OPERATOR ACTION (only if needed):** explicitly approve the exact bridge restart
-   command after reviewing required startup-flag changes for phrase-anchor/correction.
-   Until approval, do not restart and mark those captures incomplete.
+1. **OPERATOR ACTION (next capture session):** provide a fixtures-disconnected
+   live SoundSwitch reference session and run `master-switch`, `drop-hold`,
+   `buildup`, and `correction` one scenario at a time.
+2. **OPERATOR ACTION (only if needed):** explicitly approve an exact bridge restart
+   command if the running core does not contain the verified phase-trace wiring.
+   No active scenario requires a special startup flag.
 3. [unknown] The actual ticks/beat, integer quantizer, and per-transition origin/
    reset behavior remain unknown until B6 passes.
 4. [unknown] Whether one universal origin exists. A deterministic class-specific
@@ -531,11 +534,12 @@ git diff --check
 ## Pre-handoff checklist and adversarial self-review
 
 1. [confirmed] Every factual claim is labeled confirmed/assumed/unknown.
-2. [confirmed] File/line anchors were rechecked at `bc9f7f4` before authoring.
+2. [confirmed] Current status and implementation anchors were rechecked at
+   `b2ce63d`; exact line numbers remain secondary to executable symbols.
 3. [confirmed] Pending arm, smart-drop mask, held drop, same-scene refire, and
    accepted-identity interactions are explicit.
-4. [confirmed] Arm, refire, master-switch, drop-hold, buildup, phrase-anchor,
-   correction, stop/incomplete, and project-drift paths all fail closed.
+4. [confirmed] Arm, refire, master-switch, drop-hold, buildup, correction,
+   stop/incomplete, and project-drift paths all fail closed.
 5. [confirmed] The only third-party command surface here is operator-owned
    `tcpdump`; interface, filter, output path, stop action, AppLog copy, and hashes
    are explicit. No external API payload is assumed.

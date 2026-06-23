@@ -1,30 +1,35 @@
 ---
-doc_status: active-ready-for-implementation
+doc_status: active-product-contract-implementation-partial
 truth_level: code-byte-binary-and-wire-verified
-last_verified_commit: 8ca5875
-last_verified_date: 2026-06-21
-validation_scope: implementation specification for a SoundSwitch 2.10.3 current-profile static exporter/importer/player; no runtime implementation or hardware validation
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
+validation_scope: original implementation/product contract reconciled with current partial implementation; SoundSwitch 2.10.3 canonical project/RAVE profile; hardware-unvalidated
 ---
 
 # Codex Implementation Spec - SoundSwitch Importer, Exporter, and Bridge-Native Laser Player
 
 ## Authority, canonical source identity, and corrections (read first)
 
-**This file is the only active implementation authority.**
-`docs/research/soundswitch/soundswitch_static_pack_player_spec.md` is
+**This file is the original active product/implementation contract.** Current
+landed-versus-remaining status is maintained in
+`docs/plans/active/soundswitch_exporter_remaining_work.md`; that roadmap must be
+read before creating another implementation task. Code/tests win if either doc
+drifts.
+`docs/research/soundswitch/history/soundswitch_static_pack_player_spec.md` is
 `historical-draft` / superseded and MUST NOT be cited as implementation
 authority; it predates the DDJ Static Override closure, the exact 32-slot Static
 Look grammar, and learned-MIDI add/remove behavior.
 
-**Correction provenance (2026-06-21).** This spec was edited after its
-`last_verified_commit` stamp (`8ca5875`). The decode foundation was independently
-re-verified by the pack-generation proof gate
-(`tools/prove_soundswitch_pack_generation.py`); its locally generated
-`artifacts/soundswitch_pack_generation_proof/latest.json` reported
-`final_verdict: PASS_IMPLEMENTATION_MAY_BEGIN` at repo HEAD `cc526eb`. The proof
-reports are generated locally and are gitignored (never committed); regenerate the
-gate to reproduce the verdict. The committer MUST re-stamp `last_verified_commit`
-to the commit that lands these edits; do not fake provenance.
+**Implementation reconciliation (2026-06-23).** The current canonical saved
+project was re-run through `tools/prove_soundswitch_pack_generation.py` at HEAD
+`b2ce63d`: `29 PASS / 0 FAIL / 0 INCOMPLETE`, foundation `27/27`, verdict
+`PASS_IMPLEMENTATION_MAY_BEGIN`. Decoder/exporter/verifier, immutable player,
+MIDI adapter, output backends, Enttec sender, config/startup, StateManager
+scripted driving, runtime commands/status, and the offline Task-8 shadow exist in
+code. They remain default-off and hardware-unvalidated. The active roadmap
+records confirmed remaining gaps: one-click canonical replacement/reload,
+scripted runtime pause/mode/input-health/status closure, T7d capture-derived
+Autoloop phase integration, and the final hardware gate.
 
 ### Canonical bounded source identity (pinned)
 

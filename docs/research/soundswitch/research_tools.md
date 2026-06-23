@@ -13,7 +13,7 @@ production exporter/parser, are not imported by bridge runtime code, and must
 never write into `~/Music/SoundSwitch`.
 
 Current scripted byte-parity continuation:
-`docs/research/soundswitch/soundswitch_scripted_renderer_closure_handoff_spec.md`.
+`docs/research/soundswitch/history/soundswitch_scripted_renderer_closure_handoff_spec.md`.
 
 Do not use them to start/stop/signal/restart the bridge or send MIDI, OS2L,
 Art-Net, serial, Enttec, or physical DMX. Capture commands and SoundSwitch UI

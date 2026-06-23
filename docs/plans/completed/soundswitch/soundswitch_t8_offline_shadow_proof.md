@@ -1,4 +1,4 @@
-# Task 8 — SoundSwitch offline + shadow proof (completion record)
+# Task 8 — SoundSwitch offline + shadow proof (completed historical record)
 
 status: done (software) — **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**
 last_updated: 2026-06-22

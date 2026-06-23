@@ -15,7 +15,7 @@ validation_scope: spec only; no implementation; software+wire-grounded; hardware
 > spec after `soundswitch_re_closure_report.md`.
 
 > Scripted byte-parity is currently blocked. Execute
-> `docs/research/soundswitch/soundswitch_scripted_renderer_closure_handoff_spec.md`
+> `docs/research/soundswitch/history/soundswitch_scripted_renderer_closure_handoff_spec.md`
 > before implementing this runtime spec.
 
 ## Part A — Context & root cause (verified; read, do not implement)

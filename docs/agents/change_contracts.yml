@@ -257,6 +257,8 @@ contracts:
       - tests/test_enttec*.py
       - tests/test_prove_soundswitch_pack_generation.py
     inspect:
+      - docs/plans/active/soundswitch_exporter_remaining_work.md
+      - docs/plans/active/soundswitch_README.md
       - docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md
       - docs/subsystems/soundswitch_output.md
       - docs/subsystems/core_bridge.md
@@ -278,6 +280,8 @@ contracts:
       - python3 tools/check_docs_staleness.py --report
       - git diff --check
     docs_update:
+      - docs/plans/active/soundswitch_exporter_remaining_work.md
+      - docs/plans/active/soundswitch_README.md
       - docs/subsystems/soundswitch_output.md
       - docs/subsystems/core_bridge.md
       - docs/subsystems/runtime_commands.md
@@ -312,20 +316,21 @@ contracts:
       - docs/research/soundswitch/soundswitch_re_closure_report.md
       - docs/research/soundswitch/soundswitch_ghidra_addendum.md
       - docs/research/soundswitch/soundswitch_ssfile_format.md
-      - docs/research/soundswitch/soundswitch_stage2_research_findings.md
+      - docs/research/soundswitch/history/soundswitch_stage2_research_findings.md
       - docs/research/soundswitch/soundswitch_validation_matrix.md
-      - docs/research/soundswitch/soundswitch_decode_export_codex_spec.md
-      - docs/research/soundswitch/soundswitch_stage3_handoff.md
-      - docs/research/soundswitch/soundswitch_exporter_renderer_full_plan.md
+      - docs/research/soundswitch/history/soundswitch_decode_export_codex_spec.md
+      - docs/research/soundswitch/history/soundswitch_stage3_handoff.md
+      - docs/research/soundswitch/history/soundswitch_exporter_renderer_full_plan.md
       - docs/research/soundswitch/soundswitch_authoring_mutation_matrix.md
-      - docs/research/soundswitch/soundswitch_reverse_engineering_session_handoff.md
-      - docs/research/soundswitch/soundswitch_standalone_laser_exporter_spec.md
-      - docs/research/soundswitch/soundswitch_scripted_renderer_closure_handoff_spec.md
-      - docs/research/soundswitch/soundswitch_scripted_b2_operator_capture_handoff.md
-      - docs/research/soundswitch/soundswitch_static_pack_player_spec.md
+      - docs/research/soundswitch/history/soundswitch_reverse_engineering_session_handoff.md
+      - docs/research/soundswitch/history/soundswitch_standalone_laser_exporter_spec.md
+      - docs/research/soundswitch/history/soundswitch_scripted_renderer_closure_handoff_spec.md
+      - docs/research/soundswitch/history/soundswitch_scripted_b2_operator_capture_handoff.md
+      - docs/research/soundswitch/history/soundswitch_static_pack_player_spec.md
       - docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md
-      - docs/research/soundswitch/codex_ss_catalog_handoff.md
-      - docs/research/soundswitch/ss_memory_discovery.md
+      - docs/research/soundswitch/history/codex_ss_catalog_handoff.md
+      - docs/research/soundswitch/history/ss_memory_discovery.md
+      - docs/research/soundswitch/history/README.md
       - docs/status/active_work_registry.md
       - docs/architecture/doc_index.md
       - docs/research/soundswitch/research_tools.md
@@ -345,20 +350,21 @@ contracts:
       - docs/research/soundswitch/soundswitch_re_closure_report.md
       - docs/research/soundswitch/soundswitch_ghidra_addendum.md
       - docs/research/soundswitch/soundswitch_ssfile_format.md
-      - docs/research/soundswitch/soundswitch_stage2_research_findings.md
+      - docs/research/soundswitch/history/soundswitch_stage2_research_findings.md
       - docs/research/soundswitch/soundswitch_validation_matrix.md
-      - docs/research/soundswitch/soundswitch_decode_export_codex_spec.md
-      - docs/research/soundswitch/soundswitch_stage3_handoff.md
-      - docs/research/soundswitch/soundswitch_exporter_renderer_full_plan.md
+      - docs/research/soundswitch/history/soundswitch_decode_export_codex_spec.md
+      - docs/research/soundswitch/history/soundswitch_stage3_handoff.md
+      - docs/research/soundswitch/history/soundswitch_exporter_renderer_full_plan.md
       - docs/research/soundswitch/soundswitch_authoring_mutation_matrix.md
-      - docs/research/soundswitch/soundswitch_reverse_engineering_session_handoff.md
-      - docs/research/soundswitch/soundswitch_standalone_laser_exporter_spec.md
-      - docs/research/soundswitch/soundswitch_scripted_renderer_closure_handoff_spec.md
-      - docs/research/soundswitch/soundswitch_scripted_b2_operator_capture_handoff.md
-      - docs/research/soundswitch/soundswitch_static_pack_player_spec.md
+      - docs/research/soundswitch/history/soundswitch_reverse_engineering_session_handoff.md
+      - docs/research/soundswitch/history/soundswitch_standalone_laser_exporter_spec.md
+      - docs/research/soundswitch/history/soundswitch_scripted_renderer_closure_handoff_spec.md
+      - docs/research/soundswitch/history/soundswitch_scripted_b2_operator_capture_handoff.md
+      - docs/research/soundswitch/history/soundswitch_static_pack_player_spec.md
       - docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md
-      - docs/research/soundswitch/codex_ss_catalog_handoff.md
-      - docs/research/soundswitch/ss_memory_discovery.md
+      - docs/research/soundswitch/history/codex_ss_catalog_handoff.md
+      - docs/research/soundswitch/history/ss_memory_discovery.md
+      - docs/research/soundswitch/history/README.md
       - docs/status/active_work_registry.md
       - docs/architecture/doc_index.md
       - docs/research/soundswitch/research_tools.md

@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b7e0e66
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -11,7 +11,11 @@ validation_scope: software-validated only; hardware-unvalidated in repo evidence
 Runtime commands are append-only JSONL records read by `CommandReader` in `runtime_status.py`.
 The parser, not this document, is authoritative. If this document and `parse_command()` disagree, `parse_command()` wins, because apparently even documentation needs a leash.
 
-SoundSwitch pack components and the T7a default-off config loader add no command or status field. There is no accepted `set_soundswitch_pack` command and no pack-player callback. All existing command behavior remains unchanged.
+SoundSwitch T7e adds the accepted `set_soundswitch_pack` command and a sanitized
+`soundswitch_pack` status block. The callback is wired through
+`SoundSwitchPackController` on the command thread; blocking load/verify/serial
+work never enters the 200 Hz push loop. No menubar `Export from SS` action calls
+this command yet.
 
 ## Runtime files
 

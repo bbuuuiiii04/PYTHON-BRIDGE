@@ -1,4 +1,7 @@
-# SoundSwitch implementation — progress ledger
+# SoundSwitch implementation — superseded progress ledger
+
+> Historical only. Current status and next actions are maintained in
+> `docs/plans/active/soundswitch_exporter_remaining_work.md`.
 
 last_updated: 2026-06-22T15:00:00Z   last_session_agent: codex (T7d evidence planning)
 

@@ -1,24 +1,25 @@
 ---
 doc_status: research-current
 truth_level: repository-routing-authority
-last_verified_commit: 8ca5875
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: SoundSwitch reverse-engineering document routing; software evidence only; hardware-unvalidated
 ---
 
 # SoundSwitch reverse-engineering authority
 
-All substantive SoundSwitch reverse-engineering research, evidence matrices,
-historical handoffs, and exporter/player specifications are grouped in this
-directory. Do not create another SoundSwitch RE document elsewhere. Runtime
+All current SoundSwitch reverse-engineering authority and evidence matrices are
+grouped in this directory. Superseded handoffs, intermediate findings, and draft
+specifications are physically separated under `history/`. Do not create another
+SoundSwitch RE document elsewhere. Runtime
 SoundSwitch/OS2L behavior remains documented in
 `docs/subsystems/soundswitch_output.md`; repository-wide routing remains in the
 doc index and active-work registry.
 
 Read in this order:
 
-1. `soundswitch_re_closure_report.md` — current verdict, supported boundary,
-   claim ledger, and remaining blockers.
+1. `soundswitch_re_closure_report.md` — bounded reverse-engineering verdict and
+   supported source-format boundary. It is not current implementation status.
 2. `soundswitch_ssfile_format.md` — physical project, catalog, `.ssfile`,
    MIDI-map, and static-look formats.
 3. `soundswitch_ghidra_addendum.md` — binary-derived reader/writer and runtime
@@ -26,11 +27,15 @@ Read in this order:
 4. `soundswitch_validation_matrix.md` and
    `soundswitch_authoring_mutation_matrix.md` — capture and mutation evidence.
 5. `research_tools.md` — reproduction commands and tool inventory.
-6. `soundswitch_importer_exporter_player_codex_spec.md` — authorized
-   default-off implementation handoff after the closure verdict.
+6. `soundswitch_importer_exporter_player_codex_spec.md` — original authorized
+   default-off product/implementation contract.
+7. `../../plans/active/soundswitch_exporter_remaining_work.md` — current landed
+   implementation status, confirmed gaps, checklist, dependencies, and next
+   design/spec task.
 
-The other plans and handoffs in this directory are retained as historical
-evidence. Their old readiness statements are superseded by the closure report.
+Historical research artifacts are indexed in `history/README.md`. Their old
+readiness statements are superseded by the closure report for research truth and
+by the active remaining-work roadmap for implementation status.
 
 Current control-surface facts that every future exporter must preserve:
 

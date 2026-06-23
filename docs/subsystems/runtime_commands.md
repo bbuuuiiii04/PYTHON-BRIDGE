@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b7e0e66
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-only
 ---
 
@@ -91,4 +91,5 @@ Change contract:
 Known risks:
 - Accepted command names do not prove callbacks are wired.
 - Callback success does not prove hardware-visible behavior.
+- The menubar does not yet call pack reload after export; no `Export from SS` workflow exists.
 - Runtime command docs are code-derived; if docs and `runtime_status.py` disagree, code wins.

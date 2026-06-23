@@ -1,6 +1,6 @@
-# Implementation Spec — T7e SoundSwitch pack sanitized status + validate-first runtime commands
+# Implementation Spec — T7e SoundSwitch pack status/commands (completed historical spec)
 
-status: planned — **REVISION 2 (ChatGPT review corrections applied); ready to implement**
+status: implemented and software-tested; historical spec
 last_updated: 2026-06-22
 implementer: Claude (Opus 4.8) — per operator override for this task (NOT Codex)
 target branch/PR: `soundswitch/impl` / #116 (current head `212cb50`, CI green)

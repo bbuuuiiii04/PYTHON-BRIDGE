@@ -2,15 +2,18 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-06-22.
+Audited against the current checkout at `b2ce63d` on 2026-06-23.
 
 ## SoundSwitch Pack Component Boundary
 
 - `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` provide frozen models and strict read-only decode; `soundswitch_pack.py` and `tools/export_soundswitch_pack.py` deterministically publish a canonical 95-artifact pack; `soundswitch_pack_verifier.py` independently verifies it. All are pinned to SoundSwitch 2.10.3 and the canonical UUID/RAVE profile.
 - Decode/export must not mutate a source project. Pack publication is deterministic and fail-closed; independent verification rejects inventory, hash, canonicalization, semantic, crosswalk, or source-drift changes, including the F9 one-byte mutation.
-- The immutable pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender exist as software-tested components. T7a adds a never-raising config loader and an inert tracked example; config loading is startup/reload work and must never enter `_push_tick`.
-- `__main__` does not load the T7a config, and `StateManager` does not drive the pack player. No pack controller, direct-DMX, command, or status path is active. Existing OS2L/MIDI/LED/Govee behavior stays unchanged.
-- Direct DMX and physical MIDI output must remain mutually exclusive when later startup wiring lands. Owner-driven Enttec stop sends zero, but process death/`kill -9` can leave the last frame latched; hardware validation remains future work.
+- The immutable pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender are software-tested components. The never-raising config loader is used only during startup/reload; config or pack filesystem work must never enter `_push_tick`.
+- `__main__` loads optional pack config, chooses one backend, starts verified workers, builds one immutable `PackRuntime`, and wires validate-first commands/status. `StateManager` reads one runtime reference per tick and is the sole `submit_frame` caller.
+- Absent/disabled config preserves the legacy MIDI path. Dry-run/none opens no physical pack output. Pack failure falls back to disabled/none, never physical MIDI.
+- Direct DMX and physical MIDI output are mutually exclusive at backend construction and port ownership. Owner-driven Enttec stop sends zero, but process death/`kill -9` can leave the last frame latched; hardware validation remains future work.
+- Native pack Autoloop output remains zero-safe until T7d captures uniquely prove scale, quantizer, and every active transition-origin rule. No agent may assume 600 ticks/beat.
+- The scripted driver is not a completed live contract yet: pause-vs-stop, explicit scripted-mode authority, MIDI-input health fail-to-zero, and complete sanitized operational status remain active gaps in `docs/plans/active/soundswitch_exporter_remaining_work.md`.
 
 ## State Ownership
 

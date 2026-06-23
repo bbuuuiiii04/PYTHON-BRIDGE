@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b7e0e66
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-only
 ---
 
@@ -37,7 +37,7 @@ Coverage expectations:
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.
-- `tests/test_soundswitch_project_decoder.py` covers the strict decoder/frozen models. `tests/test_soundswitch_pack.py` covers deterministic export, the canonical 95-artifact pack, independent verification, exact 232+1/32/42/45 inventory, the seven-class F-3 crosswalk, byte-identical repeat export, and mutation rejection. The proof gate is 29 PASS / 0 FAIL / 0 INCOMPLETE with F9 and F10 passing. `tests/test_soundswitch_pack_player_config.py` covers the T7a default-off loader, precedence, strict fixture-map validation, and fail-closed results. These remain software/wire tests; they do not validate runtime integration or hardware.
+- `tests/test_soundswitch_project_decoder.py` covers the strict decoder/frozen models. `tests/test_soundswitch_pack.py` covers deterministic export, the canonical 95-artifact pack, independent verification, exact 232+1/32/42/45 inventory, the seven-class F-3 crosswalk, byte-identical repeat export, and mutation rejection. The current-project proof is 29 PASS / 0 FAIL / 0 INCOMPLETE with F9 and F10 passing. Config/startup/controller/commands, StateManager driver, player, MIDI input, frame sender, Enttec, shadow, and T7d tooling have focused suites. The 2026-06-23 audit ran 310 focused tests and the full 2256-test suite successfully. These remain software/wire tests; they do not prove physical fixtures or close the scripted pause/mode/input-health gaps listed in the active roadmap.
 
 Change contract:
 - Do not modify tests just to make docs changes pass.

@@ -1,42 +1,76 @@
-# SoundSwitch pack-player — planning & spec doc set (grouped index)
+---
+doc_status: active-plan-index
+truth_level: code-and-test-grounded-routing
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
+validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+---
 
-> **Status:** ACTIVE INDEX (AWR-107). Repo status **SOFTWARE-VALIDATED ONLY /
-> HARDWARE-UNVALIDATED**. This index groups every SoundSwitch pack-player planning/spec doc so
-> they are read together, not scattered. It grants **no runtime or hardware authorization**.
-> If a doc conflicts with code, **code wins**.
+# SoundSwitch exporter / bridge-native DMX - active project index
 
-## Current state (verified at HEAD `bc9f7f4`, 2026-06-22)
+This is the grouped planning index for AWR-107. Code and tests remain the
+implementation authority. Research/format evidence remains grouped under
+`docs/research/soundswitch/`.
 
-- Tasks **0–6**: merged (PR #115). Deterministic export + independent verification of the
-  canonical pack; loader/player/MIDI-input/backends/Enttec sender all software/wire-validated.
-- Task **7.0** (`07581ca`) + **7.1** (`f7ae38d`): implemented + fresh-opus review APPROVE, on
-  **PR #116** (open). Signal-authority fix + executor single-backend injection + `scene_name`.
-- Tasks **7a/7b/7c/7e**: implemented and software-reviewed on `soundswitch/impl`; validated config
-  remains default-off, with validate-first runtime control and sanitized status.
-- Task **8**: approved in software/offline scope at `bc9f7f4`. Task **9** remains an explicit
-  operator hardware gate.
-- **Open blocker:** both ticks/beat scaling (600 is only a candidate) and the transition-origin
-  contract across every arm/refire path remain unproven for T7d. Pack autoloop output and runtime
-  phase shadow stay safe/zero/deferred rather than guess.
+## Read now, in order
 
-## Read in this order
+1. `soundswitch_exporter_remaining_work.md` - **single active completion
+   checklist and roadmap**. It records what is implemented, the confirmed
+   scripted-runtime gaps, the menubar/export gap, T7d dependencies, task order,
+   gates, and completion definition.
+2. `../../research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
+   - original product/implementation contract. Use it for intended behavior,
+   then use the remaining-work roadmap for actual landed status.
+3. `soundswitch_t7d_capture_evidence_plan.md` - T7d evidence requirements. No
+   phase mapping is selected by this plan.
+4. `soundswitch_t7d_capture_gate_handoff.md` - active operator workflow for the
+   six live scenarios: arm, refire, master-switch, drop-hold, buildup, and
+   correction.
+5. `../../validation/soundswitch_t7d_phase_contract_evidence.md` and
+   `../../validation/soundswitch_t7d_phase_contract_blocked.md` - current honest
+   evidence verdict: `INCOMPLETE_T7D_EVIDENCE`; two accepted arm and two
+   accepted refire integrity captures exist, while four scenario pairs and the
+   unique corpus oracle remain incomplete.
+6. `../../prompts/active/soundswitch_t7d_resume_handoff.md` - use only when the
+   operator is physically present to run the T7d capture session.
+7. `../../prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md` -
+   ready-to-send Opus prompt for the next design/spec task. Scope is RW-1 only;
+   it authorizes no implementation or live action.
 
-| # | Doc | Role |
-|---|-----|------|
-| 1 | `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` | **Implementation authority** — the only active impl spec (Part B T7 `:534` / T8 `:574` / T9 `:605`; Part C invariants `:699`). Also surfaced via the `soundswitch_importer_exporter_player_codex_spec.md` symlink in this folder. |
-| 2 | `soundswitch_t7_t8_t9_implementation_spec.md` | **Combined implementer brief** (this effort): decomposes T7→T7a–e, pins the verified mechanisms, flags the `phase_tick` blocker, and specs T8 + T9. The grouped "everything spec'd out" doc. |
-| 3 | `soundswitch_t7d_capture_evidence_plan.md` | **Current T7d blocker plan** — seven-scenario operator capture matrix, non-circular scale/origin oracle, safe-zero unblock criteria. T7d remains unimplemented. |
-| 4 | `soundswitch_orchestration_prompt.md` | Generic orchestration protocol (bootstrap, per-task loop, gates, reporting). |
-| 5 | `soundswitch_t7_t8_orchestration.md` | T7+T8 orchestration prompt (effort/reviewer map, T7.0/T7.1 preconditions, after-T8 opus-max review). |
-| 6 | `soundswitch_review_pack.md` | Adversarial review gates: before-T7 `:168`, T8 `:195`, T9 `:217`. |
-| 7 | `soundswitch_impl_progress.md` | **Resume ledger** (AWR-107) — proof-gate state, next action, per-task status. Verify against code before resuming. |
-| 8 | `docs/agents/change_contracts.yml` → `soundswitch_pack_player` (`:233`) | Change contract: code globs, tests, `docs_update` list, forbidden assumptions. |
+The compatibility symlink
+`soundswitch_importer_exporter_player_codex_spec.md` remains for older links.
 
-Historical / superseded: `soundswitch_t4_t6_handoff.md` (T4–T6 handoff; those tasks are merged).
+## Current implementation snapshot
 
-## What "done" looks like for the remaining work
-The combined spec (#2) Part E is the definition of done. In short: T7a–c+e are determinable from
-current code now; **T7d (autoloop DMX) and runtime phase shadow remain gated on captured proof of
-both scale and every transition-origin rule**. T9 starts as an operator hardware-gate handoff document. The
-operator has separately authorized controlled device/restart validation after the offline,
-shadow, review, zero-frame, rollback, and single-process gates pass.
+- Decoder/exporter/compiler/verifier: implemented and current-project proof
+  passes 29/29.
+- Current scripted content: 32/32 active existing-path tracks supported.
+- Pure scripted renderer: implemented/software-wire tested.
+- Config/startup/runtime command/StateManager/Enttec lane: implemented,
+  default-off, but scripted runtime pause/mode/input-health/status gaps remain.
+- Menubar `Export from SS` plus canonical replacement/reload: not implemented.
+- T7d phase tooling: implemented; four captures pass conductor integrity across
+  arm/refire, while four scenario pairs and the corpus oracle remain incomplete.
+- Native-DMX Autoloop selection: intentionally not implemented; safe-zero.
+- Hardware validation: absent.
+
+See the remaining-work roadmap for evidence, exact tasks, and acceptance gates.
+
+## Completed/superseded project planning
+
+Completed implementation specs/proofs and the old progress ledger are grouped
+under:
+
+```text
+docs/plans/completed/soundswitch/
+```
+
+They are historical evidence only. Redundant completed session handoffs,
+orchestration prompts, and the superseded readiness-review prompt were deleted;
+git history remains their provenance. Do not resume from completed artifacts.
+
+## Safety boundary
+
+No active planning document authorizes a restart, backend toggle, MIDI/serial
+open, Enttec/DMX output, fixture connection, or hardware test. Those actions
+remain behind the explicit operator gate in the remaining-work roadmap.

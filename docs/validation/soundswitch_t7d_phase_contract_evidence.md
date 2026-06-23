@@ -1,23 +1,28 @@
 ---
 doc_status: active-validation
 truth_level: code-grounded
-last_verified_commit: 37fffa4
-last_verified_date: 2026-06-22
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: T7d phase-contract evidence ledger; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # T7d phase-contract evidence ledger
 
-## Final verdict (this session): `INCOMPLETE_T7D_EVIDENCE`
+## Current verdict: `INCOMPLETE_T7D_EVIDENCE`
 
-No hardware captures were taken. The bridge core process was not running at the
-start of this session and the runtime status file was stale (frozen at
-2026-06-21 19:53; session date 2026-06-22), so the passive-capture reference
-path (live OS2L → SoundSwitch → Universe-0 Art-Net) could not be observed. The
-capture matrix therefore has **zero accepted, zero rejected, zero
-incomplete** real captures. The live capture gate was handed off
-(`docs/plans/active/soundswitch_t7d_capture_gate_handoff.md`) so it runs when the
-operator is physically present at the decks.
+Five live wire-capture runs now exist under the ignored T7d capture corpus. The
+capture conductor classifies **four ACCEPTED** integrity runs (two `arm`, two
+`refire`) and **one FAIL** run (the first `arm` baseline recorded zero core
+bridge processes). Each accepted run has an unchanged project hash, a clean
+phase footer, zero recorder drops, the required marker, and more than 20
+Universe-0 frames.
+
+`ACCEPTED` here means only that the capture artifact passed the conductor's
+fail-closed integrity gate. It is **not** a phase-contract pass and it is not
+physical fixture validation. No accepted capture has a checked-in
+`PASS_T7D_PHASE_CONTRACT` oracle result. Four scenarios have not been captured,
+and identity/holdout coverage has not been reconciled. The only honest corpus
+verdict therefore remains `INCOMPLETE_T7D_EVIDENCE`.
 
 **Scope update 2026-06-22:** the pass is **six** scenarios. `phrase-anchor` was
 dropped — `_phrase_anchor` only fires with `RBSS_PHRASE_ANCHOR=1`
@@ -32,13 +37,25 @@ status.
 
 | state | count | notes |
 | --- | --- | --- |
-| ACCEPTED | 0 | no live bridge; no captures taken |
-| REJECTED/FAIL | 0 | — |
-| INCOMPLETE | 0 | — (none attempted; gate handed off) |
+| ACCEPTED | 4 | `arm` 2, `refire` 2; conductor integrity classification only |
+| REJECTED/FAIL | 1 | initial `arm`; baseline recorded zero core bridge processes |
+| INCOMPLETE | 0 | no attempted run has this conductor classification |
 
-Required before B6 can pass (plan §A4/§B6): two ACCEPTED repetitions for each of
-arm, refire, master-switch, drop-hold, buildup, correction; ≥3
-verified IAC/bank-4 identities; ≥2 BPM/pitch values; ≥1 full holdout identity.
+| scenario | ACCEPTED | FAIL | still required before corpus oracle |
+| --- | ---: | ---: | --- |
+| arm | 2 | 1 | capture-count gate met; oracle/identity reconciliation pending |
+| refire | 2 | 0 | capture-count gate met; oracle/identity reconciliation pending |
+| master-switch | 0 | 0 | 2 accepted runs |
+| drop-hold | 0 | 0 | 2 accepted runs |
+| buildup | 0 | 0 | 2 accepted runs |
+| correction | 0 | 0 | 2 accepted runs |
+
+Required before B6 can pass (plan §A4/§B6): finish the four missing scenario
+pairs; reconcile at least three verified IAC/bank-4 identities; prove at least
+two BPM/pitch values; and reserve at least one full holdout identity. The
+accepted traces contain observed BPM values 130, 138, 141, and 150, but that
+does not satisfy B6 until each oracle segment has unambiguous identity ownership
+and the cross-validation/holdout split is documented.
 
 ## Tooling readiness (software/wire-validated only)
 
@@ -62,7 +79,8 @@ integer beats-per-cycle `b ∈ [8, 128]` that divide evenly, plus {480, 600, 720
 **600 is always included but never assumed.** The circular `rate = bpm * 10.0`
 premise (equivalent to assuming 600) was removed from the fit path.
 
-- **Did 600 pass on real data?** Unknown — no real captures. On synthetic data
+- **Did 600 pass on real data?** Unknown — the accepted captures have not been
+  run through a complete, documented corpus oracle. On synthetic data
   the oracle correctly *recovers* 600 when 600 is the truth and *rejects* 600
   when 480 is the truth (`test_recovers_480_and_explicitly_rejects_600`).
 - **Winning quantizer:** Unknown on real data. Synthetic tests show floor can be
@@ -74,8 +92,8 @@ premise (equivalent to assuming 600) was removed from the fit path.
 
 | scenario | result |
 | --- | --- |
-| arm | UNKNOWN — requires capture |
-| refire | UNKNOWN — requires capture |
+| arm | CAPTURED 2/2; phase origin still UNKNOWN until oracle |
+| refire | CAPTURED 2/2; phase origin still UNKNOWN until oracle |
 | master-switch | UNKNOWN — requires capture |
 | drop-hold | UNKNOWN — requires capture |
 | buildup | UNKNOWN — requires capture |
@@ -89,18 +107,18 @@ selects continuous, snap, and arm-sync origins correctly when they are
 distinguishable, and reports aliasing (e.g. 32-beat-multiple origins at tpb=600)
 as ambiguity rather than a guess.
 
-## Other required fields (all pending real capture)
+## Other required fields
 
-- **Transition timing tolerance / clock residual:** n/a — measured per capture
-  from dual timestamps; the oracle's `compare_wire_frames` enforces it.
-- **Identity ownership:** n/a — resolved offline from the verified
+- **Transition timing tolerance / clock residual:** not yet documented for the
+  accepted runs; it must be measured from dual timestamps before oracle use.
+- **Identity ownership:** not yet reconciled for the accepted runs; resolve
+  offline from the verified
   scene→identity map + AppLog; the oracle requires unambiguous ownership.
-- **Universe-0 verification:** n/a — `count_universe0_frames` /
-  `parse_artnet_pcap.universe_frames` ready; `MIN_UNIVERSE0_FRAMES = 20`.
-- **Project before/after hash:** n/a — conductor + plan §B4 hash before/after;
-  any drift → FAIL.
-- **Recorder drops:** n/a — schema-2 tracer counts dropped samples; any drop
-  spanning a segment → INCOMPLETE.
+- **Universe-0 verification:** conductor counts pass for the four accepted runs
+  (1,530; 1,813; 2,617; and 2,871 frames). Ownership/segment alignment still
+  requires oracle review.
+- **Project before/after hash:** matched for all four accepted runs.
+- **Recorder drops:** zero and footer clean for all four accepted runs.
 
 ## Ambiguities and rejected hypotheses (synthetic coverage)
 
@@ -116,8 +134,8 @@ test).
 
 The phase contract is a property of the **live** bridge → SoundSwitch animation
 pipeline. It can only be measured by observing real Universe-0 frames against a
-real beat authority. No amount of software testing substitutes for that
-observation. With the bridge down and the operator not at the decks, the honest
-verdict is `INCOMPLETE_T7D_EVIDENCE`. See
+real beat authority. Four integrity-accepted runs are useful progress, but they
+cover only two of six scenarios and have not produced a unique corpus oracle
+fit. The honest verdict remains `INCOMPLETE_T7D_EVIDENCE`. See
 `docs/validation/soundswitch_t7d_phase_contract_blocked.md` for the exact missing
 evidence and `…_capture_gate_handoff.md` for how the next agent obtains it.

@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 9918dd4
-last_verified_date: 2026-06-22
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-only
 ---
 
@@ -18,9 +18,10 @@ Purpose:
 - Own startup wiring, bridge state, event handling, timing, and top-level coordination.
 
 SoundSwitch pack-player boundary:
-- The strict decoder/exporter/verifier and immutable pack loader/player remain outside `StateManager`. MIDI-input, backend, and Enttec components exist but are not pack-wired by startup.
+- The strict decoder/exporter/verifier and immutable pack loader/player remain outside `StateManager`. Optional MIDI-input, backend, and Enttec components are built by startup/command-thread orchestration and passed to `StateManager` as one immutable runtime bundle.
 - T7.0 keeps process signal ownership in `__main__`; T7.1 routes the existing laser executor through one injected backend while retaining the MIDI default path.
-- T7a adds only a validated, default-off config loader and tracked example. `__main__` does not load it, and no pack-player, Enttec, status, or command integration exists yet. OS2L, MIDI lasers, LED/Govee, Rekordbox readers, and runtime behavior remain unchanged.
+- T7a/T7b/T7c/T7e are wired: `__main__` loads optional default-off config, chooses one backend, starts verified workers, creates `PackRuntime`, injects it into `StateManager`, and wires sanitized status plus validate-first commands. Absent/disabled config preserves legacy MIDI; dry-run/none opens no pack hardware.
+- The active roadmap records remaining runtime closure: one-click export/publish/reload, scripted pause/mode/input-health/status, T7d Autoloop phase, and hardware validation. Current Autoloop pack output remains zero-safe.
 
 Authoritative code:
 - `__main__.py`

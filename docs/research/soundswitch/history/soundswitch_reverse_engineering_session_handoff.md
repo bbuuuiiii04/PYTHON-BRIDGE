@@ -15,7 +15,7 @@ validation_scope: scratch-project authoring diffs and passive software evidence;
 > blackout/restore. See `soundswitch_re_closure_report.md`.
 
 > **Current scripted-renderer closure handoff:**
-> `docs/research/soundswitch/soundswitch_scripted_renderer_closure_handoff_spec.md`
+> `docs/research/soundswitch/history/soundswitch_scripted_renderer_closure_handoff_spec.md`
 > supersedes this file's older scripted-capture task ordering. Use this broader
 > handoff for historical authoring/catalog context only where the closure spec
 > explicitly routes to it.
@@ -136,11 +136,11 @@ Current unstaged/untracked research work includes:
 - `docs/agents/change_contracts.yml`
 - `docs/architecture/doc_index.md`
 - `docs/research/soundswitch/soundswitch_ssfile_format.md`
-- `docs/research/soundswitch/soundswitch_stage2_research_findings.md`
+- `docs/research/soundswitch/history/soundswitch_stage2_research_findings.md`
 - `docs/research/soundswitch/soundswitch_validation_matrix.md`
-- `docs/research/soundswitch/soundswitch_stage3_handoff.md`
-- `docs/research/soundswitch/soundswitch_decode_export_codex_spec.md`
-- `docs/research/soundswitch/soundswitch_exporter_renderer_full_plan.md`
+- `docs/research/soundswitch/history/soundswitch_stage3_handoff.md`
+- `docs/research/soundswitch/history/soundswitch_decode_export_codex_spec.md`
+- `docs/research/soundswitch/history/soundswitch_exporter_renderer_full_plan.md`
 - `docs/research/soundswitch/soundswitch_authoring_mutation_matrix.md`
 - `docs/status/active_work_registry.md`
 - `docs/research/soundswitch/research_tools.md`

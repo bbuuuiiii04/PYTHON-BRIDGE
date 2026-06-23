@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b7e0e66
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-only
 ---
 
@@ -20,7 +20,7 @@ Purpose:
 SoundSwitch pack-player boundary:
 - `soundswitch_pack_player_config.py` implements the T7a startup-only, never-raising config loader.
 - `config/soundswitch_pack_player.example.json` is tracked, disabled, dry-run, and `output_backend: "none"` by default. The ignored local copy is `config/soundswitch_pack_player.json`.
-- This config is not wired into startup, `StateManager`, status, commands, MIDI, or Enttec yet. T7a alone causes no runtime or hardware behavior change.
+- This config is loaded by startup/reload orchestration. When explicitly enabled with backend `pack`, it builds the verified player, controller inputs, fixture-map-bound Enttec sender, and StateManager runtime bundle. Absent/disabled config preserves legacy MIDI; dry-run/none opens no physical pack output.
 
 Authoritative code:
 - `config.py`
@@ -58,7 +58,8 @@ Config:
 - Local ignored `config/led_look_director.json` can legitimately lag the tracked example; mirror Patch F to live config only with explicit operator approval and a loader check.
 - Point/mono palette ranges can collapse slot-color entries 0-4 to one solid RGB for any slot cue; `random_with_mono_chance` can also opt individual looks into probabilistic solid slots 0-4; slot 5 remains reserved pure white.
 - SoundSwitch pack-player path precedence is explicit argument, then `RBSS_SOUNDSWITCH_PACK_PLAYER_CONFIG`, then `config/soundswitch_pack_player.json`; an absent selected file returns `not_configured`.
-- Pack-player config defaults are `enabled=false`, `dry_run=true`, and `output_backend=none`. Supported backends are `none`, `midi`, and `pack`, but T7a does not activate any backend.
+- Pack-player config defaults are `enabled=false`, `dry_run=true`, and `output_backend=none`. Supported configured backends are `none`, `midi`, and `pack`; runtime command switching to `midi` remains deliberately unsupported. Pack enable/reload/backend actions are explicit and validate-first.
+- The ignored local pack config was absent in the 2026-06-23 audit. No pack/Enttec live setup is therefore claimed.
 - `fixture_map` must define exactly CH1 through CH19 with integer DMX addresses 1 through 512. A non-empty `fixture_map_path` is authoritative over the inline map and resolves relative to the containing config file unless absolute.
 - Pack-player timeouts must be positive integers. Paths and the Enttec port field must be strings. `midi_input_aliases` must map non-empty device identity strings to non-empty local port-alias strings.
 - Invalid JSON, unknown keys, duplicate JSON keys, duplicate fixture channels after integer coercion, invalid map files, and invalid field types fail closed as `invalid_config`; the loader never raises.

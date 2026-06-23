@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan
 truth_level: code-grounded
-last_verified_commit: 37fffa4
-last_verified_date: 2026-06-22
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: capture-gate handoff only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -142,6 +142,13 @@ Track progress:
 python3 tools/t7d_capture_conductor.py summarize-corpus
 ```
 
+**Current corpus, verified 2026-06-23:** `arm` has 2 ACCEPTED and 1 FAIL;
+`refire` has 2 ACCEPTED; `master-switch`, `drop-hold`, `buildup`, and
+`correction` have no attempts. The failed arm run recorded zero bridge
+processes at baseline. The accepted classifications prove capture integrity,
+not the phase contract. Resume at `master-switch` unless an integrity review
+invalidates an existing run.
+
 ## 4. After enough ACCEPTED captures: run the oracle
 
 For each accepted segment (one identity per run), run the falsifiable oracle:
@@ -162,10 +169,11 @@ and the origin. The contract math is unit-tested
 only on real data — confirm the clock offset and segment windows against the
 capture (plan §B5) and do not seed any production value from a capture.
 
-The schema-2 phase trace requires the **B1 `_push_tick` call-site** to be wired
-first — that is a live-critical hot-path edit deferred for plan-first review (see
-plan §B1 implementation-status note). Get that reviewed and merged before live
-captures, or the `session.jsonl` will lack `autoloop_phase` rows.
+The schema-2 phase trace **is wired in current code**. Before trusting a live
+capture, run the documented smoke test and prove that the currently running
+bridge emits `autoloop_phase` rows plus a clean `phase_trace_footer`. A missing
+row means the running process is stale or the trace is invalid; it does not
+reopen the already-landed B1 implementation task.
 
 ## 5. Then, and only then, write the final artifacts
 
@@ -186,10 +194,12 @@ captures, or the `session.jsonl` will lack `autoloop_phase` rows.
 Repo status stays **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED**
 throughout the capture pass; a software/wire pass never upgrades it.
 
-## 6. Session log — 2026-06-22 (prep done, capture not yet run)
+## 6. Session log — 2026-06-22/23
 
-Operator was **not yet set up** for the live pass, so no scenarios ran. All
-automatable prep is done; resume goes straight to §3 scenario captures.
+The live pass started after the original prep handoff. The ignored corpus now
+contains five attempts: two accepted arm runs, two accepted refire runs, and one
+failed initial arm run. Four scenario pairs remain. No real-capture oracle
+verdict has been recorded, so do not derive or implement phase behavior yet.
 
 - **Restart gate CLEARED.** The core bridge was restarted onto the B1 wiring
   (core start `14:14:57` > `state_manager.py` mtime `14:00:04`). Phase-trace

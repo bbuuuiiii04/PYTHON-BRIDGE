@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b7e0e66
-last_verified_date: 2026-06-21
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-only
 ---
 
@@ -10,7 +10,11 @@ validation_scope: software-only
 
 This repo uses tracked example configs plus local ignored configs. Do not commit local device secrets, local IPs, API keys, or backup files.
 
-SoundSwitch Task 7a adds a validated, startup-only pack-player config schema and tracked example. It is not wired into bridge startup or runtime yet, so existing SoundSwitch OS2L, laser, LED/Govee, Rekordbox, status, MIDI, and Enttec behavior remains unchanged.
+SoundSwitch Tasks T7a/T7b/T7c/T7e add a validated pack-player config schema,
+tracked inert example, startup construction, StateManager frame driver,
+validate-first runtime controls, and sanitized status. The default remains
+absent/disabled/dry-run/none, so no pack hardware opens unless a reviewed local
+config explicitly enables backend `pack`.
 
 ## Tracked examples
 
@@ -50,13 +54,25 @@ Use `docs/agents/task_playbooks/update_config_schema.md` before changing config 
 
 If the selected file is absent, the result is `available=false`, `reason=not_configured`. Any read, JSON, schema, or fixture-map error returns `reason=invalid_config`; the loader does not raise.
 
-The tracked example is inert: `enabled=false`, `dry_run=true`, and `output_backend=none`. Copy it to the ignored local filename only when preparing a local setup. T7a does not start MIDI, serial, Enttec, DMX, or controller-input workers.
+The tracked example is inert: `enabled=false`, `dry_run=true`, and
+`output_backend=none`. Copy it to the ignored local filename only when preparing
+a reviewed local setup. The local file was absent in the 2026-06-23 audit.
 
 `fixture_map` must contain exactly the string keys `1` through `19`, each mapped to an integer DMX address from 1 through 512. `fixture_map_path` is an optional alternative: when non-empty it takes precedence over the inline map. Relative map paths resolve against the directory containing the selected config file; absolute paths remain absolute. Map files contain the mapping object itself.
 
 Supported `output_backend` values are `none`, `midi`, and `pack`. Both timeout fields must be positive integers. `pack_path`, `fixture_map_path`, and `enttec_port` are strings. `midi_input_aliases` maps non-empty saved device identities to non-empty local port aliases. Do not put actual device identifiers or live port details in the tracked example or docs.
 
-This remains **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**. Backend selection and runtime ownership are later Task 7 work.
+When config is explicitly enabled with `output_backend=pack`, startup loads and
+verifies `pack_path`, constructs controller inputs and the fixture-map-bound
+sender, confirms input/serial readiness, and publishes the runtime only on
+success. Dry-run/none opens neither; pack failure disables output and never
+falls back to physical MIDI. Runtime `set_soundswitch_pack` supports explicit
+reload/backend/enable actions, with runtime `backend=midi` intentionally
+unsupported.
+
+This remains **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**. Do not create
+or enable the local config until the active remaining-work roadmap reaches its
+reviewed deployment/hardware gate.
 
 ## LED color-engine notes
 

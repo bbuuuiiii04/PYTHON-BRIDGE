@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 9918dd4
-last_verified_date: 2026-06-22
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -32,11 +32,21 @@ This matrix is deliberately conservative. If evidence is missing, the answer is 
 
 ## Lighting outputs
 
-The SoundSwitch project/pack tooling is not a live lighting-output claim. For the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile, strict decode, deterministic canonical export, independent verification, immutable pack loading/rendering, MIDI-input routing, backend abstraction, and Enttec framing/sending have software tests. The proof gate is 29 PASS / 0 FAIL / 0 INCOMPLETE with F9 and F10 passing. T7a adds a default-off config loader only; pack startup, `StateManager`, status, commands, direct DMX, and hardware support remain unavailable.
+The SoundSwitch project/pack tooling is not a live lighting-output claim. For
+the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile, strict decode,
+deterministic new-path export, independent verification, immutable pack
+loading/rendering, MIDI-input routing, backend abstraction, config/startup,
+StateManager scripted driving, commands/status, and Enttec framing/sending have
+software tests. The current proof gate is 29 PASS / 0 FAIL / 0 INCOMPLETE.
+Direct-DMX code exists but is default-off, locally unconfigured, and
+hardware-unvalidated. Scripted runtime gaps and T7d capture/native-Autoloop work
+remain listed in the active roadmap.
 
 | Output | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | SoundSwitch OS2L | implemented | code path exists | Exact SoundSwitch version support unknown. |
+| SoundSwitch scripted pack/direct DMX | partial, default-off | current-project proof plus player/startup/driver/sender tests | 32/32 active scripts supported; pause/mode/input-health/status closure and physical validation remain. |
+| SoundSwitch native-DMX Autoloops | blocked | pure renderer/capture-tool tests plus 4 conductor-integrity-accepted live wire captures | Arm/refire each have two accepted captures, but four scenario pairs and the unique corpus oracle remain; no phase contract; automatic base remains zero. |
 | Laser MIDI | implemented | code path plus lifecycle unit/integration tests | Default-on gated drop/post-drop cycling, shuffle-bag selection, static-impact fallback, and kill-switch-OFF legacy behavior are software-tested. Broad fixture/safety validation is not documented. |
 | LED/Govee cloud scene | implemented | code path exists | Scripted groove/drop/post-drop blackout mapping is software-tested and the shipped example config now enables the master switch (`true`) with the conservative blackout policy; device support and room-visible behavior are not generalized. |
 | LED/Govee realtime | implemented/experimental | code path exists | Slot-color strategy behavior, Patch S `random_with_mono_chance`, generic M2.5 groove/post_drop/drop/Patch E1 nebula/Patch E2 center-comet/Patch E3 twinkle cues, and Patch F default-bank cleanup are software-tested only; current H612D setup must be validated through hardware log before broad claims. |
