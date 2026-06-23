@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan
 truth_level: code-test-and-current-project-grounded
-last_verified_commit: 0c2ba07
+last_verified_commit: 5029ec4
 last_verified_date: 2026-06-23
 validation_scope: docs-only completion audit and remaining-work roadmap; SoundSwitch 2.10.3 canonical project/RAVE profile; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -58,10 +58,12 @@ Authority order for every task:
 ## 2. Audit snapshot
 
 Audit date: **2026-06-23**. The executable implementation baseline was
-`soundswitch/impl` at `b2ce63d`; the initial docs consolidation was auto-synced
-through `0c2ba07`. The intervening commits changed Markdown only (plus an
-unrelated plan file), so the code/test findings remain tied to `b2ce63d`.
-The worktree was clean before the initial docs-only pass.
+`soundswitch/impl` at `b2ce63d`; this roadmap was re-verified through `5029ec4`.
+Subsequent commits changed Markdown/agent instructions,
+`docs/agents/change_contracts.yml` housekeeping, and only the authority-path
+docstring in `tools/prove_soundswitch_pack_generation.py`; no executable runtime
+behavior changed, so the code/test findings remain tied to `b2ce63d`. The
+worktree was clean before the initial docs-only pass.
 
 ### 2.1 Current saved-project proof
 
@@ -124,8 +126,11 @@ docs drift check passed
 
 The advisory staleness report correctly identified the
 `soundswitch_pack_player` contract and related architecture/status documents as
-stale. This consolidation corrects that routing drift. Hard checks passing did
-not mean the prose was current; they only proved the checker-enforced surfaces.
+stale. This consolidation de-duplicated the routing, but the advisory
+`soundswitch_pack_player` staleness persists at `5029ec4` until every contract
+document is re-verified and the contract's `last_verified_commit` is bumped.
+Hard checks passing did not mean the prose was current; they only proved the
+checker-enforced surfaces.
 
 ### 2.3 Live/runtime state observed without mutation
 
@@ -151,8 +156,8 @@ started, stopped, signaled, or restarted.
 | Pure scripted renderer/player | **done, software/wire** | Sparse persistence, raw-zero, seek/backseek, paused query, stop/unload zero, overrides/masks. |
 | Scripted `StateManager` driver | **partial** | Playing/fresh/valid-SSID path submits frames; runtime pause/mode/input-health gaps remain. |
 | Static Override/blackout input adapter | **partial runtime integration** | Adapter semantics tested; driver ignores health/error/drop fields. |
-| Pack config/startup/runtime commands | **implemented, default-off** | Config load, startup construction, explicit enable/reload/backend, atomic runtime bundle. |
-| Direct-DMX backend and Enttec sender | **implemented, software/wire only** | Fixture-map expansion, 518-byte framing, mailbox, graceful zero/stop; no rig proof. |
+| Pack config/startup/runtime commands | **implemented, default-off** | Config load, startup construction, explicit enable/reload/backend, and atomic runtime-bundle swap; a post-swap shutdown-ownership gap remains because new output owners are not re-registered for cleanup (RW-1A). |
+| Direct-DMX backend and Enttec sender | **implemented, software/wire only** | Fixture-map expansion, 518-byte framing, mailbox, and startup-owned graceful zero/stop; runtime-swap cleanup remains RW-1A; no rig proof. |
 | MIDI-laser/direct-DMX mutual exclusivity | **implemented, software-tested** | One injected backend and port-level startup selection. |
 | Offline/shadow Task 8 | **done, software** | Backend-none/frame-hash shadow; runtime Autoloop phase intentionally deferred. |
 | T7d capture tooling | **done, software** | Phase tracer, conductor, oracle and synthetic tests exist. |
@@ -226,7 +231,11 @@ scan, or ad-hoc JSON copy pipeline.
 - [x] [C] `StateManager` is the sole per-tick `submit_frame` owner.
 - [x] [C] `SoundSwitchFrameSender` expands CH1-CH19 using only the validated
   fixture map and queues Enttec frames through a bounded latest-frame mailbox.
-- [x] [C] Graceful stop requests a zero packet before serial close.
+- [x] [C] Graceful stop requests a zero packet before serial close for the
+  startup-owned sender. A sender created by a runtime `set_soundswitch_pack`
+  swap is published into `sm._pack_runtime` but is not registered in
+  `__main__.pack_output_owners`; SIGTERM/SIGINT/atexit cleanup therefore does
+  not zero/stop that live swapped sender (RW-1A).
 - [x] [C] Process death/`kill -9` cannot be claimed safe; Enttec may retain the
   last frame and therefore still requires a physical kill method.
 
@@ -275,7 +284,16 @@ Required behavior:
   project paths, device names, ports, raw exceptions, or project bytes.
 - [ ] [P] After successful publish, request `set_soundswitch_pack/reload` only
   when appropriate. Reload must never imply enablement or a backend change.
-  The existing controller already validates a disabled pack while staying off.
+  When the runtime is disabled, the existing controller returns
+  `reloaded_disabled` only if `_prepare_pack_runtime()` can build a fully
+  pack-capable bundle: available config, `enabled=true`, `dry_run=false`,
+  `output_backend=pack`, valid pack and CH1-CH19 fixture map, and a configured
+  `enttec_port`. The prepare step constructs but does not start the sender, so it
+  does not open the port. Missing config, `enabled=false`, `dry_run=true`,
+  `output_backend=none`, or pack mode without a port instead returns a sanitized
+  reload failure while remaining off. The documented RW-6 safe posture therefore
+  cannot use reload to confirm publication: export success is a standalone result
+  and must not depend on disabled-runtime reload succeeding.
 - [ ] [P] If the bridge is stopped, complete export successfully and report
   that the pack will load on the next configured startup; do not start or
   restart the bridge.
@@ -291,8 +309,10 @@ Acceptance gate:
 - the canonical location is the only persistent pack location;
 - successful replacement is independently verified;
 - failed replacement leaves the old verified pack byte-identical and loadable;
-- enabled runtime reloads without a partial bundle; disabled runtime stays
-  disabled; stopped bridge stays stopped;
+- enabled runtime reloads without a partial bundle; a disabled runtime with a
+  fully pack-capable on-disk config returns `reloaded_disabled`, while a disabled
+  runtime with a non-pack-capable/default-off config returns a sanitized reload
+  failure; both remain disabled, and a stopped bridge stays stopped;
 - no hardware/device is opened by export tests;
 - menubar remains responsive and reports sanitized state.
 
@@ -410,6 +430,40 @@ Required work:
   noisy dashboard.
 - [ ] [P] Add status/menubar tests and update drift checks if the documented
   command/status contract changes.
+
+### RW-1A - Runtime output ownership on shutdown
+
+**Status:** [C] confirmed gap. **Priority:** before RW-6, M5, hardware work, or
+any pack-output enablement.
+
+Evidence:
+
+- `__main__.main()` creates `pack_output_owners` for the startup sender and MIDI
+  input, and `_cleanup_pack_outputs()` is the SIGTERM/SIGINT/atexit cleanup path.
+  Those owner slots are assigned only around startup worker construction.
+- `SoundSwitchPackController._swap_to_started()` builds and starts new output
+  objects, then publishes them through `StateManager.set_pack_runtime()` without
+  updating `pack_output_owners`.
+- `StateManager.stop()` only sets its stop event, and `_run()` exits without
+  zeroing or stopping the currently published `PackRuntime` outputs.
+- `test_shutdown_zeros_pack_before_slow_bridge_joins` is a static source-order
+  assertion. It does not exercise SIGTERM after a runtime swap.
+- Pack output is currently default-off and the ignored local pack config is
+  absent, so this is latent until pack mode is enabled and runtime-swapped.
+
+Required work:
+
+- [ ] [P] After every runtime swap, make the live published `PackRuntime`'s
+  `frame_sender` and `midi_input` reachable by shutdown cleanup. Either
+  re-register them in `pack_output_owners` when publishing, or have the
+  SIGTERM/SIGINT/atexit path zero and stop `sm.get_pack_runtime()` directly.
+- [ ] [P] Keep all zero/stop/join work outside `_push_tick`; no blocking work may
+  enter the 200 Hz path.
+- [ ] [P] Add a behavioral shutdown test that swaps to a new fake sender, raises
+  SIGTERM through the shutdown path, asserts that the **live** sender's
+  `zero_and_stop()` is called, and proves that stopping the stale startup sender
+  is a harmless no-op. The existing source-order test is not acceptance evidence
+  for this runtime-swap case.
 
 ### RW-6 - Local pack configuration and deployment preparation
 
@@ -570,6 +624,18 @@ reviewable commits.
 4. Integrate input health and expanded status.
 5. Run scripted event-chain shadow and adversarial review.
 
+### Milestone M2A - Runtime output shutdown ownership
+
+Dependency: M0. This must land before RW-6 advances beyond default-off, before
+any pack-output enablement or hardware work, and before M5.
+
+1. Implement RW-1A without adding blocking work to `_push_tick`.
+2. Behaviorally swap to a new fake sender and exercise the SIGTERM shutdown
+   path, proving the live sender is zeroed/stopped and stale startup cleanup is
+   harmless.
+3. Run focused startup/controller/shutdown tests, the full software suite, and
+   docs gates before any enablement handoff.
+
 ### Milestone M3 - T7d capture evidence
 
 Dependency: current capture tooling; does not require physical direct-DMX
@@ -592,8 +658,8 @@ Dependency: M3 PASS only.
 
 ### Milestone M5 - Hardware gate and final milestone closeout
 
-Dependencies: M1, M2, M4, current proof/shadow/review approval, local config
-prepared but disabled.
+Dependencies: M1, M2, M2A, M4, current proof/shadow/review approval, local
+config prepared but disabled.
 
 1. Author and review the T9 handoff only.
 2. Obtain explicit operator approval for execution.
@@ -605,7 +671,10 @@ prepared but disabled.
 
 1. `StateManager` remains the only writer of `DeckState`.
 2. No filesystem, subprocess, MIDI API, serial, socket, sleep, retry, or
-   blocking queue operation enters the 200 Hz push loop.
+   blocking queue operation enters the 200 Hz push loop. The Enttec latest-frame
+   mailbox lock and MIDI-input snapshot lock are the permitted short-held,
+   non-blocking in-memory synchronization; neither performs I/O in its critical
+   section.
 3. Source SoundSwitch projects are read-only and saved bytes are authority.
 4. Full rescan identity is exact; never use display-name, fuzzy path, or file
    order as identity.
@@ -625,8 +694,9 @@ prepared but disabled.
     for explicitly added sanitized observability.
 12. No local paths, device IDs, ports, fixture addresses, project bytes,
     captures, or secrets are committed.
-13. Graceful shutdown sends zero; hard-kill safety requires a physical kill
-    path and cannot be claimed in software.
+13. Graceful shutdown sends zero (currently guaranteed only for the
+    startup-owned sender; runtime-swapped senders require RW-1A); hard-kill
+    safety requires a physical kill path and cannot be claimed in software.
 14. Software tests and passive wire captures never become physical fixture
     validation claims.
 
