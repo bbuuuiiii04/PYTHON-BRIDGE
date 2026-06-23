@@ -63,6 +63,7 @@ def _ctx(
     *,
     abs_beat: float = 64.0,
     autoloop_tick_just_fired: bool = False,
+    smart_drop_blackout_arm: bool = False,
 ) -> LaserContext:
     return LaserContext(
         active_deck=1, playing=True, elapsed_ms=1000, bpm=128.0,
@@ -71,6 +72,7 @@ def _ctx(
         active_track_loaded=True, autoloop_ready=True,
         autoloop_tick_just_fired=autoloop_tick_just_fired,
         scripted_id=0,
+        smart_drop_blackout_arm=smart_drop_blackout_arm,
     )
 
 
@@ -86,6 +88,8 @@ def _make_config(scenes: dict[str, LaserScene], smart_drop_mode: str = "blackout
         startup_scene="safe_static", stop_scene="safe_static",
         stale_scene="safe_static", emergency_scene="safe_static",
         fallback_scene="safe_static",
+        manual_blackout_on=LaserMidiMessage(kind="manual_blackout", channel=1, note=100, velocity=127),
+        manual_blackout_off=LaserMidiMessage(kind="manual_blackout", channel=1, note=101, velocity=127),
     )
 
 
