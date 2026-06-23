@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import errno
+import json
 import os
 import secrets
 import shutil
@@ -21,8 +22,12 @@ if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
 
 from rb_ss_bridge_v2.soundswitch_pack import compile_pack_artifacts  # noqa: E402
-from rb_ss_bridge_v2.soundswitch_pack_verifier import verify_pack  # noqa: E402
-from rb_ss_bridge_v2.soundswitch_project_decoder import decode_project  # noqa: E402
+from rb_ss_bridge_v2.soundswitch_pack_verifier import (  # noqa: E402
+    SoundSwitchPackVerificationError, verify_pack,
+)
+from rb_ss_bridge_v2.soundswitch_project_decoder import (  # noqa: E402
+    SoundSwitchDecodeError, decode_project,
+)
 
 
 CANONICAL_SOURCE_PROJECT = Path("~/Music/SoundSwitch/default.ssproj").expanduser()
@@ -38,6 +43,10 @@ except OSError:
 
 class ExportAlreadyRunningError(RuntimeError):
     """Another publisher currently owns the destination lock."""
+
+
+class PackSwapError(OSError):
+    """The verified staged pack could not replace the canonical pack."""
 
 
 def _generator_commit() -> str:
@@ -276,22 +285,93 @@ def publish_pack(
         staging = _stage_artifacts(artifacts, parent, destination.name)
         try:
             result = verify_pack(staging, source_project=source)
-            if first_export:
-                os.replace(staging, destination)
-                _fsync_dir(parent)
-            else:
-                _atomic_swap_dir(staging, destination, parent)
+            try:
+                if first_export:
+                    os.replace(staging, destination)
+                    _fsync_dir(parent)
+                else:
+                    _atomic_swap_dir(staging, destination, parent)
+            except OSError as exc:
+                raise PackSwapError("canonical pack swap failed") from exc
             return {**result, "first_export": first_export}
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
 
 
-def main() -> int:
+def _atomic_write_result(path: Path, result: dict[str, object]) -> None:
+    parent = path.expanduser().parent
+    fd, staging_name = tempfile.mkstemp(prefix=f".{path.name}.tmp-", dir=parent)
+    staging = Path(staging_name)
+    try:
+        data = (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(staging, path.expanduser())
+        _fsync_dir(parent)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        staging.unlink(missing_ok=True)
+        raise
+
+
+def _publish_verdict(exc: Exception) -> str:
+    if isinstance(exc, ExportAlreadyRunningError):
+        return "locked"
+    if isinstance(exc, (SoundSwitchDecodeError, FileNotFoundError)):
+        return "source_error"
+    if isinstance(exc, SoundSwitchPackVerificationError):
+        return "verify_failed"
+    if isinstance(exc, PackSwapError):
+        return "swap_failed"
+    return "unknown_error"
+
+
+def _canonical_publish_result() -> dict[str, object]:
+    try:
+        result = publish_pack(CANONICAL_SOURCE_PROJECT, CANONICAL_PACK_DIR)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "verdict": _publish_verdict(exc),
+            "manifest_sha256": "",
+            "artifact_count": 0,
+            "first_export": False,
+            "error_category": type(exc).__name__,
+        }
+    return {
+        "ok": True,
+        "verdict": "published",
+        "manifest_sha256": result["manifest_sha256"],
+        "artifact_count": result["artifact_count"],
+        "first_export": result["first_export"],
+        "error_category": "",
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
-    args = parser.parse_args()
+    parser.add_argument("--project", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--publish-canonical", action="store_true")
+    parser.add_argument("--result-json", type=Path)
+    args = parser.parse_args(argv)
+    if args.publish_canonical:
+        if args.project is not None or args.output is not None or args.result_json is None:
+            parser.error("canonical publish requires only --publish-canonical and --result-json")
+        result = _canonical_publish_result()
+        try:
+            _atomic_write_result(args.result_json, result)
+        except Exception:
+            return 1
+        return 0 if result["ok"] else 1
+    if args.project is None or args.output is None or args.result_json is not None:
+        parser.error("legacy export requires --project and --output")
     result = export_pack(args.project, args.output)
     print(f"pack: {args.output.expanduser()}")
     print(f"manifest_sha256: {result['manifest_sha256']}")

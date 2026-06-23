@@ -860,5 +860,76 @@ class PublishPackReplaceTests(unittest.TestCase):
                     self.assertNotIn(home, path.read_bytes(), path)
 
 
+class PublishPackCliTests(unittest.TestCase):
+    def test_canonical_cli_writes_sanitized_success_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result_path = Path(tmp) / "result.json"
+            publish_result = {
+                "verified": True,
+                "manifest_sha256": "a" * 64,
+                "artifact_count": 95,
+                "first_export": False,
+            }
+            with mock.patch.object(export_module, "publish_pack", return_value=publish_result):
+                return_code = export_module.main([
+                    "--publish-canonical", "--result-json", str(result_path),
+                ])
+            self.assertEqual(return_code, 0)
+            self.assertEqual(json.loads(result_path.read_text()), {
+                "ok": True,
+                "verdict": "published",
+                "manifest_sha256": "a" * 64,
+                "artifact_count": 95,
+                "first_export": False,
+                "error_category": "",
+            })
+
+    def test_canonical_cli_failure_exposes_only_category(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result_path = Path(tmp) / "result.json"
+            raw_message = "/private/path device UUID port details"
+            with mock.patch.object(
+                export_module, "publish_pack",
+                side_effect=SoundSwitchPackVerificationError(raw_message),
+            ):
+                return_code = export_module.main([
+                    "--publish-canonical", "--result-json", str(result_path),
+                ])
+            self.assertEqual(return_code, 1)
+            result = json.loads(result_path.read_text())
+            self.assertEqual(result["verdict"], "verify_failed")
+            self.assertEqual(result["error_category"], "SoundSwitchPackVerificationError")
+            self.assertNotIn(raw_message, result_path.read_text())
+            self.assertNotIn(str(Path.home()), result_path.read_text())
+
+    def test_canonical_cli_classifies_lock_source_and_swap_failures(self):
+        cases = (
+            (ExportAlreadyRunningError("busy"), "locked"),
+            (SoundSwitchDecodeError("source", "unavailable"), "source_error"),
+            (export_module.PackSwapError("swap"), "swap_failed"),
+            (RuntimeError("other"), "unknown_error"),
+        )
+        for exception, verdict in cases:
+            with self.subTest(verdict=verdict), \
+                 mock.patch.object(export_module, "publish_pack", side_effect=exception):
+                result = export_module._canonical_publish_result()
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["verdict"], verdict)
+            self.assertEqual(result["error_category"], type(exception).__name__)
+
+    def test_legacy_cli_still_accepts_project_and_output(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(
+                 export_module, "export_pack",
+                 return_value={"manifest_sha256": "a" * 64, "artifact_count": 95},
+             ) as export:
+            output = Path(tmp) / "pack"
+            return_code = export_module.main([
+                "--project", "source.ssproj", "--output", str(output),
+            ])
+        self.assertEqual(return_code, 0)
+        export.assert_called_once_with(Path("source.ssproj"), output)
+
+
 if __name__ == "__main__":
     unittest.main()
