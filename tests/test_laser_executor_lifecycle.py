@@ -293,5 +293,77 @@ class TestA7Regression(unittest.TestCase):
         self.assertNotEqual(notes_track1, notes_track2, "Track 2 bag pass should not match Track 1")
 
 
+class TestLaserBlackoutEquivalence(unittest.TestCase):
+    def test_blackout_equivalence(self) -> None:
+        scenes = {
+            "d1": _scene("d1", note=41),
+            "safe_static": _scene("safe_static", scene_type="static", note=99),
+        }
+        config = _make_config(scenes)
+        
+        # Flag ON
+        pers_on = LaserPersonality(
+            name="test", safe_scene="safe_static", default_scene="d1",
+            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            drop_scene="d1", post_drop_scene="",
+            breakdown_scene="d1", transition_scene="safe_static",
+            drop_bank=("d1",), drop_lifecycle_mirror=True,
+        )
+        backend_on = _FakeMidiOutput()
+        ex_on = LaserSceneExecutor(config=config, backend=backend_on, personality=pers_on, randomize_cursors=False)
+        ctx_on = _ctx(smart_drop_blackout_arm=True)
+        ex_on.on_decision(_decision("d1", "drop_crossing", "drop"), ctx_on)
+        blackout_on = [m for m, _ in backend_on.calls if m.kind == "manual_blackout"]
+        
+        # Flag OFF
+        pers_off = LaserPersonality(
+            name="test", safe_scene="safe_static", default_scene="d1",
+            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            drop_scene="d1", post_drop_scene="",
+            breakdown_scene="d1", transition_scene="safe_static",
+            drop_bank=("d1",), drop_lifecycle_mirror=False,
+        )
+        backend_off = _FakeMidiOutput()
+        ex_off = LaserSceneExecutor(config=config, backend=backend_off, personality=pers_off, randomize_cursors=False)
+        ctx_off = _ctx(smart_drop_blackout_arm=True)
+        ex_off.on_decision(_decision("d1", "drop_crossing", "drop"), ctx_off)
+        blackout_off = [m for m, _ in backend_off.calls if m.kind == "manual_blackout"]
+
+        self.assertTrue(len(blackout_on) > 0)
+        self.assertEqual(len(blackout_on), len(blackout_off))
+        for b_on, b_off in zip(blackout_on, blackout_off):
+            self.assertEqual(b_on.channel, b_off.channel)
+            self.assertEqual(b_on.note, b_off.note)
+            self.assertEqual(b_on.velocity, b_off.velocity)
+            self.assertEqual(b_on.kind, b_off.kind)
+
+    def test_disallowed_crossing_no_stranded_dark(self) -> None:
+        scenes = {
+            "d1": _scene("d1", note=41),
+            "safe_static": _scene("safe_static", scene_type="static", note=99),
+        }
+        pers_on = LaserPersonality(
+            name="test", safe_scene="safe_static", default_scene="d1",
+            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            drop_scene="d1", post_drop_scene="",
+            breakdown_scene="d1", transition_scene="safe_static",
+            drop_bank=("d1",), drop_lifecycle_mirror=True,
+        )
+        backend = _FakeMidiOutput()
+        ex = LaserSceneExecutor(config=_make_config(scenes), backend=backend, personality=pers_on, randomize_cursors=False)
+        
+        # simulated pending state
+        ex._blackout_pending_for_drop_window = True
+        ex._mask_owners.add("smart_drop")
+        
+        ctx = _ctx(autoloop_tick_just_fired=False, smart_drop_blackout_arm=True)
+        ex.on_decision(_decision("d1", "post_drop_cycle", "post_drop"), ctx)
+        
+        ex.clear_pending_blackout()
+        
+        self.assertFalse(ex._blackout_pending_for_drop_window)
+        self.assertEqual(len(ex._mask_owners), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
