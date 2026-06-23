@@ -379,3 +379,32 @@ class TestParity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestResolveMutateFalse(unittest.TestCase):
+    def test_breakdown_start_crossing_yields_post_drop(self) -> None:
+        """breakdown_start_crossing + smart_post_drop_active returns post_drop without mutation."""
+        lc = DropLifecycle(_cfg(impact_beats=8.0))
+        # Arm a lifecycle first so the chorus window is active
+        lc._first_drop_anchor_beat = 64.0
+        lc._impact_until_beat = 72.0
+        lc._impact_count = 1
+        sp = _sp(
+            current_phrase_is_chorus=True,
+            smart_post_drop_active=True,
+            abs_beat=80.0,
+        )
+        res = lc.resolve(sp, mutate=False)
+        self.assertEqual(res.role, "post_drop")
+        
+    def test_transition_window_active_yields_post_drop(self) -> None:
+        """transition_window_active returns post_drop without mutation."""
+        lc = DropLifecycle(_cfg(impact_beats=8.0))
+        lc._first_drop_anchor_beat = 64.0
+        lc._impact_until_beat = 72.0
+        lc._impact_count = 1
+        sp = _sp(
+            current_phrase_is_chorus=True,
+            abs_beat=80.0,
+        )
+        res = lc.resolve(sp, mutate=False)
+        self.assertEqual(res.role, "post_drop")
