@@ -31,7 +31,7 @@ Each item points at an on-disk spec. **A spec is a plan, not proof of implementa
 | AWR-001 | Old-doc classification + archive pass | mostly done | Done in this refactor (`docs/architecture/doc_index.md` classifies all docs; completed prompts/plans moved to `docs/archive/`). Remaining: verify M2 prompts in `docs/prompts/active/` and archive the completed ones. |
 | AWR-002 | Untracked govee spec | open | Classify `docs/plans/completed/govee_realtime_codex_spec.md` (completed vs awaiting-build) and commit or archive it in a separate change. |
 | AWR-003 | Stray root output files | open | Relocate tracked `cues_output.md` / `cues_timing_output.md` to `docs/data/` or gitignore. |
-| AWR-004 | First agent-workflow dry run | active | Seeded with `docs/agents/operator_workflow.md` and `docs/agents/skills/*.md`; next real feature branch should use intake → implementation → adversarial review → repair/handoff and record missing routes, unclear contracts, or token-waste points. |
+| AWR-004 | First agent-workflow dry run | active | Seeded with `docs/agents/operator_workflow.md`; next real feature branch should use intake → implementation → adversarial review → repair/handoff and record missing routes, unclear contracts, or token-waste points. |
 | AWR-005 | Runtime command test inventory | active | Map parser/handler tests and add missing ones only in a separate code/test PR. |
 | AWR-006 | Contract coverage audit | active | After a feature PR, tighten `docs/agents/change_contracts.yml` around any files agents had to rediscover. |
 
@@ -62,12 +62,12 @@ Deprecated plans belong in `docs/architecture/doc_index.md` or `docs/archive/` w
 | --- | --- | --- | --- |
 | HW-001 | SoundSwitch OS2L local setup | version, interface, track, expected behavior, result, date | not logged |
 | HW-002 | Laser MIDI path | fixture/mapping, blackout behavior, manual override, safety notes | not logged |
-| HW-003 | Govee realtime path | device model, firmware/app assumptions, effect, expected behavior, result | not logged |
+| HW-003 | Govee realtime path | device model, firmware/app assumptions, effect, result | not logged |
 
 ## Compatibility expansion tasks
 
 | ID | Target | Required proof | Status |
-| --- | --- | --- | --- |
+| --- | --- | --- |
 | COMP-001 | Rekordbox versions beyond my current setup | reader/offset validation plus tests/logs | unknown |
 | COMP-002 | macOS versions beyond my current setup | launch/read/status validation | unknown |
 | COMP-003 | Windows/Linux | architecture decision, not docs optimism | unsupported/unknown |
