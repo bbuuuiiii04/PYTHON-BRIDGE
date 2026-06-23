@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-06-21. Treat code as the source of
+Audited against the current checkout on 2026-06-22. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -50,6 +50,7 @@ This component lane is not a second live authority: `__main__` does not load the
 | `SmartPhrasingEngine` | pure musical phrasing engine (no OS2L sends, no `OutputState` writes) | yes | called by `StateManager` thread | per-tick `SmartPhrasingSnapshot` | immutable `SmartPhrasingState` intents |
 | `LaserDirector` | laser scene/role policy only | yes | called by `StateManager` thread | `LaserContext` (including `SmartPhrasingState`) | `LaserSceneDecision` |
 | `LaserSceneExecutor` | laser trigger execution only (MIDI/blackout/cooldown/transition-mask) | yes | called by `StateManager` thread | `LaserSceneDecision`, `LaserContext` | MIDI triggers and executor blackout state |
+| `DropLifecycle` | pure drop/post-drop role resolver | yes | called by `LaserDirector` on the `StateManager` thread | `SmartPhrasingState` fields and immutable config | `DropResult`; no I/O |
 | `LEDLookDirector` | LED room-look policy only | yes | called by `StateManager` thread | manual/emergency LED context and `SmartPhrasingState`-derived role | `LEDLookDecision` |
 | `GoveeSceneAdapter` | LED transport queue/worker | no hot-path I/O | public trigger called by `StateManager`; worker owns Govee transport | `LEDLookDecision` | bounded queue commands and sanitized adapter status |
 | `SoundSwitchEngine` | SoundSwitch output-intent fanout helper | yes | called by `StateManager` thread | active deck routing and send intents from `StateManager` | routed OS2L sends for scripted/autoloop/smart-transition/live-BPM-follow helpers |
@@ -100,9 +101,16 @@ direct path inactive while MTC/current state fallbacks continue where available.
 - `SoundSwitchEngine` performs canonical OS2L/SoundSwitch deck-route fanout for
   the sends requested by `StateManager`.
 - `LaserDirector` consumes `SmartPhrasingState` through `LaserContext` to make
-  scene policy decisions only.
+  scene policy decisions only. Its default-on drop lifecycle uses the LED
+  phrase-context gate, a configurable flat impact window, and a capped
+  chorus-to-chorus impact count.
 - `LaserSceneExecutor` consumes those decisions and handles laser MIDI output,
   role cooldown/rotation, blackout latching, and transition-mask cleanup.
+  Drop/post-drop cycles use usable-only shuffle bags and autoloop-tick cadence;
+  static scenes remain valid for the initial impact fallback.
+- `StateManager` resets director/executor lifecycle state at track/deck/stop/
+  resume boundaries. Scripted and idle lighting transitions reset director
+  lifecycle state without adding push-loop I/O.
 
 ## LED Look Director
 
@@ -121,6 +129,9 @@ direct path inactive while MTC/current state fallbacks continue where available.
   remapped through the latched LED `scripted_mode` policy before dispatch.
 - `LEDLookDirector` chooses configured LED looks from role banks. LED banks are
   separate from laser banks.
+- The live LED drop resolver remains StateManager-owned and unchanged. The pure
+  `DropLifecycle` module is parity-tested against its flat-window behavior for
+  laser policy reuse; it does not replace LED look-duration or offset handling.
 - `GoveeSceneAdapter` keeps public trigger handoff bounded/non-blocking; slow
   Govee transport belongs to its worker.
 - Current automatic role-entry is dry-run/config-gated. Live automation,

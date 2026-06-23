@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout on 2026-06-21.
+Audited against the current checkout on 2026-06-22.
 
 ## SoundSwitch Pack Component Boundary
 
@@ -29,6 +29,14 @@ Audited against the current checkout on 2026-06-21.
   MIDI side effects directly.
 - `LaserSceneExecutor` owns laser MIDI trigger execution, blackout/cooldown,
   and transition-mask cleanup for laser output.
+- `DropLifecycle` is a pure resolver. Default-on laser impacts must pass the
+  LED-equivalent phrase-context gate; sustained drop/post-drop cycles may fire
+  only on autoloop ticks and may select only usable autoloop scenes.
+- An initial laser drop impact may fall back to the configured static drop
+  scene when no usable cyclable entry exists; this prevents a silent dark hit.
+- Setting `drop_lifecycle_mirror` false must retain the pre-mirror director and
+  executor path. Lifecycle state must reset on the documented track/deck/mode
+  teardown boundaries without adding I/O to `_push_tick`.
 - `StateManager` remains the coordinator: event-loop owner, suppression-gate
   owner, `DeckState`/`OutputState` owner, and runtime decision/log owner.
 - `beat_math.py` helpers remain pure computation utilities (no runtime state or
@@ -47,6 +55,9 @@ Audited against the current checkout on 2026-06-21.
   API/LAN/cloud behavior.
 - Automatic LED role-entry is transition/role-keyed only. It must not emit
   commands every tick or every beat.
+- The live LED drop/post-drop resolver remains in `StateManager`; pure
+  `DropLifecycle` parity covers only its flat impact window and must not be
+  treated as live per-look-duration or backend-offset parity.
 - Scripted-track LED automation must stay behind the existing
   `safety.scripted_mode_automation` master switch and the `lighting_mode ==
   "scripted"` gate. Role remapping is a latched policy lookup, not config

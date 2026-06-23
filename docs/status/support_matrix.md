@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: b7e0e66
-last_verified_date: 2026-06-21
+last_verified_commit: 9918dd4
+last_verified_date: 2026-06-22
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -37,7 +37,7 @@ The SoundSwitch project/pack tooling is not a live lighting-output claim. For th
 | Output | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | SoundSwitch OS2L | implemented | code path exists | Exact SoundSwitch version support unknown. |
-| Laser MIDI | implemented | code path exists | Broad fixture/safety validation not documented. |
+| Laser MIDI | implemented | code path plus lifecycle unit/integration tests | Default-on gated drop/post-drop cycling, shuffle-bag selection, static-impact fallback, and kill-switch-OFF legacy behavior are software-tested. Broad fixture/safety validation is not documented. |
 | LED/Govee cloud scene | implemented | code path exists | Scripted groove/drop/post-drop blackout mapping is software-tested and the shipped example config now enables the master switch (`true`) with the conservative blackout policy; device support and room-visible behavior are not generalized. |
 | LED/Govee realtime | implemented/experimental | code path exists | Slot-color strategy behavior, Patch S `random_with_mono_chance`, generic M2.5 groove/post_drop/drop/Patch E1 nebula/Patch E2 center-comet/Patch E3 twinkle cues, and Patch F default-bank cleanup are software-tested only; current H612D setup must be validated through hardware log before broad claims. |
 

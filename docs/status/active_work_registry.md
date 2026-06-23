@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: bc9f7f4
+last_verified_commit: 9918dd4
 last_verified_date: 2026-06-22
 validation_scope: software-only
 ---
@@ -23,6 +23,7 @@ Each item points at an on-disk spec. **A spec is a plan, not proof of implementa
 | AWR-105 | LED role mapping v2 | `docs/plans/active/led_role_mapping_v2_spec.md` | scripted groove/drop/post-drop blackout remap is implemented and software-tested in current worktree; broader role-mapping-v2 scope still needs verification against `led_look_director.py`/`led_models.py` |
 | AWR-106 | LED color engine M2.5 solid-color strategy + Patch F cleanup | `docs/plans/active/led_color_engine_solid_color_and_patch_f_spec.md` | Patch S `random_with_mono_chance` and Patch F tracked-example bank cleanup are implemented and software-tested only; live-config mirror remains operator-gated; all hardware behavior remains unvalidated |
 | AWR-107 | SoundSwitch static exporter / bridge-native player | `docs/research/soundswitch/README.md` (directory authority), `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` (implementation authority), `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` (current blocker plan), `docs/plans/active/soundswitch_t7d_b1_phase_trace_wiring_spec.md` (B1 wiring spec+impl record), `docs/plans/active/soundswitch_impl_progress.md` (resume ledger) | Tasks 0–8 are software/offline-complete except T7d. Proof gate is 29 PASS / 0 FAIL / 0 INCOMPLETE with F9+F10; T8 shadow is backend-none/frame-hash only. **B1 phase-trace tick wiring IMPLEMENTED 2026-06-22 (Opus, operator override): schema-2 `autoloop_phase` rows emit on the playing path while a session recording is active; deterministic tracer close + `phase_trace_footer` integrity record; any dropped/undrained/unclean-close invalidates the whole capture via `evaluate_phase_trace_integrity`. Evidence tooling only — requires a bridge restart to take effect in a live capture.** T7d runtime autoloop DMX is still planned and blocked until captures uniquely prove ticks/beat and reset/continue/snap rules for arm, refire, master-switch, drop-hold, buildup, phrase-anchor, and correction. Current pack autoloop output stays safe-zero (never calls `select_autoloop`); 600 is not accepted as proven; no phase mapping selected. Task 9 is an explicit operator hardware gate. No restart, device output, or hardware validation is authorized; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
+| AWR-108 | Laser drop/post-drop lifecycle mirror | `docs/plans/active/chorus_drop_cycling_spec.md` | Tasks 1-5 and Part D are implemented and software-tested at `9918dd4` and `ed78263`. Live LED behavior is unchanged. Laser hardware/SoundSwitch observation and kill-switch rehearsal remain pending; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
 
 ## Documentation system follow-ups
 

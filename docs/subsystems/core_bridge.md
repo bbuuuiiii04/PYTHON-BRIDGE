@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b7e0e66
-last_verified_date: 2026-06-21
+last_verified_commit: 9918dd4
+last_verified_date: 2026-06-22
 validation_scope: software-only
 ---
 
@@ -42,6 +42,7 @@ Runtime flow:
 - decisions: active deck state, phrase/role state, lighting dispatch timing
 - outputs: OS2L sends, laser decisions, LED decisions, copied status snapshots
 - scripted-track LED automation is still StateManager-gated: `safety.scripted_mode_automation` must be true, `lighting_mode` must be `scripted`, and the smart-phrasing role is remapped through the latched LED `scripted_mode` policy before dispatch
+- laser drop-lifecycle state is reset alongside existing lifecycle teardown on master change, active track load, full stop, and resume; director-only resets also run on scripted and idle lighting transitions
 
 Config:
 - `config.py`
@@ -51,6 +52,7 @@ Config:
 Tests:
 - inspect `tests/` for state manager, runtime status, smart phrasing, and integration tests
 - recommended broad command: `python -m unittest discover tests`
+- laser lifecycle integration coverage includes `tests/test_laser_director_lifecycle.py` and `tests/test_laser_executor_lifecycle.py`
 
 Change contract:
 - If modifying startup, also inspect `runtime_status.py`, subsystem bundle builders, and status docs.

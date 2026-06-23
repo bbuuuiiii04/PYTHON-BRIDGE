@@ -1,8 +1,8 @@
 ---
 doc_status: current-incomplete
 truth_level: code-and-config-grounded
-last_verified_commit: b7e0e66
-last_verified_date: 2026-06-21
+last_verified_commit: 9918dd4
+last_verified_date: 2026-06-22
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -42,8 +42,8 @@ Rollback notes:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | pending | SoundSwitch | pending | pending | pending | pending | pending | no repeatable repo evidence yet |
 | pending | Enttec exporter/player backend | pending | software component only; not startup-wired | explicit blackout/hard-kill and last-frame behavior | pending | pending | process death is not accepted as a hard kill; future hardware-validation gate |
-| pending | Laser MIDI | pending | pending | pending | pending | pending | no repeatable repo evidence yet |
-| pending | Govee/LED | pending | pending | pending | pending | pending | no repeatable repo evidence yet; scripted groove/drop/post-drop blackout policy, slot-color strategy, Patch S probabilistic solid-color outcomes, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, Patch E3 ambient twinkle slot cue, and Patch F default-bank cleanup are software-tested only; scripted blackout/active-role transitions, Patch D stable-hue sparkle, center-burst 0-2 / 2-4 accent band split, Patch E1/E2/E3 visuals, Patch S solid outcomes, and Patch F generic-default rotation need operator visual sign-off |
+| pending | Laser MIDI | pending | lifecycle default-on; local ignored config | gated drop impact, 32-beat hold, post-drop/drop fallback cycling, shuffle-bag order, blackout release, and kill switch | pending | pending | lifecycle is software-tested only; verify no drop leak during groove/buildup and no dark initial hit before any hardware-validated claim |
+| pending | Govee/LED | pending | pending | pending | pending | pending | no repeatable repo evidence yet; scripted groove/drop/post-drop blackout policy, slot-color strategy, Patch S probabilistic solid-color outcomes, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, Patch E3 ambient twinkle slot cue, and Patch F default-bank cleanup are software-tested only; the pure laser lifecycle parity helper does not change live LED behavior; scripted blackout/active-role transitions, Patch D stable-hue sparkle, center-burst 0-2 / 2-4 accent band split, Patch E1/E2/E3 visuals, Patch S solid outcomes, and Patch F generic-default rotation need operator visual sign-off |
 
 ## Claim rule
 
