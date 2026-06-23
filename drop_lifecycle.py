@@ -90,9 +90,11 @@ class DropLifecycle:
         anchor = self.drop_anchor(sp)
         if anchor is not None:
             if self.impact_allowed(sp):
+                armed_this_tick = False
                 if mutate:
                     self.arm(anchor)
-                return DropResult(role="drop", armed_this_tick=True)
+                    armed_this_tick = True
+                return DropResult(role="drop", armed_this_tick=armed_this_tick)
             if mutate and self._first_drop_anchor_beat is None:
                 self._first_drop_anchor_beat = anchor
             return DropResult(role="post_drop", armed_this_tick=False)
