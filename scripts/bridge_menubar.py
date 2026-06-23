@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -37,6 +39,10 @@ STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
 LASER_PAD_URL = "http://127.0.0.1:8765"
 RECORDING_PATH_TEMPLATE = "/tmp/rbss-session-{stamp}.jsonl"
+EXPORT_PROCESS_TIMEOUT_SECONDS = 120.0
+EXPORT_RELOAD_TIMEOUT_SECONDS = 8.0
+EXPORT_RELOAD_POLL_SECONDS = 0.25
+EXPORT_WORKING_DIRECTORY = str(Path(__file__).resolve().parents[2])
 
 ICON_DIR = Path("/Users/bbui")
 ICONS = {
@@ -174,6 +180,108 @@ def append_command(command: dict) -> None:
         os.chmod(COMMANDS_PATH, 0o600)
     except OSError:
         pass
+
+
+def build_export_argv(result_path: str) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "rb_ss_bridge_v2.tools.export_soundswitch_pack",
+        "--publish-canonical",
+        "--result-json",
+        result_path,
+    ]
+
+
+def _safe_error_category(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return "UnknownError"
+    if (
+        not value.isascii()
+        or not value.replace("_", "a").isalnum()
+        or not (value[0].isalpha() or value[0] == "_")
+    ):
+        return "UnknownError"
+    return value
+
+
+def parse_export_result(text: str) -> dict:
+    fallback = {"ok": False, "verdict": "unknown_error"}
+    try:
+        value = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return fallback
+    if not isinstance(value, dict) or type(value.get("ok")) is not bool:
+        return fallback
+    allowed_verdicts = {
+        "published", "source_error", "verify_failed", "locked", "swap_failed", "unknown_error",
+    }
+    verdict = value.get("verdict")
+    manifest_sha256 = value.get("manifest_sha256")
+    artifact_count = value.get("artifact_count")
+    first_export = value.get("first_export")
+    error_category = value.get("error_category")
+    if verdict not in allowed_verdicts:
+        return fallback
+    if not isinstance(manifest_sha256, str):
+        return fallback
+    if value["ok"] and (
+        len(manifest_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in manifest_sha256)
+        or verdict != "published"
+    ):
+        return fallback
+    if type(artifact_count) is not int or artifact_count < 0:
+        return fallback
+    if type(first_export) is not bool or not isinstance(error_category, str):
+        return fallback
+    return {
+        "ok": value["ok"],
+        "verdict": verdict,
+        "manifest_sha256": manifest_sha256,
+        "artifact_count": artifact_count,
+        "first_export": first_export,
+        "error_category": "" if value["ok"] else _safe_error_category(error_category),
+    }
+
+
+def evaluate_reload_ack(status: dict, expected_sha12: str) -> str:
+    if not isinstance(status, dict) or not status or status.get("stale"):
+        return "stale"
+    pack = status.get("soundswitch_pack")
+    if not isinstance(pack, dict) or not bool(pack.get("enabled")):
+        return "not_live"
+    if pack.get("pack_sha12") == expected_sha12:
+        return "succeeded"
+    return "pending"
+
+
+def export_display(state: str, result: dict | None = None) -> tuple[str, str]:
+    result = result or {}
+    if state == "exporting":
+        text = "Export from SS…  (working)"
+    elif state == "published_not_live":
+        text = "Exported ✓  saved (loads when pack enabled)"
+    elif state == "reload_succeeded":
+        text = "Exported ✓  live now"
+    elif state == "reload_failed":
+        text = "Exported ✓  saved — live reload not confirmed"
+    elif state == "export_failed":
+        text = f"Export failed  ({_safe_error_category(result.get('error_category'))})"
+    else:
+        text = "Export from SS"
+    return text, text
+
+
+def _export_failure_result(exc: Exception) -> dict:
+    return {
+        "ok": False,
+        "verdict": "unknown_error",
+        "manifest_sha256": "",
+        "artifact_count": 0,
+        "first_export": False,
+        "error_category": _safe_error_category(type(exc).__name__),
+    }
 
 
 def open_terminal_command(command: str, title: str = "RBSS_TERMINAL") -> None:
@@ -381,6 +489,9 @@ class BridgeMenuBar(NSObject):
             return None
         self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self.menu = NSMenu.alloc().init()
+        self._export_in_progress = False
+        self._export_state = "idle"
+        self._export_result = {}
         self.status_rows = []
         for _ in range(9):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
@@ -389,6 +500,13 @@ class BridgeMenuBar(NSObject):
             self.status_rows.append(item)
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.toggle_item = self._add_action("", "toggleBridge:")
+
+        self.export_status_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Export from SS", None, ""
+        )
+        self.export_status_item.setEnabled_(False)
+        self.menu.addItem_(self.export_status_item)
+        self.export_item = self._add_action("Export from SS", "exportFromSS:")
         
         self.smart_phrasing_menu = NSMenu.alloc().init()
         self.smart_phrasing_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Phrasing", None, "")
@@ -491,6 +609,7 @@ class BridgeMenuBar(NSObject):
             self.toggle_item.setTitle_("Bridge Initializing  (click to stop)")
         else:
             self.toggle_item.setTitle_("Bridge Off  (click to start)")
+        self._render_export_state()
         smart_drop_on = bool(self._snapshot.get("state_manager", {}).get("smart_drop_enabled"))
         self.smart_drop_item.setTitle_("Smart Drops: On" if smart_drop_on else "Smart Drops: Off")
         smart_breakdown_on = bool(self._snapshot.get("state_manager", {}).get("smart_breakdown_enabled"))
@@ -541,6 +660,77 @@ class BridgeMenuBar(NSObject):
             else:
                 self.record_session_item.setTitle_("Record Session: Off")
         self._adapt_timer(status)
+
+    def _render_export_state(self):
+        action_text, status_text = export_display(self._export_state, self._export_result)
+        self.export_item.setTitle_(action_text)
+        self.export_status_item.setTitle_(status_text)
+        self.export_item.setEnabled_(not self._export_in_progress)
+
+    def exportFromSS_(self, _sender):
+        if self._export_in_progress:
+            return
+        self._export_in_progress = True
+        self._export_state = "exporting"
+        self._export_result = {}
+        self._render_export_state()
+        threading.Thread(target=self._run_export, daemon=True).start()
+
+    def _run_export(self):
+        result_path = None
+        try:
+            with tempfile.NamedTemporaryFile(prefix="rbss-export-result-", suffix=".json",
+                                             delete=False) as result_file:
+                result_path = Path(result_file.name)
+            subprocess.run(
+                build_export_argv(str(result_path)),
+                cwd=EXPORT_WORKING_DIRECTORY,
+                timeout=EXPORT_PROCESS_TIMEOUT_SECONDS,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            result = parse_export_result(result_path.read_text(encoding="utf-8"))
+            if not result.get("ok"):
+                self._marshal_export_result("export_failed", result)
+                return
+
+            expected_sha12 = result["manifest_sha256"][:12]
+            status = read_status()
+            if not bridge_pids() or evaluate_reload_ack(status, expected_sha12) == "not_live":
+                self._marshal_export_result("published_not_live", result)
+                return
+
+            append_command({"cmd": "set_soundswitch_pack", "action": "reload"})
+            deadline = time.monotonic() + EXPORT_RELOAD_TIMEOUT_SECONDS
+            while time.monotonic() < deadline:
+                if evaluate_reload_ack(read_status(), expected_sha12) == "succeeded":
+                    self._marshal_export_result("reload_succeeded", result)
+                    return
+                time.sleep(EXPORT_RELOAD_POLL_SECONDS)
+            self._marshal_export_result("reload_failed", result)
+        except Exception as exc:
+            self._marshal_export_result("export_failed", _export_failure_result(exc))
+        finally:
+            if result_path is not None:
+                result_path.unlink(missing_ok=True)
+
+    def _marshal_export_result(self, state: str, result: dict):
+        payload = {"state": state, "result": result}
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "finishExport:", payload, False,
+        )
+
+    def finishExport_(self, payload):
+        state = payload.get("state") if isinstance(payload, dict) else "export_failed"
+        result = payload.get("result") if isinstance(payload, dict) else {}
+        allowed_states = {
+            "published_not_live", "reload_succeeded", "reload_failed", "export_failed",
+        }
+        self._export_state = state if state in allowed_states else "export_failed"
+        self._export_result = result if isinstance(result, dict) else {}
+        self._export_in_progress = False
+        self._render_export_state()
 
     def _adapt_timer(self, status: str) -> None:
         if self._timer is None:
