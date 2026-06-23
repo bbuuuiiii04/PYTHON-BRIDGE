@@ -113,6 +113,10 @@ class LaserPersonality:
     # separate post-drop scene). "emphasized_drop": a separate post_drop_scene
     # is held after the drop. Default mirrors the config-tooling default.
     drop_style: str = "drop_mode"
+    drop_lifecycle_mirror: bool = True        # kill switch, default ON
+    max_drops_in_a_row: int = 2
+    drop_impact_beats: float = 32.0           # operator value; flat window
+    post_drop_cycle_beats: float = 32.0       # inert: not consumed by the laser decision/exec path
 
 
 @dataclass(frozen=True)

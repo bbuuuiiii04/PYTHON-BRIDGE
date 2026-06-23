@@ -689,6 +689,23 @@ def _validate_personality(
         ):
             errors.append(f"{prefix}: '{field_name}' must be a non-negative integer")
 
+    drop_lifecycle_mirror = data.get("drop_lifecycle_mirror", True)
+    if not isinstance(drop_lifecycle_mirror, bool):
+        errors.append(f"{prefix}: 'drop_lifecycle_mirror' must be a boolean")
+
+    max_drops_in_a_row = data.get("max_drops_in_a_row", 2)
+    if (
+        not isinstance(max_drops_in_a_row, int)
+        or isinstance(max_drops_in_a_row, bool)
+        or max_drops_in_a_row < 1
+    ):
+        errors.append(f"{prefix}: 'max_drops_in_a_row' must be a positive integer")
+
+    for _knob in ("drop_impact_beats", "post_drop_cycle_beats"):
+        _value = data.get(_knob, 32.0)
+        if isinstance(_value, bool) or not isinstance(_value, (int, float)) or _value <= 0:
+            errors.append(f"{prefix}: '{_knob}' must be a positive number")
+
     bpm_band_min = data.get("bpm_band_min", 0.0)
     bpm_band_max = data.get("bpm_band_max", 0.0)
     bpm_values_valid = True
@@ -864,6 +881,10 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
             data.get("breakdown_default_restore_beats", 64)
         ),
         drop_style=_canon_drop_style(data.get("drop_style")),
+        drop_lifecycle_mirror=bool(data.get("drop_lifecycle_mirror", True)),
+        max_drops_in_a_row=int(data.get("max_drops_in_a_row", 2)),
+        drop_impact_beats=float(data.get("drop_impact_beats", 32.0)),
+        post_drop_cycle_beats=float(data.get("post_drop_cycle_beats", 32.0)),
     )
 
 
