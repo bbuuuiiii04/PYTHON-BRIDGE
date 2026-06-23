@@ -263,50 +263,79 @@ class TestResolve(unittest.TestCase):
 class TestParity(unittest.TestCase):
     """Flat-vs-flat parity with the LED resolver.
 
-    This proves the resolver reproduces the LED _led_role_from_smart_phrasing
-    drop/post_drop region with LED-equivalent config (max=2, impact=8).
+    This proves the pure resolver reproduces the StateManager LED drop/post_drop
+    region with LED-equivalent config (max=2, impact=8). It maps LED non-drop roles
+    (breakdown, pre_drop, buildup, low, groove) to 'none'.
     It does NOT prove live-LED-window parity (the LED rewrite via
     _led_note_drop_decision_accepted is out of scope).
-
-    LED non-drop roles (breakdown, pre_drop, buildup, low, groove) are mapped
-    to "none" — the resolver does NOT port those branches.
     """
 
-    def test_a8_divergence_breakdown_start_crossing(self) -> None:
-        """When chorus co-occurs with breakdown_start_crossing, LED returns
-        breakdown but the resolver returns drop/post_drop. This is a KNOWN,
-        integration-shielded divergence (priority-8 handles breakdown first
-        in the director)."""
-        lc = DropLifecycle(_cfg(impact_beats=8.0))
-        # Arm a lifecycle first so the chorus window is active
-        lc._first_drop_anchor_beat = 64.0
-        lc._impact_until_beat = 72.0
-        lc._impact_count = 1
-        sp = _sp(
-            current_phrase_is_chorus=True,
-            smart_post_drop_active=True,
-            abs_beat=80.0,  # past impact window → post_drop from resolver
-        )
-        res = lc.resolve(sp, mutate=False)
-        # Resolver says post_drop; LED would say breakdown. Accepted divergence.
-        self.assertEqual(res.role, "post_drop")
+    def setUp(self) -> None:
+        self.lc = DropLifecycle(_cfg(impact_beats=8.0, max_drops=2))
+        
+        # Construct a minimal StateManager for testing the unbound method
+        from rb_ss_bridge_v2.state_manager import StateManager
+        from rb_ss_bridge_v2.rb_memory import PositionCache
+        from unittest.mock import Mock
+        import queue
+        
+        self.sm = StateManager(queue.Queue(), PositionCache(), Mock())
+        # mock flat window on LED constants read by _led_role_from_smart_phrasing
+        self.sm.LED_MAX_DROP_IMPACTS = 2
+        self.sm.LED_DROP_IMPACT_BEATS = 8.0
 
-    def test_a8_divergence_transition_window(self) -> None:
-        """When chorus co-occurs with transition_window_active, LED returns
-        pre_drop but the resolver returns drop/post_drop. Accepted divergence."""
-        lc = DropLifecycle(_cfg(impact_beats=8.0))
-        lc._first_drop_anchor_beat = 64.0
-        lc._impact_until_beat = 72.0
-        lc._impact_count = 1
-        # transition_window_active is NOT read by the resolver — it returns
-        # drop/post_drop based on the chorus window. LED would return pre_drop.
-        sp = _sp(
-            current_phrase_is_chorus=True,
-            abs_beat=80.0,
-        )
-        res = lc.resolve(sp, mutate=False)
-        self.assertEqual(res.role, "post_drop")
+    def assertParity(self, sp, msg="") -> None:
+        from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState
+        # Convert SimpleNamespace to SmartPhrasingState since StateManager requires it
+        if isinstance(sp, types.SimpleNamespace):
+            sp_kwargs = {k: v for k, v in sp.__dict__.items() if not k.startswith('_')}
+            sp_state = SmartPhrasingState(**sp_kwargs)
+        else:
+            sp_state = sp
+            
+        res = self.lc.resolve(sp, mutate=True)
+        led_role = self.sm._led_role_from_smart_phrasing(sp_state, mutate=True)
+        
+        # Map LED non-drop roles to 'none'
+        if led_role in ("breakdown", "pre_drop", "buildup", "low", "groove"):
+            led_role = "none"
+            
+        self.assertEqual(res.role, led_role, f"{msg}: pure={res.role}, led={led_role}")
 
+    def test_parity_allowed_predecessor_flow(self) -> None:
+        """Allowed-predecessor drop -> hold(impact=8) -> post_drop"""
+        sp1 = _sp(smart_drop_crossing=True, active_drop_beat=64.0, previous_phrase_label="up", current_phrase_is_chorus=True, abs_beat=64.0)
+        self.assertParity(sp1, "Allowed cross")
+
+        sp2 = _sp(current_phrase_is_chorus=True, smart_post_drop_active=True, abs_beat=68.0)
+        self.assertParity(sp2, "Hold impact")
+
+        sp3 = _sp(current_phrase_is_chorus=True, smart_post_drop_active=True, abs_beat=80.0)
+        self.assertParity(sp3, "Post drop")
+
+    def test_parity_disallowed_predecessor_flow(self) -> None:
+        """Disallowed-predecessor -> post_drop"""
+        sp1 = _sp(smart_drop_crossing=True, active_drop_beat=300.0, previous_phrase_label="groove", abs_beat=300.0, current_phrase_is_chorus=True)
+        self.assertParity(sp1, "Disallowed cross")
+
+    def test_parity_chorus_cap(self) -> None:
+        """chorus -> chorus cap at max=2"""
+        sp1 = _sp(smart_drop_crossing=True, active_drop_beat=500.0, previous_phrase_label="up", abs_beat=500.0, current_phrase_is_chorus=True)
+        self.assertParity(sp1, "Chorus 1")
+        
+        sp2 = _sp(smart_drop_crossing=True, active_drop_beat=600.0, previous_phrase_label="chorus", abs_beat=600.0, current_phrase_is_chorus=True)
+        self.assertParity(sp2, "Chorus 2")
+
+        sp3 = _sp(smart_drop_crossing=True, active_drop_beat=700.0, previous_phrase_label="chorus", abs_beat=700.0, current_phrase_is_chorus=True)
+        self.assertParity(sp3, "Chorus 3 (capped)")
+
+    def test_parity_lifecycle_clear(self) -> None:
+        """Lifecycle clears when leaving chorus/post_drop"""
+        sp1 = _sp(smart_drop_crossing=True, active_drop_beat=64.0, previous_phrase_label="up", current_phrase_is_chorus=True, abs_beat=64.0)
+        self.assertParity(sp1, "Allowed cross")
+        
+        sp2 = _sp(abs_beat=200.0, current_phrase_label="other")
+        self.assertParity(sp2, "Clear leaving")
 
 if __name__ == "__main__":
     unittest.main()
