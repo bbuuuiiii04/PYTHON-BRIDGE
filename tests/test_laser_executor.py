@@ -158,6 +158,7 @@ def _personality(*, allow_high_impact: bool = True, rotating_banks: bool = False
         post_drop_bank=("post_a",),
         breakdown_bank=("break_a",),
         allow_high_impact=allow_high_impact,
+        drop_lifecycle_mirror=False,
     )
 
 
@@ -179,6 +180,7 @@ def _drop_mode_personality(*, allow_high_impact: bool = True) -> LaserPersonalit
         post_drop_bank=("drop_a",),
         breakdown_bank=("break_a",),
         allow_high_impact=allow_high_impact,
+        drop_lifecycle_mirror=False,
     )
 
 
@@ -200,6 +202,7 @@ def _single_drop_scene_personality(*, allow_high_impact: bool = True) -> LaserPe
         post_drop_bank=("post_a",),
         breakdown_bank=("break_a",),
         allow_high_impact=allow_high_impact,
+        drop_lifecycle_mirror=False,
     )
 
 

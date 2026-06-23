@@ -1320,11 +1320,12 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
         add_check("default personality", False, "missing default personality")
         return checks
 
+    verification_personality = replace(personality, drop_lifecycle_mirror=False)
     midi = _DryCheckMidiOutput()
     ex = LaserSceneExecutor(
         config=cfg,
         backend=MidiOutputBackend(midi),
-        personality=personality,
+        personality=verification_personality,
         randomize_cursors=False,
     )
     role_specs = [
@@ -1466,7 +1467,7 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
     ex2 = LaserSceneExecutor(
         config=cfg,
         backend=MidiOutputBackend(midi2),
-        personality=personality,
+        personality=verification_personality,
         randomize_cursors=False,
     )
     ex2.on_decision(
@@ -1513,7 +1514,7 @@ def verify_mappings_runtime(config_path: Path = _DEFAULT_CONFIG_PATH) -> list[di
         return checks
     midi3 = _DryCheckMidiOutput()
     refire_personality = replace(
-        personality,
+        verification_personality,
         phrase_bank=(personality.phrase_scene,),
     )
     ex3 = LaserSceneExecutor(
