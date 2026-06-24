@@ -358,6 +358,8 @@ class StateManager:
         self._pack_last_load_gen: tuple[int, int] | None = None   # (active, load_gen)
         self._pack_last_elapsed_ms: int | None = None
         self._pack_last_static_slot: int | None = None
+        self._pack_play_hold_key: tuple[int, int] | None = None   # (active, load_gen) last seen PLAYING on the happy path
+        self._pack_play_hold_deadline: float = 0.0                 # monotonic deadline; paused-hold expires here
         self._pack_logged_error = False
         self._led_look_director = led_look_director
         self._led_scene_adapter = led_scene_adapter
@@ -3248,7 +3250,7 @@ class StateManager:
         rt = self._pack_runtime
         return rt.sanitized_status() if rt is not None else DISABLED_PACK_RUNTIME.sanitized_status()
 
-    def _drive_pack_output(self) -> None:
+    def _drive_pack_output(self, now: float | None = None) -> None:
         """T7c/T7e: drive the pack player from authoritative deck state; submit one
         CH1-CH19 frame. READ-ONLY w.r.t. DeckState; fail-safe to ZERO; never raises
         into the tick. Automatic base ZEROs on any non-happy-path (stop/stale/error/
@@ -3258,6 +3260,7 @@ class StateManager:
         rt = self._pack_runtime
         if rt is None or not rt.active:
             return
+        now = time.monotonic() if now is None else now
         player, backend, midi_input = rt.player, rt.backend, rt.midi_input
         try:
             active = self._os.active_deck
@@ -3294,16 +3297,40 @@ class StateManager:
             ssid = getattr(getattr(d, "meta", None), "soundswitch_id", "") or ""
             metadata_ready = _pack_normalize_id(ssid) is not None
 
-            # 3. Automatic base: scripted only on the full happy path; else clear it so
-            #    a held static stands alone and no stale frame is retained.
-            #    Manual-static policy: a held Static Override is operator-controlled via
-            #    the (independent) MIDI controller, so it stays visible during ANY
-            #    non-happy-path here — idle/stop AND stale/error/track-change/
-            #    discontinuity. It loses only to blackout/emergency (set_masks -> render
-            #    ZERO above) and to pack-disabled/shutdown (driver inert / sender ZERO).
-            if playing and fresh and metadata_ready and not track_changed and not discont:
+            # 3. Automatic base transport derivation (RW-2). The pure player
+            #    re-renders from immutable events at elapsed_ms each tick, so paused
+            #    holds the current authoritative frame, never a cached one (A.5).
+            #    Hold is bound to the PLAYED (deck, load_gen) identity and a
+            #    STOP_DEBOUNCE_S deadline so (i) a never-played freshly-loaded track
+            #    is never held, and (ii) the hold matches the OS2L idle debounce.
+            #    os.was_playing is the obsolete-frame guard (A.5). The ZERO path
+            #    stays clear_selection() so a held Static Override stands alone; we
+            #    never emit transport="stopped"/"ended"/"unloaded".
+            # Reuse the EXISTING bindings computed above (3281-3295): `playing`,
+            # `fresh`, `metadata_ready`, `track_changed`, `discont`, `load_key`.
+            # Do not re-declare them. Only `happy` and `was_playing` are new.
+            happy = fresh and metadata_ready and not track_changed and not discont
+            was_playing = bool(getattr(self._os, "was_playing", False))
+            if happy and playing:
+                transport = "playing"
+                self._pack_play_hold_key = load_key
+                self._pack_play_hold_deadline = now + STOP_DEBOUNCE_S
+            elif (
+                happy and was_playing
+                and load_key == self._pack_play_hold_key
+                and now < self._pack_play_hold_deadline
+            ):
+                transport = "paused"
+            else:
+                transport = None  # stopped / hold-expired / unloaded / stale / changed / discont
+                if load_key != self._pack_play_hold_key:
+                    # New identity (track replaced / deck switched): a prior track's
+                    # hold must not resurrect. Only a real PLAY on THIS key re-enables.
+                    self._pack_play_hold_key = None
+                    self._pack_play_hold_deadline = 0.0
+            if transport is not None:
                 player.select_scripted(
-                    soundswitch_id=ssid, elapsed_ms=elapsed_ms, transport="playing",
+                    soundswitch_id=ssid, elapsed_ms=elapsed_ms, transport=transport,
                     metadata_ready=True, authority="fresh", source_errored=False,
                     elapsed_discontinuous=False, track_changed=False,
                 )
