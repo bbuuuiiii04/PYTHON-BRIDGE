@@ -3280,10 +3280,52 @@ class StateManager:
             snap = self._cache.get(active)
 
             # 1. Controller masks + static overrides (in-memory snapshot; no I/O).
+            #    RW-4: an UNHEALTHY controller drops its MANUAL OVERLAY ONLY (held
+            #    Static Look + blackout forced released); the automatic scripted base
+            #    (RW-3 gate below) is deliberately left running, so a DDJ-800 dropout
+            #    keeps the scripted show on (operator policy 2026-06-24). Held input is
+            #    honored only from a FRESH HEALTHY snapshot.
+            #
+            #    FAIL-CLOSED: health fields are read DIRECTLY off the snapshot. A
+            #    malformed double missing them raises and the outer except submits ZERO
+            #    (state_manager.py:3365-3372) — missing health never reads as healthy. An
+            #    empty-alias group is healthy by REAL construction (worker_alive=True,
+            #    error=None; soundswitch_midi_input.py:455), not by a default.
+            #
+            #    UNIFIED degradation latch: ANY degradation that can strand stale held
+            #    state — worker not alive (incl. the source-closed finally path that leaves
+            #    a held slot with worker_alive=False), ANY error, or a new mailbox drop
+            #    (possible missed note-off) — latches overlay distrust. The latch clears
+            #    ONLY on a clean, quiet, healthy snapshot (no held static, no blackout), so
+            #    a stale slot cannot resurface on mere worker recovery; a later FRESH press
+            #    is honored. The latch SURVIVES a runtime swap (set_pack_runtime stays a
+            #    pure atomic assignment); a fresh group's no-holds tick is itself a clean
+            #    tick that clears it.
             if midi_input is not None:
                 s = midi_input.snapshot()
-                player.set_masks(blackout=bool(s.blackout_held), emergency=False)
-                slot = s.held_static_slot
+                worker_alive = bool(s.worker_alive)
+                err = s.error
+                drops = int(s.mail_drop_count)
+                held_slot = s.held_static_slot
+                blackout_held = bool(s.blackout_held)
+                # ponytail: mail_drop_count is inert in the current adapter (never
+                # incremented; the _mailbox deque is unused). The drop term is a
+                # forward-compat hook with falsifiable tests (H4/H9); drop it only if the
+                # mailbox is provably never wired.
+                new_drop = drops > self._pack_last_mail_drop_count
+                self._pack_last_mail_drop_count = drops
+                if (not worker_alive) or (err is not None) or new_drop:
+                    self._pack_input_degraded_latched = True
+                if (
+                    self._pack_input_degraded_latched
+                    and worker_alive and err is None
+                    and held_slot is None and not blackout_held
+                ):
+                    self._pack_input_degraded_latched = False
+                input_healthy = not self._pack_input_degraded_latched
+                blackout = blackout_held if input_healthy else False
+                slot = held_slot if input_healthy else None
+                player.set_masks(blackout=blackout, emergency=False)
                 if slot != self._pack_last_static_slot:
                     if slot is not None:
                         player.hold_static(int(slot))
