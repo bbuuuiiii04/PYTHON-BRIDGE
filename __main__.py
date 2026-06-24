@@ -1584,6 +1584,8 @@ def main() -> None:
         config_reloader.stop()
         status_writer.stop()
         command_reader.stop()
+        command_reader.join(timeout=2.0)   # quiesce the command thread: no more swaps can publish
+        _cleanup_pack_outputs()            # authoritative re-zero of the final live runtime (idempotent)
         sm.stop()
         if rb_state_reader is not None:
             rb_state_reader.stop()
