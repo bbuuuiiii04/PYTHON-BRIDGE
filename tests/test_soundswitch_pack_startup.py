@@ -200,6 +200,68 @@ class StartupMatrixTests(unittest.TestCase):
         self.assertLess(shutdown.index("_cleanup_pack_outputs()"),
                         shutdown.index("sm.stop()"))
 
+    def test_shutdown_joins_command_reader_before_final_live_runtime_zero(self):
+        source = inspect.getsource(bridge_main.main)
+        shutdown = source[source.index("def _shutdown(sig, frame):"):]
+        command_stop = shutdown.index("command_reader.stop()")
+        command_join = shutdown.index("command_reader.join(", command_stop)
+        first_cleanup = shutdown.index("_cleanup_pack_outputs()")
+        second_cleanup = shutdown.index("_cleanup_pack_outputs()", first_cleanup + 1)
+        state_manager_stop = shutdown.index("sm.stop()")
+
+        self.assertLess(command_stop, command_join)
+        self.assertLess(command_join, second_cleanup)
+        self.assertLess(second_cleanup, state_manager_stop)
+
+    def test_shutdown_no_swap_same_objects_allow_repeat_cleanup(self):
+        class FakeOutput:
+            def __init__(self):
+                self.stop_calls = 0
+
+            def stop(self):
+                self.stop_calls += 1
+
+        class FakeRuntime:
+            def __init__(self, sender, midi_input):
+                self.frame_sender = sender
+                self.midi_input = midi_input
+
+        class FakeSM:
+            def __init__(self, runtime):
+                self._runtime = runtime
+
+            def get_pack_runtime(self):
+                return self._runtime
+
+        sender = FakeOutput()
+        midi_input = FakeOutput()
+        owners = {"sender": sender, "midi_input": midi_input}
+        sm = FakeSM(FakeRuntime(sender, midi_input))
+
+        bridge_main._shutdown_zero_pack_outputs(owners, sm)
+        self.assertEqual(sender.stop_calls, 2)
+        self.assertEqual(midi_input.stop_calls, 2)
+
+        bridge_main._shutdown_zero_pack_outputs(owners, sm)  # must not raise
+        self.assertEqual(sender.stop_calls, 3)
+        self.assertEqual(midi_input.stop_calls, 3)
+
+    def test_shutdown_repeat_cleanup_drains_startup_owners_once(self):
+        calls = []
+
+        class FakeOutput:
+            def stop(self):
+                calls.append("stop")
+
+        owners = {"sender": FakeOutput(), "midi_input": FakeOutput()}
+
+        bridge_main._shutdown_zero_pack_outputs(owners, None)
+        self.assertNotIn("sender", owners)
+        self.assertNotIn("midi_input", owners)
+
+        bridge_main._shutdown_zero_pack_outputs(owners, None)
+        self.assertEqual(calls, ["stop", "stop"])
+
     def test_shutdown_zeros_live_swapped_sender_not_just_startup(self):
         """After a runtime swap, shutdown must zero the LIVE sender; stopping the
         stale startup sender must be a harmless no-op."""
