@@ -1,7 +1,7 @@
 ---
 doc_status: active-spec
 truth_level: code-grounded-design-spec
-last_verified_commit: 4138c61
+last_verified_commit: f6910f9
 last_verified_date: 2026-06-24
 validation_scope: RW-5 sanitized copied-state status and menubar visibility only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no restart, config, output, device, or hardware action authorized
 ---
@@ -10,34 +10,35 @@ validation_scope: RW-5 sanitized copied-state status and menubar visibility only
 
 ## Part A - Context & root cause (verified; read, do not implement)
 
-- [confirmed] `PackRuntime.sanitized_status()` currently calls `backend.status()` and exposes only
-  availability, enablement, backend, pack load/hash, frame count, accepted-identity presence, and a
-  reason (`soundswitch_pack_runtime.py:35-58`). It cannot describe the frame decision the pack
-  driver just made.
-- [confirmed] `StateManager.get_pack_status()` delegates directly to that runtime method
-  (`state_manager.py:3271-3274`). The status writer invokes it every 0.5 seconds and writes the
-  result under `soundswitch_pack` (`runtime_status.py:92-99`, `runtime_status.py:123-139`).
-- [confirmed] The driver already has every minimum RW-5 decision in one tick: runtime active,
+- [confirmed] `PackRuntime.sanitized_status()` now exposes only immutable bundle facts and calls no
+  backend/provider (`soundswitch_pack_runtime.py:35-44`).
+- [confirmed] `StateManager.get_pack_status()` returns only a copy of the StateManager-owned
+  published dict (`state_manager.py:3318-3320`). The status writer invokes it every 0.5 seconds and
+  writes the result under `soundswitch_pack` (`runtime_status.py:99-106`,
+  `runtime_status.py:130-145`).
+- [confirmed] The driver uses every minimum RW-5 decision in one tick: runtime active,
   controller degradation, held static, held blackout, scripted transport, bridge lighting mode,
-  and final rendered frame (`state_manager.py:3283-3426`). No second authority source is needed.
+  and final rendered frame, then publishes software intent before submitting that same frame
+  (`state_manager.py:3369-3542`). No second authority source is used.
 - [confirmed] RW-4 intentionally allows `input_degraded=true` and `scripted_active=true` at the same
-  time: degradation drops the manual overlay only (`state_manager.py:3293-3345`). A single enum
+  time: degradation drops the manual overlay only, and RW-5 publishes both booleans
+  (`state_manager.py:3383-3435`, `state_manager.py:3511-3521`). A single enum
   cannot represent that truth without companion booleans.
 - [confirmed] Native Autoloop DMX is intentionally absent. The driver selects scripted output or
   clears the base and submits one frame; it never calls `select_autoloop`
-  (`state_manager.py:3389-3419`). Reporting `autoloop_phase_blocked` is status only.
+  (`state_manager.py:3479-3522`). Reporting `autoloop_phase_blocked` is status only.
 - [confirmed] The menubar already reads a copied JSON file, marks it stale after three seconds, and
-  never reaches into bridge runtime objects (`scripts/bridge_menubar.py:275-285`). It has an export
-  action plus one disabled export-status row (`scripts/bridge_menubar.py:625-630`), with only a
-  coarse `Exporting…` button state and terminal result text (`scripts/bridge_menubar.py:375-390`,
-  `scripts/bridge_menubar.py:786-792`).
+  never reaches into bridge runtime objects (`scripts/bridge_menubar.py:275-285`). It reuses one
+  disabled export-status row (`scripts/bridge_menubar.py:669-674`) for the allowlisted combined
+  pack/export line (`scripts/bridge_menubar.py:393-432`, `scripts/bridge_menubar.py:830-843`) and
+  marshals export/reload phases through the AppKit main thread
+  (`scripts/bridge_menubar.py:877-979`).
 - [assumed] Operator-facing wording should stay one concise row. No new submenu or dashboard is
   needed to meet the kickoff.
 
-**Root cause [confirmed].** Operational truth is computed in `_drive_pack_output` but discarded
-after frame submission. The later status surface re-queries a backend object that does not know
-scripted/controller/mask decisions. Capture a sanitized immutable dict at the decision point and
-have every surface copy it.
+**Root cause [confirmed].** Before RW-5, operational truth was discarded after submission and the
+later status surface re-queried a backend that did not know scripted/controller/mask decisions.
+RW-5 now captures a sanitized fresh dict at the decision point and has every later surface copy it.
 
 ## Part B - Tasks (implement exactly, in order)
 
@@ -269,21 +270,21 @@ No test may open AppKit UI, MIDI, serial, Enttec, DMX, or hardware.
 
 ## Part E - Acceptance
 
-- [ ] `get_pack_status()` returns copied state and calls no provider/runtime component.
-- [ ] Status distinguishes `scripted_active`, `input_degraded`, `static_held`, `blackout`,
+- [x] `get_pack_status()` returns copied state and calls no provider/runtime component.
+- [x] Status distinguishes `scripted_active`, `input_degraded`, `static_held`, `blackout`,
       `autoloop_phase_blocked`, `disabled`, and `software_zero_frame` with bounded booleans plus one enum.
-- [ ] Simultaneous degraded-input/scripted-active truth is preserved.
-- [ ] The menubar shows one concise pack/export row plus `Exporting…` and `Reloading…` phases.
-- [ ] No private identifier, raw frame/hash/error, path, port, alias, or device/fixture name appears.
-- [ ] Export/reload commands and all output behavior are unchanged.
-- [ ] `select_autoloop` remains uncalled; no T7d/native-Autoloop work entered the diff.
-- [ ] Focused and full tests pass; hard docs checks pass; staleness is reviewed; diff is clean.
-- [ ] Status remains SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+- [x] Simultaneous degraded-input/scripted-active truth is preserved.
+- [x] The menubar shows one concise pack/export row plus `Exporting…` and `Reloading…` phases.
+- [x] No private identifier, raw frame/hash/error, path, port, alias, or device/fixture name appears.
+- [x] Export/reload commands and all output behavior are unchanged.
+- [x] `select_autoloop` remains uncalled; no T7d/native-Autoloop work entered the diff.
+- [x] Focused and full tests pass; hard docs checks pass; staleness is reviewed; diff is clean.
+- [x] Status remains SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
 ## Pre-handoff checklist
 
 1. All claims are labeled; `sender_degraded` is explicitly deferred rather than guessed.
-2. File/line claims were checked at `4138c61`.
+2. File/line claims were checked at `f6910f9`.
 3. Same-tick overlay/base combinations use booleans plus a display-priority enum.
 4. Disabled, swap, normal, Autoloop-blocked, exception, and stale-UI transitions are covered.
 5. Existing status/export methods and exact reload command are reused.

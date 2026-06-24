@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified-procedure
-last_verified_commit: 4138c61
+last_verified_commit: f6910f9
 last_verified_date: 2026-06-24
 validation_scope: one local non-Autoloop SoundSwitch pack setup; procedure only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED until a completed run record exists
 ---

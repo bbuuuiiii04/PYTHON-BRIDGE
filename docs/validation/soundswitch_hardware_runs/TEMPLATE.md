@@ -1,7 +1,7 @@
 ---
 doc_status: template
 truth_level: operator-evidence-template
-last_verified_commit: 4138c61
+last_verified_commit: f6910f9
 last_verified_date: 2026-06-24
 validation_scope: one local non-Autoloop SoundSwitch pack hardware run; no result until copied and completed
 ---

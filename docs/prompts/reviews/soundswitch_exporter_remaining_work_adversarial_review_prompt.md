@@ -1,7 +1,7 @@
 ---
 doc_status: active-review-prompt
 truth_level: review-instructions-grounded-in-current-roadmap
-last_verified_commit: 4138c61
+last_verified_commit: f6910f9
 last_verified_date: 2026-06-24
 validation_scope: Opus adversarial review of SoundSwitch exporter remaining-work roadmap; review-only; no live/runtime mutation
 ---

@@ -3292,7 +3292,7 @@ class StateManager:
         _active_static_slot=None) and a fresh input group (boots held=None), so the
         push loop's last-pushed static-slot tracker is reset here. Otherwise a slot
         carried from the old player could equal the new snapshot's slot, the
-        `slot != _pack_last_static_slot` guard (:3329) would skip hold_static, and the
+        `slot != _pack_last_static_slot` guard would skip hold_static, and the
         new player would render the scripted base instead of the static. A single
         None reference assignment is atomic under the GIL; the push loop at worst reads
         it one tick stale and re-syncs. The degradation latch is deliberately NOT reset
@@ -3388,8 +3388,8 @@ class StateManager:
             #    honored only from a FRESH HEALTHY snapshot.
             #
             #    FAIL-CLOSED: health fields are read DIRECTLY off the snapshot. A
-            #    malformed double missing them raises and the outer except submits ZERO
-            #    (state_manager.py:3365-3372) — missing health never reads as healthy. An
+            #    malformed double missing them raises and the outer except below submits
+            #    ZERO — missing health never reads as healthy. An
             #    empty-alias group is healthy by REAL construction (worker_alive=True,
             #    error=None; soundswitch_midi_input.py:455), not by a default.
             #
@@ -3461,7 +3461,7 @@ class StateManager:
             # RW-3 temporal hold identity (A.4): bind the pause-hold to the full played
             # identity so a bare re-arm / re-resolve to a different scripted_id or ssid
             # cannot resurrect a stale paused frame. Same-identity clear->re-resolve->arm
-            # is closed by the _arm_unscripted teardown (Task 2). Reuse load_key (:3283).
+            # is closed by the _arm_unscripted teardown (Task 2). Reuse load_key above.
             play_identity = (*load_key, scripted_id, norm_ssid)
 
             # 3. Automatic base transport derivation (RW-2). The pure player
@@ -3473,7 +3473,7 @@ class StateManager:
             #    os.was_playing is the obsolete-frame guard (A.5). The ZERO path
             #    stays clear_selection() so a held Static Override stands alone; we
             #    never emit transport="stopped"/"ended"/"unloaded".
-            # Reuse the EXISTING bindings computed above (3281-3295): `playing`,
+            # Reuse the EXISTING bindings computed above: `playing`,
             # `fresh`, `metadata_ready`, `track_changed`, `discont`, `load_key`.
             # Do not re-declare them. Only `happy` and `was_playing` are new.
             happy = (

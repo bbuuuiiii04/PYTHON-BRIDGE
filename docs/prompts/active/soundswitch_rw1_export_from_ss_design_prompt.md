@@ -1,7 +1,7 @@
 ---
 doc_status: active-prompt
 truth_level: code-test-and-current-roadmap-grounded
-last_verified_commit: 4138c61
+last_verified_commit: f6910f9
 last_verified_date: 2026-06-24
 validation_scope: Opus design/spec prompt for RW-1 only; no implementation or live/runtime mutation
 ---

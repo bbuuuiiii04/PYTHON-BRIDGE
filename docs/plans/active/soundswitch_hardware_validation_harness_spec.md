@@ -1,7 +1,7 @@
 ---
 doc_status: active-spec
 truth_level: code-grounded
-last_verified_commit: 4138c61
+last_verified_commit: f6910f9
 last_verified_date: 2026-06-24
 validation_scope: non-Autoloop SoundSwitch pack hardware-validation procedure and evidence schema; no hardware action authorized by this document; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -27,16 +27,17 @@ validation_scope: non-Autoloop SoundSwitch pack hardware-validation procedure an
   inspected or changed during this offline revision. The procedure uses the menubar's exact
   bridge-only process pattern as an operator gate rather than inferring state from a broad argv
   substring.
-- [confirmed] The repo has no repeatable SoundSwitch hardware record. HW-001 is `not logged` and
+- [confirmed] The repo has no repeatable SoundSwitch hardware record. HW-001 says the reviewed
+  procedure/template exist but no run is logged, and
   ROAD-003 still asks for repeatable logs (`docs/status/active_work_registry.md:43-45`,
-  `docs/status/active_work_registry.md:60-64`). The current hardware log has only a generic entry
-  template (`docs/validation/hardware_validation_log.md:27-50`).
+  `docs/status/active_work_registry.md:60-64`). The current hardware log contains only pending rows
+  and points to the procedure/template (`docs/validation/hardware_validation_log.md:25-54`).
 - [confirmed] A healthy held blackout resolves the pack frame to zero; a degraded controller drops
-  only the manual overlay and leaves the scripted base running (`state_manager.py:3293-3345`). A
-  malformed controller snapshot reaches the outer zero path (`state_manager.py:3420-3427`).
+  only the manual overlay and leaves the scripted base running (`state_manager.py:3383-3435`). A
+  malformed controller snapshot reaches the bounded software-zero path (`state_manager.py:3523-3542`).
 - [confirmed] The direct-DMX driver never calls `select_autoloop`; native Autoloop DMX therefore
-  stays zero by design (`state_manager.py:3409-3419`,
-  `tests/test_state_manager_pack_driver.py:499-508`).
+  stays zero by design (`state_manager.py:3479-3522`,
+  `tests/test_state_manager_pack_driver.py:532-540`).
 - [confirmed] The separate OS2L connection exposes bounded connectivity and send/drop/error
   counters, while socket writes stay on its sender thread (`osl_output.py:53-93`,
   `osl_output.py:120-149`). The hardware record can compare those counters without recording the
@@ -110,7 +111,7 @@ The procedure must use these gates in this order:
    known-dark verification, then require separate operator approval before restoring the physical
    path. If a known-dark baseline cannot be proven, record `FAIL` or `INCOMPLETE`. Do not use the
    menubar laser emergency item as proof of pack-DMX emergency masking: the pack driver currently
-   passes `emergency=False` (`state_manager.py:3339`).
+   passes `emergency=False` (`state_manager.py:3429`).
 8. **Closeout.** Restore the ignored config to `enabled=false`, `dry_run=true`,
    `output_backend=none`; start/leave stopped only as the operator requests; if restarted, verify
    exactly one process. Record final fixture darkness and the sanitized status/log watchpoints.
@@ -220,22 +221,22 @@ result never substitutes for the fixture observations.
 
 ## Part E - Acceptance
 
-- [ ] The reusable procedure and run template exist at the exact paths above.
-- [ ] Every output-opening, restart, config, fixture, blackout, and emergency step is visibly marked
+- [x] The reusable procedure and run template exist at the exact paths above.
+- [x] Every output-opening, restart, config, fixture, blackout, and emergency step is visibly marked
       `OPERATOR ACTION` with an immediate approval gate.
-- [ ] The safe enable/disable sequence requires one bridge process after start and zero before live
+- [x] The safe enable/disable sequence requires one bridge process after start and zero before live
       config editing.
-- [ ] The run template captures per-fixture expected versus observed behavior and all required
+- [x] The run template captures per-fixture expected versus observed behavior and all required
       sequence rows without private data.
-- [ ] The emergency rehearsal uses the physical kill path and explicitly rejects `kill -9` as a test.
-- [ ] No Autoloop capture, phase selection, native-Autoloop DMX, or T7d work entered the spec.
-- [ ] HW-001/ROAD-003/status claims change only after a committed real-run record supports them.
-- [ ] Focused tests and docs gates pass; `git diff --check` is clean.
+- [x] The emergency rehearsal uses the physical kill path and explicitly rejects `kill -9` as a test.
+- [x] No Autoloop capture, phase selection, native-Autoloop DMX, or T7d work entered the spec.
+- [x] HW-001/ROAD-003/status claims remain hardware-unvalidated until a committed real-run record supports a bounded result.
+- [x] Focused tests and docs gates pass; `git diff --check` is clean.
 
 ## Pre-handoff checklist
 
 1. Claims are labeled confirmed/unknown; local hardware facts remain unknown until the operator gate.
-2. All file/line claims were rechecked at `4138c61`.
+2. All file/line claims were rechecked at `f6910f9`.
 3. Same-tick output composition is not changed.
 4. Enable, failure, emergency, shutdown, and restore transitions all have explicit cleanup gates.
 5. The existing menubar/config/status/Enttec sequence is named exactly; no invented API is used.
