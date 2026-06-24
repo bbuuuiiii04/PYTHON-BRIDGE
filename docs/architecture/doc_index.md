@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 32a6786
+last_verified_commit: 4ffe7c8
 last_verified_date: 2026-06-24
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -86,6 +86,8 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md` | AGENT PROMPT (ACTIVE) | Opus design/spec prompt for one-click canonical export, safe replacement, menubar execution, and explicit reload acknowledgement. No implementation/live authority. |
 | `docs/prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Independent Opus adversarial review of the authoritative roadmap, code claims, T7d evidence, safety gates, and Markdown lifecycle. Review-only. |
 | `docs/prompts/reviews/soundswitch_rw1a_shutdown_ownership_implementation_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Independent Opus adversarial review of RW-1A graceful-shutdown ownership implementation commits `1908737` and `988d73a`. Review-only; no live/runtime mutation. |
+| `docs/prompts/reviews/soundswitch_rw3_mode_authority_review_prompt.md` | REVIEW / AUDIT | Historical design-spec review prompt for RW-3 rounds 1-3. Evidence only; it predates implementation. |
+| `docs/prompts/reviews/soundswitch_rw3_mode_authority_implementation_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Independent adversarial review of RW-3 implementation range `d4bcdd5..4ffe7c8`. Review-only; no live/runtime mutation. |
 | `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material T7/T8 implementation specs/proofs and the old progress ledger. Redundant prompts/handoffs were deleted. Historical evidence only. |
 | `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |
 | `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | Active prompts only; SoundSwitch has the RW-1 design prompt and the operator-presence T7d resume handoff. Obsolete SoundSwitch prompts were deleted. |
@@ -97,7 +99,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | --- | --- | --- |
 | `docs/archive/prompts/*.md` (7) | ARCHIVE | Completed/superseded agent prompts. |
 | `docs/archive/plans/*.md` (2) | ARCHIVE | Completed autoloop spec + plan. |
-| `docs/prompts/reviews/*.md` (4) | REVIEW / AUDIT | Past review briefs; kept in place (a runtime comment in `anlz_reader.py` references `drop_detection_review_v2.md`). |
+| `docs/prompts/reviews/*.md` (9) | REVIEW / AUDIT | Review briefs; entries listed above remain active, while the others are evidence-only. Kept in place because a runtime comment in `anlz_reader.py` references `drop_detection_review_v2.md`. |
 | `docs/history/*.md` + `docs/history/archive/*.md` (5) | ARCHIVE / HISTORICAL | Rollout logs; kept in place (referenced by `current_architecture.md`, `subsystems/logging.md`, and a test name). |
 | `cues_output.md`, `cues_timing_output.md` (repo root) | GENERATED OUTPUT | Tool output; relocate to `docs/data/` or gitignore. |
 
