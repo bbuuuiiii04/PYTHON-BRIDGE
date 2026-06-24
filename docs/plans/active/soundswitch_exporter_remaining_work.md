@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan
 truth_level: code-test-and-current-project-grounded
-last_verified_commit: 38953ca
-last_verified_date: 2026-06-23
+last_verified_commit: 38fbc19
+last_verified_date: 2026-06-24
 validation_scope: docs-only completion audit and remaining-work roadmap; SoundSwitch 2.10.3 canonical project/RAVE profile; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -321,31 +321,36 @@ still required before RW-1 is promoted from review-pending to complete.
 
 ### RW-2 - Scripted runtime transport semantics
 
-**Status:** [C] partial/mismatched. **Priority:** before any scripted hardware gate.
+**Status:** [x] [C] implemented and software-tested at `38fbc19`
+(`state_manager.py` implementation `a47129a`, driver tests `4d6c5df`, real
+inner/event-path tests `38fbc19`). **HARDWARE-UNVALIDATED.**
 
 Evidence:
 
 - `soundswitch_laser_player.py:213-224` accepts `playing` and `paused`.
 - `soundswitch_laser_player.py:271-315` renders both `playing` and `paused`, and
   returns zero for stopped/ended/unloaded.
-- `state_manager.py:1120-1124` represents `PAUSE` by setting
-  `DeckState.playing=False`.
-- `state_manager.py:3292-3311` selects scripted output only when `playing=True`;
-  every false value clears the selection. The runtime therefore cannot
-  distinguish paused from stopped for the pack driver.
-- Pure-player pause tests exist, but `tests/test_state_manager_pack_driver.py`
-  does not cover a real pause-vs-stop distinction.
+- `StateManager._drive_pack_output()` now binds a driver-local pause-hold latch
+  to `(active_deck, load_gen)`, bounds it by `STOP_DEBOUNCE_S`, and retains
+  `OutputState.was_playing` as the obsolete-frame guard.
+- Paused output re-renders at authoritative `DeckState.elapsed_ms`; confirmed
+  stop, hold expiry, unload, stale authority, replacement, master change, and
+  discontinuity use `clear_selection()` so the base resolves ZERO without
+  suppressing a held Static Override.
+- `tests/test_state_manager_pack_driver.py` covers driver-level pause/stop,
+  expiry, identity replacement, resume, static/blackout precedence, and real
+  inner/event-path timing, replacement, snapshot settle, and event chaining.
 
 Required work:
 
-- [ ] [P] Design one authoritative transport derivation using existing
+- [x] [C] Design one authoritative transport derivation using existing
   StateManager/Rekordbox state; do not create a second transport owner.
-- [ ] [P] Pin desired pause behavior to the already-authorized player contract:
+- [x] [C] Pin desired pause behavior to the already-authorized player contract:
   paused rerenders/holds the current authoritative elapsed frame; stopped,
   ended, unloaded, stale, and errored resolve zero.
-- [ ] [P] Cover pause, resume, stop debounce, master change, track load, stale
+- [x] [C] Cover pause, resume, stop debounce, master change, track load, stale
   position, elapsed discontinuity, and source recovery.
-- [ ] [P] Prove that pause does not retain an obsolete cached frame; the frame
+- [x] [C] Prove that pause does not retain an obsolete cached frame; the frame
   must still derive from immutable events at authoritative elapsed.
 
 ### RW-3 - Explicit scripted/autoloop/idle authority gate
