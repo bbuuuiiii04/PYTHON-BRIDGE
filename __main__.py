@@ -861,6 +861,54 @@ def _direct_master_startup_seed(rb_version: str, fallback_deck: int = 1) -> tupl
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+def _shutdown_zero_pack_outputs(
+    pack_output_owners: dict[str, Any],
+    sm: Any | None,
+) -> None:
+    """Send a final zero frame + close on shutdown for the pack's DMX output.
+
+    Zeroes the LIVE runtime sender/input (authoritative after any runtime swap)
+    AND the startup-owned slots. All calls are idempotent: stop() on an already-
+    stopped sender is a no-op, and the no-swap case where the live sender IS the
+    startup sender simply stops the same object once. sm is None only during the
+    pre-StateManager startup window, where only the startup slots exist.
+    """
+    # Live runtime first: this is the only handle to a sender installed by a
+    # runtime enable/reload/backend swap. Single atomic read of the runtime.
+    if sm is not None:
+        try:
+            rt = sm.get_pack_runtime()
+        except Exception:
+            rt = None
+        if rt is not None:
+            live_sender = getattr(rt, "frame_sender", None)
+            if live_sender is not None:
+                try:
+                    live_sender.stop()
+                except Exception:
+                    pass
+            live_input = getattr(rt, "midi_input", None)
+            if live_input is not None:
+                try:
+                    live_input.stop()
+                except Exception:
+                    pass
+    # Startup-owned slots: covers the pre-sm early-shutdown window and is a
+    # harmless no-op once the live sender (same object pre-swap) is stopped.
+    sender = pack_output_owners.pop("sender", None)
+    midi_input = pack_output_owners.pop("midi_input", None)
+    if sender is not None:
+        try:
+            sender.stop()
+        except Exception:
+            pass
+    if midi_input is not None:
+        try:
+            midi_input.stop()
+        except Exception:
+            pass
+
+
 def main() -> None:
     if not _acquire_single_instance_lock():
         log.error("another rb_ss_bridge_v2 process is already running; exiting")
@@ -870,20 +918,10 @@ def main() -> None:
     # mutable slots let the handler/atexit path own resources even while the
     # rest of bridge startup is still in progress.
     pack_output_owners: dict[str, Any] = {"sender": None, "midi_input": None}
+    _sm_holder: dict[str, Any] = {"sm": None}  # set after StateManager is built
 
     def _cleanup_pack_outputs() -> None:
-        sender = pack_output_owners.pop("sender", None)
-        midi_input = pack_output_owners.pop("midi_input", None)
-        if sender is not None:
-            try:
-                sender.stop()
-            except Exception:
-                pass
-        if midi_input is not None:
-            try:
-                midi_input.stop()
-            except Exception:
-                pass
+        _shutdown_zero_pack_outputs(pack_output_owners, _sm_holder["sm"])
 
     def _early_shutdown(sig, frame):
         log.info("[MAIN] shutdown  sig=%d  phase=startup", sig)
@@ -1029,6 +1067,7 @@ def main() -> None:
         led_color_engine=led_bundle.led_color_engine,
         soundswitch_pack_runtime=soundswitch_pack_runtime,
     )
+    _sm_holder["sm"] = sm
     if led_bundle.realtime_runner is not None:
         led_bundle.realtime_runner.set_beat_provider(sm.get_active_beat_anchor)
         led_bundle.realtime_runner.start()
