@@ -79,6 +79,9 @@ for remaining scope.
 The review must not edit files, mutate runtime state, inspect live config, start
 or stop the bridge, append runtime commands, or open hardware interfaces.
 
+Ready-to-paste handoff:
+`docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md`.
+
 ### 2. Non-Autoloop operator hardware run
 
 - [ ] The operator prepares ignored local configuration while the exact bridge
@@ -189,6 +192,7 @@ not enter status or the menubar.
 | Active T7d plan/handoff | `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md`, `soundswitch_t7d_capture_gate_handoff.md` |
 | T7d result | `docs/validation/soundswitch_t7d_phase_contract_evidence.md`, `soundswitch_t7d_phase_contract_blocked.md` |
 | Hardware procedure/template | `docs/validation/soundswitch_hardware_validation_procedure.md`, `soundswitch_hardware_runs/TEMPLATE.md` |
+| Current independent review | `docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md` |
 
 The separately scoped roadmap/registry reconciliation spec is not part of this
 route or this implementation pass.

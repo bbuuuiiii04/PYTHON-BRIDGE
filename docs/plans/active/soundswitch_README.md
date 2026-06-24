@@ -38,6 +38,9 @@ implementation authority. Research/format evidence remains grouped under
    operator procedure and evidence schema with the independent-review revisions
    implemented; fresh implementation review remains pending. Their presence is
    not a hardware-validation result.
+8. `../../prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md`
+   - commit-scoped, review-only ChatGPT handoff for RW-5, the procedure/template,
+   and this document-lifecycle cleanup.
 
 The compatibility symlink
 `soundswitch_importer_exporter_player_codex_spec.md` remains for older links.
@@ -48,6 +51,7 @@ The compatibility symlink
 | --- | --- | --- |
 | current planning authority | `docs/plans/active/soundswitch_*.md` | roadmap, T7d evidence plan/handoff, compatibility pointers; the separately scoped reconciliation spec is not part of this route |
 | current task prompt | `docs/prompts/active/soundswitch_rw7_capture_agent_prompt.md` | operator-conducted T7d capture only |
+| current review prompt | `docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md` | independent review of the current non-live implementation checkpoint |
 | material implementation history | `docs/plans/completed/soundswitch/` | old ledger, every implemented SoundSwitch spec, shadow proof |
 | current RE authority | `docs/research/soundswitch/` | closure report, format/binary findings, evidence matrices, tool guide, product contract |
 | superseded RE history | `docs/research/soundswitch/history/` | intermediate findings, old handoffs, draft specs, Stage-1 scratch |
