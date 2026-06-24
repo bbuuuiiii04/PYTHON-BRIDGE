@@ -3090,6 +3090,16 @@ class StateManager:
         log.info("[SM] clear-scripted  deck=%d", deck)
         d.scripted_id = 0
         d.meta.soundswitch_id = ""
+        # RW-3 (A.4): scripted de-ownership of the HELD deck immediately disarms the pack
+        # pause-hold. SCRIPTED_CLEAR is the only de-owner whose state a same-drain
+        # re-resolve+re-arm can fully restore, so the 4-tuple play_identity cannot see the
+        # transient; tear the latch down here. Gate on the hold-owning deck
+        # (_pack_play_hold_key[0]) so a mirror-deck clear (operator loading the next track
+        # on the idle deck during a brief pause) does NOT spuriously drop the active deck's
+        # hold. Same _run thread as the driver (no lock); push-local only.
+        if self._pack_play_hold_key is not None and self._pack_play_hold_key[0] == deck:
+            self._pack_play_hold_key = None
+            self._pack_play_hold_deadline = 0.0
 
     # ── Lighting state machine ────────────────────────────────────────────────
 
