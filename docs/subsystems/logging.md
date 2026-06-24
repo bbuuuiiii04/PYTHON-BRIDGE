@@ -2,7 +2,7 @@
 
 Status: CURRENT SUPPORTING
 
-Audited against the current checkout on 2026-06-18.
+Audited against the current checkout at `4138c61` on 2026-06-24.
 
 This is the canonical runtime logging guide. Historical implementation context
 is retained in `docs/history/logging_implementation_handoff.md`, but current
@@ -99,6 +99,11 @@ lines such as `[LASER]`, `[LX]`, `[LED] look=...`, `[RGB] activate`,
 `[RGB] summary`, `[OS2L]`, and StateManager master/play/load lines when those
 subsystems actually emit them. The preset does not send commands, change
 runtime state, or validate hardware-visible behavior.
+
+RW-5 pack status failures remain bounded: the status surface and pack-driver error line expose only
+an exception category, never a raw message that could contain a path, port, alias, device name, or
+identifier. `software_zero_frame` is software intent and must not be interpreted as physical
+darkness.
 
 Programmatic output:
 

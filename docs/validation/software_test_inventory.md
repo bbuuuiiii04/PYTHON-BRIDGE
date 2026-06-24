@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: b2ce63d
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -30,7 +30,7 @@ python -m pytest tests
 | Runtime commands | parser/handler/status writer tests | needed before command changes |
 | Logging visibility | bridge formatting/rate helpers and logging diagnostic coverage tests | verifies software-only log filtering and spam-control behavior |
 | Rekordbox readers | reader, offset, live BPM tests | cannot prove all app versions |
-| SoundSwitch | OS2L/output helpers; project/pack/player/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/shadow/T7d tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; software tests do not prove physical fixtures or close roadmap-listed runtime gaps |
+| SoundSwitch | OS2L/output helpers; project/pack/player/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/T7d tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status is software intent and tests do not prove physical fixtures |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety |
 | LED/Govee | LED config/director/color/realtime/renderer tests | cannot prove device compatibility |
 | Replay/session tooling | replay format and smoke tests | software-only |
@@ -55,12 +55,11 @@ When adding or changing tests, update:
 This is software validation only. Separate focused suites cover the immutable
 pack loader/player, MIDI adapter, backend abstraction, Enttec framing/sender,
 pack-player config, startup matrix, atomic controller, runtime commands/status,
-and StateManager driver. The 2026-06-23 audit ran 310 focused tests and the full
-suite (`Ran 2256`, `OK`, skipped=3, expected failures=1). The tests use fake/
-injected hardware seams. They do not prove Enttec/fixture behavior. They also do
-not currently close the active roadmap gaps: no menubar export/replace/reload
-workflow; no runtime pause-vs-stop integration test; no explicit scripted-mode
-event-chain gate; and no StateManager fail-to-zero use of MIDI snapshot health.
+StateManager driver, and menubar. RW-5 tests fail on backend/provider re-query,
+published-dict mutation/reuse, incorrect precedence or simultaneous truths,
+unsafe lifecycle snapshots, raw render/submit errors, stale active UI, export
+phase races, reload-command drift, or private-data leaks. The tests use fake/
+injected hardware seams. They do not prove Enttec/fixture behavior.
 - relevant subsystem card
 - relevant task playbook if test workflow changed
 

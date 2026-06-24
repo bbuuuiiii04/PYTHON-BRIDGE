@@ -32,6 +32,13 @@ _DEFAULT_PACK_STATUS: dict[str, Any] = {
     "backend": "disabled",
     "pack_loaded": False,
     "pack_sha12": "",
+    "operational_state": "disabled",
+    "scripted_active": False,
+    "input_degraded": False,
+    "static_held": False,
+    "blackout": False,
+    "autoloop_phase_blocked": False,
+    "software_zero_frame": True,
     "frame_count": 0,
     "has_active_identity": False,
     "reason": "not_configured",
@@ -195,12 +202,18 @@ class StatusWriter(threading.Thread):
         )
 
     def _safe_pack_status(self) -> dict[str, Any]:
-        return _safe_provider_snapshot(
-            self._pack_status_provider,
-            provider_name="pack_status_provider",
-            throttle_key=f"pack_status_provider.{id(self)}",
-            default=_DEFAULT_PACK_STATUS,
-        )
+        try:
+            payload = self._pack_status_provider()
+            if isinstance(payload, dict):
+                return payload
+        except Exception as exc:
+            if log_throttled(
+                f"runtime_status.provider_failure.pack_status_provider.{id(self)}", 5.0
+            ):
+                log.warning("[STATUS] pack_status_provider_failed err=%s", type(exc).__name__)
+        fallback = dict(_DEFAULT_PACK_STATUS)
+        fallback["reason"] = "provider_error"
+        return fallback
 
 
 class CommandReader(threading.Thread):

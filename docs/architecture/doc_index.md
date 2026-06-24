@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 4ffe7c8
+last_verified_commit: 4138c61
 last_verified_date: 2026-06-24
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -48,7 +48,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | Subsystem cards | `docs/subsystems/{core_bridge,rekordbox_readers,soundswitch_output,laser,led_govee,runtime_commands,config,tests}.md` | CURRENT — compact, code-verified cards. |
 | Status / truth | `docs/status/*.md` (7) | CURRENT — project status, feature/support/validation matrices, known limitations, active work. |
 | Setup / usage | `docs/setup/*.md` (4) | CURRENT. |
-| Validation policy | `docs/validation/{validation_policy,software_test_inventory,hardware_validation_log}.md` | CURRENT. |
+| Validation policy | `docs/validation/{validation_policy,software_test_inventory,hardware_validation_log,soundswitch_hardware_validation_procedure}.md`, `docs/validation/soundswitch_hardware_runs/TEMPLATE.md` | CURRENT — SoundSwitch procedure/template are operator gates, not completed hardware evidence. |
 | Archive banner | `docs/archive/README.md` | CURRENT. |
 
 ## Current supporting — verify before relying
@@ -83,6 +83,8 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE CONTRACT POINTER | Symlink to the original product/implementation contract. Read the active remaining-work roadmap for current status. |
 | `docs/plans/active/soundswitch_t7c_pack_driver_spec.md` | COMPATIBILITY POINTER | Preserves code/test links to the completed T7c spec; current status is in the SoundSwitch remaining-work roadmap. |
 | `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` | PLAN / SPEC (ACTIVE) | Current six-scenario T7d blocker plan: prove ticks/beat plus arm/refire/master/drop/buildup/correction origin rules from operator-owned captures. It selects no phase mapping and grants no runtime/hardware authorization. |
+| `docs/plans/active/soundswitch_rw5_operational_status_spec.md` | PLAN / SPEC (ACTIVE) | RW-5 provider-free copied software status and stale-safe menubar visibility; hardware remains unvalidated. |
+| `docs/plans/active/soundswitch_hardware_validation_harness_spec.md` | PLAN / SPEC (ACTIVE) | Reviewed non-Autoloop operator procedure/template; no agent hardware authority and no completed run. |
 | `docs/prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md` | AGENT PROMPT (ACTIVE) | Opus design/spec prompt for one-click canonical export, safe replacement, menubar execution, and explicit reload acknowledgement. No implementation/live authority. |
 | `docs/prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Independent Opus adversarial review of the authoritative roadmap, code claims, T7d evidence, safety gates, and Markdown lifecycle. Review-only. |
 | `docs/prompts/reviews/soundswitch_rw1a_shutdown_ownership_implementation_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Independent Opus adversarial review of RW-1A graceful-shutdown ownership implementation commits `1908737` and `988d73a`. Review-only; no live/runtime mutation. |

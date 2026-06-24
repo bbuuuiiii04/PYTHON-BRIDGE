@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b2ce63d
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: software-only
 ---
 
@@ -21,7 +21,8 @@ SoundSwitch pack-player boundary:
 - The strict decoder/exporter/verifier and immutable pack loader/player remain outside `StateManager`. Optional MIDI-input, backend, and Enttec components are built by startup/command-thread orchestration and passed to `StateManager` as one immutable runtime bundle.
 - T7.0 keeps process signal ownership in `__main__`; T7.1 routes the existing laser executor through one injected backend while retaining the MIDI default path.
 - T7a/T7b/T7c/T7e are wired: `__main__` loads optional default-off config, chooses one backend, starts verified workers, creates `PackRuntime`, injects it into `StateManager`, and wires sanitized status plus validate-first commands. Absent/disabled config preserves legacy MIDI; dry-run/none opens no pack hardware.
-- The active roadmap records remaining runtime closure: one-click export/publish/reload, scripted pause/mode/input-health/status, T7d Autoloop phase, and hardware validation. Current Autoloop pack output remains zero-safe.
+- RW-5 status is StateManager-owned copied state: one fresh dict is published from the already-rendered frame, and readers receive only a copy. `software_zero_frame` and the attempted frame counter are software intent, not physical output proof.
+- Sender health, T7d Autoloop phase, and hardware validation remain open. Current Autoloop pack output remains software-zero.
 
 Authoritative code:
 - `__main__.py`

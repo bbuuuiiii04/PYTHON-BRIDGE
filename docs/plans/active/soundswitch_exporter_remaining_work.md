@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan
 truth_level: code-test-and-current-project-grounded
-last_verified_commit: 1a90b01
+last_verified_commit: 4138c61
 last_verified_date: 2026-06-24
 validation_scope: docs-only completion audit and remaining-work roadmap; SoundSwitch 2.10.3 canonical project/RAVE profile; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -418,29 +418,28 @@ Required work:
 
 ### RW-5 - Operational status and menubar visibility
 
-**Status:** [C] basic status exists; original operational surface is incomplete.
+**Status:** [C] RW-5 copied operational status and the combined stale-safe menubar row are
+implemented and focused-software-tested. Sender/serial health and physical darkness remain unknown.
 
 Evidence:
 
-- `PackRuntime.sanitized_status()` currently exposes availability, enabled,
-  backend, pack-loaded/hash, frame count, active-identity presence, and reason
-  (`soundswitch_pack_runtime.py:35-58`).
-- It does not expose the current source kind, scripted authority/elapsed,
-  Autoloop phase readiness, held static slot, blackout, MIDI-input health,
-  mailbox drops, sender health, last-frame hash, or stale/error category.
-- The menubar has no pack/export status row or export progress.
+- `PackRuntime.sanitized_status()` exposes immutable bundle facts and calls no provider.
+- `StateManager` publishes a fresh copied snapshot from the already-rendered frame with bounded
+  operational booleans, display precedence, attempted frame count, and software-only zero state.
+- The menubar reuses one pack/export row, shows exporting/reloading terminal states, and renders a
+  stale file as `Pack: Unknown`.
+- The snapshot intentionally does not expose elapsed values, raw frames/hashes/errors, identifiers,
+  sender health, serial-send confirmation, Enttec acceptance, or physical darkness.
 
 Required work:
 
-- [ ] [P] Define a sanitized, bounded status schema sufficient to distinguish
-  `exporting`, `export_failed`, `published`, `reload_failed`, `disabled`,
-  `scripted_active`, `autoloop_phase_blocked`, `input_degraded`,
-  `sender_degraded`, and `zero_safe` without leaking identifiers/paths/ports.
-- [ ] [P] Source status from copied/snapshot state; never call providers,
+- [x] [C] Define a sanitized, bounded schema for disabled/blackout/input-degraded/static/scripted/
+  Autoloop-blocked/software-zero state plus export phases without leaking private data.
+- [x] [C] Source status from copied/snapshot state; never call providers,
   filesystems, subprocesses, MIDI, or serial inside the 200 Hz push loop.
-- [ ] [P] Show concise menubar state without turning routine operation into a
+- [x] [C] Show concise menubar state without turning routine operation into a
   noisy dashboard.
-- [ ] [P] Add status/menubar tests and update drift checks if the documented
+- [x] [C] Add status/menubar tests and update the documented
   command/status contract changes.
 
 ### RW-1A - Runtime output ownership on shutdown

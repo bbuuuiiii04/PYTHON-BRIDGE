@@ -34,26 +34,12 @@ class PackRuntime:
 
     def sanitized_status(self) -> dict[str, Any]:
         """Sanitized status dict (no paths/ports/aliases/devices/UUIDs/raw errors)."""
-        backend_name = "disabled"
-        frame_count = 0
-        has_active_identity = False
-        if self.backend is not None:
-            try:
-                raw = self.backend.status()
-            except Exception:
-                raw = {}
-            backend_name = str(raw.get("backend", "unknown"))
-            fc = raw.get("frame_count", 0)
-            frame_count = int(fc) if isinstance(fc, int) else 0
-            has_active_identity = bool(raw.get("last_accepted_identity"))
         return {
             "available": self.player is not None or self.backend is not None,
             "enabled": bool(self.enabled),
-            "backend": backend_name if self.enabled else "disabled",
+            "backend": "pack" if self.active else "disabled",
             "pack_loaded": self.player is not None,
             "pack_sha12": self.pack_sha12 or "",
-            "frame_count": frame_count,
-            "has_active_identity": has_active_identity,
             "reason": self.reason,           # sanitized category only
         }
 

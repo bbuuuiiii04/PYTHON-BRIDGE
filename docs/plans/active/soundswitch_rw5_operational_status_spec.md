@@ -1,7 +1,7 @@
 ---
 doc_status: active-spec
 truth_level: code-grounded-design-spec
-last_verified_commit: ab4d293
+last_verified_commit: 4138c61
 last_verified_date: 2026-06-24
 validation_scope: RW-5 sanitized copied-state status and menubar visibility only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no restart, config, output, device, or hardware action authorized
 ---
@@ -80,30 +80,33 @@ Add one module-level pure helper:
 
 ```python
 def _pack_operational_state(*, enabled, blackout, input_degraded, static_held,
-                            scripted_active, autoloop_phase_blocked, zero_safe) -> str:
+                            scripted_active, autoloop_phase_blocked,
+                            software_zero_frame) -> str:
 ```
 
 Return the first true state in this precedence:
 
 ```text
 disabled -> blackout -> input_degraded -> static_held -> scripted_active
--> autoloop_phase_blocked -> zero_safe
+-> autoloop_phase_blocked -> software_zero_frame
 ```
 
-The fallback is `zero_safe`; no free-form value is allowed.
+The fallback is `software_zero_frame`; no free-form value is allowed. This name means only that the
+software-rendered CH1-CH19 frame equals `_PACK_ZERO_FRAME`. It does not prove serial delivery,
+Enttec acceptance, fixture darkness, or clearing of a stale frame after a physical hard kill.
 
 In `StateManager.__init__`, initialize `_pack_status_snapshot` from the current immutable runtime
 plus these bounded fields:
 
 ```text
 operational_state: disabled|blackout|input_degraded|static_held|scripted_active|
-                   autoloop_phase_blocked|zero_safe
+                   autoloop_phase_blocked|software_zero_frame
 scripted_active: bool
 input_degraded: bool
 static_held: bool
 blackout: bool
 autoloop_phase_blocked: bool
-zero_safe: bool
+software_zero_frame: bool
 frame_count: non-negative int
 has_active_identity: bool
 ```
@@ -114,7 +117,10 @@ Requirements:
 - `get_pack_status()` returns `dict(self._pack_status_snapshot)` only. It must not call the runtime,
   player, input, backend, sender, or any provider.
 - `set_pack_runtime()` preserves its atomic runtime assignment and RW-4 static-slot reset, then
-  publishes a disabled/initial snapshot from `runtime.sanitized_status()`. It performs no I/O.
+  publishes an initial snapshot from `runtime.sanitized_status()`. A disabled/swapping bundle
+  reports `disabled`; a newly active enabled pack reports `enabled=true`, `backend=pack`, and the
+  neutral software state `software_zero_frame`, never `operational_state=disabled`. It performs no
+  I/O and resets the StateManager-owned attempted-frame count.
 - In `_drive_pack_output()`, reuse the already-computed `input_healthy`, `slot`, `blackout`,
   `transport`, current `self._os.lighting_mode`, and rendered frame. Render once into a local,
   publish the copied status, then submit that same frame.
@@ -123,13 +129,19 @@ Requirements:
 - `static_held = slot is not None`; `blackout = bool(blackout)`.
 - `autoloop_phase_blocked = rt.active and self._os.lighting_mode == "autoloop"`; this is an honest
   status flag only and does not select output.
-- `zero_safe = frame == _PACK_ZERO_FRAME`.
+- `software_zero_frame = frame == _PACK_ZERO_FRAME`.
 - Increment one StateManager-owned frame counter for each attempted normal frame submission. Preserve
   it across ordinary ticks; reset it when a new runtime bundle is published.
 - Derive `has_active_identity` only from the in-memory `backend.last_accepted_identity` property if
   present; never call `backend.status()`.
-- On the existing outer exception path, publish a bounded `zero_safe` snapshot with all activity/
+- Publish the fresh copied snapshot before calling `backend.submit_frame(frame)`. This records
+  software intent only. `frame_count` means attempted normal software-frame submissions, not
+  confirmed sender writes, serial sends, Enttec acceptance, or physical output.
+- On the existing outer exception path, publish a bounded `software_zero_frame` snapshot with all activity/
   overlay flags false before attempting the existing zero submit. Do not include the exception.
+- A submit exception may occur after the software-intent snapshot was published. The bounded
+  exception snapshot and fallback zero submit still cannot prove that either frame reached hardware;
+  no sender-health field is added in RW-5.
 
 The booleans are authoritative; `operational_state` is only the concise display priority. Thus a
 degraded controller can truthfully report both `input_degraded=true` and
@@ -154,7 +166,7 @@ Reuse `export_status_item`; do not add menu rows. Add a pure function that accep
 | `static_held` | `Static held` |
 | `scripted_active` | `Scripted active` |
 | `autoloop_phase_blocked` | `Autoloop blocked` |
-| `zero_safe` | `Zero` |
+| `software_zero_frame` | `Software zero` |
 | anything else | `Unknown` |
 
 Render `Pack: <label> · <export label>` using only allowlisted export labels:
@@ -193,7 +205,7 @@ Do not close hardware validation or native Autoloop DMX.
   overlay degradation latch/Option B runtime swap, and manual Static Override precedence remain
   unchanged.
 - `input_degraded` means the overlay is distrusted; it does not imply the scripted base is dark.
-- `blackout` is healthy held pack blackout. Malformed input/status failures remain zero-safe.
+- `blackout` is healthy held pack blackout. Malformed input/status failures remain software-zero.
 - `autoloop_phase_blocked` is informational. Native Autoloop DMX remains safe-zero.
 - Existing OS2L, lasers, LEDs/Govee, Rekordbox readers, and bridge commands are untouched.
 - Menubar reads only `/tmp/rb_ss_bridge_v2_status.json`; it never imports bridge runtime objects.
@@ -209,14 +221,20 @@ Add table-driven tests for every precedence row and for the simultaneous
 
 Extend `tests/test_state_manager_pack_driver.py` to prove:
 
-- disabled runtime -> `disabled`, `zero_safe=true`;
+- initial disabled runtime -> `disabled`, `software_zero_frame=true`;
+- initial active runtime, enable/start, runtime swap, and reload -> enabled/backend pack with the
+  neutral `software_zero_frame` snapshot before the first tick; disable -> disabled; shutdown is
+  represented to the menubar by a stale status file and therefore `Pack: Unknown`;
 - scripted frame -> `scripted_active`, non-zero;
 - degraded input with a valid scripted base -> `input_degraded=true`,
   `scripted_active=true`, non-zero;
 - healthy static -> `static_held`; healthy blackout -> `blackout`, zero;
 - bridge `lighting_mode="autoloop"` without scripted ownership ->
   `autoloop_phase_blocked`, zero, and `select_autoloop` not called;
-- driver exception -> copied `zero_safe`, sanitized, and zero submit attempted;
+- driver exception -> copied `software_zero_frame`, sanitized, and zero submit attempted;
+- status is already published when normal `backend.submit_frame` raises; `frame_count` records the
+  attempt, no raw exception is exposed, and no physical-darkness claim is added;
+- each publication uses a fresh dict; older published dicts are never mutated or reused;
 - `get_pack_status()` does not call backend/input/player/sender methods and returns a copy.
 
 Replace the leaky-backend expectations in `tests/test_soundswitch_pack_commands.py`: use a backend
@@ -228,7 +246,8 @@ and prove the output contains none of `_FORBIDDEN`.
 Extend `tests/test_bridge_menubar.py` with a pure truth table for all pack labels, stale/unknown,
 all export labels, error sanitization, and the 80-character bound. Prove the background worker
 marshals `exporting -> reloading -> idle` without changing the exact reload command or its existing
-freshness gates.
+freshness gates. Prove an older background detect/phase callback cannot overwrite a newer export
+state.
 
 ### Gates
 
@@ -252,7 +271,7 @@ No test may open AppKit UI, MIDI, serial, Enttec, DMX, or hardware.
 
 - [ ] `get_pack_status()` returns copied state and calls no provider/runtime component.
 - [ ] Status distinguishes `scripted_active`, `input_degraded`, `static_held`, `blackout`,
-      `autoloop_phase_blocked`, `disabled`, and `zero_safe` with bounded booleans plus one enum.
+      `autoloop_phase_blocked`, `disabled`, and `software_zero_frame` with bounded booleans plus one enum.
 - [ ] Simultaneous degraded-input/scripted-active truth is preserved.
 - [ ] The menubar shows one concise pack/export row plus `Exporting…` and `Reloading…` phases.
 - [ ] No private identifier, raw frame/hash/error, path, port, alias, or device/fixture name appears.
@@ -264,7 +283,7 @@ No test may open AppKit UI, MIDI, serial, Enttec, DMX, or hardware.
 ## Pre-handoff checklist
 
 1. All claims are labeled; `sender_degraded` is explicitly deferred rather than guessed.
-2. File/line claims were checked at `ab4d293`.
+2. File/line claims were checked at `4138c61`.
 3. Same-tick overlay/base combinations use booleans plus a display-priority enum.
 4. Disabled, swap, normal, Autoloop-blocked, exception, and stale-UI transitions are covered.
 5. Existing status/export methods and exact reload command are reused.
@@ -272,7 +291,8 @@ No test may open AppKit UI, MIDI, serial, Enttec, DMX, or hardware.
 7. `_pack_operational_state` and menubar formatting are pure test seams.
 8. Hot-path purity, process safety, output neutrality, and hardware boundaries are explicit.
 9. Adversarial case: RW-4 degradation while scripted output continues must not be mislabeled zero;
-   companion booleans plus frame-derived `zero_safe` prevent that false claim.
+   companion booleans plus frame-derived `software_zero_frame` prevent that false claim without
+   implying serial delivery or physical darkness.
 
 ## When you finish
 

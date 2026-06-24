@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout at `b2ce63d` on 2026-06-23.
+Audited against the current checkout at `4138c61` on 2026-06-24.
 
 ## SoundSwitch Pack Component Boundary
 
@@ -10,10 +10,18 @@ Audited against the current checkout at `b2ce63d` on 2026-06-23.
 - Decode/export must not mutate a source project. Pack publication is deterministic and fail-closed; independent verification rejects inventory, hash, canonicalization, semantic, crosswalk, or source-drift changes, including the F9 one-byte mutation.
 - The immutable pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender are software-tested components. The never-raising config loader is used only during startup/reload; config or pack filesystem work must never enter `_push_tick`.
 - `__main__` loads optional pack config, chooses one backend, starts verified workers, builds one immutable `PackRuntime`, and wires validate-first commands/status. `StateManager` reads one runtime reference per tick and is the sole `submit_frame` caller.
+- `PackRuntime.sanitized_status()` calls no backend/provider. `StateManager` owns the copied pack
+  operational snapshot, publishes a fresh dict from the already-rendered frame before submission,
+  and returns only a copy to status readers. The 200 Hz path gains no I/O, lock, or worker poll.
+- `software_zero_frame` is frame equality only and `frame_count` counts attempted normal software
+  frames. Neither proves serial delivery, Enttec acceptance, or physical darkness; sender health is
+  not inferred.
 - Absent/disabled config preserves the legacy MIDI path. Dry-run/none opens no physical pack output. Pack failure falls back to disabled/none, never physical MIDI.
 - Direct DMX and physical MIDI output are mutually exclusive at backend construction and port ownership. Owner-driven Enttec stop sends zero, but process death/`kill -9` can leave the last frame latched; hardware validation remains future work.
 - Native pack Autoloop output remains zero-safe until T7d captures uniquely prove scale, quantizer, and every active transition-origin rule. No agent may assume 600 ticks/beat.
-- The scripted driver is not a completed live contract yet: pause-vs-stop, explicit scripted-mode authority, MIDI-input health fail-to-zero, and complete sanitized operational status remain active gaps in `docs/plans/active/soundswitch_exporter_remaining_work.md`.
+- The direct-DMX lane remains hardware-unvalidated. The reviewed operator procedure requires an
+  exact bridge-only process detector, a reachable physical kill, and a known-dark Enttec/DMX
+  baseline before physical restore after an emergency rehearsal.
 
 ## State Ownership
 

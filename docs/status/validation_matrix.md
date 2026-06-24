@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: b2ce63d
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -37,7 +37,7 @@ Current repo-facing status remains:
 | Rekordbox readers | partial | unvalidated | Reader correctness depends on live app/version/permissions. |
 | SoundSwitch OS2L | partial | unvalidated | OS2L output code exists; hardware/app validation log needed. |
 | SoundSwitch offline decoder/exporter/pack/verifier | software-tested | not applicable | Pinned to SoundSwitch 2.10.3 plus the canonical UUID/RAVE profile. Tests verify deterministic export, independent semantic verification, exact 232+1/32/42/45 inventory, and the seven-class F-3 crosswalk. Current proof: 29 PASS / 0 FAIL / 0 INCOMPLETE, foundation 27/27 PASS; F9 and F10 pass. No project mutation or live output. |
-| SoundSwitch scripted loader/player/MIDI/runtime/backend/Enttec | substantial partial software/wire-tested | unvalidated | Loader/player, input adapter, backend, sender, default-off config/startup, StateManager driver, commands, and basic status have focused tests. 32/32 active scripts export/render. Runtime pause/mode/input-health/status gaps remain; live config is absent and no physical output is validated. |
+| SoundSwitch scripted loader/player/MIDI/runtime/backend/Enttec | substantial partial software/wire-tested | unvalidated | Loader/player, input adapter, backend, sender, default-off config/startup, StateManager driver, commands, and copied RW-5 status have focused tests. Tests cover provider-free reads, precedence, simultaneous degraded/scripted truth, fresh dict publication, lifecycle snapshots, stale menubar state, and bounded render/submit failures. `software_zero_frame` and `frame_count` are software intent only; no physical output is validated. |
 | SoundSwitch native-DMX Autoloops/T7d | evidence partial | unvalidated | Pure Autoloop renderer, phase tracer, conductor, and falsifiable oracle have tests. Two arm and two refire captures pass conductor integrity, but four scenario pairs, identity/holdout reconciliation, and a unique corpus oracle remain. Scale/quantizer/origin are unknown and StateManager intentionally never selects Autoloops. |
 | Laser policy/executor | partial; lifecycle software-tested | unvalidated | Pure flat-window parity, A3 phrase gating, A4 blackout arm/clear preservation, lifecycle teardown, autoloop-tick cycling, usable-only shuffle bags, static-impact fallback, and kill-switch-OFF behavior have deterministic tests. `tools/check_laser_midi_sync.py` reports 0 errors on the live config. Fixture validation must be recorded separately. |
 | LED/Govee cloud | partial | unvalidated | Cloud path exists; device behavior must be logged. The new pure lifecycle resolver does not replace or alter live LED dispatch. |
@@ -46,6 +46,10 @@ Current repo-facing status remains:
 | Laser Pad/frontend | partial | unvalidated | Syntax/frontend smoke tests do not prove live safety. |
 
 ## Required hardware validation record
+
+Use `docs/validation/soundswitch_hardware_validation_procedure.md` and copy
+`docs/validation/soundswitch_hardware_runs/TEMPLATE.md` for the SoundSwitch local-setup slice. Their
+existence is not hardware evidence; only a completed operator run can change hardware status.
 
 A hardware validation entry must include:
 

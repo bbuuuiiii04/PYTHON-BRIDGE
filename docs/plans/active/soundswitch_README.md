@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
-last_verified_commit: 0c2ba07
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -53,6 +53,7 @@ The compatibility symlink
 | current RE authority | `docs/research/soundswitch/` | closure report, format/binary findings, evidence matrices, tool guide, product contract |
 | superseded RE history | `docs/research/soundswitch/history/` | intermediate findings, old handoffs, draft specs, Stage-1 scratch |
 | active T7d validation | `docs/validation/soundswitch_t7d_*.md` | evidence ledger and blocked report |
+| hardware-validation procedure | `docs/validation/soundswitch_hardware_validation_procedure.md`, `docs/validation/soundswitch_hardware_runs/TEMPLATE.md` | reviewed operator sequence/template; no completed hardware evidence |
 | cross-subsystem contracts | `docs/subsystems/`, `docs/architecture/`, `docs/setup/`, `docs/status/` | current runtime/config/operator status; these remain in their repo-wide taxonomy |
 | tool-local pointer | `tools/ssfmt/re/README.md` | points to the current research tool guide; not a second authority |
 
@@ -65,13 +66,14 @@ artifacts, not planning documents. They are not moved into the authority tree.
   passes 29/29.
 - Current scripted content: 32/32 active existing-path tracks supported.
 - Pure scripted renderer: implemented/software-wire tested.
-- Config/startup/runtime command/StateManager/Enttec lane: implemented,
-  default-off, but scripted runtime pause/mode/input-health/status gaps remain.
-- Menubar `Export from SS` plus canonical replacement/reload: not implemented.
+- Config/startup/runtime command/StateManager/Enttec lane: implemented and default-off; RW-5 copied
+  operational status is software-tested and does not claim sender/physical state.
+- Menubar `Export from SS` plus canonical replacement/reload and combined pack/export row:
+  implemented and software-tested.
 - T7d phase tooling: implemented; four captures pass conductor integrity across
   arm/refire, while four scenario pairs and the corpus oracle remain incomplete.
 - Native-DMX Autoloop selection: intentionally not implemented; safe-zero.
-- Hardware validation: absent.
+- Hardware procedure/template: present; no real operator run, so hardware remains unvalidated.
 
 See the remaining-work roadmap for evidence, exact tasks, and acceptance gates.
 

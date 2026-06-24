@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b2ce63d
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: software-only
 ---
 
@@ -20,7 +20,7 @@ Purpose:
 Offline SoundSwitch pack boundary:
 - Task 2 deterministically exports and independently verifies a canonical 95-artifact pack for the pinned SoundSwitch 2.10.3 canonical RAVE project, including the seven-class F-3 control crosswalk. It does not replace or alter Laser Director policy, MIDI execution, mappings, blackout behavior, or status.
 - The pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender exist. `LaserSceneExecutor` has one injected backend slot; startup selects legacy MIDI, none/dry-run, or verified pack/Enttec from the optional default-off config. Physical MIDI and direct DMX remain mutually exclusive.
-- Pack backend startup, `StateManager` scripted frame driving, commands, and basic status are implemented in software. Native pack Autoloops remain zero-safe pending T7d capture evidence; scripted runtime gaps and all hardware validation remain tracked in `docs/plans/active/soundswitch_exporter_remaining_work.md`.
+- Pack backend startup, `StateManager` scripted frame driving, commands, and copied RW-5 status are implemented in software. RW-5 changes status publication only: laser policy, MIDI execution, blackout, mappings, and selection are unchanged. Native pack Autoloops remain software-zero pending T7d evidence; hardware remains unvalidated.
 
 Authoritative code:
 - `laser_config.py`

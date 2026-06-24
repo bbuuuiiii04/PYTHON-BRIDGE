@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout at `b2ce63d` on 2026-06-23. Treat code as the source of
+Audited against the current checkout at `4138c61` on 2026-06-24. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -37,20 +37,21 @@ The SoundSwitch pack lane contains frozen source models, strict read-only
 decode, deterministic canonical-pack export, independent verification, an
 immutable pack loader/player, a MIDI-input adapter, an output-backend
 abstraction, an Enttec frame sender, a validated default-off config loader,
-startup wiring, an atomic `PackRuntime`, validate-first runtime controls, and a
-StateManager scripted-frame driver. The current-project proof gate is 29 PASS /
+startup wiring, an atomic `PackRuntime`, validate-first runtime controls, a
+StateManager scripted-frame driver, and provider-free copied operational status.
+The current-project proof gate is 29 PASS /
 0 FAIL / 0 INCOMPLETE, including F9 and F10.
 
 This lane remains subordinate to existing bridge authority. `__main__` loads
 the optional config and chooses one physical laser backend before workers start;
-`StateManager` reads authoritative deck state and is the sole per-tick
-`submit_frame` owner. Blocking load/verify/serial work remains on startup or the
-command thread. Absent/disabled config preserves legacy MIDI; dry-run/none opens
-neither physical output path. Confirmed remaining gaps are tracked in
-`docs/plans/active/soundswitch_exporter_remaining_work.md`: one-click canonical
-pack replacement/reload; scripted pause/mode/input-health/status closure; T7d
-capture-derived Autoloop phase integration; and hardware validation. Current
-native Autoloop pack output remains zero-safe.
+`StateManager` reads authoritative deck state, is the sole per-tick
+`submit_frame` owner, and publishes one fresh software-intent status dict from the
+already-rendered frame before submission. Status reads copy that dict without
+calling runtime/backend providers. Blocking load/verify/serial work remains on
+startup or the command thread. Absent/disabled config preserves legacy MIDI;
+dry-run/none opens neither physical output path. Sender delivery health, T7d
+capture-derived Autoloop phase integration, and hardware validation remain open.
+Current native Autoloop pack output remains software-zero.
 
 ## Runtime Subsystems
 
@@ -69,7 +70,7 @@ native Autoloop pack output remains zero-safe.
 | `LEDLookDirector` | LED room-look policy only | yes | called by `StateManager` thread | manual/emergency LED context and `SmartPhrasingState`-derived role | `LEDLookDecision` |
 | `GoveeSceneAdapter` | LED transport queue/worker | no hot-path I/O | public trigger called by `StateManager`; worker owns Govee transport | `LEDLookDecision` | bounded queue commands and sanitized adapter status |
 | `SoundSwitchEngine` | SoundSwitch output-intent fanout helper | yes | called by `StateManager` thread | active deck routing and send intents from `StateManager` | routed OS2L sends for scripted/autoloop/smart-transition/live-BPM-follow helpers |
-| `LaserPackPlayer` / `PackRuntime` | verified SoundSwitch pack rendering and atomic runtime snapshot | yes, pure/in-memory | player called by `StateManager`; bundle published by command thread | active deck metadata/elapsed, input snapshot, immutable pack | CH1-CH19 frame plus sanitized diagnostics |
+| `LaserPackPlayer` / `PackRuntime` | verified SoundSwitch pack rendering and atomic runtime snapshot | yes, pure/in-memory | player called by `StateManager`; bundle published by command thread | active deck metadata/elapsed, input snapshot, immutable pack | CH1-CH19 frame plus copied software-intent diagnostics |
 | `SoundSwitchFrameSender` / Enttec worker | mutually exclusive direct-DMX transport | no blocking hot-path I/O | `StateManager` submits to bounded mailbox; worker owns serial | CH1-CH19 frame + validated fixture map | Enttec DMX Pro packets; owner-driven zero/stop |
 | `beat_math.py` | pure beat and beatgrid math helper | yes | called in hot path from `StateManager` | elapsed ms, bpm, beatgrid markers | computed beat positions / target elapsed |
 | `OS2LConnection` / `OS2LOutput` | output transport authority | yes | sender/reconnect threads own sockets | SoundSwitch DNS-SD, send queue | TCP OS2L messages |
@@ -107,9 +108,9 @@ direct path inactive while MTC/current state fallbacks continue where available.
    sends mirrored OS2L updates to active, mirror, 3, and 4 through
    `SoundSwitchEngine`.
 6. When a verified pack runtime is explicitly active, the pack driver submits
-   one nonblocking CH1-CH19 frame per tick. Scripted playback is implemented but
-   has the pause/mode/input-health gaps named in the active roadmap; native
-   Autoloop rendering remains zero-safe pending T7d evidence.
+   one nonblocking CH1-CH19 frame per tick and publishes copied operational status
+   from that same rendered frame. Native Autoloop rendering remains software-zero
+   pending T7d evidence.
 
 ## Smart-Transition Architecture
 

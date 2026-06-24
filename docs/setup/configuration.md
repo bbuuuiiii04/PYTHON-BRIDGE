@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b2ce63d
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: software-only
 ---
 
@@ -15,6 +15,9 @@ tracked inert example, startup construction, StateManager frame driver,
 validate-first runtime controls, and sanitized status. The default remains
 absent/disabled/dry-run/none, so no pack hardware opens unless a reviewed local
 config explicitly enables backend `pack`.
+
+RW-5 adds copied operational status only. It does not alter this schema or tracked defaults, and no
+ignored live config was read or changed during implementation.
 
 ## Tracked examples
 
@@ -56,7 +59,7 @@ If the selected file is absent, the result is `available=false`, `reason=not_con
 
 The tracked example is inert: `enabled=false`, `dry_run=true`, and
 `output_backend=none`. Copy it to the ignored local filename only when preparing
-a reviewed local setup. The local file was absent in the 2026-06-23 audit.
+a reviewed local setup. Current local-file state was not inspected during RW-5 implementation.
 
 `fixture_map` must contain exactly the string keys `1` through `19`, each mapped to an integer DMX address from 1 through 512. `fixture_map_path` is an optional alternative: when non-empty it takes precedence over the inline map. Relative map paths resolve against the directory containing the selected config file; absolute paths remain absolute. Map files contain the mapping object itself.
 

@@ -1,12 +1,16 @@
 ---
 doc_status: active-review-prompt
 truth_level: review-instructions-grounded-in-current-roadmap
-last_verified_commit: 5029ec4
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: Opus adversarial review of SoundSwitch exporter remaining-work roadmap; review-only; no live/runtime mutation
 ---
 
 # Opus adversarial review prompt - SoundSwitch exporter roadmap
+
+Current-code note: RW-5 copied operational status and the hardware procedure/template were added
+after this review brief was authored. This remains review-only and is not current implementation or
+hardware evidence.
 
 You are the independent adversarial reviewer for the SoundSwitch exporter and
 bridge-native DMX roadmap in `/Users/bbui/rb_ss_bridge_v2`.

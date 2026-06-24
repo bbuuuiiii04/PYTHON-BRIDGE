@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b2ce63d
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: software-only
 ---
 
@@ -21,6 +21,8 @@ SoundSwitch pack-player boundary:
 - `soundswitch_pack_player_config.py` implements the T7a startup-only, never-raising config loader.
 - `config/soundswitch_pack_player.example.json` is tracked, disabled, dry-run, and `output_backend: "none"` by default. The ignored local copy is `config/soundswitch_pack_player.json`.
 - This config is loaded by startup/reload orchestration. When explicitly enabled with backend `pack`, it builds the verified player, controller inputs, fixture-map-bound Enttec sender, and StateManager runtime bundle. Absent/disabled config preserves legacy MIDI; dry-run/none opens no physical pack output.
+- RW-5 adds copied operational status only. It does not change this schema, the tracked inert defaults,
+  or live ignored config. Current live-config state was not inspected.
 
 Authoritative code:
 - `config.py`

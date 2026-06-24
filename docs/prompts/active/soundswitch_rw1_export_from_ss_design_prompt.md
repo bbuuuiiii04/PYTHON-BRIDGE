@@ -1,12 +1,16 @@
 ---
 doc_status: active-prompt
 truth_level: code-test-and-current-roadmap-grounded
-last_verified_commit: 0c2ba07
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: Opus design/spec prompt for RW-1 only; no implementation or live/runtime mutation
 ---
 
 # Opus prompt - design/spec RW-1 `Export from SS`
+
+Current-code note: RW-1 and the later RW-5 copied pack/export row are implemented and
+software-tested. This retained design prompt grants no implementation or live authority and must not
+be used as current landed-status evidence.
 
 You are the design/spec author for the next bounded SoundSwitch exporter task in
 `/Users/bbui/rb_ss_bridge_v2`.

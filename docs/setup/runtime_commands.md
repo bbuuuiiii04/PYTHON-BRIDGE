@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 38953ca
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -19,6 +19,23 @@ no command: after a verified publish it reuses only the existing `reload` action
 when the bridge is running and pack output is enabled, and waits for a fresh
 `soundswitch_pack.pack_sha12` match. It never sends `enable` or `backend`; stopped
 or disabled pack runtime receives no reload command.
+
+The additive schema-1 `soundswitch_pack` object is:
+
+| Key | Bounded meaning |
+| --- | --- |
+| `available`, `enabled`, `pack_loaded` | Bundle booleans. |
+| `backend` | `pack` or `disabled`. |
+| `pack_sha12` | Existing public manifest prefix used for reload acknowledgement. |
+| `reason` | Sanitized runtime category. |
+| `operational_state` | `disabled`, `blackout`, `input_degraded`, `static_held`, `scripted_active`, `autoloop_phase_blocked`, or `software_zero_frame`. |
+| `scripted_active`, `input_degraded`, `static_held`, `blackout`, `autoloop_phase_blocked` | Authoritative companion booleans; more than one may be true. |
+| `software_zero_frame` | The rendered CH1-CH19 software frame equals zero; not serial or physical proof. |
+| `frame_count` | Non-negative attempted normal software-frame count; not confirmed sends. |
+| `has_active_identity` | Boolean derived from the in-memory accepted-identity property; no identity is exposed. |
+
+`StateManager.get_pack_status()` returns a copy of its published dict and calls no runtime/provider.
+Sender health is deliberately absent. A stale status file renders `Pack: Unknown` in the menubar.
 
 ## Runtime files
 

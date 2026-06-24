@@ -102,6 +102,7 @@ class BridgeMenubarTests(unittest.TestCase):
     def _worker(self, bridge_menubar):
         worker = Mock()
         worker._marshal_export_result = Mock()
+        worker._marshal_export_phase = Mock()
         return worker
 
     def _ok_subprocess(self, argv, **_kwargs):
@@ -130,6 +131,7 @@ class BridgeMenubarTests(unittest.TestCase):
         state, result = worker._marshal_export_result.call_args.args
         self.assertEqual(state, "published_not_live")
         self.assertTrue(result["ok"])
+        worker._marshal_export_phase.assert_called_once_with("reloading")
 
     def test_export_worker_bridge_on_reloads_and_confirms_matching_sha(self) -> None:
         bridge_menubar = self._import_module()
@@ -149,6 +151,7 @@ class BridgeMenubarTests(unittest.TestCase):
             {"cmd": "set_soundswitch_pack", "action": "reload"}
         )
         self.assertEqual(worker._marshal_export_result.call_args.args[0], "reload_succeeded")
+        worker._marshal_export_phase.assert_called_once_with("reloading")
 
     def test_export_worker_bridge_on_but_stale_does_not_reload(self) -> None:
         bridge_menubar = self._import_module()
@@ -201,6 +204,8 @@ class BridgeMenubarTests(unittest.TestCase):
         bridge_menubar = self._import_module()
         menu = Mock()
         menu._export_in_progress = False
+        menu._detect_generation = 0
+        menu._detect_in_progress = True
         menu._render_export_state = Mock()
         thread = Mock()
         with patch.object(bridge_menubar.threading, "Thread", return_value=thread) as thread_type:
@@ -219,6 +224,7 @@ class BridgeMenubarTests(unittest.TestCase):
             "result": {"ok": True},
         })
         self.assertFalse(menu._export_in_progress)
+        self.assertEqual(menu._export_phase, "idle")
         self.assertTrue(menu._export_up_to_date)
         self.assertEqual(menu._export_state, "reload_succeeded")
         menu._render_export_state.assert_called_once_with()
@@ -252,6 +258,92 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertNotIn("/", text)
         self.assertNotIn(raw, text)
         self.assertIn("UnknownError", text)
+
+    def test_pack_export_status_line_truth_tables_and_bounds(self) -> None:
+        bridge_menubar = self._import_module()
+        states = {
+            "disabled": "Disabled",
+            "blackout": "Blackout",
+            "input_degraded": "Input degraded",
+            "static_held": "Static held",
+            "scripted_active": "Scripted active",
+            "autoloop_phase_blocked": "Autoloop blocked",
+            "software_zero_frame": "Software zero",
+            "bogus": "Unknown",
+        }
+        for state, label in states.items():
+            with self.subTest(state=state):
+                line = bridge_menubar.pack_export_status_line(
+                    {"operational_state": state}, stale=False,
+                    export_phase="idle", export_state="idle",
+                    export_up_to_date=False,
+                )
+                self.assertEqual(line, f"Pack: {label} · Ready to export")
+
+        exports = (
+            ("exporting", "idle", False, {}, "Exporting…"),
+            ("reloading", "idle", False, {}, "Reloading…"),
+            ("idle", "idle", True, {}, "Exported"),
+            ("idle", "published_not_live", True, {}, "Saved; pack disabled"),
+            ("idle", "reload_succeeded", True, {}, "Live now"),
+            ("idle", "reload_failed", True, {}, "Saved; reload unconfirmed"),
+            ("idle", "export_failed", False, {"error_category": "TimeoutExpired"},
+             "Export failed (TimeoutExpired)"),
+        )
+        for phase, state, current, result, label in exports:
+            with self.subTest(phase=phase, state=state):
+                line = bridge_menubar.pack_export_status_line(
+                    {"operational_state": "disabled"}, stale=False,
+                    export_phase=phase, export_state=state,
+                    export_up_to_date=current, export_result=result,
+                )
+                self.assertEqual(line, f"Pack: Disabled · {label}")
+
+        self.assertEqual(
+            bridge_menubar.pack_export_status_line(
+                {"operational_state": "scripted_active"}, stale=True,
+                export_phase="idle", export_state="reload_succeeded",
+                export_up_to_date=True,
+            ),
+            "Pack: Unknown",
+        )
+        line = bridge_menubar.pack_export_status_line(
+            {"operational_state": "scripted_active"}, stale=False,
+            export_phase="idle", export_state="export_failed",
+            export_up_to_date=False,
+            export_result={"error_category": "A" * 200},
+        )
+        self.assertLessEqual(len(line), 80)
+        self.assertNotIn("/private", bridge_menubar.pack_export_status_line(
+            {"operational_state": "scripted_active"}, stale=False,
+            export_phase="idle", export_state="export_failed",
+            export_up_to_date=False,
+            export_result={"error_category": "/private/device raw failure"},
+        ))
+
+    def test_stale_detect_and_phase_callbacks_cannot_overwrite_newer_state(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock(_detect_generation=2, _detect_in_progress=True,
+                    _export_in_progress=False, _export_phase="idle")
+        menu._render_export_state = Mock()
+
+        bridge_menubar.BridgeMenuBar.finishDetect_.callable(menu, {
+            "generation": 1, "verdict": "up_to_date", "sig": "old",
+        })
+        self.assertNotEqual(menu._export_up_to_date, True)
+        menu._render_export_state.assert_not_called()
+
+        bridge_menubar.BridgeMenuBar.setExportPhase_.callable(menu, "reloading")
+        self.assertEqual(menu._export_phase, "idle")
+        menu._render_export_state.assert_not_called()
+
+    def test_reload_phase_is_marshaled_to_main_thread(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        bridge_menubar.BridgeMenuBar._marshal_export_phase(menu, "reloading")
+        menu.performSelectorOnMainThread_withObject_waitUntilDone_.assert_called_once_with(
+            "setExportPhase:", "reloading", False,
+        )
 
     def test_detect_export_state_requires_positive_proof(self) -> None:
         bridge_menubar = self._import_module()

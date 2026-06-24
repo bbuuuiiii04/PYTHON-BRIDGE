@@ -390,6 +390,48 @@ def export_result_line(state: str, result: dict | None = None) -> str:
     }.get(state, "")
 
 
+def pack_export_status_line(
+    pack_status: dict,
+    *,
+    stale: bool,
+    export_phase: str,
+    export_state: str,
+    export_up_to_date: bool,
+    export_result: dict | None = None,
+) -> str:
+    """Render one bounded row from copied software status and local export state."""
+    if stale:
+        return "Pack: Unknown"
+    pack = pack_status if isinstance(pack_status, dict) else {}
+    pack_label = {
+        "disabled": "Disabled",
+        "blackout": "Blackout",
+        "input_degraded": "Input degraded",
+        "static_held": "Static held",
+        "scripted_active": "Scripted active",
+        "autoloop_phase_blocked": "Autoloop blocked",
+        "software_zero_frame": "Software zero",
+    }.get(pack.get("operational_state"), "Unknown")
+    if export_phase == "exporting":
+        export_label = "Exporting…"
+    elif export_phase == "reloading":
+        export_label = "Reloading…"
+    elif export_state == "published_not_live":
+        export_label = "Saved; pack disabled"
+    elif export_state == "reload_succeeded":
+        export_label = "Live now"
+    elif export_state == "reload_failed":
+        export_label = "Saved; reload unconfirmed"
+    elif export_state == "export_failed":
+        category = _safe_error_category((export_result or {}).get("error_category"))[:32]
+        export_label = f"Export failed ({category})"
+    elif export_up_to_date:
+        export_label = "Exported"
+    else:
+        export_label = "Ready to export"
+    return f"Pack: {pack_label} · {export_label}"[:80]
+
+
 def _export_failure_result(exc: Exception) -> dict:
     return {
         "ok": False,
@@ -607,12 +649,14 @@ class BridgeMenuBar(NSObject):
         self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self.menu = NSMenu.alloc().init()
         self._export_in_progress = False
+        self._export_phase = "idle"
         self._export_state = "idle"
         self._export_result = {}
         self._export_up_to_date = False
         self._detect_in_progress = False
         self._detect_sig = None
         self._detect_at = 0.0
+        self._detect_generation = 0
         self.status_rows = []
         for _ in range(9):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
@@ -789,7 +833,14 @@ class BridgeMenuBar(NSObject):
         self.export_item.setEnabled_(
             not self._export_in_progress and not self._export_up_to_date)
         self.export_status_item.setTitle_(
-            export_result_line(self._export_state, self._export_result))
+            pack_export_status_line(
+                self._snapshot.get("soundswitch_pack", {}),
+                stale=not self._snapshot or bool(self._snapshot.get("stale")),
+                export_phase=self._export_phase,
+                export_state=self._export_state,
+                export_up_to_date=self._export_up_to_date,
+                export_result=self._export_result,
+            ))
 
     def _maybe_detect_export_state(self):
         if self._export_in_progress or self._detect_in_progress:
@@ -799,19 +850,23 @@ class BridgeMenuBar(NSObject):
         if sig == self._detect_sig and fresh_enough:
             return
         self._detect_in_progress = True
-        self._pending_sig = sig
-        threading.Thread(target=self._run_detect, daemon=True).start()
+        self._detect_generation += 1
+        generation = self._detect_generation
+        threading.Thread(target=self._run_detect, args=(generation, sig), daemon=True).start()
 
-    def _run_detect(self):
+    def _run_detect(self, generation, sig):
         try:
             verdict = detect_export_state()
         except Exception:
             verdict = "changes"
         self.performSelectorOnMainThread_withObject_waitUntilDone_(
-            "finishDetect:", {"verdict": verdict, "sig": self._pending_sig}, False,
+            "finishDetect:", {"verdict": verdict, "sig": sig, "generation": generation}, False,
         )
 
     def finishDetect_(self, payload):
+        generation = payload.get("generation") if isinstance(payload, dict) else None
+        if generation != self._detect_generation:
+            return
         verdict = payload.get("verdict") if isinstance(payload, dict) else "changes"
         self._export_up_to_date = verdict == "up_to_date"
         self._detect_sig = payload.get("sig") if isinstance(payload, dict) else None
@@ -823,8 +878,11 @@ class BridgeMenuBar(NSObject):
         if self._export_in_progress:
             return
         self._export_in_progress = True
+        self._export_phase = "exporting"
         self._export_state = "exporting"
         self._export_result = {}
+        self._detect_generation += 1
+        self._detect_in_progress = False
         self._render_export_state()
         threading.Thread(target=self._run_export, daemon=True).start()
 
@@ -848,6 +906,7 @@ class BridgeMenuBar(NSObject):
                 self._marshal_export_result("export_failed", result)
                 return
             published_result = result
+            self._marshal_export_phase("reloading")
 
             expected_sha12 = result["manifest_sha256"][:12]
             if not bridge_pids():
@@ -894,6 +953,17 @@ class BridgeMenuBar(NSObject):
             "finishExport:", payload, False,
         )
 
+    def _marshal_export_phase(self, phase: str):
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "setExportPhase:", phase, False,
+        )
+
+    def setExportPhase_(self, phase):
+        if not self._export_in_progress:
+            return
+        self._export_phase = phase if phase in {"exporting", "reloading"} else "exporting"
+        self._render_export_state()
+
     def finishExport_(self, payload):
         state = payload.get("state") if isinstance(payload, dict) else "export_failed"
         result = payload.get("result") if isinstance(payload, dict) else {}
@@ -902,6 +972,7 @@ class BridgeMenuBar(NSObject):
         }
         self._export_state = state if state in allowed_states else "export_failed"
         self._export_result = result if isinstance(result, dict) else {}
+        self._export_phase = "idle"
         self._export_in_progress = False
         self._export_up_to_date = state != "export_failed"
         self._detect_sig = None

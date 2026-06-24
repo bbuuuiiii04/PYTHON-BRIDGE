@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 7b88b7f
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: software-only
 ---
 
@@ -26,7 +26,9 @@ Offline project export:
 - The export action is clickable **Export from Soundswitch** when the saved source may differ, disabled **Exported** only with positive proof that the pack exists, the exact source-content fingerprint matches, and the stored generator commit is valid and matches the current commit when Git can determine it; it is disabled **Exporting…** while publication runs. Detection performs content hashing and commit lookup on a background worker; only its cheap stat-signature gate runs on the AppKit thread. Each successful canonical publish best-effort writes a hashes-and-commit-only sidecar beside the pack, never inside it. A missing, corrupt, unreadable, or otherwise uncertain source/sidecar/pack state remains clickable, and sidecar failure never fails the pack publish.
 - **T7c pack driver** (`StateManager._drive_pack_output`, run once per tick via the `_push_tick` wrapper): the **sole caller of `PackOutputBackend.submit_frame`** — do not add another. The executor's `backend.trigger()` is scene-SELECTION only and never emits DMX, so the two never collide. The driver READS `DeckState`; `StateManager` remains the only writer. Automatic scripted base ZEROs on stop/stale/error/track-change/discontinuity via `LaserPackPlayer.clear_selection()`, so a held manual Static Override stands alone while idle (SoundSwitch parity); static still loses to blackout/emergency/pack-disabled/shutdown. Autoloop output stays safe-zero (driver never calls `select_autoloop`) until T7d.
 - **T7e runtime control** (`soundswitch_pack_runtime.py`, `soundswitch_pack_controller.py`): the live pack runtime is one immutable `PackRuntime` bundle published to `StateManager` by a single atomic assignment (`set_pack_runtime`), so the push loop reads a consistent snapshot per tick. The `set_soundswitch_pack` runtime command (reload/backend/enable) is validate-first on the command thread via `SoundSwitchPackController`: no implicit hot-enable; stop-before-start on the shared Enttec serial port with an explicit `frame_sender.zero_and_stop()` on the OLD sender (NoneBackend.submit_frame is a no-op, so the bundle swap alone does not darken the rig); no partial swap; pack failure → disabled/none, never MIDI; runtime `backend=midi` deferred. Sanitized `soundswitch_pack` status + sanitized command errors (no paths/ports/aliases/devices/UUIDs/raw messages).
-- **Confirmed active gaps:** RW-1 is implemented and software-tested but remains pending independent implementation review; runtime pause currently clears the scripted base because `PAUSE` and stop both present `playing=false`; the driver does not explicitly require scripted mode/id; controller snapshot health/error/drop fields are not applied to the output gate; pack status is too narrow for final operations; T7d has four conductor-accepted integrity captures across arm/refire, but four scenario pairs and the unique oracle remain, so there is no native Autoloop phase mapping. See `docs/plans/active/soundswitch_exporter_remaining_work.md`.
+- **RW-5 copied operational status:** `PackRuntime.sanitized_status()` exposes immutable bundle facts without calling a backend/provider. `StateManager` publishes a fresh bounded dict from the already-rendered frame decision before the existing submission, and `get_pack_status()` returns only a copy. The booleans preserve simultaneous truths such as degraded controller input with a continuing scripted base; the display enum uses `disabled`, `blackout`, `input_degraded`, `static_held`, `scripted_active`, `autoloop_phase_blocked`, or `software_zero_frame`. `frame_count` counts attempted normal software frames. None of these fields proves serial delivery, Enttec acceptance, or fixture darkness.
+- The menubar reuses one row for the copied pack state and export progress/result. A stale status file renders `Pack: Unknown`; export/reload still uses only the existing conservative reload command and never enables output or changes backend.
+- **Confirmed active gaps:** sender/serial delivery health is not present in RW-5; native Autoloop phase mapping remains evidence-blocked; and no real hardware run exists. The reviewed procedure and evidence template are `docs/validation/soundswitch_hardware_validation_procedure.md` and `docs/validation/soundswitch_hardware_runs/TEMPLATE.md`.
 - Live SoundSwitch OS2L behavior and all other bridge outputs remain unchanged; no hardware validation was performed.
 
 Authoritative code:
@@ -63,4 +65,4 @@ Known risks:
 - changing send order without tests
 - assuming another SoundSwitch version behaves the same
 - the non-atomic move-aside fallback has a temporary missing-destination crash window; the next publish recovers the retained backup
-- RW-1 remains SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED until independent review and any separately approved live check
+- copied software-zero status must not be treated as physical darkness; all direct-DMX hardware behavior remains unvalidated

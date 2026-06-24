@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2.state_manager import StateManager
+from rb_ss_bridge_v2.state_manager import StateManager, _pack_operational_state
 from rb_ss_bridge_v2.rb_memory import PositionCache
 from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot
 from rb_ss_bridge_v2.soundswitch_laser_player import (
@@ -107,16 +107,48 @@ def _make_sm(*, player=None, backend=None, midi_input=None, enabled=None):
 
 
 def _set(sm, *, ssid="", elapsed_ms=0, playing=False, load_gen=1, snap=FRESH,
-         active=1, was_playing=None, scripted_id=None):
+         active=1, was_playing=None, scripted_id=None, lighting_mode=None):
     if was_playing is None:
         was_playing = playing
     if scripted_id is None:
         scripted_id = 1 if ssid else 0   # ssid present ⇒ bridge-owned scripted, by default
-    sm._os = SimpleNamespace(active_deck=active, was_playing=was_playing)
+    if lighting_mode is None:
+        lighting_mode = "scripted" if scripted_id else "idle"
+    sm._os = SimpleNamespace(
+        active_deck=active, was_playing=was_playing, lighting_mode=lighting_mode)
     sm._deck = {active: SimpleNamespace(
         meta=SimpleNamespace(soundswitch_id=ssid), elapsed_ms=elapsed_ms,
         playing=playing, load_gen=load_gen, scripted_id=scripted_id)}
     sm._cache = SimpleNamespace(get=lambda _dk: snap)
+
+
+class PackOperationalStateTests(unittest.TestCase):
+    def test_precedence_table(self):
+        defaults = dict(
+            enabled=True,
+            blackout=False,
+            input_degraded=False,
+            static_held=False,
+            scripted_active=False,
+            autoloop_phase_blocked=False,
+            software_zero_frame=True,
+        )
+        cases = (
+            ({"enabled": False, "blackout": True}, "disabled"),
+            ({"blackout": True, "input_degraded": True}, "blackout"),
+            ({"input_degraded": True, "static_held": True}, "input_degraded"),
+            ({"static_held": True, "scripted_active": True}, "static_held"),
+            ({"scripted_active": True, "autoloop_phase_blocked": True}, "scripted_active"),
+            ({"autoloop_phase_blocked": True}, "autoloop_phase_blocked"),
+            ({}, "software_zero_frame"),
+            ({"input_degraded": True, "scripted_active": True}, "input_degraded"),
+        )
+        for updates, expected in cases:
+            with self.subTest(expected=expected, updates=updates):
+                self.assertEqual(
+                    _pack_operational_state(**(defaults | updates)),
+                    expected,
+                )
 
 
 class PackDriverTests(unittest.TestCase):
@@ -739,6 +771,174 @@ class PackDriverInputHealthTests(unittest.TestCase):
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
         sm._drive_pack_output()
         self.assertEqual(new_be.frames[-1][0], 200)           # fresh player honors static 8
+
+
+class PackOperationalStatusTests(unittest.TestCase):
+    def test_initial_enable_swap_reload_disable_snapshots(self):
+        disabled = _make_sm()
+        self.assertEqual(disabled.get_pack_status()["operational_state"], "disabled")
+        self.assertTrue(disabled.get_pack_status()["software_zero_frame"])
+
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=_FakeBackend())
+        initial = sm.get_pack_status()
+        self.assertTrue(initial["enabled"])
+        self.assertEqual(initial["backend"], "pack")
+        self.assertEqual(initial["operational_state"], "software_zero_frame")
+        self.assertEqual(initial["frame_count"], 0)
+
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
+        sm._drive_pack_output()
+        self.assertEqual(sm.get_pack_status()["frame_count"], 1)
+
+        sm.set_pack_runtime(PackRuntime(reason="swapping"))
+        self.assertEqual(sm.get_pack_status()["operational_state"], "disabled")
+        self.assertEqual(sm.get_pack_status()["frame_count"], 0)
+
+        for reason in ("pack", "pack"):
+            sm.set_pack_runtime(PackRuntime(
+                enabled=True,
+                reason=reason,
+                player=LaserPackPlayer(_pack()),
+                backend=_FakeBackend(),
+            ))
+            status = sm.get_pack_status()
+            self.assertEqual(status["operational_state"], "software_zero_frame")
+            self.assertEqual(status["backend"], "pack")
+            self.assertEqual(status["frame_count"], 0)
+
+        sm.set_pack_runtime(PackRuntime(reason="disabled"))
+        self.assertEqual(sm.get_pack_status()["operational_state"], "disabled")
+        self.assertTrue(sm.get_pack_status()["software_zero_frame"])
+
+    def test_operational_flags_preserve_simultaneous_truths(self):
+        cases = (
+            (
+                _FakeInput(),
+                dict(ssid=SSID, elapsed_ms=50, playing=True),
+                "scripted_active",
+                {"scripted_active": True, "software_zero_frame": False},
+            ),
+            (
+                _FakeInput(worker_alive=False),
+                dict(ssid=SSID, elapsed_ms=50, playing=True),
+                "input_degraded",
+                {
+                    "input_degraded": True,
+                    "scripted_active": True,
+                    "software_zero_frame": False,
+                },
+            ),
+            (
+                _FakeInput(held_static_slot=8),
+                dict(ssid="", playing=False),
+                "static_held",
+                {"static_held": True, "software_zero_frame": False},
+            ),
+            (
+                _FakeInput(blackout_held=True),
+                dict(ssid="", playing=False),
+                "blackout",
+                {"blackout": True, "software_zero_frame": True},
+            ),
+        )
+        for midi_input, state, expected_state, expected_flags in cases:
+            with self.subTest(expected_state=expected_state):
+                sm = _make_sm(
+                    player=LaserPackPlayer(_pack()),
+                    backend=_FakeBackend(),
+                    midi_input=midi_input,
+                )
+                _set(sm, **state)
+                sm._drive_pack_output()
+                status = sm.get_pack_status()
+                self.assertEqual(status["operational_state"], expected_state)
+                for key, value in expected_flags.items():
+                    self.assertIs(status[key], value)
+
+    def test_autoloop_is_status_only_and_never_selected(self):
+        player = LaserPackPlayer(_pack())
+        player.select_autoloop = mock.Mock(side_effect=AssertionError("select_autoloop banned"))
+        sm = _make_sm(player=player, backend=_FakeBackend())
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+
+        sm._drive_pack_output()
+
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "autoloop_phase_blocked")
+        self.assertTrue(status["autoloop_phase_blocked"])
+        self.assertTrue(status["software_zero_frame"])
+        player.select_autoloop.assert_not_called()
+
+    def test_get_status_is_provider_free_and_returns_a_copy(self):
+        backend = _FakeBackend()
+        backend.status = mock.Mock(side_effect=AssertionError("backend status banned"))
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=backend, midi_input=_FakeInput())
+        sm._pack_runtime = object()
+
+        first = sm.get_pack_status()
+        first["enabled"] = False
+        second = sm.get_pack_status()
+
+        self.assertTrue(second["enabled"])
+        backend.status.assert_not_called()
+
+    def test_each_publication_uses_a_fresh_unmutated_dict(self):
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=_FakeBackend())
+        initial = sm._pack_status_snapshot
+        initial_value = dict(initial)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
+
+        sm._drive_pack_output()
+        first_tick = sm._pack_status_snapshot
+        sm._drive_pack_output()
+        second_tick = sm._pack_status_snapshot
+
+        self.assertIsNot(initial, first_tick)
+        self.assertIsNot(first_tick, second_tick)
+        self.assertEqual(initial, initial_value)
+        self.assertEqual(first_tick["frame_count"], 1)
+        self.assertEqual(second_tick["frame_count"], 2)
+
+    def test_submit_failure_sees_published_intent_then_bounded_zero(self):
+        backend = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=backend)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
+        observed = []
+
+        def fail_submit(_frame):
+            observed.append(sm.get_pack_status())
+            raise RuntimeError("/private/device/raw submit failure")
+
+        backend.submit_frame = fail_submit
+        with self.assertLogs("state_manager", level="ERROR") as captured:
+            sm._drive_pack_output()
+
+        self.assertEqual(observed[0]["operational_state"], "scripted_active")
+        self.assertFalse(observed[0]["software_zero_frame"])
+        self.assertEqual(observed[0]["frame_count"], 1)
+        self.assertEqual(observed[1]["operational_state"], "software_zero_frame")
+        final = sm.get_pack_status()
+        self.assertEqual(final["frame_count"], 1)
+        self.assertNotIn("private", repr(final))
+        self.assertNotIn("device", repr(final))
+        self.assertNotIn("private", "\n".join(captured.output))
+        self.assertNotIn("device", "\n".join(captured.output))
+
+    def test_render_exception_publishes_bounded_zero_and_attempts_zero(self):
+        backend = _FakeBackend()
+        player = LaserPackPlayer(_pack())
+        player.render = mock.Mock(side_effect=RuntimeError("/private/raw render failure"))
+        sm = _make_sm(player=player, backend=backend)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
+
+        sm._drive_pack_output()
+
+        self.assertEqual(backend.frames, [ZERO_FRAME])
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "software_zero_frame")
+        self.assertTrue(status["software_zero_frame"])
+        self.assertEqual(status["frame_count"], 0)
+        self.assertNotIn("private", repr(status))
 
 
 class PackDriverInnerTickTests(unittest.TestCase):

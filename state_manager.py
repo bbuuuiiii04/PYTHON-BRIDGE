@@ -118,6 +118,32 @@ SMART_BREAKDOWN_ENV = "RBSS_SMART_BREAKDOWN"
 PHRASE_ANCHOR_ENV = "RBSS_PHRASE_ANCHOR"
 SMART_REARM_EXPERIMENT_ENV = "RBSS_SMART_REARM_EXPERIMENT"
 SPECTRAL_ENABLE_ENV = "RBSS_SPECTRAL_ENABLE"
+
+
+def _pack_operational_state(
+    *,
+    enabled: bool,
+    blackout: bool,
+    input_degraded: bool,
+    static_held: bool,
+    scripted_active: bool,
+    autoloop_phase_blocked: bool,
+    software_zero_frame: bool,
+) -> str:
+    """Resolve the bounded display priority; companion booleans remain authoritative."""
+    if not enabled:
+        return "disabled"
+    if blackout:
+        return "blackout"
+    if input_degraded:
+        return "input_degraded"
+    if static_held:
+        return "static_held"
+    if scripted_active:
+        return "scripted_active"
+    if autoloop_phase_blocked:
+        return "autoloop_phase_blocked"
+    return "software_zero_frame"
 WIDE_WINDOW_ENV = "RBSS_DROP_WIDE_WINDOW"
 SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
 STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
@@ -354,6 +380,17 @@ class StateManager:
         # thread (set_pack_runtime) and read once per tick by the push loop, so the
         # driver never sees a mixed old/new runtime. Default = disabled (neutral).
         self._pack_runtime: PackRuntime = soundswitch_pack_runtime or DISABLED_PACK_RUNTIME
+        self._pack_frame_count = 0
+        self._pack_status_snapshot: dict[str, Any] = {}
+        self._publish_pack_status(
+            runtime=self._pack_runtime,
+            scripted_active=False,
+            input_degraded=False,
+            static_held=False,
+            blackout=False,
+            autoloop_phase_blocked=False,
+            software_zero_frame=True,
+        )
         # Push-thread-owned driver trackers (NOT part of the swappable bundle).
         self._pack_last_load_gen: tuple[int, int] | None = None   # (active, load_gen)
         self._pack_last_elapsed_ms: int | None = None
@@ -3263,6 +3300,16 @@ class StateManager:
         """
         self._pack_runtime = runtime or DISABLED_PACK_RUNTIME
         self._pack_last_static_slot = None
+        self._pack_frame_count = 0
+        self._publish_pack_status(
+            runtime=self._pack_runtime,
+            scripted_active=False,
+            input_degraded=False,
+            static_held=False,
+            blackout=False,
+            autoloop_phase_blocked=False,
+            software_zero_frame=True,
+        )
 
     def get_pack_runtime(self) -> PackRuntime:
         """Current pack runtime bundle (for the command-thread controller's snapshot)."""
@@ -3270,8 +3317,47 @@ class StateManager:
 
     def get_pack_status(self) -> dict[str, Any]:
         """Sanitized pack status for the runtime status surface (no paths/ports/etc.)."""
-        rt = self._pack_runtime
-        return rt.sanitized_status() if rt is not None else DISABLED_PACK_RUNTIME.sanitized_status()
+        return dict(self._pack_status_snapshot)
+
+    def _publish_pack_status(
+        self,
+        *,
+        runtime: PackRuntime,
+        scripted_active: bool,
+        input_degraded: bool,
+        static_held: bool,
+        blackout: bool,
+        autoloop_phase_blocked: bool,
+        software_zero_frame: bool,
+    ) -> None:
+        """Publish one fresh software-intent snapshot with one atomic assignment."""
+        rt = runtime or DISABLED_PACK_RUNTIME
+        try:
+            has_active_identity = bool(getattr(rt.backend, "last_accepted_identity", None))
+        except Exception:
+            has_active_identity = False
+        active = bool(rt.active)
+        status = rt.sanitized_status()
+        status.update({
+            "operational_state": _pack_operational_state(
+                enabled=active,
+                blackout=bool(blackout),
+                input_degraded=bool(input_degraded),
+                static_held=bool(static_held),
+                scripted_active=bool(scripted_active),
+                autoloop_phase_blocked=bool(autoloop_phase_blocked),
+                software_zero_frame=bool(software_zero_frame),
+            ),
+            "scripted_active": bool(scripted_active),
+            "input_degraded": bool(input_degraded),
+            "static_held": bool(static_held),
+            "blackout": bool(blackout),
+            "autoloop_phase_blocked": bool(autoloop_phase_blocked),
+            "software_zero_frame": bool(software_zero_frame),
+            "frame_count": max(0, int(self._pack_frame_count)),
+            "has_active_identity": has_active_identity,
+        })
+        self._pack_status_snapshot = status
 
     def _drive_pack_output(self, now: float | None = None) -> None:
         """T7c/T7e: drive the pack player from authoritative deck state; submit one
@@ -3285,6 +3371,10 @@ class StateManager:
             return
         now = time.monotonic() if now is None else now
         player, backend, midi_input = rt.player, rt.backend, rt.midi_input
+        input_healthy = True
+        slot = None
+        blackout = False
+        transport = None
         try:
             active = self._os.active_deck
             d = self._deck[active]
@@ -3415,12 +3505,37 @@ class StateManager:
             else:
                 player.clear_selection()
 
-            # 4. Submit exactly one frame.
-            backend.submit_frame(player.render().frame)
-        except Exception:
+            # 4. Publish software intent, then submit that same frame exactly once.
+            frame = player.render().frame
+            self._pack_frame_count += 1
+            self._publish_pack_status(
+                runtime=rt,
+                scripted_active=transport is not None,
+                input_degraded=midi_input is not None and not input_healthy,
+                static_held=slot is not None,
+                blackout=bool(blackout),
+                autoloop_phase_blocked=(
+                    rt.active and self._os.lighting_mode == "autoloop"
+                ),
+                software_zero_frame=frame == _PACK_ZERO_FRAME,
+            )
+            backend.submit_frame(frame)
+        except Exception as exc:
             if not self._pack_logged_error:
-                log.exception("[SM] pack driver error; resolving ZERO")
+                log.error(
+                    "[SM] pack driver error; resolving ZERO  error=%s",
+                    type(exc).__name__,
+                )
                 self._pack_logged_error = True
+            self._publish_pack_status(
+                runtime=rt,
+                scripted_active=False,
+                input_degraded=False,
+                static_held=False,
+                blackout=False,
+                autoloop_phase_blocked=False,
+                software_zero_frame=True,
+            )
             try:
                 backend.submit_frame(_PACK_ZERO_FRAME)
             except Exception:

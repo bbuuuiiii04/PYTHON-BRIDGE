@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 38953ca
-last_verified_date: 2026-06-23
+last_verified_commit: 4138c61
+last_verified_date: 2026-06-24
 validation_scope: software-only
 ---
 
@@ -25,6 +25,11 @@ SoundSwitch pack-player boundary (T7c/T7e):
   thread (all blocking load_pack/serial work off the push loop).
 - **Sanitized only:** the `soundswitch_pack` status and any `set_soundswitch_pack` failure detail
   expose no paths, ports, aliases, device names, fixture maps, UUIDs, or raw exception messages.
+- RW-5 makes the base runtime facts provider-free and has `StateManager` own the copied operational
+  snapshot. `get_pack_status()` copies only that dict. `operational_state` is a display-priority enum;
+  the companion booleans remain authoritative. `software_zero_frame` and `frame_count` mean rendered
+  software zero and attempted normal software frames only, never confirmed serial/Enttec output or
+  physical fixture darkness.
 - Runtime `backend=midi` is **deferred** (callback returns sanitized `unsupported_action`); no
   runtime command opens IAC/MidiOutput; pack failure falls back to disabled/none, never MIDI.
 - The menubar `Export from SS` workflow adds no command. After verified disk publication it reuses
@@ -98,4 +103,6 @@ Known risks:
 - Callback success does not prove hardware-visible behavior.
 - A matching `pack_sha12` proves the running status snapshot references the published content; it
   does not prove fixture-visible output or hardware safety.
+- `software_zero_frame=true` does not prove a zero packet was sent or accepted. Sender health is not
+  part of RW-5, and a stale menubar status is shown as `Pack: Unknown`.
 - Runtime command docs are code-derived; if docs and `runtime_status.py` disagree, code wins.

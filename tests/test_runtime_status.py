@@ -324,6 +324,8 @@ class RuntimeStatusWriterTests(unittest.TestCase):
         led_provider=None,
         color_status=None,
         color_provider=None,
+        pack_status=None,
+        pack_provider=None,
     ):
         sm = Mock()
         sm.snapshot.return_value = sm_snapshot
@@ -363,6 +365,8 @@ class RuntimeStatusWriterTests(unittest.TestCase):
             )
         if laser_provider is None:
             laser_provider = lambda: laser_status
+        if pack_provider is None and pack_status is not None:
+            pack_provider = lambda: pack_status
         return StatusWriter(
             sm,
             live_bpm,
@@ -373,7 +377,43 @@ class RuntimeStatusWriterTests(unittest.TestCase):
             laser_status_provider=laser_provider,
             led_status_provider=led_provider,
             color_engine_status_provider=color_provider,
+            pack_status_provider=pack_provider,
         )
+
+    def test_pack_status_default_and_copied_provider_schema(self) -> None:
+        writer = self._make_writer(
+            sm_snapshot={"active_deck": 1, "deck": {"1": {}, "2": {}}},
+            laser_status={"available": False, "enabled": False, "reason": "not_configured"},
+        )
+        default = writer.snapshot()["soundswitch_pack"]
+        self.assertEqual(default["operational_state"], "disabled")
+        self.assertTrue(default["software_zero_frame"])
+        self.assertEqual(default["frame_count"], 0)
+
+        pack = dict(default, enabled=True, backend="pack",
+                    operational_state="scripted_active", scripted_active=True,
+                    software_zero_frame=False, frame_count=7)
+        writer = self._make_writer(
+            sm_snapshot={"active_deck": 1, "deck": {"1": {}, "2": {}}},
+            laser_status={"available": False, "enabled": False, "reason": "not_configured"},
+            pack_status=pack,
+        )
+        self.assertEqual(writer.snapshot()["soundswitch_pack"], pack)
+
+    def test_pack_provider_failure_is_bounded_and_does_not_leak(self) -> None:
+        def fail():
+            raise RuntimeError("/private/device/raw provider failure")
+
+        writer = self._make_writer(
+            sm_snapshot={"active_deck": 1, "deck": {"1": {}, "2": {}}},
+            laser_status={"available": False, "enabled": False, "reason": "not_configured"},
+            pack_provider=fail,
+        )
+        pack = writer.snapshot()["soundswitch_pack"]
+        self.assertEqual(pack["reason"], "provider_error")
+        self.assertEqual(pack["operational_state"], "disabled")
+        self.assertNotIn("private", repr(pack))
+        self.assertNotIn("device", repr(pack))
 
     def test_status_writer_emits_smart_phrasing_block(self) -> None:
         writer = self._make_writer(

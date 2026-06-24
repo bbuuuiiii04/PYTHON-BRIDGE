@@ -16,17 +16,10 @@ _FORBIDDEN = ("/", "tty", "cu.", "COM", "enttec", "port", "alias", "device",
               "fixture_map", "pack_path")
 
 
-class _LeakyBackend:
-    """A backend whose status() tries to leak sensitive fields."""
+class _ForbiddenProviderBackend:
+    """Any status-provider call is a regression on the provider-free base snapshot."""
     def status(self):
-        return {
-            "backend": "pack",
-            "frame_count": 3,
-            "last_accepted_identity": "3CCBCD6F-7C1B-44D8-882C-A52A74CC1827",
-            "enttec_port": "/dev/cu.usbserial-AB",
-            "midi_input_aliases": {"IAC Driver Bus 1": "x"},
-            "pack_path": "/Users/bbui/Music/SoundSwitch/default.ssproj",
-        }
+        raise AssertionError("backend.status() must not be called")
 
 
 class PackCommandParseTests(unittest.TestCase):
@@ -97,15 +90,14 @@ class PackCommandDispatchTests(unittest.TestCase):
 class PackStatusSanitizationTests(unittest.TestCase):
     def test_sanitized_status_drops_sensitive_fields(self):
         rt = PackRuntime(enabled=True, reason="pack", player=object(),
-                         backend=_LeakyBackend(), pack_sha12="88a2e9484869")
+                         backend=_ForbiddenProviderBackend(), pack_sha12="88a2e9484869")
         status = rt.sanitized_status()
         blob = json.dumps(status)
         for tok in _FORBIDDEN:
             self.assertNotIn(tok, blob, f"leaked {tok!r} in {blob!r}")
-        # the raw UUID identity must not appear; only a boolean flag.
-        self.assertNotIn("3CCBCD6F", blob)
-        self.assertTrue(status["has_active_identity"])
-        self.assertEqual(status["frame_count"], 3)
+        self.assertEqual(status["backend"], "pack")
+        self.assertNotIn("has_active_identity", status)
+        self.assertNotIn("frame_count", status)
         self.assertEqual(status["pack_sha12"], "88a2e9484869")
 
     def test_disabled_status_is_clean(self):
