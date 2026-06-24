@@ -176,10 +176,11 @@ deck may stay "paused" before it is "stopped". Two coherent designs exist:
   glitch on a live rig), and (iii) reintroduces the bounded obsolete-elapsed race
   A.5 closes (it would rely on `discont` to catch it one tick later).
 
-**[P] Decision pinned: implement (A).** The independent reviewer/operator must
-confirm this duration semantics before Codex starts; if (B) is preferred, the
-elapsed-authority hardening in A.5 must be promoted to an explicit published
-per-tick authority object (out of scope here).
+**[P] Decision: implement (A) — operator-confirmed 2026-06-24.** The independent
+adversarial reviewer should still attack this choice on live-safety grounds, but
+the operator has selected (A). If the review surfaces a blocking reason to prefer
+(B), the elapsed-authority hardening in A.5 must be promoted to an explicit
+published per-tick authority object (a separate, larger change, out of scope here).
 
 "Ended" is not given a separate detector: there is no reliable distinct
 end-of-track signal in current state, and the genuine end-of-show transitions
