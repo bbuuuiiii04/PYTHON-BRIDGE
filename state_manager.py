@@ -3247,11 +3247,22 @@ class StateManager:
     def set_pack_runtime(self, runtime: PackRuntime) -> None:
         """Atomically publish a new pack runtime bundle (command thread → push loop).
 
-        A single attribute assignment; the push loop reads one reference per tick, so
-        it never sees a mixed old/new runtime. All blocking work (load_pack, serial
-        open/close, old-sender zero_and_stop) must already be done by the caller.
+        The runtime ref is published in one assignment, so the push loop never sees a
+        mixed old/new runtime. All blocking work (load_pack, serial open/close,
+        old-sender zero_and_stop) must already be done by the caller.
+
+        RW-4: a swapped-in bundle always carries a FRESH player (boots
+        _active_static_slot=None) and a fresh input group (boots held=None), so the
+        push loop's last-pushed static-slot tracker is reset here. Otherwise a slot
+        carried from the old player could equal the new snapshot's slot, the
+        `slot != _pack_last_static_slot` guard (:3329) would skip hold_static, and the
+        new player would render the scripted base instead of the static. A single
+        None reference assignment is atomic under the GIL; the push loop at worst reads
+        it one tick stale and re-syncs. The degradation latch is deliberately NOT reset
+        (it must survive a swap; see H10).
         """
         self._pack_runtime = runtime or DISABLED_PACK_RUNTIME
+        self._pack_last_static_slot = None
 
     def get_pack_runtime(self) -> PackRuntime:
         """Current pack runtime bundle (for the command-thread controller's snapshot)."""

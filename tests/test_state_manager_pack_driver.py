@@ -718,6 +718,28 @@ class PackDriverInputHealthTests(unittest.TestCase):
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 200)
 
+    # H11 — regression: a static slot carried in _pack_last_static_slot across a
+    # runtime swap must NOT suppress hold_static on the fresh player when the new
+    # snapshot reports the same slot while healthy.
+    def test_runtime_swap_resyncs_carried_static_slot(self):
+        old_be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=old_be,
+                      midi_input=_FakeInput(held_static_slot=8))
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
+        sm._drive_pack_output()
+        self.assertEqual(old_be.frames[-1][0], 200)          # old player honors static 8
+        self.assertEqual(sm._pack_last_static_slot, 8)
+        self.assertFalse(sm._pack_input_degraded_latched)    # healthy swap, not latched
+
+        new_be = _FakeBackend()
+        sm.set_pack_runtime(PackRuntime(
+            enabled=True, reason="pack", player=LaserPackPlayer(_pack()),
+            midi_input=_FakeInput(held_static_slot=8), backend=new_be))
+        self.assertIsNone(sm._pack_last_static_slot)          # tracker reset on swap
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
+        sm._drive_pack_output()
+        self.assertEqual(new_be.frames[-1][0], 200)           # fresh player honors static 8
+
 
 class PackDriverInnerTickTests(unittest.TestCase):
     def setUp(self):
