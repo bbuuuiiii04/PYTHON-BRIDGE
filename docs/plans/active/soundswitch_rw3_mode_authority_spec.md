@@ -224,15 +224,31 @@ So today, a valid-UUID-not-in-pack deck that is playing+fresh+held-static output
 `missing_selection` → **held static stands → CH1==200**. The submitted frame changes
 from ZERO to static.
 
-**Policy decision [C], operator-aligned.** This is **blessed**. The accepted
-manual-static policy (`tests/test_state_manager_pack_driver.py:350-382`; RW-2 spec
-A.3) is: held Static Override is operator-controlled, stands during deck-authority
-problems (stale/error/track-change/discontinuity), and loses **only** to
-blackout/emergency/pack-disabled/shutdown. "Deck is not a bridge-owned scripted
-track" is a deck-authority condition, not blackout — so held static **should** stand.
-RW-3's change is a **correction toward the accepted policy**, removing today's
-accidental suppression. It is live-safe: held static means the operator is physically
-holding a controller button and wants that look visible. Tested by R10.
+**Policy decision [P], operator-confirmed 2026-06-24.** This is **blessed**. The
+operator's intent: a held Static Override is an **authoritative overlay** — while held
+it wins over whatever automatic base is active (scripted OR autoloop); the instant it
+is released or toggled off, output returns immediately to the underlying base. It
+loses **only** to a real blackout/emergency (the safety kill still zeroes first) and to
+pack-disabled/shutdown. This matches the accepted manual-static policy
+(`tests/test_state_manager_pack_driver.py:350-382`; RW-2 spec A.3) and the player
+precedence (`render()` `soundswitch_laser_player.py:345-373`: emergency/blackout →
+ZERO first; a non-`missing_selection` base diagnostic suppresses static; otherwise
+static composes over the base). "Deck is not a bridge-owned scripted track" is a
+deck-authority condition, not blackout — so held static **should** stand. RW-3's change
+is a **correction toward that policy**, removing today's accidental suppression (the
+`scripted_not_found` path) for the unowned case, making it behave like the
+stale/track-change cases where static already stands. Live-safe: held static means the
+operator is physically holding a controller button and wants that look visible.
+Tested by R10.
+
+> **Lane nuance [C] (RW-8 boundary, not a regression).** On the bridge-native pack
+> lane, the underlying base for an *autoloop* track is ZERO until RW-8 (native autoloop
+> DMX is out of scope here). So releasing a held static during an autoloop track returns
+> the pack lane to ZERO, not an autoloop pack look; releasing during a *scripted* track
+> returns to the scripted show. The live OS2L/SoundSwitch lane is unaffected and returns
+> to autoloop normally. The overlay/release mechanics themselves are correct on both
+> lanes (the driver reads `held_static_slot` each tick and calls
+> `release_static` on release, `state_manager.py:3274-3280`).
 
 ### A.7 Corrected safety statement — automatic scripted base only [C]
 RW-3 adds necessary conditions to `happy` (`scripted_owned`, `scripted_identity_ok`),
@@ -465,10 +481,11 @@ Commit: `test(soundswitch): RW-3 inner-path autoloop-uuid zero + same-drain clea
    math are unchanged.
 5. **S7.9 manual Static Override + blackout precedence.** Masks/static block
    (`:3271-3280`) and player precedence (`render()` `:345-373`) untouched. **Blessed
-   change (A.6):** held static now stands alone over the ZEROed automatic base in
-   unowned mode (incl. valid-UUID-not-in-pack), consistent with the accepted
-   manual-static policy; blackout/emergency still win first. Only the *automatic*
-   base is gated; the controller path is unchanged (RW-4 boundary held).
+   change (A.6, operator-confirmed 2026-06-24):** held static is an authoritative
+   overlay — it now stands alone over the ZEROed automatic base in unowned mode (incl.
+   valid-UUID-not-in-pack) and returns to the underlying base on release, consistent
+   with the accepted manual-static policy; blackout/emergency still win first. Only the
+   *automatic* base is gated; the controller path is unchanged (RW-4 boundary held).
 6. **No `transport="stopped"/"ended"/"unloaded"`.** ZERO stays `clear_selection()`.
 7. **Corrected safety proof (A.7).** `happy_RW3 → happy_today`, so RW-3 cannot create
    a new non-zero **automatic scripted base**. The held-static layer is separate and
