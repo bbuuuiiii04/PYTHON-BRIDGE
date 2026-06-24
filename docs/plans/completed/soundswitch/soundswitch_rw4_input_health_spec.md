@@ -1,9 +1,9 @@
 ---
-doc_status: active-plan
-truth_level: code-grounded-design-spec
+doc_status: completed-spec
+truth_level: historical-implementation-spec
 last_verified_commit: d37a472
 last_verified_date: 2026-06-24
-validation_scope: RW-4 controller-input health → manual-overlay fail-to-released for the bridge-native CH1-CH19 pack driver; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED; default-off (enabled=false, dry_run=true, output_backend=none) — no restart/enable/backend/MIDI/serial/hardware authorized
+validation_scope: implemented RW-4 input-health spec; historical evidence only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Codex Implementation Spec — RW-4 Controller-input health fail-to-released

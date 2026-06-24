@@ -1,3 +1,11 @@
+---
+doc_status: completed-proof
+truth_level: historical-software-evidence
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
+validation_scope: completed offline/shadow software proof; HARDWARE-UNVALIDATED
+---
+
 # Task 8 — SoundSwitch offline + shadow proof (completed historical record)
 
 status: done (software) — **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**

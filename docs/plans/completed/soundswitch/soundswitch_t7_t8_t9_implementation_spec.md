@@ -1,3 +1,11 @@
+---
+doc_status: superseded-spec
+truth_level: historical-only
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
+validation_scope: superseded combined SoundSwitch T7-T9 specification
+---
+
 # Codex Implementation Spec — SoundSwitch Tasks 7–9 (superseded combined spec)
 
 > T7a/T7b/T7c/T7e and T8 landed. T7d and the hardware gate are now routed by

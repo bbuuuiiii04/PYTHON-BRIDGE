@@ -1,739 +1,209 @@
 ---
 doc_status: active-plan
-truth_level: code-test-and-current-project-grounded
+truth_level: code-and-test-grounded
 last_verified_commit: f6910f9
 last_verified_date: 2026-06-24
-validation_scope: docs-only completion audit and remaining-work roadmap; SoundSwitch 2.10.3 canonical project/RAVE profile; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: SoundSwitch 2.10.3 canonical-project/RAVE-profile implementation status; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
-# SoundSwitch Exporter and Bridge-Native DMX - Remaining Work
+# SoundSwitch Exporter and Bridge-Native DMX - Current Status and Remaining Work
 
-This is the single active completion checklist and roadmap for the SoundSwitch
-exporter / static-pack / bridge-native DMX project. It replaces the old
-session-by-session progress ledger and the completed T4-T8 orchestration
-handoffs as the current implementation-status authority.
+This is the single current implementation-status authority for the SoundSwitch
+exporter and bridge-native DMX project. Code and tests win if this file drifts.
+Completed implementation details live under `docs/plans/completed/soundswitch/`;
+they are history, not active instructions.
 
-The bounded product goal is:
+The bounded operator workflow remains:
 
-1. Brandon authors and **saves** lighting in SoundSwitch 2.10.3.
-2. Brandon clicks one bridge-menubar action, **Export from SS**.
-3. The exporter performs a complete, stable, read-only rescan of the canonical
-   SoundSwitch project.
-4. A verified replacement is published to one canonical pack location. Failed
-   exports leave the previous verified pack untouched.
-5. A running bridge reloads the verified replacement without an implicit
-   enable or backend change.
-6. Scripted tracks, Autoloops, Static Overrides, blackout, and emergency policy
-   render through the bridge-owned CH1-CH19 player and the mutually exclusive
-   direct-DMX backend.
-7. Existing OS2L, MIDI-laser, LED/Govee, Rekordbox-reader, and command behavior
-   remains unchanged whenever pack mode is absent, disabled, dry-run, or
-   `output_backend=none`.
+1. Save lighting in SoundSwitch 2.10.3.
+2. Click `Export from Soundswitch` in the bridge menubar.
+3. Publish one verified canonical pack without damaging the prior verified pack.
+4. Conservatively reload an already-enabled pack runtime without enabling output,
+   changing backend, or starting the bridge.
+5. Render scripted tracks and manual static/blackout controls through the
+   bridge-owned CH1-CH19 path.
 
-This roadmap does **not** authorize a bridge restart, config toggle, MIDI/serial
-open, Enttec open, DMX send, fixture connection, or hardware test.
+Accepted status is **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
+No document in this route authorizes a restart, config toggle, runtime command,
+MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 
-> Accepted status: **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
+## Current status
 
-## 1. Evidence labels and authority
+| Area | Current evidence |
+| --- | --- |
+| Saved-project decode/export | Implemented for the bounded 2.10.3 canonical project/RAVE/CH1-CH19 profile. Complete rescans, stable identity, strict validation, and read-only source handling are software-tested. |
+| Pack compile/verify/load | Implemented. Deterministic compilation, independent verification, and mutation rejection are software-tested. |
+| RW-1 export/publish/reload | Implemented, independently reviewed, and software-tested. Replacement is staged and verified; reload stays conservative and never implies enable/backend/start. Source-fingerprint freshness drives the menubar state. |
+| RW-1A shutdown ownership | Implemented, independently reviewed, and software-tested. Graceful shutdown reaches the current runtime-swapped sender and attempts zero before close. Hard process death remains physically unsafe. |
+| RW-2 scripted transport | Implemented and software-tested. Pause rerenders/holds the authoritative elapsed frame; confirmed stop/unload/stale authority resolves the base to zero. |
+| RW-3 mode authority | Implemented, independently reviewed, and software-tested. Scripted selection requires current bridge-owned scripted authority; Autoloop remains unselected. |
+| RW-4 controller health | Implemented, independently reviewed, and software-tested. Degraded controller input releases manual overlays while preserving simultaneous scripted truth; runtime swap resynchronizes static-slot state. |
+| RW-5 operational status | Implemented and software-tested. Status is provider-free copied software state; `software_zero_frame` and `frame_count` do not claim serial delivery or physical darkness. |
+| Menubar status | Implemented and software-tested. It consumes only the copied status file, bounds the combined row after sanitization, and renders stale status as `Pack: Unknown`. |
+| Non-Autoloop hardware procedure | Independent-review revisions are implemented in the procedure/template; fresh implementation review remains pending. No operator evidence run exists. |
+| T7d phase evidence | Incomplete. Two accepted arm and two accepted refire integrity captures exist; four scenario pairs, identity/holdout reconciliation, and a unique oracle remain. |
+| Native Autoloop DMX | Intentionally not implemented. `StateManager` does not call `select_autoloop`; the automatic base remains software-zero in Autoloop mode. |
+| Physical hardware | Unvalidated. No committed real-run evidence file exists. |
 
-- **[C] confirmed** - read in current code/current project bytes, or executed in
-  the 2026-06-23 audit.
-- **[P] required policy/spec decision** - the gap is confirmed, but the exact
-  implementation must be designed and reviewed before code changes.
-- **[U] unknown** - requires live capture, live configuration, or hardware
-  evidence; no software inference may promote it.
+The current-project proof record remains 29 PASS / 0 FAIL / 0 INCOMPLETE and
+32/32 active scripted tracks exportable at its recorded bounded source snapshot.
+That proof is software evidence, not fixture evidence and not a guarantee for
+other SoundSwitch versions, projects, profiles, or layouts.
 
-Authority order for every task:
+## Completed implementation records
 
-1. executable code;
-2. tests;
-3. tracked example configuration;
-4. runtime command/status surfaces;
-5. current file tree and current saved SoundSwitch project;
-6. current research/validation documents;
-7. retained completed implementation records and research history as historical
-   evidence only.
+Material specifications are retained only under
+`docs/plans/completed/soundswitch/`:
 
-## 2. Audit snapshot
+- RW-1 export, post-review fixes, and freshness detection;
+- RW-1A graceful shutdown ownership;
+- RW-2 pause/stop transport;
+- RW-3 mode authority;
+- RW-4 input degradation and static-slot swap resynchronization;
+- RW-5 copied operational status and menubar visibility;
+- the non-Autoloop hardware procedure/template implementation;
+- earlier T7/T8 pack-player and offline-shadow records.
 
-Audit date: **2026-06-23**. The executable implementation baseline was
-`soundswitch/impl` at `b2ce63d`; this roadmap was re-verified through `5029ec4`.
-Subsequent commits changed Markdown/agent instructions,
-`docs/agents/change_contracts.yml` housekeeping, and only the authority-path
-docstring in `tools/prove_soundswitch_pack_generation.py`; no executable runtime
-behavior changed, so the code/test findings remain tied to `b2ce63d`. The
-worktree was clean before the initial docs-only pass. Re-verified `1a90b01`
-(2026-06-24 scoping pass): RW-2 transport landed (`a47129a`/`4d6c5df`/`38fbc19`)
-and RW-1A closed (`90ba8a2`/`7772bd2`); runtime code is byte-identical at current
-HEAD `9bce251`, which is an auto-sync that re-touched only this roadmap and
-`active_work_registry.md`. No executable runtime behavior changed since `b2ce63d`.
+Do not resume from a completed spec. Recheck current code and use this roadmap
+for remaining scope.
 
-### 2.1 Current saved-project proof
+## Remaining work
 
-Command executed from `/Users/bbui` against the current canonical project, with
-the report written under `/tmp`:
+### 1. Independent implementation review
+
+- [ ] Run the current review-only ChatGPT handoff against the pushed commit
+  range.
+- [ ] Resolve any blocker/high-severity finding with a separate reviewed change.
+- [ ] Keep review conclusions bounded to software/wire evidence.
+
+The review must not edit files, mutate runtime state, inspect live config, start
+or stop the bridge, append runtime commands, or open hardware interfaces.
+
+### 2. Non-Autoloop operator hardware run
+
+- [ ] The operator prepares ignored local configuration while the exact bridge
+  process detector reports zero real bridge processes.
+- [ ] The operator confirms a reachable physical kill path before any non-zero
+  output.
+- [ ] The operator explicitly approves menubar startup and verifies exactly one
+  real bridge process afterward.
+- [ ] The operator proves a dark idle baseline, executes only the bounded
+  non-Autoloop matrix, performs the emergency rehearsal, and restores config to
+  default-off.
+- [ ] A sanitized evidence file is created from
+  `docs/validation/soundswitch_hardware_runs/TEMPLATE.md`.
+
+The controlling document is
+`docs/validation/soundswitch_hardware_validation_procedure.md`. Status cannot
+prove physical kill reachability, controller release, in-room Rekordbox
+transport, fixture darkness, or Enttec output darkness; those remain operator
+observations/actions. If a known-dark baseline cannot be proven after an
+emergency zero failure or unknown result, the run is FAIL or INCOMPLETE.
+
+### 3. T7d capture evidence
+
+This work remains excluded from the current implementation/review pass.
+
+- [ ] Collect two accepted repetitions for master-switch, drop-hold, buildup,
+  and correction using the existing operator-conducted workflow.
+- [ ] Reconcile identity/BPM/holdout coverage and unchanged source hashes.
+- [ ] Obtain one unique scale/quantizer/origin/reset/continue/snap contract, or
+  record FAIL/INCOMPLETE.
+
+The active authority is
+`docs/plans/active/soundswitch_t7d_capture_evidence_plan.md`. No phase mapping
+may be selected from incomplete evidence.
+
+### 4. Native Autoloop DMX
+
+This work remains excluded and blocked by T7d.
+
+- [ ] Author a separate evidence-grounded implementation spec only after
+  `PASS_T7D_PHASE_CONTRACT`.
+- [ ] Independently review that spec before implementation.
+- [ ] Keep unknown transition classes software-zero.
+
+### 5. Final closeout
+
+- [ ] Rerun the current-project proof against an operator-approved source
+  snapshot after all software work, including any future Autoloop work.
+- [ ] Run focused tests, full tests, docs gates, and adversarial review at the
+  final software checkpoint.
+- [ ] Complete and commit a real operator hardware evidence record before any
+  bounded local hardware-validation claim.
+- [ ] Keep all broader compatibility and maturity claims explicitly unsupported.
+
+## RW-5 status contract
+
+The copied pack status contains only:
+
+- bundle facts: `available`, `enabled`, `backend`, `pack_loaded`, `pack_sha12`,
+  and bounded `reason`;
+- `operational_state` with precedence `disabled`, `blackout`,
+  `input_degraded`, `static_held`, `scripted_active`,
+  `autoloop_phase_blocked`, `software_zero_frame`;
+- authoritative companion booleans for those simultaneous truths;
+- `frame_count`, meaning attempted normal software frames;
+- `has_active_identity`, derived from in-memory backend state.
+
+`software_zero_frame` means only `frame == _PACK_ZERO_FRAME`. It does not prove
+that submit succeeded, serial sent, Enttec accepted a packet, fixtures are dark,
+or a hard-killed Enttec stopped retransmitting a stale frame. Submit/render
+failures expose only bounded software state; raw exceptions and private data do
+not enter status or the menubar.
+
+## Invariants
+
+1. `StateManager` remains the only writer of `DeckState` and the sole per-tick
+   pack-frame submit owner.
+2. The 200 Hz path gains no filesystem, subprocess, MIDI, serial, socket,
+   provider, worker-polling, sleep, retry, or blocking work.
+3. Source SoundSwitch projects are read-only; complete saved bytes are authority.
+4. Identity is exact. Display names, fuzzy paths, and file order are not IDs.
+5. Only independently verified packs may publish or load.
+6. Reload/export never enables output, changes backend, starts/restarts the
+   bridge, or opens hardware.
+7. Direct DMX and physical MIDI-laser output remain mutually exclusive.
+8. Automatic base output resolves software-zero on unowned mode, stop/unload,
+   stale/error, invalid identity, failed render/reload, disable, and shutdown.
+9. Blackout wins; manual Static Override behavior changes only under an
+   explicit reviewed policy.
+10. Existing OS2L, lasers, LEDs/Govee, Rekordbox readers, and default-off bridge
+    behavior remain unchanged outside explicitly enabled pack mode.
+11. Status, logs, docs, and evidence never expose local paths, ports, aliases,
+    device names, fixture serials, project UUIDs, raw frames/hashes/errors,
+    config contents, or raw status files.
+12. Graceful zero is a software attempt. Hard-kill safety still requires a
+    physical kill path and a known-dark restore baseline.
+13. Software tests and passive wire evidence never become fixture validation.
+
+## Document map
+
+| Purpose | Authority |
+| --- | --- |
+| Current implementation status | this file |
+| Project routing | `docs/plans/active/soundswitch_README.md` |
+| Product/format contract | `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` |
+| Current RE routing | `docs/research/soundswitch/README.md` |
+| Completed implementation specs | `docs/plans/completed/soundswitch/` |
+| Active T7d plan/handoff | `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md`, `soundswitch_t7d_capture_gate_handoff.md` |
+| T7d result | `docs/validation/soundswitch_t7d_phase_contract_evidence.md`, `soundswitch_t7d_phase_contract_blocked.md` |
+| Hardware procedure/template | `docs/validation/soundswitch_hardware_validation_procedure.md`, `soundswitch_hardware_runs/TEMPLATE.md` |
+
+The separately scoped roadmap/registry reconciliation spec is not part of this
+route or this implementation pass.
+
+## Required software gates
 
 ```bash
-python3.14 -m rb_ss_bridge_v2.tools.prove_soundswitch_pack_generation \
-  --project ~/Music/SoundSwitch/default.ssproj \
-  --output-dir /tmp/rbss-soundswitch-audit-proof
-```
-
-Result:
-
-```text
-final_verdict: PASS_IMPLEMENTATION_MAY_BEGIN
-counts: 29 PASS / 0 FAIL / 0 INCOMPLETE (foundation 27/27)
-```
-
-[C] Current project/profile inventory proven by that run:
-
-- project UUID `{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}`;
-- SoundSwitch `2.10.3`, primary Venue `RAVE`, Universe 0, CH1-CH19,
-  no intensity channel;
-- 42/42 current Autoloops parse;
-- 44/45 scripted files parse;
-- the one unsupported script is the inactive In-App Demo and has no active
-  existing-path TrackMap row;
-- 32/32 active existing-path scripted tracks are supported;
-- 19/19 learned IAC Autoloop bindings resolve;
-- 32 Static Looks parse and DDJ slots 8/16/17/24 render their expected frames;
-- 232 render-bearing Venue cues plus one catalog-tail record parse;
-- the 166-cue active union has zero missing GUIDs and retains SHA-256
-  `88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2`;
-- F9 one-byte pack mutation and F10 active CC/pitch override fail closed.
-
-### 2.2 Tests and docs checks executed
-
-Focused RW-1 exporter/menubar/config tests:
-
-```text
-Ran 83 tests in 7.993s
-OK
-```
-
-Full suite:
-
-```text
-Ran 2286 tests in 31.993s
-OK (skipped=3, expected failures=1)
-```
-
-Current-project proof gate:
-
-```text
-final_verdict: PASS_IMPLEMENTATION_MAY_BEGIN
-counts: 29 PASS / 0 FAIL / 0 INCOMPLETE (foundation 27/27)
-```
-
-Hard docs checks:
-
-```text
-docs metadata check passed
-agent contract check passed
-docs drift check passed
-```
-
-The advisory staleness report identified seven contracts as stale from the
-global `a5f7ced` baseline, including the broad `soundswitch_pack_player`
-contract. The RW-1 docs named by the reviewed spec were re-verified, but the
-global baseline was not advanced because unrelated contract docs remain to be
-re-verified. Hard checks passing does not mean every broad contract document is
-current; it proves only the checker-enforced surfaces.
-
-### 2.3 Live/runtime state observed without mutation
-
-[C] The ignored local `config/soundswitch_pack_player.json` is absent.
-
-[C] The last status snapshot was stale and reported the pack disabled/not
-configured (`legacy_midi_not_configured`, no pack loaded, zero pack frames).
-
-[C] No bridge core process was running during the audit. No process was
-started, stopped, signaled, or restarted.
-
-## 3. Completion matrix
-
-| Workstream | Status | Verified boundary |
-| --- | --- | --- |
-| Reverse engineering / format closure | **done, bounded** | Current 2.10.3 canonical project/RAVE/CH1-CH19 scope only. |
-| Current-project decoder | **done, software** | Strict read-only full inventory, identity/stability/collision/layout checks. |
-| Canonical pack compiler and independent verifier | **done, software** | Deterministic 95-artifact pack; new-path atomic publish; F9/F10 pass. |
-| Complete rescan semantics | **done inside each export** | Saved add/edit/rename/delete/mapping/static changes are read on the next invocation. |
-| Menubar `Export from SS` workflow | **implemented, software-tested; review pending** | Background subprocess, sanitized progress/result, stopped/disabled no-reload path, and fingerprint reload acknowledgement are covered by pure tests. |
-| Replace one canonical pack in place | **implemented, software-tested; review pending** | `publish_pack()` verifies staging before macOS swap or recoverable move-aside fallback; failure-path and real-project byte/load tests pass. |
-| Scripted content support | **done, bounded software/wire** | 32/32 active existing-path scripts supported; inactive demo excluded explicitly. |
-| Pure scripted renderer/player | **done, software/wire** | Sparse persistence, raw-zero, seek/backseek, paused query, stop/unload zero, overrides/masks. |
-| Scripted `StateManager` driver | **partial** | Playing/fresh/valid-SSID path submits frames; runtime pause/mode/input-health gaps remain. |
-| Static Override/blackout input adapter | **partial runtime integration** | Adapter semantics tested; driver ignores health/error/drop fields. |
-| Pack config/startup/runtime commands | **implemented, default-off** | Config load, startup construction, explicit enable/reload/backend, and atomic runtime-bundle swap; post-swap shutdown ownership now closed (RW-1A done: shutdown zeroes the live runtime via `sm.get_pack_runtime()`). |
-| Direct-DMX backend and Enttec sender | **implemented, software/wire only** | Fixture-map expansion, 518-byte framing, mailbox, and graceful zero/stop for both startup-owned and runtime-swapped senders (RW-1A done); no rig proof. |
-| MIDI-laser/direct-DMX mutual exclusivity | **implemented, software-tested** | One injected backend and port-level startup selection. |
-| Offline/shadow Task 8 | **done, software** | Backend-none/frame-hash shadow; runtime Autoloop phase intentionally deferred. |
-| T7d capture tooling | **done, software** | Phase tracer, conductor, oracle and synthetic tests exist. |
-| T7d live phase evidence | **blocked/incomplete** | 2 arm + 2 refire captures pass conductor integrity; 4 scenario pairs, identity/holdout reconciliation, and the unique oracle remain; no scale/quantizer/origin selected. |
-| Native-DMX Autoloop driver | **not implemented by design** | `StateManager` never calls `select_autoloop`; base stays zero. |
-| Hardware gate / physical fixture validation | **not started** | No repeatable repo hardware record; local pack config absent. |
-| PR integration | **open** | PR #116 contains the implementation series; merge is not completion proof. |
-
-## 4. What is complete and must not be rebuilt
-
-### 4.1 Saved-project decode and export semantics
-
-- [x] [C] Project identity is pinned by UUID, SoundSwitch version, Venue GUID,
-  and current 19-channel fixture profile.
-- [x] [C] Every export invocation snapshots the complete project tree and
-  rejects symlinks, concurrent source drift, case collisions, missing sources,
-  identity conflicts, unresolved active references, and unsupported active
-  layouts (`soundswitch_project_decoder.decode_project`).
-- [x] [C] Autoloop identity is catalog/file-number based, not display-name or
-  file-order based.
-- [x] [C] Scripted identity is normalized SSID plus the saved TrackMap path
-  classification.
-- [x] [C] Learned MIDI mappings and all 32 primary-Venue Static Looks are
-  rescanned during each export invocation.
-- [x] [C] Added, edited, renamed, and deleted saved content is represented by
-  the next full export. There is no frozen-corpus dependency.
-- [x] [C] The source SoundSwitch project is read-only. The exporter does not
-  and must not save or mutate SoundSwitch.
-- [x] [C] Export captures saved on-disk changes only. Unsaved SoundSwitch UI
-  state is outside the readable project boundary.
-
-### 4.2 Pack compiler, verification, and loader
-
-- [x] [C] The compiler emits the canonical 95-artifact directory.
-- [x] [C] Identical inputs generate byte-identical pack trees.
-- [x] [C] Independent verification checks manifest/inventory/source hashes,
-  canonical JSON, semantics, crosswalks, fixture boundary, and optional current
-  source-project equality.
-- [x] [C] New-path export stages, fsyncs, verifies, and atomically renames the
-  staging directory into a previously absent destination.
-- [x] [C] A failed new-path export removes staging and does not publish it.
-- [x] [C] `load_pack()` returns immutable verified models and rejects mutations.
-
-Do not replace these components with a watcher, capture-derived renderer, fuzzy
-scan, or ad-hoc JSON copy pipeline.
-
-### 4.3 Scripted content and pure rendering
-
-- [x] [C] All 32 current active scripted tracks use supported layouts and have
-  no missing referenced cue.
-- [x] [C] Future ordinary saved scripted tracks in the supported 2.10.3 layout
-  family are decoded from their current bytes; no per-track capture is needed.
-- [x] [C] A genuinely new active layout fails export before publication and
-  needs a separate evidence/format-extension task.
-- [x] [C] `render_scripted_frame()` applies persistent sparse patches from an
-  initial zero state using authoritative integer elapsed milliseconds.
-- [x] [C] Equal-time stored order, raw-zero clear/control behavior, static
-  precedence, blackout/emergency precedence, and stop/end/unload zero are
-  covered by tests and current-project golden frames.
-- [x] [C] The pure player accepts `transport="paused"` and rerenders the
-  current authoritative elapsed position without history dependence.
-
-### 4.4 Low-level direct-DMX software lane
-
-- [x] [C] `__main__._build_soundswitch_pack_startup()` constructs a verified
-  player, controller group, fixture-map-bound sender, and `PackOutputBackend`.
-- [x] [C] `__main__._start_soundswitch_pack_workers()` starts controller inputs
-  before the serial sender and rolls both back on failure.
-- [x] [C] Pack startup and runtime reload never fall back to physical MIDI after
-  a pack failure.
-- [x] [C] `StateManager` is the sole per-tick `submit_frame` owner.
-- [x] [C] `SoundSwitchFrameSender` expands CH1-CH19 using only the validated
-  fixture map and queues Enttec frames through a bounded latest-frame mailbox.
-- [x] [C] Graceful stop requests a zero packet before serial close for both the
-  startup-owned sender and any runtime `set_soundswitch_pack` swapped sender:
-  SIGTERM/SIGINT/atexit cleanup reads the live runtime via
-  `sm.get_pack_runtime()` and zeroes it, after joining the command thread so no
-  swap can publish a new sender post-zero (RW-1A done, `90ba8a2`).
-- [x] [C] Process death/`kill -9` cannot be claimed safe; Enttec may retain the
-  last frame and therefore still requires a physical kill method.
-
-> **Forward note — laser transition-blackout migration (cross-subsystem; settle here, not in MIDI):**
-> when the laser-director output migrates to the direct-DMX/`PackOutputBackend` lane, the laser
-> transition blackout — today the MIDI mask (`breakdown`/`master_switch` covers + the Smart-Drop
-> drop-window, the held `manual_blackout_on/off` note refcounted in `LaserSceneExecutor`, cleared by
-> the StateManager SM-net `smart_drop_crossing_without_drop_decision`) — must be reproduced as a
-> frame-level blackout. The held note retires (the pack backend already no-ops `manual_blackout_*`;
-> they carry no `scene_name`), but the masking **decision** (overlapping refcounted owners + teardown
-> timing) ports over. Settle the owner/teardown semantics, including the known **C2** gated-off
-> -crossing edge, here rather than in the outgoing MIDI path. See `docs/subsystems/laser.md`
-> (Blackout-mask migration) and `docs/plans/active/laser_smartnet_mask_preserve_spec.md`.
-
-## 5. Confirmed remaining implementation gaps
-
-### RW-1 - One-click canonical export/publish/reload workflow
-
-**Status:** [C] implemented and software-tested on branch
-`soundswitch/rw1-export-from-ss`; independent implementation review is pending.
-
-Evidence:
-
-- commits `bcbb312`, `5d9b59f`, and `38953ca` implement replace publication,
-  the canonical sanitized CLI, and the menubar worker/reload handshake.
-- `PublishPackReplaceTests` plus current-project tests cover first publish,
-  replacement, idempotence, staged verification failure, fallback rollback,
-  symlink/parent rejection, lock recovery, orphan cleanup, and byte-identical
-  loadability of the prior verified pack.
-- `tests/test_bridge_menubar.py` covers exact argv construction, result parsing,
-  reload-ack freshness, stopped/disabled behavior, exact reload command,
-  click concurrency, timeout recovery, and sanitized display strings.
-
-Required behavior:
-
-- [x] [C] Define one stable canonical pack location. The existing format is a
-  directory; “one file” in operator UX means one canonical pack location, not
-  multiple timestamped export directories.
-- [x] [C] Add a replace-capable publication API that builds and verifies a
-  sibling staging directory, preserves the old verified pack through every
-  pre-publish failure, atomically swaps only after verification, fsyncs the
-  directory entries/rename, and rolls back safely if replacement fails.
-- [x] [C] Do not follow or replace a symlinked destination or parent.
-- [x] [C] Serialize concurrent export attempts; a second click must not create
-  two publishers or race reload.
-- [x] [C] Add `Export from SS` to the menubar and run blocking decode/export/
-  verify work off the AppKit/UI thread.
-- [x] [C] Show sanitized progress and terminal success/failure without local
-  project paths, device names, ports, raw exceptions, or project bytes.
-- [x] [C] After successful publish, request `set_soundswitch_pack/reload` only
-  when appropriate. Reload never implies enablement or a backend change. The
-  menubar sends no command when status reports pack output disabled; publication
-  success is standalone and the default-off posture remains unchanged.
-- [x] [C] If the bridge is stopped, complete export successfully and report
-  that the pack will load on the next configured startup; do not start or
-  restart the bridge.
-- [x] [C] A failed export or reload must leave a clear operator-visible result;
-  export success and runtime reload success must be distinguishable.
-- [x] [C] Keep SoundSwitch save outside the bridge. SoundSwitch changes remain
-  save-before-export; the bridge does not automate Command-S. The compact menu
-  text does not add instructional copy.
-
-Acceptance gate:
-
-- one click performs exactly one full rescan;
-- the canonical location is the only persistent pack location;
-- successful replacement is independently verified;
-- failed replacement leaves the old verified pack byte-identical and loadable;
-- enabled runtime requests reload and requires a fresh matching pack fingerprint
-  before reporting live; disabled runtime receives no command and remains
-  disabled, and a stopped bridge stays stopped;
-- no hardware/device is opened by export tests;
-- menubar remains responsive and reports sanitized state.
-
-Implementation evidence satisfies these software gates. Independent review is
-still required before RW-1 is promoted from review-pending to complete.
-
-### RW-2 - Scripted runtime transport semantics
-
-**Status:** [x] [C] implemented and software-tested at `38fbc19`
-(`state_manager.py` implementation `a47129a`, driver tests `4d6c5df`, real
-inner/event-path tests `38fbc19`). **HARDWARE-UNVALIDATED.**
-
-Evidence:
-
-- `soundswitch_laser_player.py:213-224` accepts `playing` and `paused`.
-- `soundswitch_laser_player.py:271-315` renders both `playing` and `paused`, and
-  returns zero for stopped/ended/unloaded.
-- `StateManager._drive_pack_output()` now binds a driver-local pause-hold latch
-  to `(active_deck, load_gen)`, bounds it by `STOP_DEBOUNCE_S`, and retains
-  `OutputState.was_playing` as the obsolete-frame guard.
-- Paused output re-renders at authoritative `DeckState.elapsed_ms`; confirmed
-  stop, hold expiry, unload, stale authority, replacement, master change, and
-  discontinuity use `clear_selection()` so the base resolves ZERO without
-  suppressing a held Static Override.
-- `tests/test_state_manager_pack_driver.py` covers driver-level pause/stop,
-  expiry, identity replacement, resume, static/blackout precedence, and real
-  inner/event-path timing, replacement, snapshot settle, and event chaining.
-
-Required work:
-
-- [x] [C] Design one authoritative transport derivation using existing
-  StateManager/Rekordbox state; do not create a second transport owner.
-- [x] [C] Pin desired pause behavior to the already-authorized player contract:
-  paused rerenders/holds the current authoritative elapsed frame; stopped,
-  ended, unloaded, stale, and errored resolve zero.
-- [x] [C] Cover pause, resume, stop debounce, master change, track load, stale
-  position, elapsed discontinuity, and source recovery.
-- [x] [C] Prove that pause does not retain an obsolete cached frame; the frame
-  must still derive from immutable events at authoritative elapsed.
-
-### RW-3 - Explicit scripted/autoloop/idle authority gate
-
-**Status:** [C] implementation does not enforce the full stated authority tuple.
-
-Evidence:
-
-- `StateManager._update_lighting()` derives `scripted` only from
-  `d.scripted_id and is_playing`, otherwise `autoloop`/`idle`.
-- `StateManager._drive_pack_output()` currently gates scripted selection on
-  `playing + fresh PositionCache + normalized soundswitch_id + no load/change
-  discontinuity`; it does not require `d.scripted_id` or
-  `OutputState.lighting_mode == "scripted"`.
-- Current tests inject SSID/playing directly and do not prove the real
-  filepath-resolved -> scripted-id -> lighting-mode -> pack-frame chain.
-
-Required work:
-
-- [ ] [P] Specify and implement one explicit mode-authority decision that reuses
-  `active_deck`, `d.scripted_id`, `d.meta.soundswitch_id`,
-  `os.lighting_mode`, transport, and fresh position authority.
-- [ ] [P] Zero the automatic base during any unresolved/mismatched transition;
-  do not render an SSID merely because it is syntactically valid.
-- [ ] [P] Add real event-chain integration tests for load, filepath resolve,
-  scripted match, play, master switch, track replacement, and return to
-  autoloop/idle.
-- [ ] [P] Preserve the accepted manual Static Override policy and its blackout
-  precedence; do not let the mode gate silently change controller behavior.
-
-### RW-4 - Controller-input health fail-to-zero integration
-
-**Status:** [C] snapshot health exists but the driver ignores it.
-
-Evidence:
-
-- `MidiInputSnapshot` exposes `worker_alive`, `error`, and `mail_drop_count`
-  alongside held state (`soundswitch_midi_input.py:36-47`).
-- The adapter clears stale held state and reports `stale_hold`
-  (`soundswitch_midi_input.py:100-121`).
-- `StateManager._drive_pack_output()` reads only `blackout_held` and
-  `held_static_slot` (`state_manager.py:3267-3277`).
-- A dead/errored controller can therefore clear its held override while the
-  automatic scripted base continues; the active implementation does not
-  satisfy the broader fail-to-zero requirement stated by the original spec.
-
-Required work:
-
-- [ ] [P] Decide and document the exact healthy/recovery latch using existing
-  snapshot fields; no MIDI API call may enter `_push_tick`.
-- [ ] [P] On worker death, input error, conflicting holds, or safety-relevant
-  mailbox loss, resolve the appropriate output to zero before recovery.
-- [ ] [P] Define how an intentionally empty controller-alias configuration is
-  distinguished from a configured worker failure so scripted playback without
-  manual inputs is not accidentally made impossible.
-- [ ] [P] Require a fresh healthy snapshot before normal input-controlled output
-  resumes; prevent stale note-off/note-on state from reappearing after reload.
-- [ ] [P] Add tests for worker death while static held, worker death while
-  blackout held, no aliases configured, mailbox drops, stale hold, conflict,
-  pack reload, and healthy recovery.
-
-### RW-5 - Operational status and menubar visibility
-
-**Status:** [C] RW-5 copied operational status and the combined stale-safe menubar row are
-implemented and focused-software-tested. Sender/serial health and physical darkness remain unknown.
-
-Evidence:
-
-- `PackRuntime.sanitized_status()` exposes immutable bundle facts and calls no provider.
-- `StateManager` publishes a fresh copied snapshot from the already-rendered frame with bounded
-  operational booleans, display precedence, attempted frame count, and software-only zero state.
-- The menubar reuses one pack/export row, shows exporting/reloading terminal states, and renders a
-  stale file as `Pack: Unknown`.
-- The snapshot intentionally does not expose elapsed values, raw frames/hashes/errors, identifiers,
-  sender health, serial-send confirmation, Enttec acceptance, or physical darkness.
-
-Required work:
-
-- [x] [C] Define a sanitized, bounded schema for disabled/blackout/input-degraded/static/scripted/
-  Autoloop-blocked/software-zero state plus export phases without leaking private data.
-- [x] [C] Source status from copied/snapshot state; never call providers,
-  filesystems, subprocesses, MIDI, or serial inside the 200 Hz push loop.
-- [x] [C] Show concise menubar state without turning routine operation into a
-  noisy dashboard.
-- [x] [C] Add status/menubar tests and update the documented
-  command/status contract changes.
-
-### RW-1A - Runtime output ownership on shutdown
-
-**Status:** [C] **done.** Implemented and software-tested
-(`__main__._shutdown_zero_pack_outputs`, commits `1908737`/`988d73a`) per the
-reviewed spec (`docs/plans/active/soundswitch_rw1a_shutdown_ownership_spec.md`).
-Independent review returned REVISE-AND-APPROVE; the revision landed in `90ba8a2`
-(quiesce command thread via `command_reader.join` before a final re-zero, closing
-the concurrent-swap race) + `7772bd2` (test). Graceful SIGTERM/SIGINT/atexit now
-zero+close the live runtime-swapped sender, not just the startup-owned one.
-
-**Chosen design (supersedes the "re-register in `pack_output_owners`" option
-below):** the live runtime-swapped sender is already the single source of truth
-via `sm.get_pack_runtime()` (startup and post-swap alike), so the shutdown path
-zeroes it directly (option b). No controller changes and no per-publish
-re-registration are required.
-
-Evidence:
-
-- `__main__.main()` creates `pack_output_owners` for the startup sender and MIDI
-  input, and `_cleanup_pack_outputs()` is the SIGTERM/SIGINT/atexit cleanup path.
-  Those owner slots are assigned only around startup worker construction.
-- `SoundSwitchPackController._swap_to_started()` builds and starts new output
-  objects, then publishes them through `StateManager.set_pack_runtime()` without
-  updating `pack_output_owners`.
-- `StateManager.stop()` only sets its stop event, and `_run()` exits without
-  zeroing or stopping the currently published `PackRuntime` outputs.
-- `test_shutdown_zeros_pack_before_slow_bridge_joins` is a static source-order
-  assertion. It does not exercise SIGTERM after a runtime swap.
-- Pack output is currently default-off and the ignored local pack config is
-  absent, so this is latent until pack mode is enabled and runtime-swapped.
-
-Required work (all closed — see status header; verified in code at `1a90b01`):
-
-- [x] [C] After every runtime swap, the live published `PackRuntime`'s sender is
-  reachable by shutdown cleanup via the chosen option-b direct path:
-  `__main__._shutdown_zero_pack_outputs()` reads `sm.get_pack_runtime()` and
-  zeroes the live runtime (`__main__.py:864-898`), so no per-publish
-  re-registration is needed.
-- [x] [C] All zero/stop/join work stays outside `_push_tick`; the cleanup runs on
-  the shutdown path (`__main__.py:1582-1588`), not the 200 Hz loop.
-- [x] [C] Behavioral shutdown coverage lands in `988d73a` (swapped-sender zero)
-  and `7772bd2` (final re-zero after `command_reader.join` quiesces swaps); the
-  old source-order test is no longer the sole evidence.
-
-### RW-6 - Local pack configuration and deployment preparation
-
-**Status:** [C] code exists; [U] live values and physical mapping are not validated.
-
-- [ ] [U] Select the one canonical pack location after RW-1 design.
-- [ ] [U] Create the ignored local pack config from the tracked example only
-  after review. Do not commit paths, aliases, fixture addresses, or ports.
-- [ ] [U] Verify the physical CH1-CH19 -> DMX-address fixture map.
-- [ ] [U] Verify controller device-to-port aliases if Static Overrides/blackout
-  inputs are used.
-- [ ] [U] Verify the Enttec port and physical kill method.
-- [ ] [U] Keep `enabled=false`, `dry_run=true`, `output_backend=none` until the
-  reviewed hardware gate explicitly advances each setting.
-
-This is deployment/configuration work, not proof that the runtime implementation
-is correct.
-
-### RW-7 - T7d live Autoloop phase evidence
-
-**Status:** [C] tooling complete; [C] 4 integrity-accepted captures across 2 of
-6 scenarios; [U] phase contract incomplete; implementation blocked.
-
-- [x] [C] Schema-2 phase tracing and footer integrity are wired.
-- [x] [C] Capture conductor and active-wait operator workflow exist.
-- [x] [C] Falsifiable oracle searches scale/quantizer/recorded-state origins;
-  600 is a hypothesis, not a default.
-- [x] [C] Capture-count gate met for `arm` (2 ACCEPTED, 1 FAIL) and `refire`
-  (2 ACCEPTED). These are conductor integrity verdicts, not oracle verdicts.
-- [ ] [U] Reverify exactly one bridge process, pack disabled, fixtures/Enttec
-  safe, and the B1 trace smoke test before the next capture session.
-- [ ] [U] Collect two accepted repetitions of each remaining scenario:
-  master-switch, drop-hold, buildup, and correction.
-- [ ] [U] Cover at least three verified identities, at least two BPM/pitch
-  values, and one full holdout identity. Accepted traces contain observed BPM
-  values 130/138/141/150, but identity ownership and the holdout split remain
-  unverified.
-- [ ] [U] Prove unchanged project hashes, Universe-0 ownership, sufficient frame
-  count, trace integrity, and no recorder drop for every accepted segment.
-- [ ] [U] Obtain one unique scale/quantizer/origin/reset/continue/snap contract,
-  or record `FAIL`/`INCOMPLETE` without writing a runtime spec.
-
-The retired phrase-anchor scenario is not part of the current live contract
-because the operator does not run `RBSS_PHRASE_ANCHOR=1`. Re-add it only if the
-live launch policy changes.
-
-### RW-8 - Native-DMX Autoloop runtime integration
-
-**Status:** [C] intentionally not implemented; blocked by RW-7.
-
-Current boundary:
-
-- `LaserPackPlayer.select_autoloop(identity, phase_tick)` and pure rendering
-  exist.
-- `PackOutputBackend.last_accepted_identity` records the executor-accepted
-  verified pack identity.
-- `StateManager._drive_pack_output()` never calls `select_autoloop`; its
-  automatic base remains zero for Autoloop mode unless an independent held
-  Static Override is active.
-
-Only after `PASS_T7D_PHASE_CONTRACT`:
-
-- [ ] author a separate reviewed Part A-E implementation spec grounded in the
-  accepted capture hashes and derived contract;
-- [ ] reuse executor-accepted identity and existing beat/transition authority;
-- [ ] compute phase with the proven scale, quantizer, and per-transition origin;
-- [ ] define every reset/continue/snap path, including stop, track/deck change,
-  arm correction, refire, buildup/drop hold, reload, stale/error, and shutdown;
-- [ ] keep unknown transition classes zero-safe rather than guessing;
-- [ ] add pure phase math, StateManager integration, shadow, error, teardown,
-  and nonblocking tests;
-- [ ] rerun the proof gate and all SoundSwitch/full-suite/docs gates;
-- [ ] obtain fresh adversarial review before hardware work.
-
-### RW-9 - Final offline/shadow/adversarial closeout
-
-**Status:** [C] old Task 8 passed for the pre-RW implementation; new changes
-must be re-gated.
-
-- [ ] rerun current-project proof after RW-1/RW-2/RW-3/RW-4/RW-5 changes;
-- [ ] prove byte-identical repeated replacement exports;
-- [ ] mutate current and staged pack artifacts adversarially and prove rejection;
-- [ ] run the menubar workflow with a fake/subprocess seam and no AppKit freeze;
-- [ ] run scripted event-chain shadow including play/pause/resume/seek/stop,
-  master/track transitions, input failure/recovery, static/blackout, reload, and
-  disabled/default-off neutrality;
-- [ ] after RW-8, add runtime Autoloop phase shadow using the proven contract;
-- [ ] perform a fresh high-effort adversarial review by a reviewer who did not
-  implement the corresponding task.
-
-### RW-10 - Task 9 hardware handoff and operator gate
-
-**Status:** [U] not executed; handoff must be written/reviewed after software
-closeout.
-
-- [ ] Author the exact fixtures-safe hardware handoff; do not execute it during
-  authoring/review.
-- [ ] Name the sanitized backend/port alias, physical fixture state, zero-frame
-  preflight, physical kill method, stop/start/rollback commands, and
-  single-process verification.
-- [ ] Test order must be safe zero/static -> one scripted track -> DDJ
-  press/release -> blackout press/release -> one proven Autoloop -> disconnect
-  -> graceful shutdown.
-- [ ] Record logs/status/frame/physical pass-fail criteria for each step.
-- [ ] Explicitly acknowledge the Enttec last-frame hazard on `kill -9`.
-- [ ] Obtain explicit operator approval immediately before any restart, output
-  enable, serial/MIDI open, DMX send, or fixture-visible test.
-- [ ] Keep status hardware-unvalidated unless a repeatable validation record is
-  completed and referenced from `docs/validation/hardware_validation_log.md`.
-
-### RW-11 - Documentation and branch closeout
-
-- [x] This roadmap replaces the stale progress ledger as active status authority.
-- [x] Material T7/T8 implementation records are grouped under completed
-  SoundSwitch planning history; redundant prompts/handoffs were deleted.
-- [ ] Keep the roadmap, active-work registry, research README, subsystem cards,
-  architecture, setup docs, matrices, and validation inventories aligned after
-  every behavior patch.
-- [x] Correct T7d evidence/blocker docs for the 2 arm + 2 refire accepted
-  integrity captures and 1 failed arm run.
-- [ ] Keep those evidence docs current after every remaining capture and oracle
-  pass; never pre-fill results.
-- [ ] Merge PR #116 only after the chosen software checkpoint is reviewed and
-  gates are current. PR state is coordination metadata, not validation.
-
-## 6. Dependency-ordered roadmap
-
-### Milestone M0 - Documentation authority reset
-
-**This docs-only pass.** No runtime behavior changes.
-
-- [x] verify code/test/project evidence;
-- [x] establish this remaining-work authority;
-- [x] correct stale routing/status claims;
-- [x] remove redundant completed prompts/handoffs from active routing and group
-  retained implementation/research history by lifecycle;
-- [x] run and record final docs checks/diff review.
-
-### Milestone M1 - One-click exporter workflow
-
-Dependency: M0. Does not depend on T7d or hardware.
-
-1. Opus designs a Part A-E implementation spec for RW-1.
-2. Independent review attacks replacement atomicity, failure rollback, menu
-   responsiveness, sanitized output, concurrency, and reload/no-enable behavior.
-3. Codex implements only the reviewed spec.
-4. Run targeted export/menubar/controller tests, proof gate, full suite, and
-   docs gates.
-
-### Milestone M2 - Scripted live-runtime contract closure
-
-Dependency: M0; may be designed in parallel with M1 but should land as separate
-reviewable commits.
-
-1. Design/spec RW-2, RW-3, RW-4, and RW-5 from existing authority variables.
-2. Resolve pause versus stop without a second transport owner.
-3. Gate scripted output explicitly by current mode/identity/authority.
-4. Integrate input health and expanded status.
-5. Run scripted event-chain shadow and adversarial review.
-
-### Milestone M2A - Runtime output shutdown ownership
-
-Dependency: M0. This must land before RW-6 advances beyond default-off, before
-any pack-output enablement or hardware work, and before M5.
-
-1. Implement RW-1A without adding blocking work to `_push_tick`.
-2. Behaviorally swap to a new fake sender and exercise the SIGTERM shutdown
-   path, proving the live sender is zeroed/stopped and stale startup cleanup is
-   harmless.
-3. Run focused startup/controller/shutdown tests, the full software suite, and
-   docs gates before any enablement handoff.
-
-### Milestone M3 - T7d capture evidence
-
-Dependency: current capture tooling; does not require physical direct-DMX
-output. Requires operator presence and fixtures-safe confirmation.
-
-1. Resume the active capture handoff at `master-switch`; capture the four
-   remaining scenario pairs one scenario at a time.
-2. Keep the agent turn alive at physical action gates and poll for evidence.
-3. Run the independent oracle and update evidence/blocked docs.
-4. Stop without a runtime spec if the result is not
-   `PASS_T7D_PHASE_CONTRACT`.
-
-### Milestone M4 - Native-DMX Autoloop integration
-
-Dependency: M3 PASS only.
-
-1. Author/review the evidence-grounded T7d Part A-E spec.
-2. Implement proven phase/origin integration and zero-safe transitions.
-3. Rerun all proof/shadow/full-suite/docs gates and fresh adversarial review.
-
-### Milestone M5 - Hardware gate and final milestone closeout
-
-Dependencies: M1, M2, M2A, M4, current proof/shadow/review approval, local
-config prepared but disabled.
-
-1. Author and review the T9 handoff only.
-2. Obtain explicit operator approval for execution.
-3. Validate exactly one bridge process, safe physical state, zero preflight,
-   scripted path, controls/masks, proven Autoloop, disconnect, and shutdown.
-4. Record evidence and update status without overstating compatibility.
-
-## 7. Mandatory invariants for every remaining task
-
-1. `StateManager` remains the only writer of `DeckState`.
-2. No filesystem, subprocess, MIDI API, serial, socket, sleep, retry, or
-   blocking queue operation enters the 200 Hz push loop. The Enttec latest-frame
-   mailbox lock and MIDI-input snapshot lock are the permitted short-held,
-   non-blocking in-memory synchronization; neither performs I/O in its critical
-   section.
-3. Source SoundSwitch projects are read-only and saved bytes are authority.
-4. Full rescan identity is exact; never use display-name, fuzzy path, or file
-   order as identity.
-5. Publish only independently verified packs.
-6. Invalid export/reload/startup never partially swaps runtime state and never
-   falls back from pack failure to physical MIDI.
-7. Direct DMX and physical MIDI-laser output remain mutually exclusive at both
-   backend construction and physical port ownership.
-8. Automatic output resolves zero on unowned mode, stop/unload, stale/error,
-   invalid identity, failed reload, sender failure, disable, and shutdown.
-9. Manual Static Override behavior may change only through an explicit reviewed
-   policy; emergency/blackout must always win.
-10. Reload/export does not implicitly enable output, select a backend, restart
-    the bridge, or open hardware.
-11. Default-off/absent-config behavior remains byte/order-neutral for existing
-    OS2L, MIDI lasers, LEDs/Govee, Rekordbox readers, commands, and logs except
-    for explicitly added sanitized observability.
-12. No local path, device ID, port, fixture address, project byte, capture, or
-    secret is surfaced at runtime. The intentional canonical
-    `~/Music/SoundSwitch/...` source/pack constants and tracked example value are
-    the only committed operator paths authorized by RW-1.
-13. Graceful shutdown sends zero for both startup-owned and runtime-swapped
-    senders (RW-1A done); hard-kill safety still requires a physical kill path
-    and cannot be claimed in software.
-14. Software tests and passive wire captures never become physical fixture
-    validation claims.
-
-## 8. Required gates after implementation patches
-
-Run the narrow task tests during development, then before checkpoint:
-
-```bash
-cd /Users/bbui
-python3.14 -m rb_ss_bridge_v2.tools.prove_soundswitch_pack_generation \
-  --project ~/Music/SoundSwitch/default.ssproj \
-  --output-dir /tmp/rbss-soundswitch-proof
-
-cd /Users/bbui/rb_ss_bridge_v2
+python3 -m unittest \
+  tests.test_state_manager_pack_driver \
+  tests.test_soundswitch_pack_commands \
+  tests.test_runtime_status \
+  tests.test_bridge_menubar \
+  tests.test_soundswitch_frame_sender \
+  tests.test_enttec_dmx_pro \
+  tests.test_soundswitch_pack_startup
 python3 -m unittest discover tests
 python3 tools/check_docs_metadata.py
 python3 tools/check_agent_contracts.py
@@ -742,68 +212,22 @@ python3 tools/check_docs_staleness.py --report
 git diff --check
 ```
 
-Also require Python 3.11 affected-module coverage for startup/dataclass/import
-changes because CI uses 3.11 while the local default used in this audit is 3.14.
+All tests must use fake/injected interfaces. These commands do not authorize
+live configuration, process control, runtime commands, or hardware access.
 
-Hardware-facing tests must use injected fake MIDI/serial/Enttec interfaces until
-the separately approved T9 execution gate.
+## Project completion definition
 
-## 9. Document map and lifecycle
+The full project is not complete until all of the following are proven:
 
-### Current authority
+- [x] one-click saved-project export safely replaces one canonical pack and
+  reports bounded operator state;
+- [x] RW-1A through RW-5 scripted transport, mode, input-health, shutdown, and
+  copied-status work is implemented and software-tested;
+- [ ] T7d uniquely proves the active Autoloop phase contract;
+- [ ] native Autoloop DMX uses only that proven contract;
+- [ ] final proof, full software gates, and independent review pass;
+- [ ] a real operator hardware run is recorded;
+- [ ] unchanged behavior outside enabled pack mode is verified at the final
+  checkpoint.
 
-- `docs/plans/active/soundswitch_exporter_remaining_work.md` - this active
-  completion checklist and task ordering.
-- `docs/plans/active/soundswitch_README.md` - grouped project index.
-- `docs/research/soundswitch/README.md` - research/format authority routing.
-- `docs/research/soundswitch/soundswitch_re_closure_report.md` - bounded RE
-  completion verdict; not current implementation status.
-- `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
-  - original product/implementation contract; this roadmap records actual
-  landed versus remaining work.
-- `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` and
-  `soundswitch_t7d_capture_gate_handoff.md` - current operator-evidence path.
-- `docs/validation/soundswitch_t7d_phase_contract_evidence.md` and
-  `soundswitch_t7d_phase_contract_blocked.md` - honest current incomplete
-  verdict: four integrity-accepted captures cover arm/refire, four scenario
-  pairs plus identity/oracle proof remain.
-
-### Completed/superseded planning history
-
-Completed implementation specs/proofs and the old progress ledger belong under
-`docs/plans/completed/soundswitch/`. Redundant session handoffs, orchestration
-prompts, review packs, and the superseded readiness-review prompt were deleted;
-git history remains their provenance. Historical research handoffs/drafts are
-grouped under `docs/research/soundswitch/history/`. The active T7d resume prompt
-remains active only for the operator capture pass.
-
-## 10. Next task
-
-The next task is an independent implementation review of RW-1. The reviewer
-must attack directory replacement/recovery, UI concurrency, fingerprint reload
-acknowledgement, sanitization, and no-implicit-enable/no-hardware neutrality.
-RW-1 must not be called complete until that review approves the implementation.
-
-Ready-to-send prompt:
-the implementing Codex session provides an updated ChatGPT review prompt in its
-final response.
-
-Independent roadmap review prompt:
-`docs/prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md`.
-
-## When this project can be called complete
-
-Do not call the SoundSwitch exporter / bridge-native DMX project complete until:
-
-- [ ] one-click saved-project export safely replaces one canonical pack and
-  provides operator feedback;
-- [ ] scripted runtime pause/mode/input-health/status gaps are closed and
-  shadow-reviewed;
-- [ ] T7d live evidence uniquely proves the active phase contract;
-- [ ] native Autoloop direct-DMX integration uses only that proven contract;
-- [ ] proof gate, adversarial pack tests, full suite, docs checks, and fresh
-  independent reviews pass on the final software checkpoint;
-- [ ] the operator-approved hardware sequence is executed and recorded;
-- [ ] existing OS2L/MIDI-laser/LED-Govee/Rekordbox behavior is verified
-  unchanged outside explicitly enabled pack mode;
-- [ ] status remains bounded honestly to the exact evidence collected.
+Until then: **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.

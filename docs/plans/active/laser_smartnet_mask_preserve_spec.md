@@ -29,7 +29,7 @@ no-ops `manual_blackout_*` because they carry no `scene_name`), but the masking 
 the DMX frame-level blackout is designed, NOT by patching the outgoing MIDI path. The MIDI-path fix
 below (`clear_drop_window_blackout`) is retained as **reference/analysis only** and is **not queued
 for Codex**. Cross-refs: `docs/subsystems/laser.md` (Blackout-mask migration) and
-`docs/plans/active/soundswitch_exporter_remaining_work.md` §4.4.
+`docs/plans/active/soundswitch_exporter_remaining_work.md#invariants`.
 
 ---
 

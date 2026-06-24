@@ -1,3 +1,11 @@
+---
+doc_status: completed-spec
+truth_level: historical-implementation-spec
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
+validation_scope: implemented T7e pack status/commands specification; historical evidence only
+---
+
 # Implementation Spec — T7e SoundSwitch pack status/commands (completed historical spec)
 
 status: implemented and software-tested; historical spec

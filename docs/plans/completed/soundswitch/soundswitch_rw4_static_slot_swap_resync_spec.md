@@ -1,3 +1,11 @@
+---
+doc_status: completed-spec
+truth_level: historical-implementation-spec
+last_verified_commit: ef46de1
+last_verified_date: 2026-06-24
+validation_scope: implemented RW-4 static-slot runtime-swap regression fix; historical evidence only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+---
+
 # Codex Implementation Spec — RW-4: resync carried static slot across a pack runtime swap
 
 ## Part A — Context & root cause (verified; read, do not implement)

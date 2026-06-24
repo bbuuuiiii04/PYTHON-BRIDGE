@@ -1,9 +1,9 @@
 ---
-doc_status: active-plan
-truth_level: code-grounded-design-spec
+doc_status: completed-spec
+truth_level: historical-implementation-spec
 last_verified_commit: f07f3a3
 last_verified_date: 2026-06-24
-validation_scope: RW-2 scripted runtime transport (pause vs stop) design spec; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED; default-off (enabled=false, dry_run=true, output_backend=none) — no restart/enable/hardware authorized
+validation_scope: implemented RW-2 scripted transport spec; historical evidence only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Codex Implementation Spec — RW-2 Scripted Runtime Transport (pause vs stop)

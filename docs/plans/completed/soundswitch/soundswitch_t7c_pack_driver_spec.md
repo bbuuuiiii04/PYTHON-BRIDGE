@@ -1,3 +1,11 @@
+---
+doc_status: completed-spec
+truth_level: historical-implementation-spec
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
+validation_scope: implemented T7c scripted pack-driver specification; historical evidence only
+---
+
 # Implementation Spec — T7c StateManager scripted-mode pack driver
 
 status: **implemented / software-accepted** (ChatGPT review ACCEPT as software checkpoint)

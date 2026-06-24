@@ -1,9 +1,9 @@
 ---
-doc_status: active-plan
-truth_level: code-grounded-design-spec
+doc_status: completed-spec
+truth_level: historical-implementation-spec
 last_verified_commit: d97ff44
 last_verified_date: 2026-06-24
-validation_scope: RW-3 scripted/autoloop/idle mode-authority gate (mode-only) + de-ownership-safe pause-hold latch for the bridge-native CH1-CH19 pack driver; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED; default-off (enabled=false, dry_run=true, output_backend=none) — no restart/enable/backend/hardware authorized
+validation_scope: implemented RW-3 mode-authority spec; historical evidence only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Codex Implementation Spec — RW-3 Explicit scripted/autoloop/idle mode-authority gate

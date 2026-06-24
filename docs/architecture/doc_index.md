@@ -79,20 +79,15 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/active/led_role_mapping_v2_spec.md` | PLAN / SPEC (ACTIVE) | Verify status against code. |
 | `docs/plans/active/rt_comet_*.md` (3) | PLAN / SPEC (ACTIVE) | Realtime comet stutter/smoothness/pause work; verify which are landed. |
 | `docs/plans/active/soundswitch_README.md` | ACTIVE PROJECT INDEX | Grouped routing for the SoundSwitch exporter/bridge-native DMX project. |
-| `docs/plans/active/soundswitch_exporter_remaining_work.md` | ACTIVE CHECKLIST / ROADMAP | Current landed-versus-remaining authority. Covers one-click export/publish/reload, scripted runtime closure, T7d, hardware gating, dependencies, invariants, and completion criteria. |
+| `docs/plans/active/soundswitch_exporter_remaining_work.md` | ACTIVE CHECKLIST / ROADMAP | Current landed-versus-remaining authority. RW-1 through RW-5 are implemented/software-tested; T7d, native Autoloop DMX, a real hardware run, and final closeout remain. |
 | `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE CONTRACT POINTER | Symlink to the original product/implementation contract. Read the active remaining-work roadmap for current status. |
 | `docs/plans/active/soundswitch_t7c_pack_driver_spec.md` | COMPATIBILITY POINTER | Preserves code/test links to the completed T7c spec; current status is in the SoundSwitch remaining-work roadmap. |
 | `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` | PLAN / SPEC (ACTIVE) | Current six-scenario T7d blocker plan: prove ticks/beat plus arm/refire/master/drop/buildup/correction origin rules from operator-owned captures. It selects no phase mapping and grants no runtime/hardware authorization. |
-| `docs/plans/active/soundswitch_rw5_operational_status_spec.md` | PLAN / SPEC (ACTIVE) | RW-5 provider-free copied software status and stale-safe menubar visibility; hardware remains unvalidated. |
-| `docs/plans/active/soundswitch_hardware_validation_harness_spec.md` | PLAN / SPEC (ACTIVE) | Reviewed non-Autoloop operator procedure/template; no agent hardware authority and no completed run. |
-| `docs/prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md` | AGENT PROMPT (ACTIVE) | Opus design/spec prompt for one-click canonical export, safe replacement, menubar execution, and explicit reload acknowledgement. No implementation/live authority. |
-| `docs/prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Independent Opus adversarial review of the authoritative roadmap, code claims, T7d evidence, safety gates, and Markdown lifecycle. Review-only. |
-| `docs/prompts/reviews/soundswitch_rw1a_shutdown_ownership_implementation_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Independent Opus adversarial review of RW-1A graceful-shutdown ownership implementation commits `1908737` and `988d73a`. Review-only; no live/runtime mutation. |
-| `docs/prompts/reviews/soundswitch_rw3_mode_authority_review_prompt.md` | REVIEW / AUDIT | Historical design-spec review prompt for RW-3 rounds 1-3. Evidence only; it predates implementation. |
-| `docs/prompts/reviews/soundswitch_rw3_mode_authority_implementation_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Independent adversarial review of RW-3 implementation range `d4bcdd5..4ffe7c8`. Review-only; no live/runtime mutation. |
-| `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material T7/T8 implementation specs/proofs and the old progress ledger. Redundant prompts/handoffs were deleted. Historical evidence only. |
+| `docs/prompts/active/soundswitch_rw7_capture_agent_prompt.md` | AGENT PROMPT (ACTIVE) | Only active SoundSwitch execution prompt; operator-conducted T7d evidence collection with no pack/hardware enablement authority. |
+| `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material RW-1 through RW-5, hardware-procedure, T7/T8 specs/proofs, and the old progress ledger. Historical evidence only. |
+| `docs/plans/active/soundswitch_roadmap_registry_reconciliation_spec.md` | UNROUTED / EXCLUDED SPEC | Explicitly outside the current implementation pass and not active because the registry does not list it. Do not execute it without fresh operator scope. |
 | `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |
-| `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | Active prompts only; SoundSwitch has the RW-1 design prompt and the operator-presence T7d resume handoff. Obsolete SoundSwitch prompts were deleted. |
+| `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | Active prompts only; SoundSwitch has one operator-presence T7d capture prompt. Obsolete SoundSwitch prompts were deleted. |
 | `docs/plans/completed/govee_realtime_codex_spec.md` | PLAN / SPEC | **Untracked local file** — classify (completed vs awaiting-build) and commit or archive separately. |
 
 ## Archive / historical — evidence only
@@ -101,7 +96,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | --- | --- | --- |
 | `docs/archive/prompts/*.md` (7) | ARCHIVE | Completed/superseded agent prompts. |
 | `docs/archive/plans/*.md` (2) | ARCHIVE | Completed autoloop spec + plan. |
-| `docs/prompts/reviews/*.md` (9) | REVIEW / AUDIT | Review briefs; entries listed above remain active, while the others are evidence-only. Kept in place because a runtime comment in `anlz_reader.py` references `drop_detection_review_v2.md`. |
+| `docs/prompts/reviews/*.md` | REVIEW / AUDIT | Current review handoffs plus non-SoundSwitch historical review briefs retained where code references them. Completed SoundSwitch review prompts were deleted; Git history preserves them. |
 | `docs/history/*.md` + `docs/history/archive/*.md` (5) | ARCHIVE / HISTORICAL | Rollout logs; kept in place (referenced by `current_architecture.md`, `subsystems/logging.md`, and a test name). |
 | `cues_output.md`, `cues_timing_output.md` (repo root) | GENERATED OUTPUT | Tool output; relocate to `docs/data/` or gitignore. |
 
@@ -119,5 +114,6 @@ Then open `docs/validation/` for evidence, `docs/archive/` only for history.
 
 When code changes, update the docs named by the matching contract in
 `docs/agents/change_contracts.yml`, then run the three `tools/check_docs_*.py`
-checkers. When a doc's status changes (e.g. a plan completes), reclassify it here
-and move completed prompts/plans into `docs/archive/`.
+checkers. When a doc's status changes, reclassify it here, retain material
+implementation specs under `docs/plans/completed/`, and delete redundant prompts
+whose only remaining value is already preserved in Git history.

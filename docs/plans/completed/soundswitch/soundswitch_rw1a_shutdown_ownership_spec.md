@@ -1,9 +1,9 @@
 ---
-doc_status: active-spec
-truth_level: code-grounded
+doc_status: completed-spec
+truth_level: historical-implementation-spec
 last_verified_commit: bd23413
 last_verified_date: 2026-06-23
-validation_scope: RW-1A runtime output ownership on shutdown spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no implementation performed in this doc; no restart/device/output/hardware action authorized
+validation_scope: implemented RW-1A shutdown-ownership spec; historical evidence only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Codex Implementation Spec — RW-1A: zero the live swapped pack sender on shutdown

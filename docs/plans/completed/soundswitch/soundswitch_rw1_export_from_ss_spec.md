@@ -1,9 +1,9 @@
 ---
-doc_status: active-spec
-truth_level: code-grounded
+doc_status: completed-spec
+truth_level: historical-implementation-spec
 last_verified_commit: 683af8d
 last_verified_date: 2026-06-23
-validation_scope: RW-1 implementation spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no implementation performed
+validation_scope: implemented RW-1 one-click export spec; historical evidence only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Codex Implementation Spec — RW-1 one-click `Export from SS`
@@ -405,7 +405,8 @@ bridge's pack output stays default-off. No live state is touched by reverting.
 ### E4. Stop point
 
 Spec + independent review only. **No implementation in this task.** Reviewer prompt:
-`docs/prompts/reviews/soundswitch_rw1_export_from_ss_review_prompt.md`.
+The original spec-review prompt was deleted after completion; Git history
+preserves it.
 
 ---
 

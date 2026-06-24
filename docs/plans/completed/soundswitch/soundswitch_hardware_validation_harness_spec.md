@@ -1,9 +1,9 @@
 ---
-doc_status: active-spec
-truth_level: code-grounded
+doc_status: completed-spec
+truth_level: historical-implementation-spec
 last_verified_commit: f6910f9
 last_verified_date: 2026-06-24
-validation_scope: non-Autoloop SoundSwitch pack hardware-validation procedure and evidence schema; no hardware action authorized by this document; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: implemented procedure and evidence template only; no operator hardware run; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Codex Implementation Spec - Non-Autoloop SoundSwitch Hardware-Validation Harness

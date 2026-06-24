@@ -285,8 +285,6 @@ Inspect first:
 
 - `docs/plans/active/soundswitch_exporter_remaining_work.md`
 - `docs/plans/active/soundswitch_README.md`
-- `docs/prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md`
-- `docs/prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md`
 - `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
 - `docs/subsystems/soundswitch_output.md`
 - the exact code and tests named by the active roadmap item

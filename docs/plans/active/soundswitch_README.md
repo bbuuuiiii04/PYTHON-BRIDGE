@@ -15,9 +15,8 @@ implementation authority. Research/format evidence remains grouped under
 ## Read now, in order
 
 1. `soundswitch_exporter_remaining_work.md` - **single active completion
-   checklist and roadmap**. It records what is implemented, the confirmed
-   scripted-runtime gaps, the menubar/export gap, T7d dependencies, task order,
-   gates, and completion definition.
+   checklist and roadmap**. It records landed software, the remaining T7d and
+   hardware gates, task order, and completion definition.
 2. `../../research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
    - original product/implementation contract. Use it for intended behavior,
    then use the remaining-work roadmap for actual landed status.
@@ -31,14 +30,14 @@ implementation authority. Research/format evidence remains grouped under
    evidence verdict: `INCOMPLETE_T7D_EVIDENCE`; two accepted arm and two
    accepted refire integrity captures exist, while four scenario pairs and the
    unique corpus oracle remain incomplete.
-6. `../../prompts/active/soundswitch_t7d_resume_handoff.md` - use only when the
-   operator is physically present to run the T7d capture session.
-7. `../../prompts/active/soundswitch_rw1_export_from_ss_design_prompt.md` -
-   ready-to-send Opus prompt for the next design/spec task. Scope is RW-1 only;
-   it authorizes no implementation or live action.
-8. `../../prompts/reviews/soundswitch_exporter_remaining_work_adversarial_review_prompt.md`
-   - independent Opus review prompt that tries to disprove this roadmap before
-   it is used as implementation authority.
+6. `../../prompts/active/soundswitch_rw7_capture_agent_prompt.md` - the only
+   active SoundSwitch execution prompt. Use it only with the operator physically
+   present and the explicit live gates it names.
+7. `../../validation/soundswitch_hardware_validation_procedure.md` and
+   `../../validation/soundswitch_hardware_runs/TEMPLATE.md` - non-Autoloop
+   operator procedure and evidence schema with the independent-review revisions
+   implemented; fresh implementation review remains pending. Their presence is
+   not a hardware-validation result.
 
 The compatibility symlink
 `soundswitch_importer_exporter_player_codex_spec.md` remains for older links.
@@ -47,9 +46,9 @@ The compatibility symlink
 
 | lifecycle | location | contents |
 | --- | --- | --- |
-| current planning authority | `docs/plans/active/soundswitch_*.md` | roadmap, T7d evidence plan/handoff, compatibility pointers |
-| current task/review prompts | `docs/prompts/active/soundswitch_*.md`, `docs/prompts/reviews/soundswitch_*.md` | RW-1 Opus design prompt, T7d resume prompt, roadmap adversarial-review prompt |
-| material implementation history | `docs/plans/completed/soundswitch/` | old ledger, implemented specs, shadow proof |
+| current planning authority | `docs/plans/active/soundswitch_*.md` | roadmap, T7d evidence plan/handoff, compatibility pointers; the separately scoped reconciliation spec is not part of this route |
+| current task prompt | `docs/prompts/active/soundswitch_rw7_capture_agent_prompt.md` | operator-conducted T7d capture only |
+| material implementation history | `docs/plans/completed/soundswitch/` | old ledger, every implemented SoundSwitch spec, shadow proof |
 | current RE authority | `docs/research/soundswitch/` | closure report, format/binary findings, evidence matrices, tool guide, product contract |
 | superseded RE history | `docs/research/soundswitch/history/` | intermediate findings, old handoffs, draft specs, Stage-1 scratch |
 | active T7d validation | `docs/validation/soundswitch_t7d_*.md` | evidence ledger and blocked report |
@@ -66,8 +65,9 @@ artifacts, not planning documents. They are not moved into the authority tree.
   passes 29/29.
 - Current scripted content: 32/32 active existing-path tracks supported.
 - Pure scripted renderer: implemented/software-wire tested.
-- Config/startup/runtime command/StateManager/Enttec lane: implemented and default-off; RW-5 copied
-  operational status is software-tested and does not claim sender/physical state.
+- Config/startup/runtime command/StateManager/Enttec lane: implemented and
+  default-off; RW-2 through RW-5 runtime authority/status work is
+  software-tested and does not claim sender/physical state.
 - Menubar `Export from SS` plus canonical replacement/reload and combined pack/export row:
   implemented and software-tested.
 - T7d phase tooling: implemented; four captures pass conductor integrity across
@@ -79,16 +79,16 @@ See the remaining-work roadmap for evidence, exact tasks, and acceptance gates.
 
 ## Completed/superseded project planning
 
-Completed implementation specs/proofs and the old progress ledger are grouped
+All completed implementation specs/proofs and the old progress ledger are grouped
 under:
 
 ```text
 docs/plans/completed/soundswitch/
 ```
 
-They are historical evidence only. Redundant completed session handoffs,
-orchestration prompts, and the superseded readiness-review prompt were deleted;
-git history remains their provenance. Do not resume from completed artifacts.
+They are historical evidence only. Redundant kickoffs, authoring prompts,
+session handoffs, and completed review prompts were deleted; Git history remains
+their provenance. Do not resume from completed artifacts.
 
 ## Safety boundary
 

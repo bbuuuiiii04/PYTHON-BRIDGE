@@ -1,9 +1,9 @@
 ---
-doc_status: active-spec
-truth_level: code-grounded-design-spec
+doc_status: completed-spec
+truth_level: historical-implementation-spec
 last_verified_commit: f6910f9
 last_verified_date: 2026-06-24
-validation_scope: RW-5 sanitized copied-state status and menubar visibility only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no restart, config, output, device, or hardware action authorized
+validation_scope: implemented RW-5 copied operational-status spec; historical evidence only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Codex Implementation Spec - RW-5 Operational Status and Menubar Visibility

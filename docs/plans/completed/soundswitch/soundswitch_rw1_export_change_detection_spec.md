@@ -1,9 +1,9 @@
 ---
-doc_status: active-spec
-truth_level: code-grounded
+doc_status: completed-spec
+truth_level: historical-implementation-spec
 last_verified_commit: 9095cef
 last_verified_date: 2026-06-23
-validation_scope: RW-1 export change-detection (smart Export button) spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no implementation performed in this doc
+validation_scope: implemented RW-1 export change-detection spec; historical evidence only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Codex Implementation Spec — `Export from Soundswitch` change-detection button

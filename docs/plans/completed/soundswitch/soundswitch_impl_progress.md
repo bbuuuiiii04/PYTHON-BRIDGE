@@ -1,3 +1,11 @@
+---
+doc_status: superseded-ledger
+truth_level: historical-only
+last_verified_commit: b2ce63d
+last_verified_date: 2026-06-23
+validation_scope: superseded SoundSwitch implementation session ledger
+---
+
 # SoundSwitch implementation — superseded progress ledger
 
 > Historical only. Current status and next actions are maintained in
