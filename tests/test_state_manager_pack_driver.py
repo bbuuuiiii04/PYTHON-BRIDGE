@@ -7,6 +7,7 @@ synthetic. See docs/plans/active/soundswitch_t7c_pack_driver_spec.md (Part D).
 from __future__ import annotations
 
 import queue
+import os
 import unittest
 from types import MappingProxyType, SimpleNamespace
 from unittest import mock
@@ -598,6 +599,49 @@ class PackDriverInnerTickTests(unittest.TestCase):
         frame = self._tick(deck=deck, elapsed_ms=elapsed_ms, snap_playing=True)
         self.assertTrue(self.sm._os.was_playing)
         return frame
+
+    # RW-3 R6
+    def test_inner_autoloop_uuid_stays_zero(self):
+        with mock.patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "0"}):
+            self._event(Ev.TRACK_LOADED, payload={"title": "autoloop"})
+            load_gen = self.sm._deck[1].load_gen
+            self.sm._on_filepath_resolved(1, {
+                "filepath": "/music/autoloop.wav",
+                "bpm": 0.0,
+                "content_id": "autoloop",
+                "first_beat_ms": 0.0,
+                "soundswitch_id": SSID,
+                "total_ms": 19_200,
+                "load_gen": load_gen,
+            })
+            frame = self._start_playing()
+            self.assertEqual(self.sm._os.lighting_mode, "autoloop")
+            self.assertEqual(frame, ZERO_FRAME)
+
+    # RW-3 R8
+    def test_inner_same_identity_clear_resolve_arm_while_paused_zeros(self):
+        with mock.patch.dict(os.environ, {"RBSS_SCRIPTED_DIRECT": "0"}):
+            self._load_scripted()
+            self._event(Ev.SCRIPTED_ARM, payload={"scripted_id": 7})
+            self.assertEqual(self._start_playing()[0], 9)
+            self._event(Ev.PAUSE)
+            self.assertEqual(self._tick(elapsed_ms=50, snap_playing=False)[0], 9)
+
+            load_gen = self.sm._deck[1].load_gen
+            self._event(Ev.SCRIPTED_CLEAR)
+            self.sm._on_filepath_resolved(1, {
+                "filepath": "/music/track.wav",
+                "bpm": 0.0,
+                "content_id": "track",
+                "first_beat_ms": 0.0,
+                "soundswitch_id": SSID,
+                "total_ms": 19_200,
+                "load_gen": load_gen,
+            })
+            self._event(Ev.SCRIPTED_ARM, payload={"scripted_id": 7})
+
+            self.assertEqual(self._tick(elapsed_ms=50, snap_playing=False), ZERO_FRAME)
+            self.assertIsNone(self.sm._pack_play_hold_key)
 
     def test_inner_pause_hold_matches_osl_idle(self):
         self._load_scripted()
