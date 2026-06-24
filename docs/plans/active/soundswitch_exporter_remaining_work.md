@@ -436,8 +436,16 @@ Required work:
 
 ### RW-1A - Runtime output ownership on shutdown
 
-**Status:** [C] confirmed gap. **Priority:** before RW-6, M5, hardware work, or
-any pack-output enablement.
+**Status:** [C] confirmed gap; reviewed implementation spec authored and handed
+to Codex (`docs/plans/active/soundswitch_rw1a_shutdown_ownership_spec.md`), not
+yet implemented. **Priority:** before RW-6, M5, hardware work, or any
+pack-output enablement.
+
+**Chosen design (supersedes the "re-register in `pack_output_owners`" option
+below):** the live runtime-swapped sender is already the single source of truth
+via `sm.get_pack_runtime()` (startup and post-swap alike), so the shutdown path
+zeroes it directly (option b). No controller changes and no per-publish
+re-registration are required.
 
 Evidence:
 
