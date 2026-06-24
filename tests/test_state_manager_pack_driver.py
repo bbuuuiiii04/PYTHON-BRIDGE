@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.state_manager import StateManager
 from rb_ss_bridge_v2.rb_memory import PositionCache
+from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot
 from rb_ss_bridge_v2.soundswitch_laser_player import (
     ZERO_FRAME, LaserPackPlayer,
 )
@@ -434,6 +435,157 @@ class PackDriverTests(unittest.TestCase):
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True, snap=FRESH)
         sm._drive_pack_output()  # must not raise
         self.assertEqual(be.frames[-1], ZERO_FRAME)
+
+
+class PackDriverInnerTickTests(unittest.TestCase):
+    def setUp(self):
+        self.now = 100.0
+        self.clock = mock.patch(
+            "rb_ss_bridge_v2.state_manager.time.monotonic",
+            side_effect=lambda: self.now,
+        )
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+        self.backend = _FakeBackend()
+        self.sm = _make_sm(player=LaserPackPlayer(_pack()), backend=self.backend)
+
+    def _event(self, kind, deck=1, payload=None):
+        self.sm._handle_event(BridgeEvent(
+            kind=kind, deck=deck, payload=payload or {}, source="rw2-test",
+        ))
+
+    def _resolve_scripted(self, deck=1, title="track"):
+        load_gen = self.sm._deck[deck].load_gen
+        self.sm._on_filepath_resolved(deck, {
+            "filepath": f"/music/{title}.wav",
+            "bpm": 0.0,
+            "content_id": title,
+            "first_beat_ms": 0.0,
+            "soundswitch_id": SSID,
+            "total_ms": 19_200,
+            "load_gen": load_gen,
+        })
+        self._event(Ev.SCRIPTED_ARM, deck, {"scripted_id": load_gen})
+
+    def _load_scripted(self, deck=1, title="track"):
+        self._event(Ev.TRACK_LOADED, deck, {"title": title})
+        self._resolve_scripted(deck, title)
+
+    def _tick(self, *, deck=1, elapsed_ms=50, snap_playing=False):
+        self.sm._cache.update(PositionSnapshot(
+            deck=deck,
+            elapsed_ms=elapsed_ms,
+            playing=snap_playing,
+            updated_at=self.now,
+        ))
+        self.sm._push_tick()
+        return self.backend.frames[-1]
+
+    def _start_playing(self, deck=1, elapsed_ms=50):
+        self._event(Ev.PLAY, deck)
+        frame = self._tick(deck=deck, elapsed_ms=elapsed_ms, snap_playing=True)
+        self.now += 0.4
+        frame = self._tick(deck=deck, elapsed_ms=elapsed_ms, snap_playing=True)
+        self.assertTrue(self.sm._os.was_playing)
+        return frame
+
+    def test_inner_pause_hold_matches_osl_idle(self):
+        self._load_scripted()
+        self.assertEqual(self._start_playing()[0], 9)
+        last_play = self.now
+
+        self.now += 0.005
+        self._event(Ev.PAUSE)
+        self.assertEqual(self._tick(elapsed_ms=50, snap_playing=False)[0], 9)
+        self.assertEqual(self.sm._os.lighting_mode, "scripted")
+
+        boundary = last_play + 0.5
+        self.now = boundary - 0.001
+        self.assertEqual(self._tick(elapsed_ms=50, snap_playing=False)[0], 9)
+        self.now = boundary
+        self.assertEqual(self._tick(elapsed_ms=50, snap_playing=False), ZERO_FRAME)
+        self.assertEqual(self.sm._os.lighting_mode, "scripted")
+
+        self.now = boundary + 0.005000001
+        self.assertEqual(self._tick(elapsed_ms=50, snap_playing=False), ZERO_FRAME)
+        self.assertEqual(self.sm._os.lighting_mode, "idle")
+        self.assertLessEqual(self.now - boundary, 0.005001)
+
+    def test_inner_replacement_while_paused_not_held(self):
+        self._load_scripted(title="old")
+        self._start_playing()
+        self.now += 0.01
+        self._event(Ev.PAUSE)
+        self.assertEqual(self._tick(elapsed_ms=50, snap_playing=False)[0], 9)
+
+        self.now += 0.01
+        self._event(Ev.TRACK_LOADED, payload={"title": "replacement"})
+        load_gen = self.sm._deck[1].load_gen
+        self.sm._on_filepath_resolved(1, {
+            "filepath": "/music/replacement.wav",
+            "bpm": 0.0,
+            "content_id": "replacement",
+            "first_beat_ms": 0.0,
+            "soundswitch_id": SSID,
+            "total_ms": 19_200,
+            "load_gen": load_gen,
+        })
+        self.assertEqual(self._tick(elapsed_ms=50, snap_playing=False), ZERO_FRAME)
+        self.now += 0.005
+        self.assertEqual(self._tick(elapsed_ms=50, snap_playing=False), ZERO_FRAME)
+        self.assertIsNone(self.sm._pack_play_hold_key)
+
+    def test_inner_pause_before_snapshot_settles(self):
+        self._load_scripted()
+        self._start_playing(elapsed_ms=60)
+        snap_updated_at = self.now
+        self._event(Ev.PAUSE)
+
+        self.now += 0.03
+        self.sm._cache.update(PositionSnapshot(
+            deck=1, elapsed_ms=30, playing=True, updated_at=snap_updated_at,
+        ))
+        self.sm._push_tick()
+        self.assertEqual(self.sm._deck[1].elapsed_ms, 60)
+        self.assertEqual(self.backend.frames[-1][0], 9)
+
+        self.now += 0.01
+        self.assertEqual(self._tick(elapsed_ms=30, snap_playing=False)[0], 5)
+        self.assertEqual(self.sm._deck[1].elapsed_ms, 30)
+
+    def test_event_chain_load_play_pause_resume_master_replace_stop(self):
+        self._event(Ev.TRACK_LOADED, 1, {"title": "deck1"})
+        self.assertEqual(self._tick(deck=1, elapsed_ms=0, snap_playing=False), ZERO_FRAME)
+        self._resolve_scripted(deck=1, title="deck1")
+        self.assertEqual(self._tick(deck=1, elapsed_ms=0, snap_playing=False), ZERO_FRAME)
+        self.assertEqual(self._start_playing(deck=1)[0], 9)
+
+        self.now += 0.01
+        self._event(Ev.PAUSE, 1)
+        self.assertEqual(self._tick(deck=1, elapsed_ms=50, snap_playing=False)[0], 9)
+        self.now += 0.01
+        self._event(Ev.PLAY, 1)
+        self.assertEqual(self._tick(deck=1, elapsed_ms=60, snap_playing=True)[0], 9)
+
+        self.now += 0.01
+        self._event(Ev.MASTER_CHANGED, 2)
+        self.assertEqual(self._tick(deck=2, elapsed_ms=0, snap_playing=False), ZERO_FRAME)
+        self._event(Ev.TRACK_LOADED, 2, {"title": "replacement"})
+        self.assertEqual(self._tick(deck=2, elapsed_ms=0, snap_playing=False), ZERO_FRAME)
+        self._resolve_scripted(deck=2, title="replacement")
+        self.now += 0.01
+        self.assertEqual(self._tick(deck=2, elapsed_ms=0, snap_playing=False), ZERO_FRAME)
+
+        self.assertEqual(self._start_playing(deck=2)[0], 9)
+        last_play = self.now
+        self.now += 0.005
+        self._event(Ev.PAUSE, 2)
+        self.assertEqual(self._tick(deck=2, elapsed_ms=50, snap_playing=False)[0], 9)
+        self.now = last_play + 0.5
+        self.assertEqual(self._tick(deck=2, elapsed_ms=50, snap_playing=False), ZERO_FRAME)
+        self.now += 0.005000001
+        self.assertEqual(self._tick(deck=2, elapsed_ms=50, snap_playing=False), ZERO_FRAME)
+        self.assertEqual(self.sm._os.lighting_mode, "idle")
 
 
 if __name__ == "__main__":
