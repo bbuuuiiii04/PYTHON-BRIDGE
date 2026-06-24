@@ -348,8 +348,10 @@ the `ssid` at `:3297` and the `active` at `:3266`):
             # RW-3 temporal identity for the pause-hold latch (A.4): bind the hold to
             # the full played identity so a clear->arm / re-resolve to a different
             # scripted_id or ssid within the hold window cannot resurrect a stale
-            # paused frame. Reacquisition requires a fresh PLAY tick.
-            play_identity = (active, int(getattr(d, "load_gen", 0)), scripted_id, norm_ssid)
+            # paused frame. Reacquisition requires a fresh PLAY tick. Reuse the
+            # EXISTING `load_key = (active, load_gen)` computed at :3283 (do not
+            # recompute load_gen) so the track_changed and hold identities stay aligned.
+            play_identity = (*load_key, scripted_id, norm_ssid)
 ```
 
 **1c. AND the new terms into `happy` and switch the hold latch to `play_identity`** —
