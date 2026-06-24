@@ -18,23 +18,26 @@ SPEC UNDER REVIEW:
   docs/plans/active/soundswitch_rw3_mode_authority_spec.md  (RW-3 — explicit
   scripted/autoloop/idle mode-authority gate for the bridge-native CH1-CH19 pack driver)
 
-REVISION UNDER REVIEW: this is review ROUND 2. Round 1 REJECTED the first draft on 5
-objections (identity-unaware pause-hold latch; a false strict-narrowing proof under held
-Static Override; scripted_id != 0 not proving identity coupling to the current
-soundswitch_id; an R6 test that drove _push_tick_inner but asserted a submitted frame;
-missing test coverage). The spec's "Revision note" and Appendix 1 claim all 5 are now
-closed. Your job is to verify those closures against code and find any that remain open
-or are newly broken. Pay special attention to the held-Static-Override blessing (is the
-new non-zero static frame in unowned mode actually intended and safe?) and to the new
-scripted_identity_ok false-zero bound (can it dark a legitimately scripted track?).
+REVISION UNDER REVIEW: this is review ROUND 3. Rounds 1 and 2 both REJECTED. Round 2's
+three objections were: (BLOCKER) the 4-tuple hold key could not prove "reacquisition
+requires a fresh PLAY" for a SAME-IDENTITY clear -> re-resolve -> arm in one drain;
+(MAJOR) a registry identity guard (scripted_identity_ok) false-zeroed a legitimate
+direct-mode filepath match and the spec's "restart recovers" claim was false; (MINOR) an
+R9 test that called scripted_tracks.register() twice for the same id (a no-op). The spec's
+"Revision note" + Appendix 1 claim all three are closed. Verify those closures against
+code and find any that remain open or are newly broken. Focus on: (a) the new
+_arm_unscripted latch-teardown — is it complete (does any de-owner path STILL escape it?)
+and thread-safe? (b) the move to MODE-ONLY (registry guard removed) — does removing it
+reopen any real hole where the pack could render a WRONG track's content, or is the
+"renders only the loaded soundswitch_id" bound airtight?
 
-WHAT RW-3 DOES NOW (one sentence): the pack driver decides "is this a scripted track"
-from a syntactically-valid embedded soundswitch_id (a UUID), instead of the bridge's real
-scripted-mode authority DeckState.scripted_id; RW-3 ANDs scripted_owned (scripted_id != 0)
-AND a read-only scripted_identity_ok registry guard into the happy-path gate, re-keys the
-RW-2 pause-hold latch from (active, load_gen) to the full played identity
-(active, load_gen, scripted_id, normalized_ssid), and consciously blesses held Static
-Override standing alone over the ZEROed automatic base in unowned mode.
+WHAT RW-3 DOES NOW (one sentence): the pack driver gates the automatic scripted base on
+DeckState.scripted_id (a MODE-ONLY gate; no registry identity lookup), re-keys the RW-2
+pause-hold latch to the played identity (active, load_gen, scripted_id, normalized_ssid),
+adds a two-line latch teardown inside _arm_unscripted so any SCRIPTED_CLEAR immediately
+disarms the pause-hold (closing the same-identity clear->re-resolve->arm resurrection),
+and consciously blesses held Static Override standing alone over the ZEROed automatic base
+in unowned mode.
 
 OPERATOR CONTEXT YOU MUST WEIGH (affects severity, not correctness): the live rig runs
 RBSS_SCRIPTED_DIRECT=1 (direct mode ON) with a bounded event queue (queue.Queue(maxsize=512),
@@ -100,32 +103,38 @@ ATTACK THESE SPECIFICALLY (give a concrete failing tick sequence, not vibes):
      render a scripted base (so lighting_mode would have caught it)? Conversely, does
      using scripted_id introduce a flicker/dark-flash on a legitimately scripted track
      during the arm window, and is that acceptable vs the OS2L lane?
-  3. RW-2 pause-hold interaction (Round-1 BLOCKER fix). The hold latch is now keyed by
-     play_identity = (active, load_gen, scripted_id, normalized_ssid) and the else branch
-     resets on play_identity != hold_key. Prove the paused branch cannot render a stale
-     scripted frame after a same-drain SCRIPTED_CLEAR -> SCRIPTED_ARM (to a different OR the
-     same scripted_id) within the hold window. Check both: (a) the natural backstop that
-     _arm_unscripted (3092) clears soundswitch_id so a clear without a fresh resolve zeros
-     via metadata_ready; and (b) the play_identity reset when a re-resolve restores a
-     DIFFERENT ssid. Find any case where the latch (i) fails to reset when it should, or
-     (ii) wrongly resets / fails to set for a legitimate pause (would break RW-2 T1/T4/T5).
-  3b. scripted_identity_ok false-zero (Round-1 MAJOR fix). The new read-only helper fails
-     closed when the in-memory scripted registry (scripted_tracks.lookup) maps scripted_id
-     to a normalized ssid different from the current one, and falls open on registry
-     absence / empty registry ssid. The spec (C.11) claims this is a no-op under direct=1
-     for normally resolved tracks and only darks a track on mid-session ssid re-authoring.
-     Attack that: construct a legitimately scripted track that this guard wrongly ZEROs
-     (e.g. filepath-matched registry entry with a stale non-empty ssid; brace-wrapped vs
-     bare UUID normalization; showfile-direct hash). Is the fail-open/fail-closed split
-     correct, or does it dark a real show?
-  3c. Held Static Override blessing (Round-1 MAJOR fix). The spec (A.6/C.5) admits RW-3
-     changes a valid-UUID-not-in-pack + scripted_id==0 + held-static deck from ZERO (today,
-     because the player's scripted_not_found suppresses static, soundswitch_laser_player.py
-     298-301 + 361-362) to static standing alone (CH1==200), and blesses it as consistent
-     with the accepted manual-static policy (tests 350-382). Verify the today-behavior claim
-     in the player. Is the blessing actually safe/intended, or is there a live scenario where
-     this new non-zero static frame is wrong? Is the proof correctly narrowed to
-     "automatic scripted base only"?
+  3. De-ownership latch teardown COMPLETENESS (Round-2 BLOCKER fix). RW-3 adds, inside
+     _arm_unscripted (~3091-3092), `self._pack_play_hold_key = None` /
+     `self._pack_play_hold_deadline = 0.0`. The spec (A.4) claims SCRIPTED_CLEAR is the ONLY
+     de-owner whose state a same-drain re-resolve+re-arm can fully restore, so the 4-tuple
+     play_identity catches all OTHERS (TRACK_LOADED bumps load_gen monotonically;
+     RB_RESTARTED and master-switch drop was_playing). ATTACK that completeness: find ANY
+     de-ownership or identity-restoration path, reachable in one exhaustive _drain_events()
+     pass, that (i) restores a byte-identical play_identity while a paused hold is live, (ii)
+     does NOT route through _arm_unscripted, and (iii) does NOT bump load_gen or drop
+     was_playing. Also: is the teardown thread-safe (is _arm_unscripted ever called off the
+     _run thread)? Does it wrongly tear down a LEGITIMATE pause-hold (does a normal pause
+     ever emit SCRIPTED_CLEAR for the active deck)? Should it be gated on
+     deck == active_deck (cross-deck clear tearing down the active hold)?
+  3b. MODE-ONLY decision — removing the registry identity guard (Round-2 MAJOR fix). The
+     round-1 registry guard was removed because it false-zeroed filepath-matched shows
+     (registry ssid=OLD vs loaded ssid=NEW-in-pack) and "restart recovers" was false
+     (resolve_filepaths only writes ssid when empty, scripted_tracks.py:82). RW-3 is now
+     mode-only and leans on the bound "the pack renders only the LOADED d.meta.soundswitch_id
+     (3297/3333), never a third track's content; the player's scripted_not_found (298-301)
+     zeros an absent ssid." ATTACK that bound: find any reachable state where scripted_id != 0
+     but the pack renders content for a DIFFERENT track than the loaded soundswitch_id, or
+     where mode-only renders a track the operator clearly did not want scripted (esp. the
+     master-deck transfer 2559-2568 and OSC arm under direct=0). Is mode-only actually safe,
+     or does round-1 Objection 3 reopen?
+  3c. Held Static Override blessing (operator-confirmed). The spec (A.6/C.5) changes a
+     valid-UUID-not-in-pack + scripted_id==0 + held-static deck from ZERO (today, because the
+     player's scripted_not_found suppresses static, soundswitch_laser_player.py 298-301 +
+     361-362) to static standing alone (CH1==200). The operator confirmed the intent (static
+     = authoritative overlay; loses only to blackout/emergency). Verify the today-behavior
+     claim in the player and that the proof is correctly narrowed to "automatic scripted base
+     only" (RW-3 may create a new non-zero frame ONLY through held static, never the auto
+     base). Find any live scenario where this static frame is wrong.
   4. Every mode-transition cleanup path (the A.8 table): fresh-load, resolved-not-scripted,
      scripted-not-yet-armed, play, pause, master switch, track replacement (load_gen
      change), return to autoloop, return to idle, stale, discontinuity, mid-play mode flip.
