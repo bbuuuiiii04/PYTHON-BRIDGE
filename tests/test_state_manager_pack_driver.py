@@ -26,7 +26,9 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (
     LoadedTimelineEvent,
 )
 from rb_ss_bridge_v2.soundswitch_pack_runtime import PackRuntime
+from rb_ss_bridge_v2.scripted_tracks import SCRIPTED_TRACKS, register
 SSID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+SSID2 = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"   # valid UUID, ABSENT from _pack()
 FRESH = SimpleNamespace(is_stale=lambda _s: False)
 STALE = SimpleNamespace(is_stale=lambda _s: True)
 
@@ -100,13 +102,15 @@ def _make_sm(*, player=None, backend=None, midi_input=None, enabled=None):
 
 
 def _set(sm, *, ssid="", elapsed_ms=0, playing=False, load_gen=1, snap=FRESH,
-         active=1, was_playing=None):
+         active=1, was_playing=None, scripted_id=None):
     if was_playing is None:
         was_playing = playing
+    if scripted_id is None:
+        scripted_id = 1 if ssid else 0   # ssid present ⇒ bridge-owned scripted, by default
     sm._os = SimpleNamespace(active_deck=active, was_playing=was_playing)
     sm._deck = {active: SimpleNamespace(
         meta=SimpleNamespace(soundswitch_id=ssid), elapsed_ms=elapsed_ms,
-        playing=playing, load_gen=load_gen)}
+        playing=playing, load_gen=load_gen, scripted_id=scripted_id)}
     sm._cache = SimpleNamespace(get=lambda _dk: snap)
 
 
@@ -305,7 +309,113 @@ class PackDriverTests(unittest.TestCase):
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True, active=2)
         sm._drive_pack_output(now=10.3)
         self.assertEqual(be.frames[-1][0], 9)
-        self.assertEqual(sm._pack_play_hold_key, (2, 1))
+        self.assertEqual(sm._pack_play_hold_key, (2, 1, 1, SSID))
+
+    # RW-3 R1
+    def test_valid_ssid_but_unscripted_playing_zeros(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, scripted_id=0)
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+
+    # RW-3 R2
+    def test_scripted_owned_playing_still_renders(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, scripted_id=7)
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1][0], 9)
+
+    # RW-3 R3
+    def test_unscripted_pause_does_not_hold(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, scripted_id=7)
+        sm._drive_pack_output(now=10.0)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=False,
+             was_playing=True, scripted_id=0)
+        sm._drive_pack_output(now=10.1)
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        self.assertIsNone(sm._pack_play_hold_key)
+        self.assertEqual(sm._pack_play_hold_deadline, 0.0)
+
+    # RW-3 R4
+    def test_scripted_id_set_but_ssid_empty_zeros(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+        _set(sm, ssid="", playing=True, scripted_id=7)
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+
+    # RW-3 R5
+    def test_unscripted_in_pack_with_held_static_shows_static(self):
+        be = _FakeBackend()
+        inp = _FakeInput(held_static_slot=8)
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        _set(sm, ssid=SSID, playing=True, scripted_id=0)
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1][0], 200)
+
+    # RW-3 R7
+    def test_pause_hold_not_resurrected_by_scripted_id_change(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True,
+             load_gen=1, scripted_id=1)
+        sm._drive_pack_output(now=10.0)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=False,
+             was_playing=True, load_gen=1, scripted_id=2)
+        sm._drive_pack_output(now=10.1)
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        self.assertIsNone(sm._pack_play_hold_key)
+
+    # RW-3 R9
+    def test_mode_only_ignores_registry_identity(self):
+        self.addCleanup(lambda: SCRIPTED_TRACKS.pop(7, None))
+        register(7, {"name": "x", "ssid": SSID2})
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, scripted_id=7)
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1][0], 9)
+
+        _set(sm, ssid=SSID2, playing=True, scripted_id=7)
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+
+    # RW-3 R10
+    def test_valid_uuid_missing_from_pack_with_held_static(self):
+        be = _FakeBackend()
+        inp = _FakeInput(held_static_slot=8)
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        # Pre-RW-3 the missing scripted selection suppressed static; the mode gate lets
+        # the held authoritative overlay stand over the unowned ZERO base (A.6/C.5).
+        _set(sm, ssid=SSID2, playing=True, scripted_id=0)
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1][0], 200)
+
+    # RW-3 R11
+    def test_mirror_deck_clear_does_not_drop_active_hold(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, scripted_id=7)
+        sm._drive_pack_output(now=10.0)
+        active_hold = sm._pack_play_hold_key
+        sm._deck[2] = SimpleNamespace(
+            meta=SimpleNamespace(soundswitch_id=SSID2), scripted_id=9)
+
+        sm._handle_event(BridgeEvent(
+            kind=Ev.SCRIPTED_CLEAR, deck=2, payload={}, source="rw3-test",
+        ))
+        self.assertEqual(sm._deck[2].scripted_id, 0)
+        self.assertEqual(sm._pack_play_hold_key, active_hold)
+
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=False,
+             was_playing=True, scripted_id=7)
+        sm._drive_pack_output(now=10.1)
+        self.assertEqual(be.frames[-1][0], 9)
 
     # D6
     def test_blackout_held_with_static_is_zero(self):
