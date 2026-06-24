@@ -162,8 +162,8 @@ started, stopped, signaled, or restarted.
 | Pure scripted renderer/player | **done, software/wire** | Sparse persistence, raw-zero, seek/backseek, paused query, stop/unload zero, overrides/masks. |
 | Scripted `StateManager` driver | **partial** | Playing/fresh/valid-SSID path submits frames; runtime pause/mode/input-health gaps remain. |
 | Static Override/blackout input adapter | **partial runtime integration** | Adapter semantics tested; driver ignores health/error/drop fields. |
-| Pack config/startup/runtime commands | **implemented, default-off** | Config load, startup construction, explicit enable/reload/backend, and atomic runtime-bundle swap; a post-swap shutdown-ownership gap remains because new output owners are not re-registered for cleanup (RW-1A). |
-| Direct-DMX backend and Enttec sender | **implemented, software/wire only** | Fixture-map expansion, 518-byte framing, mailbox, and startup-owned graceful zero/stop; runtime-swap cleanup remains RW-1A; no rig proof. |
+| Pack config/startup/runtime commands | **implemented, default-off** | Config load, startup construction, explicit enable/reload/backend, and atomic runtime-bundle swap; post-swap shutdown ownership now closed (RW-1A done: shutdown zeroes the live runtime via `sm.get_pack_runtime()`). |
+| Direct-DMX backend and Enttec sender | **implemented, software/wire only** | Fixture-map expansion, 518-byte framing, mailbox, and graceful zero/stop for both startup-owned and runtime-swapped senders (RW-1A done); no rig proof. |
 | MIDI-laser/direct-DMX mutual exclusivity | **implemented, software-tested** | One injected backend and port-level startup selection. |
 | Offline/shadow Task 8 | **done, software** | Backend-none/frame-hash shadow; runtime Autoloop phase intentionally deferred. |
 | T7d capture tooling | **done, software** | Phase tracer, conductor, oracle and synthetic tests exist. |
@@ -237,11 +237,11 @@ scan, or ad-hoc JSON copy pipeline.
 - [x] [C] `StateManager` is the sole per-tick `submit_frame` owner.
 - [x] [C] `SoundSwitchFrameSender` expands CH1-CH19 using only the validated
   fixture map and queues Enttec frames through a bounded latest-frame mailbox.
-- [x] [C] Graceful stop requests a zero packet before serial close for the
-  startup-owned sender. A sender created by a runtime `set_soundswitch_pack`
-  swap is published into `sm._pack_runtime` but is not registered in
-  `__main__.pack_output_owners`; SIGTERM/SIGINT/atexit cleanup therefore does
-  not zero/stop that live swapped sender (RW-1A).
+- [x] [C] Graceful stop requests a zero packet before serial close for both the
+  startup-owned sender and any runtime `set_soundswitch_pack` swapped sender:
+  SIGTERM/SIGINT/atexit cleanup reads the live runtime via
+  `sm.get_pack_runtime()` and zeroes it, after joining the command thread so no
+  swap can publish a new sender post-zero (RW-1A done, `90ba8a2`).
 - [x] [C] Process death/`kill -9` cannot be claimed safe; Enttec may retain the
   last frame and therefore still requires a physical kill method.
 
@@ -441,13 +441,13 @@ Required work:
 
 ### RW-1A - Runtime output ownership on shutdown
 
-**Status:** [C] implemented and software-tested (`__main__._shutdown_zero_pack_outputs`,
-commits `1908737`/`988d73a`) per the reviewed spec
-(`docs/plans/active/soundswitch_rw1a_shutdown_ownership_spec.md`). Independent
-implementation review returned **REVISE-AND-APPROVE**: one narrow concurrent-swap
-race (cleanup runs before `command_reader.stop()`, which does not join) plus minor
-test-coverage gaps remain; a code-only revision is in flight. **Priority:** before
-RW-6, M5, hardware work, or any pack-output enablement.
+**Status:** [C] **done.** Implemented and software-tested
+(`__main__._shutdown_zero_pack_outputs`, commits `1908737`/`988d73a`) per the
+reviewed spec (`docs/plans/active/soundswitch_rw1a_shutdown_ownership_spec.md`).
+Independent review returned REVISE-AND-APPROVE; the revision landed in `90ba8a2`
+(quiesce command thread via `command_reader.join` before a final re-zero, closing
+the concurrent-swap race) + `7772bd2` (test). Graceful SIGTERM/SIGINT/atexit now
+zero+close the live runtime-swapped sender, not just the startup-owned one.
 
 **Chosen design (supersedes the "re-register in `pack_output_owners`" option
 below):** the live runtime-swapped sender is already the single source of truth
@@ -715,9 +715,9 @@ config prepared but disabled.
     secret is surfaced at runtime. The intentional canonical
     `~/Music/SoundSwitch/...` source/pack constants and tracked example value are
     the only committed operator paths authorized by RW-1.
-13. Graceful shutdown sends zero (currently guaranteed only for the
-    startup-owned sender; runtime-swapped senders require RW-1A); hard-kill
-    safety requires a physical kill path and cannot be claimed in software.
+13. Graceful shutdown sends zero for both startup-owned and runtime-swapped
+    senders (RW-1A done); hard-kill safety still requires a physical kill path
+    and cannot be claimed in software.
 14. Software tests and passive wire captures never become physical fixture
     validation claims.
 
