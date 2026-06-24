@@ -38,6 +38,12 @@ The maintainer is the project owner/operator, not a software engineer. Agents sh
 * **Important claims need proof**, but proof should be written naturally in the text, not as formal proof-card templates unless explicitly requested in that format.
 * **Pause for real decisions only**: behavior changes, architecture changes, live-safety risk, code/docs conflict, multiple valid paths, or validation risk. Do not ask for approval on routine mechanical edits.
 
+### Git workflow
+
+* Work directly on `main`. Do not create feature, topic, review, temporary, agent, or worktree branches unless the user explicitly authorizes one in the current request.
+* Do not create additional worktrees when they would create or require another branch. If a tool requires a branch or pull request, explain the conflict instead of creating one silently.
+* Before deleting an existing branch, prove its unique work is represented in `main`.
+
 ### Examples
 
 **Good example style:**

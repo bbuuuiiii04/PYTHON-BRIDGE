@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: bc9f7f4
-last_verified_date: 2026-06-22
+last_verified_commit: 32a6786
+last_verified_date: 2026-06-24
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -30,7 +30,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 
 | File | Type |
 | --- | --- |
-| `AGENTS.md` | CURRENT AUTHORITATIVE — single AI-agent entrypoint (router, source map, invariants, token budget). |
+| `AGENTS.md` | CURRENT AUTHORITATIVE — single AI-agent entrypoint (communication, main-only Git workflow, router, source map, invariants, token budget). |
 | `README.md` | CURRENT AUTHORITATIVE — public/GitHub truth and project boundary. |
 | `docs/architecture/current_architecture.md` | CURRENT AUTHORITATIVE — compact system overview. |
 | `docs/architecture/runtime_invariants.md` | CURRENT AUTHORITATIVE — invariants from code/tests. |
