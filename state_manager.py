@@ -358,6 +358,8 @@ class StateManager:
         self._pack_last_load_gen: tuple[int, int] | None = None   # (active, load_gen)
         self._pack_last_elapsed_ms: int | None = None
         self._pack_last_static_slot: int | None = None
+        self._pack_last_mail_drop_count: int = 0      # RW-4: monotonic mailbox-drop baseline
+        self._pack_input_degraded_latched: bool = False  # RW-4: unified input-degradation latch
         self._pack_play_hold_key: tuple[int, int, int, str] | None = None  # play identity (active, load_gen, scripted_id, norm_ssid)
         self._pack_play_hold_deadline: float = 0.0                 # monotonic deadline; paused-hold expires here
         self._pack_logged_error = False
