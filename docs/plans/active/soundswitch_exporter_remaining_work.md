@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan
 truth_level: code-test-and-current-project-grounded
-last_verified_commit: 38fbc19
+last_verified_commit: 1a90b01
 last_verified_date: 2026-06-24
 validation_scope: docs-only completion audit and remaining-work roadmap; SoundSwitch 2.10.3 canonical project/RAVE profile; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -63,7 +63,11 @@ Subsequent commits changed Markdown/agent instructions,
 `docs/agents/change_contracts.yml` housekeeping, and only the authority-path
 docstring in `tools/prove_soundswitch_pack_generation.py`; no executable runtime
 behavior changed, so the code/test findings remain tied to `b2ce63d`. The
-worktree was clean before the initial docs-only pass.
+worktree was clean before the initial docs-only pass. Re-verified `1a90b01`
+(2026-06-24 scoping pass): RW-2 transport landed (`a47129a`/`4d6c5df`/`38fbc19`)
+and RW-1A closed (`90ba8a2`/`7772bd2`); runtime code is byte-identical at current
+HEAD `9bce251`, which is an auto-sync that re-touched only this roadmap and
+`active_work_registry.md`. No executable runtime behavior changed since `b2ce63d`.
 
 ### 2.1 Current saved-project proof
 
@@ -470,19 +474,18 @@ Evidence:
 - Pack output is currently default-off and the ignored local pack config is
   absent, so this is latent until pack mode is enabled and runtime-swapped.
 
-Required work:
+Required work (all closed — see status header; verified in code at `1a90b01`):
 
-- [ ] [P] After every runtime swap, make the live published `PackRuntime`'s
-  `frame_sender` and `midi_input` reachable by shutdown cleanup. Either
-  re-register them in `pack_output_owners` when publishing, or have the
-  SIGTERM/SIGINT/atexit path zero and stop `sm.get_pack_runtime()` directly.
-- [ ] [P] Keep all zero/stop/join work outside `_push_tick`; no blocking work may
-  enter the 200 Hz path.
-- [ ] [P] Add a behavioral shutdown test that swaps to a new fake sender, raises
-  SIGTERM through the shutdown path, asserts that the **live** sender's
-  `zero_and_stop()` is called, and proves that stopping the stale startup sender
-  is a harmless no-op. The existing source-order test is not acceptance evidence
-  for this runtime-swap case.
+- [x] [C] After every runtime swap, the live published `PackRuntime`'s sender is
+  reachable by shutdown cleanup via the chosen option-b direct path:
+  `__main__._shutdown_zero_pack_outputs()` reads `sm.get_pack_runtime()` and
+  zeroes the live runtime (`__main__.py:864-898`), so no per-publish
+  re-registration is needed.
+- [x] [C] All zero/stop/join work stays outside `_push_tick`; the cleanup runs on
+  the shutdown path (`__main__.py:1582-1588`), not the 200 Hz loop.
+- [x] [C] Behavioral shutdown coverage lands in `988d73a` (swapped-sender zero)
+  and `7772bd2` (final re-zero after `command_reader.join` quiesces swaps); the
+  old source-order test is no longer the sole evidence.
 
 ### RW-6 - Local pack configuration and deployment preparation
 
