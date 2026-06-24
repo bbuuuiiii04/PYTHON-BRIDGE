@@ -200,6 +200,82 @@ class StartupMatrixTests(unittest.TestCase):
         self.assertLess(shutdown.index("_cleanup_pack_outputs()"),
                         shutdown.index("sm.stop()"))
 
+    def test_shutdown_zeros_live_swapped_sender_not_just_startup(self):
+        """After a runtime swap, shutdown must zero the LIVE sender; stopping the
+        stale startup sender must be a harmless no-op."""
+        calls = []
+
+        class FakeSender:
+            def __init__(self, name):
+                self.name = name
+
+            def stop(self):
+                calls.append(f"{self.name}.stop")
+
+        class FakeInput:
+            def __init__(self, name):
+                self.name = name
+
+            def stop(self):
+                calls.append(f"{self.name}.stop")
+
+        class FakeRuntime:
+            def __init__(self, sender, midi_input):
+                self.frame_sender = sender
+                self.midi_input = midi_input
+
+        class FakeSM:
+            def __init__(self, rt):
+                self._rt = rt
+
+            def get_pack_runtime(self):
+                return self._rt
+
+        startup_sender = FakeSender("startup_sender")
+        startup_input = FakeInput("startup_input")
+        live_sender = FakeSender("live_sender")  # installed by a runtime swap
+        live_input = FakeInput("live_input")
+        owners = {"sender": startup_sender, "midi_input": startup_input}
+        sm = FakeSM(FakeRuntime(live_sender, live_input))
+
+        bridge_main._shutdown_zero_pack_outputs(owners, sm)
+
+        # The live swapped sender/input MUST be stopped (final zero frame + close).
+        self.assertIn("live_sender.stop", calls)
+        self.assertIn("live_input.stop", calls)
+        # The stale startup sender is still stopped (harmless), proving no path is skipped.
+        self.assertIn("startup_sender.stop", calls)
+        self.assertIn("startup_input.stop", calls)
+        # Startup-owner slots are drained so that branch is a no-op on repeat cleanup.
+        self.assertNotIn("sender", owners)
+        self.assertNotIn("midi_input", owners)
+
+    def test_shutdown_pre_sm_window_only_touches_startup_owners(self):
+        """Before StateManager exists (sm=None), only the startup slots are stopped
+        and no live-runtime read is attempted."""
+        calls = []
+
+        class FakeSender:
+            def stop(self):
+                calls.append("startup.stop")
+
+        owners = {"sender": FakeSender(), "midi_input": None}
+        bridge_main._shutdown_zero_pack_outputs(owners, None)  # must not raise
+        self.assertEqual(calls, ["startup.stop"])
+
+    def test_shutdown_disabled_runtime_is_noop(self):
+        """Default-off: a runtime with no sender/input must be a guarded no-op."""
+        class FakeRuntime:
+            frame_sender = None
+            midi_input = None
+
+        class FakeSM:
+            def get_pack_runtime(self):
+                return FakeRuntime()
+
+        owners = {"sender": None, "midi_input": None}
+        bridge_main._shutdown_zero_pack_outputs(owners, FakeSM())  # must not raise
+
 
 class InputGroupTests(unittest.TestCase):
     binding = PackMidiBinding("DDJ", "note", 0, 7, "static_look", target_slot=8)
