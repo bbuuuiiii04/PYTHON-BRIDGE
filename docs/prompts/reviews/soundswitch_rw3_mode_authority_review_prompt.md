@@ -113,9 +113,12 @@ ATTACK THESE SPECIFICALLY (give a concrete failing tick sequence, not vibes):
      pass, that (i) restores a byte-identical play_identity while a paused hold is live, (ii)
      does NOT route through _arm_unscripted, and (iii) does NOT bump load_gen or drop
      was_playing. Also: is the teardown thread-safe (is _arm_unscripted ever called off the
-     _run thread)? Does it wrongly tear down a LEGITIMATE pause-hold (does a normal pause
-     ever emit SCRIPTED_CLEAR for the active deck)? Should it be gated on
-     deck == active_deck (cross-deck clear tearing down the active hold)?
+     _run thread)? The teardown is gated `if self._pack_play_hold_key is not None and
+     self._pack_play_hold_key[0] == deck` so a MIRROR-deck clear (loading the next track on
+     the idle deck during a pause) does not drop the active hold — verify that gate is both
+     (i) correct (key[0] is always the hold-owning deck) and (ii) BLOCKER-safe (a clear of
+     the HELD deck still tears down). Find any case where the gate wrongly preserves a hold
+     that should drop, or wrongly drops one that should hold.
   3b. MODE-ONLY decision — removing the registry identity guard (Round-2 MAJOR fix). The
      round-1 registry guard was removed because it false-zeroed filepath-matched shows
      (registry ssid=OLD vs loaded ssid=NEW-in-pack) and "restart recovers" was false

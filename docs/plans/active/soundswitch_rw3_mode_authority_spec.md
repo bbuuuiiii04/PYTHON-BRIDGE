@@ -42,11 +42,13 @@ fixes all of round 2. Each is re-verified, not taken on faith:
   `load_gen`, **restores the same ssid**, no auto-arm under `=0`) → `SCRIPTED_ARM`
   (restores the same `scripted_id`). The driver then sees an **identical**
   `(active, load_gen, scripted_id, norm_ssid)`, so the paused branch could render
-  without a fresh PLAY. **Fixed:** add a one-line latch teardown inside
-  `_arm_unscripted` (the SCRIPTED_CLEAR handler) so any scripted de-ownership
-  immediately disarms the pack pause-hold; the 4-tuple still covers the other de-owner
-  paths. Completeness proof + thread-safety in A.4; test R8 reproduces the exact
-  sequence.
+  without a fresh PLAY. **Fixed:** add a deck-gated latch teardown inside
+  `_arm_unscripted` (the SCRIPTED_CLEAR handler) so de-ownership of the **hold-owning**
+  deck immediately disarms the pack pause-hold; the 4-tuple still covers the other
+  de-owner paths. A round-3 ChatGPT note added the `_pack_play_hold_key[0] == deck` gate
+  so a mirror-deck clear (loading the next track on the idle deck during a pause) cannot
+  drop the active hold — verified executably. Completeness proof + thread-safety in A.4;
+  tests R8 (held-deck clear ZEROs) and R11 (mirror-deck clear preserves).
 - **(R2 MAJOR) `scripted_identity_ok` false-zeroed a legitimate direct-mode filepath
   match, and "restart recovers" was false.** Verified: `resolve_filepaths` only writes
   ssid `if not track.get("ssid")` (`scripted_tracks.py:82`), so a stale **non-empty**
@@ -161,17 +163,34 @@ deadline is still live, `was_playing` is still True → the paused branch would 
 **without a fresh PLAY**. The driver never observed `scripted_owned==False` (it only
 sees net state after the exhaustive drain).
 
-**Fix [C] — teardown the latch at the de-ownership event, not just at the driver.**
-Add to `_arm_unscripted` (the sole `SCRIPTED_CLEAR` consumer, `:1254-1255`):
+**Fix [C] — teardown the latch at the de-ownership event, not just at the driver,
+gated to the hold-owning deck.** Add to `_arm_unscripted` (the sole `SCRIPTED_CLEAR`
+consumer, `:1254-1255`):
 ```python
-self._pack_play_hold_key = None
-self._pack_play_hold_deadline = 0.0
+if self._pack_play_hold_key is not None and self._pack_play_hold_key[0] == deck:
+    self._pack_play_hold_key = None
+    self._pack_play_hold_deadline = 0.0
 ```
 When the CLEAR is processed *during the drain* (step 1), the latch is nulled. Steps 2–3
 do **not** restore it (only the driver's playing branch sets it, and the driver runs
 **after** the drain). At driver time the latch is `None`, the paused branch fails
 (`play_identity != None`), and the else-branch keeps it `None` → ZERO, requiring a
 fresh PLAY tick to re-arm. Closes the BLOCKER.
+
+**Why the `[0] == deck` gate (review round 3) [C].** `_arm_unscripted(deck)` is called
+with the deck whose filepath just resolved non-scripted (`SCRIPTED_CLEAR` carries
+`ev.deck`, enqueued by `_on_filepath_resolved(deck, …)` `:2971-2975`; `_handle_event`
+binds `d = ev.deck` `:1109`). A bare teardown would null the hold whenever **either**
+deck loses scripted ownership — including the **mirror** deck. The common live action
+"pause the active deck briefly, then load the next track on the idle deck" emits
+`SCRIPTED_CLEAR(mirror)` → `_arm_unscripted(mirror)`, which would spuriously drop the
+**active** deck's pause-hold and black the held cue early. The hold key's first element
+is the deck that armed the hold (`play_identity[0] = active`), so gating on
+`self._pack_play_hold_key[0] == deck` tears the hold down **only** when the deck being
+de-owned is the deck that owns the hold. Verified executably: a `SCRIPTED_CLEAR(2)`
+preserves a live `(1, …)` hold under the gate, while a `SCRIPTED_CLEAR(1)` still tears it
+down (BLOCKER fix intact). A stale hold key for a no-longer-active deck cannot linger —
+the driver's else-branch already resets on an `active` mismatch in `play_identity`.
 
 **Thread-safety [C].** `_arm_unscripted` is reached only via `SCRIPTED_CLEAR` →
 `_handle_event` (`:1089`) → `_drain_events` → `_run` (`:872-877`). `_drive_pack_output`
@@ -188,10 +207,12 @@ Every scripted de-ownership path is covered:
 | `RB_RESTARTED` (`:1257-1271`) | `scripted_id`→0 **and** `was_playing`→False | paused branch needs `was_playing` |
 | active-deck switch (`_on_master_changed` `:2569`,`:2580`) | `active` changes **and** `was_playing`→False | 4-tuple `active` + `was_playing` |
 Only `SCRIPTED_CLEAR` can restore an *identical* 4-tuple within one drain; the others
-change a monotonic/irreversible field or drop `was_playing`. So a single teardown in
-`_arm_unscripted` is the smallest complete fix. (A normal pause does **not** emit a
-`SCRIPTED_CLEAR` for the active deck — `_on_filepath_resolved` does not re-fire without
-a new load — so the teardown never disturbs a legitimate pause-hold; see R8 vs R1/R3.)
+change a monotonic/irreversible field or drop `was_playing`. So a single deck-gated
+teardown in `_arm_unscripted` is the smallest complete fix. (A normal pause does **not**
+emit a `SCRIPTED_CLEAR` for the active deck — `_on_filepath_resolved` does not re-fire
+without a new load — and the `[0] == deck` gate stops a mirror-deck clear from touching
+the active hold, so the teardown never disturbs a legitimate pause-hold; see R8/R11 vs
+R1/R3.)
 
 ### A.5 Authority variable: `d.scripted_id`, not `os.lighting_mode` [C]/[A]
 The mode term is `d.scripted_id`, not `os.lighting_mode`: `scripted_id` is read in-tick
@@ -354,12 +375,16 @@ Append to `_arm_unscripted` (`:3087-3092`), after the two existing writes:
         log.info("[SM] clear-scripted  deck=%d", deck)
         d.scripted_id = 0
         d.meta.soundswitch_id = ""
-        # RW-3 (A.4): scripted de-ownership immediately disarms the pack pause-hold.
-        # SCRIPTED_CLEAR is the only de-owner whose state a same-drain re-resolve+re-arm
-        # can fully restore, so the 4-tuple play_identity cannot see the transient; tear
-        # the latch down here. Same _run thread as the driver (no lock); push-local only.
-        self._pack_play_hold_key = None
-        self._pack_play_hold_deadline = 0.0
+        # RW-3 (A.4): scripted de-ownership of the HELD deck immediately disarms the pack
+        # pause-hold. SCRIPTED_CLEAR is the only de-owner whose state a same-drain
+        # re-resolve+re-arm can fully restore, so the 4-tuple play_identity cannot see the
+        # transient; tear the latch down here. Gate on the hold-owning deck
+        # (_pack_play_hold_key[0]) so a mirror-deck clear (operator loading the next track
+        # on the idle deck during a brief pause) does NOT spuriously drop the active deck's
+        # hold. Same _run thread as the driver (no lock); push-local only.
+        if self._pack_play_hold_key is not None and self._pack_play_hold_key[0] == deck:
+            self._pack_play_hold_key = None
+            self._pack_play_hold_deadline = 0.0
 ```
 This is the **only** change to `_arm_unscripted`; do not alter its existing behavior.
 
@@ -419,10 +444,11 @@ Commit: `test(soundswitch): RW-3 inner autoloop-uuid zero + same-identity clear�
    → ZERO; the roadmap "require `d.scripted_id`" gap is closed.
 4. **RW-2 not regressed.** Paused branch requires `happy` (now incl. `scripted_owned`)
    and an exact `play_identity` match; a deck that loses scripted ownership cannot render
-   a stale frame (`happy` False and/or `play_identity` mismatch and/or the
+   a stale frame (`happy` False and/or `play_identity` mismatch and/or the deck-gated
    `_arm_unscripted` teardown). A normal pause emits no `SCRIPTED_CLEAR` for the active
-   deck, so the teardown never disturbs a legitimate hold (R1/R3 vs R8). `STOP_DEBOUNCE_S`
-   and deadline math unchanged.
+   deck, and the `[0] == deck` gate stops a mirror-deck clear (loading the next track on
+   the idle deck) from dropping the active hold, so the teardown never disturbs a
+   legitimate hold (R1/R3/R11 vs R8). `STOP_DEBOUNCE_S` and deadline math unchanged.
 5. **S7.9 manual Static Override + blackout precedence.** Masks/static block (`:3271-3280`)
    and player precedence (`:345-373`) untouched. **Blessed change (A.6, operator-confirmed
    2026-06-24):** held static is an authoritative overlay — stands alone over the ZEROed
@@ -500,6 +526,15 @@ CH1==200. `SSID2` is a valid UUID **absent** from `_pack().scripted`.
   → assert frame `== ZERO_FRAME` **and** `self.sm._pack_play_hold_key is None` (the
   `_arm_unscripted` teardown disarmed the hold; the byte-identical `play_identity` did
   NOT resurrect it). This is the sequence the old R8 missed.
+- **R11 `test_mirror_deck_clear_does_not_drop_active_hold`** (round-3 deck gate) — drive
+  a scripted deck-1 hold live (active=1, paused within `STOP_DEBOUNCE_S`, so
+  `sm._pack_play_hold_key == (1, …)`), then `_event(Ev.SCRIPTED_CLEAR, deck=2)`
+  (operator loads a non-scripted next track on the idle deck). Assert `_arm_unscripted(2)`
+  ran (deck 2 `scripted_id == 0`) **and** the deck-1 hold is **preserved**
+  (`sm._pack_play_hold_key == (1, …)`); a following deck-1 `_tick()` still holds the cue
+  (CH1==9). Contrast: a `_event(Ev.SCRIPTED_CLEAR, deck=1)` tears the hold down (covered
+  by R8). This can be a driver-level test (set `_pack_play_hold_key` directly + call
+  `_arm_unscripted` via the event) since it isolates the gate.
 
 **Regression — green unchanged after 3a/3c:** D1–D14, the RW-2 driver tests, the three
 `PackDriverInnerTickTests` RW-2 timing tests, and the manual-static-policy tests
@@ -569,7 +604,8 @@ results. Provide an updated reviewer prompt in your final response.
 | R1 MAJOR | `scripted_id != 0` ≠ identity coupling | mode-only + bounded harm (pack renders loaded ssid only) | A.3, C.11, D R9 |
 | R1 MAJOR | R6 drove `_push_tick_inner` but asserted a frame | R6 drives `_push_tick()` | D R6, B.Task 4 |
 | R1 MINOR | coverage | R6/R7/R8/R9/R10 | D |
-| **R2 BLOCKER** | same-identity clear→re-resolve→arm resurrects hold | `_arm_unscripted` latch teardown + completeness proof | A.4, B.Task 2, D R8 |
+| **R2 BLOCKER** | same-identity clear→re-resolve→arm resurrects hold | deck-gated `_arm_unscripted` latch teardown + completeness proof | A.4, B.Task 2, D R8/R11 |
+| R3 note | mirror-deck clear could drop the active hold | `_pack_play_hold_key[0] == deck` gate (executably verified) | A.4, B.Task 2, D R11 |
 | **R2 MAJOR** | `scripted_identity_ok` false-zeros filepath match; "restart recovers" false | registry guard removed → mode-only; false claim deleted | A.3, C.11, D R9 |
 | **R2 MINOR** | R9 double-`register()` is a no-op | single register + `addCleanup` pop | D R9, B.3b |
 
@@ -603,9 +639,11 @@ results. Provide an updated reviewer prompt in your final response.
    (R8). (b) *filepath-match with stale registry ssid* → mode-only renders (no registry
    guard, R9). (c) *OSC/transfer mismatch* → renders the loaded ssid, or ZEROs if not in
    pack; never a third track (A.3/C.11). (d) *valid UUID not in pack + held static* →
-   blessed static stand-alone (R10). (e) *cross-deck SCRIPTED_CLEAR during a hold* → tears
-   down the active hold; fail-closed, bounded to the 0.5 s window, and a normal pause emits
-   no such clear (A.4). (f) *honesty* → "restart recovers" deleted; severity stated as
-   explicit-authority + de-ownership safety, not "actively wrong right now."
+   blessed static stand-alone (R10). (e) *mirror-deck SCRIPTED_CLEAR during a hold*
+   (loading the next track on the idle deck while the active deck is paused — a common
+   action) → the `[0] == deck` gate preserves the active hold; only a clear of the held
+   deck tears it down (executably verified; R11). (f) *honesty* → "restart recovers"
+   deleted; severity stated as explicit-authority + de-ownership safety, not "actively
+   wrong right now."
 
 **Verdict: all 9 pass; rounds 1 & 2 objections closed — Codex-ready (pending re-review).**
