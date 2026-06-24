@@ -358,7 +358,7 @@ class StateManager:
         self._pack_last_load_gen: tuple[int, int] | None = None   # (active, load_gen)
         self._pack_last_elapsed_ms: int | None = None
         self._pack_last_static_slot: int | None = None
-        self._pack_play_hold_key: tuple[int, int] | None = None   # (active, load_gen) last seen PLAYING on the happy path
+        self._pack_play_hold_key: tuple[int, int, int, str] | None = None  # play identity (active, load_gen, scripted_id, norm_ssid)
         self._pack_play_hold_deadline: float = 0.0                 # monotonic deadline; paused-hold expires here
         self._pack_logged_error = False
         self._led_look_director = led_look_director
@@ -3295,7 +3295,19 @@ class StateManager:
             fresh = not (snap is None or snap.is_stale(MEM_STALE_S))
             playing = bool(getattr(d, "playing", False))
             ssid = getattr(getattr(d, "meta", None), "soundswitch_id", "") or ""
-            metadata_ready = _pack_normalize_id(ssid) is not None
+            norm_ssid = _pack_normalize_id(ssid)              # RW-3: capture once
+            metadata_ready = norm_ssid is not None
+            # RW-3 mode authority: the bridge's scripted classification is
+            # DeckState.scripted_id (the flag _update_lighting keys on, :3117), NOT a
+            # syntactically valid UUID. Mode-only: do not consult the scripted registry
+            # for identity (it false-zeros filepath-matched shows; see spec A.3).
+            scripted_id = int(getattr(d, "scripted_id", 0) or 0)
+            scripted_owned = scripted_id != 0
+            # RW-3 temporal hold identity (A.4): bind the pause-hold to the full played
+            # identity so a bare re-arm / re-resolve to a different scripted_id or ssid
+            # cannot resurrect a stale paused frame. Same-identity clear->re-resolve->arm
+            # is closed by the _arm_unscripted teardown (Task 2). Reuse load_key (:3283).
+            play_identity = (*load_key, scripted_id, norm_ssid)
 
             # 3. Automatic base transport derivation (RW-2). The pure player
             #    re-renders from immutable events at elapsed_ms each tick, so paused
@@ -3309,23 +3321,24 @@ class StateManager:
             # Reuse the EXISTING bindings computed above (3281-3295): `playing`,
             # `fresh`, `metadata_ready`, `track_changed`, `discont`, `load_key`.
             # Do not re-declare them. Only `happy` and `was_playing` are new.
-            happy = fresh and metadata_ready and not track_changed and not discont
+            happy = (
+                fresh and metadata_ready and scripted_owned
+                and not track_changed and not discont
+            )
             was_playing = bool(getattr(self._os, "was_playing", False))
             if happy and playing:
                 transport = "playing"
-                self._pack_play_hold_key = load_key
+                self._pack_play_hold_key = play_identity
                 self._pack_play_hold_deadline = now + STOP_DEBOUNCE_S
             elif (
                 happy and was_playing
-                and load_key == self._pack_play_hold_key
+                and play_identity == self._pack_play_hold_key
                 and now < self._pack_play_hold_deadline
             ):
                 transport = "paused"
             else:
-                transport = None  # stopped / hold-expired / unloaded / stale / changed / discont
-                if load_key != self._pack_play_hold_key:
-                    # New identity (track replaced / deck switched): a prior track's
-                    # hold must not resurrect. Only a real PLAY on THIS key re-enables.
+                transport = None  # stopped/hold-expired/unloaded/stale/changed/discont/unowned
+                if play_identity != self._pack_play_hold_key:
                     self._pack_play_hold_key = None
                     self._pack_play_hold_deadline = 0.0
             if transport is not None:
