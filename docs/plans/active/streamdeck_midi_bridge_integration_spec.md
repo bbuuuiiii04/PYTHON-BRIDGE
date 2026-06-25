@@ -1,14 +1,16 @@
 # Codex Implementation Spec — Stream Deck MIDI controller: robustness + bridge autostart
 
-Status: **Phase 1 ready for Codex now.** **Phase 2 (Part F) is fully specified and ready**, but is
-live-critical bridge work — implement it after Phase 1 lands, and treat Tasks 6–7 as plan-first
-(operator reviews before merge).
+Status: **Phase 1 ready for Codex now.** **Phase 2 (Part F) is fully specified**, but is a
+live-critical render-path change — implement it after Phase 1 lands, and treat **Task 5 (the layered
+compositor)** as plan-first (operator reviews before merge).
 
 The Stream Deck script already exists and works as a MIDI controller (15 pads → notes 36–50 on
 MIDI channel 3). Phase 1 hardens it for unattended live use and makes the bridge own its lifecycle.
-Phase 2 makes pads mapped to SoundSwitch static looks follow that look's press/toggle mode and light
-up to track the on/off state — driving the look through the bridge's **generic** MIDI-surface input
-(no Stream-Deck-specific bridge code), with the pad LED handled locally by the controller.
+Phase 2 adds a **generic layered DMX compositor** so pads mapped to static looks stack as overlay
+layers (toggle = persistent, press = transient) over the live autoloop, following each look's
+press/toggle mode — with **no Stream-Deck-specific code in the bridge** and the pad LEDs handled
+locally by the controller. SoundSwitch is being retired to an authoring tool; the bridge is the
+live runtime.
 
 ---
 
@@ -195,87 +197,102 @@ Wire-up (idempotent — `start_streamdeck` no-ops when already running, relaunch
 
 ---
 
-## Part F — Phase 2 (toggle-mode sync — bridge stays generic)
+## Part F — Phase 2 (layered static-look compositor — bridge stays generic)
 
-**Requirement (operator):** If a Stream Deck pad is mapped to a SoundSwitch **static look**, the pad
-must follow that look's **press vs toggle** mode, and a toggle pad must light up to reflect the
-look's on/off state. **The bridge must NOT contain any Stream-Deck-specific code or config.** The
-bridge only has to **detect the Stream Deck as a generic MIDI surface** and drive it through its
-existing engine. The press/toggle pad LED is the controller's own responsibility.
+> **Correction (supersedes earlier drafts of this section).** Phase 2 is **not** "wire the Stream
+> Deck into the existing engine, zero new bridge logic." The bridge's current static path holds
+> **one** look and **replaces the whole frame** — it cannot stack or overlay. The real feature is a
+> **new, generic layered DMX compositor** in the render path. It is still device-agnostic: it is
+> driven by MIDI notes from any surface, with **no Stream-Deck-specific code or string in the
+> bridge.** SoundSwitch is being **retired** to an authoring tool — the bridge is the live runtime.
 
-**What already exists [confirmed] — most of this is built and generic:**
-- `interaction` is decoded directly from the `.ssproj` (`soundswitch_project_decoder.py:883-889`,
-  byte `0=press / 1=toggle`) and carried end-to-end: `ControlLabelState.interaction_mode` →
-  `ResolvedControlBinding.interaction_mode` → `PackMidiBinding.interaction`
-  (`soundswitch_pack_loader.py:296`). **So "the exporter exports this" is already true.**
-- The bridge already routes a **generic** MIDI surface: `SoundSwitchMidiInputGroup` /
-  `SoundSwitchMidiInputAdapter` (`soundswitch_midi_input.py:418,59`), wired in `__main__.py:444,495,
-  541`, bound from operator config `cfg.midi_input_aliases` (currently `{}`). It matches incoming
-  notes to bindings by `(device_name, message_type, channel_zero_based, data_byte)` (`_key`, :54) and
-  applies press/toggle in `_process_note_on/off` (:222-277): toggle flips the held slot on each
-  `note_on`, `note_off` ignored; press is momentary. **No device is named in source** — binding is by
-  the project's learned device + operator alias. Port matching is generic (`_match_port_index`, :357).
-- The live pack player is the lighting authority (`config/soundswitch_pack_player.json`:
-  `enabled:true, dry_run:false, backend:pack`, DMX CH1-19), so a pad press must reach the bridge to
-  drive a look — exactly what the generic MIDI-input path is for.
+**Requirement (operator), locked model:**
+- **Base layer = the live autoloop/scripted frame.** Static looks stack *above* it.
+- A static look is a **sparse per-channel patch**: a channel it does not set is **transparent**
+  (falls through to the layer below); a channel it sets — **including an explicit 0** — overrides.
+- **Toggle pad = persistent layer** (press flips it in/out of the stack). **Press pad = transient
+  layer** (added on `note_on`, removed on `note_off`, reverting to whatever is beneath).
+- **Stack order = execution recency** — newest on top, toggle or press alike; re-pressing a pad moves
+  its layer to the top. **Topmost wins each channel. Nothing is auto-untoggled** (a toggle only
+  changes when its own pad is pressed).
+- **emergency/blackout > the whole stack** → black. Hold lasts until `note_off` (no timeout). If the
+  input surface disconnects (deck died), the bridge **clears the static stack** (back to autoloop).
+- Bridge restart (operator: "never will") → controller blanks all LEDs and resets.
 
-**Design (no Stream-Deck coupling in the bridge):**
-- The Stream Deck is learned in the SoundSwitch project like any controller and the project is
-  exported. The operator points the bridge's existing **generic** `midi_input_aliases` at whatever
-  MIDI input surface is present (the Stream Deck's `"Stream Deck"` port). The bridge then drives the
-  looks with correct press/toggle via the engine it already has — **zero new bridge logic, no
-  "Stream Deck" string in bridge source.**
-- The **controller** owns its pad LEDs. It reads the exported binding view for its own
-  `(CHANNEL, note)` keys; for a pad bound to a `static_look` with `interaction="toggle"` it tracks a
-  **local** on/off state and lights the pad accordingly (flip per press); press-mode and unmapped
-  pads keep today's momentary flash. The bridge is not asked to push anything back.
+**What's confirmed in code [confirmed] — the gap is the whole feature:**
+- **Single slot, full-frame replace, opaque** today: `LaserPackPlayer._active_static_slot: int|None`
+  (`soundswitch_laser_player.py:186`); `resolve_frame` returns the static frame *instead of* base
+  (`:153-163`); `render_static_look_frame` fills `[0]*19` so unset channels render **black, not
+  transparent** (`:143-150`). The MIDI engine is likewise single-slot: `_held_static_slot`
+  (`soundswitch_midi_input.py:222-277`).
+- **The data already supports layering** [confirmed]: a look's `generic_attributes`
+  (`soundswitch_pack_loader.py:586`) is a **sparse** list of `(dmx_channel, value)` — "unset" = absent,
+  "set to 0" = present with value 0. So transparency needs **no exporter change**; the renderer just
+  discards it today.
+- `interaction` (press/toggle) is already decoded from the `.ssproj`
+  (`soundswitch_project_decoder.py:883-889`, `0=press/1=toggle`) and carried to
+  `PackMidiBinding.interaction` (`soundswitch_pack_loader.py:296`).
+- Generic MIDI input already exists and names no device: `SoundSwitchMidiInputGroup`
+  (`soundswitch_midi_input.py:418`), wired in `__main__.py:444,495,541`, bound from
+  `cfg.midi_input_aliases` (currently `{}`), matched generically (`_match_port_index`, `:357`).
 
 ### Tasks
-### Task 5 — bridge: generic MIDI-surface detection (config-first; no SD specifics)
-- Confirm the existing `midi_input_aliases` → `SoundSwitchMidiInputGroup` path binds an arbitrary
-  MIDI input surface with **no source change** (it should — binding is by learned `device_name` +
-  alias, port matched generically). Document the operator config to point it at the present surface.
-- Optional generic enhancement: surface the list of **available MIDI input port names** in the bridge
-  runtime status (reuse the mido input enumeration + `_match_port_index`) so the operator can see a
-  surface was detected. This must name **no specific device** and add no Stream-Deck logic.
+### Task 5 — bridge: generic layered static-look compositor (the core; live-critical, plan-first)
+Replace the single-slot static path with an ordered **layer stack**, driven generically by MIDI notes.
+- **State (in the MIDI→state engine, generic):** an ordered list of active static layers, each
+  `{slot, kind: toggle|press}` in recency order. `note_on` toggle → if slot present remove it, else
+  push on top. `note_on` press → push a transient layer on top. `note_off` press → remove that layer;
+  `note_off` toggle → ignore. On input-port disconnect → clear the stack. **Remove the 2 s
+  `controller_hold_timeout_ms` cutoff** for held layers (hold = until `note_off`/disconnect).
+- **Render (replace `resolve_frame` + `render_static_look_frame`):** start from the base
+  autoloop/scripted frame; for each layer bottom→top apply only its **sparse** `generic_attributes`
+  (absent channel falls through; set channel — incl. 0 — overrides). Precedence stays
+  **emergency/blackout > stack > base**. The render must be a **pure function** of (base frame,
+  ordered layers, blackout/emergency) so the 200 Hz push loop stays non-blocking; the worker thread
+  mutates the stack, the loop reads an immutable snapshot (same pattern as `MidiInputSnapshot`).
+- **No Stream-Deck specifics.** Layers are keyed by learned binding `(device_name, channel, note)`
+  → `static_look` slot. Optional generic add: list available MIDI input port names in runtime status.
 
-### Task 6 — exporter: consumer-readable binding view (device-agnostic, build-time)
-- The pack already carries `PackMidiBinding(channel_zero_based, data_byte, target_kind, interaction,
-  target_slot, target_name)`. If that pack form is not readable by an external program, have the
-  **exporter** write a small sidecar at export time — recommend `<pack_path>/midi_bindings.json` — a
-  list of `{channel, note, target_kind, interaction, name}` for the project's learned bindings. This
-  is exporter **output** (the project's own bindings), not bridge runtime, and names no device.
+### Task 6 — exporter: device-agnostic binding sidecar (build-time)
+- If the pack form is not externally readable, have the **exporter** write `<pack_path>/midi_bindings.json`:
+  a list of `{channel, note, target_kind, interaction, name}` for the project's learned bindings.
+  Exporter output (the project's own bindings), names no device. The compositor itself reads the
+  look's channel patches from the pack it already loads — the sidecar is only for the controller's LEDs.
 
-### Task 7 — controller: per-pad press/toggle + local LED state
-- At startup the controller reads the sidecar (Task 6). For each pad it owns, key by `(CHANNEL, note)`
-  → if it matches a `static_look` toggle binding, mark the pad toggle and track local on/off; light
-  the pad when on. Press/unmapped pads unchanged. Recommend the controller also **adopt the bound
-  notes from the sidecar** so pads auto-match the project (fallback to fixed 36-50 if no sidecar).
-- `# ponytail:` LED state is local — accurate while the Stream Deck is the only thing toggling a
-  given look; it can drift if another surface toggles the same look (accepted — see Part C).
+### Task 7 — controller: local LED state from the sidecar (no conflict logic needed)
+- Read the sidecar at startup; key each pad by `(CHANNEL, note)`. Toggle pad → track **local** on/off,
+  flip per press, light when on. Press pad → momentary (today's flash). Adopt bound notes from the
+  sidecar so pads auto-match the project (fallback to fixed 36-50). **No compositor logic in the
+  controller** — because nothing auto-untoggles, every state change is a press the controller sees,
+  so local LEDs are correct by construction. Blank all LEDs on its own (re)start.
 
 ### Part C additions (Phase 2 invariants)
-- **No Stream-Deck-specific code, string, or file emit in the bridge runtime.** The bridge treats it
-  as a generic MIDI surface only. Phase 2 bridge work is config + an optional generic port-list in
-  status; all device-aware logic lives in the controller and the (device-agnostic) exporter sidecar.
-- The bridge remains the single lighting authority and applies authoritative press/toggle via the
-  existing engine; the 200 Hz push loop is untouched.
-- Controller LED is local/cosmetic and never drives lighting; it cannot emit on the lasers' channels.
+- **No Stream-Deck string, code, or file emit in `rb_ss_bridge_v2/*.py`.** The compositor and MIDI
+  input are generic; all device-aware logic lives in the controller + the device-agnostic sidecar.
+- Compositor render is a **pure function** (base + layers + flags → frame); **no I/O on the push
+  loop**; stack mutation is worker-thread only, read via immutable snapshot.
+- Base = live autoloop/scripted; transparency via sparse patches; recency stack; topmost wins;
+  **emergency/blackout overrides the whole stack**. Held layers release on `note_off` or input
+  disconnect — never stick past the surface going away.
+- Controller LED is local/cosmetic, never drives lighting, never emits on the lasers' channels.
 
 ### Part D additions (Phase 2 tests)
-- Pure-function seam: given a binding view + a pad's `(channel, note)`, the controller resolves the
-  correct mode (press/toggle/none) and the toggle LED transition — testable without hardware.
-- Existing `soundswitch_midi_input` press/toggle tests must stay green (no engine change).
+- **Pure-function compositor seam** (the core): given a base frame + ordered sparse layers (+ flags),
+  assert: transparency (absent channel shows base/lower), explicit-0 override, topmost-wins on
+  overlap, two disjoint toggles compose (Lego), press layer reverts on removal, blackout → ZERO_FRAME.
+- Stack lifecycle: toggle add/remove, press add-on-`note_on`/remove-on-`note_off`, recency ordering,
+  clear-on-disconnect — testable without hardware (feed raw messages, no port).
+- Controller LED mapping is a pure function of `(sidecar, pressed-set)` — testable.
 
 ### Acceptance (Phase 2)
-- No occurrence of `streamdeck`/`Stream Deck` added under `rb_ss_bridge_v2/*.py` runtime code.
-- With the surface aliased in config: a toggle-look pad press toggles the look via the bridge and the
-  pad stays lit until pressed again; a press-look pad is momentary. Bridge `pgrep` count still 1.
-- The exporter sidecar lists each learned binding's `interaction`; the controller reads it and sets
-  per-pad behavior accordingly.
+- No `streamdeck`/`Stream Deck` token under `rb_ss_bridge_v2/*.py` runtime code; bridge `pgrep` == 1.
+- Two disjoint toggles → both render simultaneously (Lego). Overlapping toggles → topmost wins the
+  shared channel, older keeps its other channels and stays lit. Press over a toggle → temporary
+  override, reverts to the toggle/autoloop on release. Hold > 2 s persists. Transparent channels show
+  the live autoloop. Blackout blacks the whole stack.
+- Existing autoloop/scripted/blackout behavior unchanged when no static layer is active.
 
-**Remaining true unknown (small):** SoundSwitch's *own* toggle wire semantics are not needed here —
-the bridge engine (`_process_note_on/off`) already defines them (flip on `note_on`, ignore
-`note_off`), and the controller mirrors that same rule locally. The only open item is the exact
-exporter hook site for Task 6's sidecar, which Codex locates in the pack-build path
-(`soundswitch_pack_loader` / `soundswitch_pack_runtime`); symbols are named above.
+**No remaining unknowns.** The only mechanical item is the exporter hook site for Task 6, which Codex
+locates in the pack-build path (`soundswitch_pack_loader`/`soundswitch_pack_runtime`). Tasks 5 is the
+live-critical one (replaces `resolve_frame`/`_active_static_slot`/`_held_static_slot`) — plan-first,
+operator reviews before merge.
