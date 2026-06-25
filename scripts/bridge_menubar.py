@@ -322,6 +322,7 @@ def parse_export_result(text: str) -> dict:
         return fallback
     allowed_verdicts = {
         "published", "source_error", "verify_failed", "locked", "swap_failed", "unknown_error",
+        "sidecar_failed",
     }
     verdict = value.get("verdict")
     manifest_sha256 = value.get("manifest_sha256")

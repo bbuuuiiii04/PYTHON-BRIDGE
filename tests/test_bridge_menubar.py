@@ -285,6 +285,19 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertEqual(bridge_menubar.parse_export_result("not-json"), fallback)
         self.assertEqual(bridge_menubar.parse_export_result("{}"), fallback)
 
+    def test_parse_export_result_accepts_sidecar_failure(self) -> None:
+        bridge_menubar = self._import_module()
+        result = {
+            "ok": False,
+            "verdict": "sidecar_failed",
+            "manifest_sha256": "",
+            "artifact_count": 0,
+            "first_export": False,
+            "error_category": "BindingSidecarWriteError",
+        }
+
+        self.assertEqual(bridge_menubar.parse_export_result(json.dumps(result)), result)
+
     def test_evaluate_reload_ack_truth_table(self) -> None:
         bridge_menubar = self._import_module()
         expected = "a" * 12
