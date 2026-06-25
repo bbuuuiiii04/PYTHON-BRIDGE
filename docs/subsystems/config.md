@@ -63,7 +63,7 @@ Config:
 - Pack-player config defaults are `enabled=false`, `dry_run=true`, and `output_backend=none`. Supported configured backends are `none`, `midi`, and `pack`; runtime command switching to `midi` remains deliberately unsupported. Pack enable/reload/backend actions are explicit and validate-first.
 - The ignored local pack config was absent in the 2026-06-23 audit. No pack/Enttec live setup is therefore claimed.
 - `fixture_map` must define exactly CH1 through CH19 with integer DMX addresses 1 through 512. A non-empty `fixture_map_path` is authoritative over the inline map and resolves relative to the containing config file unless absolute.
-- Pack-player timeouts must be positive integers. Paths and the Enttec port field must be strings. `midi_input_aliases` must map non-empty device identity strings to non-empty local port-alias strings.
+- Pack-player timeouts must be positive integers. Paths and the Enttec port field must be strings. `midi_input_aliases` is optional; when present it maps non-empty saved static-controller device identities to non-empty local port-alias strings and overrides the default device-name auto-bind.
 - Invalid JSON, unknown keys, duplicate JSON keys, duplicate fixture channels after integer coercion, invalid map files, and invalid field types fail closed as `invalid_config`; the loader never raises.
 
 Tests:

@@ -31,7 +31,7 @@ The additive schema-1 `soundswitch_pack` object is:
 | `pack_sha12` | Existing public manifest prefix used for reload acknowledgement. |
 | `reason` | Sanitized runtime category. |
 | `operational_state` | `disabled`, `blackout`, `input_degraded`, `static_held`, `scripted_active`, `autoloop_phase_blocked`, or `software_zero_frame`. |
-| `scripted_active`, `input_degraded`, `static_held`, `blackout`, `autoloop_phase_blocked` | Authoritative companion booleans; more than one may be true. |
+| `scripted_active`, `input_degraded`, `static_held`, `blackout`, `autoloop_phase_blocked` | Authoritative companion booleans; more than one may be true. `input_degraded` can mean manual Static Look input is unavailable while scripted pack DMX continues. |
 | `software_zero_frame` | The rendered CH1-CH19 software frame equals zero; not serial or physical proof. |
 | `frame_count` | Non-negative attempted normal software-frame count; not confirmed sends. |
 | `has_active_identity` | Boolean derived from the in-memory accepted-identity property; no identity is exposed. |

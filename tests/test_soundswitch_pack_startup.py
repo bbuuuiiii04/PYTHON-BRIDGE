@@ -77,7 +77,8 @@ class _LifecycleFake:
 
 class StartupMatrixTests(unittest.TestCase):
     def _build(self, result, *, input_fail=False, sender_fail=False,
-               pack_loader=lambda _path: _pack(), start=True):
+               pack_loader=lambda _path: _pack(), start=True,
+               input_factory_override=None):
         events = []
         controller = _LifecycleFake("input", events, fail_start=input_fail)
         sender = _LifecycleFake("sender", events, fail_start=sender_fail)
@@ -100,7 +101,7 @@ class StartupMatrixTests(unittest.TestCase):
             pack_loader=pack_loader,
             player_factory=lambda pack: ("player", pack),
             frame_sender_factory=sender_factory,
-            midi_input_factory=input_factory,
+            midi_input_factory=input_factory_override or input_factory,
         )
         if start:
             bundle = bridge_main._start_soundswitch_pack_workers(bundle)
@@ -156,6 +157,47 @@ class StartupMatrixTests(unittest.TestCase):
                 self.assertIn("input.stop", events)
                 if input_fail:
                     self.assertNotIn("sender.start", events)
+
+    def test_missing_controller_input_degrades_but_pack_sender_starts(self):
+        events = []
+
+        class MissingInputAdapter:
+            def __init__(self, bindings, *, stale_timeout_ms):
+                self._snap = MidiInputSnapshot(None, False, True, None, 0)
+
+            def start(self, port, *, device_name):
+                events.append(("input.start", port, device_name))
+                raise OSError("synthetic missing controller")
+
+            def stop(self):
+                events.append(("input.stop",))
+
+            def mark_unavailable(self):
+                self._snap = MidiInputSnapshot(None, False, False, "input_unavailable", 0)
+
+            def snapshot(self):
+                return self._snap
+
+            def panic(self):
+                pass
+
+            def on_pack_reload(self):
+                pass
+
+        def input_factory(bindings, aliases, *, stale_timeout_ms):
+            return SoundSwitchMidiInputGroup(
+                bindings, aliases, stale_timeout_ms=stale_timeout_ms,
+                adapter_factory=MissingInputAdapter,
+            )
+
+        bundle, sender_events, _ = self._build(
+            _result(aliases={}), input_factory_override=input_factory,
+        )
+
+        self.assertIsInstance(bundle.laser_backend, PackOutputBackend)
+        self.assertEqual(sender_events, ["sender.start"])
+        self.assertEqual(events, [("input.start", "DDJ", "DDJ"), ("input.stop",)])
+        self.assertEqual(bundle.midi_input.snapshot().error, "input_error")
 
     def test_missing_enttec_is_no_output(self):
         bundle, events, _ = self._build(_result(enttec_port=""))
@@ -351,17 +393,18 @@ class InputGroupTests(unittest.TestCase):
                                                "static_look", target_slot=16)),
                 {"DDJ": "same", "OTHER": "same"}, adapter_factory=factory,
             )
-        with self.assertRaisesRegex(ValueError, "verified binding"):
+        with self.assertRaisesRegex(ValueError, "static-look binding"):
             SoundSwitchMidiInputGroup((self.binding,), {"UNKNOWN": "port"},
                                       adapter_factory=factory)
         self.assertEqual(calls, [])
 
-    def test_start_rollback_and_sanitized_status(self):
+    def test_start_degrades_and_keeps_sanitized_status(self):
         events = []
 
         class Adapter:
             def __init__(self, bindings, *, stale_timeout_ms):
                 self.device = bindings[0].device_name
+                self._snap = MidiInputSnapshot(None, False, True, None, 0)
 
             def start(self, port, *, device_name):
                 events.append(("start", device_name))
@@ -371,8 +414,11 @@ class InputGroupTests(unittest.TestCase):
             def stop(self):
                 events.append(("stop", self.device))
 
+            def mark_unavailable(self):
+                self._snap = MidiInputSnapshot(None, False, False, "input_unavailable", 0)
+
             def snapshot(self):
-                return MidiInputSnapshot(None, False, False, None, 0)
+                return self._snap
 
         bindings = (self.binding, PackMidiBinding(
             "OTHER", "note", 0, 8, "static_look", target_slot=16,
@@ -380,10 +426,10 @@ class InputGroupTests(unittest.TestCase):
         group = SoundSwitchMidiInputGroup(
             bindings, {"DDJ": "secret-a", "OTHER": "secret-b"}, adapter_factory=Adapter,
         )
-        with self.assertRaisesRegex(RuntimeError, "startup failed"):
-            group.start()
-        self.assertEqual(events[:2], [("start", "DDJ"), ("start", "OTHER")])
+        group.start()
+        self.assertEqual(events, [("start", "DDJ"), ("start", "OTHER"), ("stop", "OTHER")])
         status = group.status()
+        self.assertTrue(status["has_error"])
         self.assertNotIn("secret", repr(status))
         self.assertNotIn("DDJ", repr(status))
 

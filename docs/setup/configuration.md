@@ -63,13 +63,13 @@ a reviewed local setup. Current local-file state was not inspected during RW-5 i
 
 `fixture_map` must contain exactly the string keys `1` through `19`, each mapped to an integer DMX address from 1 through 512. `fixture_map_path` is an optional alternative: when non-empty it takes precedence over the inline map. Relative map paths resolve against the directory containing the selected config file; absolute paths remain absolute. Map files contain the mapping object itself.
 
-Supported `output_backend` values are `none`, `midi`, and `pack`. Both timeout fields must be positive integers. `pack_path`, `fixture_map_path`, and `enttec_port` are strings. `midi_input_aliases` maps non-empty saved device identities to non-empty local port aliases. Do not put actual device identifiers or live port details in the tracked example or docs.
+Supported `output_backend` values are `none`, `midi`, and `pack`. Both timeout fields must be positive integers. `pack_path`, `fixture_map_path`, and `enttec_port` are strings. `midi_input_aliases` is optional; when present it maps non-empty saved static-controller device identities to non-empty local port aliases and overrides device-name auto-bind. Do not put actual device identifiers or live port details in the tracked example or docs.
 
 When config is explicitly enabled with `output_backend=pack`, startup loads and
 verifies `pack_path`, constructs controller inputs and the fixture-map-bound
-sender, confirms input/serial readiness, and publishes the runtime only on
-success. Dry-run/none opens neither; pack failure disables output and never
-falls back to physical MIDI. Runtime `set_soundswitch_pack` supports explicit
+sender, and confirms serial readiness. Missing or ambiguous controller input
+degrades manual Static Looks while pack DMX can continue; serial/sender failure
+still disables output and never falls back to physical MIDI. Runtime `set_soundswitch_pack` supports explicit
 reload/backend/enable actions, with runtime `backend=midi` intentionally
 unsupported.
 

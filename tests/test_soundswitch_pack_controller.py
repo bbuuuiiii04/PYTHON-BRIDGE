@@ -13,6 +13,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.soundswitch_pack_controller import SoundSwitchPackController
 from rb_ss_bridge_v2.soundswitch_pack_runtime import PackRuntime
+from rb_ss_bridge_v2.soundswitch_midi_input import (
+    MidiInputSnapshot,
+    SoundSwitchMidiInputGroup,
+)
+from rb_ss_bridge_v2.soundswitch_pack_loader import PackMidiBinding
 
 
 class _Sender:
@@ -95,6 +100,58 @@ class ControllerTests(unittest.TestCase):
         # a disabled bundle is published before the new enabled one (driver stops first).
         self.assertFalse(h.published[0].active)
         self.assertTrue(h.published[-1].active)
+
+    def test_reload_keeps_pack_enabled_when_controller_input_degrades(self):
+        log: list[str] = []
+
+        class MissingInputAdapter:
+            def __init__(self, bindings, *, stale_timeout_ms):
+                self._snap = MidiInputSnapshot(None, False, True, None, 0)
+
+            def start(self, port, *, device_name):
+                log.append(f"{device_name}.input_start")
+                raise OSError("synthetic missing controller")
+
+            def stop(self):
+                log.append("input.stop")
+
+            def mark_unavailable(self):
+                self._snap = MidiInputSnapshot(None, False, False, "input_unavailable", 0)
+
+            def snapshot(self):
+                return self._snap
+
+            def panic(self):
+                pass
+
+            def on_pack_reload(self):
+                pass
+
+        def prepared():
+            group = SoundSwitchMidiInputGroup(
+                (PackMidiBinding("DDJ", "note", 0, 7, "static_look", target_slot=8),),
+                {},
+                adapter_factory=MissingInputAdapter,
+            )
+            return PackRuntime(
+                enabled=False, reason="prepared", player=object(),
+                midi_input=group, backend=object(),
+                frame_sender=_Sender(log, "new"), pack_sha12="newsha",
+            )
+
+        h = _Harness(prepare=prepared)
+        h.current = PackRuntime(
+            enabled=True, reason="pack", player=object(),
+            midi_input=_Input(log, "old"), backend=object(),
+            frame_sender=_Sender(log, "old"),
+        )
+
+        ok, detail = h.ctrl.handle("reload")
+
+        self.assertEqual((ok, detail), (True, "pack"))
+        self.assertTrue(h.current.active)
+        self.assertEqual(h.current.midi_input.snapshot().error, "input_error")
+        self.assertIn("new.start", log)
 
     def test_validate_first_failure_retains_old_runtime(self):
         def boom():

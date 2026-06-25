@@ -55,7 +55,9 @@ When adding or changing tests, update:
 This is software validation only. Separate focused suites cover the immutable
 pack loader/player, MIDI adapter, backend abstraction, Enttec framing/sender,
 pack-player config, startup matrix, atomic controller, runtime commands/status,
-StateManager driver, and menubar. RW-5 tests fail on backend/provider re-query,
+StateManager driver, and menubar. MIDI/startup tests cover static-controller
+auto-bind, alias override, missing/ambiguous controller degradation, and
+output-bus exclusion. RW-5 tests fail on backend/provider re-query,
 published-dict mutation/reuse, incorrect precedence or simultaneous truths,
 unsafe lifecycle snapshots, raw render/submit errors, stale active UI, export
 phase races, reload-command drift, missed one-shot auto-enable retry, or

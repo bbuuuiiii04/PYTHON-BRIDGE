@@ -80,7 +80,9 @@ artifacts, not planning documents. They are not moved into the authority tree.
   implicit hot-enable.
 - Static Override Press/Toggle interaction mode decoded from the SoundSwitch-saved
   byte and honored by the bridge MIDI input: implemented and software-tested;
-  unknown saved mode fails closed to momentary.
+  unknown saved mode fails closed to momentary. Static-controller input is
+  auto-bound from pack bindings unless an alias overrides it; missing or
+  ambiguous input degrades manual Static Looks without disabling pack DMX.
 - Canonical pack now lives at the repo-local ignored path
   `local/soundswitch/rbss_canonical_pack`.
 - T7d phase tooling: implemented; four captures pass conductor integrity across

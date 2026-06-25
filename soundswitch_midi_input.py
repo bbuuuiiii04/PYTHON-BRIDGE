@@ -190,6 +190,10 @@ class SoundSwitchMidiInputAdapter:
                 log.warning("[SS-MIDI] worker did not exit within stop timeout; state cleared")
         self._clear_held("stop")
 
+    def mark_unavailable(self) -> None:
+        """Mark this input unavailable without raising into pack output startup."""
+        self._clear_held("input_unavailable", error_msg="input_unavailable")
+
     def panic(self) -> None:
         """Immediately clear all held state (e.g. on bridge emergency)."""
         self._clear_held("panic")
@@ -322,6 +326,16 @@ class SoundSwitchMidiInputAdapter:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _match_port_index(ports: Sequence[str], port_name: str) -> int | None:
+        exact = [i for i, name in enumerate(ports) if name == port_name]
+        if len(exact) == 1:
+            return exact[0]
+        partial = [i for i, name in enumerate(ports) if port_name in name]
+        if len(partial) == 1:
+            return partial[0]
+        return None
+
+    @staticmethod
     def _make_real_source(
         port_name: str,
     ) -> Callable[[], Iterator[tuple[int, int, int] | None]]:
@@ -336,17 +350,23 @@ class SoundSwitchMidiInputAdapter:
             import rtmidi  # type: ignore[import-untyped]
             midi_in = rtmidi.MidiIn()
             try:
+                ignore_types = getattr(midi_in, "ignore_types", None)
+                if callable(ignore_types):
+                    ignore_types(sysex=True, timing=True, active_sense=True)
                 ports = midi_in.get_ports()
-                matches = [i for i, name in enumerate(ports) if port_name in name]
-                if not matches:
+                match = SoundSwitchMidiInputAdapter._match_port_index(ports, port_name)
+                if match is None:
                     raise OSError(f"MIDI port not found: {port_name!r}; available={ports!r}")
-                midi_in.open_port(matches[0])
+                midi_in.open_port(match)
                 while True:
                     msg = midi_in.get_message()
                     if msg is not None:
                         data, _delta = msg
                         if len(data) >= 3:
                             yield (data[0], data[1], data[2])
+                        else:
+                            time.sleep(_INPUT_POLL_INTERVAL_S)
+                            yield None
                         continue  # drain queued messages before sleeping
                     time.sleep(_INPUT_POLL_INTERVAL_S)
                     yield None
@@ -396,12 +416,12 @@ class SoundSwitchMidiInputAdapter:
 
 
 class SoundSwitchMidiInputGroup:
-    """Own one input adapter per configured device alias as one lifecycle.
+    """Own one input adapter per render-affecting controller as one lifecycle.
 
-    Construction validates the full device/alias set before any worker starts.
-    ``start()`` is rollback-safe: if any adapter start raises, every adapter is
-    stopped and the group remains unavailable.  Port aliases and device names
-    are intentionally absent from ``status()``.
+    Construction validates aliases before any worker starts.  Static-look
+    devices are auto-bound by pack device name when no explicit alias exists;
+    blackout-only devices are not opened as inputs.  Port aliases and device
+    names are intentionally absent from ``status()``.
     """
 
     def __init__(
@@ -412,22 +432,27 @@ class SoundSwitchMidiInputGroup:
         stale_timeout_ms: int = 2000,
         adapter_factory=SoundSwitchMidiInputAdapter,
     ) -> None:
-        binding_devices = {binding.device_name for binding in bindings}
+        input_devices = {
+            binding.device_name
+            for binding in bindings
+            if binding.target_kind == "static_look"
+        }
         if len(set(aliases.values())) != len(aliases):
             raise ValueError("controller input aliases must own distinct ports")
-        unknown = sorted(set(aliases) - binding_devices)
+        unknown = sorted(set(aliases) - input_devices)
         if unknown:
-            raise ValueError("controller input alias has no verified binding")
-        self._entries: tuple[tuple[str, str, SoundSwitchMidiInputAdapter], ...] = tuple(
+            raise ValueError("controller input alias has no verified static-look binding")
+        self._entries: tuple[tuple[str, str, str, SoundSwitchMidiInputAdapter], ...] = tuple(
             (
                 device_name,
-                aliases[device_name],
+                aliases.get(device_name, device_name),
+                "override" if device_name in aliases else "auto",
                 adapter_factory(
                     [binding for binding in bindings if binding.device_name == device_name],
                     stale_timeout_ms=stale_timeout_ms,
                 ),
             )
-            for device_name in sorted(aliases)
+            for device_name in sorted(input_devices)
         )
         self._started = False
 
@@ -438,20 +463,34 @@ class SoundSwitchMidiInputGroup:
     def start(self) -> None:
         if self._started:
             raise RuntimeError("SoundSwitchMidiInputGroup already started")
-        try:
-            for device_name, port_alias, adapter in self._entries:
+        available = 0
+        for device_name, port_alias, mode, adapter in self._entries:
+            try:
                 adapter.start(port_alias, device_name=device_name)
-        except Exception as exc:
-            for _device_name, _port_alias, adapter in reversed(self._entries):
+            except Exception as exc:
                 try:
                     adapter.stop()
                 except Exception:
                     pass
-            raise RuntimeError("controller input startup failed") from exc
+                mark_unavailable = getattr(adapter, "mark_unavailable", None)
+                if callable(mark_unavailable):
+                    mark_unavailable()
+                log.warning(
+                    "[SS-MIDI] controller input unavailable  mode=%s  error=%s",
+                    mode,
+                    type(exc).__name__,
+                )
+                continue
+            available += 1
+            log.info("[SS-MIDI] controller input bound  mode=%s", mode)
+        if self._entries and available == 0:
+            log.warning(
+                "[SS-MIDI] no controller inputs available; pack DMX continues without manual static looks"
+            )
         self._started = True
 
     def stop(self) -> None:
-        for _device_name, _port_alias, adapter in reversed(self._entries):
+        for _device_name, _port_alias, _mode, adapter in reversed(self._entries):
             try:
                 adapter.stop()
             except Exception:
@@ -459,15 +498,15 @@ class SoundSwitchMidiInputGroup:
         self._started = False
 
     def panic(self) -> None:
-        for _device_name, _port_alias, adapter in self._entries:
+        for _device_name, _port_alias, _mode, adapter in self._entries:
             adapter.panic()
 
     def on_pack_reload(self) -> None:
-        for _device_name, _port_alias, adapter in self._entries:
+        for _device_name, _port_alias, _mode, adapter in self._entries:
             adapter.on_pack_reload()
 
     def snapshot(self) -> MidiInputSnapshot:
-        snapshots = [adapter.snapshot() for _device, _port, adapter in self._entries]
+        snapshots = [adapter.snapshot() for _device, _port, _mode, adapter in self._entries]
         held_slots = {
             snapshot.held_static_slot
             for snapshot in snapshots

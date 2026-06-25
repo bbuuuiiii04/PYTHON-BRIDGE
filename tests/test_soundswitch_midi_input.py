@@ -12,6 +12,7 @@ from rb_ss_bridge_v2.soundswitch_midi_input import (
     MidiInputSnapshot,
     PackMidiBinding,
     SoundSwitchMidiInputAdapter,
+    SoundSwitchMidiInputGroup,
 )
 from rb_ss_bridge_v2.soundswitch_pack import SoundSwitchPackCompileError
 from rb_ss_bridge_v2.soundswitch_pack_models import (
@@ -120,7 +121,11 @@ class TestRealMidiSource(unittest.TestCase):
             def __init__(self):
                 self.opened = None
                 self.closed = False
+                self.ignored = None
                 self._queue = list(messages)
+
+            def ignore_types(self, *, sysex, timing, active_sense):
+                self.ignored = (sysex, timing, active_sense)
 
             def get_ports(self):
                 return list(ports)
@@ -149,6 +154,35 @@ class TestRealMidiSource(unittest.TestCase):
             gen.close()
         self.assertEqual(inst.opened, 1)  # substring matched "DDJ-800 Port" at index 1
         self.assertTrue(inst.closed)
+        self.assertEqual(inst.ignored, (True, True, True))
+
+    def test_real_source_prefers_exact_port_match(self):
+        fake, inst = self._fake_rtmidi(
+            ["Other DDJ-800 Port", "DDJ-800"],
+            [([0x99, 8, 100], 0.0)],
+        )
+        with mock.patch.dict(sys.modules, {"rtmidi": fake}):
+            gen = SoundSwitchMidiInputAdapter._make_real_source("DDJ-800")()
+            self.assertEqual(next(gen), (0x99, 8, 100))
+            gen.close()
+        self.assertEqual(inst.opened, 1)
+
+    def test_real_source_rejects_ambiguous_substring_match(self):
+        fake, _ = self._fake_rtmidi(["DDJ-800 Port A", "DDJ-800 Port B"], [])
+        with mock.patch.dict(sys.modules, {"rtmidi": fake}):
+            with self.assertRaises(OSError):
+                next(SoundSwitchMidiInputAdapter._make_real_source("DDJ-800")())
+
+    def test_real_source_skips_short_non_note_messages(self):
+        fake, _ = self._fake_rtmidi(
+            ["DDJ-800"],
+            [([0xF8], 0.0), ([0x99, 8, 100], 0.0)],
+        )
+        with mock.patch.dict(sys.modules, {"rtmidi": fake}):
+            gen = SoundSwitchMidiInputAdapter._make_real_source("DDJ-800")()
+            self.assertIsNone(next(gen))
+            self.assertEqual(next(gen), (0x99, 8, 100))
+            gen.close()
 
     def test_real_source_raises_when_port_absent(self):
         fake, _ = self._fake_rtmidi(["IAC Driver Bus 1"], [])
@@ -467,6 +501,94 @@ class TestDisabledAndUnknown(unittest.TestCase):
         s = a.snapshot()
         self.assertIsNone(s.held_static_slot)
         self.assertFalse(s.blackout_held)
+
+
+# ---------------------------------------------------------------------------
+# Input group auto-detection / degradation
+# ---------------------------------------------------------------------------
+
+class TestInputGroupAutoDetection(unittest.TestCase):
+    class Adapter:
+        def __init__(self, bindings, *, stale_timeout_ms, fail=False, events=None):
+            self.bindings = tuple(bindings)
+            self.fail = fail
+            self.events = events if events is not None else []
+            self._snap = MidiInputSnapshot(None, False, True, None, 0)
+
+        def start(self, port, *, device_name):
+            self.events.append(("start", port, device_name, tuple(b.device_name for b in self.bindings)))
+            if self.fail:
+                raise OSError("synthetic missing port")
+
+        def stop(self):
+            self.events.append(("stop",))
+
+        def mark_unavailable(self):
+            self._snap = MidiInputSnapshot(None, False, False, "input_unavailable", 0)
+
+        def panic(self):
+            pass
+
+        def on_pack_reload(self):
+            pass
+
+        def snapshot(self):
+            return self._snap
+
+    def test_empty_aliases_auto_bind_static_device_only(self):
+        events = []
+
+        def factory(bindings, *, stale_timeout_ms):
+            return self.Adapter(bindings, stale_timeout_ms=stale_timeout_ms, events=events)
+
+        group = SoundSwitchMidiInputGroup(
+            (_SLOT8, _BLACKOUT),
+            {},
+            adapter_factory=factory,
+        )
+        group.start()
+
+        self.assertEqual(group.worker_count, 1)
+        self.assertEqual(events, [("start", DDJ, DDJ, (DDJ,))])
+
+    def test_explicit_alias_overrides_auto_detected_device_name(self):
+        events = []
+
+        def factory(bindings, *, stale_timeout_ms):
+            return self.Adapter(bindings, stale_timeout_ms=stale_timeout_ms, events=events)
+
+        group = SoundSwitchMidiInputGroup(
+            (_SLOT8,),
+            {DDJ: "Local Controller Port"},
+            adapter_factory=factory,
+        )
+        group.start()
+
+        self.assertEqual(events, [("start", "Local Controller Port", DDJ, (DDJ,))])
+
+    def test_missing_controller_degrades_without_raising(self):
+        def factory(bindings, *, stale_timeout_ms):
+            return self.Adapter(bindings, stale_timeout_ms=stale_timeout_ms, fail=True)
+
+        group = SoundSwitchMidiInputGroup(
+            (_SLOT8,),
+            {},
+            adapter_factory=factory,
+        )
+        group.start()
+
+        snapshot = group.snapshot()
+        self.assertFalse(snapshot.worker_alive)
+        self.assertEqual(snapshot.error, "input_error")
+        self.assertTrue(group.status()["has_error"])
+
+    def test_blackout_only_output_bus_is_not_a_controller_alias_target(self):
+        with self.assertRaisesRegex(ValueError, "static-look"):
+            SoundSwitchMidiInputGroup(
+                (_BLACKOUT,),
+                {IAC: "IAC Driver Bus 1"},
+                adapter_factory=lambda *args, **kwargs: self.fail("must not construct"),
+            )
 
 
 # ---------------------------------------------------------------------------
