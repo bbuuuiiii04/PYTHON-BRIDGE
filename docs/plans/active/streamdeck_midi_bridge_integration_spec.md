@@ -241,9 +241,10 @@ Wire-up (idempotent — `start_streamdeck` no-ops when already running, relaunch
   (falls through to the layer below); a channel it sets — **including an explicit 0** — overrides.
 - **Toggle pad = persistent layer** (press flips it in/out of the stack). **Press pad = transient
   layer** (added on `note_on`, removed on `note_off`, reverting to whatever is beneath).
-- **Stack order = execution recency** — newest on top, toggle or press alike; re-pressing a pad moves
-  its layer to the top. **Topmost wins each channel. Nothing is auto-untoggled** (a toggle only
-  changes when its own pad is pressed).
+- **Stack order = execution recency** — newest on top, toggle or press alike; a fresh add lands on
+  top. Re-pressing an already-active toggle removes it (it does not move to top); remove-then-re-add
+  is how that toggle lands on top again. **Topmost wins each channel. Nothing is auto-untoggled** (a
+  toggle only changes when its own pad is pressed).
 - **emergency/blackout > the whole stack** → black.
 - **Hold / recovery [RESOLVED 2026-06-25 — input-port-gone detection]:** remove the 2 s
   `controller_hold_timeout_ms` cutoff (`soundswitch_pack_player_config.py:53`); held layers last until
@@ -256,6 +257,13 @@ Wire-up (idempotent — `start_streamdeck` no-ops when already running, relaunch
   port-gone event the bridge sees — locked in as a Part C invariant. **When the 2 s timeout is removed,
   preserve blackout-hold auto-release** by an equivalent mechanism (that same gate currently also
   releases blackout-hold at `soundswitch_midi_input.py:114-117`).
+  - **CoreMIDI/rtmidi check [confirmed locally 2026-06-25]:** a `/opt/homebrew/bin/python3` probe of
+    both `mido.open_output(..., virtual=True)` and raw `rtmidi.MidiOut.open_virtual_port()` showed the
+    virtual source appears in `rtmidi.MidiIn.get_ports()` and disappears after `port.close()`; a
+    SIGKILL-abandoned virtual source also disappeared from the same already-open `MidiIn.get_ports()`.
+    CoreMIDI briefly returned a non-string `None` entry after the abandoned-source case, so the worker
+    backstop must compare exact string port names only and treat non-string entries as absent. Do not
+    reuse an unguarded substring scan for the periodic port-presence check.
   - **Residual (accepted) [confirmed]:** port-gone does *not* catch a `note_off` genuinely lost in
     CoreMIDI/rtmidi's buffer while the port stays up — rare on a dedicated low-traffic virtual port
     with 15 pads. `# ponytail:` no press watchdog; add a press-only timeout later only if a stuck
@@ -396,7 +404,9 @@ stack on a transient `error` string. This is the same signal as the port-gone ba
   ZERO).
 - **Port-gone clear:** feed a port-absent signal and assert the stack clears. The port-presence check
   (`get_ports()`) must be **injectable** like `_message_source` so this is testable without hardware.
-  Also assert blackout-hold auto-release still works after the 2 s timeout is removed.
+  Include a defensive case where `get_ports()` returns a non-string entry (observed locally as `None`
+  after a killed virtual source) so the worker clears the stack instead of raising. Also assert
+  blackout-hold auto-release still works after the 2 s timeout is removed.
 - Controller LED mapping is a pure function of `(sidecar, pressed-set)` — testable.
 
 ### Acceptance (Phase 2)
