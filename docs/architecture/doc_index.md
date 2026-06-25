@@ -89,7 +89,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material RW-1 through RW-5, hardware-procedure, T7/T8 specs/proofs, and the old progress ledger. Historical evidence only. |
 | `docs/plans/active/soundswitch_roadmap_registry_reconciliation_spec.md` | UNROUTED / EXCLUDED SPEC | Explicitly outside the current implementation pass and not active because the registry does not list it. Do not execute it without fresh operator scope. |
 | `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |
-| `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | Active prompts only; SoundSwitch has one operator-presence T7d capture prompt. Obsolete SoundSwitch prompts were deleted. |
+| `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | Active prompts only; SoundSwitch has an operator-presence T7d capture prompt and a read-only remaining-software scoping prompt. Obsolete SoundSwitch prompts were deleted. |
 | `docs/plans/completed/govee_realtime_codex_spec.md` | PLAN / SPEC | **Untracked local file** — classify (completed vs awaiting-build) and commit or archive separately. |
 
 ## Archive / historical — evidence only
