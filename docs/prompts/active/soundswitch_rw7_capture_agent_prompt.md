@@ -113,42 +113,50 @@ coverage table; you cannot claim "3 identities / 2 BPM / 1 holdout" from ACCEPTE
 Tell the operator what is still missing after each accepted run.
 
 ## Run mechanics (drive the conductor, don't reimplement it)
-`<run_dir>` = `tools/ssfmt/captures/t7d/t7d_<scenario>_<run-stamp>`. For each repetition:
+Run everything from the repo root. Pick **one run-stamp per repetition** and reuse it for the
+dir name, both project hashes, and the `run-scenario` call so they all land in the same place —
+the conductor names the run dir `t7d_<scenario>_<run-stamp>`. Have the operator run the hash/copy
+commands in **one persistent terminal** so `$RUN_STAMP`/`$RUN_DIR` survive across steps. For each
+repetition:
 1. Preflight (above) → ping → WAIT until green.
-2. **Project before-hash (operator action — the conductor does NOT do this).** Ping and WAIT
-   for the operator to run, into the run dir:
+2. **Set the run-stamp + project before-hash (operator action — the conductor does NOT hash).**
+   Fix the stamp first, create the dir the conductor will use (its own `mkdir` is `exist_ok`, so
+   pre-creating is harmless), and hash the project into it:
 
    ```bash
+   RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
+   RUN_DIR="tools/ssfmt/captures/t7d/t7d_<scenario>_$RUN_STAMP"
+   mkdir -p "$RUN_DIR/logs"
    find "$HOME/Music/SoundSwitch/default.ssproj" -maxdepth 1 -type f \
-     -exec shasum -a 256 {} + | LC_ALL=C sort > "<run_dir>/project.before.sha256"
+     -exec shasum -a 256 {} + | LC_ALL=C sort > "$RUN_DIR/project.before.sha256"
    ```
-3. `python3 tools/t7d_capture_conductor.py run-scenario <name> --run-stamp "$(date +%Y%m%d_%H%M%S)" --run-stamp-epoch "$(date +%s)"`
-   (`--run-stamp` is **required**) — it pings the operator to start `tcpdump` and perform the
-   single action, then active-waits for: capture-start (pcap+session growing), playback through
-   `min_window_beats` while tcpdump runs + required markers, then artifact settle. Relay its
-   pings to the operator and wait with it. For **`correction`**, also pass a larger
-   `--window-timeout-s` (e.g. `900`) and warn the operator it usually takes several attempts to
-   induce the `arm-grace-late` / `-pending` / `-clear` sequence.
-4. **Project after-hash + AppLog copy (operator action — the conductor does NOT do this).**
-   Immediately after the window stops, ping and WAIT for:
+3. `python3 tools/t7d_capture_conductor.py run-scenario <scenario> --run-stamp "$RUN_STAMP" --run-stamp-epoch "$(date +%s)"`
+   (`--run-stamp` is **required** and must be the **same** `$RUN_STAMP` from step 2) — it pings
+   the operator to start `tcpdump` and perform the single action, then active-waits for:
+   capture-start (pcap+session growing), playback through `min_window_beats` while tcpdump runs +
+   required markers, artifact settle, and finally **classifies** (`ACCEPTED` / `INCOMPLETE` /
+   `FAIL`) via `classify_gate`. Relay its pings to the operator and wait with it. For
+   **`correction`**, also pass a larger `--window-timeout-s` (e.g. `900`) and warn the operator it
+   usually takes several attempts to induce the `arm-grace-late` / `-pending` / `-clear` sequence.
+   Treat its verdict as an **integrity** verdict only, **not** a phase contract — and note its
+   ACCEPTED does **not** yet prove project immutability (it hard-codes that check); step 5 does.
+4. **Project after-hash + AppLog copy (operator action — the conductor does NOT do this).** In the
+   same terminal, immediately after the window stops, ping and WAIT for:
 
    ```bash
    find "$HOME/Music/SoundSwitch/default.ssproj" -maxdepth 1 -type f \
-     -exec shasum -a 256 {} + | LC_ALL=C sort > "<run_dir>/project.after.sha256"
+     -exec shasum -a 256 {} + | LC_ALL=C sort > "$RUN_DIR/project.after.sha256"
    cp "$HOME/Library/Application Support/Onesixone/Soundswitch/Logs"/AppLog*.txt \
-     "<run_dir>/logs/"
+     "$RUN_DIR/logs/"
    ```
 
    Without these, `project.before`/`project.after` are missing (so `validate-scenario` fails
    closed) and the corpus has no AppLog to join identity offline.
-5. Let it **classify** (`ACCEPTED` / `INCOMPLETE` / `FAIL`) via `classify_gate`. Classification
-   is an **integrity** verdict only, **not** a phase-contract verdict — do not editorialize it
-   into "the contract is X."
-6. `validate-scenario <run_dir>` to re-confirm (it now actually verifies
-   `project.before == project.after` and fails closed if either is missing), then
-   `python3 tools/t7d_capture_conductor.py summarize-corpus` after each accepted run to report
-   remaining coverage. `summarize-corpus` takes **no path argument** — its default root is the
-   t7d capture dir; `--capture-root` if ever needed is a global flag placed *before* the
+5. `python3 tools/t7d_capture_conductor.py validate-scenario "$RUN_DIR"` for the real verdict (it
+   actually verifies `project.before == project.after` and fails closed if either is missing),
+   then `python3 tools/t7d_capture_conductor.py summarize-corpus` after each accepted run to
+   report remaining coverage. `summarize-corpus` takes **no path argument** — its default root is
+   the t7d capture dir; `--capture-root` if ever needed is a global flag placed *before* the
    subcommand.
 
 ## Fail-closed discipline (do not soften)
