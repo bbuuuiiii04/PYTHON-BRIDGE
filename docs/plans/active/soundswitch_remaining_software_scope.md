@@ -123,40 +123,54 @@ Not a numbered roadmap item; it's the "code/doc drift you can prove" bucket.
 7. **Invariants.** Docs-only rule (AGENTS.md §6): no runtime change.
 8. **Owner.** Claude / docs.
 
-### Static-override interaction model — momentary only (open question, was missed)
+### Static-override toggle mode — REQUIRED, not modeled (was missed in prior scope)
 
 1. **Plain meaning.** Static looks work, but the bridge-native player only does
-   *momentary/hold* — a static is on while the controller note is held, and
-   releases on note-off. It does **not** do *toggle* (tap-on, walk away, tap-off).
+   *momentary/hold* — a static is on while the controller note is held and
+   releases on note-off. The operator's rig uses **mixed** pads: some momentary
+   (flash), some **toggle** (tap-on, walk away, tap-off). The bridge-native path
+   does not reproduce the toggle ones, so this is **confirmed remaining software
+   work** (operator confirmed 2026-06-24), not an optional boundary.
 2. **Current state — `confirmed`.** `soundswitch_midi_input.py:214-256`: note-on
    holds the slot, **repeated note-on is idempotent** (no toggle-off), note-off
-   releases, velocity-0 note-on → note-off, 2 s stale-hold auto-clear. The export
-   binding (`PackMidiBinding`, `soundswitch_pack_loader.py:40-51`) carries only
-   `target_kind` + `target_slot` — **no toggle/momentary field**; the exporter does
-   not record a pad's toggle setting. Tested:
+   releases, velocity-0 note-on → note-off. The export binding (`PackMidiBinding`,
+   `soundswitch_pack_loader.py:40-51`) carries only `target_kind` + `target_slot`
+   — **no toggle/momentary field**. Tested momentary-only:
    `tests/test_soundswitch_midi_input.py` (`test_repeated_note_on_idempotent`,
-   `test_note_off_releases_current`), `tests/test_static_looks.py`. Consistent with
-   the RE finding that SoundSwitch's own `EnableStaticLookOverride` is momentary at
-   the engine level (`soundswitch_ghidra_addendum.md:85`) — a different layer from
-   the controller pad's toggle/momentary setting.
-3. **Scope impact.** Only bites in the bridge-native direct-DMX path (default-off,
-   gated behind T7d + hardware). In the current live OS2L path SoundSwitch handles
-   the pad mode, so toggle works today. **Not listed in the roadmap** as remaining
-   work or as a stated limitation — a genuine gap in prior scoping, surfaced
-   2026-06-24.
-4. **Doable now or blocked.** The *decision* is doable now (operator input). The
-   implementation, if needed, is doable now too (no hardware/T7d dependency).
-5. **Decision needed (operator).** Do any live static-look pads use **toggle**
-   mode? **If yes** → the bridge-native path needs a toggle latch in the input
-   adapter + a toggle flag carried through the export binding/spec (Effort S-M,
-   software). **If no** → momentary-only is correct; just record it as an accepted
-   boundary in `soundswitch_output.md` / the roadmap (Effort S, docs).
-6. **Effort S (decision/docs) → S-M (if toggle latch needed). Risk low** until the
-   direct-DMX path is enabled.
-7. **Invariants.** Any toggle latch must keep safe-zero on stale/degraded/swap
-   (roadmap invariants 8, 11) — a latched toggle must still release on input
-   degradation, pack reload, panic, and shutdown like the momentary hold does.
-8. **Owner.** Operator decision → Claude (doc the boundary) or Codex (toggle latch).
+   `test_note_off_releases_current`), `tests/test_static_looks.py`.
+3. **Scope impact / urgency.** Only bites on the bridge-native direct-DMX path
+   (default-off, gated behind T7d + hardware). In the current live OS2L path
+   SoundSwitch handles the pad mode, so toggle works **today**. So this is a
+   prerequisite for *trusting direct-DMX live*, not for anything running now — it
+   sequences with the direct-DMX cutover, not before the cleanups.
+4. **Two real design problems (this is not just a flag):**
+   - **(a) Where does the bridge learn which pads are toggle?** `assumed`: the RE
+     does **not** document a controller pad-mode field in the saved project (only
+     the *engine-level* override is known-momentary, `soundswitch_ghidra_addendum.md:85`).
+     So the exporter likely **cannot auto-extract** toggle-vs-momentary. Cheap path:
+     operator declares toggle slot numbers in bridge config (a small list);
+     expensive path: RE the project's pad-mode bytes to keep export automatic.
+   - **(b) The 2 s stale-hold timeout collides with toggle.** `confirmed`:
+     `static_held_at` is set on note-on and **never refreshed**
+     (`soundswitch_midi_input.py:106-115`), so a hold auto-clears after 2 s as
+     `stale_hold`. A toggle pad gets exactly **one** note-on, so it would
+     auto-release ~2 s after being toggled on — fatal to toggle. A toggle binding
+     needs an indefinite hold (no inactivity auto-release) that **still** clears on
+     genuine safety events (worker death, stop, panic, pack reload, shutdown —
+     `_clear_held`, which already covers toggles). *(Related unknown: whether even
+     a physically-held momentary pad survives past 2 s depends on whether the DDJ
+     repeats note-ons — worth confirming during the same change.)*
+5. **Doable now or blocked.** Doable now — no T7d/hardware dependency. Best done
+   as part of preparing the direct-DMX path for live trust.
+6. **Smallest bounded deliverable.** A Codex spec: add `interaction:
+   momentary|toggle` to `PackMidiBinding` (default `momentary`, source =
+   config-declared toggle-slot list unless RE proves the project field); apply a
+   toggle state machine in `_process_note_on` (flip held/clear) that exempts toggle
+   bindings from the inactivity stale-timeout but not from `_clear_held`; tests for
+   flip-on/flip-off, ignore-note-off-for-toggle, and release-on-degrade/reload/panic.
+7. **Effort S-M. Risk: live-safety** — a latched-on static must still safe-zero on
+   input degradation, pack reload, panic, and shutdown (roadmap invariants 8, 11).
+8. **Owner.** Claude (this scope + the Codex spec) → Codex (implementation).
 
 ### Item 5 (software slice) — rerun the closeout gates
 
@@ -260,6 +274,9 @@ Not a numbered roadmap item; it's the "code/doc drift you can prove" bucket.
    bump stamps. Bundle with #1.
 3. Resolve any BLOCKER/HIGH review finding via a separate reviewed change.
 4. **Item 5 (software slice)** — re-run the gate block (green now).
+5. **Static-override toggle mode** — doable now, no gate, but only *needed* before
+   the direct-DMX path is trusted live; sequence it with the direct-DMX cutover,
+   not ahead of the cleanups. Next step: a Codex spec (see the item above).
 
 **Blocked-software (gate named):**
 5. **Item 3** — T7d derivation/oracle PASS. *Gate:* operator captures of the four
