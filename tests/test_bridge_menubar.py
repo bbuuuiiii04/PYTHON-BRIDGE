@@ -167,6 +167,47 @@ class BridgeMenubarTests(unittest.TestCase):
             handler(menu)
             self.assertEqual(append_command.call_count, 2)
 
+    def test_auto_set_soundswitch_pack_retries_one_failed_auto_enable(self) -> None:
+        # U2: SS can drop OS2L before releasing the FTDI port. One retry covers the
+        # transient busy-port handoff without per-refresh command spam.
+        bridge_menubar = self._import_module()
+        menu = Mock(
+            _snapshot={
+                "soundswitch": {"connected": False},
+                "soundswitch_pack": {"available": True, "enabled": False},
+            },
+            _status="on",
+            _pack_auto_pending_enabled=None,
+            _pack_auto_retried_enabled=None,
+        )
+        handler = bridge_menubar.BridgeMenuBar._auto_set_soundswitch_pack
+        with patch.object(bridge_menubar, "append_command") as append_command:
+            handler(menu)
+            menu._snapshot = {
+                "soundswitch": {"connected": False},
+                "soundswitch_pack": {
+                    "available": True,
+                    "enabled": False,
+                    "reason": "pack_start_failed",
+                },
+            }
+            handler(menu)
+            handler(menu)
+
+        self.assertEqual(
+            append_command.call_args_list,
+            [
+                unittest.mock.call(
+                    {"cmd": "set_soundswitch_pack", "action": "enable", "enabled": True}
+                ),
+                unittest.mock.call(
+                    {"cmd": "set_soundswitch_pack", "action": "enable", "enabled": True}
+                ),
+            ],
+        )
+        self.assertTrue(menu._pack_auto_pending_enabled)
+        self.assertTrue(menu._pack_auto_retried_enabled)
+
     def test_pack_export_status_line_surfaces_failure_reason(self) -> None:
         bridge_menubar = self._import_module()
         common = dict(stale=False, export_phase="idle", export_state="idle",

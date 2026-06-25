@@ -691,6 +691,7 @@ class BridgeMenuBar(NSObject):
         self._detect_at = 0.0
         self._detect_generation = 0
         self._pack_auto_pending_enabled = None
+        self._pack_auto_retried_enabled = None
         self.status_rows = []
         for _ in range(9):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
@@ -889,12 +890,24 @@ class BridgeMenuBar(NSObject):
             snap = self._snapshot if isinstance(self._snapshot, dict) else {}
             if self._status == "on" and snap and not snap.get("stale"):
                 self._pack_auto_pending_enabled = None
+                self._pack_auto_retried_enabled = None
             return
         target = command["enabled"]
         if target == self._pack_auto_pending_enabled:
+            snap = self._snapshot if isinstance(self._snapshot, dict) else {}
+            pack = snap.get("soundswitch_pack", {}) if isinstance(snap, dict) else {}
+            if (
+                target is True
+                and getattr(self, "_pack_auto_retried_enabled", None) != target
+                and isinstance(pack, dict)
+                and pack.get("reason") == "pack_start_failed"
+            ):
+                append_command(command)
+                self._pack_auto_retried_enabled = target
             return
         append_command(command)
         self._pack_auto_pending_enabled = target
+        self._pack_auto_retried_enabled = None
 
     def _maybe_detect_export_state(self):
         if self._export_in_progress or self._detect_in_progress:
