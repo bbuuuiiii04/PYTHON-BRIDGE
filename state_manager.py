@@ -394,7 +394,7 @@ class StateManager:
         # Push-thread-owned driver trackers (NOT part of the swappable bundle).
         self._pack_last_load_gen: tuple[int, int] | None = None   # (active, load_gen)
         self._pack_last_elapsed_ms: int | None = None
-        self._pack_last_static_slot: int | None = None
+        self._pack_last_static_layers: tuple[Any, ...] = ()
         self._pack_last_mail_drop_count: int = 0      # RW-4: monotonic mailbox-drop baseline
         self._pack_input_degraded_latched: bool = False  # RW-4: unified input-degradation latch
         self._pack_play_hold_key: tuple[int, int, int, str] | None = None  # play identity (active, load_gen, scripted_id, norm_ssid)
@@ -3288,18 +3288,17 @@ class StateManager:
         mixed old/new runtime. All blocking work (load_pack, serial open/close,
         old-sender zero_and_stop) must already be done by the caller.
 
-        RW-4: a swapped-in bundle always carries a FRESH player (boots
-        _active_static_slot=None) and a fresh input group (boots held=None), so the
-        push loop's last-pushed static-slot tracker is reset here. Otherwise a slot
-        carried from the old player could equal the new snapshot's slot, the
-        `slot != _pack_last_static_slot` guard would skip hold_static, and the
-        new player would render the scripted base instead of the static. A single
-        None reference assignment is atomic under the GIL; the push loop at worst reads
-        it one tick stale and re-syncs. The degradation latch is deliberately NOT reset
-        (it must survive a swap; see H10).
+        RW-4: a swapped-in bundle always carries a FRESH player (boots with no
+        static layers) and a fresh input group (boots with no held layers), so the
+        push loop's last-pushed layer tracker is reset here. Otherwise a layer tuple
+        carried from the old player could equal the new snapshot's tuple and skip
+        set_static_layers on the fresh player. A single reference assignment is
+        atomic under the GIL; the push loop at worst reads it one tick stale and
+        re-syncs. The degradation latch is deliberately NOT reset (it must survive
+        a swap; see H10).
         """
         self._pack_runtime = runtime or DISABLED_PACK_RUNTIME
-        self._pack_last_static_slot = None
+        self._pack_last_static_layers = ()
         self._pack_frame_count = 0
         self._publish_pack_status(
             runtime=self._pack_runtime,
@@ -3372,7 +3371,7 @@ class StateManager:
         now = time.monotonic() if now is None else now
         player, backend, midi_input = rt.player, rt.backend, rt.midi_input
         input_healthy = True
-        slot = None
+        layers: tuple[Any, ...] = ()
         blackout = False
         transport = None
         try:
@@ -3393,46 +3392,36 @@ class StateManager:
             #    empty-alias group is healthy by REAL construction (worker_alive=True,
             #    error=None; soundswitch_midi_input.py:455), not by a default.
             #
-            #    UNIFIED degradation latch: ANY degradation that can strand stale held
-            #    state — worker not alive (incl. the source-closed finally path that leaves
-            #    a held slot with worker_alive=False), ANY error, or a new mailbox drop
-            #    (possible missed note-off) — latches overlay distrust. The latch clears
-            #    ONLY on a clean, quiet, healthy snapshot (no held static, no blackout), so
-            #    a stale slot cannot resurface on mere worker recovery; a later FRESH press
-            #    is honored. The latch SURVIVES a runtime swap (set_pack_runtime stays a
-            #    pure atomic assignment); a fresh group's no-holds tick is itself a clean
-            #    tick that clears it.
+            #    UNIFIED degradation latch: worker death / input-port-gone latches
+            #    overlay distrust. Transient error strings and mailbox-drop counters do
+            #    not clear a still-live layer stack. The latch clears ONLY on a clean,
+            #    quiet, healthy snapshot (worker alive, no error, no held layers, no
+            #    blackout), so a stale layer cannot resurface on mere worker recovery.
             if midi_input is not None:
                 s = midi_input.snapshot()
                 worker_alive = bool(s.worker_alive)
                 err = s.error
                 drops = int(s.mail_drop_count)
-                held_slot = s.held_static_slot
+                held_layers = s.held_layers
+                if type(held_layers) is not tuple:
+                    raise TypeError("held_layers must be an immutable tuple")
                 blackout_held = bool(s.blackout_held)
-                # ponytail: mail_drop_count is inert in the current adapter (never
-                # incremented; the _mailbox deque is unused). The drop term is a
-                # forward-compat hook with falsifiable tests (H4/H9); drop it only if the
-                # mailbox is provably never wired.
-                new_drop = drops > self._pack_last_mail_drop_count
                 self._pack_last_mail_drop_count = drops
-                if (not worker_alive) or (err is not None) or new_drop:
+                if not worker_alive:
                     self._pack_input_degraded_latched = True
                 if (
                     self._pack_input_degraded_latched
                     and worker_alive and err is None
-                    and held_slot is None and not blackout_held
+                    and not held_layers and not blackout_held
                 ):
                     self._pack_input_degraded_latched = False
                 input_healthy = not self._pack_input_degraded_latched
                 blackout = blackout_held if input_healthy else False
-                slot = held_slot if input_healthy else None
+                layers = held_layers if input_healthy else ()
                 player.set_masks(blackout=blackout, emergency=False)
-                if slot != self._pack_last_static_slot:
-                    if slot is not None:
-                        player.hold_static(int(slot))
-                    elif self._pack_last_static_slot is not None:
-                        player.release_static(int(self._pack_last_static_slot))
-                    self._pack_last_static_slot = slot
+                if layers != self._pack_last_static_layers:
+                    player.set_static_layers(layers)
+                    self._pack_last_static_layers = layers
 
             # 2. Derive the happy-path gate (fail-conservative; uncertain ⇒ ZERO base).
             load_key = (active, int(getattr(d, "load_gen", 0)))
@@ -3512,7 +3501,7 @@ class StateManager:
                 runtime=rt,
                 scripted_active=transport is not None,
                 input_degraded=midi_input is not None and not input_healthy,
-                static_held=slot is not None,
+                static_held=bool(layers),
                 blackout=bool(blackout),
                 autoloop_phase_blocked=(
                     rt.active and self._os.lighting_mode == "autoloop"

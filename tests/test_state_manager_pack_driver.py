@@ -22,6 +22,7 @@ from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot
 from rb_ss_bridge_v2.soundswitch_laser_player import (
     ZERO_FRAME, LaserPackPlayer,
 )
+from rb_ss_bridge_v2.soundswitch_midi_input import LayerEntry
 from rb_ss_bridge_v2.soundswitch_pack_loader import (
     LoadedAttribute, LoadedDocument, LoadedPack, LoadedStaticLook, LoadedScalarValue,
     LoadedTimelineEvent,
@@ -61,6 +62,10 @@ def _pack():
         static_looks=MappingProxyType({8: _look(8, (200,) + (0,) * 18)}))
 
 
+def _layer_tuple(slot: int) -> tuple[LayerEntry, ...]:
+    return (LayerEntry(slot, "toggle", 1),)
+
+
 class _FakeBackend:
     def __init__(self):
         self.frames = []
@@ -82,12 +87,14 @@ class _FakeBackend:
 
 
 class _FakeInput:
-    # The driver reads .blackout_held/.held_static_slot plus RW-4 health fields
+    # The driver reads .blackout_held/.held_layers plus RW-4 health fields
     # (.worker_alive/.error/.mail_drop_count) from the snapshot.
-    def __init__(self, *, held_static_slot=None, blackout_held=False,
+    def __init__(self, *, held_layer_slot=None, held_layers=None, blackout_held=False,
                  worker_alive=True, error=None, mail_drop_count=0):
+        if held_layers is None:
+            held_layers = (() if held_layer_slot is None else _layer_tuple(int(held_layer_slot)))
         self._snap = SimpleNamespace(
-            held_static_slot=held_static_slot, blackout_held=blackout_held,
+            held_layers=held_layers, blackout_held=blackout_held,
             worker_alive=worker_alive, error=error, mail_drop_count=mail_drop_count)
         self.calls = 0
 
@@ -171,7 +178,7 @@ class PackDriverTests(unittest.TestCase):
     # D3
     def test_no_track_with_held_static_submits_static(self):
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8)
+        inp = _FakeInput(held_layer_slot=8)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid="", playing=False, snap=FRESH)
         sm._drive_pack_output()
@@ -260,7 +267,7 @@ class PackDriverTests(unittest.TestCase):
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
         sm._drive_pack_output(now=10.0)
-        inp._snap.held_static_slot = 8
+        inp._snap.held_layers = _layer_tuple(8)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=False, was_playing=True)
         sm._drive_pack_output(now=10.1)
         self.assertEqual(be.frames[-1][0], 200)
@@ -307,7 +314,7 @@ class PackDriverTests(unittest.TestCase):
                 _set(sm, ssid=SSID, elapsed_ms=50, playing=True, load_gen=1)
                 sm._drive_pack_output(now=10.0)
                 if held_static:
-                    inp._snap.held_static_slot = 8
+                    inp._snap.held_layers = _layer_tuple(8)
                 _set(sm, ssid=SSID, elapsed_ms=50, playing=False,
                      was_playing=True, load_gen=2)
                 sm._drive_pack_output(now=10.1)
@@ -388,7 +395,7 @@ class PackDriverTests(unittest.TestCase):
     # RW-3 R5
     def test_unscripted_in_pack_with_held_static_shows_static(self):
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8)
+        inp = _FakeInput(held_layer_slot=8)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, playing=True, scripted_id=0)
         sm._drive_pack_output()
@@ -425,7 +432,7 @@ class PackDriverTests(unittest.TestCase):
     # RW-3 R10
     def test_valid_uuid_missing_from_pack_with_held_static(self):
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8)
+        inp = _FakeInput(held_layer_slot=8)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         # Pre-RW-3 the missing scripted selection suppressed static; the mode gate lets
         # the held authoritative overlay stand over the unowned ZERO base (A.6/C.5).
@@ -457,7 +464,7 @@ class PackDriverTests(unittest.TestCase):
     # D6
     def test_blackout_held_with_static_is_zero(self):
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8, blackout_held=True)
+        inp = _FakeInput(held_layer_slot=8, blackout_held=True)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid="", playing=False, snap=FRESH)
         sm._drive_pack_output()
@@ -501,7 +508,7 @@ class PackDriverTests(unittest.TestCase):
     # auto-releases it if the operator lets go.
     def test_stale_authority_with_held_static_shows_static(self):
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8)
+        inp = _FakeInput(held_layer_slot=8)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True, snap=STALE)
         sm._drive_pack_output()
@@ -509,7 +516,7 @@ class PackDriverTests(unittest.TestCase):
 
     def test_track_change_with_held_static_shows_static(self):
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8)
+        inp = _FakeInput(held_layer_slot=8)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True, load_gen=1, snap=FRESH)
         sm._drive_pack_output()
@@ -521,7 +528,7 @@ class PackDriverTests(unittest.TestCase):
         # Pack disabled (player/backend cleared) -> driver no-ops -> no DMX even with
         # a (previously) held static. (Shutdown ZEROs via the frame sender at __main__.)
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8)
+        inp = _FakeInput(held_layer_slot=8)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         sm.set_pack_runtime(PackRuntime())  # simulate disable/rollback (inactive)
         _set(sm, ssid="", playing=False, snap=FRESH)
@@ -590,7 +597,7 @@ class PackDriverInputHealthTests(unittest.TestCase):
         be = _FakeBackend()
         # Models source closure, which can leave a held slot reported. Exception death
         # clears held state in _clear_held and is not the fail-open gap.
-        inp = _FakeInput(held_static_slot=8, worker_alive=False, error=None)
+        inp = _FakeInput(held_layer_slot=8, worker_alive=False, error=None)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
         sm._drive_pack_output()
@@ -614,7 +621,7 @@ class PackDriverInputHealthTests(unittest.TestCase):
             _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
             sm._drive_pack_output()
             self.assertEqual(be.frames[-1][0], 9)
-            self.assertIsNone(sm._pack_last_static_slot)
+            self.assertEqual(sm._pack_last_static_layers, ())
 
         with self.subTest("midi input none"):
             be = _FakeBackend()
@@ -624,46 +631,45 @@ class PackDriverInputHealthTests(unittest.TestCase):
             self.assertEqual(be.frames[-1][0], 9)
 
     # H4
-    def test_new_mailbox_drop_latches_overlay_drop(self):
+    def test_new_mailbox_drop_does_not_latch_overlay_drop(self):
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8, mail_drop_count=0)
+        inp = _FakeInput(held_layer_slot=8, mail_drop_count=0)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 200)
         inp._snap.mail_drop_count = 1
         sm._drive_pack_output()
-        self.assertEqual(be.frames[-1][0], 9)
+        self.assertEqual(be.frames[-1][0], 200)
         sm._drive_pack_output()
-        self.assertEqual(be.frames[-1][0], 9)
+        self.assertEqual(be.frames[-1][0], 200)
 
     # H5
-    def test_stale_hold_drops_blackout(self):
+    def test_stale_error_string_does_not_release_blackout(self):
         be = _FakeBackend()
         inp = _FakeInput(blackout_held=True, error="stale_hold", worker_alive=True)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
         sm._drive_pack_output()
-        self.assertEqual(be.frames[-1][0], 9)
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
 
     # H6
-    def test_conflicting_holds_drops_overlay(self):
+    def test_transient_error_string_does_not_clear_layers(self):
         be = _FakeBackend()
         inp = _FakeInput(
-            blackout_held=True,
-            error="conflicting_static_holds",
-            held_static_slot=None,
+            error="input_error",
+            held_layer_slot=8,
             worker_alive=True,
         )
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
         sm._drive_pack_output()
-        self.assertEqual(be.frames[-1][0], 9)
+        self.assertEqual(be.frames[-1][0], 200)
 
     # H7
     def test_worker_recovery_requires_clean_release_before_rehonor(self):
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8, worker_alive=False, error=None)
+        inp = _FakeInput(held_layer_slot=8, worker_alive=False, error=None)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
 
@@ -676,19 +682,19 @@ class PackDriverInputHealthTests(unittest.TestCase):
         self.assertEqual(be.frames[-1][0], 9)
         self.assertTrue(sm._pack_input_degraded_latched)
 
-        inp._snap.held_static_slot = None
+        inp._snap.held_layers = ()
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 9)
         self.assertFalse(sm._pack_input_degraded_latched)
 
-        inp._snap.held_static_slot = 8
+        inp._snap.held_layers = _layer_tuple(8)
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 200)
 
     # H8
     def test_reload_no_false_drop_no_latch(self):
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8, mail_drop_count=0)
+        inp = _FakeInput(held_layer_slot=8, mail_drop_count=0)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         sm._pack_last_mail_drop_count = 5
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
@@ -697,9 +703,9 @@ class PackDriverInputHealthTests(unittest.TestCase):
         self.assertFalse(sm._pack_input_degraded_latched)
 
     # H9
-    def test_mailbox_drop_latch_recovers_after_clean_tick(self):
+    def test_mailbox_drop_does_not_drop_live_layers(self):
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8, mail_drop_count=0)
+        inp = _FakeInput(held_layer_slot=8, mail_drop_count=0)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
 
@@ -707,15 +713,15 @@ class PackDriverInputHealthTests(unittest.TestCase):
         self.assertEqual(be.frames[-1][0], 200)
         inp._snap.mail_drop_count = 1
         sm._drive_pack_output()
-        self.assertEqual(be.frames[-1][0], 9)
-        self.assertTrue(sm._pack_input_degraded_latched)
+        self.assertEqual(be.frames[-1][0], 200)
+        self.assertFalse(sm._pack_input_degraded_latched)
 
-        inp._snap.held_static_slot = None
+        inp._snap.held_layers = ()
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 9)
         self.assertFalse(sm._pack_input_degraded_latched)
 
-        inp._snap.held_static_slot = 8
+        inp._snap.held_layers = _layer_tuple(8)
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 200)
 
@@ -727,7 +733,7 @@ class PackDriverInputHealthTests(unittest.TestCase):
         sm._pack_last_mail_drop_count = 5
 
         be = _FakeBackend()
-        inp = _FakeInput(held_static_slot=8, mail_drop_count=0)
+        inp = _FakeInput(held_layer_slot=8, mail_drop_count=0)
         sm.set_pack_runtime(PackRuntime(
             enabled=True,
             reason="pack",
@@ -741,33 +747,33 @@ class PackDriverInputHealthTests(unittest.TestCase):
         self.assertEqual(be.frames[-1][0], 9)
         self.assertTrue(sm._pack_input_degraded_latched)
 
-        inp._snap.held_static_slot = None
+        inp._snap.held_layers = ()
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 9)
         self.assertFalse(sm._pack_input_degraded_latched)
 
-        inp._snap.held_static_slot = 8
+        inp._snap.held_layers = _layer_tuple(8)
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 200)
 
-    # H11 — regression: a static slot carried in _pack_last_static_slot across a
-    # runtime swap must NOT suppress hold_static on the fresh player when the new
-    # snapshot reports the same slot while healthy.
+    # H11 — regression: static layers carried in _pack_last_static_layers across a
+    # runtime swap must NOT suppress set_static_layers on the fresh player when the
+    # new snapshot reports the same tuple while healthy.
     def test_runtime_swap_resyncs_carried_static_slot(self):
         old_be = _FakeBackend()
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=old_be,
-                      midi_input=_FakeInput(held_static_slot=8))
+                      midi_input=_FakeInput(held_layer_slot=8))
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
         sm._drive_pack_output()
         self.assertEqual(old_be.frames[-1][0], 200)          # old player honors static 8
-        self.assertEqual(sm._pack_last_static_slot, 8)
+        self.assertEqual(tuple(layer.slot for layer in sm._pack_last_static_layers), (8,))
         self.assertFalse(sm._pack_input_degraded_latched)    # healthy swap, not latched
 
         new_be = _FakeBackend()
         sm.set_pack_runtime(PackRuntime(
             enabled=True, reason="pack", player=LaserPackPlayer(_pack()),
-            midi_input=_FakeInput(held_static_slot=8), backend=new_be))
-        self.assertIsNone(sm._pack_last_static_slot)          # tracker reset on swap
+            midi_input=_FakeInput(held_layer_slot=8), backend=new_be))
+        self.assertEqual(sm._pack_last_static_layers, ())     # tracker reset on swap
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
         sm._drive_pack_output()
         self.assertEqual(new_be.frames[-1][0], 200)           # fresh player honors static 8
@@ -829,7 +835,7 @@ class PackOperationalStatusTests(unittest.TestCase):
                 },
             ),
             (
-                _FakeInput(held_static_slot=8),
+                _FakeInput(held_layer_slot=8),
                 dict(ssid="", playing=False),
                 "static_held",
                 {"static_held": True, "software_zero_frame": False},

@@ -9,6 +9,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.soundswitch_midi_input import (
+    LayerEntry,
     MidiInputSnapshot,
     PackMidiBinding,
     SoundSwitchMidiInputAdapter,
@@ -106,6 +107,14 @@ def _note_on_vel0(adapter: SoundSwitchMidiInputAdapter,
     adapter._feed_raw_message(status, binding.data_byte, 0)
 
 
+def _slots(adapter: SoundSwitchMidiInputAdapter) -> tuple[int, ...]:
+    return tuple(layer.slot for layer in adapter.snapshot().held_layers)
+
+
+def _kinds(adapter: SoundSwitchMidiInputAdapter) -> tuple[str, ...]:
+    return tuple(layer.kind for layer in adapter.snapshot().held_layers)
+
+
 # ---------------------------------------------------------------------------
 # Real MIDI source (production port factory)
 # ---------------------------------------------------------------------------
@@ -144,7 +153,7 @@ class TestRealMidiSource(unittest.TestCase):
 
     def test_real_source_parses_python_rtmidi_messages(self):
         fake, inst = self._fake_rtmidi(
-            ["IAC Driver Bus 1", "DDJ-800 Port"],
+            ["IAC Driver Bus 1", "DDJ-800"],
             [([0x99, 8, 100], 0.0)],
         )
         with mock.patch.dict(sys.modules, {"rtmidi": fake}):
@@ -152,7 +161,7 @@ class TestRealMidiSource(unittest.TestCase):
             self.assertEqual(next(gen), (0x99, 8, 100))
             self.assertIsNone(next(gen))  # empty queue -> poll tick, lets worker stop
             gen.close()
-        self.assertEqual(inst.opened, 1)  # substring matched "DDJ-800 Port" at index 1
+        self.assertEqual(inst.opened, 1)
         self.assertTrue(inst.closed)
         self.assertEqual(inst.ignored, (True, True, True))
 
@@ -167,10 +176,10 @@ class TestRealMidiSource(unittest.TestCase):
             gen.close()
         self.assertEqual(inst.opened, 1)
 
-    def test_real_source_rejects_ambiguous_substring_match(self):
+    def test_real_source_rejects_substring_only_match(self):
         fake, _ = self._fake_rtmidi(["DDJ-800 Port A", "DDJ-800 Port B"], [])
         with mock.patch.dict(sys.modules, {"rtmidi": fake}):
-            with self.assertRaises(OSError):
+            with self.assertRaises(Exception):
                 next(SoundSwitchMidiInputAdapter._make_real_source("DDJ-800")())
 
     def test_real_source_skips_short_non_note_messages(self):
@@ -187,8 +196,11 @@ class TestRealMidiSource(unittest.TestCase):
     def test_real_source_raises_when_port_absent(self):
         fake, _ = self._fake_rtmidi(["IAC Driver Bus 1"], [])
         with mock.patch.dict(sys.modules, {"rtmidi": fake}):
-            with self.assertRaises(OSError):
+            with self.assertRaises(Exception):
                 next(SoundSwitchMidiInputAdapter._make_real_source("DDJ-800")())
+
+    def test_non_string_port_entry_counts_absent(self):
+        self.assertFalse(SoundSwitchMidiInputAdapter._port_present([None], "DDJ-800"))
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +211,7 @@ class TestSnapshotInitial(unittest.TestCase):
     def test_initial_state(self):
         a = _adapter(_SLOT8)
         s = a.snapshot()
-        self.assertIsNone(s.held_static_slot)
+        self.assertEqual(s.held_layers, ())
         self.assertFalse(s.blackout_held)
         self.assertFalse(s.worker_alive)
         self.assertEqual(s.mail_drop_count, 0)
@@ -211,7 +223,7 @@ class TestSnapshotImmutable(unittest.TestCase):
         s = a.snapshot()
         self.assertIsInstance(s, MidiInputSnapshot)
         with self.assertRaises(Exception):
-            s.held_static_slot = 99  # type: ignore[misc]
+            s.held_layers = ()  # type: ignore[misc]
 
 
 class TestStartupReadiness(unittest.TestCase):
@@ -245,14 +257,14 @@ class TestNoteOnVelocityZero(unittest.TestCase):
     def test_vel0_treated_as_note_off(self):
         a = _adapter(_SLOT8)
         _note_on(a, _SLOT8)                 # select
-        self.assertEqual(a.snapshot().held_static_slot, 8)
+        self.assertEqual(_slots(a), (8,))
         _note_on_vel0(a, _SLOT8)            # must behave as note-off
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), ())
 
     def test_vel0_without_prior_select_is_noop(self):
         a = _adapter(_SLOT8)
         _note_on_vel0(a, _SLOT8)
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), ())
 
 
 # ---------------------------------------------------------------------------
@@ -263,32 +275,33 @@ class TestStaticOverride(unittest.TestCase):
     def test_note_on_selects_slot(self):
         a = _adapter(_SLOT8)
         _note_on(a, _SLOT8)
-        self.assertEqual(a.snapshot().held_static_slot, 8)
+        self.assertEqual(_slots(a), (8,))
 
     def test_note_off_releases_current(self):
         a = _adapter(_SLOT8)
         _note_on(a, _SLOT8)
         _note_off(a, _SLOT8)
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), ())
 
-    def test_repeated_note_on_idempotent(self):
+    def test_repeated_press_note_on_stacks(self):
         a = _adapter(_SLOT8)
         _note_on(a, _SLOT8)
         _note_on(a, _SLOT8)
         _note_on(a, _SLOT8)
-        self.assertEqual(a.snapshot().held_static_slot, 8)
+        self.assertEqual(_slots(a), (8, 8, 8))
+        self.assertEqual(_kinds(a), ("press", "press", "press"))
 
     def test_note_off_noop_when_not_held(self):
         a = _adapter(_SLOT8)
         _note_off(a, _SLOT8)
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), ())
 
-    def test_slot17_replaces_slot8(self):
+    def test_slot17_layers_over_slot8(self):
         a = _adapter(_SLOT8, _SLOT17)
         _note_on(a, _SLOT8)
-        self.assertEqual(a.snapshot().held_static_slot, 8)
+        self.assertEqual(_slots(a), (8,))
         _note_on(a, _SLOT17)
-        self.assertEqual(a.snapshot().held_static_slot, 17)
+        self.assertEqual(_slots(a), (8, 17))
 
     def test_release_old_slot_does_not_clear_new(self):
         """Adversarial target #1: slot 8 → slot 17 → release 8 must leave slot 17."""
@@ -296,51 +309,51 @@ class TestStaticOverride(unittest.TestCase):
         _note_on(a, _SLOT8)
         _note_on(a, _SLOT17)
         _note_off(a, _SLOT8)              # release the old (non-current) slot
-        self.assertEqual(a.snapshot().held_static_slot, 17)
+        self.assertEqual(_slots(a), (17,))
 
-    def test_release_slot17_after_replacing_slot8(self):
-        """Correct note-off for the new slot clears it."""
+    def test_release_slot17_after_layering_slot8_reveals_slot8(self):
+        """Correct note-off for the top slot reveals the layer underneath."""
         a = _adapter(_SLOT8, _SLOT17)
         _note_on(a, _SLOT8)
         _note_on(a, _SLOT17)
         _note_off(a, _SLOT17)
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), (8,))
 
     def test_toggle_note_on_latches_and_same_note_unlatches(self):
         a = _adapter(_TOGGLE8)
         _note_on(a, _TOGGLE8)
-        self.assertEqual(a.snapshot().held_static_slot, 8)
+        self.assertEqual(_slots(a), (8,))
         _note_on(a, _TOGGLE8)
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), ())
 
     def test_toggle_note_off_and_velocity_zero_do_not_unlatch(self):
         a = _adapter(_TOGGLE8)
         _note_on(a, _TOGGLE8)
         _note_off(a, _TOGGLE8)
-        self.assertEqual(a.snapshot().held_static_slot, 8)
+        self.assertEqual(_slots(a), (8,))
         _note_on_vel0(a, _TOGGLE8)
-        self.assertEqual(a.snapshot().held_static_slot, 8)
+        self.assertEqual(_slots(a), (8,))
 
     def test_toggle_is_exempt_from_stale_timeout(self):
         a = SoundSwitchMidiInputAdapter([_TOGGLE8], stale_timeout_ms=1)
         _note_on(a, _TOGGLE8)
         with mock.patch("rb_ss_bridge_v2.soundswitch_midi_input.time.monotonic",
                         return_value=time.monotonic() + 10):
-            self.assertEqual(a.snapshot().held_static_slot, 8)
+            self.assertEqual(_slots(a), (8,))
 
-    def test_different_toggle_slot_replaces_current(self):
+    def test_different_toggle_slot_layers_on_top(self):
         a = _adapter(_TOGGLE8, _TOGGLE17)
         _note_on(a, _TOGGLE8)
         _note_on(a, _TOGGLE17)
-        self.assertEqual(a.snapshot().held_static_slot, 17)
+        self.assertEqual(_slots(a), (8, 17))
 
-    def test_press_replaces_toggle_and_press_release_clears(self):
+    def test_press_over_toggle_reverts_to_toggle_on_release(self):
         a = _adapter(_TOGGLE8, _SLOT17)
         _note_on(a, _TOGGLE8)
         _note_on(a, _SLOT17)
-        self.assertEqual(a.snapshot().held_static_slot, 17)
+        self.assertEqual(_slots(a), (8, 17))
         _note_off(a, _SLOT17)
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), (8,))
 
 
 # ---------------------------------------------------------------------------
@@ -375,14 +388,14 @@ class TestNonRenderControls(unittest.TestCase):
         a = _adapter(_PACK_SEL)
         _note_on(a, _PACK_SEL)
         s = a.snapshot()
-        self.assertIsNone(s.held_static_slot)
+        self.assertEqual(s.held_layers, ())
         self.assertFalse(s.blackout_held)
 
     def test_inactive_report_only_is_noop(self):
         a = _adapter(_INACTIVE)
         _note_on(a, _INACTIVE)
         s = a.snapshot()
-        self.assertIsNone(s.held_static_slot)
+        self.assertEqual(s.held_layers, ())
         self.assertFalse(s.blackout_held)
 
 
@@ -391,36 +404,35 @@ class TestNonRenderControls(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestClearOnEvent(unittest.TestCase):
-    def test_stale_holds_clear_independently_without_killing_worker(self):
+    def test_blackout_auto_releases_on_worker_tick_without_clearing_static(self):
         a = SoundSwitchMidiInputAdapter([_SLOT8, _BLACKOUT], stale_timeout_ms=100)
-        a._worker_alive = True
         with mock.patch("rb_ss_bridge_v2.soundswitch_midi_input.time.monotonic",
-                        side_effect=(1.0, 1.05, 1.11)):
+                        side_effect=(1.0, 1.05)):
             _note_on(a, _SLOT8)
             _note_on(a, _BLACKOUT)
-            snapshot = a.snapshot()
-        self.assertIsNone(snapshot.held_static_slot)
-        self.assertTrue(snapshot.blackout_held)
+        a._expire_blackout_if_needed(1.16)
+        snapshot = a.snapshot()
+        self.assertEqual(tuple(layer.slot for layer in snapshot.held_layers), (8,))
+        self.assertFalse(snapshot.blackout_held)
         self.assertEqual(snapshot.error, "stale_hold")
 
     def test_fresh_matched_input_recovers_stale_error_only_when_worker_healthy(self):
         a = SoundSwitchMidiInputAdapter([_SLOT8], stale_timeout_ms=100)
-        a._worker_alive = True
-        with mock.patch("rb_ss_bridge_v2.soundswitch_midi_input.time.monotonic",
-                        side_effect=(1.0, 1.2, 1.21, 1.22)):
-            _note_on(a, _SLOT8)
-            self.assertEqual(a.snapshot().error, "stale_hold")
-            _note_on(a, _SLOT8)
-            fresh = a.snapshot()
+        with a._lock:
+            a._worker_alive = True
+            a._error = "stale_hold"
+            a._refresh_snapshot_locked()
+        _note_on(a, _SLOT8)
+        fresh = a.snapshot()
         self.assertIsNone(fresh.error)
-        self.assertEqual(fresh.held_static_slot, 8)
+        self.assertEqual(tuple(layer.slot for layer in fresh.held_layers), (8,))
 
     def test_panic_clears_static_slot(self):
         a = _adapter(_SLOT8)
         _note_on(a, _SLOT8)
         a.panic()
         s = a.snapshot()
-        self.assertIsNone(s.held_static_slot)
+        self.assertEqual(s.held_layers, ())
         self.assertFalse(s.worker_alive)
 
     def test_panic_clears_blackout(self):
@@ -435,21 +447,63 @@ class TestClearOnEvent(unittest.TestCase):
         _note_on(a, _BLACKOUT)
         a.on_pack_reload()
         s = a.snapshot()
-        self.assertIsNone(s.held_static_slot)
+        self.assertEqual(s.held_layers, ())
         self.assertFalse(s.blackout_held)
 
     def test_stop_clears_state(self):
         a = _adapter(_SLOT8)
         _note_on(a, _SLOT8)
         a.stop()
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), ())
 
     def test_worker_death_clears_state(self):
         a = _adapter(_SLOT8)
         _note_on(a, _SLOT8)
         a._clear_held("worker_death")       # simulate worker dying
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), ())
         self.assertFalse(a.snapshot().worker_alive)
+
+    def test_port_gone_clears_stack_and_reopens_without_restart(self):
+        ports = ["fake-port"]
+
+        def live_source():
+            while True:
+                time.sleep(0.01)
+                yield None
+
+        def checker():
+            return list(ports)
+
+        def wait_for(predicate):
+            deadline = time.time() + 1.0
+            while time.time() < deadline:
+                if predicate():
+                    return
+                time.sleep(0.01)
+            self.fail("condition not reached")
+
+        a = _adapter(_SLOT8)
+        a.start(
+            "fake-port",
+            _message_source=live_source,
+            _port_checker=checker,
+            readiness_timeout_s=0.5,
+        )
+        try:
+            _note_on(a, _SLOT8)
+            self.assertEqual(_slots(a), (8,))
+
+            ports[:] = [None]
+            wait_for(lambda: a.snapshot().error == "input_port_gone")
+            self.assertEqual(_slots(a), ())
+            self.assertFalse(a.snapshot().worker_alive)
+
+            ports[:] = ["fake-port"]
+            wait_for(lambda: a.snapshot().worker_alive and a.snapshot().error is None)
+            _note_on(a, _SLOT8)
+            self.assertEqual(_slots(a), (8,))
+        finally:
+            a.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -465,21 +519,21 @@ class TestDeviceNameDispatch(unittest.TestCase):
         a = SoundSwitchMidiInputAdapter([_SLOT8])
         a._connected_device = IAC  # simulate start(device_name=IAC)
         _note_on(a, _SLOT8)  # _SLOT8 is DDJ-800 → should be ignored
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), ())
 
     def test_connected_device_accepts_matching_device(self):
         """Messages from the connected device are processed normally."""
         a = SoundSwitchMidiInputAdapter([_SLOT8])
         a._connected_device = DDJ  # _SLOT8 is DDJ-800
         _note_on(a, _SLOT8)
-        self.assertEqual(a.snapshot().held_static_slot, 8)
+        self.assertEqual(_slots(a), (8,))
 
     def test_no_connected_device_accepts_all(self):
         """None connected device accepts all devices (test-injection mode)."""
         a = SoundSwitchMidiInputAdapter([_SLOT8])
         # _connected_device stays None (default)
         _note_on(a, _SLOT8)
-        self.assertEqual(a.snapshot().held_static_slot, 8)
+        self.assertEqual(_slots(a), (8,))
 
 
 class TestDisabledAndUnknown(unittest.TestCase):
@@ -487,7 +541,7 @@ class TestDisabledAndUnknown(unittest.TestCase):
         a = _adapter(_SLOT8)
         # Note 99 on ch9 is not registered
         a._feed_raw_message(0x99, 99, 64)
-        self.assertIsNone(a.snapshot().held_static_slot)
+        self.assertEqual(_slots(a), ())
 
     def test_cc_message_on_non_render_does_not_crash(self):
         cc_binding = PackMidiBinding(
@@ -499,7 +553,7 @@ class TestDisabledAndUnknown(unittest.TestCase):
         # CC on ch0 data1=7
         a._feed_raw_message(0xB0, 7, 64)
         s = a.snapshot()
-        self.assertIsNone(s.held_static_slot)
+        self.assertEqual(s.held_layers, ())
         self.assertFalse(s.blackout_held)
 
 
@@ -513,7 +567,7 @@ class TestInputGroupAutoDetection(unittest.TestCase):
             self.bindings = tuple(bindings)
             self.fail = fail
             self.events = events if events is not None else []
-            self._snap = MidiInputSnapshot(None, False, True, None, 0)
+            self._snap = MidiInputSnapshot((), False, True, None, 0)
 
         def start(self, port, *, device_name):
             self.events.append(("start", port, device_name, tuple(b.device_name for b in self.bindings)))
@@ -524,7 +578,7 @@ class TestInputGroupAutoDetection(unittest.TestCase):
             self.events.append(("stop",))
 
         def mark_unavailable(self):
-            self._snap = MidiInputSnapshot(None, False, False, "input_unavailable", 0)
+            self._snap = MidiInputSnapshot((), False, False, "input_unavailable", 0)
 
         def panic(self):
             pass
@@ -581,6 +635,29 @@ class TestInputGroupAutoDetection(unittest.TestCase):
         self.assertFalse(snapshot.worker_alive)
         self.assertEqual(snapshot.error, "input_error")
         self.assertTrue(group.status()["has_error"])
+
+    def test_group_merges_layers_by_global_recency(self):
+        other = PackMidiBinding(
+            device_name="Other Controller", message_type="note",
+            channel_zero_based=9, data_byte=123,
+            target_kind="static_look", target_slot=17,
+            interaction="toggle",
+        )
+        created = []
+
+        def factory(bindings, *, stale_timeout_ms):
+            adapter = SoundSwitchMidiInputAdapter(bindings, stale_timeout_ms=stale_timeout_ms)
+            created.append(adapter)
+            return adapter
+
+        group = SoundSwitchMidiInputGroup((_TOGGLE8, other), {}, adapter_factory=factory)
+        self.assertEqual(group.worker_count, 2)
+        _note_on(created[0], _TOGGLE8)
+        _note_on(created[1], other)
+
+        snapshot = group.snapshot()
+        self.assertEqual(tuple(layer.slot for layer in snapshot.held_layers), (8, 17))
+        self.assertLess(snapshot.held_layers[0].seq, snapshot.held_layers[1].seq)
 
     def test_blackout_only_output_bus_is_not_a_controller_alias_target(self):
         with self.assertRaisesRegex(ValueError, "static-look"):

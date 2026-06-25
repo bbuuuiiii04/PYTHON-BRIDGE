@@ -35,6 +35,7 @@ CANONICAL_SOURCE_PROJECT = Path("~/Music/SoundSwitch/default.ssproj").expanduser
 CANONICAL_PACK_DIR = REPO_ROOT / "local" / "soundswitch" / "rbss_canonical_pack"
 
 _SIDECAR_SUFFIX = ".source.json"  # sibling of the pack dir; NEVER inside it
+_BINDING_SIDECAR_SUFFIX = ".midi_bindings.json"
 
 _RENAME_SWAP = 0x00000002
 _EXPORT_LOCK_TTL_SECONDS = 10 * 60
@@ -118,6 +119,10 @@ def _sidecar_path(destination: Path) -> Path:
     return destination.parent / f".{destination.name}{_SIDECAR_SUFFIX}"
 
 
+def _binding_sidecar_path(destination: Path) -> Path:
+    return destination.parent / f".{destination.name}{_BINDING_SIDECAR_SUFFIX}"
+
+
 def _write_source_sidecar(destination: Path, source: Path, manifest_sha256: str) -> None:
     fingerprint = _source_content_fingerprint(source)
     if fingerprint is None:
@@ -128,6 +133,25 @@ def _write_source_sidecar(destination: Path, source: Path, manifest_sha256: str)
         "pack_manifest_sha256": manifest_sha256,
     }
     _atomic_write_result(_sidecar_path(destination), payload)
+
+
+def _write_binding_sidecar(destination: Path, decoded) -> None:
+    rows = []
+    for row in decoded.resolved_controls:
+        binding = row.binding
+        if not binding.enabled or row.target_kind != "static_look":
+            continue
+        if binding.message_type != "note" or row.interaction_mode not in ("press", "toggle"):
+            continue
+        rows.append({
+            "channel": binding.channel_zero_based,
+            "note": binding.data_byte,
+            "target_kind": "static_look",
+            "interaction": row.interaction_mode,
+            "name": row.target_name or "",
+        })
+    rows.sort(key=lambda item: (item["channel"], item["note"], item["name"]))
+    _atomic_write_result(_binding_sidecar_path(destination), rows)
 
 
 def _fsync_dir(directory: Path) -> None:
@@ -383,7 +407,7 @@ def publish_pack(
             raise
 
 
-def _atomic_write_result(path: Path, result: dict[str, object]) -> None:
+def _atomic_write_result(path: Path, result: object) -> None:
     parent = path.expanduser().parent
     fd, staging_name = tempfile.mkstemp(prefix=f".{path.name}.tmp-", dir=parent)
     staging = Path(staging_name)
@@ -434,6 +458,10 @@ def _canonical_publish_result() -> dict[str, object]:
             CANONICAL_PACK_DIR,
             CANONICAL_SOURCE_PROJECT,
             str(result["manifest_sha256"]),
+        )
+        _write_binding_sidecar(
+            CANONICAL_PACK_DIR,
+            decode_project(CANONICAL_SOURCE_PROJECT),
         )
     except Exception:
         pass

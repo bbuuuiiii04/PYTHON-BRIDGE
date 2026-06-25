@@ -163,7 +163,7 @@ class StartupMatrixTests(unittest.TestCase):
 
         class MissingInputAdapter:
             def __init__(self, bindings, *, stale_timeout_ms):
-                self._snap = MidiInputSnapshot(None, False, True, None, 0)
+                self._snap = MidiInputSnapshot((), False, True, None, 0)
 
             def start(self, port, *, device_name):
                 events.append(("input.start", port, device_name))
@@ -173,7 +173,7 @@ class StartupMatrixTests(unittest.TestCase):
                 events.append(("input.stop",))
 
             def mark_unavailable(self):
-                self._snap = MidiInputSnapshot(None, False, False, "input_unavailable", 0)
+                self._snap = MidiInputSnapshot((), False, False, "input_unavailable", 0)
 
             def snapshot(self):
                 return self._snap
@@ -404,7 +404,7 @@ class InputGroupTests(unittest.TestCase):
         class Adapter:
             def __init__(self, bindings, *, stale_timeout_ms):
                 self.device = bindings[0].device_name
-                self._snap = MidiInputSnapshot(None, False, True, None, 0)
+                self._snap = MidiInputSnapshot((), False, True, None, 0)
 
             def start(self, port, *, device_name):
                 events.append(("start", device_name))
@@ -415,7 +415,7 @@ class InputGroupTests(unittest.TestCase):
                 events.append(("stop", self.device))
 
             def mark_unavailable(self):
-                self._snap = MidiInputSnapshot(None, False, False, "input_unavailable", 0)
+                self._snap = MidiInputSnapshot((), False, False, "input_unavailable", 0)
 
             def snapshot(self):
                 return self._snap

@@ -106,7 +106,7 @@ class ControllerTests(unittest.TestCase):
 
         class MissingInputAdapter:
             def __init__(self, bindings, *, stale_timeout_ms):
-                self._snap = MidiInputSnapshot(None, False, True, None, 0)
+                self._snap = MidiInputSnapshot((), False, True, None, 0)
 
             def start(self, port, *, device_name):
                 log.append(f"{device_name}.input_start")
@@ -116,7 +116,7 @@ class ControllerTests(unittest.TestCase):
                 log.append("input.stop")
 
             def mark_unavailable(self):
-                self._snap = MidiInputSnapshot(None, False, False, "input_unavailable", 0)
+                self._snap = MidiInputSnapshot((), False, False, "input_unavailable", 0)
 
             def snapshot(self):
                 return self._snap

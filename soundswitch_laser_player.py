@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import uuid
-from typing import Literal
+from typing import Literal, Mapping, Sequence
 
+from .soundswitch_midi_input import LayerEntry
 from .soundswitch_pack_loader import (
     LoadedAttribute,
     LoadedAutoloop,
@@ -39,6 +40,12 @@ class PlayerDiagnostic:
 
 @dataclass(frozen=True, slots=True)
 class PlayerResult:
+    frame: tuple[int, ...]
+    diagnostic: PlayerDiagnostic | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LayerApplyResult:
     frame: tuple[int, ...]
     diagnostic: PlayerDiagnostic | None = None
 
@@ -140,27 +147,64 @@ def render_autoloop_frame(loop: LoadedDocument | LoadedAutoloop,
                          lambda time: time < 0 or 0 <= time <= wrapped)
 
 
-def render_static_look_frame(static_look: LoadedStaticLook) -> tuple[int, ...]:
-    """Render generic attributes; retained scalar/colour/position data is inert."""
-    if static_look.profile_has_intensity_channel:
-        raise ValueError("19-channel player cannot skip a declared intensity channel")
-    frame = [0] * CHANNEL_COUNT
-    for attribute in static_look.generic_attributes:
-        _apply_attribute(frame, attribute)
-    return tuple(frame)
+def _layer_diagnostic(skipped_count: int, skipped_slots: list[int]) -> PlayerDiagnostic | None:
+    if skipped_count == 0:
+        return None
+    context = (("skipped_count", str(skipped_count)),)
+    if skipped_slots:
+        context += (("slots", ",".join(str(slot) for slot in skipped_slots)),)
+    return PlayerDiagnostic(
+        "static_layers_skipped",
+        "one or more Static Look layers were skipped",
+        context,
+    )
 
 
-def resolve_frame(base: tuple[int, ...], static_override: tuple[int, ...] | None,
-                  blackout: bool, emergency: bool) -> tuple[int, ...]:
-    """Apply emergency/blackout > held static > current base precedence."""
+def _layer_slot(layer: object) -> int | None:
+    slot = getattr(layer, "slot", None)
+    kind = getattr(layer, "kind", None)
+    seq = getattr(layer, "seq", None)
+    if type(slot) is not int or kind not in ("toggle", "press") or type(seq) is not int:
+        return None
+    return slot
+
+
+def apply_layers(
+    base: tuple[int, ...],
+    layers: Sequence[LayerEntry],
+    static_looks: Mapping[int, LoadedStaticLook],
+    blackout: bool,
+    emergency: bool,
+) -> LayerApplyResult:
+    """Apply sparse Static Look layers over a valid base frame, bottom to top."""
     base = _validate_frame(base, "base frame")
-    if static_override is not None:
-        static_override = _validate_frame(static_override, "static override frame")
     if type(blackout) is not bool or type(emergency) is not bool:
         raise ValueError("blackout and emergency must be booleans")
     if emergency or blackout:
-        return ZERO_FRAME
-    return static_override if static_override is not None else base
+        return LayerApplyResult(ZERO_FRAME)
+    frame = list(base)
+    skipped = 0
+    skipped_slots: list[int] = []
+    for layer in tuple(layers):
+        slot = _layer_slot(layer)
+        if slot is None:
+            skipped += 1
+            continue
+        look = static_looks.get(slot)
+        if look is None or look.profile_has_intensity_channel:
+            skipped += 1
+            skipped_slots.append(slot)
+            continue
+        candidate = list(frame)
+        try:
+            for attribute in look.generic_attributes:
+                _apply_attribute(candidate, attribute)
+        except (TypeError, ValueError):
+            skipped += 1
+            skipped_slots.append(slot)
+            continue
+        frame = candidate
+    return LayerApplyResult(tuple(frame), _layer_diagnostic(skipped, skipped_slots))
 
 
 def normalize_soundswitch_id(value: str | None) -> str | None:
@@ -183,14 +227,14 @@ class LaserPackPlayer:
     def __init__(self, pack: LoadedPack):
         self._pack = pack
         self._selection: _ScriptedSelection | _AutoloopSelection | None = None
-        self._active_static_slot: int | None = None
+        self._static_layers: tuple[LayerEntry, ...] = ()
         self._blackout = False
         self._emergency = False
         self._waiting_after_reload = False
 
     @property
-    def active_static_slot(self) -> int | None:
-        return self._active_static_slot
+    def static_layers(self) -> tuple[LayerEntry, ...]:
+        return self._static_layers
 
     @property
     def blackout(self) -> bool:
@@ -203,7 +247,7 @@ class LaserPackPlayer:
     def reload(self, pack: LoadedPack) -> PlayerResult:
         self._pack = pack
         self._selection = None
-        self._active_static_slot = None
+        self._static_layers = ()
         self._blackout = False
         self._emergency = False
         self._waiting_after_reload = True
@@ -231,17 +275,8 @@ class LaserPackPlayer:
         self._waiting_after_reload = False
         return self.render()
 
-    def hold_static(self, slot_index: int) -> PlayerResult:
-        if slot_index not in self._pack.static_looks:
-            return _diagnostic("static_look_not_found", "Static Override slot is absent",
-                               slot=slot_index)
-        self._active_static_slot = slot_index
-        return self.render()
-
-    def release_static(self, slot_index: int) -> PlayerResult:
-        # Releasing an older, non-current held note cannot clear its replacement.
-        if self._active_static_slot == slot_index:
-            self._active_static_slot = None
+    def set_static_layers(self, layers: Sequence[LayerEntry]) -> PlayerResult:
+        self._static_layers = tuple(layers)
         return self.render()
 
     def clear_selection(self) -> PlayerResult:
@@ -360,21 +395,20 @@ class LaserPackPlayer:
         # active, but it must never bypass a known stop/stale/error condition.
         if base.diagnostic is not None and base.diagnostic.code != "missing_selection":
             return base
-        if self._active_static_slot is not None:
-            look = self._pack.static_looks.get(self._active_static_slot)
-            if look is None:
-                return _diagnostic("static_look_not_found", "active Static Override disappeared",
-                                   slot=self._active_static_slot)
+        if self._static_layers:
             try:
-                return PlayerResult(resolve_frame(base.frame, render_static_look_frame(look),
-                                                  False, False))
+                layered = apply_layers(
+                    base.frame, self._static_layers, self._pack.static_looks,
+                    self._blackout, self._emergency,
+                )
+                return PlayerResult(layered.frame, layered.diagnostic)
             except (TypeError, ValueError) as exc:
                 return _diagnostic("player_error", str(exc))
         return base
 
 
 __all__ = [
-    "CHANNEL_COUNT", "CONTROL_CHANNELS", "LaserPackPlayer", "PlayerDiagnostic",
+    "CHANNEL_COUNT", "CONTROL_CHANNELS", "LayerApplyResult", "LaserPackPlayer", "PlayerDiagnostic",
     "PlayerResult", "ZERO_FRAME", "normalize_soundswitch_id", "render_autoloop_frame",
-    "render_scripted_frame", "render_static_look_frame", "resolve_frame",
+    "render_scripted_frame", "apply_layers",
 ]

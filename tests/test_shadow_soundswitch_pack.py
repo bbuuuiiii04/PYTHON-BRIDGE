@@ -26,6 +26,7 @@ from rb_ss_bridge_v2.soundswitch_laser_player import (
     ZERO_FRAME,
     LaserPackPlayer,
 )
+from rb_ss_bridge_v2.soundswitch_midi_input import LayerEntry
 from rb_ss_bridge_v2.soundswitch_pack_loader import (
     LoadedAttribute,
     LoadedDocument,
@@ -49,6 +50,10 @@ SCRIPTED_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 def _hash(frame: tuple[int, ...]) -> str:
     """Independent reference hash (test side, not via the harness)."""
     return hashlib.sha256(bytes(frame)).hexdigest()
+
+
+def _layer(slot: int, seq: int = 1) -> LayerEntry:
+    return LayerEntry(slot, "toggle", seq)
 
 
 def _scripted_doc() -> LoadedDocument:
@@ -114,7 +119,7 @@ class RunShadowTests(unittest.TestCase):
             ShadowAction("clear_selection", "transition",
                          lambda p: p.clear_selection(), ZERO_FRAME),
             ShadowAction("static7_stands_alone", "static",
-                         lambda p: p.hold_static(7), STATIC7_FRAME),
+                         lambda p: p.set_static_layers((_layer(7),)), STATIC7_FRAME),
             ShadowAction("blackout_over_static", "blackout",
                          lambda p: p.set_blackout(True), ZERO_FRAME),
             ShadowAction("blackout_released", "static",
@@ -210,13 +215,13 @@ class StaticSlotCoverageTests(unittest.TestCase):
     def test_slot_8_renders_expected_independent_frame(self):
         player = LaserPackPlayer(_pack())
         player.clear_selection()
-        result = player.hold_static(8)
+        result = player.set_static_layers((_layer(8),))
         self.assertEqual(frame_sha256(result.frame), _hash(STATIC8_FRAME))
 
     def test_slot_7_create_then_edit_changes_frame(self):
         player = LaserPackPlayer(_pack({7: _look(7, 3, 200)}))
         player.clear_selection()
-        created = player.hold_static(7)
+        created = player.set_static_layers((_layer(7),))
         self.assertEqual(frame_sha256(created.frame), _hash(STATIC7_FRAME))
         # "Edit" slot 7 via an immutable pack reload — CH3 200 -> CH5 60.  The
         # post-reload wait latch beats a held static, so fresh authority must be
@@ -225,7 +230,7 @@ class StaticSlotCoverageTests(unittest.TestCase):
         player.reload(edited_pack)
         player.select_scripted(SCRIPTED_ID, 1000)
         player.clear_selection()
-        edited = player.hold_static(7)
+        edited = player.set_static_layers((_layer(7),))
         edited_frame = (0, 0, 0, 0, 60) + (0,) * 14
         self.assertEqual(frame_sha256(edited.frame), _hash(edited_frame))
         self.assertNotEqual(created.frame, edited.frame)

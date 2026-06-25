@@ -41,6 +41,7 @@ from rb_ss_bridge_v2.soundswitch_laser_player import (  # noqa: E402
     LaserPackPlayer,
     PlayerResult,
 )
+from rb_ss_bridge_v2.soundswitch_midi_input import LayerEntry  # noqa: E402
 
 # Physical output backends permitted under shadow mode (no device, no transmit).
 _ALLOWED_BACKENDS = frozenset(("none", "pack"))
@@ -195,7 +196,7 @@ def build_hermetic_scenario() -> list[ShadowAction]:
         ShadowAction("clear_selection", "transition",
                      lambda p: p.clear_selection(), ZERO_FRAME),
         ShadowAction("static_stands_alone", "static",
-                     lambda p: p.hold_static(7), static_frame),
+                     lambda p: p.set_static_layers((LayerEntry(7, "toggle", 1),)), static_frame),
         ShadowAction("blackout_over_static", "blackout",
                      lambda p: p.set_blackout(True), ZERO_FRAME),
         ShadowAction("blackout_released", "static",

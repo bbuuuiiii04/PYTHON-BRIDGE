@@ -16,11 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.soundswitch_laser_player import (
     ZERO_FRAME,
     LaserPackPlayer,
+    apply_layers,
     render_autoloop_frame,
     render_scripted_frame,
-    render_static_look_frame,
-    resolve_frame,
 )
+from rb_ss_bridge_v2.soundswitch_midi_input import LayerEntry
 from rb_ss_bridge_v2.soundswitch_pack_loader import (
     LoadedAttribute,
     LoadedDocument,
@@ -59,6 +59,21 @@ def _look(slot: int, values: tuple[int, ...]) -> LoadedStaticLook:
         intensity_values=(LoadedScalarValue(1, 1, 0.5),),
         strobe_values=(), colour_values=(), position_values=(),
     )
+
+
+def _sparse_look(slot: int, patch: tuple[tuple[int, int], ...],
+                 *, fixture_group: int = 0x493) -> LoadedStaticLook:
+    return LoadedStaticLook(
+        slot_index=slot, record_version=5, name=f"slot-{slot}",
+        generic_attributes=tuple(LoadedAttribute(fixture_group, channel, channel, value)
+                                 for channel, value in patch),
+        intensity_values=(LoadedScalarValue(1, 1, 0.5),),
+        strobe_values=(), colour_values=(), position_values=(),
+    )
+
+
+def _layer(slot: int, seq: int = 1, kind: str = "toggle") -> LayerEntry:
+    return LayerEntry(slot, kind, seq)  # type: ignore[arg-type]
 
 
 def _pack(script=None, loop=None) -> LoadedPack:
@@ -132,7 +147,8 @@ class PureRendererTests(unittest.TestCase):
 
     def test_static_generic_attributes_and_retained_intensity_no_channel(self):
         look = _look(8, tuple(range(19)))
-        self.assertEqual(render_static_look_frame(look), tuple(range(19)))
+        rendered = apply_layers(ZERO_FRAME, (_layer(8),), {8: look}, False, False)
+        self.assertEqual(rendered.frame, tuple(range(19)))
         self.assertEqual(look.intensity_values[0].value, 0.5)
         declared = LoadedStaticLook(
             slot_index=look.slot_index, record_version=look.record_version, name=look.name,
@@ -140,17 +156,67 @@ class PureRendererTests(unittest.TestCase):
             strobe_values=look.strobe_values, colour_values=look.colour_values,
             position_values=look.position_values, profile_has_intensity_channel=True,
         )
-        with self.assertRaisesRegex(ValueError, "intensity channel"):
-            render_static_look_frame(declared)
+        skipped = apply_layers(ZERO_FRAME, (_layer(8),), {8: declared}, False, False)
+        self.assertEqual(skipped.frame, ZERO_FRAME)
+        self.assertEqual(skipped.diagnostic.code, "static_layers_skipped")
 
-    def test_resolve_precedence_and_frame_validation(self):
+    def test_apply_layers_precedence_and_frame_validation(self):
         base = (1,) * 19
-        override = (2,) * 19
-        self.assertEqual(resolve_frame(base, override, False, False), override)
-        self.assertEqual(resolve_frame(base, override, True, False), ZERO_FRAME)
-        self.assertEqual(resolve_frame(base, override, False, True), ZERO_FRAME)
+        look = _sparse_look(8, ((1, 2),))
+        self.assertEqual(apply_layers(base, (_layer(8),), {8: look}, False, False).frame[0], 2)
+        self.assertEqual(apply_layers(base, (_layer(8),), {8: look}, True, False).frame,
+                         ZERO_FRAME)
+        self.assertEqual(apply_layers(base, (_layer(8),), {8: look}, False, True).frame,
+                         ZERO_FRAME)
         with self.assertRaises(ValueError):
-            resolve_frame((1,) * 18, None, False, False)
+            apply_layers((1,) * 18, (), {}, False, False)
+
+    def test_apply_layers_transparency_zero_and_topmost_wins(self):
+        base = tuple(range(1, 20))
+        looks = {
+            1: _sparse_look(1, ((1, 100), (2, 0))),
+            2: _sparse_look(2, ((1, 7), (3, 77))),
+        }
+        result = apply_layers(
+            base,
+            (_layer(1, 1, "toggle"), _layer(2, 2, "press")),
+            looks,
+            blackout=False,
+            emergency=False,
+        )
+        self.assertIsNone(result.diagnostic)
+        self.assertEqual(result.frame[0:4], (7, 0, 77, 4))
+
+    def test_apply_layers_disjoint_press_release_and_masks(self):
+        base = (9,) * 19
+        looks = {
+            1: _sparse_look(1, ((1, 10),)),
+            2: _sparse_look(2, ((2, 20),)),
+        }
+        both = apply_layers(base, (_layer(1, 1), _layer(2, 2, "press")),
+                            looks, False, False)
+        reverted = apply_layers(base, (_layer(1, 1),), looks, False, False)
+        self.assertEqual(both.frame[0:3], (10, 20, 9))
+        self.assertEqual(reverted.frame[0:3], (10, 9, 9))
+        self.assertEqual(apply_layers(base, (_layer(1),), looks, True, False).frame, ZERO_FRAME)
+        self.assertEqual(apply_layers(base, (_layer(1),), looks, False, True).frame, ZERO_FRAME)
+
+    def test_apply_layers_skips_malformed_without_zeroing_base(self):
+        base = (3,) * 19
+        looks = {
+            1: _sparse_look(1, ((1, 10),)),
+            2: _sparse_look(2, ((2, 20),), fixture_group=0x999),
+            3: _sparse_look(3, ((20, 99),)),
+        }
+        result = apply_layers(
+            base,
+            (_layer(1, 1), _layer(2, 2), _layer(3, 3), _layer(99, 4)),
+            looks,
+            False,
+            False,
+        )
+        self.assertEqual(result.frame[0:3], (10, 3, 3))
+        self.assertEqual(result.diagnostic.code, "static_layers_skipped")
 
 
 class PlayerStateTests(unittest.TestCase):
@@ -175,18 +241,18 @@ class PlayerStateTests(unittest.TestCase):
     def test_clear_selection_lets_held_static_stand_alone(self):
         # SoundSwitch shows a manual Static Look even with no track playing: clearing
         # the automatic base must leave a held static visible (T7c idle behavior).
-        self.player.hold_static(8)
+        self.player.set_static_layers((_layer(8),))
         result = self.player.clear_selection()
         self.assertIsNone(result.diagnostic)
         self.assertNotEqual(result.frame, ZERO_FRAME)
-        self.assertEqual(self.player.active_static_slot, 8)  # state not cleared
+        self.assertEqual(tuple(layer.slot for layer in self.player.static_layers), (8,))
 
     def test_clear_selection_without_static_is_zero(self):
         result = self.player.clear_selection()
         self.assertEqual(result.frame, ZERO_FRAME)
 
     def test_clear_selection_held_static_still_loses_to_blackout(self):
-        self.player.hold_static(8)
+        self.player.set_static_layers((_layer(8),))
         self.player.set_masks(blackout=True, emergency=False)
         self.assertEqual(self.player.clear_selection().frame, ZERO_FRAME)
 
@@ -219,7 +285,7 @@ class PlayerStateTests(unittest.TestCase):
 
     def test_stop_stale_and_error_cannot_be_bypassed_by_static_override(self):
         ssid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-        self.assertEqual(self.player.hold_static(8).frame[0], 8)
+        self.assertEqual(self.player.set_static_layers((_layer(8),)).frame[0], 8)
         for kwargs, code in (
                 ({"transport": "stopped"}, "transport_stopped"),
                 ({"authority": "stale"}, "stale_authority"),
@@ -231,28 +297,28 @@ class PlayerStateTests(unittest.TestCase):
 
     def test_override_replace_release_order_blackout_and_current_base(self):
         self.player.select_autoloop("SSAutoLoop8.ssfile", 0)
-        self.assertEqual(self.player.hold_static(8).frame[0], 8)
-        self.assertEqual(self.player.hold_static(17).frame[0], 17)
-        self.assertEqual(self.player.release_static(8).frame[0], 17)
+        self.assertEqual(self.player.set_static_layers((_layer(8, 1),)).frame[0], 8)
+        self.assertEqual(self.player.set_static_layers((_layer(8, 1), _layer(17, 2))).frame[0], 17)
+        self.assertEqual(self.player.set_static_layers((_layer(17, 2),)).frame[0], 17)
         self.assertEqual(self.player.set_blackout(True).frame, ZERO_FRAME)
         self.player.select_autoloop("SSAutoLoop8.ssfile", 10)
         self.assertEqual(self.player.set_blackout(False).frame[0], 17)
-        self.assertEqual(self.player.release_static(17).frame[0], 8)
+        self.assertEqual(self.player.set_static_layers((_layer(8, 1),)).frame[0], 8)
 
     def test_blackout_same_tick_wins_and_emergency_wins(self):
         self.player.select_scripted("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 0)
-        self.player.hold_static(24)
+        self.player.set_static_layers((_layer(24),))
         self.assertEqual(self.player.set_masks(blackout=True, emergency=False).frame, ZERO_FRAME)
         self.assertEqual(self.player.set_masks(blackout=False, emergency=True).frame, ZERO_FRAME)
 
     def test_reload_clears_holds_masks_selection_until_fresh_authority(self):
         self.player.select_scripted("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 0)
-        self.player.hold_static(16)
+        self.player.set_static_layers((_layer(16),))
         self.player.set_blackout(True)
         result = self.player.reload(_pack(self.track, self.loop))
         self.assertEqual(result.frame, ZERO_FRAME)
         self.assertEqual(result.diagnostic.code, "reload_waiting_authority")
-        self.assertIsNone(self.player.active_static_slot)
+        self.assertEqual(self.player.static_layers, ())
         self.assertFalse(self.player.blackout)
         self.assertEqual(self.player.render().frame, ZERO_FRAME)
 
@@ -414,7 +480,10 @@ class CurrentPackGoldenTests(unittest.TestCase):
         }
         for slot, frame_hex in expected.items():
             with self.subTest(slot=slot):
-                self.assertEqual(bytes(render_static_look_frame(self.pack.static_looks[slot])).hex(),
+                rendered = apply_layers(
+                    ZERO_FRAME, (_layer(slot),), self.pack.static_looks, False, False,
+                )
+                self.assertEqual(bytes(rendered.frame).hex(),
                                  frame_hex)
 
     def test_current_pack_count_257_preroll_raw_zero_and_no_capture_state(self):
@@ -525,8 +594,8 @@ class CurrentPackGoldenTests(unittest.TestCase):
         player = LaserPackPlayer(self.pack)
         self.assertEqual(bytes(player.select_scripted(soundswitch_id, 83_839).frame).hex(),
                          at_83839)
-        self.assertEqual(bytes(player.hold_static(8).frame).hex(), slot8)
-        self.assertEqual(bytes(player.release_static(8).frame).hex(), at_83839)
+        self.assertEqual(bytes(player.set_static_layers((_layer(8),)).frame).hex(), slot8)
+        self.assertEqual(bytes(player.set_static_layers(()).frame).hex(), at_83839)
         self.assertEqual(player.set_blackout(True).frame, ZERO_FRAME)
         self.assertEqual(player.select_scripted(soundswitch_id, 84_065).frame, ZERO_FRAME)
         self.assertEqual(bytes(player.set_blackout(False).frame).hex(), at_84065)

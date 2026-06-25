@@ -14,10 +14,12 @@ Quit Elgato's Stream Deck app first — only one process can hold the device.
 """
 import os
 import fcntl
+import json
 import signal
 import sys
 import threading
 from datetime import datetime
+from pathlib import Path
 
 import mido
 from StreamDeck.DeviceManager import DeviceManager
@@ -32,6 +34,8 @@ NOTE_BASE = 36              # pad 0 (top-left) -> note 36 (C1); pads ascend
 VELOCITY = 127
 LOCK_PATH = "/tmp/streamdeck_midi.lock"
 RETRY_SECONDS = 3
+PACK_DIR = Path(__file__).resolve().parents[1] / "local" / "soundswitch" / "rbss_canonical_pack"
+BINDING_SIDECAR = PACK_DIR.parent / f".{PACK_DIR.name}.midi_bindings.json"
 # Drop 1.png .. 15.png in the icons/ folder beside this file to give pads
 # custom pictures (else the pad shows its number + note):
 ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
@@ -57,14 +61,71 @@ def _acquire_singleton_lock() -> bool:
     return True
 
 
-def note_for(key: int) -> int:
+def _fixed_rows(key_count: int = 15) -> list[dict]:
+    return [
+        {
+            "channel": CHANNEL,
+            "note": NOTE_BASE + key,
+            "target_kind": "static_look",
+            "interaction": "press",
+            "name": "",
+        }
+        for key in range(key_count)
+    ]
+
+
+def _rows_from_payload(payload) -> list[dict]:
+    rows = payload.get("bindings", []) if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return []
+    cleaned = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if row.get("channel") != CHANNEL or row.get("target_kind") != "static_look":
+            continue
+        note = row.get("note")
+        interaction = row.get("interaction")
+        if type(note) is not int or not 0 <= note <= 127 or interaction not in ("press", "toggle"):
+            continue
+        cleaned.append({
+            "channel": CHANNEL,
+            "note": note,
+            "target_kind": "static_look",
+            "interaction": interaction,
+            "name": row.get("name") if isinstance(row.get("name"), str) else "",
+        })
+    cleaned.sort(key=lambda item: (item["channel"], item["note"], item["name"]))
+    return cleaned
+
+
+def load_sidecar(path: Path = BINDING_SIDECAR, key_count: int = 15) -> list[dict]:
+    try:
+        rows = _rows_from_payload(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError):
+        rows = []
+    return (rows or _fixed_rows(key_count))[:key_count]
+
+
+def led_state(sidecar, pressed_set: set[tuple[int, int]]) -> dict[tuple[int, int], bool]:
+    rows = _rows_from_payload(sidecar) or _fixed_rows()
+    return {
+        (CHANNEL, row["note"]): (CHANNEL, row["note"]) in pressed_set
+        for row in rows
+    }
+
+
+def note_for(key: int, sidecar=None) -> int:
+    rows = sidecar if isinstance(sidecar, list) else _fixed_rows()
+    if 0 <= key < len(rows):
+        return int(rows[key]["note"])
     return NOTE_BASE + key
 
 
-def key_to_message(key: int, pressed: bool) -> mido.Message:
+def key_to_message(key: int, pressed: bool, sidecar=None) -> mido.Message:
     """The one piece of logic worth testing: pad -> MIDI message."""
     kind = "note_on" if pressed else "note_off"
-    return mido.Message(kind, channel=CHANNEL, note=note_for(key),
+    return mido.Message(kind, channel=CHANNEL, note=note_for(key, sidecar),
                         velocity=VELOCITY if pressed else 0)
 
 
@@ -75,7 +136,7 @@ def _font(size):
         return ImageFont.load_default()
 
 
-def render_key(deck, key: int, pressed: bool):
+def render_key(deck, key: int, pressed: bool, sidecar=None):
     image = PILHelper.create_image(deck)
     icon = os.path.join(ICON_DIR, f"{key + 1}.png")
     if os.path.exists(icon):
@@ -89,7 +150,7 @@ def render_key(deck, key: int, pressed: bool):
         w, h = image.width, image.height
         draw.text((w / 2, h / 2 - 8), str(key + 1), anchor="mm",
                   font=_font(30), fill="white")
-        draw.text((w / 2, h - 14), f"n{note_for(key)}", anchor="mm",
+        draw.text((w / 2, h - 14), f"n{note_for(key, sidecar)}", anchor="mm",
                   font=_font(13), fill=(170, 170, 170))
     return PILHelper.to_native_format(deck, image)
 
@@ -116,11 +177,26 @@ def acquire_deck():
     return None
 
 
-def make_on_key(deck, port):
+def make_on_key(deck, port, sidecar, active_keys: set[tuple[int, int]]):
     def on_key(_deck, key, pressed):
         try:
-            port.send(key_to_message(key, pressed))
-            deck.set_key_image(key, render_key(deck, key, pressed))
+            if not 0 <= key < len(sidecar):
+                return
+            row = sidecar[key]
+            pad_key = (CHANNEL, row["note"])
+            port.send(key_to_message(key, pressed, sidecar))
+            if row["interaction"] == "toggle":
+                if pressed:
+                    if pad_key in active_keys:
+                        active_keys.remove(pad_key)
+                    else:
+                        active_keys.add(pad_key)
+            elif pressed:
+                active_keys.add(pad_key)
+            else:
+                active_keys.discard(pad_key)
+            deck.set_key_image(key, render_key(deck, key, led_state(sidecar, active_keys)[pad_key],
+                                               sidecar))
         except (TransportError, OSError) as exc:
             log(f"key callback error: {exc}")
     return on_key
@@ -143,11 +219,14 @@ def main():
 
         port = None
         try:
+            sidecar = load_sidecar(key_count=deck.key_count())
+            active_keys: set[tuple[int, int]] = set()
             port = mido.open_output(PORT_NAME, virtual=True)
             for k in range(deck.key_count()):
-                deck.set_key_image(k, render_key(deck, k, False))
-            deck.set_key_callback(make_on_key(deck, port))
-            log(f'"{PORT_NAME}" live - notes {NOTE_BASE}-{NOTE_BASE + deck.key_count() - 1}, '
+                deck.set_key_image(k, render_key(deck, k, False, sidecar))
+            deck.set_key_callback(make_on_key(deck, port, sidecar, active_keys))
+            notes = [row["note"] for row in sidecar]
+            log(f'"{PORT_NAME}" live - notes {min(notes)}-{max(notes)}, '
                 f"ch {CHANNEL + 1}")
 
             # ponytail: poll-based disconnect detect at 1 Hz; switch to events if a frozen-deck gap appears.
@@ -179,6 +258,16 @@ def selftest():
     off = key_to_message(14, False)
     assert off.type == "note_off" and off.note == 50 and off.velocity == 0 and off.channel == CHANNEL
     assert note_for(0) == 36 and note_for(14) == 50
+    rows = [
+        {"channel": CHANNEL, "note": 40, "target_kind": "static_look",
+         "interaction": "toggle", "name": "A"},
+        {"channel": CHANNEL, "note": 41, "target_kind": "static_look",
+         "interaction": "press", "name": "B"},
+        {"channel": 0, "note": 1, "target_kind": "static_look",
+         "interaction": "toggle", "name": "wrong"},
+    ]
+    assert key_to_message(0, True, rows).note == 40
+    assert led_state(rows, {(CHANNEL, 40)}) == {(CHANNEL, 40): True, (CHANNEL, 41): False}
     assert CHANNEL not in (0, 1)
     print("selftest OK")
 
