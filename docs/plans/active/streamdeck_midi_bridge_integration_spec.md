@@ -1,8 +1,11 @@
 # Codex Implementation Spec — Stream Deck MIDI controller: robustness + bridge autostart
 
-Status: **Phase 1 ready for Codex now.** **Phase 2 (Part F) is fully specified**, but is a
-live-critical render-path change — implement it after Phase 1 lands, and treat **Task 5 (the layered
-compositor)** as plan-first (operator reviews before merge).
+Status: **Phase 1 ready for Codex** — robustness fixes from the 2026-06-25 adversarial review are
+folded in (flock fd-retention, anchored `pgrep`/`pkill`, broadened device-error catch, callback-wrap
+shown in pseudocode). **Phase 2 (Part F) is revised and remains plan-first and GATED on Phase 1
+execution + operator approval** — do not hand **Task 5 (the layered compositor)** to Codex until
+Phase 1 has landed and the operator signs off on the open decisions named at the end of Part F. The
+earlier "no remaining unknowns" claim was wrong and is retracted.
 
 The Stream Deck script already exists and works as a MIDI controller (15 pads → notes 36–50 on
 MIDI channel 3). Phase 1 hardens it for unattended live use and makes the bridge own its lifecycle.
@@ -75,6 +78,12 @@ ensures one instance exists while the bridge is up and kills it when the bridge 
   (`fcntl.flock` confirmed available on macOS). If it's already held, log
   `"streamdeck_midi: another instance is running, exiting"` and `return` (exit 0). Hold the lock for
   the process lifetime. This makes the script idempotent regardless of how often the watcher calls it.
+- **Retain the lock file object for the whole process lifetime** in a module-level global (e.g.
+  `_LOCK_FILE = None`, then assign the `open(LOCK_PATH, "w")` handle to it). The lock lives on the open
+  fd — if the handle is garbage-collected the kernel releases the lock while the process is still
+  running, so a watcher relaunch could open the deck twice. Do **not** acquire on a throwaway
+  `open(...)`; keep the object referenced. flock auto-releases on process death (crash included), so a
+  crashed instance never permanently blocks the next launch — no stale-lock cleanup is needed.
 
 ### Task 3 — `streamdeck/streamdeck_midi.py`: supervisor loop (acquire / run / reconnect)
 Replace the one-shot `main()` body with a supervisor loop so the controller survives "deck not present
@@ -83,8 +92,10 @@ yet", "Elgato app holds the device", and mid-run unplug/replug without crash-loo
 ```
 def acquire_deck():
     # enumerate; for each handle try open()+reset()+set_brightness(60); return the first that
-    # opens cleanly, else None. Catch StreamDeck.Transport.Transport.TransportError (and OSError)
-    # — a busy device (Elgato app) or absent device must return None, not raise.
+    # opens cleanly, else None. Wrap BOTH enumeration and open() in try/except Exception (broader
+    # than TransportError/OSError): a busy device (Elgato app), an absent device, OR any USB-scan
+    # error (e.g. a RuntimeError/HID error raised inside enumerate()) must return None, not raise.
+    # Enumeration must never crash the supervisor loop.
 
 def run():
     if not _acquire_singleton_lock():   # Task 2
@@ -120,9 +131,20 @@ def run():
             log("Stream Deck disconnected — waiting for it to come back")
     log("streamdeck_midi: shutdown")
 ```
-- The key callback (`make_on_key`) must wrap its body in `try/except (TransportError, OSError)`; on a
-  transport error it logs and does nothing (the `deck.connected()` poll will catch the disconnect and
-  drive reconnect). It must never raise out of the library's reader thread.
+- The key callback (`make_on_key`) must wrap its **entire** body in `try/except (TransportError,
+  OSError)`; on a transport error it logs and does nothing (the `deck.connected()` poll will catch the
+  disconnect and drive reconnect). It must never raise out of the library's reader thread. Show it
+  explicitly so it can't be missed:
+  ```
+  def make_on_key(deck, port):
+      def on_key(_deck, key, pressed):
+          try:
+              port.send(key_to_message(key, pressed))
+              deck.set_key_image(key, render_key(deck, key, pressed))
+          except (TransportError, OSError) as e:
+              log(f"key callback error: {e}")
+      return on_key
+  ```
 - `log()` = timestamped line to stdout with `flush=True` (the watcher redirects stdout to a logfile).
 - `import` `TransportError` from `StreamDeck.Transport.Transport` (confirmed import path), `fcntl`.
 - Keep `note_for`, `key_to_message`, `render_key`, `_font`, and `selftest()` unchanged except as
@@ -135,7 +157,12 @@ Add near the config block (after line ~18):
 STREAMDECK_SCRIPT="/Users/bbui/rb_ss_bridge_v2/streamdeck/streamdeck_midi.py"
 STREAMDECK_LOG="/tmp/streamdeck.log"
 
-streamdeck_running() { pgrep -f "streamdeck_midi.py" > /dev/null 2>&1; }
+# Anchor the match to the python interpreter so a bare `pgrep -f streamdeck_midi.py`
+# can't match an editor with the file open, the watcher's own grep, or any other process
+# that merely mentions the path. The [p] bracket also keeps the pattern from matching itself.
+STREAMDECK_PAT="[p]ython3?.*streamdeck_midi\.py"
+
+streamdeck_running() { pgrep -f "$STREAMDECK_PAT" > /dev/null 2>&1; }
 
 start_streamdeck() {
     streamdeck_running && return 0
@@ -145,9 +172,11 @@ start_streamdeck() {
 
 stop_streamdeck() {
     streamdeck_running || return 0
-    pkill -f "streamdeck_midi.py" 2>/dev/null
+    pkill -f "$STREAMDECK_PAT" 2>/dev/null
     log_watcher "stopped streamdeck"
 }
+# ponytail: the backgrounded child becomes a transient zombie until bash reaps it on the next
+# loop iteration — harmless here. Add an explicit `wait` only if accumulation is ever observed.
 ```
 Wire-up (idempotent — `start_streamdeck` no-ops when already running, relaunches if the process died):
 - **Start:** in the main loop, call `start_streamdeck` on every iteration where the bridge is
@@ -215,8 +244,25 @@ Wire-up (idempotent — `start_streamdeck` no-ops when already running, relaunch
 - **Stack order = execution recency** — newest on top, toggle or press alike; re-pressing a pad moves
   its layer to the top. **Topmost wins each channel. Nothing is auto-untoggled** (a toggle only
   changes when its own pad is pressed).
-- **emergency/blackout > the whole stack** → black. Hold lasts until `note_off` (no timeout). If the
-  input surface disconnects (deck died), the bridge **clears the static stack** (back to autoloop).
+- **emergency/blackout > the whole stack** → black.
+- **Hold / recovery [DECISION — operator must pick before Task 5 builds]:** the locked model wants a
+  held layer to last until `note_off`/disconnect with **no** 2 s cutoff. But removing the 2 s
+  `controller_hold_timeout_ms` (`soundswitch_pack_player_config.py:53`) is **only safe with a
+  replacement backstop** — today that timeout is the *only* mechanism that ever releases a stuck
+  layer: input-disconnect detection does **not** exist (`_make_real_source` never notices a vanished
+  port, `soundswitch_midi_input.py:361-372`), and the dropped-note counter is **inert**
+  (`_mail_drop_count` is initialized and read but never incremented, `:89,125`; the latch at
+  `state_manager.py:3416` can therefore never fire). With no backstop, a single dropped `note_off`
+  or a controller crash mid-press pins a static look on the rig **forever**. Task 5 must ship **one
+  of**: (a) a long **press-only** watchdog (e.g. 30–60 s) that auto-releases a *transient* layer while
+  leaving toggles persistent; (b) real input-disconnect detection (periodic `get_ports()` re-check or
+  a controller heartbeat) that triggers the stack-clear; or (c) actually wire `_mailbox`/drop-count so
+  the existing degradation latch can fire. **Also note:** the 2 s timeout currently gates
+  **blackout-hold** auto-release too (`:114-117`) — whatever replaces it must preserve blackout
+  auto-release.
+- **Clear-on-disconnect [DECISION]:** "input surface disconnects → bridge clears the static stack" is
+  required by the model but has **no detection seam today**. It is satisfied only if Task 5 adds the
+  seam (option (b) above); it cannot be assumed to work for free.
 - Bridge restart (operator: "never will") → controller blanks all LEDs and resets.
 
 **What's confirmed in code [confirmed] — the gap is the whole feature:**
@@ -226,9 +272,13 @@ Wire-up (idempotent — `start_streamdeck` no-ops when already running, relaunch
   transparent** (`:143-150`). The MIDI engine is likewise single-slot: `_held_static_slot`
   (`soundswitch_midi_input.py:222-277`).
 - **The data already supports layering** [confirmed]: a look's `generic_attributes`
-  (`soundswitch_pack_loader.py:586`) is a **sparse** list of `(dmx_channel, value)` — "unset" = absent,
-  "set to 0" = present with value 0. So transparency needs **no exporter change**; the renderer just
-  discards it today.
+  (`soundswitch_pack_loader.py:586`) is a **sparse** list of `LoadedAttribute` rows
+  (`dmx_channel`, `value`, **and `fixture_group`**) — "unset" = absent, "set to 0" = present with
+  value 0. So transparency needs **no exporter change**; the renderer just discards the sparseness
+  today. **Caveat [confirmed]:** the per-channel apply must replicate `_apply_attribute`'s filter —
+  rows whose `fixture_group != PRIMARY_FIXTURE_GROUP` are **skipped** (`soundswitch_laser_player.py:78`).
+  A naive `(channel, value)` patch that ignores `fixture_group` would write channels the engine
+  intentionally drops. The render rules in Task 5 carry this filter.
 - `interaction` (press/toggle) is already decoded from the `.ssproj`
   (`soundswitch_project_decoder.py:883-889`, `0=press/1=toggle`) and carried to
   `PackMidiBinding.interaction` (`soundswitch_pack_loader.py:296`).
@@ -239,17 +289,58 @@ Wire-up (idempotent — `start_streamdeck` no-ops when already running, relaunch
 ### Tasks
 ### Task 5 — bridge: generic layered static-look compositor (the core; live-critical, plan-first)
 Replace the single-slot static path with an ordered **layer stack**, driven generically by MIDI notes.
-- **State (in the MIDI→state engine, generic):** an ordered list of active static layers, each
-  `{slot, kind: toggle|press}` in recency order. `note_on` toggle → if slot present remove it, else
-  push on top. `note_on` press → push a transient layer on top. `note_off` press → remove that layer;
-  `note_off` toggle → ignore. On input-port disconnect → clear the stack. **Remove the 2 s
-  `controller_hold_timeout_ms` cutoff** for held layers (hold = until `note_off`/disconnect).
-- **Render (replace `resolve_frame` + `render_static_look_frame`):** start from the base
-  autoloop/scripted frame; for each layer bottom→top apply only its **sparse** `generic_attributes`
-  (absent channel falls through; set channel — incl. 0 — overrides). Precedence stays
-  **emergency/blackout > stack > base**. The render must be a **pure function** of (base frame,
-  ordered layers, blackout/emergency) so the 200 Hz push loop stays non-blocking; the worker thread
-  mutates the stack, the loop reads an immutable snapshot (same pattern as `MidiInputSnapshot`).
+Today everything in this path is single-slot; every seam below must be widened (exact symbols named so
+Codex builds with no guessing).
+
+**State — in the MIDI→state engine (`SoundSwitchMidiInputAdapter`, generic, no device strings):**
+- Replace the scalar `_held_static_slot` (`soundswitch_midi_input.py:83`) with an ordered list of
+  layer entries `{slot, kind: toggle|press}` in recency order (newest last). `note_on` toggle → if
+  `slot` present remove it, else push on top. `note_on` press → push a transient entry on top.
+  `note_off` press → remove that `(slot, press)` entry; `note_off` toggle → ignore. **Re-press of a
+  present toggle removes it** (it does **not** move to top — only a fresh push lands on top, so
+  remove-then-re-press is how a toggle returns to the top). On input-port disconnect → clear the list
+  (gated on the disconnect-detection DECISION above). Remove the 2 s `controller_hold_timeout_ms`
+  cutoff **only together with** the chosen backstop (DECISION above).
+- **Snapshot:** widen `MidiInputSnapshot` (`soundswitch_midi_input.py:47`) — replace the scalar
+  `held_static_slot: int|None` with `held_layers: tuple[LayerEntry, ...]`, an **immutable tuple**
+  ordered bottom→top. Build it by copying the engine list into a tuple **under `_lock`**; never hand
+  the push loop a live list (anti-tear). `snapshot()` must become a **pure read** — move the current
+  stale-clear *writes* (`:110-119`) out of `snapshot()` into the worker/backstop path so the 200 Hz
+  loop never mutates engine state.
+- **Group merge:** `SoundSwitchMidiInputGroup.snapshot()` collapses adapters to a single slot and
+  raises `conflicting_static_holds` when >1 (`soundswitch_midi_input.py:508-525`) — structurally
+  incompatible with a stack. Redefine it to concatenate each adapter's `held_layers` into one
+  recency-ordered tuple and drop the single-slot conflict flag. (For a single controller this is just
+  that adapter's tuple; the cross-device ordering rule is a DECISION — see end of Part F.)
+- **Player API:** `LaserPackPlayer` is single-slot (`_active_static_slot`,
+  `soundswitch_laser_player.py:186`; `hold_static`/`release_static`, `:234-245`). Add
+  `set_static_layers(layers)` storing the ordered tuple; `reload()` (`:203-209`) must reset it to
+  empty (slot indices are not stable across pack reload — see Part C reload invariant).
+
+**Render — replace `resolve_frame` + `render_static_look_frame` (`soundswitch_laser_player.py:143-163`)
+with a single pure function `apply_layers(base, layers, blackout, emergency) -> frame`:**
+1. if `emergency or blackout`: return `ZERO_FRAME` (precedence **emergency/blackout > stack > base**,
+   unchanged from `:161`).
+2. start from a **copy of the base** autoloop/scripted frame — **never `[0]*19`.** Seeding a per-layer
+   full frame is the transparency bug: it would black every channel the layer doesn't set and clobber
+   the autoloop beneath.
+3. for each layer **bottom→top**, apply only its set channels onto the working frame, **replicating
+   `_apply_attribute`'s filter**: skip rows where `fixture_group != PRIMARY_FIXTURE_GROUP` (`:78`);
+   for the rest write `frame[dmx_channel-1] = value` (explicit 0 overrides; an absent channel falls
+   through to whatever is beneath). The topmost layer wins each channel it sets.
+- **Per-layer error isolation [DECISION]:** a malformed look raises in apply today and `render()`
+  fail-closes the **whole** frame to ZERO (`:145,371-372`). In a stack, pick: skip the bad layer and
+  log (recommended — one corrupt look can't black the stage) **or** keep fail-closed. Choose one and
+  test it.
+- The render stays a **pure function** of (base, ordered layers, blackout, emergency); the 200 Hz push
+  loop reads the immutable snapshot and calls it — **no I/O, no locks on the loop** (AGENTS §6).
+
+**Degradation latch [DECISION]:** the push loop drops the entire overlay (`slot=None`) on any
+`error`, `worker_alive` flap, or `new_drop` (`state_manager.py:3418-3428`). With a stack this blinks
+**all** held layers off/on on a transient glitch. Restrict the drop-all to true
+worker-death/disconnect; do not drop the stack on a transient `error` string. (Tie this to the
+backstop/disconnect DECISION above.)
+
 - **No Stream-Deck specifics.** Layers are keyed by learned binding `(device_name, channel, note)`
   → `static_look` slot. Optional generic add: list available MIDI input port names in runtime status.
 
@@ -259,12 +350,19 @@ Replace the single-slot static path with an ordered **layer stack**, driven gene
   Exporter output (the project's own bindings), names no device. The compositor itself reads the
   look's channel patches from the pack it already loads — the sidecar is only for the controller's LEDs.
 
-### Task 7 — controller: local LED state from the sidecar (no conflict logic needed)
+### Task 7 — controller: local LED state from the sidecar (cosmetic; may diverge)
 - Read the sidecar at startup; key each pad by `(CHANNEL, note)`. Toggle pad → track **local** on/off,
   flip per press, light when on. Press pad → momentary (today's flash). Adopt bound notes from the
   sidecar so pads auto-match the project (fallback to fixed 36-50). **No compositor logic in the
-  controller** — because nothing auto-untoggles, every state change is a press the controller sees,
-  so local LEDs are correct by construction. Blank all LEDs on its own (re)start.
+  controller.** Blank all LEDs on its own (re)start.
+- **LED state is cosmetic and can diverge from the bridge stack — the earlier "correct by
+  construction" claim is [confirmed false] and is retracted.** The controller is a separate process
+  that sees only its own presses, not bridge-side clears. After a bridge stack-clear (input
+  disconnect, pack reload) or a dropped `note_on`/`note_off`, a toggle's pad LED and the bridge's
+  actual layer state can invert, so the next press does the opposite of what the operator expects.
+  Acceptable for a cosmetic LED on a personal rig; recovery is a double-press to re-sync. The LED
+  must **never** drive lighting. (If exact sync is ever wanted, add a bridge→controller state feed —
+  out of scope here.)
 
 ### Part C additions (Phase 2 invariants)
 - **No Stream-Deck string, code, or file emit in `rb_ss_bridge_v2/*.py`.** The compositor and MIDI
@@ -275,6 +373,10 @@ Replace the single-slot static path with an ordered **layer stack**, driven gene
   **emergency/blackout overrides the whole stack**. Held layers release on `note_off` or input
   disconnect — never stick past the surface going away.
 - Controller LED is local/cosmetic, never drives lighting, never emits on the lasers' channels.
+- **Pack reload clears the stack.** On `on_pack_reload`/controller swap the engine clears the layer
+  list and the player resets via `set_static_layers([])` — `static_look` slot indices are keyed by
+  position (`soundswitch_pack_loader.py:582`) and are **not** stable across reload, so a carried-over
+  layer would point at the wrong look. The controller blanks its LEDs on (re)start to resync.
 
 ### Part D additions (Phase 2 tests)
 - **Pure-function compositor seam** (the core): given a base frame + ordered sparse layers (+ flags),
@@ -292,7 +394,17 @@ Replace the single-slot static path with an ordered **layer stack**, driven gene
   the live autoloop. Blackout blacks the whole stack.
 - Existing autoloop/scripted/blackout behavior unchanged when no static layer is active.
 
-**No remaining unknowns.** The only mechanical item is the exporter hook site for Task 6, which Codex
-locates in the pack-build path (`soundswitch_pack_loader`/`soundswitch_pack_runtime`). Tasks 5 is the
-live-critical one (replaces `resolve_frame`/`_active_static_slot`/`_held_static_slot`) — plan-first,
-operator reviews before merge.
+**Open decisions before Task 5 builds (operator must resolve — this retracts the earlier "no
+remaining unknowns" claim):**
+1. **Stuck-layer backstop** — press watchdog vs disconnect detection vs wiring the drop counter (Hold/
+   recovery DECISION above). Live-safety critical: without one, a dropped `note_off` or a controller
+   crash mid-press pins a look on the rig forever.
+2. **Per-layer render-error isolation** — skip the bad layer (recommended) vs fail-closed to ZERO.
+3. **Degradation-latch scope** — restrict the drop-all to true worker-death/disconnect.
+4. **Cross-device layer ordering** in the group merge (trivial for a single controller; name the rule).
+
+The only mechanical item is the Task 6 exporter hook site, which Codex locates in the pack-build path
+(`soundswitch_pack_loader`/`soundswitch_pack_runtime`). Task 5 is the live-critical one — it replaces
+`resolve_frame`/`render_static_look_frame`/`_active_static_slot`/`_held_static_slot` — and stays
+**plan-first and GATED on Phase 1 execution + operator approval**: it must not start until Phase 1 has
+landed and the operator has signed off on decisions 1–4.
