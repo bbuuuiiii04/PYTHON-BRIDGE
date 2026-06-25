@@ -24,9 +24,9 @@ the operator and actively wait.** You never reinterpret missing evidence.
    block (for the exact invocation flags) so your coordination matches its real active-wait
    gates and fail-closed rules. Know its limits: the conductor copies only `bridge.log` and
    hard-codes `project_hash_matched=True` in `run-scenario` — it does **not** hash the
-   SoundSwitch project or copy AppLogs. Those are operator steps you must drive (see Run
-   mechanics), or `validate-scenario` will fail closed and the corpus will be unusable for the
-   later identity join.
+   SoundSwitch project or copy AppLogs. **You** run those yourself (read-only evidence collection
+   into the ignored capture dir — not a physical action; see Run mechanics), or `validate-scenario`
+   will fail closed and the corpus will be unusable for the later identity join.
 
 ## HARD SAFETY BOUNDARIES — never cross
 - **Observer only.** Never connect to or open Enttec/serial/MIDI/DMX, never enable the
@@ -74,7 +74,8 @@ ready:**
 ## Per-scenario preflight (operator-confirmed each time)
 Before each `run-scenario`, ping and WAIT for the operator to confirm, and verify what you
 can yourself:
-- exactly one core bridge running (`pgrep` == 1) and pack output **disabled** in status;
+- exactly one core bridge running (confirmed via `prepare` / `core_bridge_process_count`, not a
+  bare `pgrep`) and pack output **disabled** in status;
 - SoundSwitch open on the **saved bounded project** (project bytes unchanged);
 - all physical lasers/DMX fixtures and Enttec output **disconnected/powered off**, no live
   audience;
