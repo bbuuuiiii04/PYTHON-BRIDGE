@@ -442,9 +442,8 @@ def pack_export_status_line(
     elif export_state == "export_failed":
         category = _safe_error_category((export_result or {}).get("error_category"))[:32]
         note = f"export failed ({category})"
-    # When the pack is off for a real FAILURE (not the benign SS-connected auto-off,
-    # which carries reason "disabled"/"none"), say so — otherwise the operator can't
-    # tell "off on purpose" from "tried to start and couldn't" without reading source.
+    # Off for a real failure (not the benign SS-connected auto-off, reason
+    # "disabled"/"none") -> say why, so "off on purpose" reads differently from "couldn't start".
     if not note and light_label == "pack off":
         note = {
             "pack_load_failed": "pack unreadable — re-export",
@@ -876,14 +875,10 @@ class BridgeMenuBar(NSObject):
     def _auto_set_soundswitch_pack(self):
         command = pack_auto_command(self._snapshot, bridge_status=self._status)
         if command is None:
-            # A FRESH snapshot that needs no command means the bridge has settled at
-            # the desired state (or the pack is ineligible): nothing is in flight, so
-            # drop the debounce latch and let the next real transition re-send. Only a
-            # stale / bridge-off snapshot keeps the latch (pack_auto_command already
-            # returns None for those). Without this, a failed enable — e.g. enabling
-            # with no Enttec port, which the controller rejects so `enabled` never
-            # flips True — would leave the latch stuck at True forever and silently
-            # kill BOTH auto-enable and auto-disable for the menubar's lifetime.
+            # Clear the debounce latch on a fresh settled snapshot so a later
+            # transition can re-send. Keying it on confirmed enabled==target instead
+            # latches forever after a failed enable (e.g. no Enttec port), killing
+            # auto enable/disable for the menubar's life. Stale/off keeps the latch.
             snap = self._snapshot if isinstance(self._snapshot, dict) else {}
             if self._status == "on" and snap and not snap.get("stale"):
                 self._pack_auto_pending_enabled = None
