@@ -238,6 +238,29 @@ class BridgeMenubarTests(unittest.TestCase):
             bridge_menubar.export_button_text(False, False), "Export",
         )
 
+    def test_pack_toggle_line_truth_table(self) -> None:
+        bridge_menubar = self._import_module()
+        self.assertEqual(
+            bridge_menubar.pack_toggle_line({"available": True}, bridge_status="off"),
+            ("Lighting Pack: bridge off", False),
+        )
+        for pack in ({}, "missing", {"reason": "not_configured"}, {"available": False}):
+            with self.subTest(pack=pack):
+                self.assertEqual(
+                    bridge_menubar.pack_toggle_line(pack),
+                    ("Lighting Pack: not configured", False),
+                )
+        self.assertEqual(
+            bridge_menubar.pack_toggle_line({"available": True, "enabled": True}),
+            ("Lighting Pack: On  (click to turn off)", True),
+        )
+        self.assertEqual(
+            bridge_menubar.pack_toggle_line(
+                {"available": True, "enabled": False, "reason": "dry_run"},
+            ),
+            ("Lighting Pack: Off  (click to turn on)", True),
+        )
+
     def test_export_result_line_truth_table_and_sanitization(self) -> None:
         bridge_menubar = self._import_module()
         self.assertEqual(bridge_menubar.export_result_line("idle"), "")
