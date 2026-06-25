@@ -792,6 +792,10 @@ class BridgeMenuBar(NSObject):
         else:
             self.toggle_item.setTitle_("Bridge Off  (click to start)")
         self._render_export_state()
+        pack_title, pack_clickable = pack_toggle_line(
+            self._snapshot.get("soundswitch_pack", {}), bridge_status=self._status)
+        self.pack_toggle_item.setTitle_(pack_title)
+        self.pack_toggle_item.setEnabled_(pack_clickable)
         self._maybe_detect_export_state()
         smart_drop_on = bool(self._snapshot.get("state_manager", {}).get("smart_drop_enabled"))
         self.smart_drop_item.setTitle_("Smart Drops: On" if smart_drop_on else "Smart Drops: Off")
