@@ -143,11 +143,32 @@ it is sound.
   weakening the existing exclusive-port and no-MIDI-fallback invariants. If current behavior is
   intended, document it explicitly as an operator watchpoint.
 
-### C. Empty `midi_input_aliases` = silent loss of controller input
-- [confirmed] Empty aliases → `SoundSwitchMidiInputGroup` builds zero adapters → `snapshot()` always
-  reports no held slot → Static Looks are inert while pack DMX still runs. This is silent.
-- Should startup emit a loud, sanitized warning when pack mode is enabled with render-affecting
-  static/blackout bindings but no input alias maps their device? Propose/implement if warranted.
+### C. Controller auto-detection (REQUIRED) + empty-aliases silent failure
+- [confirmed] `SoundSwitchMidiInputGroup.__init__` (~L407–423) builds adapters ONLY for
+  `device_name in sorted(aliases)`. The live config currently has `midi_input_aliases = {}`, so zero
+  adapters are built → `snapshot()` always reports no held slot → Static Looks are inert while pack
+  DMX still runs. This is silent, and it forces manual per-device config.
+- [confirmed] Everything needed to auto-detect already exists: every binding carries `device_name`
+  (`DDJ-800` on the static looks), the source factory enumerates ports via `MidiIn().get_ports()`,
+  and it matches by substring (`port_name in name`). SoundSwitch itself just enumerates CoreMIDI
+  inputs and matches the learned device name — the bridge has the identical capability.
+- **Implement auto-detection** so the operator does not hand-maintain a port map:
+  - At startup, derive the input device set from the pack's **`static_look`** bindings (physical
+    operator controls). This yields `{DDJ-800}` and **must NOT** include `IAC Driver Bus 1`, which
+    is the bridge's own OUTPUT bus to SoundSwitch (opening it as input would feed the bridge its own
+    autoloop/blackout commands — a feedback trigger). Do not auto-bind `blackout_mask` devices that
+    are the bridge's output bus.
+  - For each such device, match it against `MidiIn().get_ports()` (exact name first, then substring)
+    and open the matching live port. If multiple ports match, define and document a deterministic
+    rule; if none match, **skip that device with a sanitized warning and keep pack DMX running**
+    (this is the degrade-not-die behavior from §4.B) — do not abort all output.
+  - Keep `midi_input_aliases` as an **optional override** for the case where the OS/CoreMIDI port
+    name differs from the SoundSwitch device name. Explicit alias wins over auto-detection.
+  - Emit a loud, sanitized log line distinguishing: auto-bound device, overridden device, and
+    render-affecting device with no available port (operator watchpoint).
+- Add tests with a fake `rtmidi` module (no real MIDI): auto-bind when the port is present;
+  graceful skip + DMX preserved when absent; explicit-alias override; IAC/output-bus never opened
+  as input.
 
 ### D. Toggle semantics & stuck-on risk
 - Verify: toggle latches on nonzero note-on, second same-slot note-on clears, note-off ignored,
