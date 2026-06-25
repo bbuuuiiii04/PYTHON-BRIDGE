@@ -139,7 +139,7 @@ def _write_source_sidecar(destination: Path, source: Path, manifest_sha256: str)
     _atomic_write_result(_sidecar_path(destination), payload)
 
 
-def _write_binding_sidecar(destination: Path, decoded) -> None:
+def _binding_sidecar_rows(decoded) -> list[dict[str, object]]:
     rows = []
     for row in decoded.resolved_controls:
         binding = row.binding
@@ -155,12 +155,47 @@ def _write_binding_sidecar(destination: Path, decoded) -> None:
             "name": row.target_name or "",
         })
     rows.sort(key=lambda item: (item["channel"], item["note"], item["name"]))
-    _atomic_write_result(_binding_sidecar_path(destination), rows)
+    return rows
+
+
+def _write_binding_sidecar(destination: Path, decoded) -> None:
+    _atomic_write_result(_binding_sidecar_path(destination), _binding_sidecar_rows(decoded))
 
 
 def _write_required_binding_sidecar(destination: Path, decoded) -> None:
     try:
         _write_binding_sidecar(destination, decoded)
+    except Exception as exc:
+        raise BindingSidecarWriteError("midi binding sidecar write failed") from exc
+
+
+def _stage_binding_sidecar(parent: Path, destination_name: str, decoded) -> Path:
+    """Produce and durably write the required binding sidecar to a sibling temp.
+
+    Done BEFORE the canonical pack swap so a sidecar that cannot be produced or
+    written fails the publish while the prior verified pack stays untouched; the
+    returned temp is promoted with one rename after the swap. The ``.tmp-`` prefix
+    matches ``_gc_orphan_staging`` so an interrupted run's temp is reclaimed.
+    """
+    try:
+        data = (json.dumps(_binding_sidecar_rows(decoded), sort_keys=True,
+                           separators=(",", ":")) + "\n").encode()
+        fd, staging_name = tempfile.mkstemp(prefix=f".{destination_name}.tmp-", dir=parent)
+        staging = Path(staging_name)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            _fsync_dir(parent)
+        except BaseException:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            staging.unlink(missing_ok=True)
+            raise
+        return staging
     except Exception as exc:
         raise BindingSidecarWriteError("midi binding sidecar write failed") from exc
 
@@ -410,6 +445,11 @@ def publish_pack(
         staging = _stage_artifacts(artifacts, parent, destination.name)
         try:
             result = verify_pack(staging, source_project=source)
+            # Stage the REQUIRED binding sidecar before the swap so a sidecar that
+            # cannot be produced/written fails the publish with the canonical pack
+            # untouched (matching export_pack's all-or-nothing contract). It is a
+            # sibling file, so it is promoted with one rename after the swap.
+            staged_sidecar = _stage_binding_sidecar(parent, destination.name, decoded)
             try:
                 if first_export:
                     os.replace(staging, destination)
@@ -417,11 +457,20 @@ def publish_pack(
                 else:
                     _atomic_swap_dir(staging, destination, parent)
             except OSError as exc:
+                staged_sidecar.unlink(missing_ok=True)
                 raise PackSwapError("canonical pack swap failed") from exc
+            except BaseException:
+                staged_sidecar.unlink(missing_ok=True)
+                raise
+            try:
+                os.replace(staged_sidecar, _binding_sidecar_path(destination))
+                _fsync_dir(parent)
+            except OSError as exc:
+                staged_sidecar.unlink(missing_ok=True)
+                raise BindingSidecarWriteError("midi binding sidecar promote failed") from exc
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
-        _write_required_binding_sidecar(destination, decoded)
         return {**result, "first_export": first_export}
 
 

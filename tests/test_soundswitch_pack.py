@@ -861,6 +861,27 @@ class PublishPackReplaceTests(unittest.TestCase):
             self.assertEqual(self._files(destination), before)
             self.assertEqual(self._leftovers(root), [])
 
+    def test_sidecar_failure_before_swap_preserves_prior_pack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            destination.mkdir()
+            (destination / "manifest.json").write_bytes(b"old\n")
+            before = self._files(destination)
+            prior_sidecar = export_module._binding_sidecar_path(destination)
+            prior_sidecar.write_bytes(b'[{"prior":true}]\n')
+            patches = self._patch_export({"manifest.json": b"new\n"})
+            with patches[0], patches[1], patches[2], patches[3], \
+                 mock.patch.object(export_module, "_binding_sidecar_rows",
+                                   side_effect=OSError("synthetic sidecar failure")):
+                with self.assertRaises(export_module.BindingSidecarWriteError):
+                    publish_pack(root / "source.ssproj", destination)
+            # The required sidecar could not be produced, so the canonical pack and
+            # its prior sidecar must be left exactly as they were (no half-publish).
+            self.assertEqual(self._files(destination), before)
+            self.assertEqual(prior_sidecar.read_bytes(), b'[{"prior":true}]\n')
+            self.assertEqual(self._leftovers(root), [])
+
     def test_symlink_destination_and_invalid_parents_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1205,7 +1226,7 @@ class PublishPackCliTests(unittest.TestCase):
                      return_value={"verified": True, "manifest_sha256": "a" * 64,
                                    "artifact_count": len(artifacts)},
                  ), \
-                 mock.patch.object(export_module, "_write_binding_sidecar",
+                 mock.patch.object(export_module, "_binding_sidecar_rows",
                                    side_effect=OSError("disk full")), \
                  mock.patch.object(export_module, "_write_source_sidecar") as source_sidecar:
                 result = export_module._canonical_publish_result()
