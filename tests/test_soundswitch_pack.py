@@ -620,6 +620,63 @@ class ExportPackLaunchSafetyTests(unittest.TestCase):
             self.assertFalse(dest.exists(), "destination present after failed publish")
             self.assertEqual(self._staging_leftovers(root), [], "staging left behind")
 
+    def test_export_pack_writes_sibling_binding_sidecar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            decoded = SimpleNamespace(resolved_controls=(
+                SimpleNamespace(
+                    binding=SimpleNamespace(
+                        enabled=True, message_type="note", channel_zero_based=2,
+                        data_byte=44, device_name="private-device",
+                    ),
+                    target_kind="static_look",
+                    interaction_mode="press",
+                    target_name="White",
+                ),
+            ))
+            artifacts = {"manifest.json": b'{"keep":true}\n'}
+            with mock.patch.object(export_module, "decode_project", return_value=decoded), \
+                 mock.patch.object(export_module, "_generator_commit", return_value="0" * 40), \
+                 mock.patch.object(export_module, "compile_pack_artifacts",
+                                   return_value=artifacts), \
+                 mock.patch.object(
+                     export_module, "verify_pack",
+                     return_value={"verified": True, "manifest_sha256": "a" * 64,
+                                   "artifact_count": len(artifacts)},
+                 ):
+                export_pack(root / "ignored.ssproj", dest)
+
+            self.assertEqual((dest / "manifest.json").read_bytes(), artifacts["manifest.json"])
+            self.assertFalse(any(dest.rglob("*midi_bindings.json")))
+            self.assertEqual(
+                json.loads(export_module._binding_sidecar_path(dest).read_text()),
+                [{"channel": 2, "interaction": "press", "name": "White",
+                  "note": 44, "target_kind": "static_look"}],
+            )
+
+    def test_export_pack_sidecar_failure_removes_new_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            decoded = SimpleNamespace(resolved_controls=())
+            with mock.patch.object(export_module, "decode_project", return_value=decoded), \
+                 mock.patch.object(export_module, "_generator_commit", return_value="0" * 40), \
+                 mock.patch.object(export_module, "compile_pack_artifacts",
+                                   return_value={"manifest.json": b"{}\n"}), \
+                 mock.patch.object(
+                     export_module, "verify_pack",
+                     return_value={"verified": True, "manifest_sha256": "a" * 64,
+                                   "artifact_count": 1},
+                 ), \
+                 mock.patch.object(export_module, "_write_binding_sidecar",
+                                   side_effect=OSError("disk full")):
+                with self.assertRaises(export_module.BindingSidecarWriteError):
+                    export_pack(root / "ignored.ssproj", dest)
+
+            self.assertFalse(dest.exists())
+            self.assertFalse(export_module._binding_sidecar_path(dest).exists())
+
     def test_artifact_write_failure_rolls_back_and_publishes_nothing(self):
         # A mid-write failure (e.g. disk error) must not leave a partial pack
         # nor reach the verify/publish gates.
@@ -681,7 +738,8 @@ class ExportDurabilityTests(unittest.TestCase):
                 replaced_at["index"] = len(calls)
                 return real_replace(src, dst)
 
-            with mock.patch.object(export_module, "decode_project", return_value=object()), \
+            decoded = SimpleNamespace(resolved_controls=())
+            with mock.patch.object(export_module, "decode_project", return_value=decoded), \
                  mock.patch.object(export_module, "compile_pack_artifacts", return_value=artifacts), \
                  mock.patch.object(export_module, "verify_pack", return_value={"manifest_sha256": "x", "artifact_count": 2}), \
                  mock.patch.object(export_module, "_fsync_dir", side_effect=spy_fsync_dir), \
@@ -702,8 +760,9 @@ class ExportDurabilityTests(unittest.TestCase):
 class PublishPackReplaceTests(unittest.TestCase):
     def _patch_export(self, artifacts=None):
         artifacts = artifacts or {"manifest.json": b"{}\n", "old.json": b"old\n"}
+        decoded = SimpleNamespace(resolved_controls=())
         return (
-            mock.patch.object(export_module, "decode_project", return_value=object()),
+            mock.patch.object(export_module, "decode_project", return_value=decoded),
             mock.patch.object(export_module, "_generator_commit", return_value="0" * 40),
             mock.patch.object(export_module, "compile_pack_artifacts", return_value=artifacts),
             mock.patch.object(
@@ -934,6 +993,55 @@ class PublishPackReplaceTests(unittest.TestCase):
                 if path.is_file():
                     self.assertNotIn(home, path.read_bytes(), path)
 
+    def test_publish_writes_sibling_binding_sidecar_without_mutating_pack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            artifacts = {"manifest.json": b'{"keep":true}\n'}
+            decoded = SimpleNamespace(resolved_controls=(
+                SimpleNamespace(
+                    binding=SimpleNamespace(
+                        enabled=True, message_type="note", channel_zero_based=2,
+                        data_byte=40, device_name="private-device",
+                    ),
+                    target_kind="static_look",
+                    interaction_mode="toggle",
+                    target_name="Blue Chase",
+                ),
+                SimpleNamespace(
+                    binding=SimpleNamespace(
+                        enabled=True, message_type="cc", channel_zero_based=2,
+                        data_byte=41, device_name="private-device",
+                    ),
+                    target_kind="static_look",
+                    interaction_mode="press",
+                    target_name="Ignored CC",
+                ),
+            ))
+            with mock.patch.object(export_module, "decode_project", return_value=decoded), \
+                 mock.patch.object(export_module, "_generator_commit", return_value="0" * 40), \
+                 mock.patch.object(export_module, "compile_pack_artifacts",
+                                   return_value=artifacts), \
+                 mock.patch.object(
+                     export_module, "verify_pack",
+                     return_value={"verified": True, "manifest_sha256": "a" * 64,
+                                   "artifact_count": len(artifacts)},
+                 ):
+                publish_pack(root / "source.ssproj", destination)
+
+            self.assertEqual(self._files(destination), artifacts)
+            self.assertFalse(any(destination.rglob("*midi_bindings.json")))
+            sidecar = export_module._binding_sidecar_path(destination)
+            self.assertEqual(sidecar.parent, destination.parent)
+            self.assertEqual(json.loads(sidecar.read_text(encoding="utf-8")), [{
+                "channel": 2,
+                "note": 40,
+                "target_kind": "static_look",
+                "interaction": "toggle",
+                "name": "Blue Chase",
+            }])
+            self.assertNotIn("device_name", sidecar.read_text(encoding="utf-8"))
+
 
 class PublishPackCliTests(unittest.TestCase):
     def test_canonical_cli_writes_sanitized_success_result(self):
@@ -1038,26 +1146,74 @@ class PublishPackCliTests(unittest.TestCase):
             }])
             self.assertNotIn("device_name", sidecar.read_text(encoding="utf-8"))
 
-    def test_canonical_publish_writes_binding_sidecar_after_source_sidecar(self):
-        order = []
-        publish_result = {
-            "verified": True,
-            "manifest_sha256": "a" * 64,
-            "artifact_count": 95,
-            "first_export": False,
-        }
-        decoded = SimpleNamespace(resolved_controls=())
+    def test_canonical_publish_reuses_decoded_project_for_binding_sidecar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.ssproj"
+            destination = root / "pack"
+            decoded = SimpleNamespace(resolved_controls=(
+                SimpleNamespace(
+                    binding=SimpleNamespace(
+                        enabled=True, message_type="note", channel_zero_based=2,
+                        data_byte=40,
+                    ),
+                    target_kind="static_look",
+                    interaction_mode="press",
+                    target_name="Blue",
+                ),
+            ))
+            artifacts = {"manifest.json": b"{}\n"}
 
-        with mock.patch.object(export_module, "publish_pack", return_value=publish_result), \
-             mock.patch.object(export_module, "_write_source_sidecar",
-                               side_effect=lambda *_args: order.append("source")), \
-             mock.patch.object(export_module, "decode_project", return_value=decoded), \
-             mock.patch.object(export_module, "_write_binding_sidecar",
-                               side_effect=lambda *_args: order.append("binding")):
-            result = export_module._canonical_publish_result()
+            with mock.patch.object(export_module, "CANONICAL_SOURCE_PROJECT", source), \
+                 mock.patch.object(export_module, "CANONICAL_PACK_DIR", destination), \
+                 mock.patch.object(export_module, "decode_project", return_value=decoded) as decode, \
+                 mock.patch.object(export_module, "_generator_commit", return_value="0" * 40), \
+                 mock.patch.object(export_module, "compile_pack_artifacts",
+                                   return_value=artifacts), \
+                 mock.patch.object(
+                     export_module, "verify_pack",
+                     return_value={"verified": True, "manifest_sha256": "a" * 64,
+                                   "artifact_count": len(artifacts)},
+                 ), \
+                 mock.patch.object(export_module, "_write_source_sidecar"):
+                result = export_module._canonical_publish_result()
 
-        self.assertTrue(result["ok"])
-        self.assertEqual(order, ["source", "binding"])
+            self.assertTrue(result["ok"])
+            decode.assert_called_once_with(source)
+            self.assertEqual(
+                json.loads(export_module._binding_sidecar_path(destination).read_text()),
+                [{"channel": 2, "interaction": "press", "name": "Blue",
+                  "note": 40, "target_kind": "static_look"}],
+            )
+
+    def test_canonical_publish_binding_sidecar_failure_is_visible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.ssproj"
+            destination = root / "pack"
+            decoded = SimpleNamespace(resolved_controls=())
+            artifacts = {"manifest.json": b"{}\n"}
+
+            with mock.patch.object(export_module, "CANONICAL_SOURCE_PROJECT", source), \
+                 mock.patch.object(export_module, "CANONICAL_PACK_DIR", destination), \
+                 mock.patch.object(export_module, "decode_project", return_value=decoded), \
+                 mock.patch.object(export_module, "_generator_commit", return_value="0" * 40), \
+                 mock.patch.object(export_module, "compile_pack_artifacts",
+                                   return_value=artifacts), \
+                 mock.patch.object(
+                     export_module, "verify_pack",
+                     return_value={"verified": True, "manifest_sha256": "a" * 64,
+                                   "artifact_count": len(artifacts)},
+                 ), \
+                 mock.patch.object(export_module, "_write_binding_sidecar",
+                                   side_effect=OSError("disk full")), \
+                 mock.patch.object(export_module, "_write_source_sidecar") as source_sidecar:
+                result = export_module._canonical_publish_result()
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["verdict"], "sidecar_failed")
+            self.assertEqual(result["error_category"], "BindingSidecarWriteError")
+            source_sidecar.assert_not_called()
 
     def test_canonical_publish_creates_repo_local_parent(self):
         with tempfile.TemporaryDirectory() as tmp:

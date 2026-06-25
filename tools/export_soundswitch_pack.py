@@ -53,6 +53,10 @@ class PackSwapError(OSError):
     """The verified staged pack could not replace the canonical pack."""
 
 
+class BindingSidecarWriteError(RuntimeError):
+    """The required Stream Deck MIDI binding sidecar could not be written."""
+
+
 def _generator_commit() -> str:
     try:
         result = subprocess.run(
@@ -152,6 +156,13 @@ def _write_binding_sidecar(destination: Path, decoded) -> None:
         })
     rows.sort(key=lambda item: (item["channel"], item["note"], item["name"]))
     _atomic_write_result(_binding_sidecar_path(destination), rows)
+
+
+def _write_required_binding_sidecar(destination: Path, decoded) -> None:
+    try:
+        _write_binding_sidecar(destination, decoded)
+    except Exception as exc:
+        raise BindingSidecarWriteError("midi binding sidecar write failed") from exc
 
 
 def _fsync_dir(directory: Path) -> None:
@@ -366,6 +377,12 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
         os.replace(staging, destination)
         # Persist the rename itself so the published pack survives a crash.
         _fsync_dir(parent)
+        try:
+            _write_required_binding_sidecar(destination, decoded)
+        except BaseException:
+            shutil.rmtree(destination, ignore_errors=True)
+            _fsync_dir(parent)
+            raise
         return result
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -401,10 +418,11 @@ def publish_pack(
                     _atomic_swap_dir(staging, destination, parent)
             except OSError as exc:
                 raise PackSwapError("canonical pack swap failed") from exc
-            return {**result, "first_export": first_export}
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
+        _write_required_binding_sidecar(destination, decoded)
+        return {**result, "first_export": first_export}
 
 
 def _atomic_write_result(path: Path, result: object) -> None:
@@ -437,6 +455,8 @@ def _publish_verdict(exc: Exception) -> str:
         return "verify_failed"
     if isinstance(exc, PackSwapError):
         return "swap_failed"
+    if isinstance(exc, BindingSidecarWriteError):
+        return "sidecar_failed"
     return "unknown_error"
 
 
@@ -458,10 +478,6 @@ def _canonical_publish_result() -> dict[str, object]:
             CANONICAL_PACK_DIR,
             CANONICAL_SOURCE_PROJECT,
             str(result["manifest_sha256"]),
-        )
-        _write_binding_sidecar(
-            CANONICAL_PACK_DIR,
-            decode_project(CANONICAL_SOURCE_PROJECT),
         )
     except Exception:
         pass

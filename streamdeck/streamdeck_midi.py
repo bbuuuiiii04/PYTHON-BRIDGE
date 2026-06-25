@@ -115,17 +115,25 @@ def led_state(sidecar, pressed_set: set[tuple[int, int]]) -> dict[tuple[int, int
     }
 
 
-def note_for(key: int, sidecar=None) -> int:
+def _row_for_key(key: int, sidecar=None) -> dict | None:
     rows = sidecar if isinstance(sidecar, list) else _fixed_rows()
     if 0 <= key < len(rows):
-        return int(rows[key]["note"])
-    return NOTE_BASE + key
+        return rows[key]
+    return None
+
+
+def note_for(key: int, sidecar=None) -> int | None:
+    row = _row_for_key(key, sidecar)
+    return int(row["note"]) if row is not None else None
 
 
 def key_to_message(key: int, pressed: bool, sidecar=None) -> mido.Message:
     """The one piece of logic worth testing: pad -> MIDI message."""
+    note = note_for(key, sidecar)
+    if note is None:
+        raise ValueError("unbound Stream Deck key")
     kind = "note_on" if pressed else "note_off"
-    return mido.Message(kind, channel=CHANNEL, note=note_for(key, sidecar),
+    return mido.Message(kind, channel=CHANNEL, note=note,
                         velocity=VELOCITY if pressed else 0)
 
 
@@ -138,6 +146,11 @@ def _font(size):
 
 def render_key(deck, key: int, pressed: bool, sidecar=None):
     image = PILHelper.create_image(deck)
+    row = _row_for_key(key, sidecar)
+    if row is None:
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([0, 0, image.width, image.height], fill=(8, 8, 8))
+        return PILHelper.to_native_format(deck, image)
     icon = os.path.join(ICON_DIR, f"{key + 1}.png")
     if os.path.exists(icon):
         image.paste(Image.open(icon).convert("RGB").resize(image.size))
@@ -150,7 +163,7 @@ def render_key(deck, key: int, pressed: bool, sidecar=None):
         w, h = image.width, image.height
         draw.text((w / 2, h / 2 - 8), str(key + 1), anchor="mm",
                   font=_font(30), fill="white")
-        draw.text((w / 2, h - 14), f"n{note_for(key, sidecar)}", anchor="mm",
+        draw.text((w / 2, h - 14), f"n{row['note']}", anchor="mm",
                   font=_font(13), fill=(170, 170, 170))
     return PILHelper.to_native_format(deck, image)
 
@@ -180,9 +193,9 @@ def acquire_deck():
 def make_on_key(deck, port, sidecar, active_keys: set[tuple[int, int]]):
     def on_key(_deck, key, pressed):
         try:
-            if not 0 <= key < len(sidecar):
+            row = _row_for_key(key, sidecar)
+            if row is None:
                 return
-            row = sidecar[key]
             pad_key = (CHANNEL, row["note"])
             port.send(key_to_message(key, pressed, sidecar))
             if row["interaction"] == "toggle":
