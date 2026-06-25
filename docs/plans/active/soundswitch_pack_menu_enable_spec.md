@@ -131,7 +131,7 @@ disabled defaults** plus clear placeholders the operator fills when hardware arr
   "enabled": false,
   "dry_run": true,
   "output_backend": "none",
-  "pack_path": "~/Music/SoundSwitch/rbss_canonical_pack",
+  "pack_path": "/Users/bbui/rb_ss_bridge_v2/local/soundswitch/rbss_canonical_pack",
   "fixture_map": {"1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10, "11": 11, "12": 12, "13": 13, "14": 14, "15": 15, "16": 16, "17": 17, "18": 18, "19": 19},
   "fixture_map_path": "",
   "midi_input_aliases": {},

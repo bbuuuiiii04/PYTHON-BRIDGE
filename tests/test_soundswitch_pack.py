@@ -992,6 +992,27 @@ class PublishPackCliTests(unittest.TestCase):
             self.assertFalse(any(destination.rglob("*.source.json")))
             self.assertNotIn(str(Path.home()), sidecar.read_text(encoding="utf-8"))
 
+    def test_canonical_publish_creates_repo_local_parent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "local" / "soundswitch" / "pack"
+            publish_result = {
+                "verified": True,
+                "manifest_sha256": "a" * 64,
+                "artifact_count": 95,
+                "first_export": True,
+            }
+
+            def fake_publish(_source, pack_dir):
+                self.assertTrue(Path(pack_dir).parent.is_dir())
+                return publish_result
+
+            with mock.patch.object(export_module, "CANONICAL_PACK_DIR", destination), \
+                 mock.patch.object(export_module, "publish_pack", side_effect=fake_publish), \
+                 mock.patch.object(export_module, "_write_source_sidecar"):
+                result = export_module._canonical_publish_result()
+
+        self.assertTrue(result["ok"])
+
     def test_source_sidecar_failure_does_not_fail_canonical_publish(self):
         publish_result = {
             "verified": True,

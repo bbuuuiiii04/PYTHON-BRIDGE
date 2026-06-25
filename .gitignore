@@ -14,6 +14,7 @@ config/laser_director.json
 config/led_look_director.json
 config/soundswitch_pack_player.json
 spec/*.npy
+local/
 # Generated, environment-specific proof reports (regenerate locally; never commit)
 artifacts/soundswitch_pack_generation_proof/latest.*
 

@@ -32,7 +32,7 @@ from rb_ss_bridge_v2.soundswitch_project_decoder import (  # noqa: E402
 
 
 CANONICAL_SOURCE_PROJECT = Path("~/Music/SoundSwitch/default.ssproj").expanduser()
-CANONICAL_PACK_DIR = Path("~/Music/SoundSwitch/rbss_canonical_pack").expanduser()
+CANONICAL_PACK_DIR = REPO_ROOT / "local" / "soundswitch" / "rbss_canonical_pack"
 
 _SIDECAR_SUFFIX = ".source.json"  # sibling of the pack dir; NEVER inside it
 
@@ -418,6 +418,7 @@ def _publish_verdict(exc: Exception) -> str:
 
 def _canonical_publish_result() -> dict[str, object]:
     try:
+        CANONICAL_PACK_DIR.parent.mkdir(parents=True, exist_ok=True)
         result = publish_pack(CANONICAL_SOURCE_PROJECT, CANONICAL_PACK_DIR)
     except Exception as exc:
         return {

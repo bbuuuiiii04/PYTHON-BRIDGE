@@ -31,6 +31,7 @@ from Foundation import NSAttributedString, NSMutableAttributedString, NSObject, 
 
 
 WATCHER = "/Users/bbui/ss_bridge_watcher.sh"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 MENUBAR_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*[[:space:]]+/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar\.py$"
 BRIDGE_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*([[:space:]]+-u)?[[:space:]]+-m[[:space:]]+rb_ss_bridge_v2$"
 WATCHER_PATTERN = r"^(/bin/bash|bash)[[:space:]]+/Users/bbui/ss_bridge_watcher\.sh$"
@@ -45,7 +46,7 @@ EXPORT_RELOAD_TIMEOUT_SECONDS = 8.0
 EXPORT_RELOAD_POLL_SECONDS = 0.25
 EXPORT_WORKING_DIRECTORY = str(Path(__file__).resolve().parents[2])
 CANONICAL_SOURCE_PROJECT = str(Path("~/Music/SoundSwitch/default.ssproj").expanduser())
-CANONICAL_PACK_DIR = Path("~/Music/SoundSwitch/rbss_canonical_pack").expanduser()
+CANONICAL_PACK_DIR = REPO_ROOT / "local" / "soundswitch" / "rbss_canonical_pack"
 DETECT_MAX_AGE_SECONDS = 30.0
 _SIDECAR_SUFFIX = ".source.json"
 
