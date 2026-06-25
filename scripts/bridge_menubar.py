@@ -370,20 +370,23 @@ def export_button_text(in_progress: bool, up_to_date: bool) -> str:
     return "Export"
 
 
-def pack_toggle_line(pack_status: dict, *, bridge_status: str | None = None) -> tuple[str, bool]:
-    """(title, clickable) for the Lighting Pack on/off item.
-
-    Pure: derived only from the copied snapshot. The menu never drives DMX —
-    clicking only enqueues a set_soundswitch_pack command for the bridge.
-    """
-    if bridge_status == "off":
-        return "Lighting Pack: bridge off", False
-    pack = pack_status if isinstance(pack_status, dict) else {}
+def pack_auto_command(status: dict, *, bridge_status: str | None = None) -> dict | None:
+    if bridge_status != "on" or not isinstance(status, dict) or not status or status.get("stale"):
+        return None
+    soundswitch = status.get("soundswitch", {})
+    pack = status.get("soundswitch_pack", {})
+    if not isinstance(soundswitch, dict) or not isinstance(pack, dict):
+        return None
+    connected = soundswitch.get("connected")
+    if type(connected) is not bool:
+        return None
     if not pack.get("available") or pack.get("reason") == "not_configured":
-        return "Lighting Pack: not configured", False
-    if pack.get("enabled"):
-        return "Lighting Pack: On  (click to turn off)", True
-    return "Lighting Pack: Off  (click to turn on)", True
+        return None
+    enabled = bool(pack.get("enabled"))
+    desired = not connected
+    if enabled == desired:
+        return None
+    return {"cmd": "set_soundswitch_pack", "action": "enable", "enabled": desired}
 
 
 def export_result_line(state: str, result: dict | None = None) -> str:
@@ -673,6 +676,7 @@ class BridgeMenuBar(NSObject):
         self._detect_sig = None
         self._detect_at = 0.0
         self._detect_generation = 0
+        self._pack_auto_pending_enabled = None
         self.status_rows = []
         for _ in range(9):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
@@ -688,7 +692,6 @@ class BridgeMenuBar(NSObject):
         )
         self.export_status_item.setEnabled_(False)
         self.menu.addItem_(self.export_status_item)
-        self.pack_toggle_item = self._add_action("Lighting Pack: …", "toggleSoundswitchPack:")
         
         self.smart_phrasing_menu = NSMenu.alloc().init()
         self.smart_phrasing_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Phrasing", None, "")
@@ -792,10 +795,7 @@ class BridgeMenuBar(NSObject):
         else:
             self.toggle_item.setTitle_("Bridge Off  (click to start)")
         self._render_export_state()
-        pack_title, pack_clickable = pack_toggle_line(
-            self._snapshot.get("soundswitch_pack", {}), bridge_status=self._status)
-        self.pack_toggle_item.setTitle_(pack_title)
-        self.pack_toggle_item.setEnabled_(pack_clickable)
+        self._auto_set_soundswitch_pack()
         self._maybe_detect_export_state()
         smart_drop_on = bool(self._snapshot.get("state_manager", {}).get("smart_drop_enabled"))
         self.smart_drop_item.setTitle_("Smart Drops: On" if smart_drop_on else "Smart Drops: Off")
@@ -863,6 +863,19 @@ class BridgeMenuBar(NSObject):
                 export_result=self._export_result,
                 bridge_status=self._status,
             ))
+
+    def _auto_set_soundswitch_pack(self):
+        command = pack_auto_command(self._snapshot, bridge_status=self._status)
+        if command is None:
+            pack = self._snapshot.get("soundswitch_pack", {}) if isinstance(self._snapshot, dict) else {}
+            if isinstance(pack, dict) and pack.get("enabled") == self._pack_auto_pending_enabled:
+                self._pack_auto_pending_enabled = None
+            return
+        target = command["enabled"]
+        if target == self._pack_auto_pending_enabled:
+            return
+        append_command(command)
+        self._pack_auto_pending_enabled = target
 
     def _maybe_detect_export_state(self):
         if self._export_in_progress or self._detect_in_progress:
@@ -1075,13 +1088,6 @@ class BridgeMenuBar(NSObject):
 
     def toggleLaserDirector_(self, _sender):
         append_command({"cmd": "toggle_laser_director"})
-        self.refresh_(None)
-
-    def toggleSoundswitchPack_(self, _sender):
-        pack = self._snapshot.get("soundswitch_pack", {}) if isinstance(self._snapshot, dict) else {}
-        currently_on = bool(pack.get("enabled"))
-        append_command({"cmd": "set_soundswitch_pack", "action": "enable",
-                        "enabled": not currently_on})
         self.refresh_(None)
 
     def laserBlackout_(self, _sender):

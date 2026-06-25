@@ -53,6 +53,81 @@ class BridgeMenubarTests(unittest.TestCase):
             }
         )
 
+    def test_pack_auto_command_follows_soundswitch_connection(self) -> None:
+        bridge_menubar = self._import_module()
+        self.assertEqual(
+            bridge_menubar.pack_auto_command(
+                {
+                    "soundswitch": {"connected": False},
+                    "soundswitch_pack": {"available": True, "enabled": False},
+                },
+                bridge_status="on",
+            ),
+            {"cmd": "set_soundswitch_pack", "action": "enable", "enabled": True},
+        )
+        self.assertEqual(
+            bridge_menubar.pack_auto_command(
+                {
+                    "soundswitch": {"connected": True},
+                    "soundswitch_pack": {"available": True, "enabled": True},
+                },
+                bridge_status="on",
+            ),
+            {"cmd": "set_soundswitch_pack", "action": "enable", "enabled": False},
+        )
+        self.assertIsNone(
+            bridge_menubar.pack_auto_command(
+                {
+                    "soundswitch": {"connected": False},
+                    "soundswitch_pack": {"available": True, "enabled": True},
+                },
+                bridge_status="on",
+            )
+        )
+
+    def test_pack_auto_command_ignores_unknown_or_unconfigured_state(self) -> None:
+        bridge_menubar = self._import_module()
+        snapshots = (
+            {},
+            {"stale": True, "soundswitch_pack": {"available": True, "enabled": False}},
+            {"soundswitch_pack": "bad"},
+            {"soundswitch": {}, "soundswitch_pack": {"available": True, "enabled": False}},
+            {"soundswitch": {"connected": False}, "soundswitch_pack": {"reason": "not_configured"}},
+        )
+        for snapshot in snapshots:
+            with self.subTest(snapshot=snapshot):
+                self.assertIsNone(bridge_menubar.pack_auto_command(snapshot, bridge_status="on"))
+        self.assertIsNone(
+            bridge_menubar.pack_auto_command(
+                {
+                    "soundswitch": {"connected": False},
+                    "soundswitch_pack": {"available": True, "enabled": False},
+                },
+                bridge_status="off",
+            )
+        )
+
+    def test_auto_set_soundswitch_pack_suppresses_duplicate_pending_command(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock(
+            _snapshot={
+                "soundswitch": {"connected": False},
+                "soundswitch_pack": {"available": True, "enabled": False},
+            },
+            _status="on",
+            _pack_auto_pending_enabled=None,
+        )
+        handler = bridge_menubar.BridgeMenuBar._auto_set_soundswitch_pack
+
+        with patch.object(bridge_menubar, "append_command") as append_command:
+            handler(menu)
+            handler(menu)
+
+        append_command.assert_called_once_with(
+            {"cmd": "set_soundswitch_pack", "action": "enable", "enabled": True}
+        )
+        self.assertTrue(menu._pack_auto_pending_enabled)
+
     def test_build_export_argv_uses_module_without_shell(self) -> None:
         bridge_menubar = self._import_module()
         self.assertEqual(bridge_menubar.build_export_argv("result.json"), [
@@ -236,29 +311,6 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertEqual(bridge_menubar.export_button_text(False, True), "Exported")
         self.assertEqual(
             bridge_menubar.export_button_text(False, False), "Export",
-        )
-
-    def test_pack_toggle_line_truth_table(self) -> None:
-        bridge_menubar = self._import_module()
-        self.assertEqual(
-            bridge_menubar.pack_toggle_line({"available": True}, bridge_status="off"),
-            ("Lighting Pack: bridge off", False),
-        )
-        for pack in ({}, "missing", {"reason": "not_configured"}, {"available": False}):
-            with self.subTest(pack=pack):
-                self.assertEqual(
-                    bridge_menubar.pack_toggle_line(pack),
-                    ("Lighting Pack: not configured", False),
-                )
-        self.assertEqual(
-            bridge_menubar.pack_toggle_line({"available": True, "enabled": True}),
-            ("Lighting Pack: On  (click to turn off)", True),
-        )
-        self.assertEqual(
-            bridge_menubar.pack_toggle_line(
-                {"available": True, "enabled": False, "reason": "dry_run"},
-            ),
-            ("Lighting Pack: Off  (click to turn on)", True),
         )
 
     def test_export_result_line_truth_table_and_sanitization(self) -> None:
