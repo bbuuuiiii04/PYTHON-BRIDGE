@@ -65,6 +65,42 @@ EXCLUDED in `doc_index.md`. Reconciling it is out of scope here.
 
 ---
 
+## Direction (decided 2026-06-25): direct-DMX with autoloops on day one
+
+The operator is switching to the bridge driving CH1-19 DMX directly, and **autoloop
+tracks must work from day one** (no dark interim). This pulls the *entire* blocked
+chain onto the critical path and makes the T7d captures the long pole.
+
+**Why autoloops force the long path.** Direct-DMX and SoundSwitch-over-OS2L are
+mutually-exclusive owners of CH1-19. In direct-DMX mode the bridge renders autoloop
+animation as software-zero (invariant 8; roadmap line 45), so without native
+autoloop those tracks are dark except a held static override. Requiring autoloops
+day one therefore requires `PASS_T7D_PHASE_CONTRACT` → native autoloop build
+*before* the cutover. The earlier "direct-DMX is parked / not urgent" framing in
+this doc is superseded.
+
+**Critical path to a live direct-DMX cutover:**
+1. **T7d captures (Item 3) — LONG POLE, operator at the rig.** `master-switch`,
+   `drop-hold`, `buildup`, `correction`; two accepted reps each via the conductor.
+   `arm` + `refire` already accepted; B1/B2 tooling done and reviewed.
+2. **Derive + oracle PASS (Item 3, Claude).** `PASS_T7D_PHASE_CONTRACT`, byte-exact.
+3. **Native Autoloop DMX (Item 4).** Codex spec from the proven contract → build →
+   adversarial review.
+4. **Toggle support.** Runs parallel to 1-3; no T7d dependency.
+5. **Hardware validation run (Item 2) — operator at the rig.** The gate before any
+   live direct output (real lasers; the one load-bearing safety step).
+6. **Independent review + cleanups (Item 1 + drift) → final closeout (Item 5).**
+
+**Parallelizes off the rig (start now, no rig time):** the toggle Codex spec +
+build, the review-range refresh + review, the menubar doc-drift cleanup.
+**Needs rig time (schedule):** the T7d capture sessions first, the hardware
+validation run later.
+
+**First action:** schedule a T7d capture session and run the conductor for
+`master-switch` — it is the bottleneck and only the operator can produce it.
+
+---
+
 ## Software, doable now
 
 ### Item 1 — Independent implementation review
