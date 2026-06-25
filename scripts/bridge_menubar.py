@@ -1077,6 +1077,13 @@ class BridgeMenuBar(NSObject):
         append_command({"cmd": "toggle_laser_director"})
         self.refresh_(None)
 
+    def toggleSoundswitchPack_(self, _sender):
+        pack = self._snapshot.get("soundswitch_pack", {}) if isinstance(self._snapshot, dict) else {}
+        currently_on = bool(pack.get("enabled"))
+        append_command({"cmd": "set_soundswitch_pack", "action": "enable",
+                        "enabled": not currently_on})
+        self.refresh_(None)
+
     def laserBlackout_(self, _sender):
         append_command({"cmd": "laser_blackout"})
         self.refresh_(None)
