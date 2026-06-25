@@ -381,22 +381,20 @@ class BridgeMenubarTests(unittest.TestCase):
                 self.assertEqual(bridge_menubar.detect_export_state(), "changes")
                 pack.mkdir()
 
+            # The bridge git commit no longer affects the verdict: a matching
+            # source fingerprint is up-to-date regardless of HEAD movement.
             with patch.object(bridge_menubar, "CANONICAL_SOURCE_PROJECT", str(source)), \
                  patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack), \
                  patch.object(bridge_menubar, "current_generator_commit", return_value="c" * 40):
-                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
-            with patch.object(bridge_menubar, "CANONICAL_SOURCE_PROJECT", str(source)), \
-                 patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack), \
-                 patch.object(bridge_menubar, "current_generator_commit", return_value=None):
                 self.assertEqual(bridge_menubar.detect_export_state(), "up_to_date")
 
+            # A sidecar with only the source fingerprint (no commit) is enough.
             sidecar.write_text(json.dumps({
                 "source_fingerprint": bridge_menubar._source_content_fingerprint(source),
             }), encoding="utf-8")
             with patch.object(bridge_menubar, "CANONICAL_SOURCE_PROJECT", str(source)), \
-                 patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack), \
-                 patch.object(bridge_menubar, "current_generator_commit", return_value=None):
-                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
+                 patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack):
+                self.assertEqual(bridge_menubar.detect_export_state(), "up_to_date")
 
     def test_finish_export_updates_freshness_verdict(self) -> None:
         bridge_menubar = self._import_module()

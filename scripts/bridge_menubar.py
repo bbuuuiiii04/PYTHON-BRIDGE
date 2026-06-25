@@ -155,21 +155,11 @@ def detect_export_state() -> str:
     current = _source_content_fingerprint(CANONICAL_SOURCE_PROJECT)
     if current is None or current != sidecar.get("source_fingerprint"):
         return "changes"
-    expected_commit = sidecar.get("generator_commit")
-    if (
-        not isinstance(expected_commit, str)
-        or len(expected_commit) != 40
-        or any(c not in "0123456789abcdef" for c in expected_commit)
-    ):
-        return "changes"
-    now_commit = current_generator_commit()
-    # Only enforce the commit guard when we can actually determine HEAD; an
-    # unavailable git must not permanently un-grey the button.
-    if (
-        now_commit is not None
-        and now_commit != expected_commit
-    ):
-        return "changes"
+    # ponytail: up-to-date is keyed purely on SoundSwitch source content. The
+    # old git-commit guard un-greyed the button on every unrelated bridge
+    # commit (auto-sync moves HEAD each turn) even when SoundSwitch was
+    # unchanged. Re-add a generator-version guard only if a pack-format change
+    # ever needs to force re-export.
     return "up_to_date"
 
 
