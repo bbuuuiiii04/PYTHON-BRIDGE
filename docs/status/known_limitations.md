@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 199af0d
+last_verified_commit: e17733b
 last_verified_date: 2026-06-25
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -19,7 +19,7 @@ Current SoundSwitch exporter/importer work remains **SOFTWARE-VALIDATED ONLY / H
 - SoundSwitch version/interface compatibility is not broadly documented.
 - The offline SoundSwitch decoder is deliberately limited to SoundSwitch 2.10.3, the canonical project UUID, and the RAVE Venue profile. It is read-only; other projects/versions/profiles are unsupported unless explicitly added and tested.
 - Frozen source models, strict decoding, deterministic canonical replacement, independent verification, immutable pack loading/rendering, MIDI-input routing, backend abstraction, Enttec sending, config/startup, `StateManager` scripted frame driving, validate-first commands, and copied sanitized operational status are implemented for the pinned project boundary.
-- The menubar `Export from SS` action and conservative post-export reload are implemented and software-tested. A separate pack on/off menu item and a SoundSwitch-connection auto-switch send `set_soundswitch_pack action=enable`, but there is no implicit hot-enable without a real pack backend + Enttec port. The combined pack row reads only the copied status file; stale data renders Unknown.
+- The menubar `Export from SS` action and conservative post-export reload are implemented and software-tested. The SoundSwitch-connection auto-switch sends `set_soundswitch_pack action=enable` and retries one fresh disconnected `pack_start_failed`, but there is no manual pack button and no implicit hot-enable without a real pack backend + Enttec port. The combined pack row reads only the copied status file; stale data renders Unknown.
 - Static Override Press/Toggle behavior follows the SoundSwitch-saved interaction mode (decoded byte), not operator config; a saved mode the decoder cannot identify fails closed to momentary. The canonical pack is published to and loaded from the repo-local ignored path `local/soundswitch/rbss_canonical_pack`.
 - RW-5 does not report sender health. `software_zero_frame=true` means only that software rendered zero, and `frame_count` counts attempted normal software frames. Neither proves serial delivery, Enttec acceptance, or fixture darkness.
 - Native-DMX Autoloops remain evidence-blocked and zero-safe. T7d has four conductor-accepted integrity captures (two arm, two refire), but four scenario pairs, identity/holdout reconciliation, and a unique corpus oracle verdict remain; no phase mapping can be implemented honestly yet.

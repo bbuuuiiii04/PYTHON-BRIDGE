@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: f6910f9
-last_verified_date: 2026-06-24
+last_verified_commit: e17733b
+last_verified_date: 2026-06-25
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -58,7 +58,8 @@ pack-player config, startup matrix, atomic controller, runtime commands/status,
 StateManager driver, and menubar. RW-5 tests fail on backend/provider re-query,
 published-dict mutation/reuse, incorrect precedence or simultaneous truths,
 unsafe lifecycle snapshots, raw render/submit errors, stale active UI, export
-phase races, reload-command drift, or private-data leaks. The tests use fake/
+phase races, reload-command drift, missed one-shot auto-enable retry, or
+private-data leaks. The tests use fake/
 injected hardware seams. They do not prove Enttec/fixture behavior.
 - relevant subsystem card
 - relevant task playbook if test workflow changed

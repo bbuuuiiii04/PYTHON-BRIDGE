@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
-last_verified_commit: 199af0d
+last_verified_commit: e17733b
 last_verified_date: 2026-06-25
 validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -74,8 +74,9 @@ artifacts, not planning documents. They are not moved into the authority tree.
   software-tested and does not claim sender/physical state.
 - Menubar `Export from SS` plus canonical replacement/reload and combined pack/export row:
   implemented and software-tested.
-- Menubar pack on/off toggle + auto-switch by SoundSwitch connection
-  (`set_soundswitch_pack action=enable`): implemented and software-tested; no
+- Menubar auto-switch by SoundSwitch connection (`set_soundswitch_pack
+  action=enable`): implemented and software-tested, including one bounded retry
+  after a fresh disconnected `pack_start_failed`; no manual pack button and no
   implicit hot-enable.
 - Static Override Press/Toggle interaction mode decoded from the SoundSwitch-saved
   byte and honored by the bridge MIDI input: implemented and software-tested;
@@ -103,7 +104,7 @@ session handoffs, and completed review prompts were deleted; Git history remains
 their provenance. Do not resume from completed artifacts.
 
 The 2026-06-25 audit retired five more now-landed planning docs into
-`docs/plans/completed/soundswitch/`: the menubar pack on/off + auto-switch spec,
+`docs/plans/completed/soundswitch/`: the menubar auto-switch spec,
 the repo-local pack-move handoff, the Static Override Press/Toggle parity spec,
 the roadmap/registry reconciliation spec, and the read-only remaining-software
 scoping snapshot. Their two authoring/scoping prompts were deleted (Git history

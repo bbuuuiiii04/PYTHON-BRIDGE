@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 199af0d
+last_verified_commit: e17733b
 last_verified_date: 2026-06-25
 validation_scope: software-only
 ---
@@ -36,9 +36,10 @@ SoundSwitch pack-player boundary (T7c/T7e):
   only `{"cmd":"set_soundswitch_pack","action":"reload"}` when the bridge is running and pack
   output is enabled, then waits for a fresh `soundswitch_pack.pack_sha12` match. That export/reload
   path never sends `enable`/`backend`, and a stopped bridge or disabled pack receives no reload
-  command. A **separate** menubar pack on/off item (and the SoundSwitch-connection auto-switch,
-  `_auto_set_soundswitch_pack()`) does send `set_soundswitch_pack action=enable`; there is still no
-  implicit hot-enable without a real pack backend + Enttec port.
+  command. The SoundSwitch-connection auto-switch (`_auto_set_soundswitch_pack()`) does send
+  `set_soundswitch_pack action=enable`, with one bounded retry after a fresh disconnected
+  `pack_start_failed`; there is still no implicit hot-enable without a real pack backend + Enttec
+  port and no manual pack button.
 
 Authoritative code:
 - `runtime_status.py`

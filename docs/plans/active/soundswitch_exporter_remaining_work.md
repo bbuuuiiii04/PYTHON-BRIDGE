@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan
 truth_level: code-and-test-grounded
-last_verified_commit: 199af0d
+last_verified_commit: e17733b
 last_verified_date: 2026-06-25
 validation_scope: SoundSwitch 2.10.3 canonical-project/RAVE-profile implementation status; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -40,7 +40,7 @@ MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 | RW-4 controller health | Implemented, independently reviewed, and software-tested. Degraded controller input releases manual overlays while preserving simultaneous scripted truth; runtime swap resynchronizes static-slot state. |
 | RW-5 operational status | Implemented and software-tested. Status is provider-free copied software state; `software_zero_frame` and `frame_count` do not claim serial delivery or physical darkness. |
 | Menubar status | Implemented and software-tested. It consumes only the copied status file, bounds the combined row after sanitization, and renders stale status as `Pack: Unknown`. |
-| Menubar pack on/off + auto-switch | Implemented and software-tested. A pack on/off menu item sends `set_soundswitch_pack action=enable` (`scripts/bridge_menubar.py:390`), and `_auto_set_soundswitch_pack()` (`:868`) flips pack output by SoundSwitch connection. No implicit hot-enable; enabling still requires a real `output_backend=pack` + `dry_run=false` + Enttec port. |
+| Menubar auto-switch | Implemented and software-tested. `_auto_set_soundswitch_pack()` (`scripts/bridge_menubar.py:883`) flips pack output by SoundSwitch connection using `set_soundswitch_pack action=enable`; a fresh disconnected `pack_start_failed` auto-enable gets one bounded retry. No manual pack button; no implicit hot-enable; enabling still requires a real `output_backend=pack` + `dry_run=false` + Enttec port. |
 | Static Press/Toggle interaction mode | Implemented and software-tested. The decoder reads the SoundSwitch-saved Press/Toggle byte (`PushButton+0xc1`, `soundswitch_project_decoder.py:855-888`); the pack model/loader carry `interaction_mode ∈ {press, toggle}` (`soundswitch_pack_models.py:250`, `soundswitch_pack_loader.py:53,283`); the MIDI input adapter latches toggle slots and ignores note-off for toggles (`soundswitch_midi_input.py:220-252`). Unknown saved mode fails closed to momentary. |
 | Canonical pack location | Repo-local ignored path `local/soundswitch/rbss_canonical_pack` (`git check-ignore` confirmed). The tracked example config names the absolute local checkout path; old `~/Music/SoundSwitch/...` references survive only in historical completed specs. |
 | Non-Autoloop hardware procedure | Independent-review revisions are implemented in the procedure/template; fresh implementation review remains pending. No operator evidence run exists. |
@@ -66,7 +66,7 @@ Material specifications are retained only under
 - RW-5 copied operational status and menubar visibility;
 - the non-Autoloop hardware procedure/template implementation;
 - earlier T7/T8 pack-player and offline-shadow records;
-- the menubar pack on/off + connection auto-switch spec (`soundswitch_pack_menu_enable_spec.md`);
+- the completed menubar connection auto-switch spec (`soundswitch_pack_menu_enable_spec.md`);
 - the repo-local canonical pack move (`soundswitch_pack_repo_local_handoff.md`);
 - the SoundSwitch Static Override Press/Toggle parity spec (`soundswitch_static_toggle_spec.md`);
 - the roadmap/registry reconciliation spec (`soundswitch_roadmap_registry_reconciliation_spec.md`)
