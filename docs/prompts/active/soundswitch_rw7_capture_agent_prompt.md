@@ -60,9 +60,14 @@ ready:**
   present and pack disabled. If it is 0, >1, or status is missing: **ping the operator to bring
   up exactly one bridge and WAIT** — re-run `prepare` until it is green. Do **not** start a
   scenario, and do **not** restart the bridge yourself.
-- **Bridge restarts mid-session.** If the process count changes or status disappears during a
-  run, the recorder/session state is invalid: abort that run as `INCOMPLETE`, tell the
-  operator, re-confirm one bridge + pack disabled, and re-run the scenario from scratch.
+- **Bridge/process safety during a run.** The conductor proves the core-count/pack gate at
+  baseline and again when `run-scenario` finalizes; it does not run `prepare` inside the
+  active window. If the saved `run-scenario` summary records `bridge_process_count != 1`
+  or `pack_output_disabled=false`, that run is `FAIL`, not `INCOMPLETE`. If a bridge or
+  SoundSwitch restart only appears as timeout, recorder drops, a missing/dirty phase footer,
+  missing markers, too few Universe-0 frames, or insufficient pcap-overlap beat span, keep
+  the `INCOMPLETE` verdict. Either way, never accept the run; re-confirm one bridge + pack
+  disabled and re-run the scenario from scratch.
 - **SoundSwitch not running / restarts.** Autoloop DMX only exists while SoundSwitch is open
   on the saved bounded project. If SoundSwitch is closed or restarts, the Art-Net capture has
   no real autoloop output — **ping the operator to confirm SoundSwitch is open on the saved
@@ -85,8 +90,10 @@ can yourself:
 wiring.** Otherwise the session emits no `autoloop_phase` rows and every run burns its full
 `--window-timeout-s` before failing INCOMPLETE — after the operator already performed the
 action. Verify a recent `session.jsonl` under `tools/ssfmt/captures/` contains `autoloop_phase`
-rows, or have the operator confirm the bridge is the current build; if it predates B1, ping the
-operator to restart into the current build and WAIT (you do not restart it).
+rows, or have the operator confirm the bridge is the current build; if it predates B1, stop the
+capture attempt and request separate operator approval for the exact restart command. You do not
+restart it. After the operator performs the approved restart, re-run `prepare` and the schema-2
+pre-check from scratch.
 Run `python3 tools/t7d_capture_conductor.py prepare` to machine-check the bridge-count +
 pack-disabled gate; if it returns nonzero, **do not proceed** — ping and wait until green.
 
@@ -112,6 +119,10 @@ designate the holdout identity**, and **for every accepted run record — in cha
 note — the run dir, the exact identity the operator used, and the BPM/pitch.** Maintain a running
 coverage table; you cannot claim "3 identities / 2 BPM / 1 holdout" from ACCEPTED counts alone.
 Tell the operator what is still missing after each accepted run.
+Before the first new repetition, inventory the existing accepted `arm` and `refire` run dirs.
+Add their run dirs, identities, BPM/pitch, AppLog proof, and holdout/train status to the same
+coverage table. If any of that cannot be proven, mark it `UNKNOWN` and report it as remaining
+B6 coverage; do not claim identity/BPM/holdout coverage from the four remaining scenarios alone.
 
 ## Run mechanics (drive the conductor, don't reimplement it)
 **You (the agent) run the hash + AppLog steps yourself** — they are read-only reads of the project
@@ -156,22 +167,37 @@ literals in steps 2–5. For each repetition:
      -exec shasum -a 256 {} + | LC_ALL=C sort > "$RUN_DIR/project.after.sha256"
    cp "$HOME/Library/Application Support/Onesixone/Soundswitch/Logs"/AppLog*.txt \
      "$RUN_DIR/logs/"
+   cp "$RUN_DIR/summary.json" "$RUN_DIR/summary.run_scenario.json"
    ```
 
    Without these, `project.before`/`project.after` are missing (so `validate-scenario` fails
    closed) and the corpus has no AppLog to join identity offline.
 5. `python3 tools/t7d_capture_conductor.py validate-scenario "/Users/bbui/rb_ss_bridge_v2/tools/ssfmt/captures/t7d/t7d_<scenario>_<run-stamp>"`
-   for the real verdict (it verifies `project.before == project.after` and fails closed if either
-   is missing), then `python3 tools/t7d_capture_conductor.py summarize-corpus` after each accepted
-   run to report remaining coverage. `summarize-corpus` takes **no path argument** — its default
+   for the post-hash verdict (it verifies `project.before == project.after` and fails closed if
+   either is missing). Final acceptance requires BOTH `summary.run_scenario.json` and the
+   post-validation `summary.json` to say `ACCEPTED`; the saved run-scenario summary is the only
+   record of the real bridge-count/pack-disabled live gates because `validate-scenario` revalidates
+   artifacts with those two fields hard-coded. Then hash the final capture contents:
+
+   ```bash
+   cd /Users/bbui/rb_ss_bridge_v2
+   RUN_DIR="/Users/bbui/rb_ss_bridge_v2/tools/ssfmt/captures/t7d/t7d_<scenario>_<run-stamp>"
+   find "$RUN_DIR" -type f ! -name artifacts.sha256 -exec shasum -a 256 {} + \
+     | LC_ALL=C sort > "$RUN_DIR/artifacts.sha256"
+   ```
+
+   Run `python3 tools/t7d_capture_conductor.py summarize-corpus` after each accepted run to report
+   remaining coverage. `summarize-corpus` takes **no path argument** — its default
    root is the t7d capture dir; `--capture-root` if ever needed is a global flag placed *before*
    the subcommand.
 
 ## Fail-closed discipline (do not soften)
-- A run is `FAIL` if pack was enabled, not exactly one bridge, or project bytes changed.
-- `INCOMPLETE` on timeout, recorder drops, missing markers, too few Universe-0 frames, or
-  SoundSwitch/bridge down during capture. **Never** reinterpret missing/contaminated evidence
-  as accepted. Never edit code or inject timing to force a marker.
+- A run is `FAIL` if the saved `run-scenario` summary shows pack enabled or not exactly one
+  bridge, or if the post-hash validation shows project bytes changed.
+- `INCOMPLETE` on timeout, recorder drops, missing markers, too few Universe-0 frames,
+  missing/dirty phase footer, too few playing `autoloop_phase` rows, insufficient pcap-overlap
+  beat span, or SoundSwitch/bridge artifact loss during capture. **Never** reinterpret
+  missing/contaminated evidence as accepted. Never edit code or inject timing to force a marker.
 - Do **not** attempt the derivation/holdout fit (plan §B5) — that is a separate later step.
   Your deliverable is the **accepted capture corpus**, not the phase contract.
 
@@ -179,7 +205,9 @@ literals in steps 2–5. For each repetition:
 After the session: per-scenario `ACCEPTED`/`INCOMPLETE`/`FAIL` counts with run dirs; the
 `summarize-corpus` output; the per-run identity + BPM/pitch table and which identity is the
 reserved holdout; confirmation that each accepted run has matching
-`project.before`/`project.after` hashes and copied AppLogs; exactly which coverage targets
-remain (which scenarios still need a 2nd accepted rep, which identities/BPM/holdout are still
-missing); and any environment blocker (bridge/SoundSwitch readiness) that interrupted a run.
+`project.before`/`project.after` hashes, copied AppLogs, `artifacts.sha256`, and both saved
+`summary.run_scenario.json` + post-validation `summary.json` verdicts; exactly which coverage
+targets remain (which scenarios still need a 2nd accepted rep, which existing or new run
+identities/BPM/holdout are still missing or `UNKNOWN`); and any environment blocker
+(bridge/SoundSwitch readiness) that interrupted a run.
 Preserve **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
