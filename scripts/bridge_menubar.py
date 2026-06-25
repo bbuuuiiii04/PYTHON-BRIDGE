@@ -370,6 +370,22 @@ def export_button_text(in_progress: bool, up_to_date: bool) -> str:
     return "Export"
 
 
+def pack_toggle_line(pack_status: dict, *, bridge_status: str | None = None) -> tuple[str, bool]:
+    """(title, clickable) for the Lighting Pack on/off item.
+
+    Pure: derived only from the copied snapshot. The menu never drives DMX —
+    clicking only enqueues a set_soundswitch_pack command for the bridge.
+    """
+    if bridge_status == "off":
+        return "Lighting Pack: bridge off", False
+    pack = pack_status if isinstance(pack_status, dict) else {}
+    if not pack.get("available") or pack.get("reason") == "not_configured":
+        return "Lighting Pack: not configured", False
+    if pack.get("enabled"):
+        return "Lighting Pack: On  (click to turn off)", True
+    return "Lighting Pack: Off  (click to turn on)", True
+
+
 def export_result_line(state: str, result: dict | None = None) -> str:
     result = result or {}
     return {
