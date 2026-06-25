@@ -426,8 +426,9 @@ New/updated tests, by file. **Bold** = the spec's required cases.
 
 ---
 
-### Open decision for the operator (the single REVISE item)
-Task 6 sidecar location — **recommend sibling-of-pack** (`_write_source_sidecar` pattern; manifest +
-pinned proof-gate hash untouched; build-time only, doesn't gate Task 5). The alternative (in-pack
-manifest artifact) is also valid but forces re-pinning `88a2e948…` in two hard gates and adds a verifier
-surface for zero live benefit. Confirm sibling, and I'll fold the exact wording into the Codex spec.
+### Operator decision — RESOLVED 2026-06-25
+Task 6 sidecar location = **sibling-of-pack** (next to the pack folder, never inside it; the
+`_write_source_sidecar` pattern). Manifest + pinned proof-gate hash (`88a2e948…`) untouched; build-time
+only; does not gate Task 5. The remaining mechanical item is the one-line spec edit (Task 6 wording in
+§3) — to be folded into the Codex implementation spec. This is the only REVISE item; with it applied,
+Part F is implementable as planned.
