@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e17733b
+last_verified_commit: e48092d
 last_verified_date: 2026-06-25
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -37,7 +37,7 @@ The additive schema-1 `soundswitch_pack` object is:
 | `has_active_identity` | Boolean derived from the in-memory accepted-identity property; no identity is exposed. |
 
 `StateManager.get_pack_status()` returns a copy of its published dict and calls no runtime/provider.
-Sender health is deliberately absent. A stale status file renders `Pack: Unknown` in the menubar.
+Sender health is deliberately absent. A stale status file renders `Lighting: no status yet` in the menubar.
 
 ## Runtime files
 

@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e17733b
+last_verified_commit: e48092d
 last_verified_date: 2026-06-25
 validation_scope: software-only
 ---
@@ -108,5 +108,5 @@ Known risks:
 - A matching `pack_sha12` proves the running status snapshot references the published content; it
   does not prove fixture-visible output or hardware safety.
 - `software_zero_frame=true` does not prove a zero packet was sent or accepted. Sender health is not
-  part of RW-5, and a stale menubar status is shown as `Pack: Unknown`.
+  part of RW-5, and a stale menubar status is shown as `Lighting: no status yet`.
 - Runtime command docs are code-derived; if docs and `runtime_status.py` disagree, code wins.

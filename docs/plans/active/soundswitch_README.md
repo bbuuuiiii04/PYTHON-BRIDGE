@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
-last_verified_commit: e17733b
+last_verified_commit: e48092d
 last_verified_date: 2026-06-25
 validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -36,8 +36,7 @@ implementation authority. Research/format evidence remains grouped under
 7. `../../validation/soundswitch_hardware_validation_procedure.md` and
    `../../validation/soundswitch_hardware_runs/TEMPLATE.md` - non-Autoloop
    operator procedure and evidence schema with the independent-review revisions
-   implemented; fresh implementation review remains pending. Their presence is
-   not a hardware-validation result.
+   implemented. Their presence is not a hardware-validation result.
 8. `../../prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md`
    - commit-scoped, review-only ChatGPT handoff for RW-5, the procedure/template,
    and this document-lifecycle cleanup.
@@ -66,7 +65,7 @@ artifacts, not planning documents. They are not moved into the authority tree.
 ## Current implementation snapshot
 
 - Decoder/exporter/compiler/verifier: implemented and current-project proof
-  passes 29/29.
+  passes 29 PASS / 0 FAIL / 0 INCOMPLETE.
 - Current scripted content: 32/32 active existing-path tracks supported.
 - Pure scripted renderer: implemented/software-wire tested.
 - Config/startup/runtime command/StateManager/Enttec lane: implemented and
@@ -88,7 +87,8 @@ artifacts, not planning documents. They are not moved into the authority tree.
 - T7d phase tooling: implemented; four captures pass conductor integrity across
   arm/refire, while four scenario pairs and the corpus oracle remain incomplete.
 - Native-DMX Autoloop selection: intentionally not implemented; safe-zero.
-- Hardware procedure/template: present; no real operator run, so hardware remains unvalidated.
+- Hardware procedure/template: present; latest software/wire review complete;
+  no real operator run, so hardware remains unvalidated.
 
 See the remaining-work roadmap for evidence, exact tasks, and acceptance gates.
 

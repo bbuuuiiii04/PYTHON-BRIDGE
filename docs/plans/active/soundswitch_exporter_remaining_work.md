@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan
 truth_level: code-and-test-grounded
-last_verified_commit: e17733b
+last_verified_commit: e48092d
 last_verified_date: 2026-06-25
 validation_scope: SoundSwitch 2.10.3 canonical-project/RAVE-profile implementation status; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -33,17 +33,17 @@ MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 | --- | --- |
 | Saved-project decode/export | Implemented for the bounded 2.10.3 canonical project/RAVE/CH1-CH19 profile. Complete rescans, stable identity, strict validation, and read-only source handling are software-tested. |
 | Pack compile/verify/load | Implemented. Deterministic compilation, independent verification, and mutation rejection are software-tested. |
-| RW-1 export/publish/reload | Implemented, independently reviewed, and software-tested. Replacement is staged and verified; reload stays conservative and never implies enable/backend/start. Source-fingerprint freshness drives the menubar state. |
+| RW-1 export/publish/reload | Implemented, independently reviewed, and software-tested. Replacement is staged and verified; the required binding sidecar is staged before swap, and pre-swap sidecar failure preserves the prior pack. Reload stays conservative and never implies enable/backend/start. Source-fingerprint freshness drives the menubar state. |
 | RW-1A shutdown ownership | Implemented, independently reviewed, and software-tested. Graceful shutdown reaches the current runtime-swapped sender and attempts zero before close. Hard process death remains physically unsafe. |
 | RW-2 scripted transport | Implemented and software-tested. Pause rerenders/holds the authoritative elapsed frame; confirmed stop/unload/stale authority resolves the base to zero. |
 | RW-3 mode authority | Implemented, independently reviewed, and software-tested. Scripted selection requires current bridge-owned scripted authority; Autoloop remains unselected. |
 | RW-4 controller health | Implemented, independently reviewed, and software-tested. Degraded controller input releases manual overlays while preserving simultaneous scripted truth; missing/ambiguous static-controller input no longer disables pack DMX; runtime swap resynchronizes static-slot state. |
 | RW-5 operational status | Implemented and software-tested. Status is provider-free copied software state; `software_zero_frame` and `frame_count` do not claim serial delivery or physical darkness. |
-| Menubar status | Implemented and software-tested. It consumes only the copied status file, bounds the combined row after sanitization, and renders stale status as `Pack: Unknown`. |
+| Menubar status | Implemented and software-tested. It consumes only the copied status file, bounds the combined row after sanitization, and renders stale status as `Lighting: no status yet`. |
 | Menubar auto-switch | Implemented and software-tested. `_auto_set_soundswitch_pack()` (`scripts/bridge_menubar.py:883`) flips pack output by SoundSwitch connection using `set_soundswitch_pack action=enable`; a fresh disconnected `pack_start_failed` auto-enable gets one bounded retry. No manual pack button; no implicit hot-enable; enabling still requires a real `output_backend=pack` + `dry_run=false` + Enttec port. |
 | Static Press/Toggle interaction mode | Implemented and software-tested. The decoder reads the SoundSwitch-saved Press/Toggle byte (`PushButton+0xc1`, `soundswitch_project_decoder.py:855-888`); the pack model/loader carry `interaction_mode ∈ {press, toggle}` (`soundswitch_pack_models.py:250`, `soundswitch_pack_loader.py:53,283`); the MIDI input adapter latches toggle slots and ignores note-off for toggles (`soundswitch_midi_input.py:220-252`). Unknown saved mode fails closed to momentary. |
 | Canonical pack location | Repo-local ignored path `local/soundswitch/rbss_canonical_pack` (`git check-ignore` confirmed). The tracked example config names the absolute local checkout path; old `~/Music/SoundSwitch/...` references survive only in historical completed specs. |
-| Non-Autoloop hardware procedure | Independent-review revisions are implemented in the procedure/template; fresh implementation review remains pending. No operator evidence run exists. |
+| Non-Autoloop hardware procedure | Independent-review revisions are implemented in the procedure/template; the latest software/wire implementation review is complete. No operator evidence run exists. |
 | T7d phase evidence | Incomplete. Two accepted arm and two accepted refire integrity captures exist; four scenario pairs, identity/holdout reconciliation, and a unique oracle remain. |
 | Native Autoloop DMX | Intentionally not implemented. `StateManager` does not call `select_autoloop`; the automatic base remains software-zero in Autoloop mode. |
 | Physical hardware | Unvalidated. No committed real-run evidence file exists. |
@@ -90,10 +90,15 @@ Three label sets name the same items; they are not separate work:
 
 ### 1. Independent implementation review
 
-- [ ] Run the current review-only ChatGPT handoff against the pushed commit
+Current checkpoint complete at `e48092d`; see
+`docs/validation/soundswitch_exporter_player_software_review.md` and
+`docs/validation/soundswitch_publish_sidecar_review.md`. No blocker/high
+findings were found; one medium menubar parser mismatch was fixed.
+
+- [x] Run the current review-only ChatGPT handoff against the current `main`
   range.
-- [ ] Resolve any blocker/high-severity finding with a separate reviewed change.
-- [ ] Keep review conclusions bounded to software/wire evidence.
+- [x] Resolve any blocker/high-severity finding with a separate reviewed change.
+- [x] Keep review conclusions bounded to software/wire evidence.
 
 The review must not edit files, mutate runtime state, inspect live config, start
 or stop the bridge, append runtime commands, or open hardware interfaces.
@@ -211,7 +216,8 @@ not enter status or the menubar.
 | Active T7d plan/handoff | `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md`, `soundswitch_t7d_capture_gate_handoff.md` |
 | T7d result | `docs/validation/soundswitch_t7d_phase_contract_evidence.md`, `soundswitch_t7d_phase_contract_blocked.md` |
 | Hardware procedure/template | `docs/validation/soundswitch_hardware_validation_procedure.md`, `soundswitch_hardware_runs/TEMPLATE.md` |
-| Current independent review | `docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md` |
+| Latest independent review | `docs/validation/soundswitch_exporter_player_software_review.md`, `docs/validation/soundswitch_publish_sidecar_review.md` |
+| Reusable review prompt | `docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md` |
 
 The separately scoped roadmap/registry reconciliation spec is not part of this
 route or this implementation pass.
