@@ -198,6 +198,43 @@ def _decode_recordable_control_map(data: bytes) -> dict[str, Any] | None:
     }
 
 
+def _decode_recordable_control_label_state(data: bytes) -> dict[str, Any] | None:
+    """Decode PushButton label RGBA plus saved checkable Press/Toggle state."""
+    if len(data) < 18 or struct.unpack_from("<I", data, 0)[0] != _RECORDABLE_MAGIC:
+        return None
+    if struct.unpack_from("<I", data, 6)[0] != _RECORDABLE_MAP_SIGNATURE:
+        return None
+    if len(data) >= 11 and struct.unpack_from("<I", data, 7)[0] == _RECORDABLE_MAP_SIGNATURE:
+        return None
+
+    reader = _RecordableReader(data)
+    reader.signature(_RECORDABLE_MAGIC)
+    version = reader.u16()
+    if version != 1:
+        return None
+    reader.signature(_RECORDABLE_MAP_SIGNATURE)
+    count = _bounded_count(reader, "control-label")
+    rows = []
+    for _ in range(count):
+        control_path = reader.string()
+        rgba = reader.u32()
+        mode_raw = reader.u8()
+        if mode_raw not in (0, 1):
+            raise ValueError(f"invalid interaction mode {mode_raw}")
+        rows.append(
+            {
+                "control_path": control_path,
+                "label_rgba_hex": f"{rgba:08x}",
+                "interaction_mode": "toggle" if mode_raw == 1 else "press",
+                "interaction_mode_raw": mode_raw,
+            }
+        )
+    reader.signature(_RECORDABLE_MAGIC)
+    if reader.offset != len(data):
+        raise ValueError(f"{len(data) - reader.offset} trailing bytes")
+    return {"version": version, "control_count": count, "controls": rows}
+
+
 def _resolve_autoloop_midi_bindings(
     artifacts: list[dict[str, Any]], catalog: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -312,6 +349,11 @@ def _resolve_static_look_midi_bindings(
             "bindings": [],
         }
 
+    interaction_by_path = {
+        row["control_path"]: row["interaction_mode"]
+        for artifact in artifacts
+        for row in (artifact.get("control_label_state") or {}).get("controls", [])
+    }
     rows = []
     for artifact in artifacts:
         control_map = artifact.get("control_map")
@@ -333,8 +375,18 @@ def _resolve_static_look_midi_bindings(
                 "midi_channel_one_based": binding["channel_one_based"],
                 "midi_data_byte": binding["data_byte"],
                 "control_path": binding["control_path"],
+                "interaction_mode": interaction_by_path.get(binding["control_path"]),
                 "slot_index": slot_index,
             }
+            if row["interaction_mode"] not in ("press", "toggle"):
+                row.update(
+                    {
+                        "status": "unresolved",
+                        "unresolved_reason": "saved StaticOverride interaction mode is not decoded",
+                    }
+                )
+                rows.append(row)
+                continue
             if len(static_looks) != 32:
                 row.update(
                     {
@@ -665,10 +717,22 @@ def _describe(path: Path, project_dir: Path, script_ids: list[str]) -> dict[str,
                 output["format"] = "structured binary MIDI control map"
                 output["control_map"] = control_map
             else:
-                output["unsupported_reason"] = (
-                    "control-registry payload framing is not decoded; printable control "
-                    "identifiers alone do not establish registry semantics"
-                )
+                try:
+                    control_label_state = _decode_recordable_control_label_state(data)
+                except (UnicodeDecodeError, ValueError) as exc:
+                    output["control_label_state_decode_error"] = str(exc)
+                    output["unsupported_reason"] = (
+                        "recognized control-label registry failed strict decoding"
+                    )
+                else:
+                    if control_label_state is not None:
+                        output["format"] = "structured binary control label state map"
+                        output["control_label_state"] = control_label_state
+                    else:
+                        output["unsupported_reason"] = (
+                            "control-registry payload framing is not decoded; printable control "
+                            "identifiers alone do not establish registry semantics"
+                        )
     elif relative_path == "In App Demo.mp4":
         output["format"] = "ISO Base Media File"
         output["brand"] = data[8:12].decode("ascii", errors="replace") if len(data) >= 12 else None

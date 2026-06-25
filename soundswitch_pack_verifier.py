@@ -605,6 +605,11 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
             expected_class = "pack_selection"
         if row.get("control_classification") != expected_class:
             _fail("learned control has incorrect F-3 classification")
+        if row.get("target_kind") == "static_look":
+            if row.get("interaction_mode") not in ("press", "toggle"):
+                _fail("static override interaction mode is missing or invalid")
+        elif "interaction_mode" in row:
+            _fail("non-static learned control carries interaction mode")
     active_render = [row for row in controls if row.get("active") and row.get("target_kind") in ("autoloop", "static_look")]
     if any(row.get("message_type") != "note" for row in active_render):
         _fail("unsupported active message semantics")

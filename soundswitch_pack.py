@@ -215,6 +215,8 @@ def _selection_map(project: DecodedSoundSwitchProject) -> dict[str, Any]:
                 "message_type": b.message_type, "source_offset": b.source_offset,
                 "target_identity": row.target_identity, "target_index": row.target_index,
                 "target_kind": row.target_kind, "target_name": row.target_name}
+        if row.target_kind == "static_look":
+            item["interaction_mode"] = row.interaction_mode
         controls.append(item)
         if b.enabled and b.device_name == "IAC Driver Bus 1" and b.message_type == "note":
             event_targets[(b.device_name, b.channel_zero_based, b.data_byte)] = item

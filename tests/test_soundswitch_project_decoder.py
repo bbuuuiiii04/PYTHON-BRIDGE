@@ -19,6 +19,7 @@ from rb_ss_bridge_v2.soundswitch_pack_models import (
     AutoloopCatalogEntry,
     AutoloopCategory,
     LearnedMidiMap,
+    ControlLabelState,
     MidiBinding,
     MidiCollection,
     MidiDevice,
@@ -100,6 +101,19 @@ def _learned_map(bindings: tuple[tuple[int, int, int, str, int], ...]) -> bytes:
     data += struct.pack("<IQ", 0x01380306, 2) + b"\x11\x22"
     data += struct.pack("<I", 0xDEADBEEF)
     return bytes(data)
+
+
+def _control_label_state(rows: tuple[tuple[str, int, int], ...]) -> bytes:
+    data = bytearray(struct.pack("<IH", 0xDEADBEEF, 1))
+    data += struct.pack("<IQ", 0x01380308, len(rows))
+    for path, rgba, mode in rows:
+        data += _typed_string(path) + struct.pack("<IB", rgba, mode)
+    data += struct.pack("<I", 0xDEADBEEF)
+    return bytes(data)
+
+
+def _state(path: str, mode: str) -> ControlLabelState:
+    return ControlLabelState(0, "recordable/labels.dat", "0" * 64, path, 0, mode)  # type: ignore[arg-type]
 
 
 def _empty_catalog(version: int = 3, layout: int = 2) -> bytes:
@@ -249,6 +263,21 @@ class IdentityInventoryAndMidiTests(unittest.TestCase):
         with self.assertRaisesRegex(decoder.SoundSwitchDecodeError, "trailing"):
             decoder.decode_learned_midi(data + b"x", "recordable/map.dat")
 
+    def test_control_label_state_decodes_press_and_toggle_modes(self):
+        press = "SoundSwitch.Controls.StaticOverride8"
+        toggle = "SoundSwitch.Controls.StaticOverride9"
+        data = _control_label_state(((press, 0xFF66B14C, 0), (toggle, 0xFFA500FF, 1)))
+
+        states = decoder.decode_control_label_states(data, "recordable/labels.dat")
+
+        self.assertIsNotNone(states)
+        assert states is not None
+        by_path = {row.control_path: row for row in states}
+        self.assertEqual(by_path[press].interaction_mode, "press")
+        self.assertEqual(by_path[toggle].interaction_mode, "toggle")
+        with self.assertRaisesRegex(decoder.SoundSwitchDecodeError, "trailing"):
+            decoder.decode_control_label_states(data + b"x", "recordable/labels.dat")
+
     def test_catalog_version_is_pinned_to_three(self):
         parsed = decoder.decode_catalog(_empty_catalog(), "synthetic.bin")
         self.assertEqual(parsed.version, 3)
@@ -269,11 +298,20 @@ class IdentityInventoryAndMidiTests(unittest.TestCase):
         )
         mapping = LearnedMidiMap("map", "0" * 64, 1, 0,
                                  (MidiDevice("Device", (MidiCollection(1, bindings),), b""),))
-        rows = decoder._resolve_controls((mapping,), (catalog,), looks, {"SSAutoLoop43.ssfile"})
+        states = {
+            "SoundSwitch.Controls.StaticOverride8": _state("SoundSwitch.Controls.StaticOverride8", "toggle"),
+            "SoundSwitch.Controls.StaticOverride9": _state("SoundSwitch.Controls.StaticOverride9", "press"),
+            "SoundSwitch.Controls.StaticOverride31": _state("SoundSwitch.Controls.StaticOverride31", "toggle"),
+            "SoundSwitch.Controls.StaticOverride0": _state("SoundSwitch.Controls.StaticOverride0", "press"),
+        }
+        rows = decoder._resolve_controls(
+            (mapping,), (catalog,), looks, {"SSAutoLoop43.ssfile"}, states,
+        )
         self.assertEqual((rows[0].target_identity, rows[0].target_index), ("SSAutoLoop43.ssfile", 42))
         self.assertEqual(
-            (rows[1].target_identity, rows[1].target_index, rows[1].target_name),
-            (f"{decoder.CANONICAL_VENUE_GUID}:slot:9", 9, "look-9"),
+            (rows[1].target_identity, rows[1].target_index, rows[1].target_name,
+             rows[1].interaction_mode),
+            (f"{decoder.CANONICAL_VENUE_GUID}:slot:9", 9, "look-9", "press"),
         )
 
         collision = bindings + (
@@ -283,14 +321,14 @@ class IdentityInventoryAndMidiTests(unittest.TestCase):
         mapping = LearnedMidiMap("map", "0" * 64, 1, 0,
                                  (MidiDevice("Device", (MidiCollection(1, collision),), b""),))
         with self.assertRaisesRegex(decoder.SoundSwitchDecodeError, "midi_collision"):
-            decoder._resolve_controls((mapping,), (catalog,), looks, {"SSAutoLoop43.ssfile"})
+            decoder._resolve_controls((mapping,), (catalog,), looks, {"SSAutoLoop43.ssfile"}, states)
 
         disabled = MidiBinding(3, "Device", 1, "note", 0, 79, 0,
                                "SoundSwitch.Controls.StaticOverride31", False)
         disabled_map = LearnedMidiMap("map", "0" * 64, 1, 0,
                                       (MidiDevice("Device", (MidiCollection(1, (disabled,)),), b""),))
         disabled_row = decoder._resolve_controls(
-            (disabled_map,), (catalog,), looks[:1], {"SSAutoLoop43.ssfile"}
+            (disabled_map,), (catalog,), looks[:1], {"SSAutoLoop43.ssfile"}, states,
         )[0]
         self.assertFalse(disabled_row.binding.enabled)
         self.assertEqual(disabled_row.target_identity,
@@ -301,7 +339,7 @@ class IdentityInventoryAndMidiTests(unittest.TestCase):
         cc_map = LearnedMidiMap("map", "0" * 64, 1, 0,
                                 (MidiDevice("Device", (MidiCollection(1, (cc,)),), b""),))
         with self.assertRaisesRegex(decoder.SoundSwitchDecodeError, "unsupported_active_control"):
-            decoder._resolve_controls((cc_map,), (catalog,), looks, {"SSAutoLoop43.ssfile"})
+            decoder._resolve_controls((cc_map,), (catalog,), looks, {"SSAutoLoop43.ssfile"}, states)
 
     def test_catalog_autoloop_reconciliation_detects_missing_and_orphan_files(self):
         entry = AutoloopCatalogEntry(0, 0, 0, 1, True, "one", 0, "bank")
@@ -385,6 +423,10 @@ class CurrentCorpusTests(unittest.TestCase):
         self.assertEqual(sum(row.target_kind == "autoloop" for row in enabled), 19)
         static_rows = [row for row in enabled if row.target_kind == "static_look"]
         self.assertEqual({row.target_index for row in static_rows}, {8, 16, 17, 24})
+        self.assertEqual(
+            {row.target_index: row.interaction_mode for row in static_rows},
+            {8: "press", 16: "press", 17: "press", 24: "press"},
+        )
         inventory_script_ids = {
             match.group(1).upper()
             for row in decoded.source_inventory

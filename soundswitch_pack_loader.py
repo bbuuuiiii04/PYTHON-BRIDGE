@@ -50,6 +50,7 @@ class PackMidiBinding:
     ]
     target_slot: int | None = None
     target_identity: str | None = None
+    interaction: Literal["press", "toggle"] = "press"
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +248,7 @@ def _runtime_metadata(
         _fail("learned controller rows are missing")
     bindings: list[PackMidiBinding] = []
     seen_events: set[tuple[str, str, int, int]] = set()
+    seen_static_slots: set[tuple[str, int]] = set()
     for row in control_rows:
         if not isinstance(row, dict):
             _fail("learned controller row must be an object")
@@ -259,6 +261,7 @@ def _runtime_metadata(
         data_byte = row.get("data_byte")
         classification = row.get("control_classification")
         target_kind = row.get("target_kind")
+        interaction_mode = row.get("interaction_mode")
         if message_type not in _MESSAGE_TYPES \
                 or type(channel) is not int or not 0 <= channel <= 15 \
                 or type(data_byte) is not int or not 0 <= data_byte <= 127 \
@@ -277,6 +280,12 @@ def _runtime_metadata(
             slot = row.get("target_index")
             if target_kind != "static_look" or type(slot) is not int or not 0 <= slot <= 31:
                 _fail("invalid static_override controller target")
+            if interaction_mode not in ("press", "toggle"):
+                _fail("invalid static_override interaction mode")
+            static_key = (device, slot)
+            if static_key in seen_static_slots:
+                _fail("duplicate active static_override slot ownership")
+            seen_static_slots.add(static_key)
             bindings.append(PackMidiBinding(
                 device_name=device,
                 message_type="note",
@@ -284,6 +293,7 @@ def _runtime_metadata(
                 data_byte=data_byte,
                 target_kind="static_look",
                 target_slot=slot,
+                interaction=interaction_mode,
             ))
         else:
             identity = row.get("target_identity")

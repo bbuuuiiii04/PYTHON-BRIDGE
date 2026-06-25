@@ -301,6 +301,7 @@ class LoaderTests(unittest.TestCase):
                 "channel_zero_based": 0, "data_byte": 7,
                 "control_classification": "static_override",
                 "target_kind": "static_look", "target_index": 8,
+                "interaction_mode": "toggle",
             }],
         }
         return manifest, selection
@@ -312,6 +313,7 @@ class LoaderTests(unittest.TestCase):
         )
         self.assertEqual(crosswalk["phrase"], "SSAutoLoop1.ssfile")
         self.assertEqual(bindings[0].target_slot, 8)
+        self.assertEqual(bindings[0].interaction, "toggle")
         self.assertNotIn("sensitive_path", project)
         self.assertEqual(len(source_hash), 64)
         self.assertEqual(union["count"], 2)
@@ -327,6 +329,24 @@ class LoaderTests(unittest.TestCase):
         manifest, selection = self._runtime_rows()
         selection["learned_controls"].append(dict(selection["learned_controls"][0]))
         with self.assertRaisesRegex(SoundSwitchPackLoadError, "duplicate active"):
+            _runtime_metadata(manifest, selection)
+
+    def test_runtime_metadata_rejects_missing_bad_and_duplicate_static_interaction(self):
+        manifest, selection = self._runtime_rows()
+        del selection["learned_controls"][0]["interaction_mode"]
+        with self.assertRaisesRegex(SoundSwitchPackLoadError, "interaction mode"):
+            _runtime_metadata(manifest, selection)
+
+        manifest, selection = self._runtime_rows()
+        selection["learned_controls"][0]["interaction_mode"] = "momentary"
+        with self.assertRaisesRegex(SoundSwitchPackLoadError, "interaction mode"):
+            _runtime_metadata(manifest, selection)
+
+        manifest, selection = self._runtime_rows()
+        duplicate = dict(selection["learned_controls"][0])
+        duplicate["data_byte"] = 8
+        selection["learned_controls"].append(duplicate)
+        with self.assertRaisesRegex(SoundSwitchPackLoadError, "slot ownership"):
             _runtime_metadata(manifest, selection)
 
     def test_schema_is_mandatory_unknown_major_rejected_and_verifier_runs_first(self):

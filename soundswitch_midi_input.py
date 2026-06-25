@@ -217,6 +217,16 @@ class SoundSwitchMidiInputAdapter:
         with self._lock:
             if kind == "static_look":
                 slot = binding.target_slot
+                if binding.interaction == "toggle":
+                    if self._held_static_slot == slot:
+                        self._held_static_slot = None
+                        self._static_held_at = None
+                        log.debug("[SS-MIDI] static slot toggled off: slot=%s", slot)
+                    else:
+                        self._held_static_slot = slot
+                        self._static_held_at = None
+                        log.debug("[SS-MIDI] static slot toggled on: slot=%s", slot)
+                    return
                 self._static_held_at = time.monotonic()
                 if self._held_static_slot == slot:
                     log.debug("[SS-MIDI] note-on idempotent: slot=%s", slot)
@@ -238,6 +248,9 @@ class SoundSwitchMidiInputAdapter:
         with self._lock:
             if kind == "static_look":
                 slot = binding.target_slot
+                if binding.interaction == "toggle":
+                    log.debug("[SS-MIDI] note-off ignored for toggle slot=%s", slot)
+                    return
                 # Releasing an old, non-current note must not clear its replacement.
                 if self._held_static_slot == slot:
                     self._held_static_slot = None

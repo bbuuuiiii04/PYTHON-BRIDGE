@@ -309,6 +309,40 @@ repeat devices:
 u32le 0xDEADBEEF
 ```
 
+### Static Override button interaction mode
+
+A separate version-1 `recordable/*.dat` control-label state map stores the
+saved `PushButton` colour and interaction state:
+
+```text
+u32le 0xDEADBEEF
+u16le version == 1
+TypeSignature map (0x01380308), u64 control_count
+repeat controls:
+    typed NUL string control_path (0x01380305)
+    u32le label_rgba
+    u8 interaction_flag        # 0 press, 1 toggle
+u32le 0xDEADBEEF
+```
+
+SoundSwitch 2.10.3 binary evidence ties this final byte to Press/Toggle mode.
+`MIDIDialog::eventFilter` changes `PushButton+0xc1`: choosing `Toggle Mode`
+calls `QAbstractButton::setCheckable(true)` and stores `1`; choosing
+`Press Mode` calls `setCheckable(false)` and stores `0`.
+`ControlManagerPrivate::saveControlLabelColour` writes the same byte after
+the label RGBA value, and `ControlManagerPrivate::reloadData` reads it back,
+calls `QAbstractButton::setCheckable(flag)`, then stores it back at
+`PushButton+0xc1`.
+
+Current local saved project bytes include both values. In
+`recordable/f87a4dfc2a52298e7e4f71fa8a89395a.dat`,
+`StaticOverride8`, `16`, `17`, and `24` decode as `press`, while
+`StaticOverride9`, `10`, and others decode as `toggle`. An older checked copy
+under `vln_ss_analysis/copies/ssproj` differs only for `StaticOverride9`
+from `press` to `toggle`, with target path identity unchanged. Confidence is
+binary-and-saved-byte confirmed for SoundSwitch 2.10.3; physical controller
+behavior remains hardware-unvalidated until an operator-approved live check.
+
 The current file has 24 bindings across DDJ-800, IAC Driver Bus 1, and KOMPLETE
 KONTROL A49; 19 IAC Autoloop bindings and four DDJ Static Overrides are
 render-affecting for the product.

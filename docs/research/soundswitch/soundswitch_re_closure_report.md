@@ -112,17 +112,27 @@ recordable parser.
 It contains 24 bindings across three devices, including these four enabled
 DDJ-800 notes:
 
-| DDJ MIDI | Control path | Slot | Static Look | Exact primary laser CH1-CH19 hex |
-| --- | --- | ---: | --- | --- |
-| CH7 note 106 | `StaticOverride16` | 16 | OFF | `00000000000000000000000000000000000000` |
-| CH10 note 122 | `StaticOverride24` | 24 | STROBE BUILDUP #1 | `010015ff00288a00ff00ff00ff005d000000ff` |
-| CH10 note 123 | `StaticOverride8` | 8 | STROBE EFFECT | `1800260000797c0000d6ff000000000000006e` |
-| CH10 note 127 | `StaticOverride17` | 17 | RAINBOW STROBE | `26001d00006483ffffff00000000000000004f` |
+| DDJ MIDI | Control path | Slot | Mode | Static Look | Exact primary laser CH1-CH19 hex |
+| --- | --- | ---: | --- | --- | --- |
+| CH7 note 106 | `StaticOverride16` | 16 | press | OFF | `00000000000000000000000000000000000000` |
+| CH10 note 122 | `StaticOverride24` | 24 | press | STROBE BUILDUP #1 | `010015ff00288a00ff00ff00ff005d000000ff` |
+| CH10 note 123 | `StaticOverride8` | 8 | press | STROBE EFFECT | `1800260000797c0000d6ff000000000000006e` |
+| CH10 note 127 | `StaticOverride17` | 17 | press | RAINBOW STROBE | `26001d00006483ffffff00000000000000004f` |
 
 The exporter must include these learned inputs and all 32 primary-Venue slots,
 not only bridge-output IAC mappings. `StaticOverrideN` selects zero-based slot
 `N`. Note-on holds the override; matching note-off clears that slot only and
 rerenders the current underlying playback.
+
+The saved Press/Toggle interaction mode comes from
+`recordable/f87a4dfc2a52298e7e4f71fa8a89395a.dat`, not the MIDI-learn
+registry above. Its `ControlLabelColour` map stores `control_path`,
+`label_rgba`, and a one-byte interaction flag: `0 = press`, `1 = toggle`.
+Binary evidence shows SoundSwitch's menu actions write that flag through
+`PushButton+0xc1` and reload it through `QAbstractButton::setCheckable(flag)`.
+The current enabled DDJ static mappings decode as `press`; other saved
+StaticOverride rows in the same project decode as `toggle`, proving both
+allowed values from saved project bytes.
 
 Binary `StaticLooksManager::Read/Write` proves the GUID-keyed collection, fixed
 32 slots, and version-5 record writers. `EnableStaticLookOverride(int,bool)`

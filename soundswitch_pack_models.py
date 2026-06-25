@@ -241,12 +241,23 @@ class LearnedMidiMap:
 
 
 @dataclass(frozen=True, slots=True)
+class ControlLabelState:
+    source_offset: int
+    source_path: str
+    source_sha256: str
+    control_path: str
+    rgba: int
+    interaction_mode: Literal["press", "toggle"]
+
+
+@dataclass(frozen=True, slots=True)
 class ResolvedControlBinding:
     binding: MidiBinding
     target_kind: Literal["autoloop", "static_look", "no_target", "non_render"]
     target_identity: str | None
     target_index: int | None
     target_name: str | None = None
+    interaction_mode: Literal["press", "toggle"] | None = None
 
 
 @dataclass(frozen=True, slots=True)

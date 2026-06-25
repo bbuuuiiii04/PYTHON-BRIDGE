@@ -21,6 +21,7 @@ from .soundswitch_pack_models import (
     AutoloopCatalog,
     AutoloopCatalogEntry,
     AutoloopCategory,
+    ControlLabelState,
     CueAttribute,
     CueDictionaryEntry,
     DecodedSoundSwitchProject,
@@ -848,6 +849,50 @@ def decode_learned_midi(data: bytes, path: str, source_sha256: str | None = None
     return LearnedMidiMap(path, source_sha256 or _hash(data), version, status, tuple(devices))
 
 
+def decode_control_label_states(
+    data: bytes, path: str, source_sha256: str | None = None
+) -> tuple[ControlLabelState, ...] | None:
+    """Decode SoundSwitch saved button label colour + press/toggle state.
+
+    Reverse-engineered from SoundSwitch 2.10.3:
+    ``ControlManagerPrivate::loadControlLabelColour`` reads this map, calls
+    ``QAbstractButton::setCheckable(flag)``, then stores the same flag at
+    ``PushButton+0xc1``. The UI context menu writes that byte as Press/Toggle.
+    """
+    if len(data) < 18 or data[:4] != struct.pack("<I", 0xDEADBEEF) \
+            or data[6:10] != struct.pack("<I", 0x01380308):
+        return None
+    if data[7:11] == struct.pack("<I", 0x01380308):
+        return None
+    reader = _RecordableReader(data, path)
+    reader.signature(0xDEADBEEF)
+    version = reader.u16()
+    if version != 1:
+        return None
+    reader.signature(0x01380308)
+    states = []
+    seen = set()
+    source = source_sha256 or _hash(data)
+    for _ in range(reader.count("control label")):
+        offset = reader.offset
+        control_path = reader.string()
+        if control_path in seen:
+            _fail("duplicate_key", "duplicate control label state", path, offset)
+        seen.add(control_path)
+        rgba = reader.u32()
+        mode_raw = reader.u8()
+        if mode_raw not in (0, 1):
+            _fail("control_label_state", "invalid interaction mode flag", path, reader.offset - 1)
+        states.append(ControlLabelState(
+            offset, path, source, control_path, rgba,
+            "toggle" if mode_raw == 1 else "press",
+        ))
+    reader.signature(0xDEADBEEF)
+    if reader.offset != len(data):
+        _fail("recordable_eof", "trailing control-label bytes", path, reader.offset)
+    return tuple(states)
+
+
 def _all_bindings(maps: tuple[LearnedMidiMap, ...]) -> tuple[MidiBinding, ...]:
     return tuple(binding for mapping in maps for device in mapping.devices
                  for collection in device.collections for binding in collection.bindings)
@@ -909,7 +954,8 @@ def _validate_document_cues(documents: tuple[LightingDocument, ...], venue_cue_g
 
 
 def _resolve_controls(maps: tuple[LearnedMidiMap, ...], catalogs: tuple[AutoloopCatalog, ...],
-                      static_looks: tuple[StaticLook, ...], autoloop_paths: set[str]) -> tuple[ResolvedControlBinding, ...]:
+                      static_looks: tuple[StaticLook, ...], autoloop_paths: set[str],
+                      control_states: dict[str, ControlLabelState]) -> tuple[ResolvedControlBinding, ...]:
     entries: dict[int, AutoloopCatalogEntry] = {}
     categories: dict[int, AutoloopCategory] = {}
     for catalog in catalogs:
@@ -936,12 +982,22 @@ def _resolve_controls(maps: tuple[LearnedMidiMap, ...], catalogs: tuple[Autoloop
             # Disabled learns are part of the complete registry but cannot make
             # a project artifact active or collide with an enabled event.
             control_index = int((auto or static).group(1))
+            interaction_mode = None
+            if static:
+                state = control_states.get(binding.control_path)
+                if state is None:
+                    _fail(
+                        "unresolved_control",
+                        f"Static Override slot {control_index} has no saved interaction mode",
+                    )
+                interaction_mode = state.interaction_mode
             resolved.append(ResolvedControlBinding(
                 binding,
                 "autoloop" if auto else "static_look",
                 None if auto else f"{CANONICAL_VENUE_GUID}:slot:{control_index}",
                 control_index,
                 None,
+                interaction_mode,
             ))
             continue
         if auto:
@@ -958,9 +1014,12 @@ def _resolve_controls(maps: tuple[LearnedMidiMap, ...], catalogs: tuple[Autoloop
         elif static:
             slot = int(static.group(1))
             if slot >= len(static_looks): _fail("unresolved_control", f"Static Override slot {slot} is missing")
+            state = control_states.get(binding.control_path)
+            if state is None:
+                _fail("unresolved_control", f"Static Override slot {slot} has no saved interaction mode")
             resolved.append(ResolvedControlBinding(
                 binding, "static_look", f"{CANONICAL_VENUE_GUID}:slot:{slot}", slot,
-                static_looks[slot].name,
+                static_looks[slot].name, state.interaction_mode,
             ))
         else:
             resolved.append(ResolvedControlBinding(binding, "non_render", None, None))
@@ -1050,6 +1109,7 @@ def decode_project(project: str | os.PathLike[str], *,
                                                 identity.venue_guid, active_script_paths))
 
     learned = []
+    control_label_states = []
     decoded_paths = {".ssproj", "SoundSwitchVenues.bin", "SoundSwitchAutoLoops.bin",
                      "SoundSwitchAutoLoopsEx.bin", "SoundSwitchTrackMap.bin"}
     decoded_paths.update(row.relative_path for row in autoloops)
@@ -1060,14 +1120,27 @@ def decode_project(project: str | os.PathLike[str], *,
             mapping = decode_learned_midi(data, relative, _hash(data))
             if mapping is not None:
                 learned.append(mapping); decoded_paths.add(relative)
+                continue
+            states = decode_control_label_states(data, relative, _hash(data))
+            if states is not None:
+                control_label_states.extend(states); decoded_paths.add(relative)
     if not learned: _fail("learned_midi", "no complete learned MIDI registry was decoded")
+    control_states_by_path: dict[str, ControlLabelState] = {}
+    for state in control_label_states:
+        if _STATIC_CONTROL.fullmatch(state.control_path) is None:
+            continue
+        prior = control_states_by_path.get(state.control_path)
+        if prior is not None and prior != state:
+            _fail("identity_conflict", f"conflicting control label state for {state.control_path}")
+        control_states_by_path[state.control_path] = state
     for source in inventory:
         if source.relative_path not in decoded_paths:
             diagnostics.append(SourceDiagnostic("opaque_artifact", source.relative_path,
                                                 "retained by path, size, hash, mode, and mtime; no render semantics",
                                                 active=False))
     resolved = _resolve_controls(tuple(learned), catalogs, looks,
-                                 {row.relative_path for row in autoloops})
+                                 {row.relative_path for row in autoloops},
+                                 control_states_by_path)
     if any(not name or name.strip() != name for name in no_target_policy_inputs) \
             or len(no_target_policy_inputs) != len(set(no_target_policy_inputs)):
         _fail("no_target_policy", "policy names must be unique, nonempty, and trimmed")
@@ -1083,6 +1156,7 @@ def decode_project(project: str | os.PathLike[str], *,
 
 __all__ = [
     "CANONICAL_PROJECT_UUID", "CANONICAL_SOUNDSWITCH_VERSION", "CANONICAL_VENUE_GUID",
-    "SoundSwitchDecodeError", "decode_catalog", "decode_learned_midi", "decode_project",
+    "SoundSwitchDecodeError", "decode_catalog", "decode_control_label_states",
+    "decode_learned_midi", "decode_project",
     "decode_ssfile", "decode_static_looks", "decode_track_map", "decode_venue_cues",
 ]

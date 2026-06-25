@@ -95,6 +95,23 @@ class InventoryProjectArtifactsTests(unittest.TestCase):
             ],
         )
 
+    def test_decodes_control_label_state_modes(self):
+        data = bytearray()
+        data += _sig(0xDEADBEEF)
+        data += struct.pack("<H", 1)
+        data += _sig(0x01380308) + struct.pack("<Q", 2)
+        data += _string("SoundSwitch.Controls.StaticOverride8")
+        data += bytes.fromhex("4cb166ff") + b"\x00"
+        data += _string("SoundSwitch.Controls.StaticOverride9")
+        data += bytes.fromhex("ff00a5ff") + b"\x01"
+        data += _sig(0xDEADBEEF)
+
+        decoded = MODULE._decode_recordable_control_label_state(bytes(data))
+
+        self.assertEqual(decoded["control_count"], 2)
+        self.assertEqual(decoded["controls"][0]["interaction_mode"], "press")
+        self.assertEqual(decoded["controls"][1]["interaction_mode"], "toggle")
+
     def test_inventory_leaves_control_registry_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -114,6 +131,16 @@ class InventoryProjectArtifactsTests(unittest.TestCase):
 
     def test_resolves_autoloop_control_through_category_order(self):
         artifacts = [
+            {
+                "control_label_state": {
+                    "controls": [
+                        {
+                            "control_path": "SoundSwitch.Controls.StaticOverride17",
+                            "interaction_mode": "toggle",
+                        }
+                    ]
+                }
+            },
             {
                 "relative_path": "recordable/map.dat",
                 "sha256": "abc",
@@ -192,6 +219,16 @@ class InventoryProjectArtifactsTests(unittest.TestCase):
     def test_resolves_static_override_to_primary_venue_slot(self):
         artifacts = [
             {
+                "control_label_state": {
+                    "controls": [
+                        {
+                            "control_path": "SoundSwitch.Controls.StaticOverride17",
+                            "interaction_mode": "toggle",
+                        }
+                    ]
+                }
+            },
+            {
                 "relative_path": "recordable/map.dat",
                 "sha256": "abc",
                 "control_map": {
@@ -217,6 +254,7 @@ class InventoryProjectArtifactsTests(unittest.TestCase):
         self.assertEqual(report["status"], "resolved")
         self.assertEqual(report["binding_count"], 1)
         self.assertEqual(report["bindings"][0]["slot_index"], 17)
+        self.assertEqual(report["bindings"][0]["interaction_mode"], "toggle")
         self.assertEqual(report["bindings"][0]["name"], "LOOK 17")
         self.assertEqual(report["bindings"][0]["groups"]["0x493"]["1"], 17)
 

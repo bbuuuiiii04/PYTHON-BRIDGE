@@ -153,6 +153,12 @@ class CurrentProjectPackTests(unittest.TestCase):
         overrides = [row for row in selection["learned_controls"]
                      if row["target_kind"] == "static_look" and row["active"]]
         self.assertTrue(all(row["control_classification"] == "static_override" for row in overrides))
+        self.assertEqual(
+            {row["target_index"]: row["interaction_mode"] for row in overrides},
+            {8: "press", 16: "press", 17: "press", 24: "press"},
+        )
+        self.assertFalse(any("interaction_mode" in row for row in selection["learned_controls"]
+                             if row["target_kind"] != "static_look"))
 
     def test_two_exports_are_byte_identical(self):
         second = self.root / "pack-second"
@@ -274,6 +280,16 @@ class CurrentProjectPackTests(unittest.TestCase):
             row = next(r for r in value["learned_controls"] if r["active"] and r["target_kind"] == "static_look")
             row["message_type"] = "control_change"
         self._semantic_mutation(semantic, "selection_map.json", make_cc); cases.append(semantic)
+        missing_mode = self._copy("mut-missing-static-mode")
+        def remove_mode(value):
+            row = next(r for r in value["learned_controls"] if r["active"] and r["target_kind"] == "static_look")
+            del row["interaction_mode"]
+        self._semantic_mutation(missing_mode, "selection_map.json", remove_mode); cases.append(missing_mode)
+        bad_mode = self._copy("mut-bad-static-mode")
+        def corrupt_mode(value):
+            row = next(r for r in value["learned_controls"] if r["active"] and r["target_kind"] == "static_look")
+            row["interaction_mode"] = "momentary"
+        self._semantic_mutation(bad_mode, "selection_map.json", corrupt_mode); cases.append(bad_mode)
         for pack in cases:
             with self.subTest(pack=pack.name): self.assertRejected(pack)
 

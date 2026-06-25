@@ -1,5 +1,6 @@
 """Tests for soundswitch_midi_input — no MIDI/serial/Art-Net hardware opened."""
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -48,6 +49,18 @@ _SLOT17 = PackMidiBinding(
     device_name=DDJ, message_type="note",
     channel_zero_based=9, data_byte=123,
     target_kind="static_look", target_slot=17,
+)
+_TOGGLE8 = PackMidiBinding(
+    device_name=DDJ, message_type="note",
+    channel_zero_based=9, data_byte=122,
+    target_kind="static_look", target_slot=8,
+    interaction="toggle",
+)
+_TOGGLE17 = PackMidiBinding(
+    device_name=DDJ, message_type="note",
+    channel_zero_based=9, data_byte=123,
+    target_kind="static_look", target_slot=17,
+    interaction="toggle",
 )
 _BLACKOUT = PackMidiBinding(
     device_name=IAC, message_type="note",
@@ -203,6 +216,42 @@ class TestStaticOverride(unittest.TestCase):
         a = _adapter(_SLOT8, _SLOT17)
         _note_on(a, _SLOT8)
         _note_on(a, _SLOT17)
+        _note_off(a, _SLOT17)
+        self.assertIsNone(a.snapshot().held_static_slot)
+
+    def test_toggle_note_on_latches_and_same_note_unlatches(self):
+        a = _adapter(_TOGGLE8)
+        _note_on(a, _TOGGLE8)
+        self.assertEqual(a.snapshot().held_static_slot, 8)
+        _note_on(a, _TOGGLE8)
+        self.assertIsNone(a.snapshot().held_static_slot)
+
+    def test_toggle_note_off_and_velocity_zero_do_not_unlatch(self):
+        a = _adapter(_TOGGLE8)
+        _note_on(a, _TOGGLE8)
+        _note_off(a, _TOGGLE8)
+        self.assertEqual(a.snapshot().held_static_slot, 8)
+        _note_on_vel0(a, _TOGGLE8)
+        self.assertEqual(a.snapshot().held_static_slot, 8)
+
+    def test_toggle_is_exempt_from_stale_timeout(self):
+        a = SoundSwitchMidiInputAdapter([_TOGGLE8], stale_timeout_ms=1)
+        _note_on(a, _TOGGLE8)
+        with mock.patch("rb_ss_bridge_v2.soundswitch_midi_input.time.monotonic",
+                        return_value=time.monotonic() + 10):
+            self.assertEqual(a.snapshot().held_static_slot, 8)
+
+    def test_different_toggle_slot_replaces_current(self):
+        a = _adapter(_TOGGLE8, _TOGGLE17)
+        _note_on(a, _TOGGLE8)
+        _note_on(a, _TOGGLE17)
+        self.assertEqual(a.snapshot().held_static_slot, 17)
+
+    def test_press_replaces_toggle_and_press_release_clears(self):
+        a = _adapter(_TOGGLE8, _SLOT17)
+        _note_on(a, _TOGGLE8)
+        _note_on(a, _SLOT17)
+        self.assertEqual(a.snapshot().held_static_slot, 17)
         _note_off(a, _SLOT17)
         self.assertIsNone(a.snapshot().held_static_slot)
 
