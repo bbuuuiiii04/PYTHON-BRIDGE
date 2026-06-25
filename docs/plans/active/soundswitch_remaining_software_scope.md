@@ -31,6 +31,22 @@ review prompt at `67c9b7a` — HEAD has moved past both; see Item 1 and Drift).
 These are software/wire gates only. `software_zero_frame` and `frame_count`
 prove no serial send, no Enttec acceptance, and no physical darkness.
 
+## Numbering crosswalk (old RW-6…RW-10 → current items)
+
+The current roadmap names items 1-5 + T7d and dropped the old `RW-N` numbers.
+Those numbers survive only as forward-references inside the completed RW-1…RW-4
+specs and the `soundswitch_rw7_capture_agent_prompt.md` filename — **no RW-6/RW-8/
+RW-9 spec file exists** (`find docs -iname '*rw6*'…` → none). So they are not
+unscoped work; they map onto the items below:
+
+| Old label | Means | Here |
+| --- | --- | --- |
+| RW-5 | operational status (copied status + menubar) | landed/software-tested (phantom-work list) |
+| RW-6 | create the *live* local config (hardware prereq) | operator, folded into **H1** |
+| RW-7 | T7d live autoloop-phase capture | tooling **B1** (done) + capture **H2** (operator) |
+| RW-8 | native-DMX Autoloop implementation | **B2** (`select_autoloop` still uncalled) |
+| RW-9 / RW-10 | hardware run(s) / final hardware validation | **H1** + hardware slice of **B3** |
+
 ---
 
 ## Software items, doable now
