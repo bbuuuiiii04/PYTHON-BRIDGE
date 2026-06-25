@@ -2,8 +2,8 @@
 doc_status: active-review-prompt
 truth_level: code-grounded
 last_verified_commit: d37a472
-last_verified_date: 2026-06-24
-validation_scope: one-shot operator-conducted capture agent prompt for RW-7 / T7d live autoloop-phase evidence; OBSERVER-ONLY; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no pack enable, no bridge restart, no fixture/Enttec/DMX/MIDI connection, no project mutation
+last_verified_date: 2026-06-25
+validation_scope: one-shot operator-conducted capture agent prompt for RW-7 / T7d live autoloop-phase evidence; OBSERVER-ONLY; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no pack enable, no bridge restart, no fixture/Enttec/DMX/MIDI connection, no project mutation
 ---
 
 # One-shot capture agent — RW-7 / T7d live autoloop-phase evidence
@@ -20,8 +20,13 @@ the operator and actively wait.** You never reinterpret missing evidence.
    (scenarios, identity/BPM coverage, holdout method, safety preflight, classification).
 2. `tools/t7d_capture_conductor.py` — the **tool you drive**. It is already built and is the
    only capture mechanism. Use it; do not invent a capture procedure or write new capture
-   code. Read its `SCENARIOS`, `classify`, and `cmd_run_scenario` so your coordination
-   matches its real active-wait gates and fail-closed rules.
+   code. Read its `SCENARIOS`, `classify_gate`, `cmd_run_scenario`, and the `main`/argparse
+   block (for the exact invocation flags) so your coordination matches its real active-wait
+   gates and fail-closed rules. Know its limits: the conductor copies only `bridge.log` and
+   hard-codes `project_hash_matched=True` in `run-scenario` — it does **not** hash the
+   SoundSwitch project or copy AppLogs. Those are operator steps you must drive (see Run
+   mechanics), or `validate-scenario` will fail closed and the corpus will be unusable for the
+   later identity join.
 
 ## HARD SAFETY BOUNDARIES — never cross
 - **Observer only.** Never connect to or open Enttec/serial/MIDI/DMX, never enable the
