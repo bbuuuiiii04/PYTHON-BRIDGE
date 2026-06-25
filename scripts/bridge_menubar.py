@@ -688,6 +688,7 @@ class BridgeMenuBar(NSObject):
         )
         self.export_status_item.setEnabled_(False)
         self.menu.addItem_(self.export_status_item)
+        self.pack_toggle_item = self._add_action("Lighting Pack: …", "toggleSoundswitchPack:")
         
         self.smart_phrasing_menu = NSMenu.alloc().init()
         self.smart_phrasing_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Phrasing", None, "")
