@@ -388,38 +388,44 @@ def pack_export_status_line(
     export_state: str,
     export_up_to_date: bool,
     export_result: dict | None = None,
+    bridge_status: str | None = None,
 ) -> str:
-    """Render one bounded row from copied software status and local export state."""
+    """Plain-language line under the Export button: what the lighting pack is
+    doing live, plus only the export feedback the button can't show."""
+    if bridge_status == "off":
+        return "Lighting: bridge off"
     if stale:
-        return "Pack: Unknown"
+        return "Lighting: no status yet"
     pack = pack_status if isinstance(pack_status, dict) else {}
-    pack_label = {
-        "disabled": "Disabled",
-        "blackout": "Blackout",
-        "input_degraded": "Input degraded",
-        "static_held": "Static held",
-        "scripted_active": "Scripted active",
-        "autoloop_phase_blocked": "Autoloop blocked",
-        "software_zero_frame": "Software zero",
-    }.get(pack.get("operational_state"), "Unknown")
+    light_label = {
+        "disabled": "pack off",
+        "blackout": "blackout",
+        "input_degraded": "input degraded",
+        "static_held": "holding static",
+        "scripted_active": "scripted active",
+        "autoloop_phase_blocked": "autoloop blocked",
+        "software_zero_frame": "zeroed",
+    }.get(pack.get("operational_state"), "unknown")
+    # Steady Exported / Ready-to-export is already on the button; only surface
+    # progress, failure, or a save/reload result the button can't convey.
+    note = ""
     if export_phase == "exporting":
-        export_label = "Exporting…"
+        note = "exporting…"
     elif export_phase == "reloading":
-        export_label = "Reloading…"
+        note = "reloading…"
     elif export_state == "published_not_live":
-        export_label = "Saved; pack disabled"
+        note = "saved — enable pack to go live"
     elif export_state == "reload_succeeded":
-        export_label = "Live now"
+        note = "live now"
     elif export_state == "reload_failed":
-        export_label = "Saved; reload unconfirmed"
+        note = "saved — reload unconfirmed"
     elif export_state == "export_failed":
         category = _safe_error_category((export_result or {}).get("error_category"))[:32]
-        export_label = f"Export failed ({category})"
-    elif export_up_to_date:
-        export_label = "Exported"
-    else:
-        export_label = "Ready to export"
-    return f"Pack: {pack_label} · {export_label}"[:80]
+        note = f"export failed ({category})"
+    line = f"Lighting: {light_label}"
+    if note:
+        line = f"{line} · {note}"
+    return line[:80]
 
 
 def _export_failure_result(exc: Exception) -> dict:
@@ -834,6 +840,7 @@ class BridgeMenuBar(NSObject):
                 export_state=self._export_state,
                 export_up_to_date=self._export_up_to_date,
                 export_result=self._export_result,
+                bridge_status=self._status,
             ))
 
     def _maybe_detect_export_state(self):

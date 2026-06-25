@@ -262,33 +262,33 @@ class BridgeMenubarTests(unittest.TestCase):
     def test_pack_export_status_line_truth_tables_and_bounds(self) -> None:
         bridge_menubar = self._import_module()
         states = {
-            "disabled": "Disabled",
-            "blackout": "Blackout",
-            "input_degraded": "Input degraded",
-            "static_held": "Static held",
-            "scripted_active": "Scripted active",
-            "autoloop_phase_blocked": "Autoloop blocked",
-            "software_zero_frame": "Software zero",
-            "bogus": "Unknown",
+            "disabled": "pack off",
+            "blackout": "blackout",
+            "input_degraded": "input degraded",
+            "static_held": "holding static",
+            "scripted_active": "scripted active",
+            "autoloop_phase_blocked": "autoloop blocked",
+            "software_zero_frame": "zeroed",
+            "bogus": "unknown",
         }
         for state, label in states.items():
             with self.subTest(state=state):
+                # Steady "ready to export" adds no note: button already shows it.
                 line = bridge_menubar.pack_export_status_line(
                     {"operational_state": state}, stale=False,
                     export_phase="idle", export_state="idle",
                     export_up_to_date=False,
                 )
-                self.assertEqual(line, f"Pack: {label} · Ready to export")
+                self.assertEqual(line, f"Lighting: {label}")
 
         exports = (
-            ("exporting", "idle", False, {}, "Exporting…"),
-            ("reloading", "idle", False, {}, "Reloading…"),
-            ("idle", "idle", True, {}, "Exported"),
-            ("idle", "published_not_live", True, {}, "Saved; pack disabled"),
-            ("idle", "reload_succeeded", True, {}, "Live now"),
-            ("idle", "reload_failed", True, {}, "Saved; reload unconfirmed"),
+            ("exporting", "idle", False, {}, "exporting…"),
+            ("reloading", "idle", False, {}, "reloading…"),
+            ("idle", "published_not_live", True, {}, "saved — enable pack to go live"),
+            ("idle", "reload_succeeded", True, {}, "live now"),
+            ("idle", "reload_failed", True, {}, "saved — reload unconfirmed"),
             ("idle", "export_failed", False, {"error_category": "TimeoutExpired"},
-             "Export failed (TimeoutExpired)"),
+             "export failed (TimeoutExpired)"),
         )
         for phase, state, current, result, label in exports:
             with self.subTest(phase=phase, state=state):
@@ -297,15 +297,34 @@ class BridgeMenubarTests(unittest.TestCase):
                     export_phase=phase, export_state=state,
                     export_up_to_date=current, export_result=result,
                 )
-                self.assertEqual(line, f"Pack: Disabled · {label}")
+                self.assertEqual(line, f"Lighting: pack off · {label}")
 
+        # Steady up-to-date adds no note (button shows "Exported").
+        self.assertEqual(
+            bridge_menubar.pack_export_status_line(
+                {"operational_state": "scripted_active"}, stale=False,
+                export_phase="idle", export_state="idle",
+                export_up_to_date=True,
+            ),
+            "Lighting: scripted active",
+        )
+
+        # Bridge off wins over any stale snapshot content.
+        self.assertEqual(
+            bridge_menubar.pack_export_status_line(
+                {"operational_state": "scripted_active"}, stale=True,
+                export_phase="idle", export_state="reload_succeeded",
+                export_up_to_date=True, bridge_status="off",
+            ),
+            "Lighting: bridge off",
+        )
         self.assertEqual(
             bridge_menubar.pack_export_status_line(
                 {"operational_state": "scripted_active"}, stale=True,
                 export_phase="idle", export_state="reload_succeeded",
                 export_up_to_date=True,
             ),
-            "Pack: Unknown",
+            "Lighting: no status yet",
         )
         line = bridge_menubar.pack_export_status_line(
             {"operational_state": "scripted_active"}, stale=False,
