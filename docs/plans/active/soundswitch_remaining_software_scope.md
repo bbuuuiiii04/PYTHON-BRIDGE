@@ -123,6 +123,41 @@ Not a numbered roadmap item; it's the "code/doc drift you can prove" bucket.
 7. **Invariants.** Docs-only rule (AGENTS.md §6): no runtime change.
 8. **Owner.** Claude / docs.
 
+### Static-override interaction model — momentary only (open question, was missed)
+
+1. **Plain meaning.** Static looks work, but the bridge-native player only does
+   *momentary/hold* — a static is on while the controller note is held, and
+   releases on note-off. It does **not** do *toggle* (tap-on, walk away, tap-off).
+2. **Current state — `confirmed`.** `soundswitch_midi_input.py:214-256`: note-on
+   holds the slot, **repeated note-on is idempotent** (no toggle-off), note-off
+   releases, velocity-0 note-on → note-off, 2 s stale-hold auto-clear. The export
+   binding (`PackMidiBinding`, `soundswitch_pack_loader.py:40-51`) carries only
+   `target_kind` + `target_slot` — **no toggle/momentary field**; the exporter does
+   not record a pad's toggle setting. Tested:
+   `tests/test_soundswitch_midi_input.py` (`test_repeated_note_on_idempotent`,
+   `test_note_off_releases_current`), `tests/test_static_looks.py`. Consistent with
+   the RE finding that SoundSwitch's own `EnableStaticLookOverride` is momentary at
+   the engine level (`soundswitch_ghidra_addendum.md:85`) — a different layer from
+   the controller pad's toggle/momentary setting.
+3. **Scope impact.** Only bites in the bridge-native direct-DMX path (default-off,
+   gated behind T7d + hardware). In the current live OS2L path SoundSwitch handles
+   the pad mode, so toggle works today. **Not listed in the roadmap** as remaining
+   work or as a stated limitation — a genuine gap in prior scoping, surfaced
+   2026-06-24.
+4. **Doable now or blocked.** The *decision* is doable now (operator input). The
+   implementation, if needed, is doable now too (no hardware/T7d dependency).
+5. **Decision needed (operator).** Do any live static-look pads use **toggle**
+   mode? **If yes** → the bridge-native path needs a toggle latch in the input
+   adapter + a toggle flag carried through the export binding/spec (Effort S-M,
+   software). **If no** → momentary-only is correct; just record it as an accepted
+   boundary in `soundswitch_output.md` / the roadmap (Effort S, docs).
+6. **Effort S (decision/docs) → S-M (if toggle latch needed). Risk low** until the
+   direct-DMX path is enabled.
+7. **Invariants.** Any toggle latch must keep safe-zero on stale/degraded/swap
+   (roadmap invariants 8, 11) — a latched toggle must still release on input
+   degradation, pack reload, panic, and shutdown like the momentary hold does.
+8. **Owner.** Operator decision → Claude (doc the boundary) or Codex (toggle latch).
+
 ### Item 5 (software slice) — rerun the closeout gates
 
 1. **Plain meaning.** Re-prove the suite/proof/docs gates are green — done this
