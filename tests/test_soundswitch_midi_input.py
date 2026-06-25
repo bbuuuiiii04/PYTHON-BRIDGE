@@ -1,6 +1,7 @@
 """Tests for soundswitch_midi_input — no MIDI/serial/Art-Net hardware opened."""
 import sys
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -102,6 +103,58 @@ def _note_on_vel0(adapter: SoundSwitchMidiInputAdapter,
     """Inject a note-on velocity=0 (must normalize to note-off)."""
     status = 0x90 | binding.channel_zero_based
     adapter._feed_raw_message(status, binding.data_byte, 0)
+
+
+# ---------------------------------------------------------------------------
+# Real MIDI source (production port factory)
+# ---------------------------------------------------------------------------
+
+class TestRealMidiSource(unittest.TestCase):
+    """The production source must use the installed python-rtmidi (``MidiIn``)
+    API. Guards against the ``RtMidiIn`` (rtmidi-python) API that the bridge
+    environment does not ship, which silently disabled all controller input."""
+
+    @staticmethod
+    def _fake_rtmidi(ports, messages):
+        class _FakeMidiIn:
+            def __init__(self):
+                self.opened = None
+                self.closed = False
+                self._queue = list(messages)
+
+            def get_ports(self):
+                return list(ports)
+
+            def open_port(self, index):
+                self.opened = index
+
+            def close_port(self):
+                self.closed = True
+
+            def get_message(self):
+                return self._queue.pop(0) if self._queue else None
+
+        inst = _FakeMidiIn()
+        return types.SimpleNamespace(MidiIn=lambda: inst), inst
+
+    def test_real_source_parses_python_rtmidi_messages(self):
+        fake, inst = self._fake_rtmidi(
+            ["IAC Driver Bus 1", "DDJ-800 Port"],
+            [([0x99, 8, 100], 0.0)],
+        )
+        with mock.patch.dict(sys.modules, {"rtmidi": fake}):
+            gen = SoundSwitchMidiInputAdapter._make_real_source("DDJ-800")()
+            self.assertEqual(next(gen), (0x99, 8, 100))
+            self.assertIsNone(next(gen))  # empty queue -> poll tick, lets worker stop
+            gen.close()
+        self.assertEqual(inst.opened, 1)  # substring matched "DDJ-800 Port" at index 1
+        self.assertTrue(inst.closed)
+
+    def test_real_source_raises_when_port_absent(self):
+        fake, _ = self._fake_rtmidi(["IAC Driver Bus 1"], [])
+        with mock.patch.dict(sys.modules, {"rtmidi": fake}):
+            with self.assertRaises(OSError):
+                next(SoundSwitchMidiInputAdapter._make_real_source("DDJ-800")())
 
 
 # ---------------------------------------------------------------------------

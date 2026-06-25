@@ -32,6 +32,10 @@ log = logging.getLogger("soundswitch_midi_input")
 # counted.  Bounded to prevent unbounded memory growth on runaway input.
 _MAILBOX_MAXLEN = 256
 
+# python-rtmidi's get_message() is non-blocking; sleep this long between empty
+# polls so the worker is responsive to stop without busy-spinning a core.
+_INPUT_POLL_INTERVAL_S = 0.003
+
 
 @dataclass(frozen=True, slots=True)
 class MidiInputSnapshot:
@@ -321,25 +325,34 @@ class SoundSwitchMidiInputAdapter:
     def _make_real_source(
         port_name: str,
     ) -> Callable[[], Iterator[tuple[int, int, int] | None]]:
-        """Return a factory that opens a real rtmidi port and iterates messages."""
+        """Return a factory that opens a real python-rtmidi input port.
+
+        Uses python-rtmidi's ``MidiIn`` API (the MIDI package the rest of the
+        bridge ships).  ``get_message()`` is non-blocking and returns
+        ``(message_bytes, delta)`` or ``None``; empty polls sleep briefly and
+        yield ``None`` so the worker can observe stop between messages.
+        """
         def factory() -> Iterator[tuple[int, int, int] | None]:
             import rtmidi  # type: ignore[import-untyped]
-            midi_in = rtmidi.RtMidiIn()
+            midi_in = rtmidi.MidiIn()
             try:
-                ports = [midi_in.getPortName(i) for i in range(midi_in.getPortCount())]
+                ports = midi_in.get_ports()
                 matches = [i for i, name in enumerate(ports) if port_name in name]
                 if not matches:
                     raise OSError(f"MIDI port not found: {port_name!r}; available={ports!r}")
-                midi_in.openPort(matches[0])
+                midi_in.open_port(matches[0])
                 while True:
-                    msg = midi_in.getMessage(250)  # 250 ms poll
-                    if msg:
-                        yield (msg.getRawByte(0), msg.getRawByte(1), msg.getRawByte(2))
-                    else:
-                        yield None
+                    msg = midi_in.get_message()
+                    if msg is not None:
+                        data, _delta = msg
+                        if len(data) >= 3:
+                            yield (data[0], data[1], data[2])
+                        continue  # drain queued messages before sleeping
+                    time.sleep(_INPUT_POLL_INTERVAL_S)
+                    yield None
             finally:
                 try:
-                    midi_in.closePort()
+                    midi_in.close_port()
                 except Exception:
                     pass
         return factory
