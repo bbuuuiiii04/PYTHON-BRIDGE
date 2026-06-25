@@ -245,24 +245,25 @@ Wire-up (idempotent — `start_streamdeck` no-ops when already running, relaunch
   its layer to the top. **Topmost wins each channel. Nothing is auto-untoggled** (a toggle only
   changes when its own pad is pressed).
 - **emergency/blackout > the whole stack** → black.
-- **Hold / recovery [DECISION — operator must pick before Task 5 builds]:** the locked model wants a
-  held layer to last until `note_off`/disconnect with **no** 2 s cutoff. But removing the 2 s
-  `controller_hold_timeout_ms` (`soundswitch_pack_player_config.py:53`) is **only safe with a
-  replacement backstop** — today that timeout is the *only* mechanism that ever releases a stuck
-  layer: input-disconnect detection does **not** exist (`_make_real_source` never notices a vanished
-  port, `soundswitch_midi_input.py:361-372`), and the dropped-note counter is **inert**
-  (`_mail_drop_count` is initialized and read but never incremented, `:89,125`; the latch at
-  `state_manager.py:3416` can therefore never fire). With no backstop, a single dropped `note_off`
-  or a controller crash mid-press pins a static look on the rig **forever**. Task 5 must ship **one
-  of**: (a) a long **press-only** watchdog (e.g. 30–60 s) that auto-releases a *transient* layer while
-  leaving toggles persistent; (b) real input-disconnect detection (periodic `get_ports()` re-check or
-  a controller heartbeat) that triggers the stack-clear; or (c) actually wire `_mailbox`/drop-count so
-  the existing degradation latch can fire. **Also note:** the 2 s timeout currently gates
-  **blackout-hold** auto-release too (`:114-117`) — whatever replaces it must preserve blackout
-  auto-release.
-- **Clear-on-disconnect [DECISION]:** "input surface disconnects → bridge clears the static stack" is
-  required by the model but has **no detection seam today**. It is satisfied only if Task 5 adds the
-  seam (option (b) above); it cannot be assumed to work for free.
+- **Hold / recovery [RESOLVED 2026-06-25 — input-port-gone detection]:** remove the 2 s
+  `controller_hold_timeout_ms` cutoff (`soundswitch_pack_player_config.py:53`); held layers last until
+  `note_off` or the input port disappearing. The backstop for a stranded layer is **input-port-gone
+  detection**: Task 5 adds a periodic `get_ports()` re-check on the **worker thread** (not the push
+  loop); when the bound virtual MIDI port is no longer present, clear the whole stack (back to
+  autoloop). This also satisfies the model's "input surface disconnects → clear the stack" requirement
+  — same mechanism. **This is sufficient because the Phase 1 controller closes its virtual MIDI port
+  on every deck disconnect** (Task 3 `finally: port.close()`), so a deck yanked mid-press becomes a
+  port-gone event the bridge sees — locked in as a Part C invariant. **When the 2 s timeout is removed,
+  preserve blackout-hold auto-release** by an equivalent mechanism (that same gate currently also
+  releases blackout-hold at `soundswitch_midi_input.py:114-117`).
+  - **Residual (accepted) [confirmed]:** port-gone does *not* catch a `note_off` genuinely lost in
+    CoreMIDI/rtmidi's buffer while the port stays up — rare on a dedicated low-traffic virtual port
+    with 15 pads. `# ponytail:` no press watchdog; add a press-only timeout later only if a stuck
+    press with the port still present is ever observed live.
+  - **Debounce knob [confirmed]:** port-gone clears immediately, so a brief deck flake (controller
+    closes+reopens the port) drops held toggles and they won't auto-restore (controller LED then
+    diverges — see Task 7). `# ponytail:` clear-on-first-absence; add an N-second debounce only if
+    nuisance clears show up live.
 - Bridge restart (operator: "never will") → controller blanks all LEDs and resets.
 
 **What's confirmed in code [confirmed] — the gap is the whole feature:**
@@ -311,7 +312,9 @@ Codex builds with no guessing).
   raises `conflicting_static_holds` when >1 (`soundswitch_midi_input.py:508-525`) — structurally
   incompatible with a stack. Redefine it to concatenate each adapter's `held_layers` into one
   recency-ordered tuple and drop the single-slot conflict flag. (For a single controller this is just
-  that adapter's tuple; the cross-device ordering rule is a DECISION — see end of Part F.)
+  that adapter's tuple. **Cross-device ordering [RESOLVED — by recency]:** if a second surface is ever
+  added, merge all adapters' layers into one **global recency order** — newest press/toggle on top
+  regardless of which surface it came from.)
 - **Player API:** `LaserPackPlayer` is single-slot (`_active_static_slot`,
   `soundswitch_laser_player.py:186`; `hold_static`/`release_static`, `:234-245`). Add
   `set_static_layers(layers)` storing the ordered tuple; `reload()` (`:203-209`) must reset it to
@@ -328,18 +331,18 @@ with a single pure function `apply_layers(base, layers, blackout, emergency) -> 
    `_apply_attribute`'s filter**: skip rows where `fixture_group != PRIMARY_FIXTURE_GROUP` (`:78`);
    for the rest write `frame[dmx_channel-1] = value` (explicit 0 overrides; an absent channel falls
    through to whatever is beneath). The topmost layer wins each channel it sets.
-- **Per-layer error isolation [DECISION]:** a malformed look raises in apply today and `render()`
-  fail-closes the **whole** frame to ZERO (`:145,371-372`). In a stack, pick: skip the bad layer and
-  log (recommended — one corrupt look can't black the stage) **or** keep fail-closed. Choose one and
-  test it.
+- **Per-layer error isolation [RESOLVED — skip + log]:** a malformed look raises in apply today and
+  `render()` fail-closes the **whole** frame to ZERO (`:145,371-372`). In the stack, **skip the bad
+  layer and log**, continuing to render the rest — one corrupt look must never black the stage. Test
+  it (Part D).
 - The render stays a **pure function** of (base, ordered layers, blackout, emergency); the 200 Hz push
   loop reads the immutable snapshot and calls it — **no I/O, no locks on the loop** (AGENTS §6).
 
-**Degradation latch [DECISION]:** the push loop drops the entire overlay (`slot=None`) on any
-`error`, `worker_alive` flap, or `new_drop` (`state_manager.py:3418-3428`). With a stack this blinks
-**all** held layers off/on on a transient glitch. Restrict the drop-all to true
-worker-death/disconnect; do not drop the stack on a transient `error` string. (Tie this to the
-backstop/disconnect DECISION above.)
+**Degradation latch [RESOLVED — restrict to worker-death / port-gone]:** the push loop drops the
+entire overlay (`slot=None`) on any `error`, `worker_alive` flap, or `new_drop`
+(`state_manager.py:3418-3428`). With a stack this would blink **all** held layers off/on on a
+transient glitch, so **restrict the drop-all to true worker-death / port-gone** — do not drop the
+stack on a transient `error` string. This is the same signal as the port-gone backstop above.
 
 - **No Stream-Deck specifics.** Layers are keyed by learned binding `(device_name, channel, note)`
   → `static_look` slot. Optional generic add: list available MIDI input port names in runtime status.
@@ -377,6 +380,11 @@ backstop/disconnect DECISION above.)
   list and the player resets via `set_static_layers([])` — `static_look` slot indices are keyed by
   position (`soundswitch_pack_loader.py:582`) and are **not** stable across reload, so a carried-over
   layer would point at the wrong look. The controller blanks its LEDs on (re)start to resync.
+- **Controller closes its virtual MIDI port on deck disconnect** (load-bearing for the stack backstop).
+  Task 3's supervisor `finally` runs `port.close()` whenever `deck.connected()` goes false, so a yanked
+  deck becomes a **port-gone** event the bridge's disconnect detection (Task 5) can see and clear the
+  stack on. **Do not** change the controller to keep the virtual port open across deck reconnects —
+  that would silently strand a held press (the port-gone backstop is the only thing that clears it).
 
 ### Part D additions (Phase 2 tests)
 - **Pure-function compositor seam** (the core): given a base frame + ordered sparse layers (+ flags),
@@ -384,6 +392,11 @@ backstop/disconnect DECISION above.)
   overlap, two disjoint toggles compose (Lego), press layer reverts on removal, blackout → ZERO_FRAME.
 - Stack lifecycle: toggle add/remove, press add-on-`note_on`/remove-on-`note_off`, recency ordering,
   clear-on-disconnect — testable without hardware (feed raw messages, no port).
+- **Skip-bad-layer:** a malformed layer is skipped and the remaining layers + base still render (not
+  ZERO).
+- **Port-gone clear:** feed a port-absent signal and assert the stack clears. The port-presence check
+  (`get_ports()`) must be **injectable** like `_message_source` so this is testable without hardware.
+  Also assert blackout-hold auto-release still works after the 2 s timeout is removed.
 - Controller LED mapping is a pure function of `(sidecar, pressed-set)` — testable.
 
 ### Acceptance (Phase 2)
@@ -394,17 +407,18 @@ backstop/disconnect DECISION above.)
   the live autoloop. Blackout blacks the whole stack.
 - Existing autoloop/scripted/blackout behavior unchanged when no static layer is active.
 
-**Open decisions before Task 5 builds (operator must resolve — this retracts the earlier "no
-remaining unknowns" claim):**
-1. **Stuck-layer backstop** — press watchdog vs disconnect detection vs wiring the drop counter (Hold/
-   recovery DECISION above). Live-safety critical: without one, a dropped `note_off` or a controller
-   crash mid-press pins a look on the rig forever.
-2. **Per-layer render-error isolation** — skip the bad layer (recommended) vs fail-closed to ZERO.
-3. **Degradation-latch scope** — restrict the drop-all to true worker-death/disconnect.
-4. **Cross-device layer ordering** in the group merge (trivial for a single controller; name the rule).
+**Decisions resolved (operator sign-off 2026-06-25 — retracts the earlier "no remaining unknowns"
+claim):**
+1. **Stuck-layer backstop → input-port-gone detection** (no press watchdog, no drop-counter). Made
+   sufficient by the Phase 1 controller closing its virtual port on deck loss (Part C invariant).
+   Residual lost-`note_off`-with-port-up tail accepted; immediate-clear (debounce later if needed).
+2. **Per-layer render error → skip the bad layer + log** (never black the whole stage).
+3. **Degradation latch → restrict drop-all to true worker-death / port-gone** (no flicker on transient
+   errors).
+4. **Cross-device layer ordering → by recency** (global newest-on-top if a second surface is ever added).
 
-The only mechanical item is the Task 6 exporter hook site, which Codex locates in the pack-build path
-(`soundswitch_pack_loader`/`soundswitch_pack_runtime`). Task 5 is the live-critical one — it replaces
-`resolve_frame`/`render_static_look_frame`/`_active_static_slot`/`_held_static_slot` — and stays
-**plan-first and GATED on Phase 1 execution + operator approval**: it must not start until Phase 1 has
-landed and the operator has signed off on decisions 1–4.
+The only mechanical item left is the Task 6 exporter hook site, which Codex locates in the pack-build
+path (`soundswitch_pack_loader`/`soundswitch_pack_runtime`). Task 5 is the live-critical one — it
+replaces `resolve_frame`/`render_static_look_frame`/`_active_static_slot`/`_held_static_slot` — and
+stays **plan-first and GATED on Phase 1 execution**: it must not start until Phase 1 has landed and the
+operator confirms the build.
