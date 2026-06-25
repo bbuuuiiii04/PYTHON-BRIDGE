@@ -1,10 +1,14 @@
 # Codex Implementation Spec — Stream Deck MIDI controller: robustness + bridge autostart
 
-Status: **Phase 1 ready for Codex.** Phase 2 is **blocked** on 3 verifications (see Part F) — do not implement Phase 2 yet.
+Status: **Phase 1 ready for Codex now.** **Phase 2 (Part F) is fully specified and ready**, but is
+live-critical bridge work — implement it after Phase 1 lands, and treat Tasks 6–7 as plan-first
+(operator reviews before merge).
 
 The Stream Deck script already exists and works as a MIDI controller (15 pads → notes 36–50 on
-MIDI channel 3). This spec hardens it for unattended live use and makes the bridge own its
-lifecycle. Phase 2 (toggle-mode sync to SoundSwitch static looks) is scoped but not yet handoff-ready.
+MIDI channel 3). Phase 1 hardens it for unattended live use and makes the bridge own its lifecycle.
+Phase 2 makes pads mapped to SoundSwitch static looks follow that look's press/toggle mode and light
+up to track the on/off state — driving the look through the bridge's **generic** MIDI-surface input
+(no Stream-Deck-specific bridge code), with the pad LED handled locally by the controller.
 
 ---
 
@@ -191,43 +195,87 @@ Wire-up (idempotent — `start_streamdeck` no-ops when already running, relaunch
 
 ---
 
-## Part F — Phase 2 (NOT ready — toggle-mode sync to SoundSwitch static looks)
+## Part F — Phase 2 (toggle-mode sync — bridge stays generic)
 
 **Requirement (operator):** If a Stream Deck pad is mapped to a SoundSwitch **static look**, the pad
-must follow that look's SoundSwitch **press vs toggle** trigger mode. For a toggle-mode look, the pad
-press must drive the toggled state (and the pad LED should reflect on/off). The SoundSwitch exporter
-must make this mode available to the bridge/controller.
+must follow that look's **press vs toggle** mode, and a toggle pad must light up to reflect the
+look's on/off state. **The bridge must NOT contain any Stream-Deck-specific code or config.** The
+bridge only has to **detect the Stream Deck as a generic MIDI surface** and drive it through its
+existing engine. The press/toggle pad LED is the controller's own responsibility.
 
-**What already exists [confirmed]:**
-- The exporter/loader already models per-binding mode: `PackMidiBinding`
-  (`soundswitch_pack_loader.py:39-53`) carries `message_type`, `channel_zero_based`, `data_byte`
-  (the note), `target_kind` (incl. `"static_look"`), and `interaction: Literal["press","toggle"]`.
-- `ResolvedControlBinding.interaction_mode` (`soundswitch_pack_models.py:260`) and
-  `ControlLabelState.interaction_mode` (`:250`) carry the same. `DecodedSoundSwitchProject` exposes
-  `static_looks` and `resolved_controls` (`:276`,`:283`). `MidiDevice.feedback_bytes` (`:231`) hints
-  SoundSwitch may emit MIDI feedback (relevant to true state reflection — unconfirmed).
+**What already exists [confirmed] — most of this is built and generic:**
+- `interaction` is decoded directly from the `.ssproj` (`soundswitch_project_decoder.py:883-889`,
+  byte `0=press / 1=toggle`) and carried end-to-end: `ControlLabelState.interaction_mode` →
+  `ResolvedControlBinding.interaction_mode` → `PackMidiBinding.interaction`
+  (`soundswitch_pack_loader.py:296`). **So "the exporter exports this" is already true.**
+- The bridge already routes a **generic** MIDI surface: `SoundSwitchMidiInputGroup` /
+  `SoundSwitchMidiInputAdapter` (`soundswitch_midi_input.py:418,59`), wired in `__main__.py:444,495,
+  541`, bound from operator config `cfg.midi_input_aliases` (currently `{}`). It matches incoming
+  notes to bindings by `(device_name, message_type, channel_zero_based, data_byte)` (`_key`, :54) and
+  applies press/toggle in `_process_note_on/off` (:222-277): toggle flips the held slot on each
+  `note_on`, `note_off` ignored; press is momentary. **No device is named in source** — binding is by
+  the project's learned device + operator alias. Port matching is generic (`_match_port_index`, :357).
+- The live pack player is the lighting authority (`config/soundswitch_pack_player.json`:
+  `enabled:true, dry_run:false, backend:pack`, DMX CH1-19), so a pad press must reach the bridge to
+  drive a look — exactly what the generic MIDI-input path is for.
 
-**Intended design (to be finalized after Part F verifications):**
-- Keep the bridge out of the hot path: the exporter emits a small **binding table** artifact
-  (per static-look binding: `channel`, `note`, `interaction`, look name/id) where the standalone
-  controller can read it. The controller keys each pad by its own `(CHANNEL, note)`; if that matches a
-  `target_kind="static_look"` binding with `interaction="toggle"`, the pad uses toggle behavior +
-  on/off LED state; otherwise momentary (today's behavior). This adds **no** bridge-process code.
+**Design (no Stream-Deck coupling in the bridge):**
+- The Stream Deck is learned in the SoundSwitch project like any controller and the project is
+  exported. The operator points the bridge's existing **generic** `midi_input_aliases` at whatever
+  MIDI input surface is present (the Stream Deck's `"Stream Deck"` port). The bridge then drives the
+  looks with correct press/toggle via the engine it already has — **zero new bridge logic, no
+  "Stream Deck" string in bridge source.**
+- The **controller** owns its pad LEDs. It reads the exported binding view for its own
+  `(CHANNEL, note)` keys; for a pad bound to a `static_look` with `interaction="toggle"` it tracks a
+  **local** on/off state and lights the pad accordingly (flip per press); press-mode and unmapped
+  pads keep today's momentary flash. The bridge is not asked to push anything back.
 
-**Blocking unknowns — verify before writing the Phase 2 task list (analysis = Claude's job):**
-1. [unknown] **SoundSwitch toggle MIDI semantics** — does a toggle-mode look flip on each `note_on`
-   (ignoring `note_off`), or need a specific sequence? Determines exactly what the controller emits
-   in toggle mode. Verify against SoundSwitch behavior/docs.
-2. [unknown] **Is `PackMidiBinding.interaction` actually populated from the SS project**, or does it
-   default to `"press"`? Trace the decode path that sets it; confirm a real toggle look decodes as
-   `"toggle"`.
-3. [unknown] **Consumable artifact** — does the exporter already emit these bindings to a file the
-   controller can read, or only build the in-memory immutable model? If in-memory only, Phase 2 must
-   add a tiny JSON emit (channel, note, target_kind, interaction, name) and define its path/refresh.
+### Tasks
+### Task 5 — bridge: generic MIDI-surface detection (config-first; no SD specifics)
+- Confirm the existing `midi_input_aliases` → `SoundSwitchMidiInputGroup` path binds an arbitrary
+  MIDI input surface with **no source change** (it should — binding is by learned `device_name` +
+  alias, port matched generically). Document the operator config to point it at the present surface.
+- Optional generic enhancement: surface the list of **available MIDI input port names** in the bridge
+  runtime status (reuse the mido input enumeration + `_match_port_index`) so the operator can see a
+  surface was detected. This must name **no specific device** and add no Stream-Deck logic.
 
-**Live-safety note for Phase 2:** toggle state in the controller is a local guess of SoundSwitch's
-state; without SoundSwitch→controller MIDI feedback it can drift (e.g., the same look toggled by
-another control). Decide explicitly whether to (a) accept local-only state, or (b) consume
-`feedback_bytes`/SoundSwitch MIDI-out for true sync — do not silently assume sync. This is
-SoundSwitch-exporter / live-critical work and must be designed against the existing pack pipeline
-(PR #116 lineage), plan-first, not bolted on.
+### Task 6 — exporter: consumer-readable binding view (device-agnostic, build-time)
+- The pack already carries `PackMidiBinding(channel_zero_based, data_byte, target_kind, interaction,
+  target_slot, target_name)`. If that pack form is not readable by an external program, have the
+  **exporter** write a small sidecar at export time — recommend `<pack_path>/midi_bindings.json` — a
+  list of `{channel, note, target_kind, interaction, name}` for the project's learned bindings. This
+  is exporter **output** (the project's own bindings), not bridge runtime, and names no device.
+
+### Task 7 — controller: per-pad press/toggle + local LED state
+- At startup the controller reads the sidecar (Task 6). For each pad it owns, key by `(CHANNEL, note)`
+  → if it matches a `static_look` toggle binding, mark the pad toggle and track local on/off; light
+  the pad when on. Press/unmapped pads unchanged. Recommend the controller also **adopt the bound
+  notes from the sidecar** so pads auto-match the project (fallback to fixed 36-50 if no sidecar).
+- `# ponytail:` LED state is local — accurate while the Stream Deck is the only thing toggling a
+  given look; it can drift if another surface toggles the same look (accepted — see Part C).
+
+### Part C additions (Phase 2 invariants)
+- **No Stream-Deck-specific code, string, or file emit in the bridge runtime.** The bridge treats it
+  as a generic MIDI surface only. Phase 2 bridge work is config + an optional generic port-list in
+  status; all device-aware logic lives in the controller and the (device-agnostic) exporter sidecar.
+- The bridge remains the single lighting authority and applies authoritative press/toggle via the
+  existing engine; the 200 Hz push loop is untouched.
+- Controller LED is local/cosmetic and never drives lighting; it cannot emit on the lasers' channels.
+
+### Part D additions (Phase 2 tests)
+- Pure-function seam: given a binding view + a pad's `(channel, note)`, the controller resolves the
+  correct mode (press/toggle/none) and the toggle LED transition — testable without hardware.
+- Existing `soundswitch_midi_input` press/toggle tests must stay green (no engine change).
+
+### Acceptance (Phase 2)
+- No occurrence of `streamdeck`/`Stream Deck` added under `rb_ss_bridge_v2/*.py` runtime code.
+- With the surface aliased in config: a toggle-look pad press toggles the look via the bridge and the
+  pad stays lit until pressed again; a press-look pad is momentary. Bridge `pgrep` count still 1.
+- The exporter sidecar lists each learned binding's `interaction`; the controller reads it and sets
+  per-pad behavior accordingly.
+
+**Remaining true unknown (small):** SoundSwitch's *own* toggle wire semantics are not needed here —
+the bridge engine (`_process_note_on/off`) already defines them (flip on `note_on`, ignore
+`note_off`), and the controller mirrors that same rule locally. The only open item is the exact
+exporter hook site for Task 6's sidecar, which Codex locates in the pack-build path
+(`soundswitch_pack_loader` / `soundswitch_pack_runtime`); symbols are named above.
