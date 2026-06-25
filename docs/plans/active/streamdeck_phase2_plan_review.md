@@ -1,19 +1,25 @@
 # Phase 2 (Part F) — Plan / Spec Review: generic layered static-look compositor
 
-Status: **planning + spec review — SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.** Do not implement
-from this doc alone; it gates the Codex spec. Baseline: `main` @ `2eff33e` (clean tree), suite
-**2382 OK** (skipped 3, xfail 1). All anchors below were re-resolved against this HEAD.
+Status: **review evidence / superseded by revised spec — SOFTWARE-VALIDATED ONLY /
+HARDWARE-UNVALIDATED.** Do not implement from this doc alone. Baseline for the original review was
+`main` @ `2eff33e` (clean tree), suite **2382 OK** (skipped 3, xfail 1). A later Codex review at
+`92a210e` found additional handoff blockers (hot-path lock wording, render-path logging, port recovery,
+global recency ownership, and missed tests); those corrections are folded into
+`docs/plans/active/streamdeck_midi_bridge_integration_spec.md` Part F and
+`docs/prompts/active/streamdeck_phase2_codex_implementation_prompt.md`.
 
 Source spec: `docs/plans/active/streamdeck_midi_bridge_integration_spec.md` Part F.
 
 ---
 
-## 1. Verdict
+## 1. Original Verdict
 
-**REVISE.**
+**SUPERSEDED / EVIDENCE ONLY.** The original verdict was **REVISE**.
 
-Task 5 (the live-critical compositor) and Task 7 (controller LEDs) are well-grounded and implementable
-with the plan in §3 — that part is READY-quality. The blocker is **Task 6**: its stated hook site,
+At the time, this review judged Task 5 (the live-critical compositor) and Task 7 (controller LEDs)
+well-grounded and implementable with the plan in §3. A later Codex review found additional Task 5
+handoff blockers; use the current spec and prompt, not this historical plan, for implementation.
+The original blocker here was **Task 6**: its stated hook site,
 "the exporter writes `<pack_path>/midi_bindings.json`" (spec lines 359, 362), **contradicts current
 code** and cannot be implemented as written. One spec edit fixes it (exact replacement wording in §3,
 Task 6). Because a spec line contradicts code, the whole-Part-F verdict is REVISE, not READY.
@@ -100,6 +106,10 @@ All **[confirmed]** unless noted. Anchors re-resolved at `2eff33e`.
 ---
 
 ## 3. Implementation Plan
+
+Historical evidence only. The current implementation instructions are in
+`docs/plans/active/streamdeck_midi_bridge_integration_spec.md` Part F and
+`docs/prompts/active/streamdeck_phase2_codex_implementation_prompt.md`.
 
 Ordering: **5A → 5B → 5C → 5D → 5E → 5F → 5G** (all bridge-side, commit after each), then **Task 6**
 (build-time, independent), then **Task 7** (controller, independent). Task 5 must not start until
@@ -396,17 +406,18 @@ New/updated tests, by file. **Bold** = the spec's required cases.
    2 starts from a copy of `base`; the **transparency-over-base** test fails if anyone reintroduces the
    `[0]*19` seed.
 2. **Push-loop mutation / frame tearing.** Today `snapshot()` *writes* engine state on the 200 Hz loop
-   (`:110-119`) and could hand the loop a live list. **Guard:** 5B makes `snapshot()` a pure read that
-   returns an **immutable tuple** built under `_lock`; stale/port-gone writes move to the worker (5C).
-   Violates AGENTS §6 otherwise.
+   (`:110-119`) and could hand the loop a live list. **Current guard:** the revised spec/prompt makes
+   `snapshot()` lock-free by returning a cached immutable snapshot; stale/port-gone writes move to the
+   worker (5C). Violates AGENTS §6 otherwise.
 3. **Degradation latch blinks the whole stack on a transient glitch.** The latch drops **all** overlay on
    any `err` (incl. `stale_hold`) or `new_drop` (`:3418`) — with a multi-layer stack that is a visible
    mid-set stutter. **Guard:** 5G restricts the drop-all to true worker-death / port-gone; the
    **transient-error-does-not-clear** test locks it in.
 4. **One corrupt look blacks the stage.** Today a malformed look raises and `render()` fail-closes the
    **whole** frame to ZERO (`:371-372`). In a stack that would kill the autoloop and every other layer.
-   **Guard:** 5F isolates each layer in try/except — skip+log the bad one, render the rest; the
-   **skip-bad-layer** test asserts the rest still render.
+   **Current guard:** 5F isolates each layer in try/except — skip the bad one, surface a non-blocking
+   diagnostic outside the render path, and render the rest; the **skip-bad-layer** test asserts the
+   rest still render.
 5. **Pack reload points a carried layer at the wrong look.** Slot indices are positional and unstable
    across reload (`soundswitch_pack_loader.py:582`). **Guard:** 5E `reload()` empties the stack and 5G
    pushes `set_static_layers(())` from a fresh group; `set_pack_runtime` already resets the tracker
@@ -428,7 +439,6 @@ New/updated tests, by file. **Bold** = the spec's required cases.
 
 ### Operator decision — RESOLVED 2026-06-25
 Task 6 sidecar location = **sibling-of-pack** (next to the pack folder, never inside it; the
-`_write_source_sidecar` pattern). Manifest + pinned proof-gate hash (`88a2e948…`) untouched; build-time
-only; does not gate Task 5. The remaining mechanical item is the one-line spec edit (Task 6 wording in
-§3) — to be folded into the Codex implementation spec. This is the only REVISE item; with it applied,
-Part F is implementable as planned.
+`_write_source_sidecar` pattern). Manifest + pinned proof-gate hash (`88a2e948...`) untouched;
+build-time only; does not gate Task 5. The original one-line Task 6 spec edit has been folded into the
+current spec/prompt along with the later Codex review fixes named at the top of this file.

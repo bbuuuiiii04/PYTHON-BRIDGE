@@ -96,9 +96,11 @@ equality + pinned `manifest_sha256`.
 ## Locked decisions — do NOT reopen (flag only if the code makes one impossible)
 - Stack order = execution **recency**, newest on top; re-press of an active toggle **removes** it (no
   reorder).
-- Per-layer render error → **skip + log** (never ZERO the whole frame).
+- Per-layer render error → **skip + non-blocking diagnostic** (never ZERO the whole frame; never log
+  from the render path).
 - Degradation drop-all **restricted to worker-death / port-gone**.
-- Cross-device ordering = **by recency** (one controller live; multi-surface merge is deferred).
+- Cross-device ordering = **by process-global recency** (one controller live; multi-surface merge is
+  still tested, not relied on live).
 - Task 6 sidecar = **next to the pack folder (sibling)**, build-time only.
 
 ---

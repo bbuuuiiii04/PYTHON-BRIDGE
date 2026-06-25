@@ -1,11 +1,11 @@
 # Codex Implementation Spec — Stream Deck MIDI controller: robustness + bridge autostart
 
-Status: **Phase 1 ready for Codex** — robustness fixes from the 2026-06-25 adversarial review are
-folded in (flock fd-retention, anchored `pgrep`/`pkill`, broadened device-error catch, callback-wrap
-shown in pseudocode). **Phase 2 (Part F) is revised and remains plan-first and GATED on Phase 1
-execution + operator approval** — do not hand **Task 5 (the layered compositor)** to Codex until
-Phase 1 has landed and the operator signs off on the open decisions named at the end of Part F. The
-earlier "no remaining unknowns" claim was wrong and is retracted.
+Status: **Phase 1 implemented; Phase 2 (Part F) revised for Codex implementation.** Phase 2 remains
+software-only / hardware-unvalidated until the software gates pass and the operator explicitly
+approves any bridge restart or hardware smoke. The 2026-06-25 review blockers are folded in:
+lock-free hot-path snapshots, worker-thread port-gone recovery, pure compositor error isolation,
+process-global layer recency, and sibling-only binding sidecars. The earlier "no remaining unknowns"
+claim was wrong and is retracted.
 
 The Stream Deck script already exists and works as a MIDI controller (15 pads → notes 36–50 on
 MIDI channel 3). Phase 1 hardens it for unattended live use and makes the bridge own its lifecycle.
@@ -254,9 +254,11 @@ Wire-up (idempotent — `start_streamdeck` no-ops when already running, relaunch
   autoloop). This also satisfies the model's "input surface disconnects → clear the stack" requirement
   — same mechanism. **This is sufficient because the Phase 1 controller closes its virtual MIDI port
   on every deck disconnect** (Task 3 `finally: port.close()`), so a deck yanked mid-press becomes a
-  port-gone event the bridge sees — locked in as a Part C invariant. **When the 2 s timeout is removed,
-  preserve blackout-hold auto-release** by an equivalent mechanism (that same gate currently also
-  releases blackout-hold at `soundswitch_midi_input.py:114-117`).
+  port-gone event the bridge sees — locked in as a Part C invariant. The MIDI input worker must then
+  close the stale source, keep retrying the same exact port name on the worker thread, and recover only
+  from a fresh reopened source; it must not require a bridge restart for normal deck unplug/replug.
+  **When the 2 s timeout is removed, preserve blackout-hold auto-release** by an equivalent mechanism
+  (that same gate currently also releases blackout-hold at `soundswitch_midi_input.py:114-117`).
   - **CoreMIDI/rtmidi check [confirmed locally 2026-06-25]:** a `/opt/homebrew/bin/python3` probe of
     both `mido.open_output(..., virtual=True)` and raw `rtmidi.MidiOut.open_virtual_port()` showed the
     virtual source appears in `rtmidi.MidiIn.get_ports()` and disappears after `port.close()`; a
@@ -312,8 +314,9 @@ Codex builds with no guessing).
   cutoff **only together with** the chosen backstop (DECISION above).
 - **Snapshot:** widen `MidiInputSnapshot` (`soundswitch_midi_input.py:47`) — replace the scalar
   `held_static_slot: int|None` with `held_layers: tuple[LayerEntry, ...]`, an **immutable tuple**
-  ordered bottom→top. Build it by copying the engine list into a tuple **under `_lock`**; never hand
-  the push loop a live list (anti-tear). `snapshot()` must become a **pure read** — move the current
+  ordered bottom→top. Worker/mutation paths copy the engine list into a tuple under `_lock` and publish
+  a cached immutable `MidiInputSnapshot`. `snapshot()` itself must only return that cached object:
+  no `_lock`, no allocation of a live mutable list, no writes, and no I/O. Move the current
   stale-clear *writes* (`:110-119`) out of `snapshot()` into the worker/backstop path so the 200 Hz
   loop never mutates engine state.
 - **Group merge:** `SoundSwitchMidiInputGroup.snapshot()` collapses adapters to a single slot and
@@ -322,7 +325,9 @@ Codex builds with no guessing).
   recency-ordered tuple and drop the single-slot conflict flag. (For a single controller this is just
   that adapter's tuple. **Cross-device ordering [RESOLVED — by recency]:** if a second surface is ever
   added, merge all adapters' layers into one **global recency order** — newest press/toggle on top
-  regardless of which surface it came from.)
+  regardless of which surface it came from.) `LayerEntry.seq` must come from one process-global
+  monotonic source (for example a module helper guarded by a lock), not from per-adapter counters; two
+  adapters must not be able to produce the same ordering sequence.
 - **Player API:** `LaserPackPlayer` is single-slot (`_active_static_slot`,
   `soundswitch_laser_player.py:186`; `hold_static`/`release_static`, `:234-245`). Add
   `set_static_layers(layers)` storing the ordered tuple; `reload()` (`:203-209`) must reset it to
@@ -339,10 +344,12 @@ with a single pure function `apply_layers(base, layers, blackout, emergency) -> 
    `_apply_attribute`'s filter**: skip rows where `fixture_group != PRIMARY_FIXTURE_GROUP` (`:78`);
    for the rest write `frame[dmx_channel-1] = value` (explicit 0 overrides; an absent channel falls
    through to whatever is beneath). The topmost layer wins each channel it sets.
-- **Per-layer error isolation [RESOLVED — skip + log]:** a malformed look raises in apply today and
+- **Per-layer error isolation [RESOLVED — skip + non-blocking diagnostic]:** a malformed look raises in apply today and
   `render()` fail-closes the **whole** frame to ZERO (`:145,371-372`). In the stack, **skip the bad
-  layer and log**, continuing to render the rest — one corrupt look must never black the stage. Test
-  it (Part D).
+  layer and surface a non-blocking diagnostic**, continuing to render the rest — one corrupt look must
+  never black the stage. Do **not** log from `apply_layers()` or from the 200 Hz render path; keep the
+  compositor pure and expose any skipped-layer count/status through `PlayerResult`/status plumbing or
+  another non-I/O signal. Test it (Part D).
 - The render stays a **pure function** of (base, ordered layers, blackout, emergency); the 200 Hz push
   loop reads the immutable snapshot and calls it — **no I/O, no locks on the loop** (AGENTS §6).
 
@@ -356,10 +363,17 @@ stack on a transient `error` string. This is the same signal as the port-gone ba
   → `static_look` slot. Optional generic add: list available MIDI input port names in runtime status.
 
 ### Task 6 — exporter: device-agnostic binding sidecar (build-time)
-- If the pack form is not externally readable, have the **exporter** write `<pack_path>/midi_bindings.json`:
-  a list of `{channel, note, target_kind, interaction, name}` for the project's learned bindings.
-  Exporter output (the project's own bindings), names no device. The compositor itself reads the
-  look's channel patches from the pack it already loads — the sidecar is only for the controller's LEDs.
+- If the pack form is not externally readable, have the **exporter** write the binding sidecar as a
+  **sibling of the pack directory**, never inside the pack dir. Use `_sidecar_path`-style naming:
+  `<pack_dir.parent>/.<pack_dir.name>.midi_bindings.json`.
+- The sidecar contains a list of `{channel, note, target_kind, interaction, name}` for the project's
+  learned static-look bindings. It names no device. The compositor itself reads the look's channel
+  patches from the pack it already loads — the sidecar is only for the controller's LEDs.
+- Do **not** edit `compile_pack_artifacts`, `soundswitch_pack.py`, the manifest, or
+  `soundswitch_pack_verifier.py`. The verifier enforces strict file-set equality
+  (`soundswitch_pack_verifier.py:394` at the 2026-06-25 review), and `publish_pack` re-stages and
+  atomically swaps the pack, so an in-pack sidecar is rejected by verification and wiped on re-export.
+  The pinned proof-gate hash in `tools/prove_soundswitch_pack_generation.py` stays untouched.
 
 ### Task 7 — controller: local LED state from the sidecar (cosmetic; may diverge)
 - Read the sidecar at startup; key each pad by `(CHANNEL, note)`. Toggle pad → track **local** on/off,
@@ -378,8 +392,9 @@ stack on a transient `error` string. This is the same signal as the port-gone ba
 ### Part C additions (Phase 2 invariants)
 - **No Stream-Deck string, code, or file emit in `rb_ss_bridge_v2/*.py`.** The compositor and MIDI
   input are generic; all device-aware logic lives in the controller + the device-agnostic sidecar.
-- Compositor render is a **pure function** (base + layers + flags → frame); **no I/O on the push
-  loop**; stack mutation is worker-thread only, read via immutable snapshot.
+- Compositor render is a **pure function** (base + layers + flags → frame); **no I/O, locks, logging,
+  or snapshot mutation on the push loop**; stack mutation is worker-thread only, read through a cached
+  immutable snapshot object.
 - Base = live autoloop/scripted; transparency via sparse patches; recency stack; topmost wins;
   **emergency/blackout overrides the whole stack**. Held layers release on `note_off` or input
   disconnect — never stick past the surface going away.
@@ -401,12 +416,18 @@ stack on a transient `error` string. This is the same signal as the port-gone ba
 - Stack lifecycle: toggle add/remove, press add-on-`note_on`/remove-on-`note_off`, recency ordering,
   clear-on-disconnect — testable without hardware (feed raw messages, no port).
 - **Skip-bad-layer:** a malformed layer is skipped and the remaining layers + base still render (not
-  ZERO).
+  ZERO). The assertion must also prove no render-path logging/I/O is needed; the skipped-layer signal
+  is returned or surfaced without side effects in `apply_layers()`.
 - **Port-gone clear:** feed a port-absent signal and assert the stack clears. The port-presence check
   (`get_ports()`) must be **injectable** like `_message_source` so this is testable without hardware.
   Include a defensive case where `get_ports()` returns a non-string entry (observed locally as `None`
   after a killed virtual source) so the worker clears the stack instead of raising. Also assert
-  blackout-hold auto-release still works after the 2 s timeout is removed.
+  blackout-hold auto-release still works after the 2 s timeout is removed. Add a recovery test:
+  absent port clears the stack and degrades input; the same exact port returning later lets the worker
+  reopen and accept a fresh note without a bridge restart.
+- Test the global recency source with two adapters: overlapping layers from different adapters sort by
+  `LayerEntry.seq`, and equal per-adapter counters cannot occur because there are no per-adapter
+  counters.
 - Controller LED mapping is a pure function of `(sidecar, pressed-set)` — testable.
 
 ### Acceptance (Phase 2)
@@ -422,13 +443,14 @@ claim):**
 1. **Stuck-layer backstop → input-port-gone detection** (no press watchdog, no drop-counter). Made
    sufficient by the Phase 1 controller closing its virtual port on deck loss (Part C invariant).
    Residual lost-`note_off`-with-port-up tail accepted; immediate-clear (debounce later if needed).
-2. **Per-layer render error → skip the bad layer + log** (never black the whole stage).
+2. **Per-layer render error → skip the bad layer + non-blocking diagnostic** (never black the whole
+   stage; never log from the render path).
 3. **Degradation latch → restrict drop-all to true worker-death / port-gone** (no flicker on transient
    errors).
-4. **Cross-device layer ordering → by recency** (global newest-on-top if a second surface is ever added).
+4. **Cross-device layer ordering → by process-global recency** (global newest-on-top if a second
+   surface is ever added).
 
-The only mechanical item left is the Task 6 exporter hook site, which Codex locates in the pack-build
-path (`soundswitch_pack_loader`/`soundswitch_pack_runtime`). Task 5 is the live-critical one — it
-replaces `resolve_frame`/`render_static_look_frame`/`_active_static_slot`/`_held_static_slot` — and
-stays **plan-first and GATED on Phase 1 execution**: it must not start until Phase 1 has landed and the
-operator confirms the build.
+Task 5 is the live-critical one — it replaces `resolve_frame`/`render_static_look_frame`/
+`_active_static_slot`/`_held_static_slot` — and can be implemented from the dedicated Phase 2 Codex
+prompt after software-only gates are accepted. Bridge restart, controller hardware smoke, Enttec/DMX,
+or any live-performance check remains an explicit operator approval gate.
