@@ -409,6 +409,7 @@ def pack_export_status_line(
     export_up_to_date: bool,
     export_result: dict | None = None,
     bridge_status: str | None = None,
+    soundswitch_connected: bool | None = None,
 ) -> str:
     """Plain-language line under the Export button: what the lighting pack is
     doing live, plus only the export feedback the button can't show."""
@@ -442,13 +443,18 @@ def pack_export_status_line(
     elif export_state == "export_failed":
         category = _safe_error_category((export_result or {}).get("error_category"))[:32]
         note = f"export failed ({category})"
-    # Off for a real failure (not the benign SS-connected auto-off, reason
-    # "disabled"/"none") -> say why, so "off on purpose" reads differently from "couldn't start".
+    # Why the pack is off. With SoundSwitch connected, off is the INTENDED state —
+    # SS holds the shared Enttec FTDI port, so a boot-time "pack_start_failed" there is
+    # the expected handoff, NOT a fault. Only when SS is disconnected (the bridge was
+    # meant to own the port) does a failure reason mean "check the rig".
     if not note and light_label == "pack off":
-        note = {
-            "pack_load_failed": "pack unreadable — re-export",
-            "pack_start_failed": "output didn't start (check Enttec)",
-        }.get(pack.get("reason"), "")
+        if soundswitch_connected:
+            note = "SoundSwitch active"
+        else:
+            note = {
+                "pack_load_failed": "pack unreadable — re-export",
+                "pack_start_failed": "output didn't start (check Enttec)",
+            }.get(pack.get("reason"), "")
     line = f"Lighting: {light_label}"
     if note:
         line = f"{line} · {note}"
@@ -870,6 +876,7 @@ class BridgeMenuBar(NSObject):
                 export_up_to_date=self._export_up_to_date,
                 export_result=self._export_result,
                 bridge_status=self._status,
+                soundswitch_connected=(self._snapshot.get("soundswitch", {}) or {}).get("connected"),
             ))
 
     def _auto_set_soundswitch_pack(self):

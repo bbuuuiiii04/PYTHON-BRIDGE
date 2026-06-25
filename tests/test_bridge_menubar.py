@@ -196,6 +196,27 @@ class BridgeMenubarTests(unittest.TestCase):
             "Lighting: pack off · exporting…",
         )
 
+    def test_pack_export_status_line_ss_connected_is_benign_not_a_fault(self) -> None:
+        # SoundSwitch holds the shared Enttec port while running, so a boot-time
+        # pack_start_failed with SS CONNECTED is the expected handoff, not a fault.
+        bridge_menubar = self._import_module()
+        common = dict(stale=False, export_phase="idle", export_state="idle",
+                      export_up_to_date=False)
+        self.assertEqual(
+            bridge_menubar.pack_export_status_line(
+                {"operational_state": "disabled", "reason": "pack_start_failed"},
+                soundswitch_connected=True, **common),
+            "Lighting: pack off · SoundSwitch active",
+        )
+        # Same failure reason but SS DISCONNECTED = the bridge owned the port and
+        # couldn't open it -> real "check Enttec".
+        self.assertEqual(
+            bridge_menubar.pack_export_status_line(
+                {"operational_state": "disabled", "reason": "pack_start_failed"},
+                soundswitch_connected=False, **common),
+            "Lighting: pack off · output didn't start (check Enttec)",
+        )
+
     def test_build_export_argv_uses_module_without_shell(self) -> None:
         bridge_menubar = self._import_module()
         self.assertEqual(bridge_menubar.build_export_argv("result.json"), [
