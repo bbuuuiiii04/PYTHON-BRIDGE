@@ -638,6 +638,10 @@ class BridgeMenuBar(NSObject):
             return None
         self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         self.menu = NSMenu.alloc().init()
+        # Honor our own setEnabled_ calls (e.g. greying the Export button when
+        # up-to-date). Default autoenablesItems=True makes AppKit force-enable
+        # any item with an action, silently ignoring setEnabled_(False).
+        self.menu.setAutoenablesItems_(False)
         self._export_in_progress = False
         self._export_phase = "idle"
         self._export_state = "idle"
