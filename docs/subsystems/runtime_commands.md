@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: f6910f9
-last_verified_date: 2026-06-24
+last_verified_commit: 199af0d
+last_verified_date: 2026-06-25
 validation_scope: software-only
 ---
 
@@ -34,8 +34,11 @@ SoundSwitch pack-player boundary (T7c/T7e):
   runtime command opens IAC/MidiOutput; pack failure falls back to disabled/none, never MIDI.
 - The menubar `Export from SS` workflow adds no command. After verified disk publication it reuses
   only `{"cmd":"set_soundswitch_pack","action":"reload"}` when the bridge is running and pack
-  output is enabled, then waits for a fresh `soundswitch_pack.pack_sha12` match. It never sends
-  `enable`/`backend`, and a stopped bridge or disabled pack receives no reload command.
+  output is enabled, then waits for a fresh `soundswitch_pack.pack_sha12` match. That export/reload
+  path never sends `enable`/`backend`, and a stopped bridge or disabled pack receives no reload
+  command. A **separate** menubar pack on/off item (and the SoundSwitch-connection auto-switch,
+  `_auto_set_soundswitch_pack()`) does send `set_soundswitch_pack action=enable`; there is still no
+  implicit hot-enable without a real pack backend + Enttec port.
 
 Authoritative code:
 - `runtime_status.py`

@@ -128,6 +128,74 @@ class BridgeMenubarTests(unittest.TestCase):
         )
         self.assertTrue(menu._pack_auto_pending_enabled)
 
+    def test_auto_set_soundswitch_pack_recovers_after_failed_enable(self) -> None:
+        # Regression: a failed enable (enabled never flips True, e.g. no Enttec port)
+        # must not latch the debounce flag forever and kill auto enable/disable.
+        bridge_menubar = self._import_module()
+        menu = Mock(
+            _snapshot={
+                "soundswitch": {"connected": False},
+                "soundswitch_pack": {"available": True, "enabled": False},
+            },
+            _status="on",
+            _pack_auto_pending_enabled=None,
+        )
+        handler = bridge_menubar.BridgeMenuBar._auto_set_soundswitch_pack
+        with patch.object(bridge_menubar, "append_command") as append_command:
+            handler(menu)               # SS off -> enable=True sent
+            handler(menu)               # still off + still disabled -> suppressed
+            self.assertEqual(append_command.call_count, 1)
+            # SS reconnects: no command needed, but the latch must clear on a fresh no-op.
+            menu._snapshot = {
+                "soundswitch": {"connected": True},
+                "soundswitch_pack": {"available": True, "enabled": False},
+            }
+            handler(menu)
+            self.assertIsNone(menu._pack_auto_pending_enabled)
+            # Stale snapshot must NOT clear or spam (keeps the latch, sends nothing).
+            menu._pack_auto_pending_enabled = True
+            menu._snapshot = {"stale": True}
+            handler(menu)
+            self.assertTrue(menu._pack_auto_pending_enabled)
+            self.assertEqual(append_command.call_count, 1)
+            # SS disconnects again on a fresh snapshot: a real transition re-sends.
+            menu._pack_auto_pending_enabled = None
+            menu._snapshot = {
+                "soundswitch": {"connected": False},
+                "soundswitch_pack": {"available": True, "enabled": False},
+            }
+            handler(menu)
+            self.assertEqual(append_command.call_count, 2)
+
+    def test_pack_export_status_line_surfaces_failure_reason(self) -> None:
+        bridge_menubar = self._import_module()
+        common = dict(stale=False, export_phase="idle", export_state="idle",
+                      export_up_to_date=False)
+        self.assertEqual(
+            bridge_menubar.pack_export_status_line(
+                {"operational_state": "disabled", "reason": "pack_start_failed"}, **common),
+            "Lighting: pack off · output didn't start (check Enttec)",
+        )
+        self.assertEqual(
+            bridge_menubar.pack_export_status_line(
+                {"operational_state": "disabled", "reason": "pack_load_failed"}, **common),
+            "Lighting: pack off · pack unreadable — re-export",
+        )
+        # Benign SS-connected auto-off carries reason "disabled": no scary note.
+        self.assertEqual(
+            bridge_menubar.pack_export_status_line(
+                {"operational_state": "disabled", "reason": "disabled"}, **common),
+            "Lighting: pack off",
+        )
+        # A live export note still wins over the steady failure reason.
+        self.assertEqual(
+            bridge_menubar.pack_export_status_line(
+                {"operational_state": "disabled", "reason": "pack_start_failed"},
+                stale=False, export_phase="exporting", export_state="idle",
+                export_up_to_date=False),
+            "Lighting: pack off · exporting…",
+        )
+
     def test_build_export_argv_uses_module_without_shell(self) -> None:
         bridge_menubar = self._import_module()
         self.assertEqual(bridge_menubar.build_export_argv("result.json"), [

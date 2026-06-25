@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: f6910f9
-last_verified_date: 2026-06-24
+last_verified_commit: 199af0d
+last_verified_date: 2026-06-25
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -17,8 +17,10 @@ SoundSwitch T7e adds the accepted `set_soundswitch_pack` command and a sanitized
 work never enters the 200 Hz push loop. The menubar `Export from SS` action adds
 no command: after a verified publish it reuses only the existing `reload` action
 when the bridge is running and pack output is enabled, and waits for a fresh
-`soundswitch_pack.pack_sha12` match. It never sends `enable` or `backend`; stopped
-or disabled pack runtime receives no reload command.
+`soundswitch_pack.pack_sha12` match. That export/reload action never sends `enable` or `backend`;
+stopped or disabled pack runtime receives no reload command. A separate menubar pack on/off item
+(and the SoundSwitch-connection auto-switch) does send `set_soundswitch_pack action=enable`, with no
+implicit hot-enable.
 
 The additive schema-1 `soundswitch_pack` object is:
 

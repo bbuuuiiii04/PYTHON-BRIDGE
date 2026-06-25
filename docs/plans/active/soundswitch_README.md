@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
-last_verified_commit: f6910f9
-last_verified_date: 2026-06-24
+last_verified_commit: 199af0d
+last_verified_date: 2026-06-25
 validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -74,6 +74,14 @@ artifacts, not planning documents. They are not moved into the authority tree.
   software-tested and does not claim sender/physical state.
 - Menubar `Export from SS` plus canonical replacement/reload and combined pack/export row:
   implemented and software-tested.
+- Menubar pack on/off toggle + auto-switch by SoundSwitch connection
+  (`set_soundswitch_pack action=enable`): implemented and software-tested; no
+  implicit hot-enable.
+- Static Override Press/Toggle interaction mode decoded from the SoundSwitch-saved
+  byte and honored by the bridge MIDI input: implemented and software-tested;
+  unknown saved mode fails closed to momentary.
+- Canonical pack now lives at the repo-local ignored path
+  `local/soundswitch/rbss_canonical_pack`.
 - T7d phase tooling: implemented; four captures pass conductor integrity across
   arm/refire, while four scenario pairs and the corpus oracle remain incomplete.
 - Native-DMX Autoloop selection: intentionally not implemented; safe-zero.
@@ -93,6 +101,14 @@ docs/plans/completed/soundswitch/
 They are historical evidence only. Redundant kickoffs, authoring prompts,
 session handoffs, and completed review prompts were deleted; Git history remains
 their provenance. Do not resume from completed artifacts.
+
+The 2026-06-25 audit retired five more now-landed planning docs into
+`docs/plans/completed/soundswitch/`: the menubar pack on/off + auto-switch spec,
+the repo-local pack-move handoff, the Static Override Press/Toggle parity spec,
+the roadmap/registry reconciliation spec, and the read-only remaining-software
+scoping snapshot. Their two authoring/scoping prompts were deleted (Git history
+preserves them). The `soundswitch_t7c_pack_driver_spec.md` compatibility pointer
+stays active because live code and tests still cite that path.
 
 ## Safety boundary
 
