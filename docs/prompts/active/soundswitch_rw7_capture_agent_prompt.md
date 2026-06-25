@@ -36,7 +36,7 @@ the operator and actively wait.** You never reinterpret missing evidence.
 - **Pack output MUST stay disabled** for every capture (`soundswitch_pack` null/disabled in
   status). A capture taken with pack output enabled is a **FAIL** — the conductor enforces
   this; you must not work around it.
-- Preserve **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED** and default-off posture.
+- Preserve **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED** and default-off posture.
 
 ## THE OPERATOR-PING + ACTIVE-WAIT LAW (the core of this task)
 Every step that needs a human is an **active-wait gate, not a stop.** For each gate you:
@@ -52,11 +52,14 @@ Every step that needs a human is an **active-wait gate, not a stop.** For each g
 
 **You must actively wait for ALL operator actions, including the environment not being
 ready:**
-- **Bridge not running / wrong count.** Before *and* during every scenario, confirm exactly
-  one core bridge: `pgrep -f '[r]b_ss_bridge_v2' | wc -l` must be `1` and status present. If
-  it is 0, >1, or status is missing: **ping the operator to bring up exactly one bridge and
-  WAIT** — poll until it's `1` and pack is disabled. Do **not** start a scenario, and do
-  **not** restart the bridge yourself.
+- **Bridge not running / wrong count.** The authority for the bridge count is the conductor's
+  own core-process check (`prepare` / `core_bridge_process_count`), which excludes the menubar,
+  the `| tee` wrapper, the laser pad, and this conductor. A bare `pgrep -f rb_ss_bridge_v2 |
+  wc -l` over-counts in this repo — use it only as a rough hint, never as the gate. Before
+  *and* during every scenario, require `prepare` to report exactly one core bridge with status
+  present and pack disabled. If it is 0, >1, or status is missing: **ping the operator to bring
+  up exactly one bridge and WAIT** — re-run `prepare` until it is green. Do **not** start a
+  scenario, and do **not** restart the bridge yourself.
 - **Bridge restarts mid-session.** If the process count changes or status disappears during a
   run, the recorder/session state is invalid: abort that run as `INCOMPLETE`, tell the
   operator, re-confirm one bridge + pack disabled, and re-run the scenario from scratch.
@@ -77,9 +80,14 @@ can yourself:
   audience;
 - the chosen autoloop **identity is verified/bridge-used** (per plan §A4/§B6), and you are
   using the planned BPM/pitch for this repetition.
-Run `python3 tools/t7d_capture_conductor.py prepare …` (or the equivalent `cmd_prepare`) to
-machine-check the bridge-count + pack-disabled gate; if it returns nonzero, **do not
-proceed** — ping and wait until green.
+**Before the first scenario, confirm the running bridge has the B1 schema-2 phase-trace
+wiring.** Otherwise the session emits no `autoloop_phase` rows and every run burns its full
+`--window-timeout-s` before failing INCOMPLETE — after the operator already performed the
+action. Verify a recent `session.jsonl` under `tools/ssfmt/captures/` contains `autoloop_phase`
+rows, or have the operator confirm the bridge is the current build; if it predates B1, ping the
+operator to restart into the current build and WAIT (you do not restart it).
+Run `python3 tools/t7d_capture_conductor.py prepare` to machine-check the bridge-count +
+pack-disabled gate; if it returns nonzero, **do not proceed** — ping and wait until green.
 
 ## Scenarios to capture (the work)
 `arm` and `refire` already have **2 ACCEPTED** each. Capture the remaining four, driving the
@@ -96,21 +104,52 @@ operator with each scenario's `operator_action` text from the conductor verbatim
 
 **Coverage targets (per plan §A4/§B6):** **two ACCEPTED repetitions per scenario**; across the
 matrix, at least **three verified identities**, the same identity captured at **two materially
-different BPM/pitch** values, and at least **one full holdout identity** reserved. Track which
-of these are still missing and tell the operator after each accepted run.
+different BPM/pitch** values, and at least **one full holdout identity** reserved. The conductor
+records **none** of this — its manifest/summary store only scenario, markers, and verdict, and
+`summarize-corpus` tallies only by scenario/verdict. So it is on you: **before the first run,
+designate the holdout identity**, and **for every accepted run record — in chat and in a sidecar
+note — the run dir, the exact identity the operator used, and the BPM/pitch.** Maintain a running
+coverage table; you cannot claim "3 identities / 2 BPM / 1 holdout" from ACCEPTED counts alone.
+Tell the operator what is still missing after each accepted run.
 
 ## Run mechanics (drive the conductor, don't reimplement it)
-For each repetition:
+`<run_dir>` = `tools/ssfmt/captures/t7d/t7d_<scenario>_<run-stamp>`. For each repetition:
 1. Preflight (above) → ping → WAIT until green.
-2. `python3 tools/t7d_capture_conductor.py run-scenario <name> …` — it pings the operator to
-   start `tcpdump` and perform the single action, then active-waits for: capture-start
-   (pcap+session growing), playback through `min_window_beats` while tcpdump runs + required
-   markers, then artifact settle. Relay its pings to the operator and wait with it.
-3. Let it **classify** (`ACCEPTED` / `INCOMPLETE` / `FAIL`). Classification is an **integrity**
-   verdict only, **not** a phase-contract verdict — do not editorialize it into "the contract
-   is X."
-4. `validate-scenario <run_dir>` to re-confirm, and `summarize-corpus <root>` after each
-   accepted run to report remaining coverage.
+2. **Project before-hash (operator action — the conductor does NOT do this).** Ping and WAIT
+   for the operator to run, into the run dir:
+
+   ```bash
+   find "$HOME/Music/SoundSwitch/default.ssproj" -maxdepth 1 -type f \
+     -exec shasum -a 256 {} + | LC_ALL=C sort > "<run_dir>/project.before.sha256"
+   ```
+3. `python3 tools/t7d_capture_conductor.py run-scenario <name> --run-stamp "$(date +%Y%m%d_%H%M%S)" --run-stamp-epoch "$(date +%s)"`
+   (`--run-stamp` is **required**) — it pings the operator to start `tcpdump` and perform the
+   single action, then active-waits for: capture-start (pcap+session growing), playback through
+   `min_window_beats` while tcpdump runs + required markers, then artifact settle. Relay its
+   pings to the operator and wait with it. For **`correction`**, also pass a larger
+   `--window-timeout-s` (e.g. `900`) and warn the operator it usually takes several attempts to
+   induce the `arm-grace-late` / `-pending` / `-clear` sequence.
+4. **Project after-hash + AppLog copy (operator action — the conductor does NOT do this).**
+   Immediately after the window stops, ping and WAIT for:
+
+   ```bash
+   find "$HOME/Music/SoundSwitch/default.ssproj" -maxdepth 1 -type f \
+     -exec shasum -a 256 {} + | LC_ALL=C sort > "<run_dir>/project.after.sha256"
+   cp "$HOME/Library/Application Support/Onesixone/Soundswitch/Logs"/AppLog*.txt \
+     "<run_dir>/logs/"
+   ```
+
+   Without these, `project.before`/`project.after` are missing (so `validate-scenario` fails
+   closed) and the corpus has no AppLog to join identity offline.
+5. Let it **classify** (`ACCEPTED` / `INCOMPLETE` / `FAIL`) via `classify_gate`. Classification
+   is an **integrity** verdict only, **not** a phase-contract verdict — do not editorialize it
+   into "the contract is X."
+6. `validate-scenario <run_dir>` to re-confirm (it now actually verifies
+   `project.before == project.after` and fails closed if either is missing), then
+   `python3 tools/t7d_capture_conductor.py summarize-corpus` after each accepted run to report
+   remaining coverage. `summarize-corpus` takes **no path argument** — its default root is the
+   t7d capture dir; `--capture-root` if ever needed is a global flag placed *before* the
+   subcommand.
 
 ## Fail-closed discipline (do not soften)
 - A run is `FAIL` if pack was enabled, not exactly one bridge, or project bytes changed.
@@ -122,7 +161,9 @@ For each repetition:
 
 ## Report back (concise, plain language)
 After the session: per-scenario `ACCEPTED`/`INCOMPLETE`/`FAIL` counts with run dirs; the
-`summarize-corpus` output; exactly which coverage targets remain (which scenarios still need a
-2nd accepted rep, which identities/BPM/holdout are still missing); and any environment blocker
-(bridge/SoundSwitch readiness) that interrupted a run. Preserve **SOFTWARE-VALIDATED ONLY /
-HARDWARE-UNVALIDATED**.
+`summarize-corpus` output; the per-run identity + BPM/pitch table and which identity is the
+reserved holdout; confirmation that each accepted run has matching
+`project.before`/`project.after` hashes and copied AppLogs; exactly which coverage targets
+remain (which scenarios still need a 2nd accepted rep, which identities/BPM/holdout are still
+missing); and any environment blocker (bridge/SoundSwitch readiness) that interrupted a run.
+Preserve **SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
