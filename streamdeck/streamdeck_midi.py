@@ -13,13 +13,16 @@ Quit:       Ctrl-C  (resets the deck on the way out)
 Quit Elgato's Stream Deck app first — only one process can hold the device.
 """
 import os
+import fcntl
 import signal
 import sys
 import threading
+from datetime import datetime
 
 import mido
 from StreamDeck.DeviceManager import DeviceManager
 from StreamDeck.ImageHelpers import PILHelper
+from StreamDeck.Transport.Transport import TransportError
 from PIL import Image, ImageDraw, ImageFont
 
 # --- config: change these to taste -------------------------------------------
@@ -27,10 +30,31 @@ PORT_NAME = "Stream Deck"   # name other apps will see this controller as
 CHANNEL = 2                 # 2 == MIDI channel 3 (chans 1-2 are the lasers')
 NOTE_BASE = 36              # pad 0 (top-left) -> note 36 (C1); pads ascend
 VELOCITY = 127
+LOCK_PATH = "/tmp/streamdeck_midi.lock"
+RETRY_SECONDS = 3
 # Drop 1.png .. 15.png in the icons/ folder beside this file to give pads
 # custom pictures (else the pad shows its number + note):
 ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
 # -----------------------------------------------------------------------------
+_LOCK_FILE = None
+
+
+def log(message: str) -> None:
+    print(f"{datetime.now().isoformat(timespec='seconds')} {message}", flush=True)
+
+
+def _acquire_singleton_lock() -> bool:
+    global _LOCK_FILE
+
+    _LOCK_FILE = open(LOCK_PATH, "w")
+    try:
+        fcntl.flock(_LOCK_FILE, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("streamdeck_midi: another instance is running, exiting")
+        _LOCK_FILE.close()
+        _LOCK_FILE = None
+        return False
+    return True
 
 
 def note_for(key: int) -> int:
@@ -70,39 +94,83 @@ def render_key(deck, key: int, pressed: bool):
     return PILHelper.to_native_format(deck, image)
 
 
-def main():
-    decks = DeviceManager().enumerate()
-    if not decks:
-        sys.exit("No Stream Deck found. Plug it in and quit Elgato's app.")
+def acquire_deck():
+    try:
+        decks = DeviceManager().enumerate()
+    except Exception as exc:
+        log(f"Stream Deck enumerate error: {exc}")
+        return None
 
-    deck = decks[0]  # one physical Original enumerates twice on macOS; first is fine
-    deck.open()
-    deck.reset()
-    deck.set_brightness(60)
+    for deck in decks:
+        try:
+            deck.open()
+            deck.reset()
+            deck.set_brightness(60)
+            return deck
+        except Exception as exc:
+            log(f"Stream Deck open error: {exc}")
+            try:
+                deck.close()
+            except Exception:
+                pass
+    return None
 
-    port = mido.open_output(PORT_NAME, virtual=True)
 
-    for k in range(deck.key_count()):
-        deck.set_key_image(k, render_key(deck, k, False))
-
+def make_on_key(deck, port):
     def on_key(_deck, key, pressed):
-        port.send(key_to_message(key, pressed))
-        deck.set_key_image(key, render_key(deck, key, pressed))
+        try:
+            port.send(key_to_message(key, pressed))
+            deck.set_key_image(key, render_key(deck, key, pressed))
+        except (TransportError, OSError) as exc:
+            log(f"key callback error: {exc}")
+    return on_key
 
-    deck.set_key_callback(on_key)
 
-    print(f'"{PORT_NAME}" MIDI port is live — {deck.key_count()} pads, '
-          f"notes {NOTE_BASE}-{NOTE_BASE + deck.key_count() - 1}, "
-          f"channel {CHANNEL + 1}. Ctrl-C to quit.")
+def main():
+    if not _acquire_singleton_lock():
+        return
 
     stop = threading.Event()
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
-    stop.wait()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: stop.set())
 
-    deck.reset()
-    deck.close()
-    port.close()
-    print("\nClosed.")
+    while not stop.is_set():
+        deck = acquire_deck()
+        if deck is None:
+            log("waiting for Stream Deck (absent or held by Elgato app)...")
+            stop.wait(RETRY_SECONDS)
+            continue
+
+        port = None
+        try:
+            port = mido.open_output(PORT_NAME, virtual=True)
+            for k in range(deck.key_count()):
+                deck.set_key_image(k, render_key(deck, k, False))
+            deck.set_key_callback(make_on_key(deck, port))
+            log(f'"{PORT_NAME}" live - notes {NOTE_BASE}-{NOTE_BASE + deck.key_count() - 1}, '
+                f"ch {CHANNEL + 1}")
+
+            # ponytail: poll-based disconnect detect at 1 Hz; switch to events if a frozen-deck gap appears.
+            while not stop.is_set() and deck.connected():
+                stop.wait(1.0)
+        except (TransportError, OSError) as exc:
+            log(f"device error: {exc} - will reconnect")
+        finally:
+            try:
+                deck.reset()
+                deck.close()
+            except Exception:
+                pass
+            if port is not None:
+                try:
+                    port.close()
+                except Exception:
+                    pass
+
+        if not stop.is_set():
+            log("Stream Deck disconnected - waiting for it to come back")
+
+    log("streamdeck_midi: shutdown")
 
 
 def selftest():
@@ -111,6 +179,7 @@ def selftest():
     off = key_to_message(14, False)
     assert off.type == "note_off" and off.note == 50 and off.velocity == 0 and off.channel == CHANNEL
     assert note_for(0) == 36 and note_for(14) == 50
+    assert CHANNEL not in (0, 1)
     print("selftest OK")
 
 

@@ -23,6 +23,9 @@ STARTED_AT=0
 WARNED_MULTIPLE=0
 MONITOR_OPENED=0
 GOVEE_ENV_FILE="$HOME/Library/Application Support/RBSS Bridge/govee.env"
+STREAMDECK_SCRIPT="${REPO_ROOT}/streamdeck/streamdeck_midi.py"
+STREAMDECK_LOG="/tmp/streamdeck.log"
+STREAMDECK_PAT="[p]ython3?.*streamdeck_midi\.py"
 
 ss_running() {
     pgrep -x "SoundSwitch" > /dev/null 2>&1
@@ -39,6 +42,24 @@ bridge_alive() {
 log_watcher() {
     printf '[watcher] %s\n' "$*" >> "$LOG_FILE"
 }
+
+streamdeck_running() {
+    pgrep -f "$STREAMDECK_PAT" > /dev/null 2>&1
+}
+
+start_streamdeck() {
+    streamdeck_running && return 0
+    "$PYTHON" "$STREAMDECK_SCRIPT" >> "$STREAMDECK_LOG" 2>&1 &
+    log_watcher "started streamdeck pid=$!"
+}
+
+stop_streamdeck() {
+    streamdeck_running || return 0
+    pkill -f "$STREAMDECK_PAT" 2>/dev/null
+    log_watcher "stopped streamdeck"
+}
+
+# ponytail: the child may sit briefly until bash reaps it; add wait only if zombies accumulate.
 
 ensure_laser_config() {
     if [ ! -f "$LASER_CONFIG_PATH" ]; then
@@ -235,6 +256,7 @@ stop_bridge() {
     BRIDGE_PID=""
     BRIDGE_MANAGED=0
     STARTED_AT=0
+    stop_streamdeck
     if [ "$MONITOR_OPENED" -eq 1 ] || monitor_open; then
         close_monitor
         MONITOR_OPENED=0
@@ -242,6 +264,7 @@ stop_bridge() {
 }
 
 cleanup() {
+    stop_streamdeck
     stop_bridge
 }
 
@@ -252,6 +275,7 @@ while true; do
     if [ "$MANUAL_MODE" = "1" ]; then
         if [ "$MONITOR_OPENED" -eq 1 ] && ! monitor_open; then
             log_watcher "manual terminal closed; stopping bridge"
+            stop_streamdeck
             kill_bridge_processes
             exit 0
         fi
@@ -261,6 +285,8 @@ while true; do
                 exit 0
             fi
             start_manual_terminal_bridge
+        else
+            start_streamdeck
         fi
         sleep 3
         continue
@@ -274,6 +300,9 @@ while true; do
 
     if ss_running; then
         ensure_bridge
+        if bridge_alive; then
+            start_streamdeck
+        fi
         if [ "$MONITOR_OPENED" -eq 0 ] && ! monitor_open; then
             open_monitor
         fi
