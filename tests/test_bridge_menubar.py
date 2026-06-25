@@ -235,7 +235,7 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertEqual(bridge_menubar.export_button_text(True, True), "Exporting…")
         self.assertEqual(bridge_menubar.export_button_text(False, True), "Exported")
         self.assertEqual(
-            bridge_menubar.export_button_text(False, False), "Export from Soundswitch",
+            bridge_menubar.export_button_text(False, False), "Export",
         )
 
     def test_export_result_line_truth_table_and_sanitization(self) -> None:

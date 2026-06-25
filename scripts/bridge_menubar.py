@@ -377,7 +377,7 @@ def export_button_text(in_progress: bool, up_to_date: bool) -> str:
         return "Exporting…"
     if up_to_date:
         return "Exported"
-    return "Export from Soundswitch"
+    return "Export"
 
 
 def export_result_line(state: str, result: dict | None = None) -> str:
@@ -666,12 +666,12 @@ class BridgeMenuBar(NSObject):
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.toggle_item = self._add_action("", "toggleBridge:")
 
+        self.export_item = self._add_action("Export", "exportFromSS:")
         self.export_status_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "", None, ""
         )
         self.export_status_item.setEnabled_(False)
         self.menu.addItem_(self.export_status_item)
-        self.export_item = self._add_action("Export from SS", "exportFromSS:")
         
         self.smart_phrasing_menu = NSMenu.alloc().init()
         self.smart_phrasing_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Phrasing", None, "")
