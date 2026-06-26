@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout at `bdbf66b` on 2026-06-25.
+Audited against the current checkout at `cb31cf8` on 2026-06-25.
 
 ## SoundSwitch Pack Component Boundary
 

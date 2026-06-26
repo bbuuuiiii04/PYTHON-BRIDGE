@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan
 truth_level: code-and-test-grounded
-last_verified_commit: bdbf66b
+last_verified_commit: cb31cf8
 last_verified_date: 2026-06-25
 validation_scope: SoundSwitch 2.10.3 canonical-project/RAVE-profile implementation status; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -33,7 +33,7 @@ MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 | --- | --- |
 | Saved-project decode/export | Implemented for the bounded 2.10.3 canonical project/RAVE/CH1-CH19 profile. Complete rescans, stable identity, strict validation, and read-only source handling are software-tested. |
 | Pack compile/verify/load | Implemented. Deterministic compilation, independent verification, and mutation rejection are software-tested. |
-| RW-1 export/publish/reload | Implemented, independently reviewed, and software-tested. Replacement is staged and verified; the required binding sidecar is staged before swap, and pre-swap sidecar failure preserves the prior pack. Reload stays conservative and never implies enable/backend/start. Source-fingerprint freshness drives the menubar state. Stable opaque backup/media/preset rewrites are ignored, but `recordable/*.dat` remains fingerprinted because it can later decode into learned-MIDI/control-state content. |
+| RW-1 export/publish/reload | Implemented, independently reviewed, and software-tested. Replacement is staged and verified; the required binding sidecar is staged before swap, and pre-swap sidecar failure preserves the prior pack. Reload stays conservative and never implies enable/backend/start. Source-fingerprint freshness drives the menubar state. Stable opaque backup/media/preset rewrites are ignored, but `recordable/*.dat` remains fingerprinted because it can later decode into learned-MIDI/control-state content; older sidecars that listed it fail open. |
 | RW-1A shutdown ownership | Implemented, independently reviewed, and software-tested. Graceful shutdown reaches the current runtime-swapped sender and attempts zero before close. Hard process death remains physically unsafe. |
 | RW-2 scripted transport | Implemented and software-tested. Pause rerenders/holds the authoritative elapsed frame; confirmed stop/unload/stale authority resolves the base to zero. |
 | RW-3 mode authority | Implemented, independently reviewed, and software-tested. Scripted selection requires current bridge-owned scripted authority; Autoloop remains unselected. |

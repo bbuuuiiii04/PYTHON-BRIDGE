@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: bdbf66b
+last_verified_commit: cb31cf8
 last_verified_date: 2026-06-25
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -48,7 +48,7 @@ When adding or changing tests, update:
 
 `tests/test_soundswitch_project_decoder.py` covers frozen source-model use and strict, read-only decoding: physical document bounds/trailers, venue/static-look parsing, canonical identity and stable inventory gates, learned MIDI/control reconciliation, catalog/script classification, malformed and unsupported-source rejection, and the 232 render-cue plus one catalog-tail split. When the canonical local project is available, the current-corpus test also verifies its expected decoded counts and classifications.
 
-`tests/test_soundswitch_pack.py` covers deterministic export, the canonical 95-artifact pack, independent verification, exact 232+1/32/42/45 inventory, byte-identical repeat export, atomic publish, source sidecar ignored-path derivation, source/inventory/hash/canonicalization/semantic mutation rejection, and the seven-class F-3 crosswalk. `tests/test_prove_soundswitch_pack_generation.py` covers the proof-gate seams. The current proof result is 29 PASS / 0 FAIL / 0 INCOMPLETE with foundation 27/27 PASS; F9 and F10 pass.
+`tests/test_soundswitch_pack.py` covers deterministic export, the canonical 95-artifact pack, independent verification, exact 232+1/32/42/45 inventory, byte-identical repeat export, atomic publish, source sidecar ignored-path derivation/sanitization, source/inventory/hash/canonicalization/semantic mutation rejection, and the seven-class F-3 crosswalk. `tests/test_prove_soundswitch_pack_generation.py` covers the proof-gate seams. The current proof result is 29 PASS / 0 FAIL / 0 INCOMPLETE with foundation 27/27 PASS; F9 and F10 pass.
 
 `tests/test_shadow_soundswitch_pack.py` (Task 8 offline shadow proof) drives a synthetic verified `LaserPackPlayer` through scripted/static/blackout transitions with the physical backend forced to `none` (`tools/shadow_soundswitch_pack.py`), recording ONLY frame SHA-256 hashes and comparing each against an independently hand-computed expected frame. It proves stop/blackout/emergency/reload-wait resolve to a zero frame, that a held Static Override stands alone over a cleared base, twice-run hash determinism, report sanitization (no raw frames/paths/identities), backend-`none` enforcement (a frame sender is rejected), slots 8/16/17/24 plus a controlled slot-7 create/edit, and that the removed non-functional `--project` option is rejected. Pure explicit-`phase_tick` autoloop rendering is covered by `tests/test_soundswitch_laser_player.py`; only runtime beat-to-phase shadow coverage remains reported `deferred_t7d_phase_origin`. Software/offline only — no hardware claim.
 
