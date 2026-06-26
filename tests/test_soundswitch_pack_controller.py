@@ -68,6 +68,9 @@ class _Harness:
 
 
 class ControllerTests(unittest.TestCase):
+    def test_dead_build_started_helper_is_absent(self):
+        self.assertFalse(hasattr(SoundSwitchPackController, "_build_started"))
+
     def test_enable_from_disabled_builds_and_starts(self):
         log: list[str] = []
         h = _Harness(prepare=lambda: _unstarted(log, "new"))

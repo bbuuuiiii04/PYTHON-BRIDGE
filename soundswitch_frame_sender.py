@@ -61,7 +61,7 @@ def expand_ch1_ch19_to_512(
             continue
         idx = ch_num - 1  # 0-based index into frame_19
         value = frame_19[idx] if idx < len(frame_19) else 0
-        out[dmx_addr - 1] = value  # 1-based address → 0-based byte index
+        out[dmx_addr - 1] = value if isinstance(value, int) and 0 <= value <= 255 else 0
     return out
 
 
@@ -252,6 +252,8 @@ def _validated_fixture_map(fixture_map: Mapping[int, int]) -> dict[int, int]:
     if any(type(address) is not int or not 1 <= address <= 512
            for address in normalized.values()):
         raise ValueError("fixture_map addresses must be integers from 1 to 512")
+    if len(set(normalized.values())) != len(normalized):
+        raise ValueError("fixture_map addresses must be unique")
     return normalized
 
 

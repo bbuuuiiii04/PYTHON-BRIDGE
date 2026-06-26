@@ -84,17 +84,6 @@ class SoundSwitchPackController:
         self._publish(PackRuntime(enabled=False, reason=reason, pack_sha12=cur.pack_sha12))
         _safe_zero_and_stop(cur)
 
-    def _build_started(self) -> PackRuntime:
-        """prepare() a new unstarted runtime, start input then sender; raises on failure."""
-        new = self._prepare()  # validate-first: build + verify (may raise)
-        if new.midi_input is not None:
-            new.midi_input.start()           # controller input first
-        if new.frame_sender is not None:
-            new.frame_sender.start()         # serial port second (raises if it fails)
-        return PackRuntime(
-            enabled=True, reason="pack", player=new.player, midi_input=new.midi_input,
-            backend=new.backend, frame_sender=new.frame_sender, pack_sha12=new.pack_sha12)
-
     def _swap_to_started(self) -> tuple[bool, str]:
         """Validate-first, stop-before-start swap to a freshly started runtime."""
         old = self._snapshot()

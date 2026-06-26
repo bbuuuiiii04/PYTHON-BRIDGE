@@ -17,7 +17,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.enttec_dmx_pro import build_dmx_packet, _ZERO_PACKET
-from rb_ss_bridge_v2.soundswitch_frame_sender import expand_ch1_ch19_to_512, SoundSwitchFrameSender
+from rb_ss_bridge_v2.soundswitch_frame_sender import (
+    expand_ch1_ch19_to_512,
+    SoundSwitchFrameSender,
+    _validated_fixture_map,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +150,13 @@ class TestExpandCh1Ch19To512(unittest.TestCase):
         out = expand_ch1_ch19_to_512(frame, FULL_FIXTURE_MAP)
         for ch in range(1, 20):
             self.assertEqual(out[ch - 1], 255)
+
+    def test_expand_is_fail_closed_on_out_of_range_values(self):
+        fm = {i: i for i in range(1, 20)}
+        for bad in (-1, 256, None):
+            frame = tuple([bad] + [0]*18)
+            out = expand_ch1_ch19_to_512(frame, fm)   # must not raise
+            self.assertEqual(out[0], 0, f"value {bad!r} not fail-closed to 0")
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +403,11 @@ class TestSoundSwitchFrameSender(unittest.TestCase):
         invalid[1] = True
         with self.assertRaisesRegex(ValueError, "integers from 1 to 512"):
             SoundSwitchFrameSender(port="unused", fixture_map=invalid)
+
+    def test_fixture_map_rejects_duplicate_dmx_addresses(self):
+        fm = {i: i for i in range(1, 20)}; fm[2] = 1  # CH1 and CH2 both -> DMX 1
+        with self.assertRaises(ValueError):
+            _validated_fixture_map(fm)
 
 
 if __name__ == "__main__":
