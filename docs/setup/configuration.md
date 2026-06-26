@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: cb31cf8
-last_verified_date: 2026-06-25
+last_verified_commit: 1c12b17
+last_verified_date: 2026-06-26
 validation_scope: software-only
 ---
 
@@ -61,7 +61,7 @@ The tracked example is inert: `enabled=false`, `dry_run=true`, and
 `output_backend=none`. Copy it to the ignored local filename only when preparing
 a reviewed local setup. Current local-file state was not inspected during RW-5 implementation.
 
-`fixture_map` must contain exactly the string keys `1` through `19`, each mapped to an integer DMX address from 1 through 512. `fixture_map_path` is an optional alternative: when non-empty it takes precedence over the inline map. Relative map paths resolve against the directory containing the selected config file; absolute paths remain absolute. Map files contain the mapping object itself.
+`fixture_map` must contain exactly the string keys `1` through `19`, each mapped to a unique integer DMX address from 1 through 512. `fixture_map_path` is an optional alternative: when non-empty it takes precedence over the inline map. Relative map paths resolve against the directory containing the selected config file; absolute paths remain absolute. Map files contain the mapping object itself.
 
 Supported `output_backend` values are `none`, `midi`, and `pack`. Both timeout fields must be positive integers. `pack_path`, `fixture_map_path`, and `enttec_port` are strings. `midi_input_aliases` is optional; when present it maps non-empty saved static-controller device identities to non-empty local port aliases and overrides device-name auto-bind. Do not put actual device identifiers or live port details in the tracked example or docs.
 
