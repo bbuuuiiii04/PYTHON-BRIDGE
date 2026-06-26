@@ -112,7 +112,8 @@ class SoundSwitchPackController:
                 new_unstarted.frame_sender.start()
         except Exception as exc:
             _safe_zero_and_stop(new_unstarted)
-            self._publish(PackRuntime(enabled=False, reason="pack_start_failed"))
+            self._publish(PackRuntime(
+                enabled=False, reason="pack_start_failed", pack_sha12=old.pack_sha12))
             return False, _sanitize_error(exc)
         self._publish(PackRuntime(
             enabled=True, reason="pack", player=new_unstarted.player,

@@ -209,6 +209,24 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(h.current.active)            # safe no-output
         self.assertEqual(h.current.reason, "pack_start_failed")  # NOT midi
 
+    def test_start_failure_preserves_pack_sha12_in_status(self):
+        log: list[str] = []
+        old_sha = "abc123def456"
+
+        def prep():
+            rt = _unstarted(log, "new", sha=old_sha)
+            rt.frame_sender.fail_start = True
+            return rt
+
+        h = _Harness(prepare=prep)
+        h.current = PackRuntime(enabled=True, reason="pack", pack_sha12=old_sha,
+                                player=object(), backend=object())
+        ok, detail = h.ctrl.handle("enable", enabled=True)
+        self.assertEqual((ok, detail), (False, "RuntimeError"))
+        self.assertEqual(h.published[-1].reason, "pack_start_failed")
+        self.assertEqual(h.published[-1].pack_sha12, old_sha,
+                         "pack_sha12 dropped on start-failure (drift vs other disabled publishes)")
+
     def test_unknown_action_is_unsupported(self):
         h = _Harness(prepare=lambda: PackRuntime())
         self.assertEqual(h.ctrl.handle("bogus"), (False, "unsupported_action"))
