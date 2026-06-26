@@ -793,13 +793,14 @@ class TestF10ExportFail(unittest.TestCase):
         except SoundSwitchPackCompileError as exc:
             self.assertNotIn("relearn", str(exc), "F10 must not fire for note type")
 
-    def test_live_export_path_enforces_pinned_totals_by_default(self):
-        """export_pack() calls compile_pack_artifacts WITHOUT enforce_pinned_totals,
-        so the default MUST stay True. Otherwise a totals-drifted or empty project
-        could publish a corrupt pack. This pins the fail-closed default."""
+    def test_live_export_path_allows_dynamic_default_and_strict_opt_in(self):
+        """Live export compiles saved-project totals dynamically; proof can opt in."""
         project = _project_with_binding("note", "static_look")  # valid identity, empty totals
+        compile_pack_artifacts(project, generator_commit="test")
         with self.assertRaisesRegex(SoundSwitchPackCompileError, "totals drifted"):
-            compile_pack_artifacts(project, generator_commit="test")  # default enforce_pinned_totals=True
+            compile_pack_artifacts(
+                project, generator_commit="test", enforce_pinned_totals=True,
+            )
 
     def test_disabled_cc_binding_does_not_fail_export(self):
         """Disabled CC binding on static_look must not trigger F10."""

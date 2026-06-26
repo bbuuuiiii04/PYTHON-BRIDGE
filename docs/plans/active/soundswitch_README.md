@@ -64,9 +64,10 @@ artifacts, not planning documents. They are not moved into the authority tree.
 
 ## Current implementation snapshot
 
-- Decoder/exporter/compiler/verifier: implemented and current-project proof
-  passes 29 PASS / 0 FAIL / 0 INCOMPLETE.
-- Current scripted content: 32/32 active existing-path tracks supported.
+- Decoder/exporter/compiler/verifier: implemented. Live export performs a
+  dynamic saved-project rescan; the old closure-count gate is proof-only.
+- Current scripted content: active existing-path tracks export when decoded and
+  reconciled against the saved project.
 - Pure scripted renderer: implemented/software-wire tested.
 - Config/startup/runtime command/StateManager/Enttec lane: implemented and
   default-off; RW-2 through RW-5 runtime authority/status work is

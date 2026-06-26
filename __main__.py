@@ -446,10 +446,10 @@ def _build_soundswitch_pack_startup(
     """Choose pack-vs-legacy output before starting any output worker.
 
     ``laser_backend=None`` deliberately preserves the existing MIDI startup
-    path.  An explicit enabled none/dry-run config returns ``NoneBackend`` so
-    neither MIDI nor DMX is opened.  Pack construction is complete before the
-    controller group and frame sender start; any start failure rolls both back
-    and remains no-output rather than silently falling back to MIDI.
+    path.  An explicit none/dry-run config returns ``NoneBackend`` so neither
+    MIDI nor DMX is opened.  When pack mode is requested but the direct DMX
+    hardware is not available, return ``None`` so the legacy SoundSwitch/IAC
+    path stays alive until pack hardware can actually start.
     """
     if not cfg_result.available or cfg_result.config is None:
         return SoundSwitchPackStartupBundle(
@@ -486,7 +486,7 @@ def _build_soundswitch_pack_startup(
     if not cfg.enttec_port:
         log.warning("[MAIN] soundswitch-pack disabled  reason=missing_enttec_port")
         return SoundSwitchPackStartupBundle(
-            NoneBackend(), pack, player, None, None, "pack_start_failed",
+            None, pack, player, None, None, "pack_start_failed",
         )
 
     midi_input: Optional[SoundSwitchMidiInputGroup] = None
@@ -522,7 +522,7 @@ def _build_soundswitch_pack_startup(
             type(exc).__name__,
         )
         return SoundSwitchPackStartupBundle(
-            NoneBackend(), pack, player, None, None, "pack_start_failed",
+            None, pack, player, None, None, "pack_start_failed",
         )
     return SoundSwitchPackStartupBundle(
         backend, pack, player, midi_input, frame_sender, "pack",
@@ -554,7 +554,7 @@ def _start_soundswitch_pack_workers(
             type(exc).__name__,
         )
         return SoundSwitchPackStartupBundle(
-            NoneBackend(), bundle.pack, bundle.player, None, None, "pack_start_failed",
+            None, bundle.pack, bundle.player, None, None, "pack_start_failed",
         )
     return bundle
 

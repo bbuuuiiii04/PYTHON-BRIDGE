@@ -24,7 +24,7 @@ Current SoundSwitch exporter/importer work remains **SOFTWARE-VALIDATED ONLY / H
 - RW-5 does not report sender health. `software_zero_frame=true` means only that software rendered zero, and `frame_count` counts attempted normal software frames. Neither proves serial delivery, Enttec acceptance, or fixture darkness.
 - Native-DMX Autoloops remain evidence-blocked and zero-safe. T7d has four conductor-accepted integrity captures (two arm, two refire), but four scenario pairs, identity/holdout reconciliation, and a unique corpus oracle verdict remain; no phase mapping can be implemented honestly yet.
 - The ignored local pack config was absent in the 2026-06-23 audit; no live pack/Enttec setup is claimed.
-- The pack proof is 29 PASS / 0 FAIL / 0 INCOMPLETE with foundation 27/27 PASS; F9 mutation rejection and F10 active CC/pitch rejection both pass.
+- The old exact-count pack proof is closure evidence for its recorded source snapshot only. Live export uses dynamic saved-project reconciliation; F9 mutation rejection and F10 active CC/pitch rejection remain proof seams.
 - Laser support depends on local MIDI mapping and fixture behavior.
 - Govee support is not generalized across devices.
 

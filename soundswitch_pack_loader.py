@@ -297,7 +297,7 @@ def _runtime_metadata(
             ))
         else:
             identity = row.get("target_identity")
-            if target_kind != "autoloop":
+            if target_kind not in ("autoloop", "static_look"):
                 _fail("invalid blackout_mask controller target kind")
             bindings.append(PackMidiBinding(
                 device_name=device,
@@ -668,9 +668,6 @@ def load_pack(pack: str | Path) -> LoadedPack:
     for binding in learned_midi_bindings:
         if binding.target_kind == "static_look" and binding.target_slot not in looks:
             _fail("controller binding references a missing Static Look")
-        if binding.target_kind == "blackout_mask" \
-                and binding.target_identity not in loops:
-            _fail("blackout binding references a missing Autoloop")
 
     return LoadedPack(
         schema_version=schema_version,

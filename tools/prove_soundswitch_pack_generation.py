@@ -1016,14 +1016,16 @@ def _prove_pack_mutation(project: Path) -> dict[str, Any]:
         with tempfile.TemporaryDirectory() as tmp:
             pack = Path(tmp) / "pack"
             exported = export_pack(project, pack)
-            verified = verify_pack(pack, source_project=project)
+            verified = verify_pack(
+                pack, source_project=project, enforce_snapshot_totals=True,
+            )
             target = pack / "static_looks.json"
             data = bytearray(target.read_bytes())
             data[len(data) // 2] ^= 1
             target.write_bytes(data)
             rejected = False
             try:
-                verify_pack(pack)
+                verify_pack(pack, enforce_snapshot_totals=True)
             except SoundSwitchPackVerificationError:
                 rejected = True
             return {"ok": bool(exported.get("verified") and verified.get("verified") and rejected),

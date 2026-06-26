@@ -144,13 +144,13 @@ class StartupMatrixTests(unittest.TestCase):
         self.assertEqual(captured["fixture_map"], {channel: 20 + channel for channel in range(1, 20)})
         self.assertEqual(captured["idle"], 0.25)
 
-    def test_partial_start_failures_stop_both_and_never_fall_back_to_midi(self):
+    def test_partial_start_failures_stop_both_and_preserve_legacy_midi(self):
         for input_fail, sender_fail in ((True, False), (False, True)):
             with self.subTest(input_fail=input_fail, sender_fail=sender_fail):
                 bundle, events, _ = self._build(
                     _result(), input_fail=input_fail, sender_fail=sender_fail,
                 )
-                self.assertIsInstance(bundle.laser_backend, NoneBackend)
+                self.assertIsNone(bundle.laser_backend)
                 self.assertIsNone(bundle.frame_sender)
                 self.assertIsNone(bundle.midi_input)
                 self.assertIn("sender.stop", events)
@@ -199,12 +199,12 @@ class StartupMatrixTests(unittest.TestCase):
         self.assertEqual(events, [("input.start", "DDJ", "DDJ"), ("input.stop",)])
         self.assertEqual(bundle.midi_input.snapshot().error, "input_error")
 
-    def test_missing_enttec_is_no_output(self):
+    def test_missing_enttec_preserves_legacy_midi(self):
         bundle, events, _ = self._build(_result(enttec_port=""))
-        self.assertIsInstance(bundle.laser_backend, NoneBackend)
+        self.assertIsNone(bundle.laser_backend)
         self.assertEqual(events, [])
 
-    def test_legacy_builder_constructs_and_starts_midi_once_only_for_none_backend(self):
+    def test_legacy_builder_constructs_and_starts_midi_once_only_for_implicit_backend(self):
         cfg = LaserConfig(
             enabled=True, dry_run=False, smart_drop_mode="blackout_mask",
             midi_output_port="fake-midi", scenes={}, personalities={},
@@ -227,8 +227,13 @@ class StartupMatrixTests(unittest.TestCase):
         with mock.patch.object(bridge_main, "MidiOutput", FakeMidi):
             legacy = bridge_main._build_laser_startup_wiring(result)
             pack = bridge_main._build_laser_startup_wiring(result, backend=NoneBackend())
+            pack_unavailable = bridge_main._build_laser_startup_wiring(result, backend=None)
         self.assertIsInstance(legacy.laser_executor._backend, MidiOutputBackend)
-        self.assertEqual(created, [("fake-midi", False, "construct"), ("start",)])
+        self.assertIsInstance(pack_unavailable.laser_executor._backend, MidiOutputBackend)
+        self.assertEqual(created, [
+            ("fake-midi", False, "construct"), ("start",),
+            ("fake-midi", False, "construct"), ("start",),
+        ])
         self.assertIsNone(pack.midi_output)
         self.assertIsInstance(pack.laser_executor._backend, NoneBackend)
 

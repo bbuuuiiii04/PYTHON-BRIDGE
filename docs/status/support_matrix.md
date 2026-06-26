@@ -37,7 +37,8 @@ the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile, strict decode,
 deterministic new-path export, independent verification, immutable pack
 loading/rendering, MIDI-input routing, backend abstraction, config/startup,
 StateManager scripted driving, copied operational status, commands, and Enttec framing/sending have
-software tests. The current proof gate is 29 PASS / 0 FAIL / 0 INCOMPLETE.
+software tests. Live export reconciles saved-project inventory dynamically; the
+old exact-count closure snapshot is proof-only.
 Direct-DMX code exists but is default-off, locally unconfigured, and
 hardware-unvalidated. Copied status proves software intent only; sender health,
 T7d capture/native-Autoloop work, and physical validation remain open.
@@ -45,7 +46,7 @@ T7d capture/native-Autoloop work, and physical validation remain open.
 | Output | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | SoundSwitch OS2L | implemented | code path exists | Exact SoundSwitch version support unknown. |
-| SoundSwitch scripted pack/direct DMX | partial, default-off | current-project proof plus player/startup/driver/sender/status tests | 32/32 active scripts supported; SoundSwitch-saved Static Override Press/Toggle interaction mode is honored; static-controller input auto-binds unless an alias overrides it, and missing/ambiguous input degrades manual Static Looks without disabling pack DMX; canonical pack lives at repo-local ignored `local/soundswitch/rbss_canonical_pack`; copied RW-5 status is software-only, sender health is not reported, and physical validation remains. |
+| SoundSwitch scripted pack/direct DMX | partial, default-off | dynamic export/verifier tests plus player/startup/driver/sender/status tests | Active existing-path scripts export when decoded and reconciled from the saved project; SoundSwitch-saved Static Override Press/Toggle interaction mode is honored; static-controller input auto-binds unless an alias overrides it, and missing/ambiguous input degrades manual Static Looks without disabling pack DMX; canonical pack lives at repo-local ignored `local/soundswitch/rbss_canonical_pack`; copied RW-5 status is software-only, sender health is not reported, and physical validation remains. |
 | SoundSwitch native-DMX Autoloops | blocked | pure renderer/capture-tool tests plus 4 conductor-integrity-accepted live wire captures | Arm/refire each have two accepted captures, but four scenario pairs and the unique corpus oracle remain; no phase contract; automatic base remains zero. |
 | Laser MIDI | implemented | code path plus lifecycle unit/integration tests | Default-on gated drop/post-drop cycling, shuffle-bag selection, static-impact fallback, and kill-switch-OFF legacy behavior are software-tested. Broad fixture/safety validation is not documented. |
 | LED/Govee cloud scene | implemented | code path exists | Scripted groove/drop/post-drop blackout mapping is software-tested and the shipped example config now enables the master switch (`true`) with the conservative blackout policy; device support and room-visible behavior are not generalized. |

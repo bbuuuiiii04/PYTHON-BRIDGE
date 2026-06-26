@@ -431,7 +431,9 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
     if not parent.is_dir() or parent.is_symlink():
         raise ValueError("output parent must be an existing real directory")
     decoded = decode_project(source)
-    artifacts = compile_pack_artifacts(decoded, generator_commit=_generator_commit())
+    artifacts = compile_pack_artifacts(
+        decoded, generator_commit=_generator_commit(), enforce_pinned_totals=False,
+    )
     staging = _stage_artifacts(artifacts, parent, destination.name)
     try:
         result = verify_pack(staging, source_project=source)
@@ -467,7 +469,9 @@ def publish_pack(
             raise ValueError("destination must be a real directory or absent")
         first_export = not destination.exists()
         decoded = decode_project(source)
-        artifacts = compile_pack_artifacts(decoded, generator_commit=_generator_commit())
+        artifacts = compile_pack_artifacts(
+            decoded, generator_commit=_generator_commit(), enforce_pinned_totals=False,
+        )
         staging = _stage_artifacts(artifacts, parent, destination.name)
         try:
             result = verify_pack(staging, source_project=source)

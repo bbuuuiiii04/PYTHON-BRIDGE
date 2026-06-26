@@ -34,13 +34,14 @@ RBSS_SMART_BREAKDOWN=1
 These defaults are present in `scripts/ss_bridge_watcher.sh`.
 
 The SoundSwitch pack lane contains frozen source models, strict read-only
-decode, deterministic canonical-pack export, independent verification, an
+decode, deterministic canonical-pack export, dynamic saved-project inventory
+reconciliation, independent verification, an
 immutable pack loader/player, a MIDI-input adapter, an output-backend
 abstraction, an Enttec frame sender, a validated default-off config loader,
 startup wiring, an atomic `PackRuntime`, validate-first runtime controls, a
 StateManager scripted-frame driver, and provider-free copied operational status.
-The current-project proof gate is 29 PASS /
-0 FAIL / 0 INCOMPLETE, including F9 and F10.
+The old exact-count closure snapshot is proof-only; live export accepts
+internally consistent saved edits. F9 and F10 proof seams remain covered.
 
 This lane remains subordinate to existing bridge authority. `__main__` loads
 the optional config and chooses one physical laser backend before workers start;

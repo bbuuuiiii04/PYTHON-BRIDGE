@@ -117,6 +117,10 @@ class CurrentProjectPackTests(unittest.TestCase):
         path = pack / relative
         value = json.loads(path.read_text())
         mutate(value)
+        self._write_json_artifact(pack, relative, value)
+
+    def _write_json_artifact(self, pack: Path, relative: str, value) -> None:
+        path = pack / relative
         data = _canonical(value)
         path.write_bytes(data)
         manifest_path = pack / "manifest.json"
@@ -124,6 +128,33 @@ class CurrentProjectPackTests(unittest.TestCase):
         row = next(item for item in manifest["artifact_hashes"] if item["path"] == relative)
         row["size"] = len(data); row["sha256"] = _sha(data)
         manifest_path.write_bytes(_canonical(manifest))
+
+    def _mutate_manifest(self, pack: Path, mutate) -> None:
+        manifest_path = pack / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        mutate(manifest)
+        manifest_path.write_bytes(_canonical(manifest))
+
+    def _active_union(self, pack: Path) -> tuple[int, str]:
+        selection = json.loads((pack / "selection_map.json").read_text())
+        track = json.loads((pack / "track_map.json").read_text())
+        active_loops = {row["target_identity"] for row in selection["iac_selections"]
+                        if row.get("active") and row.get("target_kind") == "autoloop"}
+        active_scripts = {row["relative_path"] for row in track["scripted_inventory"]
+                          if row.get("active_existing_path")}
+        refs: set[str] = set()
+        for path in (pack / "autoloops").glob("*.json"):
+            document = json.loads(path.read_text())["document"]
+            if document["relative_path"] in active_loops:
+                refs.update(row["resolved_cue_guid"].lower() for row in document["timeline"]
+                            if row.get("resolved_cue_guid"))
+        for path in (pack / "scripted").glob("*.json"):
+            document = json.loads(path.read_text()).get("document")
+            if isinstance(document, dict) and document["relative_path"] in active_scripts:
+                refs.update(row["resolved_cue_guid"].lower() for row in document["timeline"]
+                            if row.get("resolved_cue_guid"))
+        union = sorted(refs)
+        return len(union), hashlib.sha256("\n".join(union).encode("ascii")).hexdigest()
 
     def assertRejected(self, pack: Path):
         with self.assertRaises(SoundSwitchPackVerificationError):
@@ -140,23 +171,47 @@ class CurrentProjectPackTests(unittest.TestCase):
         result = verify_pack(self.pack, source_project=self.project)
         self.assertTrue(result["verified"])
         manifest = json.loads((self.pack / "manifest.json").read_text())
-        self.assertEqual(manifest["totals"]["total_venue_records"], 233)
-        self.assertEqual(manifest["totals"]["render_cues"], 232)
-        self.assertEqual(manifest["totals"]["catalog_tail_records"], 1)
+        venue = json.loads((self.pack / "venue_cues.json").read_text())
+        render = [row for row in venue["records"] if row["record_kind"] == "fixture_payload"]
+        tails = [row for row in venue["records"]
+                 if row["record_kind"] == "minimal_default_catalog_tail"]
+        self.assertEqual(manifest["totals"]["total_venue_records"], len(venue["records"]))
+        self.assertEqual(manifest["totals"]["render_cues"], len(render))
+        self.assertEqual(manifest["totals"]["catalog_tail_records"], len(tails))
         self.assertEqual(manifest["totals"]["static_looks"], 32)
-        self.assertEqual(manifest["totals"]["total_autoloops"], 42)
-        self.assertEqual(manifest["totals"]["scripted_inventory"], 45)
-        self.assertEqual(manifest["totals"]["parsed_scripted"], 44)
+        self.assertEqual(
+            manifest["totals"]["total_autoloops"],
+            len(list((self.pack / "autoloops").glob("*.json"))),
+        )
+        track = json.loads((self.pack / "track_map.json").read_text())
+        self.assertEqual(manifest["totals"]["scripted_inventory"],
+                         len(track["scripted_inventory"]))
+        self.assertEqual(
+            manifest["totals"]["parsed_scripted"],
+            sum(1 for path in (self.pack / "scripted").glob("*.json")
+                if json.loads(path.read_text()).get("document") is not None),
+        )
+        union_count, union_sha = self._active_union(self.pack)
+        self.assertEqual(manifest["active_cue_union"],
+                         {"count": union_count, "sha256": union_sha})
         selection = json.loads((self.pack / "selection_map.json").read_text())
         self.assertTrue(any(row["resolution"] == "no_project_target"
                             for row in selection["bridge_scenes"]))
         self.assertEqual(sorted(row["target_index"] for row in selection["learned_controls"]
-                                if row["active"] and row["target_kind"] == "static_look"),
+                                if row["active"] and row["target_kind"] == "static_look"
+                                and row["device_name"] == "DDJ-800"),
                          [8, 16, 17, 24])
         self.assertEqual(set(selection["classification_policy"]), {
             "pack_selection", "static_override", "blackout_mask", "bridge_owned_safety",
             "no_project_target", "inactive_report_only", "unsupported_fail_export"})
         self.assertEqual(selection["manual_blackout"]["control_classification"], "blackout_mask")
+        blackout_controls = [row for row in selection["learned_controls"]
+                             if row["active"]
+                             and row["device_name"] == "IAC Driver Bus 1"
+                             and row["channel_zero_based"] == 0
+                             and row["data_byte"] == 0]
+        self.assertEqual([row["control_classification"] for row in blackout_controls],
+                         ["blackout_mask"])
         scenes = {row["policy_name"]: row for row in selection["bridge_scenes"]}
         self.assertEqual(scenes["house_post_drop_1"]["control_classification"],
                          "inactive_report_only")
@@ -169,7 +224,8 @@ class CurrentProjectPackTests(unittest.TestCase):
         self.assertTrue(selected)
         self.assertTrue(all(row["control_classification"] == "pack_selection" for row in selected))
         overrides = [row for row in selection["learned_controls"]
-                     if row["target_kind"] == "static_look" and row["active"]]
+                     if row["target_kind"] == "static_look" and row["active"]
+                     and row["control_classification"] == "static_override"]
         self.assertTrue(all(row["control_classification"] == "static_override" for row in overrides))
         self.assertEqual(
             {row["target_index"]: row["interaction_mode"] for row in overrides},
@@ -177,6 +233,83 @@ class CurrentProjectPackTests(unittest.TestCase):
         )
         self.assertFalse(any("interaction_mode" in row for row in selection["learned_controls"]
                              if row["target_kind"] != "static_look"))
+
+    def test_dynamic_verifier_accepts_extra_unused_venue_cue_but_strict_proof_rejects(self):
+        pack = self._copy("dynamic-extra-venue-cue")
+        venue = json.loads((pack / "venue_cues.json").read_text())
+        used = {row["cue_guid"] for row in venue["records"]}
+        guid = next(f"{index:032x}" for index in range(1, 1000) if f"{index:032x}" not in used)
+        source_offset = max(row["source_offset"] for row in venue["records"]) + 1
+        row = json.loads(json.dumps(next(item for item in venue["records"]
+                                         if item["record_kind"] == "fixture_payload")))
+        row["cue_guid"] = guid
+        row["name"] = "unused saved edit"
+        row["source_offset"] = source_offset
+        row["end_offset"] = source_offset + 1
+        venue["records"].append(row)
+        venue["records"].sort(key=lambda item: item["source_offset"])
+        venue["render_cue_count"] += 1
+        venue["total_record_count"] += 1
+        self._write_json_artifact(pack, "venue_cues.json", venue)
+        self._mutate_manifest(pack, lambda manifest: (
+            manifest["totals"].__setitem__("render_cues", venue["render_cue_count"]),
+            manifest["totals"].__setitem__("total_venue_records", venue["total_record_count"]),
+        ))
+
+        self.assertTrue(verify_pack(pack)["verified"])
+        with self.assertRaisesRegex(SoundSwitchPackVerificationError, "proof snapshot"):
+            verify_pack(pack, enforce_snapshot_totals=True)
+
+    def test_dynamic_verifier_accepts_inactive_scripted_row_with_recomputed_union(self):
+        pack = self._copy("dynamic-inactive-script")
+        track = json.loads((pack / "track_map.json").read_text())
+        row = next(item for item in track["scripted_inventory"]
+                   if item["active_existing_path"])
+        row["active_existing_path"] = False
+        self._write_json_artifact(pack, "track_map.json", track)
+        count, sha = self._active_union(pack)
+        self._mutate_manifest(pack, lambda manifest: (
+            manifest.__setitem__("active_cue_union", {"count": count, "sha256": sha}),
+            manifest["totals"].__setitem__("active_existing_path_scripted",
+                                           manifest["totals"]["active_existing_path_scripted"] - 1),
+            manifest["totals"].__setitem__("active_cue_union", count),
+        ))
+
+        self.assertTrue(verify_pack(pack)["verified"])
+        with self.assertRaisesRegex(SoundSwitchPackVerificationError, "proof snapshot"):
+            verify_pack(pack, enforce_snapshot_totals=True)
+
+    def test_dynamic_verifier_accepts_removed_unreferenced_autoloop_artifact(self):
+        pack = self._copy("dynamic-removed-autoloop")
+        selection = json.loads((pack / "selection_map.json").read_text())
+        referenced = {row["target_identity"] for row in selection["iac_selections"]
+                      if row.get("active") and row.get("target_kind") == "autoloop"}
+        referenced.update(row["target_identity"] for row in selection["bridge_scenes"]
+                          if row.get("resolution") == "project_target")
+        if selection["manual_blackout"].get("target_identity"):
+            referenced.add(selection["manual_blackout"]["target_identity"])
+        removable = None
+        for path in sorted((pack / "autoloops").glob("*.json")):
+            document = json.loads(path.read_text())["document"]
+            if document["relative_path"] not in referenced:
+                removable = path
+                break
+        if removable is None:
+            self.skipTest("no unreferenced autoloop artifact in the current saved project")
+        relative = removable.relative_to(pack).as_posix()
+        removable.unlink()
+        self._mutate_manifest(pack, lambda manifest: (
+            manifest.__setitem__(
+                "artifact_hashes",
+                [row for row in manifest["artifact_hashes"] if row["path"] != relative],
+            ),
+            manifest["totals"].__setitem__("total_autoloops",
+                                           manifest["totals"]["total_autoloops"] - 1),
+        ))
+
+        self.assertTrue(verify_pack(pack)["verified"])
+        with self.assertRaisesRegex(SoundSwitchPackVerificationError, "proof snapshot"):
+            verify_pack(pack, enforce_snapshot_totals=True)
 
     def test_two_exports_are_byte_identical(self):
         second = self.root / "pack-second"

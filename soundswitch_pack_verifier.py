@@ -16,8 +16,22 @@ SCHEMA_VERSION = "1.0.0"
 PROJECT_UUID = "{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}"
 VENUE_GUID = "b8ad2201b9e4c94696c898a7e8f6a5a9"
 SOUNDSWITCH_VERSION = "2.10.3"
-ACTIVE_UNION_COUNT = 166
-ACTIVE_UNION_SHA256 = "88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2"
+# Proof-only closure snapshot. Normal live export/load verification is dynamic.
+SNAPSHOT_ACTIVE_UNION_COUNT = 166
+SNAPSHOT_ACTIVE_UNION_SHA256 = "88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2"
+SNAPSHOT_TOTALS = {
+    "active_cue_union": SNAPSHOT_ACTIVE_UNION_COUNT,
+    "active_existing_path_scripted": 32,
+    "catalog_tail_records": 1,
+    "ddj_static_overrides": 4,
+    "iac_autoloop_bindings": 19,
+    "parsed_scripted": 44,
+    "render_cues": 232,
+    "scripted_inventory": 45,
+    "static_looks": 32,
+    "total_autoloops": 42,
+    "total_venue_records": 233,
+}
 PRIMARY_FIXTURE_GROUP = 0x493
 CONTROL_CHANNELS = frozenset((8, 9, 11))
 ATTRIBUTE_FIELDS = {"channel_id", "dmx_channel", "fixture_group", "source_offset", "value"}
@@ -365,7 +379,12 @@ def _validate_document(doc: Any, expected_path: str,
     return refs
 
 
-def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+def verify_pack(
+    pack: str | os.PathLike[str],
+    *,
+    source_project: str | os.PathLike[str] | None = None,
+    enforce_snapshot_totals: bool = False,
+) -> dict[str, Any]:
     root = Path(pack)
     files = _regular_files(root)
     if "manifest.json" not in files:
@@ -449,9 +468,14 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
     _ordered(records, lambda row: row.get("source_offset", -1), "Venue cue records")
     render = [row for row in records if row.get("record_kind") == "fixture_payload"]
     tails = [row for row in records if row.get("record_kind") == "minimal_default_catalog_tail"]
-    if (len(render), len(tails), len(records)) != (232, 1, 233) or \
-            (venue.get("render_cue_count"), venue.get("catalog_tail_count"), venue.get("total_record_count")) != (232, 1, 233):
-        _fail("Venue count split mismatch; require 232 render + 1 catalog-tail")
+    venue_counts = (len(render), len(tails), len(records))
+    if len(render) + len(tails) != len(records):
+        _fail("unsupported Venue cue record kind")
+    if not render:
+        _fail("Venue cue split has no render-bearing cues")
+    if (venue.get("render_cue_count"), venue.get("catalog_tail_count"),
+            venue.get("total_record_count")) != venue_counts:
+        _fail("Venue count split mismatch")
     cue_guids = [row.get("cue_guid") for row in records]
     if any(not isinstance(guid, str) or re.fullmatch(r"[0-9a-f]{32}", guid) is None
            for guid in cue_guids) or len(set(cue_guids)) != len(cue_guids):
@@ -461,7 +485,7 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
     if any(row.get("render_bearing") is not False or row.get("attributes") for row in tails):
         _fail("catalog-tail must remain distinct and non-render-bearing")
     cue_patches = {row.get("cue_guid"): row.get("attributes") for row in render}
-    if len(cue_patches) != 232 or any(not isinstance(rows, list) for rows in cue_patches.values()):
+    if len(cue_patches) != len(render) or any(not isinstance(rows, list) for rows in cue_patches.values()):
         _fail("duplicate Venue cue GUID")
     for row in render:
         _apply_patch([0] * 19, row["attributes"], f"Venue cue {row.get('cue_guid')}")
@@ -532,13 +556,9 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
         inventory_by_ssid[ssid] = row
     active_scripts = {row["relative_path"] for row in inventory
                       if row["active_existing_path"]}
-    if len(inventory) != 45 or len(active_scripts) != 32:
-        _fail("scripted inventory/active count mismatch")
 
     autoloop_paths = sorted(path for path in values if re.fullmatch(r"autoloops/[1-9][0-9]*\.json", path))
     script_paths = sorted(path for path in values if re.fullmatch(r"scripted/[0-9a-f-]{36}\.json", path))
-    if len(autoloop_paths) != 42 or len(script_paths) != 45:
-        _fail("Autoloop/scripted artifact count mismatch")
     if {Path(path).stem.upper() for path in script_paths} != set(inventory_by_ssid):
         _fail("scripted inventory/artifact identity mismatch")
     refs_by_source: dict[str, set[str]] = {}
@@ -546,7 +566,7 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
         doc = values[artifact].get("document")
         expected = f"SSAutoLoop{Path(artifact).stem}.ssfile"
         refs_by_source[expected] = _validate_document(doc, expected, cue_patches, source_hashes)
-    unsupported_inactive = 0
+    parsed_scripted = 0
     for artifact in script_paths:
         row = values[artifact]
         classification = row.get("classification", {})
@@ -567,8 +587,8 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
             if row.get("unsupported_inactive") is not True or active \
                     or classification.get("status") == "supported_mapped_primary":
                 _fail("unsupported active scripted row")
-            unsupported_inactive += 1
         else:
+            parsed_scripted += 1
             if row.get("unsupported_inactive") is not False:
                 _fail("renderable scripted artifact has unsupported marker")
             if active and (classification.get("status") != "supported_mapped_primary"
@@ -577,8 +597,6 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
                 _fail("active scripted inventory is unsupported or non-renderable")
             refs_by_source[expected_path] = _validate_document(
                 doc, expected_path, cue_patches, source_hashes, active=active)
-    if unsupported_inactive != 1:
-        _fail("expected exactly one inactive unsupported scripted row")
 
     selection = values["selection_map.json"]
     controls = selection.get("learned_controls", [])
@@ -596,11 +614,13 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
     for row in controls:
         if not row.get("active") or row.get("target_kind") == "non_render":
             expected_class = "inactive_report_only"
+        elif row.get("device_name") == "IAC Driver Bus 1" \
+                and row.get("channel_zero_based") == 0 \
+                and row.get("data_byte") == 0 \
+                and row.get("message_type") == "note":
+            expected_class = "blackout_mask"
         elif row.get("target_kind") == "static_look":
             expected_class = "static_override"
-        elif (row.get("device_name"), row.get("channel_zero_based"), row.get("data_byte"),
-              row.get("target_kind")) == ("IAC Driver Bus 1", 0, 0, "autoloop"):
-            expected_class = "blackout_mask"
         else:
             expected_class = "pack_selection"
         if row.get("control_classification") != expected_class:
@@ -617,15 +637,21 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
         _fail("active selection has malformed target identity")
     iac = [row for row in active_render if row.get("device_name") == "IAC Driver Bus 1" and row.get("target_kind") == "autoloop"]
     ddj = [row for row in active_render if row.get("device_name") == "DDJ-800" and row.get("target_kind") == "static_look"]
-    if len(iac) != 19 or len(ddj) != 4 or sorted(row.get("target_index") for row in ddj) != [8, 16, 17, 24]:
-        _fail("active selection crosswalk count mismatch")
+    for row in ddj:
+        if type(row.get("target_index")) is not int or not 0 <= row["target_index"] < len(looks):
+            _fail("active DDJ Static Override target mismatch")
     if selection.get("iac_selections") != iac or selection.get("ddj_static_overrides") != ddj:
         _fail("explicit IAC/DDJ crosswalk mismatch")
     scenes = selection.get("bridge_scenes", [])
-    iac_by_event = {(row.get("channel_zero_based"), row.get("data_byte")): row for row in iac}
+    iac_note_by_event = {
+        (row.get("channel_zero_based"), row.get("data_byte")): row for row in controls
+        if row.get("active")
+        and row.get("device_name") == "IAC Driver Bus 1"
+        and row.get("message_type") == "note"
+    }
     expected_scenes = []
     for name, channel, note in BRIDGE_SCENES:
-        target = iac_by_event.get((channel, note))
+        target = iac_note_by_event.get((channel, note))
         classification = ("inactive_report_only" if name == "house_post_drop_1" else
                           "pack_selection" if target else
                           "bridge_owned_safety" if channel == 1 and note in (0, 1, 2)
@@ -638,7 +664,7 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
                                 "target_kind": target.get("target_kind") if target else None})
     if scenes != expected_scenes:
         _fail("bridge scene F-3 crosswalk mismatch")
-    blackout = iac_by_event.get((0, 0))
+    blackout = iac_note_by_event.get((0, 0))
     expected_blackout = {"channel_zero_based": 0, "control_classification": "blackout_mask",
                          "data_byte": 0, "resolution": "project_target" if blackout else "no_project_target",
                          "target_identity": blackout.get("target_identity") if blackout else None}
@@ -655,21 +681,28 @@ def verify_pack(pack: str | os.PathLike[str], *, source_project: str | os.PathLi
                                 for path in active_loop_paths | active_scripts)))
     union_sha = _sha("\n".join(union).encode("ascii"))
     declared_union = manifest.get("active_cue_union", {})
-    if (len(union), union_sha) != (ACTIVE_UNION_COUNT, ACTIVE_UNION_SHA256) or \
-            declared_union != {"count": ACTIVE_UNION_COUNT, "sha256": ACTIVE_UNION_SHA256}:
+    if declared_union != {"count": len(union), "sha256": union_sha}:
         _fail("active-cue union count/hash drift")
     totals = manifest.get("totals", {})
     if not isinstance(totals, dict):
         _fail("malformed manifest totals")
-    expected_totals = {"render_cues": 232, "catalog_tail_records": 1, "total_venue_records": 233,
-                       "static_looks": 32, "total_autoloops": 42, "scripted_inventory": 45,
-                       "parsed_scripted": 44, "active_existing_path_scripted": 32,
-                       "iac_autoloop_bindings": 19, "ddj_static_overrides": 4,
-                       "active_cue_union": 166}
-    if any(totals.get(key) != value for key, value in expected_totals.items()):
+    expected_totals = {"render_cues": len(render), "catalog_tail_records": len(tails),
+                       "total_venue_records": len(records), "static_looks": len(looks),
+                       "total_autoloops": len(autoloop_paths),
+                       "scripted_inventory": len(inventory),
+                       "parsed_scripted": parsed_scripted,
+                       "active_existing_path_scripted": len(active_scripts),
+                       "iac_autoloop_bindings": len(iac), "ddj_static_overrides": len(ddj),
+                       "active_cue_union": len(union), "learned_mappings": len(registry_bindings)}
+    if totals != expected_totals:
         _fail("manifest totals mismatch")
-    if totals.get("learned_mappings") != len(registry_bindings):
-        _fail("manifest learned MIDI binding count mismatch")
+    if enforce_snapshot_totals:
+        if venue_counts != (232, 1, 233):
+            _fail("proof snapshot Venue count drift")
+        if any(totals.get(key) != value for key, value in SNAPSHOT_TOTALS.items()):
+            _fail("proof snapshot manifest totals drift")
+        if (len(union), union_sha) != (SNAPSHOT_ACTIVE_UNION_COUNT, SNAPSHOT_ACTIVE_UNION_SHA256):
+            _fail("proof snapshot active-cue union drift")
     return {"manifest_sha256": _sha(manifest_bytes), "artifact_count": len(files),
             "active_cue_union_sha256": union_sha, "verified": True}
 

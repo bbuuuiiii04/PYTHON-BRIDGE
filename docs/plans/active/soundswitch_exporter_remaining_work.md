@@ -31,7 +31,7 @@ MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 
 | Area | Current evidence |
 | --- | --- |
-| Saved-project decode/export | Implemented for the bounded 2.10.3 canonical project/RAVE/CH1-CH19 profile. Complete rescans, stable identity, strict validation, and read-only source handling are software-tested. |
+| Saved-project decode/export | Implemented for the bounded 2.10.3 canonical project/RAVE/CH1-CH19 profile. Complete dynamic rescans, stable identity, strict semantic validation, dynamic inventory reconciliation, and read-only source handling are software-tested. |
 | Pack compile/verify/load | Implemented. Deterministic compilation, independent verification, and mutation rejection are software-tested. |
 | RW-1 export/publish/reload | Implemented, independently reviewed, and software-tested. Replacement is staged and verified; the required binding sidecar is staged before swap, and pre-swap sidecar failure preserves the prior pack. Reload stays conservative and never implies enable/backend/start. Source-fingerprint freshness drives the menubar state. Stable opaque backup/media/preset rewrites are ignored, but `recordable/*.dat` remains fingerprinted because it can later decode into learned-MIDI/control-state content; older sidecars that listed it fail open. |
 | RW-1A shutdown ownership | Implemented, independently reviewed, and software-tested. Graceful shutdown reaches the current runtime-swapped sender and attempts zero before close. Hard process death remains physically unsafe. |
@@ -48,10 +48,12 @@ MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 | Native Autoloop DMX | Intentionally not implemented. `StateManager` does not call `select_autoloop`; the automatic base remains software-zero in Autoloop mode. |
 | Physical hardware | Unvalidated. No committed real-run evidence file exists. |
 
-The current-project proof record remains 29 PASS / 0 FAIL / 0 INCOMPLETE and
-32/32 active scripted tracks exportable at its recorded bounded source snapshot.
-That proof is software evidence, not fixture evidence and not a guarantee for
-other SoundSwitch versions, projects, profiles, or layouts.
+The old 29 PASS / 0 FAIL / 0 INCOMPLETE proof record remains closure evidence
+for its recorded source snapshot only. Live export now reconciles the saved
+project dynamically, while the old snapshot totals are enforced only when proof
+tooling explicitly asks for strict snapshot mode. That proof is software
+evidence, not fixture evidence and not a guarantee for other SoundSwitch
+versions, projects, profiles, or layouts.
 
 ## Completed implementation records
 
@@ -152,7 +154,7 @@ This work remains excluded and blocked by T7d.
 
 ### 5. Final closeout
 
-- [ ] Rerun the current-project proof against an operator-approved source
+- [ ] Rerun the proof-only snapshot gate or refresh its approved source
   snapshot after all software work, including any future Autoloop work.
 - [ ] Run focused tests, full tests, docs gates, and adversarial review at the
   final software checkpoint.

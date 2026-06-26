@@ -6,7 +6,7 @@ Audited against the current checkout at `cb31cf8` on 2026-06-25.
 
 ## SoundSwitch Pack Component Boundary
 
-- `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` provide frozen models and strict read-only decode; `soundswitch_pack.py` and `tools/export_soundswitch_pack.py` deterministically publish a canonical 95-artifact pack; `soundswitch_pack_verifier.py` independently verifies it. All are pinned to SoundSwitch 2.10.3 and the canonical UUID/RAVE profile.
+- `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` provide frozen models and strict read-only decode; `soundswitch_pack.py` and `tools/export_soundswitch_pack.py` deterministically publish the repo-local canonical pack; `soundswitch_pack_verifier.py` independently verifies it with dynamic saved-project inventory reconciliation by default and an explicit proof-only snapshot gate. All are pinned to SoundSwitch 2.10.3 and the canonical UUID/RAVE profile.
 - Decode/export must not mutate a source project. Pack publication is deterministic and fail-closed; independent verification rejects inventory, hash, canonicalization, semantic, crosswalk, or source-drift changes, including the F9 one-byte mutation.
 - The immutable pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender are software-tested components. The never-raising config loader is used only during startup/reload; config or pack filesystem work must never enter `_push_tick`.
 - `__main__` loads optional pack config, chooses one backend, starts verified workers, builds one immutable `PackRuntime`, and wires validate-first commands/status. `StateManager` reads one runtime reference per tick and is the sole `submit_frame` caller.

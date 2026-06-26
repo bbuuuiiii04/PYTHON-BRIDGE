@@ -50,9 +50,6 @@ CANONICAL_PROJECT_UUID = "{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}"
 CANONICAL_SOUNDSWITCH_VERSION = "2.10.3"
 CANONICAL_CONTAINER_VERSION = 3
 CANONICAL_VENUE_GUID = "b8ad2201b9e4c94696c898a7e8f6a5a9"
-CANONICAL_RENDER_CUE_COUNT = 232
-CANONICAL_CATALOG_TAIL_COUNT = 1
-
 _MAGIC = b"\xaa\xaa\x09\x55"
 _TRAILER_SIZE = 10
 _MAX_COUNT = 100_000
@@ -1049,8 +1046,13 @@ def decode_project(project: str | os.PathLike[str], *,
     cues = decode_venue_cues(venue_data)
     render_count = sum(cue.render_bearing for cue in cues)
     tail_count = len(cues) - render_count
-    if (render_count, tail_count, len(cues)) != (232, 1, 233):
-        _fail("venue_cue_split", f"expected 232 render + 1 catalog-tail, got {render_count} + {tail_count}",
+    if render_count <= 0:
+        _fail("venue_cue_split", "expected at least one render-bearing Venue cue",
+              "SoundSwitchVenues.bin")
+    if any(cue.render_bearing and cue.record_kind != "fixture_payload" for cue in cues) \
+            or any((not cue.render_bearing) and cue.attributes for cue in cues):
+        _fail("venue_cue_split",
+              f"invalid render/catalog-tail split: {render_count} render + {tail_count} catalog-tail",
               "SoundSwitchVenues.bin")
     looks = decode_static_looks(venue_data, identity.venue_guid)
 

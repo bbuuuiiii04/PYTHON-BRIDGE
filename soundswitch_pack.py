@@ -27,6 +27,7 @@ from .soundswitch_project_decoder import (
 )
 
 PACK_SCHEMA_VERSION = "1.0.0"
+# Proof-only closure snapshot. Live export must opt in before enforcing it.
 ACTIVE_CUE_UNION_SHA256 = "88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2"
 ACTIVE_CUE_UNION_COUNT = 166
 PRIMARY_FIXTURE_GROUP = 0x493
@@ -204,11 +205,11 @@ def _selection_map(project: DecodedSoundSwitchProject) -> dict[str, Any]:
         b = row.binding
         if not b.enabled or row.target_kind == "non_render":
             classification = "inactive_report_only"
+        elif b.device_name == "IAC Driver Bus 1" and b.channel_zero_based == 0 \
+                and b.data_byte == 0 and b.message_type == "note":
+            classification = "blackout_mask"
         elif row.target_kind == "static_look":
             classification = "static_override"
-        elif (b.device_name, b.channel_zero_based, b.data_byte, row.target_kind) == \
-                ("IAC Driver Bus 1", 0, 0, "autoloop"):
-            classification = "blackout_mask"
         else:
             classification = "pack_selection"
         item = {"active": b.enabled, "channel_zero_based": b.channel_zero_based,
@@ -268,7 +269,7 @@ def _selection_map(project: DecodedSoundSwitchProject) -> dict[str, Any]:
 def compile_pack_artifacts(
     project: DecodedSoundSwitchProject,
     *, generator_commit: str,
-    enforce_pinned_totals: bool = True,
+    enforce_pinned_totals: bool = False,
 ) -> dict[str, bytes]:
     if project.identity.project_uuid != CANONICAL_PROJECT_UUID or \
             project.identity.soundswitch_version != CANONICAL_SOUNDSWITCH_VERSION or \
