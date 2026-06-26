@@ -147,6 +147,7 @@ def _opaque_source_paths(pack_dir: Path) -> frozenset[str]:
         if isinstance(row, dict)
         and row.get("parse_status") == "retained_opaque"
         and isinstance(row.get("path"), str)
+        and not row["path"].startswith("recordable/")
     )
 
 

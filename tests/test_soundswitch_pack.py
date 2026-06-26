@@ -1123,6 +1123,33 @@ class PublishPackCliTests(unittest.TestCase):
             self.assertFalse(any(destination.rglob("*.source.json")))
             self.assertNotIn(str(Path.home()), sidecar.read_text(encoding="utf-8"))
 
+    def test_opaque_source_paths_keeps_recordable_dat_visible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "pack"
+            destination.mkdir()
+            (destination / "manifest.json").write_text(json.dumps({
+                "source_inventory": [
+                    {
+                        "path": "SoundSwitchVenues.bin.backup",
+                        "parse_status": "retained_opaque",
+                    },
+                    {
+                        "path": "recordable/01bede4d8ea57b3b58574d71826dc1f5.dat",
+                        "parse_status": "retained_opaque",
+                    },
+                    {
+                        "path": "automation_presets/PRESET 1.sspreset",
+                        "parse_status": "retained_opaque",
+                    },
+                    {"path": "project.ssfile", "parse_status": "parsed"},
+                ],
+            }), encoding="utf-8")
+
+            self.assertEqual(export_module._opaque_source_paths(destination), frozenset({
+                "SoundSwitchVenues.bin.backup",
+                "automation_presets/PRESET 1.sspreset",
+            }))
+
     def test_write_binding_sidecar_is_sibling_and_manifest_unchanged(self):
         with tempfile.TemporaryDirectory() as tmp:
             destination = Path(tmp) / "pack"
