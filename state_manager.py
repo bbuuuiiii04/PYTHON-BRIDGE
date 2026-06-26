@@ -3300,6 +3300,7 @@ class StateManager:
         self._pack_runtime = runtime or DISABLED_PACK_RUNTIME
         self._pack_last_static_layers = ()
         self._pack_frame_count = 0
+        self._pack_logged_error = False
         self._publish_pack_status(
             runtime=self._pack_runtime,
             scripted_active=False,

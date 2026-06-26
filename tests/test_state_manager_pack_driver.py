@@ -756,6 +756,15 @@ class PackDriverInputHealthTests(unittest.TestCase):
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 200)
 
+    def test_set_pack_runtime_resets_logged_error_latch(self):
+        sm = _make_sm()
+        sm._pack_logged_error = True                  # simulate prior runtime logged an error
+        sm._pack_input_degraded_latched = True        # H10 latch must survive swaps
+        sm.set_pack_runtime(PackRuntime(reason="disabled"))
+        self.assertFalse(sm._pack_logged_error,
+                         "post-reload first driver error would be silently swallowed")
+        self.assertTrue(sm._pack_input_degraded_latched)
+
     # H11 — regression: static layers carried in _pack_last_static_layers across a
     # runtime swap must NOT suppress set_static_layers on the fresh player when the
     # new snapshot reports the same tuple while healthy.
