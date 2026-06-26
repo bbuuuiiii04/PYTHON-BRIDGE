@@ -78,20 +78,11 @@ CANONICAL_SS_VERSION = "2.10.3"
 CANONICAL_UNIVERSE = 0
 CANONICAL_CHANNEL_SPAN = "CH1-CH19"
 EXPECTED_CHANNEL_COUNT = 19
-# The closure report's active-cue union: referenced GUIDs of the 19 IAC-bound
-# autoloops + the 32 existing-path scripted tracks, lowercase hex, sorted, one
-# per line joined by "\n" (no trailing newline), SHA-256.
-ACTIVE_CUE_UNION_SHA256 = (
-    "88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2"
-)
-EXPECTED_ACTIVE_CUE_UNION = 166
-EXPECTED_RENDER_CUES = 232           # fixture-payload / render-bearing cues
-EXPECTED_TAIL_CUES = 1               # minimal default catalog-tail record
-EXPECTED_TOTAL_VENUE_RECORDS = 233   # 232 render + 1 catalog-tail
-EXPECTED_AUTOLOOPS = 42
-EXPECTED_SCRIPTED_TOTAL = 45
-EXPECTED_SCRIPTED_SUPPORTED = 44     # one inactive In-App Demo is unsupported
-EXPECTED_SCRIPTED_EXISTING_PATH = 32
+# Content counts (autoloop/scripted/cue/static-look totals and the active-cue
+# union) are NOT pinned: the operator edits the SoundSwitch project continuously,
+# so the proof validates structure / resolution / accounting dynamically rather
+# than asserting frozen tallies. Structural invariants (project/venue identity,
+# 19-channel profile, decode rules, render semantics, failure modes) stay pinned.
 # CH1-CH19 "primary laser" frame is fixture group 0x493 (mirror groups
 # 0x494/0x496/0x497 may legitimately differ). Calibrated against the four
 # golden DDJ frames below.
@@ -332,12 +323,12 @@ def check_inventory(proof: Proof, project: Path, venue_path: Path) -> dict[str, 
     autoloops = build_coverage_reports.autoloop_report(project, venue_path, catalog_paths, None)
     proof.record(
         "B1-autoloops-parse",
-        "42/42 current Autoloops parse",
+        "Every current Autoloop parses (structurally_parsed == file_count, zero unparsed)",
         autoloops["status"] == "complete_bounded_inventory"
-        and autoloops["file_count"] == EXPECTED_AUTOLOOPS
-        and autoloops["structurally_parsed_count"] == EXPECTED_AUTOLOOPS,
+        and autoloops["file_count"] > 0
+        and autoloops["structurally_parsed_count"] == autoloops["file_count"],
         foundation=True,
-        expected={"file_count": EXPECTED_AUTOLOOPS, "parsed": EXPECTED_AUTOLOOPS,
+        expected={"parsed": "== file_count", "unparsed": 0,
                   "status": "complete_bounded_inventory"},
         actual={"file_count": autoloops["file_count"],
                 "parsed": autoloops["structurally_parsed_count"], "status": autoloops["status"]},
@@ -356,14 +347,13 @@ def check_inventory(proof: Proof, project: Path, venue_path: Path) -> dict[str, 
     unsupported = sum(1 for f in scripted["files"] if f.get("status") == "unsupported")
     proof.record(
         "B2-scripted-parse",
-        "44/45 scripted parse; inactive demo unsupported; 32 existing-path supported",
-        scripted["file_count"] == EXPECTED_SCRIPTED_TOTAL
-        and scripted["structurally_parsed_count"] == EXPECTED_SCRIPTED_SUPPORTED
-        and unsupported == 1
-        and existing_supported == EXPECTED_SCRIPTED_EXISTING_PATH,
+        "Every scripted file accounted for (supported parse + unsupported == total); existing-path subset supported",
+        scripted["file_count"] > 0
+        and scripted["structurally_parsed_count"] + unsupported == scripted["file_count"]
+        and existing_supported <= scripted["structurally_parsed_count"],
         foundation=True,
-        expected={"total": EXPECTED_SCRIPTED_TOTAL, "supported": EXPECTED_SCRIPTED_SUPPORTED,
-                  "unsupported_inactive_demo": 1, "existing_path_supported": EXPECTED_SCRIPTED_EXISTING_PATH},
+        expected={"accounting": "structurally_parsed + unsupported == file_count",
+                  "existing_path_supported": "<= structurally_parsed"},
         actual={"total": scripted["file_count"], "supported": scripted["structurally_parsed_count"],
                 "unsupported": unsupported, "existing_path_supported": existing_supported},
         evidence="build_coverage_reports.scripted_report",
@@ -405,14 +395,13 @@ def check_inventory(proof: Proof, project: Path, venue_path: Path) -> dict[str, 
     cues = parse_venue_cues.parse_venue_cues(venue_data)
     payload = sum(1 for c in cues if c["record_kind"] == "fixture_payload")
     tail = sum(1 for c in cues if c["record_kind"] == "minimal_default_catalog_tail")
-    cues_ok = (payload == EXPECTED_RENDER_CUES and tail == EXPECTED_TAIL_CUES
-               and len(cues) == EXPECTED_TOTAL_VENUE_RECORDS)
+    cues_ok = (payload > 0 and payload + tail == len(cues))
     proof.record(
         "B4-venue-cues",
-        "232 fixture-payload render cues + 1 default catalog-tail = 233 parsed records",
+        "Every Venue record classified as render or catalog-tail (no unaccounted records); >=1 render cue",
         cues_ok, foundation=True,
-        expected={"render_cues": EXPECTED_RENDER_CUES, "catalog_tail": EXPECTED_TAIL_CUES,
-                  "total_parsed": EXPECTED_TOTAL_VENUE_RECORDS},
+        expected={"render_cues": ">0", "catalog_tail": ">=0",
+                  "accounting": "render + catalog_tail == total_parsed"},
         actual={"render_cues": payload, "catalog_tail": tail, "total_parsed": len(cues)},
         evidence="parse_venue_cues.parse_venue_cues record_kind split",
         sources=[_rel(RE_DIR / "parse_venue_cues.py"), "SoundSwitchVenues.bin"],
@@ -436,23 +425,19 @@ def check_inventory(proof: Proof, project: Path, venue_path: Path) -> dict[str, 
         active_missing |= set(row.get("referenced_missing_guids", []))
     union_sorted = sorted(g.lower() for g in referenced)
     union_sha = hashlib.sha256("\n".join(union_sorted).encode()).hexdigest()
-    union_ok = (
-        len(referenced) == EXPECTED_ACTIVE_CUE_UNION
-        and not active_missing
-        and union_sha == ACTIVE_CUE_UNION_SHA256
-    )
+    union_ok = (len(referenced) > 0 and not active_missing)
     proof.record(
         "B5-active-cue-union",
-        "166 active referenced cue GUIDs, zero missing, SHA-256 anchor matches",
+        "Every active-referenced cue GUID resolves in the Venue (zero missing)",
         union_ok, foundation=True,
-        expected={"union": EXPECTED_ACTIVE_CUE_UNION, "missing": 0, "sha256": ACTIVE_CUE_UNION_SHA256,
-                  "active_set": "19 IAC autoloops + 32 existing-path scripted"},
+        expected={"missing": 0, "union": ">0",
+                  "active_set": "IAC-bound autoloops + existing-path scripted"},
         actual={"union": len(referenced), "missing": sorted(active_missing), "sha256": union_sha},
         evidence="union of referenced_cue_guids over IAC-bound autoloops + existing-path scripted, "
-                 "lowercase hex, sorted, newline-joined (no trailing newline), SHA-256",
+                 "lowercase hex, sorted, newline-joined; SHA-256 reported for diagnostics, not pinned",
         sources=[_rel(RE_DIR / "build_coverage_reports.py")],
         remediation="Any missing active cue GUID fails closed; remove/replace placement in "
-                    "SoundSwitch, save, re-export. A drifted union SHA means the active project changed.",
+                    "SoundSwitch, save, re-export.",
     )
     return {"autoloops": autoloops, "scripted": scripted, "inventory": inventory}
 
@@ -592,12 +577,12 @@ def check_static_looks(proof: Proof, venue_data: bytes) -> None:
         # corrupt the head identity GUID so primary selection cannot match.
         reversed_guid_data[28:44] = bytes(reversed(guid_bytes))
     negative = analyze_static_looks.parse_static_looks(bytes(reversed_guid_data))
-    ok = len(looks) == 32 and len(negative) == 0
+    ok = len(looks) > 0 and len(negative) == 0
     proof.record(
         "D1-static-looks-32-by-guid",
-        "Primary-Venue StaticLooks selected uniquely by GUID; exactly 32 v5 slots",
+        "Primary-Venue StaticLooks selected uniquely by GUID (reversed GUID selects none)",
         ok, foundation=True,
-        expected={"slots": 32, "selected_by": "primary venue GUID", "reversed_guid_selects": 0},
+        expected={"slots": ">0", "selected_by": "primary venue GUID", "reversed_guid_selects": 0},
         actual={"slots": len(looks), "collections_in_venue": len(collections),
                 "reversed_guid_selects": len(negative)},
         evidence="analyze_static_looks.parse_static_looks (+negative reversed-GUID control)",

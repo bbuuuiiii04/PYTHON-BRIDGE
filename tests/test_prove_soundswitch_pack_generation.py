@@ -106,13 +106,6 @@ class VerdictStateMachineTests(unittest.TestCase):
 
 
 class CanonicalConstantsTests(unittest.TestCase):
-    def test_active_union_sha_pinned(self):
-        self.assertEqual(
-            prove.ACTIVE_CUE_UNION_SHA256,
-            "88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2",
-        )
-        self.assertEqual(prove.EXPECTED_ACTIVE_CUE_UNION, 166)
-
     def test_ddj_golden_frames_are_19_bytes(self):
         for slot, (_note, _control, _name, hex_frame) in prove.GOLDEN_DDJ.items():
             self.assertEqual(len(hex_frame), 38, slot)  # 19 bytes
