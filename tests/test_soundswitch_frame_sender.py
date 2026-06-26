@@ -263,6 +263,55 @@ class TestSoundSwitchFrameSender(unittest.TestCase):
         sender.stop()
         self.assertTrue(fake.closed, "Serial port was not closed after stop()")
 
+    def test_double_start_is_idempotent_not_destructive(self):
+        """A 2nd start() on an already-running sender must be a no-op, not
+        clear _ready_event, time out, and kill the live worker."""
+        sender, fake = self._make_sender()
+        sender.start()
+        self.assertTrue(sender.status()["worker"]["running"])
+        try:
+            sender.start()  # currently raises and kills the sender
+        except RuntimeError as e:
+            self.fail(f"double start() raised and bricked the sender: {e}")
+        self.assertTrue(sender.status()["worker"]["running"],
+                        "double start() killed the running sender - DMX bricked")
+        self.assertFalse(sender.status()["stopped"])
+        sender.stop()
+
+    def test_restart_with_idle_watchdog_does_not_raise_threads_once(self):
+        sender, fake = self._make_sender(idle_blackout_s=0.2)
+        sender.start(); sender.stop()
+        sender._idle_thread.join(timeout=1.0)  # let the watchdog fully exit
+        sender2_ok = True
+        try:
+            sender.start()
+        except RuntimeError:
+            sender2_ok = False
+        self.assertTrue(sender2_ok, "restart raised 'threads can only be started once'")
+        sender.stop()
+
+    def test_restart_after_stop_resumes_submit(self):
+        sender, fake = self._make_sender()
+        sender.start(); sender.submit(tuple([1]*19)); sender.stop()
+        sender.start()
+        before = sender.status()["submit_count"]
+        sender.submit(tuple([2]*19))
+        self.assertEqual(sender.status()["submit_count"], before + 1,
+                         "submit() silently no-op after restart (frames lost)")
+        sender.stop()
+
+    def test_zero_and_stop_marks_stopped_and_stops_idle_watchdog(self):
+        sender, fake = self._make_sender(idle_blackout_s=0.2)
+        sender.start()
+        sender.zero_and_stop()            # the controller's teardown call
+        self.assertTrue(sender._stopped, "zero_and_stop left _stopped False (asymmetric with stop())")
+        sender._idle_thread.join(timeout=1.0)
+        self.assertFalse(sender._idle_thread.is_alive(), "idle watchdog leaked after zero_and_stop()")
+        before = sender.status()["submit_count"]
+        sender.submit(tuple([5]*19))
+        self.assertEqual(sender.status()["submit_count"], before,
+                         "submit() after teardown still enqueued to a dead worker")
+
     def test_mailbox_latest_frame_only(self):
         """When multiple frames are submitted rapidly, only the latest is sent
         (bounded mailbox with maxlen=2 in the worker)."""

@@ -124,19 +124,19 @@ class SoundSwitchFrameSender:
 
         # Optional idle-watchdog thread
         self._idle_thread: threading.Thread | None = None
-        if idle_blackout_s > 0:
-            self._idle_thread = threading.Thread(
-                target=self._idle_watchdog,
-                name="SoundSwitchFrameSender-idle",
-                daemon=True,
-            )
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def start(self, *, readiness_timeout_s: float = 2.0) -> None:
-        """Start only after the serial port is confirmed open, or raise."""
+        """Start only after the serial port is confirmed open, or raise.
+
+        Idempotent: a second start() on an already-running sender is a no-op.
+        """
+        if self._worker.status().get("running") and self._startup_error is None:
+            return
+        self._stopped = False
         self._ready_event.clear()
         self._startup_error = None
         self._worker.start()
@@ -146,7 +146,12 @@ class SoundSwitchFrameSender:
         if self._startup_error is not None:
             self.stop()
             raise RuntimeError("SoundSwitch DMX port failed to open")
-        if self._idle_thread is not None and not self._idle_thread.is_alive():
+        if self._idle_blackout_s > 0:
+            self._idle_thread = threading.Thread(
+                target=self._idle_watchdog,
+                name="SoundSwitchFrameSender-idle",
+                daemon=True,
+            )
             self._idle_thread.start()
         log.info("SoundSwitchFrameSender started")
 
@@ -185,6 +190,7 @@ class SoundSwitchFrameSender:
         Called on idle timeout, error, or owner-driven stop()/shutdown.
         Matches the VLN catchable-exit blackout convention.
         """
+        self._stopped = True
         self._worker.put_frame(_ZERO_PACKET)
         self._zero_count += 1
         self._worker.stop()
