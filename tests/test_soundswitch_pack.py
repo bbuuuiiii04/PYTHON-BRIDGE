@@ -257,8 +257,6 @@ class CurrentProjectPackTests(unittest.TestCase):
         ))
 
         self.assertTrue(verify_pack(pack)["verified"])
-        with self.assertRaisesRegex(SoundSwitchPackVerificationError, "proof snapshot"):
-            verify_pack(pack, enforce_snapshot_totals=True)
 
     def test_dynamic_verifier_accepts_inactive_scripted_row_with_recomputed_union(self):
         pack = self._copy("dynamic-inactive-script")
@@ -276,8 +274,6 @@ class CurrentProjectPackTests(unittest.TestCase):
         ))
 
         self.assertTrue(verify_pack(pack)["verified"])
-        with self.assertRaisesRegex(SoundSwitchPackVerificationError, "proof snapshot"):
-            verify_pack(pack, enforce_snapshot_totals=True)
 
     def test_dynamic_verifier_accepts_removed_unreferenced_autoloop_artifact(self):
         pack = self._copy("dynamic-removed-autoloop")
@@ -308,8 +304,6 @@ class CurrentProjectPackTests(unittest.TestCase):
         ))
 
         self.assertTrue(verify_pack(pack)["verified"])
-        with self.assertRaisesRegex(SoundSwitchPackVerificationError, "proof snapshot"):
-            verify_pack(pack, enforce_snapshot_totals=True)
 
     def test_two_exports_are_byte_identical(self):
         second = self.root / "pack-second"

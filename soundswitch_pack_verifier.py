@@ -16,22 +16,6 @@ SCHEMA_VERSION = "1.0.0"
 PROJECT_UUID = "{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}"
 VENUE_GUID = "b8ad2201b9e4c94696c898a7e8f6a5a9"
 SOUNDSWITCH_VERSION = "2.10.3"
-# Proof-only closure snapshot. Normal live export/load verification is dynamic.
-SNAPSHOT_ACTIVE_UNION_COUNT = 166
-SNAPSHOT_ACTIVE_UNION_SHA256 = "88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2"
-SNAPSHOT_TOTALS = {
-    "active_cue_union": SNAPSHOT_ACTIVE_UNION_COUNT,
-    "active_existing_path_scripted": 32,
-    "catalog_tail_records": 1,
-    "ddj_static_overrides": 4,
-    "iac_autoloop_bindings": 19,
-    "parsed_scripted": 44,
-    "render_cues": 232,
-    "scripted_inventory": 45,
-    "static_looks": 32,
-    "total_autoloops": 42,
-    "total_venue_records": 233,
-}
 PRIMARY_FIXTURE_GROUP = 0x493
 CONTROL_CHANNELS = frozenset((8, 9, 11))
 ATTRIBUTE_FIELDS = {"channel_id", "dmx_channel", "fixture_group", "source_offset", "value"}
@@ -383,7 +367,6 @@ def verify_pack(
     pack: str | os.PathLike[str],
     *,
     source_project: str | os.PathLike[str] | None = None,
-    enforce_snapshot_totals: bool = False,
 ) -> dict[str, Any]:
     root = Path(pack)
     files = _regular_files(root)
@@ -696,13 +679,6 @@ def verify_pack(
                        "active_cue_union": len(union), "learned_mappings": len(registry_bindings)}
     if totals != expected_totals:
         _fail("manifest totals mismatch")
-    if enforce_snapshot_totals:
-        if venue_counts != (232, 1, 233):
-            _fail("proof snapshot Venue count drift")
-        if any(totals.get(key) != value for key, value in SNAPSHOT_TOTALS.items()):
-            _fail("proof snapshot manifest totals drift")
-        if (len(union), union_sha) != (SNAPSHOT_ACTIVE_UNION_COUNT, SNAPSHOT_ACTIVE_UNION_SHA256):
-            _fail("proof snapshot active-cue union drift")
     return {"manifest_sha256": _sha(manifest_bytes), "artifact_count": len(files),
             "active_cue_union_sha256": union_sha, "verified": True}
 

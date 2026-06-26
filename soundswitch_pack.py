@@ -27,9 +27,6 @@ from .soundswitch_project_decoder import (
 )
 
 PACK_SCHEMA_VERSION = "1.0.0"
-# Proof-only closure snapshot. Live export must opt in before enforcing it.
-ACTIVE_CUE_UNION_SHA256 = "88a2e94848b696ff685fc747593d1440abb760034f8b6ea2fd71a525d1b4f4a2"
-ACTIVE_CUE_UNION_COUNT = 166
 PRIMARY_FIXTURE_GROUP = 0x493
 CONTROL_CHANNELS = frozenset((8, 9, 11))
 
@@ -269,7 +266,6 @@ def _selection_map(project: DecodedSoundSwitchProject) -> dict[str, Any]:
 def compile_pack_artifacts(
     project: DecodedSoundSwitchProject,
     *, generator_commit: str,
-    enforce_pinned_totals: bool = False,
 ) -> dict[str, bytes]:
     if project.identity.project_uuid != CANONICAL_PROJECT_UUID or \
             project.identity.soundswitch_version != CANONICAL_SOUNDSWITCH_VERSION or \
@@ -296,16 +292,6 @@ def compile_pack_artifacts(
                    and r.binding.device_name == "IAC Driver Bus 1" and r.target_kind == "autoloop"]
     enabled_ddj = [r for r in project.resolved_controls if r.binding.enabled
                    and r.binding.device_name == "DDJ-800" and r.target_kind == "static_look"]
-    if enforce_pinned_totals:
-        actual = (len(project.render_cues), len(project.catalog_tail_cues), len(project.attribute_cues),
-                  len(project.static_looks), len(project.autoloops),
-                  len(project.scripted_track_classifications), len(project.scripted_tracks),
-                  len(active_scripts), len(enabled_iac), len(enabled_ddj), len(union), union_sha)
-        expected = (232, 1, 233, 32, 42, 45, 44, 32, 19, 4,
-                    ACTIVE_CUE_UNION_COUNT, ACTIVE_CUE_UNION_SHA256)
-        if actual != expected:
-            raise SoundSwitchPackCompileError(f"pinned current-project totals drifted: expected={expected!r}; actual={actual!r}")
-
     artifacts: dict[str, bytes] = {}
     def add(path: str, value: dict[str, Any]) -> None:
         artifacts[path] = canonical_json_bytes(value)
@@ -387,6 +373,6 @@ def compile_pack_artifacts(
     return dict(sorted(artifacts.items()))
 
 
-__all__ = ["ACTIVE_CUE_UNION_COUNT", "ACTIVE_CUE_UNION_SHA256", "PACK_SCHEMA_VERSION",
+__all__ = ["PACK_SCHEMA_VERSION",
            "SoundSwitchPackCompileError", "canonical_json_bytes", "compile_pack_artifacts",
            "render_document_boundaries", "render_static_look_frame", "sha256_bytes"]

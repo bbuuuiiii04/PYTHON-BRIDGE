@@ -432,7 +432,7 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
         raise ValueError("output parent must be an existing real directory")
     decoded = decode_project(source)
     artifacts = compile_pack_artifacts(
-        decoded, generator_commit=_generator_commit(), enforce_pinned_totals=False,
+        decoded, generator_commit=_generator_commit(),
     )
     staging = _stage_artifacts(artifacts, parent, destination.name)
     try:
@@ -470,7 +470,7 @@ def publish_pack(
         first_export = not destination.exists()
         decoded = decode_project(source)
         artifacts = compile_pack_artifacts(
-            decoded, generator_commit=_generator_commit(), enforce_pinned_totals=False,
+            decoded, generator_commit=_generator_commit(),
         )
         staging = _stage_artifacts(artifacts, parent, destination.name)
         try:

@@ -741,7 +741,7 @@ class TestF10ExportFail(unittest.TestCase):
 
     def _assert_export_fails_with_relearn(self, project: DecodedSoundSwitchProject) -> None:
         with self.assertRaises(SoundSwitchPackCompileError) as cm:
-            compile_pack_artifacts(project, generator_commit="test", enforce_pinned_totals=False)
+            compile_pack_artifacts(project, generator_commit="test")
         msg = str(cm.exception)
         self.assertIn("relearn", msg)
         self.assertIn("note-capable", msg)
@@ -786,21 +786,16 @@ class TestF10ExportFail(unittest.TestCase):
     def test_note_static_look_does_not_fail_export(self):
         """Note-type bindings on static_look must NOT trigger F10."""
         project = _project_with_binding("note", "static_look")
-        # Should not raise (may raise on pinned-totals mismatch, not F10)
+        # Should not raise (may raise for other compile errors, but not F10)
         try:
-            compile_pack_artifacts(project, generator_commit="test",
-                                   enforce_pinned_totals=False)
+            compile_pack_artifacts(project, generator_commit="test")
         except SoundSwitchPackCompileError as exc:
             self.assertNotIn("relearn", str(exc), "F10 must not fire for note type")
 
-    def test_live_export_path_allows_dynamic_default_and_strict_opt_in(self):
-        """Live export compiles saved-project totals dynamically; proof can opt in."""
+    def test_live_export_path_compiles_dynamically(self):
+        """Live export compiles saved-project totals dynamically."""
         project = _project_with_binding("note", "static_look")  # valid identity, empty totals
         compile_pack_artifacts(project, generator_commit="test")
-        with self.assertRaisesRegex(SoundSwitchPackCompileError, "totals drifted"):
-            compile_pack_artifacts(
-                project, generator_commit="test", enforce_pinned_totals=True,
-            )
 
     def test_disabled_cc_binding_does_not_fail_export(self):
         """Disabled CC binding on static_look must not trigger F10."""
@@ -832,8 +827,7 @@ class TestF10ExportFail(unittest.TestCase):
             no_target_policy_inputs=(), diagnostics=(),
         )
         try:
-            compile_pack_artifacts(project, generator_commit="test",
-                                   enforce_pinned_totals=False)
+            compile_pack_artifacts(project, generator_commit="test")
         except SoundSwitchPackCompileError as exc:
             self.assertNotIn("relearn", str(exc),
                              "F10 must not fire for disabled CC binding")
@@ -860,8 +854,7 @@ class TestF10ExportFail(unittest.TestCase):
             no_target_policy_inputs=(), diagnostics=(),
         )
         try:
-            compile_pack_artifacts(project, generator_commit="test",
-                                   enforce_pinned_totals=False)
+            compile_pack_artifacts(project, generator_commit="test")
         except SoundSwitchPackCompileError as exc:
             self.assertNotIn("relearn", str(exc),
                              "F10 must not fire for non-render CC binding")

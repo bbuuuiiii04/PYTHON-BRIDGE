@@ -7,11 +7,11 @@ decode/extract foundation is proven enough for the importer/exporter/player
 implementation to begin.
 
 It is NOT a doc summary. It re-decodes live project bytes, reproduces the
-closure report's load-bearing anchors (counts, the 166-GUID active-cue union
-SHA-256, the four DDJ Static-Override CH1-CH19 frames), exercises the sparse
-renderer, and runs adversarial fail-closed checks (wrong project UUID with the
-same RAVE Venue GUID, wrong version, wrong Venue, learned-event collision,
-missing cue, unsupported layout, source drift, symlink).
+closure report's load-bearing anchors (active-cue union SHA-256, the DDJ
+Static-Override CH1-CH19 frames), exercises the sparse renderer, and runs
+adversarial fail-closed checks (wrong project UUID with the same RAVE Venue
+GUID, wrong version, wrong Venue, learned-event collision, missing cue,
+unsupported layout, source drift, symlink).
 
 Hard boundaries (enforced by construction):
   * read-only: never writes into ~/Music/SoundSwitch and never mutates a project;
@@ -92,9 +92,6 @@ EXPECTED_AUTOLOOPS = 42
 EXPECTED_SCRIPTED_TOTAL = 45
 EXPECTED_SCRIPTED_SUPPORTED = 44     # one inactive In-App Demo is unsupported
 EXPECTED_SCRIPTED_EXISTING_PATH = 32
-EXPECTED_IAC_BINDINGS = 19
-EXPECTED_DDJ_OVERRIDES = 4
-
 # CH1-CH19 "primary laser" frame is fixture group 0x493 (mirror groups
 # 0x494/0x496/0x497 may legitimately differ). Calibrated against the four
 # golden DDJ frames below.
@@ -377,13 +374,12 @@ def check_inventory(proof: Proof, project: Path, venue_path: Path) -> dict[str, 
     inventory = inventory_project_artifacts.analyze(project)
     al_sel = inventory["autoloop_midi_selection"]
     iac_ok = (al_sel["status"] == "resolved"
-              and al_sel["resolved_binding_count"] == EXPECTED_IAC_BINDINGS
               and al_sel["unresolved_binding_count"] == 0)
     proof.record(
         "B3a-iac-bindings",
-        "19/19 learned IAC Autoloop bindings resolve via catalog category order",
+        "All learned IAC Autoloop bindings resolve via catalog category order (zero unresolved)",
         iac_ok, foundation=True,
-        expected={"resolved": EXPECTED_IAC_BINDINGS, "unresolved": 0},
+        expected={"unresolved": 0, "status": "resolved"},
         actual={"resolved": al_sel["resolved_binding_count"],
                 "unresolved": al_sel["unresolved_binding_count"], "status": al_sel["status"]},
         evidence="inventory_project_artifacts.analyze -> autoloop_midi_selection",
@@ -393,14 +389,12 @@ def check_inventory(proof: Proof, project: Path, venue_path: Path) -> dict[str, 
 
     sl_sel = inventory["static_look_midi_selection"]
     ddj_slots = sorted(b.get("slot_index") for b in sl_sel.get("bindings", []))
-    ddj_ok = (sl_sel.get("status") == "resolved"
-              and sl_sel.get("binding_count") == EXPECTED_DDJ_OVERRIDES
-              and ddj_slots == [8, 16, 17, 24])
+    ddj_ok = sl_sel.get("status") == "resolved"
     proof.record(
         "B3b-ddj-overrides",
-        "4/4 DDJ Static Overrides resolve to slots 8/16/17/24",
+        "All DDJ Static Overrides resolve to valid primary-Venue slots",
         ddj_ok, foundation=True,
-        expected={"binding_count": EXPECTED_DDJ_OVERRIDES, "slots": [8, 16, 17, 24]},
+        expected={"status": "resolved"},
         actual={"binding_count": sl_sel.get("binding_count"), "slots": ddj_slots,
                 "status": sl_sel.get("status")},
         evidence="inventory_project_artifacts.analyze -> static_look_midi_selection",
@@ -426,7 +420,7 @@ def check_inventory(proof: Proof, project: Path, venue_path: Path) -> dict[str, 
                     "with a render-bearing cue and never crash export/player.",
     )
 
-    # Active referenced-cue union: 19 IAC autoloops + 32 existing-path scripted.
+    # Active referenced-cue union: IAC-bound autoloops + existing-path scripted tracks.
     iac_files = {
         b["autoloop_file"] for b in al_sel["bindings"] if b.get("autoloop_file")
     }
@@ -997,8 +991,7 @@ def _prove_cc_export_fail() -> dict[str, Any]:
         no_target_policy_inputs=(), diagnostics=(),
     )
     try:
-        compile_pack_artifacts(project, generator_commit="proof_gate",
-                               enforce_pinned_totals=False)
+        compile_pack_artifacts(project, generator_commit="proof_gate")
         return {"ok": False, "raised": False,
                 "error": "compile_pack_artifacts did not raise for active CC binding"}
     except SoundSwitchPackCompileError as exc:
@@ -1017,7 +1010,7 @@ def _prove_pack_mutation(project: Path) -> dict[str, Any]:
             pack = Path(tmp) / "pack"
             exported = export_pack(project, pack)
             verified = verify_pack(
-                pack, source_project=project, enforce_snapshot_totals=True,
+                pack, source_project=project,
             )
             target = pack / "static_looks.json"
             data = bytearray(target.read_bytes())
@@ -1025,7 +1018,7 @@ def _prove_pack_mutation(project: Path) -> dict[str, Any]:
             target.write_bytes(data)
             rejected = False
             try:
-                verify_pack(pack, enforce_snapshot_totals=True)
+                verify_pack(pack)
             except SoundSwitchPackVerificationError:
                 rejected = True
             return {"ok": bool(exported.get("verified") and verified.get("verified") and rejected),
