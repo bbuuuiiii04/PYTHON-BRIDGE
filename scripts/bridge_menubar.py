@@ -159,7 +159,10 @@ def detect_export_state() -> str:
     if not sidecar:
         return "changes"
     raw_ignore = sidecar.get("ignored_paths")
-    ignore = frozenset(p for p in raw_ignore if isinstance(p, str)) \
+    ignore = frozenset(
+        p for p in raw_ignore
+        if isinstance(p, str) and not p.startswith("recordable/")
+    ) \
         if isinstance(raw_ignore, list) else frozenset()
     current = _source_content_fingerprint(CANONICAL_SOURCE_PROJECT, ignore=ignore)
     if current is None or current != sidecar.get("source_fingerprint"):

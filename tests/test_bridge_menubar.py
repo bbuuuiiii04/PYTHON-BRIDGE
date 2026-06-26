@@ -668,6 +668,47 @@ class BridgeMenubarTests(unittest.TestCase):
                 content.write_bytes(b"edited-lighting")
                 self.assertEqual(bridge_menubar.detect_export_state(), "changes")
 
+    def test_detect_export_state_keeps_recordable_dat_visible(self) -> None:
+        bridge_menubar = self._import_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.ssproj"
+            source.mkdir()
+            (source / "project.ssfile").write_bytes(b"real-lighting")
+            backup = source / "SoundSwitchVenues.bin.backup"
+            backup.write_bytes(b"backup-v1")
+            recordable = source / "recordable" / "01bede4d8ea57b3b58574d71826dc1f5.dat"
+            recordable.parent.mkdir()
+            recordable.write_bytes(b"opaque-today")
+            pack = root / "pack"
+            pack.mkdir()
+            ignored = [
+                "SoundSwitchVenues.bin.backup",
+                "recordable/01bede4d8ea57b3b58574d71826dc1f5.dat",
+            ]
+            sidecar = bridge_menubar._sidecar_path(pack)
+            sidecar.write_text(json.dumps({
+                "source_fingerprint": bridge_menubar._source_content_fingerprint(
+                    source, ignore=frozenset(ignored)),
+                "ignored_paths": ignored,
+            }), encoding="utf-8")
+
+            with patch.object(bridge_menubar, "CANONICAL_SOURCE_PROJECT", str(source)), \
+                 patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack):
+                # Old sidecars that ignored recordable/*.dat must fail open.
+                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
+
+                sidecar.write_text(json.dumps({
+                    "source_fingerprint": bridge_menubar._source_content_fingerprint(
+                        source, ignore=frozenset({"SoundSwitchVenues.bin.backup"})),
+                    "ignored_paths": ignored,
+                }), encoding="utf-8")
+                self.assertEqual(bridge_menubar.detect_export_state(), "up_to_date")
+                backup.write_bytes(b"backup-v2-rewritten-by-perform")
+                self.assertEqual(bridge_menubar.detect_export_state(), "up_to_date")
+                recordable.write_bytes(b"learned-midi-or-control-state")
+                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
+
     def test_finish_export_updates_freshness_verdict(self) -> None:
         bridge_menubar = self._import_module()
         for state in ("reload_succeeded", "published_not_live", "reload_failed"):
