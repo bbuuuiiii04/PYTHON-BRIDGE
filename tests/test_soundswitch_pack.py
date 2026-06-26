@@ -70,6 +70,23 @@ class PurePackCompilerTests(unittest.TestCase):
             CueAttribute(0, 0x493, 82, 1, 7), CueAttribute(1, 0x494, 83, 2, 99)))
         self.assertEqual(render_static_look_frame(look), (7,) + (0,) * 18)
 
+    def test_render_static_look_ignores_out_of_range_dmx_channel(self):
+        look = StaticLook(0, 1, 0, 5, "x", (), (), (), (), (
+            CueAttribute(0, 0x493, 82, 0, 99),))
+        frame = render_static_look_frame(look)
+        self.assertEqual(frame, tuple([0]*19), "dmx_channel=0 corrupted CH19 via frame[-1]")
+        look20 = StaticLook(0, 1, 0, 5, "x", (), (), (), (), (
+            CueAttribute(0, 0x493, 82, 20, 5),))
+        render_static_look_frame(look20)  # must not raise IndexError
+
+        cue = AttributeCue(1, 2, "fixture_payload", "a", "a" * 32, "p",
+                           (CueAttribute(1, 0x493, 82, 0, 77),))
+        doc = LightingDocument("SSAutoLoop1.ssfile", "0" * 64, 1, 3, "p", "x", 1, (), (
+            TimelineRecord(100, 1, -1, 1, "cue", 0, cue.cue_guid),), (), 1,
+            b"0123456789", "1" * 64, None)
+        self.assertEqual(render_document_boundaries(doc, {cue.cue_guid: cue})[0]["frame"],
+                         [0] * 19)
+
     def test_canonical_json_is_stable_and_rejects_nan(self):
         self.assertEqual(canonical_json_bytes({"b": 1, "a": 2}), b'{"a":2,"b":1}\n')
         with self.assertRaises(ValueError):

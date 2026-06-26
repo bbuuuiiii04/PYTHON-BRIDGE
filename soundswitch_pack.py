@@ -82,7 +82,7 @@ def _attrs(rows: Iterable[CueAttribute]) -> list[dict[str, Any]]:
 def render_static_look_frame(look: StaticLook) -> tuple[int, ...]:
     frame = [0] * 19
     for row in look.generic_attributes:
-        if row.fixture_group == PRIMARY_FIXTURE_GROUP:
+        if row.fixture_group == PRIMARY_FIXTURE_GROUP and 1 <= row.dmx_channel <= len(frame):
             frame[row.dmx_channel - 1] = row.value
     return tuple(frame)
 
@@ -114,7 +114,10 @@ def render_document_boundaries(
                     "remove/replace the placement in SoundSwitch, save, and re-export"
                 )
             for attribute in cue.attributes:
-                if attribute.fixture_group == PRIMARY_FIXTURE_GROUP:
+                if (
+                    attribute.fixture_group == PRIMARY_FIXTURE_GROUP
+                    and 1 <= attribute.dmx_channel <= len(frame)
+                ):
                     frame[attribute.dmx_channel - 1] = attribute.value
         output.append({"frame": frame.copy(), "source_order": source_order,
                        "source_offset": row.source_offset, "time": row.time})
