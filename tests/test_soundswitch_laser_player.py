@@ -283,6 +283,12 @@ class PlayerStateTests(unittest.TestCase):
                 self.assertEqual(result.frame, ZERO_FRAME)
                 self.assertEqual(result.diagnostic.code, code)
 
+    def test_player_error_diag_uses_class_name_not_str_exc(self):
+        ssid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        result = self.player.select_scripted(ssid, -1)
+        self.assertEqual(result.diagnostic.code, "player_error")
+        self.assertEqual(result.diagnostic.message, "ValueError")
+
     def test_stop_stale_and_error_cannot_be_bypassed_by_static_override(self):
         ssid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         self.assertEqual(self.player.set_static_layers((_layer(8),)).frame[0], 8)

@@ -85,7 +85,7 @@ def load_soundswitch_pack_player_config(
             base_dir=resolved.parent,
         )
     except Exception as exc:  # The public loader's contract is never-raising.
-        return _invalid(f"cannot load config: {type(exc).__name__}: {exc}")
+        return _invalid(f"cannot load config: {type(exc).__name__}")
 
 
 def load_soundswitch_pack_player_config_from_dict(
@@ -132,7 +132,7 @@ def load_soundswitch_pack_player_config_from_dict(
             except Exception as exc:
                 errors.append(
                     "fixture_map_path cannot be loaded: "
-                    f"{type(exc).__name__}: {exc}"
+                    f"{type(exc).__name__}"
                 )
                 fixture_value = {}
         fixture_map = _fixture_map(fixture_value, errors)
@@ -162,7 +162,7 @@ def load_soundswitch_pack_player_config_from_dict(
             config=config,
         )
     except Exception as exc:  # Keep the from-dict seam just as fail-closed.
-        return _invalid(f"cannot validate config: {type(exc).__name__}: {exc}")
+        return _invalid(f"cannot validate config: {type(exc).__name__}")
 
 
 def _resolve_path(explicit: Optional[str]) -> Path:

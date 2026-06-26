@@ -347,7 +347,7 @@ class LaserPackPlayer:
         try:
             return PlayerResult(render_scripted_frame(document, selection.elapsed_ms))
         except (TypeError, ValueError) as exc:
-            return _diagnostic("player_error", str(exc))
+            return _diagnostic("player_error", type(exc).__name__)
 
     def _autoloop_base(self, selection: _AutoloopSelection) -> PlayerResult:
         if selection.authority not in ("fresh", "stale", "ambiguous"):
@@ -375,7 +375,7 @@ class LaserPackPlayer:
         try:
             return PlayerResult(render_autoloop_frame(document, selection.phase_tick))
         except (TypeError, ValueError) as exc:
-            return _diagnostic("player_error", str(exc))
+            return _diagnostic("player_error", type(exc).__name__)
 
     def render(self) -> PlayerResult:
         if self._emergency or self._blackout:
@@ -403,7 +403,7 @@ class LaserPackPlayer:
                 )
                 return PlayerResult(layered.frame, layered.diagnostic)
             except (TypeError, ValueError) as exc:
-                return _diagnostic("player_error", str(exc))
+                return _diagnostic("player_error", type(exc).__name__)
         return base
 
 

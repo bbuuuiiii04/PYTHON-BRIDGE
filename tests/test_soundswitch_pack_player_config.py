@@ -194,6 +194,32 @@ class SoundSwitchPackPlayerConfigTests(unittest.TestCase):
         self.assertEqual(result.reason, "invalid_config")
         self.assertTrue(any("fixture_map_path cannot be loaded" in e for e in result.errors))
 
+    def test_config_fixture_map_error_excludes_raw_path(self) -> None:
+        sensitive = "/dev/tty.usbserial-XYZ_missing.json"
+        result = load_soundswitch_pack_player_config_from_dict(
+            _valid(fixture_map_path=sensitive),
+        )
+        self.assertFalse(result.available)
+        for err in result.errors:
+            self.assertNotIn("/dev/tty.usbserial-XYZ", err)
+
+    def test_config_load_error_excludes_raw_path_from_error_and_log(self) -> None:
+        sensitive = "/Users/bbui/.ssh/config"
+        with mock.patch.object(
+            config_module,
+            "_read_json_object",
+            side_effect=OSError(f"Permission denied: {sensitive}"),
+        ), tempfile.TemporaryDirectory() as tmp, self.assertLogs(
+            "soundswitch_pack_player_config", level="WARNING",
+        ) as logs:
+            path = Path(tmp) / "config.json"
+            path.write_text("{}", encoding="utf-8")
+            result = load_soundswitch_pack_player_config(str(path))
+        self.assertFalse(result.available)
+        for err in result.errors:
+            self.assertNotIn(sensitive, err)
+        self.assertNotIn(sensitive, "\n".join(logs.output))
+
     def test_invalid_json_and_non_object_are_invalid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -215,7 +241,7 @@ class SoundSwitchPackPlayerConfigTests(unittest.TestCase):
             )
             result = load_soundswitch_pack_player_config(str(path))
         self.assertFalse(result.available)
-        self.assertTrue(any("duplicate JSON key" in e for e in result.errors))
+        self.assertEqual(result.errors, ("cannot load config: ValueError",))
 
     def test_duplicate_fixture_channel_after_integer_coercion_is_invalid(self) -> None:
         fixture = _identity_map()
