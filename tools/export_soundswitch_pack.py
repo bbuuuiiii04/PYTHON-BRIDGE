@@ -94,9 +94,12 @@ def _source_stat_signature(project: str | os.PathLike[str]) -> str | None:
     return digest.hexdigest()
 
 
-def _source_content_fingerprint(project: str | os.PathLike[str]) -> str | None:
+def _source_content_fingerprint(
+    project: str | os.PathLike[str], *, ignore: frozenset[str] = frozenset(),
+) -> str | None:
     """Exact change signal: sha256 over sorted (relpath, sha256(file bytes)) of
-    every regular file in the bundle. Returns None if the bundle is absent."""
+    every regular file in the bundle, excluding `ignore` relpaths. Returns None
+    if the bundle is absent."""
     base = Path(project).expanduser()
     if not base.is_dir():
         return None
@@ -107,11 +110,13 @@ def _source_content_fingerprint(project: str | os.PathLike[str]) -> str | None:
             path = Path(root) / name
             if path.is_symlink() or not path.is_file():
                 continue
+            rel = path.relative_to(base).as_posix()
+            if rel in ignore:
+                continue
             try:
                 data = path.read_bytes()
             except OSError:
                 return None  # unreadable source -> treat as "cannot prove up-to-date"
-            rel = path.relative_to(base).as_posix()
             rows.append((rel, hashlib.sha256(data).hexdigest()))
     digest = hashlib.sha256()
     for rel, file_hash in sorted(rows):
@@ -127,14 +132,34 @@ def _binding_sidecar_path(destination: Path) -> Path:
     return destination.parent / f".{destination.name}{_BINDING_SIDECAR_SUFFIX}"
 
 
+def _opaque_source_paths(pack_dir: Path) -> frozenset[str]:
+    """Relpaths the decoder retained but parsed nothing from (backups, demo
+    media, caches). SoundSwitch rewrites these during normal navigation, so they
+    must not count as pending export changes. Read from the pack manifest the
+    publish just wrote; absent/unreadable -> empty (fall back to whole-tree)."""
+    try:
+        manifest = json.loads((pack_dir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    inventory = manifest.get("source_inventory", []) if isinstance(manifest, dict) else []
+    return frozenset(
+        row["path"] for row in inventory
+        if isinstance(row, dict)
+        and row.get("parse_status") == "retained_opaque"
+        and isinstance(row.get("path"), str)
+    )
+
+
 def _write_source_sidecar(destination: Path, source: Path, manifest_sha256: str) -> None:
-    fingerprint = _source_content_fingerprint(source)
+    ignored = _opaque_source_paths(destination)
+    fingerprint = _source_content_fingerprint(source, ignore=ignored)
     if fingerprint is None:
         return  # cannot fingerprint -> leave no sidecar; detection stays "changes"
     payload = {
         "source_fingerprint": fingerprint,
         "generator_commit": _generator_commit(),
         "pack_manifest_sha256": manifest_sha256,
+        "ignored_paths": sorted(ignored),
     }
     _atomic_write_result(_sidecar_path(destination), payload)
 

@@ -86,9 +86,12 @@ def _source_stat_signature(project: str | os.PathLike[str]) -> str | None:
     return digest.hexdigest()
 
 
-def _source_content_fingerprint(project: str | os.PathLike[str]) -> str | None:
+def _source_content_fingerprint(
+    project: str | os.PathLike[str], *, ignore: frozenset[str] = frozenset(),
+) -> str | None:
     """Exact change signal: sha256 over sorted (relpath, sha256(file bytes)) of
-    every regular file in the bundle. Returns None if the bundle is absent."""
+    every regular file in the bundle, excluding `ignore` relpaths. Returns None
+    if the bundle is absent."""
     base = Path(project).expanduser()
     if not base.is_dir():
         return None
@@ -99,11 +102,13 @@ def _source_content_fingerprint(project: str | os.PathLike[str]) -> str | None:
             path = Path(root) / name
             if path.is_symlink() or not path.is_file():
                 continue
+            rel = path.relative_to(base).as_posix()
+            if rel in ignore:
+                continue
             try:
                 data = path.read_bytes()
             except OSError:
                 return None  # unreadable source -> treat as "cannot prove up-to-date"
-            rel = path.relative_to(base).as_posix()
             rows.append((rel, hashlib.sha256(data).hexdigest()))
     digest = hashlib.sha256()
     for rel, file_hash in sorted(rows):
@@ -153,7 +158,10 @@ def detect_export_state() -> str:
     sidecar = read_source_sidecar()
     if not sidecar:
         return "changes"
-    current = _source_content_fingerprint(CANONICAL_SOURCE_PROJECT)
+    raw_ignore = sidecar.get("ignored_paths")
+    ignore = frozenset(p for p in raw_ignore if isinstance(p, str)) \
+        if isinstance(raw_ignore, list) else frozenset()
+    current = _source_content_fingerprint(CANONICAL_SOURCE_PROJECT, ignore=ignore)
     if current is None or current != sidecar.get("source_fingerprint"):
         return "changes"
     # ponytail: up-to-date is keyed purely on SoundSwitch source content. The

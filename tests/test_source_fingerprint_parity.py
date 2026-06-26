@@ -79,6 +79,33 @@ class SourceFingerprintParityTests(unittest.TestCase):
                 bridge_menubar._source_stat_signature(bundle),
             )
 
+    def test_ignore_set_skips_files_in_lockstep(self) -> None:
+        bridge_menubar = self._import_menubar()
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "project.ssproj"
+            bundle.mkdir()
+            (bundle / "project.ssfile").write_bytes(b"content")
+            opaque = bundle / "demo.mp4"
+            opaque.write_bytes(b"v1")
+            ignore = frozenset({"demo.mp4"})
+
+            base = export_module._source_content_fingerprint(bundle, ignore=ignore)
+            self.assertEqual(
+                base, bridge_menubar._source_content_fingerprint(bundle, ignore=ignore),
+            )
+            # Rewriting an ignored file must not move the fingerprint, on either side.
+            opaque.write_bytes(b"v2-rewritten-and-longer")
+            self.assertEqual(
+                base, export_module._source_content_fingerprint(bundle, ignore=ignore),
+            )
+            self.assertEqual(
+                base, bridge_menubar._source_content_fingerprint(bundle, ignore=ignore),
+            )
+            # Without the ignore the change is visible (proves the file is real).
+            self.assertNotEqual(
+                base, export_module._source_content_fingerprint(bundle),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1118,6 +1118,7 @@ class PublishPackCliTests(unittest.TestCase):
                 "source_fingerprint": export_module._source_content_fingerprint(source),
                 "generator_commit": "b" * 40,
                 "pack_manifest_sha256": "a" * 64,
+                "ignored_paths": [],
             })
             self.assertFalse(any(destination.rglob("*.source.json")))
             self.assertNotIn(str(Path.home()), sidecar.read_text(encoding="utf-8"))

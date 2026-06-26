@@ -633,6 +633,41 @@ class BridgeMenubarTests(unittest.TestCase):
                  patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack):
                 self.assertEqual(bridge_menubar.detect_export_state(), "up_to_date")
 
+    def test_detect_export_state_ignores_opaque_source_files(self) -> None:
+        # SoundSwitch rewrites non-content files (backups, demo media, caches)
+        # as a side effect of normal UI navigation (e.g. selecting PERFORM).
+        # The decoder marks those `retained_opaque`; the exporter records them
+        # in the sidecar `ignored_paths`. Detection must skip them so the button
+        # does not falsely flip to EXPORT when nothing the bridge runs changed.
+        bridge_menubar = self._import_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.ssproj"
+            source.mkdir()
+            content = source / "project.ssfile"
+            content.write_bytes(b"real-lighting")
+            backup = source / "SoundSwitchVenues.bin.backup"
+            backup.write_bytes(b"backup-v1")
+            pack = root / "pack"
+            pack.mkdir()
+            ignored = ["SoundSwitchVenues.bin.backup"]
+            sidecar = bridge_menubar._sidecar_path(pack)
+            sidecar.write_text(json.dumps({
+                "source_fingerprint": bridge_menubar._source_content_fingerprint(
+                    source, ignore=frozenset(ignored)),
+                "ignored_paths": ignored,
+            }), encoding="utf-8")
+
+            with patch.object(bridge_menubar, "CANONICAL_SOURCE_PROJECT", str(source)), \
+                 patch.object(bridge_menubar, "CANONICAL_PACK_DIR", pack):
+                self.assertEqual(bridge_menubar.detect_export_state(), "up_to_date")
+                # The reported bug: rewriting the opaque backup must NOT flip.
+                backup.write_bytes(b"backup-v2-rewritten-by-perform")
+                self.assertEqual(bridge_menubar.detect_export_state(), "up_to_date")
+                # A real lighting edit MUST still flip to changes.
+                content.write_bytes(b"edited-lighting")
+                self.assertEqual(bridge_menubar.detect_export_state(), "changes")
+
     def test_finish_export_updates_freshness_verdict(self) -> None:
         bridge_menubar = self._import_module()
         for state in ("reload_succeeded", "published_not_live", "reload_failed"):
