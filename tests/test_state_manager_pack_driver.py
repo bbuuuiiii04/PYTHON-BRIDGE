@@ -569,6 +569,22 @@ class PackDriverTests(unittest.TestCase):
             sm._push_tick()
         self.assertEqual(be.frames, [ZERO_FRAME])  # direct ZERO, driver not run
 
+    def test_run_loop_exception_before_push_tick_submits_pack_zero_and_exits(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+        sm._push_tick = mock.Mock()
+
+        def boom():
+            sm._stop.set()
+            raise RuntimeError("drain crash")
+
+        sm._drain_events = boom
+        with self.assertLogs("state_manager", level="ERROR") as captured:
+            sm._run()
+        sm._push_tick.assert_not_called()
+        self.assertEqual(be.frames, [ZERO_FRAME])
+        self.assertIn("RuntimeError", "\n".join(captured.output))
+
     # D14
     def test_driver_does_no_blocking_io(self):
         be = _FakeBackend()
@@ -645,9 +661,9 @@ class PackDriverInputHealthTests(unittest.TestCase):
         self.assertEqual(be.frames[-1][0], 200)
 
     # H5
-    def test_stale_error_string_does_not_release_blackout(self):
+    def test_transient_error_string_does_not_release_blackout(self):
         be = _FakeBackend()
-        inp = _FakeInput(blackout_held=True, error="stale_hold", worker_alive=True)
+        inp = _FakeInput(blackout_held=True, error="input_error", worker_alive=True)
         sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
         _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
         sm._drive_pack_output()

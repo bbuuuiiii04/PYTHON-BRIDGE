@@ -641,6 +641,8 @@ def decode_catalog(data: bytes, path: str, source_sha256: str | None = None) -> 
     indices = set()
     for ordering in range(entry_count):
         start = offset
+        if offset + 16 > len(data):
+            _fail("bounds", "catalog entry header is outside the source", path, offset)
         record_type, app_index, bars, enabled = struct.unpack_from("<IIII", data, offset)
         offset += 16
         name, offset = _plain_utf16_string(data, offset, path)

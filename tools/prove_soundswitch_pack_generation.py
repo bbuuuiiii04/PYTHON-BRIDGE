@@ -83,22 +83,9 @@ EXPECTED_CHANNEL_COUNT = 19
 # so the proof validates structure / resolution / accounting dynamically rather
 # than asserting frozen tallies. Structural invariants (project/venue identity,
 # 19-channel profile, decode rules, render semantics, failure modes) stay pinned.
-# CH1-CH19 "primary laser" frame is fixture group 0x493 (mirror groups
-# 0x494/0x496/0x497 may legitimately differ). Calibrated against the four
-# golden DDJ frames below.
+# CH1-CH19 "primary laser" frame is fixture group 0x493; mirror groups
+# 0x494/0x496/0x497 may legitimately differ.
 PRIMARY_LASER_FIXTURE_GROUP = "0x493"
-
-# DDJ Static Override golden truth: note -> (slot, name, ch1_19_hex).
-GOLDEN_DDJ = {
-    16: ("CH7 note 106", "StaticOverride16", "OFF",
-         "00000000000000000000000000000000000000"),
-    24: ("CH10 note 122", "StaticOverride24", "STROBE BUILDUP #1",
-         "010015ff00288a00ff00ff00ff005d000000ff"),
-    8: ("CH10 note 123", "StaticOverride8", "STROBE EFFECT",
-        "1800260000797c0000d6ff000000000000006e"),
-    17: ("CH10 note 127", "StaticOverride17", "RAINBOW STROBE",
-         "26001d00006483ffffff00000000000000004f"),
-}
 
 DEFAULT_PROJECT = Path("~/Music/SoundSwitch/default.ssproj").expanduser()
 DEFAULT_SCRATCH = Path("~/Music/SoundSwitch/codex fixture research real.ssproj").expanduser()
@@ -378,18 +365,18 @@ def check_inventory(proof: Proof, project: Path, venue_path: Path) -> dict[str, 
     )
 
     sl_sel = inventory["static_look_midi_selection"]
-    ddj_slots = sorted(b.get("slot_index") for b in sl_sel.get("bindings", []))
-    ddj_ok = sl_sel.get("status") == "resolved"
+    static_slots = sorted(b.get("slot_index") for b in sl_sel.get("bindings", []))
+    static_ok = sl_sel.get("status") == "resolved"
     proof.record(
-        "B3b-ddj-overrides",
-        "All DDJ Static Overrides resolve to valid primary-Venue slots",
-        ddj_ok, foundation=True,
+        "B3b-static-override-selection",
+        "All active Static Overrides resolve to valid primary-Venue slots",
+        static_ok, foundation=True,
         expected={"status": "resolved"},
-        actual={"binding_count": sl_sel.get("binding_count"), "slots": ddj_slots,
+        actual={"binding_count": sl_sel.get("binding_count"), "slots": static_slots,
                 "status": sl_sel.get("status")},
         evidence="inventory_project_artifacts.analyze -> static_look_midi_selection",
         sources=[_rel(RE_DIR / "inventory_project_artifacts.py")],
-        remediation="A DDJ override that fails to resolve to a primary-Venue slot fails closed.",
+        remediation="A Static Override that fails to resolve to a primary-Venue slot fails closed.",
     )
 
     cues = parse_venue_cues.parse_venue_cues(venue_data)
@@ -592,23 +579,23 @@ def check_static_looks(proof: Proof, venue_data: bytes) -> None:
 
     results = []
     all_match = True
-    for slot, (note, control, name, golden_hex) in GOLDEN_DDJ.items():
-        look = looks[slot] if slot < len(looks) else None
-        rendered = _frame_hex(_render_primary_ch_frame(look["groups"])) if look else None
-        match = (look is not None and look["name"] == name and rendered == golden_hex)
+    for slot, look in enumerate(looks):
+        frame = _render_primary_ch_frame(look["groups"])
+        rendered = _frame_hex(frame)
+        match = len(frame) == EXPECTED_CHANNEL_COUNT and all(
+            isinstance(value, int) and 0 <= value <= 255 for value in frame)
         all_match &= match
-        results.append({"slot": slot, "note": note, "control": control, "name": name,
-                        "expected_hex": golden_hex, "rendered_hex": rendered,
-                        "name_match": look is not None and look["name"] == name, "match": match})
+        results.append({"slot": slot, "name": look["name"], "rendered_hex": rendered,
+                        "frame_bytes": len(frame), "match": match})
     proof.record(
-        "D2-ddj-ch1-19-frames",
-        "DDJ overrides render exact CH1-CH19 frames (slots 8/16/17/24)",
+        "D2-static-look-ch1-19-frames",
+        "Static Looks render structural CH1-CH19 frames",
         all_match, foundation=True,
-        expected={str(s): GOLDEN_DDJ[s][3] for s in GOLDEN_DDJ},
+        expected={"frame_bytes": EXPECTED_CHANNEL_COUNT, "slots": len(looks)},
         actual=results,
-        evidence=f"render fixture group {PRIMARY_LASER_FIXTURE_GROUP} of each Static Look slot",
+        evidence=f"recompute fixture group {PRIMARY_LASER_FIXTURE_GROUP} for each Static Look slot",
         sources=[_rel(RE_DIR / "analyze_static_looks.py"), "SoundSwitchVenues.bin"],
-        remediation="A mismatch means the Venue static bank or profile changed; fail closed.",
+        remediation="A malformed Static Look frame or primary fixture mapping fails closed.",
     )
 
 

@@ -2,17 +2,21 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout at `cb31cf8` on 2026-06-25.
+Audited against the current checkout at `595fabd` on 2026-06-27.
 
 ## SoundSwitch Pack Component Boundary
 
 - `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` provide frozen models and strict read-only decode; `soundswitch_pack.py` and `tools/export_soundswitch_pack.py` deterministically publish the repo-local canonical pack; `soundswitch_pack_verifier.py` independently verifies it with dynamic saved-project inventory reconciliation by default and an explicit proof-only snapshot gate. All are pinned to SoundSwitch 2.10.3 and the canonical UUID/RAVE profile.
 - Decode/export must not mutate a source project. Pack publication is deterministic and fail-closed; independent verification rejects inventory, hash, canonicalization, semantic, crosswalk, or source-drift changes, including the F9 one-byte mutation.
+- The verifier must stay a runtime-loader superset for pack metadata. It rejects duplicate active controller events, duplicate Static Override slot ownership, invalid Static Override targets on any device, bridge scene target/classification drift, missing Autoloop references, and empty bridge-scene crosswalks before a pack can publish or load.
 - The immutable pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender are software-tested components. The never-raising config loader is used only during startup/reload; config or pack filesystem work must never enter `_push_tick`.
 - `__main__` loads optional pack config, chooses one backend, starts verified workers, builds one immutable `PackRuntime`, and wires validate-first commands/status. `StateManager` reads one runtime reference per tick and is the sole `submit_frame` caller.
 - `PackRuntime.sanitized_status()` calls no backend/provider. `StateManager` owns the copied pack
   operational snapshot, publishes a fresh dict from the already-rendered frame before submission,
   and returns only a copy to status readers. The 200 Hz path gains no I/O, lock, or worker poll.
+- A caught ordinary exception in the 200 Hz iteration submits a direct pack ZERO frame, logs a bounded
+  counter, skips that instant, and keeps the loop alive. `KeyboardInterrupt`/`SystemExit` still pass
+  through; non-pack output lanes are not force-zeroed by this guard.
 - `software_zero_frame` is frame equality only and `frame_count` counts attempted normal software
   frames. Neither proves serial delivery, Enttec acceptance, or physical darkness; sender health is
   not inferred.
@@ -36,6 +40,7 @@ Audited against the current checkout at `cb31cf8` on 2026-06-25.
 
 - `SmartPhrasingEngine` is a pure musical phrasing engine. It emits
   `SmartPhrasingState` intents and does not send OS2L or write `OutputState`.
+- On the first live tick after a reset, an exact Smart Drop beat landing fires once with a small exactness epsilon; near-misses must not round forward into a false drop.
 - `LaserDirector` is scene policy only; it does not send OS2L and does not emit
   MIDI side effects directly.
 - `LaserSceneExecutor` owns laser MIDI trigger execution, blackout/cooldown,

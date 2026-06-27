@@ -404,23 +404,32 @@ class TestNonRenderControls(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestClearOnEvent(unittest.TestCase):
-    def test_blackout_auto_releases_on_worker_tick_without_clearing_static(self):
-        a = SoundSwitchMidiInputAdapter([_SLOT8, _BLACKOUT], stale_timeout_ms=100)
+    def test_blackout_hold_does_not_self_expire_without_note_off(self):
+        a = SoundSwitchMidiInputAdapter([_SLOT8, _BLACKOUT], stale_timeout_ms=1)
+        _note_on(a, _SLOT8)
+        _note_on(a, _BLACKOUT)
         with mock.patch("rb_ss_bridge_v2.soundswitch_midi_input.time.monotonic",
-                        side_effect=(1.0, 1.05)):
-            _note_on(a, _SLOT8)
-            _note_on(a, _BLACKOUT)
-        a._expire_blackout_if_needed(1.16)
-        snapshot = a.snapshot()
+                        return_value=time.monotonic() + 10):
+            snapshot = a.snapshot()
         self.assertEqual(tuple(layer.slot for layer in snapshot.held_layers), (8,))
-        self.assertFalse(snapshot.blackout_held)
-        self.assertEqual(snapshot.error, "stale_hold")
+        self.assertTrue(snapshot.blackout_held)
+        self.assertIsNone(snapshot.error)
 
-    def test_fresh_matched_input_recovers_stale_error_only_when_worker_healthy(self):
+    def test_input_port_gone_clears_blackout_and_static(self):
+        a = SoundSwitchMidiInputAdapter([_SLOT8, _BLACKOUT], stale_timeout_ms=1)
+        _note_on(a, _SLOT8)
+        _note_on(a, _BLACKOUT)
+        a._mark_port_gone()
+        snapshot = a.snapshot()
+        self.assertEqual(snapshot.held_layers, ())
+        self.assertFalse(snapshot.blackout_held)
+        self.assertEqual(snapshot.error, "input_port_gone")
+
+    def test_fresh_matched_input_recovers_port_gone_error_only_when_worker_healthy(self):
         a = SoundSwitchMidiInputAdapter([_SLOT8], stale_timeout_ms=100)
         with a._lock:
             a._worker_alive = True
-            a._error = "stale_hold"
+            a._error = "input_port_gone"
             a._refresh_snapshot_locked()
         _note_on(a, _SLOT8)
         fresh = a.snapshot()

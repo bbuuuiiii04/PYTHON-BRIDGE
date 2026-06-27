@@ -908,33 +908,48 @@ class StateManager:
 
     def _run(self) -> None:
         log.info("[SM] starting")
+        loop_error_count = 0
+        next_loop_error_log = 0.0
         while not self._stop.is_set():
             t0 = time.monotonic()
-            profiler = self._profiler
-            if profiler is None:
-                self._drain_events()
-                self._push_tick()
-                self._maybe_publish_snapshot(time.monotonic())
-                remaining = self._TICK_INTERVAL - (time.monotonic() - t0)
-            else:
-                queue_depth = self._queue_depth()
-                self._drain_events()
-                t1 = time.monotonic()
-                self._push_tick()
-                t2 = time.monotonic()
-                did_publish = self._maybe_publish_snapshot(t2)
-                t3 = time.monotonic()
-                elapsed_s = t3 - t0
-                remaining = self._TICK_INTERVAL - elapsed_s
-                profiler.record(
-                    tick_ms=elapsed_s * 1000.0,
-                    drain_ms=(t1 - t0) * 1000.0,
-                    push_ms=(t2 - t1) * 1000.0,
-                    snapshot_ms=((t3 - t2) * 1000.0 if did_publish else None),
-                    overrun_ms=max(0.0, -remaining * 1000.0),
-                    queue_depth=queue_depth,
-                )
-                profiler.maybe_log(t3)
+            try:
+                profiler = self._profiler
+                if profiler is None:
+                    self._drain_events()
+                    self._push_tick()
+                    self._maybe_publish_snapshot(time.monotonic())
+                    remaining = self._TICK_INTERVAL - (time.monotonic() - t0)
+                else:
+                    queue_depth = self._queue_depth()
+                    self._drain_events()
+                    t1 = time.monotonic()
+                    self._push_tick()
+                    t2 = time.monotonic()
+                    did_publish = self._maybe_publish_snapshot(t2)
+                    t3 = time.monotonic()
+                    elapsed_s = t3 - t0
+                    remaining = self._TICK_INTERVAL - elapsed_s
+                    profiler.record(
+                        tick_ms=elapsed_s * 1000.0,
+                        drain_ms=(t1 - t0) * 1000.0,
+                        push_ms=(t2 - t1) * 1000.0,
+                        snapshot_ms=((t3 - t2) * 1000.0 if did_publish else None),
+                        overrun_ms=max(0.0, -remaining * 1000.0),
+                        queue_depth=queue_depth,
+                    )
+                    profiler.maybe_log(t3)
+            except Exception as exc:
+                loop_error_count += 1
+                self._submit_pack_zero_frame()
+                now = time.monotonic()
+                if now >= next_loop_error_log:
+                    log.error(
+                        "[SM] push loop error; skipping tick  error=%s  count=%d",
+                        type(exc).__name__,
+                        loop_error_count,
+                    )
+                    next_loop_error_log = now + 1.0
+                continue
             if remaining > 0:
                 time.sleep(remaining)
 
@@ -3272,14 +3287,18 @@ class StateManager:
         try:
             self._push_tick_inner()
         except BaseException:
-            if rt is not None and rt.active and rt.backend is not None:
-                try:
-                    rt.backend.submit_frame(_PACK_ZERO_FRAME)
-                except Exception:
-                    pass
+            self._submit_pack_zero_frame(rt)
             raise
         if rt is not None and rt.active:
             self._drive_pack_output()
+
+    def _submit_pack_zero_frame(self, rt: PackRuntime | None = None) -> None:
+        rt = self._pack_runtime if rt is None else rt
+        if rt is not None and rt.active and rt.backend is not None:
+            try:
+                rt.backend.submit_frame(_PACK_ZERO_FRAME)
+            except Exception:
+                pass
 
     def set_pack_runtime(self, runtime: PackRuntime) -> None:
         """Atomically publish a new pack runtime bundle (command thread → push loop).

@@ -164,6 +164,26 @@ class TestSmartPhrasing(unittest.TestCase):
         res2 = self.engine.update(replace(snap, abs_beat=64.25))
         self.assertFalse(res2.state.smart_drop_crossing)
 
+    def test_first_tick_exact_drop_landing_fires_once(self):
+        snap = self._default_snap(smart_drop_beats=(64.0,))
+        res = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertTrue(res.state.smart_drop_crossing)
+        res2 = self.engine.update(replace(snap, abs_beat=65.0))
+        self.assertFalse(res2.state.smart_drop_crossing)
+
+    def test_first_tick_near_drop_landing_does_not_round_forward(self):
+        snap = self._default_snap(smart_drop_beats=(64.0,))
+        res = self.engine.update(replace(snap, abs_beat=63.6))
+        self.assertFalse(res.state.smart_drop_crossing)
+        res2 = self.engine.update(replace(snap, abs_beat=64.0))
+        self.assertTrue(res2.state.smart_drop_crossing)
+
+    def test_track_change_exact_drop_landing_fires_once(self):
+        snap = self._default_snap(smart_drop_beats=(64.0,))
+        self.engine.update(replace(snap, track_id="A", abs_beat=63.5))
+        res = self.engine.update(replace(snap, track_id="B", abs_beat=64.0))
+        self.assertTrue(res.state.smart_drop_crossing)
+
     def test_drop_crossing_is_not_blackout_dependent(self):
         # We did not pass any blackout parameters.
         snap = self._default_snap(smart_drop_beats=(64.0,))
@@ -817,7 +837,7 @@ class TestSmartPhrasing(unittest.TestCase):
         playhead_jump_res = playhead_jump_engine.update(replace(base, abs_beat=30.0))
         self.assertFalse(playhead_jump_res.state.transition_window_active)
 
-    def test_stop_clears_previous_beat_baseline(self):
+    def test_stop_reset_exact_drop_landing_fires_once(self):
         snap = self._default_snap(smart_drop_beats=(64.0,))
         self.engine.update(replace(snap, abs_beat=63.5))
         
@@ -826,7 +846,7 @@ class TestSmartPhrasing(unittest.TestCase):
         
         # Resume at 64.0
         res = self.engine.update(replace(snap, abs_beat=64.0))
-        self.assertFalse(res.state.smart_drop_crossing)
+        self.assertTrue(res.state.smart_drop_crossing)
         
         # Next tick
         res2 = self.engine.update(replace(snap, abs_beat=64.25))

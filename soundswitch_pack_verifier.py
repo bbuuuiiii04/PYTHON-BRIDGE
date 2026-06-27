@@ -625,6 +625,25 @@ def verify_pack(
             _fail("active DDJ Static Override target mismatch")
     if selection.get("iac_selections") != iac or selection.get("ddj_static_overrides") != ddj:
         _fail("explicit IAC/DDJ crosswalk mismatch")
+    seen_static_slots: set[tuple[Any, Any]] = set()
+    seen_events: set[tuple[Any, Any, Any, Any]] = set()
+    for row in controls:
+        if not row.get("active"):
+            continue
+        event_key = (row.get("device_name"), row.get("message_type"),
+                     row.get("channel_zero_based"), row.get("data_byte"))
+        if event_key in seen_events:
+            _fail("duplicate active learned controller event")
+        seen_events.add(event_key)
+        if row.get("control_classification") != "static_override":
+            continue
+        slot = row.get("target_index")
+        if row.get("target_kind") != "static_look" or type(slot) is not int or not 0 <= slot <= 31:
+            _fail("invalid static_override controller target")
+        owner = (row.get("device_name"), slot)
+        if owner in seen_static_slots:
+            _fail("duplicate active static_override slot ownership")
+        seen_static_slots.add(owner)
     scenes = selection.get("bridge_scenes", [])
     iac_note_by_event = {
         (row.get("channel_zero_based"), row.get("data_byte")): row for row in controls
@@ -647,6 +666,23 @@ def verify_pack(
                                 "target_kind": target.get("target_kind") if target else None})
     if scenes != expected_scenes:
         _fail("bridge scene F-3 crosswalk mismatch")
+    for scene in scenes:
+        if scene.get("resolution") == "project_target" \
+                and scene.get("control_classification") != "pack_selection":
+            _fail("project-target bridge scene is not pack_selection: "
+                  f"{scene.get('policy_name')}")
+    autoloop_identities = {f"SSAutoLoop{Path(path).stem}.ssfile" for path in autoloop_paths}
+    active_loop_paths = {row.get("target_identity") for row in iac}
+    if not active_loop_paths:
+        _fail("bridge scene crosswalk has no project targets")
+    if not active_loop_paths.issubset(autoloop_identities):
+        _fail("active IAC selection references a missing Autoloop")
+    crosswalk_targets = {scene.get("target_identity") for scene in scenes
+                         if scene.get("resolution") == "project_target"}
+    if not crosswalk_targets:
+        _fail("bridge scene crosswalk has no project targets")
+    if not crosswalk_targets.issubset(autoloop_identities):
+        _fail("bridge scene crosswalk references a missing Autoloop")
     blackout = iac_note_by_event.get((0, 0))
     expected_blackout = {"channel_zero_based": 0, "control_classification": "blackout_mask",
                          "data_byte": 0, "resolution": "project_target" if blackout else "no_project_target",
@@ -659,7 +695,6 @@ def verify_pack(
             row.get("control_classification") != "no_project_target" for row in no_targets):
         _fail("no-target policy classification mismatch")
 
-    active_loop_paths = {row.get("target_identity") for row in iac}
     union = sorted(set().union(*(refs_by_source.get(path, set())
                                 for path in active_loop_paths | active_scripts)))
     union_sha = _sha("\n".join(union).encode("ascii"))

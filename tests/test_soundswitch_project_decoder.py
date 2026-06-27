@@ -187,6 +187,13 @@ class VenueAndStaticLookTests(unittest.TestCase):
 
 
 class IdentityInventoryAndMidiTests(unittest.TestCase):
+    def test_truncated_catalog_entry_header_fails_closed_as_decode_error(self):
+        data = (decoder._MAGIC + struct.pack("<IIIII", 3, 0, 0, 2, 1)
+                + struct.pack("<I", 1) + _plain_string("bank")
+                + struct.pack("<I", 1) + b"\x00" * 15)
+        with self.assertRaisesRegex(decoder.SoundSwitchDecodeError, "bounds"):
+            decoder.decode_catalog(data, "SoundSwitchAutoLoops.bin")
+
     def test_wrong_uuid_same_venue_rejects_before_deeper_decode(self):
         manifest = json.dumps({
             "id": "{E34F6DCD-EBB9-4088-BD28-7BC0272D011A}",

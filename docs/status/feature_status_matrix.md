@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: cb31cf8
-last_verified_date: 2026-06-25
+last_verified_commit: 595fabd
+last_verified_date: 2026-06-27
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -45,6 +45,6 @@ Status vocabulary:
 | LED color engine M2 work | implemented/partial | software-tested partially | local setup | Current code includes color engine paths, fixed six-slot slot-color output, configurable slot-fill strategies including Patch S `random_with_mono_chance`, software-tested generic groove/post_drop/drop chase, drop center-burst, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, Patch E3 ambient twinkle slot cue, and Patch F default-bank cleanup into generic slot looks plus `legacy_color_suffix` storage. Patch D/E/S/F remain SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
 | Govee cloud scene adapter | implemented | software-tested partially | local setup | Single API-key path, device compatibility not generalized. |
 | Govee realtime runner/transport | implemented/experimental | software-tested partially | local setup | H612D evidence exists in config examples, broad Govee support unknown. |
-| SoundSwitch export/operator UI | implemented | software-tested | pinned canonical project only | `Export from SS` publishes one canonical pack, shows exporting/reloading/result state, and uses only the conservative existing reload command. Pack output auto-switches by SoundSwitch connection using `set_soundswitch_pack action=enable`; a fresh disconnected `pack_start_failed` gets one bounded retry. There is no manual pack button, and auto-switching does not imply hot-enable without a real pack backend + Enttec port. The combined pack row is copied-state only; stale status renders `Lighting: no status yet`. SoundSwitch save remains operator-owned. |
+| SoundSwitch export/operator UI | implemented | software-tested | pinned canonical project only | `Export from SS` publishes one canonical pack, shows exporting/reloading/result state, and uses only the conservative existing reload command. Verification now fails closed on loader-only runtime metadata gaps before publication, and the import report surfaces reserved-event/deactivated-script diagnostics. Pack output auto-switches by SoundSwitch connection using `set_soundswitch_pack action=enable`; a fresh disconnected `pack_start_failed` gets one bounded retry. There is no manual pack button, and auto-switching does not imply hot-enable without a real pack backend + Enttec port. The combined pack row is copied-state only; stale status renders `Lighting: no status yet`. SoundSwitch save remains operator-owned. |
 | Multi-Rekordbox-version support | unknown | unvalidated | unknown | Needs explicit compatibility expansion tasks. |
 | Windows/Linux support | unsupported/unknown | unvalidated | unsupported currently | Current reader architecture is macOS-bound. |

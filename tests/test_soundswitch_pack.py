@@ -15,6 +15,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.soundswitch_pack import (
+    BRIDGE_SCENES,
     canonical_json_bytes,
     render_document_boundaries,
     render_static_look_frame,
@@ -156,6 +157,137 @@ class CurrentProjectPackTests(unittest.TestCase):
         union = sorted(refs)
         return len(union), hashlib.sha256("\n".join(union).encode("ascii")).hexdigest()
 
+    @staticmethod
+    def _selection_classification(row: dict) -> str:
+        if not row.get("active") or row.get("target_kind") == "non_render":
+            return "inactive_report_only"
+        if row.get("device_name") == "IAC Driver Bus 1" \
+                and row.get("channel_zero_based") == 0 \
+                and row.get("data_byte") == 0 \
+                and row.get("message_type") == "note":
+            return "blackout_mask"
+        if row.get("target_kind") == "static_look":
+            return "static_override"
+        return "pack_selection"
+
+    def _refresh_selection_map(self, selection: dict) -> None:
+        controls = selection["learned_controls"]
+        for row in controls:
+            row["control_classification"] = self._selection_classification(row)
+        controls.sort(key=lambda row: (row["device_name"], row["channel_zero_based"],
+                                       row["data_byte"], row["control_path"],
+                                       row["source_offset"]))
+        event_targets = {}
+        for row in controls:
+            if row["active"] and row["device_name"] == "IAC Driver Bus 1" \
+                    and row["message_type"] == "note":
+                event_targets[(row["device_name"], row["channel_zero_based"],
+                               row["data_byte"])] = row
+        scenes = []
+        for name, channel, note in BRIDGE_SCENES:
+            target = event_targets.get(("IAC Driver Bus 1", channel, note))
+            if name == "house_post_drop_1":
+                classification = "inactive_report_only"
+            elif target:
+                classification = "pack_selection"
+            elif channel == 1 and note in (0, 1, 2):
+                classification = "bridge_owned_safety"
+            else:
+                classification = "no_project_target"
+            scenes.append({
+                "channel_zero_based": channel,
+                "control_classification": classification,
+                "data_byte": note,
+                "policy_name": name,
+                "resolution": "project_target" if target else "no_project_target",
+                "target_identity": target["target_identity"] if target else None,
+                "target_kind": target["target_kind"] if target else None,
+            })
+        blackout = event_targets.get(("IAC Driver Bus 1", 0, 0))
+        selection["bridge_scenes"] = scenes
+        selection["manual_blackout"] = {
+            "channel_zero_based": 0,
+            "control_classification": "blackout_mask",
+            "data_byte": 0,
+            "resolution": "project_target" if blackout else "no_project_target",
+            "target_identity": blackout["target_identity"] if blackout else None,
+        }
+        selection["iac_selections"] = [
+            row for row in controls if row["active"]
+            and row["device_name"] == "IAC Driver Bus 1"
+            and row["target_kind"] == "autoloop"
+        ]
+        selection["ddj_static_overrides"] = [
+            row for row in controls if row["active"]
+            and row["device_name"] == "DDJ-800"
+            and row["target_kind"] == "static_look"
+        ]
+
+    def _update_midi_binding(self, pack: Path, control_path: str, **fields) -> None:
+        registry = json.loads((pack / "midi_mappings.json").read_text())
+        found = False
+        for mapping in registry["maps"]:
+            for device in mapping["devices"]:
+                for collection in device["collections"]:
+                    for binding in collection["bindings"]:
+                        if binding["control_path"] == control_path:
+                            binding.update(fields)
+                            found = True
+        if not found:
+            self.fail(f"binding not found: {control_path}")
+        self._write_json_artifact(pack, "midi_mappings.json", registry)
+
+    def _move_midi_binding_device(self, pack: Path, control_path: str, new_device: str) -> None:
+        registry = json.loads((pack / "midi_mappings.json").read_text())
+        moved = None
+        feedback_hex = ""
+        for mapping in registry["maps"]:
+            for device in mapping["devices"]:
+                for collection in device["collections"]:
+                    for index, binding in enumerate(list(collection["bindings"])):
+                        if binding["control_path"] == control_path:
+                            moved = dict(binding)
+                            feedback_hex = device["feedback_hex"]
+                            del collection["bindings"][index]
+                            break
+                    if moved is not None:
+                        break
+                if moved is not None:
+                    break
+            if moved is not None:
+                moved["device_name"] = new_device
+                target = next((device for device in mapping["devices"]
+                               if device["name"] == new_device), None)
+                if target is None:
+                    target = {"name": new_device, "feedback_hex": feedback_hex,
+                              "collections": []}
+                    mapping["devices"].append(target)
+                collection = next((row for row in target["collections"]
+                                   if row["collection_id"] == moved["collection_id"]), None)
+                if collection is None:
+                    collection = {"collection_id": moved["collection_id"], "bindings": []}
+                    target["collections"].append(collection)
+                collection["bindings"].append(moved)
+                collection["bindings"].sort(key=lambda row: row["source_offset"])
+                target["collections"].sort(key=lambda row: row["collection_id"])
+                mapping["devices"].sort(key=lambda row: row["name"])
+                break
+        if moved is None:
+            self.fail(f"binding not found: {control_path}")
+        self._write_json_artifact(pack, "midi_mappings.json", registry)
+
+    def _recompute_manifest_runtime_totals(self, pack: Path) -> None:
+        selection = json.loads((pack / "selection_map.json").read_text())
+        count, sha = self._active_union(pack)
+        self._mutate_manifest(pack, lambda manifest: (
+            manifest.__setitem__("active_cue_union", {"count": count, "sha256": sha}),
+            manifest["totals"].__setitem__("active_cue_union", count),
+            manifest["totals"].__setitem__("iac_autoloop_bindings",
+                                           len(selection["iac_selections"])),
+            manifest["totals"].__setitem__("ddj_static_overrides",
+                                           len(selection["ddj_static_overrides"])),
+        ))
+
     def assertRejected(self, pack: Path):
         with self.assertRaises(SoundSwitchPackVerificationError):
             verify_pack(pack)
@@ -233,6 +365,32 @@ class CurrentProjectPackTests(unittest.TestCase):
         )
         self.assertFalse(any("interaction_mode" in row for row in selection["learned_controls"]
                              if row["target_kind"] != "static_look"))
+
+    def test_import_report_surfaces_runtime_reclassifications_without_source_paths(self):
+        result = verify_pack(self.pack, source_project=self.project)
+        self.assertTrue(result["verified"])
+        report = json.loads((self.pack / "import_report.json").read_text())
+        track = json.loads((self.pack / "track_map.json").read_text())
+        selection = json.loads((self.pack / "selection_map.json").read_text())
+        self.assertEqual(
+            report["scripted_deactivated_missing_file"],
+            sorted(row["relative_path"] for row in track["scripted_inventory"]
+                   if row["status"] == "supported_mapped_primary"
+                   and not row["active_existing_path"]),
+        )
+        expected_reserved = sorted(
+            ({
+                "control_path": row["control_path"],
+                "note": "treated as momentary blackout, not a static look",
+                "target_index": row["target_index"],
+            } for row in selection["learned_controls"]
+             if row["control_classification"] == "blackout_mask"
+             and row["target_kind"] == "static_look"),
+            key=lambda row: (row["control_path"], row["target_index"] or -1),
+        )
+        self.assertEqual(report["reserved_event_reclassifications"], expected_reserved)
+        self.assertFalse(any("target_identity" in row or "relative_path" in row
+                             for row in report["reserved_event_reclassifications"]))
 
     def test_dynamic_verifier_accepts_extra_unused_venue_cue_but_strict_proof_rejects(self):
         pack = self._copy("dynamic-extra-venue-cue")
@@ -610,6 +768,102 @@ class CurrentProjectPackTests(unittest.TestCase):
             row["control_classification"] = "pack_selection"
         self._semantic_mutation(crosswalk, "selection_map.json", mutate_classification)
         self.assertRejected(crosswalk)
+
+    def test_verifier_mirrors_loader_runtime_metadata_rejections(self):
+        baseline = json.loads((self.pack / "selection_map.json").read_text())
+        active_iac = [row for row in baseline["learned_controls"]
+                      if row["active"] and row["device_name"] == "IAC Driver Bus 1"
+                      and row["target_kind"] == "autoloop"]
+        active_static = [row for row in baseline["learned_controls"]
+                         if row["active"] and row["target_kind"] == "static_look"
+                         and row["control_classification"] == "static_override"]
+        if len(active_iac) < 2 or len(active_static) < 2:
+            self.skipTest("current SoundSwitch project lacks enough active controls")
+
+        duplicate_static = self._copy("mut-runtime-duplicate-static-slot")
+        selection = json.loads((duplicate_static / "selection_map.json").read_text())
+        statics = [row for row in selection["learned_controls"]
+                   if row["active"] and row["control_classification"] == "static_override"]
+        statics[1]["target_identity"] = statics[0]["target_identity"]
+        statics[1]["target_index"] = statics[0]["target_index"]
+        statics[1]["target_name"] = statics[0]["target_name"]
+        self._refresh_selection_map(selection)
+        self._write_json_artifact(duplicate_static, "selection_map.json", selection)
+        self.assertVerifierAndLoaderRejected(
+            duplicate_static, "duplicate active static_override slot ownership")
+
+        duplicate_event = self._copy("mut-runtime-duplicate-event")
+        selection = json.loads((duplicate_event / "selection_map.json").read_text())
+        iac = [row for row in selection["learned_controls"]
+               if row["active"] and row["device_name"] == "IAC Driver Bus 1"
+               and row["target_kind"] == "autoloop"]
+        iac[1]["channel_zero_based"] = iac[0]["channel_zero_based"]
+        iac[1]["data_byte"] = iac[0]["data_byte"]
+        self._update_midi_binding(
+            duplicate_event, iac[1]["control_path"],
+            channel_zero_based=iac[0]["channel_zero_based"],
+            data_byte=iac[0]["data_byte"],
+        )
+        self._refresh_selection_map(selection)
+        self._write_json_artifact(duplicate_event, "selection_map.json", selection)
+        self.assertVerifierAndLoaderRejected(
+            duplicate_event, "duplicate active learned controller event")
+
+        reserved_scene = self._copy("mut-runtime-reserved-scene")
+        selection = json.loads((reserved_scene / "selection_map.json").read_text())
+        row = next(item for item in selection["learned_controls"]
+                   if item["active"] and item["device_name"] == "IAC Driver Bus 1"
+                   and item["target_kind"] == "autoloop")
+        row["data_byte"] = 41
+        self._update_midi_binding(reserved_scene, row["control_path"], data_byte=41)
+        self._refresh_selection_map(selection)
+        self._write_json_artifact(reserved_scene, "selection_map.json", selection)
+        self.assertVerifierAndLoaderRejected(
+            reserved_scene, "project-target bridge scene is not pack_selection")
+
+        invalid_static = self._copy("mut-runtime-invalid-static-target")
+        selection = json.loads((invalid_static / "selection_map.json").read_text())
+        row = next(item for item in selection["learned_controls"]
+                   if item["active"] and item["control_classification"] == "static_override")
+        row["device_name"] = "OTHER Controller"
+        row["target_identity"] = "SSStaticLook99"
+        row["target_index"] = 99
+        row["target_name"] = "slot 99"
+        self._move_midi_binding_device(invalid_static, row["control_path"], "OTHER Controller")
+        self._refresh_selection_map(selection)
+        self._write_json_artifact(invalid_static, "selection_map.json", selection)
+        self.assertVerifierAndLoaderRejected(
+            invalid_static, "invalid static_override controller target")
+
+        missing_autoloop = self._copy("mut-runtime-missing-autoloop")
+        selection = json.loads((missing_autoloop / "selection_map.json").read_text())
+        row = next(item for item in selection["learned_controls"]
+                   if item["active"] and item["device_name"] == "IAC Driver Bus 1"
+                   and item["target_kind"] == "autoloop")
+        row["target_identity"] = "SSAutoLoop999999.ssfile"
+        row["target_index"] = 999998
+        row["target_name"] = "missing autoloop"
+        self._refresh_selection_map(selection)
+        self._write_json_artifact(missing_autoloop, "selection_map.json", selection)
+        self._recompute_manifest_runtime_totals(missing_autoloop)
+        self.assertVerifierAndLoaderRejected(
+            missing_autoloop, "active IAC selection references a missing Autoloop")
+
+        empty_crosswalk = self._copy("mut-runtime-empty-crosswalk")
+        selection = json.loads((empty_crosswalk / "selection_map.json").read_text())
+        disabled_paths = []
+        for row in selection["learned_controls"]:
+            if row["active"] and row["device_name"] == "IAC Driver Bus 1" \
+                    and row["target_kind"] == "autoloop":
+                row["active"] = False
+                disabled_paths.append(row["control_path"])
+        for control_path in disabled_paths:
+            self._update_midi_binding(empty_crosswalk, control_path, enabled=False)
+        self._refresh_selection_map(selection)
+        self._write_json_artifact(empty_crosswalk, "selection_map.json", selection)
+        self._recompute_manifest_runtime_totals(empty_crosswalk)
+        self.assertVerifierAndLoaderRejected(
+            empty_crosswalk, "bridge scene crosswalk has no project targets")
 
     def test_midi_registry_rejects_parent_mismatch_raw_type_and_retained_field_mutations(self):
         mutations = {

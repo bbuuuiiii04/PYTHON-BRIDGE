@@ -105,10 +105,27 @@ class VerdictStateMachineTests(unittest.TestCase):
         self.assertEqual(prove.compute_verdict(checks), "PASS_IMPLEMENTATION_MAY_BEGIN")
 
 
-class CanonicalConstantsTests(unittest.TestCase):
-    def test_ddj_golden_frames_are_19_bytes(self):
-        for slot, (_note, _control, _name, hex_frame) in prove.GOLDEN_DDJ.items():
-            self.assertEqual(len(hex_frame), 38, slot)  # 19 bytes
+class StaticLookProofTests(unittest.TestCase):
+    def test_static_look_proof_validates_frame_shape_without_pinned_hex(self):
+        looks = [
+            {"name": "operator edit A", "groups": {"0x493": {"1": 0x12, "19": 0x34}}},
+            {"name": "operator edit B", "groups": {"0x493": {"2": 0x56}, "0x496": {"1": 0xff}}},
+        ]
+        venue_data = bytearray(44)
+        proof = prove.Proof()
+        with mock.patch.object(prove.analyze_static_looks, "parse_static_looks",
+                               side_effect=[looks, []]), \
+                mock.patch.object(prove.analyze_static_looks, "parse_static_look_collections",
+                                  return_value=[{}]), \
+                mock.patch.object(prove.analyze_static_looks, "primary_venue_identity",
+                                  return_value={"venue_guid": prove.CANONICAL_VENUE_GUID}):
+            prove.check_static_looks(proof, bytes(venue_data))
+
+        d2 = next(row for row in proof.checks if row["id"] == "D2-static-look-ch1-19-frames")
+        self.assertEqual(d2["status"], prove.PASS)
+        self.assertEqual(d2["expected"], {"frame_bytes": prove.EXPECTED_CHANNEL_COUNT, "slots": 2})
+        self.assertTrue(all(row["frame_bytes"] == prove.EXPECTED_CHANNEL_COUNT for row in d2["actual"]))
+        self.assertTrue(all("expected_hex" not in row for row in d2["actual"]))
 
 
 class PackMutationGateTests(unittest.TestCase):

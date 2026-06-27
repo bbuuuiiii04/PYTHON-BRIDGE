@@ -18,6 +18,7 @@ from .soundswitch_pack_models import (
     CueAttribute,
     DecodedSoundSwitchProject,
     LightingDocument,
+    ResolvedControlBinding,
     StaticLook,
 )
 from .soundswitch_project_decoder import (
@@ -195,20 +196,36 @@ def _active_union(project: DecodedSoundSwitchProject, active_scripts: set[str]) 
     return guids, sha256_bytes("\n".join(guids).encode("ascii"))
 
 
+def _control_classification(row: ResolvedControlBinding) -> str:
+    b = row.binding
+    if not b.enabled or row.target_kind == "non_render":
+        return "inactive_report_only"
+    if b.device_name == "IAC Driver Bus 1" and b.channel_zero_based == 0 \
+            and b.data_byte == 0 and b.message_type == "note":
+        return "blackout_mask"
+    if row.target_kind == "static_look":
+        return "static_override"
+    return "pack_selection"
+
+
+def _reserved_event_reclassifications(project: DecodedSoundSwitchProject) -> list[dict[str, Any]]:
+    rows = []
+    for row in project.resolved_controls:
+        if _control_classification(row) == "blackout_mask" and row.target_kind == "static_look":
+            rows.append({
+                "control_path": row.binding.control_path,
+                "target_index": row.target_index,
+                "note": "treated as momentary blackout, not a static look",
+            })
+    return sorted(rows, key=lambda row: (row["control_path"], row["target_index"] or -1))
+
+
 def _selection_map(project: DecodedSoundSwitchProject) -> dict[str, Any]:
     controls = []
     event_targets: dict[tuple[str, int, int], dict[str, Any]] = {}
     for row in project.resolved_controls:
         b = row.binding
-        if not b.enabled or row.target_kind == "non_render":
-            classification = "inactive_report_only"
-        elif b.device_name == "IAC Driver Bus 1" and b.channel_zero_based == 0 \
-                and b.data_byte == 0 and b.message_type == "note":
-            classification = "blackout_mask"
-        elif row.target_kind == "static_look":
-            classification = "static_override"
-        else:
-            classification = "pack_selection"
+        classification = _control_classification(row)
         item = {"active": b.enabled, "channel_zero_based": b.channel_zero_based,
                 "collection_id": b.collection_id, "control_path": b.control_path,
                 "control_classification": classification,
@@ -288,6 +305,10 @@ def compile_pack_artifacts(
     cues = {row.cue_guid: row for row in project.render_cues}
     active_scripts = _active_script_paths(project)
     union, union_sha = _active_union(project, active_scripts)
+    deactivated_scripts = sorted(
+        row.relative_path for row in project.scripted_track_classifications
+        if row.status == "supported_mapped_primary" and row.relative_path not in active_scripts
+    )
     enabled_iac = [r for r in project.resolved_controls if r.binding.enabled
                    and r.binding.device_name == "IAC Driver Bus 1" and r.target_kind == "autoloop"]
     enabled_ddj = [r for r in project.resolved_controls if r.binding.enabled
@@ -333,7 +354,9 @@ def compile_pack_artifacts(
     add("import_report.json", _root("import_report",
         diagnostics=sorted((asdict(row) for row in project.diagnostics),
                            key=lambda row: (row["relative_path"], row["code"], row["offset"] or -1, row["message"])),
-        hardware_status="SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED"))
+        hardware_status="SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED",
+        reserved_event_reclassifications=_reserved_event_reclassifications(project),
+        scripted_deactivated_missing_file=deactivated_scripts))
 
     artifact_rows = [{"path": path, "sha256": sha256_bytes(data), "size": len(data)}
                      for path, data in sorted(artifacts.items())]

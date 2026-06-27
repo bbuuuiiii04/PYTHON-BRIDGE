@@ -9,6 +9,8 @@ from .config import (
     SMART_BREAKDOWN_IGNORE_OUTRO_BEATS,
 )
 
+_EXACT_DROP_EPSILON = 1e-6
+
 
 PhraseLabel = Literal["up", "chorus", "low", "other"]
 
@@ -303,17 +305,25 @@ class SmartPhrasingEngine:
 
         # 2. Drop crossing
         smart_drop_crossing = False
-        if prev_abs_beat is not None:
-            for drop_beat in sorted(snapshot.smart_drop_beats):
-                if (
-                    prev_abs_beat < drop_beat <= abs_beat
-                    and drop_beat not in self._fired_drop_beats
-                ):
-                    smart_drop_crossing = True
-                    if mutate:
-                        self._fired_drop_beats.add(drop_beat)
-                    scratch.active_drop_beat = drop_beat
-                    break
+        for drop_beat in sorted(snapshot.smart_drop_beats):
+            crossed_from_history = (
+                prev_abs_beat is not None
+                and prev_abs_beat < drop_beat <= abs_beat
+            )
+            exact_resume_landing = (
+                mutate
+                and prev_abs_beat is None
+                and abs(drop_beat - abs_beat) <= _EXACT_DROP_EPSILON
+            )
+            if (
+                (crossed_from_history or exact_resume_landing)
+                and drop_beat not in self._fired_drop_beats
+            ):
+                smart_drop_crossing = True
+                if mutate:
+                    self._fired_drop_beats.add(drop_beat)
+                scratch.active_drop_beat = drop_beat
+                break
 
         # 3. Resolve next Smart Drop
         next_smart_drop_beat = None

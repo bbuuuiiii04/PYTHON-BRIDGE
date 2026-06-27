@@ -6,10 +6,10 @@ last_verified_date: 2026-06-27
 validation_scope: hardening spec derived from the adversarial edge-case sweep of the SoundSwitch
   RE -> pack -> runtime -> live-DMX pipeline; every fix is fail-loud-at-export or report-only and
   must not change DMX output for the current valid project; SOFTWARE-ONLY, HARDWARE-UNVALIDATED.
-  REVISED 2026-06-27 after a second adversarial (Opus) line-by-line verifier/loader audit: Task 1
-  expanded from F3+F5 to a TRUE superset (adds Gap A/C/D + anti-drift fuzz test), Task 11 (F12)
-  fix corrected (the "refresh on inbound message" approach does not hold a silent blackout), and
-  F1/F2/F15 guidance tightened. All verifier/loader file:line re-checked against 291203b.
+  REVISED 2026-06-27 after a second adversarial verifier/loader audit: Task 1 expanded from F3+F5
+  to loader-superset hardening, including the loader's empty-crosswalk rule; Task 9 uses an exact
+  landing epsilon instead of round-forward behavior; Task 11 removes the short blackout hold expiry.
+  All verifier/loader file:line anchors were re-checked against 291203b before implementation.
 ---
 
 # Codex Implementation Spec — SoundSwitch RE-pipeline edge-case hardening
@@ -40,9 +40,9 @@ error string — at the gig.
 
 **The fix class is not "patch F3 and F5"; it is "make `verify_pack` reject every pack `load_pack`
 would reject."** A second adversarial audit (2026-06-27) walked every `_fail` in `load_pack` /
-`_runtime_metadata` against `verify_pack` and found **five** reverse gaps (verify accepts → load
-rejects), not two. All five are below; Task 1 closes them and adds a fuzz test so the two checkers
-cannot silently drift apart again.
+`_runtime_metadata` against `verify_pack` and found **six** reverse gaps (verify accepts → load
+rejects), not two. All six are below; Task 1 closes them with deterministic verifier/loader parity
+cases so the two checkers cannot silently drift apart again.
 
 - **[confirmed] F3 — duplicate Static Override slot ownership.** A real operator can learn two pads
   to one Static Override button (same `control_path`, different note). The decoder
@@ -77,13 +77,12 @@ cannot silently drift apart again.
   `refs_by_source.get(path, set())` (`soundswitch_pack_verifier.py:663-664`) — a selection pointing
   at a non-existent autoloop silently yields an empty set and PASSES. Reachable via a producer bug or
   a tampered pack — exactly the class an independent verifier exists to catch.
-- **[unknown — design decision, NOT auto-mirrored] Gap B — empty bridge-scene crosswalk.** `load_pack`
-  rejects a pack with zero `project_target` bridge scenes ("bridge scene crosswalk has no project
-  targets", `soundswitch_pack_loader.py:243-244`); `verify_pack` does not require ≥1. A degenerate
-  static-looks-only pack (no IAC→autoloop selections) would verify green and fail load. **Do NOT
-  blindly mirror this** — it may mean the LOADER is too strict (a static-only pack could be
-  legitimate), not that the verifier is too lax. See Part B Task 1f: this needs an operator/design
-  call before either side changes. The live pack has a non-empty crosswalk, so nothing fires today.
+- **[confirmed implementation decision] Gap B — empty bridge-scene crosswalk.** `load_pack` rejects a
+  pack with zero `project_target` bridge scenes ("bridge scene crosswalk has no project targets",
+  `soundswitch_pack_loader.py:243-244`). To preserve the current runtime contract and keep
+  `verify_pack accepts => load_pack accepts`, the verifier mirrors that rejection. If a
+  static-looks-only pack should become valid later, loosen loader and verifier together in a separate
+  behavior-design change.
 
 ### A2 — `decode_catalog` leaks `struct.error` on a truncated catalog (contract violation)
 - **[confirmed] F4.** `soundswitch_project_decoder.py:644`
@@ -166,12 +165,13 @@ its marker). Do not "fix" any of these.
 - **Do not change DMX output for the current valid live project.** Every task is either a new
   rejection of an already-broken (load-failing) pack, a report-only diagnostic, or a guard that only
   fires on malformed/corrupt input. Run the green baseline (Part E) before and after each task.
-- Do **not** touch the runtime hot path, `state_manager.py`, laser/LED/Govee subsystems, MIDI/serial
-  device code, or the live project under `~/Music`.
+- For export-time Tasks 1-8, do **not** touch the runtime hot path, `state_manager.py`,
+  laser/LED/Govee subsystems, MIDI/serial device code, or the live project under `~/Music`. The
+  later live-path Tasks 9-11 are the explicitly scoped exception.
 - Do **not** weaken any existing check to make a test pass. Add tests; never edit a test to hide a
   regression.
 
-### Task 1 — `soundswitch_pack_verifier.py`: make `verify_pack` a TRUE superset of the `load_pack` runtime invariants (fixes F3 + F5 + Gap A + Gap C + Gap D)
+### Task 1 — `soundswitch_pack_verifier.py`: make `verify_pack` a loader-superset for runtime metadata (fixes F3 + F5 + Gap A + Gap B + Gap C + Gap D)
 Goal: fail at **export/verify** instead of at runtime load, for EVERY reverse gap, not just F3/F5.
 Each sub-check below mirrors a specific `load_pack` rejection one-for-one; cite the mirrored loader
 line in a comment. Use the verifier's existing `_fail(...)` helper (raises
@@ -243,17 +243,15 @@ already rejected). `autoloop_paths` is built at current `:543`; `iac` at `:621`;
 ```
 (`Path` is already imported, `soundswitch_pack_verifier.py:12`.)
 
-**1f — Gap B (empty crosswalk): DECISION, do NOT implement yet.** The loader rejects a zero-target
-pack (`soundswitch_pack_loader.py:243-244`). Mirroring that into `verify_pack` would reject a
-legitimate static-looks-only pack just as hard at export. Conversely, loosening the LOADER to accept
-zero-target packs is a runtime-behaviour change. **Stop and get an operator/design call:** is a pack
-with no IAC→autoloop selections a valid configuration? Only after that answer does this become a
-verifier check (mirror loader) OR a loader relaxation. Do not guess. The live pack has a non-empty
-crosswalk, so neither side fires today; this is not blocking F3/F5/A/C/D.
+**1f — Gap B (empty crosswalk): mirror current loader behavior.** The loader rejects a zero-target
+pack (`soundswitch_pack_loader.py:243-244`). The implementation mirrors that in `verify_pack` so
+export and runtime cannot disagree. A static-looks-only pack may be a valid future feature, but that
+must be a paired loader+verifier behavior change, not an exporter/runtime split.
 
-**Anti-drift guard (the real fix — see Part D).** One-off mirrors rot. Add the property/fuzz test in
-Part D that asserts, over randomized selection maps, that **any pack `verify_pack` accepts,
-`load_pack` also accepts** — so a future loader rejection added without a verifier mirror fails CI.
+**Anti-drift guard (the real fix — see Part D).** One-off mirrors rot. At minimum, cover each
+loader-only rejection with a verifier+loader parity mutation case. A randomized property/fuzz test is
+still a useful future expansion, but the acceptance gate for this patch is the deterministic cases
+that reproduce every confirmed gap.
 
 All `_fail` calls raise `SoundSwitchPackVerificationError`, so `export_pack`/`publish_pack` reject
 these packs on the staged dir before the canonical swap — the operator sees a `verify_failed` verdict
@@ -336,10 +334,12 @@ the old id/title. Do not change the data, only the names. Low priority.
 ---
 
 ## Part C — Invariants that MUST still hold (live safety)
-- **No new runtime state fields.** Every task changes export-time code (verifier / compiler /
-  decoder) or the proof gate, or adds a report-only artifact field. Nothing touches the 200 Hz hot
-  path or adds a runtime state field, so there is no pending-state or mode-transition cleanup to
-  guard (checklist items 3/4 are N/A by construction — keep it that way).
+- **Export-time tasks stay offline.** Tasks 1-8 change verifier/compiler/decoder/proof/report code
+  only. They do not open devices, mutate the source SoundSwitch project, or add hot-path I/O.
+- **Live-path tasks stay bounded.** Tasks 9-11 touch smart phrasing, the 200 Hz loop, and MIDI-input
+  hold state. They must not add blocking I/O, runtime config reads, or hardware opens to `_push_tick`.
+  The loop guard darkens only the pack lane for a bad tick; OS2L/laser-MIDI/LED lanes are not
+  force-zeroed by that guard.
 - **Verified non-regression (Task 1, all sub-checks):** on the current live project the clean pack
   has (a) no duplicate `(device, slot)` static-override owner [F3], (b) no `project_target`
   non-`pack_selection` bridge scene — `house_post_drop_1` resolves `no_project_target` [F5], (c) no
@@ -360,8 +360,8 @@ the old id/title. Do not change the data, only the names. Low priority.
 - **Fail-closed only tightens.** Tasks 1 and 2 may only *add* rejections of packs/inputs that already
   fail at load (Task 1) or already corrupt the parse (Task 2). No previously-accepted *valid* pack may
   start failing. Prove this with the baseline export still passing.
-- The 200 Hz push loop, `StateManager` ownership, reader→event flow, and all
-  laser/LED/MIDI/serial paths are untouched (`docs/architecture/runtime_invariants.md`).
+- State ownership, reader→event flow, and serial/device ownership remain unchanged
+  (`docs/architecture/runtime_invariants.md`).
 - The decoder stays read-only on the source project; no new writes into `~/Music`.
 
 ## Part D — Tests
@@ -383,12 +383,10 @@ Add to `tests/` (pure-function seams; no live project, no devices, no subprocess
     artifact.
   Each must FAIL on the unpatched verifier (write the test first, watch it pass-through, then patch)
   and must be rejected by `load_pack` too (sanity that the gap was real).
-- **Task 1 anti-drift property test — `tests/test_soundswitch_pack_verifier.py` (the durable guard):**
-  generate randomized but schema-valid selection maps (vary device, channel, note, classification,
-  target_kind, slot, duplicate/own-vs-missing autoloop) and assert the invariant
-  **`verify_pack` accepts ⇒ `load_pack` accepts`** (i.e. there is no pack the verifier passes that the
-  loader rejects). Pure-function seam: drive both off the same staged-dir bytes; no devices, no live
-  project. This is what stops a future loader rejection from being added without a verifier mirror.
+- **Task 1 anti-drift parity cases:** for each confirmed loader-only rejection, mutate a staged pack,
+  rehash the touched artifacts, assert `verify_pack` rejects with the specific message, and assert
+  `load_pack` rejects through the verifier path. A randomized `verify_pack accepts => load_pack accepts`
+  property test remains a useful later hardening step.
 - **Task 2 — `tests/test_soundswitch_project_decoder.py`:** truncate a known-good catalog blob at the
   entry-loop boundary and assert `decode_catalog` raises `SoundSwitchDecodeError` (code `bounds`),
   not `struct.error`. A `for cut in range(...)` sweep mirroring `fuzz_decode.py` is ideal.
@@ -403,14 +401,14 @@ Add to `tests/` (pure-function seams; no live project, no devices, no subprocess
 - [ ] `python3 tools/prove_soundswitch_pack_generation.py --project ~/Music/SoundSwitch/default.ssproj`
       → `PASS_IMPLEMENTATION_MAY_BEGIN` (29/29 foundation), including after a synthetic slot recolour
       for Task 5.
-- [ ] Clean oracle export still `verified=True / 95 artifacts`; `manifest_sha256` unchanged for a tree
-      with no deactivated scripts / no reserved-event collisions (Tasks 1,2,5–7), and changed *only*
-      by the added report fields for Tasks 3–4.
+- [ ] Clean oracle export still `verified=True / 95 artifacts` and `load_pack` succeeds. The manifest
+      may change because `import_report.json` now carries report-only fields; no rendered DMX frame
+      changes are allowed for the clean project.
 - [ ] New tests added and passing; no existing test edited to pass.
-- [ ] `verify_pack` now rejects all five Task-1 gaps: F3 + F5 (re-run `work/repro_3_dup_slot.py` /
-      `work/repro_5_postdrop_event.py` → both `verify_pack: REJECTED`), plus the Gap A / Gap C /
-      Gap D unit cases. The anti-drift property test (`verify accepts ⇒ load accepts`) passes.
-- [ ] Gap B left as an open decision (Task 1f) — NOT implemented; flagged for the operator.
+- [ ] `verify_pack` now rejects all Task-1 runtime-metadata gaps: F3, F5, Gap A, Gap B, Gap C, and
+      Gap D. Each deterministic parity case also proves `load_pack` rejects through the verifier path.
+- [ ] Gap B mirrors current loader behavior. If static-only packs should be accepted later, change
+      loader and verifier together instead of letting exporter and runtime diverge.
 - [ ] `decode_project` on a truncated `SoundSwitchAutoLoopsEx.bin` raises `SoundSwitchDecodeError`,
       not `struct.error` (re-run `fuzz_decode.py` → 0 crash findings).
 - [ ] Hard checks pass: `python3 tools/check_docs_metadata.py`, `check_agent_contracts.py`,
@@ -426,19 +424,20 @@ before implementing** (per `feedback_plan_first_live_critical`). Keep them separ
 - **Root cause:** `_compute_tick_state` drop-crossing needs `prev_abs_beat` (`:306`); on the first
   tick after any reset (`update()` sets `_previous_abs_beat=None`) a drop equal to that first beat is
   never crossed (S16 in `work/replay_phrasing.py`).
-- **Fix direction:** on the first tick after a reset, fire a one-time crossing for any unfired
-  `drop_beat == round(abs_beat)` (exact-landing case) — e.g. seed the crossing check so a drop at the
-  resumed beat resolves once and is added to `_fired_drop_beats`. Do NOT seed `prev = abs-1` blindly
-  (that would also fire drops just *behind* the cue point). Add a replay test mirroring S16.
+- **Fix direction:** on the first tick after a reset, fire a one-time crossing only for an unfired
+  drop whose beat equals the current beat within a tiny exactness epsilon. Do NOT use `round(abs_beat)`
+  or seed `prev = abs-1`; both can fire drops that are merely near or behind the cue point. Add a replay
+  test mirroring S16 plus a near-miss test.
 - **Live safety:** must fire each drop at most once; must not re-fire on the next tick.
 
 ### Task 10 — `state_manager.py`: the 200Hz loop must survive an unexpected error, not freeze (fixes F15) [confirmed]
 - **Intent:** operator said "just skip that instant" — keep the show running through a glitch.
 - **Root cause:** `_run` (`:911-918`) has no per-tick catch and `_push_tick` re-raises after zeroing
   DMX (`:3274-3280`), so one unhandled error kills the lighting thread (frozen show, restart needed).
-- **Fix direction:** keep the zero-DMX-on-error safety, but in `_run` wrap the tick so it logs and
-  CONTINUES instead of dying — `try: self._push_tick() except Exception: <rate-limited log>; continue`
-  (the pack DMX was already zeroed inside `_push_tick` `:3274-3280`). Catch **`Exception`, NOT
+- **Fix direction:** keep the zero-DMX-on-error safety, but in `_run` wrap the full iteration so it
+  logs and CONTINUES instead of dying. Submit a direct pack ZERO in the wrapper too, because an
+  exception can occur before `_push_tick()` has a chance to run; `_push_tick` still zeros and re-raises
+  for inner tick failures. Catch **`Exception`, NOT
   `BaseException`** — `_push_tick` catches `BaseException` and re-raises (`:3274`), so a
   `KeyboardInterrupt`/`SystemExit` must pass THROUGH the `_run` wrapper to stop the thread; `except
   Exception` does that because those are not `Exception` subclasses. Add a rate-limited log + a
@@ -485,25 +484,22 @@ before implementing** (per `feedback_plan_first_live_critical`). Keep them separ
   2s value. Confirm the port-check still runs while blackout is held: `:456-462` calls
   `_expire_blackout_if_needed()` AND the port check on every empty poll, so removing the expiry leaves
   the port-gone failsafe intact.
-- **Gate:** F12 only bites once the blackout is actually reachable, which needs IAC opened (a
-  `static_look` binding on IAC — see F1/A3). If the operator decides the pack's blackout routes
-  elsewhere (or IAC is never opened), this task may be moot. **Resolve blackout routing (with Task 4 /
-  A3) before implementing.** Not live today.
+- **Scope:** this is a pack MIDI-input safety fix. It is software-validated without opening hardware;
+  whether the authored BLACK OUT pad is reachable in the live pack still depends on the separate
+  blackout-routing/device decision.
 - **Test:** feed `_feed_raw_message(0x90,0,100)` (note-on, no note-off), advance the clock past the
   old 2s window with empty polls → assert `blackout_held` stays `True`; then drop the port (port
   checker returns absent) → assert `blackout_held` clears via `input_port_gone`. Asserts the hold no
   longer self-releases while the controller is alive, yet a dead port still clears it.
 
 ## When you finish
-Commit each task separately (`fix(soundswitch): verify_pack is a true superset of load_pack runtime
-invariants (F3/F5 + Gap A/C/D)`, etc.). Report back: which tasks landed, the before/after
-`manifest_sha256` for the clean export, the `fuzz_decode.py` crash count (must be 0), and that the
-anti-drift property test (`verify accepts ⇒ load accepts`) passes. Flag these **open operator/design
-decisions** as still unresolved — this spec only makes them visible, it does not decide them:
-- **Gap B (Task 1f):** is a static-looks-only pack with zero IAC→autoloop selections valid? Decides
-  whether `verify_pack` mirrors the loader's "≥1 project target" rule, or the loader is loosened.
-- **A3 / F1 + F12 blackout routing (Task 4, Task 11):** the pack currently neither honours nor safely
-  holds the BLACK OUT pad (IAC isn't opened; if opened it mis-expires). Decide how the pack routes
-  blackout before go-live; Task 11 is gated on this.
+Report back: which tasks landed, the before/after `manifest_sha256` for the clean export, the
+truncated-catalog crash result, and the verifier/loader parity cases that were exercised. Flag these
+**open operator/design decisions** as still unresolved — this spec only makes them visible, it does
+not decide them:
+- **Static-only pack design:** current code preserves the loader's "≥1 project target" rule. If that
+  should change, loosen loader and verifier together.
+- **A3 / F1 blackout routing:** the pack input adapter now holds blackout safely once routed, but live
+  routing and physical behavior remain hardware-unvalidated.
 - **A4 / F2 (Task 3):** stop gating scripted activity on export-host file existence? Spec only adds
   the report-only diagnostic.

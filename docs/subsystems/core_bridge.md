@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: cb31cf8
-last_verified_date: 2026-06-25
+last_verified_commit: 595fabd
+last_verified_date: 2026-06-27
 validation_scope: software-only
 ---
 
@@ -22,6 +22,7 @@ SoundSwitch pack-player boundary:
 - T7.0 keeps process signal ownership in `__main__`; T7.1 routes the existing laser executor through one injected backend while retaining the MIDI default path.
 - T7a/T7b/T7c/T7e are wired: `__main__` loads optional default-off config, chooses one backend, starts verified workers, creates `PackRuntime`, injects it into `StateManager`, and wires sanitized status plus validate-first commands. Absent/disabled config preserves legacy MIDI; dry-run/none opens no pack hardware.
 - RW-5 status is StateManager-owned copied state: one fresh dict is published from the already-rendered frame, and readers receive only a copy. `software_zero_frame` and the attempted frame counter are software intent, not physical output proof.
+- The main 200 Hz loop catches ordinary per-iteration exceptions, submits a direct pack ZERO frame, logs a bounded counter, skips that instant, and continues. It does not catch process-control exceptions, and it does not force-zero separate OS2L/laser-MIDI/LED lanes.
 - Sender health, T7d Autoloop phase, and hardware validation remain open. Current Autoloop pack output remains software-zero.
 
 Authoritative code:
