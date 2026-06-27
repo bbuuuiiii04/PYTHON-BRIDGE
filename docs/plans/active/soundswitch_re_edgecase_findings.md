@@ -153,6 +153,33 @@ dark / `:334` mask_off) armed on entering the pre-drop transition window and on 
   sticks on forever … Release the mask and clear the latch" — handled via `if not
   sp_state.smart_breakdown_active`.
 
+### F13 — A drop on the first SmartPhrasing tick after a reset is silently missed  [timing, confirmed via replay]
+- **Where:** `smart_phrasing.py:304-316` — drop-crossing detection is guarded by `if prev_abs_beat is
+  not None:`, and `_compute_tick_state`'s next-drop/`fired_drop_beats` machinery only fires a crossing
+  when `prev_abs_beat < drop_beat <= abs_beat`. After any `reset()` (track change, deck switch,
+  `playhead_jump_backward`, or first playback tick) `self._previous_abs_beat` is `None`, so the first
+  observed beat cannot register a crossing. A drop whose beat equals that first observed beat is
+  **permanently missed for that pass** — the next tick has `prev == abs == drop_beat`, and
+  `drop_beat <= drop_beat` is false for the strict `<`, so it never fires.
+- **Repro (replay harness `work/replay_phrasing.py` + S16):** play track A to beat 62, then load track
+  B sampled first at beat 64 with a drop at 64 → `smart_drop_crossing` is False on the load tick AND
+  the next tick. Same with a single-tick start exactly on a drop (`[64.0,65.0]` → no crossing vs
+  `[63.0,64.0,65.0]` → crossing at 64). A forward *jump* that lands on a drop (prev exists) DOES fire
+  (S14), so this is specifically the first-tick-after-reset case.
+- **Live impact:** the drop's crossing-triggered lighting (impact look / role change) does not fire for
+  that one drop. Narrow — needs the first sampled beat after a reset to coincide with a drop beat
+  (more plausible when drops sit on integer beats and a deck switch / track load samples an integer
+  beat). The pre-drop blackout is moot here (you're at the drop, not approaching). Severity: minor.
+- **Fix direction:** seed `prev_abs_beat` on the tick after a reset (or treat the first tick as
+  `prev = abs - 1 beat`) so an exact-boundary drop at the resumed position is still crossed once.
+
+**Timing replay coverage (this round):** built `work/replay_phrasing.py` and exercised 16 scenarios —
+linear drop, mini-drops, backward loop re-fire, forward jump over a drop, breakdown crossings,
+breakdown-suppressed deferred transition-mask arm (single + multi-breakdown), post-drop overlap, and
+second-drop re-arm. **All timed correctly except F13.** The drop / transition-mask / breakdown timing
+in `smart_phrasing.py` is otherwise sound. NOT yet replay-tested: `autoloop_controller.py` phrase-arm
+grace + master-correction scheduling (next target).
+
 **One noted edge (not a confirmed bug):** `Ev.PAUSE` (`state_manager.py:1161-1166`) only sets
 `playing=False`; it does not itself resolve the laser pending blackout. A transition mask armed at the
 exact moment of a pause holds the laser dark for the pause duration until stop-detection or resume
@@ -163,6 +190,60 @@ This matches the operator's experience ("never noticed a half-blackout / stuck m
 live-path surface that this read-only audit could NOT verify is the **timing math** (drop-beat
 detection, autoloop phrase-arm grace windows, master-correction scheduling) — those need a live
 runtime / replay harness, not static reading, and are the right target for a runtime-capable follow-up.
+
+### F14 — Autoloop arm-correction has a loop with no escape hatch (NOT reachable today; a missing seatbelt)
+- **Plain-language:** when the bridge syncs an autoloop to a phrase boundary and has to push the sync
+  to a later boundary, it does so in a loop. If it ever tried this **without knowing the track's BPM**
+  (BPM reading as 0) on a track whose beat-map doesn't reach far enough, that loop would never finish
+  and the whole bridge would freeze — lights stuck, beat sync dead, restart required.
+- **What I confirmed:** the freeze is real — I called the function with BPM=0 and it ran forever
+  (`autoloop_controller.py:481` uncapped `while`; `:407-408` returns the current time unchanged when
+  BPM≤0, so the loop's exit condition never gets closer).
+- **Why it is NOT a live bug today:** both callers are guarded. `_maybe_lock_autoloop_arm` returns
+  early if BPM≤0 (`:566`), and `arm_bpm` there falls back to that already-positive BPM. The other
+  caller (`arm_autoloop:282`) only fires when `autoloop_master_phrase_arm` is true, and the only
+  production call site passes it **false** (`state_manager.py:3235`). So nothing feeds BPM=0 in.
+- **Severity:** latent / defensive only. **Recommended cheap fix regardless:** cap the loop (e.g. stop
+  after ~64 phrase boundaries) and/or refuse to schedule a correction when BPM≤0 — one line of
+  insurance so a future code change can't turn this into a frozen-show bug.
+- **Confidence:** function-level freeze confirmed (reproduced); production-unreachable confirmed by
+  tracing both callers. See Ambiguities A1.
+
+### F15 — The lighting "brain" has no safety net: one unexpected error freezes the whole show (intent unclear)
+- **Plain-language:** the bridge runs all its lighting decisions in one fast loop, 200 times a second.
+  If any single step in that loop hits an unexpected error, the bridge turns the DMX lights off
+  (safe) but then the loop **stops running entirely** — beat sync, lasers, LEDs, SoundSwitch all
+  freeze — and it does **not** restart itself. You'd have to restart the bridge to get lights back.
+- **What I confirmed (code):** the loop (`state_manager.py:911-918`) has no error catch around the
+  per-tick work, and the tick wrapper deliberately re-raises after zeroing DMX
+  (`:3274-3280`). The thread is started once as a daemon (`:651`) with no watchdog/restart.
+- **Why I'm NOT calling it a bug yet:** I did not find a specific, reachable error that actually
+  triggers this — the loop's code is mature and guards most edge cases (e.g. BPM divisions are
+  guarded). So this is "the safety net is missing," not "here's how it crashes." And the re-raise
+  looks deliberate — it may be an intentional "go dark rather than show garbage" choice.
+- **Operator question:** see Ambiguities A5. Severity depends entirely on intent + whether any push-
+  path error is reachable. Confidence: the no-recovery behavior is confirmed; a trigger is not.
+
+## AMBIGUITIES / QUESTIONS FOR THE OPERATOR (verify before treating as bugs)
+These are things I could not resolve from the code alone — I need the operator's intent before
+calling them bugs. None are confirmed live problems.
+- **A1 (F14 reachability):** Does the bridge ever try to *start/sync an autoloop* on a track when it
+  does **not** know the BPM yet — e.g. a track with no BPM set, or in the instant after a deck switch
+  before the BPM is read? And is the "master phrase arm" mode ever actually used? If the answer to
+  both is "no," F14 stays a harmless missing-seatbelt. If "yes," it can freeze the show and should be
+  fixed first.
+- **A2 (F1 intent):** The "BLACK OUT" pad (StaticOverride31) mapped to the reserved blackout note — is
+  that *intended* to be a blackout (momentary all-off), which is how the new pack would treat it? Or do
+  you intend it as a normal static look you can latch? (Only matters if/when the new pack drives DMX.)
+- **A3 (F2 intent):** For the new pack, should a scripted track's lights depend on whether its audio
+  file is found on the machine doing the export? Today they silently turn off if the file moved.
+- **A4 (F13 intent):** If you cue a track to land exactly on a drop and hit play, should the drop's
+  light "hit" still fire? Today that one drop is skipped (the bridge needs one beat of history first).
+- **A5 (F15 intent):** If the bridge hits one unexpected internal error mid-song, do you want it to
+  (a) shut the lighting brain down completely until you restart the bridge — current behavior, lights
+  freeze — or (b) skip that one instant and keep the show running? Right now it's (a), with the DMX
+  lights going dark on the way down. If you want (b), the loop needs a "catch the error, log it, keep
+  going" wrapper.
 
 ## Pre-runtime findings (carried from the hardening spec, re-verified this session)
 F1, F1b, F2, F3, F4, F5 detail + repros are in `soundswitch_re_edgecase_hardening_spec.md` Part A and
