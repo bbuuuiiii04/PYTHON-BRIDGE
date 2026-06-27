@@ -239,6 +239,13 @@ calling them bugs. None are confirmed live problems.
   file is found on the machine doing the export? Today they silently turn off if the file moved.
 - **A4 (F13 intent):** If you cue a track to land exactly on a drop and hit play, should the drop's
   light "hit" still fire? Today that one drop is skipped (the bridge needs one beat of history first).
+- **A6 (two breakdown paths):** The bridge computes "where the breakdowns are" twice — once for the
+  laser transition mask (recomputed live from the raw track data, `state_manager.py:4288`) and once
+  for the other path (a pre-filtered list, `meta.smart_breakdowns`). The code comment flags they can
+  differ. Question: should the lasers and the rest of the lighting always agree on where a breakdown
+  is? If yes and they ever differ, the laser mask and the LED/SoundSwitch reaction could land on
+  slightly different beats. (Both selection functions are sound; this is about them being fed the same
+  vs different inputs.) Not a confirmed bug — needs your intent.
 - **A5 (F15 intent):** If the bridge hits one unexpected internal error mid-song, do you want it to
   (a) shut the lighting brain down completely until you restart the bridge — current behavior, lights
   freeze — or (b) skip that one instant and keep the show running? Right now it's (a), with the DMX

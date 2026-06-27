@@ -59,20 +59,40 @@ crossing (`state_manager.py:1767`) with an anchor backstop — sound. See the re
 audit" section. Only un-verified edge: a transition mask armed exactly at `Ev.PAUSE` holds the laser
 dark for the pause (likely intended) — confirm only with live runtime.
 
+**Live-path TIMING + plumbing — AUDITED THIS ROUND, found SOUND (don't re-audit):** drove the real
+`SmartPhrasingEngine` through 16 replay scenarios (`work/replay_phrasing.py`) — drop crossing,
+mini-drops, backward loop, forward jump, breakdown crossings, breakdown-suppressed deferred
+transition arm, post-drop overlap, second-drop re-arm — all correct except **F13** (a drop on the
+first tick after a reset is missed; narrow). Also verified SOUND: `beat_math.py` (every division
+guards `bpm>0`/`interval>0` — safe on no-BPM, single-beat, or duplicate-timestamp grids), the
+per-deck drop/phrase/breakdown caches (keyed by `load_gen`, invalidated on track load — no stale
+drops), `smart_rearm` phrase-anchor rearm, and the OS2L output (`os2l_injector` catches & skips
+malformed commands; `osl_output` divisions guarded). **F14** (uncapped arm-correction loop) and
+**F15** (no per-tick exception handler on the 200Hz loop → fail-fast to a frozen show) are LATENT —
+no reachable trigger found; F15's intent is ambiguous (A5). See the findings register's "LIVE-path
+audit" + "AMBIGUITIES A1–A5" sections — **resolve A1–A5 with the operator before treating F14/F15/F1/
+F2/F13 as bugs.**
+
 ## Highest-value places NOT yet swept (go here) — these need a RUNTIME / replay harness, not static reading
-1. **Drop / phrase TIMING math** in `smart_phrasing.py` (drop-beat detection, `transition_window_beats`,
-   `beats_to_next_drop`), `autoloop_controller.py` (phrase-arm grace windows
-   `_AUTOLOOP_MASTER_PHRASE_START_GRACE_BEATS`, `schedule_master_correction`, the "arm-grace-late"
-   path), and `smart_rearm.py`. A wrong beat = blackout/look/arm fires at the wrong time — visible
-   live. The *lifecycle* is sound (above); the *timing* is what's unverified. Build a replay harness
-   that feeds synthetic beat/elapsed/BPM sequences and asserts the arm/clear/drop beats — do NOT
-   speculate about timing from static reading (the operator rejects ungrounded claims).
-2. **Structural (length/offset-consistent) corruption fuzz of `SoundSwitchVenues.bin`** — prior run did
+1. **Drop / breakdown DETECTION classification + selection — AUDITED, found SOUND (don't re-audit):**
+   `energy_model.py` (every division/index guarded — empty series, single/duplicate beats, zero total
+   all safe) and `smart_phrasing.py` `select_smart_drops`/`select_smart_breakdowns`/`find_restore_beat`
+   (sorted+deduped intro/outro filtering, restore-beat = next buildup/drop). What remains UNVERIFIED is
+   the raw input: `audio_spectral_features.py` / `spectral_cache.py` (do the spectral features land the
+   drop at the right *beat*?) — needs real audio, not static reading. Also the two-breakdown-path
+   divergence noted at `state_manager.py:4288` (snapshot recomputes from raw ANLZ vs coordinator's
+   pre-filtered `meta.smart_breakdowns`) — confirm with the operator whether those two are meant to
+   agree.
+2. **The Rekordbox READERS** — `rb_state_reader.py`, `rb_memory.py`, `rb_offsets.py`, `live_bpm.py`,
+   `mtc_reader.py`. They produce the beat/BPM/elapsed everything else trusts. Memory-offset/stale-read
+   bugs here mistime the whole show. (Hardware/Rekordbox-specific — may need the live rig.)
+3. **LED color engine / look director** — `led_look_director.py`, `led_color_engine.py`,
+   `led_dispatch_coordinator.py`, the smart_drop_blackout LED dispatch. Large; the operator's Govee
+   looks. Only the smart-drop dedup was checked.
+4. **Structural (length/offset-consistent) corruption fuzz of `SoundSwitchVenues.bin`** — prior run did
    truncation only. Hunt for a *silent mis-parse* (decode succeeds, output semantically wrong, still
-   verifies) — the format entangles values with length/offset fields.
-3. **`enttec_dmx_pro.py` wire framing** (`build_dmx_packet`, the worker) — last stage before the
-   lights; hardware-adjacent but packet framing/escaping is pure software.
-4. **Capture-replay RE tools** — only if captures exist; low live-stakes.
+   verifies).
+5. **`enttec_dmx_pro.py` wire framing** + capture-replay RE tools — last-stage/low-stakes.
 
 ## Infrastructure you can reuse
 - Scratchpad harness + repros: `/private/tmp/.../scratchpad/work/` (`harness.py` decodes the live
