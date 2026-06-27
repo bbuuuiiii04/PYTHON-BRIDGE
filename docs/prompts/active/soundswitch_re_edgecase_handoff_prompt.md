@@ -50,21 +50,29 @@ freeze/compare drift, multi-venue cue handling, autoloop catalog resolution. All
 the findings in the register. **F9 (overlay bleed-through) and F10 (static-loses-to-stale) were
 investigated and RULED OUT** (intended/defended) — do not resurrect them.
 
-## Highest-value places NOT yet swept (go here)
-1. **The legacy LIVE path** — `sound_switch_engine.py`, `osl_output.py`, `os2l_injector.py`,
-   `smart_phrasing.py`, `smart_drop`/`smart_rearm`, and how the operator's actual blackout / "transition
-   mask" / smart-drop behavior is produced and timed. This is what's *actually driving the lights*.
-   (Note: this is broader than the original RE-pack prompt — confirm with the operator whether to
-   expand scope here, since this is where their real live behavior lives.)
-2. **Structural (length/offset-consistent) corruption fuzz of `SoundSwitchVenues.bin`** — the prior
-   run only did truncation. Hunt for a *silent mis-parse* (decode succeeds, output semantically wrong,
-   still verifies) — the format entangles values with length/offset fields, so this is where a silent
-   wrong-frame could hide.
-3. **`enttec_dmx_pro.py` wire framing** (`build_dmx_packet`, the worker) — the last stage before the
-   lights; hardware-adjacent but the packet framing/escaping is pure software.
-4. **Capture-replay RE tools** (`validate_*_capture`, `parse_artnet_pcap`, `align_capture`,
-   `audit_legacy_capture`, `correlate_midi_autoloop`, `uuidxref`, `t7d_phase_contract`) — only run if
-   the captures exist; low live-stakes.
+**Live path mask/blackout lifecycle — AUDITED THIS ROUND, found SOUND (don't re-audit):** the
+transition-mask + breakdown-blackout *clear* lifecycle (`smart_phrasing` / `smart_rearm` /
+`laser_executor` / `state_manager` stop/resume/deck-switch/track-load + the breakdown leaked-window
+guard at `smart_rearm.py:258-277` + the per-tick transition falling-edge) is robustly cleared on every
+transition path — no stuck-dark / leaked-mask bug. The smart-drop-blackout dedup is reset at each drop
+crossing (`state_manager.py:1767`) with an anchor backstop — sound. See the register's "LIVE-path
+audit" section. Only un-verified edge: a transition mask armed exactly at `Ev.PAUSE` holds the laser
+dark for the pause (likely intended) — confirm only with live runtime.
+
+## Highest-value places NOT yet swept (go here) — these need a RUNTIME / replay harness, not static reading
+1. **Drop / phrase TIMING math** in `smart_phrasing.py` (drop-beat detection, `transition_window_beats`,
+   `beats_to_next_drop`), `autoloop_controller.py` (phrase-arm grace windows
+   `_AUTOLOOP_MASTER_PHRASE_START_GRACE_BEATS`, `schedule_master_correction`, the "arm-grace-late"
+   path), and `smart_rearm.py`. A wrong beat = blackout/look/arm fires at the wrong time — visible
+   live. The *lifecycle* is sound (above); the *timing* is what's unverified. Build a replay harness
+   that feeds synthetic beat/elapsed/BPM sequences and asserts the arm/clear/drop beats — do NOT
+   speculate about timing from static reading (the operator rejects ungrounded claims).
+2. **Structural (length/offset-consistent) corruption fuzz of `SoundSwitchVenues.bin`** — prior run did
+   truncation only. Hunt for a *silent mis-parse* (decode succeeds, output semantically wrong, still
+   verifies) — the format entangles values with length/offset fields.
+3. **`enttec_dmx_pro.py` wire framing** (`build_dmx_packet`, the worker) — last stage before the
+   lights; hardware-adjacent but packet framing/escaping is pure software.
+4. **Capture-replay RE tools** — only if captures exist; low live-stakes.
 
 ## Infrastructure you can reuse
 - Scratchpad harness + repros: `/private/tmp/.../scratchpad/work/` (`harness.py` decodes the live

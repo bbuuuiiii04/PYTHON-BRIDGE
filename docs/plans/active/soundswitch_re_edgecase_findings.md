@@ -132,6 +132,38 @@ Ruled OUT after verification (kept for honesty / so the next agent doesn't re-ch
 
 ---
 
+## LIVE-path audit — transition mask / breakdown blackout (the operator's actual blackout behavior)
+
+This round audited the **legacy live path** (what actually drives lights today): the laser
+director / executor + `smart_phrasing` + `smart_rearm` transition-mask and breakdown-blackout
+lifecycle. The operator's "transition mask" = a held laser blackout (`laser_executor.py:321` mask_on
+dark / `:334` mask_off) armed on entering the pre-drop transition window and on breakdown.
+
+**Result: VERIFIED SOUND — no stuck-dark / leaked-mask bug found.** The class of bug worth fearing
+("lasers stuck blacked out after a transition") is defended at every path I could construct:
+- The pending laser blackout is force-resolved on **stop** (`_do_stop` → `_clear_smart_rearm_state`
+  `:4433` + `reset_runtime_state` `:4398`), **resume** (`:4425-4427`), **deck switch**
+  (`_on_master_changed` `:2631-2639`), and **active-track load** (`_on_track_loaded` `:2660-2669`).
+- The **transition mask** self-clears every tick via the falling edge (`smart_phrasing.py:410-411`
+  `elif scratch.transition_window_active: transition_mask_should_clear = True`), so backward scrub,
+  track loop, or a tick that skips the drop all drive the window inactive and clear the mask
+  (`laser_executor.py:104-105`), plus the `drop_crossing` resolves it (`:129-248`).
+- The **breakdown mask** (latched, not per-tick) has an explicit leaked-window guard
+  (`smart_rearm.py:258-277`): "if the playhead leaves the breakdown window any other way … the mask
+  sticks on forever … Release the mask and clear the latch" — handled via `if not
+  sp_state.smart_breakdown_active`.
+
+**One noted edge (not a confirmed bug):** `Ev.PAUSE` (`state_manager.py:1161-1166`) only sets
+`playing=False`; it does not itself resolve the laser pending blackout. A transition mask armed at the
+exact moment of a pause holds the laser dark for the pause duration until stop-detection or resume
+clears it. Lasers dark while the music is paused is plausibly intended; operator has not reported it.
+Worth a live confirm only if the operator pauses mid-pre-drop and sees the lasers stay dark.
+
+This matches the operator's experience ("never noticed a half-blackout / stuck mask"). The remaining
+live-path surface that this read-only audit could NOT verify is the **timing math** (drop-beat
+detection, autoloop phrase-arm grace windows, master-correction scheduling) — those need a live
+runtime / replay harness, not static reading, and are the right target for a runtime-capable follow-up.
+
 ## Pre-runtime findings (carried from the hardening spec, re-verified this session)
 F1, F1b, F2, F3, F4, F5 detail + repros are in `soundswitch_re_edgecase_hardening_spec.md` Part A and
 the `work/repro_*.py` scripts. F3 additionally proven from raw `recordable` bytes through
