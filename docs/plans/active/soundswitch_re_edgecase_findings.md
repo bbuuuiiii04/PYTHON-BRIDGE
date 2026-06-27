@@ -224,6 +224,38 @@ runtime / replay harness, not static reading, and are the right target for a run
 - **Operator question:** see Ambiguities A5. Severity depends entirely on intent + whether any push-
   path error is reachable. Confidence: the no-recovery behavior is confirmed; a trigger is not.
 
+## OPERATOR INTENT — ANSWERED 2026-06-26 (authoritative re-grades)
+The operator answered the questions. Re-grading every affected finding against their stated intent:
+- **F14 → NOT a bug (closed).** "It will always know BPM." The zero-BPM freeze condition can never
+  occur. Keep the loop-cap only as cheap defensive insurance; not required.
+- **F1 → NOT a bug for the real setup (closed).** BLACK OUT is authored as PRESS-and-HOLD; the pack's
+  blackout is also press-and-hold (note-on holds, note-off releases) → it does what the operator wants.
+  Only a footgun if a *non-blackout* look were ever mapped to that exact reserved note, which it isn't.
+- **F12 → CONFIRMED bug, but pre-go-live (pack only).** Operator authored BLACK OUT as press-and-hold
+  → it must stay dark for the whole hold. The pack player auto-releases the blackout after ~2s
+  (`stale_timeout_ms`) even while held — that directly contradicts press-and-hold. Fix when/before the
+  pack drives DMX: the stale timer must track *controller silence*, not time-since-press, so a real
+  held blackout never lets go.
+- **F13 → CONFIRMED bug (live).** Operator: "drop should still fire," "the bridge should always know
+  what phrase the track is in." Today, if the first beat seen after a reset/cue lands exactly on a
+  drop, that drop's laser hit is skipped. Fix: seed the previous-beat so the first tick can still
+  detect a crossing. This is in the LIVE laser path, not just the pack.
+- **F15 → CONFIRMED desired fix.** Operator: "just skip that instant." Today one unexpected internal
+  error stops the whole 200Hz loop (frozen show, restart needed). Operator wants skip-and-continue.
+  Fix: wrap the per-tick work in try/except that zeros DMX, logs, and CONTINUES instead of re-raising.
+  (No reachable trigger found, but the operator confirms the survive-and-continue behavior they want.)
+- **F2 → deferred.** Operator doesn't recognize the scenario (it's about the not-live pack); revisit
+  with a clearer explanation when the pack is actually deployed. Not a current concern.
+- **A6 → RESOLVED, not a bug.** Operator: the laser and the rest "should agree" on the down-breakdown
+  phrase. Verified they DO: both call `select_smart_breakdowns` on the same raw ANLZ breakdowns with
+  the same `total_beats` (`len(beatgrid)`), and `meta.anlz_breakdowns`/`meta.smart_breakdowns` are
+  written atomically together (`state_manager.py:1228-1235`). Same start beats. The code comment's
+  "divergence" warning is over-cautious.
+
+**Net actionable bug list (intent-grounded):** F13 (live, drop-on-cue missed — fix), F15 (loop should
+survive errors — fix), F3/F4/F5 (export pipeline — fix), F12 (press-hold blackout — fix before pack
+goes live). Everything else is closed/deferred/cosmetic.
+
 ## AMBIGUITIES / QUESTIONS FOR THE OPERATOR (verify before treating as bugs)
 These are things I could not resolve from the code alone — I need the operator's intent before
 calling them bugs. None are confirmed live problems.

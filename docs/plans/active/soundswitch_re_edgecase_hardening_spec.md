@@ -282,6 +282,43 @@ Add to `tests/` (pure-function seams; no live project, no devices, no subprocess
 - [ ] Hard checks pass: `python3 tools/check_docs_metadata.py`, `check_agent_contracts.py`,
       `check_docs_drift.py`.
 
+## Part B' — LIVE-PATH fixes added after operator intent confirmation (2026-06-26)
+These are confirmed against operator intent (see the findings register "OPERATOR INTENT — ANSWERED").
+They touch the LIVE laser/phrasing path and the runtime loop — **live-critical, so plan-first review
+before implementing** (per `feedback_plan_first_live_critical`). Keep them separate commits.
+
+### Task 9 — `smart_phrasing.py`: fire a drop the operator cued straight onto (fixes F13) [confirmed]
+- **Intent:** operator said a drop must ALWAYS fire, even cued exactly onto it.
+- **Root cause:** `_compute_tick_state` drop-crossing needs `prev_abs_beat` (`:306`); on the first
+  tick after any reset (`update()` sets `_previous_abs_beat=None`) a drop equal to that first beat is
+  never crossed (S16 in `work/replay_phrasing.py`).
+- **Fix direction:** on the first tick after a reset, fire a one-time crossing for any unfired
+  `drop_beat == round(abs_beat)` (exact-landing case) — e.g. seed the crossing check so a drop at the
+  resumed beat resolves once and is added to `_fired_drop_beats`. Do NOT seed `prev = abs-1` blindly
+  (that would also fire drops just *behind* the cue point). Add a replay test mirroring S16.
+- **Live safety:** must fire each drop at most once; must not re-fire on the next tick.
+
+### Task 10 — `state_manager.py`: the 200Hz loop must survive an unexpected error, not freeze (fixes F15) [confirmed]
+- **Intent:** operator said "just skip that instant" — keep the show running through a glitch.
+- **Root cause:** `_run` (`:911-918`) has no per-tick catch and `_push_tick` re-raises after zeroing
+  DMX (`:3274-3280`), so one unhandled error kills the lighting thread (frozen show, restart needed).
+- **Fix direction:** keep the zero-DMX-on-error safety, but in `_run` wrap the tick so it logs and
+  CONTINUES instead of dying — e.g. `try: self._push_tick() except Exception: log.exception("[SM] tick
+  error — skipped"); ` (the DMX was already zeroed inside `_push_tick`). Consider a rate-limited error
+  log + a counter so a persistent error is visible. Do NOT swallow `KeyboardInterrupt`/stop signals.
+- **Live safety:** a skipped tick yields ZERO DMX for that instant (already the behavior), then the
+  next tick recovers from immutable state. Verify the loop keeps running after a forced exception.
+
+### Task 11 — `soundswitch_midi_input.py`: a held blackout must stay dark for the whole hold (fixes F12) [pre-go-live, pack only]
+- **Intent:** BLACK OUT is authored press-and-hold; it must stay black as long as held.
+- **Root cause:** `_expire_blackout_if_needed` (`:246-255`) releases the blackout `stale_timeout_ms`
+  after the note-on (`_blackout_held_at` set once at `:287`, never refreshed); MIDI sends no repeat
+  note-ons during a hold, so a >2s hold un-blacks itself.
+- **Fix direction:** the stale timer should measure *controller silence* (time since the last message
+  from that device), not time-since-press — refresh the hold timestamp on any inbound message from the
+  bound device, so a held blackout with a live controller never expires; only a genuinely silent/dead
+  controller times out. (Only needed when the pack drives DMX; not live today.)
+
 ## When you finish
 Commit each task separately (`fix(soundswitch): verify_pack enforces load-pack slot-ownership +
 reserved-scene invariants (F3/F5)`, etc.). Report back: which tasks landed, the before/after
