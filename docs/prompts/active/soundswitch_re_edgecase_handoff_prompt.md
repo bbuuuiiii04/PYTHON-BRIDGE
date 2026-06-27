@@ -73,26 +73,32 @@ no reachable trigger found; F15's intent is ambiguous (A5). See the findings reg
 audit" + "AMBIGUITIES A1–A5" sections — **resolve A1–A5 with the operator before treating F14/F15/F1/
 F2/F13 as bugs.**
 
-## Highest-value places NOT yet swept (go here) — these need a RUNTIME / replay harness, not static reading
-1. **Drop / breakdown DETECTION classification + selection — AUDITED, found SOUND (don't re-audit):**
-   `energy_model.py` (every division/index guarded — empty series, single/duplicate beats, zero total
-   all safe) and `smart_phrasing.py` `select_smart_drops`/`select_smart_breakdowns`/`find_restore_beat`
-   (sorted+deduped intro/outro filtering, restore-beat = next buildup/drop). What remains UNVERIFIED is
-   the raw input: `audio_spectral_features.py` / `spectral_cache.py` (do the spectral features land the
-   drop at the right *beat*?) — needs real audio, not static reading. Also the two-breakdown-path
-   divergence noted at `state_manager.py:4288` (snapshot recomputes from raw ANLZ vs coordinator's
-   pre-filtered `meta.smart_breakdowns`) — confirm with the operator whether those two are meant to
-   agree.
-2. **The Rekordbox READERS** — `rb_state_reader.py`, `rb_memory.py`, `rb_offsets.py`, `live_bpm.py`,
-   `mtc_reader.py`. They produce the beat/BPM/elapsed everything else trusts. Memory-offset/stale-read
-   bugs here mistime the whole show. (Hardware/Rekordbox-specific — may need the live rig.)
-3. **LED color engine / look director** — `led_look_director.py`, `led_color_engine.py`,
-   `led_dispatch_coordinator.py`, the smart_drop_blackout LED dispatch. Large; the operator's Govee
-   looks. Only the smart-drop dedup was checked.
-4. **Structural (length/offset-consistent) corruption fuzz of `SoundSwitchVenues.bin`** — prior run did
-   truncation only. Hunt for a *silent mis-parse* (decode succeeds, output semantically wrong, still
-   verifies).
-5. **`enttec_dmx_pro.py` wire framing** + capture-replay RE tools — last-stage/low-stakes.
+## SCOPE — STRICT (operator-set, 2026-06-26)
+**In scope: ONLY the SoundSwitch EXPORTER and the DMX RUNTIME.**
+- Exporter = `~/Music/.ssproj` → `soundswitch_project_decoder` → `soundswitch_pack`(compile) →
+  `soundswitch_pack_verifier` → `tools/export_soundswitch_pack` (+ `tools/ssfmt/re` RE toolkit + the
+  proof gate). The decode → pack → verify → export chain.
+- DMX runtime = `soundswitch_pack_loader` → `soundswitch_laser_player` / `apply_layers` →
+  `soundswitch_midi_input` → `soundswitch_pack_controller` / `soundswitch_pack_runtime` →
+  `soundswitch_frame_sender` → Enttec CH1-19. The pack that drives DMX.
+
+**OUT OF SCOPE — do NOT go here** (a prior run wrongly suggested these): the Rekordbox readers
+(`rb_*`, `live_bpm`), the laser director / MIDI laser path (`laser_director`/`laser_executor`/
+`smart_phrasing`/`smart_rearm`/`autoloop_controller`), the LED/Govee engine (`led_*`), and the
+audio/spectral analysis (`energy_model`/`audio_spectral_features`/`spectral_cache`). These are other
+subsystems, not the SoundSwitch exporter or the DMX runtime.
+
+## Remaining IN-SCOPE work (the exporter + DMX runtime were otherwise swept clean — software-only, no rig)
+1. **Structural (length/offset-consistent) corruption fuzz of `SoundSwitchVenues.bin`** (exporter) —
+   prior run did truncation only. Hunt for a *silent mis-parse*: decode succeeds, the pack's values are
+   semantically wrong, and verify still passes — the venue format ties values to length/offset fields.
+2. **`enttec_dmx_pro.py` wire framing** (DMX runtime) — `build_dmx_packet` + the worker; the software
+   that turns a 19-channel frame into Enttec bytes. Packet framing/escaping is pure software.
+3. **The `tools/ssfmt/re` capture-replay tools** (exporter RE toolkit) — only if their captures exist.
+
+Note: within the exporter + DMX runtime, the SOFTWARE is fully covered by reading/replay; nothing
+software-level needs the physical rig. A rig would only confirm the DMX bytes light the real fixtures
+(the HARDWARE-UNVALIDATED boundary the prompt set as off-limits) — that's not unfinished software work.
 
 ## Infrastructure you can reuse
 - Scratchpad harness + repros: `/private/tmp/.../scratchpad/work/` (`harness.py` decodes the live
