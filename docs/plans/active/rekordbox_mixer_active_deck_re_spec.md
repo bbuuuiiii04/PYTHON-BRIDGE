@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: static-and-passive-live-verified planning spec
-last_verified_commit: 1775a5a
+last_verified_commit: 77395af
 last_verified_date: 2026-06-28
-validation_scope: static RE plus operator-approved passive process-memory proof for Rekordbox 7.2.11 Deck 1/2 upfader and LOW/BASS EQ; CFX/filter static candidate located but not passively proven; runtime implementation, filter, software behavior, and hardware behavior unvalidated
+validation_scope: static RE plus operator-approved passive process-memory proof for Rekordbox 7.2.11 Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and master-change survival; runtime implementation, software behavior, and hardware behavior unvalidated
 ---
 
 # Codex Implementation Spec - Rekordbox Mixer Active-Deck Authority
@@ -96,21 +96,23 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   `/tmp/rbss_re/ghidra_cfx_dump.txt`.
 - [confirmed] Current proof is summarized in
   `docs/research/rekordbox_mixer_active_deck_re_evidence.md`. The local raw
-  live snapshot artifact is `/tmp/rbss_re/mixer_proof_snapshots.jsonl`.
+  live snapshot artifacts are `/tmp/rbss_re/mixer_proof_snapshots.jsonl` and
+  `/tmp/rbss_re/cfx_mixer_samples.jsonl`.
 - [confirmed] `ChannelFaderComp::eventAbsoluteValueChanged` validates the
   incoming device object against a stored component pointer near
   `this + 0x238`, converts the incoming integer to a normalized double with
   scale `6.103888176768602e-05`, stores a cached double near `this + 0x250`,
   and passes the value plus an id near `this + 0x248` toward a `DjEngine`
-  singleton call target at `0x1007b4b08`. The id is a deck/channel candidate,
-  not yet proven as Deck 1 vs Deck 2.
+  singleton call target at `0x1007b4b08`. This static function alone does not
+  prove Deck 1 vs Deck 2; the passive proof below does.
 - [confirmed] `EqControlComp::eventAbsoluteValueChanged` checks three stored
   device-object pointers near `this + 600`, `this + 0x260`, and `this + 0x268`,
   maps them to band indexes `0`, `1`, and `2`, applies the same
   `6.103888176768602e-05` scale, stores cached per-band doubles near
   `this + 0x290 + band * 8`, and passes value, id near `this + 0x288`, and
   band index toward a `DjEngine` singleton call target at `0x1007b51cc`.
-  Band index order is not yet proven to be low/mid/high.
+  This static function alone does not prove low/mid/high order; the passive
+  proof below maps band index `2` to LOW/BASS.
 - [confirmed] `MixerControlComp::eventAbsoluteValueChanged` has the same
   normalized-value shape, with a device pointer near `this + 0x268`, id near
   `this + 0x278`, cached double near `this + 0x280`, and call target
@@ -131,7 +133,7 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   `EqualizerNXS2::setParameter` identify downstream parameter slots and curve
   handling. They are useful contrast evidence, but they are not by themselves a
   bridge-readable live mixer pointer chain.
-- [confirmed] Static CFX evidence exists outside the mixer graph chain:
+- [confirmed] Static CFX GUI evidence exists:
   `effectGui::RbxCFXDeviceComponent::eventOnChanged()` /
   `eventAbsoluteValueChanged()` route CFX events to
   `RbxCfxControlBehavior::setCfxKnobValue()`,
@@ -142,9 +144,34 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   behavior pointer near `this + 0x168`; knob device-object slots near
   `this + 0x1d8` through `this + 0x200` route to CFX knob indexes `0..5`.
   Rekordbox strings also expose CFX/FILTER commands and
-  `CFXParameterCH1` through `CFXParameterCH4`. This is a static candidate only:
-  it is not tied to the passive-verified `DjEngineIF` audio-graph chain and does
-  not prove Deck 1/2 filter memory.
+  `CFXParameterCH1` through `CFXParameterCH4`. This is GUI/effect-state
+  contrast evidence; the bridge-readable FILTER endpoint is the audio chain
+  below.
+- [confirmed] Static and passive Color FX audio/container evidence ties CFX
+  FILTER to the same `DjSystem` / `DjUnitAudioGraph` family as the
+  passive-verified mixer chain. `DjEngineIF::getDjSystem()` returns
+  `*(engine + 0xa0)`. `RekordboxDjColorFxUnitContainer` creates one
+  `RekordboxDjColorFxUnit` per player index, stores first-layer pointers in its
+  container vector at `+0x68..+0x78`, stores unit pointers in its vector at
+  `+0xf0..+0x100`, and attaches each unit with
+  `DjSystem::setChannelFx(unit, player_index, 4)`. `DjSystem::setChannelFx()`
+  dispatches through the audio graph; `DjMixerUnit::setChannelFx()` indexes the
+  mixer channel vector at `+0x2c8..+0x2d0`; `InputChannelGraph::setEffectUnit()`
+  iterates the processor vector at `channel_graph + 0x480..+0x488`; and
+  `FxUnitProcessor::addFxUnit()` stores the `AbstractFxUnit*` in a per-slot
+  vector when `slot < 7`. For CFX attach slot `4`, that processor vector triple
+  is `+0x1e0`, `+0x1e8`, and `+0x1f0`.
+- [confirmed] Inside `RekordboxDjColorFxUnit`, the layer vector is
+  `+0x88..+0x98`. `+0x68` is not the unit layer vector; it belongs to the
+  container's first-layer pointer vector.
+- [confirmed] Static Color FX parameter evidence shows
+  `RekordboxDjColorFxUnitContainer::setParameter()` / `getParameter()` using the
+  unit vector at `container + 0xf0` by channel/deck argument, and
+  `RekordboxDjColorFxLayer::setParameter()` storing normalized parameter values
+  at `layer + 0xe8` and `layer + 0xec`. `ColorFxFilterDjm900NXS2` scales filter
+  parameters to a `0..255` audio raw domain, with smoother pointers at
+  `filter + 0x360` and `filter + 0x368`; passive proof confirmed neutral raw
+  `128`, min raw `0`, and max raw `255`.
 - [confirmed] Static and live proof tie the readable Rekordbox 7.2.11 mixer
   root to `djengine::DjEngineIF::singletonHolder` at preferred VA
   `0x104e16ea8`, runtime base-relative holder offset `0x4e16ea8`.
@@ -176,31 +203,39 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   Deck 2 upfader `04E16EE8 A8 458 0 2C8 8 470 30`,
   Deck 1 LOW/BASS `04E16EE8 A8 458 0 2C8 0 460 30 38`, and
   Deck 2 LOW/BASS `04E16EE8 A8 458 0 2C8 8 460 30 38`.
+- [confirmed] Using existing `rb_offsets.py` chain semantics, the local
+  Rekordbox 7.2.11 CFX FILTER implementation-candidate chains are:
+  Deck 1 FILTER param0 `04E16EE8 A8 458 0 2C8 0 480 0 1E0 0 88 0 E8`,
+  Deck 2 FILTER param0 `04E16EE8 A8 458 0 2C8 8 480 0 1E0 0 88 0 E8`,
+  Deck 1 FILTER param1 `04E16EE8 A8 458 0 2C8 0 480 0 1E0 0 88 0 EC`, and
+  Deck 2 FILTER param1 `04E16EE8 A8 458 0 2C8 8 480 0 1E0 0 88 0 EC`.
+  A future reader must validate vector bounds, `unit_channel`, selected effect
+  id `0`, finite values, and readable both-deck state before using filter
+  values for any tracking or status.
 - [confirmed] Operator-approved passive process-memory proof captured the same
   live PID/base while moving one physical control at a time: Deck 2 upfader
   down/top, Deck 2 LOW/BASS down/center/top, Deck 1 upfader down/top, Deck 1
   LOW/BASS down/top, and final LOW/BASS neutral restore.
+- [confirmed] Operator-approved passive process-memory proof also captured
+  Deck 1 mid-fader (`raw=511.5`, `norm=0.5`), Deck 1/2 CFX FILTER min/neutral
+  /max endpoints, CFX PARAM/resonance movement, relaunch reacquisition
+  (`86137` -> `87290` with base change), and direct-master-change survival for
+  raw master `0` / bridge deck `1` and raw master `1` / bridge deck `2`.
 - [confirmed] `rekordcrate` is useful background for Rekordbox export/settings
   formats, but its `DJMMYSETTING.DAT` parser covers mixer preference settings
   such as channel-fader curve and crossfader curve, not live per-deck fader/EQ
   positions.
-- [unknown] CFX/filter GUI/effect-state handling is statically located, but
-  Deck 1/2 filter knob memory is not decoded or passively proven. No stable
-  pointer root, deck mapping, or raw/normalized range is established for bridge
-  use. Do not add filter reader fields, resolver inputs, LED overlay behavior,
-  or bridge-ready status claims until an operator-approved passive proof ties a
-  stable root to Deck 1 and Deck 2 filter values.
-- [unknown] The Deck 1/2 upfader and LOW/BASS chains are proven for the current
-  local Rekordbox 7.2.11 live process only; other Rekordbox versions and
-  post-relaunch stability still require explicit validation.
-- [unknown] Play/stop/master-change survival was not proven; implementation
-  must retain fail-closed validity/freshness checks.
+- [confirmed] No local Rekordbox 7.2.11 Deck 1/2 pointer/value-mapping unknown
+  remains for upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 midpoint,
+  local relaunch reacquisition, or direct-master-change survival.
+- [unknown] The chains are proven for local Rekordbox `7.2.11.0342` only; other
+  Rekordbox versions still require explicit validation.
+- [unknown] Actual play/stop survival with loaded tracks was not proven. After
+  relaunch, Deck 1/2 had no loaded tracks, so the play/pause probe did not
+  create transport movement. Implementation must retain fail-closed validity
+  and freshness checks.
 - [unknown] Missing/unreadable mixer values are not implemented yet and must
   invalidate mixer authority rather than guessing from one deck.
-- [unknown] Deck 1 intermediate/audible upfader was not separately sampled in
-  this pass. The raw chain is proven for Deck 1 down/top and Deck 2
-  down/half/top, but Deck 1 mid-position symmetry should remain an RE follow-up
-  unless implementation labels only need down/top plus thresholded non-down.
 - [unknown] Runtime thresholds, hysteresis, and stability timing remain
   resolver implementation work.
 
@@ -307,9 +342,10 @@ mechanics and asks only for concrete physical actions.
 Required proof:
 
 Current status: completed for Deck 1/2 upfader and LOW/BASS EQ on
-2026-06-28. See
-`docs/research/rekordbox_mixer_active_deck_re_evidence.md`. Filter proof is
-deferred.
+2026-06-28. The continuation pass also completed Deck 1 mid-fader, Deck 1/2
+CFX FILTER param0/param1, relaunch reacquire, and direct-master-change
+survival proof. See
+`docs/research/rekordbox_mixer_active_deck_re_evidence.md`.
 
 Initial approved physical setup, if the operator has not moved controls before
 proof starts:
@@ -321,15 +357,16 @@ proof starts:
 Treat that only as a baseline instruction from the operator. It is not proof
 until passive samples are captured under current-turn approval.
 
-- Deck 1 fader: down, audible, top.
-- Deck 2 fader: down, audible, top.
-- Deck 1 bass: below neutral, neutral/12 o'clock, above neutral.
-- Deck 2 bass: below neutral, neutral/12 o'clock, above neutral.
-- Deck 1 and Deck 2 filter neutral and movement, if filter is included.
-- repeated samples per physical position.
-- evidence that Deck 1 and Deck 2 are not swapped.
-- evidence that values survive play/stop/master changes.
-- evidence that missing/unreadable values are detectable as invalid authority.
+- Already captured: Deck 1 fader down/mid/top, Deck 2 fader down/half/top,
+  Deck 1 bass below/neutral/above, Deck 2 bass below/neutral/above, Deck 1/2
+  FILTER neutral/min/max, repeated samples per physical position, evidence that
+  Deck 1 and Deck 2 are not swapped, relaunch reacquire, and direct-master
+  changes.
+- Still not captured: actual play/stop survival with loaded tracks. The
+  relaunch session had no loaded tracks, so the play/pause button probe did not
+  advance live-position counters.
+- Runtime implementation must still prove missing/unreadable values are
+  detectable as invalid authority.
 
 Deliverable:
 
@@ -355,6 +392,13 @@ Required offset/parser changes:
   `04E16EE8 A8 458 0 2C8 8 470 30`,
   `04E16EE8 A8 458 0 2C8 0 460 30 38`,
   `04E16EE8 A8 458 0 2C8 8 460 30 38`.
+- If exposing CFX FILTER tracking/status, extend the model with explicit
+  optional filter fields and use the passive-verified chain lines exactly:
+  `04E16EE8 A8 458 0 2C8 0 480 0 1E0 0 88 0 E8`,
+  `04E16EE8 A8 458 0 2C8 8 480 0 1E0 0 88 0 E8`,
+  `04E16EE8 A8 458 0 2C8 0 480 0 1E0 0 88 0 EC`,
+  `04E16EE8 A8 458 0 2C8 8 480 0 1E0 0 88 0 EC`.
+  Filter fields must not feed active-deck authority.
 
 Required reader changes:
 
@@ -365,6 +409,10 @@ Required reader changes:
   mixer authority invalid for both decks.
 - Normalize only after range validation: fader `raw / 1023.0`, LOW/BASS
   `raw / 255.0`.
+- If filter tracking/status is implemented, validate selected effect id `0`,
+  `unit_channel`, vector bounds, and finite `0.0..1.0` param0/param1 for both
+  decks. Missing or ambiguous filter state must invalidate filter tracking, not
+  active-deck authority.
 
 Expected shape:
 
@@ -433,7 +481,8 @@ clearly.
 
 ### Task 7 - Filter Overlay Tracking Only
 
-If filter is decoded, expose its state for a near-term LED/Govee overlay
+Filter is decoded for local Rekordbox 7.2.11. If implementation exposes filter
+state, keep it as tracking/status data for a near-term LED/Govee overlay
 follow-up. Do not implement visual overlay behavior until the visual design is
 specified.
 
@@ -480,8 +529,13 @@ Required tests:
   exists.
 - `rb_offsets.py` parser/model tests proving the four Rekordbox `7.2.11` mixer
   chains are exposed by named fields, not ignored as trailing text.
+- If filter fields are added, parser/model tests proving the four CFX FILTER
+  chains are exposed by named optional fields and cannot affect authority.
 - mixer f32 reader tests proving valid `0.0`, `255.0`, and `1023.0` are accepted
   while NaN, infinity, unreadable, null, and out-of-range values fail closed.
+- If filter fields are added, filter reader tests proving valid `0.0`, `0.5`,
+  and `1.0` are accepted only when effect id, unit channel, and vector bounds
+  are valid.
 
 Do not build a huge logging harness unless the implementation makes it cheap.
 
@@ -501,8 +555,10 @@ git diff --check
 Implementation is not complete until:
 
 - `docs/architecture/active_deck_authority.md` remains accurate.
-- RE evidence proves Deck 1/2 upfader and bass decoded labels.
+- RE evidence proves Deck 1/2 upfader, bass, and non-authority FILTER decoded
+  labels for local Rekordbox 7.2.11.
 - both-deck mixer authority validity is implemented.
+- filter data, if implemented, has no active-deck authority impact.
 - `rb_master_deck` is separate from `active_deck`.
 - old playing-only mirror auto-switch cannot bypass valid mixer authority.
 - invalid mixer authority visibly falls back to old RB-master behavior.
@@ -527,8 +583,10 @@ Before marking this ready, check these failure modes:
 - a non-active scripted deck continues to drive outputs.
 - the push loop gained blocking process-memory or Ghidra work.
 - filter overlay scope expanded into active-deck authority.
-- a static Ghidra symbol candidate is treated as a memory offset without passive
-  process proof.
+- any new static Ghidra symbol candidate is treated as a memory offset without
+  passive process proof.
+- the CFX FILTER chain is used without validating vector bounds, selected
+  effect id `0`, `unit_channel`, and both-deck finite values.
 - the passive-verified mixer vector chain is accidentally replaced by the static
   `getMixerControl()` return offset without a new live proof.
 - mixer chain lines are appended to `rb_offsets.py` but ignored by the fixed

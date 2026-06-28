@@ -1,9 +1,9 @@
 ---
 doc_status: active-review-prompt
 truth_level: reverse-engineering-review-instructions
-last_verified_commit: 27a078b
+last_verified_commit: 77395af
 last_verified_date: 2026-06-28
-validation_scope: adversarial review of Rekordbox mixer active-deck static/passive-live RE reasoning and implementation handoff; review-only; no live sampling/hardware authority
+validation_scope: adversarial review of Rekordbox mixer active-deck static/passive-live RE reasoning after local 7.2.11 fader/LOW/FILTER closure and implementation handoff; review-only; no live sampling/hardware authority
 ---
 
 # ChatGPT adversarial review - Rekordbox mixer active-deck RE
@@ -15,7 +15,7 @@ active-deck authority. Do not implement fixes.
 Repo: `/Users/bbui/rb_ss_bridge_v2`
 Branch: `main`
 Evidence base before this review-prompt update:
-`27a078bdf5c69d8f3610ce87f36907dec4955b08`
+`77395af`
 
 ## Hard Boundary
 
@@ -36,6 +36,14 @@ If present, the local static dump from the planning pass is:
 - `/tmp/rbss_re/ghidra_input_channel_dump.txt`
 - `/tmp/rbss_re/ghidra_mixer_xrefs.txt`
 - `/tmp/rbss_re/ghidra_mixer_index_dump.txt`
+- `/tmp/rbss_re/ghidra_cfx_dump.txt`
+- `/tmp/rbss_re/ghidra_filter_audio_dump.txt`
+- `/tmp/rbss_re/ghidra_colorfx_unit_dump.txt`
+- `/tmp/rbss_re/ghidra_djsystem_fx_dump.txt`
+- `/tmp/rbss_re/ghidra_fx_processor_dump.txt`
+- `/tmp/rbss_re/ghidra_colorfx_deep_dump.txt`
+- `/tmp/rbss_re/mixer_proof_snapshots.jsonl`
+- `/tmp/rbss_re/cfx_mixer_samples.jsonl`
 
 Treat it as a local artifact to inspect or regenerate, not as committed proof.
 The committed proof summary is:
@@ -102,11 +110,16 @@ support it. Try to disprove:
 8. EQ band index `2` = LOW/BASS is proven for Deck 1 and Deck 2 by passive
    samples, while band indexes `0` and `1` are not overclaimed as high/mid.
 9. Raw ranges and normalization are supported: upfader `0..1023`, LOW/BASS
-   `0..255`.
-10. Filter, other Rekordbox versions, relaunch stability, play/stop/master
-   survival, missing-value detection, thresholds, and runtime freshness remain
-   explicit unknowns.
-11. `rekordcrate` / `DJMMYSETTING.DAT` preference settings are not mistaken for
+   `0..255`, and non-authority FILTER param0/param1 `0.0..1.0`.
+10. The FILTER chain is supported by static CFX audio/container evidence and
+   passive one-control-at-a-time samples, including Deck 1/2 min/neutral/max,
+   selected effect id `0`, `unit_channel`, and smoother raw `0/128/255`.
+11. Local relaunch reacquire and direct-master-change survival are supported by
+   passive samples after PID/base change and after raw master `0`/`1` changes.
+12. Other Rekordbox versions, actual play/stop survival with loaded tracks,
+   missing-value detection, thresholds, and runtime freshness remain explicit
+   validation gaps.
+13. `rekordcrate` / `DJMMYSETTING.DAT` preference settings are not mistaken for
    live upfader/EQ/filter state.
 
 ## Review Surface C - Implementation Handoff Safety
