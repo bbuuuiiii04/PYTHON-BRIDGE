@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: static-and-passive-live-verified planning spec
-last_verified_commit: c14bff1
+last_verified_commit: 1775a5a
 last_verified_date: 2026-06-28
-validation_scope: static RE plus operator-approved passive process-memory proof for Rekordbox 7.2.11 Deck 1/2 upfader and LOW/BASS EQ; runtime implementation, filter, software behavior, and hardware behavior unvalidated
+validation_scope: static RE plus operator-approved passive process-memory proof for Rekordbox 7.2.11 Deck 1/2 upfader and LOW/BASS EQ; CFX/filter static candidate located but not passively proven; runtime implementation, filter, software behavior, and hardware behavior unvalidated
 ---
 
 # Codex Implementation Spec - Rekordbox Mixer Active-Deck Authority
@@ -89,10 +89,11 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   generated local decompiler dump at
   `/tmp/rbss_re/ghidra_candidate_dump.txt`. These are local RE artifacts, not
   committed repo evidence.
-- [confirmed] GhidraMCP was not available as a callable Codex tool or running
-  HTTP bridge in this session. Static Ghidra headless scripting was available
-  and produced the candidate decompilation below. Any future MCP-assisted pass
-  must report MCP availability separately instead of implying it was used.
+- [confirmed] The first RE pass did not have callable GhidraMCP, but the
+  2026-06-28 continuation pass had GhidraMCP available for loaded mixer
+  functions. CFX addresses were not loaded as decompilable MCP functions and
+  required a temporary no-analysis headless dump at
+  `/tmp/rbss_re/ghidra_cfx_dump.txt`.
 - [confirmed] Current proof is summarized in
   `docs/research/rekordbox_mixer_active_deck_re_evidence.md`. The local raw
   live snapshot artifact is `/tmp/rbss_re/mixer_proof_snapshots.jsonl`.
@@ -113,8 +114,9 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
 - [confirmed] `MixerControlComp::eventAbsoluteValueChanged` has the same
   normalized-value shape, with a device pointer near `this + 0x268`, id near
   `this + 0x278`, cached double near `this + 0x280`, and call target
-  `0x1007b4bfc`. This is a filter/mixer-control candidate, not active-deck
-  authority proof.
+  `0x1007b4bfc`; GhidraMCP decompilation shows that target resolves to
+  `DjEngineIF::setDigitalTrim()`. This is not the CFX filter path and is not
+  active-deck authority proof.
 - [confirmed] `DjMixerUnit::setChannelFaderPosition` bounds a channel index
   against an object vector near `this + 0x2c8..0x2d0`. When an active flag near
   `this + 0x2c0` is set, it dispatches through the selected channel object.
@@ -129,6 +131,16 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   `EqualizerNXS2::setParameter` identify downstream parameter slots and curve
   handling. They are useful contrast evidence, but they are not by themselves a
   bridge-readable live mixer pointer chain.
+- [confirmed] Static CFX evidence exists outside the mixer graph chain:
+  `effectGui::RbxCFXDeviceComponent::eventOnChanged()` /
+  `eventAbsoluteValueChanged()` route CFX events to
+  `RbxCfxControlBehavior::setCfxKnobValue()`,
+  `setCfxParameterKnobValue()`, `setCfxButtonState()`, `startEffect()`, and
+  `selectFx()`. The knob path clamps `0..1` values and stores GUI/effect-state
+  fields including `+0xfc`, per-index `+0xe8 + index * 4`, parameter `+0x100`,
+  and remembered parameter `+0x70 + index * 4`. This is a static candidate only:
+  it is not tied to the passive-verified `DjEngineIF` audio-graph chain and does
+  not prove Deck 1/2 filter memory.
 - [confirmed] Static and live proof tie the readable Rekordbox 7.2.11 mixer
   root to `djengine::DjEngineIF::singletonHolder` at preferred VA
   `0x104e16ea8`, runtime base-relative holder offset `0x4e16ea8`.
@@ -168,7 +180,10 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   formats, but its `DJMMYSETTING.DAT` parser covers mixer preference settings
   such as channel-fader curve and crossfader curve, not live per-deck fader/EQ
   positions.
-- [unknown] Filter knob memory is not decoded or proven in this pass.
+- [unknown] CFX/filter GUI/effect-state handling is statically located, but
+  Deck 1/2 filter knob memory is not decoded or passively proven. No stable
+  pointer root, deck mapping, or raw/normalized range is established for bridge
+  use.
 - [unknown] The Deck 1/2 upfader and LOW/BASS chains are proven for the current
   local Rekordbox 7.2.11 live process only; other Rekordbox versions and
   post-relaunch stability still require explicit validation.

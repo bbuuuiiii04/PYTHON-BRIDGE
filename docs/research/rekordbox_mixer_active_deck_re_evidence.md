@@ -1,9 +1,9 @@
 ---
 doc_status: research-current
 truth_level: static-and-passive-live-verified
-last_verified_commit: c14bff1
+last_verified_commit: 1775a5a
 last_verified_date: 2026-06-28
-validation_scope: Rekordbox 7.2.11 arm64 static Ghidra headless evidence plus operator-approved passive process-memory proof; bridge/runtime/hardware output unmodified and unvalidated
+validation_scope: Rekordbox 7.2.11 arm64 static Ghidra/GhidraMCP evidence plus operator-approved passive process-memory proof for upfader/LOW; CFX/filter static candidate located but not passively proven; bridge/runtime/hardware output unmodified and unvalidated
 ---
 
 # Rekordbox Mixer Active-Deck RE Evidence
@@ -22,8 +22,11 @@ not opened or mutated during this proof.
 - Thin-binary MD5: `f87084a7261547c0fe0c725291fa8c3e`.
 - Thin-binary SHA-256:
   `bfd71965fb23fb6dc88461de9bd39e371b34a6455faea89fd1e353ba1d03efbd`.
-- Static tool path: Ghidra 11.3.2 headless, no-analysis import.
-- GhidraMCP status: unavailable in this session; no MCP evidence is claimed.
+- Static tool path: Ghidra 11.3.2 headless, no-analysis import, plus
+  GhidraMCP for loaded mixer symbols.
+- GhidraMCP status: available for loaded mixer functions in the 2026-06-28
+  continuation pass; CFX addresses still required a temporary headless dump.
+- CFX static artifact: `/tmp/rbss_re/ghidra_cfx_dump.txt`.
 - Live process proof: Rekordbox PID `35122`, Mach-O base `0x102bf4000`.
 - Live proof artifact: `/tmp/rbss_re/mixer_proof_snapshots.jsonl`.
 
@@ -164,10 +167,27 @@ proof rows below use the same PID, base address, and pointer chain.
   scales normalized values to `0..255`.
 - `EqualizerNXS2::setParameter()` and `getParameter()` use `+0x20`, `+0x2c`,
   and `+0x38` for band indexes `0`, `1`, and `2`.
+- `MixerControlComp::eventAbsoluteValueChanged()` routes to
+  `DjEngineIF::setDigitalTrim()`, not the CFX filter path. It should no longer
+  be treated as a filter candidate without contradictory new evidence.
+- Static CFX evidence is separate from the mixer graph proof:
+  `effectGui::RbxCFXDeviceComponent::eventOnChanged()` /
+  `eventAbsoluteValueChanged()` route CFX events to
+  `RbxCfxControlBehavior::setCfxKnobValue()`,
+  `setCfxParameterKnobValue()`, `setCfxButtonState()`, `startEffect()`, and
+  `selectFx()`.
+- `RbxCfxControlBehavior::setCfxKnobValue()` clamps knob values to `0..1` and
+  stores them in GUI/effect-state fields including `+0xfc` and per-index
+  `+0xe8 + index * 4`. `setCfxParameterKnobValue()` stores a parameter value at
+  `+0x100`, and `memoryParamKnob()` can copy that value to `+0x70 + index * 4`.
+  This identifies likely CFX state, but not a bridge-readable Deck 1/2 filter
+  memory chain.
 
 ## Remaining Unknowns
 
-- Filter knob memory is not decoded or proven in this pass.
+- CFX/filter GUI/effect-state handling is statically located, but Deck 1/2
+  filter knob memory is not decoded or passively proven. No stable pointer root,
+  deck mapping, or raw/normalized range is established for bridge use.
 - This proves the local Rekordbox 7.2.11 live process, not other Rekordbox
   versions or post-relaunch stability.
 - Play/stop/master-change survival was not proven; implementation must retain
