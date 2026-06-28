@@ -48,8 +48,11 @@ the optional config and chooses one physical laser backend before workers start;
 `StateManager` reads authoritative deck state, is the sole per-tick
 `submit_frame` owner, and publishes one fresh software-intent status dict from the
 already-rendered frame before submission. Status reads copy that dict without
-calling runtime/backend providers. Blocking load/verify/serial work remains on
-startup or the command thread. Absent/disabled config preserves legacy MIDI;
+calling runtime/backend providers. Ordinary drain/tick/snapshot exceptions skip
+only the failed instant with a bounded log, at most one direct pack ZERO frame,
+and the normal 200 Hz throttle preserved; process-control exceptions still
+escape. Blocking load/verify/serial work remains on startup or the command
+thread. Absent/disabled config preserves legacy MIDI;
 dry-run/none opens neither physical output path. Sender delivery health, T7d
 capture-derived Autoloop phase integration, and hardware validation remain open.
 Current native Autoloop pack output remains software-zero.

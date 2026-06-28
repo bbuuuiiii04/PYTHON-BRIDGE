@@ -186,7 +186,8 @@ not enter status or the menubar.
 1. `StateManager` remains the only writer of `DeckState` and the sole per-tick
    pack-frame submit owner.
 2. The 200 Hz path gains no filesystem, subprocess, MIDI, serial, socket,
-   provider, worker-polling, sleep, retry, or blocking work.
+   provider, worker-polling, retry, or blocking work, and no sleeps beyond the
+   existing StateManager tick throttle.
 3. Source SoundSwitch projects are read-only; complete saved bytes are authority.
 4. Identity is exact. Display names, fuzzy paths, and file order are not IDs.
 5. Only independently verified packs may publish or load.

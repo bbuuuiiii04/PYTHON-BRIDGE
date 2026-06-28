@@ -14,9 +14,11 @@ Audited against the current checkout at `595fabd` on 2026-06-27.
 - `PackRuntime.sanitized_status()` calls no backend/provider. `StateManager` owns the copied pack
   operational snapshot, publishes a fresh dict from the already-rendered frame before submission,
   and returns only a copy to status readers. The 200 Hz path gains no I/O, lock, or worker poll.
-- A caught ordinary exception in the 200 Hz iteration submits a direct pack ZERO frame, logs a bounded
-  counter, skips that instant, and keeps the loop alive. `KeyboardInterrupt`/`SystemExit` still pass
-  through; non-pack output lanes are not force-zeroed by this guard.
+- A caught ordinary exception in the 200 Hz drain/tick/snapshot iteration submits at most one direct
+  pack ZERO frame, logs a bounded counter, skips only that instant, preserves the normal 200 Hz
+  throttle before the next iteration, and keeps the loop alive. If `_push_tick()` already submitted
+  ZERO for an inner tick failure, `_run()` does not submit a duplicate. `KeyboardInterrupt`/
+  `SystemExit` still pass through; non-pack output lanes are not force-zeroed by this guard.
 - `software_zero_frame` is frame equality only and `frame_count` counts attempted normal software
   frames. Neither proves serial delivery, Enttec acceptance, or physical darkness; sender health is
   not inferred.

@@ -912,18 +912,25 @@ class StateManager:
         next_loop_error_log = 0.0
         while not self._stop.is_set():
             t0 = time.monotonic()
+            remaining = 0.0
+            push_started = False
+            push_completed = False
             try:
                 profiler = self._profiler
                 if profiler is None:
                     self._drain_events()
+                    push_started = True
                     self._push_tick()
+                    push_completed = True
                     self._maybe_publish_snapshot(time.monotonic())
                     remaining = self._TICK_INTERVAL - (time.monotonic() - t0)
                 else:
                     queue_depth = self._queue_depth()
                     self._drain_events()
                     t1 = time.monotonic()
+                    push_started = True
                     self._push_tick()
+                    push_completed = True
                     t2 = time.monotonic()
                     did_publish = self._maybe_publish_snapshot(t2)
                     t3 = time.monotonic()
@@ -940,8 +947,9 @@ class StateManager:
                     profiler.maybe_log(t3)
             except Exception as exc:
                 loop_error_count += 1
-                self._submit_pack_zero_frame()
                 now = time.monotonic()
+                if not push_started or push_completed:
+                    self._submit_pack_zero_frame()
                 if now >= next_loop_error_log:
                     log.error(
                         "[SM] push loop error; skipping tick  error=%s  count=%d",
@@ -949,7 +957,7 @@ class StateManager:
                         loop_error_count,
                     )
                     next_loop_error_log = now + 1.0
-                continue
+                remaining = self._TICK_INTERVAL - (now - t0)
             if remaining > 0:
                 time.sleep(remaining)
 

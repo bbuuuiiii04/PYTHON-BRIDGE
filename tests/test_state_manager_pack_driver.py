@@ -103,6 +103,22 @@ class _FakeInput:
         return self._snap
 
 
+class _RunClock:
+    def __init__(self, start=100.0):
+        self.now = start
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, duration):
+        self.sleeps.append(duration)
+        self.now += duration
+
+    def spend_tick(self):
+        self.now += StateManager._TICK_INTERVAL * 2
+
+
 def _make_sm(*, player=None, backend=None, midi_input=None, enabled=None):
     if enabled is None:
         enabled = player is not None and backend is not None
@@ -569,21 +585,169 @@ class PackDriverTests(unittest.TestCase):
             sm._push_tick()
         self.assertEqual(be.frames, [ZERO_FRAME])  # direct ZERO, driver not run
 
-    def test_run_loop_exception_before_push_tick_submits_pack_zero_and_exits(self):
+    def test_run_loop_drain_exception_sleeps_zero_logs_then_recovers(self):
+        clock = _RunClock()
         be = _FakeBackend()
-        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
-        sm._push_tick = mock.Mock()
+        with mock.patch("rb_ss_bridge_v2.state_manager.time.monotonic", clock.monotonic), \
+             mock.patch("rb_ss_bridge_v2.state_manager.time.sleep", clock.sleep):
+            sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+            drains = 0
+            snapshots = []
 
-        def boom():
-            sm._stop.set()
-            raise RuntimeError("drain crash")
+            def drain():
+                nonlocal drains
+                drains += 1
+                if drains == 1:
+                    raise RuntimeError("drain crash")
 
-        sm._drain_events = boom
-        with self.assertLogs("state_manager", level="ERROR") as captured:
-            sm._run()
-        sm._push_tick.assert_not_called()
+            def publish(now):
+                snapshots.append(now)
+                clock.spend_tick()
+                sm._stop.set()
+                return False
+
+            sm._drain_events = drain
+            sm._push_tick = mock.Mock()
+            sm._maybe_publish_snapshot = publish
+            with self.assertLogs("state_manager", level="ERROR") as captured:
+                sm._run()
+
+        self.assertEqual(drains, 2)
+        sm._push_tick.assert_called_once()
+        self.assertEqual(len(snapshots), 1)
         self.assertEqual(be.frames, [ZERO_FRAME])
+        self.assertEqual(len(clock.sleeps), 1)
+        self.assertEqual(len(captured.output), 1)
         self.assertIn("RuntimeError", "\n".join(captured.output))
+
+    def test_run_loop_push_tick_inner_exception_does_not_double_zero(self):
+        clock = _RunClock()
+        be = _FakeBackend()
+        with mock.patch("rb_ss_bridge_v2.state_manager.time.monotonic", clock.monotonic), \
+             mock.patch("rb_ss_bridge_v2.state_manager.time.sleep", clock.sleep):
+            sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+            _set(sm, ssid=SSID, elapsed_ms=50, playing=True, snap=FRESH)
+            pushes = 0
+
+            def inner():
+                nonlocal pushes
+                pushes += 1
+                if pushes == 1:
+                    raise ValueError("inner crash")
+
+            def publish(_now):
+                clock.spend_tick()
+                sm._stop.set()
+                return False
+
+            sm._push_tick_inner = inner
+            sm._maybe_publish_snapshot = publish
+            with self.assertLogs("state_manager", level="ERROR") as captured:
+                sm._run()
+
+        self.assertEqual(pushes, 2)
+        self.assertEqual(be.frames[0], ZERO_FRAME)
+        self.assertNotEqual(be.frames[1], ZERO_FRAME)
+        self.assertEqual(be.frames.count(ZERO_FRAME), 1)
+        self.assertEqual(len(clock.sleeps), 1)
+        self.assertEqual(len(captured.output), 1)
+        self.assertIn("ValueError", "\n".join(captured.output))
+
+    def test_run_loop_snapshot_exception_zeros_after_normal_output_then_recovers(self):
+        clock = _RunClock()
+        be = _FakeBackend()
+        with mock.patch("rb_ss_bridge_v2.state_manager.time.monotonic", clock.monotonic), \
+             mock.patch("rb_ss_bridge_v2.state_manager.time.sleep", clock.sleep):
+            sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+            _set(sm, ssid=SSID, elapsed_ms=50, playing=True, snap=FRESH)
+            sm._push_tick_inner = lambda: None
+            snapshots = 0
+
+            def publish(_now):
+                nonlocal snapshots
+                snapshots += 1
+                if snapshots == 1:
+                    raise RuntimeError("snapshot crash")
+                clock.spend_tick()
+                sm._stop.set()
+                return False
+
+            sm._maybe_publish_snapshot = publish
+            with self.assertLogs("state_manager", level="ERROR") as captured:
+                sm._run()
+
+        self.assertEqual(snapshots, 2)
+        self.assertNotEqual(be.frames[0], ZERO_FRAME)
+        self.assertEqual(be.frames[1], ZERO_FRAME)
+        self.assertNotEqual(be.frames[2], ZERO_FRAME)
+        self.assertEqual(be.frames.count(ZERO_FRAME), 1)
+        self.assertEqual(len(clock.sleeps), 1)
+        self.assertEqual(len(captured.output), 1)
+        self.assertIn("RuntimeError", "\n".join(captured.output))
+
+    def test_run_loop_persistent_drain_exception_sleeps_and_bounds_logs_under_profiler(self):
+        clock = _RunClock()
+        be = _FakeBackend()
+        failures = 50
+        with mock.patch("rb_ss_bridge_v2.state_manager.time.monotonic", clock.monotonic), \
+             mock.patch("rb_ss_bridge_v2.state_manager.time.sleep", clock.sleep):
+            sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+            sm._profiler = SimpleNamespace(record=mock.Mock(), maybe_log=mock.Mock())
+            seen = 0
+
+            def drain():
+                nonlocal seen
+                seen += 1
+                if seen == failures:
+                    sm._stop.set()
+                raise RuntimeError("persistent drain crash")
+
+            sm._drain_events = drain
+            sm._push_tick = mock.Mock()
+            with self.assertLogs("state_manager", level="ERROR") as captured:
+                sm._run()
+
+        self.assertEqual(seen, failures)
+        sm._push_tick.assert_not_called()
+        self.assertEqual(be.frames, [ZERO_FRAME] * failures)
+        self.assertEqual(len(clock.sleeps), failures)
+        self.assertEqual(len(captured.output), 1)
+        sm._profiler.record.assert_not_called()
+
+    def test_control_exceptions_escape_before_push_tick_without_error_log(self):
+        for exc_type in (KeyboardInterrupt, SystemExit):
+            with self.subTest(exc_type=exc_type.__name__):
+                clock = _RunClock()
+                be = _FakeBackend()
+                with mock.patch("rb_ss_bridge_v2.state_manager.time.monotonic", clock.monotonic), \
+                     mock.patch("rb_ss_bridge_v2.state_manager.time.sleep", clock.sleep), \
+                     mock.patch("rb_ss_bridge_v2.state_manager.log.error") as log_error:
+                    sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+                    sm._drain_events = mock.Mock(side_effect=exc_type())
+                    with self.assertRaises(exc_type):
+                        sm._run()
+
+                log_error.assert_not_called()
+                self.assertEqual(clock.sleeps, [])
+                self.assertEqual(be.frames, [])
+
+    def test_control_exceptions_escape_from_push_tick_after_single_zero(self):
+        for exc_type in (KeyboardInterrupt, SystemExit):
+            with self.subTest(exc_type=exc_type.__name__):
+                clock = _RunClock()
+                be = _FakeBackend()
+                with mock.patch("rb_ss_bridge_v2.state_manager.time.monotonic", clock.monotonic), \
+                     mock.patch("rb_ss_bridge_v2.state_manager.time.sleep", clock.sleep), \
+                     mock.patch("rb_ss_bridge_v2.state_manager.log.error") as log_error:
+                    sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+                    _set(sm, ssid=SSID, elapsed_ms=50, playing=True, snap=FRESH)
+                    sm._push_tick_inner = mock.Mock(side_effect=exc_type())
+                    with self.assertRaises(exc_type):
+                        sm._run()
+
+                log_error.assert_not_called()
+                self.assertEqual(clock.sleeps, [])
+                self.assertEqual(be.frames, [ZERO_FRAME])
 
     # D14
     def test_driver_does_no_blocking_io(self):

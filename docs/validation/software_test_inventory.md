@@ -60,7 +60,8 @@ auto-bind, alias override, missing/ambiguous controller degradation, and
 output-bus exclusion. RW-5 tests fail on backend/provider re-query,
 published-dict mutation/reuse, incorrect precedence or simultaneous truths,
 unsafe lifecycle snapshots, raw render/submit errors, 200 Hz loop error death,
-blackout self-release drift, stale active UI, export phase races,
+missing throttle sleeps, duplicate ZERO submits after `_push_tick()` inner failures,
+process-control exception swallowing, blackout self-release drift, stale active UI, export phase races,
 reload-command drift, missed one-shot auto-enable retry, or
 private-data leaks. The tests use fake/
 injected hardware seams. They do not prove Enttec/fixture behavior.
