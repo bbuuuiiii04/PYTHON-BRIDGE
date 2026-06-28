@@ -138,7 +138,11 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   `setCfxParameterKnobValue()`, `setCfxButtonState()`, `startEffect()`, and
   `selectFx()`. The knob path clamps `0..1` values and stores GUI/effect-state
   fields including `+0xfc`, per-index `+0xe8 + index * 4`, parameter `+0x100`,
-  and remembered parameter `+0x70 + index * 4`. This is a static candidate only:
+  and remembered parameter `+0x70 + index * 4`. The CFX component stores its
+  behavior pointer near `this + 0x168`; knob device-object slots near
+  `this + 0x1d8` through `this + 0x200` route to CFX knob indexes `0..5`.
+  Rekordbox strings also expose CFX/FILTER commands and
+  `CFXParameterCH1` through `CFXParameterCH4`. This is a static candidate only:
   it is not tied to the passive-verified `DjEngineIF` audio-graph chain and does
   not prove Deck 1/2 filter memory.
 - [confirmed] Static and live proof tie the readable Rekordbox 7.2.11 mixer
@@ -183,7 +187,9 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
 - [unknown] CFX/filter GUI/effect-state handling is statically located, but
   Deck 1/2 filter knob memory is not decoded or passively proven. No stable
   pointer root, deck mapping, or raw/normalized range is established for bridge
-  use.
+  use. Do not add filter reader fields, resolver inputs, LED overlay behavior,
+  or bridge-ready status claims until an operator-approved passive proof ties a
+  stable root to Deck 1 and Deck 2 filter values.
 - [unknown] The Deck 1/2 upfader and LOW/BASS chains are proven for the current
   local Rekordbox 7.2.11 live process only; other Rekordbox versions and
   post-relaunch stability still require explicit validation.

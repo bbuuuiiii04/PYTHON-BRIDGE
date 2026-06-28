@@ -176,12 +176,25 @@ proof rows below use the same PID, base address, and pointer chain.
   `RbxCfxControlBehavior::setCfxKnobValue()`,
   `setCfxParameterKnobValue()`, `setCfxButtonState()`, `startEffect()`, and
   `selectFx()`.
+- In the 2026-06-28 static continuation pass, GhidraMCP remained usable for
+  loaded mixer functions, but the CFX addresses `0x100211170`
+  (`RbxCFXDeviceComponent::eventAbsoluteValueChanged`) and `0x1009f59bc`
+  (`RbxCfxControlBehavior::setCfxKnobValue`) returned no MCP-loaded function.
+  CFX details below therefore come from `/tmp/rbss_re/ghidra_cfx_dump.txt`.
+- `RbxCFXDeviceComponent` stores the CFX behavior pointer near `this + 0x168`.
+  Knob device-object slots near `this + 0x1d8` through `this + 0x200` route to
+  CFX knob indexes `0..5`, with incoming absolute values normalized by the same
+  `6.103888e-05` scale seen in other Rekordbox controller handlers.
 - `RbxCfxControlBehavior::setCfxKnobValue()` clamps knob values to `0..1` and
   stores them in GUI/effect-state fields including `+0xfc` and per-index
   `+0xe8 + index * 4`. `setCfxParameterKnobValue()` stores a parameter value at
   `+0x100`, and `memoryParamKnob()` can copy that value to `+0x70 + index * 4`.
   This identifies likely CFX state, but not a bridge-readable Deck 1/2 filter
   memory chain.
+- User-facing strings in the Rekordbox binary confirm CFX/FILTER labels,
+  `CFXParameterCH1` through `CFXParameterCH4`, center commands, and the
+  "Filter is set as default" path. This is UI/command evidence only; it does not
+  establish a stable process-memory chain or Deck 1/2 mapping for bridge reads.
 
 ## Remaining Unknowns
 
