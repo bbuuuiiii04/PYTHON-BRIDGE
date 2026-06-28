@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: static-and-passive-live-verified planning spec
-last_verified_commit: 77395af
+last_verified_commit: ab2bc15
 last_verified_date: 2026-06-28
-validation_scope: static RE plus operator-approved passive process-memory proof for Rekordbox 7.2.11 Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and master-change survival; runtime implementation, software behavior, and hardware behavior unvalidated
+validation_scope: static RE plus operator-approved passive process-memory proof for Rekordbox 7.2.11 Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; runtime implementation, software behavior, and hardware behavior unvalidated
 ---
 
 # Codex Implementation Spec - Rekordbox Mixer Active-Deck Authority
@@ -41,6 +41,8 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
 - [confirmed] Current playing-only auto-switch paths enqueue
   `Ev.MASTER_CHANGED` for the mirror deck when the active deck is stopped/idle
   and the mirror deck is playing.
+- [confirmed] `_do_resume()` can also correct an empty-deck mismatch by writing
+  `self._os.active_deck = mirror` directly.
 - [confirmed] `_update_lighting()` derives scripted/autoloop/idle from the
   active deck's playing/scripted state.
 - [confirmed] `_drive_pack_output()` reads `self._os.active_deck` and renders
@@ -219,15 +221,17 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
 - [confirmed] Operator-approved passive process-memory proof also captured
   Deck 1 mid-fader (`raw=511.5`, `norm=0.5`), Deck 1/2 CFX FILTER min/neutral
   /max endpoints, CFX PARAM/resonance movement, relaunch reacquisition
-  (`86137` -> `87290` with base change), and direct-master-change survival for
-  raw master `0` / bridge deck `1` and raw master `1` / bridge deck `2`.
+  (`86137` -> `87290` with base change), and mixer-chain readability after
+  operator-labeled Deck 1/2 MASTER actions. Direct-master byte reliability is
+  current bridge code truth, not a field carried by the mixer JSONL artifacts.
 - [confirmed] `rekordcrate` is useful background for Rekordbox export/settings
   formats, but its `DJMMYSETTING.DAT` parser covers mixer preference settings
   such as channel-fader curve and crossfader curve, not live per-deck fader/EQ
   positions.
 - [confirmed] No local Rekordbox 7.2.11 Deck 1/2 pointer/value-mapping unknown
   remains for upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 midpoint,
-  local relaunch reacquisition, or direct-master-change survival.
+  local relaunch reacquisition, or mixer-chain readability after
+  operator-labeled master-button actions.
 - [unknown] The chains are proven for local Rekordbox `7.2.11.0342` only; other
   Rekordbox versions still require explicit validation.
 - [unknown] Actual play/stop survival with loaded tracks was not proven. After
@@ -343,8 +347,9 @@ Required proof:
 
 Current status: completed for Deck 1/2 upfader and LOW/BASS EQ on
 2026-06-28. The continuation pass also completed Deck 1 mid-fader, Deck 1/2
-CFX FILTER param0/param1, relaunch reacquire, and direct-master-change
-survival proof. See
+CFX FILTER param0/param1, relaunch reacquire, and mixer-chain readability after
+operator-labeled master-button actions. Direct-master byte authority remains
+current bridge code truth. See
 `docs/research/rekordbox_mixer_active_deck_re_evidence.md`.
 
 Initial approved physical setup, if the operator has not moved controls before
@@ -360,8 +365,8 @@ until passive samples are captured under current-turn approval.
 - Already captured: Deck 1 fader down/mid/top, Deck 2 fader down/half/top,
   Deck 1 bass below/neutral/above, Deck 2 bass below/neutral/above, Deck 1/2
   FILTER neutral/min/max, repeated samples per physical position, evidence that
-  Deck 1 and Deck 2 are not swapped, relaunch reacquire, and direct-master
-  changes.
+  Deck 1 and Deck 2 are not swapped, relaunch reacquire, and mixer-chain
+  readability after operator-labeled master-button actions.
 - Still not captured: actual play/stop survival with loaded tracks. The
   relaunch session had no loaded tracks, so the play/pause button probe did not
   advance live-position counters.
@@ -460,6 +465,8 @@ Required changes:
 - route all valid active-deck changes through the resolver.
 - remove/suppress playing-only mirror auto-switch as an independent authority
   while mixer authority is valid.
+- remove/suppress resume-time direct `active_deck` correction as an independent
+  authority while mixer authority is valid.
 - allow old RB-master behavior while mixer authority is invalid.
 - recover automatically when mixer authority becomes valid.
 - avoid per-tick log spam.
@@ -524,6 +531,8 @@ Required tests:
   `rb_master_deck` and does not bypass resolver when mixer authority is valid.
 - StateManager integration test proving old mirror auto-switch does not promote
   a fader-down playing deck when mixer authority is valid.
+- StateManager integration test proving resume-time empty-deck correction does
+  not bypass the resolver when mixer authority is valid.
 - runtime status/heartbeat test for `active_deck` plus `rb_master_deck`.
 - Rekordbox reader tests for decoded mixer validity/freshness once reader code
   exists.
@@ -561,6 +570,7 @@ Implementation is not complete until:
 - filter data, if implemented, has no active-deck authority impact.
 - `rb_master_deck` is separate from `active_deck`.
 - old playing-only mirror auto-switch cannot bypass valid mixer authority.
+- resume-time empty-deck correction cannot bypass valid mixer authority.
 - invalid mixer authority visibly falls back to old RB-master behavior.
 - recovery from invalid mixer authority returns to fader dominance.
 - status/heartbeat exposes the required fields.
@@ -577,6 +587,8 @@ Before marking this ready, check these failure modes:
   auto-switch path.
 - `MASTER_CHANGED` still writes `active_deck` directly during valid mixer
   authority.
+- resume-time empty-deck correction still writes `active_deck` directly during
+  valid mixer authority.
 - `active_deck` and `rb_master_deck` are conflated in status/heartbeat.
 - one deck's missing mixer state is treated as a valid comparison.
 - raw memory thresholds are hardcoded without RE-labeled physical positions.

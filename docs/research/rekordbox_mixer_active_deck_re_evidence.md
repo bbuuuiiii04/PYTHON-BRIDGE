@@ -1,9 +1,9 @@
 ---
 doc_status: research-current
 truth_level: static-and-passive-live-verified
-last_verified_commit: 77395af
+last_verified_commit: ab2bc15
 last_verified_date: 2026-06-28
-validation_scope: Rekordbox 7.2.11 arm64 static Ghidra/GhidraMCP evidence plus operator-approved passive process-memory proof for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and master-change survival; bridge/runtime/hardware output unmodified and unvalidated
+validation_scope: Rekordbox 7.2.11 arm64 static Ghidra/GhidraMCP evidence plus operator-approved passive process-memory proof for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; bridge/runtime/hardware output unmodified and unvalidated
 ---
 
 # Rekordbox Mixer Active-Deck RE Evidence
@@ -227,7 +227,7 @@ Accessibility/UI control mapping used during passive proof:
 | `deck2_filter_max` | `86137` / `0x102b58000` | p0 `1.0`, cutoff `255` | p0 `1.0`, cutoff `255` | Deck 2 max edge proved valid top. |
 | `restored_neutral` | `86137` / `0x102b58000` | p0 `0.5`, p1 `0.5`, cutoff/res `128/128` | p0 `0.5`, p1 `0.5`, cutoff/res `128/128` | Deck 1/2 CFX restored to neutral. |
 
-## Relaunch, Master-Change, and UI Survival Proof
+## Relaunch, Master-Labeled Chain, and UI Survival Proof
 
 - `fader124_50`: Deck 1 channel fader accessibility control was set to `50`.
   Passive read showed channel 0 fader raw `511.5`, normalized `0.5`; channel 1
@@ -238,23 +238,25 @@ Accessibility/UI control mapping used during passive proof:
   were `86137` / `0x102b58000`; new PID/base were `87290` / `0x102ae4000`.
   The same root chain reacquired engine, audio graph, mixer, channel vector,
   Deck 1/2 fader/EQ, and Deck 1/2 CFX FILTER neutral values.
-- `after_deck1_master_press`: pressing Deck 1 MASTER (`app.0.1.195`) changed
-  the direct master byte to raw `0` / bridge deck `1`; Deck 1/2 fader, EQ, CFX
-  unit channel, selected FILTER id, and neutral FILTER params remained readable
-  through the same reacquired chain.
-- `after_deck2_master_press`: pressing Deck 2 MASTER (`app.0.1.217`) changed
-  the direct master byte to raw `1` / bridge deck `2`; Deck 1/2 fader, EQ, CFX
-  unit channel, selected FILTER id, and neutral FILTER params remained readable.
-- `final_deck1_master_restore`: pressing Deck 1 MASTER (`app.0.1.195`) changed
-  the direct master byte back to raw `0` / bridge deck `1`; Deck 1/2 fader,
-  EQ, CFX unit channel, selected FILTER id, and neutral FILTER params remained
-  readable. A Deck 2 MASTER re-press did not clear direct master back to
-  `255/no_master`, so the final observed Rekordbox master state was Deck 1.
-- `after_deck1_play_press` and `after_deck1_pause_restore`: pressing the Deck 1
-  Play/Pause button did not advance direct live-position counters because Deck
-  1 and Deck 2 had no loaded tracks after relaunch (`track_info` was empty and
-  both live-position values stayed `0`). The mixer chain remained readable, but
-  this is not actual play/stop survival proof.
+- The master-button labels below were captured immediately after operator
+  Deck 1/2 MASTER actions. The `cfx_mixer_samples.jsonl` artifact records
+  mixer/CFX fields, not raw direct-master byte, track-info, or live-position
+  fields. Use these samples as mixer-chain readability proof across labeled
+  master actions. Direct-master byte reliability is current bridge code truth,
+  not a field proven by this mixer artifact.
+- `after_deck1_master_press`: after Deck 1 MASTER (`app.0.1.195`), Deck 1/2
+  fader, EQ, CFX unit channel, selected FILTER id, and neutral FILTER params
+  remained readable through the same reacquired chain.
+- `after_deck2_master_press`: after Deck 2 MASTER (`app.0.1.217`), Deck 1/2
+  fader, EQ, CFX unit channel, selected FILTER id, and neutral FILTER params
+  remained readable.
+- `final_deck1_master_restore`: after Deck 1 MASTER (`app.0.1.195`), Deck 1/2
+  fader, EQ, CFX unit channel, selected FILTER id, and neutral FILTER params
+  remained readable.
+- `after_deck1_play_press` and `after_deck1_pause_restore`: these labels did
+  not prove actual play/stop survival with loaded tracks. The mixer chain
+  remained readable, but actual loaded-track transport survival remains outside
+  this evidence set.
 
 ## Static Function Evidence
 
@@ -316,7 +318,8 @@ Accessibility/UI control mapping used during passive proof:
 
 No local Rekordbox 7.2.11 Deck 1/2 pointer/value-mapping unknown remains for
 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 midpoint, local relaunch
-reacquisition, or direct-master-change survival.
+reacquisition, or mixer-chain readability after operator-labeled master-button
+actions.
 
 The following are not proven by this RE evidence and remain implementation or
 validation work:

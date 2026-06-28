@@ -1,9 +1,9 @@
 ---
 doc_status: active-implementation-prompt
 truth_level: static-and-passive-live-re-closed-handoff
-last_verified_commit: 77395af
+last_verified_commit: ab2bc15
 last_verified_date: 2026-06-28
-validation_scope: handoff after Rekordbox 7.2.11 local RE closure for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and master-change survival; runtime implementation and hardware output unvalidated
+validation_scope: handoff after Rekordbox 7.2.11 local RE closure for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; runtime implementation and hardware output unvalidated
 ---
 
 # Codex Task - Implement Rekordbox Mixer Active-Deck Authority
@@ -51,6 +51,8 @@ Use executable code over docs when they conflict.
   signal-specific ranges.
 - `StateManager._on_master_changed()` still writes
   `self._os.active_deck = new_deck` directly.
+- `StateManager._do_resume()` can also correct an empty-deck mismatch by
+  writing `self._os.active_deck = mirror` directly.
 - `runtime_status._heartbeat_payload()` still reports
   `"master": active_deck`.
 
@@ -58,7 +60,9 @@ Use executable code over docs when they conflict.
 
 No local Rekordbox 7.2.11 Deck 1/2 pointer/value-mapping unknown remains for
 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 midpoint, local relaunch
-reacquisition, or direct-master-change survival.
+reacquisition, or mixer-chain readability after operator-labeled master-button
+actions. Direct-master byte authority is existing bridge code behavior, not a
+field proven by the mixer JSONL artifact.
 
 Artifacts:
 
@@ -169,10 +173,12 @@ Ghidra asks to analyze.
    while mixer authority is valid.
 7. Suppress old playing-only mirror auto-switch as an independent authority
    while mixer authority is valid.
-8. Update status/heartbeat so `master` no longer means `active_deck`. Expose
+8. Suppress resume-time direct `active_deck` correction as an independent
+   authority while mixer authority is valid.
+9. Update status/heartbeat so `master` no longer means `active_deck`. Expose
    `active_deck`, `rb_master_deck`, mixer validity, decoded fader/bass, and
    authority reason.
-9. Keep SoundSwitch, laser, LED/Govee, scripted, and autoloop behavior unchanged
+10. Keep SoundSwitch, laser, LED/Govee, scripted, and autoloop behavior unchanged
    after a selected `active_deck` is chosen.
 
 ## Remaining Validation Gaps

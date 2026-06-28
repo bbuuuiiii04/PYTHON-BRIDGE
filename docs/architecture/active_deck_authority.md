@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: b1e5fd6
+last_verified_commit: ab2bc15
 last_verified_date: 2026-06-28
 validation_scope: behavior contract; implementation and hardware validation pending
 ---
@@ -276,6 +276,9 @@ when direct master is not ready.
 
 [confirmed] Current push-loop paths can auto-promote the mirror deck using
 playing state alone.
+
+[confirmed] Current resume correction can also write `self._os.active_deck`
+directly when correcting an empty-deck mismatch.
 
 [confirmed] Current heartbeat reports `"master": active_deck`.
 

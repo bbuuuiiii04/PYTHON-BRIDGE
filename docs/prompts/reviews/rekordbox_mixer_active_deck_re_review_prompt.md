@@ -1,7 +1,7 @@
 ---
 doc_status: active-review-prompt
 truth_level: reverse-engineering-review-instructions
-last_verified_commit: 918c0a1
+last_verified_commit: ab2bc15
 last_verified_date: 2026-06-28
 validation_scope: strict adversarial review of Rekordbox mixer active-deck static/passive-live RE reasoning and implementation readiness; review-only; no live sampling, restart, or hardware authority
 ---
@@ -74,6 +74,10 @@ The bridge already has play/stop authority from Rekordbox offset live-position
 movement via `RBStateReader`. Verify that in current code. The active-deck work
 is about adding mixer authority: Deck 1/2 upfader plus LOW/BASS freshness,
 invalidation, thresholds, hysteresis, resolver behavior, status, and heartbeat.
+Do not frame direct master as missing or unreliable either; direct master is
+current bridge code behavior when configured and currently ready. The mixer RE
+evidence should not overclaim that its JSONL artifacts prove raw direct-master
+bytes unless those fields are actually present.
 
 Other Rekordbox versions are future validation work. They are not a blocker for
 the local Rekordbox `7.2.11.0342` spec, but the spec must not overclaim support
@@ -119,11 +123,14 @@ Treat every RE claim as guilty until proven. Try to disprove:
 9. CFX FILTER param0/param1 are proven only as tracking/non-authority data.
 10. Filter validation requirements are explicit: vector bounds, selected effect
     id `0`, `unit_channel`, finite values, both-deck readability.
-11. Relaunch reacquire and direct-master-change survival are supported by
-    samples after PID/base/master changes.
+11. Relaunch reacquire and mixer-chain readability after operator-labeled
+    master-button actions are supported by samples after PID/base/master
+    actions. Raw direct-master byte behavior must come from current code/tests
+    or an artifact that actually records those fields, not from mixer JSONL
+    labels alone.
 12. Local 7.2.11 pointer/value mapping has no remaining known Deck 1/2 gap for
     upfader, LOW/BASS, FILTER, Deck 1 midpoint, relaunch reacquire, or
-    master-change survival.
+    mixer-chain readability after operator-labeled master actions.
 13. Runtime mixer freshness/invalidation/thresholds/hysteresis are not falsely
     claimed as implemented.
 
@@ -142,7 +149,8 @@ Try to disprove that the implementation handoff is safe:
 5. `MASTER_CHANGED` becomes `rb_master_deck` only while mixer authority is valid.
 6. `active_deck` is selected only through a pure resolver while mixer authority
    is valid.
-7. Playing-only mirror auto-switch cannot bypass valid mixer authority.
+7. Playing-only mirror auto-switch and resume-time direct `active_deck`
+   correction cannot bypass valid mixer authority.
 8. Filter cannot affect `active_deck`.
 9. Decks 3/4, crossfader, trim/gain, mid/high EQ, real audio loudness, mute, and
    unrelated FX are still non-authority inputs.
