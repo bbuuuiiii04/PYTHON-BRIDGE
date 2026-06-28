@@ -714,6 +714,46 @@ class PackDriverTests(unittest.TestCase):
         self.assertEqual(len(captured.output), 1)
         sm._profiler.record.assert_not_called()
 
+    def test_run_loop_profiler_record_exception_sleeps_and_recovers(self):
+        clock = _RunClock()
+        be = _FakeBackend()
+        with mock.patch("rb_ss_bridge_v2.state_manager.time.monotonic", clock.monotonic), \
+             mock.patch("rb_ss_bridge_v2.state_manager.time.sleep", clock.sleep):
+            sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+            _set(sm, ssid=SSID, elapsed_ms=50, playing=True, snap=FRESH)
+            sm._push_tick_inner = lambda: None
+            records = 0
+            publishes = 0
+
+            def record(**_kwargs):
+                nonlocal records
+                records += 1
+                if records == 1:
+                    raise RuntimeError("profiler record crash")
+
+            def publish(_now):
+                nonlocal publishes
+                publishes += 1
+                if publishes == 2:
+                    clock.spend_tick()
+                    sm._stop.set()
+                return False
+
+            sm._profiler = SimpleNamespace(record=record, maybe_log=mock.Mock())
+            sm._maybe_publish_snapshot = publish
+            with self.assertLogs("state_manager", level="ERROR") as captured:
+                sm._run()
+
+        self.assertEqual(records, 2)
+        self.assertEqual(publishes, 2)
+        self.assertNotEqual(be.frames[0], ZERO_FRAME)
+        self.assertEqual(be.frames[1], ZERO_FRAME)
+        self.assertNotEqual(be.frames[2], ZERO_FRAME)
+        self.assertEqual(be.frames.count(ZERO_FRAME), 1)
+        self.assertEqual(len(clock.sleeps), 1)
+        self.assertEqual(len(captured.output), 1)
+        self.assertIn("RuntimeError", "\n".join(captured.output))
+
     def test_control_exceptions_escape_before_push_tick_without_error_log(self):
         for exc_type in (KeyboardInterrupt, SystemExit):
             with self.subTest(exc_type=exc_type.__name__):

@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan
 truth_level: code-and-test-grounded
-last_verified_commit: cb31cf8
-last_verified_date: 2026-06-25
+last_verified_commit: 3918603
+last_verified_date: 2026-06-28
 validation_scope: SoundSwitch 2.10.3 canonical-project/RAVE-profile implementation status; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 

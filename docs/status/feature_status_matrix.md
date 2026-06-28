@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 595fabd
-last_verified_date: 2026-06-27
+last_verified_commit: 3918603
+last_verified_date: 2026-06-28
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -25,7 +25,7 @@ Status vocabulary:
 | Feature area | Implementation status | Validation status | Compatibility scope | Notes |
 | --- | --- | --- | --- | --- |
 | Core startup | implemented | software-tested indirectly | local setup | `__main__.py` wires the runtime components. |
-| StateManager event/push loop | implemented | software-tested indirectly | local setup | Central owner for deck/runtime/lighting state. |
+| StateManager event/push loop | implemented | software-tested partially | local setup | Central owner for deck/runtime/lighting state. Ordinary loop exceptions are covered for tick-throttled skip/continue, bounded logging, process-control exception escape, and no duplicate pack ZERO after `_push_tick()` inner failures. |
 | Runtime `[BEAT]` heartbeat | implemented | software-tested partially | local setup | `StatusWriter` emits a throttled status-only heartbeat and writes the same summary into status JSON. Hardware-visible output is unchanged and unvalidated. |
 | Logging visibility live watch | implemented | software-tested partially | local setup | `docs/setup/logging_live_watch.json` provides a curated control-file preset for `[BEAT]`, laser, LED/Govee, SoundSwitch, and master/deck logs using existing `LoggingManager` filters. It changes logging visibility only and remains hardware-unvalidated. |
 | SoundSwitch OS2L output | implemented | software-tested partially | local setup | Uses OS2L TCP and VirtualDJ-shaped messages. |

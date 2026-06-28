@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: cb31cf8
-last_verified_date: 2026-06-25
+last_verified_commit: 3918603
+last_verified_date: 2026-06-28
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -36,8 +36,8 @@ The SoundSwitch project/pack tooling is not a live lighting-output claim. For
 the pinned SoundSwitch 2.10.3 canonical UUID/RAVE profile, strict decode,
 deterministic new-path export, independent verification, immutable pack
 loading/rendering, MIDI-input routing, backend abstraction, config/startup,
-StateManager scripted driving, copied operational status, commands, and Enttec framing/sending have
-software tests. Live export reconciles saved-project inventory dynamically; the
+StateManager scripted driving, copied operational status, commands, Enttec framing/sending, and
+tick-throttled ordinary loop-error handling have software tests. Live export reconciles saved-project inventory dynamically; the
 old exact-count closure snapshot is proof-only.
 Direct-DMX code exists but is default-off, locally unconfigured, and
 hardware-unvalidated. Copied status proves software intent only; sender health,

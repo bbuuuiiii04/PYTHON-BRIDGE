@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 595fabd
-last_verified_date: 2026-06-27
+last_verified_commit: 3918603
+last_verified_date: 2026-06-28
 validation_scope: software-only
 ---
 
@@ -37,7 +37,7 @@ Coverage expectations:
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.
-- `tests/test_soundswitch_project_decoder.py` covers the strict decoder/frozen models, including typed truncated-catalog failures. `tests/test_soundswitch_pack.py` covers deterministic export, independent verification, dynamic saved-project inventory reconciliation, proof-only strict snapshot rejection, the seven-class F-3 crosswalk, loader-superset runtime metadata rejections, report-only import diagnostics, byte-identical repeat export, source sidecar ignored-path derivation/sanitization, and mutation rejection. F9 and F10 proof seams remain covered. Config/startup/controller/commands, StateManager driver, player, MIDI input, frame sender, Enttec, shadow, and T7d tooling have focused suites. MIDI/startup tests cover python-rtmidi `MidiIn`, static-controller auto-bind, explicit alias override, ambiguous/missing controller degradation, output-bus exclusion, and blackout hold/release behavior. RW-5 adds falsifiable coverage for provider-free copied status, state precedence/simultaneous truths, fresh-dict publication, lifecycle snapshots, render/submit failure sanitization, stale menubar handling, export phases, and the unchanged reload command. These remain software/wire tests and do not prove physical fixtures.
+- `tests/test_soundswitch_project_decoder.py` covers the strict decoder/frozen models, including typed truncated-catalog failures. `tests/test_soundswitch_pack.py` covers deterministic export, independent verification, dynamic saved-project inventory reconciliation, proof-only strict snapshot rejection, the seven-class F-3 crosswalk, loader-superset runtime metadata rejections, report-only import diagnostics, byte-identical repeat export, source sidecar ignored-path derivation/sanitization, and mutation rejection. F9 and F10 proof seams remain covered. Config/startup/controller/commands, StateManager driver, player, MIDI input, frame sender, Enttec, shadow, and T7d tooling have focused suites. StateManager pack-driver tests cover ordinary `_run` drain/tick/snapshot/profiler exceptions, preserved 200 Hz throttle sleeps, bounded loop-error logs, no duplicate pack ZERO after `_push_tick()` inner failures, and `KeyboardInterrupt`/`SystemExit` escape. MIDI/startup tests cover python-rtmidi `MidiIn`, static-controller auto-bind, explicit alias override, ambiguous/missing controller degradation, output-bus exclusion, and blackout hold/release behavior. RW-5 adds falsifiable coverage for provider-free copied status, state precedence/simultaneous truths, fresh-dict publication, lifecycle snapshots, render/submit failure sanitization, stale menubar handling, export phases, and the unchanged reload command. These remain software/wire tests and do not prove physical fixtures.
 
 Change contract:
 - Do not modify tests just to make docs changes pass.

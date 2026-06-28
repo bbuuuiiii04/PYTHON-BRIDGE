@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
-last_verified_commit: cb31cf8
-last_verified_date: 2026-06-25
+last_verified_commit: 3918603
+last_verified_date: 2026-06-28
 validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -71,7 +71,9 @@ artifacts, not planning documents. They are not moved into the authority tree.
 - Pure scripted renderer: implemented/software-wire tested.
 - Config/startup/runtime command/StateManager/Enttec lane: implemented and
   default-off; RW-2 through RW-5 runtime authority/status work is
-  software-tested and does not claim sender/physical state.
+  software-tested and does not claim sender/physical state. StateManager ordinary
+  loop exceptions preserve the 200 Hz throttle and submit at most one pack ZERO
+  for the failed iteration.
 - Menubar `Export from SS` plus canonical replacement/reload and combined pack/export row:
   implemented and software-tested.
 - Menubar auto-switch by SoundSwitch connection (`set_soundswitch_pack

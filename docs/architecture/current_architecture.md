@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout at `cb31cf8` on 2026-06-25. Treat code as the source of
+Audited against the current checkout at `3918603` on 2026-06-28. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape

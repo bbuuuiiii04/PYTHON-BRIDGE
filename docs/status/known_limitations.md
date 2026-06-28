@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: cb31cf8
-last_verified_date: 2026-06-25
+last_verified_commit: 3918603
+last_verified_date: 2026-06-28
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -21,7 +21,7 @@ Current SoundSwitch exporter/importer work remains **SOFTWARE-VALIDATED ONLY / H
 - Frozen source models, strict decoding, deterministic canonical replacement, independent verification, immutable pack loading/rendering, MIDI-input routing, backend abstraction, Enttec sending, config/startup, `StateManager` scripted frame driving, validate-first commands, and copied sanitized operational status are implemented for the pinned project boundary.
 - The menubar `Export from SS` action and conservative post-export reload are implemented and software-tested. The SoundSwitch-connection auto-switch sends `set_soundswitch_pack action=enable` and retries one fresh disconnected `pack_start_failed`, but there is no manual pack button and no implicit hot-enable without a real pack backend + Enttec port. The combined pack row reads only the copied status file; stale data renders `Lighting: no status yet`.
 - Static Override Press/Toggle behavior follows the SoundSwitch-saved interaction mode (decoded byte), not operator config; a saved mode the decoder cannot identify fails closed to momentary. Static-controller input auto-binds from pack bindings unless `midi_input_aliases` overrides it; missing or ambiguous controller input degrades manual Static Looks while pack DMX can continue. The canonical pack is published to and loaded from the repo-local ignored path `local/soundswitch/rbss_canonical_pack`.
-- RW-5 does not report sender health. `software_zero_frame=true` means only that software rendered zero, and `frame_count` counts attempted normal software frames. Neither proves serial delivery, Enttec acceptance, or fixture darkness.
+- RW-5 does not report sender health. `software_zero_frame=true` means only that software rendered zero, and `frame_count` counts attempted normal software frames. The ordinary-loop-exception ZERO guard is likewise software intent only. Neither proves serial delivery, Enttec acceptance, or fixture darkness.
 - Native-DMX Autoloops remain evidence-blocked and zero-safe. T7d has four conductor-accepted integrity captures (two arm, two refire), but four scenario pairs, identity/holdout reconciliation, and a unique corpus oracle verdict remain; no phase mapping can be implemented honestly yet.
 - The ignored local pack config was absent in the 2026-06-23 audit; no live pack/Enttec setup is claimed.
 - The old exact-count pack proof is closure evidence for its recorded source snapshot only. Live export uses dynamic saved-project reconciliation; F9 mutation rejection and F10 active CC/pitch rejection remain proof seams.
