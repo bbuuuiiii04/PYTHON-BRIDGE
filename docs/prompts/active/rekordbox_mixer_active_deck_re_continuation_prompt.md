@@ -47,6 +47,55 @@ Use executable code over docs when they conflict.
 - Do not make support claims beyond the local Rekordbox 7.2.11 proof unless you
   have new evidence.
 
+## GhidraMCP Ready State
+
+Do not rediscover or reinstall GhidraMCP. It was verified on 2026-06-28 with:
+
+- Ghidra 11.3.2: `/Users/bbui/Desktop/ghidra_11.3.2_PUBLIC`
+- project: `/Users/bbui/Desktop/Ghidra Projects/Rekordbox Mixer RE.gpr`
+- program: `rekordbox_7_2_11_arm64`
+- HTTP backend: `127.0.0.1:8080`
+- plugin class persisted in CodeBrowser tool config:
+  `com.lauriewired.GhidraMCPPlugin`
+
+Start with these checks:
+
+```bash
+curl -fsS --max-time 5 http://127.0.0.1:8080/segments | sed -n '1,20p'
+```
+
+Then use:
+
+```json
+mcp__ghidra.list_segments({"limit":5,"offset":0})
+mcp__ghidra.decompile_function_by_address({"address":"0x10219e9b8"})
+```
+
+Expected proof for the decompile check: `DjUnitAudioGraph::getMixerControl`
+loads `*(param_1 + 0x458)`, bounds with `*(param_1 + 0x464)`, and returns the
+selected element plus `0x180`.
+
+If the Codex session does not expose the `mcp__ghidra` namespace, use tool
+discovery for Ghidra MCP tools; do not debug the plugin first.
+
+If `curl` says connection refused, use this exact recovery path:
+
+```bash
+osascript <<'APPLESCRIPT'
+tell application "Terminal"
+  do script "cd /Users/bbui && '/Users/bbui/Desktop/ghidra_11.3.2_PUBLIC/support/launch.sh' fg jdk Ghidra \"\" \"\" ghidra.GhidraRun '/Users/bbui/Desktop/Ghidra Projects/Rekordbox Mixer RE.gpr'"
+end tell
+APPLESCRIPT
+```
+
+Wait for Ghidra to open the Rekordbox project. If the program is not loaded,
+open CodeBrowser from the Project Manager Tool Chest, press `Cmd-O` in
+CodeBrowser, select `rekordbox_7_2_11_arm64`, press OK, and choose `No` if
+Ghidra asks to analyze. Re-run the `curl` and MCP checks above.
+
+Do not use `ghidraRun ghidra:/Users/...?/rekordbox_7_2_11_arm64`; it is the
+wrong launch form and produces "Invalid Project".
+
 Local artifacts from the previous pass may exist:
 
 - `/tmp/rbss_re/ghidra_candidate_dump.txt`
