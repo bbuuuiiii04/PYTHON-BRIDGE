@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 3918603
+last_verified_commit: 27a078b
 last_verified_date: 2026-06-28
-validation_scope: software-validated only; hardware-unvalidated in repo evidence
+validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
 
 
@@ -34,7 +34,7 @@ Status vocabulary:
 | SoundSwitch native-DMX Autoloops | planned/blocked | pure renderer and capture tooling software-tested; 4 live wire captures pass conductor integrity only | pinned pack only | `select_autoloop` exists but StateManager never calls it. T7d arm/refire have two accepted captures each, but four scenario pairs and the unique oracle remain; ticks/beat, quantizer, and six active transition-origin rules are unknown. Automatic Autoloop base stays zero-safe. |
 | Rekordbox memory position reader | implemented | software-tested partially | macOS local setup | macOS Mach APIs. Other OSes unsupported/unknown. |
 | Rekordbox direct state reader | implemented | software-tested partially | current local Rekordbox only | Offset/version assumptions require validation per version. |
-| Rekordbox mixer active-deck authority | planned | static RE candidate evidence only; live unvalidated | current local Rekordbox target only | Operator-authoritative target behavior is documented in `docs/architecture/active_deck_authority.md`; Ghidra/Ghidra-MCP RE plus implementation handoff lives in `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md`. Static Ghidra decompilation found candidate mixer value-flow and fader/EQ state fields, but live Deck 1/2 mixer authority remains unimplemented and unvalidated. Current code still uses Rekordbox master/playing-only auto-switch as active-deck authority. |
+| Rekordbox mixer active-deck authority | planned | static RE plus passive live process-memory proof for Deck 1/2 upfader and LOW/BASS EQ; runtime unimplemented; hardware unvalidated | current local Rekordbox 7.2.11 target only | Operator-authoritative target behavior is documented in `docs/architecture/active_deck_authority.md`; the implementation handoff lives in `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md`; proof lives in `docs/research/rekordbox_mixer_active_deck_re_evidence.md`. Ghidra headless static evidence plus operator-approved passive sampling confirms local Deck 1/2 upfader chains, LOW/BASS chains, Deck 1/2 channel ownership, and EQ band 2 = LOW/BASS. Filter, version/relaunch stability, play/stop/master-change survival, runtime validity/freshness, resolver thresholds, and status/heartbeat integration remain unimplemented or unproven. Current code still uses Rekordbox master/playing-only auto-switch as active-deck authority. |
 | Live BPM | implemented | software-tested partially | current local Rekordbox only | Direct offset-table path plus discovery fallback. |
 | MTC fallback | implemented | software-tested unknown | local setup | Fallback path, not primary compatibility proof. |
 | Smart phrasing/drop/breakdown | implemented | software-tested partially | local setup | Must remain StateManager-owned at runtime. |

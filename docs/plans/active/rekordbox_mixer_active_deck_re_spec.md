@@ -1,15 +1,15 @@
 ---
 doc_status: current
-truth_level: code-verified planning spec
-last_verified_commit: b1e5fd6
+truth_level: static-and-passive-live-verified planning spec
+last_verified_commit: 27a078b
 last_verified_date: 2026-06-28
-validation_scope: static RE candidate scan plus implementation plan; raw offsets, decoded values, software behavior, and hardware behavior unvalidated
+validation_scope: static RE plus operator-approved passive process-memory proof for Rekordbox 7.2.11 Deck 1/2 upfader and LOW/BASS EQ; runtime implementation, filter, software behavior, and hardware behavior unvalidated
 ---
 
 # Codex Implementation Spec - Rekordbox Mixer Active-Deck Authority
 
-Status: ACTIVE SPEC. This is a plan and RE handoff, not proof of
-implementation.
+Status: ACTIVE SPEC. This is a plan plus RE evidence handoff, not proof of
+runtime implementation.
 
 This project is separate from the SoundSwitch exporter / bridge-native DMX
 runtime work. It must remain compatible with that work by preserving the rule
@@ -85,6 +85,9 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   HTTP bridge in this session. Static Ghidra headless scripting was available
   and produced the candidate decompilation below. Any future MCP-assisted pass
   must report MCP availability separately instead of implying it was used.
+- [confirmed] Current proof is summarized in
+  `docs/research/rekordbox_mixer_active_deck_re_evidence.md`. The local raw
+  live snapshot artifact is `/tmp/rbss_re/mixer_proof_snapshots.jsonl`.
 - [confirmed] `ChannelFaderComp::eventAbsoluteValueChanged` validates the
   incoming device object against a stored component pointer near
   `this + 0x238`, converts the incoming integer to a normalized double with
@@ -118,23 +121,50 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   `EqualizerNXS2::setParameter` identify downstream parameter slots and curve
   handling. They are useful contrast evidence, but they are not by themselves a
   bridge-readable live mixer pointer chain.
+- [confirmed] Static and live proof tie the readable Rekordbox 7.2.11 mixer
+  root to `djengine::DjEngineIF::singletonHolder` at preferred VA
+  `0x104e16ea8`, runtime base-relative holder offset `0x4e16ea8`.
+  `SingletonHolder::get()` returns `*(holder + 0x40)`, and
+  `DjEngineIF::getAudioGraph()` returns `*(engine + 0xa8)`.
+- [confirmed] The live bridge-readable chain is:
+  holder `base + 0x4e16ea8`, engine `*(holder + 0x40)`, audio graph
+  `*(engine + 0xa8)`, mixer vector `*(graph + 0x458)`, mixer base
+  `*(mixer_vector + 0)`, channel vector `*(mixer_base + 0x2c8)`, and
+  `channel_graph[n] = *(channel_vector + n * 8)`.
+- [confirmed] Deck 1 maps to mixer channel index `0` and Deck 2 maps to mixer
+  channel index `1` in the current Rekordbox 7.2.11 proof session.
+- [confirmed] Upfader raw state is a float in `0..1023` at
+  `*(channel_graph + 0x470) + 0x30`. Normalize with `raw / 1023.0`.
+- [confirmed] LOW/BASS EQ raw state is a float in `0..255` at
+  `eq_child + 0x38`, where `eqiso = *(channel_graph + 0x460)` and
+  `eq_child = *(eqiso + 0x30)`. Normalize with `raw / 255.0`.
+- [confirmed] EQ band index `2` is physical LOW/BASS for Deck 1 and Deck 2.
+  Band indexes `0` and `1` remained neutral during this pass and are not
+  physically mapped here.
+- [confirmed] Using existing `rb_offsets.py` chain semantics, the Rekordbox
+  7.2.11 implementation-candidate chains are:
+  Deck 1 upfader `04E16EE8 A8 458 0 2C8 0 470 30`,
+  Deck 2 upfader `04E16EE8 A8 458 0 2C8 8 470 30`,
+  Deck 1 LOW/BASS `04E16EE8 A8 458 0 2C8 0 460 30 38`, and
+  Deck 2 LOW/BASS `04E16EE8 A8 458 0 2C8 8 460 30 38`.
+- [confirmed] Operator-approved passive process-memory proof captured the same
+  live PID/base while moving one physical control at a time: Deck 2 upfader
+  down/top, Deck 2 LOW/BASS down/center/top, Deck 1 upfader down/top, Deck 1
+  LOW/BASS down/top, and final LOW/BASS neutral restore.
 - [confirmed] `rekordcrate` is useful background for Rekordbox export/settings
   formats, but its `DJMMYSETTING.DAT` parser covers mixer preference settings
   such as channel-fader curve and crossfader curve, not live per-deck fader/EQ
   positions.
-- [unknown] Rekordbox mixer memory locations for Deck 1/2 upfader, bass EQ, and
-  filter are not decoded in current bridge code.
-- [unknown] The static symbol candidates above are not yet proven to expose a
-  stable heap object or pointer chain readable from the bridge.
-- [unknown] The `DjMixerUnit + 0x2b0` child-state candidate has not been tied to
-  a static base, object lifetime owner, or Mach-readable pointer path.
-- [unknown] The UI component ids near `ChannelFaderComp + 0x248`,
-  `EqControlComp + 0x288`, and `MixerControlComp + 0x278` have not been proven
-  as Deck 1/Deck 2 ownership.
-- [unknown] EQ band index order is not proven. Treat indexes `0`, `1`, and `2`
-  as candidates only until passive proof maps one index to physical bass/low.
-- [unknown] Exact raw values and stability behavior for physical fader/EQ/filter
-  positions are not known until RE evidence exists.
+- [unknown] Filter knob memory is not decoded or proven in this pass.
+- [unknown] The Deck 1/2 upfader and LOW/BASS chains are proven for the current
+  local Rekordbox 7.2.11 live process only; other Rekordbox versions and
+  post-relaunch stability still require explicit validation.
+- [unknown] Play/stop/master-change survival was not proven; implementation
+  must retain fail-closed validity/freshness checks.
+- [unknown] Missing/unreadable mixer values are not implemented yet and must
+  invalidate mixer authority rather than guessing from one deck.
+- [unknown] Runtime thresholds, hysteresis, and stability timing remain
+  resolver implementation work.
 
 Root cause: current bridge authority conflates Rekordbox master with the
 show-driving active deck. The target behavior in
@@ -237,6 +267,11 @@ The operator gives one physical action at a time. Codex owns passive recording
 mechanics and asks only for concrete physical actions.
 
 Required proof:
+
+Current status: completed for Deck 1/2 upfader and LOW/BASS EQ on
+2026-06-28. See
+`docs/research/rekordbox_mixer_active_deck_re_evidence.md`. Filter proof is
+deferred.
 
 Initial approved physical setup, if the operator has not moved controls before
 proof starts:

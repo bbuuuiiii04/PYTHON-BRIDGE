@@ -1,9 +1,9 @@
 ---
 doc_status: active-review-prompt
 truth_level: reverse-engineering-review-instructions
-last_verified_commit: b1e5fd6
+last_verified_commit: 27a078b
 last_verified_date: 2026-06-28
-validation_scope: adversarial review of Rekordbox mixer active-deck RE reasoning and implementation handoff; review-only; no live sampling/hardware authority
+validation_scope: adversarial review of Rekordbox mixer active-deck static/passive-live RE reasoning and implementation handoff; review-only; no live sampling/hardware authority
 ---
 
 # ChatGPT adversarial review - Rekordbox mixer active-deck RE
@@ -14,7 +14,8 @@ active-deck authority. Do not implement fixes.
 
 Repo: `/Users/bbui/rb_ss_bridge_v2`
 Branch: `main`
-Planning head: `b1e5fd63ea5a87432160d5ab78da07333dda60b3`
+Evidence base before this review-prompt update:
+`27a078bdf5c69d8f3610ce87f36907dec4955b08`
 
 ## Hard Boundary
 
@@ -31,8 +32,15 @@ limitation instead of inventing RE evidence.
 If present, the local static dump from the planning pass is:
 
 - `/tmp/rbss_re/ghidra_candidate_dump.txt`
+- `/tmp/rbss_re/ghidra_singleton_dump.txt`
+- `/tmp/rbss_re/ghidra_input_channel_dump.txt`
+- `/tmp/rbss_re/ghidra_mixer_xrefs.txt`
+- `/tmp/rbss_re/ghidra_mixer_index_dump.txt`
 
 Treat it as a local artifact to inspect or regenerate, not as committed proof.
+The committed proof summary is:
+
+- `docs/research/rekordbox_mixer_active_deck_re_evidence.md`
 
 ## Required Reads
 
@@ -41,6 +49,7 @@ Read these first:
 - `AGENTS.md`
 - `docs/architecture/active_deck_authority.md`
 - `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md`
+- `docs/research/rekordbox_mixer_active_deck_re_evidence.md`
 - `docs/subsystems/rekordbox_readers.md`
 - `rb_offsets.py`
 - `rb_state_reader.py`
@@ -63,9 +72,10 @@ Try to disprove:
 5. Invalid or missing mixer authority visibly falls back to old RB-master
    behavior and recovers when valid mixer authority returns.
 
-## Review Surface B - Static RE Reasoning
+## Review Surface B - Static And Passive-Live RE Reasoning
 
-Treat static candidates as suspects, not proof. Try to disprove:
+Treat every RE claim as suspect until the static and passive-live evidence both
+support it. Try to disprove:
 
 1. The Ghidra import evidence matches the Rekordbox 7.2.11 arm64 binary, not a
    stale or wrong-architecture artifact.
@@ -79,21 +89,24 @@ Treat static candidates as suspects, not proof. Try to disprove:
 3. The decompiler evidence actually supports the stated value flow:
    raw device integer -> normalized value -> deck/channel or band id -> engine
    sink, instead of a UI-only or preference-only path.
-4. The spec does not jump from symbol names, UI component offsets, or
-   `DjMixerUnit` child-state offsets to stable bridge-readable memory offsets.
-5. The `DjMixerUnit + 0x2b0` per-channel child-state candidate is not treated
-   as a valid read target until a stable root pointer, object lifetime, and
-   Deck 1/Deck 2 ownership are proven.
-6. Candidate ids near `ChannelFaderComp + 0x248`,
-   `EqControlComp + 0x288`, and `MixerControlComp + 0x278` are not assumed to
-   be Deck 1/Deck 2 without independent evidence.
-7. EQ band indexes `0`, `1`, and `2` are not assumed to be low/mid/high until
-   passive proof maps them to physical controls.
-8. Deck/channel ownership must be proven independently and cannot be assumed
-   from UI labels or function names.
-9. Raw values, neutral points, top/down labels, bass ordering, and stability
-   timing remain unknown until passive proof exists.
-10. `rekordcrate` / `DJMMYSETTING.DAT` preference settings are not mistaken for
+4. The spec does not jump from symbol names, UI component offsets, or inactive
+   `DjMixerUnit + 0x2b0` child-state offsets to bridge-readable memory offsets.
+5. The claimed bridge-readable chain through `DjEngineIF::singletonHolder`,
+   engine `+0x40`, graph `+0xa8`, mixer vector `+0x458`, channel vector
+   `+0x2c8`, channel graph `+0x470` fader, and `+0x460` EQ is actually
+   supported by decompilation and passive memory reads.
+6. The proposed `rb_offsets.py` chain lines match the existing chain semantics
+   instead of being off by one dereference or final offset.
+7. Deck 1 = channel index `0` and Deck 2 = channel index `1` are proven by
+   one-control-at-a-time passive samples, not assumed from UI labels.
+8. EQ band index `2` = LOW/BASS is proven for Deck 1 and Deck 2 by passive
+   samples, while band indexes `0` and `1` are not overclaimed as high/mid.
+9. Raw ranges and normalization are supported: upfader `0..1023`, LOW/BASS
+   `0..255`.
+10. Filter, other Rekordbox versions, relaunch stability, play/stop/master
+   survival, missing-value detection, thresholds, and runtime freshness remain
+   explicit unknowns.
+11. `rekordcrate` / `DJMMYSETTING.DAT` preference settings are not mistaken for
    live upfader/EQ/filter state.
 
 ## Review Surface C - Implementation Handoff Safety

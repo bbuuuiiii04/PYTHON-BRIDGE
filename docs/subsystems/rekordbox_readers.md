@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
-validation_scope: software-only
+last_verified_commit: 27a078b
+last_verified_date: 2026-06-28
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -16,6 +16,9 @@ Status:
 
 Purpose:
 - Read Rekordbox runtime state, position, track/load data, ANLZ paths, and displayed BPM through guarded local readers.
+- Future mixer active-deck reader work should start from
+  `docs/research/rekordbox_mixer_active_deck_re_evidence.md` and
+  `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md`.
 
 Authoritative code:
 - `rb_memory.py`
@@ -57,3 +60,5 @@ Known risks:
 - stale offsets
 - false readiness
 - treating one working local version as support for all versions
+- treating the proven local 7.2.11 upfader/LOW chains as implemented runtime
+  authority before reader, resolver, status, and fallback work exists
