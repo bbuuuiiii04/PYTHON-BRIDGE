@@ -256,7 +256,7 @@ Add small data models in `models.py`:
   - `low_label: str`
 - `MixerAuthoritySnapshot`
   - `valid: bool`
-  - `deck: dict[int, MixerDeckReading]`
+  - `deck: read-only Mapping[int, MixerDeckReading]`
   - `updated_at: float`
   - `reason: str`
   - optional non-authority `filter` data only if filter tracking is implemented
@@ -442,15 +442,15 @@ Event handling:
 - `Ev.MASTER_CHANGED` updates `rb_master_deck`.
 - While mixer authority is valid/fresh, `Ev.MASTER_CHANGED` must not directly
   write `active_deck`; it only influences resolver tie/fallback cases.
-- While mixer authority is invalid/stale, preserve old direct/OSC RB-master
+- While mixer authority is invalid/stale, preserve old direct RB-master
   behavior as the named fallback so current bridge operation does not go dark
   just because mixer authority is missing. Legacy playing-only mirror
-  auto-switches may remain active only in this invalid fallback mode and must
-  report a distinct `fallback_reason`, for example `legacy_mirror_auto_switch`,
-  instead of pretending to be `rb_master_fallback`.
+  auto-switches must stay gated off; invalid fallback authority may change
+  `active_deck` only through the RB-master fallback path.
 - OSC `/bridge/active_deck` and `/bridge/bridge_deck` remain legacy/debug
-  fallback inputs only. They must not bypass valid mixer authority and should not
-  rewrite `rb_master_deck` when mixer authority is valid.
+  fallback inputs only. They must not bypass valid mixer authority, must not
+  independently select the show deck, and should not rewrite `rb_master_deck`
+  when mixer authority is valid.
 
 Current bypasses to remove or gate:
 
