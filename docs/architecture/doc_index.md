@@ -35,6 +35,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/architecture/current_architecture.md` | CURRENT AUTHORITATIVE — compact system overview. |
 | `docs/architecture/runtime_invariants.md` | CURRENT AUTHORITATIVE — invariants from code/tests. |
 | `docs/architecture/bridge_design.md` | CURRENT AUTHORITATIVE — detailed design anchor. |
+| `docs/architecture/active_deck_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative target behavior for fader/bass active-deck authority; implementation pending. |
 | `docs/architecture/laser_director_design.md` | CURRENT AUTHORITATIVE — Laser Director design. |
 | `docs/architecture/doc_index.md` | CURRENT AUTHORITATIVE — this index. |
 
@@ -79,13 +80,19 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/active/led_role_mapping_v2_spec.md` | PLAN / SPEC (ACTIVE) | Verify status against code. |
 | `docs/plans/active/rt_comet_*.md` (3) | PLAN / SPEC (ACTIVE) | Realtime comet stutter/smoothness/pause work; verify which are landed. |
 | `docs/plans/active/soundswitch_README.md` | ACTIVE PROJECT INDEX | Grouped routing for the SoundSwitch exporter/bridge-native DMX project. |
-| `docs/plans/active/soundswitch_exporter_remaining_work.md` | ACTIVE CHECKLIST / ROADMAP | Current landed-versus-remaining authority. RW-1 through RW-5 are implemented/software-tested; T7d, native Autoloop DMX, a real hardware run, and final closeout remain. || `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE CONTRACT POINTER | Symlink to the original product/implementation contract. Read the active remaining-work roadmap for current status. |
+| `docs/plans/active/soundswitch_exporter_remaining_work.md` | ACTIVE CHECKLIST / ROADMAP | Current landed-versus-remaining authority. RW-1 through RW-5 are implemented/software-tested; T7d, native Autoloop DMX, a real hardware run, and final closeout remain. |
+| `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE CONTRACT POINTER | Symlink to the original product/implementation contract. Read the active remaining-work roadmap for current status. |
 | `docs/plans/active/soundswitch_t7c_pack_driver_spec.md` | COMPATIBILITY POINTER | Preserves code/test links to the completed T7c spec; current status is in the SoundSwitch remaining-work roadmap. |
-| `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` | PLAN / SPEC (ACTIVE) | Current six-scenario T7d blocker plan: prove ticks/beat plus arm/refire/master/drop/buildup/correction origin rules from operator-owned captures. It selects no phase mapping and grants no runtime/hardware authorization. || `docs/prompts/active/soundswitch_rw7_capture_agent_prompt.md` | AGENT PROMPT (ACTIVE) | Operator-conducted T7d evidence collection with no pack/hardware enablement authority. || `docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Commit-scoped independent ChatGPT review of RW-5, the non-Autoloop procedure/template, and SoundSwitch document lifecycle. Review-only. |
+| `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` | PLAN / SPEC (ACTIVE) | Current six-scenario T7d blocker plan: prove ticks/beat plus arm/refire/master/drop/buildup/correction origin rules from operator-owned captures. It selects no phase mapping and grants no runtime/hardware authorization. |
+| `docs/prompts/active/soundswitch_rw7_capture_agent_prompt.md` | AGENT PROMPT (ACTIVE) | Operator-conducted T7d evidence collection with no pack/hardware enablement authority. |
+| `docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Commit-scoped independent ChatGPT review of RW-5, the non-Autoloop procedure/template, and SoundSwitch document lifecycle. Review-only. |
 | `docs/plans/active/streamdeck_midi_bridge_integration_spec.md` | PLAN / SPEC (ACTIVE) | Stream Deck controller lifecycle plus Phase 2 generic layered static-look compositor. Phase 1 implemented; Phase 2 is implementation-ready but live restart/hardware smoke remain operator-gated. |
 | `docs/prompts/active/streamdeck_phase2_codex_implementation_prompt.md` | AGENT PROMPT (ACTIVE) | Codex implementation handoff for Phase 2 Part F. Software-only; no bridge restart or hardware action authority. |
 | `docs/plans/active/streamdeck_phase2_plan_review.md`, `docs/plans/active/streamdeck_phase2_codex_review_prompt.md` | REVIEW / AUDIT | Phase 2 review evidence and pre-implementation review prompt. Evidence only; current implementation instructions are in the spec and active prompt. |
-| `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material RW-1 through RW-5, hardware-procedure, T7/T8 specs/proofs, and the old progress ledger. Historical evidence only. || `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |
+| `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md` | PLAN / SPEC (ACTIVE) | Ghidra/Ghidra-MCP RE plus implementation handoff for fader/bass active-deck authority. Validate against `docs/architecture/active_deck_authority.md` before implementation. |
+| `docs/prompts/reviews/rekordbox_mixer_active_deck_re_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Adversarial review handoff for the Rekordbox mixer RE process and implementation spec. Review-only. |
+| `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material RW-1 through RW-5, hardware-procedure, T7/T8 specs/proofs, and the old progress ledger. Historical evidence only. |
+| `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |
 | `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | Active prompts only; SoundSwitch keeps just the operator-presence T7d capture prompt. Obsolete SoundSwitch prompts — including the completed remaining-software scoping and static-toggle authoring prompts — were deleted; Git history preserves them. |
 | `docs/plans/completed/govee_realtime_codex_spec.md` | PLAN / SPEC | **Untracked local file** — classify (completed vs awaiting-build) and commit or archive separately. |
 
@@ -105,7 +112,8 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 2. `docs/architecture/current_architecture.md`
 3. `docs/architecture/runtime_invariants.md`
 4. `docs/architecture/bridge_design.md`
-5. this index
+5. `docs/architecture/active_deck_authority.md` for fader/bass active-deck target behavior
+6. this index
 
 Then open `docs/validation/` for evidence, `docs/archive/` only for history.
 
