@@ -1,152 +1,178 @@
 ---
 doc_status: active-review-prompt
 truth_level: reverse-engineering-review-instructions
-last_verified_commit: 77395af
+last_verified_commit: 918c0a1
 last_verified_date: 2026-06-28
-validation_scope: adversarial review of Rekordbox mixer active-deck static/passive-live RE reasoning after local 7.2.11 fader/LOW/FILTER closure and implementation handoff; review-only; no live sampling/hardware authority
+validation_scope: strict adversarial review of Rekordbox mixer active-deck static/passive-live RE reasoning and implementation readiness; review-only; no live sampling, restart, or hardware authority
 ---
 
-# ChatGPT adversarial review - Rekordbox mixer active-deck RE
+# Strict Adversarial Review - Rekordbox Mixer Active-Deck RE
 
-You are the independent adversarial reviewer for `rb_ss_bridge_v2`. Review the
-reverse-engineering process and reasoning for Rekordbox 7.2.11 mixer
-active-deck authority. Do not implement fixes.
+You are an independent adversarial reviewer for `rb_ss_bridge_v2`.
+
+Goal: deeply review the Rekordbox mixer active-deck reverse-engineering work and
+validate every finding against current executable code, current architecture
+docs, RE evidence, and repo status docs. Fight assumptions aggressively. Do not
+implement fixes.
 
 Repo: `/Users/bbui/rb_ss_bridge_v2`
 Branch: `main`
-Evidence base before this review-prompt update:
-`77395af`
+Prompt-generation observed HEAD: `918c0a1`, but verify current HEAD yourself
+before reviewing.
 
 ## Hard Boundary
 
-This is review-only. Do not edit, commit, push, or mutate external state. Do
-not restart the bridge. Do not start, stop, signal, or inspect live bridge
-processes. Do not open MIDI, serial, Enttec, DMX, Govee, or lighting hardware.
-Do not run live Rekordbox process-memory sampling or capture unless the operator
-explicitly approves it in that review turn.
+Review-only. Do not edit files, commit, push, restart the bridge, signal
+processes, run live process-memory sampling, or touch MIDI, serial, Enttec, DMX,
+Govee, SoundSwitch, lasers, LEDs, or hardware-adjacent outputs.
 
-Static repository inspection, static Ghidra/GhidraMCP reads, and offline
-decompilation are allowed. If GhidraMCP is unavailable, report that as a review
-limitation instead of inventing RE evidence.
+Static repo inspection is allowed. Static Ghidra/GhidraMCP reads are allowed.
+Offline `/tmp/rbss_re/*` artifact inspection is allowed if present, but treat
+local tmp artifacts as supporting evidence, not repo authority. If GhidraMCP is
+unavailable, say so and do not invent RE confidence.
 
-If present, the local static dump from the planning pass is:
+## Source Order
 
-- `/tmp/rbss_re/ghidra_candidate_dump.txt`
-- `/tmp/rbss_re/ghidra_singleton_dump.txt`
-- `/tmp/rbss_re/ghidra_input_channel_dump.txt`
-- `/tmp/rbss_re/ghidra_mixer_xrefs.txt`
-- `/tmp/rbss_re/ghidra_mixer_index_dump.txt`
-- `/tmp/rbss_re/ghidra_cfx_dump.txt`
-- `/tmp/rbss_re/ghidra_filter_audio_dump.txt`
-- `/tmp/rbss_re/ghidra_colorfx_unit_dump.txt`
-- `/tmp/rbss_re/ghidra_djsystem_fx_dump.txt`
-- `/tmp/rbss_re/ghidra_fx_processor_dump.txt`
-- `/tmp/rbss_re/ghidra_colorfx_deep_dump.txt`
-- `/tmp/rbss_re/mixer_proof_snapshots.jsonl`
-- `/tmp/rbss_re/cfx_mixer_samples.jsonl`
+Use this authority order:
 
-Treat it as a local artifact to inspect or regenerate, not as committed proof.
-The committed proof summary is:
+1. Current executable code and tests.
+2. Config/status/runtime command surfaces.
+3. Current architecture/subsystem docs.
+4. Committed RE evidence docs.
+5. Local `/tmp/rbss_re/*` artifacts.
+6. Memory/old prompts/history, as context only.
 
-- `docs/research/rekordbox_mixer_active_deck_re_evidence.md`
+Code beats docs. Current files beat old prompt text.
 
 ## Required Reads
 
-Read these first:
+Read these before forming a verdict:
 
 - `AGENTS.md`
+- `docs/architecture/current_architecture.md`
+- `docs/architecture/runtime_invariants.md`
 - `docs/architecture/active_deck_authority.md`
+- `docs/subsystems/rekordbox_readers.md`
 - `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md`
 - `docs/research/rekordbox_mixer_active_deck_re_evidence.md`
-- `docs/subsystems/rekordbox_readers.md`
+- `docs/prompts/reviews/rekordbox_mixer_active_deck_re_review_prompt.md`
+- `docs/status/active_work_registry.md`
+- `docs/status/feature_status_matrix.md`
+- `docs/status/validation_matrix.md`
 - `rb_offsets.py`
 - `rb_state_reader.py`
 - `state_manager.py`
 - `runtime_status.py`
 - `models.py`
+- relevant tests under `tests/`
 
-Use executable code over docs when they conflict.
+## Critical Clarification To Preserve
 
-## Review Surface A - Target Behavior
+Do not frame basic play/stop as an unresolved RE problem.
 
-Try to disprove:
+The bridge already has play/stop authority from Rekordbox offset live-position
+movement via `RBStateReader`. Verify that in current code. The active-deck work
+is about adding mixer authority: Deck 1/2 upfader plus LOW/BASS freshness,
+invalidation, thresholds, hysteresis, resolver behavior, status, and heartbeat.
 
-1. `active_deck` is defined as the playing audible show deck, not Rekordbox
-   master.
-2. `rb_master_deck` remains available only for tie/fallback behavior.
-3. Decks 3/4, crossfader, trim, gain, mid/high EQ, real loudness, FX, and filter
-   are not active-deck authority inputs for the first implementation.
-4. Filter is scoped to a later LED/Govee overlay only.
-5. Invalid or missing mixer authority visibly falls back to old RB-master
-   behavior and recovers when valid mixer authority returns.
+Other Rekordbox versions are future validation work. They are not a blocker for
+the local Rekordbox `7.2.11.0342` spec, but the spec must not overclaim support
+beyond that local target.
 
-## Review Surface B - Static And Passive-Live RE Reasoning
+## Review Surface A - Current Runtime Truth
 
-Treat every RE claim as suspect until the static and passive-live evidence both
-support it. Try to disprove:
+Try to disprove every current-code claim:
 
-1. The Ghidra import evidence matches the Rekordbox 7.2.11 arm64 binary, not a
-   stale or wrong-architecture artifact.
-2. The candidate symbols are relevant to live mixer control state:
-   `ChannelFaderComp::eventAbsoluteValueChanged`,
-   `EqControlComp::eventAbsoluteValueChanged`,
-   `MixerControlComp::eventAbsoluteValueChanged`,
-   `DjMixerUnit::setChannelFaderPosition`,
-   `DjMixerUnit::setEqPosition`,
-   `ChannelFader::setParameter`, and `EqualizerNXS2::setParameter`.
-3. The decompiler evidence actually supports the stated value flow:
-   raw device integer -> normalized value -> deck/channel or band id -> engine
-   sink, instead of a UI-only or preference-only path.
-4. The spec does not jump from symbol names, UI component offsets, or inactive
-   `DjMixerUnit + 0x2b0` child-state offsets to bridge-readable memory offsets.
-5. The claimed bridge-readable chain through `DjEngineIF::singletonHolder`,
-   engine `+0x40`, graph `+0xa8`, mixer vector `+0x458`, channel vector
-   `+0x2c8`, channel graph `+0x470` fader, and `+0x460` EQ is actually
-   supported by decompilation and passive memory reads.
-6. The proposed `rb_offsets.py` chain lines match the existing chain semantics
-   instead of being off by one dereference or final offset.
-7. Deck 1 = channel index `0` and Deck 2 = channel index `1` are proven by
-   one-control-at-a-time passive samples, not assumed from UI labels.
-8. EQ band index `2` = LOW/BASS is proven for Deck 1 and Deck 2 by passive
-   samples, while band indexes `0` and `1` are not overclaimed as high/mid.
-9. Raw ranges and normalization are supported: upfader `0..1023`, LOW/BASS
-   `0..255`, and non-authority FILTER param0/param1 `0.0..1.0`.
-10. The FILTER chain is supported by static CFX audio/container evidence and
-   passive one-control-at-a-time samples, including Deck 1/2 min/neutral/max,
-   selected effect id `0`, `unit_channel`, and smoother raw `0/128/255`.
-11. Local relaunch reacquire and direct-master-change survival are supported by
-   passive samples after PID/base change and after raw master `0`/`1` changes.
-12. Other Rekordbox versions, actual play/stop survival with loaded tracks,
-   missing-value detection, thresholds, and runtime freshness remain explicit
-   validation gaps.
-13. `rekordcrate` / `DJMMYSETTING.DAT` preference settings are not mistaken for
-   live upfader/EQ/filter state.
+1. `RBStateReader` already infers play/pause from `live_pos_per_deck` offset
+   movement.
+2. `Ev.MASTER_CHANGED` still writes or causes writes to
+   `OutputState.active_deck` today.
+3. Playing-only mirror auto-switch paths still exist today.
+4. `runtime_status` heartbeat still conflates `master` and `active_deck` today,
+   unless current code changed.
+5. `rb_offsets.py` currently has legacy deck offset chains and no implemented
+   named mixer fields unless current code changed.
+6. Existing architecture forbids blocking work in the 200 Hz `StateManager`
+   push loop.
 
-## Review Surface C - Implementation Handoff Safety
+For each, cite current `file:line`.
 
-Try to disprove:
+## Review Surface B - RE Evidence
 
-1. The future reader path reuses the existing `RBStateReader` / `rb_offsets.py`
-   fail-closed model instead of inventing an unrelated runtime reader.
-2. The 200 Hz `StateManager` push loop gains no blocking I/O, Ghidra work,
-   filesystem reads, subprocess calls, locks, MIDI, serial, or network work.
-3. The resolver is pure and directly testable.
-4. `MASTER_CHANGED` no longer writes `active_deck` directly while mixer
-   authority is valid.
-5. Playing-only mirror auto-switch cannot promote a fader-down playing deck
-   while mixer authority is valid.
-6. Status/heartbeat stops conflating `master` and `active_deck`.
-7. Missing one deck's mixer state makes mixer authority invalid; no one-sided
-   guessing.
-8. SoundSwitch, lasers, LEDs/Govee, scripted/autoloop mode, beat/BPM/elapsed,
-   and pack output continue to follow the selected `active_deck`.
+Treat every RE claim as guilty until proven. Try to disprove:
 
-## Minimum Verification
+1. The binary/version identity: Rekordbox `7.2.11.0342`, arm64 thin artifact,
+   hashes, and Ghidra project/dumps match the stated target.
+2. The static symbols actually support live mixer state, not UI-only or
+   settings-only paths.
+3. The bridge-readable root chain is supported:
+   `base + 0x4e16ea8` -> holder `+0x40` -> engine -> graph `+0xa8` -> mixer
+   vector `+0x458` -> mixer base -> channel vector `+0x2c8` -> channel graph.
+4. The proposed `rb_offsets.py` chain semantics are correct: hops vs final
+   offset, no missing dereference, no extra dereference.
+5. Deck 1 = channel index `0` and Deck 2 = channel index `1` are proven by
+   one-control-at-a-time passive samples.
+6. Upfader raw range `0..1023` and normalization `raw / 1023.0` are proven.
+7. LOW/BASS raw range `0..255`, normalization `raw / 255.0`, and EQ band index
+   `2` = LOW/BASS are proven.
+8. Band indexes `0` and `1` are not overclaimed.
+9. CFX FILTER param0/param1 are proven only as tracking/non-authority data.
+10. Filter validation requirements are explicit: vector bounds, selected effect
+    id `0`, `unit_channel`, finite values, both-deck readability.
+11. Relaunch reacquire and direct-master-change survival are supported by
+    samples after PID/base/master changes.
+12. Local 7.2.11 pointer/value mapping has no remaining known Deck 1/2 gap for
+    upfader, LOW/BASS, FILTER, Deck 1 midpoint, relaunch reacquire, or
+    master-change survival.
+13. Runtime mixer freshness/invalidation/thresholds/hysteresis are not falsely
+    claimed as implemented.
 
-Run only software/read-only commands unless explicitly approved otherwise:
+## Review Surface C - Spec And Architecture Fit
+
+Try to disprove that the implementation handoff is safe:
+
+1. It reuses `RBStateReader` / `rb_offsets.py` instead of inventing a second
+   reader.
+2. It adds named mixer chains, not anonymous trailing chain lines ignored by the
+   parser.
+3. It avoids reusing `_follow_float()` if that helper still rejects valid mixer
+   values like `0.0` or `1023.0`.
+4. Missing/unreadable mixer state on either deck invalidates mixer authority for
+   both decks.
+5. `MASTER_CHANGED` becomes `rb_master_deck` only while mixer authority is valid.
+6. `active_deck` is selected only through a pure resolver while mixer authority
+   is valid.
+7. Playing-only mirror auto-switch cannot bypass valid mixer authority.
+8. Filter cannot affect `active_deck`.
+9. Decks 3/4, crossfader, trim/gain, mid/high EQ, real audio loudness, mute, and
+   unrelated FX are still non-authority inputs.
+10. Status and heartbeat must expose `active_deck/show_deck`, `rb_master_deck`,
+    mixer validity, decoded Deck 1/2 fader/bass, and authority reason.
+
+## Assumption-Fighting Rules
+
+For every claim, label it:
+
+- `confirmed-current-code`
+- `confirmed-committed-evidence`
+- `confirmed-local-artifact`
+- `contradicted`
+- `unverified`
+- `overclaimed`
+
+Do not accept "the doc says so." Require a code line, evidence-doc line, static
+dump symbol/function, or passive sample label.
+
+If a claim depends on `/tmp/rbss_re/*`, state whether the artifact existed and
+what exact file was inspected.
+
+## Minimum Commands
+
+Run read-only checks unless impossible:
 
 ```bash
 git status --short --branch
+git rev-parse --short HEAD
 python3 tools/check_docs_metadata.py
 python3 tools/check_agent_contracts.py
 python3 tools/check_docs_drift.py
@@ -154,27 +180,32 @@ python3 tools/check_docs_staleness.py --report
 git diff --check
 ```
 
-If implementation code exists by the time you review, also run the narrow tests
-named by the implementation spec plus:
+If implementation code exists by the time of review, also run:
 
 ```bash
 python3 -m unittest discover tests
 ```
 
-If a command cannot run, mark it unverified. These checks do not prove live
-Rekordbox mixer behavior or hardware output.
+If a command cannot run, mark it unverified. These commands do not prove live
+mixer or hardware behavior.
 
-## Required Response
+## Required Output
 
 Return one verdict: `APPROVE`, `REVISE`, or `REJECT`.
 
 Then provide:
 
-1. findings first, ordered BLOCKER/HIGH/MEDIUM/LOW, each with current
-   `file:line`, evidence, impact, and the smallest required correction;
-2. a requirement-by-requirement audit of surfaces A-C marked confirmed,
-   contradicted, or unverified;
-3. exact commands run and results;
-4. explicit uncertainty labels for all RE claims;
-5. a necessity/overreach verdict: what must exist for active-deck authority, and
-   what the spec should delete or defer.
+1. Findings first, ordered `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`.
+2. For each finding: `file:line`, evidence, impact, smallest correction.
+3. Requirement-by-requirement audit of Review Surfaces A-C.
+4. Explicit list of assumptions you rejected.
+5. Explicit list of assumptions still present in the docs/spec.
+6. Exact commands run and results.
+7. Final implementation-readiness statement:
+   - what is ready for local Rekordbox 7.2.11 implementation;
+   - what is future-version validation only;
+   - what remains runtime implementation work;
+   - what must not be claimed as hardware validated.
+
+Keep the review severe. Prefer rejecting an overclaim to approving a vague
+statement.
