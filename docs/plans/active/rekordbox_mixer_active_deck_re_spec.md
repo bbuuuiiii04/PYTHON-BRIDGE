@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: static-and-passive-live-verified planning spec
-last_verified_commit: 27a078b
+last_verified_commit: c14bff1
 last_verified_date: 2026-06-28
 validation_scope: static RE plus operator-approved passive process-memory proof for Rekordbox 7.2.11 Deck 1/2 upfader and LOW/BASS EQ; runtime implementation, filter, software behavior, and hardware behavior unvalidated
 ---
@@ -49,6 +49,14 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   mirror plus decks 3/4 for canonical fanout.
 - [confirmed] `runtime_status._heartbeat_payload()` currently reports
   `"master": active_deck`.
+- [confirmed] `rb_offsets.py` currently parses a fixed legacy layout of one
+  master chain plus four chains per deck. Mixer chains cannot be made available
+  by merely appending extra chain lines; the offset model/parser/tests must grow
+  explicit mixer fields.
+- [confirmed] `RBStateReader._follow_float()` currently filters float reads to
+  `0.0 < v < 1000.0`, which is correct enough for live BPM but wrong for mixer
+  values. Valid mixer proof includes `0.0`, `255.0`, and `1023.0`, so mixer
+  reads need their own finite float helper/range validation.
 - [confirmed] Rekordbox 7.2.11 is installed at
   `/Applications/rekordbox 7/rekordbox.app`.
 - [confirmed] Static Ghidra import requires a thin architecture binary; Ghidra
@@ -126,6 +134,11 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   `0x104e16ea8`, runtime base-relative holder offset `0x4e16ea8`.
   `SingletonHolder::get()` returns `*(holder + 0x40)`, and
   `DjEngineIF::getAudioGraph()` returns `*(engine + 0xa8)`.
+- [confirmed] Static `DjUnitAudioGraph::getMixerControl(0)` returns a mixer
+  control view at an offset from the object stored in the graph mixer vector,
+  while the passive bridge-readable proof starts from the vector object itself.
+  Do not replace the passive-verified chain with the static `getMixerControl`
+  return offset unless a new passive proof validates that alternate endpoint.
 - [confirmed] The live bridge-readable chain is:
   holder `base + 0x4e16ea8`, engine `*(holder + 0x40)`, audio graph
   `*(engine + 0xa8)`, mixer vector `*(graph + 0x458)`, mixer base
@@ -163,6 +176,10 @@ SoundSwitch exporter or direct-DMX runtime while implementing this project.
   must retain fail-closed validity/freshness checks.
 - [unknown] Missing/unreadable mixer values are not implemented yet and must
   invalidate mixer authority rather than guessing from one deck.
+- [unknown] Deck 1 intermediate/audible upfader was not separately sampled in
+  this pass. The raw chain is proven for Deck 1 down/top and Deck 2
+  down/half/top, but Deck 1 mid-position symmetry should remain an RE follow-up
+  unless implementation labels only need down/top plus thresholded non-down.
 - [unknown] Runtime thresholds, hysteresis, and stability timing remain
   resolver implementation work.
 
@@ -304,6 +321,30 @@ Deliverable:
 After RE proof exists, add the smallest reader/model seam that can publish
 decoded mixer state without blocking the push loop.
 
+Required offset/parser changes:
+
+- Extend `RBOffsetVersion` with explicit optional mixer chains for Deck 1 and
+  Deck 2 upfader raw and LOW/BASS raw. Do not append anonymous extra chain
+  lines to the existing fixed `1 + 4*deck_count` parser layout.
+- Add parser coverage proving the Rekordbox `7.2.11` record exposes exactly the
+  four proven mixer chains and that older records without mixer chains remain
+  supported/fail-closed.
+- Use the passive-verified chain lines exactly:
+  `04E16EE8 A8 458 0 2C8 0 470 30`,
+  `04E16EE8 A8 458 0 2C8 8 470 30`,
+  `04E16EE8 A8 458 0 2C8 0 460 30 38`,
+  `04E16EE8 A8 458 0 2C8 8 460 30 38`.
+
+Required reader changes:
+
+- Add a mixer-specific finite f32 read path; do not reuse `_follow_float()` as
+  written because it rejects valid mixer values `0.0` and `1023.0`.
+- Validate raw ranges per signal: upfader `0.0..1023.0`, LOW/BASS `0.0..255.0`.
+  Any NaN, infinity, unreadable chain, null chain, or out-of-range value makes
+  mixer authority invalid for both decks.
+- Normalize only after range validation: fader `raw / 1023.0`, LOW/BASS
+  `raw / 255.0`.
+
 Expected shape:
 
 - per-deck decoded upfader labels.
@@ -416,6 +457,10 @@ Required tests:
 - runtime status/heartbeat test for `active_deck` plus `rb_master_deck`.
 - Rekordbox reader tests for decoded mixer validity/freshness once reader code
   exists.
+- `rb_offsets.py` parser/model tests proving the four Rekordbox `7.2.11` mixer
+  chains are exposed by named fields, not ignored as trailing text.
+- mixer f32 reader tests proving valid `0.0`, `255.0`, and `1023.0` are accepted
+  while NaN, infinity, unreadable, null, and out-of-range values fail closed.
 
 Do not build a huge logging harness unless the implementation makes it cheap.
 
@@ -444,6 +489,8 @@ Implementation is not complete until:
 - status/heartbeat exposes the required fields.
 - required tests pass.
 - no live restart/hardware action was performed without explicit approval.
+- implementation proves the existing `_follow_float()` BPM filter was not reused
+  for mixer raw values.
 
 ## Adversarial Self-Review Checklist
 
@@ -461,6 +508,11 @@ Before marking this ready, check these failure modes:
 - filter overlay scope expanded into active-deck authority.
 - a static Ghidra symbol candidate is treated as a memory offset without passive
   process proof.
+- the passive-verified mixer vector chain is accidentally replaced by the static
+  `getMixerControl()` return offset without a new live proof.
+- mixer chain lines are appended to `rb_offsets.py` but ignored by the fixed
+  parser layout.
+- `RBStateReader._follow_float()` rejects valid mixer bottom/top values.
 - `DJMMYSETTING.DAT` / rekordcrate preference settings are mistaken for live
   mixer control state.
 

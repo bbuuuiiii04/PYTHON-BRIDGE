@@ -1,7 +1,7 @@
 ---
 doc_status: research-current
 truth_level: static-and-passive-live-verified
-last_verified_commit: 27a078b
+last_verified_commit: c14bff1
 last_verified_date: 2026-06-28
 validation_scope: Rekordbox 7.2.11 arm64 static Ghidra headless evidence plus operator-approved passive process-memory proof; bridge/runtime/hardware output unmodified and unvalidated
 ---
@@ -34,6 +34,13 @@ The static symbol `djengine::DjEngineIF::singletonHolder` is at preferred VA
 `SingletonHolder::get()` returns the engine pointer stored at holder `+0x40`.
 `DjEngineIF::getAudioGraph()` returns `*(engine + 0xa8)`.
 `DjUnitAudioGraph::getMixerControl(0)` uses the mixer vector at graph `+0x458`.
+
+Static `getMixerControl(0)` returns a mixer-control view derived from the object
+stored in the graph mixer vector. The bridge-readable proof below intentionally
+uses the passive-verified object chain, not the decompiler's return adjustment.
+If a future pass wants to use the static return endpoint directly, it must prove
+that alternate endpoint with passive reads before changing implementation
+chains.
 
 Live proof used this chain:
 
@@ -105,6 +112,11 @@ Deck 2 LOW raw:     04E16EE8 A8 458 0 2C8 8 460 30 38
 
 These chains are not yet implemented in `rb_offsets.py`.
 
+`rb_offsets.py` currently parses a fixed one-master plus four-chains-per-deck
+layout. Implementing these chains requires explicit mixer fields/parser tests;
+merely appending lines to the existing table would not expose them to the
+reader.
+
 Post-restore passive verification of those exact chain lines against the live
 process produced:
 
@@ -162,6 +174,10 @@ proof rows below use the same PID, base address, and pointer chain.
   fail-closed validity and freshness checks.
 - Missing/unreadable mixer values are not implemented yet and must invalidate
   mixer authority rather than guessing from one deck.
+- Deck 1 intermediate/audible upfader was not separately sampled; Deck 1
+  down/top and Deck 2 down/half/top were sampled.
+- The existing live-BPM float reader rejects valid mixer values `0.0` and
+  `1023.0`; implementation needs a mixer-specific finite-f32 range check.
 - Runtime threshold, hysteresis, and stability timing remain resolver work.
 - No SoundSwitch, laser, LED/Govee, DMX, MIDI, serial, Enttec, or bridge-output
   behavior is validated by this RE proof.
