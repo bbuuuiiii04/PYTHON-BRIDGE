@@ -1,0 +1,41 @@
+# Keep Graphify focused on code orientation. It already respects .gitignore.
+graphify-out/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+.DS_Store
+
+# No prose or semantic extraction: code map only, no cloud/API-key workflow.
+*.md
+*.txt
+*.rst
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.html
+*.htm
+docs/
+.github/
+
+# Generated/exported data and capture corpora.
+*.log
+*.npy
+cues_*.md
+*cues*.json
+soundswitch_laser_cues.json
+docs/data/
+captures/
+capture*/
+VirtualLaserNode*/
+*.ssproj/
+
+# Local scratch.
+experiments/
+local/
+artifacts/
+work/
