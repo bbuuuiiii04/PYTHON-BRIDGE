@@ -1,9 +1,9 @@
 ---
 doc_status: superseded-implementation-prompt
 truth_level: historical-static-and-passive-live-re-closed-handoff
-last_verified_commit: 7c16fd5
+last_verified_commit: 0d3aa5c
 last_verified_date: 2026-06-29
-validation_scope: historical handoff after Rekordbox 7.2.11 local RE closure; runtime implementation now exists in current worktree and remains software-tested only; hardware output unvalidated
+validation_scope: historical handoff after Rekordbox 7.2.11 local RE closure; runtime implementation exists at 0d3aa5c and remains software-tested only; hardware output unvalidated
 ---
 
 # Codex Task - Implement Rekordbox Mixer Active-Deck Authority

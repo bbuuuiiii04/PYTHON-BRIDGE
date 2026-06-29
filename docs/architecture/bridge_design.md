@@ -8,8 +8,7 @@ originSessionId: 88cd1a53-8b87-4b05-b106-26c1fb0a5730
 
 Status: CURRENT AUTHORITATIVE
 
-Last reconciled against the current checkout at `7c16fd5` plus current worktree
-changes on 2026-06-29.
+Last reconciled against implementation commit `0d3aa5c` on 2026-06-29.
 
 ## Purpose
 

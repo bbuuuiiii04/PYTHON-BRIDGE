@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout at `7c16fd5` plus current worktree changes on 2026-06-29. Treat code as the source of
+Audited against implementation commit `0d3aa5c` on 2026-06-29. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape

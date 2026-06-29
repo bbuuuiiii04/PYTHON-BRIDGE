@@ -2,7 +2,7 @@
 
 Status: CURRENT SUPPORTING
 
-Audited against the current checkout at `7c16fd5` plus current worktree changes on 2026-06-29.
+Audited against implementation commit `0d3aa5c` on 2026-06-29.
 
 This is the canonical runtime logging guide. Historical implementation context
 is retained in `docs/history/logging_implementation_handoff.md`, but current

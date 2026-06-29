@@ -1,14 +1,14 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 7c16fd5
+last_verified_commit: 0d3aa5c
 last_verified_date: 2026-06-29
 validation_scope: behavior contract plus software-tested implementation; live/hardware validation pending
 ---
 
 # Active Deck Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; SOFTWARE-TESTED IMPLEMENTATION IN CURRENT WORKTREE
+Status: AUTHORITATIVE TARGET BEHAVIOR; SOFTWARE-TESTED IMPLEMENTATION AT `0d3aa5c`
 
 This document defines how the bridge is expected to choose `active_deck`.
 Behavior that differs from this document is a regression unless this document is
