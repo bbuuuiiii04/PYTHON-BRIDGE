@@ -1,9 +1,9 @@
 ---
 doc_status: active-review-prompt
 truth_level: reverse-engineering-review-instructions
-last_verified_commit: ab2bc15
-last_verified_date: 2026-06-28
-validation_scope: strict adversarial review of Rekordbox mixer active-deck static/passive-live RE reasoning and implementation readiness; review-only; no live sampling, restart, or hardware authority
+last_verified_commit: a82cf16
+last_verified_date: 2026-06-29
+validation_scope: strict adversarial review of Rekordbox mixer active-deck static/passive-live RE reasoning and implementation readiness, including implementation-precision findings addressed in the active spec; review-only; no live sampling, restart, or hardware authority
 ---
 
 # Strict Adversarial Review - Rekordbox Mixer Active-Deck RE
@@ -149,12 +149,26 @@ Try to disprove that the implementation handoff is safe:
 5. `MASTER_CHANGED` becomes `rb_master_deck` only while mixer authority is valid.
 6. `active_deck` is selected only through a pure resolver while mixer authority
    is valid.
-7. Playing-only mirror auto-switch and resume-time direct `active_deck`
+7. Raw Rekordbox Deck C/D direct-reader `PLAY`, `PAUSE`, and
+   `MASTER_CHANGED` cannot be aliased into Deck 1/2 resolver eligibility or
+   `rb_master_deck`.
+8. `rb_master_deck` has validity/freshness/source semantics; startup defaults,
+   sentinel/no-master, unreadable, unsupported, stale, or OSC fallback inputs
+   cannot silently become Deck 1 master truth.
+9. Neutral/equal tie and invalid-mixer fallback behavior is defined when
+   `rb_master_deck` is unavailable/stale.
+10. StateManager reruns/applies the resolver after `PLAY` and `PAUSE` mutate
+    playing state, so a paused/non-eligible active deck cannot keep driving until
+    an unrelated mixer snapshot.
+11. OSC scripted arm/clear fallback cannot enqueue or process deck `0`, and
+    `SCRIPTED_ARM`/`SCRIPTED_CLEAR` reject non-1/2 decks before `_deck[0]`
+    indexing or `_arm_unscripted(0)`.
+12. Playing-only mirror auto-switch and resume-time direct `active_deck`
    correction cannot bypass valid mixer authority.
-8. Filter cannot affect `active_deck`.
-9. Decks 3/4, crossfader, trim/gain, mid/high EQ, real audio loudness, mute, and
+13. Filter cannot affect `active_deck`.
+14. Decks 3/4, crossfader, trim/gain, mid/high EQ, real audio loudness, mute, and
    unrelated FX are still non-authority inputs.
-10. Status and heartbeat must expose `active_deck/show_deck`, `rb_master_deck`,
+15. Status and heartbeat must expose `active_deck/show_deck`, `rb_master_deck`,
     mixer validity, decoded Deck 1/2 fader/bass, and authority reason.
 
 ## Assumption-Fighting Rules

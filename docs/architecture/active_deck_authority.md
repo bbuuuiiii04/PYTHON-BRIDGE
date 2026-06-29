@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: ab2bc15
-last_verified_date: 2026-06-28
+last_verified_commit: a82cf16
+last_verified_date: 2026-06-29
 validation_scope: behavior contract; implementation and hardware validation pending
 ---
 
@@ -40,7 +40,7 @@ primary show authority when mixer authority is valid.
 | Term | Meaning |
 | --- | --- |
 | `active_deck` / `show_deck` | Deck currently driving bridge outputs. |
-| `rb_master_deck` | Rekordbox-reported master deck. |
+| `rb_master_deck` | Rekordbox-reported master deck, or unknown/unavailable when no current valid direct master read exists. |
 | mixer authority | Decoded mixer state for Deck 1 and Deck 2. |
 | eligible deck | A deck that is playing and has an audible upfader. |
 | fader `down` | Decoded physical silent/down position from RE evidence. |
@@ -59,7 +59,8 @@ The resolver uses only:
 - deck playing state.
 - upfader decoded position.
 - bass EQ decoded position.
-- `rb_master_deck` only for the tie/fallback cases in this document.
+- current valid/fresh `rb_master_deck` only for the tie/fallback cases in this
+  document.
 
 Decks 3 and 4 are not authority candidates. Any SoundSwitch Deck 3/4 use remains
 an internal routing detail for existing SoundSwitch/autoloop/scripted behavior.
@@ -98,6 +99,12 @@ Rules:
 
 When mixer authority is valid:
 
+`rb_master_deck` is usable only when current, valid/fresh, and Deck 1 or Deck 2.
+If a rule below says to use `rb_master_deck` while it is unavailable, stale, or
+invalid, the bridge must not synthesize Deck 1. It must hold the current eligible
+`active_deck` when possible; otherwise it must go idle with a visible
+master-unavailable reason until a dominant candidate or valid master appears.
+
 1. If no deck is eligible, the show is idle after the stability behavior below.
 2. If exactly one deck is eligible, that deck becomes `active_deck`.
 3. If both decks are eligible and exactly one fader is `top`, the top-fader deck
@@ -105,16 +112,17 @@ When mixer authority is valid:
 4. If both decks are eligible and both faders are `top`, compare bass EQ.
 5. If both top-fader decks have unequal bass positions, the higher bass position
    wins.
-6. If both top-fader decks have equal bass and current `active_deck` is still
-   eligible, hold current `active_deck`.
-7. If both top-fader decks have equal bass and there is no current active deck,
-   use `rb_master_deck`.
-8. If both bass EQs are `neutral`, `rb_master_deck` is the preferred tie-break,
-   subject to stability/no-flicker behavior.
+6. If both top-fader decks have `neutral` bass, current valid/fresh
+   `rb_master_deck` is the preferred tie-break, subject to stability/no-flicker
+   behavior.
+7. If both top-fader decks have equal non-neutral bass and current `active_deck`
+   is still eligible, hold current `active_deck`.
+8. If both top-fader decks have equal non-neutral bass and there is no current
+   active deck, use current valid/fresh `rb_master_deck`.
 9. If both decks are eligible and neither fader is `top`, hold current
    `active_deck` if still eligible.
 10. If both decks are eligible, neither fader is `top`, and there is no current
-    active deck, use `rb_master_deck` if eligible.
+    active deck, use current valid/fresh `rb_master_deck` if eligible.
 11. If exactly one eligible deck remains in a neither-top fallback state, use
     that deck.
 12. If none are eligible, idle.
@@ -137,7 +145,13 @@ Rules:
 
 ## Rekordbox Master
 
-`MASTER_CHANGED` updates `rb_master_deck`.
+`MASTER_CHANGED` updates `rb_master_deck` only when the input represents current
+valid Rekordbox direct master truth for Deck 1 or Deck 2.
+
+`rb_master_deck` must carry enough validity/freshness/source state that status,
+tie-breaking, and invalid-mixer fallback can distinguish proven Rekordbox master
+truth from startup defaults, unsupported reads, sentinel/no-master values,
+unreadable chains, stale data, or legacy OSC fallback input.
 
 While mixer authority is valid, `MASTER_CHANGED` must not directly set
 `active_deck`. Rekordbox master wins only the tie cases described above.
@@ -174,10 +188,14 @@ Invalid mixer authority is a fault, not normal operation.
 When mixer authority is invalid:
 
 - fail visibly through status/logs/menubar.
-- temporarily use old RB-master behavior.
+- temporarily use old RB-master behavior only when `rb_master_deck` is current
+  and valid/fresh.
 - keep trying to reacquire valid mixer authority.
 - allow old RB-master behavior to change `active_deck`.
 - mark the reason as `mixer_invalid_fallback`.
+- if `rb_master_deck` is unavailable/stale during invalid mixer authority, do
+  not default to Deck 1. Hold a still-playing current show deck only through an
+  explicit fallback reason, or go idle visibly.
 
 When mixer authority becomes valid again:
 

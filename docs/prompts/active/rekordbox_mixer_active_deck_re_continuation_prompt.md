@@ -1,9 +1,9 @@
 ---
 doc_status: active-implementation-prompt
 truth_level: static-and-passive-live-re-closed-handoff
-last_verified_commit: ab2bc15
-last_verified_date: 2026-06-28
-validation_scope: handoff after Rekordbox 7.2.11 local RE closure for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; runtime implementation and hardware output unvalidated
+last_verified_commit: a82cf16
+last_verified_date: 2026-06-29
+validation_scope: handoff after Rekordbox 7.2.11 local RE closure for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; implementation-precision review findings folded into active spec/prompt; runtime implementation and hardware output unvalidated
 ---
 
 # Codex Task - Implement Rekordbox Mixer Active-Deck Authority
@@ -49,10 +49,23 @@ Use executable code over docs when they conflict.
 - `RBStateReader._follow_float()` rejects valid mixer edge values with
   `0.0 < v < 1000.0`. Mixer reads need a separate finite-f32 helper with
   signal-specific ranges.
+- `RBStateReader` currently maps raw Rekordbox Deck A/C to bridge Deck 1 and raw
+  Deck B/D to bridge Deck 2, then loops all four raw decks. Under mixer authority,
+  resolver-support `PLAY`, `PAUSE`, and direct `MASTER_CHANGED` must be raw Deck
+  A/B only; raw Deck C/D must not update Deck 1/2 eligibility or
+  `rb_master_deck`.
 - `StateManager._on_master_changed()` still writes
   `self._os.active_deck = new_deck` directly.
+- `OutputState` does not yet carry `rb_master_deck` validity/freshness/source.
+  Do not default Deck 1 as proven Rekordbox master truth.
+- Current `StateManager` PLAY/PAUSE handling only mutates `DeckState.playing`.
+  The implementation must rerun/apply the active-deck resolver immediately after
+  those mutations.
 - `StateManager._do_resume()` can also correct an empty-deck mismatch by
   writing `self._os.active_deck = mirror` directly.
+- OSC `/bridge/track_loaded` currently falls back to `get_active_deck()` when no
+  last-loaded deck exists. After `active_deck=0` exists, scripted arm/clear must
+  reject/defer when both last-loaded deck and active deck are non-1/2.
 - `runtime_status._heartbeat_payload()` still reports
   `"master": active_deck`.
 
@@ -166,20 +179,33 @@ Ghidra asks to analyze.
    NaN, infinity, unreadable chains, null chains, and out-of-range values.
 4. Publish decoded per-deck mixer labels and both-deck validity/freshness
    without blocking the 200 Hz push loop.
-5. Add a pure active-deck resolver matching
+5. Suppress raw Deck C/D direct-reader `PLAY`, `PAUSE`, and direct
+   `MASTER_CHANGED` as resolver-support inputs. Preserve SoundSwitch Deck 3/4
+   fanout only as downstream routing after a resolved Deck 1/2 show deck exists.
+6. Add a pure active-deck resolver matching
    `docs/architecture/active_deck_authority.md`.
-6. Preserve `rb_master_deck` separately from `active_deck`. `MASTER_CHANGED`
-   must update `rb_master_deck` and must not directly overwrite `active_deck`
+7. Preserve `rb_master_deck` separately from `active_deck`, with explicit
+   validity/freshness/source fields. Startup, unreadable, sentinel/no-master,
+   unsupported, or stale direct master must not silently become Deck 1.
+   `MASTER_CHANGED` must update `rb_master_deck` and must not directly overwrite
+   `active_deck` while mixer authority is valid.
+8. Specify and test neutral/equal tie behavior and invalid mixer fallback when
+   `rb_master_deck` is unavailable/stale; never synthesize Deck 1 as master.
+9. Rerun/apply the resolver after StateManager handles `PLAY` or `PAUSE`.
+   Active `PAUSE` must idle/switch through the resolver; non-active `PLAY` must
+   become eligible only through resolver/stability.
+10. Reject/defer OSC scripted arm/clear when no valid last-loaded or active
+    Deck 1/2 exists, and reject `SCRIPTED_ARM`/`SCRIPTED_CLEAR` deck `0` before
+    any `_deck[0]` indexing.
+11. Suppress old playing-only mirror auto-switch as an independent authority
    while mixer authority is valid.
-7. Suppress old playing-only mirror auto-switch as an independent authority
-   while mixer authority is valid.
-8. Suppress resume-time direct `active_deck` correction as an independent
+12. Suppress resume-time direct `active_deck` correction as an independent
    authority while mixer authority is valid.
-9. Update status/heartbeat so `master` no longer means `active_deck`. Expose
-   `active_deck`, `rb_master_deck`, mixer validity, decoded fader/bass, and
-   authority reason.
-10. Keep SoundSwitch, laser, LED/Govee, scripted, and autoloop behavior unchanged
-   after a selected `active_deck` is chosen.
+13. Update status/heartbeat so `master` no longer means `active_deck`. Expose
+    `active_deck`, `rb_master_deck`, master validity/freshness/source, mixer
+    validity, decoded fader/bass, and authority reason.
+14. Keep SoundSwitch, laser, LED/Govee, scripted, and autoloop behavior unchanged
+    after a selected `active_deck` is chosen.
 
 ## Remaining Validation Gaps
 

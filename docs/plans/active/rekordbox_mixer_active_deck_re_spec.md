@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-and-re-evidence-grounded implementation spec
-last_verified_commit: 902c587
-last_verified_date: 2026-06-28
-validation_scope: current-code inspection plus committed static/passive-live RE evidence for local Rekordbox 7.2.11 Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; runtime implementation, software behavior, and hardware behavior unvalidated
+last_verified_commit: a82cf16
+last_verified_date: 2026-06-29
+validation_scope: current-code inspection plus committed static/passive-live RE evidence for local Rekordbox 7.2.11 Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; implementation-precision review findings addressed in spec only; runtime implementation, software behavior, and hardware behavior unvalidated
 ---
 
 # Codex Implementation Spec - Rekordbox Mixer Active-Deck Authority
@@ -49,9 +49,19 @@ autoloop behavior unchanged after the resolved show deck is chosen.
 - [confirmed] `RBStateReader` already derives play/pause from live-position
   movement after warmup/evidence polls (`rb_state_reader.py:317-386`). Basic
   play/stop is not unresolved RE.
+- [confirmed] `RBStateReader` maps Rekordbox raw Deck A/C indexes to bridge Deck
+  1 and raw Deck B/D indexes to bridge Deck 2 (`rb_state_reader.py:27-31`,
+  `rb_state_reader.py:67-69`), then loops all four raw Rekordbox decks for
+  per-deck reads (`rb_state_reader.py:254-255`). Current tests even prove raw
+  Deck C direct-master byte `2` emits bridge Deck 1 today
+  (`tests/test_rb_state_reader.py:111-118`).
 - [confirmed] `RBStateReader._enqueue()` already routes enabled authoritative
   event kinds to the authoritative queue without blocking the reader thread
   (`rb_state_reader.py:494-505`).
+- [confirmed] `RBStateReader` already has direct-master availability semantics:
+  it marks current direct master readable only when the master byte is readable
+  and in range, and tests cover sentinel/unavailable transitions
+  (`rb_state_reader.py:467-491`, `tests/test_rb_state_reader.py:157-190`).
 - [confirmed] `RBStateReader._follow_float()` rejects `0.0` and `1023.0`
   (`rb_state_reader.py:530-542`). That helper must not be reused for mixer
   fader/EQ reads because those are valid mixer endpoints.
@@ -63,6 +73,9 @@ autoloop behavior unchanged after the resolved show deck is chosen.
   (`__main__.py:717-733`).
 - [confirmed] `StateManager._handle_event()` sends every `Ev.MASTER_CHANGED`
   directly to `_on_master_changed()` (`state_manager.py:1168-1175`).
+- [confirmed] Current `Ev.PLAY` and `Ev.PAUSE` handling only mutates
+  `DeckState.playing`; it does not rerun any active-deck resolver because no
+  resolver exists yet (`state_manager.py:1179-1190`).
 - [confirmed] `_on_master_changed()` currently writes
   `self._os.active_deck = new_deck` and resets lighting/autoloop/LED/laser
   state (`state_manager.py:2610-2671`).
@@ -84,6 +97,12 @@ autoloop behavior unchanged after the resolved show deck is chosen.
   invalid routing (`sound_switch_engine.py:20-23`).
 - [confirmed] `_update_lighting()` derives scripted/autoloop/idle from the active
   deck's playing/scripted state (`state_manager.py:3187-3218`).
+- [confirmed] OSC `/bridge/track_loaded` falls back to
+  `state_manager.get_active_deck()` when no last-loaded deck is known, then can
+  enqueue `Ev.SCRIPTED_ARM` or `Ev.SCRIPTED_CLEAR` with that deck
+  (`__main__.py:735-771`, `__main__.py:791-810`). Current
+  `StateManager` scripted handlers index `self._deck[d]` or call
+  `_arm_unscripted(d)` without a non-1/2 guard (`state_manager.py:1304-1317`).
 - [confirmed] Per-tick OS2L sends fan out through `SoundSwitchEngine.deck_route`
   for the current active deck (`state_manager.py:3875-3888`,
   `state_manager.py:4103-4107`).
@@ -267,6 +286,12 @@ Add small data models in `models.py`:
   - `updated_at: float`
   - `reason: str`
   - optional non-authority `filter` data only if filter tracking is implemented
+- `RBMasterState` or equivalent explicit fields
+  - `deck: Optional[int]` (`None` means unknown/unavailable)
+  - `valid: bool`
+  - `source: str`
+  - `updated_at: float`
+  - `fallback_reason: str`
 
 Add `Ev.MIXER_STATE = "mixer_state"`.
 
@@ -325,6 +350,18 @@ Exact read behavior:
   `TRACK_LOADED`.
 - Keep reader threads publishing events/snapshots only; do not mutate
   `DeckState`, `OutputState`, or lighting state from the reader.
+- Resolver-support direct inputs must be raw Deck A/B only:
+  - For mixer authority support, raw Rekordbox deck indexes `0` and `1` are the
+    only raw decks allowed to produce `Ev.PLAY`, `Ev.PAUSE`, direct
+    `Ev.MASTER_CHANGED`, transport availability, or master availability that can
+    update Deck 1/2 resolver state.
+  - Raw Rekordbox deck indexes `2` and `3` must not be aliased into Deck 1/2
+    resolver eligibility or `rb_master_deck` while mixer authority is enabled.
+  - This restriction applies even though the current reader maps A/C -> bridge
+    Deck 1 and B/D -> bridge Deck 2 for legacy direct reads.
+  - Do not remove existing downstream SoundSwitch Deck 3/4 routing/fanout; Decks
+    3/4 remain internal output routing details after a resolved Deck 1/2 show
+    deck is selected.
 
 Freshness:
 
@@ -348,6 +385,10 @@ Tests:
 - Cover NaN, infinity, null chain, unreadable chain, and out-of-range values.
 - Cover both-deck validity and partial-deck invalidation.
 - Cover unchanged valid values refreshing snapshot time.
+- Cover raw Deck C/D `PLAY`, `PAUSE`, and direct `MASTER_CHANGED` suppression for
+  resolver-support routing: raw indexes `2` and `3` must not update Deck 1/2
+  eligibility, transport availability, master availability, or `rb_master_deck`
+  under mixer authority.
 
 ### Task 4 - `active_deck_resolver.py`: pure resolver
 
@@ -358,7 +399,9 @@ side effects, or hardware imports.
 Required input model:
 
 - current `active_deck` (`0`, `1`, or `2`; `0` means idle/no audible show deck)
-- current `rb_master_deck` (`1` or `2`)
+- current `rb_master_deck` (`1`, `2`, or `None`)
+- `rb_master_deck_valid`, `rb_master_deck_source`,
+  `rb_master_deck_updated_at`/age, and `rb_master_fallback_reason`
 - Deck 1 playing state
 - Deck 2 playing state
 - Deck 1 decoded upfader raw/norm/label
@@ -383,6 +426,12 @@ Resolver behavior:
 - If mixer authority is invalid or stale, return the old-RB-master fallback
   decision with `authority_reason="mixer_invalid_fallback"` and a concrete
   `fallback_reason`.
+- The old-RB-master fallback is usable only when `rb_master_deck` is current,
+  valid/fresh, and in `(1, 2)`. If direct master is missing, sentinel, unreadable,
+  unsupported, stale, or sourced from legacy OSC, do not synthesize Deck 1. Hold
+  the current nonzero active deck only if its direct playing state is still true;
+  otherwise return `active_deck=0` with a concrete reason such as
+  `rb_master_unavailable_fallback`.
 - Eligible means playing and upfader not down.
 - Fader-down decks are not eligible even if bass is high.
 - Paused/not-playing decks are not eligible even if fader is top.
@@ -390,11 +439,16 @@ Resolver behavior:
 - Both eligible and exactly one top fader: top-fader deck wins.
 - Both eligible, both faders top, unequal LOW/BASS: higher LOW/BASS wins.
 - Both eligible, both faders top, both LOW/BASS neutral: eligible
-  `rb_master_deck` wins, subject to stability/no-flicker behavior.
+  current-valid `rb_master_deck` wins, subject to stability/no-flicker behavior.
+  If `rb_master_deck` is unavailable/stale, hold current eligible active deck; if
+  none exists, return idle with a concrete reason such as
+  `rb_master_unavailable_tie`.
 - Both eligible, both faders top, equal non-neutral LOW/BASS: hold current
-  eligible active deck; otherwise use eligible `rb_master_deck`.
+  eligible active deck; otherwise use eligible current-valid `rb_master_deck`. If
+  no usable master exists, return idle rather than defaulting to Deck 1.
 - Both eligible, neither fader top: hold current eligible active deck; otherwise
-  use eligible `rb_master_deck`.
+  use eligible current-valid `rb_master_deck`. If no usable master exists, return
+  idle rather than defaulting to Deck 1.
 - No eligible deck returns `active_deck=0` with `authority_reason="idle_no_audible"`.
 - Any active-deck change must pass stability. During stability wait, hold current
   active deck only while it remains playing and audible; otherwise return idle.
@@ -407,14 +461,29 @@ Tests:
 - Cover every scenario listed in `docs/architecture/active_deck_authority.md`.
 - Explicitly cover both top faders + both LOW/BASS neutral where current active
   is the non-master deck; expected result is eligible `rb_master_deck`.
+- Cover startup with no current direct master.
+- Cover direct master unreadable, sentinel/no-master, unsupported, and stale.
+- Cover neutral/equal tie while `rb_master_deck` is unavailable/stale; it must
+  hold current eligible active deck if possible, otherwise idle with a
+  master-unavailable reason.
+- Cover invalid mixer fallback while `rb_master_deck` is unavailable/stale; it
+  must not default to Deck 1.
 - Cover invalid fallback, invalid-to-valid recovery, no-audible idle, bass-swap
-  stability, and fader-down playing deck rejection.
+  stability, fader-down playing deck rejection, and paused/not-playing deck
+  rejection.
 
 ### Task 5 - `state_manager.py`: integrate resolver without output redesign
 
 State ownership:
 
-- Add `OutputState.rb_master_deck: int = 1`.
+- Add `OutputState.rb_master_deck: Optional[int] = None`.
+- Add explicit master validity/status fields on `OutputState`, for example
+  `rb_master_deck_valid: bool = False`, `rb_master_deck_source: str = "unknown"`,
+  `rb_master_deck_updated_at: float = 0.0`, and
+  `rb_master_fallback_reason: str = ""`.
+- Default Deck 1 must never mean proven Rekordbox master truth. Startup may seed
+  an old fallback active deck, but `rb_master_deck` remains invalid/unknown until
+  a current direct master read proves Deck 1 or Deck 2.
 - Change `OutputState.active_deck` semantics to the resolved show deck:
   `0` means idle/no audible active deck, `1` or `2` means that deck drives the
   show.
@@ -422,7 +491,9 @@ State ownership:
 - Store status-facing authority fields on `OutputState` and copy them through
   `StateManager.snapshot()`:
   `active_deck_authority_reason`, `mixer_authority_valid`,
-  `mixer_authority_updated_at`, and `mixer_fallback_reason`.
+  `mixer_authority_updated_at`, `mixer_fallback_reason`, `rb_master_deck`,
+  `rb_master_deck_valid`, `rb_master_deck_source`,
+  `rb_master_deck_updated_at`/age, and `rb_master_fallback_reason`.
 
 Deck-switch side effects:
 
@@ -457,7 +528,18 @@ Deck-switch side effects:
 Event handling:
 
 - `Ev.MIXER_STATE` updates the latest mixer snapshot and reruns the resolver.
-- `Ev.MASTER_CHANGED` updates `rb_master_deck`.
+- `Ev.PLAY` and `Ev.PAUSE` first mutate `DeckState.playing`, then immediately
+  rerun/apply the resolver with the new eligibility state.
+- Active-deck `PAUSE` must become idle or switch only through the resolver and
+  stability behavior. It must not keep driving the paused/non-eligible deck until
+  an unrelated later mixer snapshot arrives.
+- Non-active-deck `PLAY` makes that deck eligible only through the resolver and
+  stability behavior. It must not directly switch `active_deck`.
+- `Ev.MASTER_CHANGED` from direct Rekordbox raw Deck A/B updates
+  `rb_master_deck` plus its validity/source/updated-at fields.
+- Any direct Rekordbox raw Deck C/D master signal must be ignored for
+  `rb_master_deck` and resolver support. If the event shape cannot prove the raw
+  deck was A/B, reject it rather than aliasing C/D to Deck 1/2 authority.
 - While mixer authority is valid/fresh, `Ev.MASTER_CHANGED` must not directly
   write `active_deck`; it only influences resolver tie/fallback cases.
 - While mixer authority is invalid/stale, preserve old direct RB-master
@@ -470,6 +552,10 @@ Event handling:
   independently select the show deck, and must never rewrite `rb_master_deck`.
   If retained, convert them to a distinct legacy fallback path/event so
   Rekordbox-reported master and OSC-requested deck cannot be confused.
+- `Ev.SCRIPTED_ARM` and `Ev.SCRIPTED_CLEAR` must reject or ignore any deck not in
+  `(1, 2)` before touching `self._deck[d]`, `_personality_eligible_deck[d]`,
+  `_arm_unscripted(d)`, pending arm state, or SoundSwitch/LED/laser/autoloop
+  state.
 
 Current bypasses to remove or gate:
 
@@ -497,11 +583,26 @@ Tests:
   existing StateManager test file if it already owns these helpers.
 - Prove `MASTER_CHANGED` updates `rb_master_deck` without bypassing the resolver
   while mixer authority is valid.
+- Prove raw Rekordbox Deck C/D direct `MASTER_CHANGED` cannot update
+  `rb_master_deck` and cannot become Deck 1/2 fallback authority.
+- Prove startup with no current direct master leaves `rb_master_deck` invalid or
+  unknown rather than silently defaulting to Deck 1.
 - Prove old RB-master behavior still works while mixer authority is invalid.
+- Prove invalid mixer fallback does not default to Deck 1 when direct master is
+  unreadable, sentinel/no-master, unsupported, or stale.
 - Prove valid mixer recovery returns to fader dominance.
+- Prove active-deck `PAUSE` reruns the resolver and causes idle/switch behavior
+  through eligibility/stability.
+- Prove non-active-deck `PLAY` reruns the resolver but cannot bypass stability or
+  directly switch `active_deck`.
+- Prove PLAY/PAUSE support input changes are applied quickly enough that outputs
+  cannot continue driving a paused/non-eligible active deck until an unrelated
+  mixer snapshot arrives.
 - Prove each mirror auto-switch path cannot promote a fader-down deck while mixer
   authority is valid.
 - Prove `_do_resume()` empty-deck correction cannot bypass valid mixer authority.
+- Prove `SCRIPTED_ARM deck=0` and `SCRIPTED_CLEAR deck=0` are ignored/rejected
+  safely and cannot index `self._deck[0]`.
 - Prove idle/no-audible `1/2 -> 0` does not drive the previous active deck, call
   `deck_route(0)`, or leave pack/lighting/autoloop/laser/LED state armed from
   the old show deck.
@@ -527,6 +628,10 @@ Tests:
   `Ev.MASTER_CHANGED` from the same `RBStateReader` into the authoritative queue,
   even when `RBSS_PLAY_DIRECT` and `RBSS_MASTER_DIRECT` are disabled. These are
   resolver support inputs, not optional old direct-reader feature flags.
+- Those resolver support inputs must be raw Deck A/B only. The startup wiring,
+  reader filtering, or event adapter must prove raw Rekordbox indexes `2` and `3`
+  cannot be aliased into Deck 1/2 `PLAY`, `PAUSE`, direct `MASTER_CHANGED`,
+  transport readiness, master readiness, eligibility, or `rb_master_deck`.
 - Rerun the resolver when mixer state, play/pause state, or `rb_master_deck`
   changes. Default-on mixer authority must not publish fresh mixer snapshots
   while eligibility or tie-break master inputs are stale due to unrouted events.
@@ -536,19 +641,31 @@ Tests:
 - OSC `/bridge/active_deck` remains ignored while current direct master is ready
   today; after mixer authority lands, it must also be unable to bypass valid
   mixer authority.
+- OSC `/bridge/track_loaded` scripted fallback must choose only a valid bridge
+  deck. If `get_last_loaded_deck()` is not `1` or `2` and `get_active_deck()` is
+  not `1` or `2`, reject/defer the scripted arm/clear action and log a concise
+  reason; do not enqueue `SCRIPTED_ARM`, enqueue `SCRIPTED_CLEAR`, or call
+  `_auto_populate()` with deck `0`.
 - Add a startup wiring test proving mixer authority constructs/wires
   `RBStateReader` when the version has named mixer offsets and all existing
   direct flags are disabled.
 - That startup wiring test must prove the authoritative kinds include
   `Ev.MIXER_STATE`, `Ev.PLAY`, `Ev.PAUSE`, and direct `Ev.MASTER_CHANGED`, so
   `drop_unrouted_events=True` cannot discard resolver inputs.
+- Add OSC/input tests proving `/bridge/track_loaded` during idle startup cannot
+  enqueue or process deck `0` scripted events, and cannot route pending
+  auto-populate phase 2 through deck `0`.
 
 ### Task 7 - `runtime_status.py` and `StateManager.snapshot()`: separate show deck and master
 
 Expose these fields from `StateManager.snapshot()`:
 
 - `active_deck`: resolved show deck, `0`, `1`, or `2`
-- `rb_master_deck`: current Rekordbox master deck, `1` or `2`
+- `rb_master_deck`: current Rekordbox master deck, `1`, `2`, or `None`/absent
+  when unknown
+- `rb_master_deck_valid`, `rb_master_deck_source`,
+  `rb_master_deck_age_s` or `rb_master_deck_updated_at`, and
+  `rb_master_fallback_reason`
 - `active_deck_authority_reason`
 - `mixer_authority_valid`
 - `mixer_authority_age_s` or `mixer_authority_updated_at`
@@ -562,7 +679,9 @@ Heartbeat rules:
 - Heartbeat must stop reporting `master = active_deck`.
 - Prefer explicit fields: `active_deck` or `show_deck`, plus `rb_master_deck`.
 - If the legacy `master` field remains, it must mean `rb_master_deck` only and
-  tests must prove that `master` no longer follows `active_deck`.
+  tests must prove that `master` no longer follows `active_deck`. If
+  `rb_master_deck` is unknown/invalid/stale, `master` must be null/absent or
+  explicitly marked invalid; it must not default to Deck 1.
 - The `[BEAT]` log should name both concepts clearly, for example
   `deck=<active_deck> rb_master=<rb_master_deck>`.
 - Include mixer validity/fallback reason in status JSON. Keep heartbeat concise
@@ -614,6 +733,10 @@ record.
 - `RBStateReader._tick_deck()` still enqueues `ANLZ_PATH` before `TRACK_LOADED`.
 - Memory play bits do not override `DeckState.playing`.
 - Direct readiness must be currently true; a flag alone is not authority.
+- Raw Rekordbox Deck C/D direct-reader events do not become Deck 1/2
+  resolver-support inputs under mixer authority.
+- `rb_master_deck` is unknown/invalid until a current direct master read proves
+  Deck 1 or Deck 2; no default value may be treated as truth.
 - The 200 Hz push loop must not gain blocking I/O, process-memory scanning,
   Ghidra calls, filesystem scans, network calls, MIDI/serial/DMX calls, sleeps,
   subprocess calls, or status-provider calls.
@@ -643,6 +766,9 @@ Required new/extended tests:
   - NaN, infinity, null/unreadable, and out-of-range failure
   - both-deck validity requirement
   - unchanged mixer values refreshing freshness
+  - raw Rekordbox Deck C/D `PLAY`, `PAUSE`, and direct `MASTER_CHANGED` cannot
+    update Deck 1/2 resolver support inputs, transport/master readiness, or
+    `rb_master_deck`
 - `tests/test_active_deck_resolver.py`
   - every scenario in `docs/architecture/active_deck_authority.md`
   - both top faders + neutral bass selects `rb_master_deck`, even if current
@@ -652,12 +778,33 @@ Required new/extended tests:
   - no-audible idle
   - bass-swap stability
   - fader-down playing deck rejection
+  - paused/not-playing deck rejection
+  - startup/no-current-direct-master behavior
+  - direct master unreadable/sentinel/stale behavior
+  - neutral/equal tie while `rb_master_deck` is unavailable/stale
+  - invalid mixer fallback while `rb_master_deck` is unavailable/stale
 - StateManager integration tests
   - `MASTER_CHANGED` updates `rb_master_deck` without bypassing resolver when
     mixer authority is valid
+  - raw Rekordbox Deck C/D direct `MASTER_CHANGED` cannot update
+    `rb_master_deck`
+  - startup with no current direct master does not silently treat Deck 1 as
+    Rekordbox master truth
   - old RB-master fallback works while mixer authority is invalid
+  - invalid/stale mixer fallback does not default to Deck 1 when direct master is
+    unavailable/stale
+  - active-deck `PAUSE` reruns resolver and becomes idle/switch through resolver
+  - non-active-deck `PLAY` reruns resolver but cannot directly switch or bypass
+    stability
+  - PLAY/PAUSE support inputs update eligibility before outputs can continue
+    driving a paused/non-eligible active deck waiting for an unrelated mixer
+    snapshot
   - OSC fallback input cannot mutate `rb_master_deck` and cannot influence valid
     mixer authority
+  - `/bridge/track_loaded` during idle startup cannot enqueue/process deck `0`
+    scripted events
+  - `SCRIPTED_ARM deck=0` and `SCRIPTED_CLEAR deck=0` are ignored/rejected before
+    any `self._deck[0]` indexing or `_arm_unscripted(0)` call
   - legacy mirror fallback has a distinct fallback reason if retained while
     mixer authority is invalid
   - mirror auto-switch paths cannot promote fader-down decks while mixer authority
@@ -699,11 +846,20 @@ The runtime implementation is not complete until:
   reusing `_follow_float()` for mixer raw values.
 - `active_deck_resolver.py` is pure and test-covered.
 - `rb_master_deck` is separate from `active_deck`.
+- `rb_master_deck` carries current-valid/fresh/source semantics and starts
+  unknown/invalid unless direct master truth is currently proven.
 - `MASTER_CHANGED` cannot directly change `active_deck` while mixer authority is
   valid/fresh.
+- Raw Rekordbox Deck C/D direct-reader `PLAY`, `PAUSE`, and `MASTER_CHANGED` do
+  not update Deck 1/2 resolver eligibility or `rb_master_deck`.
 - Default-on mixer authority routes mixer snapshots, play/pause, and direct
   Rekordbox master updates so resolver inputs stay current.
+- PLAY/PAUSE event handling reruns the resolver immediately after mutating
+  playing state.
 - OSC legacy active-deck input cannot rewrite `rb_master_deck`.
+- OSC scripted arm/clear input rejects/defer when both last-loaded deck and
+  active deck are invalid/non-1/2, and StateManager rejects non-1/2 scripted
+  arm/clear events before indexing deck state.
 - Playing-only mirror auto-switch cannot bypass valid mixer authority.
 - `_do_resume()` empty-deck correction cannot bypass valid mixer authority.
 - Idle/no-audible `active_deck=0` is explicitly handled before any deck-index,
@@ -730,6 +886,18 @@ Before marking the implementation ready, try to disprove these:
 - OSC legacy input still rewrites `rb_master_deck`.
 - Default-on mixer authority drops `PLAY`, `PAUSE`, or direct `MASTER_CHANGED`
   because old direct flags are disabled.
+- Raw Deck C/D direct-reader `PLAY`, `PAUSE`, or `MASTER_CHANGED` leaks into
+  Deck 1/2 eligibility or `rb_master_deck`.
+- Default `rb_master_deck=1` is treated as real Rekordbox master before a current
+  direct master read proves it.
+- Neutral/equal ties or invalid mixer fallback silently select Deck 1 when
+  `rb_master_deck` is unavailable/stale.
+- `PLAY`/`PAUSE` handlers update `DeckState.playing` but fail to rerun/apply the
+  resolver.
+- OSC `/bridge/track_loaded` during idle startup enqueues `SCRIPTED_ARM` or
+  `SCRIPTED_CLEAR` for deck `0`.
+- `SCRIPTED_ARM deck=0` or `SCRIPTED_CLEAR deck=0` indexes `_deck[0]` or reaches
+  `_arm_unscripted(0)`.
 - `_do_resume()` still writes `active_deck` directly during valid mixer authority.
 - Idle/no-audible state keeps driving the previous deck.
 - Idle/no-audible state still creates MTC deck-0 anchors or indexes `_deck[0]`.
