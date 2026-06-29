@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-re-evidence-grounded implementation spec
-last_verified_commit: 2c5758a
+last_verified_commit: 902c587
 last_verified_date: 2026-06-28
 validation_scope: current-code inspection plus committed static/passive-live RE evidence for local Rekordbox 7.2.11 Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; runtime implementation, software behavior, and hardware behavior unvalidated
 ---
@@ -207,7 +207,13 @@ Exact parser behavior:
   present for a version, keep the legacy record valid but set all four required
   mixer fields to `None`. That makes mixer authority invalid for that version
   while preserving current direct master/play/load behavior.
+- If any required mixer label appears more than once for a version, keep the
+  legacy record valid but set all four required mixer fields to `None`. Duplicate
+  authority labels are ambiguous and must fail closed rather than using
+  first-wins or last-wins behavior.
 - If filter labels are partially present or malformed, set all filter fields to
+  `None`; do not affect mixer authority.
+- If any optional filter label appears more than once, set all filter fields to
   `None`; do not affect mixer authority.
 
 Exact local 7.2.11 mixer chains:
@@ -235,6 +241,7 @@ Tests:
   set to `None`.
 - Prove local `7.2.11` exposes the four mixer fields by name.
 - Prove malformed/partial mixer labels leave mixer fields `None`.
+- Prove duplicate required mixer labels leave all mixer fields `None`.
 - Prove anonymous trailing chain lines are not silently accepted as authority.
 - If filter fields are included, prove they are named optional fields and cannot
   affect active-deck authority.
@@ -382,8 +389,10 @@ Resolver behavior:
 - Exactly one eligible deck wins.
 - Both eligible and exactly one top fader: top-fader deck wins.
 - Both eligible, both faders top, unequal LOW/BASS: higher LOW/BASS wins.
-- Both eligible, both faders top, equal/neutral LOW/BASS: hold current eligible
-  active deck; otherwise use eligible `rb_master_deck`.
+- Both eligible, both faders top, both LOW/BASS neutral: eligible
+  `rb_master_deck` wins, subject to stability/no-flicker behavior.
+- Both eligible, both faders top, equal non-neutral LOW/BASS: hold current
+  eligible active deck; otherwise use eligible `rb_master_deck`.
 - Both eligible, neither fader top: hold current eligible active deck; otherwise
   use eligible `rb_master_deck`.
 - No eligible deck returns `active_deck=0` with `authority_reason="idle_no_audible"`.
@@ -396,6 +405,8 @@ Tests:
 
 - Add `tests/test_active_deck_resolver.py`.
 - Cover every scenario listed in `docs/architecture/active_deck_authority.md`.
+- Explicitly cover both top faders + both LOW/BASS neutral where current active
+  is the non-master deck; expected result is eligible `rb_master_deck`.
 - Cover invalid fallback, invalid-to-valid recovery, no-audible idle, bass-swap
   stability, and fader-down playing deck rejection.
 
@@ -427,6 +438,13 @@ Deck-switch side effects:
   `_push_tick_inner()`, `_drive_pack_output()`, or any `deck_route(active)` call
   indexes/routes a real deck. Idle must not drive the previous deck just because
   it was previously active.
+- Guard every direct use of `self._deck[self._os.active_deck]` or
+  `self._deck[active]` so `active_deck=0` cannot raise or select a stale real
+  deck. Current non-push examples include the `RB_RESTARTED` stop/LED-idle path
+  and pending scripted arm phase-2 routing.
+- `MTCReader` must not publish `TC_UPDATE` for deck `0`, and `StateManager` must
+  ignore any invalid `TC_UPDATE` deck. Idle/no-audible state must clear or
+  suppress MTC fallback anchors so stale timecode cannot restart output timing.
 - Define all three active-deck transition classes:
   - `1/2 -> 1/2`: run the extracted deck-switch side effects once.
   - `1/2 -> 0`: clear/idle output state without routing Deck 0; reset or clear
@@ -449,8 +467,9 @@ Event handling:
   `active_deck` only through the RB-master fallback path.
 - OSC `/bridge/active_deck` and `/bridge/bridge_deck` remain legacy/debug
   fallback inputs only. They must not bypass valid mixer authority, must not
-  independently select the show deck, and should not rewrite `rb_master_deck`
-  when mixer authority is valid.
+  independently select the show deck, and must never rewrite `rb_master_deck`.
+  If retained, convert them to a distinct legacy fallback path/event so
+  Rekordbox-reported master and OSC-requested deck cannot be confused.
 
 Current bypasses to remove or gate:
 
@@ -486,6 +505,8 @@ Tests:
 - Prove idle/no-audible `1/2 -> 0` does not drive the previous active deck, call
   `deck_route(0)`, or leave pack/lighting/autoloop/laser/LED state armed from
   the old show deck.
+- Prove `MTCReader`/`TC_UPDATE` cannot create a deck-0 anchor and `RB_RESTARTED`
+  while `active_deck=0` does not index `self._deck[0]`.
 - Prove `0 -> 1/2` recovery starts the new show deck without replaying stale
   previous-deck timing.
 
@@ -502,6 +523,13 @@ Tests:
   the loaded `RBOffsetVersion` has all four named mixer fields.
 - Route `Ev.MIXER_STATE` through the existing event queue. Do not add a separate
   live thread or polling loop.
+- When mixer authority is enabled, also route `Ev.PLAY`, `Ev.PAUSE`, and direct
+  `Ev.MASTER_CHANGED` from the same `RBStateReader` into the authoritative queue,
+  even when `RBSS_PLAY_DIRECT` and `RBSS_MASTER_DIRECT` are disabled. These are
+  resolver support inputs, not optional old direct-reader feature flags.
+- Rerun the resolver when mixer state, play/pause state, or `rb_master_deck`
+  changes. Default-on mixer authority must not publish fresh mixer snapshots
+  while eligibility or tie-break master inputs are stale due to unrouted events.
 - Keep existing direct master readiness behavior for the old fallback path.
 - Keep startup seeding conservative: direct master may seed `rb_master_deck` and
   old fallback active deck, but it is not proof of mixer authority.
@@ -511,6 +539,9 @@ Tests:
 - Add a startup wiring test proving mixer authority constructs/wires
   `RBStateReader` when the version has named mixer offsets and all existing
   direct flags are disabled.
+- That startup wiring test must prove the authoritative kinds include
+  `Ev.MIXER_STATE`, `Ev.PLAY`, `Ev.PAUSE`, and direct `Ev.MASTER_CHANGED`, so
+  `drop_unrouted_events=True` cannot discard resolver inputs.
 
 ### Task 7 - `runtime_status.py` and `StateManager.snapshot()`: separate show deck and master
 
@@ -536,6 +567,8 @@ Heartbeat rules:
   `deck=<active_deck> rb_master=<rb_master_deck>`.
 - Include mixer validity/fallback reason in status JSON. Keep heartbeat concise
   and throttled; do not add per-tick status spam.
+- When `active_deck=0`, heartbeat/status must not look up deck `0` runtime data;
+  report no active show deck and degrade BPM/phrase fields safely.
 
 Tests:
 
@@ -602,6 +635,7 @@ Required new/extended tests:
   - named 7.2.11 mixer fields
   - old records without mixer fields still valid
   - malformed/partial mixer labels fail closed
+  - duplicate required mixer labels fail closed
   - anonymous trailing chain lines do not become authority
   - optional filter fields, if implemented, are non-authority
 - `tests/test_rb_state_reader.py`
@@ -611,6 +645,8 @@ Required new/extended tests:
   - unchanged mixer values refreshing freshness
 - `tests/test_active_deck_resolver.py`
   - every scenario in `docs/architecture/active_deck_authority.md`
+  - both top faders + neutral bass selects `rb_master_deck`, even if current
+    active was the non-master deck
   - invalid fallback
   - invalid-to-valid recovery
   - no-audible idle
@@ -620,6 +656,8 @@ Required new/extended tests:
   - `MASTER_CHANGED` updates `rb_master_deck` without bypassing resolver when
     mixer authority is valid
   - old RB-master fallback works while mixer authority is invalid
+  - OSC fallback input cannot mutate `rb_master_deck` and cannot influence valid
+    mixer authority
   - legacy mirror fallback has a distinct fallback reason if retained while
     mixer authority is invalid
   - mirror auto-switch paths cannot promote fader-down decks while mixer authority
@@ -627,6 +665,8 @@ Required new/extended tests:
   - `_do_resume()` empty-deck correction cannot bypass resolver
   - idle/no-audible state does not drive previous active deck, route Deck 0, or
     leave stale pack/lighting/autoloop/laser/LED intent armed
+  - idle/no-audible state suppresses MTC fallback, rejects invalid `TC_UPDATE`
+    decks, and handles `RB_RESTARTED` without indexing deck `0`
   - `0 -> 1/2` recovery starts a fresh show deck without stale previous-deck timing
 - `tests/test_runtime_status.py`
   - heartbeat separates show deck and `rb_master_deck`
@@ -661,6 +701,9 @@ The runtime implementation is not complete until:
 - `rb_master_deck` is separate from `active_deck`.
 - `MASTER_CHANGED` cannot directly change `active_deck` while mixer authority is
   valid/fresh.
+- Default-on mixer authority routes mixer snapshots, play/pause, and direct
+  Rekordbox master updates so resolver inputs stay current.
+- OSC legacy active-deck input cannot rewrite `rb_master_deck`.
 - Playing-only mirror auto-switch cannot bypass valid mixer authority.
 - `_do_resume()` empty-deck correction cannot bypass valid mixer authority.
 - Idle/no-audible `active_deck=0` is explicitly handled before any deck-index,
@@ -684,8 +727,12 @@ Before marking the implementation ready, try to disprove these:
   auto-switch path.
 - `MASTER_CHANGED` still writes `active_deck` directly during valid mixer
   authority.
+- OSC legacy input still rewrites `rb_master_deck`.
+- Default-on mixer authority drops `PLAY`, `PAUSE`, or direct `MASTER_CHANGED`
+  because old direct flags are disabled.
 - `_do_resume()` still writes `active_deck` directly during valid mixer authority.
 - Idle/no-audible state keeps driving the previous deck.
+- Idle/no-audible state still creates MTC deck-0 anchors or indexes `_deck[0]`.
 - `active_deck` and `rb_master_deck` are still conflated in status or heartbeat.
 - One deck's missing mixer state is treated as a valid comparison.
 - Raw memory thresholds are described as RE facts instead of implementation
