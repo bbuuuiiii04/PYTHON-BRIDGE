@@ -82,9 +82,13 @@ Do **not** read the whole repo. Do **not** start with old prompts/plans/history.
 
 If the task is still unclear after the path above, **stop and report uncertainty.** Do not spelunk old prompts to invent context.
 
-If `graphify-out/graph.json` exists and the task needs broad codebase orientation, use `graphify query`,
-`graphify explain`, or `graphify path` before opening many files. Skip it for exact line/symbol
-lookups where `rg` is already narrower. The graph is a lead only; code and tests remain authority.
+If `graphify-out/graph.json` exists and the task needs broad codebase orientation, `graphify query`,
+`graphify explain`, or `graphify path` can point at likely files before opening many files. Skip
+Graphify for exact symbol, line, or known-file lookups where `rg` is cheaper and narrower. Never
+report Graphify output as confirmed architecture, ownership, call flow, blast radius, or live
+behavior: the graph is a lead only. `INFERRED` / `AMBIGUOUS` edges and shortest paths require
+source/test confirmation, especially before any live-critical claim. Do not use or document
+`graphify plan` unless the current local CLI proves that command exists.
 
 ## 3. Task router
 

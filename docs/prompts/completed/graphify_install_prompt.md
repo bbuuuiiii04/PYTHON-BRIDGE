@@ -1,14 +1,18 @@
 ---
-doc_status: active-implementation-prompt
-truth_level: workflow-tooling
-last_verified_commit: f5cfddd
+doc_status: completed-prompt
+truth_level: historical-workflow
+last_verified_commit: 56a505e
 last_verified_date: 2026-06-29
-validation_scope: agent task prompt to install + customize Graphify (repo relationship map) for
-  rb_ss_bridge_v2. Dev-tooling only; manual query access, no hooks, no runtime/bridge code, no
-  live-bridge interaction. Tracked as AWR-112.
+validation_scope: historical agent task prompt; Graphify setup is complete and current workflow lives
+  in docs/setup/graphify.md. Dev-tooling only; manual query access, no hooks, no runtime/bridge code,
+  no live-bridge interaction. Closed as AWR-112.
 ---
 
-# Agent Prompt — Install & customize Graphify (repo relationship map) for rb_ss_bridge_v2
+# Historical Prompt — Install & customize Graphify for rb_ss_bridge_v2
+
+> **COMPLETED 2026-06-29. Do not execute this as an active setup task.**
+> Use `docs/setup/graphify.md` for the current Graphify workflow. This file is retained only as
+> historical evidence of the install/tuning prompt.
 
 You are the next agent working on `rb_ss_bridge_v2` (local: `/Users/bbui/rb_ss_bridge_v2`, GitHub:
 `bbuuuiiii04/PYTHON-BRIDGE`). Your job is to **install Graphify and tune it to this repo**, then prove

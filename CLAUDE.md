@@ -28,9 +28,11 @@ Also follow `AGENTS.md` §0 Brandon Communication Mode:
 - **Cost discipline.** Offload large read-only sweeps (logs / capture corpora / multi-file research)
   to a read-only subagent and verify its load-bearing claims before relying on them; keep
   safety-critical (live-mixing / runtime-invariant / laser-LED) reasoning on a high tier.
-- **Graphify.** When `graphify-out/graph.json` exists and you need broad codebase orientation, run
-  `graphify query`, `graphify explain`, or `graphify path` before reading many files. This is manual
-  query access only, not a hook; code/tests still win.
+- **Graphify.** Use `graphify query`, `graphify explain`, or `graphify path` only for broad
+  orientation before reading many files. Skip it for exact symbol/line/known-file lookup where `rg`
+  is narrower. This is manual query access only, not a hook; code/tests still win. Never present
+  Graphify output as confirmed architecture, ownership, call flow, blast radius, or live behavior.
+  `INFERRED` / `AMBIGUOUS` edges and shortest paths require source/test confirmation.
 
 ## Spec / handoff authoring
 When producing a Codex (or implementer) spec, use the operator's Part A–E format and run the

@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: f5cfddd
+last_verified_commit: 56a505e
 last_verified_date: 2026-06-29
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
@@ -78,7 +78,6 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/completed/{led_color_engine_spec,led_color_engine_m2_5_spec,led_color_engine_solid_color_and_patch_f_spec,led_role_mapping_v2_spec,beat_sync_runtime_spec,rt_comet_*}.md` | COMPLETED / SUPERSEDED PLANNING | LED color engine (core + M2.5 + solid-color/Patch F), role-mapping v2, beat-sync, and realtime-comet specs — software work landed. AWR-101–104 have operator hardware sign-off (2026-06-29, Home Govee; see `docs/validation/hardware_validation_log.md`); AWR-105 (role mapping) and AWR-106 (solid-color + Patch F) are software-done but hardware-pending. Historical evidence only. |
 | `docs/plans/active/laser_color_engine_design_spec.md` | PLAN / SPEC (PLANNED — blocked) | Laser CH8/CH9 color control; **not implemented**, blocked on operator CH8/CH9 capture (VirtualLaserNode). Tracked as AWR-111. |
 | `docs/plans/completed/docs_orphan_check_spec.md` | COMPLETED / SUPERSEDED PLANNING | Active-doc lifecycle check (orphan + stale) — IMPLEMENTED in `tools/check_agent_contracts.py`; AWR-007 done. Historical record. |
-| `docs/prompts/active/graphify_install_prompt.md` | AGENT PROMPT (ACTIVE) | Install + tune Graphify repo-map (manual query for Claude+Codex / code-only). Tracked as AWR-112. |
 | `docs/plans/active/soundswitch_README.md` | ACTIVE PROJECT INDEX | Grouped routing for the SoundSwitch exporter/bridge-native DMX project. |
 | `docs/plans/active/soundswitch_exporter_remaining_work.md` | ACTIVE CHECKLIST / ROADMAP | Current landed-versus-remaining authority. RW-1 through RW-5 are implemented/software-tested; T7d, native Autoloop DMX, a real hardware run, and final closeout remain. |
 | `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE CONTRACT POINTER | Symlink to the original product/implementation contract. Read the active remaining-work roadmap for current status. |
@@ -93,7 +92,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/prompts/reviews/rekordbox_mixer_active_deck_re_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Adversarial review handoff for the Rekordbox mixer RE process and implementation spec. Review-only. |
 | `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material RW-1 through RW-5, hardware-procedure, T7/T8 specs/proofs, and the old progress ledger. Historical evidence only. |
 | `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |
-| `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | Active prompts only; SoundSwitch keeps just the operator-presence T7d capture prompt. Obsolete SoundSwitch prompts — including the completed remaining-software scoping and static-toggle authoring prompts — were deleted; Git history preserves them. |
+| `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | Active prompts only. Completed setup prompts belong in `docs/prompts/completed/`; obsolete SoundSwitch prompts — including the completed remaining-software scoping and static-toggle authoring prompts — were deleted; Git history preserves them. |
 | `docs/plans/completed/govee_realtime_codex_spec.md` | PLAN / SPEC | **Untracked local file** — classify (completed vs awaiting-build) and commit or archive separately. |
 
 ## Setup notes
@@ -108,6 +107,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | --- | --- | --- |
 | `docs/archive/prompts/*.md` (7) | ARCHIVE | Completed/superseded agent prompts. |
 | `docs/archive/plans/*.md` (3) | ARCHIVE | Completed autoloop spec + plan; deferred laser SM-net blackout-mask spec (do-not-implement in MIDI path, 2026-06-23 — reference design for future DMX-frame blackout). |
+| `docs/prompts/completed/graphify_install_prompt.md` | ARCHIVE / HISTORICAL | Completed Graphify install/tuning prompt for AWR-112; current workflow is `docs/setup/graphify.md`. |
 | `docs/prompts/reviews/*.md` | REVIEW / AUDIT | Current review handoffs plus non-SoundSwitch historical review briefs retained where code references them. Completed SoundSwitch review prompts were deleted; Git history preserves them. |
 | `docs/history/*.md` + `docs/history/archive/*.md` (5) | ARCHIVE / HISTORICAL | Rollout logs; kept in place (referenced by `current_architecture.md`, `subsystems/logging.md`, and a test name). |
 
