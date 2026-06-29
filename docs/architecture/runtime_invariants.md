@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against implementation commit `0d3aa5c` on 2026-06-29.
+Audited against implementation commit `74febec` on 2026-06-29.
 
 ## SoundSwitch Pack Component Boundary
 
@@ -99,8 +99,11 @@ Audited against implementation commit `0d3aa5c` on 2026-06-29.
   mixer-authority-enabled startup must begin with idle `active_deck=0` rather
   than treating Deck 1 as Rekordbox master truth; non-mixer legacy startup may
   still use the old default deck.
-- Direct runtime master must ignore the no-master sentinel and remain not-ready
-  until the byte maps to a valid Rekordbox deck.
+- Direct master startup seed must require stable raw Deck A/B; raw Deck C/D must
+  fall back rather than aliasing to bridge Deck 1/2.
+- Direct runtime master under mixer authority must refresh valid raw Deck A/B
+  before the freshness window expires, and must publish invalidation for
+  sentinel/no-master, unreadable, or unsupported raw Deck C/D states.
 - Direct track load requires direct ANLZ to be enabled so ANLZ-before-load
   ordering remains intact.
 - When named Deck 1/2 mixer authority offsets exist for the selected Rekordbox
@@ -118,7 +121,8 @@ Audited against implementation commit `0d3aa5c` on 2026-06-29.
   Rekordbox master state for tie and invalid-mixer fallback only.
 - `active_deck=0` means idle/no audible deck. The push loop must not index
   `self._deck[0]`, call `SoundSwitchEngine.deck_route(0)`, create MTC deck-0
-  anchors, or keep driving stale previous-deck output.
+  anchors, or keep driving stale previous-deck output. Entering idle runs the
+  fixed safe-deck SoundSwitch/OS2L clear/off path without deck-0 routing.
 - The 200 Hz StateManager push loop must not gain Rekordbox reads, filesystem
   scans, process-memory sampling, subprocesses, sleeps, network calls,
   MIDI/serial/DMX calls, status-provider calls, or other blocking I/O for

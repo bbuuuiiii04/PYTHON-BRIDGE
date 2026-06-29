@@ -1,9 +1,9 @@
 ---
 doc_status: research-current
 truth_level: binary-static-analysis-corroborating
-last_verified_commit: 8ca5875
-last_verified_date: 2026-06-21
-validation_scope: read-only static analysis of local SoundSwitch 2.10.3 arm64 and x86_64 binaries using symbols and headless Ghidra; no process attach or modification; hardware-unvalidated
+last_verified_commit: 74febec
+last_verified_date: 2026-06-29
+validation_scope: read-only static analysis of local SoundSwitch 2.10.3 binary; current GhidraMCP expansion is arm64-inspected and x86_64 parity remains a separate gate; no process attach or modification; hardware-unvalidated
 ---
 
 # SoundSwitch binary reverse-engineering addendum
@@ -15,10 +15,21 @@ bytes, controlled diffs, tests, and passive wire captures remain the behavioral
 authority; decompilation corroborates physical readers/writers and explains
 state/precedence.
 
-The analysis used `nm`, `c++filt`, `otool`, and Ghidra 12.1.2 headless against
-the local SoundSwitch 2.10.3 universal binary. GhidraMCP was not required. No
-app bundle, project, or live process was patched, injected, attached, or
-modified.
+The original analysis used `nm`, `c++filt`, `otool`, and headless Ghidra
+against the local SoundSwitch 2.10.3 universal binary. The 2026-06-29 expansion
+used GhidraMCP against the loaded thin arm64 program
+`SoundSwitch_2_10_3_arm64`; the thin x86_64 program was imported but not used as
+new evidence. No app bundle, project, or live process was patched, injected,
+attached, or modified.
+
+Inspected binary identity for the 2026-06-29 expansion:
+
+- universal `/Applications/SoundSwitch.app/Contents/MacOS/SoundSwitch` SHA256
+  `636ed4aa48287d019a96c60f8d9107e75f3e72abe4f7b0aa8fa54aaa661984e9`;
+- thin arm64 SHA256
+  `b8db8335d96d090faf281ef782426d7995a7ae35d0fb656c490f3fd7db8f2694`;
+- thin x86_64 SHA256
+  `0e68b7273d456f44479fcca100724226780f5dfd6eedf8f7235cc465fce72593`.
 
 ## `.ssfile` readers and writers
 
@@ -40,11 +51,14 @@ The paired writers establish:
   `u32 raw_reference`;
 - `SoundSwitchDocData` trailer: `u32, bool, u32, bool`, 10 physical bytes.
 
-Both architectures use the stored integer without a provenance branch inside
-these readers. Wire behavior remains the final product rule: current 2.10.3
-runtime emits positive references as `raw-1`, including a cold-open newly
-authored track. The editor/writer can store the visually selected direct number;
-that mismatch is application behavior, not a second loader format.
+The 2026-06-29 arm64 GhidraMCP pass shows the reader/writer path uses the stored
+integer without a provenance branch. `AttributesCueMap::AttributesCueMap` builds
+cue-map keys from zero, and `AttributeCueTrackEntry::ReadEntry` / `WriteEntry`
+read/write that direct key. Wire behavior remains the final product rule:
+current 2.10.3 runtime emits positive references as `raw-1`, including a
+cold-open newly authored track. The editor/writer can store the visually
+selected direct number; that mismatch is application behavior, not a second
+loader format.
 
 `AttrChangeEntry::Read/Write` proves the 17-byte records are version-2
 intensity `AttributeTrack` entries. `Channel::SetIntensity` requires a channel
@@ -68,9 +82,37 @@ entries are retained but do not write CH1-CH19.
 The bounded player consumes the bridge's stricter single-active-deck authority,
 so it does not need to duplicate SoundSwitch's inactive multi-deck composition.
 
+## Autoloop runtime bounds
+
+The 2026-06-29 GhidraMCP pass also inspected arm64 Autoloop playback control
+flow. This is useful context for RW-7 / T7d, but it is not a replacement for the
+passive Art-Net phase corpus.
+
+| Function | Address | Finding |
+| --- | --- | --- |
+| `SoundSwitchPlayBack::SetAutoloopPlayBackData` | `0x100333ce4` | stores an `AutoLoopTrack` as playback data and switches show state |
+| `SoundSwitchPlayBack::GetAutoloopPlayBackData` | `0x1003340cc` | returns the active Autoloop playback object |
+| `SoundSwitchPlayBack::ForcePlayAutoLoop` | `0x100334574` | switches to Autoloop playback and calls `AutoLoopTrack::OverrideAutoLoop` |
+| `SSPlaybacks::LoadAutoLoopTrack` | `0x100335c64` | constructs an `AutoLoopTrack` from `AutoLoopsManager`, `SeratoBeatGrid`, and deck state |
+| `SSPlaybacks::OnAutoLoopElapsed` | `0x1003388e8` | exits Autoloop override state when elapsed handling fires |
+| `AutoLoopTrack::AutoLoopTrack` | `0x10025e570` | constructs `AutoLoopLayout` for the track |
+| `AutoLoopTrack::OverrideAutoLoop` | `0x10025edb8` | records the selected index when applicable and rebuilds from a starting beat |
+| `AutoLoopTrack::GetCurrentIndex` | `0x10025ee20` | exposes the current Autoloop index for manager/UI state |
+| `AutoLoopTrack::GetProgress` | `0x10025ee6c` | reports progress from current layout time over Autoloop time |
+| `AutoLoopLayout::AutoLoopLayout` | `0x100263bd4` | builds `BeatSpace` from `SeratoBeatGrid`, initializes indexes, then builds the default Autoloop from beat zero |
+| `AutoLoopLayout::buildAutoLoopForStartingBeat` | `0x10025f22c` | selects/rotates an Autoloop index and stores index, start beat, end beat, beat count, and document pointer |
+
+This confirms Autoloop playback is beatgrid/beat-window/index based and uses
+the same playback/cache path that later feeds static overlay and blackout logic.
+It does **not** prove the bridge-facing T7d phase contract: ticks-per-beat,
+integer quantizer, origin, reset/continue/snap/correction behavior,
+master-switch behavior, drop-hold behavior, BPM/pitch drift behavior, or
+identity/holdout coverage. Those remain passive-runtime questions.
+
 ## Static Looks
 
-Relevant symbols and arm64 entry points:
+Relevant symbols and arm64 entry points, confirmed in the 2026-06-29 GhidraMCP
+pass unless otherwise stated:
 
 | Function | Address | Finding |
 | --- | --- | --- |
@@ -145,8 +187,10 @@ export until separately decoded and validated.
 
 ## Net result
 
-The binary evidence closes the physical `.ssfile`, Static Look, learned MIDI
-map, override precedence, blackout, and current-profile intensity questions
-needed by the bounded perfect exporter/player spec. Remaining limits are
-version/profile compatibility and hardware validation, not unknown active
-SoundSwitch behavior.
+The arm64 binary evidence confirms the physical `.ssfile`, Static Look, learned
+MIDI map, override precedence, blackout, current-profile intensity questions,
+and Autoloop beat-window/index machinery needed to bound the exporter/player
+research. It does not prove Native Autoloop DMX phase behavior. Remaining limits
+are x86_64 parity for this expansion, future version/profile compatibility, the
+wire-backed-but-not-reader/writer-binary-located runtime `raw-1` rule, the
+RW-7/T7d passive phase corpus, and hardware validation.

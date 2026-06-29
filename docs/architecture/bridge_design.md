@@ -8,7 +8,7 @@ originSessionId: 88cd1a53-8b87-4b05-b106-26c1fb0a5730
 
 Status: CURRENT AUTHORITATIVE
 
-Last reconciled against implementation commit `0d3aa5c` on 2026-06-29.
+Last reconciled against implementation commit `74febec` on 2026-06-29.
 
 ## Purpose
 
@@ -148,12 +148,13 @@ range checks. Provisional candidates are not published to `PositionCache`.
 
 With `RBSS_MASTER_SEED_DIRECT=1`, `_direct_master_startup_seed()` reads the
 direct master byte twice, 0.5 s apart, using the same offset table as
-`RBStateReader`. Direct seed is used only if both reads are readable, valid
-bridge decks, stable, and equal. Any unsupported version, attach failure,
-unreadable chain, invalid deck, unstable read, or `0xFF` no-master sentinel
-falls closed. When mixer authority is enabled, that fallback startup show deck
-is idle (`active_deck=0`) so Deck 1 is not treated as proven audible authority.
-When mixer authority is disabled, legacy startup can still use the default deck.
+`RBStateReader`. Direct seed is used only if both reads are readable, stable,
+equal, and raw Rekordbox Deck A/B (`0` or `1`). Raw Deck C/D, unsupported
+version, attach failure, unreadable chain, invalid deck, unstable read, or
+`0xFF` no-master sentinel falls closed. When mixer authority is enabled, that
+fallback startup show deck is idle (`active_deck=0`) so Deck 1 is not treated
+as proven audible authority. When mixer authority is disabled, legacy startup
+can still use the default deck.
 
 ### B3: Direct Play/Pause
 
@@ -161,6 +162,12 @@ With `RBSS_PLAY_DIRECT=1`, `RBStateReader` infers play/pause by movement in
 `live_pos_per_deck[d]` after warmup and evidence polls. A failed position read
 resets inference for that deck. The direct transport path emits only once it is
 currently readable and has a baseline/last state for the deck.
+
+When mixer authority is enabled, raw Deck C/D transport never updates Deck 1/2
+eligibility. If a previously available Deck 1/2 transport path becomes
+unavailable, `RBStateReader` emits a fail-closed `PAUSE source='rb_state'` with
+`reason='transport_unavailable'`; decks that were never proven transport-ready
+do not emit startup pause noise.
 
 `StateManager` still treats `d.playing` as the authoritative play state after
 the selected source has produced events. The raw `PositionSnapshot.playing` bit
@@ -199,15 +206,20 @@ Deck identity comes from `FILEPATH_RESOLVED`, which inherited the original
 
 With `RBSS_MASTER_DIRECT=1`, `RBStateReader` adds `Ev.MASTER_CHANGED` to
 `authoritative_kinds`. The main reader emits `MASTER_CHANGED source='rb_state'`
-when the raw master byte changes and maps to a valid Rekordbox deck index. The
-`0xFF` no-master sentinel updates the direct baseline but does not emit an event
-and does not mark direct master ready.
+when the raw master byte changes and maps to raw Rekordbox Deck A/B. While
+mixer authority uses direct master as resolver support, stable raw Deck A/B
+truth is refreshed before the resolver stale window expires. Raw Deck C/D,
+sentinel/no-master, and unreadable states emit a one-shot invalidating
+`MASTER_CHANGED deck=0 source='rb_state'` on transition and do not alias into
+Deck 1/2.
 
 When mixer authority is enabled, `RBStateReader` also routes direct
 `MASTER_CHANGED` as resolver support even if `RBSS_MASTER_DIRECT=0`. Raw Deck
-3/4 master bytes are not resolver support. StateManager stores current valid
-Deck 1/2 direct master as `rb_master_deck`; while mixer authority is valid/fresh
-this must not directly write `active_deck`.
+3/4 master bytes are invalidation support, not Deck 1/2 resolver candidates.
+StateManager stores current valid Deck 1/2 direct master as `rb_master_deck`;
+invalidating direct-master events clear that validity and rerun the resolver.
+While mixer authority is valid/fresh, direct master must not directly write
+`active_deck`.
 
 OSC `/bridge/active_deck` and `/bridge/bridge_deck` enqueue legacy active-deck
 fallback events for non-mixer-authority operation. They do not update
@@ -534,9 +546,11 @@ recent errors.
 
 State snapshots and heartbeat expose `active_deck`/`show_deck` separately from
 `rb_master_deck`. Heartbeat must not report `master = active_deck`; `master`
-means current valid Rekordbox master when present. Mixer authority status
-includes validity, age/timestamp, fallback reason, authority reason, and decoded
-Deck 1/2 upfader plus LOW/BASS raw/norm/label fields.
+means current valid/fresh Rekordbox master when present. Stale
+`rb_master_deck_age_s` is status-invalid even if the older internal snapshot
+flag was true. Mixer authority status includes validity, age/timestamp,
+fallback reason, authority reason, and decoded Deck 1/2 upfader plus LOW/BASS
+raw/norm/label fields.
 
 `CommandReader` tails `/tmp/rb_ss_bridge_v2_commands.jsonl`. Supported commands:
 
@@ -583,7 +597,7 @@ Update current validation notes after new live runs or decisions.
 | --- | --- | --- |
 | Unsupported Rekordbox version | Direct offset-table readers no-op or fail closed | Add offsets before promoting direct paths for that version. |
 | Direct reader attach/read failure | Direct readiness false | Direct path stays inactive. |
-| Direct master `0xFF` sentinel | No master event; direct master not ready | Direct master stays inactive. |
+| Direct master invalid/unreadable state | Direct master not ready | Emit one invalidating resolver-support event, clear `rb_master_deck_valid`, and fail closed without aliasing raw Deck C/D. |
 | Missing/invalid/stale mixer authority | Active-deck resolver cannot compare fader/bass dominance | Status marks visible mixer fallback; use current valid/fresh `rb_master_deck` only, otherwise hold a still-playing current show deck or go idle without synthesizing Deck 1. |
 | Active deck resolves to 0 | No audible show deck | Clear idle runtime state; do not route deck 0, index deck 0, create MTC deck-0 anchors, or keep driving previous-deck output. |
 | Deck-2 position unresolved | `pos=no-snap`; timing from MTC/current elapsed | Retry discovery; MTC covers gap. |

@@ -9,6 +9,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from .active_deck_resolver import RB_MASTER_STALE_AFTER_S
 from .bridge_fmt import log_throttled
 
 
@@ -643,7 +644,18 @@ def _heartbeat_payload(
     color: dict[str, Any],
 ) -> dict[str, Any]:
     active_deck = _as_int(state.get("active_deck"), default=0)
-    rb_master = state.get("rb_master_deck") if state.get("rb_master_deck_valid") else None
+    rb_master_valid = bool(state.get("rb_master_deck_valid", False))
+    try:
+        rb_master_age = float(state.get("rb_master_deck_age_s"))
+    except (TypeError, ValueError):
+        rb_master_age = None
+    if (
+        rb_master_age is not None
+        and math.isfinite(rb_master_age)
+        and rb_master_age > RB_MASTER_STALE_AFTER_S
+    ):
+        rb_master_valid = False
+    rb_master = state.get("rb_master_deck") if rb_master_valid else None
     deck_key = str(active_deck)
     deck_state = (
         _dict_or_empty(_dict_or_empty(state.get("deck")).get(deck_key))
@@ -674,7 +686,7 @@ def _heartbeat_payload(
         "show_deck": active_deck,
         "master": rb_master,
         "rb_master_deck": rb_master,
-        "rb_master_deck_valid": bool(state.get("rb_master_deck_valid", False)),
+        "rb_master_deck_valid": rb_master_valid,
         "active_deck_authority_reason": str(
             state.get("active_deck_authority_reason") or ""
         ),

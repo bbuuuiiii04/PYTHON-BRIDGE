@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 0d3aa5c
+last_verified_commit: 74febec
 last_verified_date: 2026-06-29
 validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-output unvalidated
 ---
@@ -46,6 +46,15 @@ Runtime flow:
 - decisions: readiness, freshness, valid chains, fallback behavior
 - outputs: `BridgeEvent`s, `PositionSnapshot`s, live BPM status, mixer authority
   snapshots
+- under mixer authority, raw Deck A/B direct-master reads publish
+  `MASTER_CHANGED` on change and on a bounded refresh interval before
+  `rb_master_deck` freshness can expire
+- raw Deck C/D, sentinel/no-master, and unreadable direct-master states publish
+  a single invalidating `MASTER_CHANGED deck=0` transition with a short reason;
+  raw C/D never alias into Deck 1/2 authority
+- Deck 1/2 transport support fails closed: once a transport path was available,
+  becoming unreadable emits `PAUSE` with `reason=transport_unavailable`; raw
+  Deck C/D transport remains suppressed for resolver eligibility
 
 Config:
 - `config.py`
@@ -72,6 +81,7 @@ Known risks:
 - accidentally accepting anonymous/unknown offset lines as mixer authority
 - using the live-BPM `_follow_float()` helper for mixer values; valid mixer
   endpoints include `0.0`, `255.0`, and `1023.0`, so mixer reads use finite
-  range-checked f32 reads instead
+  range-checked f32 reads instead and preserve `unreadable`, `non_finite`, and
+  `out_of_range` invalid reasons
 - letting Decks 3/4, CFX FILTER, mid/high EQ, crossfader, gain/trim, mute, FX,
   or real audio loudness become active-deck authority inputs

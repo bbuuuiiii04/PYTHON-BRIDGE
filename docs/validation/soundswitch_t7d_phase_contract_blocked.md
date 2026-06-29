@@ -1,8 +1,8 @@
 ---
 doc_status: active-validation
 truth_level: code-grounded
-last_verified_commit: b2ce63d
-last_verified_date: 2026-06-23
+last_verified_commit: 74febec
+last_verified_date: 2026-06-29
 validation_scope: T7d blocked report; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -20,6 +20,13 @@ This is **not** an easy exit: the software workflow exists and four captures
 have passed its integrity gate. Remaining work includes physical capture labor
 for four scenario pairs plus offline identity reconciliation and oracle analysis.
 What is blocked is the complete evidence contract, not the tooling.
+
+The 2026-06-29 read-only GhidraMCP pass does not change this blocker. It
+confirms SoundSwitch 2.10.3 arm64 Autoloop playback is beatgrid/beat-window/index
+based and reaches the shared playback/cache/static/blackout path, but it does
+not prove emitted Universe-0 phase, origin, reset/continue/snap/correction, or
+identity/holdout coverage for the bridge transition classes. x86_64 parity is
+still UNKNOWN.
 
 ## What is DONE (software/wire-validated only)
 

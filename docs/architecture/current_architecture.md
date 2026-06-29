@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against implementation commit `0d3aa5c` on 2026-06-29. Treat code as the source of
+Audited against implementation commit `74febec` on 2026-06-29. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -107,6 +107,11 @@ sentinels, stale data, and unwarmed transport inference leave the corresponding
 direct path inactive while MTC/current state fallbacks continue where available.
 Invalid or stale mixer authority is visible in status and falls back only to a
 current valid/fresh Rekordbox direct master; it does not synthesize Deck 1.
+Under mixer authority, raw Deck A/B direct-master truth is refreshed before the
+stale window expires. Raw Deck C/D, sentinel/no-master, and unreadable master
+states invalidate `rb_master_deck` instead of aliasing or silently waiting for
+staleness. Lost Deck 1/2 transport support emits a fail-closed pause once the
+path was previously available.
 
 ## Signal Flow
 
@@ -115,7 +120,8 @@ current valid/fresh Rekordbox direct master; it does not synthesize Deck 1.
    resolver, live BPM service, status/command helpers, `StateManager`, optional
    `RBStateReader`, `RBMemoryReader`, `MTCReader`, and OSC listener.
 2. Startup master is seeded from direct master only when
-   `RBSS_MASTER_SEED_DIRECT=1` and two direct reads are stable and valid. With
+   `RBSS_MASTER_SEED_DIRECT=1` and two direct reads are stable raw Deck A/B
+   values. Raw Deck C/D falls back instead of aliasing to bridge Deck 1/2. With
    mixer authority enabled and no direct seed, startup begins idle
    (`active_deck=0`) rather than treating Deck 1 as proven Rekordbox master
    truth. Non-mixer legacy startup can still use the default deck.
@@ -193,11 +199,11 @@ Supporting LED operator docs:
 | --- | --- |
 | B1 ANLZ | Direct when path is readable for the deck. |
 | B2 Position | Direct versioned position chain when valid; ObjC scan and MTC remain fallbacks. |
-| C1 Startup master seed | Direct only after two stable valid reads; otherwise mixer-enabled startup begins idle and non-mixer legacy startup uses the old default deck. |
+| C1 Startup master seed | Direct only after two stable valid raw Deck A/B reads; otherwise mixer-enabled startup begins idle and non-mixer legacy startup uses the old default deck. |
 | B3 Play/pause | Direct movement-derived events after warmup/evidence. |
 | B4 Track load | Direct full-title load only when direct ANLZ is enabled and title memory is readable. |
 | B5 Scripted routing | Direct from `FILEPATH_RESOLVED` by SSID, show-file SSID, or unique filepath. |
-| B6 Runtime Rekordbox master | Direct `MASTER_CHANGED` when direct master byte is readable and valid; with mixer authority enabled this updates `rb_master_deck`, not `active_deck`. |
+| B6 Runtime Rekordbox master | Direct `MASTER_CHANGED` when direct master byte is readable and valid; with mixer authority enabled this updates/refreshes `rb_master_deck`, not `active_deck`, and invalid raw Deck C/D/sentinel/unreadable states clear validity. |
 | Mixer active-deck authority | Default-on when named Deck 1/2 mixer offsets exist for the selected version; software-tested for local Rekordbox 7.2.11 chains, hardware/live unvalidated. |
 | Live BPM | Direct offset-table BPM when fresh and valid; discovery and metadata fallback remain. |
 

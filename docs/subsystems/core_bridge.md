@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 0d3aa5c
+last_verified_commit: 74febec
 last_verified_date: 2026-06-29
 validation_scope: software-only
 ---
@@ -58,7 +58,9 @@ Runtime flow:
   rewrite `active_deck`; invalid/stale mixer fallback is resolver-mediated
   `rb_master_deck` fallback only
 - idle/no-audible `active_deck=0` clears runtime state and must not call
-  `deck_route(0)` or index `self._deck[0]`
+  `deck_route(0)` or index `self._deck[0]`; entering idle also runs the existing
+  fixed-deck SoundSwitch/OS2L clear/off body so stale previous-deck output is
+  cleared without routing deck 0
 
 Config:
 - `config.py`

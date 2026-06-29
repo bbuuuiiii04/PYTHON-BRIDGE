@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from .config import MEM_POLL_HZ, RB_SCALE
-from .active_deck_resolver import label_low, label_upfader
+from .active_deck_resolver import RB_MASTER_STALE_AFTER_S, label_low, label_upfader
 from .models import BridgeEvent, Ev, MixerAuthoritySnapshot, MixerDeckReading
 from .rb_memory import (
     PositionCache,
@@ -77,6 +77,7 @@ _PLAY_WARMUP_POLLS = 3
 _LIVEPOS_LOG_INTERVAL_S = 5.0
 _LIVEPOS_RESET_SAMPLES = 10_000   # below this after being above → track reset
 _PLAY_EVIDENCE_POLLS = 2
+RB_MASTER_REFRESH_INTERVAL_S = RB_MASTER_STALE_AFTER_S / 2.0
 _TRACK_INFO_FIELD_RE = re.compile(r"(?:^|\n)\s*(?:[A-Za-z]\s+)?Title:\s*(.*?)(?:\r?\n|$)")
 
 
@@ -152,6 +153,8 @@ class RBStateReader(threading.Thread):
 
         # Per-deck last-seen state for diffing
         self._last_master: Optional[int] = None
+        self._last_master_event_key: Optional[tuple[object, ...]] = None
+        self._last_master_event_at: float = 0.0
         self._last_track: dict[int, str] = {}
         self._last_bpm: dict[int, float] = {}
         self._last_pos_samples: dict[int, int] = {}
@@ -242,10 +245,13 @@ class RBStateReader(threading.Thread):
         self._title_readable_this_tick = set()
         self._master_readable_this_tick = False
 
+        now = self._clock()
         master_raw = self._follow_u8(task, base, offs.master_deck)
         if master_raw is not None:
             self._master_readable_this_tick = True
-        if master_raw is not None and master_raw != self._last_master:
+        if self._mixer_authority_enabled:
+            self._publish_mixer_master_state(master_raw, offs, now)
+        elif master_raw is not None and master_raw != self._last_master:
             self._last_master = master_raw
             if 0 <= master_raw < offs.deck_count and self._raw_deck_supports_resolver(master_raw):
                 self._enqueue(BridgeEvent(
@@ -264,6 +270,61 @@ class RBStateReader(threading.Thread):
         self._update_transport_available()
         self._update_track_load_available()
         self._update_master_available()
+
+    def _publish_mixer_master_state(
+        self,
+        master_raw: Optional[int],
+        offs: RBOffsetVersion,
+        now: float,
+    ) -> None:
+        if master_raw is None:
+            self._publish_master_invalid("unreadable", None, now)
+            return
+
+        self._last_master = master_raw
+        if master_raw in (0, 1):
+            key = ("valid", master_raw)
+            if (
+                key == self._last_master_event_key
+                and now - self._last_master_event_at < RB_MASTER_REFRESH_INTERVAL_S
+            ):
+                return
+            self._last_master_event_key = key
+            self._last_master_event_at = now
+            self._enqueue(BridgeEvent(
+                kind=Ev.MASTER_CHANGED,
+                deck=_bridge_deck(master_raw),
+                payload={"rb_raw_deck": master_raw},
+                source='rb_state',
+            ))
+            return
+
+        if 0 <= master_raw < offs.deck_count:
+            self._publish_master_invalid("unsupported_raw_deck", master_raw, now)
+            return
+
+        self._publish_master_invalid("no_master", master_raw, now)
+
+    def _publish_master_invalid(
+        self,
+        reason: str,
+        rb_raw_deck: Optional[int],
+        now: float,
+    ) -> None:
+        key = ("invalid", reason, rb_raw_deck)
+        if key == self._last_master_event_key:
+            return
+        self._last_master_event_key = key
+        self._last_master_event_at = now
+        payload = {"reason": reason}
+        if rb_raw_deck is not None:
+            payload["rb_raw_deck"] = rb_raw_deck
+        self._enqueue(BridgeEvent(
+            kind=Ev.MASTER_CHANGED,
+            deck=0,
+            payload=payload,
+            source='rb_state',
+        ))
 
     def _tick_deck(self, task: int, base: int, d: int) -> None:
         offs = self._offs
@@ -419,21 +480,24 @@ class RBStateReader(threading.Thread):
             self._enqueue(BridgeEvent(Ev.MIXER_STATE, 0, {"snapshot": snapshot}, "rb_state"))
             return
 
-        d1_up = self._follow_finite_f32(task, base, chains[0], minimum=0.0, maximum=1023.0)
-        d2_up = self._follow_finite_f32(task, base, chains[1], minimum=0.0, maximum=1023.0)
-        d1_low = self._follow_finite_f32(task, base, chains[2], minimum=0.0, maximum=255.0)
-        d2_low = self._follow_finite_f32(task, base, chains[3], minimum=0.0, maximum=255.0)
-        values = (d1_up, d2_up, d1_low, d2_low)
-        if any(v is None for v in values):
+        reads = (
+            self._follow_finite_f32_result(task, base, chains[0], minimum=0.0, maximum=1023.0),
+            self._follow_finite_f32_result(task, base, chains[1], minimum=0.0, maximum=1023.0),
+            self._follow_finite_f32_result(task, base, chains[2], minimum=0.0, maximum=255.0),
+            self._follow_finite_f32_result(task, base, chains[3], minimum=0.0, maximum=255.0),
+        )
+        invalid_reason = next((reason for value, reason in reads if value is None), "")
+        if invalid_reason:
             snapshot = MixerAuthoritySnapshot(
                 valid=False,
                 deck={},
                 updated_at=now,
-                reason="unreadable",
+                reason=invalid_reason,
             )
             self._enqueue(BridgeEvent(Ev.MIXER_STATE, 0, {"snapshot": snapshot}, "rb_state"))
             return
 
+        d1_up, d2_up, d1_low, d2_low = (value for value, _ in reads)
         assert d1_up is not None and d2_up is not None and d1_low is not None and d2_low is not None
         deck = {
             1: self._mixer_reading(1, d1_up, d1_low),
@@ -509,9 +573,17 @@ class RBStateReader(threading.Thread):
             self._set_transport_available(bridge, False)
 
     def _set_transport_available(self, deck: int, available: bool) -> None:
-        if self._transport_available_by_deck.get(deck, False) == available:
+        previous = self._transport_available_by_deck.get(deck, False)
+        if previous == available:
             return
         self._transport_available_by_deck[deck] = available
+        if previous and not available and self._mixer_authority_enabled:
+            self._enqueue(BridgeEvent(
+                kind=Ev.PAUSE,
+                deck=deck,
+                payload={"reason": "transport_unavailable"},
+                source='rb_state',
+            ))
         if self._transport_available_callback is None:
             return
         try:
@@ -627,19 +699,37 @@ class RBStateReader(threading.Thread):
         minimum: float,
         maximum: float,
     ) -> Optional[float]:
+        value, _reason = self._follow_finite_f32_result(
+            task,
+            base,
+            ch,
+            minimum=minimum,
+            maximum=maximum,
+        )
+        return value
+
+    def _follow_finite_f32_result(
+        self,
+        task: int,
+        base: int,
+        ch: ChainEntry,
+        *,
+        minimum: float,
+        maximum: float,
+    ) -> tuple[Optional[float], str]:
         addr = self._follow_addr(task, base, ch)
         if addr is None:
-            return None
+            return None, "unreadable"
         try:
             data = _read_bytes(task, addr, 4)
         except OSError:
-            return None
+            return None, "unreadable"
         value = struct.unpack_from("<f", data)[0]
         if not math.isfinite(value):
-            return None
+            return None, "non_finite"
         if not (minimum <= value <= maximum):
-            return None
-        return value
+            return None, "out_of_range"
+        return value, "ok"
 
     def _follow_i64(self, task: int, base: int, ch: ChainEntry) -> Optional[int]:
         addr = self._follow_addr(task, base, ch)

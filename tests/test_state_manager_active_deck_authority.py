@@ -112,6 +112,20 @@ class StateManagerActiveDeckAuthorityTests(unittest.TestCase):
         self.assertFalse(self.sm._os.rb_master_deck_valid)
         self.assertEqual(self.sm._os.rb_master_fallback_reason, "unsupported_raw_deck")
 
+    def test_invalid_master_event_clears_rb_master_and_reruns_resolver(self):
+        self._event(Ev.MASTER_CHANGED, 2, {"rb_raw_deck": 1}, source="rb_state")
+        with mock.patch.object(
+            self.sm,
+            "_rerun_active_deck_resolver",
+            wraps=self.sm._rerun_active_deck_resolver,
+        ) as rerun:
+            self._event(Ev.MASTER_CHANGED, 0, {"reason": "no_master", "rb_raw_deck": 255}, source="rb_state")
+
+        self.assertIsNone(self.sm._os.rb_master_deck)
+        self.assertFalse(self.sm._os.rb_master_deck_valid)
+        self.assertEqual(self.sm._os.rb_master_fallback_reason, "no_master")
+        rerun.assert_called_with("rb_master_invalid")
+
     def test_pause_reruns_resolver_and_enters_idle_when_no_audible_deck(self):
         self.sm._deck[1].playing = True
         self.sm._os.active_deck = 1
@@ -121,6 +135,53 @@ class StateManagerActiveDeckAuthorityTests(unittest.TestCase):
 
         self.assertEqual(self.sm._os.active_deck, 0)
         self.assertEqual(self.sm._os.active_deck_authority_reason, "idle_no_audible")
+
+    def test_transport_unavailable_pause_fails_closed_through_resolver(self):
+        self.sm._deck[1].playing = True
+        self.sm._os.active_deck = 1
+        self._event(Ev.MIXER_STATE, payload={"snapshot": _snapshot()}, source="rb_state")
+
+        self._event(
+            Ev.PAUSE,
+            1,
+            {"reason": "transport_unavailable"},
+            source="rb_state",
+        )
+
+        self.assertFalse(self.sm._deck[1].playing)
+        self.assertEqual(self.sm._os.active_deck, 0)
+
+    def test_stale_rb_master_does_not_win_neutral_tie(self):
+        self.sm._deck[1].playing = True
+        self.sm._deck[2].playing = True
+        self.sm._os.active_deck = 0
+        self.sm._os.rb_master_deck = 2
+        self.sm._os.rb_master_deck_valid = True
+        self.sm._os.rb_master_deck_source = "rb_state"
+        self.sm._os.rb_master_deck_updated_at = self.now - 3.0
+
+        self._event(Ev.MIXER_STATE, payload={"snapshot": _snapshot(
+            d1=_reading(1, fader="top", low="neutral", low_norm=0.48),
+            d2=_reading(2, fader="top", low="neutral", low_norm=0.52),
+        )}, source="rb_state")
+        self._stabilize()
+
+        self.assertEqual(self.sm._os.active_deck, 0)
+        self.assertEqual(self.sm._os.active_deck_authority_reason, "idle_no_audible")
+
+    def test_stale_rb_master_is_invalid_in_published_snapshot(self):
+        self.sm._os.rb_master_deck = 2
+        self.sm._os.rb_master_deck_valid = True
+        self.sm._os.rb_master_deck_source = "rb_state"
+        self.sm._os.rb_master_deck_updated_at = self.now - 3.0
+
+        self.sm._publish_snapshot()
+        snap = self.sm.snapshot()
+
+        self.assertEqual(snap["rb_master_deck"], 2)
+        self.assertFalse(snap["rb_master_deck_valid"])
+        self.assertEqual(snap["rb_master_deck_source"], "rb_state")
+        self.assertGreater(snap["rb_master_deck_age_s"], 2.0)
 
     def test_invalid_mixer_uses_rb_master_fallback_and_does_not_default_to_deck1(self):
         self._event(Ev.MIXER_STATE, payload={"snapshot": _snapshot(valid=False, reason="unreadable")})
@@ -199,6 +260,50 @@ class StateManagerActiveDeckAuthorityTests(unittest.TestCase):
         self.sm._push_tick_inner()
 
         self.sm._sse.deck_route.assert_not_called()
+
+    def test_active_deck_zero_entry_clears_legacy_lighting_outputs_without_deck_route(self):
+        self.sm._os.active_deck = 1
+        self.sm._os.was_playing = True
+        self.sm._os.lighting_mode = "autoloop"
+        self.sm._sse.deck_route = mock.Mock(side_effect=AssertionError("deck_route called"))
+        self.sm._sse.send_deck_clear = mock.Mock()
+
+        self.sm._apply_resolved_active_deck(0, source="test", reason="idle_no_audible")
+
+        self.assertEqual(self.sm._os.active_deck, 0)
+        self.sm._sse.deck_route.assert_not_called()
+        self.assertEqual(
+            self.sm._out.send_deck_play.call_args_list,
+            [mock.call(dn, "off") for dn in range(1, 5)],
+        )
+        self.assertEqual(
+            self.sm._out._sub.call_args_list,
+            [mock.call(f"deck {dn} loop", "off", verbose=True) for dn in range(1, 5)],
+        )
+        self.assertEqual(
+            self.sm._sse.send_deck_clear.call_args_list,
+            [mock.call(dn) for dn in range(1, 5)],
+        )
+
+    def test_active_deck_zero_entry_clears_timing_anchors(self):
+        self.sm._os.active_deck = 1
+        self.sm._os.was_playing = True
+        self.sm._os.play_settle_after = 123.0
+        self.sm._os.not_playing_since = 123.0
+        self.sm._os.last_sent_bpm = 128.0
+        self.sm._os.autoloop_arm_bpm = 128.0
+        self.sm._os.autoloop_arm_deck = 1
+        self.sm._tc_anchor = {1: (1000, 50.0, 1.0), 2: (2000, 60.0, 1.0)}
+
+        self.sm._apply_resolved_active_deck(0, source="test", reason="idle_no_audible")
+
+        self.assertEqual(self.sm._tc_anchor, {1: (0, 0.0, 1.0), 2: (0, 0.0, 1.0)})
+        self.assertFalse(self.sm._os.was_playing)
+        self.assertEqual(self.sm._os.play_settle_after, 0.0)
+        self.assertEqual(self.sm._os.not_playing_since, 0.0)
+        self.assertEqual(self.sm._os.last_sent_bpm, 0.0)
+        self.assertEqual(self.sm._os.autoloop_arm_bpm, 0.0)
+        self.assertEqual(self.sm._os.autoloop_arm_deck, 0)
 
     def test_rb_restarted_while_idle_does_not_index_deck_zero(self):
         self.sm._os.active_deck = 0

@@ -1,14 +1,14 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 0d3aa5c
+last_verified_commit: 74febec
 last_verified_date: 2026-06-29
 validation_scope: behavior contract plus software-tested implementation; live/hardware validation pending
 ---
 
 # Active Deck Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; SOFTWARE-TESTED IMPLEMENTATION AT `0d3aa5c`
+Status: AUTHORITATIVE TARGET BEHAVIOR; SOFTWARE-TESTED IMPLEMENTATION AT `74febec`
 
 This document defines how the bridge is expected to choose `active_deck`.
 Behavior that differs from this document is a regression unless this document is
@@ -120,9 +120,10 @@ master-unavailable reason until a dominant candidate or valid master appears.
 4. If both decks are eligible and both faders are `top`, compare bass EQ.
 5. If both top-fader decks have unequal bass positions, the higher bass position
    wins.
-6. If both top-fader decks have `neutral` bass, current valid/fresh
+6. If both top-fader decks have `neutral` bass labels, current valid/fresh
    `rb_master_deck` is the preferred tie-break, subject to stability/no-flicker
-   behavior.
+   behavior. Neutral-labeled LOW/BASS values are a tie even when their raw
+   normalized values differ inside the neutral band.
 7. If both top-fader decks have equal non-neutral bass and current `active_deck`
    is still eligible, hold current `active_deck`.
 8. If both top-fader decks have equal non-neutral bass and there is no current
@@ -155,7 +156,13 @@ Rules:
 ## Rekordbox Master
 
 `MASTER_CHANGED` updates `rb_master_deck` only when the input represents current
-valid Rekordbox direct master truth for Deck 1 or Deck 2.
+valid Rekordbox direct master truth for Deck 1 or Deck 2. While mixer authority
+is enabled, stable raw Deck A/B master reads are refreshed before the resolver's
+stale window expires.
+
+Raw Deck C/D, sentinel/no-master, and unreadable direct-master reads invalidate
+`rb_master_deck`; they must not alias into Deck 1/2. Invalidating events clear
+`rb_master_deck_valid` and rerun the resolver.
 
 `rb_master_deck` must carry enough validity/freshness/source state that status,
 tie-breaking, and invalid-mixer fallback can distinguish proven Rekordbox master
@@ -271,6 +278,9 @@ Suggested reason strings:
 - `mixer_invalid_fallback`
 
 Heartbeat must not report `master = active_deck` after this feature lands.
+Stale `rb_master_deck` may remain visible with age/source/fallback diagnostics,
+but status-facing validity and heartbeat `master` must be false/empty once the
+stale window expires.
 
 ## Required Behavior Tests
 
@@ -305,6 +315,8 @@ Current implementation facts:
   suppressed as independent authority while mixer authority is enabled.
 - `active_deck=0` is an idle/no-audible state; push-loop output paths must not
   call `deck_route(0)` or index `self._deck[0]`.
+- Entering `active_deck=0` runs the existing safe SoundSwitch/OS2L idle
+  clear/off body over the fixed safe deck set, without calling `deck_route(0)`.
 - Runtime status and heartbeat expose show deck separately from
   `rb_master_deck`; heartbeat must not report `master = active_deck`.
 - Invalid/stale mixer authority falls back visibly to current valid/fresh

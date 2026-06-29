@@ -99,7 +99,7 @@ def resolve_active_deck(
             now=now,
         )
 
-    eligible = {num for num, reading in deck.items() if _eligible(reading)}
+    eligible = {num for num in (1, 2) if _eligible(deck[num])}
     if not eligible:
         return _candidate_decision(
             candidate=0,
@@ -137,17 +137,6 @@ def resolve_active_deck(
     if len(top) == 2:
         d1 = deck[1]
         d2 = deck[2]
-        if abs(d1.low_norm - d2.low_norm) > BASS_EQUAL_TOL:
-            candidate = 1 if d1.low_norm > d2.low_norm else 2
-            return _candidate_decision(
-                candidate=candidate,
-                reason="bass_dominance",
-                fallback_reason="",
-                current_active_deck=current_active_deck,
-                deck=deck,
-                state=state,
-                now=now,
-            )
         if d1.low_label == "neutral" and d2.low_label == "neutral":
             candidate = _usable_master(
                 rb_master_deck,
@@ -169,6 +158,17 @@ def resolve_active_deck(
                 )
             return _hold_or_idle(
                 current_active_deck, deck, eligible, state, now, "rb_master_unavailable_tie"
+            )
+        if abs(d1.low_norm - d2.low_norm) > BASS_EQUAL_TOL:
+            candidate = 1 if d1.low_norm > d2.low_norm else 2
+            return _candidate_decision(
+                candidate=candidate,
+                reason="bass_dominance",
+                fallback_reason="",
+                current_active_deck=current_active_deck,
+                deck=deck,
+                state=state,
+                now=now,
             )
         if current_active_deck in eligible:
             return _hold(current_active_deck, "hold_current", state)

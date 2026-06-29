@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
+last_verified_commit: 74febec
 last_verified_date: 2026-06-17
 validation_scope: software-only
 ---
@@ -37,6 +37,9 @@ Implementation notes:
 - Inspect `rb_memory.py`, `rb_state_reader.py`, `rb_offsets.py`, `live_bpm.py`, `state_manager.py`.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
+- For active-deck authority support, keep direct master freshness, invalidation,
+  raw Deck C/D no-aliasing, concrete mixer invalid reasons, and transport
+  fail-closed behavior covered by focused tests.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

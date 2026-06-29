@@ -49,7 +49,7 @@ from .beat_math import (
     _beatgrid_elapsed_for_abs_beat,
 )
 from .active_deck_resolver import (
-    MIXER_STALE_AFTER_S,
+    MIXER_STALE_AFTER_S, RB_MASTER_STALE_AFTER_S,
     ActiveDeckDecision,
     ResolverDeckInput,
     ResolverState,
@@ -1075,11 +1075,14 @@ class StateManager:
             if os.rb_master_deck_updated_at > 0.0
             else None
         )
+        rb_master_status_valid = bool(os.rb_master_deck_valid)
+        if rb_master_age is not None and rb_master_age > RB_MASTER_STALE_AFTER_S:
+            rb_master_status_valid = False
         snapshot = {
             "active_deck": os.active_deck,
             "show_deck": os.active_deck,
             "rb_master_deck": os.rb_master_deck,
-            "rb_master_deck_valid": os.rb_master_deck_valid,
+            "rb_master_deck_valid": rb_master_status_valid,
             "rb_master_deck_source": os.rb_master_deck_source,
             "rb_master_deck_updated_at": os.rb_master_deck_updated_at,
             "rb_master_deck_age_s": rb_master_age,
@@ -1253,21 +1256,20 @@ class StateManager:
         elif ev.kind == Ev.MASTER_CHANGED:
             if self._mixer_authority_enabled and ev.source == "rb_state":
                 raw_deck = ev.payload.get("rb_raw_deck")
-                if raw_deck not in (0, 1):
-                    self._os.rb_master_deck_valid = False
-                    self._os.rb_master_fallback_reason = "unsupported_raw_deck"
-                    self._rerun_active_deck_resolver("rb_master_invalid")
-                    return
                 if d in (1, 2):
+                    if raw_deck not in (0, 1):
+                        self._invalidate_rb_master(
+                            ev.payload.get("reason") or "unsupported_raw_deck"
+                        )
+                        return
                     self._os.rb_master_deck = d
                     self._os.rb_master_deck_valid = True
                     self._os.rb_master_deck_source = ev.source
                     self._os.rb_master_deck_updated_at = time.monotonic()
                     self._os.rb_master_fallback_reason = ""
                 else:
-                    self._os.rb_master_deck = None
-                    self._os.rb_master_deck_valid = False
-                    self._os.rb_master_fallback_reason = "invalid_deck"
+                    self._invalidate_rb_master(ev.payload.get("reason") or "invalid_deck")
+                    return
                 self._rerun_active_deck_resolver("rb_master")
             else:
                 self._request_legacy_active_deck(d, ev.source)
@@ -2798,6 +2800,14 @@ class StateManager:
                 reason=decision.authority_reason,
             )
 
+    def _invalidate_rb_master(self, reason: str) -> None:
+        self._os.rb_master_deck = None
+        self._os.rb_master_deck_valid = False
+        self._os.rb_master_deck_source = "rb_state"
+        self._os.rb_master_deck_updated_at = time.monotonic()
+        self._os.rb_master_fallback_reason = reason
+        self._rerun_active_deck_resolver("rb_master_invalid")
+
     # ── Deck switch ───────────────────────────────────────────────────────────
 
     def _on_master_changed(self, new_deck: int, source: str) -> None:
@@ -2922,6 +2932,7 @@ class StateManager:
         self._autoloop.clear_tempo_relock()
         self._autoloop.clear_tempo_anchor()
         self._autoloop.clear_pending_master_phrase_arm()
+        self._clear_idle_lighting_outputs()
         if self._laser_executor is not None:
             self._laser_executor.reset_runtime_state(reason=reason)
         if self._laser_director is not None:
@@ -3532,11 +3543,14 @@ class StateManager:
             self._autoloop.clear_tempo_anchor()
             self._autoloop.clear_pending_master_phrase_arm()
             self._os.live_follow_generation += 1
-            for dn in range(1, 5):
-                self._out.send_deck_play(dn, "off")
-                self._out._sub(f"deck {dn} loop", "off", verbose=True)
-            for dn in range(1, 5):
-                self._sse.send_deck_clear(dn)
+            self._clear_idle_lighting_outputs()
+
+    def _clear_idle_lighting_outputs(self) -> None:
+        for dn in range(1, 5):
+            self._out.send_deck_play(dn, "off")
+            self._out._sub(f"deck {dn} loop", "off", verbose=True)
+        for dn in range(1, 5):
+            self._sse.send_deck_clear(dn)
 
     # ── Push loop ─────────────────────────────────────────────────────────────
 

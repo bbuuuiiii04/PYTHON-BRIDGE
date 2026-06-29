@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 0d3aa5c
+last_verified_commit: 74febec
 last_verified_date: 2026-06-29
 validation_scope: software-only
 ---
@@ -60,7 +60,9 @@ Runtime flow:
 - Each status snapshot includes a compact `heartbeat` block, and `StatusWriter` logs one throttled
   `[BEAT]` line with show deck, separate Rekordbox master deck, BPM, phrase, laser scene, LED look,
   color palette, and RGB health. Heartbeat/status must not report `master = active_deck`; `master`
-  is present only when a current valid `rb_master_deck` exists.
+  is present only when a current valid and non-stale `rb_master_deck` exists. A stale
+  `rb_master_deck` can remain diagnostic in the StateManager snapshot with age/source, but heartbeat
+  `master` is empty.
   This reads existing status/snapshot provider surfaces from the status thread; it does not run in
   the 200 Hz StateManager push loop.
 - Optional status provider failures are fail-soft. The status JSON falls back to unavailable/provider

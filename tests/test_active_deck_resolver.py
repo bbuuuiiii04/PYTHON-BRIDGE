@@ -117,6 +117,18 @@ class ActiveDeckResolverTests(unittest.TestCase):
         self.assertEqual(result.active_deck, 2)
         self.assertEqual(result.authority_reason, "rb_master_tie")
 
+    def test_neutral_labeled_low_values_do_not_trigger_bass_dominance(self):
+        result = _stable(
+            current=1,
+            master=2,
+            deck={
+                1: _deck(playing=True, fader="top", low="neutral", low_norm=0.48),
+                2: _deck(playing=True, fader="top", low="neutral", low_norm=0.52),
+            },
+        )
+        self.assertEqual(result.active_deck, 2)
+        self.assertEqual(result.authority_reason, "rb_master_tie")
+
     def test_higher_bass_wins_after_stability(self):
         first = _resolve(
             current=1,
@@ -227,6 +239,45 @@ class ActiveDeckResolverTests(unittest.TestCase):
         self.assertEqual(result.active_deck, 2)
         self.assertEqual(result.authority_reason, "mixer_invalid_fallback")
         self.assertEqual(result.fallback_reason, "stale")
+
+    def test_extra_decks_are_not_authority_candidates(self):
+        result = _resolve(
+            current=0,
+            master=None,
+            master_valid=False,
+            deck={
+                1: _deck(playing=False, fader="down"),
+                2: _deck(playing=False, fader="down"),
+                3: _deck(playing=True, fader="top", low="high", low_norm=1.0),
+                4: _deck(playing=True, fader="top", low="high", low_norm=1.0),
+            },
+        )
+        self.assertEqual(result.active_deck, 0)
+
+    def test_output_deck_is_always_bridge_deck_or_idle(self):
+        cases = [
+            _resolve(deck={
+                1: _deck(playing=True, fader="top"),
+                2: _deck(playing=False, fader="down"),
+                3: _deck(playing=True, fader="top"),
+            }),
+            _resolve(deck={
+                1: _deck(playing=False, fader="down"),
+                2: _deck(playing=True, fader="top"),
+                4: _deck(playing=True, fader="top"),
+            }),
+            _resolve(
+                current=0,
+                master=None,
+                master_valid=False,
+                deck={
+                    1: _deck(playing=False, fader="down"),
+                    2: _deck(playing=False, fader="down"),
+                    3: _deck(playing=True, fader="top"),
+                },
+            ),
+        ]
+        self.assertTrue(all(result.active_deck in (0, 1, 2) for result in cases))
 
 
 if __name__ == "__main__":

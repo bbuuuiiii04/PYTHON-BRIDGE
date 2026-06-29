@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 0d3aa5c
+last_verified_commit: 74febec
 last_verified_date: 2026-06-29
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -47,9 +47,9 @@ Sender health is deliberately absent. A stale status file renders `Lighting: no 
 | Command JSONL | `/tmp/rb_ss_bridge_v2_commands.jsonl` | Created/truncated by `CommandReader` at startup with mode `0600`; append one JSON object per line. |
 
 The status JSON also includes a compact `heartbeat` object. `StatusWriter` logs the same operator
-summary as one throttled `[BEAT]` line: show deck, separate Rekordbox master deck when valid, BPM,
-phrase, laser scene, LED look, palette, and RGB health. The heartbeat is status-only observability;
-it does not send SoundSwitch, laser, LED, or Govee commands.
+summary as one throttled `[BEAT]` line: show deck, separate Rekordbox master deck when valid and
+non-stale, BPM, phrase, laser scene, LED look, palette, and RGB health. The heartbeat is status-only
+observability; it does not send SoundSwitch, laser, LED, or Govee commands.
 
 If an optional status provider fails, the status snapshot falls back to provider-error fields instead
 of crashing the status thread. Repeated provider-failure warnings are throttled for live-watch

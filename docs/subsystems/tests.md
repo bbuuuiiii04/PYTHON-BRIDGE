@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 0d3aa5c
+last_verified_commit: 74febec
 last_verified_date: 2026-06-29
 validation_scope: software-only
 ---
@@ -37,9 +37,11 @@ Coverage expectations:
   `tests/test_rb_state_reader.py`, `tests/test_active_deck_resolver.py`,
   `tests/test_state_manager_active_deck_authority.py`,
   `tests/test_main_mixer_authority_wiring.py`, and `tests/test_runtime_status.py`
-  coverage for offset fail-closed behavior, finite mixer reads, resolver policy,
-  StateManager bypass gates, default-on startup wiring, heartbeat/status
-  separation, and deck-0 idle safety.
+  coverage for offset fail-closed behavior, finite mixer reads and invalid
+  reasons, direct-master refresh/invalidation, raw Deck C/D no-aliasing, lost
+  transport fail-closed pause, resolver policy, StateManager bypass gates,
+  default-on startup wiring, heartbeat/status stale-master separation, and
+  deck-0 idle clear safety.
 - Logging visibility changes need `tests/test_bridge_fmt_rate.py` for spam-control primitives and
   `tests/test_logging_diag_coverage.py` for diagnostic coverage and the live-watch preset.
 - Config schema changes need validation tests.

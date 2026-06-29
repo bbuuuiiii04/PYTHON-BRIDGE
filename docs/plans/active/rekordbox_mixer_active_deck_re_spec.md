@@ -1,15 +1,21 @@
 ---
 doc_status: current
 truth_level: code-and-re-evidence-grounded implementation spec
-last_verified_commit: a82cf16
+last_verified_commit: 74febec
 last_verified_date: 2026-06-29
-validation_scope: current-code inspection plus committed static/passive-live RE evidence for local Rekordbox 7.2.11 Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; implementation-precision review findings addressed in spec only; runtime implementation, software behavior, and hardware behavior unvalidated
+validation_scope: current-code inspection plus focused software tests for the active-deck authority implementation; committed static/passive-live RE evidence for local Rekordbox 7.2.11 Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; no bridge restart, live process-memory sampling, or hardware-visible output validation
 ---
 
 # Codex Implementation Spec - Rekordbox Mixer Active-Deck Authority
 
-Status: ACTIVE SPEC. This is an implementation handoff, not proof that runtime
-mixer authority exists.
+Status: ACTIVE SPEC plus software-tested implementation contract. This is not
+live Rekordbox or hardware-visible output validation.
+
+Focused software patch coverage now includes direct-master refresh before
+staleness, invalid direct-master transitions, lost transport fail-closed pause,
+neutral LOW/BASS tie behavior, Deck 1/2-only resolver candidates, deck-0 idle
+clear safety, raw Deck C/D startup seed fallback, and stale heartbeat master
+suppression.
 
 The feature target is `docs/architecture/active_deck_authority.md`: the
 show-driving `active_deck` must be selected from Deck 1/2 playing state,

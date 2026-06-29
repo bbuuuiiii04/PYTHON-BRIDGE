@@ -1,8 +1,8 @@
 ---
 doc_status: research-current
 truth_level: byte-capture-and-binary-grounded
-last_verified_commit: 8ca5875
-last_verified_date: 2026-06-21
+last_verified_commit: 74febec
+last_verified_date: 2026-06-29
 validation_scope: SoundSwitch 2.10.3 current-project bytes, controlled diffs, static binary analysis, and passive software-visible Art-Net; hardware-unvalidated
 ---
 
@@ -85,7 +85,7 @@ bytes from the shifted timeline view.
 
 ### Runtime reference resolution
 
-For version-locked SoundSwitch 2.10.3 emitted behavior:
+For version-locked SoundSwitch 2.10.3 emitted runtime behavior:
 
 ```text
 raw_reference == 0: clear/control event
@@ -98,6 +98,16 @@ Evidence:
 - legacy Autoloop probe: discriminating one-based frames match, direct does not;
 - cold-open newly authored track: raw 21/22/26 emitted stored-key 20/21/25,
   3/3 one-based and 0/3 direct.
+
+Binary boundary:
+
+- current GhidraMCP inspection of the arm64 reader/writer confirms the physical
+  fields above, but does not prove the runtime `raw-1` renderer rule;
+- `AttributesCueMap::AttributesCueMap(AttributesCueLibrary&)` assigns cue-map
+  keys from zero, and `AttributeCueTrackEntry::ReadEntry` / `WriteEntry` use the
+  stored map key directly;
+- therefore the `raw-1` rule is passive-wire/runtime evidence for SoundSwitch
+  2.10.3 current content, not a `.ssfile` reader/writer storage rule.
 
 The editor selected RED/BLUE/GREEN for that cold track but runtime emitted
 PURPLE/RED/TURQOISE. The exporter reproduces runtime output from saved bytes; it

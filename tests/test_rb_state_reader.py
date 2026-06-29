@@ -192,7 +192,7 @@ class TickEventTests(unittest.TestCase):
         self.assertEqual(ev.source, "rb_state")
         self.assertEqual(ev.payload["rb_raw_deck"], 1)
 
-    def test_mixer_authority_suppresses_raw_deck_c_master(self) -> None:
+    def test_mixer_authority_invalidates_raw_deck_c_master(self) -> None:
         auth_q: queue.Queue = queue.Queue()
         reader = mod.RBStateReader(
             self.q,
@@ -209,7 +209,82 @@ class TickEventTests(unittest.TestCase):
 
         reader._tick(0xCAFE, self.base)
 
-        self.assertFalse(any(e.kind == Ev.MASTER_CHANGED for e in _drain(auth_q)))
+        masters = [e for e in _drain(auth_q) if e.kind == Ev.MASTER_CHANGED]
+        self.assertEqual(len(masters), 1)
+        self.assertEqual(masters[0].deck, 0)
+        self.assertEqual(masters[0].payload["rb_raw_deck"], 2)
+        self.assertEqual(masters[0].payload["reason"], "unsupported_raw_deck")
+
+    def test_mixer_authority_refreshes_same_raw_master_before_stale_timeout(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        now = 10.0
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.MASTER_CHANGED, Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+            clock=lambda: now,
+        )
+        self._install_valid_mixer()
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x00")
+
+        reader._tick(0xCAFE, self.base)
+        now += mod.RB_MASTER_REFRESH_INTERVAL_S / 2.0
+        reader._tick(0xCAFE, self.base)
+        now += mod.RB_MASTER_REFRESH_INTERVAL_S
+        reader._tick(0xCAFE, self.base)
+
+        masters = [e for e in _drain(auth_q) if e.kind == Ev.MASTER_CHANGED]
+        self.assertEqual([(e.deck, e.payload["rb_raw_deck"]) for e in masters], [(1, 0), (1, 0)])
+
+    def test_mixer_authority_invalid_master_events_are_not_per_tick_spam(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.MASTER_CHANGED, Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self._install_valid_mixer()
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+
+        reader._tick(0xCAFE, self.base)
+        reader._tick(0xCAFE, self.base)
+
+        masters = [e for e in _drain(auth_q) if e.kind == Ev.MASTER_CHANGED]
+        self.assertEqual(len(masters), 1)
+        self.assertEqual(masters[0].deck, 0)
+        self.assertEqual(masters[0].payload["rb_raw_deck"], 255)
+        self.assertEqual(masters[0].payload["reason"], "no_master")
+
+    def test_mixer_authority_unreadable_master_invalidates(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.MASTER_CHANGED, Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self._install_valid_mixer()
+
+        reader._tick(0xCAFE, self.base)
+
+        masters = [e for e in _drain(auth_q) if e.kind == Ev.MASTER_CHANGED]
+        self.assertEqual(len(masters), 1)
+        self.assertEqual(masters[0].deck, 0)
+        self.assertEqual(masters[0].payload["reason"], "unreadable")
 
     def test_master_availability_callback_fires_true_on_valid_master(self) -> None:
         states: list[bool] = []
@@ -474,6 +549,57 @@ class TickEventTests(unittest.TestCase):
         events = [e for e in _drain(auth_q) if e.kind in (Ev.PLAY, Ev.PAUSE)]
         self.assertEqual(events, [])
 
+    def test_lost_mixer_transport_support_emits_fail_closed_pause(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.PLAY, Ev.PAUSE, Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self._install_valid_mixer()
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.live_pos_per_deck[0],
+            payload=(1000).to_bytes(8, "little"),
+        )
+        for _ in range(8):
+            reader._tick(0xCAFE, self.base)
+        _drain(auth_q)
+
+        del self.mem.leaf[endpoint]
+        reader._tick(0xCAFE, self.base)
+
+        pauses = [e for e in _drain(auth_q) if e.kind == Ev.PAUSE]
+        self.assertEqual(len(pauses), 1)
+        self.assertEqual(pauses[0].deck, 1)
+        self.assertEqual(pauses[0].source, "rb_state")
+        self.assertEqual(pauses[0].payload["reason"], "transport_unavailable")
+
+    def test_no_startup_pause_noise_for_never_available_mixer_transport(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.PLAY, Ev.PAUSE, Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self._install_valid_mixer()
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+
+        reader._tick(0xCAFE, self.base)
+
+        self.assertEqual([e for e in _drain(auth_q) if e.kind == Ev.PAUSE], [])
+
     def test_mixer_snapshot_accepts_endpoint_values_and_refreshes_time(self) -> None:
         auth_q: queue.Queue = queue.Queue()
         now = 10.0
@@ -530,6 +656,7 @@ class TickEventTests(unittest.TestCase):
         snapshot = [e for e in _drain(auth_q) if e.kind == Ev.MIXER_STATE][0].payload["snapshot"]
         self.assertFalse(snapshot.valid)
         self.assertEqual(dict(snapshot.deck), {})
+        self.assertEqual(snapshot.reason, "non_finite")
 
     def test_mixer_snapshot_invalid_on_nan_or_out_of_range(self) -> None:
         auth_q: queue.Queue = queue.Queue()
@@ -546,7 +673,7 @@ class TickEventTests(unittest.TestCase):
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
         assert self.offs.mixer_deck1_upfader_raw is not None
 
-        for bad_value in (float("nan"), 1023.1):
+        for bad_value, reason in ((float("nan"), "non_finite"), (1023.1, "out_of_range")):
             self._install_valid_mixer()
             self.mem.install_chain(
                 self.base,
@@ -559,6 +686,35 @@ class TickEventTests(unittest.TestCase):
             ][0].payload["snapshot"]
             self.assertFalse(snapshot.valid)
             self.assertEqual(dict(snapshot.deck), {})
+            self.assertEqual(snapshot.reason, reason)
+
+    def test_mixer_snapshot_invalid_reason_unreadable(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        self._install_valid_mixer()
+        assert self.offs.mixer_deck1_low_raw is not None
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.mixer_deck1_low_raw,
+            payload=struct.pack("<f", 127.5),
+        )
+        del self.mem.leaf[endpoint]
+
+        reader._tick(0xCAFE, self.base)
+
+        snapshot = [e for e in _drain(auth_q) if e.kind == Ev.MIXER_STATE][0].payload["snapshot"]
+        self.assertFalse(snapshot.valid)
+        self.assertEqual(snapshot.reason, "unreadable")
 
     # ── chain failure ───────────────────────────────────────────────────────
     def test_unknown_chain_address_does_not_raise(self) -> None:

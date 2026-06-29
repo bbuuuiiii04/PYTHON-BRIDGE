@@ -1,8 +1,8 @@
 ---
 doc_status: active-review-prompt
 truth_level: code-grounded
-last_verified_commit: ceb6bb0
-last_verified_date: 2026-06-26
+last_verified_commit: 74febec
+last_verified_date: 2026-06-29
 validation_scope: one-shot operator-conducted capture agent prompt for RW-7 / T7d live autoloop-phase evidence; OBSERVER-ONLY except agent-owned passive tcpdump/hash/log collection; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no pack enable, no bridge restart, no fixture/Enttec/DMX/MIDI connection, no project mutation
 ---
 
@@ -28,6 +28,24 @@ evidence.
    nonempty hash files, does not copy AppLogs, and its scenario markers are not semantic enough
    for every scenario. **You** run the missing read-only evidence steps and final acceptance
    checks yourself. If your stricter checks disagree with the conductor, your stricter verdict wins.
+
+## 2026-06-29 GhidraMCP use boundary
+Use GhidraMCP only when it provides a concrete static-analysis benefit for the capture session,
+for example resolving a SoundSwitch 2.10.3 arm64 function, address, caller/callee, constant, or
+control-flow question that helps interpret captured Autoloop evidence. Use it before the first
+live operator gate or after a run, not while the operator is waiting in an active capture window.
+If GhidraMCP is unavailable or would slow the live evidence loop, skip it and record
+`GhidraMCP not used - no capture-session benefit`.
+
+Prior SoundSwitch 2.10.3 arm64 GhidraMCP work found that `.ssfile` editor reader/writer code uses
+direct zero-based cue-map keys, while runtime `raw_reference > 0 -> stored_key =
+raw_reference - 1` remains passive-runtime / project / test backed. Do not collapse
+editor/file reader-writer behavior with runtime playback behavior.
+
+GhidraMCP cannot replace passive Art-Net / AppLog / bridge phase evidence and cannot by itself
+produce `PASS_T7D_PHASE_CONTRACT`. Do not spend capture-session time on x86_64 parity or on
+locating the runtime `raw-1` renderer callsite unless that static question directly changes how
+the current run is interpreted.
 
 ## HARD SAFETY BOUNDARIES — never cross
 - **Observer only for live behavior.** Never connect to or open Enttec/serial/MIDI/DMX, never enable the

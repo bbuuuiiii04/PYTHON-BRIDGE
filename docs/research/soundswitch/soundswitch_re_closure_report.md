@@ -1,8 +1,8 @@
 ---
 doc_status: research-complete-bounded-scope
 truth_level: code-byte-binary-and-wire-verified
-last_verified_commit: 8ca5875
-last_verified_date: 2026-06-21
+last_verified_commit: 74febec
+last_verified_date: 2026-06-29
 validation_scope: SoundSwitch 2.10.3, current project/container v3, current RAVE Venue and 19-channel laser profile, passive Art-Net and static binary analysis; hardware-unvalidated
 ---
 
@@ -10,7 +10,7 @@ validation_scope: SoundSwitch 2.10.3, current project/container v3, current RAVE
 
 ## Final verdict
 
-**RE COMPLETE: READY FOR PERFECT EXPORTER SPEC**
+**BOUNDED SOFTWARE EVIDENCE: EXPORTER SPEC READY WITH PROOF GATES**
 
 This verdict is bounded to Brandon's actual workflow:
 
@@ -238,6 +238,13 @@ selected RED/BLUE/GREEN, but runtime emitted stored keys 20/21/25
 is a SoundSwitch 2.10.3 behavior the product must reproduce; it is not an
 exporter ambiguity.
 
+GhidraMCP expansion on 2026-06-29 narrows the binary claim: arm64
+`AttributesCueMap::AttributesCueMap(AttributesCueLibrary&)`,
+`AttributeCueTrackEntry::ReadEntry`, and `WriteEntry` show direct zero-based
+cue-map key storage/load behavior in the reader/writer path. The runtime
+`raw-1` rule remains passive-wire/runtime evidence for SoundSwitch 2.10.3
+current content, not a reader/writer storage rule.
+
 Create, add, delete, move/reorder, duplicate, and resave operations do not need
 a provenance heuristic. The loader always consumes the saved positive integer
 through the same effective `raw-1` behavior. The writer preserves the integer
@@ -323,8 +330,8 @@ that authority and does not emulate inactive SoundSwitch multi-deck policy.
 | --- | --- | --- | --- |
 | Cue identity is GUID-based | Venue/ClassId bytes, dictionary readers, controlled rename | confirmed | names never resolve identity |
 | Numeric cue index is metadata | dictionary key and runtime reference traces | confirmed | never persist name/index as identity |
-| Positive runtime reference is `raw-1` | A5, Autoloop wire, cold new-track wire | confirmed | version-locked one-based renderer |
-| Storage provenance can look mixed/direct | controlled legacy edit and current writer | confirmed but not a runtime blocker | preserve bytes; reproduce emitted runtime |
+| Positive runtime reference is `raw-1` | A5, Autoloop wire, cold new-track wire; arm64 reader/writer path is direct-key | confirmed runtime, binary-bounded | version-locked one-based renderer |
+| Storage provenance can look mixed/direct | controlled legacy edit and arm64 current writer | confirmed but not a runtime blocker | preserve bytes; reproduce emitted runtime |
 | Raw zero is clear/control | parser, binary, A5 2/2, file-3 zero output | confirmed | explicit clear semantics |
 | Cue application is sparse/persistent | controlled cues, renderer equality, cache binary | confirmed | omitted channels retain state |
 | Attribute value maps are current DMX bytes | Venue diffs and wire equality | confirmed | no scaling for generic CH1-CH19 |
@@ -344,12 +351,17 @@ that authority and does not emulate inactive SoundSwitch multi-deck policy.
 
 ## Remaining unknowns and unsupported boundaries
 
-There are no remaining behavioral unknowns that block the bounded perfect
-exporter/player specification.
+No remaining behavioral unknown is currently known to block the bounded
+exporter/player assumptions for SoundSwitch 2.10.3 current content, but the
+evidence gates below must stay visible and fail closed.
 
 The following are explicit compatibility or hardware boundaries:
 
 - SoundSwitch versions other than 2.10.3;
+- x86_64 parity for the 2026-06-29 GhidraMCP expansion until separately
+  re-decompiled and compared;
+- a binary callsite for the runtime `raw-1` renderer rule, which was not located
+  in the reader/writer path and remains wire-backed;
 - a changed primary Venue/profile, universe, or address layout until separately
   decoded and validated;
 - the inactive In-App Demo layout;

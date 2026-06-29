@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan
 truth_level: code-and-capture-grounded
-last_verified_commit: b2ce63d
-last_verified_date: 2026-06-23
+last_verified_commit: 74febec
+last_verified_date: 2026-06-29
 validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -28,6 +28,13 @@ validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HAR
 > `buildup`, and `correction` remain at zero attempts. ACCEPTED is an integrity
 > classification, not a phase-contract verdict. Identity/holdout reconciliation
 > and the real-capture oracle are still incomplete.
+
+> **GHIDRAMCP UPDATE 2026-06-29.** Read-only SoundSwitch 2.10.3 arm64 GhidraMCP
+> evidence confirms Autoloop beatgrid/beat-window/index machinery and the shared
+> playback/cache path. It does not prove the T7d phase contract. GhidraMCP may
+> be used before or after a capture to answer a static binary question if it
+> materially helps interpretation, but it must not consume the live operator
+> window, mutate app/project state, or replace passive Art-Net evidence.
 
 ## Part A - Context and blocker (verified; read, do not implement T7d)
 
@@ -63,6 +70,7 @@ validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HAR
 | The existing research oracle can prove the T7d scale. | `tools/ssfmt/re/validate_autoloop_capture.py:184` hard-codes `rate = bpm * 10.0`, equivalent to 600 ticks/beat, and `fit_phase` permits a fitted offset. It is useful historical render evidence but is circular for this blocker. | [unknown; not accepted] |
 | Existing passive evidence is available. | `tools/ssfmt/captures/bridge_driven_autoloops_20260619.pcap`, copied bridge/AppLogs, and the frozen `snap/` files exist locally. | [confirmed] |
 | The schema-2 recorder captures the planned T7d phase authority. | `session_phase_trace.py` defines the primitive phase row; `StateManager` emits it through a bounded nonblocking tracer; accepted captures contain thousands of `autoloop_phase` rows plus clean integrity footers. Executor scene/note fields were null in the inspected accepted rows, so identity must still be joined offline. | [confirmed seam; identity join pending] |
+| GhidraMCP can replace the remaining passive capture scenarios. | The 2026-06-29 arm64 pass bounds Autoloop as beatgrid/beat-window/index based, but it does not expose emitted Universe-0 phase/origin/reset/snap behavior for the six bridge transition classes. | [rejected] |
 
 ### A3. Questions the evidence must answer
 

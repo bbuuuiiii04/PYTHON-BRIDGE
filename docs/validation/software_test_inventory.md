@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 0d3aa5c
+last_verified_commit: 74febec
 last_verified_date: 2026-06-29
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -78,21 +78,26 @@ The active-deck authority implementation is covered by focused software tests:
   labels, duplicate/malformed/partial required label fail-closed behavior, and
   unknown/anonymous trailing line rejection for authority.
 - `tests/test_rb_state_reader.py` covers finite range-checked mixer f32 reads,
-  valid endpoints, invalid/unreadable values, immutable mixer snapshots, and
-  default resolver-support event emission.
+  valid endpoints, concrete invalid reasons, direct-master refresh and
+  invalidation, raw Deck C/D no-aliasing, transport-unavailable fail-closed
+  pause, immutable mixer snapshots, and default resolver-support event emission.
 - `tests/test_active_deck_resolver.py` covers fader eligibility, top-fader
   dominance, LOW/BASS dominance and tie cases, rb-master tie/fallback,
+  neutral-labeled LOW/BASS tie behavior, Deck 1/2-only candidate filtering,
   invalid/stale mixer fallback, recovery, no-audible idle behavior, and
   stability/no-flicker policy.
 - `tests/test_state_manager_active_deck_authority.py` covers StateManager
   integration, `rb_master_deck` separation, MASTER/OSC/mirror/resume bypass
-  gates, invalid-to-valid recovery, immutable snapshot ownership, and deck-0
-  idle safety.
+  gates, invalid-to-valid recovery, invalid/stale master handling, lost
+  transport fail-closed behavior, immutable snapshot ownership, and deck-0
+  idle clear safety.
 - `tests/test_main_mixer_authority_wiring.py` covers startup default-on mixer
-  authority and required `RBStateReader.authoritative_kinds` when old direct
-  flags are disabled.
+  authority, raw Deck A/B direct seed, raw Deck C/D fallback/no-aliasing, and
+  required `RBStateReader.authoritative_kinds` when old direct flags are
+  disabled.
 - `tests/test_runtime_status.py` covers show-deck versus Rekordbox-master
-  heartbeat/status separation and mixer authority visibility.
+  heartbeat/status separation, stale-master suppression, and mixer authority
+  visibility.
 
 This is software validation only. It does not validate live Rekordbox behavior,
 loaded-track play/stop survival, SoundSwitch, laser, LED/Govee, DMX, MIDI,

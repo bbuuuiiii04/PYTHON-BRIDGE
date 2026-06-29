@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: f6910f9
+last_verified_commit: 74febec
 last_verified_date: 2026-06-24
 validation_scope: software-only
 ---
@@ -36,7 +36,8 @@ Forbidden changes:
 Implementation notes:
 - Inspect `runtime_status.py`, `__main__.py`.
 - For `StatusWriter` heartbeat/status changes, verify the `heartbeat` JSON payload and the
-  throttled `[BEAT]` log path in `tests/test_runtime_status.py`.
+  throttled `[BEAT]` log path in `tests/test_runtime_status.py`, including stale
+  `rb_master_deck` suppression when the field is present.
 - For copied pack status changes, prove the provider is not called, published dicts are not reused,
   and software-frame fields are not documented as sender or hardware proof.
 - Prefer the smallest code or docs change that satisfies the task.

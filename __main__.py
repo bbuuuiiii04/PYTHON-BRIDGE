@@ -835,10 +835,10 @@ def _direct_master_startup_seed(rb_version: str, fallback_deck: int = 1) -> tupl
         log.info("[MASTER-SEED] direct=none fallback=%s using=fallback reason=%s",
                  direct_master_label(fallback_deck), first.reason or "unreadable")
         return fallback_deck, "default startup"
-    if first.bridge_deck not in (1, 2):
+    if first.rb_raw not in (0, 1) or first.bridge_deck not in (1, 2):
         log.info("[MASTER-SEED] direct=%s fallback=%s using=fallback reason=%s",
                  direct_master_label(first.bridge_deck), direct_master_label(fallback_deck),
-                 first.reason or "none")
+                 "unsupported_raw_deck" if first.rb_raw in (2, 3) else (first.reason or "none"))
         return fallback_deck, "default startup"
 
     time.sleep(0.5)
@@ -849,11 +849,14 @@ def _direct_master_startup_seed(rb_version: str, fallback_deck: int = 1) -> tupl
     )
     if (
         not second.readable
+        or second.rb_raw not in (0, 1)
         or second.bridge_deck not in (1, 2)
         or second.bridge_deck != first.bridge_deck
         or second.rb_raw != first.rb_raw
     ):
-        reason = second.reason if not second.readable else "unstable"
+        reason = second.reason if not second.readable else (
+            "unsupported_raw_deck" if second.rb_raw in (2, 3) else "unstable"
+        )
         log.info("[MASTER-SEED] direct=%s fallback=%s using=fallback reason=%s",
                  direct_master_label(second.bridge_deck),
                  direct_master_label(fallback_deck),
@@ -1557,7 +1560,7 @@ def main() -> None:
         "  rsr=%s  direct=%s  live_bpm=%s  follow=%s"
         "  phrase_arm=%s  smart_rearm=%s  smart_drop=%s  phrase_anchor=%s"
         "  scripted_direct=%s  osc=%d  log_control=%s",
-        initial_active_deck,
+        initial_show_deck,
         initial_active_source.replace(" ", "_"),
         rb_version_for_direct_master or "unknown",
         _onoff(rb_state_reader is not None),

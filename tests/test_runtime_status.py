@@ -531,6 +531,50 @@ class RuntimeStatusWriterTests(unittest.TestCase):
             },
         )
 
+    def test_status_writer_heartbeat_suppresses_stale_rb_master(self) -> None:
+        writer = self._make_writer(
+            sm_snapshot={
+                "active_deck": 2,
+                "rb_master_deck": 1,
+                "rb_master_deck_valid": True,
+                "rb_master_deck_age_s": 3.0,
+                "active_deck_authority_reason": "rb_master_tie",
+                "mixer_authority_valid": True,
+                "mixer_fallback_reason": "",
+                "deck": {"1": {}, "2": {"bpm": 126.25}},
+            },
+            laser_status={"available": False, "enabled": False, "reason": "not_configured"},
+            led_status={"available": False, "enabled": False, "reason": "not_configured"},
+            color_status={},
+        )
+
+        snap = writer.snapshot()
+
+        self.assertIsNone(snap["heartbeat"]["master"])
+        self.assertIsNone(snap["heartbeat"]["rb_master_deck"])
+        self.assertFalse(snap["heartbeat"]["rb_master_deck_valid"])
+        self.assertEqual(snap["heartbeat"]["deck"], 2)
+
+    def test_status_writer_heartbeat_keeps_fresh_rb_master(self) -> None:
+        writer = self._make_writer(
+            sm_snapshot={
+                "active_deck": 1,
+                "rb_master_deck": 2,
+                "rb_master_deck_valid": True,
+                "rb_master_deck_age_s": 0.5,
+                "deck": {"1": {"bpm": 128.0}, "2": {}},
+            },
+            laser_status={"available": False, "enabled": False, "reason": "not_configured"},
+            led_status={"available": False, "enabled": False, "reason": "not_configured"},
+            color_status={},
+        )
+
+        snap = writer.snapshot()
+
+        self.assertEqual(snap["heartbeat"]["master"], 2)
+        self.assertEqual(snap["heartbeat"]["rb_master_deck"], 2)
+        self.assertTrue(snap["heartbeat"]["rb_master_deck_valid"])
+
     def test_status_writer_logs_throttled_beat_heartbeat(self) -> None:
         writer = self._make_writer(
             sm_snapshot={

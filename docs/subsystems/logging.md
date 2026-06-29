@@ -2,7 +2,7 @@
 
 Status: CURRENT SUPPORTING
 
-Audited against implementation commit `0d3aa5c` on 2026-06-29.
+Audited against implementation commit `74febec` on 2026-06-29.
 
 This is the canonical runtime logging guide. Historical implementation context
 is retained in `docs/history/logging_implementation_handoff.md`, but current
@@ -94,8 +94,8 @@ disabled, so it should not turn on broad DEBUG noise. Errors still pass through
 even when their logger is not in the filtered module list.
 
 Healthy watch output should include a throttled `[BEAT]` line with show deck
-and separate `rb_master`, BPM, phrase, laser scene, LED look, palette, and RGB
-health, plus transition lines such as `[LASER]`, `[LX]`, `[LED] look=...`,
+and separate non-stale `rb_master` when available, BPM, phrase, laser scene,
+LED look, palette, and RGB health, plus transition lines such as `[LASER]`, `[LX]`, `[LED] look=...`,
 `[RGB] activate`, `[RGB] summary`, `[OS2L]`, and StateManager master/play/load
 lines when those subsystems actually emit them. The preset does not send
 commands, change runtime state, or validate hardware-visible behavior.
