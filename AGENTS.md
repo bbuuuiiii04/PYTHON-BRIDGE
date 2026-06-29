@@ -82,6 +82,10 @@ Do **not** read the whole repo. Do **not** start with old prompts/plans/history.
 
 If the task is still unclear after the path above, **stop and report uncertainty.** Do not spelunk old prompts to invent context.
 
+If `graphify-out/graph.json` exists and the task needs broad codebase orientation, use `graphify query`,
+`graphify explain`, or `graphify path` before opening many files. Skip it for exact line/symbol
+lookups where `rg` is already narrower. The graph is a lead only; code and tests remain authority.
+
 ## 3. Task router
 
 | Task | Playbook | Subsystem card | Contract key |

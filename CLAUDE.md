@@ -28,6 +28,9 @@ Also follow `AGENTS.md` §0 Brandon Communication Mode:
 - **Cost discipline.** Offload large read-only sweeps (logs / capture corpora / multi-file research)
   to a read-only subagent and verify its load-bearing claims before relying on them; keep
   safety-critical (live-mixing / runtime-invariant / laser-LED) reasoning on a high tier.
+- **Graphify.** When `graphify-out/graph.json` exists and you need broad codebase orientation, run
+  `graphify query`, `graphify explain`, or `graphify path` before reading many files. This is manual
+  query access only, not a hook; code/tests still win.
 
 ## Spec / handoff authoring
 When producing a Codex (or implementer) spec, use the operator's Part A–E format and run the

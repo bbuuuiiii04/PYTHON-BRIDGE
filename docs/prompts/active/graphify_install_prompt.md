@@ -1,11 +1,11 @@
 ---
 doc_status: active-implementation-prompt
 truth_level: workflow-tooling
-last_verified_commit: 7bf2f0e
+last_verified_commit: f5cfddd
 last_verified_date: 2026-06-29
 validation_scope: agent task prompt to install + customize Graphify (repo relationship map) for
-  rb_ss_bridge_v2. Dev-tooling only — no runtime/bridge code, no live-bridge interaction. Tracked as
-  AWR-112.
+  rb_ss_bridge_v2. Dev-tooling only; manual query access, no hooks, no runtime/bridge code, no
+  live-bridge interaction. Tracked as AWR-112.
 ---
 
 # Agent Prompt — Install & customize Graphify (repo relationship map) for rb_ss_bridge_v2
@@ -30,12 +30,11 @@ to cut token use on the understand-the-codebase step. Nothing more. It is **not*
 1. **Code-only. No cloud / no API key.** Code AST extraction is fully local. Do NOT configure
    `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/etc. for doc/PDF/image semantic extraction — we don't want it
    (live rig, no outbound calls, no cost). Map the code, not the prose.
-2. **Always-on hooks ON for BOTH Claude and Codex.** The operator wants the automatic
-   query-before-read nudge so using the map is never forgotten (this overrides the earlier
-   manual-first lean). Enable the PreToolUse hooks for both tools. Decision #5 still governs — the
-   hooks *nudge* you to query; they never authorize editing on the map alone, and code/tests stay the
-   source of truth. The pilot (Phase 6) should report hook latency / any false nudges, but the default
-   is ON for both; only disable if latency proves a real problem in practice.
+2. **Manual query for BOTH Claude and Codex; no read-interception hooks.** Use `graphify query`,
+   `graphify explain`, or `graphify path` deliberately for broad orientation before reading many
+   files. Do not install PreToolUse/read hooks or post-commit graph hooks unless the operator
+   explicitly changes this policy. Decision #5 still governs — the map points where to look; it never
+   authorizes editing on the map alone, and code/tests stay the source of truth.
 3. **Do NOT commit `graphify-out/`.** It is a build artifact derived from code (the real source of
    truth); committing it invites drift and merge conflicts on a large JSON/HTML. Gitignore it and
    regenerate on demand.
@@ -54,7 +53,8 @@ to cut token use on the understand-the-codebase step. Nothing more. It is **not*
     then `graphify install` (Claude), `graphify codex install` (Codex), `graphify install --project`
     (writes committed skill files to `.claude/skills/graphify/`); build `graphify .` /
     `graphify . --update`; query `graphify query "…"`.
-- Confirm `python3 --version` ≥ 3.10 and that `uv` or `pipx` exists; if neither, stop and ask.
+- Confirm `python3 --version` ≥ 3.10 and use the install path in the current README. If macOS/Homebrew
+  blocks direct `pip install`, use the README fallback: `pipx install graphifyy`.
 - Confirm you're on `main` with a clean-enough tree. **No new branches.**
 
 ## Phase 1 — Install (local, code-only)
@@ -83,13 +83,11 @@ overwhelmingly the Python modules + tests, not data.
   proceeding.
 
 ## Phase 4 — Integration for both tools (Claude + Codex)
-- The operator uses **both Claude and Codex** heavily and wants the map used automatically. Set up
-  project-scoped integration for both — `graphify install` / `graphify install --project` for Claude
-  and `graphify codex install` for Codex — **with the always-on PreToolUse hooks ENABLED for both**
-  (locked decision #2), so neither tool forgets to query before reading.
-- Record exactly what you enabled and how to toggle the hooks off, in case latency proves a problem in
-  practice. Decision #5 still holds — the hooks nudge querying; they never authorize acting on the map
-  alone. Confirm the hooks fire on both tools before calling Phase 4 done.
+- The operator uses **both Claude and Codex** heavily. Set up manual query access for both tools via
+  `AGENTS.md`, `CLAUDE.md`, and `docs/setup/graphify.md`.
+- Do **not** enable Graphify PreToolUse hooks or the post-commit hook. Record the hook decision and the
+  exact commands that remain available. Decision #5 still holds — the map is a lead; it never
+  authorizes acting on the map alone.
 
 ## Phase 5 — gitignore + secrets
 - Add `graphify-out/` to `.gitignore`. Do not commit it.
