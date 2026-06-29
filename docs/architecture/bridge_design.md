@@ -8,7 +8,8 @@ originSessionId: 88cd1a53-8b87-4b05-b106-26c1fb0a5730
 
 Status: CURRENT AUTHORITATIVE
 
-Last reconciled against the current checkout on 2026-06-11.
+Last reconciled against the current checkout at `7c16fd5` plus current worktree
+changes on 2026-06-29.
 
 ## Purpose
 
@@ -40,7 +41,8 @@ These defaults exist in `scripts/ss_bridge_watcher.sh`.
 
 | Component | File | Current role |
 | --- | --- | --- |
-| `RBStateReader` | `rb_state_reader.py` | Reads versioned Rekordbox offset-table chains at about 30 Hz. Can authoritatively emit ANLZ, track-load, play/pause, and master events through `authoritative_kinds`. |
+| `RBStateReader` | `rb_state_reader.py` | Reads versioned Rekordbox offset-table chains at about 30 Hz. Can authoritatively emit ANLZ, track-load, play/pause, mixer snapshots, and master events through `authoritative_kinds`. |
+| `active_deck_resolver.py` | `active_deck_resolver.py` | Pure resolver for show-deck authority from Deck 1/2 playing state, decoded upfader/LOW, `rb_master_deck`, validity/freshness, and stability state. No I/O. |
 | `RBMemoryReader` | `rb_memory.py` | Polls position at 60 Hz into `PositionCache`; can use versioned direct position chains with ObjC scan fallback. Emits `RB_RESTARTED`. |
 | `LiveBPMService` | `live_bpm.py` | Reads displayed BPM from versioned offset-table chains when supported; otherwise uses validated discovery and metadata fallback. |
 | `MTCReader` | `mtc_reader.py` | Reads IAC Bus 1 MTC at about 25 fps and emits `TC_UPDATE` as position fallback. |
@@ -73,7 +75,7 @@ the localhost fallback.
 | `LiveBPMService` | Internal BPM state | Rekordbox process memory |
 | `MTCReader` | `TC_UPDATE` events | IAC Bus 1 MIDI |
 | Resolver workers | `FILEPATH_RESOLVED`, `ANLZ_DATA` events | DB, ANLZ, lsof, audio files |
-| OSC server | OSC `MASTER_CHANGED` / legacy scripted events | UDP port 7001 |
+| OSC server | legacy active-deck / legacy scripted events | UDP port 7001 |
 | OS2L sender | TCP writes | Send queue |
 | Status writer | Status JSON file | Runtime snapshots |
 | Command reader | Command state, command side effects | Command JSONL file |
@@ -91,14 +93,19 @@ Drop menu toggle follows this pattern with `Ev.SMART_DROP_TOGGLE`.
 `StateManager` does not perform broad event-source arbitration. Source selection
 must happen before events reach it: `__main__.py` configures
 `RBStateReader.authoritative_kinds`, and direct events are routed only when the
-corresponding guarded direct flag is enabled.
+corresponding guarded direct flag is enabled. Named mixer authority is the
+exception to the old flag-only model: when the selected Rekordbox offset version
+has all required Deck 1/2 mixer labels, startup routes `MIXER_STATE`, `PLAY`,
+`PAUSE`, and direct `MASTER_CHANGED` even if the old direct flags are disabled,
+so resolver support inputs are not dropped.
 
 | Signal | Default/fallback source | Direct source | Current authority rule |
 | --- | --- | --- | --- |
 | ANLZ path | none | `RBStateReader` `Ev.ANLZ_PATH` | Direct when `RBSS_ANLZ_DIRECT=1` and readable for that deck. |
 | Position | `RBMemoryReader` ObjC scan, MTC | `RBMemoryReader` versioned `live_pos_per_deck` chain | Direct chain when `RBSS_POS_CHAIN_DIRECT=1` and valid; ObjC/MTC fallback remains. |
-| Startup master seed | deck 1 default | one-shot direct `master_deck` reads | Direct can seed startup only with `RBSS_MASTER_SEED_DIRECT=1` after two stable valid reads; otherwise deck 1 startup. |
-| Runtime master | OSC/control fallback | `RBStateReader` `Ev.MASTER_CHANGED` | Direct when `RBSS_MASTER_DIRECT=1` and the current master byte is readable and valid. |
+| Startup master seed | legacy deck 1 default when mixer authority is disabled; idle show deck when mixer authority is enabled and direct seed is unavailable | one-shot direct `master_deck` reads | Direct can seed startup `rb_master_deck` only with `RBSS_MASTER_SEED_DIRECT=1` after two stable valid reads. Mixer-authority startup without that proof begins at `active_deck=0`, not synthetic Deck 1 authority. |
+| Runtime Rekordbox master | legacy/control fallback | `RBStateReader` `Ev.MASTER_CHANGED` | Direct when `RBSS_MASTER_DIRECT=1`, or when mixer authority needs rb-master support, and the current master byte is readable and valid. With valid/fresh mixer authority this updates `rb_master_deck`; it does not directly select `active_deck`. |
+| Mixer active-deck authority | invalid/stale mixer fallback to current valid/fresh `rb_master_deck` | `RBStateReader` `Ev.MIXER_STATE` | Default-on when named Deck 1/2 mixer offset labels exist. Resolver uses Deck 1/2 playing state, upfader, LOW/BASS, `rb_master_deck` tie/fallback, validity/freshness, and stability state. |
 | Play/pause | none | `RBStateReader` movement-derived `Ev.PLAY`/`Ev.PAUSE` | Direct when `RBSS_PLAY_DIRECT=1` and transport is warmed/readable for that deck. |
 | Track load | none | `RBStateReader` full title string | Direct when `RBSS_TRACK_LOAD_DIRECT=1` and `RBSS_ANLZ_DIRECT=1` and title is readable. |
 | Scripted arm/clear | OSC `/bridge/track_loaded` when direct scripted mode is disabled | `FILEPATH_RESOLVED` from direct load path | Direct by default unless `RBSS_SCRIPTED_DIRECT=0`; direct uses resolved SSID/registry/filepath. |
@@ -109,6 +116,8 @@ Fail-closed rule: every direct authority path must become active only when its
 own current-readiness condition is true. Unsupported Rekordbox versions, attach
 failure, unreadable chains, stale reads, and no-master sentinels keep the
 corresponding direct path inactive.
+Unknown, anonymous, partial, duplicate, malformed, unreadable, NaN/Inf, or
+out-of-range mixer fields fail closed for mixer authority.
 
 ## Direct B1-B6 Details
 
@@ -143,7 +152,9 @@ direct master byte twice, 0.5 s apart, using the same offset table as
 `RBStateReader`. Direct seed is used only if both reads are readable, valid
 bridge decks, stable, and equal. Any unsupported version, attach failure,
 unreadable chain, invalid deck, unstable read, or `0xFF` no-master sentinel
-falls closed to the default startup deck.
+falls closed. When mixer authority is enabled, that fallback startup show deck
+is idle (`active_deck=0`) so Deck 1 is not treated as proven audible authority.
+When mixer authority is disabled, legacy startup can still use the default deck.
 
 ### B3: Direct Play/Pause
 
@@ -193,12 +204,20 @@ when the raw master byte changes and maps to a valid Rekordbox deck index. The
 `0xFF` no-master sentinel updates the direct baseline but does not emit an event
 and does not mark direct master ready.
 
-OSC `/bridge/active_deck` is bypassed only while direct master is enabled and
-ready. If direct master is unsupported, unreadable, sentinel, missing, or not
-warmed up, direct master stays inactive.
+When mixer authority is enabled, `RBStateReader` also routes direct
+`MASTER_CHANGED` as resolver support even if `RBSS_MASTER_DIRECT=0`. Raw Deck
+3/4 master bytes are not resolver support. StateManager stores current valid
+Deck 1/2 direct master as `rb_master_deck`; while mixer authority is valid/fresh
+this must not directly write `active_deck`.
+
+OSC `/bridge/active_deck` and `/bridge/bridge_deck` enqueue legacy active-deck
+fallback events for non-mixer-authority operation. They do not update
+`rb_master_deck`; when mixer authority is enabled, invalid/stale fallback is
+resolver-mediated `rb_master_deck` fallback only. If direct master is unsupported,
+unreadable, sentinel, missing, or not warmed up, direct master stays inactive.
 
 `read_direct_master_status()` is diagnostic/status support. Runtime direct
-master authority is only the guarded B6 main `RBStateReader` path.
+master truth is only the guarded B6 main `RBStateReader` path.
 
 ## StateManager Event Handling
 
@@ -206,9 +225,11 @@ master authority is only the guarded B6 main `RBStateReader` path.
 
 | Event | Effect |
 | --- | --- |
-| `MASTER_CHANGED` | Switch active deck, reset lighting state, reset live/autoloop/smart-rearm state, start arm guard, mark master transition source. |
+| `MIXER_STATE` | Store immutable mixer snapshot and rerun active-deck resolver. |
+| `MASTER_CHANGED` | With mixer authority enabled and `source='rb_state'`, update `rb_master_deck` and rerun resolver. With mixer authority disabled, request legacy active-deck fallback. Other mixer-enabled sources are ignored and rerun the resolver. |
+| `LEGACY_ACTIVE_DECK` | Request legacy active-deck fallback only when mixer authority is disabled; ignored when mixer authority is enabled. |
 | `TRACK_LOADED` | Clear deck metadata/scripted ID, increment `load_gen`, remember title and load trace, consume pending ANLZ path if present, start resolver work. |
-| `PLAY` / `PAUSE` | Set `DeckState.playing`; active pause clears resume-settle. |
+| `PLAY` / `PAUSE` | Set `DeckState.playing`; active pause clears resume-settle and reruns active-deck resolver when mixer authority is enabled. |
 | `ANLZ_PATH` | Store pending ANLZ path for the next matching `TRACK_LOADED`. |
 | `ANLZ_DATA` | If `load_gen` matches, store drop beat indices for Smart Drop/Phrase Anchor. |
 | `FILEPATH_RESOLVED` | Ignore stale generations; update full metadata; feed LiveBPM hint; run direct scripted match/clear if enabled. |
@@ -231,11 +252,15 @@ Startup does the following, in order:
 4. Create `PositionCache`, `LiveBPMService`, OS2L connection/output/mirror,
    injector, discovery, `StateManager`, validation runner, command reader, and
    status writer.
-5. Read Rekordbox version and run direct master startup seed if enabled.
-6. Call `StateManager.set_initial_state()` with the chosen active deck/source.
+5. Read Rekordbox version and run direct master startup seed if enabled; with
+   mixer authority enabled and no direct seed, choose idle `active_deck=0`.
+6. Call `StateManager.set_initial_state()` with the chosen active deck/source
+   and guarded `rb_master_deck` seed state.
 7. Attach `FilepathResolver`.
-8. If any direct B1/B3/B4/B6 flag is enabled, create `RBStateReader` with the
-    corresponding `authoritative_kinds`.
+8. If any direct B1/B3/B4/B6 flag is enabled, or named mixer authority offsets
+   exist for the selected Rekordbox version, create `RBStateReader` with the
+   corresponding `authoritative_kinds`. Mixer authority always adds
+   `MIXER_STATE`, `PLAY`, `PAUSE`, and `MASTER_CHANGED` support inputs.
 9. Start direct reader, memory reader, LiveBPMService, injector,
     StateManager thread, command reader, status writer, MTC reader, and OSC
     listener.
@@ -274,8 +299,10 @@ the settle window; MTC normally delivers a corrected anchor inside that window.
 
 ## Lighting State Machine
 
-Only the active/master bridge deck drives lighting. The non-master deck is
-tracked so it is ready when it becomes master.
+Only the resolved active/show bridge deck drives lighting. Rekordbox master is
+tracked separately as `rb_master_deck` for mixer tie/fallback behavior. Idle
+`active_deck=0` means no audible show deck and must not drive the previous deck,
+index `self._deck[0]`, or route SoundSwitch deck 0.
 
 Mode derivation on every push tick:
 
@@ -488,10 +515,12 @@ if not d.playing and not arm_guard and os.was_playing:
 itself; the lighting machine applies idle and sends the SoundSwitch clear.
 
 Auto-switch fallback also handles active idle + mirror playing when no explicit
-master event arrives. The stronger stopped+mirror-playing path requires both
-authoritative state and memory corroboration for the mirror deck. The
-active-idle path uses authoritative playing state only, for startup cases where
-memory may not yet be resolved.
+master event arrives only when mixer authority is not enabled. The stronger
+stopped+mirror-playing path requires both authoritative state and memory
+corroboration for the mirror deck. The active-idle path uses authoritative
+playing state only, for startup cases where memory may not yet be resolved.
+While mixer authority is enabled, playing-only mirror promotion is not an
+independent authority path; deck selection must go through the resolver.
 
 Resume detection waits `PLAY_SETTLE_MS=400` after `d.playing` becomes true before
 emitting beat/elapsed, preventing stale TC synthesis from producing an early
@@ -503,6 +532,12 @@ wrong position after pause.
 includes process state, `StateManager.snapshot()`, per-deck memory and live BPM,
 SoundSwitch connection status, validation result, runtime command status, and
 recent errors.
+
+State snapshots and heartbeat expose `active_deck`/`show_deck` separately from
+`rb_master_deck`. Heartbeat must not report `master = active_deck`; `master`
+means current valid Rekordbox master when present. Mixer authority status
+includes validity, age/timestamp, fallback reason, authority reason, and decoded
+Deck 1/2 upfader plus LOW/BASS raw/norm/label fields.
 
 `CommandReader` tails `/tmp/rb_ss_bridge_v2_commands.jsonl`. Supported commands:
 
@@ -529,7 +564,9 @@ Runtime logs are intentionally summary-centric. Important operator lines:
 
 - `[MAIN] running`: direct flags, live BPM, follow, Smart Rearm, scripted direct,
   OSC port, and log-control path.
-- `[MAIN] rsr-direct`: active direct `RBStateReader` event classes.
+- `[MAIN] rsr-direct`: active direct `RBStateReader` event classes, including
+  mixer-authority support inputs when enabled.
+- `[BEAT]`: show deck and separate `rb_master` plus status summary.
 - `[RBMASTER][DIRECT]`, `[MASTER-SEED]`: direct master status evidence.
 - `[ANLZ][DIRECT]`, `[TITLE][DIRECT]`, `[LIVEPOS][DIRECT]`: direct state-reader
   evidence when shadow/direct logging is enabled.
@@ -548,6 +585,8 @@ Update current validation notes after new live runs or decisions.
 | Unsupported Rekordbox version | Direct offset-table readers no-op or fail closed | Add offsets before promoting direct paths for that version. |
 | Direct reader attach/read failure | Direct readiness false | Direct path stays inactive. |
 | Direct master `0xFF` sentinel | No master event; direct master not ready | Direct master stays inactive. |
+| Missing/invalid/stale mixer authority | Active-deck resolver cannot compare fader/bass dominance | Status marks visible mixer fallback; use current valid/fresh `rb_master_deck` only, otherwise hold a still-playing current show deck or go idle without synthesizing Deck 1. |
+| Active deck resolves to 0 | No audible show deck | Clear idle runtime state; do not route deck 0, index deck 0, create MTC deck-0 anchors, or keep driving previous-deck output. |
 | Deck-2 position unresolved | `pos=no-snap`; timing from MTC/current elapsed | Retry discovery; MTC covers gap. |
 | RB restarts mid-show | Memory stale / old pointers invalid | `RB_RESTARTED` resets state and invalidates live BPM. |
 | MTC unavailable | Position fallback has no external timecode anchor | Warning logged; direct memory continues when available. |
@@ -572,5 +611,15 @@ Update current validation notes after new live runs or decisions.
   unresolved, or unavailable.
 - Do not hardcode absolute memory addresses across Rekordbox restarts. Offset
   tables are version-specific; discovered heap addresses are session-local.
-- Runtime direct master authority is only the guarded B6 main `RBStateReader`
+- Runtime Rekordbox master truth is only the guarded B6 main `RBStateReader`
   path.
+- Do not let legacy OSC active-deck input, playing-only mirror detection, or
+  `_do_resume()` directly rewrite `active_deck` while mixer authority is enabled;
+  invalid/stale mixer fallback must go through `rb_master_deck`.
+- Do not let CFX FILTER, Decks 3/4, crossfader, trim/gain, mute, mid/high EQ,
+  FX, or real audio loudness affect active-deck authority.
+- Do not document resolver thresholds, tolerances, stale windows, or stability
+  timing as reverse-engineered facts.
+- Do not add blocking I/O, process-memory sampling, filesystem scans, network
+  calls, MIDI/serial/DMX calls, sleeps, subprocesses, or status-provider calls
+  to the 200 Hz push loop for active-deck authority.

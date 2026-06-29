@@ -45,6 +45,7 @@ from .rb_state_reader import (
     direct_master_label,
     read_direct_master_status,
 )
+from .rb_offsets import RBOffsetVersion, load_offsets_for_version
 from .scripted_tracks import resolve_filepaths
 from .ss_library_scanner import start_ss_library_scan
 from .state_manager import (
@@ -727,9 +728,11 @@ def start_osc_listener(
                     return
             except Exception:
                 pass
-        bridge_deck = ((deck - 1) % 2) + 1 if deck > 0 else 1
+        if deck <= 0:
+            return
+        bridge_deck = ((deck - 1) % 2) + 1
         event_queue.put_nowait(BridgeEvent(
-            kind=Ev.MASTER_CHANGED, deck=bridge_deck, source="osc",
+            kind=Ev.LEGACY_ACTIVE_DECK, deck=bridge_deck, source="osc",
         ))
 
     def _track_loaded(address, *args):
@@ -746,6 +749,9 @@ def start_osc_listener(
         # because track-loaded events carry explicit deck info while this OSC message does not.
         # Falls back to active deck if no TRACK_LOADED has been seen yet (startup edge case).
         target = state_manager.get_last_loaded_deck() or state_manager.get_active_deck()
+        if target not in (1, 2):
+            log.info("[MAIN][SHADOW] scripted-osc ignored  deck=%s  reason=no_active_deck", target)
+            return
         if track_id >= 2:
             # Auto-populate new scripted track from DB if not yet registered
             from .scripted_tracks import SCRIPTED_TRACKS
@@ -857,6 +863,50 @@ def _direct_master_startup_seed(rb_version: str, fallback_deck: int = 1) -> tupl
     log.info("[MASTER-SEED] direct=%s fallback=%s using=direct",
              direct_master_label(first.bridge_deck), direct_master_label(fallback_deck))
     return int(first.bridge_deck), "direct master seed"
+
+
+def _offsets_have_mixer_authority(offsets: Optional[RBOffsetVersion]) -> bool:
+    if offsets is None:
+        return False
+    return all((
+        offsets.mixer_deck1_upfader_raw is not None,
+        offsets.mixer_deck2_upfader_raw is not None,
+        offsets.mixer_deck1_low_raw is not None,
+        offsets.mixer_deck2_low_raw is not None,
+    ))
+
+
+def _rb_state_authoritative_kinds(
+    *,
+    anlz_direct: bool,
+    play_direct: bool,
+    track_load_direct: bool,
+    master_direct: bool,
+    mixer_authority: bool,
+) -> set[str]:
+    kinds: set[str] = set()
+    if anlz_direct:
+        kinds.add(Ev.ANLZ_PATH)
+    if play_direct or mixer_authority:
+        kinds.update({Ev.PLAY, Ev.PAUSE})
+    if track_load_direct:
+        kinds.add(Ev.TRACK_LOADED)
+    if master_direct or mixer_authority:
+        kinds.add(Ev.MASTER_CHANGED)
+    if mixer_authority:
+        kinds.add(Ev.MIXER_STATE)
+    return kinds
+
+
+def _initial_show_deck_for_startup(
+    initial_active_deck: int,
+    initial_active_source: str,
+    *,
+    mixer_authority: bool,
+) -> tuple[int, bool]:
+    rb_master_valid = initial_active_source == "direct master seed"
+    show_deck = 0 if mixer_authority and not rb_master_valid else initial_active_deck
+    return show_deck, rb_master_valid
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -1022,6 +1072,12 @@ def main() -> None:
     play_direct = os.environ.get(PLAY_DIRECT_ENV) == "1"
     track_load_direct = os.environ.get(TRACK_LOAD_DIRECT_ENV) == "1"
     master_direct = os.environ.get(MASTER_DIRECT_ENV) == "1"
+    rb_version_for_direct_master = read_rekordbox_version()
+    mixer_authority = _offsets_have_mixer_authority(
+        load_offsets_for_version(rb_version_for_direct_master)
+        if rb_version_for_direct_master
+        else None
+    )
     if track_load_direct and not anlz_direct:
         log.warning("[MAIN] rsr-config  track-load-direct requires anlz-direct; ignoring")
         track_load_direct = False
@@ -1066,6 +1122,7 @@ def main() -> None:
         led_scene_adapter=led_scene_adapter,
         led_color_engine=led_bundle.led_color_engine,
         soundswitch_pack_runtime=soundswitch_pack_runtime,
+        mixer_authority_enabled=mixer_authority,
     )
     _sm_holder["sm"] = sm
     if led_bundle.realtime_runner is not None:
@@ -1329,16 +1386,24 @@ def main() -> None:
     )
 
     # Initialize master deck from guarded direct read when available, otherwise deck 1.
-    rb_version_for_direct_master = read_rekordbox_version()
     initial_active_deck, initial_active_source = _direct_master_startup_seed(
         rb_version_for_direct_master,
         1,
     )
-    sm.set_initial_state(initial_active_deck, source=initial_active_source)
+    initial_show_deck, initial_rb_master_valid = _initial_show_deck_for_startup(
+        initial_active_deck,
+        initial_active_source,
+        mixer_authority=mixer_authority,
+    )
+    sm.set_initial_state(
+        initial_show_deck,
+        source=initial_active_source,
+        rb_master_valid=initial_rb_master_valid,
+    )
     log.info("[MASTER-INIT] version=%s seed_source=%s deck=%d",
              rb_version_for_direct_master or "unknown",
              initial_active_source.replace(" ", "_"),
-             initial_active_deck)
+             initial_show_deck)
 
     # Filepath resolver (triggered by TRACK_LOADED, pushes FILEPATH_RESOLVED)
     resolver = FilepathResolver(event_queue, pos_cache)
@@ -1393,21 +1458,19 @@ def main() -> None:
         with master_direct_ready_lock:
             return master_direct_ready_flag
 
-    if anlz_direct or play_direct or track_load_direct or master_direct:
-        rb_version = read_rekordbox_version()
+    if anlz_direct or play_direct or track_load_direct or master_direct or mixer_authority:
+        rb_version = rb_version_for_direct_master
         if not rb_version:
             log.warning("[MAIN] rsr-skip  reason=version-lookup-failed")
         else:
             rb_event_queue = queue.Queue(maxsize=1)
-            authoritative_kinds = set()
-            if anlz_direct:
-                authoritative_kinds.add(Ev.ANLZ_PATH)
-            if play_direct:
-                authoritative_kinds.update({Ev.PLAY, Ev.PAUSE})
-            if track_load_direct:
-                authoritative_kinds.add(Ev.TRACK_LOADED)
-            if master_direct:
-                authoritative_kinds.add(Ev.MASTER_CHANGED)
+            authoritative_kinds = _rb_state_authoritative_kinds(
+                anlz_direct=anlz_direct,
+                play_direct=play_direct,
+                track_load_direct=track_load_direct,
+                master_direct=master_direct,
+                mixer_authority=mixer_authority,
+            )
             rb_state_reader = make_rb_state_reader(
                 rb_event_queue,
                 rb_version,
@@ -1417,11 +1480,15 @@ def main() -> None:
                 shadow_logs_enabled=False,
                 position_cache=pos_cache,
                 anlz_available_callback=_set_anlz_direct_ready if anlz_direct else None,
-                transport_available_callback=_set_play_direct_ready if play_direct else None,
+                transport_available_callback=(
+                    _set_play_direct_ready if play_direct or mixer_authority else None
+                ),
                 track_load_available_callback=(
                     _set_track_load_direct_ready if track_load_direct else None
                 ),
-                master_available_callback=_set_master_direct_ready if master_direct else None,
+                master_available_callback=(
+                    _set_master_direct_ready if master_direct or mixer_authority else None
+                ),
             )
             if getattr(rb_state_reader, "_offs", None) is None:
                 log.warning("[MAIN] rsr-skip  reason=unsupported-version  version=%s", rb_version)
@@ -1436,6 +1503,8 @@ def main() -> None:
                     active_flags.append("track-load")
                 if master_direct:
                     active_flags.append("master")
+                if mixer_authority:
+                    active_flags.append("mixer")
                 log.info("[MAIN] rsr-direct  flags=%s", "+".join(active_flags))
 
     # Memory reader (with drift detection + FM-11 RB_RESTARTED events)
@@ -1481,6 +1550,8 @@ def main() -> None:
         direct_flags.append("track-load")
     if master_direct:
         direct_flags.append("master")
+    if mixer_authority:
+        direct_flags.append("mixer")
     log.info(
         "[MAIN] running  state=on  active_deck=%d  seed=%s  rb_version=%s"
         "  rsr=%s  direct=%s  live_bpm=%s  follow=%s"

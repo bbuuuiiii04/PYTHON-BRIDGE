@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from types import MappingProxyType
+from typing import Any, Mapping, Optional
 
 
 @dataclass
@@ -112,6 +113,37 @@ class PositionSnapshot:
         return self.age_s() > threshold_s
 
 
+@dataclass(frozen=True)
+class MixerDeckReading:
+    deck: int
+    upfader_raw: float
+    upfader_norm: float
+    upfader_label: str
+    low_raw: float
+    low_norm: float
+    low_label: str
+
+
+@dataclass(frozen=True)
+class MixerAuthoritySnapshot:
+    valid: bool
+    deck: Mapping[int, MixerDeckReading]
+    updated_at: float
+    reason: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "deck", MappingProxyType(dict(self.deck)))
+
+
+@dataclass(frozen=True)
+class RBMasterState:
+    deck: Optional[int]
+    valid: bool
+    source: str
+    updated_at: float
+    fallback_reason: str = ""
+
+
 @dataclass
 class BridgeEvent:
     """Immutable typed event; produced by any source, consumed by StateManager."""
@@ -126,6 +158,15 @@ class BridgeEvent:
 class OutputState:
     """Mutable push-loop state. Owned exclusively by the push-loop closure."""
     active_deck: int = 1
+    rb_master_deck: Optional[int] = None
+    rb_master_deck_valid: bool = False
+    rb_master_deck_source: str = "unknown"
+    rb_master_deck_updated_at: float = 0.0
+    rb_master_fallback_reason: str = "unknown"
+    active_deck_authority_reason: str = "startup"
+    mixer_authority_valid: bool = False
+    mixer_authority_updated_at: float = 0.0
+    mixer_fallback_reason: str = "missing_offsets"
     was_playing: bool = False
     last_beat_elapsed_ms: int = 0
     last_sent_elapsed_ms: int = 0
@@ -194,7 +235,9 @@ class ArmSequence:
 # ── Event kind constants ──────────────────────────────────────────────────────
 
 class Ev:
+    MIXER_STATE       = "mixer_state"       # global, payload={snapshot: MixerAuthoritySnapshot}
     MASTER_CHANGED    = "master_changed"    # deck = new master (1 or 2)
+    LEGACY_ACTIVE_DECK = "legacy_active_deck" # deck = OSC/debug fallback active-deck request
     TRACK_LOADED      = "track_loaded"      # deck, payload={title: str, load_gen: int}
     PLAY              = "play"              # deck
     PAUSE             = "pause"             # deck

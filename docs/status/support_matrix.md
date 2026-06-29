@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 27a078b
-last_verified_date: 2026-06-28
+last_verified_commit: 7c16fd5
+last_verified_date: 2026-06-29
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
 
@@ -16,7 +16,7 @@ This matrix is deliberately conservative. If evidence is missing, the answer is 
 | Version | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | My current local version | local-setup-operational | operator-local knowledge, not yet captured as repo validation | Exact version must be recorded. |
-| Rekordbox 7.2.11 | code-referenced; local mixer RE-proven for Deck 1/2 upfader and LOW/BASS chains | `rb_memory.py` comments reference `get-task-allow` confirmation; `docs/research/rekordbox_mixer_active_deck_re_evidence.md` records static plus passive process-memory proof | This is not broad 7.x support, and mixer active-deck authority is not implemented yet. |
+| Rekordbox 7.2.11 | code-referenced; local mixer RE-proven for Deck 1/2 upfader and LOW/BASS chains; mixer active-deck authority software-tested | `rb_memory.py` comments reference `get-task-allow` confirmation; `docs/research/rekordbox_mixer_active_deck_re_evidence.md` records static plus passive process-memory proof; unit/integration tests cover the new resolver/reader/status paths | This is not broad 7.x support, and it is not live or hardware validation. Named mixer offsets are accepted only when all required labels are present; unknown/anonymous lines fail closed for authority. |
 | Other Rekordbox 7.x | unknown | no matrix evidence | Offset validation required. |
 | Rekordbox 6.x | unknown | app path fallback exists, but support is not proven | Do not claim support. |
 | Future versions | unknown/unsupported until validated | none | Offsets may break. |

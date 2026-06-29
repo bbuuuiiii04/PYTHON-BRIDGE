@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout at `3918603` on 2026-06-28.
+Audited against the current checkout at `7c16fd5` plus current worktree changes on 2026-06-29.
 
 ## SoundSwitch Pack Component Boundary
 
@@ -95,12 +95,36 @@ Audited against the current checkout at `3918603` on 2026-06-28.
 - A direct flag alone must not mark a direct path ready.
 - Direct authority is active only when the matching direct readiness condition is
   currently true.
-- Direct master startup seed must use two stable valid reads or fall back to the
-  default startup deck.
+- Direct master startup seed must use two stable valid reads. Without that proof,
+  mixer-authority-enabled startup must begin with idle `active_deck=0` rather
+  than treating Deck 1 as Rekordbox master truth; non-mixer legacy startup may
+  still use the old default deck.
 - Direct runtime master must ignore the no-master sentinel and remain not-ready
   until the byte maps to a valid Rekordbox deck.
 - Direct track load requires direct ANLZ to be enabled so ANLZ-before-load
   ordering remains intact.
+- When named Deck 1/2 mixer authority offsets exist for the selected Rekordbox
+  version, mixer active-deck authority is default-on without a runtime feature
+  flag. Startup must route `MIXER_STATE`, `PLAY`, `PAUSE`, and direct
+  `MASTER_CHANGED` through `RBStateReader` even if old direct flags are off.
+- While mixer authority is valid/fresh, `MASTER_CHANGED` updates
+  `rb_master_deck` only and must not directly write `active_deck`.
+- Legacy OSC active-deck input must not rewrite `rb_master_deck` and must not
+  bypass mixer authority; when mixer authority is enabled, invalid/stale fallback
+  is resolver-mediated `rb_master_deck` fallback only.
+- Playing-only mirror auto-switch and resume-time empty-deck correction must not
+  act as independent active-deck authority while mixer authority is enabled.
+- `active_deck` is the show-driving audible deck. `rb_master_deck` is separate
+  Rekordbox master state for tie and invalid-mixer fallback only.
+- `active_deck=0` means idle/no audible deck. The push loop must not index
+  `self._deck[0]`, call `SoundSwitchEngine.deck_route(0)`, create MTC deck-0
+  anchors, or keep driving stale previous-deck output.
+- The 200 Hz StateManager push loop must not gain Rekordbox reads, filesystem
+  scans, process-memory sampling, subprocesses, sleeps, network calls,
+  MIDI/serial/DMX calls, status-provider calls, or other blocking I/O for
+  active-deck authority.
+- Resolver thresholds, tolerances, stale windows, and stability timing are
+  implementation policy and must not be documented as RE-proven facts.
 
 ## Ordering
 
@@ -124,7 +148,8 @@ Audited against the current checkout at `3918603` on 2026-06-28.
 
 ## Output
 
-- Only the active bridge deck drives lighting decisions.
+- Only the resolved active bridge/show deck drives lighting decisions. Idle
+  `active_deck=0` drives idle/no-output-safe behavior, not the previous deck.
 - SoundSwitch/OS2L fanout for autoloop arm/clear/BPM, scripted Phase 0/1,
   smart-transition clears, and live BPM follow is emitted through
   `SoundSwitchEngine.deck_route(...)` and `SoundSwitchEngine.send_*` helpers.

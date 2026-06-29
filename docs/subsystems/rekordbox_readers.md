@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 27a078b
-last_verified_date: 2026-06-28
+last_verified_commit: 7c16fd5
+last_verified_date: 2026-06-29
 validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-output unvalidated
 ---
 
@@ -16,9 +16,13 @@ Status:
 
 Purpose:
 - Read Rekordbox runtime state, position, track/load data, ANLZ paths, and displayed BPM through guarded local readers.
-- Future mixer active-deck reader work should start from
-  `docs/research/rekordbox_mixer_active_deck_re_evidence.md` and
-  `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md`.
+- Read named Deck 1/2 mixer upfader and LOW/BASS chains for software-tested
+  active-deck authority when the selected Rekordbox offset version exposes all
+  required mixer labels.
+- Mixer RE evidence and implementation boundaries live in
+  `docs/research/rekordbox_mixer_active_deck_re_evidence.md`,
+  `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md`, and
+  `docs/architecture/active_deck_authority.md`.
 
 Authoritative code:
 - `rb_memory.py`
@@ -33,12 +37,15 @@ Key symbols:
 - `PositionCache`
 - `RBStateReader`
 - `LiveBPMService`
+- `MixerAuthoritySnapshot`
+- `MixerDeckReading`
 - offset-table constants and probes
 
 Runtime flow:
 - inputs: Rekordbox process memory, offset tables, discovery probes, local file/path hints
 - decisions: readiness, freshness, valid chains, fallback behavior
-- outputs: `BridgeEvent`s, `PositionSnapshot`s, live BPM status
+- outputs: `BridgeEvent`s, `PositionSnapshot`s, live BPM status, mixer authority
+  snapshots
 
 Config:
 - `config.py`
@@ -60,5 +67,11 @@ Known risks:
 - stale offsets
 - false readiness
 - treating one working local version as support for all versions
-- treating the proven local 7.2.11 upfader/LOW chains as implemented runtime
-  authority before reader, resolver, status, and fallback work exists
+- treating the software-tested local 7.2.11 mixer-authority code path as
+  hardware/live validation
+- accidentally accepting anonymous/unknown offset lines as mixer authority
+- using the live-BPM `_follow_float()` helper for mixer values; valid mixer
+  endpoints include `0.0`, `255.0`, and `1023.0`, so mixer reads use finite
+  range-checked f32 reads instead
+- letting Decks 3/4, CFX FILTER, mid/high EQ, crossfader, gain/trim, mute, FX,
+  or real audio loudness become active-deck authority inputs

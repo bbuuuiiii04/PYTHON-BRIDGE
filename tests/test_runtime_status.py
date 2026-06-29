@@ -480,6 +480,11 @@ class RuntimeStatusWriterTests(unittest.TestCase):
         writer = self._make_writer(
             sm_snapshot={
                 "active_deck": 2,
+                "rb_master_deck": 1,
+                "rb_master_deck_valid": True,
+                "active_deck_authority_reason": "bass_dominance",
+                "mixer_authority_valid": True,
+                "mixer_fallback_reason": "",
                 "deck": {"1": {}, "2": {"bpm": 126.25}},
                 "smart_phrasing": {"phrase_label": "chorus"},
             },
@@ -509,7 +514,13 @@ class RuntimeStatusWriterTests(unittest.TestCase):
             snap["heartbeat"],
             {
                 "deck": 2,
-                "master": 2,
+                "show_deck": 2,
+                "master": 1,
+                "rb_master_deck": 1,
+                "rb_master_deck_valid": True,
+                "active_deck_authority_reason": "bass_dominance",
+                "mixer_authority_valid": True,
+                "mixer_fallback_reason": "",
                 "bpm": "126.2",
                 "bpm_source": "deck",
                 "phrase": "chorus",
@@ -524,6 +535,8 @@ class RuntimeStatusWriterTests(unittest.TestCase):
         writer = self._make_writer(
             sm_snapshot={
                 "active_deck": 1,
+                "rb_master_deck": 2,
+                "rb_master_deck_valid": True,
                 "deck": {"1": {"bpm": 128.0}, "2": {}},
                 "smart_phrasing": {"phrase_label": "up"},
             },
@@ -545,11 +558,35 @@ class RuntimeStatusWriterTests(unittest.TestCase):
             writer.snapshot()
 
         line = "\n".join(captured.output)
-        self.assertIn("[BEAT] deck=1 master=1 bpm=128.0", line)
+        self.assertIn("[BEAT] deck=1 rb_master=2 bpm=128.0", line)
         self.assertIn("phrase=up", line)
         self.assertIn("laser=house_up", line)
         self.assertIn("led=rt_twinkle", line)
         self.assertIn("palette=blue_green", line)
+
+    def test_status_writer_heartbeat_safe_for_idle_show_deck(self) -> None:
+        writer = self._make_writer(
+            sm_snapshot={
+                "active_deck": 0,
+                "rb_master_deck": None,
+                "rb_master_deck_valid": False,
+                "active_deck_authority_reason": "idle_no_audible",
+                "mixer_authority_valid": True,
+                "mixer_fallback_reason": "",
+                "deck": {"1": {"bpm": 128.0}, "2": {"bpm": 130.0}},
+                "smart_phrasing": {"phrase_label": "unknown"},
+            },
+            laser_status={"available": False, "enabled": False, "reason": "not_configured"},
+            led_status={"available": False, "enabled": False, "reason": "not_configured"},
+            color_status={},
+        )
+
+        snap = writer.snapshot()
+
+        self.assertEqual(snap["heartbeat"]["deck"], 0)
+        self.assertIsNone(snap["heartbeat"]["master"])
+        self.assertEqual(snap["heartbeat"]["bpm"], "unknown")
+        self.assertEqual(snap["heartbeat"]["active_deck_authority_reason"], "idle_no_audible")
 
     def test_status_writer_suppresses_immediate_beat_heartbeat_repeat(self) -> None:
         writer = self._make_writer(

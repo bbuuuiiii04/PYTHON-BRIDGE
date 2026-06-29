@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: c14bff1
-last_verified_date: 2026-06-28
+last_verified_commit: 7c16fd5
+last_verified_date: 2026-06-29
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
 
@@ -35,7 +35,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/architecture/current_architecture.md` | CURRENT AUTHORITATIVE — compact system overview. |
 | `docs/architecture/runtime_invariants.md` | CURRENT AUTHORITATIVE — invariants from code/tests. |
 | `docs/architecture/bridge_design.md` | CURRENT AUTHORITATIVE — detailed design anchor. |
-| `docs/architecture/active_deck_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative target behavior for fader/bass active-deck authority; implementation pending. |
+| `docs/architecture/active_deck_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative behavior for fader/bass active-deck authority; software-tested implementation exists, live/hardware validation pending. |
 | `docs/architecture/laser_director_design.md` | CURRENT AUTHORITATIVE — Laser Director design. |
 | `docs/architecture/doc_index.md` | CURRENT AUTHORITATIVE — this index. |
 
@@ -89,8 +89,8 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/active/streamdeck_midi_bridge_integration_spec.md` | PLAN / SPEC (ACTIVE) | Stream Deck controller lifecycle plus Phase 2 generic layered static-look compositor. Phase 1 implemented; Phase 2 is implementation-ready but live restart/hardware smoke remain operator-gated. |
 | `docs/prompts/active/streamdeck_phase2_codex_implementation_prompt.md` | AGENT PROMPT (ACTIVE) | Codex implementation handoff for Phase 2 Part F. Software-only; no bridge restart or hardware action authority. |
 | `docs/plans/active/streamdeck_phase2_plan_review.md`, `docs/plans/active/streamdeck_phase2_codex_review_prompt.md` | REVIEW / AUDIT | Phase 2 review evidence and pre-implementation review prompt. Evidence only; current implementation instructions are in the spec and active prompt. |
-| `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md` | PLAN / SPEC (ACTIVE) | Static Ghidra plus passive process-memory RE handoff for fader/bass active-deck authority. Validate against `docs/architecture/active_deck_authority.md` and `docs/research/rekordbox_mixer_active_deck_re_evidence.md` before implementation. |
-| `docs/prompts/active/rekordbox_mixer_active_deck_re_continuation_prompt.md` | AGENT PROMPT (ACTIVE) | Continuation prompt for remaining static/passive-live Rekordbox mixer RE gaps; no runtime implementation or live sampling without current-turn operator approval. |
+| `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md` | PLAN / SPEC (ACTIVE) | Static Ghidra plus passive process-memory RE handoff that now has a software-tested runtime implementation. Validate any follow-up against `docs/architecture/active_deck_authority.md` and `docs/research/rekordbox_mixer_active_deck_re_evidence.md`; live/hardware actions remain separately gated. |
+| `docs/prompts/active/rekordbox_mixer_active_deck_re_continuation_prompt.md` | AGENT PROMPT (SUPERSEDED CONTEXT) | Historical implementation prompt for the active-deck authority runtime path. Current code/docs supersede its pre-implementation code-truth section; no live sampling or hardware action is authorized by the prompt. |
 | `docs/prompts/reviews/rekordbox_mixer_active_deck_re_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Adversarial review handoff for the Rekordbox mixer RE process and implementation spec. Review-only. |
 | `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material RW-1 through RW-5, hardware-procedure, T7/T8 specs/proofs, and the old progress ledger. Historical evidence only. |
 | `docs/plans/led_agent_orchestrator_workflow.md`, `led_look_director_integration_plan_revised.md`, `phase9_personality_resolver_plan.md` | PLAN / SPEC (ACTIVE) | Validate line refs before implementation. |

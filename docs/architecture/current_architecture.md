@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against the current checkout at `3918603` on 2026-06-28. Treat code as the source of
+Audited against the current checkout at `7c16fd5` plus current worktree changes on 2026-06-29. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -62,6 +62,7 @@ Current native Autoloop pack output remains software-zero.
 | Subsystem | Authority status | Hot path | Thread ownership | Inputs | Outputs |
 | --- | --- | --- | --- | --- | --- |
 | `StateManager` | live authority after source selection | yes | owns `DeckState`, most `OutputState`, lighting state | `BridgeEvent`s, `PositionCache`, `LiveBPMService` | OS2L sends, copied snapshots |
+| `active_deck_resolver.py` | pure show-deck authority policy when mixer authority is enabled | yes | stateless pure function plus caller-owned stability state | Deck 1/2 playing state, decoded upfader/LOW, `rb_master_deck`, validity/freshness | `ActiveDeckDecision`; no I/O |
 | `RBStateReader` | guarded live authority for ANLZ, play/pause, track load, runtime master when enabled and ready | yes | `rb-state-reader` thread | Rekordbox offset-table chains | authoritative events and readiness callbacks |
 | `RBMemoryReader` | live position authority when direct chain or validated memory snapshot is fresh; fallback scanner retained | yes | memory reader thread writes `PositionCache` | Rekordbox memory, offset tables, vmmap | `PositionSnapshot`s, `RB_RESTARTED` |
 | `MTCReader` | position fallback only | yes | MTC thread | IAC Bus 1 MTC | `TC_UPDATE` |
@@ -88,13 +89,24 @@ selection happens before events reach it:
 
 - `__main__.py` builds `RBStateReader.authoritative_kinds` from enabled direct
   flags.
+- When the selected Rekordbox offset version has all named Deck 1/2 mixer
+  authority fields, mixer authority is default-on even if the old direct
+  ANLZ/play/track-load/master flags are disabled. The same `RBStateReader` is
+  reused when other direct paths are also enabled.
 - `RBStateReader` reports per-signal readiness.
-- OSC `/bridge/active_deck` is bypassed only while direct master is currently
-  ready.
+- OSC `/bridge/active_deck` is a legacy active-deck fallback event only for
+  non-mixer-authority operation. It does not update `rb_master_deck`; when mixer
+  authority is enabled, invalid/stale fallback is resolver-mediated
+  `rb_master_deck` fallback only.
+- With mixer authority enabled, `active_deck` is the resolved show deck and may
+  be `0` for idle/no audible deck. Rekordbox direct master is retained
+  separately as `rb_master_deck` for tie and invalid-mixer fallback cases.
 
 This is fail-closed. Unsupported versions, attach failures, unreadable chains,
 sentinels, stale data, and unwarmed transport inference leave the corresponding
 direct path inactive while MTC/current state fallbacks continue where available.
+Invalid or stale mixer authority is visible in status and falls back only to a
+current valid/fresh Rekordbox direct master; it does not synthesize Deck 1.
 
 ## Signal Flow
 
@@ -103,12 +115,17 @@ direct path inactive while MTC/current state fallbacks continue where available.
    resolver, live BPM service, status/command helpers, `StateManager`, optional
    `RBStateReader`, `RBMemoryReader`, `MTCReader`, and OSC listener.
 2. Startup master is seeded from direct master only when
-   `RBSS_MASTER_SEED_DIRECT=1` and two direct reads are stable and valid;
-   otherwise deck 1 is the default startup deck.
+   `RBSS_MASTER_SEED_DIRECT=1` and two direct reads are stable and valid. With
+   mixer authority enabled and no direct seed, startup begins idle
+   (`active_deck=0`) rather than treating Deck 1 as proven Rekordbox master
+   truth. Non-mixer legacy startup can still use the default deck.
 3. MTC can publish `TC_UPDATE` as an active-deck position fallback.
-4. Direct ANLZ, track-load, play/pause, and master events flow from
-   `RBStateReader` only when configured as authoritative.
-5. `StateManager` resolves tracks, selects scripted or autoloop lighting, and
+4. Direct ANLZ, track-load, play/pause, master, and mixer-state events flow from
+   `RBStateReader` only when configured as authoritative. Mixer-authority
+   startup always routes `PLAY`, `PAUSE`, `MASTER_CHANGED`, and `MIXER_STATE`
+   so resolver support inputs are not dropped by old direct-flag settings.
+5. `StateManager` resolves tracks, separates show deck from `rb_master_deck`,
+   selects scripted or autoloop lighting from the resolved show deck, and
    sends mirrored OS2L updates to active, mirror, 3, and 4 through
    `SoundSwitchEngine`.
 6. When a verified pack runtime is explicitly active, the pack driver submits
@@ -176,11 +193,12 @@ Supporting LED operator docs:
 | --- | --- |
 | B1 ANLZ | Direct when path is readable for the deck. |
 | B2 Position | Direct versioned position chain when valid; ObjC scan and MTC remain fallbacks. |
-| C1 Startup master seed | Direct only after two stable valid reads; otherwise deck 1 default startup. |
+| C1 Startup master seed | Direct only after two stable valid reads; otherwise mixer-enabled startup begins idle and non-mixer legacy startup uses the old default deck. |
 | B3 Play/pause | Direct movement-derived events after warmup/evidence. |
 | B4 Track load | Direct full-title load only when direct ANLZ is enabled and title memory is readable. |
 | B5 Scripted routing | Direct from `FILEPATH_RESOLVED` by SSID, show-file SSID, or unique filepath. |
-| B6 Runtime master | Direct `MASTER_CHANGED` when direct master byte is readable and valid; OSC remains a bridge control input. |
+| B6 Runtime Rekordbox master | Direct `MASTER_CHANGED` when direct master byte is readable and valid; with mixer authority enabled this updates `rb_master_deck`, not `active_deck`. |
+| Mixer active-deck authority | Default-on when named Deck 1/2 mixer offsets exist for the selected version; software-tested for local Rekordbox 7.2.11 chains, hardware/live unvalidated. |
 | Live BPM | Direct offset-table BPM when fresh and valid; discovery and metadata fallback remain. |
 
 ## Documentation Map

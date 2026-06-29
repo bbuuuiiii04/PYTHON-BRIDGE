@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 3918603
-last_verified_date: 2026-06-28
+last_verified_commit: 7c16fd5
+last_verified_date: 2026-06-29
 validation_scope: software-only
 ---
 
@@ -24,10 +24,15 @@ SoundSwitch pack-player boundary:
 - RW-5 status is StateManager-owned copied state: one fresh dict is published from the already-rendered frame, and readers receive only a copy. `software_zero_frame` and the attempted frame counter are software intent, not physical output proof.
 - The main 200 Hz loop catches ordinary drain/tick/snapshot exceptions, submits at most one direct pack ZERO frame for the failed iteration, logs a bounded counter, preserves the normal tick throttle, skips only that instant, and continues. It does not double-submit ZERO when `_push_tick()` already handled an inner tick failure, does not catch process-control exceptions, and does not force-zero separate OS2L/laser-MIDI/LED lanes.
 - Sender health, T7d Autoloop phase, and hardware validation remain open. Current Autoloop pack output remains software-zero.
+- Mixer active-deck authority is now StateManager-owned through the pure
+  `active_deck_resolver.py` helper. `active_deck` is the resolved show deck and
+  may be `0` for idle/no audible deck; `rb_master_deck` is retained separately
+  for resolver tie/fallback behavior and status.
 
 Authoritative code:
 - `__main__.py`
 - `state_manager.py`
+- `active_deck_resolver.py`
 - `models.py`
 - `config.py`
 - `runtime_status.py`
@@ -35,6 +40,8 @@ Authoritative code:
 Key symbols:
 - `main`
 - `StateManager`
+- `resolve_active_deck`
+- `ActiveDeckDecision`
 - `DeckState`
 - `OutputState`
 - `BridgeEvent`
@@ -42,10 +49,16 @@ Key symbols:
 
 Runtime flow:
 - inputs: Rekordbox reader events, MTC fallback, runtime command events, position snapshots, config bundles
-- decisions: active deck state, phrase/role state, lighting dispatch timing
+- decisions: resolved show deck, Rekordbox master state, phrase/role state, lighting dispatch timing
 - outputs: OS2L sends, laser decisions, LED decisions, copied status snapshots
 - scripted-track LED automation is still StateManager-gated: `safety.scripted_mode_automation` must be true, `lighting_mode` must be `scripted`, and the smart-phrasing role is remapped through the latched LED `scripted_mode` policy before dispatch
 - laser drop-lifecycle state is reset alongside existing lifecycle teardown on master change, active track load, full stop, and resume; director-only resets also run on scripted and idle lighting transitions
+- while mixer authority is enabled, legacy OSC active-deck events, playing-only
+  mirror detection, and `_do_resume()` empty-deck correction cannot directly
+  rewrite `active_deck`; invalid/stale mixer fallback is resolver-mediated
+  `rb_master_deck` fallback only
+- idle/no-audible `active_deck=0` clears runtime state and must not call
+  `deck_route(0)` or index `self._deck[0]`
 
 Config:
 - `config.py`
@@ -65,5 +78,6 @@ Change contract:
 Known risks:
 - blocking the hot path
 - creating competing state writers
+- reintroducing an old active-deck authority bypass around the resolver
 - treating fallback readers as always authoritative
 - documenting local setup as broad support

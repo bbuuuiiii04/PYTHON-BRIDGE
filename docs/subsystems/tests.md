@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 3918603
-last_verified_date: 2026-06-28
+last_verified_commit: 7c16fd5
+last_verified_date: 2026-06-29
 validation_scope: software-only
 ---
 
@@ -31,7 +31,15 @@ Coverage expectations:
 - Core/state changes need state manager or integration tests.
 - Runtime command changes need parser/handler tests.
 - Runtime status heartbeat changes need `tests/test_runtime_status.py` coverage for payload shape,
-  log formatting, throttling seam, StateManager-published color status, and fail-soft provider behavior.
+  log formatting, throttling seam, show-deck versus Rekordbox-master separation,
+  StateManager-published color status, and fail-soft provider behavior.
+- Rekordbox mixer active-deck authority changes need `tests/test_rb_offsets.py`,
+  `tests/test_rb_state_reader.py`, `tests/test_active_deck_resolver.py`,
+  `tests/test_state_manager_active_deck_authority.py`,
+  `tests/test_main_mixer_authority_wiring.py`, and `tests/test_runtime_status.py`
+  coverage for offset fail-closed behavior, finite mixer reads, resolver policy,
+  StateManager bypass gates, default-on startup wiring, heartbeat/status
+  separation, and deck-0 idle safety.
 - Logging visibility changes need `tests/test_bridge_fmt_rate.py` for spam-control primitives and
   `tests/test_logging_diag_coverage.py` for diagnostic coverage and the live-watch preset.
 - Config schema changes need validation tests.

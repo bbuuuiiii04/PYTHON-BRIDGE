@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 3918603
-last_verified_date: 2026-06-28
+last_verified_commit: 7c16fd5
+last_verified_date: 2026-06-29
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -29,7 +29,7 @@ python -m pytest tests
 | Core bridge | state manager, models, smart phrasing, integration tests | verifies software behavior only |
 | Runtime commands | parser/handler/status writer tests | needed before command changes |
 | Logging visibility | bridge formatting/rate helpers and logging diagnostic coverage tests | verifies software-only log filtering and spam-control behavior |
-| Rekordbox readers | reader, offset, live BPM tests | cannot prove all app versions |
+| Rekordbox readers | reader, offset, live BPM, active-deck resolver, StateManager authority, startup wiring, runtime status tests | cannot prove all app versions or hardware-visible behavior |
 | SoundSwitch | OS2L/output helpers; project/pack/player/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/T7d tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status is software intent and tests do not prove physical fixtures |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety |
 | LED/Govee | LED config/director/color/realtime/renderer tests | cannot prove device compatibility |
@@ -70,6 +70,34 @@ injected hardware seams. They do not prove Enttec/fixture behavior.
 
 Hardware behavior still needs manual validation logs.
 
+## Rekordbox Mixer Active-Deck Authority
+
+The active-deck authority implementation is covered by focused software tests:
+
+- `tests/test_rb_offsets.py` covers named optional mixer offset parsing, exact
+  labels, duplicate/malformed/partial required label fail-closed behavior, and
+  unknown/anonymous trailing line rejection for authority.
+- `tests/test_rb_state_reader.py` covers finite range-checked mixer f32 reads,
+  valid endpoints, invalid/unreadable values, immutable mixer snapshots, and
+  default resolver-support event emission.
+- `tests/test_active_deck_resolver.py` covers fader eligibility, top-fader
+  dominance, LOW/BASS dominance and tie cases, rb-master tie/fallback,
+  invalid/stale mixer fallback, recovery, no-audible idle behavior, and
+  stability/no-flicker policy.
+- `tests/test_state_manager_active_deck_authority.py` covers StateManager
+  integration, `rb_master_deck` separation, MASTER/OSC/mirror/resume bypass
+  gates, invalid-to-valid recovery, immutable snapshot ownership, and deck-0
+  idle safety.
+- `tests/test_main_mixer_authority_wiring.py` covers startup default-on mixer
+  authority and required `RBStateReader.authoritative_kinds` when old direct
+  flags are disabled.
+- `tests/test_runtime_status.py` covers show-deck versus Rekordbox-master
+  heartbeat/status separation and mixer authority visibility.
+
+This is software validation only. It does not validate live Rekordbox behavior,
+loaded-track play/stop survival, SoundSwitch, laser, LED/Govee, DMX, MIDI,
+Enttec, or hardware-visible output.
+
 ## M2.5 LED slot-color workstream test files
 
 | File | Covers | Added in |
@@ -89,10 +117,10 @@ All M2.5 slot cue and strategy tests: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALID
 ## Runtime Status Heartbeat
 
 `tests/test_runtime_status.py` covers the status JSON `heartbeat` payload, the throttled `[BEAT]`
-log line and immediate repeat suppression, StateManager-published color-engine status, fail-soft
-provider behavior, and throttling for repeated provider-failure warnings. This is software-only
-observability coverage and does not validate SoundSwitch, laser, LED, Govee, or Rekordbox hardware
-behavior.
+log line and immediate repeat suppression, show-deck versus Rekordbox-master separation,
+StateManager-published color-engine status, fail-soft provider behavior, and throttling for
+repeated provider-failure warnings. This is software-only observability coverage and does not
+validate SoundSwitch, laser, LED, Govee, or Rekordbox hardware behavior.
 
 ## Logging Visibility
 

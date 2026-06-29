@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: cb31cf8
-last_verified_date: 2026-06-25
+last_verified_commit: 7c16fd5
+last_verified_date: 2026-06-29
 validation_scope: software-only
 ---
 
@@ -58,7 +58,9 @@ Key symbols:
 Runtime flow:
 - `StatusWriter` periodically writes `/tmp/rb_ss_bridge_v2_status.json`.
 - Each status snapshot includes a compact `heartbeat` block, and `StatusWriter` logs one throttled
-  `[BEAT]` line with deck/master, BPM, phrase, laser scene, LED look, color palette, and RGB health.
+  `[BEAT]` line with show deck, separate Rekordbox master deck, BPM, phrase, laser scene, LED look,
+  color palette, and RGB health. Heartbeat/status must not report `master = active_deck`; `master`
+  is present only when a current valid `rb_master_deck` exists.
   This reads existing status/snapshot provider surfaces from the status thread; it does not run in
   the 200 Hz StateManager push loop.
 - Optional status provider failures are fail-soft. The status JSON falls back to unavailable/provider
@@ -93,7 +95,7 @@ Detailed command table:
 Tests:
 - inspect `tests/` for runtime command parser/handler coverage
 - `tests/test_runtime_status.py` covers the heartbeat payload, throttled log line, and fail-soft
-  color-engine provider handling.
+  color-engine provider handling, including show-deck versus Rekordbox-master separation.
 - run `python -m unittest discover tests`
 - run `python tools/check_docs_drift.py` after command changes
 

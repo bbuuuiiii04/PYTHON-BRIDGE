@@ -59,6 +59,10 @@ def _make_offsets() -> RBOffsetVersion:
         live_pos_per_deck=tuple(chain(0x2000, 0x10 * d, 0x30, 0x108) for d in range(4)),
         track_info_per_deck=tuple(chain(0x3000, 0x10 * d, 0x40, 0x0) for d in range(4)),
         anlz_path_per_deck=tuple(chain(0x4000, 0x10 * d, 0x200) for d in range(4)),
+        mixer_deck1_upfader_raw=chain(0x5000, 0x0, 0x30),
+        mixer_deck2_upfader_raw=chain(0x5008, 0x0, 0x30),
+        mixer_deck1_low_raw=chain(0x5010, 0x0, 0x38),
+        mixer_deck2_low_raw=chain(0x5018, 0x0, 0x38),
     )
 
 
@@ -107,6 +111,39 @@ class TickEventTests(unittest.TestCase):
         for p in self._patches:
             p.stop()
 
+    def _install_valid_mixer(
+        self,
+        *,
+        d1_up: float = 1023.0,
+        d2_up: float = 0.0,
+        d1_low: float = 127.5,
+        d2_low: float = 127.5,
+    ) -> None:
+        assert self.offs.mixer_deck1_upfader_raw is not None
+        assert self.offs.mixer_deck2_upfader_raw is not None
+        assert self.offs.mixer_deck1_low_raw is not None
+        assert self.offs.mixer_deck2_low_raw is not None
+        self.mem.install_chain(
+            self.base,
+            self.offs.mixer_deck1_upfader_raw,
+            payload=struct.pack("<f", d1_up),
+        )
+        self.mem.install_chain(
+            self.base,
+            self.offs.mixer_deck2_upfader_raw,
+            payload=struct.pack("<f", d2_up),
+        )
+        self.mem.install_chain(
+            self.base,
+            self.offs.mixer_deck1_low_raw,
+            payload=struct.pack("<f", d1_low),
+        )
+        self.mem.install_chain(
+            self.base,
+            self.offs.mixer_deck2_low_raw,
+            payload=struct.pack("<f", d2_low),
+        )
+
     # ── master deck ─────────────────────────────────────────────────────────
     def test_master_byte_2_emits_master_changed_for_deck_C(self) -> None:
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x02")
@@ -153,6 +190,26 @@ class TickEventTests(unittest.TestCase):
         self.assertEqual(ev.kind, Ev.MASTER_CHANGED)
         self.assertEqual(ev.deck, 2)
         self.assertEqual(ev.source, "rb_state")
+        self.assertEqual(ev.payload["rb_raw_deck"], 1)
+
+    def test_mixer_authority_suppresses_raw_deck_c_master(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.MASTER_CHANGED, Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self._install_valid_mixer()
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\x02")
+
+        reader._tick(0xCAFE, self.base)
+
+        self.assertFalse(any(e.kind == Ev.MASTER_CHANGED for e in _drain(auth_q)))
 
     def test_master_availability_callback_fires_true_on_valid_master(self) -> None:
         states: list[bool] = []
@@ -390,6 +447,118 @@ class TickEventTests(unittest.TestCase):
             if e.kind in (Ev.PLAY, Ev.PAUSE)
         ]
         self.assertEqual(transitions, [(Ev.PLAY, 1)])
+
+    def test_mixer_authority_suppresses_raw_deck_c_play_pause_support(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.PLAY, Ev.PAUSE, Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self._install_valid_mixer()
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.live_pos_per_deck[2],
+            payload=(1000).to_bytes(8, "little"),
+        )
+        for pos in (1000, 1000, 1000, 1000, 1000, 2000, 3000, 4000):
+            self.mem.update_leaf(endpoint, pos.to_bytes(8, "little"))
+            reader._tick(0xCAFE, self.base)
+
+        events = [e for e in _drain(auth_q) if e.kind in (Ev.PLAY, Ev.PAUSE)]
+        self.assertEqual(events, [])
+
+    def test_mixer_snapshot_accepts_endpoint_values_and_refreshes_time(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        now = 10.0
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+            clock=lambda: now,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        self._install_valid_mixer(d1_up=0.0, d2_up=1023.0, d1_low=255.0, d2_low=0.0)
+
+        reader._tick(0xCAFE, self.base)
+        first = [e for e in _drain(auth_q) if e.kind == Ev.MIXER_STATE][0].payload["snapshot"]
+        now = 11.0
+        reader._tick(0xCAFE, self.base)
+        second = [e for e in _drain(auth_q) if e.kind == Ev.MIXER_STATE][0].payload["snapshot"]
+
+        self.assertTrue(first.valid)
+        self.assertEqual(first.deck[1].upfader_label, "down")
+        self.assertEqual(first.deck[2].upfader_label, "top")
+        self.assertEqual(first.deck[1].low_label, "high")
+        self.assertEqual(first.deck[2].low_label, "low")
+        self.assertEqual(second.updated_at, 11.0)
+
+    def test_mixer_snapshot_invalid_on_partial_unreadable_or_non_finite(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        self._install_valid_mixer()
+        assert self.offs.mixer_deck2_low_raw is not None
+        self.mem.install_chain(
+            self.base,
+            self.offs.mixer_deck2_low_raw,
+            payload=struct.pack("<f", float("inf")),
+        )
+
+        reader._tick(0xCAFE, self.base)
+
+        snapshot = [e for e in _drain(auth_q) if e.kind == Ev.MIXER_STATE][0].payload["snapshot"]
+        self.assertFalse(snapshot.valid)
+        self.assertEqual(dict(snapshot.deck), {})
+
+    def test_mixer_snapshot_invalid_on_nan_or_out_of_range(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        assert self.offs.mixer_deck1_upfader_raw is not None
+
+        for bad_value in (float("nan"), 1023.1):
+            self._install_valid_mixer()
+            self.mem.install_chain(
+                self.base,
+                self.offs.mixer_deck1_upfader_raw,
+                payload=struct.pack("<f", bad_value),
+            )
+            reader._tick(0xCAFE, self.base)
+            snapshot = [
+                e for e in _drain(auth_q) if e.kind == Ev.MIXER_STATE
+            ][0].payload["snapshot"]
+            self.assertFalse(snapshot.valid)
+            self.assertEqual(dict(snapshot.deck), {})
 
     # ── chain failure ───────────────────────────────────────────────────────
     def test_unknown_chain_address_does_not_raise(self) -> None:

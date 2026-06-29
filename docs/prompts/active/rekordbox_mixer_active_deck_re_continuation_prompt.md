@@ -1,12 +1,19 @@
 ---
-doc_status: active-implementation-prompt
-truth_level: static-and-passive-live-re-closed-handoff
-last_verified_commit: a82cf16
+doc_status: superseded-implementation-prompt
+truth_level: historical-static-and-passive-live-re-closed-handoff
+last_verified_commit: 7c16fd5
 last_verified_date: 2026-06-29
-validation_scope: handoff after Rekordbox 7.2.11 local RE closure for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER param0/param1, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; implementation-precision review findings folded into active spec/prompt; runtime implementation and hardware output unvalidated
+validation_scope: historical handoff after Rekordbox 7.2.11 local RE closure; runtime implementation now exists in current worktree and remains software-tested only; hardware output unvalidated
 ---
 
 # Codex Task - Implement Rekordbox Mixer Active-Deck Authority
+
+Superseded status: this prompt records the implementation handoff that produced
+the current software-tested runtime path. Do not treat the "Current Code Truth"
+section below as current after `7c16fd5` plus the active-deck authority
+worktree. For current behavior, use `docs/architecture/active_deck_authority.md`,
+`docs/architecture/current_architecture.md`, `docs/architecture/runtime_invariants.md`,
+and executable code.
 
 You are continuing `/Users/bbui/rb_ss_bridge_v2` from a completed local
 Rekordbox 7.2.11 mixer RE pass. This handoff is for implementation and
@@ -37,7 +44,7 @@ hardware unless explicitly approved in the current turn.
 
 Use executable code over docs when they conflict.
 
-## Current Code Truth
+## Pre-Implementation Code Truth
 
 - Runtime code still treats Rekordbox master and playing-only mirror switching
   as active-deck authority.

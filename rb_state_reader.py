@@ -32,6 +32,7 @@ Mapping is A/C → 1, B/D → 2.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import queue
 import re
@@ -42,7 +43,8 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from .config import MEM_POLL_HZ, RB_SCALE
-from .models import BridgeEvent, Ev
+from .active_deck_resolver import label_low, label_upfader
+from .models import BridgeEvent, Ev, MixerAuthoritySnapshot, MixerDeckReading
 from .rb_memory import (
     PositionCache,
     _base_from_vmmap,
@@ -123,6 +125,7 @@ class RBStateReader(threading.Thread):
         self._q = event_queue
         self._authoritative_q = authoritative_queue
         self._authoritative_kinds = frozenset(authoritative_kinds or ())
+        self._mixer_authority_enabled = Ev.MIXER_STATE in self._authoritative_kinds
         self._drop_unrouted_events = drop_unrouted_events
         self._shadow_logs_enabled = shadow_logs_enabled
         self._offs = offsets
@@ -244,12 +247,16 @@ class RBStateReader(threading.Thread):
             self._master_readable_this_tick = True
         if master_raw is not None and master_raw != self._last_master:
             self._last_master = master_raw
-            if 0 <= master_raw < offs.deck_count:
+            if 0 <= master_raw < offs.deck_count and self._raw_deck_supports_resolver(master_raw):
                 self._enqueue(BridgeEvent(
                     kind=Ev.MASTER_CHANGED,
                     deck=_bridge_deck(master_raw),
+                    payload={"rb_raw_deck": master_raw},
                     source='rb_state',
                 ))
+
+        if self._mixer_authority_enabled:
+            self._tick_mixer(task, base)
 
         for d in range(offs.deck_count):
             self._tick_deck(task, base, d)
@@ -315,6 +322,8 @@ class RBStateReader(threading.Thread):
                 ))
 
         # Play / pause inference: position field movement between polls.
+        if self._mixer_authority_enabled and not self._raw_deck_supports_resolver(d):
+            return
         pos = self._follow_i64(task, base, offs.live_pos_per_deck[d])
         if pos is None:
             self._reset_play_inference(d)
@@ -374,6 +383,7 @@ class RBStateReader(threading.Thread):
                 self._enqueue(BridgeEvent(
                     kind=Ev.PLAY,
                     deck=bridge,
+                    payload={"rb_raw_deck": d},
                     source='rb_state',
                 ))
             return
@@ -382,8 +392,73 @@ class RBStateReader(threading.Thread):
             self._enqueue(BridgeEvent(
                 kind=Ev.PLAY if is_playing else Ev.PAUSE,
                 deck=bridge,
+                payload={"rb_raw_deck": d},
                 source='rb_state',
             ))
+
+    def _raw_deck_supports_resolver(self, rb_idx: int) -> bool:
+        return not self._mixer_authority_enabled or rb_idx in (0, 1)
+
+    def _tick_mixer(self, task: int, base: int) -> None:
+        offs = self._offs
+        assert offs is not None
+        now = self._clock()
+        chains = (
+            offs.mixer_deck1_upfader_raw,
+            offs.mixer_deck2_upfader_raw,
+            offs.mixer_deck1_low_raw,
+            offs.mixer_deck2_low_raw,
+        )
+        if any(ch is None for ch in chains):
+            snapshot = MixerAuthoritySnapshot(
+                valid=False,
+                deck={},
+                updated_at=now,
+                reason="missing_offsets",
+            )
+            self._enqueue(BridgeEvent(Ev.MIXER_STATE, 0, {"snapshot": snapshot}, "rb_state"))
+            return
+
+        d1_up = self._follow_finite_f32(task, base, chains[0], minimum=0.0, maximum=1023.0)
+        d2_up = self._follow_finite_f32(task, base, chains[1], minimum=0.0, maximum=1023.0)
+        d1_low = self._follow_finite_f32(task, base, chains[2], minimum=0.0, maximum=255.0)
+        d2_low = self._follow_finite_f32(task, base, chains[3], minimum=0.0, maximum=255.0)
+        values = (d1_up, d2_up, d1_low, d2_low)
+        if any(v is None for v in values):
+            snapshot = MixerAuthoritySnapshot(
+                valid=False,
+                deck={},
+                updated_at=now,
+                reason="unreadable",
+            )
+            self._enqueue(BridgeEvent(Ev.MIXER_STATE, 0, {"snapshot": snapshot}, "rb_state"))
+            return
+
+        assert d1_up is not None and d2_up is not None and d1_low is not None and d2_low is not None
+        deck = {
+            1: self._mixer_reading(1, d1_up, d1_low),
+            2: self._mixer_reading(2, d2_up, d2_low),
+        }
+        snapshot = MixerAuthoritySnapshot(
+            valid=True,
+            deck=deck,
+            updated_at=now,
+            reason="ok",
+        )
+        self._enqueue(BridgeEvent(Ev.MIXER_STATE, 0, {"snapshot": snapshot}, "rb_state"))
+
+    def _mixer_reading(self, deck: int, up_raw: float, low_raw: float) -> MixerDeckReading:
+        up_norm = up_raw / 1023.0
+        low_norm = low_raw / 255.0
+        return MixerDeckReading(
+            deck=deck,
+            upfader_raw=up_raw,
+            upfader_norm=up_norm,
+            upfader_label=label_upfader(up_norm),
+            low_raw=low_raw,
+            low_norm=low_norm,
+            low_label=label_low(low_norm),
+        )
 
     def _reset_play_inference(self, d: int) -> None:
         self._last_pos_samples.pop(d, None)
@@ -421,7 +496,8 @@ class RBStateReader(threading.Thread):
             self._set_all_transport_unavailable()
             return
         ready_decks: set[int] = set()
-        for d in range(offs.deck_count):
+        raw_range = range(2) if self._mixer_authority_enabled else range(offs.deck_count)
+        for d in raw_range:
             bridge = _bridge_deck(d)
             if bridge in self._transport_readable_this_tick and d in self._last_playing:
                 ready_decks.add(bridge)
@@ -473,6 +549,7 @@ class RBStateReader(threading.Thread):
             and self._master_readable_this_tick
             and self._last_master is not None
             and 0 <= self._last_master < offs.deck_count
+            and self._raw_deck_supports_resolver(self._last_master)
         )
         self._set_master_available(ready)
 
@@ -540,6 +617,29 @@ class RBStateReader(threading.Thread):
         if not (0.0 < v < 1000.0):
             return None
         return v
+
+    def _follow_finite_f32(
+        self,
+        task: int,
+        base: int,
+        ch: ChainEntry,
+        *,
+        minimum: float,
+        maximum: float,
+    ) -> Optional[float]:
+        addr = self._follow_addr(task, base, ch)
+        if addr is None:
+            return None
+        try:
+            data = _read_bytes(task, addr, 4)
+        except OSError:
+            return None
+        value = struct.unpack_from("<f", data)[0]
+        if not math.isfinite(value):
+            return None
+        if not (minimum <= value <= maximum):
+            return None
+        return value
 
     def _follow_i64(self, task: int, base: int, ch: ChainEntry) -> Optional[int]:
         addr = self._follow_addr(task, base, ch)

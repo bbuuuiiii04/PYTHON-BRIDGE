@@ -48,6 +48,13 @@ from .beat_math import (
     _compute_beatgrid_position,
     _beatgrid_elapsed_for_abs_beat,
 )
+from .active_deck_resolver import (
+    MIXER_STALE_AFTER_S,
+    ActiveDeckDecision,
+    ResolverDeckInput,
+    ResolverState,
+    resolve_active_deck,
+)
 from .smart_phrasing import (
     build_phrase_segments_from_markers,
     select_smart_drops,
@@ -55,8 +62,8 @@ from .smart_phrasing import (
     find_restore_beat,
 )
 from .models import (
-    ArmSequence, BridgeEvent, DeckState, Ev, OutputState, PositionSnapshot,
-    SmartDropEnergyShadow, TrackMetadata,
+    ArmSequence, BridgeEvent, DeckState, Ev, MixerAuthoritySnapshot, OutputState,
+    PositionSnapshot, SmartDropEnergyShadow, TrackMetadata,
 )
 from .led_models import BeatAnchor, LEDContext
 from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS, MAX_SLOTS
@@ -358,6 +365,7 @@ class StateManager:
         os2l_connected_provider=None,
         recorder: Optional[SessionRecorder] = None,
         soundswitch_pack_runtime=None,
+        mixer_authority_enabled: bool = False,
     ) -> None:
         self._eq    = event_queue
         self._cache = position_cache
@@ -529,6 +537,7 @@ class StateManager:
         )
         self._wide_window_enable = _os.environ.get(WIDE_WINDOW_ENV, "1") != "0"
         self._stop  = threading.Event()
+        self._mixer_authority_enabled = bool(mixer_authority_enabled)
 
         # Per-deck state (written only by this thread after start())
         self._deck: dict[int, DeckState] = {
@@ -537,6 +546,13 @@ class StateManager:
         }
         # Push-loop bookkeeping
         self._os = OutputState()
+        self._mixer_snapshot = MixerAuthoritySnapshot(
+            valid=False,
+            deck={},
+            updated_at=0.0,
+            reason="missing_offsets",
+        )
+        self._active_deck_resolver_state = ResolverState()
 
         # Arm debounce: (track_id, deck) → last arm time
         self._arm_times: dict[tuple, float] = {}
@@ -641,11 +657,27 @@ class StateManager:
             callback(self._apply_personality_change)
         self._recache_initial_personality_timing()
 
-    def set_initial_state(self, active_deck: int, source: str = "default startup") -> None:
+    def set_initial_state(
+        self,
+        active_deck: int,
+        source: str = "default startup",
+        *,
+        rb_master_valid: bool = False,
+    ) -> None:
         """Apply startup active-deck state before the event loop starts."""
-        if active_deck in (1, 2):
-            self._os.active_deck = active_deck
-            log.info("[SM] init  deck=%d  src=%s", active_deck, source)
+        if active_deck not in (0, 1, 2):
+            return
+        self._os.active_deck = active_deck
+        self._os.active_deck_authority_reason = (
+            "startup_idle" if active_deck == 0 else "startup_fallback"
+        )
+        if rb_master_valid and active_deck in (1, 2):
+            self._os.rb_master_deck = active_deck
+            self._os.rb_master_deck_valid = True
+            self._os.rb_master_deck_source = source
+            self._os.rb_master_deck_updated_at = time.monotonic()
+            self._os.rb_master_fallback_reason = ""
+        log.info("[SM] init  deck=%d  src=%s", active_deck, source)
 
     def start(self) -> threading.Thread:
         t = threading.Thread(target=self._run, name="state-manager", daemon=True)
@@ -1021,8 +1053,50 @@ class StateManager:
                 "soundswitch_id": state.meta.soundswitch_id,
                 "load_gen": state.load_gen,
             }
+        now = time.monotonic()
+        mixer_age = (
+            now - self._mixer_snapshot.updated_at
+            if self._mixer_snapshot.updated_at > 0.0
+            else None
+        )
+        mixer_decks = {
+            str(num): {
+                "upfader_raw": reading.upfader_raw,
+                "upfader_norm": reading.upfader_norm,
+                "upfader_label": reading.upfader_label,
+                "low_raw": reading.low_raw,
+                "low_norm": reading.low_norm,
+                "low_label": reading.low_label,
+            }
+            for num, reading in self._mixer_snapshot.deck.items()
+        }
+        rb_master_age = (
+            now - os.rb_master_deck_updated_at
+            if os.rb_master_deck_updated_at > 0.0
+            else None
+        )
         snapshot = {
             "active_deck": os.active_deck,
+            "show_deck": os.active_deck,
+            "rb_master_deck": os.rb_master_deck,
+            "rb_master_deck_valid": os.rb_master_deck_valid,
+            "rb_master_deck_source": os.rb_master_deck_source,
+            "rb_master_deck_updated_at": os.rb_master_deck_updated_at,
+            "rb_master_deck_age_s": rb_master_age,
+            "rb_master_fallback_reason": os.rb_master_fallback_reason,
+            "active_deck_authority_reason": os.active_deck_authority_reason,
+            "mixer_authority_valid": os.mixer_authority_valid,
+            "mixer_authority_updated_at": os.mixer_authority_updated_at,
+            "mixer_authority_age_s": mixer_age,
+            "mixer_fallback_reason": os.mixer_fallback_reason,
+            "mixer": {
+                "enabled": self._mixer_authority_enabled,
+                "valid": os.mixer_authority_valid,
+                "reason": self._mixer_snapshot.reason,
+                "updated_at": self._mixer_snapshot.updated_at,
+                "age_s": mixer_age,
+                "deck": mixer_decks,
+            },
             "lighting_mode": os.lighting_mode,
             "lighting_desired": os.lighting_desired,
             "was_playing": os.was_playing,
@@ -1170,28 +1244,71 @@ class StateManager:
         log.debug("event received kind=%s src=%s payload=%s", ev.kind, ev.source, payload)
         d = ev.deck
 
-        if ev.kind == Ev.MASTER_CHANGED:
-            self._on_master_changed(d, ev.source)
+        if ev.kind == Ev.MIXER_STATE:
+            snapshot = ev.payload.get("snapshot")
+            if isinstance(snapshot, MixerAuthoritySnapshot):
+                self._mixer_snapshot = snapshot
+                self._rerun_active_deck_resolver("mixer_state")
+
+        elif ev.kind == Ev.MASTER_CHANGED:
+            if self._mixer_authority_enabled and ev.source == "rb_state":
+                raw_deck = ev.payload.get("rb_raw_deck")
+                if raw_deck not in (0, 1):
+                    self._os.rb_master_deck_valid = False
+                    self._os.rb_master_fallback_reason = "unsupported_raw_deck"
+                    self._rerun_active_deck_resolver("rb_master_invalid")
+                    return
+                if d in (1, 2):
+                    self._os.rb_master_deck = d
+                    self._os.rb_master_deck_valid = True
+                    self._os.rb_master_deck_source = ev.source
+                    self._os.rb_master_deck_updated_at = time.monotonic()
+                    self._os.rb_master_fallback_reason = ""
+                else:
+                    self._os.rb_master_deck = None
+                    self._os.rb_master_deck_valid = False
+                    self._os.rb_master_fallback_reason = "invalid_deck"
+                self._rerun_active_deck_resolver("rb_master")
+            else:
+                self._request_legacy_active_deck(d, ev.source)
+
+        elif ev.kind == Ev.LEGACY_ACTIVE_DECK:
+            self._request_legacy_active_deck(d, ev.source)
 
         elif ev.kind == Ev.TRACK_LOADED:
+            if d not in (1, 2):
+                log.info("[SM] load-ignored  deck=%s  reason=invalid_deck", d)
+                return
             self._on_track_loaded(d, ev.payload.get("title", ""), ev)
 
         elif ev.kind == Ev.PLAY:
+            if d not in (1, 2):
+                return
             if not self._deck[d].playing:
                 log.info("[SM] play  deck=%d  src=%s", d, ev.source)
             self._deck[d].playing = True
+            self._rerun_active_deck_resolver("play")
 
         elif ev.kind == Ev.PAUSE:
+            if d not in (1, 2):
+                return
             if self._deck[d].playing:
                 log.info("[SM] pause  deck=%d  src=%s", d, ev.source)
             self._deck[d].playing = False
             if d == self._os.active_deck:
                 self._os.play_settle_after = 0.0
+            self._rerun_active_deck_resolver("pause")
 
         elif ev.kind == Ev.FILEPATH_RESOLVED:
+            if d not in (1, 2):
+                log.info("[SM] resolve-ignored  deck=%s  reason=invalid_deck", d)
+                return
             self._on_filepath_resolved(d, ev.payload)
 
         elif ev.kind == Ev.ANLZ_PATH:
+            if d not in (1, 2):
+                log.info("[SM] anlz-path-ignored  deck=%s  reason=invalid_deck", d)
+                return
             # Store ANLZ path; consumed by next TRACK_LOADED for this deck
             self._pending_anlz_path[ev.deck] = ev.payload.get('anlz_path', '')
 
@@ -1284,12 +1401,16 @@ class StateManager:
                               ev.deck, gen, d_obj.load_gen)
 
         elif ev.kind == Ev.TC_UPDATE:
+            if ev.deck not in (1, 2):
+                return
             tc_ms = ev.payload.get('elapsed_ms', 0)
             if tc_ms > 0:
                 pitch = ev.payload.get('pitch_factor', 1.0)
                 self._tc_anchor[ev.deck] = (tc_ms, ev.mono, pitch)
 
         elif ev.kind == Ev.BPM_UPDATE:
+            if d not in (1, 2):
+                return
             d = self._deck[ev.deck]
             new_bpm = ev.payload.get('bpm', 0.0)
             if self._live_bpm is not None and new_bpm > 0:
@@ -1302,6 +1423,9 @@ class StateManager:
                 d.meta.bpm = new_bpm
 
         elif ev.kind == Ev.SCRIPTED_ARM:
+            if d not in (1, 2):
+                log.info("[SM] scripted-arm-ignored  deck=%s  reason=invalid_deck", d)
+                return
             sid = ev.payload.get("scripted_id", 0)
             if sid:
                 d_obj = self._deck[d]
@@ -1314,6 +1438,9 @@ class StateManager:
                         self._os.lighting_mode = ""
 
         elif ev.kind == Ev.SCRIPTED_CLEAR:
+            if d not in (1, 2):
+                log.info("[SM] scripted-clear-ignored  deck=%s  reason=invalid_deck", d)
+                return
             self._arm_unscripted(d)
 
         elif ev.kind == Ev.RB_RESTARTED:
@@ -1323,13 +1450,15 @@ class StateManager:
             for d in self._deck.values():
                 d.playing = False
                 d.scripted_id = 0
-            if self._os.was_playing:
+            if self._os.was_playing and self._os.active_deck in (1, 2):
                 self._do_stop(self._os.active_deck, self._os.last_beat_elapsed_ms)
                 self._dispatch_led_idle_ambient(
                     active=self._os.active_deck,
                     d=self._deck[self._os.active_deck],
                     reason="rb_restart",
                 )
+            self._tc_anchor = {1: (0, 0.0, 1.0), 2: (0, 0.0, 1.0)}
+            self._rerun_active_deck_resolver("rb_restarted")
             self._os.was_playing = False
             self._os.not_playing_since = 0.0
             # Reset lighting state machine so it re-derives on next tick without debounce.
@@ -2605,14 +2734,107 @@ class StateManager:
         self._led_last_section_cycle = (section_id or marker, cycle)
         return f"{active}:{d.load_gen}:{role}:{marker}"
 
+    def _mixer_valid_fresh(self, now: float) -> bool:
+        if not self._mixer_authority_enabled:
+            return False
+        if not self._mixer_snapshot.valid or self._mixer_snapshot.updated_at <= 0.0:
+            return False
+        return (now - self._mixer_snapshot.updated_at) <= MIXER_STALE_AFTER_S
+
+    def _resolver_deck_inputs(self) -> dict[int, ResolverDeckInput]:
+        out: dict[int, ResolverDeckInput] = {}
+        for deck_num, reading in self._mixer_snapshot.deck.items():
+            if deck_num not in (1, 2):
+                continue
+            out[deck_num] = ResolverDeckInput(
+                playing=bool(self._deck[deck_num].playing),
+                upfader_raw=reading.upfader_raw,
+                upfader_norm=reading.upfader_norm,
+                upfader_label=reading.upfader_label,
+                low_raw=reading.low_raw,
+                low_norm=reading.low_norm,
+                low_label=reading.low_label,
+            )
+        if not out:
+            for deck_num in (1, 2):
+                out[deck_num] = ResolverDeckInput(
+                    playing=bool(self._deck[deck_num].playing),
+                    upfader_raw=0.0,
+                    upfader_norm=0.0,
+                    upfader_label="down",
+                    low_raw=127.5,
+                    low_norm=0.5,
+                    low_label="neutral",
+                )
+        return out
+
+    def _rerun_active_deck_resolver(self, source: str) -> None:
+        if not self._mixer_authority_enabled:
+            return
+        now = time.monotonic()
+        decision = resolve_active_deck(
+            current_active_deck=self._os.active_deck,
+            rb_master_deck=self._os.rb_master_deck,
+            rb_master_deck_valid=self._os.rb_master_deck_valid,
+            rb_master_deck_source=self._os.rb_master_deck_source,
+            rb_master_deck_updated_at=self._os.rb_master_deck_updated_at,
+            rb_master_fallback_reason=self._os.rb_master_fallback_reason,
+            deck=self._resolver_deck_inputs(),
+            mixer_valid=self._mixer_snapshot.valid,
+            mixer_updated_at=self._mixer_snapshot.updated_at,
+            mixer_reason=self._mixer_snapshot.reason,
+            state=self._active_deck_resolver_state,
+            now=now,
+        )
+        self._active_deck_resolver_state = decision.state
+        self._os.active_deck_authority_reason = decision.authority_reason
+        self._os.mixer_authority_valid = self._mixer_valid_fresh(now)
+        self._os.mixer_authority_updated_at = self._mixer_snapshot.updated_at
+        self._os.mixer_fallback_reason = decision.fallback_reason
+        if decision.active_deck != self._os.active_deck:
+            self._apply_resolved_active_deck(
+                decision.active_deck,
+                source=source,
+                reason=decision.authority_reason,
+            )
+
     # ── Deck switch ───────────────────────────────────────────────────────────
 
     def _on_master_changed(self, new_deck: int, source: str) -> None:
+        self._request_legacy_active_deck(new_deck, source)
+
+    def _request_legacy_active_deck(self, new_deck: int, source: str) -> None:
+        if new_deck not in (1, 2):
+            return
+        if self._mixer_authority_enabled:
+            self._rerun_active_deck_resolver("legacy_active_ignored")
+            return
+        self._apply_resolved_active_deck(
+            new_deck,
+            source=source,
+            reason="legacy_active_deck_fallback",
+        )
+
+    def _apply_resolved_active_deck(self, new_deck: int, *, source: str, reason: str) -> None:
         old_deck = self._os.active_deck
         if new_deck == old_deck:
             return
+        if new_deck not in (0, 1, 2):
+            return
         log.info("[SM] switch  %d→%d  src=%s", old_deck, new_deck, source)
-        LOG.stats.record_transition(new_deck, "master")
+        if new_deck in (1, 2):
+            LOG.stats.record_transition(new_deck, reason)
+        if old_deck in (1, 2) and new_deck in (1, 2):
+            self._apply_nonzero_active_deck_switch(old_deck, new_deck, source)
+            return
+        if new_deck == 0:
+            self._os.active_deck = 0
+            self._enter_idle_no_audible(reason=reason)
+            return
+        self._os.active_deck = new_deck
+        self._reset_for_active_deck_entry(new_deck, source)
+
+    def _apply_nonzero_active_deck_switch(self, old_deck: int, new_deck: int, source: str) -> None:
         # OSC race fix: /bridge/active_deck can arrive after /bridge/track_loaded,
         # so SCRIPTED_ARM may land on the old active deck. If old deck wasn't playing
         # and new deck has no scripted_id, transfer it.
@@ -2629,6 +2851,10 @@ class StateManager:
             new_d.scripted_id = old_d.scripted_id
             old_d.scripted_id = 0
         self._os.active_deck = new_deck
+        self._reset_for_active_deck_entry(new_deck, source)
+
+    def _reset_for_active_deck_entry(self, new_deck: int, source: str) -> None:
+        new_d = self._deck[new_deck]
         self._os.last_arm_mono = time.monotonic()
         self._os.push_reset_bpm = True
         # Force lighting re-evaluation for the new master on the next tick.
@@ -2667,8 +2893,39 @@ class StateManager:
             self._resolve_personality_for_deck(
                 new_deck,
                 new_d.meta,
-                trigger="master_changed",
+                trigger="active_deck_changed",
             )
+
+    def _enter_idle_no_audible(self, *, reason: str) -> None:
+        self._pending_arm = None
+        self._tc_anchor = {1: (0, 0.0, 1.0), 2: (0, 0.0, 1.0)}
+        self._os.was_playing = False
+        self._os.play_settle_after = 0.0
+        self._os.not_playing_since = 0.0
+        self._os.last_sent_bpm = 0.0
+        self._os.autoloop_arm_bpm = 0.0
+        self._os.autoloop_arm_deck = 0
+        self._os.last_autoloop_status_phrase_beat = 0
+        self._os.lighting_mode = "idle"
+        self._os.lighting_desired = "idle"
+        self._os.lighting_stable_since = 0.0
+        self._os.last_armed_filepath = ""
+        self._led_rt_permitted = False
+        self._led_rt_beat = None
+        self._led_last_auto_role_key = ""
+        self._led_last_idle_role_key = ""
+        self._led_smart_drop_blackout_key = ""
+        self._clear_led_drop_lifecycle()
+        self._clear_smart_rearm_state()
+        self._autoloop.clear_arm_phrase_lock()
+        self._autoloop.clear_live_bpm_follow()
+        self._autoloop.clear_tempo_relock()
+        self._autoloop.clear_tempo_anchor()
+        self._autoloop.clear_pending_master_phrase_arm()
+        if self._laser_executor is not None:
+            self._laser_executor.reset_runtime_state(reason=reason)
+        if self._laser_director is not None:
+            self._laser_director.reset_runtime_state(reason=reason)
 
     # ── Track load → lsof trigger ─────────────────────────────────────────────
 
@@ -3404,6 +3661,21 @@ class StateManager:
         transport = None
         try:
             active = self._os.active_deck
+            if active not in (1, 2):
+                player.clear_selection()
+                frame = player.render().frame
+                self._pack_frame_count += 1
+                self._publish_pack_status(
+                    runtime=rt,
+                    scripted_active=False,
+                    input_degraded=False,
+                    static_held=False,
+                    blackout=False,
+                    autoloop_phase_blocked=False,
+                    software_zero_frame=frame == _PACK_ZERO_FRAME,
+                )
+                backend.submit_frame(frame)
+                return
             d = self._deck[active]
             snap = self._cache.get(active)
 
@@ -3559,6 +3831,12 @@ class StateManager:
                 pass
 
     def _push_tick_inner(self) -> None:
+        self._rerun_active_deck_resolver("push_tick")
+        if self._os.active_deck not in (1, 2):
+            if self._os.was_playing or self._os.lighting_mode != "idle" or self._pending_arm is not None:
+                self._enter_idle_no_audible(reason="idle_no_audible")
+            return
+
         # FM-1: check two-phase arm timer before any other push logic
         self._check_pending_arm()
 
@@ -3621,7 +3899,7 @@ class StateManager:
             self._update_lighting(active, d, confident_playing, elapsed_ms, bpm, now)
             arm_guard = (now - os.last_arm_mono) < ARM_GUARD_S
             switch_requested = False
-            if not d.playing and not arm_guard:
+            if not self._mixer_authority_enabled and not d.playing and not arm_guard:
                 if self._deck[mirror].playing:
                     log.info("[SM] switch  %d→%d  src=auto  reason=idle+mirror-playing",
                              active, mirror)
@@ -3770,7 +4048,7 @@ class StateManager:
                          and self._deck[mirror].playing)
 
         if stop_confirmed and os.was_playing:
-            if other_playing and not arm_guard:
+            if other_playing and not arm_guard and not self._mixer_authority_enabled:
                 log.info("[SM] switch  %d→%d  src=auto  reason=stopped+mirror-playing",
                          active, mirror)
                 os.not_playing_since = 0.0
@@ -3798,7 +4076,10 @@ class StateManager:
         # Handles the case where RB auto-assigns master without an explicit
         # deck-change event.
         idle_switch_requested = False
-        if not os.was_playing and not d.playing and not arm_guard:
+        if (
+            not self._mixer_authority_enabled
+            and not os.was_playing and not d.playing and not arm_guard
+        ):
             if self._deck[mirror].playing:
                 log.info("[SM] switch  %d→%d  src=auto  reason=idle+mirror-playing",
                          active, mirror)
@@ -4400,6 +4681,8 @@ class StateManager:
     # ── Stop / resume helpers ─────────────────────────────────────────────────
 
     def _do_stop(self, deck: int, elapsed_ms: int) -> None:
+        if deck not in (1, 2):
+            return
         log.info("[SM] stop  deck=%d  elapsed=%s", deck, bf.elapsed(elapsed_ms))
         os = self._os
         self._deck[deck].playing  = False
@@ -4427,6 +4710,8 @@ class StateManager:
             self._laser_director.reset_runtime_state(reason="stop")
 
     def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
+        if deck not in (1, 2):
+            return
         mirror = 3 - deck
         d = self._deck[deck]
         m = self._deck[mirror]
@@ -4434,11 +4719,13 @@ class StateManager:
                  deck, bf.elapsed(elapsed_ms), bpm, bf.short(d.meta.filepath))
 
         # Deck mismatch correction: if active deck is empty but other has track, swap
-        if not d.meta.filepath and m.meta.filepath:
+        if not self._mixer_authority_enabled and not d.meta.filepath and m.meta.filepath:
             log.info("[SM] switch  %d→%d  src=auto  reason=empty-deck", deck, mirror)
             self._os.active_deck = mirror
             deck, mirror = mirror, deck
             d, m = m, d
+        elif self._mixer_authority_enabled and not d.meta.filepath and m.meta.filepath:
+            self._rerun_active_deck_resolver("resume_empty_deck")
 
         self._os.was_playing          = True
         self._os.last_sent_bpm        = 0.0

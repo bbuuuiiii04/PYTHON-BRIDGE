@@ -1,22 +1,24 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: a82cf16
+last_verified_commit: 7c16fd5
 last_verified_date: 2026-06-29
-validation_scope: behavior contract; implementation and hardware validation pending
+validation_scope: behavior contract plus software-tested implementation; live/hardware validation pending
 ---
 
 # Active Deck Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR
+Status: AUTHORITATIVE TARGET BEHAVIOR; SOFTWARE-TESTED IMPLEMENTATION IN CURRENT WORKTREE
 
 This document defines how the bridge is expected to choose `active_deck`.
-After the fader-dominance feature is implemented, behavior that differs from
-this document is a regression unless this document is intentionally updated.
+Behavior that differs from this document is a regression unless this document is
+intentionally updated.
 
-Current code does not yet implement this full contract. Current code still sets
-`OutputState.active_deck` from `MASTER_CHANGED` events and playing-only mirror
-auto-switch paths. That is the behavior this feature replaces.
+Current code implements this contract in software through `active_deck_resolver.py`,
+`StateManager`, `RBStateReader`, runtime status, and the Rekordbox 7.2.11 named
+mixer offset fields. This is not a live-output or hardware-validation claim.
+No bridge restart, live Rekordbox sampling, SoundSwitch, laser, LED/Govee, DMX,
+MIDI, Enttec, or physical-output validation is implied by this document.
 
 ## Meaning
 
@@ -50,6 +52,8 @@ primary show authority when mixer authority is valid.
 
 The behavior contract uses physical decoded labels, not raw memory numbers.
 Raw value mapping belongs to the Rekordbox reverse-engineering layer.
+Current resolver thresholds, tolerance values, stale windows, and stability time
+are implementation policy constants, not RE-proven facts.
 
 ## Authority Inputs
 
@@ -81,6 +85,10 @@ These must not affect active-deck authority in the first implementation:
 Mid/high EQ may be decoded for future visibility, but they do not decide
 `active_deck`. The filter knob may be decoded for the LED overlay follow-up, but
 it does not decide `active_deck`.
+
+Current implementation decodes Deck 1/2 upfader and LOW/BASS only for authority.
+CFX FILTER remains non-authority and is not part of the first runtime status
+surface.
 
 ## Eligibility
 
@@ -131,8 +139,9 @@ master-unavailable reason until a dominant candidate or valid master appears.
 
 Any `active_deck` change requires the candidate to remain stable first.
 
-The exact timing is unknown until Rekordbox mixer values are decoded and
-observed. The behavior contract must not invent numeric thresholds.
+The exact human-visible feel may need live tuning after operator-approved
+runtime observation. Numeric thresholds/tolerances in code are conservative
+implementation policy, not proof about Rekordbox internals.
 
 Rules:
 
@@ -165,7 +174,9 @@ OSC `/bridge/active_deck` and `/bridge/bridge_deck` are historical
 TimecodeLink-era inputs. They must not bypass the fader/EQ resolver.
 
 If retained, they are legacy/debug/fallback inputs only. They are not valid
-mixer authority.
+mixer authority. For mixer-authority-enabled versions, they must not select the
+show deck directly; invalid/stale mixer fallback goes through current valid/fresh
+`rb_master_deck` only.
 
 ## Old Mirror Auto-Switch
 
@@ -281,24 +292,26 @@ The implementation must include direct resolver coverage for these scenarios:
 8. Reason/status changes are emitted without per-tick log spam when cheap to
    test.
 
-## Current Code Mismatch To Replace
+## Implementation Notes
 
-[confirmed] Current `Ev.MASTER_CHANGED` goes directly to
-`StateManager._on_master_changed`, which writes `self._os.active_deck`.
+Current implementation facts:
 
-[confirmed] `RBStateReader` currently emits `Ev.MASTER_CHANGED` when the direct
-master byte changes.
+- `Ev.MASTER_CHANGED` from `RBStateReader` updates `rb_master_deck` while mixer
+  authority is enabled; it does not directly write `active_deck`.
+- OSC `/bridge/active_deck` and `/bridge/bridge_deck` enqueue
+  `Ev.LEGACY_ACTIVE_DECK`, which cannot rewrite `rb_master_deck` and cannot
+  select `active_deck` while mixer authority is enabled.
+- Playing-only mirror auto-switch and resume-time empty-deck correction are
+  suppressed as independent authority while mixer authority is enabled.
+- `active_deck=0` is an idle/no-audible state; push-loop output paths must not
+  call `deck_route(0)` or index `self._deck[0]`.
+- Runtime status and heartbeat expose show deck separately from
+  `rb_master_deck`; heartbeat must not report `master = active_deck`.
+- Invalid/stale mixer authority falls back visibly to current valid/fresh
+  Rekordbox direct master behavior and does not synthesize Deck 1.
 
-[confirmed] OSC `/bridge/active_deck` currently enqueues `Ev.MASTER_CHANGED`
-when direct master is not ready.
-
-[confirmed] Current push-loop paths can auto-promote the mirror deck using
-playing state alone.
-
-[confirmed] Current resume correction can also write `self._os.active_deck`
-directly when correcting an empty-deck mismatch.
-
-[confirmed] Current heartbeat reports `"master": active_deck`.
-
-These current behaviors are implementation targets for replacement or
-compatibility fallback under this contract.
+Historical behavior that wrote `active_deck` directly from direct master,
+playing-only mirror detection, resume correction, or heartbeat master mirroring
+is retained only as documented invalid-mixer `rb_master_deck` fallback or has
+been replaced by resolver-mediated behavior. Legacy OSC active-deck requests are
+retained only for non-mixer-authority fallback operation.

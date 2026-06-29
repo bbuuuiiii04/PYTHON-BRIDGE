@@ -105,6 +105,10 @@ _OFFSETS_MACOS_ARM64: str = """\
 04DD3570 18 2C8 120
 04DD3570 18 270 38 48 28 F0 4
 04E193C8 20 3F0
+MIXER_D1_UPFADER_RAW 04E16EE8 A8 458 0 2C8 0 470 30
+MIXER_D2_UPFADER_RAW 04E16EE8 A8 458 0 2C8 8 470 30
+MIXER_D1_LOW_RAW     04E16EE8 A8 458 0 2C8 0 460 30 38
+MIXER_D2_LOW_RAW     04E16EE8 A8 458 0 2C8 8 460 30 38
 
 
 7.2.10
@@ -173,6 +177,10 @@ class RBOffsetVersion:
     live_pos_per_deck:   tuple[ChainEntry, ...]
     track_info_per_deck: tuple[ChainEntry, ...]
     anlz_path_per_deck:  tuple[ChainEntry, ...]
+    mixer_deck1_upfader_raw: Optional[ChainEntry] = None
+    mixer_deck2_upfader_raw: Optional[ChainEntry] = None
+    mixer_deck1_low_raw: Optional[ChainEntry] = None
+    mixer_deck2_low_raw: Optional[ChainEntry] = None
 
 
 # ── Parser ───────────────────────────────────────────────────────────────────
@@ -183,6 +191,52 @@ def _parse_chain(line: str) -> ChainEntry:
     if len(nums) < 1:
         raise ValueError(f"empty chain line: {line!r}")
     return ChainEntry(hops=nums[:-1], final_off=nums[-1])
+
+
+_REQUIRED_MIXER_LABELS = (
+    "MIXER_D1_UPFADER_RAW",
+    "MIXER_D2_UPFADER_RAW",
+    "MIXER_D1_LOW_RAW",
+    "MIXER_D2_LOW_RAW",
+)
+
+
+def _parse_optional_mixer_lines(
+    version: str,
+    lines: list[str],
+) -> tuple[Optional[ChainEntry], Optional[ChainEntry], Optional[ChainEntry], Optional[ChainEntry]]:
+    parsed: dict[str, ChainEntry] = {}
+    bad_mixer = False
+    for line in lines:
+        parts = line.split(maxsplit=1)
+        label = parts[0] if parts else ""
+        if label in _REQUIRED_MIXER_LABELS:
+            if label in parsed:
+                log.warning("offsets: duplicate mixer label %s in version %s", label, version)
+                bad_mixer = True
+                continue
+            if len(parts) != 2:
+                log.warning("offsets: malformed mixer label %s in version %s", label, version)
+                bad_mixer = True
+                continue
+            try:
+                parsed[label] = _parse_chain(parts[1])
+            except ValueError:
+                log.warning("offsets: malformed mixer chain %s in version %s", label, version)
+                bad_mixer = True
+            continue
+
+        try:
+            _parse_chain(line)
+        except ValueError:
+            log.warning("offsets: ignoring unknown optional label %s in version %s", label, version)
+        else:
+            log.warning("offsets: ignoring anonymous trailing chain in version %s", version)
+
+    if bad_mixer or (parsed and set(parsed) != set(_REQUIRED_MIXER_LABELS)):
+        log.warning("offsets: mixer authority disabled for version %s", version)
+        return (None, None, None, None)
+    return tuple(parsed.get(label) for label in _REQUIRED_MIXER_LABELS)  # type: ignore[return-value]
 
 
 def parse_offsets(text: str, *, deck_count: int = 4) -> dict[str, RBOffsetVersion]:
@@ -222,6 +276,7 @@ def parse_offsets(text: str, *, deck_count: int = 4) -> dict[str, RBOffsetVersio
         livep  = tuple(per_deck[4 * d + 1] for d in range(deck_count))
         tinfo  = tuple(per_deck[4 * d + 2] for d in range(deck_count))
         anlz   = tuple(per_deck[4 * d + 3] for d in range(deck_count))
+        mixer = _parse_optional_mixer_lines(version, block[1 + expected_lines:])
         out[version] = RBOffsetVersion(
             version=version,
             deck_count=deck_count,
@@ -230,6 +285,10 @@ def parse_offsets(text: str, *, deck_count: int = 4) -> dict[str, RBOffsetVersio
             live_pos_per_deck=livep,
             track_info_per_deck=tinfo,
             anlz_path_per_deck=anlz,
+            mixer_deck1_upfader_raw=mixer[0],
+            mixer_deck2_upfader_raw=mixer[1],
+            mixer_deck1_low_raw=mixer[2],
+            mixer_deck2_low_raw=mixer[3],
         )
     return out
 

@@ -2,17 +2,20 @@
 # If code in code_globs changes, update every doc in docs_update and run the checks.
 # key_symbols are verified to exist in code by tools/check_agent_contracts.py.
 version: 2
-last_verified_commit: 1c12b17
-last_verified_date: 2026-06-26
+last_verified_commit: 7c16fd5
+last_verified_date: 2026-06-29
 contracts:
   core_bridge:
     code_globs:
       - __main__.py
       - state_manager.py
+      - active_deck_resolver.py
       - models.py
       - config.py
     key_symbols:
       - StateManager
+      - resolve_active_deck
+      - ActiveDeckDecision
       - BridgeEvent
       - DeckState
     inspect:

@@ -182,7 +182,7 @@ class StatusWriter(threading.Thread):
         ):
             return
         log.info(
-            "[BEAT] deck=%s master=%s bpm=%s phrase=%s laser=%s led=%s palette=%s rgb=%s",
+            "[BEAT] deck=%s rb_master=%s bpm=%s phrase=%s laser=%s led=%s palette=%s rgb=%s",
             heartbeat["deck"],
             heartbeat["master"],
             heartbeat["bpm"],
@@ -642,10 +642,15 @@ def _heartbeat_payload(
     led: dict[str, Any],
     color: dict[str, Any],
 ) -> dict[str, Any]:
-    active_deck = _as_int(state.get("active_deck"), default=1)
+    active_deck = _as_int(state.get("active_deck"), default=0)
+    rb_master = state.get("rb_master_deck") if state.get("rb_master_deck_valid") else None
     deck_key = str(active_deck)
-    deck_state = _dict_or_empty(_dict_or_empty(state.get("deck")).get(deck_key))
-    deck_status = _dict_or_empty(deck_runtime.get(deck_key))
+    deck_state = (
+        _dict_or_empty(_dict_or_empty(state.get("deck")).get(deck_key))
+        if active_deck in (1, 2)
+        else {}
+    )
+    deck_status = _dict_or_empty(deck_runtime.get(deck_key)) if active_deck in (1, 2) else {}
     live_bpm = _dict_or_empty(deck_status.get("live_bpm"))
     smart_phrasing = _dict_or_empty(state.get("smart_phrasing"))
 
@@ -666,7 +671,15 @@ def _heartbeat_payload(
 
     return {
         "deck": active_deck,
-        "master": active_deck,
+        "show_deck": active_deck,
+        "master": rb_master,
+        "rb_master_deck": rb_master,
+        "rb_master_deck_valid": bool(state.get("rb_master_deck_valid", False)),
+        "active_deck_authority_reason": str(
+            state.get("active_deck_authority_reason") or ""
+        ),
+        "mixer_authority_valid": bool(state.get("mixer_authority_valid", False)),
+        "mixer_fallback_reason": str(state.get("mixer_fallback_reason") or ""),
         "bpm": _fmt_float(bpm_value),
         "bpm_source": bpm_source,
         "phrase": str(smart_phrasing.get("phrase_label") or "unknown"),

@@ -123,6 +123,8 @@ class MTCReader:
         if elapsed_ms <= 0:
             return
         deck = self._get_active_deck()
+        if deck not in (1, 2):
+            return
         now  = time.monotonic()
         if now - self._last_log >= _LOG_INTERVAL_S:
             self._last_log = now

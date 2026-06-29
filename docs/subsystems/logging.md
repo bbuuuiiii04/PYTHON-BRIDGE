@@ -2,7 +2,7 @@
 
 Status: CURRENT SUPPORTING
 
-Audited against the current checkout at `f6910f9` on 2026-06-24.
+Audited against the current checkout at `7c16fd5` plus current worktree changes on 2026-06-29.
 
 This is the canonical runtime logging guide. Historical implementation context
 is retained in `docs/history/logging_implementation_handoff.md`, but current
@@ -77,8 +77,8 @@ The preset uses the existing control-file schema only. It filters to the
 operator-facing runtime loggers for:
 
 - `runtime_status` for the throttled `[BEAT]` heartbeat.
-- `state_manager`, `rb_state`, `rb_memory`, and `live_bpm` for deck/master and
-  Rekordbox reader visibility.
+- `state_manager`, `rb_state`, `rb_memory`, and `live_bpm` for show-deck,
+  Rekordbox-master, mixer-authority, and reader visibility.
 - `osl_output` and `os2l_injector` for SoundSwitch routing/output visibility.
 - `laser_director`, `laser_executor`, and `laser_config` for laser policy and
   MIDI execution visibility.
@@ -93,12 +93,12 @@ The preset sets these loggers to `INFO` and leaves `debug` and `anomalies`
 disabled, so it should not turn on broad DEBUG noise. Errors still pass through
 even when their logger is not in the filtered module list.
 
-Healthy watch output should include a throttled `[BEAT]` line with deck/master,
-BPM, phrase, laser scene, LED look, palette, and RGB health, plus transition
-lines such as `[LASER]`, `[LX]`, `[LED] look=...`, `[RGB] activate`,
-`[RGB] summary`, `[OS2L]`, and StateManager master/play/load lines when those
-subsystems actually emit them. The preset does not send commands, change
-runtime state, or validate hardware-visible behavior.
+Healthy watch output should include a throttled `[BEAT]` line with show deck
+and separate `rb_master`, BPM, phrase, laser scene, LED look, palette, and RGB
+health, plus transition lines such as `[LASER]`, `[LX]`, `[LED] look=...`,
+`[RGB] activate`, `[RGB] summary`, `[OS2L]`, and StateManager master/play/load
+lines when those subsystems actually emit them. The preset does not send
+commands, change runtime state, or validate hardware-visible behavior.
 
 RW-5 pack status failures remain bounded: the status surface and pack-driver error line expose only
 an exception category, never a raw message that could contain a path, port, alias, device name, or

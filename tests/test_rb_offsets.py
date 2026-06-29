@@ -82,6 +82,24 @@ class V7211ChainTests(unittest.TestCase):
                 msg=f"deck {d}",
             )
 
+    def test_named_mixer_chains(self) -> None:
+        self.assertEqual(
+            self.v.mixer_deck1_upfader_raw,
+            ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 0, 0x470), final_off=0x30),
+        )
+        self.assertEqual(
+            self.v.mixer_deck2_upfader_raw,
+            ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 8, 0x470), final_off=0x30),
+        )
+        self.assertEqual(
+            self.v.mixer_deck1_low_raw,
+            ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 0, 0x460, 0x30), final_off=0x38),
+        )
+        self.assertEqual(
+            self.v.mixer_deck2_low_raw,
+            ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 8, 0x460, 0x30), final_off=0x38),
+        )
+
 
 _MINI = """\
 1.0.0
@@ -118,11 +136,58 @@ class ParserTests(unittest.TestCase):
             v.bpm_per_deck[1],
             ChainEntry(hops=(0xB0, 0x8, 0xC0), final_off=0x1),
         )
+        self.assertIsNone(v.mixer_deck1_upfader_raw)
+        self.assertIsNone(v.mixer_deck2_upfader_raw)
+        self.assertIsNone(v.mixer_deck1_low_raw)
+        self.assertIsNone(v.mixer_deck2_low_raw)
 
     def test_parser_skips_truncated_blocks(self) -> None:
         truncated = "1.0.0\nAA 0 0 1\n"
         table = parse_offsets(truncated)
         self.assertNotIn("1.0.0", table)
+
+    def test_partial_mixer_labels_fail_closed(self) -> None:
+        text = _MINI + "\n"
+        text = text.replace("\n\n\n", "\nMIXER_D1_UPFADER_RAW 1 2\n\n\n", 1)
+        v = parse_offsets(text, deck_count=2)["1.0.0"]
+        self.assertIsNone(v.mixer_deck1_upfader_raw)
+        self.assertIsNone(v.mixer_deck2_upfader_raw)
+        self.assertIsNone(v.mixer_deck1_low_raw)
+        self.assertIsNone(v.mixer_deck2_low_raw)
+
+    def test_duplicate_mixer_label_fails_closed(self) -> None:
+        text = _MINI.replace(
+            "\n\n\n",
+            "\n" + "\n".join([
+                "MIXER_D1_UPFADER_RAW 1 10",
+                "MIXER_D1_UPFADER_RAW 1 20",
+                "MIXER_D2_UPFADER_RAW 2 10",
+                "MIXER_D1_LOW_RAW 3 10",
+                "MIXER_D2_LOW_RAW 4 10",
+                "",
+                "",
+                "",
+            ]),
+            1,
+        )
+        v = parse_offsets(text, deck_count=2)["1.0.0"]
+        self.assertIsNone(v.mixer_deck1_upfader_raw)
+        self.assertIsNone(v.mixer_deck2_upfader_raw)
+
+    def test_anonymous_trailing_chain_does_not_become_authority(self) -> None:
+        text = _MINI.replace("\n\n\n", "\nAA BB CC\n\n\n", 1)
+        with self.assertLogs("rb_offsets", level="WARNING") as captured:
+            v = parse_offsets(text, deck_count=2)["1.0.0"]
+        self.assertIsNone(v.mixer_deck1_upfader_raw)
+        self.assertIn("anonymous trailing chain", "\n".join(captured.output))
+
+    def test_unknown_labeled_trailing_line_does_not_become_authority(self) -> None:
+        text = _MINI.replace("\n\n\n", "\nFILTER_D1_PARAM0 1 2\n\n\n", 1)
+        with self.assertLogs("rb_offsets", level="WARNING") as captured:
+            v = parse_offsets(text, deck_count=2)["1.0.0"]
+        self.assertIsNone(v.mixer_deck1_upfader_raw)
+        self.assertIsNone(v.mixer_deck2_upfader_raw)
+        self.assertIn("unknown optional label", "\n".join(captured.output))
 
 
 class ChainEntryTests(unittest.TestCase):
