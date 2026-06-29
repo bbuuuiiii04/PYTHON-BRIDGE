@@ -7,7 +7,7 @@ validation_scope: docs-tooling only; extends tools/check_agent_contracts.py with
   check. No runtime/bridge code, no network, no hardware. SOFTWARE-ONLY.
 ---
 
-# Codex Implementation Spec — Active-doc lifecycle check (orphans + stale-classified)
+# Codex Implementation Spec — Docs orphan-coverage check (fail CI on unclassified active docs)
 
 You are Codex, implementing on `rb_ss_bridge_v2`. Work directly on `main` (no new branches).
 Code and tests win over docs. Implement Part B exactly, in order, commit after each task.
@@ -43,14 +43,6 @@ Nothing failed. This task adds the missing guardrail so it can't happen again.
 - **[confirmed] Wiring is automatic.** CI runs the file at `.github/workflows/docs.yml:22` and the
   local hook loops it at `tools/git-hooks/pre-commit:22`. Adding the check *inside* this file needs
   **no new CI/hook wiring**.
-- **[confirmed] The reverse failure also exists — stale-classified docs.**
-  `docs/prompts/active/rekordbox_mixer_active_deck_re_continuation_prompt.md` is classified in
-  `doc_index.md` as `AGENT PROMPT (SUPERSEDED CONTEXT)` yet still lives in `docs/prompts/active/`; the
-  active-deck runtime it handed off is implemented + software-tested (AWR-110). So a prompt can be
-  executed/superseded and linger in `active/` looking pending. **"Executed" is not machine-detectable,
-  but "classified retired (completed/superseded/archived) yet still in `active/`" is** — that is the
-  signal Task 3 uses. Repo convention for spent one-shot prompts is **delete** (Git preserves);
-  reusable review/capture prompts stay (`doc_index.md` lines ~95/106/125).
 
 **Decision (locked):** extend `tools/check_agent_contracts.py` — do **not** create a new
 `tools/check_docs_orphans.py` (that would duplicate `ROOT`/error-printing/`main` and require new CI
@@ -168,68 +160,6 @@ if __name__ == "__main__":
 ```
 Commit: `tests: pure-function coverage for the orphan-check matcher`.
 
-### Task 3 — `tools/check_agent_contracts.py`: flag stale-classified active docs (reverse of Task 1)
-
-Add the matcher (after `is_classified`):
-```python
-RETIRED_LABEL_RE = re.compile(r"COMPLETED|SUPERSEDED|ARCHIVE|HISTORICAL|DEPRECATED", re.I)
-ACTIVE_DOC_PREFIXES = ("docs/plans/active/", "docs/prompts/active/")
-
-def misfiled_active_rows(doc_index_text: str) -> list[str]:
-    """Paths whose doc_index row sits in an active/ dir but carries a retired status label."""
-    bad: list[str] = []
-    for line in doc_index_text.splitlines():
-        if not line.startswith("| `"):
-            continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 2:
-            continue
-        paths = CODE_REF_RE.findall(cells[0])
-        if paths and paths[0].startswith(ACTIVE_DOC_PREFIXES) and RETIRED_LABEL_RE.search(cells[1]):
-            bad.append(paths[0])
-    return bad
-```
-
-In `main()`, after the orphan loop, add:
-```python
-    doc_index_text = (ROOT / "docs/architecture/doc_index.md").read_text(encoding="utf-8")
-    for path in misfiled_active_rows(doc_index_text):
-        errors.append(
-            f"stale-classified active doc: {path} is labeled retired (completed/superseded/"
-            "archived) in doc_index but still in active/ — move it to completed/ or delete it "
-            "(Git history preserves prompts)"
-        )
-```
-
-Notes:
-- **`PLANNED` is NOT a retired label.** The laser-color spec is `PLAN / SPEC (PLANNED — blocked)` —
-  blocked-but-active, must NOT be flagged. `RETIRED_LABEL_RE` deliberately excludes `PLANNED`/`ACTIVE`.
-- Rows whose path is in `completed/`, `archive/`, etc. are skipped by `ACTIVE_DOC_PREFIXES` even though
-  their labels say SUPERSEDED — only `active/`-dir rows are flagged.
-
-Extend `tests/test_docs_orphan_check.py` with a `TestMisfiled` class (pure, no files):
-```python
-class TestMisfiled(unittest.TestCase):
-    def test_superseded_in_active_flagged(self):
-        row = "| `docs/prompts/active/x.md` | AGENT PROMPT (SUPERSEDED CONTEXT) | n |"
-        self.assertEqual(cac.misfiled_active_rows(row), ["docs/prompts/active/x.md"])
-    def test_active_label_ok(self):
-        row = "| `docs/prompts/active/x.md` | AGENT PROMPT (ACTIVE) | n |"
-        self.assertEqual(cac.misfiled_active_rows(row), [])
-    def test_planned_not_retired(self):
-        row = "| `docs/plans/active/laser.md` | PLAN / SPEC (PLANNED — blocked) | n |"
-        self.assertEqual(cac.misfiled_active_rows(row), [])
-    def test_completed_dir_not_flagged(self):
-        row = "| `docs/plans/completed/x.md` | COMPLETED / SUPERSEDED PLANNING | n |"
-        self.assertEqual(cac.misfiled_active_rows(row), [])
-```
-Commit: `docs-tooling: flag stale-classified docs left in active/`.
-
-**Precondition for green:** Task 3 will fail on current `main` because of the one real instance
-(`rekordbox_mixer_active_deck_re_continuation_prompt.md`, labeled SUPERSEDED in `active/`). Resolve it
-per operator decision BEFORE landing Task 3 — delete it and drop its `AWR-110` reference (Git
-preserves), or reclassify if still genuinely active. Do not land Task 3 with CI red.
-
 ## Part C — Invariants that MUST still hold (live safety)
 
 - **No runtime/bridge behavior change.** This touches only a docs checker + a test. The 200 Hz loop,
@@ -252,11 +182,6 @@ preserves), or reclassify if still genuinely active. Do not land Task 3 with CI 
 - [ ] The other two hard checks still pass; full unittest suite still green.
 - [ ] Only `tools/check_agent_contracts.py` and `tests/test_docs_orphan_check.py` changed. No runtime
       code, no new dependency, no new CI/hook wiring.
-- [ ] Task 3 (reverse): an `active/`-dir row labeled retired (completed/superseded/archived) fails CI;
-      `PLANNED` rows and `completed/`-dir rows do NOT. `TestMisfiled` passes.
-- [ ] Precondition resolved: `rekordbox_mixer_active_deck_re_continuation_prompt.md` no longer trips
-      the reverse check (deleted + `AWR-110` reference dropped, or reclassified per operator), so the
-      whole `check_agent_contracts.py` passes on `main`.
 
 ## When you finish
 - Commit per task with the messages above.

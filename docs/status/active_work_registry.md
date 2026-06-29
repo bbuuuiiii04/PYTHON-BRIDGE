@@ -37,7 +37,7 @@ Each item points at an on-disk spec. **A spec is a plan, not proof of implementa
 | AWR-004 | First agent-workflow dry run | active | Use this system on the next real feature change on `main`; record missing routes, unclear contracts, token-waste points, or hidden branch-state risks. |
 | AWR-005 | Runtime command test inventory | active | Map parser/handler tests and add missing ones only in a separate code/test PR. |
 | AWR-006 | Contract coverage audit | active | After a feature PR, tighten `docs/agents/change_contracts.yml` around any files agents had to rediscover. |
-| AWR-007 | Active-doc lifecycle check (orphan + stale) | spec ready for Codex | `docs/plans/active/docs_orphan_check_spec.md` — extend `tools/check_agent_contracts.py` to fail CI when a file in `docs/plans/active/` or `docs/prompts/active/` is (a) not classified in `doc_index.md`/registry [orphan], or (b) classified retired (completed/superseded/archived) yet still in `active/` [stale]. Closes the gap that let the AWR-111 orphan persist and the reverse "forgot to retire an executed prompt" gap. Precondition: resolve the one live stale instance (rekordbox continuation prompt). |
+| AWR-007 | Docs orphan-coverage check | spec ready for Codex | `docs/plans/active/docs_orphan_check_spec.md` — extend `tools/check_agent_contracts.py` to fail CI when a file in `docs/plans/active/` or `docs/prompts/active/` is not classified in `doc_index.md`/registry. Closes the gap that let the AWR-111 orphan persist. |
 
 ## Future roadmap
 
