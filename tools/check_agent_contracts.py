@@ -4,6 +4,8 @@
 Checks that:
   - subsystem cards, task playbooks, and contract docs exist;
   - file paths referenced in those docs actually exist;
+  - every file in docs/plans/active and docs/prompts/active is classified in
+    doc_index.md or active_work_registry.md;
   - AGENTS.md routes to the required playbooks/cards/contracts;
   - every contract in change_contracts.yml has the required fields;
   - every contract.key_symbol exists as a class/def/constant in the code;
@@ -17,6 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import fnmatch
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +68,15 @@ AGENTS_REQUIRED_ROUTES = [
     "docs/subsystems/runtime_commands.md",
 ]
 
+# Forward-coverage: every file in these dirs must be classified in one of the
+# classifier docs below, or CI fails. This is the guardrail that catches a spec
+# dropped into active/ without being registered (e.g. the AWR-111 orphan).
+ACTIVE_DOC_GLOBS = ["docs/plans/active/*.md", "docs/prompts/active/*.md"]
+CLASSIFIER_DOCS = [
+    "docs/architecture/doc_index.md",
+    "docs/status/active_work_registry.md",
+]
+
 # Backtick tokens that are patterns/dirs, not concrete files to existence-check.
 CODE_REF_RE = re.compile(r"`([^`]+)`")
 
@@ -85,6 +97,25 @@ def is_checkable_path(token: str) -> bool:
 
 def referenced_paths(text: str) -> set[str]:
     return {t for t in CODE_REF_RE.findall(text) if is_checkable_path(t)}
+
+
+def classifier_tokens(texts: list[str]) -> set[str]:
+    """All backtick-quoted tokens from the classifier docs (incl. glob/path tokens)."""
+    tokens: set[str] = set()
+    for text in texts:
+        tokens.update(CODE_REF_RE.findall(text))
+    return tokens
+
+
+def is_classified(relpath: str, tokens: set[str]) -> bool:
+    """True if relpath is named (exact path or basename) or glob-matched by any token."""
+    name = relpath.rsplit("/", 1)[-1]
+    for tok in tokens:
+        if tok == relpath or tok == name:
+            return True
+        if "*" in tok and (fnmatch.fnmatch(relpath, tok) or fnmatch.fnmatch(name, tok)):
+            return True
+    return False
 
 
 def parse_contracts(text: str) -> dict[str, dict[str, list[str]]]:
@@ -148,6 +179,23 @@ def main() -> int:
         for ref in sorted(referenced_paths(path.read_text(encoding="utf-8"))):
             if not (ROOT / ref).exists():
                 errors.append(f"{rel}: referenced path does not exist: {ref}")
+
+    classifier_texts: list[str] = []
+    for rel in CLASSIFIER_DOCS:
+        path = ROOT / rel
+        if not path.exists():
+            errors.append(f"missing classifier doc: {rel}")
+            continue
+        classifier_texts.append(path.read_text(encoding="utf-8"))
+    tokens = classifier_tokens(classifier_texts)
+    for glob in ACTIVE_DOC_GLOBS:
+        for path in sorted(ROOT.glob(glob)):
+            rel = path.relative_to(ROOT).as_posix()
+            if not is_classified(rel, tokens):
+                errors.append(
+                    f"unclassified active doc: {rel} — add it to "
+                    "docs/architecture/doc_index.md or docs/status/active_work_registry.md"
+                )
 
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8") if (ROOT / "AGENTS.md").exists() else ""
     for route in AGENTS_REQUIRED_ROUTES:
