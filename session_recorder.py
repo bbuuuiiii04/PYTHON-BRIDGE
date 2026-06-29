@@ -7,15 +7,28 @@ import os
 import sys
 import threading
 import time
-from dataclasses import asdict
+from collections.abc import Mapping
+from dataclasses import asdict, fields, is_dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from .live_bpm import LiveBPMStatus
 from .models import BridgeEvent, PositionSnapshot
 
 RECORD_SESSION_ENV = "RBSS_RECORD_SESSION"
 RECORD_DEDUP_ENV = "RBSS_RECORD_DEDUP"
+
+
+def _json_safe(value: Any) -> Any:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field.name: _json_safe(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return repr(value)
 
 
 class SessionRecorder:
@@ -62,7 +75,19 @@ class SessionRecorder:
         return cls(path, dedup=os.environ.get(RECORD_DEDUP_ENV) == "1")
 
     def record_event(self, ev: BridgeEvent) -> None:
-        self._append({"t": ev.mono, "kind": "event", "data": asdict(ev)})
+        self._append(
+            {
+                "t": ev.mono,
+                "kind": "event",
+                "data": {
+                    "kind": ev.kind,
+                    "deck": ev.deck,
+                    "payload": _json_safe(ev.payload),
+                    "source": ev.source,
+                    "mono": ev.mono,
+                },
+            }
+        )
 
     def record_position(self, deck: int, snap: PositionSnapshot) -> None:
         with self._lock:

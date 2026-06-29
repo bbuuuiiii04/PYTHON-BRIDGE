@@ -261,6 +261,10 @@ class MarkersTests(unittest.TestCase):
         self.assertTrue(cc.markers_present(log, ["[SM] midi-refire", "[LX] fired"]))
         self.assertFalse(cc.markers_present(log, ["[SM] midi-refire", "phrase-anchor"]))
 
+    def test_buildup_marker_matches_bridge_log_format(self):
+        log = "15:46:20.566 [INFO   ] [LX] fired  role=buildup  scene=house_buildup_1  note=64  reason=buildup_to_drop_window\n"
+        self.assertTrue(cc.markers_present(log, cc.SCENARIOS["buildup"]["required_markers"]))
+
 
 class ManifestTests(unittest.TestCase):
     def test_build_manifest_has_core_fields(self):

@@ -11,7 +11,13 @@ from unittest.mock import Mock
 from unittest.mock import patch
 
 from .live_bpm import LiveBPMStatus
-from .models import BridgeEvent, PositionSnapshot
+from .models import (
+    BridgeEvent,
+    Ev,
+    MixerAuthoritySnapshot,
+    MixerDeckReading,
+    PositionSnapshot,
+)
 from .state_manager import StateManager
 
 
@@ -63,7 +69,7 @@ class CapturedSession:
                         raise ValueError(f"unsupported session schema: {row.get('schema')!r}")
                     continue
                 if kind == "event":
-                    events.append(BridgeEvent(**row["data"]))
+                    events.append(_decode_event(row["data"]))
                 elif kind == "position":
                     deck = int(row["deck"])
                     positions.setdefault(deck, []).append(PositionSnapshot(**row["data"]))
@@ -88,6 +94,29 @@ class CapturedSession:
         for samples in live_bpm_status.values():
             samples.sort(key=lambda sample: sample[0])
         return cls(events, positions, live_bpm, live_bpm_status, autoloop_phase)
+
+
+def _decode_event(data: dict) -> BridgeEvent:
+    ev = BridgeEvent(**data)
+    if ev.kind != Ev.MIXER_STATE:
+        return ev
+    raw = ev.payload.get("snapshot")
+    if not isinstance(raw, dict):
+        return ev
+    raw_deck = raw.get("deck") or {}
+    deck: dict[int, MixerDeckReading] = {}
+    if isinstance(raw_deck, dict):
+        for num, reading in raw_deck.items():
+            if not isinstance(reading, dict):
+                continue
+            deck[int(num)] = MixerDeckReading(**reading)
+    ev.payload["snapshot"] = MixerAuthoritySnapshot(
+        valid=bool(raw.get("valid", False)),
+        deck=deck,
+        updated_at=float(raw.get("updated_at", 0.0)),
+        reason=str(raw.get("reason", "")),
+    )
+    return ev
 
 
 class ReplayPositionCache:

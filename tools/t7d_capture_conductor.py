@@ -99,7 +99,7 @@ SCENARIOS: dict[str, dict] = {
             "Use a track with a curated Smart Drop and an UP phrase. Start >"
             "buildup_lookahead_beats before the drop."
         ),
-        "required_markers": ["[LX] fired role=buildup", "buildup_to_drop_window"],
+        "required_markers": ["[LX] fired  role=buildup", "buildup_to_drop_window"],
         "min_window_beats": 48,
         "restart_required": False,
     },
