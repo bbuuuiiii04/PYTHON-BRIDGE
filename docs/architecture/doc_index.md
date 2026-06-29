@@ -75,11 +75,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 
 | Zone | Type | Notes |
 | --- | --- | --- |
-| `docs/plans/active/led_color_engine_spec.md` | PLAN / SPEC (ACTIVE) | LED color engine build contract (spec §15). |
-| `docs/plans/active/led_color_engine_m2_5_spec.md` | PLAN / SPEC (ACTIVE) | M2.5 (slotize Frame cues + fill); spec'd, **not implemented**. |
-| `docs/plans/active/beat_sync_runtime_spec.md` | PLAN / SPEC (ACTIVE) | Beat-sync runtime. |
-| `docs/plans/active/led_role_mapping_v2_spec.md` | PLAN / SPEC (ACTIVE) | Verify status against code. |
-| `docs/plans/active/rt_comet_*.md` (3) | PLAN / SPEC (ACTIVE) | Realtime comet stutter/smoothness/pause work; verify which are landed. |
+| `docs/plans/completed/{led_color_engine_spec,led_color_engine_m2_5_spec,led_color_engine_solid_color_and_patch_f_spec,led_role_mapping_v2_spec,beat_sync_runtime_spec,rt_comet_*}.md` | COMPLETED / SUPERSEDED PLANNING | LED color engine (core + M2.5 + solid-color/Patch F), role-mapping v2, beat-sync, and realtime-comet specs — software work landed. AWR-101–104 have operator hardware sign-off (2026-06-29, Home Govee; see `docs/validation/hardware_validation_log.md`); AWR-105 (role mapping) and AWR-106 (solid-color + Patch F) are software-done but hardware-pending. Historical evidence only. |
 | `docs/plans/active/soundswitch_README.md` | ACTIVE PROJECT INDEX | Grouped routing for the SoundSwitch exporter/bridge-native DMX project. |
 | `docs/plans/active/soundswitch_exporter_remaining_work.md` | ACTIVE CHECKLIST / ROADMAP | Current landed-versus-remaining authority. RW-1 through RW-5 are implemented/software-tested; T7d, native Autoloop DMX, a real hardware run, and final closeout remain. |
 | `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE CONTRACT POINTER | Symlink to the original product/implementation contract. Read the active remaining-work roadmap for current status. |

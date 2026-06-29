@@ -2,8 +2,8 @@
 doc_status: current-incomplete
 truth_level: code-and-config-grounded
 last_verified_commit: cb31cf8
-last_verified_date: 2026-06-25
-validation_scope: software-validated only; hardware-unvalidated in repo evidence
+last_verified_date: 2026-06-29
+validation_scope: software-validated only, except the Govee/LED color-engine, realtime-comet, and beat-sync paths (AWR-101–104) which carry operator hardware sign-off on Home Govee (2026-06-29); SoundSwitch / laser / Enttec remain hardware-unvalidated
 ---
 
 # Hardware Validation Log
@@ -53,7 +53,26 @@ Rollback notes:
 | pending | SoundSwitch | pending | pending | reviewed procedure/template available | pending | pending | no repeatable repo evidence yet |
 | pending | Enttec exporter/player backend | pending | software/startup/status lane implemented; current live config not inspected | zero preflight, one scripted track, controls/masks, emergency physical kill, known-dark reset, graceful closeout | pending | pending | process death is not accepted as a hard kill; no operator run occurred |
 | pending | Laser MIDI | pending | lifecycle default-on; local ignored config | gated drop impact, 32-beat hold, post-drop/drop fallback cycling, shuffle-bag order, blackout release, and kill switch | pending | pending | lifecycle is software-tested only; verify no drop leak during groove/buildup and no dark initial hit before any hardware-validated claim |
-| pending | Govee/LED | pending | pending | pending | pending | pending | no repeatable repo evidence yet; scripted groove/drop/post-drop blackout policy, slot-color strategy, Patch S probabilistic solid-color outcomes, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, Patch E3 ambient twinkle slot cue, and Patch F default-bank cleanup are software-tested only; the pure laser lifecycle parity helper does not change live LED behavior; scripted blackout/active-role transitions, Patch D stable-hue sparkle, center-burst 0-2 / 2-4 accent band split, Patch E1/E2/E3 visuals, Patch S solid outcomes, and Patch F generic-default rotation need operator visual sign-off |
+| 2026-06-29 | Govee/LED color/comet/beat-sync (AWR-101–104) | Home Govee (hardware) | bridge HEAD 2026-06-29; live LED config (gitignored) | operator ran the rig and observed M2.5 slot cues (Patch E1/E2/E3), color-engine core (decoupled color/drift/drop-snap), realtime comet (stutter/smoothness/pause), and beat-sync against spec | PASS — operator visual sign-off | this log entry | visual sign-off, not instrumented capture; code-milestone re-audit for AWR-102/103/104 not separately performed |
+| pending | Govee/LED remaining (AWR-105/106) | pending | pending | scripted groove/drop/post-drop blackout policy (AWR-105); Patch S solid-color outcomes + Patch F default-bank rotation (AWR-106); Patch D stable-hue sparkle; center-burst 0-2 / 2-4 accent band split | pending | pending | software-tested only; need operator visual sign-off. The AWR-101–104 paths were signed off 2026-06-29 (row above). |
+
+## Validation records
+
+```text
+Date: 2026-06-29
+Commit: docs change in the adb5511 cleanup series
+Operator: Brandon
+OS version: macOS (Darwin 24.3.0)
+Rekordbox version: 7.2.11
+SoundSwitch version: n/a — Govee/LED path, SoundSwitch not involved
+Lighting hardware: Home Govee strip(s), LAN / realtime path
+Config files used, with secrets redacted: live LED look-director + color-engine config (gitignored; Govee key in govee.env)
+Test steps: ran the bridge live on the home rig and observed the four LED workstreams during normal play — M2.5 slot cues (Patch E1 nebula, E2 center-comet, E3 ambient twinkle), color-engine core (decoupled color, drift, drop-snap), realtime comet (stutter / smoothness / pause), beat-sync runtime
+Observed results: all four behaved per spec on hardware
+Pass/fail: PASS
+Caveats: operator visual sign-off, not an instrumented capture; covers AWR-101–104 only. AWR-105 (role mapping) and AWR-106 (solid-color + Patch F) were NOT signed off and remain hardware-pending. Code-level milestone audit for AWR-102/103/104 was not separately performed; sign-off is on observed running behavior.
+Rollback notes: docs-only record; no runtime/config change.
+```
 
 ## Claim rule
 
