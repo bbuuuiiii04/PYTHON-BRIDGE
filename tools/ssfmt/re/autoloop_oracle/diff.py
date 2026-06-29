@@ -72,6 +72,14 @@ class _Selection:
     reason: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedFrame:
+    timestamp: float
+    actual: tuple[int, ...]
+    abs_beat: float
+    look: str
+
+
 def phase_tick(abs_beat: float, phase_offset_beats: float) -> int:
     return max(0, round((abs_beat + phase_offset_beats) * TICKS_PER_BEAT))
 
@@ -121,13 +129,37 @@ def score(
     look_statuses: dict[str, str] | None = None,
     frame_cache: dict[tuple[str, int], tuple[int, ...]] | None = None,
 ) -> ScoreResult:
+    total, excluded, prepared = _prepare_frames(
+        frames,
+        beat_fn,
+        look_fn,
+        loops,
+        latency_s=latency_s,
+        look_statuses=look_statuses,
+    )
+    return _score_prepared(
+        total,
+        excluded,
+        prepared,
+        loops,
+        phase_offset_beats=phase_offset_beats,
+        tol=tol,
+        frame_cache=frame_cache,
+    )
+
+
+def _prepare_frames(
+    frames: Iterable[tuple[float, tuple[int, ...]]],
+    beat_fn: Callable[[float], float | None],
+    look_fn: Callable[[float], str | None],
+    loops: dict[str, object],
+    *,
+    latency_s: float,
+    look_statuses: dict[str, str] | None,
+) -> tuple[int, dict[str, int], list[_PreparedFrame]]:
     total = 0
-    scored = 0
-    exact = 0
     excluded: dict[str, int] = {}
-    channels: dict[int, int] = {}
-    look_counts: dict[str, list[int]] = {}
-    worst: list[WorstSample] = []
+    prepared: list[_PreparedFrame] = []
 
     def exclude(reason: str) -> None:
         excluded[reason] = excluded.get(reason, 0) + 1
@@ -148,12 +180,33 @@ def score(
         if loop is None:
             exclude((look_statuses or {}).get(look, "CONTENT_DRIFTED"))
             continue
+        prepared.append(_PreparedFrame(timestamp, actual, abs_beat, look))
+    return total, excluded, prepared
 
-        predicted = _cached_frame(loop, look, abs_beat, phase_offset_beats, frame_cache)
+
+def _score_prepared(
+    total: int,
+    excluded: dict[str, int],
+    prepared: list[_PreparedFrame],
+    loops: dict[str, object],
+    *,
+    phase_offset_beats: float,
+    tol: int,
+    frame_cache: dict[tuple[str, int], tuple[int, ...]] | None,
+) -> ScoreResult:
+    scored = 0
+    exact = 0
+    channels: dict[int, int] = {}
+    look_counts: dict[str, list[int]] = {}
+    worst: list[WorstSample] = []
+
+    for row in prepared:
+        loop = loops[row.look]
+        predicted = _cached_frame(loop, row.look, row.abs_beat, phase_offset_beats, frame_cache)
         mismatched_channels = [
             index + 1
             for index in range(DMX_CH)
-            if abs(predicted[index] - actual[index]) > tol
+            if abs(predicted[index] - row.actual[index]) > tol
         ]
         mismatch_count = len(mismatched_channels)
         scored += 1
@@ -161,12 +214,12 @@ def score(
             exact += 1
         for channel in mismatched_channels:
             channels[channel] = channels.get(channel, 0) + 1
-        counts = look_counts.setdefault(look, [0, 0])
+        counts = look_counts.setdefault(row.look, [0, 0])
         counts[0] += 1
         counts[1] += int(mismatch_count == 0)
         if mismatch_count:
-            max_error = max(abs(predicted[index] - actual[index]) for index in range(DMX_CH))
-            worst.append(WorstSample(timestamp, look, mismatch_count, max_error))
+            max_error = max(abs(predicted[index] - row.actual[index]) for index in range(DMX_CH))
+            worst.append(WorstSample(row.timestamp, row.look, mismatch_count, max_error))
             worst.sort(key=lambda item: (item.mismatch_count, item.max_abs_error), reverse=True)
             del worst[10:]
 
@@ -199,16 +252,22 @@ def search(
     best: Best | None = None
     frame_cache: dict[tuple[str, int], tuple[int, ...]] = {}
     for latency_s in latency_grid:
+        total, excluded, prepared = _prepare_frames(
+            frame_list,
+            beat_fn,
+            look_fn,
+            loops,
+            latency_s=latency_s,
+            look_statuses=look_statuses,
+        )
         for phase_offset_beats in phase_grid:
-            result = score(
-                frame_list,
-                beat_fn,
-                look_fn,
+            result = _score_prepared(
+                total,
+                excluded,
+                prepared,
                 loops,
-                latency_s=latency_s,
                 phase_offset_beats=phase_offset_beats,
                 tol=tol,
-                look_statuses=look_statuses,
                 frame_cache=frame_cache,
             )
             candidate_rate = result.exact_match_rate or 0.0
