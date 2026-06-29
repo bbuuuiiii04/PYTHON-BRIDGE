@@ -25,5 +25,28 @@ class TestIsClassified(unittest.TestCase):
                                            {"docs/plans/active/other.md", "unrelated.md"}))
 
 
+class TestMisfiled(unittest.TestCase):
+    def test_superseded_in_active_flagged(self):
+        row = "| `docs/prompts/active/x.md` | AGENT PROMPT (SUPERSEDED CONTEXT) | n |"
+        self.assertEqual(cac.misfiled_active_rows(row), ["docs/prompts/active/x.md"])
+
+    def test_active_label_ok(self):
+        row = "| `docs/prompts/active/x.md` | AGENT PROMPT (ACTIVE) | n |"
+        self.assertEqual(cac.misfiled_active_rows(row), [])
+
+    def test_planned_not_retired(self):
+        row = "| `docs/plans/active/laser.md` | PLAN / SPEC (PLANNED — blocked) | n |"
+        self.assertEqual(cac.misfiled_active_rows(row), [])
+
+    def test_retired_word_in_notes_not_label_ok(self):
+        # "completed" in the notes cell, not the label cell, must NOT trip the check
+        row = "| `docs/plans/active/ptr.md` | COMPATIBILITY POINTER | links to the completed spec |"
+        self.assertEqual(cac.misfiled_active_rows(row), [])
+
+    def test_completed_dir_not_flagged(self):
+        row = "| `docs/plans/completed/x.md` | COMPLETED / SUPERSEDED PLANNING | n |"
+        self.assertEqual(cac.misfiled_active_rows(row), [])
+
+
 if __name__ == "__main__":
     unittest.main()

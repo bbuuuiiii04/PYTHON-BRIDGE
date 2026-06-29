@@ -1,13 +1,24 @@
 ---
-doc_status: active-implementation-spec
+doc_status: completed-spec
 truth_level: code-grounded
 last_verified_commit: 3818b91
 last_verified_date: 2026-06-29
-validation_scope: docs-tooling only; extends tools/check_agent_contracts.py with a forward-coverage
-  check. No runtime/bridge code, no network, no hardware. SOFTWARE-ONLY.
+validation_scope: docs-tooling only; extends tools/check_agent_contracts.py with active-doc lifecycle
+  coverage. No runtime/bridge code, no network, no hardware. SOFTWARE-ONLY.
 ---
 
-# Codex Implementation Spec — Docs orphan-coverage check (fail CI on unclassified active docs)
+# Codex Implementation Spec — Active-doc lifecycle check (orphans + stale-classified)
+
+> **IMPLEMENTED 2026-06-29 — both directions live in `tools/check_agent_contracts.py`.**
+> - **Forward (orphan):** Tasks 1–2 below, by Codex (commits `574247d` + `1420aad`) —
+>   `is_classified`/`classifier_tokens` + the active-glob loop; fail when a file in
+>   `docs/plans/active/` or `docs/prompts/active/` is not classified in doc_index/registry.
+> - **Reverse (stale):** implemented directly (not handed to Codex) — `misfiled_active_rows` +
+>   `RETIRED_LABEL_RE`/`ACTIVE_DOC_PREFIXES`; fail when an `active/`-dir row carries a retired LABEL
+>   (completed/superseded/archived) in doc_index, so an executed/superseded prompt left in `active/`
+>   goes red. Only the label cell is checked, so deliberate `COMPATIBILITY POINTER` stubs are not
+>   flagged. Tests: `tests/test_docs_orphan_check.py` (`TestIsClassified` + `TestMisfiled`).
+> The code is the record; the tasks below are the original handoff, kept for provenance.
 
 You are Codex, implementing on `rb_ss_bridge_v2`. Work directly on `main` (no new branches).
 Code and tests win over docs. Implement Part B exactly, in order, commit after each task.

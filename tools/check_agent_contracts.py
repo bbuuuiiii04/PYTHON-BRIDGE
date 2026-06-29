@@ -77,6 +77,13 @@ CLASSIFIER_DOCS = [
     "docs/status/active_work_registry.md",
 ]
 
+# Reverse-coverage: a file in these dirs must NOT carry a retired status LABEL in its
+# doc_index row (it should have moved to completed/ or been deleted). Catches an
+# executed/superseded prompt left sitting in active/. Only the label cell is checked,
+# so deliberate "COMPATIBILITY POINTER"-style stubs are not flagged.
+ACTIVE_DOC_PREFIXES = ("docs/plans/active/", "docs/prompts/active/")
+RETIRED_LABEL_RE = re.compile(r"COMPLETED|SUPERSEDED|ARCHIVE|HISTORICAL|DEPRECATED", re.I)
+
 # Backtick tokens that are patterns/dirs, not concrete files to existence-check.
 CODE_REF_RE = re.compile(r"`([^`]+)`")
 
@@ -116,6 +123,21 @@ def is_classified(relpath: str, tokens: set[str]) -> bool:
         if "*" in tok and (fnmatch.fnmatch(relpath, tok) or fnmatch.fnmatch(name, tok)):
             return True
     return False
+
+
+def misfiled_active_rows(doc_index_text: str) -> list[str]:
+    """Paths whose doc_index row sits in an active/ dir but carries a retired status label."""
+    bad: list[str] = []
+    for line in doc_index_text.splitlines():
+        if not line.startswith("| `"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        paths = CODE_REF_RE.findall(cells[0])
+        if paths and paths[0].startswith(ACTIVE_DOC_PREFIXES) and RETIRED_LABEL_RE.search(cells[1]):
+            bad.append(paths[0])
+    return bad
 
 
 def parse_contracts(text: str) -> dict[str, dict[str, list[str]]]:
@@ -196,6 +218,17 @@ def main() -> int:
                     f"unclassified active doc: {rel} — add it to "
                     "docs/architecture/doc_index.md or docs/status/active_work_registry.md"
                 )
+
+    doc_index_text = (
+        (ROOT / "docs/architecture/doc_index.md").read_text(encoding="utf-8")
+        if (ROOT / "docs/architecture/doc_index.md").exists() else ""
+    )
+    for path in misfiled_active_rows(doc_index_text):
+        errors.append(
+            f"stale-classified active doc: {path} is labeled retired (completed/"
+            "superseded/archived) in doc_index but still in active/ — move it to "
+            "completed/ or delete it (Git history preserves prompts)"
+        )
 
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8") if (ROOT / "AGENTS.md").exists() else ""
     for route in AGENTS_REQUIRED_ROUTES:
