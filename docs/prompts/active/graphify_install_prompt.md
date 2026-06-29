@@ -30,11 +30,12 @@ to cut token use on the understand-the-codebase step. Nothing more. It is **not*
 1. **Code-only. No cloud / no API key.** Code AST extraction is fully local. Do NOT configure
    `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/etc. for doc/PDF/image semantic extraction — we don't want it
    (live rig, no outbound calls, no cost). Map the code, not the prose.
-2. **Manual `graphify query` first — NOT always-on read-interception hooks.** The default install may
-   add PreToolUse hooks that fire before every file read/grep. We rejected always-on hooks (latency +
-   the over-trust risk of an agent believing the map over the source). Set up the *query capability*
-   for both tools, but leave the always-on hooks **off** unless your pilot (Phase 6) proves they add
-   value without friction. Document whatever you choose.
+2. **Always-on hooks ON for BOTH Claude and Codex.** The operator wants the automatic
+   query-before-read nudge so using the map is never forgotten (this overrides the earlier
+   manual-first lean). Enable the PreToolUse hooks for both tools. Decision #5 still governs — the
+   hooks *nudge* you to query; they never authorize editing on the map alone, and code/tests stay the
+   source of truth. The pilot (Phase 6) should report hook latency / any false nudges, but the default
+   is ON for both; only disable if latency proves a real problem in practice.
 3. **Do NOT commit `graphify-out/`.** It is a build artifact derived from code (the real source of
    truth); committing it invites drift and merge conflicts on a large JSON/HTML. Gitignore it and
    regenerate on demand.
@@ -82,12 +83,13 @@ overwhelmingly the Python modules + tests, not data.
   proceeding.
 
 ## Phase 4 — Integration for both tools (Claude + Codex)
-- The operator uses **both Claude and Codex** heavily. Set up project-scoped query availability for
-  both (e.g. `graphify install --project` + `graphify codex install`), so the committed skill/query is
-  there for either tool.
-- Apply locked decision #2: keep always-on read-interception hooks **off** by default. If the installer
-  force-adds them, test their latency/behavior on a few real reads; disable if they interfere or nudge
-  toward trusting the map over source. Record exactly what you enabled/disabled and how to toggle it.
+- The operator uses **both Claude and Codex** heavily and wants the map used automatically. Set up
+  project-scoped integration for both — `graphify install` / `graphify install --project` for Claude
+  and `graphify codex install` for Codex — **with the always-on PreToolUse hooks ENABLED for both**
+  (locked decision #2), so neither tool forgets to query before reading.
+- Record exactly what you enabled and how to toggle the hooks off, in case latency proves a problem in
+  practice. Decision #5 still holds — the hooks nudge querying; they never authorize acting on the map
+  alone. Confirm the hooks fire on both tools before calling Phase 4 done.
 
 ## Phase 5 — gitignore + secrets
 - Add `graphify-out/` to `.gitignore`. Do not commit it.
