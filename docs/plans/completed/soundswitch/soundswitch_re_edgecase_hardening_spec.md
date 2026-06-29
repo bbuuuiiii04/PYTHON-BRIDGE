@@ -1,5 +1,5 @@
 ---
-doc_status: active-implementation-spec
+doc_status: completed-spec
 truth_level: code-grounded
 last_verified_commit: 291203b
 last_verified_date: 2026-06-27

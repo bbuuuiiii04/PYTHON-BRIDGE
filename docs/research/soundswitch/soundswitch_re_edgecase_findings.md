@@ -1,5 +1,5 @@
 ---
-doc_status: active-adversarial-findings-register
+doc_status: historical-evidence
 truth_level: code-grounded
 last_verified_commit: b0e5e47
 last_verified_date: 2026-06-26

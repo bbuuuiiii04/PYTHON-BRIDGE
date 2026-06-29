@@ -63,6 +63,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/guides/*.md` (4) | CURRENT SUPPORTING — laser MIDI mapping, rollout checklist, Laser Pad. |
 | `docs/subsystems/logging.md` | CURRENT SUPPORTING — matches `logging_manager.py`. |
 | `docs/data/offsets-*.yaml` (3) | CURRENT SUPPORTING — Rekordbox offset reference data. |
+| `docs/data/cues_*.md` (2) | GENERATED OUTPUT — relocated cue dumps; not in the reading path. |
 | `docs/research/*.md` | RESEARCH — ANLZ energy/waveform-tag evidence plus Rekordbox mixer active-deck RE proof. |
 | `docs/research/soundswitch/*.md` | SOUNDSWITCH RE AUTHORITY — current closure report, format/binary findings, evidence matrices, tool guide, and product contract. Start with `README.md`. |
 | `docs/research/soundswitch/history/*.md` | SOUNDSWITCH RE HISTORY — superseded handoffs, intermediate findings, and draft exporter/player specs. Historical provenance only. |
@@ -102,10 +103,9 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | Zone | Type | Notes |
 | --- | --- | --- |
 | `docs/archive/prompts/*.md` (7) | ARCHIVE | Completed/superseded agent prompts. |
-| `docs/archive/plans/*.md` (2) | ARCHIVE | Completed autoloop spec + plan. |
+| `docs/archive/plans/*.md` (3) | ARCHIVE | Completed autoloop spec + plan; deferred laser SM-net blackout-mask spec (do-not-implement in MIDI path, 2026-06-23 — reference design for future DMX-frame blackout). |
 | `docs/prompts/reviews/*.md` | REVIEW / AUDIT | Current review handoffs plus non-SoundSwitch historical review briefs retained where code references them. Completed SoundSwitch review prompts were deleted; Git history preserves them. |
 | `docs/history/*.md` + `docs/history/archive/*.md` (5) | ARCHIVE / HISTORICAL | Rollout logs; kept in place (referenced by `current_architecture.md`, `subsystems/logging.md`, and a test name). |
-| `cues_output.md`, `cues_timing_output.md` (repo root) | GENERATED OUTPUT | Tool output; relocate to `docs/data/` or gitignore. |
 
 ## Main reading order
 

@@ -1,5 +1,5 @@
 ---
-doc_status: active-plan
+doc_status: deferred-reference
 truth_level: code-grounded
 last_verified_commit: b2ce63d
 last_verified_date: 2026-06-23
