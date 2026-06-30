@@ -48,6 +48,11 @@ FRAME_INTERVAL = 1.0 / TARGET_FPS
 # colors into fewer unique groups → fewer BLE writes per frame
 QUANT_STEP = 8
 
+# Render at the same virtual resolution the live system uses (60 segments),
+# then downsample to the 15 physical BLE segments via max-channel pooling.
+# ponytail: without this, a 0.8-segment comet on 15 segs is a single strobing dot.
+RENDER_SEGMENTS = 60
+
 _renderer = GoveeFrameRenderer()
 
 
@@ -57,10 +62,24 @@ def _quantize(r: int, g: int, b: int) -> tuple[int, int, int]:
     return (q(r), q(g), q(b))
 
 
+def _downsample(frame: list[tuple[int, int, int]], physical: int) -> list[tuple[int, int, int]]:
+    """Max-pool RENDER_SEGMENTS virtual segments down to physical BLE segments."""
+    out = []
+    ratio = len(frame) / physical
+    for i in range(physical):
+        lo = int(i * ratio)
+        hi = max(lo + 1, int((i + 1) * ratio))
+        bucket = frame[lo:hi]
+        r = max(c[0] for c in bucket)
+        g = max(c[1] for c in bucket)
+        b = max(c[2] for c in bucket)
+        out.append((r, g, b))
+    return out
+
+
 def _frame_to_packets(frame: list[tuple[int, int, int]]) -> list[bytes]:
     """
     Group segments by (quantized) color → one mode=15 packet per unique color.
-    Black segments are skipped (no packet; all-black was sent at start of cleared state).
     Returns list of packets to write this frame.
     """
     color_to_segs: dict[tuple[int, int, int], list[int]] = {}
@@ -111,15 +130,16 @@ async def play(address: str, effect_name: str, bpm: float, duration_sec: float):
                 # local_t = time within current beat (0..1/beat_per_sec seconds)
                 local_t = (elapsed % (1.0 / beat_per_sec)) if beat_per_sec > 0 else elapsed
 
-                frame = _renderer.render(
+                virtual = _renderer.render(
                     effect_name,
                     beat_pos=beat_pos,
                     local_t=local_t,
                     frame_index=frame_index,
                     params={},
-                    segments=TOTAL_SEGMENTS,
+                    segments=RENDER_SEGMENTS,
                     seed=42,
                 )
+                frame = _downsample(virtual, TOTAL_SEGMENTS)
 
                 packets = _frame_to_packets(frame)
                 for pkt in packets:
