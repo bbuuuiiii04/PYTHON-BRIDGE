@@ -239,10 +239,25 @@ async def cmd_scan():
         print(f"\nUse address above with 'services', 'keepalive', etc.")
 
 
+async def _get_device(addr: str):
+    """
+    On macOS, BleakClient needs the BLEDevice object from a fresh scan.
+    BleakScanner.find_device_by_address rescans until found or timeout.
+    """
+    from bleak import BleakScanner
+    print(f"  Scanning to locate {addr} ...")
+    device = await BleakScanner.find_device_by_address(addr, timeout=15.0)
+    if device is None:
+        raise RuntimeError(f"Device {addr} not found in scan. Ensure strip is on and in BLE range.")
+    print(f"  Found: {device.name!r}  addr={device.address}")
+    return device
+
+
 async def cmd_services(addr: str):
     from bleak import BleakClient
+    device = await _get_device(addr)
     print(f"Connecting to {addr} (no writes) ...")
-    async with BleakClient(addr, timeout=20.0) as client:
+    async with BleakClient(device, timeout=20.0) as client:
         print(f"Connected: {client.is_connected}")
         print(f"\nServices and characteristics:")
         for svc in client.services:
@@ -257,9 +272,10 @@ async def cmd_services(addr: str):
 
 async def cmd_keepalive(addr: str, duration: int = 30):
     from bleak import BleakClient
+    device = await _get_device(addr)
     print(f"Connecting to {addr} for keepalive test ({duration}s) ...")
     ka = build_keepalive_packet()
-    async with BleakClient(addr, timeout=20.0) as client:
+    async with BleakClient(device, timeout=20.0) as client:
         char, wwr = await _find_write_char(client)
         print(f"Sending keepalive every 2s for {duration}s ...")
         end = time.time() + duration
@@ -276,10 +292,11 @@ async def cmd_keepalive(addr: str, duration: int = 30):
 
 async def cmd_power(addr: str, on: bool):
     from bleak import BleakClient
+    device = await _get_device(addr)
     label = "power-on" if on else "power-off"
     print(f"Connecting to {addr} for {label} ...")
     pkt = build_power_packet(on)
-    async with BleakClient(addr, timeout=20.0) as client:
+    async with BleakClient(device, timeout=20.0) as client:
         char, wwr = await _find_write_char(client)
         await _send(client, char, pkt, label, wwr)
         print(f"{label} sent. Observe strip.")
@@ -287,9 +304,10 @@ async def cmd_power(addr: str, on: bool):
 
 async def cmd_brightness(addr: str, level: int):
     from bleak import BleakClient
+    device = await _get_device(addr)
     print(f"Connecting to {addr} for brightness={level} ...")
     pkt = build_brightness_packet(level)
-    async with BleakClient(addr, timeout=20.0) as client:
+    async with BleakClient(device, timeout=20.0) as client:
         char, wwr = await _find_write_char(client)
         await _send(client, char, pkt, f"brightness={level}", wwr)
         print(f"Brightness={level} sent. Observe strip.")
@@ -297,9 +315,10 @@ async def cmd_brightness(addr: str, level: int):
 
 async def cmd_all_color(addr: str, r: int, g: int, b: int, label: str):
     from bleak import BleakClient
+    device = await _get_device(addr)
     print(f"Connecting to {addr} for {label} (all segments, LEFT=0xFF RIGHT=0x7F) ...")
     pkt = build_h617e_segment_color_packet(r, g, b, 0xFF, 0x7F)
-    async with BleakClient(addr, timeout=20.0) as client:
+    async with BleakClient(device, timeout=20.0) as client:
         char, wwr = await _find_write_char(client)
         await _send(client, char, pkt, label, wwr)
         print(f"{label} sent. Observe strip.")
@@ -308,10 +327,11 @@ async def cmd_all_color(addr: str, r: int, g: int, b: int, label: str):
 async def cmd_left_mask_sweep(addr: str):
     """Walk LEFT_MASK through single bits; RIGHT_MASK=0 so only left side lights."""
     from bleak import BleakClient
+    device = await _get_device(addr)
     bits = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80]
     print(f"Connecting to {addr} for left-mask-sweep ...")
     print("Each step: strip lit red, one bit at a time. Note which segment lights.")
-    async with BleakClient(addr, timeout=20.0) as client:
+    async with BleakClient(device, timeout=20.0) as client:
         char, wwr = await _find_write_char(client)
         # First: black out all
         await _send(client, char, build_h617e_segment_color_packet(0, 0, 0, 0xFF, 0x7F), "all-black", wwr)
@@ -329,10 +349,11 @@ async def cmd_left_mask_sweep(addr: str):
 async def cmd_right_mask_sweep(addr: str):
     """Walk RIGHT_MASK through single bits; LEFT_MASK=0."""
     from bleak import BleakClient
+    device = await _get_device(addr)
     bits = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40]
     print(f"Connecting to {addr} for right-mask-sweep ...")
     print("Each step: strip lit blue, one bit at a time. Note which segment lights.")
-    async with BleakClient(addr, timeout=20.0) as client:
+    async with BleakClient(device, timeout=20.0) as client:
         char, wwr = await _find_write_char(client)
         await _send(client, char, build_h617e_segment_color_packet(0, 0, 0, 0xFF, 0x7F), "all-black", wwr)
         await asyncio.sleep(0.5)
@@ -353,6 +374,7 @@ async def cmd_alternating_test(addr: str):
     Sends two sequential packets; if H617E honors independent groups, two colors show.
     """
     from bleak import BleakClient
+    device = await _get_device(addr)
     even = list(range(0, TOTAL_SEGMENTS, 2))
     odd  = list(range(1, TOTAL_SEGMENTS, 2))
     lm_even, rm_even = masks_for_segments(even)
@@ -363,7 +385,7 @@ async def cmd_alternating_test(addr: str):
     print(f"  Group A (even segs {even}): LEFT=0x{lm_even:02X} RIGHT=0x{rm_even:02X} → RED")
     print(f"  Group B (odd  segs {odd}):  LEFT=0x{lm_odd:02X}  RIGHT=0x{rm_odd:02X}  → BLUE")
     print(f"Connecting to {addr} ...")
-    async with BleakClient(addr, timeout=20.0) as client:
+    async with BleakClient(device, timeout=20.0) as client:
         char, wwr = await _find_write_char(client)
         await _send(client, char, pkt_a, "even-segs-red", wwr)
         await asyncio.sleep(0.05)  # small gap between writes
