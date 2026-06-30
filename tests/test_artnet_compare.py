@@ -122,6 +122,54 @@ class ArtNetCompareTests(unittest.TestCase):
         self.assertEqual(result.verdict, artnet_compare.VERDICT_INVALID)
         self.assertEqual(result.reason, "sidecar_unmatched_frame")
 
+    def test_streaming_tolerates_sidecar_ahead_and_defers_recent_frames(self) -> None:
+        # The sink writes each sidecar row before sending its packet, so at a
+        # live tick the file holds rows for frames whose U1 packets are still in
+        # flight. Batch mode rejects that lead; streaming mode reconciles the
+        # settled prefix and still reaches PASS.
+        u0a = self._packet(0, 1, 1_000_000_000, 0)
+        u1a = self._packet(1, 1, 1_001_000_000, 1)
+        u0b = self._packet(0, 2, 1_100_000_000, 0)
+        u1b = self._packet(1, 2, 1_101_000_000, 2)
+        rows = [
+            self._row(u1a, 1, scripted_active=True, soundswitch_id="script"),
+            self._row(u1b, 2, scripted_active=True, soundswitch_id="script"),
+            # sidecar row for a third frame whose U1 packet has not arrived yet
+            self._row(self._packet(1, 2, 1_102_000_000, 3), 3, scripted_active=True, soundswitch_id="script"),
+        ]
+        common = dict(
+            sidecar_header={"run_id": "run"},
+            bridge_status={"truth_check": {"run_id": "run"}},
+            required_coverage={"scripted:script"},
+        )
+
+        batch = artnet_compare.evaluate_trace([u0a, u1a, u0b, u1b], sidecar_rows=rows, **common)
+        self.assertEqual(batch.verdict, artnet_compare.VERDICT_INVALID)
+        self.assertEqual(batch.reason, "sidecar_unmatched_frame")
+
+        stream = artnet_compare.evaluate_trace(
+            [u0a, u1a, u0b, u1b], sidecar_rows=rows, streaming=True, settle_ns=0, **common
+        )
+        self.assertEqual(stream.verdict, artnet_compare.VERDICT_PASS)
+
+    def test_streaming_still_fails_a_real_byte_mismatch(self) -> None:
+        # Deferring recent frames must not hide a genuine mismatch on a settled
+        # frame.
+        u0a = self._packet(0, 1, 1_000_000_000, 0)
+        u1a = self._packet(1, 9, 1_001_000_000, 1)  # wrong bytes vs U0
+        u0b = self._packet(0, 2, 1_100_000_000, 0)
+        u1b = self._packet(1, 2, 1_101_000_000, 2)
+        rows = [self._row(u1a, 1), self._row(u1b, 2)]
+        result = artnet_compare.evaluate_trace(
+            [u0a, u1a, u0b, u1b],
+            sidecar_rows=rows,
+            sidecar_header={"run_id": "run"},
+            bridge_status={"truth_check": {"run_id": "run"}},
+            streaming=True,
+            settle_ns=0,
+        )
+        self.assertEqual(result.verdict, artnet_compare.VERDICT_FAIL)
+
     def test_wrong_sidecar_frame_index_cannot_create_pass(self) -> None:
         u0 = self._packet(0, 1, 1_000_000_000, 0)
         u1 = self._packet(1, 1, 1_001_000_000, 1)

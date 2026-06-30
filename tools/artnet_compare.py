@@ -89,6 +89,13 @@ def parse_artdmx(data: bytes, *, timestamp_ns: int, source: str = "", socket_nam
 RAPID_EVENT_GAP_MS = 50
 AUTOLOOP_PHASE_BUCKETS = 3
 AUTOLOOP_CYCLE_TICKS = 19_200
+# Live reconciliation: only finalize frames older than this margin, so the
+# sidecar (written before send) and every in-tolerance U1 have arrived. Recent
+# frames are deferred, not failed. Batch callers pass settle_ns=0 (no deferral).
+LIVE_SETTLE_NS = 50_000_000
+# A single drain burst this large means the receive buffer backed up far enough
+# that timing/order evidence is no longer trustworthy.
+LIVE_OVERLOAD_BURST = 2000
 
 
 def parse_sidecar_jsonl(text: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]], bool]:
@@ -166,6 +173,8 @@ def evaluate_trace(
     sidecar_invalid: bool = False,
     sidecar_pending: bool = False,
     compare_overloaded: bool = False,
+    streaming: bool = False,
+    settle_ns: int = 0,
 ) -> CompareResult:
     packets, duplicate_count = dedup_packets(packets)
     malformed = [p for p in packets if not p.valid_protocol]
@@ -196,14 +205,31 @@ def evaluate_trace(
     if status_truth.get("sidecar_error"):
         return CompareResult(VERDICT_INVALID, "sidecar_error", "SIDECAR_MISSING_OR_STALE", duplicate_count=duplicate_count)
 
+    tolerance_ns = int(tolerance_ms * 1_000_000)
+    if streaming and packets:
+        # The sink writes each sidecar row before sending its packet, so in a
+        # live capture the sidecar leads received U1, and the newest U1 may not
+        # have its in-tolerance neighbours yet. Finalize only the settled prefix
+        # (frames older than the latest observation by the settle margin) and
+        # defer the rest; this is what lets a denser/leading stream still PASS.
+        horizon_ns = max(packet.timestamp_ns for packet in packets) - max(0, settle_ns)
+        u1 = [packet for packet in u1 if packet.timestamp_ns <= horizon_ns]
+        u0 = [packet for packet in u0 if packet.timestamp_ns <= horizon_ns - tolerance_ns]
+        if not u0 or not u1:
+            return CompareResult(VERDICT_INCOMPLETE, "settling", "COVERAGE_INCOMPLETE", duplicate_count=duplicate_count)
+
     seq_error = _u1_sequence_error(u1)
     if seq_error:
         return CompareResult(VERDICT_INVALID, seq_error, "U1_SEQUENCE_GAP", duplicate_count=duplicate_count)
 
-    if len(u1) < len(u0):
-        return CompareResult(VERDICT_INVALID, "missing_u1_frame", "SETUP_INVALID", matches=len(u1), duplicate_count=duplicate_count)
-    if len(sidecar_rows) > len(u1):
-        return CompareResult(VERDICT_INVALID, "sidecar_unmatched_frame", "SIDECAR_MISSING_OR_STALE", matches=len(u1), duplicate_count=duplicate_count)
+    if not streaming:
+        # Batch/offline reconciliation of a complete capture: counts must line
+        # up exactly. Live callers settle a prefix instead (see above), where a
+        # leading sidecar and denser U1 are expected, not a setup error.
+        if len(u1) < len(u0):
+            return CompareResult(VERDICT_INVALID, "missing_u1_frame", "SETUP_INVALID", matches=len(u1), duplicate_count=duplicate_count)
+        if len(sidecar_rows) > len(u1):
+            return CompareResult(VERDICT_INVALID, "sidecar_unmatched_frame", "SIDECAR_MISSING_OR_STALE", matches=len(u1), duplicate_count=duplicate_count)
 
     u1_sidecar_rows: list[Mapping[str, Any]] = []
     for index, bridge_packet in enumerate(u1):
@@ -228,7 +254,6 @@ def evaluate_trace(
     offsets: list[float] = []
     details: list[dict[str, Any]] = []
     matched_rows: list[Mapping[str, Any]] = []
-    tolerance_ns = int(tolerance_ms * 1_000_000)
     match_error, matched_pairs = _match_u0_to_u1(u0, u1, tolerance_ns)
     if match_error == "ambiguous_nearest_neighbor":
         return CompareResult(VERDICT_INVALID, match_error, "SETUP_INVALID", duplicate_count=duplicate_count)
@@ -247,7 +272,10 @@ def evaluate_trace(
         if bridge_packet.payload != ss_packet.payload:
             diff = _first_diffs(ss_packet.payload, bridge_packet.payload)
             details.append({"index": ss_index, "diffs": diff, "total_diffs": _diff_count(ss_packet.payload, bridge_packet.payload)})
-            if any(channel == 1 for channel, _a, _b in diff):
+            gate_addr = sidecar_row.get("visible_gate_dmx_address") if isinstance(sidecar_row, Mapping) else None
+            if type(gate_addr) is not int or not 1 <= gate_addr <= 512:
+                gate_addr = 1
+            if any(channel == gate_addr for channel, _a, _b in diff):
                 failure_class = "VISIBLE_FLASH_OR_MISS"
             elif sorted(expected_payloads) == sorted(matched_payloads):
                 failure_class = "ORDER_MISMATCH"
@@ -778,6 +806,13 @@ def run_self_check() -> None:
     cases.append(("partial_sidecar", evaluate_trace(u0 + u1, sidecar_rows=partial_rows, sidecar_header=partial_header, bridge_status=status, sidecar_invalid=partial_invalid, sidecar_pending=True), VERDICT_INCOMPLETE))
     cases.append(("partial_sidecar_timeout", evaluate_trace(u0 + u1, sidecar_rows=partial_rows, sidecar_header=partial_header, bridge_status=status, sidecar_invalid=partial_invalid), VERDICT_INVALID))
     cases.append(("overload", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1), sidecar_header={"run_id": run_id}, bridge_status=status, compare_overloaded=True), VERDICT_INVALID))
+    stream_u0a = _packet(0, base, 1_000_000_000, 0)
+    stream_u1a = _packet(1, base, 1_001_000_000, 1)
+    stream_u0b = _packet(0, base, 1_100_000_000, 0)
+    stream_u1b = _packet(1, base, 1_101_000_000, 2)
+    stream_lead_rows = rows(stream_u1a, stream_u1b, _packet(1, base, 1_102_000_000, 3))
+    cases.append(("batch_rejects_sidecar_lead", evaluate_trace([stream_u0a, stream_u1a, stream_u0b, stream_u1b], sidecar_rows=stream_lead_rows, sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"scripted:script"}), VERDICT_INVALID))
+    cases.append(("streaming_tolerates_sidecar_lead", evaluate_trace([stream_u0a, stream_u1a, stream_u0b, stream_u1b], sidecar_rows=stream_lead_rows, sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"scripted:script"}, streaming=True, settle_ns=0), VERDICT_PASS))
 
     failures = [(name, got.verdict, expected, got.reason) for name, got, expected in cases if got.verdict != expected]
     if failures:
@@ -810,6 +845,10 @@ def _bind_sockets() -> list[socket.socket]:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             if hasattr(socket, "SO_REUSEPORT"):
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+            except OSError:
+                pass
             sock.bind((address, ARTNET_PORT))
             sock.setblocking(False)
             sockets.append(sock)
@@ -854,18 +893,27 @@ def _live(args: argparse.Namespace) -> int:
     try:
         start = time.monotonic()
         last_print = time.monotonic()
+        overloaded = False
         while True:
             readable, _, _ = select.select(sockets, [], [], 0.25)
+            burst = 0
             for sock in readable:
-                data, addr = sock.recvfrom(2048)
-                packet = parse_artdmx(
-                    data,
-                    timestamp_ns=time.perf_counter_ns(),
-                    source=f"{addr[0]}:{addr[1]}",
-                    socket_name=sock.getsockname()[0],
-                )
-                if packet is not None:
-                    packets.append(packet)
+                while True:
+                    try:
+                        data, addr = sock.recvfrom(2048)
+                    except BlockingIOError:
+                        break
+                    burst += 1
+                    packet = parse_artdmx(
+                        data,
+                        timestamp_ns=time.perf_counter_ns(),
+                        source=f"{addr[0]}:{addr[1]}",
+                        socket_name=sock.getsockname()[0],
+                    )
+                    if packet is not None:
+                        packets.append(packet)
+            if burst > LIVE_OVERLOAD_BURST:
+                overloaded = True
             if time.monotonic() - last_print >= 1.0:
                 sidecar_header: dict[str, Any] | None = None
                 sidecar_rows: list[dict[str, Any]] = []
@@ -890,11 +938,15 @@ def _live(args: argparse.Namespace) -> int:
                     required_coverage=required,
                     sidecar_invalid=sidecar_invalid,
                     sidecar_pending=sidecar_pending,
+                    compare_overloaded=overloaded,
+                    streaming=True,
+                    settle_ns=LIVE_SETTLE_NS,
                 )
                 print(json.dumps(result.to_dict(), sort_keys=True))
                 if report_path:
                     with report_path.open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps(result.to_dict(), sort_keys=True) + "\n")
+                overloaded = False
                 if result.reason in ("missing_u0", "missing_u1") and elapsed < args.timeout_s:
                     last_print = time.monotonic()
                     continue

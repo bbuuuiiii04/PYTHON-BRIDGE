@@ -79,7 +79,11 @@ Art-Net truth-check tests add `tests/test_artnet_truth.py`,
 traces only. The comparator now fails closed on stale/missing/unmatched sidecar
 rows, sequence wrap, unmatched sidecar frames, and U1 packets missing sidecar
 evidence. It allows denser U1 streams only through ordered nearest-neighbor
-matches, and extra U1 rows never satisfy coverage. Its coverage ledger includes
+matches, and extra U1 rows never satisfy coverage. In live streaming mode it
+reconciles only a settled prefix — deferring the newest frames and tolerating
+the sidecar (written before send) leading received U1 — so a denser/leading
+stream is pending rather than a setup error, while a genuine byte mismatch on a
+settled frame still fails. Its coverage ledger includes
 normalized scripted timeline events/rapid pairs, matched Autoloop
 visible/authored-dark phase buckets based on each loop's cycle, static and
 blackout overlay/release combinations, and active-deck/mode transition
