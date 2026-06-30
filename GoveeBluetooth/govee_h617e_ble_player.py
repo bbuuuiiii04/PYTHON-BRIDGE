@@ -79,13 +79,14 @@ def _frame_to_packets(frame: list[tuple[int, int, int]]) -> list[bytes]:
     return packets
 
 
-async def _run_effect(client, char, wwr, effect_name: str, bpm: float, duration_sec: float, last_ka_ref: list):
+async def _run_effect(client, char, wwr, effect_name: str, bpm: float, duration_sec: float, last_ka_ref: list, params: dict | None = None):
     """Run one effect on an already-connected client. last_ka_ref = [float] shared across effects."""
     beat_per_sec = bpm / 60.0
     start_wall = time.monotonic()
     frame_index = 0
     frames_sent = 0
     writes_total = 0
+    render_params = params or {}
 
     print(f"\n>>> {effect_name}  ({duration_sec:.1f}s / {duration_sec * bpm / 60:.0f} beats)")
 
@@ -104,7 +105,7 @@ async def _run_effect(client, char, wwr, effect_name: str, bpm: float, duration_
             beat_pos=beat_pos,
             local_t=local_t,
             frame_index=frame_index,
-            params={},
+            params=render_params,
             segments=RENDER_SEGMENTS,
             seed=42,
         )
@@ -130,7 +131,7 @@ async def _run_effect(client, char, wwr, effect_name: str, bpm: float, duration_
     print(f"    {frames_sent} frames  {actual_fps:.1f}fps  {writes_total/max(1,frames_sent):.1f} writes/frame")
 
 
-async def play(address: str, effect_name: str, bpm: float, duration_sec: float):
+async def play(address: str, effect_name: str, bpm: float, duration_sec: float, params: dict | None = None):
     device = await _get_device(address)
     black = build_h617e_segment_color_packet(0, 0, 0, 0xFF, 0x7F)
 
@@ -146,7 +147,7 @@ async def play(address: str, effect_name: str, bpm: float, duration_sec: float):
 
         last_ka = [time.monotonic()]
         try:
-            await _run_effect(client, char, wwr, effect_name, bpm, duration_sec, last_ka)
+            await _run_effect(client, char, wwr, effect_name, bpm, duration_sec, last_ka, params)
         except KeyboardInterrupt:
             print("\nStopping...")
 
@@ -198,6 +199,12 @@ def main():
         print("Usage: govee_h617e_ble_player.py <address> <effect_name> [bpm] [duration_sec]")
         sys.exit(1)
 
+    _COLORS = {
+        "white": (255, 255, 255), "red": (255, 0, 0), "green": (0, 255, 0),
+        "blue": (0, 0, 255), "cyan": (0, 255, 255), "magenta": (255, 0, 255),
+        "yellow": (255, 255, 0), "orange": (255, 128, 0), "purple": (128, 0, 255),
+    }
+
     address = sys.argv[1]
 
     if sys.argv[2] == "seq":
@@ -221,16 +228,32 @@ def main():
         asyncio.run(play_sequence(address, steps, bpm))
         return
 
-    effect_name = sys.argv[2]
-    bpm = float(sys.argv[3]) if len(sys.argv) > 3 else 128.0
-    duration_sec = float(sys.argv[4]) if len(sys.argv) > 4 else 30.0
+    # Parse remaining args: effect [bpm] [duration] [color=name]
+    remaining = sys.argv[2:]
+    color_arg = next((a for a in remaining if a.startswith("color=")), None)
+    if color_arg:
+        remaining = [a for a in remaining if not a.startswith("color=")]
+    positional = [a for a in remaining if not a.startswith("color=")]
+
+    effect_name = positional[0] if positional else ""
+    bpm = float(positional[1]) if len(positional) > 1 else 128.0
+    duration_sec = float(positional[2]) if len(positional) > 2 else 30.0
 
     if effect_name not in REALTIME_EFFECT_NAMES:
         print(f"Unknown effect: {effect_name!r}")
         print("Run with 'list' to see available effects.")
         sys.exit(1)
 
-    asyncio.run(play(address, effect_name, bpm, duration_sec))
+    params = None
+    if color_arg:
+        cname = color_arg.split("=", 1)[1].lower()
+        rgb = _COLORS.get(cname)
+        if rgb is None:
+            print(f"Unknown color: {cname!r}. Options: {', '.join(_COLORS)}")
+            sys.exit(1)
+        params = {"slot_colors": [list(rgb)]}
+
+    asyncio.run(play(address, effect_name, bpm, duration_sec, params))
 
 
 if __name__ == "__main__":
