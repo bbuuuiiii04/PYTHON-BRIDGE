@@ -348,7 +348,8 @@ class CurrentProjectPackTests(unittest.TestCase):
         self.assertEqual(scenes["house_post_drop_1"]["control_classification"],
                          "inactive_report_only")
         self.assertEqual(scenes["house_breakdown_1"]["control_classification"],
-                         "no_project_target")
+                         "pack_selection")
+        self.assertEqual(scenes["house_breakdown_1"]["target_kind"], "autoloop")
         for name in ("safe_static", "transition_safe_1", "emergency_blackout"):
             self.assertEqual(scenes[name]["control_classification"], "bridge_owned_safety")
         selected = [row for row in selection["learned_controls"]
@@ -512,6 +513,24 @@ class CurrentProjectPackTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"HOME": str(home)}):
             loaded = load_pack("~/canonical-pack")
         self.assertEqual(loaded.manifest_sha256, verify_pack(self.pack)["manifest_sha256"])
+
+    def test_loader_exposes_active_iac_autoloop_binding_names(self):
+        loaded = load_pack(self.pack)
+        selection = json.loads((self.pack / "selection_map.json").read_text())
+        expected = {
+            (row["channel_zero_based"], row["data_byte"]): (
+                row["target_identity"], row["target_name"],
+            )
+            for row in selection["iac_selections"]
+            if row["active"] and row["target_kind"] == "autoloop"
+        }
+
+        self.assertTrue(expected)
+        self.assertEqual(set(loaded.autoloop_bindings), set(expected))
+        for key, binding in loaded.autoloop_bindings.items():
+            identity, name = expected[key]
+            self.assertEqual(binding.target_identity, identity)
+            self.assertEqual(binding.target_name, name)
 
     def test_one_byte_artifact_mutation_is_rejected(self):
         pack = self._copy("mut-byte")

@@ -1,26 +1,26 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 74706f4
+last_verified_commit: 6c51eb8
 last_verified_date: 2026-06-29
-validation_scope: intended native Autoloop pack-runtime behavior; current code remains software-zero for native Autoloop DMX; no bridge run, restart, SoundSwitch, MIDI, serial, Enttec, DMX, laser, LED/Govee, Rekordbox live sampling, or hardware validation
+validation_scope: intended native Autoloop pack-runtime behavior; native runtime implemented and software-tested; live bridge/runtime and hardware validation still pending
 ---
 
 # Native Autoloop Pack Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; IMPLEMENTATION PLANNED
+Status: AUTHORITATIVE TARGET BEHAVIOR; SOFTWARE-TESTED IMPLEMENTATION
 
-This document defines the intended bridge-owned native SoundSwitch Autoloop DMX
+This document defines the bridge-owned native SoundSwitch Autoloop DMX
 runtime. Behavior that differs from this document is a regression unless this
 document is intentionally updated.
 
-This is not a claim that native Autoloop DMX is implemented today. Current code
-keeps the pack Autoloop base software-zero: `StateManager._drive_pack_output()`
-clears the pack player selection when scripted transport is not active, and the
-existing tests assert that `LaserPackPlayer.select_autoloop()` is not called.
-The current SoundSwitch pack runtime already implements scripted tracks,
-Static Override, blackout/status plumbing, pack reload/enable/backend commands,
-and SoundSwitch-presence auto-switching.
+Native Autoloop DMX is implemented in software through the existing pack driver:
+the executor-selected bridge scene resolves to a canonical-pack Autoloop binding,
+`StateManager._drive_pack_output()` calls `LaserPackPlayer.select_autoloop()`
+with bridge-owned phase, then the existing pack render/submit path sends the
+single CH1-CH19 software frame. This is still not a hardware-validation claim.
+Current evidence is software/wire tests; live bridge/runtime and rig validation
+remain separate gates.
 
 ## Meaning
 
@@ -134,8 +134,9 @@ drop/post-drop timing:
 
 - `drop_impact_beats`, default `32`
 - `max_drops_in_a_row`, default `2`
-- `post_drop_cycle_beats`, retained as the intended native-DMX post-drop cycle
-  cadence knob even though current laser cadence still comes from Autoloop ticks
+- `post_drop_cycle_beats`, default `32`, retained as the intended native-DMX
+  post-drop cycle cadence knob even though current laser cadence still comes
+  from Autoloop ticks
 
 Native runtime must reuse the existing `DropLifecycle` behavior for drop vs
 post_drop timing rather than implementing a parallel drop resolver.
@@ -198,9 +199,10 @@ Post-drop:
 
 - Post-drop starts after the drop impact window while the chorus/post-drop region
   remains active.
-- Post-drop selection remains confined to post_drop looks.
-- If no usable post_drop look is mapped, fallback behavior is to cycle drop
-  looks, not to go dark.
+- If usable post_drop looks are mapped, post-drop selection remains confined to
+  post_drop looks and cycles on the bridge-owned 32-beat edge.
+- If no usable post_drop looks are mapped, fallback behavior is to cycle drop
+  looks on that same 32-beat edge, not to go dark.
 
 ## Reset And Reload
 
@@ -237,13 +239,16 @@ pack.
   phrase-anchor, marker, interval, or fallback-grid sources.
 - `render_autoloop_frame()` renders a 19-channel CH1-19 tuple, wraps by
   `loop.cycle_ticks`, and fails closed to zero for unsupported/inactive looks.
-- The pack loader already exposes `LoadedPack.autoloops`.
+- The pack loader exposes `LoadedPack.autoloops` and
+  `LoadedPack.autoloop_bindings[(channel_zero_based, data_byte)]`.
 - The pack export `selection_map.json` already carries each resolved control's
   note, target identity, and `target_name`.
-- The pack loader currently uses active IAC selections to mark active Autoloops,
-  but it does not yet expose a runtime note-to-Autoloop lookup with display name.
-- Current pack output status has states such as `autoloop_phase_blocked` and
-  `software_zero_frame`; native Autoloop status should extend this surface.
+- `native_autoloop_resolver.py` owns the I/O-free latch/phase calculation using
+  `AUTOLOOP_TICKS_PER_BEAT = 600` and `phase_offset_beats`.
+- Current pack output status exposes a nested `native_autoloop` block with
+  statuses including `rendering_active`, `empty_dark_look`, `missing_binding`,
+  `missing_autoloop_file`, `unsupported_layout`,
+  `soundswitch_present_native_suppressed`, and `software_zero_frame`.
 
 ## Non-Goals
 

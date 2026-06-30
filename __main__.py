@@ -1024,6 +1024,10 @@ def main() -> None:
         backend=soundswitch_pack_bundle.laser_backend,
         frame_sender=soundswitch_frame_sender,
         pack_sha12=(getattr(soundswitch_pack_bundle.pack, "manifest_sha256", "") or "")[:12],
+        phase_offset_beats=(
+            soundswitch_pack_cfg_result.config.phase_offset_beats
+            if soundswitch_pack_cfg_result.config is not None else 0.0
+        ),
     )
     log.info(
         "[MAIN] soundswitch-pack-config  reason=%s  available=%s  enabled=%s  startup=%s",
@@ -1124,6 +1128,7 @@ def main() -> None:
         led_look_director=led_look_director,
         led_scene_adapter=led_scene_adapter,
         led_color_engine=led_bundle.led_color_engine,
+        os2l_connected_provider=conn.is_connected,
         soundswitch_pack_runtime=soundswitch_pack_runtime,
         mixer_authority_enabled=mixer_authority,
     )
@@ -1343,6 +1348,10 @@ def main() -> None:
             midi_input=bundle.midi_input, backend=bundle.laser_backend,
             frame_sender=bundle.frame_sender,
             pack_sha12=(getattr(bundle.pack, "manifest_sha256", "") or "")[:12],
+            phase_offset_beats=(
+                cfg_result.config.phase_offset_beats
+                if cfg_result.config is not None else 0.0
+            ),
         )
 
     soundswitch_pack_controller = SoundSwitchPackController(

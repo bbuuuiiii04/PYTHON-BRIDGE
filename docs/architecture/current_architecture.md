@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against implementation commit `74febec` on 2026-06-29. Treat code as the source of
+Audited against implementation commit `6c51eb8` on 2026-06-29. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -53,9 +53,11 @@ only the failed instant with a bounded log, at most one direct pack ZERO frame,
 and the normal 200 Hz throttle preserved; process-control exceptions still
 escape. Blocking load/verify/serial work remains on startup or the command
 thread. Absent/disabled config preserves legacy MIDI;
-dry-run/none opens neither physical output path. Sender delivery health, T7d
-capture-derived Autoloop phase integration, and hardware validation remain open.
-Current native Autoloop pack output remains software-zero.
+dry-run/none opens neither physical output path. Sender delivery health,
+native Autoloop phase calibration, live runtime validation, and hardware
+validation remain open. Native Autoloop pack output is implemented in software
+through the existing pack player/submit path with bridge-owned phase; the old
+T7d six-scenario gate no longer blocks it.
 
 ## Runtime Subsystems
 
@@ -135,9 +137,10 @@ path was previously available.
    sends mirrored OS2L updates to active, mirror, 3, and 4 through
    `SoundSwitchEngine`.
 6. When a verified pack runtime is explicitly active, the pack driver submits
-   one nonblocking CH1-CH19 frame per tick and publishes copied operational status
-   from that same rendered frame. Native Autoloop rendering remains software-zero
-   pending T7d evidence.
+   one nonblocking CH1-CH19 frame per tick and publishes copied operational
+   status from that same rendered frame. Scripted tracks select scripted pack
+   documents; native Autoloops select canonical-pack Autoloops from the
+   executor-selected bridge note and render by Rekordbox beat-grid phase.
 
 ## Smart-Transition Architecture
 

@@ -52,7 +52,8 @@ def _unstarted(log, name, sha="newsha"):
     return PackRuntime(
         enabled=False, reason="prepared", player=object(),
         midi_input=_Input(log, name), backend=object(),
-        frame_sender=_Sender(log, name), pack_sha12=sha)
+        frame_sender=_Sender(log, name), pack_sha12=sha,
+        phase_offset_beats=1.25)
 
 
 class _Harness:
@@ -77,6 +78,7 @@ class ControllerTests(unittest.TestCase):
         ok, detail = h.ctrl.handle("enable", enabled=True)
         self.assertEqual((ok, detail), (True, "pack"))
         self.assertTrue(h.current.active)
+        self.assertEqual(h.current.phase_offset_beats, 1.25)
         self.assertEqual(log, ["new.input_start", "new.start"])  # input first, sender second
 
     def test_disable_zero_and_stops_old_sender(self):
@@ -84,10 +86,12 @@ class ControllerTests(unittest.TestCase):
         h = _Harness(prepare=lambda: _unstarted(log, "new"))
         h.current = PackRuntime(enabled=True, reason="pack", player=object(),
                                 midi_input=_Input(log, "old"), backend=object(),
-                                frame_sender=_Sender(log, "old"))
+                                frame_sender=_Sender(log, "old"),
+                                phase_offset_beats=2.0)
         ok, detail = h.ctrl.handle("enable", enabled=False)
         self.assertEqual((ok, detail), (True, "disabled"))
         self.assertFalse(h.current.active)
+        self.assertEqual(h.current.phase_offset_beats, 2.0)
         self.assertIn("old.zero_and_stop", log)  # physical zero, not just NoneBackend
 
     def test_stop_before_start_ordering_on_swap(self):

@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan
 truth_level: code-and-test-grounded
-last_verified_commit: 3918603
+last_verified_commit: 6c51eb8
 last_verified_date: 2026-06-28
 validation_scope: SoundSwitch 2.10.3 canonical-project/RAVE-profile implementation status; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -36,7 +36,7 @@ MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 | RW-1 export/publish/reload | Implemented, independently reviewed, and software-tested. Replacement is staged and verified; the required binding sidecar is staged before swap, and pre-swap sidecar failure preserves the prior pack. Reload stays conservative and never implies enable/backend/start. Source-fingerprint freshness drives the menubar state. Stable opaque backup/media/preset rewrites are ignored, but `recordable/*.dat` remains fingerprinted because it can later decode into learned-MIDI/control-state content; older sidecars that listed it fail open. |
 | RW-1A shutdown ownership | Implemented, independently reviewed, and software-tested. Graceful shutdown reaches the current runtime-swapped sender and attempts zero before close. Hard process death remains physically unsafe. |
 | RW-2 scripted transport | Implemented and software-tested. Pause rerenders/holds the authoritative elapsed frame; confirmed stop/unload/stale authority resolves the base to zero. |
-| RW-3 mode authority | Implemented, independently reviewed, and software-tested. Scripted selection requires current bridge-owned scripted authority; Autoloop remains unselected. |
+| RW-3 mode authority | Implemented, independently reviewed, and software-tested. Scripted selection requires current bridge-owned scripted authority; Autoloop selection is native-only when SoundSwitch is absent and no scripted identity owns the base. |
 | RW-4 controller health | Implemented, independently reviewed, and software-tested. Degraded controller input releases manual overlays while preserving simultaneous scripted truth; missing/ambiguous static-controller input no longer disables pack DMX; runtime swap resynchronizes static-slot state. |
 | RW-5 operational status | Implemented and software-tested. Status is provider-free copied software state; `software_zero_frame` and `frame_count` do not claim serial delivery or physical darkness. |
 | Menubar status | Implemented and software-tested. It consumes only the copied status file, bounds the combined row after sanitization, and renders stale status as `Lighting: no status yet`. |
@@ -44,8 +44,8 @@ MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 | Static Press/Toggle interaction mode | Implemented and software-tested. The decoder reads the SoundSwitch-saved Press/Toggle byte (`PushButton+0xc1`, `soundswitch_project_decoder.py:855-888`); the pack model/loader carry `interaction_mode ∈ {press, toggle}` (`soundswitch_pack_models.py:250`, `soundswitch_pack_loader.py:53,283`); the MIDI input adapter latches toggle slots and ignores note-off for toggles (`soundswitch_midi_input.py:220-252`). Unknown saved mode fails closed to momentary. |
 | Canonical pack location | Repo-local ignored path `local/soundswitch/rbss_canonical_pack` (`git check-ignore` confirmed). The tracked example config names the absolute local checkout path; old `~/Music/SoundSwitch/...` references survive only in historical completed specs. |
 | Non-Autoloop hardware procedure | Independent-review revisions are implemented in the procedure/template; the latest software/wire implementation review is complete. No operator evidence run exists. |
-| T7d phase evidence | Incomplete. Two accepted arm and two accepted refire integrity captures exist; four scenario pairs, identity/holdout reconciliation, and a unique oracle remain. |
-| Native Autoloop DMX | Intentionally not implemented. `StateManager` does not call `select_autoloop`; the automatic base remains software-zero in Autoloop mode. |
+| T7d phase evidence | Historical/incomplete under the old six-scenario gate. It no longer blocks native Autoloop DMX; the active native path uses bridge-owned phase, `AUTOLOOP_TICKS_PER_BEAT = 600`, `phase_offset_beats`, the offline equivalence oracle, and an operator two-flight calibration/A-B run. |
+| Native Autoloop DMX | Implemented and software-tested under `docs/architecture/native_autoloop_pack_authority.md` and `docs/plans/active/native_autoloop_dmx_runtime_spec.md`. StateManager resolves the already-selected laser scene edge through canonical pack note bindings, latches across no-edge ticks, phases an 8-bar/32-beat timeline at 600 ticks/beat with `phase_offset_beats`, preserves scripted/static/blackout/SoundSwitch-present precedence, and fails closed on missing binding/file/layout. Live/runtime validation, oracle calibration, and hardware evidence remain open. |
 | Physical hardware | Unvalidated. No committed real-run evidence file exists. |
 
 The old 29 PASS / 0 FAIL / 0 INCOMPLETE proof record remains closure evidence
@@ -129,28 +129,42 @@ transport, fixture darkness, or Enttec output darkness; those remain operator
 observations/actions. If a known-dark baseline cannot be proven after an
 emergency zero failure or unknown result, the run is FAIL or INCOMPLETE.
 
-### 3. T7d capture evidence
+### 3. Autoloop phase/equivalence evidence
 
-This work remains excluded from the current implementation/review pass.
+The old six-scenario T7d gate is no longer required for the native bridge-owned
+Autoloop runtime. It tried to prove SoundSwitch's hidden runtime phase/origin
+behavior before choosing a bridge phase formula. The native plan now chooses the
+bridge-owned formula directly and keeps one operator calibration input:
+`phase_offset_beats`.
 
-- [ ] Collect two accepted repetitions for master-switch, drop-hold, buildup,
-  and correction using the existing operator-conducted workflow.
-- [ ] Reconcile identity/BPM/holdout coverage and unchanged source hashes.
-- [ ] Obtain one unique scale/quantizer/origin/reset/continue/snap contract, or
-  record FAIL/INCOMPLETE.
+- [x] Retire T7d as a blocker for native Autoloop DMX.
+- [ ] Use the offline Autoloop equivalence oracle to compare bridge-rendered
+  Autoloop frames against captured SoundSwitch output.
+- [ ] Run the operator two-flight calibration/A-B pass before making any
+  hardware-validated or show-ready claim.
 
-The active authority is
-`docs/plans/active/soundswitch_t7d_capture_evidence_plan.md`. No phase mapping
-may be selected from incomplete evidence.
+The old T7d files remain useful historical evidence/tooling, but they are not
+the active implementation gate for native Autoloop DMX.
 
 ### 4. Native Autoloop DMX
 
-This work remains excluded and blocked by T7d.
+This work is implemented and software-tested, but not live/runtime or hardware
+validated.
 
-- [ ] Author a separate evidence-grounded implementation spec only after
-  `PASS_T7D_PHASE_CONTRACT`.
-- [ ] Independently review that spec before implementation.
-- [ ] Keep unknown transition classes software-zero.
+- [x] Author the operator-authoritative behavior document:
+  `docs/architecture/native_autoloop_pack_authority.md`.
+- [x] Author and adversarially review the implementation spec:
+  `docs/plans/active/native_autoloop_dmx_runtime_spec.md`.
+- [x] Implement native Autoloop DMX from exported pack mappings only when
+  SoundSwitch is absent.
+- [x] Replace the old software-zero-only Autoloop base with fail-closed native
+  rendering through the existing pack submit path.
+- [x] Confirm canonical-pack role-note mappings before implementation: no
+  post_drop maps means post-drop falls back to 32-beat drop-bank cycling; mapped
+  post_drop looks cycle inside the post_drop bank every 32 beats.
+- [ ] Run live/runtime validation against Rekordbox transport, role changes,
+  pack reload, SoundSwitch-present suppression, Static Override, and scripted
+  precedence before any operator-use claim.
 
 ### 5. Final closeout
 
@@ -170,7 +184,10 @@ The copied pack status contains only:
   and bounded `reason`;
 - `operational_state` with precedence `disabled`, `blackout`,
   `input_degraded`, `static_held`, `scripted_active`,
-  `autoloop_phase_blocked`, `software_zero_frame`;
+  native Autoloop states (`rendering_active`, `empty_dark_look`,
+  `missing_binding`, `missing_autoloop_file`, `unsupported_layout`,
+  `soundswitch_present_native_suppressed`), `autoloop_phase_blocked`,
+  `software_zero_frame`;
 - authoritative companion booleans for those simultaneous truths;
 - `frame_count`, meaning attempted normal software frames;
 - `has_active_identity`, derived from in-memory backend state.
@@ -194,8 +211,9 @@ not enter status or the menubar.
 6. Reload/export never enables output, changes backend, starts/restarts the
    bridge, or opens hardware.
 7. Direct DMX and physical MIDI-laser output remain mutually exclusive.
-8. Automatic base output resolves software-zero on unowned mode, stop/unload,
-   stale/error, invalid identity, failed render/reload, disable, and shutdown.
+8. Automatic base output resolves software-zero or a native fail-closed state on
+   unowned mode, stop/unload, stale/error, invalid identity, missing
+   binding/file/layout, failed render/reload, disable, and shutdown.
 9. Blackout wins; manual Static Override behavior changes only under an
    explicit reviewed policy.
 10. Existing OS2L, lasers, LEDs/Govee, Rekordbox readers, and default-off bridge
@@ -216,8 +234,10 @@ not enter status or the menubar.
 | Product/format contract | `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` |
 | Current RE routing | `docs/research/soundswitch/README.md` |
 | Completed implementation specs | `docs/plans/completed/soundswitch/` |
-| Active T7d plan/handoff | `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md`, `soundswitch_t7d_capture_gate_handoff.md` |
-| T7d result | `docs/validation/soundswitch_t7d_phase_contract_evidence.md`, `soundswitch_t7d_phase_contract_blocked.md` |
+| Historical T7d plan/handoff | `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md`, `soundswitch_t7d_capture_gate_handoff.md` |
+| Historical T7d result | `docs/validation/soundswitch_t7d_phase_contract_evidence.md`, `soundswitch_t7d_phase_contract_blocked.md` |
+| Native Autoloop authority/spec | `docs/architecture/native_autoloop_pack_authority.md`, `docs/plans/active/native_autoloop_dmx_runtime_spec.md` |
+| Autoloop equivalence oracle | `docs/plans/active/soundswitch_autoloop_equivalence_oracle_spec.md` |
 | Hardware procedure/template | `docs/validation/soundswitch_hardware_validation_procedure.md`, `soundswitch_hardware_runs/TEMPLATE.md` |
 | Latest independent review | `docs/validation/soundswitch_exporter_player_software_review.md`, `docs/validation/soundswitch_publish_sidecar_review.md` |
 | Reusable review prompt | `docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md` |
@@ -255,8 +275,10 @@ The full project is not complete until all of the following are proven:
   reports bounded operator state;
 - [x] RW-1A through RW-5 scripted transport, mode, input-health, shutdown, and
   copied-status work is implemented and software-tested;
-- [ ] T7d uniquely proves the active Autoloop phase contract;
-- [ ] native Autoloop DMX uses only that proven contract;
+- [x] native Autoloop DMX implements the greenlit bridge-owned phase contract,
+  canonical-pack role-note checks, and `phase_offset_beats` calibration path;
+- [ ] the offline equivalence oracle and operator two-flight/A-B pass are
+  recorded before any hardware-validated claim;
 - [ ] final proof, full software gates, and independent review pass;
 - [ ] a real operator hardware run is recorded;
 - [ ] unchanged behavior outside enabled pack mode is verified at the final

@@ -115,7 +115,7 @@ Human + machine change contracts: `docs/agents/change_contracts.md` and `docs/ag
 | Rekordbox direct readers | `rb_state_reader.py`, `rb_memory.py`, `rb_offsets.py`, `live_bpm.py`, `probe_live_bpm.py`, `probe_deck2.py`, `mtc_reader.py` | `docs/subsystems/rekordbox_readers.md` |
 | Track metadata | `filepath_resolver.py`, `anlz_reader.py`, `scripted_tracks.py`, `ss_library_scanner.py` | — |
 | Phrasing / autoloop / beat | `smart_phrasing.py`, `smart_rearm.py`, `autoloop_controller.py`, `beat_math.py`, `energy_model.py`, `audio_spectral_features.py`, `spectral_cache.py` | — |
-| SoundSwitch output | `osl_output.py`, `sound_switch_engine.py`, `os2l_injector.py` | `docs/subsystems/soundswitch_output.md` |
+| SoundSwitch output | `osl_output.py`, `sound_switch_engine.py`, `os2l_injector.py`, `soundswitch_pack_loader.py`, `soundswitch_laser_player.py`, `native_autoloop_resolver.py` | `docs/subsystems/soundswitch_output.md` |
 | Laser | `laser_director.py`, `laser_executor.py`, `laser_config.py`, `laser_models.py`, `laser_decision_log.py`, `personality_resolver.py`, `midi_output.py` | `docs/subsystems/laser.md` |
 | LED / Govee | `led_config.py`, `led_models.py`, `led_look_director.py`, `led_color_engine.py`, `led_dispatch_coordinator.py`, `govee_scene_adapter.py`, `govee_runtime_sender.py`, `govee_realtime_runner.py`, `govee_realtime_transport.py`, `govee_frame_renderer.py`, `govee_owner_state.py`, `govee_lan_discovery.py`, `beat_sync_engine.py` | `docs/subsystems/led_govee.md` |
 | Config | `config.py`, `laser_config.py`, `led_config.py`, `config/*.example.json` | `docs/subsystems/config.md` |

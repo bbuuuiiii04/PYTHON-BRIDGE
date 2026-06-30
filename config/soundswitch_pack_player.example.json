@@ -29,5 +29,6 @@
   "midi_input_aliases": {},
   "enttec_port": "",
   "frame_stale_timeout_ms": 250,
-  "controller_hold_timeout_ms": 2000
+  "controller_hold_timeout_ms": 2000,
+  "phase_offset_beats": 0.0
 }

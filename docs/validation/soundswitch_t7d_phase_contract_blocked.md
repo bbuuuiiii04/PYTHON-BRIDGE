@@ -1,25 +1,30 @@
 ---
 doc_status: active-validation
 truth_level: code-grounded
-last_verified_commit: 74febec
+last_verified_commit: 6c51eb8
 last_verified_date: 2026-06-29
 validation_scope: T7d blocked report; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
-# T7d runtime autoloop DMX spec — BLOCKED
+# T7d runtime autoloop DMX spec — old six-scenario gate blocked
 
-**A runtime autoloop DMX implementation spec cannot honestly be written yet.**
-The phase contract it would encode (TICKS_PER_BEAT, integer quantizer, and the
-per-transition origin/reset/continue/snap rules) is **unknown** and is provable
-only from a complete live capture corpus and unique oracle result that do not
-yet exist. Writing a spec now would mean inventing a beat-to-animation mapping
-— exactly what plan §A3/§B6 forbid.
-Per the mission's own rule, no fabricated spec is produced.
+> Superseded for native Autoloop implementation as of 2026-06-29.
+> This file records why the old SoundSwitch-runtime phase proof was incomplete.
+> It no longer blocks `docs/plans/active/native_autoloop_dmx_runtime_spec.md`.
+> The active native path uses bridge-owned phase, `AUTOLOOP_TICKS_PER_BEAT = 600`,
+> `phase_offset_beats`, the offline equivalence oracle, and an operator
+> two-flight calibration/A-B run.
+
+Under the old T7d framing, a runtime Autoloop DMX implementation spec could not
+honestly be written until SoundSwitch's own hidden phase/origin behavior was
+fully proven. That older contract is still incomplete. It has been replaced for
+native Autoloop DMX by the bridge-owned phase contract in the native spec.
 
 This is **not** an easy exit: the software workflow exists and four captures
 have passed its integrity gate. Remaining work includes physical capture labor
 for four scenario pairs plus offline identity reconciliation and oracle analysis.
-What is blocked is the complete evidence contract, not the tooling.
+What is blocked is only the complete old T7d evidence contract, not native
+Autoloop DMX implementation.
 
 The 2026-06-29 read-only GhidraMCP pass does not change this blocker. It
 confirms SoundSwitch 2.10.3 arm64 Autoloop playback is beatgrid/beat-window/index
@@ -71,12 +76,8 @@ no complete, documented real-capture oracle verdict. To reach
 Follow `docs/plans/active/soundswitch_t7d_capture_gate_handoff.md`:
 `prepare` → `run-scenario <remaining-name>` (active-wait, two accepted reps) →
 `summarize-corpus` → `validate_autoloop_capture.py --t7d` per accepted segment.
-Then update the evidence ledger. **Only if** the corpus verdict is
-`PASS_T7D_PHASE_CONTRACT` does
-`docs/plans/active/soundswitch_t7d_runtime_autoloop_dmx_implementation_spec.md`
-get written, grounded byte-for-byte in that evidence.
-
-Until then T7d stays `planned, blocked` and `_drive_pack_output` continues to
-clear the automatic autoloop base to safe-zero (or allows only the existing
-independently held static override). Repo status remains **SOFTWARE/WIRE-VALIDATED
-ONLY / HARDWARE-UNVALIDATED**.
+Then update the evidence ledger if the old proof matrix is still useful. Native
+Autoloop DMX no longer waits for `PASS_T7D_PHASE_CONTRACT`; current code uses
+the bridge-owned native spec instead and remains live/runtime and hardware
+unvalidated. Repo status remains **SOFTWARE/WIRE-VALIDATED ONLY /
+HARDWARE-UNVALIDATED**.

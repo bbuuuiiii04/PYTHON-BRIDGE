@@ -239,6 +239,7 @@ contracts:
       - soundswitch_pack*.py
       - soundswitch_project_*.py
       - soundswitch_laser_player*.py
+      - native_autoloop_resolver.py
       - soundswitch_midi_input*.py
       - laser_output_backend*.py
       - soundswitch_frame_sender*.py
@@ -259,6 +260,7 @@ contracts:
       - tests/test_source_fingerprint_parity.py
       - tests/test_soundswitch_project*.py
       - tests/test_soundswitch_laser_player*.py
+      - tests/test_native_autoloop_resolver.py
       - tests/test_soundswitch_midi_input*.py
       - tests/test_soundswitch_frame_sender*.py
       - tests/test_enttec*.py

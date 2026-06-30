@@ -15,13 +15,14 @@ implementation authority. Research/format evidence remains grouped under
 ## Read now, in order
 
 1. `soundswitch_exporter_remaining_work.md` - **single active completion
-   checklist and roadmap**. It records landed software, the remaining T7d and
-   hardware gates, task order, and completion definition.
+   checklist and roadmap**. It records landed software, native Autoloop
+   implementation status, remaining live/hardware gates, task order, and
+   completion definition.
 2. `../../research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
    - original product/implementation contract. Use it for intended behavior,
    then use the remaining-work roadmap for actual landed status.
-3. `soundswitch_t7d_capture_evidence_plan.md` - T7d evidence requirements. No
-   phase mapping is selected by this plan.
+3. `soundswitch_t7d_capture_evidence_plan.md` - historical T7d evidence
+   requirements. It is not the active native Autoloop runtime gate.
 4. `soundswitch_t7d_capture_gate_handoff.md` - active operator workflow for the
    six live scenarios: arm, refire, master-switch, drop-hold, buildup, and
    correction.
@@ -87,9 +88,12 @@ artifacts, not planning documents. They are not moved into the authority tree.
   ambiguous input degrades manual Static Looks without disabling pack DMX.
 - Canonical pack now lives at the repo-local ignored path
   `local/soundswitch/rbss_canonical_pack`.
-- T7d phase tooling: implemented; four captures pass conductor integrity across
-  arm/refire, while four scenario pairs and the corpus oracle remain incomplete.
-- Native-DMX Autoloop selection: intentionally not implemented; safe-zero.
+- T7d phase tooling: implemented and historical; four captures pass conductor
+  integrity across arm/refire, while four scenario pairs and the corpus oracle
+  remain incomplete. This no longer blocks the bridge-owned native path.
+- Native-DMX Autoloop selection: implemented/software-tested through canonical
+  pack note bindings, 32-beat phase at 600 ticks/beat, `phase_offset_beats`, and
+  the existing pack driver. Live/runtime and hardware validation remain open.
 - Hardware procedure/template: present; latest software/wire review complete;
   no real operator run, so hardware remains unvalidated.
 
@@ -118,6 +122,7 @@ stays active because live code and tests still cite that path.
 
 ## Safety boundary
 
-No active planning document authorizes a restart, backend toggle, MIDI/serial
-open, Enttec/DMX output, fixture connection, or hardware test. Those actions
-remain behind the explicit operator gate in the remaining-work roadmap.
+No active planning document by itself authorizes a restart, backend toggle,
+MIDI/serial open, Enttec/DMX output, fixture connection, or hardware test. Those
+actions remain behind explicit operator approval or a task prompt that grants
+that authority.

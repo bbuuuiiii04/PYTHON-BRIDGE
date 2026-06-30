@@ -54,6 +54,14 @@ class PackMidiBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class LoadedAutoloopBinding:
+    channel_zero_based: int
+    data_byte: int
+    target_identity: str
+    target_name: str
+
+
+@dataclass(frozen=True, slots=True)
 class LoadedAttribute:
     fixture_group: int
     channel_id: int
@@ -151,6 +159,8 @@ class LoadedPack:
     scripted: Mapping[str, LoadedScriptedTrack | LoadedDocument]
     autoloops: Mapping[str, LoadedAutoloop | LoadedDocument]
     static_looks: Mapping[int, LoadedStaticLook]
+    autoloop_bindings: Mapping[tuple[int, int], LoadedAutoloopBinding] = field(
+        default_factory=lambda: _EMPTY_MAPPING)
     bridge_scene_crosswalk: Mapping[str, str] = field(default_factory=lambda: _EMPTY_MAPPING)
     learned_midi_bindings: tuple[PackMidiBinding, ...] = ()
     project_identity: Mapping[str, str | int] = field(default_factory=lambda: _EMPTY_MAPPING)
@@ -368,6 +378,36 @@ def _runtime_metadata(
         MappingProxyType(active_cue_union),
         MappingProxyType(sanitized_totals),
     )
+
+
+def _autoloop_bindings(
+    iac_rows: list[Any],
+    autoloops: Mapping[str, LoadedAutoloop],
+) -> Mapping[tuple[int, int], LoadedAutoloopBinding]:
+    bindings: dict[tuple[int, int], LoadedAutoloopBinding] = {}
+    for row in iac_rows:
+        if not isinstance(row, dict):
+            _fail("active IAC selection row must be an object")
+        if row.get("active") is not True:
+            _fail("active IAC Autoloop row must be active")
+        if row.get("device_name") != "IAC Driver Bus 1" \
+                or row.get("message_type") != "note" \
+                or row.get("target_kind") != "autoloop":
+            _fail("active IAC Autoloop row has invalid semantics")
+        channel = row.get("channel_zero_based")
+        data_byte = row.get("data_byte")
+        if type(channel) is not int or not 0 <= channel <= 15 \
+                or type(data_byte) is not int or not 0 <= data_byte <= 127:
+            _fail("active IAC Autoloop row has invalid channel/note")
+        identity = _string(row.get("target_identity"), "Autoloop target_identity")
+        name = _string(row.get("target_name"), "Autoloop target_name")
+        if identity not in autoloops:
+            _fail("active IAC selection references a missing Autoloop")
+        key = (channel, data_byte)
+        if key in bindings:
+            _fail("duplicate active Autoloop note binding")
+        bindings[key] = LoadedAutoloopBinding(channel, data_byte, identity, name)
+    return MappingProxyType(bindings)
 
 
 def _attribute(row: dict[str, Any]) -> LoadedAttribute:
@@ -625,6 +665,7 @@ def load_pack(pack: str | Path) -> LoadedPack:
         )
     if not active_loops.issubset(loops):
         _fail("active IAC selection references a missing Autoloop")
+    autoloop_bindings = _autoloop_bindings(iac_rows, loops)
 
     scripts: dict[str, LoadedScriptedTrack] = {}
     for relative, artifact in values.items():
@@ -675,6 +716,7 @@ def load_pack(pack: str | Path) -> LoadedPack:
         has_intensity_channel=has_intensity,
         scripted=MappingProxyType(scripts), autoloops=MappingProxyType(loops),
         static_looks=MappingProxyType(looks),
+        autoloop_bindings=autoloop_bindings,
         bridge_scene_crosswalk=bridge_scene_crosswalk,
         learned_midi_bindings=learned_midi_bindings,
         project_identity=project_identity,
@@ -689,7 +731,8 @@ def load_pack(pack: str | Path) -> LoadedPack:
 
 __all__ = [
     "AUTOLOOP_CYCLE_TICKS", "LoadedAttribute", "LoadedAutoloop", "LoadedColourValue", "LoadedDocument",
-    "LoadedIntensityNode", "LoadedPack", "LoadedPositionValue", "LoadedScalarValue",
-    "LoadedScriptedTrack", "LoadedStaticLook", "LoadedTimelineEvent", "PackMidiBinding",
+    "LoadedAutoloopBinding", "LoadedIntensityNode", "LoadedPack", "LoadedPositionValue",
+    "LoadedScalarValue", "LoadedScriptedTrack", "LoadedStaticLook", "LoadedTimelineEvent",
+    "PackMidiBinding",
     "SoundSwitchPackLoadError", "load_pack",
 ]

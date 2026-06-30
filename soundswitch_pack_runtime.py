@@ -25,6 +25,7 @@ class PackRuntime:
     backend: Any = None               # LaserOutputBackend | None
     frame_sender: Any = None          # SoundSwitchFrameSender | None
     pack_sha12: str = ""              # first 12 of the public manifest sha; "" if none
+    phase_offset_beats: float = 0.0   # native Autoloop calibration knob; no latency model
 
     @property
     def active(self) -> bool:
@@ -40,6 +41,7 @@ class PackRuntime:
             "backend": "pack" if self.active else "disabled",
             "pack_loaded": self.player is not None,
             "pack_sha12": self.pack_sha12 or "",
+            "phase_offset_beats": float(self.phase_offset_beats),
             "reason": self.reason,           # sanitized category only
         }
 

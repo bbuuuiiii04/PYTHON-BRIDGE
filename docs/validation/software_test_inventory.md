@@ -30,7 +30,7 @@ python -m pytest tests
 | Runtime commands | parser/handler/status writer tests | needed before command changes |
 | Logging visibility | bridge formatting/rate helpers and logging diagnostic coverage tests | verifies software-only log filtering and spam-control behavior |
 | Rekordbox readers | reader, offset, live BPM, active-deck resolver, StateManager authority, startup wiring, runtime status tests | cannot prove all app versions or hardware-visible behavior |
-| SoundSwitch | OS2L/output helpers; project/pack/player/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/T7d tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status is software intent and tests do not prove physical fixtures |
+| SoundSwitch | OS2L/output helpers; project/pack/player/native-Autoloop-resolver/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/T7d tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status and native Autoloop rendering are software intent and tests do not prove physical fixtures |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety |
 | LED/Govee | LED config/director/color/realtime/renderer tests | cannot prove device compatibility |
 | Replay/session tooling | replay format and smoke tests | software-only |
@@ -53,11 +53,16 @@ When adding or changing tests, update:
 `tests/test_shadow_soundswitch_pack.py` (Task 8 offline shadow proof) drives a synthetic verified `LaserPackPlayer` through scripted/static/blackout transitions with the physical backend forced to `none` (`tools/shadow_soundswitch_pack.py`), recording ONLY frame SHA-256 hashes and comparing each against an independently hand-computed expected frame. It proves stop/blackout/emergency/reload-wait resolve to a zero frame, that a held Static Override stands alone over a cleared base, twice-run hash determinism, report sanitization (no raw frames/paths/identities), backend-`none` enforcement (a frame sender is rejected), slots 8/16/17/24 plus a controlled slot-7 create/edit, and that the removed non-functional `--project` option is rejected. Pure explicit-`phase_tick` autoloop rendering is covered by `tests/test_soundswitch_laser_player.py`; only runtime beat-to-phase shadow coverage remains reported `deferred_t7d_phase_origin`. Software/offline only — no hardware claim.
 
 This is software validation only. Separate focused suites cover the immutable
-pack loader/player, MIDI adapter, backend abstraction, Enttec framing/sender,
-pack-player config, startup matrix, atomic controller, runtime commands/status,
-StateManager driver, and menubar. MIDI/startup tests cover static-controller
-auto-bind, alias override, missing/ambiguous controller degradation, and
-output-bus exclusion. RW-5 tests fail on backend/provider re-query,
+pack loader/player, native Autoloop resolver, MIDI adapter, backend abstraction,
+Enttec framing/sender, pack-player config, startup matrix, atomic controller,
+runtime commands/status, StateManager driver, and menubar. Native Autoloop tests
+cover note-to-Autoloop binding/display names, 600 ticks/beat phase, latching,
+same-look refire and role re-anchor, missing binding/file/layout, all-zero dark
+looks, post-drop fallback and mapped post-drop behavior,
+scripted/static/SoundSwitch-present precedence, reload stale clearing, and the
+single submit path. MIDI/startup tests cover static-controller auto-bind, alias
+override, missing/ambiguous controller degradation, and output-bus exclusion.
+RW-5 tests fail on backend/provider re-query,
 published-dict mutation/reuse, incorrect precedence or simultaneous truths,
 unsafe lifecycle snapshots, raw render/submit errors, 200 Hz loop error death,
 missing throttle sleeps, duplicate ZERO submits after `_push_tick()` inner failures,

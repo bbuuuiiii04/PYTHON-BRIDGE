@@ -81,7 +81,10 @@ class SoundSwitchPackController:
     def _go_disabled(self, reason: str) -> None:
         """Publish a disabled (no-output) bundle, then physically zero/stop old."""
         cur = self._snapshot()
-        self._publish(PackRuntime(enabled=False, reason=reason, pack_sha12=cur.pack_sha12))
+        self._publish(PackRuntime(
+            enabled=False, reason=reason, pack_sha12=cur.pack_sha12,
+            phase_offset_beats=cur.phase_offset_beats,
+        ))
         _safe_zero_and_stop(cur)
 
     def _swap_to_started(self) -> tuple[bool, str]:
@@ -92,7 +95,10 @@ class SoundSwitchPackController:
         except Exception as exc:
             return False, _sanitize_error(exc)  # old retained; no teardown
         # Publish disabled so the driver stops submitting, then free the shared port.
-        self._publish(PackRuntime(enabled=False, reason="swapping", pack_sha12=old.pack_sha12))
+        self._publish(PackRuntime(
+            enabled=False, reason="swapping", pack_sha12=old.pack_sha12,
+            phase_offset_beats=old.phase_offset_beats,
+        ))
         _safe_zero_and_stop(old)
         try:
             if new_unstarted.midi_input is not None:
@@ -102,12 +108,16 @@ class SoundSwitchPackController:
         except Exception as exc:
             _safe_zero_and_stop(new_unstarted)
             self._publish(PackRuntime(
-                enabled=False, reason="pack_start_failed", pack_sha12=old.pack_sha12))
+                enabled=False, reason="pack_start_failed", pack_sha12=old.pack_sha12,
+                phase_offset_beats=old.phase_offset_beats,
+            ))
             return False, _sanitize_error(exc)
         self._publish(PackRuntime(
             enabled=True, reason="pack", player=new_unstarted.player,
             midi_input=new_unstarted.midi_input, backend=new_unstarted.backend,
-            frame_sender=new_unstarted.frame_sender, pack_sha12=new_unstarted.pack_sha12))
+            frame_sender=new_unstarted.frame_sender, pack_sha12=new_unstarted.pack_sha12,
+            phase_offset_beats=new_unstarted.phase_offset_beats,
+        ))
         return True, "pack"
 
     # -- actions --------------------------------------------------------------

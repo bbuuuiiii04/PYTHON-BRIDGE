@@ -162,3 +162,15 @@ class LaserSceneDecision:
     priority: int
     source: str
     role: str = "idle"
+
+
+@dataclass(frozen=True)
+class LaserResolvedScene:
+    """Final executor-selected scene edge for native pack Autoloop rendering."""
+
+    role: str
+    reason: str
+    scene: str
+    channel: int
+    note: int
+    scene_type: str

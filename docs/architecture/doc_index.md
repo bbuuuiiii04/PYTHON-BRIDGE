@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 56a505e
+last_verified_commit: 6c51eb8
 last_verified_date: 2026-06-29
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
@@ -79,13 +79,13 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/active/laser_color_engine_design_spec.md` | PLAN / SPEC (PLANNED — blocked) | Laser CH8/CH9 color control; **not implemented**, blocked on operator CH8/CH9 capture (VirtualLaserNode). Tracked as AWR-111. |
 | `docs/plans/completed/docs_orphan_check_spec.md` | COMPLETED / SUPERSEDED PLANNING | Active-doc lifecycle check (orphan + stale) — IMPLEMENTED in `tools/check_agent_contracts.py`; AWR-007 done. Historical record. |
 | `docs/plans/active/soundswitch_README.md` | ACTIVE PROJECT INDEX | Grouped routing for the SoundSwitch exporter/bridge-native DMX project. |
-| `docs/plans/active/soundswitch_exporter_remaining_work.md` | ACTIVE CHECKLIST / ROADMAP | Current landed-versus-remaining authority. RW-1 through RW-5 are implemented/software-tested; T7d, native Autoloop DMX, a real hardware run, and final closeout remain. |
+| `docs/plans/active/soundswitch_exporter_remaining_work.md` | ACTIVE CHECKLIST / ROADMAP | Current landed-versus-remaining authority. RW-1 through RW-5 and native Autoloop DMX are implemented/software-tested; old T7d six-scenario gating is historical and no longer blocks native implementation; live/runtime validation, a real hardware run, and final closeout remain. |
 | `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE CONTRACT POINTER | Symlink to the original product/implementation contract. Read the active remaining-work roadmap for current status. |
 | `docs/plans/active/soundswitch_t7c_pack_driver_spec.md` | COMPATIBILITY POINTER | Preserves code/test links to the completed T7c spec; current status is in the SoundSwitch remaining-work roadmap. |
-| `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` | PLAN / SPEC (ACTIVE) | The six-scenario incremental T7d blocker plan. The operator's all-in two-flight capture is now the active capture method and native Autoloop DMX is greenlit (2026-06-29); the implementer should relocate this to completed/ as part of native-Autoloop Task 7. Retained as capture-method evidence. |
-| `docs/plans/active/native_autoloop_dmx_runtime_spec.md` | PLAN / SPEC (ACTIVE) | Codex implementation spec for native Autoloop DMX: pack note->Autoloop map, exposing the executor's post-bank selected scene, a latched I/O-free phase resolver, StateManager pack-driver wiring, status migration, fail-closed bindings. Grounded in `docs/architecture/native_autoloop_pack_authority.md`. Greenlit; phase carries a `phase_offset_beats` calibration input pending the two-flight capture. Tracked under AWR-107. |
+| `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` | PLAN / SPEC (ACTIVE) | Historical six-scenario T7d blocker plan retained as evidence/tooling provenance. It is not the active gate for native Autoloop DMX; the greenlit native path uses the authority doc, native runtime spec, offline equivalence oracle, and operator two-flight calibration/A-B run. |
+| `docs/plans/active/native_autoloop_dmx_runtime_spec.md` | PLAN / SPEC (ACTIVE) | Codex implementation spec for native Autoloop DMX: pack note->Autoloop map, exposing the executor's post-bank selected scene, a latched I/O-free phase resolver, StateManager pack-driver wiring, status migration, fail-closed bindings. Grounded in `docs/architecture/native_autoloop_pack_authority.md`. Implemented/software-tested; phase carries a `phase_offset_beats` calibration input pending the two-flight capture. Tracked under AWR-107. |
 | `docs/plans/active/soundswitch_autoloop_equivalence_oracle_spec.md` | PLAN / SPEC (ACTIVE) | Falsifiable oracle that checks native Autoloop output equivalence against SoundSwitch-authored looks via `render_autoloop_frame`. Supports the native Autoloop phase calibration; validate against code before relying. Tracked under AWR-107. |
-| `docs/prompts/active/soundswitch_rw7_capture_agent_prompt.md` | AGENT PROMPT (ACTIVE) | Operator-conducted T7d evidence collection with no pack/hardware enablement authority. |
+| `docs/prompts/active/soundswitch_rw7_capture_agent_prompt.md` | AGENT PROMPT (ACTIVE) | Legacy operator-conducted T7d evidence prompt retained for provenance; not a native-Autoloop implementation gate and no pack/hardware enablement authority. |
 | `docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md` | REVIEW PROMPT (ACTIVE) | Commit-scoped independent ChatGPT review of RW-5, the non-Autoloop procedure/template, and SoundSwitch document lifecycle. Review-only. |
 | `docs/plans/active/streamdeck_midi_bridge_integration_spec.md` | PLAN / SPEC (ACTIVE) | Stream Deck controller lifecycle plus Phase 2 generic layered static-look compositor. Phase 1 implemented; Phase 2 is implementation-ready but live restart/hardware smoke remain operator-gated. |
 | `docs/prompts/active/streamdeck_phase2_codex_implementation_prompt.md` | AGENT PROMPT (ACTIVE) | Codex implementation handoff for Phase 2 Part F. Software-only; no bridge restart or hardware action authority. |

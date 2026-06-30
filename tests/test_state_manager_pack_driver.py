@@ -19,13 +19,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.state_manager import StateManager, _pack_operational_state
 from rb_ss_bridge_v2.rb_memory import PositionCache
 from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot
+from rb_ss_bridge_v2.laser_models import LaserResolvedScene
 from rb_ss_bridge_v2.soundswitch_laser_player import (
     ZERO_FRAME, LaserPackPlayer,
 )
 from rb_ss_bridge_v2.soundswitch_midi_input import LayerEntry
 from rb_ss_bridge_v2.soundswitch_pack_loader import (
-    LoadedAttribute, LoadedDocument, LoadedPack, LoadedStaticLook, LoadedScalarValue,
-    LoadedTimelineEvent,
+    LoadedAttribute, LoadedAutoloop, LoadedAutoloopBinding, LoadedDocument,
+    LoadedPack, LoadedStaticLook, LoadedScalarValue, LoadedTimelineEvent,
 )
 from rb_ss_bridge_v2.soundswitch_pack_runtime import PackRuntime
 from rb_ss_bridge_v2.soundswitch_midi_input import SoundSwitchMidiInputGroup
@@ -60,6 +61,27 @@ def _pack():
         schema_version="1.0.0", manifest_sha256="0" * 64, has_intensity_channel=False,
         scripted=MappingProxyType({SSID: script}), autoloops=MappingProxyType({}),
         static_looks=MappingProxyType({8: _look(8, (200,) + (0,) * 18)}))
+
+
+def _native_pack(*, empty=False, layout="shared_441_dictionary_timeline"):
+    script = LoadedDocument("synthetic.ssfile", "shared_441_dictionary_timeline",
+                            (_event(0, 0, ((1, 5),)), _event(50, 1, ((1, 9),))), (), 19_200)
+    loop_events = () if empty else (_event(0, 0, ((1, 77),)),)
+    loop_doc = LoadedDocument("SSAutoLoop4.ssfile", layout, loop_events, (), 19_200)
+    loop = LoadedAutoloop("SSAutoLoop4.ssfile", True, loop_doc)
+    return LoadedPack(
+        schema_version="1.0.0", manifest_sha256="1" * 64, has_intensity_channel=False,
+        scripted=MappingProxyType({SSID: script}),
+        autoloops=MappingProxyType({"SSAutoLoop4.ssfile": loop}),
+        static_looks=MappingProxyType({8: _look(8, (200,) + (0,) * 18)}),
+        autoloop_bindings=MappingProxyType({
+            (0, 96): LoadedAutoloopBinding(0, 96, "SSAutoLoop4.ssfile", "House Drop"),
+        }),
+    )
+
+
+def _resolved_scene(note=96, *, role="drop", scene="house_drop_1", reason="drop_crossing"):
+    return LaserResolvedScene(role, reason, scene, 1, note, "static")
 
 
 def _layer_tuple(slot: int) -> tuple[LayerEntry, ...]:
@@ -119,14 +141,16 @@ class _RunClock:
         self.now += StateManager._TICK_INTERVAL * 2
 
 
-def _make_sm(*, player=None, backend=None, midi_input=None, enabled=None):
+def _make_sm(*, player=None, backend=None, midi_input=None, enabled=None,
+             os2l_connected_provider=None):
     if enabled is None:
         enabled = player is not None and backend is not None
     rt = PackRuntime(
         enabled=enabled, reason="pack" if enabled else "disabled",
         player=player, midi_input=midi_input, backend=backend)
     return StateManager(
-        queue.Queue(), PositionCache(), mock.Mock(), soundswitch_pack_runtime=rt)
+        queue.Queue(), PositionCache(), mock.Mock(), soundswitch_pack_runtime=rt,
+        os2l_connected_provider=os2l_connected_provider)
 
 
 def _set(sm, *, ssid="", elapsed_ms=0, playing=False, load_gen=1, snap=FRESH,
@@ -200,6 +224,35 @@ class PackDriverTests(unittest.TestCase):
         sm._drive_pack_output()
         self.assertNotEqual(be.frames[-1], ZERO_FRAME)
         self.assertEqual(be.frames[-1][0], 200)  # CH1 of static look slot 8
+
+    def test_soundswitch_connected_suppresses_pack_output(self):
+        be = _FakeBackend()
+        inp = _FakeInput(held_layer_slot=8)
+        sm = _make_sm(
+            player=LaserPackPlayer(_pack()),
+            backend=be,
+            midi_input=inp,
+            os2l_connected_provider=lambda: True,
+        )
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, snap=FRESH)
+        sm._pack_play_hold_key = (1, 1, 1, SSID)
+        sm._pack_play_hold_deadline = 999.0
+
+        sm._drive_pack_output(now=10.0)
+
+        self.assertEqual(be.frames, [ZERO_FRAME])
+        self.assertEqual(inp.calls, 0)
+        self.assertEqual(sm._pack_last_static_layers, ())
+        self.assertIsNone(sm._pack_play_hold_key)
+        self.assertEqual(sm._pack_play_hold_deadline, 0.0)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "soundswitch_present_native_suppressed")
+        self.assertEqual(status["native_autoloop"]["status"], "soundswitch_present_native_suppressed")
+        self.assertTrue(status["autoloop_phase_blocked"])
+        self.assertTrue(status["software_zero_frame"])
+        self.assertFalse(status["scripted_active"])
+        self.assertFalse(status["static_held"])
+        self.assertFalse(status["blackout"])
 
     # D4
     def test_no_track_no_static_is_zero(self):
@@ -552,15 +605,131 @@ class PackDriverTests(unittest.TestCase):
         self.assertEqual(be.frames, [])
 
     # D10
-    def test_autoloop_never_called(self):
+    def test_native_autoloop_renders_from_captured_scene_and_latches_phase(self):
         be = _FakeBackend()
-        player = LaserPackPlayer(_pack())
+        sm = _make_sm(player=LaserPackPlayer(_native_pack()), backend=be)
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = _resolved_scene()
+        sm._native_abs_beat_pos = 64.0
+
+        sm._drive_pack_output()
+        sm._native_captured_scene = None
+        sm._native_abs_beat_pos = 65.5
+        sm._drive_pack_output()
+
+        self.assertEqual(be.frames[0][0], 77)
+        self.assertEqual(be.frames[1][0], 77)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "rendering_active")
+        self.assertFalse(status["autoloop_phase_blocked"])
+        self.assertEqual(status["native_autoloop"]["target_identity"], "SSAutoLoop4.ssfile")
+        self.assertEqual(status["native_autoloop"]["soundswitch_name"], "House Drop")
+        self.assertEqual(status["native_autoloop"]["phase_tick"], 900)
+
+    def test_native_autoloop_empty_dark_look_is_not_missing_binding(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_native_pack(empty=True)), backend=be)
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = _resolved_scene()
+        sm._native_abs_beat_pos = 64.0
+
+        sm._drive_pack_output()
+
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "empty_dark_look")
+        self.assertEqual(status["native_autoloop"]["status"], "empty_dark_look")
+        self.assertFalse(status["autoloop_phase_blocked"])
+
+    def test_native_missing_binding_fails_closed_and_does_not_select_autoloop(self):
+        be = _FakeBackend()
+        player = LaserPackPlayer(_native_pack())
         player.select_autoloop = mock.Mock(side_effect=AssertionError("select_autoloop banned"))
         sm = _make_sm(player=player, backend=be)
-        for playing, snap in ((True, FRESH), (False, FRESH), (True, STALE)):
-            _set(sm, ssid=SSID, elapsed_ms=10, playing=playing, snap=snap)
-            sm._drive_pack_output()
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = _resolved_scene(note=97, scene="house_drop_2")
+        sm._native_abs_beat_pos = 64.0
+
+        sm._drive_pack_output()
+
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "missing_binding")
+        self.assertTrue(status["autoloop_phase_blocked"])
         player.select_autoloop.assert_not_called()
+
+    def test_scripted_track_beats_native_autoloop(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_native_pack()), backend=be)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, scripted_id=1, lighting_mode="scripted")
+        sm._native_captured_scene = _resolved_scene()
+        sm._native_abs_beat_pos = 64.0
+
+        sm._drive_pack_output()
+
+        self.assertEqual(be.frames[-1][0], 9)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "scripted_active")
+        self.assertTrue(status["scripted_active"])
+        self.assertEqual(status["native_autoloop"]["status"], "software_zero_frame")
+
+    def test_static_override_layers_over_native_autoloop(self):
+        be = _FakeBackend()
+        inp = _FakeInput(held_layer_slot=8)
+        sm = _make_sm(player=LaserPackPlayer(_native_pack()), backend=be, midi_input=inp)
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = _resolved_scene()
+        sm._native_abs_beat_pos = 64.0
+
+        sm._drive_pack_output()
+
+        self.assertEqual(be.frames[-1][0], 200)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "static_held")
+        self.assertTrue(status["static_held"])
+        self.assertEqual(status["native_autoloop"]["status"], "rendering_active")
+
+    def test_reload_clears_stale_native_state_before_new_edge(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_native_pack()), backend=be)
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = _resolved_scene()
+        sm._native_abs_beat_pos = 64.0
+        sm._drive_pack_output()
+        self.assertNotEqual(be.frames[-1], ZERO_FRAME)
+
+        new_backend = _FakeBackend()
+        sm.set_pack_runtime(PackRuntime(
+            enabled=True,
+            reason="pack",
+            player=LaserPackPlayer(_native_pack()),
+            backend=new_backend,
+            pack_sha12="newpack",
+        ))
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = None
+        sm._native_abs_beat_pos = 65.0
+        sm._drive_pack_output()
+
+        self.assertIsNone(sm._native_autoloop.state)
+        self.assertEqual(new_backend.frames[-1], ZERO_FRAME)
+        status = sm.get_pack_status()
+        self.assertEqual(status["native_autoloop"]["reason"], "waiting_for_edge")
+
+    def test_native_autoloop_push_tick_uses_single_submit_path(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_native_pack()), backend=be)
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+
+        def inner():
+            sm._native_captured_scene = _resolved_scene()
+            sm._native_abs_beat_pos = 64.0
+
+        sm._push_tick_inner = inner
+        sm._push_tick()
+
+        self.assertEqual(len(be.frames), 1)
+        self.assertEqual(be.frames[-1][0], 77)
 
     # D11 + D12
     def test_push_tick_drives_once_through_early_return(self):
@@ -1090,8 +1259,8 @@ class PackOperationalStatusTests(unittest.TestCase):
                 for key, value in expected_flags.items():
                     self.assertIs(status[key], value)
 
-    def test_autoloop_is_status_only_and_never_selected(self):
-        player = LaserPackPlayer(_pack())
+    def test_autoloop_waiting_for_first_edge_is_zero_and_not_selected(self):
+        player = LaserPackPlayer(_native_pack())
         player.select_autoloop = mock.Mock(side_effect=AssertionError("select_autoloop banned"))
         sm = _make_sm(player=player, backend=_FakeBackend())
         _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
@@ -1099,7 +1268,8 @@ class PackOperationalStatusTests(unittest.TestCase):
         sm._drive_pack_output()
 
         status = sm.get_pack_status()
-        self.assertEqual(status["operational_state"], "autoloop_phase_blocked")
+        self.assertEqual(status["operational_state"], "software_zero_frame")
+        self.assertEqual(status["native_autoloop"]["reason"], "waiting_for_edge")
         self.assertTrue(status["autoloop_phase_blocked"])
         self.assertTrue(status["software_zero_frame"])
         player.select_autoloop.assert_not_called()

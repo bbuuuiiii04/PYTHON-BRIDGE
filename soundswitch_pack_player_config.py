@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,6 +35,7 @@ _ALLOWED_KEYS = frozenset({
     "enttec_port",
     "frame_stale_timeout_ms",
     "controller_hold_timeout_ms",
+    "phase_offset_beats",
 })
 
 
@@ -51,6 +53,7 @@ class SoundSwitchPackPlayerConfig:
     enttec_port: str
     frame_stale_timeout_ms: int
     controller_hold_timeout_ms: int
+    phase_offset_beats: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +120,7 @@ def load_soundswitch_pack_player_config_from_dict(
         controller_hold_timeout_ms = _positive_int_field(
             data, "controller_hold_timeout_ms", 2000, errors,
         )
+        phase_offset_beats = _float_field(data, "phase_offset_beats", 0.0, errors)
         midi_input_aliases = _aliases(data.get("midi_input_aliases", {}), errors)
 
         fixture_value: object = data.get(
@@ -155,6 +159,7 @@ def load_soundswitch_pack_player_config_from_dict(
             enttec_port=enttec_port,
             frame_stale_timeout_ms=frame_stale_timeout_ms,
             controller_hold_timeout_ms=controller_hold_timeout_ms,
+            phase_offset_beats=phase_offset_beats,
         )
         return SoundSwitchPackPlayerConfigResult(
             available=True,
@@ -219,6 +224,16 @@ def _positive_int_field(
         errors.append(f"{key} must be a positive integer")
         return default
     return value
+
+
+def _float_field(
+    data: dict[str, Any], key: str, default: float, errors: list[str],
+) -> float:
+    value = data.get(key, default)
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
+        errors.append(f"{key} must be a finite number")
+        return default
+    return float(value)
 
 
 def _aliases(value: object, errors: list[str]) -> dict[str, str]:

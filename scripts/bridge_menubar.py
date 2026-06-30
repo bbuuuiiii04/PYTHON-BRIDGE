@@ -436,6 +436,12 @@ def pack_export_status_line(
         "input_degraded": "input degraded",
         "static_held": "holding static",
         "scripted_active": "scripted active",
+        "rendering_active": "native autoloop",
+        "empty_dark_look": "native dark",
+        "missing_binding": "autoloop missing binding",
+        "missing_autoloop_file": "autoloop file missing",
+        "unsupported_layout": "autoloop unsupported",
+        "soundswitch_present_native_suppressed": "SoundSwitch owns lights",
         "autoloop_phase_blocked": "autoloop blocked",
         "software_zero_frame": "zeroed",
     }.get(pack.get("operational_state"), "unknown")

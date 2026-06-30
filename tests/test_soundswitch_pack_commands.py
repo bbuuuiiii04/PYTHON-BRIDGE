@@ -99,6 +99,7 @@ class PackStatusSanitizationTests(unittest.TestCase):
         self.assertNotIn("has_active_identity", status)
         self.assertNotIn("frame_count", status)
         self.assertEqual(status["pack_sha12"], "88a2e9484869")
+        self.assertEqual(status["phase_offset_beats"], 0.0)
 
     def test_disabled_status_is_clean(self):
         blob = json.dumps(PackRuntime().sanitized_status())

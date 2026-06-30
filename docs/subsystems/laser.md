@@ -20,7 +20,7 @@ Purpose:
 Offline SoundSwitch pack boundary:
 - Task 2 deterministically exports and independently verifies the repo-local canonical pack for the pinned SoundSwitch 2.10.3 canonical RAVE project, including the seven-class F-3 control crosswalk. Live export reconciles saved-project inventory dynamically; the old exact-count snapshot is proof-only. It does not replace or alter Laser Director policy, MIDI execution, mappings, blackout behavior, or status.
 - The pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender exist. `LaserSceneExecutor` has one injected backend slot; startup selects legacy MIDI, none/dry-run, or verified pack/Enttec from the optional default-off config. Physical MIDI and direct DMX remain mutually exclusive.
-- Pack backend startup, `StateManager` scripted frame driving, commands, and copied RW-5 status are implemented in software. RW-5 changes status publication only: laser policy, MIDI execution, blackout, mappings, and selection are unchanged. Native pack Autoloops remain software-zero pending T7d evidence; hardware remains unvalidated.
+- Pack backend startup, `StateManager` scripted frame driving, commands, copied RW-5 status, and native pack Autoloop scene-edge handoff are implemented in software. Laser policy, MIDI execution, blackout, and configured mappings stay unchanged; the executor now returns the already-selected scene edge so the pack driver can resolve canonical Autoloop bindings when SoundSwitch is absent. Hardware remains unvalidated.
 - Smart Drop exact cue landings are handled in the shared `SmartPhrasingEngine`: the first live tick after a reset fires an exact drop beat once, without rounding near-misses forward.
 
 Authoritative code:

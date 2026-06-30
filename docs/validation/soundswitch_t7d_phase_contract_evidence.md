@@ -1,14 +1,20 @@
 ---
 doc_status: active-validation
 truth_level: code-grounded
-last_verified_commit: b2ce63d
+last_verified_commit: 6c51eb8
 last_verified_date: 2026-06-23
 validation_scope: T7d phase-contract evidence ledger; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # T7d phase-contract evidence ledger
 
-## Current verdict: `INCOMPLETE_T7D_EVIDENCE`
+## Current verdict: `INCOMPLETE_T7D_EVIDENCE` for the old six-scenario gate
+
+> Superseded for native Autoloop implementation as of 2026-06-29.
+> This ledger remains evidence for the older T7d proof plan, but it no longer
+> blocks native Autoloop DMX. The active native path is documented in
+> `docs/architecture/native_autoloop_pack_authority.md` and
+> `docs/plans/active/native_autoloop_dmx_runtime_spec.md`.
 
 Five live wire-capture runs now exist under the ignored T7d capture corpus. The
 capture conductor classifies **four ACCEPTED** integrity runs (two `arm`, two

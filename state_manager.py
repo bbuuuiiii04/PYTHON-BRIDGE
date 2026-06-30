@@ -67,10 +67,16 @@ from .models import (
 )
 from .led_models import BeatAnchor, LEDContext
 from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS, MAX_SLOTS
-from .laser_models import LaserContext, LaserPersonality
+from .laser_models import LaserContext, LaserPersonality, LaserResolvedScene
 from .soundswitch_laser_player import (
     ZERO_FRAME as _PACK_ZERO_FRAME,
     normalize_soundswitch_id as _pack_normalize_id,
+)
+from .native_autoloop_resolver import (
+    NATIVE_AUTOLOOP_STATUSES,
+    NativeAutoloopDecision,
+    NativeAutoloopResolver,
+    finalize_native_autoloop_render,
 )
 from .soundswitch_pack_runtime import PackRuntime, DISABLED_PACK_RUNTIME
 from .osl_output import OS2LOutput
@@ -136,6 +142,7 @@ def _pack_operational_state(
     scripted_active: bool,
     autoloop_phase_blocked: bool,
     software_zero_frame: bool,
+    native_autoloop_status: str = "",
 ) -> str:
     """Resolve the bounded display priority; companion booleans remain authoritative."""
     if not enabled:
@@ -148,6 +155,8 @@ def _pack_operational_state(
         return "static_held"
     if scripted_active:
         return "scripted_active"
+    if native_autoloop_status in NATIVE_AUTOLOOP_STATUSES:
+        return native_autoloop_status
     if autoloop_phase_blocked:
         return "autoloop_phase_blocked"
     return "software_zero_frame"
@@ -408,6 +417,10 @@ class StateManager:
         self._pack_play_hold_key: tuple[int, int, int, str] | None = None  # play identity (active, load_gen, scripted_id, norm_ssid)
         self._pack_play_hold_deadline: float = 0.0                 # monotonic deadline; paused-hold expires here
         self._pack_logged_error = False
+        self._native_autoloop = NativeAutoloopResolver()
+        self._native_captured_scene: LaserResolvedScene | None = None
+        self._native_abs_beat_pos: float | None = None
+        self._native_log_key: tuple[Any, ...] = ()
         self._led_look_director = led_look_director
         self._led_scene_adapter = led_scene_adapter
         # M1b WI-1: optional LED color engine (None ⇒ no color injection).
@@ -2896,6 +2909,7 @@ class StateManager:
             self._laser_executor.reset_runtime_state(reason="master_changed")
         if self._laser_director is not None:
             self._laser_director.reset_runtime_state(reason="master_changed")
+        self._reset_native_autoloop()
         if (
             self._personality_eligible_deck.get(new_deck, False)
             and new_d.meta.content_id
@@ -2937,6 +2951,7 @@ class StateManager:
             self._laser_executor.reset_runtime_state(reason=reason)
         if self._laser_director is not None:
             self._laser_director.reset_runtime_state(reason=reason)
+        self._reset_native_autoloop()
 
     # ── Track load → lsof trigger ─────────────────────────────────────────────
 
@@ -2958,6 +2973,7 @@ class StateManager:
                 self._laser_executor.reset_runtime_state(reason="active_track_loaded")
             if self._laser_director is not None:
                 self._laser_director.reset_runtime_state(reason="active_track_loaded")
+            self._reset_native_autoloop()
             if self._led_look_director is not None:
                 self._led_look_director.reset_for_track()
         d.track_title_hint = title
@@ -3500,6 +3516,7 @@ class StateManager:
             self._clear_led_drop_lifecycle()
             if self._laser_director is not None:
                 self._laser_director.reset_runtime_state(reason="scripted")
+            self._reset_native_autoloop()
             self._clear_smart_rearm_state()
             self._os.autoloop_arm_after_master_change = False
             self._os.autoloop_master_change_source = ""
@@ -3529,6 +3546,7 @@ class StateManager:
         elif mode == "idle":
             if self._laser_director is not None:
                 self._laser_director.reset_runtime_state(reason="idle")
+            self._reset_native_autoloop()
             self._clear_smart_rearm_state()
             self._pending_arm = None
             self._os.last_armed_filepath = ""
@@ -3599,6 +3617,7 @@ class StateManager:
         self._pack_last_static_layers = ()
         self._pack_frame_count = 0
         self._pack_logged_error = False
+        self._reset_native_autoloop()
         self._publish_pack_status(
             runtime=self._pack_runtime,
             scripted_active=False,
@@ -3627,6 +3646,7 @@ class StateManager:
         blackout: bool,
         autoloop_phase_blocked: bool,
         software_zero_frame: bool,
+        native_autoloop: NativeAutoloopDecision | dict[str, Any] | None = None,
     ) -> None:
         """Publish one fresh software-intent snapshot with one atomic assignment."""
         rt = runtime or DISABLED_PACK_RUNTIME
@@ -3635,6 +3655,13 @@ class StateManager:
         except Exception:
             has_active_identity = False
         active = bool(rt.active)
+        if isinstance(native_autoloop, NativeAutoloopDecision):
+            native_block = native_autoloop.to_status_dict()
+        elif isinstance(native_autoloop, dict):
+            native_block = dict(native_autoloop)
+        else:
+            native_block = NativeAutoloopDecision("software_zero_frame").to_status_dict()
+        native_status = str(native_block.get("status", ""))
         status = rt.sanitized_status()
         status.update({
             "operational_state": _pack_operational_state(
@@ -3645,6 +3672,7 @@ class StateManager:
                 scripted_active=bool(scripted_active),
                 autoloop_phase_blocked=bool(autoloop_phase_blocked),
                 software_zero_frame=bool(software_zero_frame),
+                native_autoloop_status=native_status if active else "",
             ),
             "scripted_active": bool(scripted_active),
             "input_degraded": bool(input_degraded),
@@ -3652,10 +3680,17 @@ class StateManager:
             "blackout": bool(blackout),
             "autoloop_phase_blocked": bool(autoloop_phase_blocked),
             "software_zero_frame": bool(software_zero_frame),
+            "native_autoloop": native_block,
             "frame_count": max(0, int(self._pack_frame_count)),
             "has_active_identity": has_active_identity,
         })
         self._pack_status_snapshot = status
+
+    def _reset_native_autoloop(self) -> None:
+        self._native_autoloop.reset()
+        self._native_captured_scene = None
+        self._native_abs_beat_pos = None
+        self._native_log_key = ()
 
     def _drive_pack_output(self, now: float | None = None) -> None:
         """T7c/T7e: drive the pack player from authoritative deck state; submit one
@@ -3674,6 +3709,44 @@ class StateManager:
         blackout = False
         transport = None
         try:
+            if (
+                self._os2l_connected_provider is not None
+                and self._os2l_connected_provider()
+            ):
+                native_decision = self._native_autoloop.resolve(
+                    pack_sha12=rt.pack_sha12,
+                    bindings={},
+                    scene=None,
+                    lighting_mode=self._os.lighting_mode,
+                    scripted_active=False,
+                    playing=False,
+                    fresh=False,
+                    track_changed=False,
+                    discontinuity=False,
+                    soundswitch_present=True,
+                    abs_beat_pos=0.0,
+                    phase_offset_beats=rt.phase_offset_beats,
+                )
+                player.clear_selection()
+                player.set_static_layers(())
+                player.set_masks(blackout=False, emergency=False)
+                self._pack_last_static_layers = ()
+                self._pack_play_hold_key = None
+                self._pack_play_hold_deadline = 0.0
+                self._pack_frame_count += 1
+                self._publish_pack_status(
+                    runtime=rt,
+                    scripted_active=False,
+                    input_degraded=False,
+                    static_held=False,
+                    blackout=False,
+                    autoloop_phase_blocked=True,
+                    software_zero_frame=True,
+                    native_autoloop=native_decision,
+                )
+                backend.submit_frame(_PACK_ZERO_FRAME)
+                return
+
             active = self._os.active_deck
             if active not in (1, 2):
                 player.clear_selection()
@@ -3778,18 +3851,18 @@ class StateManager:
             #    never emit transport="stopped"/"ended"/"unloaded".
             # Reuse the EXISTING bindings computed above: `playing`,
             # `fresh`, `metadata_ready`, `track_changed`, `discont`, `load_key`.
-            # Do not re-declare them. Only `happy` and `was_playing` are new.
-            happy = (
+            # Do not re-declare them; scripted and native share the same gates.
+            scripted_happy = (
                 fresh and metadata_ready and scripted_owned
                 and not track_changed and not discont
             )
             was_playing = bool(getattr(self._os, "was_playing", False))
-            if happy and playing:
+            if scripted_happy and playing:
                 transport = "playing"
                 self._pack_play_hold_key = play_identity
                 self._pack_play_hold_deadline = now + STOP_DEBOUNCE_S
             elif (
-                happy and was_playing
+                scripted_happy and was_playing
                 and play_identity == self._pack_play_hold_key
                 and now < self._pack_play_hold_deadline
             ):
@@ -3805,11 +3878,72 @@ class StateManager:
                     metadata_ready=True, authority="fresh", source_errored=False,
                     elapsed_discontinuous=False, track_changed=False,
                 )
+                native_decision = self._native_autoloop.resolve(
+                    pack_sha12=rt.pack_sha12,
+                    bindings={},
+                    scene=None,
+                    lighting_mode=self._os.lighting_mode,
+                    scripted_active=True,
+                    playing=playing,
+                    fresh=fresh,
+                    track_changed=track_changed,
+                    discontinuity=discont,
+                    soundswitch_present=False,
+                    abs_beat_pos=self._native_abs_beat_pos or 0.0,
+                    phase_offset_beats=rt.phase_offset_beats,
+                )
             else:
-                player.clear_selection()
+                pack = player.pack
+                native_decision = self._native_autoloop.resolve(
+                    pack_sha12=rt.pack_sha12,
+                    bindings=getattr(pack, "autoloop_bindings", {}),
+                    scene=self._native_captured_scene,
+                    lighting_mode=self._os.lighting_mode,
+                    scripted_active=scripted_owned,
+                    playing=playing,
+                    fresh=fresh,
+                    track_changed=track_changed,
+                    discontinuity=discont,
+                    soundswitch_present=False,
+                    abs_beat_pos=self._native_abs_beat_pos or 0.0,
+                    phase_offset_beats=rt.phase_offset_beats,
+                )
+                if native_decision.target_identity and native_decision.phase_tick is not None:
+                    result = player.select_autoloop(
+                        native_decision.target_identity,
+                        native_decision.phase_tick,
+                        authority="fresh",
+                    )
+                    native_decision = finalize_native_autoloop_render(native_decision, result)
+                    if native_decision.status in ("missing_autoloop_file", "unsupported_layout"):
+                        self._native_autoloop.reset()
+                        player.clear_selection()
+                else:
+                    player.clear_selection()
+
+            native_log_key = (
+                native_decision.status,
+                native_decision.role,
+                native_decision.scene,
+                native_decision.note,
+                native_decision.target_identity,
+                native_decision.diagnostic,
+            )
+            if native_log_key != self._native_log_key:
+                self._native_log_key = native_log_key
+                log.info(
+                    "[SM] native-autoloop  status=%s  role=%s  scene=%s  note=%s  target=%s  reason=%s",
+                    native_decision.status,
+                    native_decision.role or "-",
+                    native_decision.scene or "-",
+                    native_decision.note if native_decision.note is not None else "-",
+                    native_decision.target_identity or "-",
+                    native_decision.reason or "-",
+                )
 
             # 4. Publish software intent, then submit that same frame exactly once.
             frame = player.render().frame
+            native_status = native_decision.status
             self._pack_frame_count += 1
             self._publish_pack_status(
                 runtime=rt,
@@ -3818,9 +3952,13 @@ class StateManager:
                 static_held=bool(layers),
                 blackout=bool(blackout),
                 autoloop_phase_blocked=(
-                    rt.active and self._os.lighting_mode == "autoloop"
+                    rt.active
+                    and self._os.lighting_mode == "autoloop"
+                    and transport is None
+                    and native_status not in ("rendering_active", "empty_dark_look")
                 ),
                 software_zero_frame=frame == _PACK_ZERO_FRAME,
+                native_autoloop=native_decision,
             )
             backend.submit_frame(frame)
         except Exception as exc:
@@ -3845,6 +3983,8 @@ class StateManager:
                 pass
 
     def _push_tick_inner(self) -> None:
+        self._native_captured_scene = None
+        self._native_abs_beat_pos = None
         self._rerun_active_deck_resolver("push_tick")
         if self._os.active_deck not in (1, 2):
             if self._os.was_playing or self._os.lighting_mode != "idle" or self._pending_arm is not None:
@@ -3899,7 +4039,8 @@ class StateManager:
                     decision = self._laser_director.tick(_lctx, now=now)
                     if self._laser_executor is not None:
                         self._laser_executor.on_tick(_lctx)
-                        self._laser_executor.on_decision(decision, _lctx)
+                        self._native_captured_scene = self._laser_executor.on_decision(
+                            decision, _lctx)
                 self._dispatch_led_idle_ambient(
                     active=active,
                     d=d,
@@ -3937,7 +4078,8 @@ class StateManager:
                 decision = self._laser_director.tick(_lctx, now=now)
                 if self._laser_executor is not None:
                     self._laser_executor.on_tick(_lctx)
-                    self._laser_executor.on_decision(decision, _lctx)
+                    self._native_captured_scene = self._laser_executor.on_decision(
+                        decision, _lctx)
             if not switch_requested:
                 self._dispatch_led_idle_ambient(
                     active=active,
@@ -4030,6 +4172,7 @@ class StateManager:
 
         # ── WI-1 monotonic LED/phrasing playhead clamp ────────────────────────
         abs_beat_pos = self._clamp_led_beat(abs_beat_pos, active, d.load_gen)
+        self._native_abs_beat_pos = float(abs_beat_pos)
 
         self._led_rt_beat = (
             active,
@@ -4137,7 +4280,8 @@ class StateManager:
                 decision = self._laser_director.tick(_lctx, now=now)
                 if self._laser_executor is not None:
                     self._laser_executor.on_tick(_lctx)
-                    self._laser_executor.on_decision(decision, _lctx)
+                    self._native_captured_scene = self._laser_executor.on_decision(
+                        decision, _lctx)
             return
 
         # ── Emit elapsed + beat ───────────────────────────────────────────────
@@ -4378,7 +4522,7 @@ class StateManager:
             )
             if self._laser_executor is not None:
                 self._laser_executor.on_tick(ctx)
-                self._laser_executor.on_decision(decision, ctx)
+                self._native_captured_scene = self._laser_executor.on_decision(decision, ctx)
         if smart_drop_result.crossing and smart_drop_blackout_mode:
             # Ordering requirement: in blackout mode keep os.drop_cut_armed true
             # through phrase-anchor processing so the coordinator suppresses
@@ -4722,6 +4866,7 @@ class StateManager:
             self._laser_executor.reset_runtime_state(reason="stop")
         if self._laser_director is not None:
             self._laser_director.reset_runtime_state(reason="stop")
+        self._reset_native_autoloop()
 
     def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
         if deck not in (1, 2):
@@ -4753,6 +4898,7 @@ class StateManager:
             self._laser_director.reset_runtime_state(reason="resume")
         if self._laser_executor is not None:
             self._laser_executor.reset_runtime_state(reason="resume")
+        self._reset_native_autoloop()
         self._log_status()
 
     def _clear_smart_rearm_state(self) -> None:

@@ -30,11 +30,13 @@ The additive schema-1 `soundswitch_pack` object is:
 | `backend` | `pack` or `disabled`. |
 | `pack_sha12` | Existing public manifest prefix used for reload acknowledgement. |
 | `reason` | Sanitized runtime category. |
-| `operational_state` | `disabled`, `blackout`, `input_degraded`, `static_held`, `scripted_active`, `autoloop_phase_blocked`, or `software_zero_frame`. |
+| `phase_offset_beats` | Finite native Autoloop calibration value; default `0.0`. |
+| `operational_state` | `disabled`, `blackout`, `input_degraded`, `static_held`, `scripted_active`, native Autoloop states (`rendering_active`, `empty_dark_look`, `missing_binding`, `missing_autoloop_file`, `unsupported_layout`, `soundswitch_present_native_suppressed`), `autoloop_phase_blocked`, or `software_zero_frame`. |
 | `scripted_active`, `input_degraded`, `static_held`, `blackout`, `autoloop_phase_blocked` | Authoritative companion booleans; more than one may be true. `input_degraded` can mean manual Static Look input is unavailable while scripted pack DMX continues. |
 | `software_zero_frame` | The rendered CH1-CH19 software frame equals zero; not serial or physical proof. |
 | `frame_count` | Non-negative attempted normal software-frame count; not confirmed sends. |
 | `has_active_identity` | Boolean derived from the in-memory accepted-identity property; no identity is exposed. |
+| `native_autoloop` | Bounded copied state for native Autoloop role/scene/note, SoundSwitch display name, target identity, anchor beat, phase tick, reason, and diagnostic. Values are absent when no native Autoloop is selected. |
 
 `StateManager.get_pack_status()` returns a copy of its published dict and calls no runtime/provider.
 Sender health is deliberately absent. A stale status file renders `Lighting: no status yet` in the menubar.

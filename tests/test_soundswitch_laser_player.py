@@ -23,12 +23,14 @@ from rb_ss_bridge_v2.soundswitch_laser_player import (
 from rb_ss_bridge_v2.soundswitch_midi_input import LayerEntry
 from rb_ss_bridge_v2.soundswitch_pack_loader import (
     LoadedAttribute,
+    LoadedAutoloop,
     LoadedDocument,
     LoadedPack,
     LoadedScalarValue,
     LoadedStaticLook,
     LoadedTimelineEvent,
     SoundSwitchPackLoadError,
+    _autoloop_bindings,
     _runtime_metadata,
     load_pack,
 )
@@ -420,6 +422,48 @@ class LoaderTests(unittest.TestCase):
         selection["learned_controls"].append(duplicate)
         with self.assertRaisesRegex(SoundSwitchPackLoadError, "slot ownership"):
             _runtime_metadata(manifest, selection)
+
+    def test_loader_autoloop_bindings_include_identity_and_display_name(self):
+        loop = LoadedAutoloop("SSAutoLoop4.ssfile", True, _document(path="SSAutoLoop4.ssfile"))
+        rows = [{
+            "active": True,
+            "device_name": "IAC Driver Bus 1",
+            "message_type": "note",
+            "channel_zero_based": 0,
+            "data_byte": 96,
+            "target_kind": "autoloop",
+            "target_identity": "SSAutoLoop4.ssfile",
+            "target_name": "House Drop",
+        }]
+
+        bindings = _autoloop_bindings(rows, {"SSAutoLoop4.ssfile": loop})
+
+        self.assertEqual(bindings[(0, 96)].target_identity, "SSAutoLoop4.ssfile")
+        self.assertEqual(bindings[(0, 96)].target_name, "House Drop")
+        with self.assertRaises(TypeError):
+            bindings[(0, 97)] = bindings[(0, 96)]
+
+    def test_loader_autoloop_bindings_fail_closed_on_duplicate_missing_file_or_name(self):
+        loop = LoadedAutoloop("SSAutoLoop4.ssfile", True, _document(path="SSAutoLoop4.ssfile"))
+        row = {
+            "active": True,
+            "device_name": "IAC Driver Bus 1",
+            "message_type": "note",
+            "channel_zero_based": 0,
+            "data_byte": 96,
+            "target_kind": "autoloop",
+            "target_identity": "SSAutoLoop4.ssfile",
+            "target_name": "House Drop",
+        }
+
+        with self.assertRaisesRegex(SoundSwitchPackLoadError, "duplicate active Autoloop"):
+            _autoloop_bindings((dict(row), dict(row)), {"SSAutoLoop4.ssfile": loop})
+        missing_file = dict(row, target_identity="missing.ssfile")
+        with self.assertRaisesRegex(SoundSwitchPackLoadError, "missing Autoloop"):
+            _autoloop_bindings((missing_file,), {"SSAutoLoop4.ssfile": loop})
+        missing_name = dict(row, target_name="")
+        with self.assertRaisesRegex(SoundSwitchPackLoadError, "target_name"):
+            _autoloop_bindings((missing_name,), {"SSAutoLoop4.ssfile": loop})
 
     def test_schema_is_mandatory_unknown_major_rejected_and_verifier_runs_first(self):
         with tempfile.TemporaryDirectory() as tmp:

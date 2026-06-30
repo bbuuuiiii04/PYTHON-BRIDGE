@@ -36,6 +36,7 @@ def _valid(**updates: object) -> dict[str, object]:
         "enttec_port": "",
         "frame_stale_timeout_ms": 250,
         "controller_hold_timeout_ms": 2000,
+        "phase_offset_beats": 0.0,
     }
     value.update(updates)
     return value
@@ -71,6 +72,7 @@ class SoundSwitchPackPlayerConfigTests(unittest.TestCase):
         self.assertEqual(config.enttec_port, "")
         self.assertEqual(config.frame_stale_timeout_ms, 250)
         self.assertEqual(config.controller_hold_timeout_ms, 2000)
+        self.assertEqual(config.phase_offset_beats, 0.0)
 
     def test_valid_full_config_and_frozen_fields(self) -> None:
         result = load_soundswitch_pack_player_config_from_dict(_valid(
@@ -82,6 +84,7 @@ class SoundSwitchPackPlayerConfigTests(unittest.TestCase):
             enttec_port="dmx-output",
             frame_stale_timeout_ms=500,
             controller_hold_timeout_ms=3000,
+            phase_offset_beats=1.25,
         ))
         self.assertTrue(result.available, result.errors)
         config = result.config
@@ -92,6 +95,7 @@ class SoundSwitchPackPlayerConfigTests(unittest.TestCase):
             config.fixture_map[1] = 99  # type: ignore[index]
         with self.assertRaises(TypeError):
             config.midi_input_aliases["x"] = "y"  # type: ignore[index]
+        self.assertEqual(config.phase_offset_beats, 1.25)
 
     def test_tracked_example_is_valid_and_inert(self) -> None:
         example = Path(__file__).resolve().parents[1] / "config" / \
@@ -107,6 +111,7 @@ class SoundSwitchPackPlayerConfigTests(unittest.TestCase):
             "/Users/bbui/rb_ss_bridge_v2/local/soundswitch/rbss_canonical_pack",
         )
         self.assertEqual(result.config.enttec_port, "")
+        self.assertEqual(result.config.phase_offset_beats, 0.0)
 
     def test_explicit_path_precedes_environment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -289,6 +294,8 @@ class SoundSwitchPackPlayerConfigTests(unittest.TestCase):
             {"frame_stale_timeout_ms": True},
             {"frame_stale_timeout_ms": 0},
             {"controller_hold_timeout_ms": -1},
+            {"phase_offset_beats": True},
+            {"phase_offset_beats": float("nan")},
             {"unknown_key": True},
         )
         for update in invalid_values:

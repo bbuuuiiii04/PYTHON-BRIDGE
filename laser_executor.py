@@ -16,7 +16,7 @@ import time
 from typing import Optional
 
 from .laser_config import LaserConfig
-from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
+from .laser_models import LaserContext, LaserPersonality, LaserResolvedScene, LaserSceneDecision
 from .laser_output_backend import LaserOutputBackend
 
 log = logging.getLogger("laser_executor")
@@ -104,10 +104,14 @@ class LaserSceneExecutor:
         if sp.transition_mask_should_clear:
             self._resolve_pending_blackout(reason="smart_phrasing_transition_mask_clear")
 
-    def on_decision(self, decision: Optional[LaserSceneDecision], ctx: LaserContext) -> None:
+    def on_decision(
+        self,
+        decision: Optional[LaserSceneDecision],
+        ctx: LaserContext,
+    ) -> LaserResolvedScene | None:
         """Consume one decision and trigger MIDI when all gates pass."""
         if decision is None:
-            return
+            return None
         is_drop_crossing = decision.reason == "drop_crossing"
 
         role = decision.role or "idle"
@@ -130,7 +134,7 @@ class LaserSceneExecutor:
                 self._resolve_pending_blackout(reason="drop_crossing_idle")
             if should_arm_blackout:
                 log.debug("[LX] blackout skipped: decision has no scene (role=%s, scene=%s)", role, decision.scene)
-            return
+            return None
 
         if role in _AUTO_ROLES and not self._passes_automatic_gates(ctx):
             self._record_gate("auto_gate_blocked")
@@ -138,7 +142,7 @@ class LaserSceneExecutor:
                 self._resolve_pending_blackout(reason="drop_crossing_auto_gate_blocked")
             if should_arm_blackout:
                 log.debug("[LX] blackout skipped: auto_gate_blocked (playing=%s, track_loaded=%s, stale=%s, mode=%s, scripted=%s, autoloop_ready=%s)", ctx.playing, ctx.active_track_loaded, ctx.position_stale, ctx.lighting_mode, ctx.scripted_id, ctx.autoloop_ready)
-            return
+            return None
 
         # Blackout arming is independent of scene selection and scene policy
         # gates. It must fire on every valid auto-tick where the arm signal is
@@ -159,7 +163,7 @@ class LaserSceneExecutor:
         if not selected_scene:
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_no_scene")
-            return
+            return None
 
         scene_def = self._config.scenes.get(selected_scene)
         if scene_def is None:
@@ -169,7 +173,7 @@ class LaserSceneExecutor:
                 self._last_error = f"missing_scene_mapping:{selected_scene}"
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_missing_scene_mapping")
-            return
+            return None
 
         allow_high_impact = bool(
             self._personality.allow_high_impact if self._personality is not None else False
@@ -178,7 +182,7 @@ class LaserSceneExecutor:
             self._record_gate("high_impact_blocked")
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_high_impact_blocked")
-            return
+            return None
 
         refire_roles = ("phrase", "buildup", "breakdown")
         cycling = decision.reason in ("drop_cycle", "post_drop_cycle")
@@ -208,7 +212,7 @@ class LaserSceneExecutor:
             self._record_gate("role_cooldown_blocked")
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_role_cooldown_blocked")
-            return
+            return None
 
         same_scene_skip = False
         with self._lock:
@@ -221,7 +225,7 @@ class LaserSceneExecutor:
         if same_scene_skip:
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_same_scene_skip")
-            return
+            return None
         if same_scene_refire:
             log.info(
                 "[LX] same-scene-refire  role=%s  scene=%s  reason=%s  beat=%.2f",
@@ -232,6 +236,14 @@ class LaserSceneExecutor:
             )
 
         priority = self._priority_for_role(role)
+        resolved = LaserResolvedScene(
+            role=role,
+            reason=decision.reason,
+            scene=selected_scene,
+            channel=int(getattr(scene_def.midi, "channel", 1)),
+            note=int(getattr(scene_def.midi, "note", 0)),
+            scene_type=str(scene_def.scene_type),
+        )
         midi_message = self._materialize_midi(
             scene_def.midi,
             ctx,
@@ -242,7 +254,7 @@ class LaserSceneExecutor:
             self._record_gate("midi_trigger_rejected")
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_midi_trigger_rejected")
-            return
+            return resolved
 
         if is_drop_crossing:
             self._resolve_pending_blackout(reason="drop_crossing_success")
@@ -267,6 +279,7 @@ class LaserSceneExecutor:
             decision.reason,
             fired_cursor,
         )
+        return resolved
 
     def trigger_blackout_on(self, ctx: LaserContext) -> None:
         """Send manual blackout-on MIDI command for Smart Drop pre-window."""

@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against implementation commit `74febec` on 2026-06-29.
+Audited against implementation commit `6c51eb8` on 2026-06-29.
 
 ## SoundSwitch Pack Component Boundary
 
@@ -24,7 +24,14 @@ Audited against implementation commit `74febec` on 2026-06-29.
   not inferred.
 - Absent/disabled config preserves the legacy MIDI path. Dry-run/none opens no physical pack output. Pack failure falls back to disabled/none, never physical MIDI.
 - Direct DMX and physical MIDI output are mutually exclusive at backend construction and port ownership. Owner-driven Enttec stop sends zero, but process death/`kill -9` can leave the last frame latched; hardware validation remains future work.
-- Native pack Autoloop output remains zero-safe until T7d captures uniquely prove scale, quantizer, and every active transition-origin rule. No agent may assume 600 ticks/beat.
+- Native pack Autoloop output is implemented in software through the existing
+  `StateManager` pack driver and `LaserPackPlayer.select_autoloop()` path.
+  Selection is I/O-free, latches across no-edge ticks, uses
+  `AUTOLOOP_TICKS_PER_BEAT = 600` plus `phase_offset_beats`, resolves only
+  canonical-pack Autoloop bindings, fails closed on missing/unsupported content,
+  preserves scripted/static/blackout precedence, and remains suppressed while
+  SoundSwitch is present. Phase calibration, live runtime validation, and
+  hardware validation remain separate gates.
 - The direct-DMX lane remains hardware-unvalidated. The reviewed operator procedure requires an
   exact bridge-only process detector, a reachable physical kill, and a known-dark Enttec/DMX
   baseline before physical restore after an emergency rehearsal.

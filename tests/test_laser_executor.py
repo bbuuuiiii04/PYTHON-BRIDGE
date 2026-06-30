@@ -369,9 +369,31 @@ class LaserSceneExecutorTests(unittest.TestCase):
         midi = _FakeMidiOutput(dry_run=False)
         midi.trigger_result = False
         ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
-        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
+        resolved = ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
         self.assertEqual(len(midi.calls), 1)
         self.assertEqual(ex.status()["last_error"], "midi_trigger_rejected")
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(resolved.scene, "phrase_a")
+        self.assertEqual(resolved.channel, 1)
+        self.assertEqual(resolved.note, 37)
+        self.assertEqual(resolved.scene_type, "autoloop")
+
+    def test_on_decision_returns_resolved_scene_on_success_only_after_selection_gates(self) -> None:
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
+
+        first = ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
+        skipped = ex.on_decision(_decision("phrase_a", "phrase_hold", "phrase"), _ctx())
+        blocked = ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx(playing=False))
+
+        self.assertIsNotNone(first)
+        assert first is not None
+        self.assertEqual(first.role, "phrase")
+        self.assertEqual(first.reason, "default_init")
+        self.assertEqual(first.scene, "phrase_a")
+        self.assertEqual(skipped, None)
+        self.assertEqual(blocked, None)
 
     def test_same_scene_reason_only_update_does_not_retrigger(self) -> None:
         midi = _FakeMidiOutput(dry_run=False)

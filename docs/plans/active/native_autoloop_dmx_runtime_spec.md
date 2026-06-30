@@ -1,7 +1,7 @@
 ---
 doc_status: active-spec
 truth_level: code-grounded implementation spec plus operator-grilled target behavior
-last_verified_commit: 74706f4
+last_verified_commit: 6c51eb8
 last_verified_date: 2026-06-29
 validation_scope: spec only; docs/code read against current checkout; no bridge run, restart, SoundSwitch, MIDI, serial, Enttec, DMX, laser, LED/Govee, Rekordbox live sampling, or hardware validation
 ---
@@ -24,24 +24,23 @@ can tune alignment without a code change; see Task 3 and Part C. Native output
 remains `SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED` until an
 operator-approved rig A/B run, per the authority doc Validation Bar.
 
-## Part A - Context & Root Cause (verified; read, do not implement)
+## Part A - Context & Root Cause (pre-implementation facts; read, do not implement)
 
-- [confirmed] In Autoloop mode the pack driver clears the player selection and
-  publishes `autoloop_phase_blocked` instead of calling `select_autoloop()`:
-  `state_manager.py:3808-3823`. `_push_tick()` runs `_push_tick_inner()` then
-  `_drive_pack_output()` exactly once per tick when `rt.active`:
-  `state_manager.py:3557-3572`.
+- [superseded gap] Before this native implementation, Autoloop mode cleared the
+  player selection and published `autoloop_phase_blocked` instead of calling
+  `select_autoloop()`. `_push_tick()` still runs `_push_tick_inner()` then
+  `_drive_pack_output()` exactly once per tick when `rt.active`.
 - [confirmed] The pure renderer already exists. `render_autoloop_frame()` renders
   a CH1-19 frame, validates non-negative integer `phase_tick`, wraps
   `phase_tick % loop.cycle_ticks`, and returns zero for inactive/unsupported
   looks: `soundswitch_laser_player.py:125-147`. Every Autoloop document is built
   with `cycle_ticks = AUTOLOOP_CYCLE_TICKS = 19_200`:
   `soundswitch_pack_loader.py:26`, `:493-494`.
-- [confirmed] The tick-per-beat scale is a fixed `600`. The pinned harness uses
-  `TICKS_PER_BEAT = 600` and `phase_tick = max(0, round((abs_beat +
-  phase_offset_beats) * 600))` through the **same** `render_autoloop_frame`:
-  `tools/ssfmt/re/autoloop_oracle/diff.py:11`, `:83-88`. `19_200 = 32 * 600`,
-  and `AUTOLOOP_ARM_PHRASE_BEATS = 32`: `config.py:7-8`.
+- [confirmed] The tick-per-beat scale is a fixed `600`. The pinned analysis
+  harness uses `TICKS_PER_BEAT = 600` through the **same**
+  `render_autoloop_frame`; runtime phase uses the modulo 32-beat formula in Part
+  C. `19_200 = 32 * 600`, and `AUTOLOOP_ARM_PHRASE_BEATS = 32`:
+  `config.py:7-8`.
 - [confirmed] The 32-beat / 19,200-tick Autoloop length is **enforced, not
   assumed**: the decoder fails any catalog entry whose `bars != 8`
   (`soundswitch_project_decoder.py:646`, `:650`); 8 bars * 4 beats = 32 beats.
@@ -56,9 +55,8 @@ operator-approved rig A/B run, per the authority doc Validation Bar.
   `missing_phase`, `autoloop_not_found`, `inactive_autoloop`,
   `unsupported_layout`, and `player_error`:
   `soundswitch_laser_player.py:270-276`, `:352-378`.
-- [confirmed] The pack loader exposes `LoadedPack.autoloops` but not yet a runtime
-  note-to-Autoloop map with display names: `soundswitch_pack_loader.py:146-162`,
-  `:493-494`, `:611-627`.
+- [implemented] The pack loader exposes `LoadedPack.autoloops` and a runtime
+  note-to-Autoloop map with display names via `LoadedPack.autoloop_bindings`.
 - [confirmed] The exporter writes `selection_map.json` `iac_selections` rows with
   `active`, `channel_zero_based`, `data_byte`, `device_name`, `message_type`,
   `target_identity`, `target_kind`, and `target_name`: `soundswitch_pack.py:223-266`.
@@ -138,21 +136,21 @@ operator-approved rig A/B run, per the authority doc Validation Bar.
   timing authority for native scene selection (the authority doc's "Mapping
   Authority"). Native re-uses the executor's post-bank selection; it never
   invents a role classifier or a parallel bank.
-- [assumed] `post_drop_cycle_beats` stays **inert** for this implementation:
-  post_drop cadence continues to come from the executor's existing
-  `autoloop_tick_just_fired` refire, exactly like the lasers. No new behavior is
-  wired to it here; the knob is retained for a future laser/native cadence change.
-  (This resolves the authority doc's "retained ... even though current laser
-  cadence still comes from Autoloop ticks", `native_autoloop_pack_authority.md:137-139`.)
-- [assumed] Drop/post_drop role notes resolve to `target_kind == "autoloop"` in
-  the canonical pack. The resolver consumes only autoloop bindings
+- [assumed] Native post_drop cadence uses the executor's existing
+  `autoloop_tick_just_fired` 32-beat refire for this implementation, exactly like
+  lasers. `post_drop_cycle_beats` remains the named config knob for future
+  cadence changes; it is not newly wired here.
+- [assumed] Groove/buildup/breakdown/drop role notes resolve to
+  `target_kind == "autoloop"` in the canonical pack. Post_drop mappings are
+  optional: if none are mapped, the native path must use the executor's existing
+  drop-cycle fallback; if post_drop notes are mapped, they must resolve to
+  Autoloops. The resolver consumes only autoloop bindings
   (`soundswitch_pack.py:262`); a role note authored as a SoundSwitch Static Look
-  has no autoloop binding and fails closed to `missing_binding` (dark) for that
-  look. **Pre-implementation check (Task 0):** confirm the live pack's role notes
-  map to autoloops before relying on native drops.
-- [unknown] `phase_offset_beats` is `0.0` until the two-flight capture proves the
-  alignment between bridge beat position and SoundSwitch Autoloop phase-0. Native
-  phase is a working default, not a hardware-validated contract.
+  has no autoloop binding and fails closed to `missing_binding` for that look.
+  **Pre-implementation check (Task 0):** confirm the live pack's role notes.
+- [confirmed] `phase_offset_beats` defaults to `0.0`; the two-flight capture may
+  later tune the alignment between bridge beat position and SoundSwitch Autoloop
+  phase-0. Native phase is a working default, not a hardware-validated contract.
 - [unknown] Exact final class/function names are implementation choices; the
   behavior, status fields, tests, and hot-path constraints below are fixed.
 
@@ -183,14 +181,21 @@ mode therefore remains software-zero.
 
 ### Task 0 - Verify role notes are Autoloops (read-only gate; do not edit)
 
-Before implementing, confirm in the canonical pack's `selection_map.json` that
-each bridge role note (groove/buildup/breakdown/drop/post_drop, e.g. notes 32,
-64, 96-111, 1, 41 on channel 0) appears in `iac_selections` with
-`target_kind == "autoloop"`. If any role note is authored as a Static Look,
-native cannot render it via the autoloop path; stop and report which notes,
-because the authority doc's "drop never dark" / "post_drop falls back to drop"
-promises (`native_autoloop_pack_authority.md:201-203`) cannot hold for a
-Static-Look-authored role. Record the result in the finish report.
+Before implementing, inspect the canonical pack artifact
+`local/soundswitch/rbss_canonical_pack/selection_map.json` (or the configured
+pack path if the operator overrides it) and confirm:
+
+- required bridge role notes for groove/buildup/breakdown/drop (e.g. channel 0
+  notes 32, 64, 1, and 96-111) appear in `iac_selections` with
+  `target_kind == "autoloop"`;
+- post_drop role notes are optional today; if none appear, record
+  `post_drop_source=drop_fallback` and expect drop-bank cycling during post-drop;
+- if post_drop notes do appear, each one must be `target_kind == "autoloop"` and
+  must cycle inside the post_drop bank every 32 beats.
+
+If any required role note is authored as a Static Look, native cannot render it
+via the autoloop path; stop and report which notes. Record the result in the
+finish report.
 
 ### Task 1 - Pack Runtime Mapping: note -> Autoloop identity/name
 
@@ -284,8 +289,7 @@ Inputs:
   pack-output-enabled / SoundSwitch-present;
 - `abs_beat_pos`;
 - `phase_offset_beats` (default `0.0`);
-- the prior native state (held identity/role/name/note, `anchor_beat`,
-  `last_drop_identity`).
+- the prior native state (held identity/role/name/note, `anchor_beat`).
 
 Latched selection model:
 
@@ -299,13 +303,8 @@ Latched selection model:
    - **found**: re-anchor — `anchor_beat = abs_beat_pos`; adopt
      `target_identity`/`target_name`/role/note/scene. Re-anchor on **every** edge
      (covers role change and single-look refire; the executor only emits on an
-     edge). If `role == "drop"`, remember `last_drop_identity = target_identity`.
-     Status `rendering_active` (or `empty_dark_look` if the render is all zero).
-   - **not found and `role == "post_drop"` and `last_drop_identity` is set**:
-     fall back to `last_drop_identity`, re-anchor, status `rendering_active`,
-     reason `post_drop_drop_fallback`. (Authority doc `:201-203` "cycle drop
-     looks, not go dark." Minimal faithful behavior: reuse the last drop look
-     restarted; full multi-look cycling is a later enhancement.)
+     edge). Status `rendering_active` (or `empty_dark_look` if the render is all
+     zero).
    - **not found otherwise**: clear native identity (do not keep stale output,
      do not guess), status `missing_binding`.
 4. Eligible and `LaserResolvedScene is None` (no edge this tick):
@@ -316,8 +315,8 @@ Latched selection model:
 Phase, computed only when an identity is held:
 
 ```python
-phase_tick = max(0, round((abs_beat_pos - anchor_beat + phase_offset_beats)
-                          * AUTOLOOP_TICKS_PER_BEAT))
+phase_tick = round(((abs_beat_pos - anchor_beat + phase_offset_beats) % 32)
+                   * AUTOLOOP_TICKS_PER_BEAT)
 ```
 
 Decision output: `status` (one of `rendering_active`, `empty_dark_look`,
@@ -336,7 +335,7 @@ Map `player.select_autoloop` diagnostics (Task 4 calls it) to these statuses:
 Files: `state_manager.py`; `tests/test_state_manager_pack_driver.py`.
 
 Native state fields on `StateManager` (held role/identity/name/note,
-`anchor_beat`, `last_drop_identity`). Reset them (single GIL-atomic assignments,
+`anchor_beat`). Reset them (single GIL-atomic assignments,
 matching the `set_pack_runtime` pattern at `:3599-3601`) at **every** site that
 resets laser state, remembering the asymmetry:
 
@@ -427,8 +426,9 @@ Required focused tests:
 - role change re-anchors phase to ~0;
 - phase advances from beat position between edges;
 - `phase_offset_beats` shifts the phase deterministically;
-- post_drop with no mapped autoloop falls back to the last drop identity (not
-  dark); with no prior drop -> software-zero;
+- current no-post_drop-map behavior falls back to the executor's drop-cycle
+  decision and cycles drop looks every 32 beats, not dark;
+- mapped post_drop looks cycle within the post_drop bank every 32 beats;
 - scripted mode still beats native Autoloop;
 - stop/unload/stale/discontinuity clear native base to zero;
 - Static Override remains layered above native Autoloop;
@@ -444,19 +444,26 @@ narrower assertions for the ineligible/missing cases.
 ### Task 7 - Docs and contracts
 
 This change edits `state_manager.py`, `laser_executor.py`, `laser_models.py`,
-`soundswitch_pack_loader.py` and adds `native_autoloop_resolver.py`, so it
-triggers **both** the `soundswitch_pack_player` and `laser` contracts in
-`docs/agents/change_contracts.yml`.
+`soundswitch_pack_loader.py`, `runtime_status.py`, and
+`scripts/bridge_menubar.py`, and adds `native_autoloop_resolver.py`, so it
+triggers at least these contracts in `docs/agents/change_contracts.yml`:
+`soundswitch_pack_player`, `laser`, `core_bridge`, `runtime_commands`, and
+`logging_visibility`.
 
 - Add `native_autoloop_resolver.py` and `tests/test_native_autoloop_resolver.py`
   to the `soundswitch_pack_player` contract `code_globs`, and add the module to
   the AGENTS.md §4 source map (SoundSwitch output row).
-- Update every doc listed under `docs_update` for both contracts that this
-  behavior touches. At minimum: `docs/subsystems/soundswitch_output.md`,
+- Update every doc listed under `docs_update` for every triggered contract that
+  this behavior touches. At minimum: `docs/subsystems/soundswitch_output.md`,
   `docs/subsystems/laser.md`, `docs/subsystems/core_bridge.md`,
+  `docs/subsystems/runtime_commands.md`, `docs/subsystems/logging.md`,
   `docs/setup/runtime_commands.md` (operational-state enum),
   `docs/architecture/current_architecture.md`,
   `docs/architecture/runtime_invariants.md`,
+  `docs/status/feature_status_matrix.md`,
+  `docs/status/support_matrix.md`,
+  `docs/status/validation_matrix.md`,
+  `docs/status/known_limitations.md`,
   `docs/plans/active/soundswitch_exporter_remaining_work.md`,
   `docs/status/active_work_registry.md` (AWR-107),
   `docs/validation/software_test_inventory.md`.
@@ -521,7 +528,8 @@ report which targeted tests ran and why the full suite was skipped.
 - Role/scene/note selection follows the executor's existing post-bank behavior;
   no parallel classifier or bank.
 - Drop/post_drop timing reuses the executor's `DropLifecycle`-driven refire;
-  empty post_drop falls back to the last drop look, not dark.
+  mapped post_drop looks cycle every 32 beats; no-post_drop-map behavior cycles
+  drop looks every 32 beats, not dark.
 - The selection latches across `None` returns: no per-tick flicker, no onset
   before the first executor edge; a same-role edge (including a single-look bank)
   re-anchors phase to ~0; role changes replace the look on the executor's first
@@ -571,5 +579,5 @@ enablement, or a rig A/B / two-flight capture.
   `autoloop_phase_blocked`. Prevented by migrating that flag and the
   operational-state enum and asserting agreement in tests.
 - **Drop authored as a Static Look.** If a role note is not an Autoloop, native
-  fails closed to `missing_binding` (dark) and the authority doc's "drop never
-  dark" cannot hold. Surfaced by the Task 0 pre-check, not hidden by a guess.
+  fails closed to `missing_binding` (dark) and the authority doc's drop fallback
+  promises cannot hold. Surfaced by the Task 0 pre-check, not hidden by a guess.

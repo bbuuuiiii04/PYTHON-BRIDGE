@@ -233,6 +233,10 @@ class LaserPackPlayer:
         self._waiting_after_reload = False
 
     @property
+    def pack(self) -> LoadedPack:
+        return self._pack
+
+    @property
     def static_layers(self) -> tuple[LayerEntry, ...]:
         return self._static_layers
 
