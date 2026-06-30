@@ -131,6 +131,8 @@ start_bridge() {
             RBSS_LED_TRANSPORT_STICKY=1 \
             RBSS_LED_TRANSPORT_COOLDOWN=0 \
             RBSS_LASER_CONFIG="$LASER_CONFIG_PATH" \
+            RBSS_ARTNET_TRUTH_CHECK=1 \
+            RBSS_ARTNET_UNIVERSE=1 \
             "$PYTHON" -m rb_ss_bridge_v2
     ) > "$LOG_FILE" 2>&1 &
     BRIDGE_PID=$!
@@ -147,7 +149,7 @@ start_manual_terminal_bridge() {
     osascript <<EOF
 tell application "Terminal"
     activate
-    do script "bash -lc 'printf \"\\033]0;RBSS_BRIDGE_MONITOR\\007\"; echo \"━━━ Bridge Manual Session ━━━\"; cd ${BRIDGE_DIR} || exit 1; echo \"Laser Director config: ${LASER_CONFIG_PATH}\"; echo \"Laser Director mode: enabled=true dry_run=true\"; GOVEE_ENV_FILE=\"${GOVEE_ENV_FILE}\"; if [ -f \"\$GOVEE_ENV_FILE\" ]; then set -a; . \"\$GOVEE_ENV_FILE\"; set +a; fi; env RBSS_GOVEE_REALTIME=1 RBSS_LIVE_BPM_FOLLOW=1 RBSS_ANLZ_DIRECT=1 RBSS_POS_CHAIN_DIRECT=1 RBSS_MASTER_SEED_DIRECT=1 RBSS_MASTER_DIRECT=1 RBSS_PLAY_DIRECT=1 RBSS_TRACK_LOAD_DIRECT=1 RBSS_SCRIPTED_DIRECT=1 RBSS_SCRIPTED_SHOWFILE_DIRECT=1 RBSS_SMART_REARM_EXPERIMENT=1 RBSS_SMART_DROP=1 RBSS_SMART_BREAKDOWN=1 RBSS_LASER_CONFIG=\"${LASER_CONFIG_PATH}\" ${PYTHON} -u -m rb_ss_bridge_v2 2>&1 | tee ${LOG_FILE}' RBSS_BRIDGE_MONITOR"
+    do script "bash -lc 'printf \"\\033]0;RBSS_BRIDGE_MONITOR\\007\"; echo \"━━━ Bridge Manual Session ━━━\"; cd ${BRIDGE_DIR} || exit 1; echo \"Laser Director config: ${LASER_CONFIG_PATH}\"; echo \"Laser Director mode: enabled=true dry_run=true\"; GOVEE_ENV_FILE=\"${GOVEE_ENV_FILE}\"; if [ -f \"\$GOVEE_ENV_FILE\" ]; then set -a; . \"\$GOVEE_ENV_FILE\"; set +a; fi; env RBSS_GOVEE_REALTIME=1 RBSS_LIVE_BPM_FOLLOW=1 RBSS_ANLZ_DIRECT=1 RBSS_POS_CHAIN_DIRECT=1 RBSS_MASTER_SEED_DIRECT=1 RBSS_MASTER_DIRECT=1 RBSS_PLAY_DIRECT=1 RBSS_TRACK_LOAD_DIRECT=1 RBSS_SCRIPTED_DIRECT=1 RBSS_SCRIPTED_SHOWFILE_DIRECT=1 RBSS_SMART_REARM_EXPERIMENT=1 RBSS_SMART_DROP=1 RBSS_SMART_BREAKDOWN=1 RBSS_LASER_CONFIG=\"${LASER_CONFIG_PATH}\" RBSS_ARTNET_TRUTH_CHECK=1 RBSS_ARTNET_UNIVERSE=1 ${PYTHON} -u -m rb_ss_bridge_v2 2>&1 | tee ${LOG_FILE}' RBSS_BRIDGE_MONITOR"
     set custom title of selected tab of front window to "RBSS_BRIDGE_MONITOR"
 end tell
 EOF

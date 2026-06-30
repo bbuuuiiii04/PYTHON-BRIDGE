@@ -49,7 +49,10 @@ class PackRuntime:
             "pack_sha256": self.pack_sha256 or "",
             "phase_offset_beats": float(self.phase_offset_beats),
             "reason": self.reason,           # sanitized category only
-            "truth_check": disabled_truth_status(self.truth_check_reason),
+            "truth_check": (
+                self.truth_sink.status() if self.truth_sink is not None
+                else disabled_truth_status(self.truth_check_reason)
+            ),
         }
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 import queue
 import socket
@@ -290,12 +291,19 @@ class ArtNetTruthSink:
     def _write_sidecar(self, row: Mapping[str, Any]) -> None:
         handle = self._sidecar
         if handle is None:
+            logging.getLogger(__name__).warning(
+                "[TRUTH] sidecar write skipped — handle is None run_id=%s", self._run_id[:8]
+            )
             return
         try:
             handle.write(json.dumps(dict(row), sort_keys=True, separators=(",", ":")) + "\n")
             handle.flush()
         except Exception as exc:
-            self._sidecar_error = f"sidecar:{type(exc).__name__}"
+            err = f"sidecar:{type(exc).__name__}:{exc}"
+            self._sidecar_error = err
+            logging.getLogger(__name__).warning(
+                "[TRUTH] sidecar write failed  run_id=%s  error=%s", self._run_id[:8], err
+            )
 
 
 def _truthy_content(intent: Mapping[str, Any] | None) -> bool:

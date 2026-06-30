@@ -21,7 +21,6 @@ from .soundswitch_pack_loader import (
 )
 
 CHANNEL_COUNT = 19
-PRIMARY_FIXTURE_GROUP = 0x493
 CONTROL_CHANNELS = frozenset((8, 9, 11))
 SUPPORTED_LAYOUTS = frozenset((
     "shared_441_dictionary_timeline",
@@ -82,8 +81,6 @@ def _validate_frame(frame: tuple[int, ...], label: str) -> tuple[int, ...]:
 
 
 def _apply_attribute(frame: list[int], row: LoadedAttribute) -> None:
-    if row.fixture_group != PRIMARY_FIXTURE_GROUP:
-        return
     if not 1 <= row.dmx_channel <= CHANNEL_COUNT or not 0 <= row.value <= 255:
         raise ValueError("loaded cue attribute is outside CH1-CH19/byte range")
     frame[row.dmx_channel - 1] = row.value
