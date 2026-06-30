@@ -135,12 +135,14 @@ class _FakeInput:
     # The driver reads .blackout_held/.held_layers plus RW-4 health fields
     # (.worker_alive/.error/.mail_drop_count) from the snapshot.
     def __init__(self, *, held_layer_slot=None, held_layers=None, blackout_held=False,
-                 worker_alive=True, error=None, mail_drop_count=0):
+                 worker_alive=True, error=None, mail_drop_count=0,
+                 blackout_bindings=()):
         if held_layers is None:
             held_layers = (() if held_layer_slot is None else _layer_tuple(int(held_layer_slot)))
         self._snap = SimpleNamespace(
             held_layers=held_layers, blackout_held=blackout_held,
-            worker_alive=worker_alive, error=error, mail_drop_count=mail_drop_count)
+            worker_alive=worker_alive, error=error, mail_drop_count=mail_drop_count,
+            blackout_bindings=tuple(blackout_bindings))
         self.calls = 0
 
     def snapshot(self):
@@ -294,6 +296,8 @@ class PackDriverTests(unittest.TestCase):
         self.assertEqual(be.frames, [ZERO_FRAME])
         self.assertEqual(truth.frames[-1][0], 9)
         self.assertEqual(truth.intents[-1]["mode"], "scripted")
+        self.assertEqual(truth.intents[-1]["elapsed_ms"], 50)
+        self.assertEqual(truth.intents[-1]["transport"], "playing")
         status = sm.get_pack_status()
         self.assertEqual(status["operational_state"], "soundswitch_present_native_suppressed")
         self.assertTrue(status["software_zero_frame"])
@@ -318,6 +322,26 @@ class PackDriverTests(unittest.TestCase):
         self.assertEqual(truth.frames[-1][0], 200)
         self.assertEqual(truth.intents[-1]["mode"], "static")
         self.assertEqual(truth.intents[-1]["static_slots"], [8])
+
+    def test_truth_check_intent_carries_blackout_binding_keys(self):
+        be = _FakeBackend()
+        truth = _FakeTruthSink()
+        inp = _FakeInput(blackout_held=True, blackout_bindings=("0:0",))
+        sm = _make_sm(
+            player=LaserPackPlayer(_pack()),
+            backend=be,
+            midi_input=inp,
+            truth_sink=truth,
+            os2l_connected_provider=lambda: True,
+        )
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, snap=FRESH)
+
+        sm._drive_pack_output(now=10.0)
+
+        self.assertEqual(be.frames, [ZERO_FRAME])
+        self.assertEqual(truth.frames[-1], ZERO_FRAME)
+        self.assertEqual(truth.intents[-1]["mode"], "blackout")
+        self.assertEqual(truth.intents[-1]["blackout_bindings"], ["0:0"])
 
     def test_truth_check_shadow_renders_native_autoloop_while_production_suppressed(self):
         be = _FakeBackend()

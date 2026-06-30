@@ -76,7 +76,11 @@ Art-Net truth-check tests add `tests/test_artnet_truth.py`,
 `tests/test_soundswitch_pack_startup.py`, and connected-shadow coverage in
 `tests/test_state_manager_pack_driver.py`. `python3 tools/artnet_compare.py
 --self-check` is the non-network validator measurement test; it uses synthetic
-traces only.
+traces only. The comparator now fails closed on stale/missing/unmatched sidecar
+rows, sequence wrap, extra U1 frames, and unmatched sidecar frames, and its
+coverage ledger includes scripted timeline events/rapid pairs, matched
+Autoloop visible/authored-dark phase buckets, static and blackout
+overlay/release combinations, and active-deck/mode transition directions.
 - relevant subsystem card
 - relevant task playbook if test workflow changed
 

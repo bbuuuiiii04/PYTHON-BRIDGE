@@ -62,11 +62,16 @@ class MidiInputSnapshot:
     worker_alive: bool
     error: str | None
     mail_drop_count: int
+    blackout_bindings: tuple[str, ...] = ()
 
 
 def _key(binding: PackMidiBinding) -> tuple:
     return (binding.device_name, binding.message_type,
             binding.channel_zero_based, binding.data_byte)
+
+
+def _binding_key(binding: PackMidiBinding) -> str:
+    return f"{binding.channel_zero_based}:{binding.data_byte}"
 
 
 class _InputPortGone(Exception):
@@ -98,6 +103,7 @@ class SoundSwitchMidiInputAdapter:
         self._lock = threading.Lock()
         self._layers: list[LayerEntry] = []
         self._blackout_held: bool = False
+        self._blackout_bindings: set[str] = set()
         self._worker_alive: bool = False
         self._error: str | None = None
         self._mail_drop_count: int = 0
@@ -200,6 +206,7 @@ class SoundSwitchMidiInputAdapter:
             changed = bool(self._layers) or self._blackout_held
             self._layers.clear()
             self._blackout_held = False
+            self._blackout_bindings.clear()
             self._error = None
             self._refresh_snapshot_locked()
         if changed:
@@ -216,6 +223,7 @@ class SoundSwitchMidiInputAdapter:
             worker_alive=self._worker_alive,
             error=self._error,
             mail_drop_count=self._mail_drop_count,
+            blackout_bindings=tuple(sorted(self._blackout_bindings)),
         )
 
     def _refresh_snapshot_locked(self) -> None:
@@ -233,6 +241,7 @@ class SoundSwitchMidiInputAdapter:
             changed = bool(self._layers) or self._blackout_held
             self._layers.clear()
             self._blackout_held = False
+            self._blackout_bindings.clear()
             self._worker_alive = worker_alive
             self._error = error_msg if error_msg is not None else reason
             self._refresh_snapshot_locked()
@@ -269,6 +278,7 @@ class SoundSwitchMidiInputAdapter:
                 log.debug("[SS-MIDI] static slot selected: slot=%s", slot)
             elif kind == "blackout_mask":
                 self._blackout_held = True
+                self._blackout_bindings.add(_binding_key(binding))
                 self._refresh_snapshot_locked()
                 log.debug("[SS-MIDI] blackout held")
             # pack_selection / bridge_owned_safety / no_project_target /
@@ -295,7 +305,10 @@ class SoundSwitchMidiInputAdapter:
                 else:
                     log.debug("[SS-MIDI] note-off for non-current slot=%s; ignored", slot)
             elif kind == "blackout_mask":
+                self._blackout_bindings.discard(_binding_key(binding))
                 self._blackout_held = False
+                if self._blackout_bindings:
+                    self._blackout_held = True
                 self._refresh_snapshot_locked()
                 log.debug("[SS-MIDI] blackout released")
             else:
@@ -588,6 +601,11 @@ class SoundSwitchMidiInputGroup:
                           if snapshots else True),
             error=("input_error" if has_error else None),
             mail_drop_count=sum(snapshot.mail_drop_count for snapshot in snapshots),
+            blackout_bindings=tuple(sorted({
+                key
+                for snapshot in snapshots
+                for key in getattr(snapshot, "blackout_bindings", ())
+            })),
         )
 
     def status(self) -> dict:

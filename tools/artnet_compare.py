@@ -12,7 +12,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_PARENT = REPO_ROOT.parent
@@ -86,14 +86,17 @@ def parse_artdmx(data: bytes, *, timestamp_ns: int, source: str = "", socket_nam
     return ArtDmxPacket(timestamp_ns, universe, sequence, declared_length, payload, source, socket_name)
 
 
-def parse_sidecar_jsonl(text: str) -> tuple[dict[str, Any] | None, dict[int, dict[str, Any]], bool]:
+RAPID_EVENT_GAP_MS = 50
+AUTOLOOP_PHASE_BUCKETS = 3
+AUTOLOOP_CYCLE_TICKS = 19_200
+
+
+def parse_sidecar_jsonl(text: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]], bool]:
     header: dict[str, Any] | None = None
-    rows: dict[int, dict[str, Any]] = {}
+    rows: list[dict[str, Any]] = []
     invalid = False
     for raw in text.splitlines(keepends=True):
         if not raw.endswith("\n"):
-            if raw.strip():
-                invalid = True
             continue
         try:
             row = json.loads(raw)
@@ -106,10 +109,17 @@ def parse_sidecar_jsonl(text: str) -> tuple[dict[str, Any] | None, dict[int, dic
         if row.get("type") == "header":
             header = row
         elif row.get("type") == "frame":
-            seq = row.get("sequence")
-            if type(seq) is int:
-                rows[seq] = row
+            if _sidecar_frame_schema_error(row):
+                invalid = True
+            else:
+                rows.append(row)
+        else:
+            invalid = True
     return header, rows, invalid
+
+
+def _has_partial_sidecar_tail(text: str) -> bool:
+    return bool(text) and not text.endswith("\n") and bool(text.rsplit("\n", 1)[-1].strip())
 
 
 def dedup_packets(
@@ -148,12 +158,13 @@ def evaluate_trace(
     *,
     ss_universe: int = 0,
     bridge_universe: int = 1,
-    sidecar_rows: Mapping[int, Mapping[str, Any]] | None = None,
+    sidecar_rows: Sequence[Mapping[str, Any]] | Mapping[Any, Mapping[str, Any]] | None = None,
     sidecar_header: Mapping[str, Any] | None = None,
     bridge_status: Mapping[str, Any] | None = None,
     tolerance_ms: float = 5.0,
     required_coverage: Iterable[str] = (),
     sidecar_invalid: bool = False,
+    sidecar_pending: bool = False,
     compare_overloaded: bool = False,
 ) -> CompareResult:
     packets, duplicate_count = dedup_packets(packets)
@@ -169,12 +180,16 @@ def evaluate_trace(
     if sidecar_invalid or compare_overloaded:
         return CompareResult(VERDICT_INVALID, "sidecar_invalid" if sidecar_invalid else "compare_overload", "SETUP_INVALID", duplicate_count=duplicate_count)
 
-    sidecar_rows = sidecar_rows or {}
+    sidecar_rows = _ordered_sidecar_rows(sidecar_rows)
     bridge_status = bridge_status or {}
     status_truth = bridge_status.get("truth_check") if isinstance(bridge_status.get("truth_check"), dict) else {}
-    status_run_id = str(status_truth.get("run_id") or bridge_status.get("run_id") or "")
-    header_run_id = str((sidecar_header or {}).get("run_id") or "")
-    if status_run_id and header_run_id and status_run_id != header_run_id:
+    status_run_raw = status_truth.get("run_id")
+    header_run_raw = (sidecar_header or {}).get("run_id")
+    status_run_id = status_run_raw if type(status_run_raw) is str else ""
+    header_run_id = header_run_raw if type(header_run_raw) is str else ""
+    if not status_run_id or not header_run_id:
+        return CompareResult(VERDICT_INVALID, "run_id_missing", "SIDECAR_MISSING_OR_STALE", duplicate_count=duplicate_count)
+    if status_run_id != header_run_id:
         return CompareResult(VERDICT_INVALID, "run_id_mismatch", "SIDECAR_MISSING_OR_STALE", duplicate_count=duplicate_count)
     if bool(status_truth.get("overflow_count")) or bool(status_truth.get("dropped_count")):
         return CompareResult(VERDICT_INVALID, "bridge_queue_overflow", "BRIDGE_QUEUE_OVERFLOW", duplicate_count=duplicate_count)
@@ -184,21 +199,41 @@ def evaluate_trace(
     seq_error = _u1_sequence_error(u1)
     if seq_error:
         return CompareResult(VERDICT_INVALID, seq_error, "U1_SEQUENCE_GAP", duplicate_count=duplicate_count)
-    sidecar_error = _sidecar_error(u1, sidecar_rows, status_run_id or header_run_id)
-    if sidecar_error:
-        return CompareResult(VERDICT_INVALID, sidecar_error, "SIDECAR_MISSING_OR_STALE", duplicate_count=duplicate_count)
 
     if _ambiguous_nearest_neighbor(u0, u1, int(tolerance_ms * 1_000_000)):
         return CompareResult(VERDICT_INVALID, "ambiguous_nearest_neighbor", "SETUP_INVALID", duplicate_count=duplicate_count)
 
     if len(u1) < len(u0):
         return CompareResult(VERDICT_INVALID, "missing_u1_frame", "SETUP_INVALID", matches=len(u1), duplicate_count=duplicate_count)
+    if len(u1) > len(u0):
+        return CompareResult(VERDICT_INVALID, "extra_u1_frame", "SETUP_INVALID", matches=len(u0), duplicate_count=duplicate_count)
+    if len(sidecar_rows) > len(u1):
+        return CompareResult(VERDICT_INVALID, "sidecar_unmatched_frame", "SIDECAR_MISSING_OR_STALE", matches=len(u1), duplicate_count=duplicate_count)
 
     offsets: list[float] = []
     details: list[dict[str, Any]] = []
+    matched_rows: list[Mapping[str, Any]] = []
     tolerance_ns = int(tolerance_ms * 1_000_000)
     for index, ss_packet in enumerate(u0):
         bridge_packet = u1[index]
+        sidecar_error, sidecar_row = _sidecar_row_for_packet(
+            bridge_packet,
+            index,
+            sidecar_rows,
+            status_run_id,
+        )
+        if sidecar_error:
+            if sidecar_pending and sidecar_error.startswith("sidecar_missing:"):
+                return CompareResult(
+                    VERDICT_INCOMPLETE,
+                    "sidecar_pending",
+                    "COVERAGE_INCOMPLETE",
+                    matches=index,
+                    offsets_ms=tuple(offsets),
+                    duplicate_count=duplicate_count,
+                )
+            return CompareResult(VERDICT_INVALID, sidecar_error, "SIDECAR_MISSING_OR_STALE", duplicate_count=duplicate_count)
+        matched_rows.append(sidecar_row)
         offset_ns = bridge_packet.timestamp_ns - ss_packet.timestamp_ns
         offsets.append(offset_ns / 1_000_000.0)
         if abs(offset_ns) > tolerance_ns:
@@ -229,7 +264,7 @@ def evaluate_trace(
                 details=tuple(details),
             )
 
-    observed = _observed_coverage(sidecar_rows.values())
+    observed = _observed_coverage(matched_rows, required_coverage=required_coverage)
     remaining = tuple(sorted(set(required_coverage) - observed))
     if remaining:
         return CompareResult(
@@ -263,20 +298,65 @@ def _u1_sequence_error(u1: list[ArtDmxPacket]) -> str:
     return ""
 
 
-def _sidecar_error(
-    u1: list[ArtDmxPacket],
-    rows: Mapping[int, Mapping[str, Any]],
+def _ordered_sidecar_rows(
+    rows: Sequence[Mapping[str, Any]] | Mapping[Any, Mapping[str, Any]] | None,
+) -> list[Mapping[str, Any]]:
+    if rows is None:
+        return []
+    if isinstance(rows, Mapping):
+        return sorted(
+            rows.values(),
+            key=lambda row: (
+                _sort_int(row.get("frame_index")),
+                _sort_int(row.get("sequence")),
+            ),
+        )
+    return list(rows)
+
+
+def _sort_int(value: Any) -> int:
+    return value if type(value) is int else 0
+
+
+def _sidecar_row_for_packet(
+    packet: ArtDmxPacket,
+    index: int,
+    rows: Sequence[Mapping[str, Any]],
     run_id: str,
-) -> str:
-    for packet in u1:
-        row = rows.get(packet.sequence)
-        if row is None:
-            return f"sidecar_missing:{packet.sequence}"
-        if run_id and str(row.get("run_id") or "") != run_id:
-            return f"sidecar_run_id_mismatch:{packet.sequence}"
-        expected_hash = hashlib.sha256(packet.payload).hexdigest()
-        if row.get("dmx_sha256") != expected_hash:
-            return f"sidecar_hash_mismatch:{packet.sequence}"
+) -> tuple[str, Mapping[str, Any]]:
+    if index >= len(rows):
+        return f"sidecar_missing:{packet.sequence}", {}
+    row = rows[index]
+    schema_error = _sidecar_frame_schema_error(row)
+    if schema_error:
+        return schema_error, {}
+    if run_id and str(row.get("run_id") or "") != run_id:
+        return f"sidecar_run_id_mismatch:{packet.sequence}", {}
+    if row.get("sequence") != packet.sequence:
+        return f"sidecar_sequence_mismatch:{packet.sequence}", {}
+    if row.get("frame_index") != index + 1:
+        return f"sidecar_frame_index_mismatch:{packet.sequence}", {}
+    expected_hash = hashlib.sha256(packet.payload).hexdigest()
+    if row.get("dmx_sha256") != expected_hash:
+        return f"sidecar_hash_mismatch:{packet.sequence}", {}
+    return "", row
+
+
+def _sidecar_frame_schema_error(row: Mapping[str, Any]) -> str:
+    sequence = row.get("sequence")
+    frame_index = row.get("frame_index")
+    digest = row.get("dmx_sha256")
+    run_id = row.get("run_id")
+    if row.get("type") != "frame":
+        return "sidecar_schema:type"
+    if type(run_id) is not str or not run_id:
+        return "sidecar_schema:run_id"
+    if type(sequence) is not int or not 1 <= sequence <= 255:
+        return "sidecar_schema:sequence"
+    if type(frame_index) is not int or frame_index < 1:
+        return "sidecar_schema:frame_index"
+    if type(digest) is not str or len(digest) != 64:
+        return "sidecar_schema:dmx_sha256"
     return ""
 
 
@@ -326,34 +406,229 @@ def _timing_summary(offsets: list[float]) -> dict[str, Any]:
 
 def build_coverage_ledger(pack: LoadedPack) -> set[str]:
     required: set[str] = set()
+    scripted_ids: set[str] = set()
     for key, row in getattr(pack, "scripted", {}).items():
-        supported = bool(getattr(row, "supported_active", True))
-        if supported:
-            required.add(f"scripted:{key}")
+        if not bool(getattr(row, "supported_active", True)):
+            continue
+        scripted_id = str(getattr(row, "soundswitch_id", "") or key)
+        scripted_ids.add(scripted_id)
+        required.add(f"scripted:{scripted_id}")
+        document = _scripted_document(row)
+        events = _document_events(document)
+        if events:
+            required.add(f"scripted_start|{scripted_id}")
+            required.add(f"scripted_end|{scripted_id}")
+        for event in events:
+            required.add(f"scripted_event|{scripted_id}|{_event_sig(event)}")
+        for left, right in zip(events, events[1:]):
+            if 0 < int(getattr(right, "time", 0)) - int(getattr(left, "time", 0)) <= RAPID_EVENT_GAP_MS:
+                required.add(
+                    f"scripted_rapid_pair|{scripted_id}|{_event_sig(left)}|{_event_sig(right)}"
+                )
+
+    autoloop_bases: set[str] = set()
     for binding in getattr(pack, "autoloop_bindings", {}).values():
-        required.add(f"autoloop:{binding.target_identity}")
+        identity = str(binding.target_identity)
+        required.add(f"autoloop:{identity}")
+        cls = _autoloop_class(pack, identity)
+        required.add(f"{cls}:{identity}")
+        autoloop_bases.add(f"{cls}:{identity}")
+        for bucket in range(AUTOLOOP_PHASE_BUCKETS):
+            required.add(f"autoloop_phase:{identity}:{bucket}")
+
+    static_slots = sorted({
+        int(binding.target_slot)
+        for binding in getattr(pack, "learned_midi_bindings", ())
+        if binding.target_kind == "static_look" and binding.target_slot is not None
+    })
+    blackout_keys = sorted({
+        _blackout_key(binding)
+        for binding in getattr(pack, "learned_midi_bindings", ())
+        if binding.target_kind == "blackout_mask"
+    })
+    bases: list[str] = []
+    if scripted_ids:
+        bases.append("scripted")
+    bases.extend(sorted(autoloop_bases))
     for binding in getattr(pack, "learned_midi_bindings", ()):
         if binding.target_kind == "static_look" and binding.target_slot is not None:
             required.add(f"static:{binding.target_slot}")
         elif binding.target_kind == "blackout_mask":
-            required.add(f"blackout:{binding.channel_zero_based}:{binding.data_byte}")
+            required.add(f"blackout:{_blackout_key(binding)}")
+    for slot in static_slots:
+        for base in bases:
+            required.add(f"static_over|{base}|{slot}")
+            required.add(f"static_release|{base}|{slot}")
+    for key in blackout_keys:
+        for base in bases:
+            required.add(f"blackout_over|{base}|{key}")
+            required.add(f"blackout_release|{base}|{key}")
+    if scripted_ids and autoloop_bases:
+        required.add("transition|mode|scripted->autoloop")
+        required.add("transition|mode|autoloop->scripted")
+        required.add("transition|deck|1->2")
+        required.add("transition|deck|2->1")
     return required
 
 
-def _observed_coverage(rows: Iterable[Mapping[str, Any]]) -> set[str]:
+def _scripted_document(row: Any) -> Any:
+    return getattr(row, "document", row)
+
+
+def _document_events(document: Any) -> list[Any]:
+    events = list(getattr(document, "events", ()) or ())
+    return sorted(events, key=lambda row: (int(getattr(row, "time", 0)), int(getattr(row, "source_order", 0))))
+
+
+def _event_sig(event: Any) -> str:
+    cue = getattr(event, "resolved_cue_guid", None) or getattr(event, "source_offset", "")
+    return ":".join((
+        str(int(getattr(event, "time", 0))),
+        str(int(getattr(event, "source_order", 0))),
+        str(getattr(event, "reference_kind", "")),
+        str(cue),
+    ))
+
+
+def _autoloop_class(pack: LoadedPack, identity: str) -> str:
+    loop = getattr(pack, "autoloops", {}).get(identity) if hasattr(getattr(pack, "autoloops", {}), "get") else None
+    document = getattr(loop, "document", loop)
+    for event in _document_events(document):
+        frame = getattr(event, "boundary_frame", None)
+        if isinstance(frame, tuple) and any(int(value or 0) > 0 for value in frame):
+            return "autoloop_visible"
+        for patch in getattr(event, "patch", ()) or ():
+            if int(getattr(patch, "value", 0) or 0) > 0:
+                return "autoloop_visible"
+    return "autoloop_authored_dark"
+
+
+def _blackout_key(binding: Any) -> str:
+    return f"{int(binding.channel_zero_based)}:{int(binding.data_byte)}"
+
+
+def _observed_coverage(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    required_coverage: Iterable[str] = (),
+) -> set[str]:
     observed: set[str] = set()
+    required = set(required_coverage)
+    scripted_events: dict[str, list[tuple[int, str]]] = {}
+    rapid_pairs: list[tuple[str, str, str]] = []
+    autoloop_classes: dict[str, str] = {}
+    for item in required:
+        if item.startswith("scripted_event|"):
+            _prefix, track, sig = item.split("|", 2)
+            time_raw = sig.split(":", 1)[0]
+            scripted_events.setdefault(track, []).append((int(time_raw), item))
+        elif item.startswith("scripted_rapid_pair|"):
+            _prefix, track, left, right = item.split("|", 3)
+            rapid_pairs.append((
+                item,
+                f"scripted_event|{track}|{left}",
+                f"scripted_event|{track}|{right}",
+            ))
+        elif item.startswith("autoloop_visible:"):
+            autoloop_classes[item.split(":", 1)[1]] = "autoloop_visible"
+        elif item.startswith("autoloop_authored_dark:"):
+            autoloop_classes[item.split(":", 1)[1]] = "autoloop_authored_dark"
+    for values in scripted_events.values():
+        values.sort()
+
+    last_elapsed: dict[str, int] = {}
+    last_base = ""
+    last_base_kind = ""
+    last_base_deck: int | None = None
+    last_deck_base = ""
+    last_static: set[int] = set()
+    last_blackout: set[str] = set()
+    scripted_started: set[str] = set()
     for row in rows:
+        base = ""
+        base_kind = ""
         if row.get("scripted_active") and row.get("soundswitch_id"):
-            observed.add(f"scripted:{row['soundswitch_id']}")
+            scripted_id = str(row["soundswitch_id"])
+            observed.add(f"scripted:{scripted_id}")
+            base = "scripted"
+            base_kind = "scripted"
+            elapsed = _int_or_none(row.get("elapsed_ms"))
+            if elapsed is not None:
+                if elapsed <= 250:
+                    observed.add(f"scripted_start|{scripted_id}")
+                    scripted_started.add(scripted_id)
+                prior = last_elapsed.get(scripted_id)
+                if scripted_id in scripted_started and prior is None:
+                    last_elapsed[scripted_id] = elapsed
+                elif scripted_id in scripted_started and elapsed >= prior:
+                    lower = prior
+                    for event_time, token in scripted_events.get(scripted_id, ()):
+                        if lower <= event_time <= elapsed:
+                            observed.add(token)
+                    if scripted_events.get(scripted_id) and elapsed >= scripted_events[scripted_id][-1][0]:
+                        observed.add(f"scripted_end|{scripted_id}")
+                    last_elapsed[scripted_id] = elapsed
         native = row.get("native_autoloop") if isinstance(row.get("native_autoloop"), dict) else {}
-        target = native.get("target_identity") if isinstance(native, dict) else ""
+        native_status = str(native.get("status") or "") if isinstance(native, dict) else ""
+        target = native.get("target_identity") if native_status in ("rendering_active", "empty_dark_look") else ""
         if target:
+            target = str(target)
             observed.add(f"autoloop:{target}")
-        for slot in row.get("static_slots") or ():
+            cls = autoloop_classes.get(
+                target,
+                "autoloop_visible" if bool(row.get("visible")) else "autoloop_authored_dark",
+            )
+            observed.add(f"{cls}:{target}")
+            base = f"{cls}:{target}"
+            base_kind = "autoloop"
+            phase_tick = _int_or_none(native.get("phase_tick"))
+            if phase_tick is not None:
+                bucket = min(
+                    AUTOLOOP_PHASE_BUCKETS - 1,
+                    int((phase_tick % AUTOLOOP_CYCLE_TICKS) / (AUTOLOOP_CYCLE_TICKS / AUTOLOOP_PHASE_BUCKETS)),
+                )
+                observed.add(f"autoloop_phase:{target}:{bucket}")
+
+        static_slots = {int(slot) for slot in (row.get("static_slots") or ()) if type(slot) is int}
+        for slot in static_slots:
             observed.add(f"static:{slot}")
+            if base:
+                observed.add(f"static_over|{base}|{slot}")
+        blackout_keys = {str(key) for key in (row.get("blackout_bindings") or ())}
         if row.get("blackout"):
-            observed.add("blackout:observed")
+            for key in blackout_keys:
+                observed.add(f"blackout:{key}")
+                if base:
+                    observed.add(f"blackout_over|{base}|{key}")
+
+        if base and base == last_base:
+            for slot in last_static - static_slots:
+                observed.add(f"static_release|{base}|{slot}")
+            for key in last_blackout - blackout_keys:
+                observed.add(f"blackout_release|{base}|{key}")
+
+        deck = _int_or_none(row.get("active_deck"))
+        if base and last_deck_base and deck in (1, 2) and last_base_deck in (1, 2) and deck != last_base_deck:
+            observed.add(f"transition|deck|{last_base_deck}->{deck}")
+        if base_kind and last_base_kind and base_kind != last_base_kind:
+            observed.add(f"transition|mode|{last_base_kind}->{base_kind}")
+
+        if base:
+            last_base = base
+            last_base_kind = base_kind
+            last_static = static_slots
+            last_blackout = blackout_keys if row.get("blackout") else set()
+            if deck in (1, 2):
+                last_deck_base = base
+                last_base_deck = deck
+    for token, left, right in rapid_pairs:
+        if left in observed and right in observed:
+            observed.add(token)
     return observed
+
+
+def _int_or_none(value: Any) -> int | None:
+    return value if type(value) is int else None
 
 
 def _packet(universe: int, payload: bytes, timestamp_ns: int, sequence: int = 1, socket_name: str = "lo") -> ArtDmxPacket:
@@ -367,18 +642,24 @@ def run_self_check() -> None:
     hidden = bytes([0, 99]) + bytes(510)
     run_id = "selfcheck"
 
-    def rows(*packets: ArtDmxPacket, stale: bool = False) -> dict[int, dict[str, Any]]:
-        return {
-            packet.sequence: {
-                "type": "frame",
-                "run_id": "old" if stale else run_id,
-                "sequence": packet.sequence,
-                "dmx_sha256": hashlib.sha256(packet.payload).hexdigest(),
-                "scripted_active": True,
-                "soundswitch_id": "script",
-            }
-            for packet in packets
+    def row(packet: ArtDmxPacket, index: int = 1, *, stale: bool = False, **extra: Any) -> dict[str, Any]:
+        out = {
+            "type": "frame",
+            "run_id": "old" if stale else run_id,
+            "sequence": packet.sequence,
+            "frame_index": index,
+            "dmx_sha256": hashlib.sha256(packet.payload).hexdigest(),
+            "scripted_active": True,
+            "soundswitch_id": "script",
         }
+        out.update(extra)
+        return out
+
+    def rows(*packets: ArtDmxPacket, stale: bool = False) -> list[dict[str, Any]]:
+        return [
+            row(packet, index, stale=stale)
+            for index, packet in enumerate(packets, 1)
+        ]
 
     status = {"truth_check": {"run_id": run_id, "overflow_count": 0, "dropped_count": 0, "sidecar_error": ""}}
     cases: list[tuple[str, CompareResult, str]] = []
@@ -391,6 +672,10 @@ def run_self_check() -> None:
     cases.append(("dedup", evaluate_trace([_packet(0, base, 1_000_000_000, 0, "lo"), _packet(0, base, 1_001_000_000, 0, "lan")] + u1, sidecar_rows=rows(*u1), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_PASS))
     cases.append(("repeated_not_deduped", evaluate_trace([_packet(0, base, 1_000_000_000, 0, "lo"), _packet(0, base, 1_005_000_000, 0, "lo"), _packet(1, base, 1_002_000_000, 1), _packet(1, base, 1_007_000_000, 2)], sidecar_rows=rows(_packet(1, base, 1_002_000_000, 1), _packet(1, base, 1_007_000_000, 2)), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_PASS))
     cases.append(("stale_sidecar", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1, stale=True), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
+    cases.append(("missing_run_id_anchor", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1), required_coverage={"scripted:script"}), VERDICT_INVALID))
+    cases.append(("missing_sidecar_header_anchor", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1), bridge_status=status, required_coverage={"scripted:script"}), VERDICT_INVALID))
+    cases.append(("missing_status_anchor", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1), sidecar_header={"run_id": run_id}, required_coverage={"scripted:script"}), VERDICT_INVALID))
+    cases.append(("top_level_status_anchor_ignored", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1), sidecar_header={"run_id": run_id}, bridge_status={"run_id": run_id}, required_coverage={"scripted:script"}), VERDICT_INVALID))
     cases.append(("seq_gap", evaluate_trace([_packet(0, base, 1_000_000_000, 0), _packet(0, base, 1_010_000_000, 0), _packet(1, base, 1_002_000_000, 1), _packet(1, base, 1_012_000_000, 3)], sidecar_rows=rows(_packet(1, base, 1_002_000_000, 1), _packet(1, base, 1_012_000_000, 3)), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
     cases.append(("seq_wrap", evaluate_trace([_packet(0, base, 1_000_000_000, 0), _packet(0, base, 1_010_000_000, 0), _packet(1, base, 1_002_000_000, 255), _packet(1, base, 1_012_000_000, 1)], sidecar_rows=rows(_packet(1, base, 1_002_000_000, 255), _packet(1, base, 1_012_000_000, 1)), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_PASS))
     cases.append(("seq_zero", evaluate_trace(u0 + [_packet(1, base, 1_003_000_000, 0)], sidecar_rows={}, sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
@@ -400,12 +685,41 @@ def run_self_check() -> None:
     cases.append(("missing_u1", evaluate_trace(u0, sidecar_rows={}, sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
     cases.append(("missing_u1_frame", evaluate_trace([_packet(0, base, 1_000_000_000, 0), _packet(0, base, 1_010_000_000, 0), _packet(1, base, 1_003_000_000, 1)], sidecar_rows=rows(_packet(1, base, 1_003_000_000, 1)), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
     cases.append(("coverage_missing", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1), sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"scripted:script", "autoloop:x"}), VERDICT_INCOMPLETE))
+    extra_u1 = _packet(1, base, 1_004_000_000, 2)
+    cases.append(("extra_u1_frame", evaluate_trace(u0 + u1 + [extra_u1], sidecar_rows=rows(*u1, extra_u1), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
+    cases.append(("sidecar_unmatched_frame", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1, extra_u1), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
+    cases.append(("sidecar_frame_index", evaluate_trace(u0 + u1, sidecar_rows=[row(u1[0], 999)], sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
+    idle_u0b = _packet(0, base, 1_010_000_000, 0)
+    idle_u1b = _packet(1, base, 1_013_000_000, 2)
+    idle_row_1 = row(u1[0], 1, scripted_active=False, active_deck=1)
+    idle_row_2 = row(idle_u1b, 2, scripted_active=False, active_deck=2)
+    cases.append(("idle_deck_transition", evaluate_trace(u0 + u1 + [idle_u0b, idle_u1b], sidecar_rows=[idle_row_1, idle_row_2], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"transition|deck|1->2"}), VERDICT_INCOMPLETE))
+    base_idle_u0c = _packet(0, hidden, 1_020_000_000, 0)
+    base_idle_u1c = _packet(1, hidden, 1_023_000_000, 3)
+    cases.append(("base_idle_base_deck_transition", evaluate_trace(u0 + u1 + [idle_u0b, idle_u1b, base_idle_u0c, base_idle_u1c], sidecar_rows=[row(u1[0], 1, active_deck=1), idle_row_2, row(base_idle_u1c, 3, active_deck=1)], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"transition|deck|2->1"}), VERDICT_INCOMPLETE))
+    timeline_required = {
+        "scripted:script",
+        "scripted_start|script",
+        "scripted_event|script|0:0:cue:a",
+        "scripted_event|script|50:1:cue:b",
+        "scripted_end|script",
+        "scripted_rapid_pair|script|0:0:cue:a|50:1:cue:b",
+    }
+    u0b = _packet(0, hidden, 1_010_000_000, 0)
+    u1b = _packet(1, hidden, 1_013_000_000, 2)
+    cases.append(("scripted_timeline_missing", evaluate_trace(u0 + u1, sidecar_rows=[row(u1[0], elapsed_ms=0)], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage=timeline_required), VERDICT_INCOMPLETE))
+    cases.append(("scripted_late_row_no_backfill", evaluate_trace(u0 + u1, sidecar_rows=[row(u1[0], elapsed_ms=200)], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage=timeline_required), VERDICT_INCOMPLETE))
+    cases.append(("scripted_timeline_pass", evaluate_trace(u0 + u1 + [u0b, u1b], sidecar_rows=[row(u1[0], 1, elapsed_ms=0), row(u1b, 2, elapsed_ms=60)], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage=timeline_required), VERDICT_PASS))
+    cases.append(("failed_autoloop_no_coverage", evaluate_trace(u0 + u1, sidecar_rows=[row(u1[0], scripted_active=False, soundswitch_id="", native_autoloop={"status": "missing_autoloop_file", "target_identity": "loop", "phase_tick": 100}, visible=True)], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"autoloop:loop"}), VERDICT_INCOMPLETE))
     cases.append(("rapid_order", evaluate_trace([_packet(0, bytes([1]) + bytes(511), 1_000_000_000, 0), _packet(0, bytes([2]) + bytes(511), 1_046_875_000, 0), _packet(1, bytes([2]) + bytes(511), 1_003_000_000, 1), _packet(1, bytes([1]) + bytes(511), 1_049_000_000, 2)], sidecar_rows=rows(_packet(1, bytes([2]) + bytes(511), 1_003_000_000, 1), _packet(1, bytes([1]) + bytes(511), 1_049_000_000, 2)), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_FAIL))
     bad = parse_artdmx(_build_artdmx(1, base, 1)[:-1], timestamp_ns=1_000_000_000)
     assert bad is not None
     cases.append(("packet_length", evaluate_trace(u0 + [bad], sidecar_rows={}, sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
     partial_header, partial_rows, partial_invalid = parse_sidecar_jsonl(json.dumps({"type": "header", "run_id": run_id}) + "\n" + '{"type":"frame"')
-    cases.append(("partial_sidecar", evaluate_trace(u0 + u1, sidecar_rows=partial_rows, sidecar_header=partial_header, bridge_status=status, sidecar_invalid=partial_invalid), VERDICT_INVALID))
+    if partial_invalid:
+        raise SystemExit("self-check failed: partial sidecar tail marked invalid")
+    cases.append(("partial_sidecar", evaluate_trace(u0 + u1, sidecar_rows=partial_rows, sidecar_header=partial_header, bridge_status=status, sidecar_invalid=partial_invalid, sidecar_pending=True), VERDICT_INCOMPLETE))
+    cases.append(("partial_sidecar_timeout", evaluate_trace(u0 + u1, sidecar_rows=partial_rows, sidecar_header=partial_header, bridge_status=status, sidecar_invalid=partial_invalid), VERDICT_INVALID))
     cases.append(("overload", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1), sidecar_header={"run_id": run_id}, bridge_status=status, compare_overloaded=True), VERDICT_INVALID))
 
     failures = [(name, got.verdict, expected, got.reason) for name, got, expected in cases if got.verdict != expected]
@@ -497,13 +811,15 @@ def _live(args: argparse.Namespace) -> int:
                     packets.append(packet)
             if time.monotonic() - last_print >= 1.0:
                 sidecar_header: dict[str, Any] | None = None
-                sidecar_rows: dict[int, dict[str, Any]] = {}
+                sidecar_rows: list[dict[str, Any]] = []
                 sidecar_invalid = not bool(sidecar_path)
+                sidecar_pending = False
+                elapsed = time.monotonic() - start
                 if sidecar_path:
                     try:
-                        sidecar_header, sidecar_rows, sidecar_invalid = parse_sidecar_jsonl(
-                            Path(sidecar_path).read_text(encoding="utf-8")
-                        )
+                        sidecar_text = Path(sidecar_path).read_text(encoding="utf-8")
+                        sidecar_pending = _has_partial_sidecar_tail(sidecar_text) and elapsed < args.timeout_s
+                        sidecar_header, sidecar_rows, sidecar_invalid = parse_sidecar_jsonl(sidecar_text)
                     except OSError:
                         sidecar_invalid = True
                 result = evaluate_trace(
@@ -516,12 +832,12 @@ def _live(args: argparse.Namespace) -> int:
                     tolerance_ms=args.tolerance_ms,
                     required_coverage=required,
                     sidecar_invalid=sidecar_invalid,
+                    sidecar_pending=sidecar_pending,
                 )
                 print(json.dumps(result.to_dict(), sort_keys=True))
                 if report_path:
                     with report_path.open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps(result.to_dict(), sort_keys=True) + "\n")
-                elapsed = time.monotonic() - start
                 if result.reason in ("missing_u0", "missing_u1") and elapsed < args.timeout_s:
                     last_print = time.monotonic()
                     continue

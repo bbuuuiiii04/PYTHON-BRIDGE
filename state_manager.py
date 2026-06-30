@@ -3677,6 +3677,9 @@ class StateManager:
         input_degraded: bool = False,
         static_layers: tuple[Any, ...] = (),
         blackout: bool = False,
+        blackout_bindings: tuple[str, ...] = (),
+        elapsed_ms: int = 0,
+        transport: str = "",
         native_autoloop: NativeAutoloopDecision | None = None,
     ) -> dict[str, Any]:
         native_status = native_autoloop.status if native_autoloop is not None else ""
@@ -3704,6 +3707,9 @@ class StateManager:
                 if type(slot) is int
             ],
             "blackout": bool(blackout),
+            "blackout_bindings": [str(key) for key in blackout_bindings],
+            "elapsed_ms": int(elapsed_ms or 0),
+            "transport": str(transport or ""),
             "native_autoloop": (
                 native_autoloop.to_status_dict()
                 if native_autoloop is not None
@@ -3783,6 +3789,7 @@ class StateManager:
         input_healthy = True
         layers: tuple[Any, ...] = ()
         blackout = False
+        blackout_bindings: tuple[str, ...] = ()
         transport = None
         try:
             soundswitch_connected = bool(
@@ -3906,6 +3913,7 @@ class StateManager:
                     self._pack_input_degraded_latched = False
                 input_healthy = not self._pack_input_degraded_latched
                 blackout = blackout_held if input_healthy else False
+                blackout_bindings = tuple(getattr(s, "blackout_bindings", ())) if input_healthy else ()
                 layers = held_layers if input_healthy else ()
                 player.set_masks(blackout=blackout, emergency=False)
                 if layers != self._pack_last_static_layers:
@@ -4067,6 +4075,9 @@ class StateManager:
                     input_degraded=input_degraded,
                     static_layers=layers,
                     blackout=blackout,
+                    blackout_bindings=blackout_bindings,
+                    elapsed_ms=elapsed_ms,
+                    transport=transport or "",
                     native_autoloop=native_decision,
                 ),
             )

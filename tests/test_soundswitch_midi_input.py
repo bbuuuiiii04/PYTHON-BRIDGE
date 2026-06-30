@@ -365,12 +365,14 @@ class TestBlackoutMask(unittest.TestCase):
         a = _adapter(_BLACKOUT)
         _note_on(a, _BLACKOUT)
         self.assertTrue(a.snapshot().blackout_held)
+        self.assertEqual(a.snapshot().blackout_bindings, ("0:0",))
 
     def test_note_off_releases_blackout(self):
         a = _adapter(_BLACKOUT)
         _note_on(a, _BLACKOUT)
         _note_off(a, _BLACKOUT)
         self.assertFalse(a.snapshot().blackout_held)
+        self.assertEqual(a.snapshot().blackout_bindings, ())
 
     def test_vel0_releases_blackout(self):
         a = _adapter(_BLACKOUT)
