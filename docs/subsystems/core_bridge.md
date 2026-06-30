@@ -26,6 +26,11 @@ SoundSwitch pack-player boundary:
 - Sender health, native Autoloop live/runtime validation, and hardware
   validation remain open. Native Autoloop pack output is implemented in software
   through the existing pack driver and remains SoundSwitch-present suppressed.
+- Art-Net truth-check is a temporary default-off measurement path. With
+  `RBSS_ARTNET_TRUTH_CHECK=1` and a valid `RBSS_ARTNET_UNIVERSE`, startup can
+  build pack rendering without Enttec, keep production output software-zero when
+  SoundSwitch is connected, and enqueue the rendered shadow frame to a bounded
+  U1 validation worker. UDP and sidecar writes stay outside `StateManager`.
 - Mixer active-deck authority is now StateManager-owned through the pure
   `active_deck_resolver.py` helper. `active_deck` is the resolved show deck and
   may be `0` for idle/no audible deck; `rb_master_deck` is retained separately

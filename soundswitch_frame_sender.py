@@ -15,6 +15,7 @@ SoundSwitch pack semantic proof comes from the pack-generation proof gate
 from __future__ import annotations
 
 import logging
+import struct
 import threading
 import time
 from typing import Callable, Mapping
@@ -63,6 +64,23 @@ def expand_ch1_ch19_to_512(
         value = frame_19[idx] if idx < len(frame_19) else 0
         out[dmx_addr - 1] = value if isinstance(value, int) and 0 <= value <= 255 else 0
     return out
+
+
+def _build_artdmx(
+    universe: int,
+    frame_512: bytes | bytearray,
+    sequence: int = 0,
+) -> bytes:
+    """Build one ArtDMX packet from an already-expanded 512-byte DMX frame."""
+    return (
+        b"Art-Net\x00"
+        + struct.pack("<H", 0x5000)
+        + struct.pack(">H", 0x000E)
+        + bytes([sequence & 0xFF, 0x00])
+        + struct.pack("<H", int(universe) & 0x7FFF)
+        + struct.pack(">H", 512)
+        + bytes(frame_512[:512]).ljust(512, b"\x00")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -259,5 +277,6 @@ def _validated_fixture_map(fixture_map: Mapping[int, int]) -> dict[int, int]:
 
 __all__ = [
     "expand_ch1_ch19_to_512",
+    "_build_artdmx",
     "SoundSwitchFrameSender",
 ]

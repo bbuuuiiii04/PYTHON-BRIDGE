@@ -30,6 +30,10 @@ SoundSwitch pack-player boundary (T7c/T7e):
   the companion booleans remain authoritative. `software_zero_frame` and `frame_count` mean rendered
   software zero and attempted normal software frames only, never confirmed serial/Enttec output or
   physical fixture darkness.
+- The `soundswitch_pack.truth_check` diagnostic block is present for the temporary Art-Net
+  retirement gate. When enabled it exposes run ID, universe, targets, sidecar path, U1 sequence,
+  queue overflow/drop counts, send errors, sidecar errors, pack SHA, and CH1 fixture-map address.
+  It is not a runtime command surface and does not imply physical output authority.
 - Runtime `backend=midi` is **deferred** (callback returns sanitized `unsupported_action`); no
   runtime command opens IAC/MidiOutput; pack failure falls back to disabled/none, never MIDI.
 - The menubar `Export from SS` workflow adds no command. After verified disk publication it reuses

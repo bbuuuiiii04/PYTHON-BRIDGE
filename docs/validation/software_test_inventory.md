@@ -30,7 +30,7 @@ python -m pytest tests
 | Runtime commands | parser/handler/status writer tests | needed before command changes |
 | Logging visibility | bridge formatting/rate helpers and logging diagnostic coverage tests | verifies software-only log filtering and spam-control behavior |
 | Rekordbox readers | reader, offset, live BPM, active-deck resolver, StateManager authority, startup wiring, runtime status tests | cannot prove all app versions or hardware-visible behavior |
-| SoundSwitch | OS2L/output helpers; project/pack/player/native-Autoloop-resolver/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/T7d tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status and native Autoloop rendering are software intent and tests do not prove physical fixtures |
+| SoundSwitch | OS2L/output helpers; project/pack/player/native-Autoloop-resolver/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/Art-Net truth-check/T7d tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status, native Autoloop rendering, and U1 truth-check packets are software/wire intent and tests do not prove physical fixtures |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety |
 | LED/Govee | LED config/director/color/realtime/renderer tests | cannot prove device compatibility |
 | Replay/session tooling | replay format and smoke tests | software-only |
@@ -70,6 +70,13 @@ process-control exception swallowing, blackout self-release drift, stale active 
 reload-command drift, missed one-shot auto-enable retry, or
 private-data leaks. The tests use fake/
 injected hardware seams. They do not prove Enttec/fixture behavior.
+
+Art-Net truth-check tests add `tests/test_artnet_truth.py`,
+`tests/test_artnet_compare.py`, startup coverage in
+`tests/test_soundswitch_pack_startup.py`, and connected-shadow coverage in
+`tests/test_state_manager_pack_driver.py`. `python3 tools/artnet_compare.py
+--self-check` is the non-network validator measurement test; it uses synthetic
+traces only.
 - relevant subsystem card
 - relevant task playbook if test workflow changed
 

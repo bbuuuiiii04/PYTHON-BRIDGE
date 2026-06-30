@@ -70,6 +70,7 @@ from .laser_output_backend import (
 )
 from .laser_models import LaserPersonality
 from .midi_output import MidiOutput
+from .artnet_truth import ArtNetTruthSink, load_truth_check_env
 from .soundswitch_frame_sender import SoundSwitchFrameSender
 from .soundswitch_laser_player import LaserPackPlayer
 from .soundswitch_midi_input import SoundSwitchMidiInputGroup
@@ -331,6 +332,8 @@ class SoundSwitchPackStartupBundle:
     midi_input: Optional[SoundSwitchMidiInputGroup]
     frame_sender: Optional[SoundSwitchFrameSender]
     reason: str
+    truth_sink: Optional[ArtNetTruthSink] = None
+    truth_check_reason: str = "disabled"
 
 
 @dataclass(frozen=True)
@@ -443,6 +446,8 @@ def _build_soundswitch_pack_startup(
     player_factory=LaserPackPlayer,
     frame_sender_factory=SoundSwitchFrameSender,
     midi_input_factory=SoundSwitchMidiInputGroup,
+    truth_sink_factory=ArtNetTruthSink,
+    truth_env_loader=load_truth_check_env,
 ) -> SoundSwitchPackStartupBundle:
     """Choose pack-vs-legacy output before starting any output worker.
 
@@ -475,6 +480,31 @@ def _build_soundswitch_pack_startup(
         )
 
     player = player_factory(pack)
+    truth_env = truth_env_loader()
+    if truth_env.enabled:
+        midi_input = midi_input_factory(
+            pack.learned_midi_bindings,
+            cfg.midi_input_aliases,
+            stale_timeout_ms=cfg.controller_hold_timeout_ms,
+        )
+        backend = PackOutputBackend(
+            scene_to_identity=dict(pack.bridge_scene_crosswalk),
+            frame_sender=None,
+        )
+        truth_sink = truth_sink_factory(
+            universe=truth_env.universe,
+            fixture_map=cfg.fixture_map,
+            targets=truth_env.targets,
+            sidecar_path=truth_env.sidecar_path,
+            pack_sha256=getattr(pack, "manifest_sha256", "") or "",
+            queue_bound=truth_env.queue_bound,
+        )
+        return SoundSwitchPackStartupBundle(
+            backend, pack, player, midi_input, None,
+            "artnet_truth_check", truth_sink, truth_env.reason,
+        )
+    if truth_env.reason not in ("disabled",):
+        log.warning("[MAIN] artnet-truth-check disabled  reason=%s", truth_env.reason)
     if cfg.dry_run or cfg.output_backend == "none":
         return SoundSwitchPackStartupBundle(
             NoneBackend(), pack, player, None, None,
@@ -534,6 +564,32 @@ def _start_soundswitch_pack_workers(
     bundle: SoundSwitchPackStartupBundle,
 ) -> SoundSwitchPackStartupBundle:
     """Start a fully constructed pack bundle after cleanup authority exists."""
+    if bundle.reason == "artnet_truth_check":
+        try:
+            if bundle.midi_input is not None:
+                bundle.midi_input.start()
+            if bundle.truth_sink is not None:
+                bundle.truth_sink.start()
+        except Exception as exc:
+            if bundle.truth_sink is not None:
+                try:
+                    bundle.truth_sink.stop()
+                except Exception:
+                    pass
+            if bundle.midi_input is not None:
+                try:
+                    bundle.midi_input.stop()
+                except Exception:
+                    pass
+            log.warning(
+                "[MAIN] soundswitch-pack disabled  reason=worker_start_failed  error=%s",
+                type(exc).__name__,
+            )
+            return SoundSwitchPackStartupBundle(
+                None, bundle.pack, bundle.player, None, None, "pack_start_failed",
+                None, bundle.truth_check_reason,
+            )
+        return bundle
     if bundle.reason != "pack" or bundle.midi_input is None or bundle.frame_sender is None:
         return bundle
     try:
@@ -946,10 +1002,17 @@ def _shutdown_zero_pack_outputs(
                     live_input.stop()
                 except Exception:
                     pass
+            live_truth_sink = getattr(rt, "truth_sink", None)
+            if live_truth_sink is not None:
+                try:
+                    live_truth_sink.stop()
+                except Exception:
+                    pass
     # Startup-owned slots: covers the pre-sm early-shutdown window and is a
     # harmless no-op once the live sender (same object pre-swap) is stopped.
     sender = pack_output_owners.pop("sender", None)
     midi_input = pack_output_owners.pop("midi_input", None)
+    truth_sink = pack_output_owners.pop("truth_sink", None)
     if sender is not None:
         try:
             sender.stop()
@@ -958,6 +1021,11 @@ def _shutdown_zero_pack_outputs(
     if midi_input is not None:
         try:
             midi_input.stop()
+        except Exception:
+            pass
+    if truth_sink is not None:
+        try:
+            truth_sink.stop()
         except Exception:
             pass
 
@@ -970,7 +1038,7 @@ def main() -> None:
     # Install owner cleanup before any pack-controlled port is opened.  The
     # mutable slots let the handler/atexit path own resources even while the
     # rest of bridge startup is still in progress.
-    pack_output_owners: dict[str, Any] = {"sender": None, "midi_input": None}
+    pack_output_owners: dict[str, Any] = {"sender": None, "midi_input": None, "truth_sink": None}
     _sm_holder: dict[str, Any] = {"sm": None}  # set after StateManager is built
 
     def _cleanup_pack_outputs() -> None:
@@ -996,11 +1064,13 @@ def main() -> None:
     )
     pack_output_owners["sender"] = soundswitch_pack_bundle.frame_sender
     pack_output_owners["midi_input"] = soundswitch_pack_bundle.midi_input
+    pack_output_owners["truth_sink"] = soundswitch_pack_bundle.truth_sink
     soundswitch_pack_bundle = _start_soundswitch_pack_workers(
         soundswitch_pack_bundle,
     )
     pack_output_owners["sender"] = soundswitch_pack_bundle.frame_sender
     pack_output_owners["midi_input"] = soundswitch_pack_bundle.midi_input
+    pack_output_owners["truth_sink"] = soundswitch_pack_bundle.truth_sink
     laser_bundle = _build_laser_startup_wiring(
         laser_cfg_result,
         backend=soundswitch_pack_bundle.laser_backend,
@@ -1012,22 +1082,26 @@ def main() -> None:
     midi_output = laser_bundle.midi_output
     soundswitch_frame_sender = soundswitch_pack_bundle.frame_sender
     soundswitch_midi_input = soundswitch_pack_bundle.midi_input
+    soundswitch_truth_sink = soundswitch_pack_bundle.truth_sink
     soundswitch_pack_player = soundswitch_pack_bundle.player
     # T7e: one immutable runtime bundle published to StateManager. enabled only when
-    # the pack workers actually started (reason == "pack"); a *_failed/none bundle is
-    # disabled (driver inert, no DMX).
+    # pack output or default-off truth-check workers actually started.
+    pack_sha256 = (getattr(soundswitch_pack_bundle.pack, "manifest_sha256", "") or "")
     soundswitch_pack_runtime = PackRuntime(
-        enabled=(soundswitch_pack_bundle.reason == "pack"),
+        enabled=(soundswitch_pack_bundle.reason in ("pack", "artnet_truth_check")),
         reason=soundswitch_pack_bundle.reason,
         player=soundswitch_pack_player,
         midi_input=soundswitch_midi_input,
         backend=soundswitch_pack_bundle.laser_backend,
         frame_sender=soundswitch_frame_sender,
-        pack_sha12=(getattr(soundswitch_pack_bundle.pack, "manifest_sha256", "") or "")[:12],
+        pack_sha12=pack_sha256[:12],
+        pack_sha256=pack_sha256,
         phase_offset_beats=(
             soundswitch_pack_cfg_result.config.phase_offset_beats
             if soundswitch_pack_cfg_result.config is not None else 0.0
         ),
+        truth_sink=soundswitch_truth_sink,
+        truth_check_reason=soundswitch_pack_bundle.truth_check_reason,
     )
     log.info(
         "[MAIN] soundswitch-pack-config  reason=%s  available=%s  enabled=%s  startup=%s",
@@ -1350,17 +1424,25 @@ def main() -> None:
         # runtime. No serial opens here — the controller starts the sender on publish.
         cfg_result = load_soundswitch_pack_player_config()
         bundle = _build_soundswitch_pack_startup(cfg_result)
-        if bundle.player is None or bundle.frame_sender is None or bundle.laser_backend is None:
+        if bundle.player is None or bundle.laser_backend is None:
             raise RuntimeError("pack_prepare_failed")
+        if bundle.frame_sender is None and bundle.truth_sink is None:
+            raise RuntimeError("pack_prepare_failed")
+        pack_sha256 = (getattr(bundle.pack, "manifest_sha256", "") or "")
         return PackRuntime(
-            enabled=False, reason="prepared", player=bundle.player,
+            enabled=False,
+            reason=bundle.reason if bundle.truth_sink is not None else "prepared",
+            player=bundle.player,
             midi_input=bundle.midi_input, backend=bundle.laser_backend,
             frame_sender=bundle.frame_sender,
-            pack_sha12=(getattr(bundle.pack, "manifest_sha256", "") or "")[:12],
+            pack_sha12=pack_sha256[:12],
+            pack_sha256=pack_sha256,
             phase_offset_beats=(
                 cfg_result.config.phase_offset_beats
                 if cfg_result.config is not None else 0.0
             ),
+            truth_sink=bundle.truth_sink,
+            truth_check_reason=bundle.truth_check_reason,
         )
 
     soundswitch_pack_controller = SoundSwitchPackController(

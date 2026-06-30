@@ -29,6 +29,7 @@ The additive schema-1 `soundswitch_pack` object is:
 | `available`, `enabled`, `pack_loaded` | Bundle booleans. |
 | `backend` | `pack` or `disabled`. |
 | `pack_sha12` | Existing public manifest prefix used for reload acknowledgement. |
+| `pack_sha256` | Full public manifest hash used by the Art-Net compare tool to reject stale/mismatched runs. |
 | `reason` | Sanitized runtime category. |
 | `phase_offset_beats` | Finite native Autoloop calibration value; default `0.0`. |
 | `operational_state` | `disabled`, `blackout`, `input_degraded`, `static_held`, `scripted_active`, native Autoloop states (`rendering_active`, `empty_dark_look`, `missing_binding`, `missing_autoloop_file`, `unsupported_layout`, `soundswitch_present_native_suppressed`), `autoloop_phase_blocked`, or `software_zero_frame`. |
@@ -37,9 +38,11 @@ The additive schema-1 `soundswitch_pack` object is:
 | `frame_count` | Non-negative attempted normal software-frame count; not confirmed sends. |
 | `has_active_identity` | Boolean derived from the in-memory accepted-identity property; no identity is exposed. |
 | `native_autoloop` | Bounded copied state for native Autoloop role/scene/note, SoundSwitch display name, target identity, anchor beat, phase tick, reason, and diagnostic. Values are absent when no native Autoloop is selected. |
+| `truth_check` | Temporary validation-only Art-Net status: enabled flag, run ID, universe, targets, sidecar path, current U1 sequence, queue drop/overflow counts, send/sidecar errors, pack SHA, and fixture-map CH1 DMX address. It is default-off and does not prove physical output. |
 
-`StateManager.get_pack_status()` returns a copy of its published dict and calls no runtime/provider.
-Sender health is deliberately absent. A stale status file renders `Lighting: no status yet` in the menubar.
+`StateManager.get_pack_status()` returns a copy of its published dict and overlays truth-check worker
+counters only on the status-reader path, not the 200 Hz render path. Sender health is deliberately
+absent. A stale status file renders `Lighting: no status yet` in the menubar.
 
 ## Runtime files
 

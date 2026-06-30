@@ -48,6 +48,12 @@ def _safe_zero_and_stop(rt: PackRuntime) -> None:
             inp.stop()
         except Exception:
             pass
+    truth_sink = getattr(rt, "truth_sink", None)
+    if truth_sink is not None:
+        try:
+            truth_sink.stop()
+        except Exception:
+            pass
 
 
 class SoundSwitchPackController:
@@ -83,6 +89,7 @@ class SoundSwitchPackController:
         cur = self._snapshot()
         self._publish(PackRuntime(
             enabled=False, reason=reason, pack_sha12=cur.pack_sha12,
+            pack_sha256=cur.pack_sha256,
             phase_offset_beats=cur.phase_offset_beats,
         ))
         _safe_zero_and_stop(cur)
@@ -97,6 +104,7 @@ class SoundSwitchPackController:
         # Publish disabled so the driver stops submitting, then free the shared port.
         self._publish(PackRuntime(
             enabled=False, reason="swapping", pack_sha12=old.pack_sha12,
+            pack_sha256=old.pack_sha256,
             phase_offset_beats=old.phase_offset_beats,
         ))
         _safe_zero_and_stop(old)
@@ -105,18 +113,25 @@ class SoundSwitchPackController:
                 new_unstarted.midi_input.start()
             if new_unstarted.frame_sender is not None:
                 new_unstarted.frame_sender.start()
+            if new_unstarted.truth_sink is not None:
+                new_unstarted.truth_sink.start()
         except Exception as exc:
             _safe_zero_and_stop(new_unstarted)
             self._publish(PackRuntime(
                 enabled=False, reason="pack_start_failed", pack_sha12=old.pack_sha12,
+                pack_sha256=old.pack_sha256,
                 phase_offset_beats=old.phase_offset_beats,
             ))
             return False, _sanitize_error(exc)
         self._publish(PackRuntime(
-            enabled=True, reason="pack", player=new_unstarted.player,
+            enabled=True, reason=new_unstarted.reason if new_unstarted.truth_sink is not None else "pack",
+            player=new_unstarted.player,
             midi_input=new_unstarted.midi_input, backend=new_unstarted.backend,
             frame_sender=new_unstarted.frame_sender, pack_sha12=new_unstarted.pack_sha12,
+            pack_sha256=new_unstarted.pack_sha256,
             phase_offset_beats=new_unstarted.phase_offset_beats,
+            truth_sink=new_unstarted.truth_sink,
+            truth_check_reason=new_unstarted.truth_check_reason,
         ))
         return True, "pack"
 

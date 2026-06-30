@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .artnet_truth import disabled_truth_status
+
 
 @dataclass(frozen=True)
 class PackRuntime:
@@ -25,7 +27,10 @@ class PackRuntime:
     backend: Any = None               # LaserOutputBackend | None
     frame_sender: Any = None          # SoundSwitchFrameSender | None
     pack_sha12: str = ""              # first 12 of the public manifest sha; "" if none
+    pack_sha256: str = ""             # public manifest sha; no paths or device identifiers
     phase_offset_beats: float = 0.0   # native Autoloop calibration knob; no latency model
+    truth_sink: Any = None            # ArtNetTruthSink | None
+    truth_check_reason: str = "disabled"
 
     @property
     def active(self) -> bool:
@@ -41,8 +46,10 @@ class PackRuntime:
             "backend": "pack" if self.active else "disabled",
             "pack_loaded": self.player is not None,
             "pack_sha12": self.pack_sha12 or "",
+            "pack_sha256": self.pack_sha256 or "",
             "phase_offset_beats": float(self.phase_offset_beats),
             "reason": self.reason,           # sanitized category only
+            "truth_check": disabled_truth_status(self.truth_check_reason),
         }
 
 

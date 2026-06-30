@@ -94,6 +94,10 @@ artifacts, not planning documents. They are not moved into the authority tree.
 - Native-DMX Autoloop selection: implemented/software-tested through canonical
   pack note bindings, 32-beat phase at 600 ticks/beat, `phase_offset_beats`, and
   the existing pack driver. Live/runtime and hardware validation remain open.
+- Art-Net truth-check gate: implemented/software-tested as a temporary
+  default-off U1 shadow-output comparator path. It requires
+  `RBSS_ARTNET_TRUTH_CHECK=1` plus a valid universe, opens no Enttec/serial, and
+  does not replace SoundSwitch U0 as final-exam authority.
 - Hardware procedure/template: present; latest software/wire review complete;
   no real operator run, so hardware remains unvalidated.
 

@@ -39,7 +39,11 @@ reconciliation, independent verification, an
 immutable pack loader/player, a MIDI-input adapter, an output-backend
 abstraction, an Enttec frame sender, a validated default-off config loader,
 startup wiring, an atomic `PackRuntime`, validate-first runtime controls, a
-StateManager scripted-frame driver, and provider-free copied operational status.
+StateManager scripted-frame driver, provider-free copied operational status, and
+a default-off Art-Net U1 truth-check sink for software/wire comparison against
+SoundSwitch U0. Truth-check mode is validation-only: it does not open Enttec,
+does not make the bridge physical lighting authority, and keeps production pack
+output software-zero while SoundSwitch is connected.
 The old exact-count closure snapshot is proof-only; live export accepts
 internally consistent saved edits. F9 and F10 proof seams remain covered.
 
@@ -79,6 +83,7 @@ T7d six-scenario gate no longer blocks it.
 | `SoundSwitchEngine` | SoundSwitch output-intent fanout helper | yes | called by `StateManager` thread | active deck routing and send intents from `StateManager` | routed OS2L sends for scripted/autoloop/smart-transition/live-BPM-follow helpers |
 | `LaserPackPlayer` / `PackRuntime` | verified SoundSwitch pack rendering and atomic runtime snapshot | yes, pure/in-memory | player called by `StateManager`; bundle published by command thread | active deck metadata/elapsed, input snapshot, immutable pack | CH1-CH19 frame plus copied software-intent diagnostics |
 | `SoundSwitchFrameSender` / Enttec worker | mutually exclusive direct-DMX transport | no blocking hot-path I/O | `StateManager` submits to bounded mailbox; worker owns serial | CH1-CH19 frame + validated fixture map | Enttec DMX Pro packets; owner-driven zero/stop |
+| `ArtNetTruthSink` | temporary validation-only U1 shadow output | no blocking hot-path I/O | `StateManager` enqueues rendered frames; worker owns UDP and sidecar writes | CH1-CH19 frame + intent metadata + fixture map | ArtDMX U1 packets and JSONL sidecar evidence; no physical DMX |
 | `beat_math.py` | pure beat and beatgrid math helper | yes | called in hot path from `StateManager` | elapsed ms, bpm, beatgrid markers | computed beat positions / target elapsed |
 | `OS2LConnection` / `OS2LOutput` | output transport authority | yes | sender/reconnect threads own sockets | SoundSwitch DNS-SD, send queue | TCP OS2L messages |
 | `StatusWriter` / `CommandReader` | auxiliary operator status/control | auxiliary | status/command threads | snapshots, command JSONL | status JSON, command side effects |

@@ -73,6 +73,18 @@ still disables output and never falls back to physical MIDI. Runtime `set_sounds
 reload/backend/enable actions, with runtime `backend=midi` intentionally
 unsupported.
 
+Temporary Art-Net truth-check mode is controlled by environment variables, not a
+new config file:
+
+- `RBSS_ARTNET_TRUTH_CHECK=1` enables validation-only U1 shadow emission.
+- `RBSS_ARTNET_UNIVERSE=1` selects the bridge truth universe; this variable alone emits nothing.
+- `RBSS_ARTNET_TARGETS` optionally overrides comma-separated IP-literal targets.
+- `RBSS_ARTNET_TRUTH_SIDECAR` optionally overrides `/tmp/rbss_artnet_truth_frames.jsonl`.
+
+In truth-check mode startup can render the pack without Enttec/serial by using a
+sender-free pack backend plus the validation sink. Production pack output still
+submits software zero while SoundSwitch is connected.
+
 This remains **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**. Do not create
 or enable the local config until the active remaining-work roadmap reaches its
 reviewed deployment/hardware gate.

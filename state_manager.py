@@ -3638,7 +3638,78 @@ class StateManager:
 
     def get_pack_status(self) -> dict[str, Any]:
         """Sanitized pack status for the runtime status surface (no paths/ports/etc.)."""
-        return dict(self._pack_status_snapshot)
+        status = dict(self._pack_status_snapshot)
+        truth_sink = getattr(self._pack_runtime, "truth_sink", None)
+        if truth_sink is not None:
+            try:
+                status["truth_check"] = truth_sink.status()
+            except Exception:
+                status["truth_check"] = {
+                    "enabled": True,
+                    "reason": "status_error",
+                    "sidecar_error": "status_error",
+                }
+        return status
+
+    def _enqueue_pack_truth_frame(
+        self,
+        *,
+        runtime: PackRuntime,
+        frame: tuple[int, ...],
+        intent: dict[str, Any],
+    ) -> None:
+        truth_sink = getattr(runtime, "truth_sink", None)
+        if truth_sink is None:
+            return
+        try:
+            truth_sink.submit_frame(frame, intent)
+        except Exception:
+            log.error("[SM] artnet truth-check enqueue failed", exc_info=False)
+
+    def _pack_truth_intent(
+        self,
+        *,
+        active_deck: int,
+        lighting_mode: str,
+        scripted_active: bool,
+        scripted_id: int = 0,
+        soundswitch_id: str = "",
+        input_degraded: bool = False,
+        static_layers: tuple[Any, ...] = (),
+        blackout: bool = False,
+        native_autoloop: NativeAutoloopDecision | None = None,
+    ) -> dict[str, Any]:
+        native_status = native_autoloop.status if native_autoloop is not None else ""
+        mode = "idle"
+        if blackout:
+            mode = "blackout"
+        elif static_layers:
+            mode = "static"
+        elif scripted_active:
+            mode = "scripted"
+        elif native_status in ("rendering_active", "empty_dark_look"):
+            mode = "autoloop"
+        return {
+            "mode": mode,
+            "active_deck": int(active_deck),
+            "lighting_mode": str(lighting_mode or ""),
+            "scripted_active": bool(scripted_active),
+            "scripted_id": int(scripted_id or 0),
+            "soundswitch_id": soundswitch_id or "",
+            "input_degraded": bool(input_degraded),
+            "static_held": bool(static_layers),
+            "static_slots": [
+                int(slot)
+                for slot in (getattr(layer, "slot", None) for layer in static_layers)
+                if type(slot) is int
+            ],
+            "blackout": bool(blackout),
+            "native_autoloop": (
+                native_autoloop.to_status_dict()
+                if native_autoloop is not None
+                else NativeAutoloopDecision("software_zero_frame").to_status_dict()
+            ),
+        }
 
     def _publish_pack_status(
         self,
@@ -3708,15 +3779,17 @@ class StateManager:
             return
         now = time.monotonic() if now is None else now
         player, backend, midi_input = rt.player, rt.backend, rt.midi_input
+        truth_sink = getattr(rt, "truth_sink", None)
         input_healthy = True
         layers: tuple[Any, ...] = ()
         blackout = False
         transport = None
         try:
-            if (
+            soundswitch_connected = bool(
                 self._os2l_connected_provider is not None
                 and self._os2l_connected_provider()
-            ):
+            )
+            if soundswitch_connected and truth_sink is None:
                 native_decision = self._native_autoloop.resolve(
                     pack_sha12=rt.pack_sha12,
                     bindings={},
@@ -3756,6 +3829,31 @@ class StateManager:
                 player.clear_selection()
                 frame = player.render().frame
                 self._pack_frame_count += 1
+                self._enqueue_pack_truth_frame(
+                    runtime=rt,
+                    frame=frame,
+                    intent=self._pack_truth_intent(
+                        active_deck=active,
+                        lighting_mode=self._os.lighting_mode,
+                        scripted_active=False,
+                    ),
+                )
+                if soundswitch_connected:
+                    self._publish_pack_status(
+                        runtime=rt,
+                        scripted_active=False,
+                        input_degraded=False,
+                        static_held=False,
+                        blackout=False,
+                        autoloop_phase_blocked=True,
+                        software_zero_frame=True,
+                        native_autoloop=NativeAutoloopDecision(
+                            "soundswitch_present_native_suppressed",
+                            reason="soundswitch_present",
+                        ),
+                    )
+                    backend.submit_frame(_PACK_ZERO_FRAME)
+                    return
                 self._publish_pack_status(
                     runtime=rt,
                     scripted_active=False,
@@ -3956,10 +4054,42 @@ class StateManager:
             frame = player.render().frame
             native_status = native_decision.status
             self._pack_frame_count += 1
+            input_degraded = midi_input is not None and not input_healthy
+            self._enqueue_pack_truth_frame(
+                runtime=rt,
+                frame=frame,
+                intent=self._pack_truth_intent(
+                    active_deck=active,
+                    lighting_mode=self._os.lighting_mode,
+                    scripted_active=transport is not None,
+                    scripted_id=scripted_id,
+                    soundswitch_id=ssid,
+                    input_degraded=input_degraded,
+                    static_layers=layers,
+                    blackout=blackout,
+                    native_autoloop=native_decision,
+                ),
+            )
+            if soundswitch_connected:
+                self._publish_pack_status(
+                    runtime=rt,
+                    scripted_active=False,
+                    input_degraded=False,
+                    static_held=False,
+                    blackout=False,
+                    autoloop_phase_blocked=True,
+                    software_zero_frame=True,
+                    native_autoloop=NativeAutoloopDecision(
+                        "soundswitch_present_native_suppressed",
+                        reason="soundswitch_present",
+                    ),
+                )
+                backend.submit_frame(_PACK_ZERO_FRAME)
+                return
             self._publish_pack_status(
                 runtime=rt,
                 scripted_active=transport is not None,
-                input_degraded=midi_input is not None and not input_healthy,
+                input_degraded=input_degraded,
                 static_held=bool(layers),
                 blackout=bool(blackout),
                 autoloop_phase_blocked=(

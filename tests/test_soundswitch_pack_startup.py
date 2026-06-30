@@ -11,6 +11,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import rb_ss_bridge_v2.__main__ as bridge_main
+from rb_ss_bridge_v2.artnet_truth import TruthCheckEnv
 from rb_ss_bridge_v2.laser_config import LaserConfig, LaserConfigResult
 from rb_ss_bridge_v2.laser_models import LaserMidiMessage
 from rb_ss_bridge_v2.laser_output_backend import MidiOutputBackend, NoneBackend, PackOutputBackend
@@ -73,6 +74,12 @@ class _LifecycleFake:
 
     def stop(self):
         self.events.append(f"{self.name}.stop")
+
+
+class _TruthSinkFake(_LifecycleFake):
+    def __init__(self, events):
+        super().__init__("truth", events)
+        self.kwargs = {}
 
 
 class StartupMatrixTests(unittest.TestCase):
@@ -203,6 +210,58 @@ class StartupMatrixTests(unittest.TestCase):
         bundle, events, _ = self._build(_result(enttec_port=""))
         self.assertIsNone(bundle.laser_backend)
         self.assertEqual(events, [])
+
+    def test_truth_check_missing_enttec_starts_no_serial_sender(self):
+        events = []
+        truth_sink = _TruthSinkFake(events)
+        captured = {}
+
+        def input_factory(bindings, aliases, *, stale_timeout_ms):
+            captured["bindings"] = bindings
+            return _LifecycleFake("input", events)
+
+        def sender_factory(*_a, **_kw):
+            events.append("sender.construct")
+            raise AssertionError("truth-check must not construct Enttec sender")
+
+        def truth_factory(**kwargs):
+            captured["truth"] = kwargs
+            return truth_sink
+
+        bundle = bridge_main._build_soundswitch_pack_startup(
+            _result(enttec_port=""),
+            pack_loader=lambda _path: _pack(),
+            player_factory=lambda pack: ("player", pack),
+            frame_sender_factory=sender_factory,
+            midi_input_factory=input_factory,
+            truth_sink_factory=truth_factory,
+            truth_env_loader=lambda: TruthCheckEnv(
+                True, "artnet_truth_check", 1, ("127.0.0.1",), "/tmp/fake.jsonl", 8,
+            ),
+        )
+        bundle = bridge_main._start_soundswitch_pack_workers(bundle)
+
+        self.assertIsInstance(bundle.laser_backend, PackOutputBackend)
+        self.assertIsNone(bundle.frame_sender)
+        self.assertIs(bundle.truth_sink, truth_sink)
+        self.assertEqual(bundle.reason, "artnet_truth_check")
+        self.assertEqual(events, ["input.start", "truth.start"])
+        self.assertEqual(captured["truth"]["universe"], 1)
+        self.assertEqual(captured["truth"]["pack_sha256"], "a" * 64)
+
+    def test_invalid_truth_universe_does_not_bypass_missing_enttec(self):
+        bundle = bridge_main._build_soundswitch_pack_startup(
+            _result(enttec_port=""),
+            pack_loader=lambda _path: _pack(),
+            player_factory=lambda pack: ("player", pack),
+            frame_sender_factory=lambda *_a, **_kw: (_ for _ in ()).throw(
+                AssertionError("sender should not be constructed without Enttec port")
+            ),
+            truth_env_loader=lambda: TruthCheckEnv(False, "invalid_universe"),
+        )
+        self.assertIsNone(bundle.laser_backend)
+        self.assertIsNone(bundle.truth_sink)
+        self.assertEqual(bundle.reason, "pack_start_failed")
 
     def test_legacy_builder_constructs_and_starts_midi_once_only_for_implicit_backend(self):
         cfg = LaserConfig(

@@ -108,6 +108,29 @@ class _FakeBackend:
         pass
 
 
+class _FakeTruthSink:
+    def __init__(self):
+        self.frames = []
+        self.intents = []
+
+    def submit_frame(self, frame, intent):
+        self.frames.append(tuple(frame))
+        self.intents.append(dict(intent))
+
+    def status(self):
+        return {
+            "enabled": True,
+            "run_id": "fake-run",
+            "universe": 1,
+            "sidecar_path": "/tmp/fake.jsonl",
+            "current_sequence": len(self.frames),
+            "dropped_count": 0,
+            "overflow_count": 0,
+            "send_error_count": 0,
+            "sidecar_error": "",
+        }
+
+
 class _FakeInput:
     # The driver reads .blackout_held/.held_layers plus RW-4 health fields
     # (.worker_alive/.error/.mail_drop_count) from the snapshot.
@@ -142,12 +165,13 @@ class _RunClock:
 
 
 def _make_sm(*, player=None, backend=None, midi_input=None, enabled=None,
-             os2l_connected_provider=None):
+             os2l_connected_provider=None, truth_sink=None):
     if enabled is None:
         enabled = player is not None and backend is not None
     rt = PackRuntime(
         enabled=enabled, reason="pack" if enabled else "disabled",
-        player=player, midi_input=midi_input, backend=backend)
+        player=player, midi_input=midi_input, backend=backend,
+        truth_sink=truth_sink)
     return StateManager(
         queue.Queue(), PositionCache(), mock.Mock(), soundswitch_pack_runtime=rt,
         os2l_connected_provider=os2l_connected_provider)
@@ -253,6 +277,70 @@ class PackDriverTests(unittest.TestCase):
         self.assertFalse(status["scripted_active"])
         self.assertFalse(status["static_held"])
         self.assertFalse(status["blackout"])
+
+    def test_truth_check_shadow_renders_scripted_while_production_suppressed(self):
+        be = _FakeBackend()
+        truth = _FakeTruthSink()
+        sm = _make_sm(
+            player=LaserPackPlayer(_pack()),
+            backend=be,
+            truth_sink=truth,
+            os2l_connected_provider=lambda: True,
+        )
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True, snap=FRESH)
+
+        sm._drive_pack_output(now=10.0)
+
+        self.assertEqual(be.frames, [ZERO_FRAME])
+        self.assertEqual(truth.frames[-1][0], 9)
+        self.assertEqual(truth.intents[-1]["mode"], "scripted")
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "soundswitch_present_native_suppressed")
+        self.assertTrue(status["software_zero_frame"])
+        self.assertEqual(status["truth_check"]["run_id"], "fake-run")
+
+    def test_truth_check_shadow_renders_static_look_while_production_suppressed(self):
+        be = _FakeBackend()
+        truth = _FakeTruthSink()
+        inp = _FakeInput(held_layer_slot=8)
+        sm = _make_sm(
+            player=LaserPackPlayer(_pack()),
+            backend=be,
+            midi_input=inp,
+            truth_sink=truth,
+            os2l_connected_provider=lambda: True,
+        )
+        _set(sm, ssid="", playing=False, snap=FRESH)
+
+        sm._drive_pack_output(now=10.0)
+
+        self.assertEqual(be.frames, [ZERO_FRAME])
+        self.assertEqual(truth.frames[-1][0], 200)
+        self.assertEqual(truth.intents[-1]["mode"], "static")
+        self.assertEqual(truth.intents[-1]["static_slots"], [8])
+
+    def test_truth_check_shadow_renders_native_autoloop_while_production_suppressed(self):
+        be = _FakeBackend()
+        truth = _FakeTruthSink()
+        sm = _make_sm(
+            player=LaserPackPlayer(_native_pack()),
+            backend=be,
+            truth_sink=truth,
+            os2l_connected_provider=lambda: True,
+        )
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = _resolved_scene()
+        sm._native_abs_beat_pos = 64.0
+
+        sm._drive_pack_output(now=10.0)
+
+        self.assertEqual(be.frames, [ZERO_FRAME])
+        self.assertEqual(truth.frames[-1][0], 77)
+        self.assertEqual(truth.intents[-1]["mode"], "autoloop")
+        self.assertEqual(
+            truth.intents[-1]["native_autoloop"]["target_identity"],
+            "SSAutoLoop4.ssfile",
+        )
 
     # D4
     def test_no_track_no_static_is_zero(self):
