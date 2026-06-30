@@ -103,16 +103,16 @@ def test_brightness():
 
 def test_segment_color():
     print("build_h617e_segment_color_packet:")
-    # RGB(255,0,0) = red; wire order is BGR so byte[4]=B=0, byte[5]=G=0, byte[6]=R=255
+    # mode=15 uses plain RGB; byte[4]=R=255, byte[5]=G=0, byte[6]=B=0
     red = build_h617e_segment_color_packet(255, 0, 0, 0xFF, 0x7F)
     check("length=20", len(red) == 20)
     check("byte[0]=0x33", red[0] == 0x33)
     check("byte[1]=0x05", red[1] == 0x05)
     check("byte[2]=0x15", red[2] == 0x15)
     check("byte[3]=0x01", red[3] == 0x01)
-    check("wire-B=0 (red→BGR swap)",   red[4] == 0)    # B channel on wire
-    check("wire-G=0",                   red[5] == 0)    # G channel on wire
-    check("wire-R=255 (red→BGR swap)",  red[6] == 255)  # R channel on wire
+    check("R=255 (mode=15 RGB)",  red[4] == 255)
+    check("G=0",                  red[5] == 0)
+    check("B=0",                  red[6] == 0)
     check("padding bytes[7..11]=0", all(red[i] == 0 for i in range(7, 12)))
     check("LEFT_MASK=0xFF", red[12] == 0xFF)
     check("RIGHT_MASK=0x7F", red[13] == 0x7F)
@@ -120,19 +120,19 @@ def test_segment_color():
     check("checksum valid", red[19] == xor_checksum(red[:19]))
 
     # single segment
-    # green (0,255,0): G channel same position, wire byte[5]=255
+    # green (0,255,0): mode=15 RGB, byte[5]=G=255
     s1 = build_h617e_segment_color_packet(0, 255, 0, 0x01, 0x00)
     check("single-left-bit0: checksum", s1[19] == xor_checksum(s1[:19]))
     check("single-left-bit0: LEFT=0x01", s1[12] == 0x01)
     check("single-left-bit0: RIGHT=0x00", s1[13] == 0x00)
-    check("single-left-bit0: wire-G=255", s1[5] == 255)
+    check("single-left-bit0: G=255", s1[5] == 255)
 
-    # blue (0,0,255): wire byte[4]=255 (B on wire)
+    # blue (0,0,255): mode=15 RGB, byte[6]=B=255
     s2 = build_h617e_segment_color_packet(0, 0, 255, 0x00, 0x01)
     check("single-right-bit0: LEFT=0x00", s2[12] == 0x00)
     check("single-right-bit0: RIGHT=0x01", s2[13] == 0x01)
     check("single-right-bit0: checksum", s2[19] == xor_checksum(s2[:19]))
-    check("single-right-bit0: wire-B=255", s2[4] == 255)
+    check("single-right-bit0: B=255", s2[6] == 255)
 
 
 # ── masks_for_segments ────────────────────────────────────────────────────────

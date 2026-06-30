@@ -109,10 +109,10 @@ def build_h617e_segment_color_packet(
       19:   XOR checksum
     """
     assert all(0 <= v <= 255 for v in (r, g, b, left_mask, right_mask))
-    # ponytail: BGR wire order confirmed empirically on GBK_H617E firmware
+    # ponytail: mode=15 uses plain RGB; mode=02 uses BGR (different sub-command, empirically confirmed)
     payload = bytes([
         0x33, 0x05, 0x15, 0x01,
-        b, g, r,
+        r, g, b,
         0x00, 0x00, 0x00, 0x00, 0x00,
         left_mask, right_mask,
         0x00, 0x00, 0x00, 0x00, 0x00,
@@ -176,10 +176,10 @@ def _run_self_tests():
     assert bpkt[2] == 128
     assert bpkt[-1] == xor_checksum(bpkt[:19])
 
-    # all-red: LEFT=0xFF RIGHT=0x7F; wire order is BGR so byte[4]=B=0, byte[6]=R=255
+    # all-red: mode=15 uses plain RGB; byte[4]=R=255, byte[5]=G=0, byte[6]=B=0
     red = build_h617e_segment_color_packet(255, 0, 0, 0xFF, 0x7F)
     assert len(red) == 20
-    assert red[4] == 0 and red[5] == 0 and red[6] == 255  # BGR: B=0, G=0, R=255
+    assert red[4] == 255 and red[5] == 0 and red[6] == 0  # RGB
     assert red[12] == 0xFF and red[13] == 0x7F
     assert red[-1] == xor_checksum(red[:19])
 
@@ -380,8 +380,9 @@ async def cmd_left_mask_sweep(addr: str):
             await _send(client, char, pkt, f"left-bit{i}=0x{bit:02X}", wwr)
             print(f"  LEFT_MASK=0x{bit:02X} sent. Which physical segment lit? (wait 1.5s)")
             await asyncio.sleep(1.5)
-        # Black out after sweep
+        # Black out after sweep — small delay ensures write-without-response lands before disconnect
         await _send(client, char, build_h617e_segment_color_packet(0, 0, 0, 0xFF, 0x7F), "all-black", wwr)
+        await asyncio.sleep(0.3)
     print("\nLeft mask sweep done. Note which segments corresponded to each bit.")
 
 
@@ -402,6 +403,7 @@ async def cmd_right_mask_sweep(addr: str):
             print(f"  RIGHT_MASK=0x{bit:02X} sent. Which physical segment lit? (wait 1.5s)")
             await asyncio.sleep(1.5)
         await _send(client, char, build_h617e_segment_color_packet(0, 0, 0, 0xFF, 0x7F), "all-black", wwr)
+        await asyncio.sleep(0.3)
     print("\nRight mask sweep done.")
 
 
