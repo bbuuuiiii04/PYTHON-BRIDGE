@@ -56,18 +56,61 @@ class ArtNetCompareTests(unittest.TestCase):
 
         self.assertEqual(result.verdict, artnet_compare.VERDICT_PASS)
 
-    def test_extra_u1_or_sidecar_rows_cannot_create_pass(self) -> None:
+    def test_extra_u1_frames_are_allowed_but_not_coverage_evidence(self) -> None:
+        u0 = self._packet(0, 1, 1_000_000_000, 0)
+        extra_before = self._packet(1, 99, 990_000_000, 1)
+        u1 = self._packet(1, 1, 1_001_000_000, 2)
+
+        result = artnet_compare.evaluate_trace(
+            [u0, extra_before, u1],
+            sidecar_rows=[
+                self._row(extra_before, 1, static_slots=[8]),
+                self._row(u1, 2),
+            ],
+            sidecar_header={"run_id": "run"},
+            bridge_status={"truth_check": {"run_id": "run"}},
+            required_coverage={"static:8"},
+        )
+        self.assertEqual(result.verdict, artnet_compare.VERDICT_INCOMPLETE)
+        self.assertEqual(result.remaining_coverage, ("static:8",))
+
+    def test_u1_can_be_denser_than_u0_when_nearest_matches_agree(self) -> None:
+        u0a = self._packet(0, 1, 1_000_000_000, 0)
+        u0b = self._packet(0, 2, 1_020_000_000, 0)
+        u1_extra_before = self._packet(1, 99, 990_000_000, 1)
+        u1a = self._packet(1, 1, 1_001_000_000, 2)
+        u1_extra_mid = self._packet(1, 88, 1_010_000_000, 3)
+        u1b = self._packet(1, 2, 1_021_000_000, 4)
+        u1_extra_after = self._packet(1, 77, 1_030_000_000, 5)
+
+        result = artnet_compare.evaluate_trace(
+            [u0a, u0b, u1_extra_before, u1a, u1_extra_mid, u1b, u1_extra_after],
+            sidecar_rows=[
+                self._row(u1_extra_before, 1),
+                self._row(u1a, 2),
+                self._row(u1_extra_mid, 3),
+                self._row(u1b, 4),
+                self._row(u1_extra_after, 5),
+            ],
+            sidecar_header={"run_id": "run"},
+            bridge_status={"truth_check": {"run_id": "run"}},
+        )
+
+        self.assertEqual(result.verdict, artnet_compare.VERDICT_PASS)
+
+    def test_unmatched_sidecar_or_missing_u1_sidecar_is_invalid(self) -> None:
         u0 = self._packet(0, 1, 1_000_000_000, 0)
         u1 = self._packet(1, 1, 1_001_000_000, 1)
-        extra_u1 = self._packet(1, 1, 1_002_000_000, 2)
+        extra_u1 = self._packet(1, 1, 1_010_000_000, 2)
+
         result = artnet_compare.evaluate_trace(
             [u0, u1, extra_u1],
-            sidecar_rows=[self._row(u1, 1), self._row(extra_u1, 2)],
+            sidecar_rows=[self._row(u1, 1)],
             sidecar_header={"run_id": "run"},
             bridge_status={"truth_check": {"run_id": "run"}},
         )
         self.assertEqual(result.verdict, artnet_compare.VERDICT_INVALID)
-        self.assertEqual(result.reason, "extra_u1_frame")
+        self.assertEqual(result.reason, "sidecar_missing:2")
 
         result = artnet_compare.evaluate_trace(
             [u0, u1],
@@ -242,6 +285,41 @@ class ArtNetCompareTests(unittest.TestCase):
         )
         self.assertEqual(complete.verdict, artnet_compare.VERDICT_PASS)
 
+    def test_scripted_id_coverage_normalizes_braces_and_case(self) -> None:
+        track_id = "01234567-89ab-cdef-0123-456789abcdef"
+        pack = SimpleNamespace(
+            scripted={
+                "ignored": SimpleNamespace(
+                    supported_active=True,
+                    soundswitch_id="{01234567-89AB-CDEF-0123-456789ABCDEF}",
+                    document=SimpleNamespace(events=()),
+                )
+            },
+            autoloop_bindings={},
+            learned_midi_bindings=(),
+        )
+        required = artnet_compare.build_coverage_ledger(pack)
+        self.assertIn(f"scripted:{track_id}", required)
+
+        u0 = self._packet(0, 1, 1_000_000_000, 0)
+        u1 = self._packet(1, 1, 1_001_000_000, 1)
+        result = artnet_compare.evaluate_trace(
+            [u0, u1],
+            sidecar_rows=[
+                self._row(
+                    u1,
+                    1,
+                    scripted_active=True,
+                    soundswitch_id="{01234567-89AB-CDEF-0123-456789ABCDEF}",
+                )
+            ],
+            sidecar_header={"run_id": "run"},
+            bridge_status={"truth_check": {"run_id": "run"}},
+            required_coverage=required,
+        )
+
+        self.assertEqual(result.verdict, artnet_compare.VERDICT_PASS)
+
     def test_overlay_release_blackout_and_transition_coverage(self) -> None:
         u0 = self._packet(0, 1, 1_000_000_000, 0)
         u1 = self._packet(1, 1, 1_001_000_000, 1)
@@ -325,12 +403,37 @@ class ArtNetCompareTests(unittest.TestCase):
         )
         self.assertEqual(result.verdict, artnet_compare.VERDICT_PASS)
 
+    def test_autoloop_phase_coverage_uses_loop_cycle_ticks(self) -> None:
+        u0 = self._packet(0, 1, 1_000_000_000, 0)
+        u1 = self._packet(1, 1, 1_001_000_000, 1)
+        result = artnet_compare.evaluate_trace(
+            [u0, u1],
+            sidecar_rows=[
+                self._row(
+                    u1,
+                    1,
+                    native_autoloop={"status": "rendering_active", "target_identity": "loop", "phase_tick": 250},
+                    visible=True,
+                )
+            ],
+            sidecar_header={"run_id": "run"},
+            bridge_status={"truth_check": {"run_id": "run"}},
+            required_coverage={
+                "autoloop:loop",
+                "autoloop_visible:loop",
+                "autoloop_cycle|loop|300",
+                "autoloop_phase:loop:2",
+            },
+        )
+
+        self.assertEqual(result.verdict, artnet_compare.VERDICT_PASS)
+
     def test_build_coverage_ledger_expands_runtime_exam_items(self) -> None:
         event_a = SimpleNamespace(time=0, source_order=0, reference_kind="cue", resolved_cue_guid="a", source_offset=10)
         event_b = SimpleNamespace(time=40, source_order=1, reference_kind="cue", resolved_cue_guid="b", source_offset=20)
         scripted_doc = SimpleNamespace(events=(event_a, event_b))
         loop_event = SimpleNamespace(time=0, source_order=0, boundary_frame=(77,) + (0,) * 18, patch=())
-        loop_doc = SimpleNamespace(events=(loop_event,))
+        loop_doc = SimpleNamespace(events=(loop_event,), cycle_ticks=300)
         pack = SimpleNamespace(
             scripted={"script": SimpleNamespace(supported_active=True, soundswitch_id="script", document=scripted_doc)},
             autoloops={"loop": SimpleNamespace(document=loop_doc)},
@@ -346,6 +449,7 @@ class ArtNetCompareTests(unittest.TestCase):
         self.assertIn("scripted_event|script|40:1:cue:b", required)
         self.assertIn("scripted_rapid_pair|script|0:0:cue:a|40:1:cue:b", required)
         self.assertIn("autoloop_visible:loop", required)
+        self.assertIn("autoloop_cycle|loop|300", required)
         self.assertIn("autoloop_phase:loop:2", required)
         self.assertIn("static_over|autoloop_visible:loop|8", required)
         self.assertIn("blackout_release|scripted|0:0", required)

@@ -200,22 +200,13 @@ def evaluate_trace(
     if seq_error:
         return CompareResult(VERDICT_INVALID, seq_error, "U1_SEQUENCE_GAP", duplicate_count=duplicate_count)
 
-    if _ambiguous_nearest_neighbor(u0, u1, int(tolerance_ms * 1_000_000)):
-        return CompareResult(VERDICT_INVALID, "ambiguous_nearest_neighbor", "SETUP_INVALID", duplicate_count=duplicate_count)
-
     if len(u1) < len(u0):
         return CompareResult(VERDICT_INVALID, "missing_u1_frame", "SETUP_INVALID", matches=len(u1), duplicate_count=duplicate_count)
-    if len(u1) > len(u0):
-        return CompareResult(VERDICT_INVALID, "extra_u1_frame", "SETUP_INVALID", matches=len(u0), duplicate_count=duplicate_count)
     if len(sidecar_rows) > len(u1):
         return CompareResult(VERDICT_INVALID, "sidecar_unmatched_frame", "SIDECAR_MISSING_OR_STALE", matches=len(u1), duplicate_count=duplicate_count)
 
-    offsets: list[float] = []
-    details: list[dict[str, Any]] = []
-    matched_rows: list[Mapping[str, Any]] = []
-    tolerance_ns = int(tolerance_ms * 1_000_000)
-    for index, ss_packet in enumerate(u0):
-        bridge_packet = u1[index]
+    u1_sidecar_rows: list[Mapping[str, Any]] = []
+    for index, bridge_packet in enumerate(u1):
         sidecar_error, sidecar_row = _sidecar_row_for_packet(
             bridge_packet,
             index,
@@ -228,29 +219,37 @@ def evaluate_trace(
                     VERDICT_INCOMPLETE,
                     "sidecar_pending",
                     "COVERAGE_INCOMPLETE",
-                    matches=index,
-                    offsets_ms=tuple(offsets),
+                    matches=0,
                     duplicate_count=duplicate_count,
                 )
             return CompareResult(VERDICT_INVALID, sidecar_error, "SIDECAR_MISSING_OR_STALE", duplicate_count=duplicate_count)
+        u1_sidecar_rows.append(sidecar_row)
+
+    offsets: list[float] = []
+    details: list[dict[str, Any]] = []
+    matched_rows: list[Mapping[str, Any]] = []
+    tolerance_ns = int(tolerance_ms * 1_000_000)
+    match_error, matched_pairs = _match_u0_to_u1(u0, u1, tolerance_ns)
+    if match_error == "ambiguous_nearest_neighbor":
+        return CompareResult(VERDICT_INVALID, match_error, "SETUP_INVALID", duplicate_count=duplicate_count)
+    if match_error:
+        return CompareResult(VERDICT_FAIL, match_error, "TIMING_MISMATCH", matches=len(matched_pairs), duplicate_count=duplicate_count)
+
+    expected_payloads = [packet.payload for packet in u0]
+    matched_payloads = [u1[u1_index].payload for _u0_index, u1_index in matched_pairs]
+    for ss_index, u1_index in matched_pairs:
+        ss_packet = u0[ss_index]
+        bridge_packet = u1[u1_index]
+        sidecar_row = u1_sidecar_rows[u1_index]
         matched_rows.append(sidecar_row)
         offset_ns = bridge_packet.timestamp_ns - ss_packet.timestamp_ns
         offsets.append(offset_ns / 1_000_000.0)
-        if abs(offset_ns) > tolerance_ns:
-            return CompareResult(
-                VERDICT_FAIL,
-                "timing_mismatch",
-                "TIMING_MISMATCH",
-                matches=index,
-                offsets_ms=tuple(offsets),
-                duplicate_count=duplicate_count,
-            )
         if bridge_packet.payload != ss_packet.payload:
             diff = _first_diffs(ss_packet.payload, bridge_packet.payload)
-            details.append({"index": index, "diffs": diff, "total_diffs": _diff_count(ss_packet.payload, bridge_packet.payload)})
+            details.append({"index": ss_index, "diffs": diff, "total_diffs": _diff_count(ss_packet.payload, bridge_packet.payload)})
             if any(channel == 1 for channel, _a, _b in diff):
                 failure_class = "VISIBLE_FLASH_OR_MISS"
-            elif sorted(p.payload for p in u0[:len(u1)]) == sorted(p.payload for p in u1[:len(u0)]):
+            elif sorted(expected_payloads) == sorted(matched_payloads):
                 failure_class = "ORDER_MISMATCH"
             else:
                 failure_class = "HIDDEN_STATE_MISMATCH"
@@ -258,7 +257,7 @@ def evaluate_trace(
                 VERDICT_FAIL,
                 "byte_mismatch",
                 failure_class,
-                matches=index,
+                matches=ss_index,
                 offsets_ms=tuple(offsets),
                 duplicate_count=duplicate_count,
                 details=tuple(details),
@@ -360,20 +359,31 @@ def _sidecar_frame_schema_error(row: Mapping[str, Any]) -> str:
     return ""
 
 
-def _ambiguous_nearest_neighbor(
-    u0: list[ArtDmxPacket],
-    u1: list[ArtDmxPacket],
+def _match_u0_to_u1(
+    u0: Sequence[ArtDmxPacket],
+    u1: Sequence[ArtDmxPacket],
     tolerance_ns: int,
-) -> bool:
-    for packet in u0:
-        candidates = sorted(
-            abs(candidate.timestamp_ns - packet.timestamp_ns)
-            for candidate in u1
-            if abs(candidate.timestamp_ns - packet.timestamp_ns) <= tolerance_ns
-        )
-        if len(candidates) >= 2 and candidates[0] == candidates[1]:
-            return True
-    return False
+) -> tuple[str, list[tuple[int, int]]]:
+    matched: list[tuple[int, int]] = []
+    search_start = 0
+    for ss_index, ss_packet in enumerate(u0):
+        candidates: list[tuple[int, int]] = []
+        for u1_index in range(search_start, len(u1)):
+            bridge_packet = u1[u1_index]
+            delta_ns = abs(bridge_packet.timestamp_ns - ss_packet.timestamp_ns)
+            if delta_ns <= tolerance_ns:
+                candidates.append((delta_ns, u1_index))
+            elif bridge_packet.timestamp_ns > ss_packet.timestamp_ns + tolerance_ns:
+                break
+        if not candidates:
+            return "timing_mismatch", matched
+        candidates.sort()
+        if len(candidates) >= 2 and candidates[0][0] == candidates[1][0]:
+            return "ambiguous_nearest_neighbor", matched
+        _delta_ns, u1_index = candidates[0]
+        matched.append((ss_index, u1_index))
+        search_start = u1_index + 1
+    return "", matched
 
 
 def _first_diffs(a: bytes, b: bytes, limit: int = 8) -> list[tuple[int, int, int]]:
@@ -410,7 +420,9 @@ def build_coverage_ledger(pack: LoadedPack) -> set[str]:
     for key, row in getattr(pack, "scripted", {}).items():
         if not bool(getattr(row, "supported_active", True)):
             continue
-        scripted_id = str(getattr(row, "soundswitch_id", "") or key)
+        scripted_id = _scripted_key(getattr(row, "soundswitch_id", "") or key)
+        if not scripted_id:
+            continue
         scripted_ids.add(scripted_id)
         required.add(f"scripted:{scripted_id}")
         document = _scripted_document(row)
@@ -433,6 +445,7 @@ def build_coverage_ledger(pack: LoadedPack) -> set[str]:
         cls = _autoloop_class(pack, identity)
         required.add(f"{cls}:{identity}")
         autoloop_bases.add(f"{cls}:{identity}")
+        required.add(f"autoloop_cycle|{identity}|{_autoloop_cycle_ticks(pack, identity)}")
         for bucket in range(AUTOLOOP_PHASE_BUCKETS):
             required.add(f"autoloop_phase:{identity}:{bucket}")
 
@@ -475,6 +488,13 @@ def _scripted_document(row: Any) -> Any:
     return getattr(row, "document", row)
 
 
+def _scripted_key(value: Any) -> str:
+    raw = str(value or "").strip()
+    if raw.startswith("{") and raw.endswith("}") and len(raw) > 1:
+        raw = raw[1:-1].strip()
+    return raw.lower()
+
+
 def _document_events(document: Any) -> list[Any]:
     events = list(getattr(document, "events", ()) or ())
     return sorted(events, key=lambda row: (int(getattr(row, "time", 0)), int(getattr(row, "source_order", 0))))
@@ -491,8 +511,7 @@ def _event_sig(event: Any) -> str:
 
 
 def _autoloop_class(pack: LoadedPack, identity: str) -> str:
-    loop = getattr(pack, "autoloops", {}).get(identity) if hasattr(getattr(pack, "autoloops", {}), "get") else None
-    document = getattr(loop, "document", loop)
+    document = _autoloop_document(pack, identity)
     for event in _document_events(document):
         frame = getattr(event, "boundary_frame", None)
         if isinstance(frame, tuple) and any(int(value or 0) > 0 for value in frame):
@@ -501,6 +520,20 @@ def _autoloop_class(pack: LoadedPack, identity: str) -> str:
             if int(getattr(patch, "value", 0) or 0) > 0:
                 return "autoloop_visible"
     return "autoloop_authored_dark"
+
+
+def _autoloop_document(pack: LoadedPack, identity: str) -> Any:
+    autoloops = getattr(pack, "autoloops", {})
+    loop = autoloops.get(identity) if hasattr(autoloops, "get") else None
+    return getattr(loop, "document", loop)
+
+
+def _autoloop_cycle_ticks(pack: LoadedPack, identity: str) -> int:
+    document = _autoloop_document(pack, identity)
+    cycle_ticks = getattr(document, "cycle_ticks", None)
+    if type(cycle_ticks) is int and cycle_ticks > 0:
+        return cycle_ticks
+    return AUTOLOOP_CYCLE_TICKS
 
 
 def _blackout_key(binding: Any) -> str:
@@ -517,6 +550,7 @@ def _observed_coverage(
     scripted_events: dict[str, list[tuple[int, str]]] = {}
     rapid_pairs: list[tuple[str, str, str]] = []
     autoloop_classes: dict[str, str] = {}
+    autoloop_cycles: dict[str, int] = {}
     for item in required:
         if item.startswith("scripted_event|"):
             _prefix, track, sig = item.split("|", 2)
@@ -533,6 +567,12 @@ def _observed_coverage(
             autoloop_classes[item.split(":", 1)[1]] = "autoloop_visible"
         elif item.startswith("autoloop_authored_dark:"):
             autoloop_classes[item.split(":", 1)[1]] = "autoloop_authored_dark"
+        elif item.startswith("autoloop_cycle|"):
+            parts = item.split("|", 2)
+            if len(parts) == 3:
+                cycle_ticks = _positive_int_from_text(parts[2])
+                if cycle_ticks is not None and cycle_ticks > 0:
+                    autoloop_cycles[parts[1]] = cycle_ticks
     for values in scripted_events.values():
         values.sort()
 
@@ -548,26 +588,27 @@ def _observed_coverage(
         base = ""
         base_kind = ""
         if row.get("scripted_active") and row.get("soundswitch_id"):
-            scripted_id = str(row["soundswitch_id"])
-            observed.add(f"scripted:{scripted_id}")
-            base = "scripted"
-            base_kind = "scripted"
-            elapsed = _int_or_none(row.get("elapsed_ms"))
-            if elapsed is not None:
-                if elapsed <= 250:
-                    observed.add(f"scripted_start|{scripted_id}")
-                    scripted_started.add(scripted_id)
-                prior = last_elapsed.get(scripted_id)
-                if scripted_id in scripted_started and prior is None:
-                    last_elapsed[scripted_id] = elapsed
-                elif scripted_id in scripted_started and elapsed >= prior:
-                    lower = prior
-                    for event_time, token in scripted_events.get(scripted_id, ()):
-                        if lower <= event_time <= elapsed:
-                            observed.add(token)
-                    if scripted_events.get(scripted_id) and elapsed >= scripted_events[scripted_id][-1][0]:
-                        observed.add(f"scripted_end|{scripted_id}")
-                    last_elapsed[scripted_id] = elapsed
+            scripted_id = _scripted_key(row["soundswitch_id"])
+            if scripted_id:
+                observed.add(f"scripted:{scripted_id}")
+                base = "scripted"
+                base_kind = "scripted"
+                elapsed = _int_or_none(row.get("elapsed_ms"))
+                if elapsed is not None:
+                    if elapsed <= 250:
+                        observed.add(f"scripted_start|{scripted_id}")
+                        scripted_started.add(scripted_id)
+                    prior = last_elapsed.get(scripted_id)
+                    if scripted_id in scripted_started and prior is None:
+                        last_elapsed[scripted_id] = elapsed
+                    elif scripted_id in scripted_started and elapsed >= prior:
+                        lower = prior
+                        for event_time, token in scripted_events.get(scripted_id, ()):
+                            if lower <= event_time <= elapsed:
+                                observed.add(token)
+                        if scripted_events.get(scripted_id) and elapsed >= scripted_events[scripted_id][-1][0]:
+                            observed.add(f"scripted_end|{scripted_id}")
+                        last_elapsed[scripted_id] = elapsed
         native = row.get("native_autoloop") if isinstance(row.get("native_autoloop"), dict) else {}
         native_status = str(native.get("status") or "") if isinstance(native, dict) else ""
         target = native.get("target_identity") if native_status in ("rendering_active", "empty_dark_look") else ""
@@ -581,12 +622,11 @@ def _observed_coverage(
             observed.add(f"{cls}:{target}")
             base = f"{cls}:{target}"
             base_kind = "autoloop"
+            cycle_ticks = autoloop_cycles.get(target, AUTOLOOP_CYCLE_TICKS)
+            observed.add(f"autoloop_cycle|{target}|{cycle_ticks}")
             phase_tick = _int_or_none(native.get("phase_tick"))
             if phase_tick is not None:
-                bucket = min(
-                    AUTOLOOP_PHASE_BUCKETS - 1,
-                    int((phase_tick % AUTOLOOP_CYCLE_TICKS) / (AUTOLOOP_CYCLE_TICKS / AUTOLOOP_PHASE_BUCKETS)),
-                )
+                bucket = _autoloop_phase_bucket(phase_tick, cycle_ticks)
                 observed.add(f"autoloop_phase:{target}:{bucket}")
 
         static_slots = {int(slot) for slot in (row.get("static_slots") or ()) if type(slot) is int}
@@ -629,6 +669,20 @@ def _observed_coverage(
 
 def _int_or_none(value: Any) -> int | None:
     return value if type(value) is int else None
+
+
+def _positive_int_from_text(value: str) -> int | None:
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _autoloop_phase_bucket(phase_tick: int, cycle_ticks: int) -> int:
+    if cycle_ticks <= 0:
+        cycle_ticks = AUTOLOOP_CYCLE_TICKS
+    return min(AUTOLOOP_PHASE_BUCKETS - 1, int(((phase_tick % cycle_ticks) * AUTOLOOP_PHASE_BUCKETS) / cycle_ticks))
 
 
 def _packet(universe: int, payload: bytes, timestamp_ns: int, sequence: int = 1, socket_name: str = "lo") -> ArtDmxPacket:
@@ -686,7 +740,8 @@ def run_self_check() -> None:
     cases.append(("missing_u1_frame", evaluate_trace([_packet(0, base, 1_000_000_000, 0), _packet(0, base, 1_010_000_000, 0), _packet(1, base, 1_003_000_000, 1)], sidecar_rows=rows(_packet(1, base, 1_003_000_000, 1)), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
     cases.append(("coverage_missing", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1), sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"scripted:script", "autoloop:x"}), VERDICT_INCOMPLETE))
     extra_u1 = _packet(1, base, 1_004_000_000, 2)
-    cases.append(("extra_u1_frame", evaluate_trace(u0 + u1 + [extra_u1], sidecar_rows=rows(*u1, extra_u1), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
+    cases.append(("extra_u1_frame", evaluate_trace(u0 + u1 + [extra_u1], sidecar_rows=rows(*u1, extra_u1), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_PASS))
+    cases.append(("extra_u1_missing_sidecar", evaluate_trace(u0 + u1 + [extra_u1], sidecar_rows=rows(*u1), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
     cases.append(("sidecar_unmatched_frame", evaluate_trace(u0 + u1, sidecar_rows=rows(*u1, extra_u1), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
     cases.append(("sidecar_frame_index", evaluate_trace(u0 + u1, sidecar_rows=[row(u1[0], 999)], sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_INVALID))
     idle_u0b = _packet(0, base, 1_010_000_000, 0)
@@ -710,7 +765,9 @@ def run_self_check() -> None:
     cases.append(("scripted_timeline_missing", evaluate_trace(u0 + u1, sidecar_rows=[row(u1[0], elapsed_ms=0)], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage=timeline_required), VERDICT_INCOMPLETE))
     cases.append(("scripted_late_row_no_backfill", evaluate_trace(u0 + u1, sidecar_rows=[row(u1[0], elapsed_ms=200)], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage=timeline_required), VERDICT_INCOMPLETE))
     cases.append(("scripted_timeline_pass", evaluate_trace(u0 + u1 + [u0b, u1b], sidecar_rows=[row(u1[0], 1, elapsed_ms=0), row(u1b, 2, elapsed_ms=60)], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage=timeline_required), VERDICT_PASS))
+    cases.append(("scripted_id_normalized", evaluate_trace(u0 + u1, sidecar_rows=[row(u1[0], soundswitch_id="{SCRIPT}")], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"scripted:script"}), VERDICT_PASS))
     cases.append(("failed_autoloop_no_coverage", evaluate_trace(u0 + u1, sidecar_rows=[row(u1[0], scripted_active=False, soundswitch_id="", native_autoloop={"status": "missing_autoloop_file", "target_identity": "loop", "phase_tick": 100}, visible=True)], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"autoloop:loop"}), VERDICT_INCOMPLETE))
+    cases.append(("autoloop_custom_cycle", evaluate_trace(u0 + u1, sidecar_rows=[row(u1[0], scripted_active=False, soundswitch_id="", native_autoloop={"status": "rendering_active", "target_identity": "loop", "phase_tick": 250}, visible=True)], sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"autoloop:loop", "autoloop_visible:loop", "autoloop_cycle|loop|300", "autoloop_phase:loop:2"}), VERDICT_PASS))
     cases.append(("rapid_order", evaluate_trace([_packet(0, bytes([1]) + bytes(511), 1_000_000_000, 0), _packet(0, bytes([2]) + bytes(511), 1_046_875_000, 0), _packet(1, bytes([2]) + bytes(511), 1_003_000_000, 1), _packet(1, bytes([1]) + bytes(511), 1_049_000_000, 2)], sidecar_rows=rows(_packet(1, bytes([2]) + bytes(511), 1_003_000_000, 1), _packet(1, bytes([1]) + bytes(511), 1_049_000_000, 2)), sidecar_header={"run_id": run_id}, bridge_status=status), VERDICT_FAIL))
     bad = parse_artdmx(_build_artdmx(1, base, 1)[:-1], timestamp_ns=1_000_000_000)
     assert bad is not None
