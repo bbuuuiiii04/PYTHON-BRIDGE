@@ -3877,11 +3877,17 @@ class StateManager:
                     self._pack_play_hold_key = None
                     self._pack_play_hold_deadline = 0.0
             if transport is not None:
-                player.select_scripted(
+                scripted_result = player.select_scripted(
                     soundswitch_id=ssid, elapsed_ms=elapsed_ms, transport=transport,
                     metadata_ready=True, authority="fresh", source_errored=False,
                     elapsed_discontinuous=False, track_changed=False,
                 )
+                # If the scripted base cannot render (e.g. soundswitch_id absent from the
+                # pack), clear it so a held manual Static Look stands alone instead of going
+                # dark. clear_selection() leaves held static + masks intact; static still
+                # loses to blackout/emergency (checked first in player.render()).
+                if scripted_result.diagnostic is not None:
+                    player.clear_selection()
                 native_decision = self._native_autoloop.resolve(
                     pack_sha12=rt.pack_sha12,
                     bindings={},

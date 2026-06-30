@@ -509,6 +509,28 @@ class PackDriverTests(unittest.TestCase):
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 200)
 
+    # RW-3 R10b: an OWNED scripted track (scripted_id != 0) whose ssid is absent from
+    # the pack can't render its scripted base; a held manual Static Look must stand
+    # alone instead of the rig going dark.
+    def test_owned_scripted_pack_miss_with_held_static_stands_alone(self):
+        be = _FakeBackend()
+        inp = _FakeInput(held_layer_slot=8)
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        _set(sm, ssid=SSID2, elapsed_ms=50, playing=True, scripted_id=7, snap=FRESH)
+        sm._drive_pack_output(now=10.0)
+        self.assertEqual(be.frames[-1][0], 200)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "static_held")
+
+    # Same case must STILL go dark under blackout — static never beats blackout.
+    def test_owned_scripted_pack_miss_with_held_static_loses_to_blackout(self):
+        be = _FakeBackend()
+        inp = _FakeInput(held_layer_slot=8, blackout_held=True)
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        _set(sm, ssid=SSID2, elapsed_ms=50, playing=True, scripted_id=7, snap=FRESH)
+        sm._drive_pack_output(now=10.0)
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+
     # RW-3 R11
     def test_mirror_deck_clear_does_not_drop_active_hold(self):
         be = _FakeBackend()
