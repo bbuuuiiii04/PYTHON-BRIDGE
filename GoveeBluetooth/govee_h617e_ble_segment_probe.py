@@ -438,6 +438,117 @@ async def cmd_alternating_test(addr: str):
     print("Alternating test done.")
 
 
+async def cmd_mode_scan(addr: str):
+    """
+    Walk through candidate 33 05 <mode> bytes to find undiscovered packet modes.
+    Each step sends a bright-red test packet then waits so operator can observe.
+    Known modes (02=solid, 15=segment-mask) are skipped.
+    """
+    from bleak import BleakClient
+    device = await _get_device(addr)
+
+    # Candidate mode bytes to probe — skip 0x02 (solid) and 0x15 (segment-mask, known)
+    known = {0x02, 0x15}
+    candidates = [m for m in range(0x01, 0x30) if m not in known]
+
+    print(f"mode-scan: probing {len(candidates)} candidate mode bytes.")
+    print("Watch the strip after each. Call out anything that changes.\n")
+
+    def _make_mode_packet(mode: int, data: bytes) -> bytes:
+        """33 05 <mode> <16 bytes of data> XOR"""
+        assert len(data) == 16
+        payload = bytes([0x33, 0x05, mode]) + data
+        return _finalize(payload)
+
+    # Two test payloads: bright red (to see color) and off (to confirm it changed)
+    red_data  = bytes([0x01, 0xFF, 0x00, 0x00]) + bytes(12)  # subcommand=01, R G B, padding
+    off_data  = bytes([0x01, 0x00, 0x00, 0x00]) + bytes(12)
+
+    async with BleakClient(device, timeout=20.0) as client:
+        char, wwr = await _find_write_char(client)
+
+        for mode in candidates:
+            pkt = _make_mode_packet(mode, red_data)
+            print(f"  mode=0x{mode:02X}  {' '.join(f'{b:02X}' for b in pkt)}")
+            try:
+                await _send(client, char, pkt, f"mode=0x{mode:02X}", wwr)
+            except Exception as e:
+                print(f"    WRITE ERROR: {e}")
+            await asyncio.sleep(1.5)
+
+        # cleanup
+        black = build_h617e_segment_color_packet(0, 0, 0, 0xFF, 0x7F)
+        await _send(client, char, black, "cleanup", wwr)
+        await asyncio.sleep(0.3)
+
+    print("\nmode-scan done. Report any mode byte that produced a visible change.")
+
+
+async def cmd_segment_seq_probe(addr: str):
+    """
+    Test hypothesis: 33 05 15 <start_idx> R0 G0 B0 R1 G1 B1 R2 G2 B2 R3 G3 B3 R4 G4 B4 XOR
+    sets 5 segments from start_idx to 5 independent colors.
+    If the strip shows a rainbow pattern, we have per-segment color control in 3 packets.
+
+    Sends 3 packets covering segs 0-14 with a repeating R/G/B/W/Y pattern.
+    If it works: strip shows rainbow stripes (not solid color).
+    If it falls back to mask mode: strip shows one color for all segments (because byte3=0 = LEFT_MASK=0 = all off).
+    """
+    from bleak import BleakClient
+    device = await _get_device(addr)
+
+    # Test pattern: 5 colors cycling R/G/B/W/Y across 15 segments
+    palette = [
+        (255, 0,   0),    # red
+        (0,   255, 0),    # green
+        (0,   0,   255),  # blue
+        (255, 255, 255),  # white
+        (255, 255, 0),    # yellow
+    ]
+    all_colors = [palette[i % 5] for i in range(15)]
+
+    def _seq_packet(start: int, colors: list) -> bytes:
+        """33 05 15 <start> R0 G0 B0 R1 G1 B1 R2 G2 B2 R3 G3 B3 R4 G4 B4 XOR"""
+        assert len(colors) == 5
+        data = bytes([start])
+        for r, g, b in colors:
+            data += bytes([r, g, b])
+        assert len(data) == 16
+        payload = bytes([0x33, 0x05, 0x15]) + data
+        return _finalize(payload)
+
+    packets = [
+        _seq_packet(0,  all_colors[0:5]),
+        _seq_packet(5,  all_colors[5:10]),
+        _seq_packet(10, all_colors[10:15]),
+    ]
+
+    print("segment-seq-probe: testing sequential per-segment color format.")
+    print("Expected if it works: rainbow stripes across the strip.")
+    print("Expected if it doesn't: strip goes black or one color (mask-mode fallback).\n")
+    for i, (start, pkt) in enumerate(zip([0, 5, 10], packets)):
+        print(f"  packet {i+1}: segs {start}-{start+4}  {' '.join(f'{b:02X}' for b in pkt)}")
+
+    async with BleakClient(device, timeout=20.0) as client:
+        char, wwr = await _find_write_char(client)
+        for pkt in packets:
+            await _send(client, char, pkt, "seq-seg", wwr)
+            await asyncio.sleep(0.05)
+        print("\nPackets sent. Observe strip for ~5s...")
+        await asyncio.sleep(5.0)
+
+        # Send it again as a solid-red via mask to confirm strip is still responding normally
+        print("Sending known-good all-red via mask for comparison...")
+        await _send(client, char, build_h617e_segment_color_packet(255, 0, 0, 0xFF, 0x7F), "all-red-mask", wwr)
+        await asyncio.sleep(3.0)
+
+        black = build_h617e_segment_color_packet(0, 0, 0, 0xFF, 0x7F)
+        await _send(client, char, black, "cleanup", wwr)
+        await asyncio.sleep(0.3)
+
+    print("segment-seq-probe done.")
+
+
 async def cmd_probe_writes(addr: str):
     """
     Try multiple write formats in sequence to find which the H617E responds to.
@@ -590,6 +701,18 @@ def main():
             print("Usage: alternating-test <addr>")
             sys.exit(1)
         asyncio.run(cmd_alternating_test(sys.argv[2]))
+
+    elif cmd == "mode-scan":
+        if len(sys.argv) < 3:
+            print("Usage: mode-scan <addr>")
+            sys.exit(1)
+        asyncio.run(cmd_mode_scan(sys.argv[2]))
+
+    elif cmd == "segment-seq-probe":
+        if len(sys.argv) < 3:
+            print("Usage: segment-seq-probe <addr>")
+            sys.exit(1)
+        asyncio.run(cmd_segment_seq_probe(sys.argv[2]))
 
     elif cmd == "probe-writes":
         if len(sys.argv) < 3:
