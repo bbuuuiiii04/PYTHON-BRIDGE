@@ -41,7 +41,7 @@ from govee_h617e_ble_segment_probe import (
 SCAN_TIMEOUT = 12.0
 
 # ponytail: 10fps is plenty for BLE; most effects look fine, strobe effects will lag
-TARGET_FPS = 30
+TARGET_FPS = 60
 FRAME_INTERVAL = 1.0 / TARGET_FPS
 
 # Round each channel to nearest QUANT_STEP to collapse near-identical comet gradient
