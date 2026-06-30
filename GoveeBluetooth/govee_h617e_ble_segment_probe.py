@@ -83,9 +83,10 @@ def build_brightness_packet(brightness: int) -> bytes:
 
 
 def build_solid_color_packet(r: int, g: int, b: int) -> bytes:
-    """33 05 02 R G B 00...00 XOR — simplest single-color mode, no segments."""
+    """33 05 02 B G R 00...00 XOR — H617E GBK firmware uses BGR wire order."""
     assert all(0 <= v <= 255 for v in (r, g, b))
-    payload = bytes([0x33, 0x05, 0x02, r, g, b]) + bytes(13)
+    # ponytail: BGR confirmed empirically — send R=255 → blue, send B=255 → red
+    payload = bytes([0x33, 0x05, 0x02, b, g, r]) + bytes(13)
     return _finalize(payload)
 
 
@@ -108,9 +109,10 @@ def build_h617e_segment_color_packet(
       19:   XOR checksum
     """
     assert all(0 <= v <= 255 for v in (r, g, b, left_mask, right_mask))
+    # ponytail: BGR wire order confirmed empirically on GBK_H617E firmware
     payload = bytes([
         0x33, 0x05, 0x15, 0x01,
-        r, g, b,
+        b, g, r,
         0x00, 0x00, 0x00, 0x00, 0x00,
         left_mask, right_mask,
         0x00, 0x00, 0x00, 0x00, 0x00,
@@ -174,10 +176,10 @@ def _run_self_tests():
     assert bpkt[2] == 128
     assert bpkt[-1] == xor_checksum(bpkt[:19])
 
-    # all-red: LEFT=0xFF RIGHT=0x7F
+    # all-red: LEFT=0xFF RIGHT=0x7F; wire order is BGR so byte[4]=B=0, byte[6]=R=255
     red = build_h617e_segment_color_packet(255, 0, 0, 0xFF, 0x7F)
     assert len(red) == 20
-    assert red[4] == 255 and red[5] == 0 and red[6] == 0
+    assert red[4] == 0 and red[5] == 0 and red[6] == 255  # BGR: B=0, G=0, R=255
     assert red[12] == 0xFF and red[13] == 0x7F
     assert red[-1] == xor_checksum(red[:19])
 
@@ -452,9 +454,9 @@ async def cmd_probe_writes(addr: str):
         ("3. solid-red mode=02",          build_solid_color_packet(255, 0, 0)),
         ("4. solid-blue mode=02",         build_solid_color_packet(0, 0, 255)),
         ("5. solid-green mode=02",        build_solid_color_packet(0, 255, 0)),
-        ("6. segment-red mode=15 grp=01", build_h617e_segment_color_packet(255, 0, 0, 0xFF, 0x7F)),
-        ("7. segment-red mode=15 grp=00", _finalize(bytes([0x33, 0x05, 0x15, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00]))),
-        ("8. segment-red mode=11 grp=01", _finalize(bytes([0x33, 0x05, 0x11, 0x01, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00]))),
+        ("6. segment-red mode=15 grp=01 (BGR)", build_h617e_segment_color_packet(255, 0, 0, 0xFF, 0x7F)),
+        ("7. segment-blue mode=15 grp=01 (BGR)", build_h617e_segment_color_packet(0, 0, 255, 0xFF, 0x7F)),
+        ("8. segment-grn mode=15 grp=01 (BGR)", build_h617e_segment_color_packet(0, 255, 0, 0xFF, 0x7F)),
         ("9. keepalive (AA 01)",          build_keepalive_packet()),
         ("10. power-off (33 01 00)",      build_power_packet(False)),
         ("11. power-on  (33 01 01)",      build_power_packet(True)),
