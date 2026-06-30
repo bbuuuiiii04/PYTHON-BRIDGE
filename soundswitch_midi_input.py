@@ -30,6 +30,7 @@ log = logging.getLogger("soundswitch_midi_input")
 # polls so the worker is responsive to stop without busy-spinning a core.
 _INPUT_POLL_INTERVAL_S = 0.003
 _PORT_RETRY_INTERVAL_S = 0.25
+_PORT_NEVER_SEEN_RETRY_INTERVAL_S = 5.0
 _PORT_CHECK_INTERVAL_S = 0.25
 
 _LAYER_SEQ_LOCK = threading.Lock()
@@ -470,9 +471,17 @@ class SoundSwitchMidiInputAdapter:
                         self._mark_port_gone()
                         self._ready_event.set()
                         log.warning("[SS-MIDI] input port gone; retrying exact port")
+                    # A device that has never once appeared retries by opening and
+                    # tearing down its own MIDI client every interval, forever.
+                    # Proved live (2026-06-30) that doing this at 0.25s churns the
+                    # process's MIDI client state badly enough to corrupt port
+                    # enumeration on a SEPARATE, already-connected adapter sharing
+                    # the process (DDJ-800 absent, retrying fast, broke Stream
+                    # Deck's open connection). A device that WAS connected and just
+                    # dropped still retries fast for quick recovery.
+                    interval = _PORT_RETRY_INTERVAL_S if ever_ready else _PORT_NEVER_SEEN_RETRY_INTERVAL_S
                     ready = False
-                    # ponytail: clear on first absence; add debounce only if live flaps prove noisy.
-                    self._stop_event.wait(_PORT_RETRY_INTERVAL_S)
+                    self._stop_event.wait(interval)
                     continue
         except Exception as exc:
             self._startup_error = type(exc).__name__

@@ -516,6 +516,51 @@ class TestClearOnEvent(unittest.TestCase):
         finally:
             a.stop()
 
+    def test_port_never_found_backs_off_to_slow_retry(self):
+        """A device that never appears must not hammer the MIDI client open/close
+        cycle. Proved live (2026-06-30) that fast retries on a never-found device
+        (e.g. DDJ-800 absent) corrupt port enumeration on a SEPARATE, already-
+        connected adapter (Stream Deck) sharing the process."""
+        from rb_ss_bridge_v2 import soundswitch_midi_input as ssmi
+        attempts = []
+
+        def never_found_source():
+            attempts.append(time.monotonic())
+            raise ssmi._InputPortGone("fake-port")
+            yield None  # pragma: no cover - unreachable, makes this a generator
+
+        a = _adapter(_SLOT8)
+        with mock.patch.object(ssmi, "_PORT_RETRY_INTERVAL_S", 0.05), \
+             mock.patch.object(ssmi, "_PORT_NEVER_SEEN_RETRY_INTERVAL_S", 0.4):
+            a.start("fake-port", _message_source=never_found_source, readiness_timeout_s=0.5)
+            time.sleep(0.25)  # several multiples of the fast interval, short of the slow one
+            a.stop()
+        self.assertEqual(len(attempts), 1)
+
+    def test_port_lost_after_connecting_still_retries_fast(self):
+        """A device that WAS connected and then drops must keep retrying fast —
+        only a never-found device gets the slow backoff."""
+        from rb_ss_bridge_v2 import soundswitch_midi_input as ssmi
+        attempts = []
+
+        def flaky_source():
+            attempts.append(time.monotonic())
+            if len(attempts) == 1:
+                yield None
+                raise ssmi._InputPortGone("fake-port")
+            while True:
+                yield None
+
+        a = _adapter(_SLOT8)
+        with mock.patch.object(ssmi, "_PORT_RETRY_INTERVAL_S", 0.05), \
+             mock.patch.object(ssmi, "_PORT_NEVER_SEEN_RETRY_INTERVAL_S", 5.0):
+            a.start("fake-port", _message_source=flaky_source, readiness_timeout_s=0.5)
+            deadline = time.time() + 1.0
+            while time.time() < deadline and len(attempts) < 2:
+                time.sleep(0.01)
+            a.stop()
+        self.assertGreaterEqual(len(attempts), 2)
+
 
 # ---------------------------------------------------------------------------
 # Disabled bindings / unknown messages
