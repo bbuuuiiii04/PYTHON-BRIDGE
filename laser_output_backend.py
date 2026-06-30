@@ -203,9 +203,53 @@ class PackOutputBackend:
                 pass
 
 
+# ---------------------------------------------------------------------------
+# Dual backend — exam mode only: drives real SoundSwitch MIDI and the pack
+# from the identical trigger so their DMX output is directly comparable.
+# ---------------------------------------------------------------------------
+
+class DualTriggerBackend:
+    """Fans trigger() out to both a real MIDI backend and the pack backend.
+
+    Used only for the ArtNet truth-check exam: SoundSwitch must receive real
+    MIDI and the pack must render DMX off the identical trigger stream, or a
+    mismatch in the comparison proves nothing. Every call other than
+    trigger()/status()/shutdown() forwards to the pack backend via
+    __getattr__, so PackRuntime.active / identity tracking / zero-frame
+    safety in state_manager.py behave exactly as in plain pack mode.
+    """
+
+    def __init__(
+        self,
+        *,
+        pack_backend: PackOutputBackend,
+        midi_backend: MidiOutputBackend,
+    ) -> None:
+        self._pack = pack_backend
+        self._midi = midi_backend
+
+    def trigger(self, msg: LaserMidiMessage, priority: str = "normal") -> bool:
+        midi_ok = self._midi.trigger(msg, priority=priority)
+        self._pack.trigger(msg, priority=priority)  # advance pack identity regardless
+        return midi_ok
+
+    def status(self) -> dict:
+        status = dict(self._pack.status())
+        status["midi_link"] = self._midi.status()
+        return status
+
+    def shutdown(self) -> None:
+        self._midi.shutdown()
+        self._pack.shutdown()
+
+    def __getattr__(self, name: str):
+        return getattr(self._pack, name)
+
+
 __all__ = [
     "LaserOutputBackend",
     "MidiOutputBackend",
     "NoneBackend",
     "PackOutputBackend",
+    "DualTriggerBackend",
 ]

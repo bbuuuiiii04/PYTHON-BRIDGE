@@ -14,7 +14,12 @@ import rb_ss_bridge_v2.__main__ as bridge_main
 from rb_ss_bridge_v2.artnet_truth import TruthCheckEnv
 from rb_ss_bridge_v2.laser_config import LaserConfig, LaserConfigResult
 from rb_ss_bridge_v2.laser_models import LaserMidiMessage
-from rb_ss_bridge_v2.laser_output_backend import MidiOutputBackend, NoneBackend, PackOutputBackend
+from rb_ss_bridge_v2.laser_output_backend import (
+    DualTriggerBackend,
+    MidiOutputBackend,
+    NoneBackend,
+    PackOutputBackend,
+)
 from rb_ss_bridge_v2.soundswitch_midi_input import (
     MidiInputSnapshot,
     SoundSwitchMidiInputGroup,
@@ -296,6 +301,63 @@ class StartupMatrixTests(unittest.TestCase):
         self.assertIsNone(pack.midi_output)
         self.assertIsInstance(pack.laser_executor._backend, NoneBackend)
 
+    def test_dual_with_midi_wraps_pack_backend_and_tracks_midi_for_shutdown(self):
+        cfg = LaserConfig(
+            enabled=True, dry_run=False, smart_drop_mode="blackout_mask",
+            midi_output_port="fake-midi", scenes={}, personalities={},
+            default_personality="", startup_scene="safe", stop_scene="safe",
+            stale_scene="safe", emergency_scene="safe", fallback_scene="safe",
+        )
+        created = []
+
+        class FakeMidi:
+            def __init__(self, *, port_name, dry_run):
+                created.append((port_name, dry_run, "construct"))
+
+            def start(self):
+                created.append(("start",))
+
+            def trigger(self, msg, priority="normal"):
+                created.append(("trigger", priority))
+                return True
+
+            def status(self):
+                return {}
+
+            def shutdown(self):
+                created.append(("shutdown",))
+
+        pack_backend = PackOutputBackend(scene_to_identity={"phrase": "SSAutoLoop1.ssfile"})
+        result = LaserConfigResult(True, "ok", cfg)
+        with mock.patch.object(bridge_main, "MidiOutput", FakeMidi):
+            bundle = bridge_main._build_laser_startup_wiring(
+                result, backend=pack_backend, dual_with_midi=True,
+            )
+
+        # midi_output must be tracked on the bundle so main()'s shutdown
+        # handler (`if midi_output is not None: midi_output.stop()`) actually
+        # closes the IAC port instead of leaking it.
+        self.assertIsNotNone(bundle.midi_output)
+        self.assertEqual(created, [("fake-midi", False, "construct"), ("start",)])
+
+        backend = bundle.laser_executor._backend
+        self.assertIsInstance(backend, DualTriggerBackend)
+        self.assertTrue(backend.trigger(LaserMidiMessage(scene_name="phrase")))
+        self.assertEqual(pack_backend.last_accepted_identity, "SSAutoLoop1.ssfile")
+
+    def test_dual_with_midi_false_preserves_plain_pack_backend(self):
+        cfg = LaserConfig(
+            enabled=True, dry_run=False, smart_drop_mode="blackout_mask",
+            midi_output_port="fake-midi", scenes={}, personalities={},
+            default_personality="", startup_scene="safe", stop_scene="safe",
+            stale_scene="safe", emergency_scene="safe", fallback_scene="safe",
+        )
+        pack_backend = PackOutputBackend()
+        result = LaserConfigResult(True, "ok", cfg)
+        bundle = bridge_main._build_laser_startup_wiring(result, backend=pack_backend)
+        self.assertIs(bundle.laser_executor._backend, pack_backend)
+        self.assertIsNone(bundle.midi_output)
+
     def test_shutdown_zeros_pack_before_slow_bridge_joins(self):
         source = inspect.getsource(bridge_main.main)
         self.assertLess(source.index("signal.signal(signal.SIGTERM, _early_shutdown)"),
@@ -514,6 +576,67 @@ class PackBackendIdentityTests(unittest.TestCase):
         self.assertEqual(frames, [(1,) * 19])
         backend.reset()
         self.assertIsNone(backend.last_accepted_identity)
+
+
+class DualTriggerBackendTests(unittest.TestCase):
+    def test_trigger_fans_out_to_both_and_returns_midi_result(self):
+        pack = PackOutputBackend(scene_to_identity={"phrase": "SSAutoLoop1.ssfile"})
+        midi = mock.Mock()
+        midi.trigger.return_value = True
+        dual = DualTriggerBackend(pack_backend=pack, midi_backend=midi)
+        msg = LaserMidiMessage(scene_name="phrase")
+
+        self.assertTrue(dual.trigger(msg, priority="high"))
+        midi.trigger.assert_called_once_with(msg, priority="high")
+        self.assertEqual(pack.last_accepted_identity, "SSAutoLoop1.ssfile")
+
+    def test_trigger_returns_midi_result_even_when_pack_no_ops(self):
+        # manual blackout commands carry no scene_name, so the pack side
+        # always rejects them; the executor's pending-state must still
+        # track the real SoundSwitch send, not the pack no-op.
+        pack = PackOutputBackend(scene_to_identity={})
+        midi = mock.Mock()
+        midi.trigger.return_value = True
+        dual = DualTriggerBackend(pack_backend=pack, midi_backend=midi)
+
+        self.assertTrue(dual.trigger(LaserMidiMessage()))
+
+    def test_trigger_returns_false_when_midi_rejects_even_if_pack_accepts(self):
+        pack = PackOutputBackend(scene_to_identity={"phrase": "SSAutoLoop1.ssfile"})
+        midi = mock.Mock()
+        midi.trigger.return_value = False
+        dual = DualTriggerBackend(pack_backend=pack, midi_backend=midi)
+
+        self.assertFalse(dual.trigger(LaserMidiMessage(scene_name="phrase")))
+        self.assertEqual(pack.last_accepted_identity, "SSAutoLoop1.ssfile")
+
+    def test_status_merges_pack_and_midi_under_midi_link(self):
+        pack = PackOutputBackend()
+        midi = mock.Mock()
+        midi.status.return_value = {"degraded": False, "running": True}
+        dual = DualTriggerBackend(pack_backend=pack, midi_backend=midi)
+
+        status = dual.status()
+        self.assertEqual(status["backend"], "pack")
+        self.assertEqual(status["midi_link"], {"degraded": False, "running": True})
+
+    def test_shutdown_stops_both_backends(self):
+        pack = mock.Mock()
+        midi = mock.Mock()
+        dual = DualTriggerBackend(pack_backend=pack, midi_backend=midi)
+
+        dual.shutdown()
+        pack.shutdown.assert_called_once()
+        midi.shutdown.assert_called_once()
+
+    def test_getattr_passthrough_exposes_pack_identity(self):
+        pack = PackOutputBackend(scene_to_identity={"phrase": "SSAutoLoop1.ssfile"})
+        midi = mock.Mock()
+        midi.trigger.return_value = True
+        dual = DualTriggerBackend(pack_backend=pack, midi_backend=midi)
+
+        dual.trigger(LaserMidiMessage(scene_name="phrase"))
+        self.assertEqual(dual.last_accepted_identity, "SSAutoLoop1.ssfile")
 
 
 if __name__ == "__main__":

@@ -63,6 +63,7 @@ from .laser_config import LaserConfig, LaserConfigResult, load_laser_director_co
 from .laser_director import LaserDirector
 from .laser_executor import LaserSceneExecutor
 from .laser_output_backend import (
+    DualTriggerBackend,
     LaserOutputBackend,
     MidiOutputBackend,
     NoneBackend,
@@ -368,6 +369,7 @@ def _build_laser_startup_wiring(
     cfg_result: LaserConfigResult,
     *,
     backend: Optional[LaserOutputBackend] = None,
+    dual_with_midi: bool = False,
 ) -> LaserStartupBundle:
     """Build optional LaserDirector and status provider from startup config result."""
     if not cfg_result.available or cfg_result.config is None:
@@ -416,6 +418,21 @@ def _build_laser_startup_wiring(
         )
         midi_output.start()
         laser_backend = MidiOutputBackend(midi_output)
+    elif dual_with_midi:
+        if cfg.dry_run:
+            log.warning(
+                "[MAIN] artnet-truth-check dry_run=1 — SoundSwitch receives no "
+                "real MIDI during the exam; the comparison will be vacuous"
+            )
+        midi_output = MidiOutput(
+            port_name=cfg.midi_output_port,
+            dry_run=cfg.dry_run,
+        )
+        midi_output.start()
+        laser_backend = DualTriggerBackend(
+            pack_backend=laser_backend,
+            midi_backend=MidiOutputBackend(midi_output),
+        )
     laser_executor = LaserSceneExecutor(
         config=cfg,
         backend=laser_backend,
@@ -1074,6 +1091,7 @@ def main() -> None:
     laser_bundle = _build_laser_startup_wiring(
         laser_cfg_result,
         backend=soundswitch_pack_bundle.laser_backend,
+        dual_with_midi=(soundswitch_pack_bundle.reason == "artnet_truth_check"),
     )
     laser_director = laser_bundle.laser_director
     laser_executor = laser_bundle.laser_executor
