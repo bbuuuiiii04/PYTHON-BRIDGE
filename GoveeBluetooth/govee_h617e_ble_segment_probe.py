@@ -82,6 +82,13 @@ def build_brightness_packet(brightness: int) -> bytes:
     return _finalize(payload)
 
 
+def build_solid_color_packet(r: int, g: int, b: int) -> bytes:
+    """33 05 02 R G B 00...00 XOR — simplest single-color mode, no segments."""
+    assert all(0 <= v <= 255 for v in (r, g, b))
+    payload = bytes([0x33, 0x05, 0x02, r, g, b]) + bytes(13)
+    return _finalize(payload)
+
+
 def build_h617e_segment_color_packet(
     r: int, g: int, b: int,
     left_mask: int, right_mask: int
@@ -427,6 +434,46 @@ async def cmd_alternating_test(addr: str):
     print("Alternating test done.")
 
 
+async def cmd_probe_writes(addr: str):
+    """
+    Try multiple write formats in sequence to find which the H617E responds to.
+    Each write is separated by 2s so the operator can observe visual changes.
+    Logs every packet hex.
+    """
+    from bleak import BleakClient
+    device = await _get_device(addr)
+    print("probe-writes: trying multiple packet formats — watch the strip after each.")
+    print("Each step waits 2s. Note which step produces a visible change.\n")
+
+    variants = [
+        # (label, packet_bytes)
+        ("1. power-on (33 01 01)",        build_power_packet(True)),
+        ("2. brightness-255 (33 04 FF)",  build_brightness_packet(255)),
+        ("3. solid-red mode=02",          build_solid_color_packet(255, 0, 0)),
+        ("4. solid-blue mode=02",         build_solid_color_packet(0, 0, 255)),
+        ("5. solid-green mode=02",        build_solid_color_packet(0, 255, 0)),
+        ("6. segment-red mode=15 grp=01", build_h617e_segment_color_packet(255, 0, 0, 0xFF, 0x7F)),
+        ("7. segment-red mode=15 grp=00", _finalize(bytes([0x33, 0x05, 0x15, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00]))),
+        ("8. segment-red mode=11 grp=01", _finalize(bytes([0x33, 0x05, 0x11, 0x01, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00]))),
+        ("9. keepalive (AA 01)",          build_keepalive_packet()),
+        ("10. power-off (33 01 00)",      build_power_packet(False)),
+        ("11. power-on  (33 01 01)",      build_power_packet(True)),
+    ]
+
+    async with BleakClient(device, timeout=20.0) as client:
+        char, wwr = await _find_write_char(client)
+        for label, pkt in variants:
+            print(f"Sending {label}")
+            _log_packet("→", pkt)
+            try:
+                await _send(client, char, pkt, label, wwr)
+                print("  Sent OK — did strip change? (watching 2s)")
+            except Exception as e:
+                print(f"  WRITE ERROR: {e}")
+            await asyncio.sleep(2.0)
+    print("\nprobe-writes done. Report which step number produced a visible change.")
+
+
 def cmd_frame_compiler_dry_run(rgb_segments: list[tuple[int, int, int]] | None = None):
     """
     No BLE writes. Take a list of RGB values (one per physical segment),
@@ -539,6 +586,12 @@ def main():
             print("Usage: alternating-test <addr>")
             sys.exit(1)
         asyncio.run(cmd_alternating_test(sys.argv[2]))
+
+    elif cmd == "probe-writes":
+        if len(sys.argv) < 3:
+            print("Usage: probe-writes <addr>")
+            sys.exit(1)
+        asyncio.run(cmd_probe_writes(sys.argv[2]))
 
     elif cmd == "frame-compiler-dry-run":
         # Optional: pass segment RGB values as "R,G,B" space-separated args
