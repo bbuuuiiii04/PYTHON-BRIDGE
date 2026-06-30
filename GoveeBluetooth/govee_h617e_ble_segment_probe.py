@@ -216,41 +216,71 @@ async def _send(client, char, packet: bytes, label: str, wwr: bool):
 
 # ── Commands ──────────────────────────────────────────────────────────────────
 
-async def cmd_scan():
+async def cmd_scan(verbose: bool = False):
     from bleak import BleakScanner
     print(f"Scanning for {SCAN_TIMEOUT}s ...")
     devices = await BleakScanner.discover(timeout=SCAN_TIMEOUT, return_adv=True)
     govee_hits = []
+    govee_mfr_hits = []
     print(f"\nFound {len(devices)} device(s):")
     for addr, (dev, adv) in devices.items():
         name = dev.name or "(no name)"
         rssi = adv.rssi if adv.rssi is not None else "?"
         flag = ""
-        if name and ("govee" in name.lower() or "h617" in name.lower() or "h61" in name.lower()):
-            flag = "  ← LIKELY TARGET"
+        mfr_data = adv.manufacturer_data or {}
+        # Govee uses manufacturer ID 0xEC06 (little-endian key = 0x06EC = 1772)
+        govee_mfr = 0xEC06 in mfr_data or 0x06EC in mfr_data
+        if govee_mfr:
+            govee_mfr_hits.append((addr, name, rssi, mfr_data))
+            flag = "  ← GOVEE (mfr data)"
+        elif name and ("govee" in name.lower() or "h617" in name.lower() or "h61" in name.lower()):
+            flag = "  ← LIKELY TARGET (name)"
             govee_hits.append((addr, name, rssi))
         print(f"  {addr}  {name!r:30s}  RSSI={rssi}{flag}")
-    if not govee_hits:
-        print("\nNo Govee/H617* devices found. Ensure strip is on and in range.")
-    else:
-        print(f"\nGovee candidates:")
+        if verbose and mfr_data:
+            for mfr_id, mfr_bytes in mfr_data.items():
+                print(f"    MFR 0x{mfr_id:04X}: {mfr_bytes.hex()}")
+        if verbose and adv.service_uuids:
+            for uuid in adv.service_uuids:
+                print(f"    SVC: {uuid}")
+    print()
+    if govee_mfr_hits:
+        print("Govee devices (confirmed by manufacturer data):")
+        for addr, name, rssi, mfr in govee_mfr_hits:
+            print(f"  {addr}  {name}  RSSI={rssi}")
+            for mid, mbytes in mfr.items():
+                print(f"    MFR 0x{mid:04X}: {mbytes.hex()}")
+    elif govee_hits:
+        print("Govee candidates (by name):")
         for addr, name, rssi in govee_hits:
-            print(f"  Address: {addr}  Name: {name}  RSSI: {rssi}")
-        print(f"\nUse address above with 'services', 'keepalive', etc.")
+            print(f"  {addr}  {name}  RSSI={rssi}")
+    else:
+        print("No Govee devices found by name or manufacturer data.")
+    print(f"\nUse address above with 'services', 'keepalive', etc.")
+    print(f"Tip: run 'scan-verbose' to see all manufacturer data for unlabeled devices.")
 
 
 async def _get_device(addr: str):
     """
-    On macOS, BleakClient needs the BLEDevice object from a fresh scan.
-    BleakScanner.find_device_by_address rescans until found or timeout.
+    On macOS, BleakClient needs a BLEDevice object from the current scan cache.
+    We do a full discover scan and pull the matching device object by address.
     """
     from bleak import BleakScanner
     print(f"  Scanning to locate {addr} ...")
-    device = await BleakScanner.find_device_by_address(addr, timeout=15.0)
-    if device is None:
-        raise RuntimeError(f"Device {addr} not found in scan. Ensure strip is on and in BLE range.")
-    print(f"  Found: {device.name!r}  addr={device.address}")
-    return device
+    devices = await BleakScanner.discover(timeout=SCAN_TIMEOUT, return_adv=True)
+    target = None
+    for a, (dev, adv) in devices.items():
+        if a.upper() == addr.upper():
+            target = dev
+            break
+    if target is None:
+        found_names = [f"{a} ({d.name or 'no name'})" for a, (d, _) in devices.items()]
+        raise RuntimeError(
+            f"Device {addr} not found in scan ({len(devices)} devices seen).\n"
+            f"Seen: {found_names}"
+        )
+    print(f"  Found: {target.name!r}  addr={target.address}")
+    return target
 
 
 async def cmd_services(addr: str):
@@ -446,8 +476,8 @@ def main():
 
     cmd = sys.argv[1]
 
-    if cmd == "scan":
-        asyncio.run(cmd_scan())
+    if cmd in ("scan", "scan-verbose"):
+        asyncio.run(cmd_scan(verbose=(cmd == "scan-verbose")))
 
     elif cmd == "services":
         if len(sys.argv) < 3:
