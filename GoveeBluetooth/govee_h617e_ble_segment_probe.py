@@ -438,50 +438,47 @@ async def cmd_alternating_test(addr: str):
     print("Alternating test done.")
 
 
-async def cmd_mode_scan(addr: str):
+async def cmd_mode_scan(addr: str, start: int = 0x01, end: int = 0x2F):
     """
     Walk through candidate 33 05 <mode> bytes to find undiscovered packet modes.
-    Each step sends a bright-red test packet then waits so operator can observe.
+    Resets to black before each mode so each one is clearly isolated.
     Known modes (02=solid, 15=segment-mask) are skipped.
     """
     from bleak import BleakClient
     device = await _get_device(addr)
 
-    # Candidate mode bytes to probe — skip 0x02 (solid) and 0x15 (segment-mask, known)
     known = {0x02, 0x15}
-    candidates = [m for m in range(0x01, 0x30) if m not in known]
+    candidates = [m for m in range(start, end + 1) if m not in known]
 
-    print(f"mode-scan: probing {len(candidates)} candidate mode bytes.")
-    print("Watch the strip after each. Call out anything that changes.\n")
+    print(f"mode-scan: {len(candidates)} modes  (0x{start:02X}–0x{end:02X})  ~{len(candidates)*4}s")
+    print("Strip resets to black before each mode. Watch for any change.\n")
 
-    def _make_mode_packet(mode: int, data: bytes) -> bytes:
-        """33 05 <mode> <16 bytes of data> XOR"""
-        assert len(data) == 16
-        payload = bytes([0x33, 0x05, mode]) + data
+    def _make_mode_packet(mode: int) -> bytes:
+        payload = bytes([0x33, 0x05, mode, 0x01, 0xFF, 0x00, 0x00]) + bytes(12)
         return _finalize(payload)
 
-    # Two test payloads: bright red (to see color) and off (to confirm it changed)
-    red_data  = bytes([0x01, 0xFF, 0x00, 0x00]) + bytes(12)  # subcommand=01, R G B, padding
-    off_data  = bytes([0x01, 0x00, 0x00, 0x00]) + bytes(12)
+    black = build_h617e_segment_color_packet(0, 0, 0, 0xFF, 0x7F)
 
     async with BleakClient(device, timeout=20.0) as client:
         char, wwr = await _find_write_char(client)
 
         for mode in candidates:
-            pkt = _make_mode_packet(mode, red_data)
-            print(f"  mode=0x{mode:02X}  {' '.join(f'{b:02X}' for b in pkt)}")
+            # Reset to black first so each mode starts clean
+            await _send(client, char, black, "reset", wwr)
+            await asyncio.sleep(0.5)
+
+            pkt = _make_mode_packet(mode)
+            print(f">>> MODE 0x{mode:02X}  ({' '.join(f'{b:02X}' for b in pkt)})")
             try:
                 await _send(client, char, pkt, f"mode=0x{mode:02X}", wwr)
             except Exception as e:
                 print(f"    WRITE ERROR: {e}")
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(3.0)
 
-        # cleanup
-        black = build_h617e_segment_color_packet(0, 0, 0, 0xFF, 0x7F)
         await _send(client, char, black, "cleanup", wwr)
         await asyncio.sleep(0.3)
 
-    print("\nmode-scan done. Report any mode byte that produced a visible change.")
+    print("\nmode-scan done. Report the 0xXX value of any mode that did something.")
 
 
 async def cmd_segment_seq_probe(addr: str):
@@ -704,9 +701,11 @@ def main():
 
     elif cmd == "mode-scan":
         if len(sys.argv) < 3:
-            print("Usage: mode-scan <addr>")
+            print("Usage: mode-scan <addr> [start_hex=01] [end_hex=2F]")
             sys.exit(1)
-        asyncio.run(cmd_mode_scan(sys.argv[2]))
+        start = int(sys.argv[3], 16) if len(sys.argv) > 3 else 0x01
+        end   = int(sys.argv[4], 16) if len(sys.argv) > 4 else 0x2F
+        asyncio.run(cmd_mode_scan(sys.argv[2], start, end))
 
     elif cmd == "segment-seq-probe":
         if len(sys.argv) < 3:
