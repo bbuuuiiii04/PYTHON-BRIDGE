@@ -592,6 +592,19 @@ def main(argv: list[str] | None = None) -> int:
     print(f"pack: {args.output.expanduser()}")
     print(f"manifest_sha256: {result['manifest_sha256']}")
     print(f"artifacts: {result['artifact_count']}")
+    # Operator visibility: show the note -> SoundSwitch Autoloop mapping the bridge
+    # will resolve at runtime, loaded from the pack just written. Best-effort: a
+    # summary failure must never fail the export itself.
+    try:
+        from rb_ss_bridge_v2.soundswitch_pack_loader import load_pack
+        loaded = load_pack(args.output)
+        print(f"autoloops: {len(loaded.autoloops)}")
+        print(f"autoloop_bindings: {len(loaded.autoloop_bindings)}")
+        for (ch0, note), binding in sorted(loaded.autoloop_bindings.items()):
+            print(f"  ch{ch0 + 1} note {note} -> {binding.target_name} "
+                  f"({binding.target_identity})")
+    except Exception as exc:  # noqa: BLE001 — summary is advisory only
+        print(f"binding-summary: unavailable ({type(exc).__name__})")
     print("status: SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED")
     return 0
 

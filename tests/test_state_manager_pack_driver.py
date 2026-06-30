@@ -716,6 +716,39 @@ class PackDriverTests(unittest.TestCase):
         status = sm.get_pack_status()
         self.assertEqual(status["native_autoloop"]["reason"], "waiting_for_edge")
 
+    def test_personality_change_resets_native_autoloop(self):
+        # Authority doc reset boundary: "personality application, where role banks
+        # change". A latched native look must be dropped when a personality applies.
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_native_pack()), backend=be)
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = _resolved_scene()
+        sm._native_abs_beat_pos = 64.0
+        sm._drive_pack_output()
+        self.assertIsNotNone(sm._native_autoloop.state)  # latched look present
+
+        sm._apply_personality_change("aggressive", None)
+
+        self.assertIsNone(sm._native_autoloop.state)
+        self.assertIsNone(sm._native_captured_scene)
+
+    def test_native_autoloop_log_includes_soundswitch_display_name(self):
+        # Operator observability: the throttled native-autoloop log must carry the
+        # SoundSwitch display name (doc: display name available at runtime), without
+        # adding phase_tick (which would spam the 200 Hz log).
+        import logging
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_native_pack()), backend=be)
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = _resolved_scene()
+        sm._native_abs_beat_pos = 64.0
+        with self.assertLogs("state_manager", level=logging.INFO) as cm:
+            sm._drive_pack_output()
+        blob = "\n".join(cm.output)
+        self.assertIn("native-autoloop", blob)
+        self.assertIn("name=House Drop", blob)
+        self.assertNotIn("phase_tick=", blob)
+
     def test_native_autoloop_push_tick_uses_single_submit_path(self):
         be = _FakeBackend()
         sm = _make_sm(player=LaserPackPlayer(_native_pack()), backend=be)

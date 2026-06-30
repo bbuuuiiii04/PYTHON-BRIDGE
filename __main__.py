@@ -1040,6 +1040,15 @@ def main() -> None:
         ),
         soundswitch_pack_bundle.reason,
     )
+    _loaded_pack = soundswitch_pack_bundle.pack
+    if _loaded_pack is not None:
+        log.info(
+            "[MAIN] soundswitch-pack-loaded  sha=%s  autoloops=%d  bindings=%d  scripted=%d",
+            (getattr(_loaded_pack, "manifest_sha256", "") or "")[:12] or "-",
+            len(getattr(_loaded_pack, "autoloops", ()) or ()),
+            len(getattr(_loaded_pack, "autoloop_bindings", ()) or ()),
+            len(getattr(_loaded_pack, "scripted", ()) or ()),
+        )
     log.info(
         "[MAIN] laser-config  reason=%s  available=%s  enabled=%s",
         laser_cfg_result.reason,

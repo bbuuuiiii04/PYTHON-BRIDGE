@@ -3098,6 +3098,10 @@ class StateManager:
             self._laser_director.set_personality_config(personality)
         if self._laser_executor is not None:
             self._laser_executor.set_personality(personality)
+        # Authority doc reset boundary: personality application changes the role
+        # banks, so the latched native Autoloop look must drop; the next fire edge
+        # re-anchors from the new banks (a one-tick zero gap is preferred over stale).
+        self._reset_native_autoloop()
         self._recache_personality_timing(personality)
         self._last_applied_personality = personality
 
@@ -3932,12 +3936,13 @@ class StateManager:
             if native_log_key != self._native_log_key:
                 self._native_log_key = native_log_key
                 log.info(
-                    "[SM] native-autoloop  status=%s  role=%s  scene=%s  note=%s  target=%s  reason=%s",
+                    "[SM] native-autoloop  status=%s  role=%s  scene=%s  note=%s  target=%s  name=%s  reason=%s",
                     native_decision.status,
                     native_decision.role or "-",
                     native_decision.scene or "-",
                     native_decision.note if native_decision.note is not None else "-",
                     native_decision.target_identity or "-",
+                    native_decision.soundswitch_name or "-",
                     native_decision.reason or "-",
                 )
 
