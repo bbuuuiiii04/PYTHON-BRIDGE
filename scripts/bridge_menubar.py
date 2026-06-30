@@ -383,6 +383,15 @@ def export_button_text(in_progress: bool, up_to_date: bool) -> str:
     return "Export"
 
 
+def _artnet_exam_active(status: dict) -> bool:
+    # DualTriggerBackend (artnet_truth_check startup only) is the sole source of
+    # "midi_link" in the executor's midi status; it's wired once at bridge boot
+    # and untouched by pack enable/disable swaps, so it survives the very
+    # auto-disable this function needs to detect and skip.
+    midi = status.get("laser_director", {}).get("executor", {}).get("midi", {})
+    return isinstance(midi, dict) and "midi_link" in midi
+
+
 def pack_auto_command(status: dict, *, bridge_status: str | None = None) -> dict | None:
     if bridge_status != "on" or not isinstance(status, dict) or not status or status.get("stale"):
         return None
@@ -394,6 +403,8 @@ def pack_auto_command(status: dict, *, bridge_status: str | None = None) -> dict
     if type(connected) is not bool:
         return None
     if not pack.get("available") or pack.get("reason") == "not_configured":
+        return None
+    if _artnet_exam_active(status):
         return None
     enabled = bool(pack.get("enabled"))
     desired = not connected

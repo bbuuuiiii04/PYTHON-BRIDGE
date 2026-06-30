@@ -85,6 +85,26 @@ class BridgeMenubarTests(unittest.TestCase):
             )
         )
 
+    def test_pack_auto_command_holds_pack_enabled_during_artnet_exam(self) -> None:
+        bridge_menubar = self._import_module()
+        exam_status = {
+            "soundswitch": {"connected": True},
+            "soundswitch_pack": {"available": True, "enabled": True},
+            "laser_director": {"executor": {"midi": {"midi_link": {"degraded": False}}}},
+        }
+        self.assertIsNone(
+            bridge_menubar.pack_auto_command(exam_status, bridge_status="on")
+        )
+        # Same snapshot minus the exam signal reverts to normal auto-disable.
+        non_exam_status = {
+            "soundswitch": {"connected": True},
+            "soundswitch_pack": {"available": True, "enabled": True},
+        }
+        self.assertEqual(
+            bridge_menubar.pack_auto_command(non_exam_status, bridge_status="on"),
+            {"cmd": "set_soundswitch_pack", "action": "enable", "enabled": False},
+        )
+
     def test_pack_auto_command_ignores_unknown_or_unconfigured_state(self) -> None:
         bridge_menubar = self._import_module()
         snapshots = (
