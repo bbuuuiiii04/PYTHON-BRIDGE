@@ -170,6 +170,26 @@ class ArtNetCompareTests(unittest.TestCase):
         )
         self.assertEqual(result.verdict, artnet_compare.VERDICT_FAIL)
 
+    def test_streaming_rejects_unverified_u1_before_byte_compare(self) -> None:
+        u0 = self._packet(0, 1, 1_000_000_000, 0)
+        u1 = self._packet(1, 9, 1_001_000_000, 1)
+        u0_later = self._packet(0, 2, 1_100_000_000, 0)
+        u1_later = self._packet(1, 2, 1_101_000_000, 2)
+        row = self._row(u1, 1)
+        row["dmx_sha256"] = hashlib.sha256(self._packet(1, 0, 1_001_000_000, 1).payload).hexdigest()
+
+        result = artnet_compare.evaluate_trace(
+            [u0, u1, u0_later, u1_later],
+            sidecar_rows=[row, self._row(u1_later, 2)],
+            sidecar_header={"run_id": "run"},
+            bridge_status={"truth_check": {"run_id": "run"}},
+            streaming=True,
+            settle_ns=0,
+        )
+
+        self.assertEqual(result.verdict, artnet_compare.VERDICT_INVALID)
+        self.assertEqual(result.reason, "sidecar_hash_mismatch:1")
+
     def test_wrong_sidecar_frame_index_cannot_create_pass(self) -> None:
         u0 = self._packet(0, 1, 1_000_000_000, 0)
         u1 = self._packet(1, 1, 1_001_000_000, 1)

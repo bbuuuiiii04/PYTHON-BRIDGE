@@ -119,6 +119,17 @@ class PureRendererTests(unittest.TestCase):
         cleared = render_scripted_frame(track, 20)
         self.assertEqual((cleared[0], cleared[2], cleared[7]), (0, 0, 1))
 
+    def test_scripted_skips_non_primary_fixture_group(self):
+        track = _document(LoadedTimelineEvent(
+            time=0, source_order=0, source_offset=100,
+            reference_kind="cue", raw_reference=1,
+            patch=(
+                LoadedAttribute(0x999, 2, 2, 99),
+                LoadedAttribute(0x493, 3, 3, 7),
+            ),
+        ))
+        self.assertEqual(render_scripted_frame(track, 0)[0:3], (0, 0, 7))
+
     def test_autoloop_signed_preroll_steady_wrap_and_sparse_persistence(self):
         loop = _document(
             _event(-2, 0, ((1, 10),)),

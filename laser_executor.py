@@ -388,6 +388,23 @@ class LaserSceneExecutor:
                 "midi": self._backend.status(),
             }
 
+    def current_autoloop_scene(self) -> LaserResolvedScene | None:
+        with self._lock:
+            role = self._last_role
+            scene = self._role_active_scene.get(role, "") if role in _AUTO_ROLES else ""
+            reason = self._last_reason or "latched"
+        scene_def = self._config.scenes.get(scene)
+        if scene_def is None or scene_def.scene_type != "autoloop":
+            return None
+        return LaserResolvedScene(
+            role=role,
+            reason=reason,
+            scene=scene,
+            channel=int(getattr(scene_def.midi, "channel", 1)),
+            note=int(getattr(scene_def.midi, "note", 0)),
+            scene_type=str(scene_def.scene_type),
+        )
+
     def _select_scene(
         self,
         decision: LaserSceneDecision,

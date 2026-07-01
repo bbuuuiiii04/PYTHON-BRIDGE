@@ -760,6 +760,23 @@ class PackDriverTests(unittest.TestCase):
         self.assertEqual(status["native_autoloop"]["soundswitch_name"], "House Drop")
         self.assertEqual(status["native_autoloop"]["phase_tick"], 900)
 
+    def test_native_autoloop_seeds_from_executor_latched_scene_without_new_edge(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_native_pack()), backend=be)
+        sm._laser_executor = SimpleNamespace(
+            current_autoloop_scene=lambda: _resolved_scene(reason="latched_active")
+        )
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = None
+        sm._native_abs_beat_pos = 65.5
+
+        sm._drive_pack_output()
+
+        self.assertEqual(be.frames[-1][0], 77)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "rendering_active")
+        self.assertEqual(status["native_autoloop"]["reason"], "latched_active")
+
     def test_native_autoloop_empty_dark_look_is_not_missing_binding(self):
         be = _FakeBackend()
         sm = _make_sm(player=LaserPackPlayer(_native_pack(empty=True)), backend=be)

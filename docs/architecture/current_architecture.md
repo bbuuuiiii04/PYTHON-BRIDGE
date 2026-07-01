@@ -60,8 +60,9 @@ thread. Absent/disabled config preserves legacy MIDI;
 dry-run/none opens neither physical output path. Sender delivery health,
 native Autoloop phase calibration, live runtime validation, and hardware
 validation remain open. Native Autoloop pack output is implemented in software
-through the existing pack player/submit path with bridge-owned phase; the old
-T7d six-scenario gate no longer blocks it.
+through the existing pack player/submit path with bridge-owned phase; when a
+fresh scene edge is absent, the pack driver may seed from the executor's latched
+active Autoloop scene. The old T7d six-scenario gate no longer blocks it.
 
 ## Runtime Subsystems
 
@@ -145,7 +146,7 @@ path was previously available.
    one nonblocking CH1-CH19 frame per tick and publishes copied operational
    status from that same rendered frame. Scripted tracks select scripted pack
    documents; native Autoloops select canonical-pack Autoloops from the
-   executor-selected bridge note and render by Rekordbox beat-grid phase.
+   fresh or executor-latched bridge note and render by Rekordbox beat-grid phase.
 
 ## Smart-Transition Architecture
 

@@ -27,7 +27,8 @@ Audited against implementation commit `6c51eb8` on 2026-06-29.
 - Art-Net truth-check output is a temporary validation-only shadow path. It is default-off, requires `RBSS_ARTNET_TRUTH_CHECK=1` plus a valid `RBSS_ARTNET_UNIVERSE`, and `RBSS_ARTNET_UNIVERSE` alone must not emit. Truth-check may construct pack rendering without Enttec by using a sender-free pack backend plus `ArtNetTruthSink`; it must not open serial/Enttec or become live physical authority. The StateManager hot path may only enqueue rendered frames to the bounded truth queue; UDP sends and sidecar writes stay on the truth worker.
 - Native pack Autoloop output is implemented in software through the existing
   `StateManager` pack driver and `LaserPackPlayer.select_autoloop()` path.
-  Selection is I/O-free, latches across no-edge ticks, uses
+  Selection is I/O-free, latches across no-edge ticks, may seed from the
+  executor's latched active Autoloop scene when no fresh edge is present, uses
   `AUTOLOOP_TICKS_PER_BEAT = 600` plus `phase_offset_beats`, resolves only
   canonical-pack Autoloop bindings, fails closed on missing/unsupported content,
   preserves scripted/static/blackout precedence, and remains suppressed while

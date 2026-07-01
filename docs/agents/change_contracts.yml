@@ -246,6 +246,7 @@ contracts:
       - enttec_*.py
       - tools/*soundswitch*pack*.py
       - tools/export_soundswitch_pack.py
+      - tools/artnet_compare.py
       - scripts/bridge_menubar.py
       - config/soundswitch_pack_player*.json
       - tests/test_soundswitch_pack_player_config.py
@@ -264,6 +265,7 @@ contracts:
       - tests/test_soundswitch_midi_input*.py
       - tests/test_soundswitch_frame_sender*.py
       - tests/test_enttec*.py
+      - tests/test_artnet_compare.py
       - tests/test_prove_soundswitch_pack_generation.py
     inspect:
       - docs/plans/active/soundswitch_exporter_remaining_work.md

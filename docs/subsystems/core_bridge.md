@@ -25,7 +25,9 @@ SoundSwitch pack-player boundary:
 - The main 200 Hz loop catches ordinary drain/tick/snapshot exceptions, submits at most one direct pack ZERO frame for the failed iteration, logs a bounded counter, preserves the normal tick throttle, skips only that instant, and continues. It does not double-submit ZERO when `_push_tick()` already handled an inner tick failure, does not catch process-control exceptions, and does not force-zero separate OS2L/laser-MIDI/LED lanes.
 - Sender health, native Autoloop live/runtime validation, and hardware
   validation remain open. Native Autoloop pack output is implemented in software
-  through the existing pack driver and remains SoundSwitch-present suppressed.
+  through the existing pack driver, can seed from the executor's latched active
+  Autoloop scene when no fresh edge is present, and remains SoundSwitch-present
+  suppressed.
 - Art-Net truth-check is a temporary default-off measurement path. With
   `RBSS_ARTNET_TRUTH_CHECK=1` and a valid `RBSS_ARTNET_UNIVERSE`, startup can
   build pack rendering without Enttec, keep production output software-zero when

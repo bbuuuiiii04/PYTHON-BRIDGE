@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
-last_verified_commit: 3918603
-last_verified_date: 2026-06-28
+last_verified_commit: 837c5a6
+last_verified_date: 2026-06-30
 validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -18,27 +18,31 @@ implementation authority. Research/format evidence remains grouped under
    checklist and roadmap**. It records landed software, native Autoloop
    implementation status, remaining live/hardware gates, task order, and
    completion definition.
-2. `../../research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
+2. `soundswitch_dmx_cue_mismatch_spec.md` - root-cause verdict and fix plan for
+   bridge U1 truth frames that do not match SoundSwitch U0, including scripted
+   playback-mixer parity, autoloop bridge-dark latch behavior, fixture-group
+   filtering, and comparator classification.
+3. `../../research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
    - original product/implementation contract. Use it for intended behavior,
    then use the remaining-work roadmap for actual landed status.
-3. `soundswitch_t7d_capture_evidence_plan.md` - historical T7d evidence
+4. `soundswitch_t7d_capture_evidence_plan.md` - historical T7d evidence
    requirements. It is not the active native Autoloop runtime gate.
-4. `soundswitch_t7d_capture_gate_handoff.md` - active operator workflow for the
+5. `soundswitch_t7d_capture_gate_handoff.md` - active operator workflow for the
    six live scenarios: arm, refire, master-switch, drop-hold, buildup, and
    correction.
-5. `../../validation/soundswitch_t7d_phase_contract_evidence.md` and
+6. `../../validation/soundswitch_t7d_phase_contract_evidence.md` and
    `../../validation/soundswitch_t7d_phase_contract_blocked.md` - current honest
    evidence verdict: `INCOMPLETE_T7D_EVIDENCE`; two accepted arm and two
    accepted refire integrity captures exist, while four scenario pairs and the
    unique corpus oracle remain incomplete.
-6. `../../prompts/active/soundswitch_rw7_capture_agent_prompt.md` - the only
+7. `../../prompts/active/soundswitch_rw7_capture_agent_prompt.md` - the only
    active SoundSwitch execution prompt. Use it only with the operator physically
    present and the explicit live gates it names.
-7. `../../validation/soundswitch_hardware_validation_procedure.md` and
+8. `../../validation/soundswitch_hardware_validation_procedure.md` and
    `../../validation/soundswitch_hardware_runs/TEMPLATE.md` - non-Autoloop
    operator procedure and evidence schema with the independent-review revisions
    implemented. Their presence is not a hardware-validation result.
-8. `../../prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md`
+9. `../../prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md`
    - commit-scoped, review-only ChatGPT handoff for RW-5, the procedure/template,
    and this document-lifecycle cleanup.
 

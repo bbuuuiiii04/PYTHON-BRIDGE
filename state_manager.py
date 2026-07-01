@@ -4010,10 +4010,16 @@ class StateManager:
                 )
             else:
                 pack = player.pack
+                native_scene = self._native_captured_scene
+                if native_scene is None and self._laser_executor is not None:
+                    current_autoloop_scene = getattr(
+                        self._laser_executor, "current_autoloop_scene", None)
+                    if callable(current_autoloop_scene):
+                        native_scene = current_autoloop_scene()
                 native_decision = self._native_autoloop.resolve(
                     pack_sha12=rt.pack_sha12,
                     bindings=getattr(pack, "autoloop_bindings", {}),
-                    scene=self._native_captured_scene,
+                    scene=native_scene,
                     lighting_mode=self._os.lighting_mode,
                     scripted_active=scripted_owned,
                     playing=playing,

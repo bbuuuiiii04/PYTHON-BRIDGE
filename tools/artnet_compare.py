@@ -234,6 +234,7 @@ def evaluate_trace(
     seq_error = _u1_sequence_error(u1)
     if seq_error:
         print(f"WARNING: sequence error {seq_error}")
+        return CompareResult(VERDICT_INVALID, seq_error, "SETUP_INVALID", duplicate_count=duplicate_count)
 
     if not streaming:
         # Batch/offline reconciliation of a complete capture: counts must line
@@ -261,8 +262,7 @@ def evaluate_trace(
                     matches=0,
                     duplicate_count=duplicate_count,
                 )
-            if not streaming:
-                return CompareResult(VERDICT_INVALID, sidecar_error, "SIDECAR_MISSING_OR_STALE", duplicate_count=duplicate_count)
+            return CompareResult(VERDICT_INVALID, sidecar_error, "SIDECAR_MISSING_OR_STALE", duplicate_count=duplicate_count)
         u1_sidecar_rows.append(sidecar_row if not sidecar_error else {})
 
     offsets: list[float] = []
@@ -827,6 +827,9 @@ def run_self_check() -> None:
     stream_lead_rows = rows(stream_u1a, stream_u1b, _packet(1, base, 1_102_000_000, 3))
     cases.append(("batch_rejects_sidecar_lead", evaluate_trace([stream_u0a, stream_u1a, stream_u0b, stream_u1b], sidecar_rows=stream_lead_rows, sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"scripted:script"}), VERDICT_INVALID))
     cases.append(("streaming_tolerates_sidecar_lead", evaluate_trace([stream_u0a, stream_u1a, stream_u0b, stream_u1b], sidecar_rows=stream_lead_rows, sidecar_header={"run_id": run_id}, bridge_status=status, required_coverage={"scripted:script"}, streaming=True, settle_ns=0), VERDICT_PASS))
+    bad_stream_row = row(stream_u1a, 1)
+    bad_stream_row["dmx_sha256"] = hashlib.sha256(hidden).hexdigest()
+    cases.append(("streaming_rejects_unverified_u1", evaluate_trace([stream_u0a, stream_u1a, stream_u0b, stream_u1b], sidecar_rows=[bad_stream_row, row(stream_u1b, 2)], sidecar_header={"run_id": run_id}, bridge_status=status, streaming=True, settle_ns=0), VERDICT_INVALID))
 
     failures = [(name, got.verdict, expected, got.reason) for name, got, expected in cases if got.verdict != expected]
     if failures:
@@ -1074,7 +1077,9 @@ def _live(args: argparse.Namespace) -> int:
                 )
                 if (result.reason in _transient or result.reason.startswith("sequence_gap")) and elapsed < args.timeout_s:
                     last_print = time.monotonic()
-                    packets = packets[-200:]
+                    # Sidecar rows are frame-index anchored. Trimming packets
+                    # breaks U1-to-sidecar integrity and can create false
+                    # byte_mismatch FAILs from unverified frames.
                     continue
                 if result.verdict in (VERDICT_FAIL, VERDICT_INVALID, VERDICT_PASS):
                     return 0 if result.verdict == VERDICT_PASS else 1
