@@ -251,6 +251,38 @@ class PackDriverTests(unittest.TestCase):
         self.assertNotEqual(be.frames[-1], ZERO_FRAME)
         self.assertEqual(be.frames[-1][0], 200)  # CH1 of static look slot 8
 
+    def test_dead_controller_does_not_block_stream_deck_static_in_pack(self):
+        # End-to-end regression for the group-health poison: a held Stream Deck static
+        # look renders in the pack DMX even though a co-learned DDJ-800 controller is
+        # absent (port-gone). Before the group overlay-trust fix this frame was ZERO
+        # (one dead controller dropped every controller's held look).
+        from rb_ss_bridge_v2.soundswitch_midi_input import SoundSwitchMidiInputAdapter
+        from rb_ss_bridge_v2.soundswitch_pack_loader import PackMidiBinding
+        sd = PackMidiBinding(device_name="Stream Deck", message_type="note",
+                             channel_zero_based=2, data_byte=36,
+                             target_kind="static_look", target_slot=8, interaction="toggle")
+        ddj = PackMidiBinding(device_name="DDJ-800", message_type="note",
+                              channel_zero_based=9, data_byte=123,
+                              target_kind="static_look", target_slot=17)
+        made: dict = {}
+
+        def factory(bindings, *, stale_timeout_ms):
+            adapter = SoundSwitchMidiInputAdapter(bindings, stale_timeout_ms=stale_timeout_ms)
+            made[bindings[0].device_name] = adapter
+            return adapter
+
+        group = SoundSwitchMidiInputGroup((sd, ddj), {}, adapter_factory=factory)
+        made["Stream Deck"]._worker_alive = True
+        made["Stream Deck"]._feed_raw_message(0x90 | 2, 36, 100)  # operator holds slot 8
+        made["DDJ-800"]._mark_port_gone()                          # absent controller
+
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=group)
+        _set(sm, ssid="", playing=False, snap=FRESH)
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1][0], 200)   # Stream Deck static slot 8 rendered
+        self.assertNotEqual(be.frames[-1], ZERO_FRAME)
+
     def test_soundswitch_connected_suppresses_pack_output(self):
         be = _FakeBackend()
         inp = _FakeInput(held_layer_slot=8)

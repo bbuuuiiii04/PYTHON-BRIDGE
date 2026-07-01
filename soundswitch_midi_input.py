@@ -598,16 +598,24 @@ class SoundSwitchMidiInputGroup:
 
     def snapshot(self) -> MidiInputSnapshot:
         snapshots = [adapter.snapshot() for _device, _port, _mode, adapter in self._entries]
-        has_error = any(snapshot.error for snapshot in snapshots)
         layers = tuple(sorted(
             (layer for snapshot in snapshots for layer in snapshot.held_layers),
             key=lambda layer: layer.seq,
         ))
+        # worker_alive/error here are the OVERLAY-TRUST verdict the pack driver's RW-4
+        # latch keys on, NOT raw controller health (status() reports that). A degraded
+        # controller self-clears its held layers/blackout (_clear_held), so a dark or
+        # absent controller surfaces no overlay to distrust. Judge trust over only the
+        # controllers actually surfacing overlay: one dead controller then can't drop
+        # another's live look, and an idle dead controller can't wedge the latch. With
+        # nobody holding anything there is no overlay, so trust is vacuously healthy.
+        contributing = [s for s in snapshots if s.held_layers or s.blackout_held]
+        has_error = any(snapshot.error for snapshot in contributing)
         return MidiInputSnapshot(
             held_layers=layers,
             blackout_held=any(snapshot.blackout_held for snapshot in snapshots),
-            worker_alive=(all(snapshot.worker_alive for snapshot in snapshots)
-                          if snapshots else True),
+            worker_alive=(all(snapshot.worker_alive for snapshot in contributing)
+                          if contributing else True),
             error=("input_error" if has_error else None),
             mail_drop_count=sum(snapshot.mail_drop_count for snapshot in snapshots),
             blackout_bindings=tuple(sorted({
@@ -618,12 +626,15 @@ class SoundSwitchMidiInputGroup:
         )
 
     def status(self) -> dict:
-        snapshot = self.snapshot()
+        # Raw controller health for diagnostics: a configured controller that is
+        # absent/dead is reported degraded here even when nobody is holding an overlay
+        # (snapshot()'s worker_alive is the narrower overlay-trust verdict instead).
+        snapshots = [adapter.snapshot() for _device, _port, _mode, adapter in self._entries]
         return {
             "configured_inputs": len(self._entries),
-            "worker_alive": snapshot.worker_alive,
-            "has_error": snapshot.error is not None,
-            "mail_drop_count": snapshot.mail_drop_count,
+            "worker_alive": (all(s.worker_alive for s in snapshots) if snapshots else True),
+            "has_error": any(s.error for s in snapshots),
+            "mail_drop_count": sum(s.mail_drop_count for s in snapshots),
         }
 
 

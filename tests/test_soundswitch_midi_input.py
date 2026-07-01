@@ -688,9 +688,45 @@ class TestInputGroupAutoDetection(unittest.TestCase):
         group.start()
 
         snapshot = group.snapshot()
-        self.assertFalse(snapshot.worker_alive)
-        self.assertEqual(snapshot.error, "input_error")
+        # No overlay is held, so the overlay-trust snapshot is vacuously healthy (there
+        # is nothing to distrust)...
+        self.assertTrue(snapshot.worker_alive)
+        self.assertIsNone(snapshot.error)
+        # ...but raw controller health still flags the missing controller for diagnostics.
+        self.assertFalse(group.status()["worker_alive"])
         self.assertTrue(group.status()["has_error"])
+
+    def test_dead_controller_does_not_drop_a_healthy_controllers_held_look(self):
+        # Bigger-fix regression: two static-look controllers on distinct ports; one is
+        # holding a look, the other's port is gone. The dead controller must NOT poison
+        # the group's overlay-trust verdict, so the live look keeps rendering. Mirrors
+        # the live case: operator holds a Stream Deck static look while the DDJ-800 is
+        # absent (2026-07-01 all_surface capture: static_held_rows=0).
+        sd = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=36,
+            target_kind="static_look", target_slot=8, interaction="toggle")
+        ddj = PackMidiBinding(
+            device_name="DDJ-800", message_type="note",
+            channel_zero_based=9, data_byte=123,
+            target_kind="static_look", target_slot=17)
+        made: dict[str, SoundSwitchMidiInputAdapter] = {}
+
+        def factory(bindings, *, stale_timeout_ms):
+            adapter = SoundSwitchMidiInputAdapter(bindings, stale_timeout_ms=stale_timeout_ms)
+            made[bindings[0].device_name] = adapter
+            return adapter
+
+        group = SoundSwitchMidiInputGroup((sd, ddj), {}, adapter_factory=factory)
+        made["Stream Deck"]._worker_alive = True
+        _note_on(made["Stream Deck"], sd)     # operator holds slot 8
+        made["DDJ-800"]._mark_port_gone()     # co-controller absent/dead
+
+        snap = group.snapshot()
+        self.assertEqual(tuple(l.slot for l in snap.held_layers), (8,))  # look surfaced
+        self.assertTrue(snap.worker_alive)     # NOT poisoned by the dead DDJ-800
+        self.assertIsNone(snap.error)
+        self.assertFalse(group.status()["worker_alive"])  # raw health still flags it
 
     def test_group_merges_layers_by_global_recency(self):
         other = PackMidiBinding(

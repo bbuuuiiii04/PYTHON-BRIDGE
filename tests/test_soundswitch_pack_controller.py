@@ -157,7 +157,9 @@ class ControllerTests(unittest.TestCase):
 
         self.assertEqual((ok, detail), (True, "pack"))
         self.assertTrue(h.current.active)
-        self.assertEqual(h.current.midi_input.snapshot().error, "input_error")
+        # Missing controller is flagged via raw-health status() (snapshot().error is the
+        # narrower overlay-trust verdict, None when nobody is holding an overlay).
+        self.assertTrue(h.current.midi_input.status()["has_error"])
         self.assertIn("new.start", log)
 
     def test_validate_first_failure_retains_old_runtime(self):

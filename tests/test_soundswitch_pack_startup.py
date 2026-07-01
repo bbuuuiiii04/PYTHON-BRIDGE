@@ -209,7 +209,9 @@ class StartupMatrixTests(unittest.TestCase):
         self.assertIsInstance(bundle.laser_backend, PackOutputBackend)
         self.assertEqual(sender_events, ["sender.start"])
         self.assertEqual(events, [("input.start", "DDJ", "DDJ"), ("input.stop",)])
-        self.assertEqual(bundle.midi_input.snapshot().error, "input_error")
+        # Missing controller is flagged via raw-health status() (snapshot().error is the
+        # narrower overlay-trust verdict, None when nobody is holding an overlay).
+        self.assertTrue(bundle.midi_input.status()["has_error"])
 
     def test_missing_enttec_preserves_legacy_midi(self):
         bundle, events, _ = self._build(_result(enttec_port=""))
