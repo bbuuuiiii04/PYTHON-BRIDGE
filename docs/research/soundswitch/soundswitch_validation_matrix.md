@@ -1,16 +1,19 @@
 ---
 doc_status: active-validation-evidence
 truth_level: byte-binary-test-and-capture-grounded
-last_verified_commit: 8ca5875
-last_verified_date: 2026-06-21
+last_verified_commit: 03af947
+last_verified_date: 2026-07-01
 validation_scope: SoundSwitch 2.10.3 bounded current project/profile; passive software-visible wire only; hardware-unvalidated
 ---
 
 # SoundSwitch reverse-engineering validation matrix
 
-The current verdict is `soundswitch_re_closure_report.md`. Missing per-file
-capture is confidence coverage, not a parser or export blocker when physical
-bytes, references, and active cue dependencies are unambiguous.
+The current historical verdict is `soundswitch_re_closure_report.md`, with the
+2026-07-01 DD42028C caveat in
+`docs/plans/active/soundswitch_pack_parity_root_cause_spec.md`. Missing
+per-file capture is not a parser blocker when physical bytes, references, and
+active cue dependencies are unambiguous, but it is no longer enough to claim
+exact U0 parity for every active scripted track.
 
 ## Product-gate matrix
 
@@ -18,9 +21,9 @@ bytes, references, and active cue dependencies are unambiguous.
 | --- | --- | --- | --- |
 | Autoloop physical grammar | 42/42 strict parses; count-257 regression | pass | all current files readable |
 | Scripted physical grammar | 44/45 strict parses | pass bounded | inactive demo unsupported |
-| Active scripted inventory | 32/32 existing-path rows supported | pass | no per-track capture requirement |
+| Active scripted inventory | existing-path rows decode/export structurally; DD42028C U0 parity mismatch confirmed | parser pass / parity fail-open gap | no broad exact-parity claim without layout proof or oracle |
 | Active Autoloop selection | 19/19 IAC bindings resolve | pass | 18 automatic + file-3 blackout |
-| Positive reference rule | legacy A5, legacy Autoloop, cold new scripted wire | pass | runtime `raw-1` |
+| Positive reference rule | legacy A5, legacy Autoloop, cold new scripted wire; DD42028C disproves a global offset as complete parity model; current GhidraMCP did not find footer/prefix/shared-byte remap | bounded pass / DD42028C exception | runtime `raw-1` remains default, but addressed-footer scripted tracks need structural or oracle proof |
 | Raw zero | A5 2/2 plus current file-3 zero behavior | pass | explicit clear/blackout source |
 | Attribute Cue bank | 232 render cues + 1 catalog-tail = 233 parsed; 166 active referenced, 0 missing | pass | full GUID closure |
 | Sparse persistent patches | controlled diffs + A5/Autoloop wire + cache binary | pass | omitted channels persist |
@@ -74,7 +77,8 @@ SoundSwitch runtime behavior.
 
 - Autoloops: `complete_bounded_inventory`, 42/42 parsed;
 - scripted: `complete_bounded_inventory`, 44/45 parsed;
-- active existing-path scripted: 32/32 supported;
+- active existing-path scripted: structurally supported, but DD42028C proves
+  structural exportability is not the same as exact U0 parity;
 - active missing referenced cue GUIDs: zero.
 
 `inventory_project_artifacts.py` reports:

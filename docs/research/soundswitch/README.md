@@ -1,8 +1,8 @@
 ---
 doc_status: research-current
 truth_level: repository-routing-authority
-last_verified_commit: 0c2ba07
-last_verified_date: 2026-06-23
+last_verified_commit: 03af947
+last_verified_date: 2026-07-01
 validation_scope: SoundSwitch reverse-engineering document routing; software evidence only; hardware-unvalidated
 ---
 
@@ -19,17 +19,23 @@ doc index and active-work registry.
 Read in this order:
 
 1. `soundswitch_re_closure_report.md` — bounded reverse-engineering verdict and
-   supported source-format boundary. It is not current implementation status.
-2. `soundswitch_ssfile_format.md` — physical project, catalog, `.ssfile`,
+   supported source-format boundary. It is not current implementation status,
+   and its broad active-scripted exact-parity implication is superseded by
+   `../../plans/active/soundswitch_pack_parity_root_cause_spec.md`.
+2. `../../plans/active/soundswitch_pack_parity_root_cause_spec.md` — current
+   DD42028C/global cue-parity root-cause spec. It records the callable
+   GhidraMCP pass, the rejected footer/global-offset theories, and the
+   fail-closed/oracle requirements for active scripted documents.
+3. `soundswitch_ssfile_format.md` — physical project, catalog, `.ssfile`,
    MIDI-map, and static-look formats.
-3. `soundswitch_ghidra_addendum.md` — binary-derived reader/writer and runtime
+4. `soundswitch_ghidra_addendum.md` — binary-derived reader/writer and runtime
    behavior.
-4. `soundswitch_validation_matrix.md` and
+5. `soundswitch_validation_matrix.md` and
    `soundswitch_authoring_mutation_matrix.md` — capture and mutation evidence.
-5. `research_tools.md` — reproduction commands and tool inventory.
-6. `soundswitch_importer_exporter_player_codex_spec.md` — original authorized
+6. `research_tools.md` — reproduction commands and tool inventory.
+7. `soundswitch_importer_exporter_player_codex_spec.md` — original authorized
    default-off product/implementation contract.
-7. `../../plans/active/soundswitch_exporter_remaining_work.md` — current landed
+8. `../../plans/active/soundswitch_exporter_remaining_work.md` — current landed
    implementation status, confirmed gaps, checklist, dependencies, and next
    design/spec task.
 

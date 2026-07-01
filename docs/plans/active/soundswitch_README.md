@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
-last_verified_commit: 837c5a6
-last_verified_date: 2026-06-30
+last_verified_commit: 03af947
+last_verified_date: 2026-07-01
 validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -14,36 +14,45 @@ implementation authority. Research/format evidence remains grouped under
 
 ## Read now, in order
 
-1. `soundswitch_exporter_remaining_work.md` - **single active completion
+1. `soundswitch_pack_parity_root_cause_spec.md` - **current global DMX cue
+   parity root-cause implementation spec**. DD42028C is the first concrete
+   witness, not the whole problem. The spec records that the shared `.ssfile`
+   cue-replay model is only internally self-consistent, that the
+   `oracle_rendered` local pack patch is containment, that current GhidraMCP
+   evidence rejects footer/shared-byte remap and global-offset fixes, and that
+   every active scripted document needs structural proof, U0 oracle proof, or
+   fail-closed publication.
+2. `soundswitch_exporter_remaining_work.md` - **single active completion
    checklist and roadmap**. It records landed software, native Autoloop
    implementation status, remaining live/hardware gates, task order, and
    completion definition.
-2. `soundswitch_dmx_cue_mismatch_spec.md` and
-   `soundswitch_pack_render_defect.md` - current scripted U0/U1 parity surface.
-   The playback-mixer theory is rejected; the confirmed issue is wrong generated
-   pack content for one scripted track, locally patched through capture-derived
-   `oracle_rendered` boundaries.
-3. `../../research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
+3. `soundswitch_pack_render_defect.md` - local containment record for
+   `dd42028c-0823-4a8d-ad7e-b26e24180272`. Do not treat it as proof that the
+   exporter/importer is correct. The patched pack improves the captured
+   boundary score but is not exact and can be overwritten by a future export.
+4. `soundswitch_dmx_cue_mismatch_spec.md` - historical parity investigation.
+   Its playback-mixer theory is explicitly rejected for the current target.
+5. `../../research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
    - original product/implementation contract. Use it for intended behavior,
    then use the remaining-work roadmap for actual landed status.
-4. `soundswitch_t7d_capture_evidence_plan.md` - historical T7d evidence
+6. `soundswitch_t7d_capture_evidence_plan.md` - historical T7d evidence
    requirements. It is not the active native Autoloop runtime gate.
-5. `soundswitch_t7d_capture_gate_handoff.md` - active operator workflow for the
+7. `soundswitch_t7d_capture_gate_handoff.md` - active operator workflow for the
    six live scenarios: arm, refire, master-switch, drop-hold, buildup, and
    correction.
-6. `../../validation/soundswitch_t7d_phase_contract_evidence.md` and
+8. `../../validation/soundswitch_t7d_phase_contract_evidence.md` and
    `../../validation/soundswitch_t7d_phase_contract_blocked.md` - current honest
    evidence verdict: `INCOMPLETE_T7D_EVIDENCE`; two accepted arm and two
    accepted refire integrity captures exist, while four scenario pairs and the
    unique corpus oracle remain incomplete.
-7. `../../prompts/active/soundswitch_rw7_capture_agent_prompt.md` - the only
+9. `../../prompts/active/soundswitch_rw7_capture_agent_prompt.md` - the only
    active SoundSwitch execution prompt. Use it only with the operator physically
    present and the explicit live gates it names.
-8. `../../validation/soundswitch_hardware_validation_procedure.md` and
+10. `../../validation/soundswitch_hardware_validation_procedure.md` and
    `../../validation/soundswitch_hardware_runs/TEMPLATE.md` - non-Autoloop
    operator procedure and evidence schema with the independent-review revisions
    implemented. Their presence is not a hardware-validation result.
-9. `../../prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md`
+11. `../../prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md`
    - commit-scoped, review-only ChatGPT handoff for RW-5, the procedure/template,
    and this document-lifecycle cleanup.
 
@@ -72,8 +81,10 @@ artifacts, not planning documents. They are not moved into the authority tree.
 
 - Decoder/exporter/compiler/verifier: implemented. Live export performs a
   dynamic saved-project rescan; the old closure-count gate is proof-only.
-- Current scripted content: active existing-path tracks export when decoded and
-  reconciled against the saved project.
+- Current scripted content: 32 active existing-path tracks can be decoded and
+  reconciled against the saved project, but exact U0 parity is not proven for
+  the cue-replay model. DD42028C is a confirmed generated-content mismatch; the
+  other 31 active scripts are unproven until structural or oracle proof exists.
 - Pure scripted renderer: implemented/software-wire tested.
 - Config/startup/runtime command/StateManager/Enttec lane: implemented and
   default-off; RW-2 through RW-5 runtime authority/status work is
@@ -98,7 +109,9 @@ artifacts, not planning documents. They are not moved into the authority tree.
   remain incomplete. This no longer blocks the bridge-owned native path.
 - Native-DMX Autoloop selection: implemented/software-tested through canonical
   pack note bindings, 32-beat phase at 600 ticks/beat, `phase_offset_beats`, and
-  the existing pack driver. Live/runtime and hardware validation remain open.
+  the existing pack driver. Existing scout oracle reports show Autoloop residual
+  mismatches separate from the DD42028C scripted-boundary defect; live/runtime
+  and hardware validation remain open.
 - Art-Net truth-check gate: implemented/software-tested as a temporary
   default-off U1 shadow-output comparator path. It requires
   `RBSS_ARTNET_TRUTH_CHECK=1` plus a valid universe, opens no Enttec/serial, and

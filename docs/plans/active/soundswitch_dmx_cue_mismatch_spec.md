@@ -1,12 +1,22 @@
 ---
 doc_status: active-spec
 truth_level: code-capture-and-ghidra-grounded root-cause spec
-last_verified_commit: 837c5a6
-last_verified_date: 2026-06-30
+last_verified_commit: 03af947
+last_verified_date: 2026-07-01
 validation_scope: read-only investigation plus software tests; no bridge restart, no live runtime toggle, no SoundSwitch project mutation, no fixture-pack/config mutation, no physical DMX/hardware writes
 ---
 
 # Codex Implementation Spec - SoundSwitch DMX Cue Mismatch
+
+> **STOP - 2026-07-01 superseded root-cause route.** The current implementation
+> spec is `docs/plans/active/soundswitch_pack_parity_root_cause_spec.md`.
+> Sections A2/A3 below are retained only as historical rejected analysis. Do not
+> implement playback-mixer/two-deck blending for the DD42028C target. The active
+> root cause is an incomplete exporter/importer model for DD42028C scripted cue
+> identity/composition, with separate Autoloop residual mismatches and separate
+> Static Look evidence limits. The 2026-07-01 GhidraMCP pass did not find a
+> footer/prefix/shared-byte cue remap, and brute-force global key offsets do not
+> explain DD42028C.
 
 > **CORRECTION 2026-06-30 — root cause A2/A3 REJECTED; mixer Tasks 3-4 STRUCK.**
 > Operator ground truth overrides the Ghidra-derived blend theory: with the DMX

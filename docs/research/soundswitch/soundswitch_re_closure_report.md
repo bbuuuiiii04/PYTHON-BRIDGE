@@ -1,8 +1,8 @@
 ---
 doc_status: research-complete-bounded-scope
 truth_level: code-byte-binary-and-wire-verified
-last_verified_commit: 74febec
-last_verified_date: 2026-06-29
+last_verified_commit: 03af947
+last_verified_date: 2026-07-01
 validation_scope: SoundSwitch 2.10.3, current project/container v3, current RAVE Venue and 19-channel laser profile, passive Art-Net and static binary analysis; hardware-unvalidated
 ---
 
@@ -11,6 +11,14 @@ validation_scope: SoundSwitch 2.10.3, current project/container v3, current RAVE
 ## Final verdict
 
 **BOUNDED SOFTWARE EVIDENCE: EXPORTER SPEC READY WITH PROOF GATES**
+
+2026-07-01 correction: this report remains useful parser/binary/wire evidence,
+but its broad active-scripted exact-parity implication is stale. DD42028C
+(`dd42028c-0823-4a8d-ad7e-b26e24180272`) has clean SoundSwitch U0 evidence where
+ordinary generated cue replay resolves or composes the wrong boundary content.
+The current implementation route is
+`docs/plans/active/soundswitch_pack_parity_root_cause_spec.md`; do not use this
+report to claim that every active scripted track has exact U0 parity.
 
 This verdict is bounded to Brandon's actual workflow:
 
@@ -23,11 +31,13 @@ This verdict is bounded to Brandon's actual workflow:
   and learned MIDI-map edits;
 - bridge-authoritative single active deck, transport, scene policy, and safety.
 
-The exporter can derive SoundSwitch's emitted behavior from the saved project
-without guessing. It must fail before publishing if an input changes during the
-read, a referenced cue is missing, a learned event is ambiguous, the primary
-Venue/profile changes, or a new container/version is unsupported. Those are
-deterministic safety checks, not unresolved active content.
+The exporter can derive many saved-project structures without guessing, but the
+DD42028C defect proves that active scripted boundary parity still needs either a
+proven structural resolver for addressed-footer/legacy edited tracks or an
+operator-approved oracle canonicalization lane. It must fail before publishing
+if an input changes during the read, a referenced cue is missing, a learned
+event is ambiguous, the primary Venue/profile changes, a scripted layout lacks
+parity proof, or a new container/version is unsupported.
 
 Exporter, importer, player, bridge integration, and physical output are not
 implemented by this research change. Status remains
@@ -42,7 +52,7 @@ implemented by this research change. Status remains
 | IAC learned Autoloop controls | 19 | all resolved to parsed files | recordable map + catalog category order |
 | Automatically selected bridge Autoloops | 18 | all clean-byte exportable | live config crosswalk + parsed files |
 | Current manual blackout target | 1 | file 3, all-zero hold target | live config + recordable map + log/wire evidence |
-| Existing-path scripted tracks | 32 | all clean-byte exportable | TrackMap + physical `.ssfile` parser |
+| Existing-path scripted tracks | 32 | structurally parseable; parity proof required | TrackMap + physical `.ssfile` parser + DD42028C U0 witness |
 | Primary-Venue Static Look slots | 32 | all parsed | Venue GUID-keyed `StaticLooks` collection |
 | DDJ-800 learned Static Look overrides | 4 | all resolved to exact slots/frames | recordable map + Static Look parser + binary |
 | Venue Attribute Cues | 232 render-bearing + 1 catalog-tail = 233 parsed | all parsed | Venue parser |
@@ -144,8 +154,10 @@ mutation. No hidden saved-frame stack exists.
 
 ### Active scripted tracks
 
-All 32 current TrackMap entries whose audio paths exist are clean-byte
-exportable. Per-file wire capture is validation coverage, not an export rule.
+The TrackMap entries whose audio paths exist are structurally parseable and
+clean-byte exportable, but that is not the same as exact U0 parity. DD42028C is
+a confirmed active-scripted generated-content mismatch; per-layout structural
+proof or oracle validation is now required before publishing parity claims.
 
 | SoundSwitch ID | Track title | Layout |
 | --- | --- | --- |
@@ -188,17 +200,19 @@ product.
 
 ## Scripted-track conclusion
 
-Future newly saved scripted tracks export directly after clicking Export when
-their container/profile matches the supported set. The exporter reads their
-GUID dictionary and physical timeline and applies the version-locked runtime
-rule below. It does not require a capture or an oracle per track.
+Future newly saved scripted tracks can be structurally decoded after clicking
+Export when their container/profile matches the supported set, but they must not
+publish as exact-parity `rendered` cue replay unless their layout has structural
+proof or an oracle proof. The exporter reads their GUID dictionary and physical
+timeline and applies the version-locked runtime rule below only as an internal
+candidate model.
 
-If a future file uses a new layout, changes while being read, or references a
-deleted Attribute Cue, export fails before pack publication and names the exact
-file/GUID. The operator action is to save/close the SoundSwitch edit, remove or
-replace the stale placement in SoundSwitch, save again, and re-export. Capture
-is required only to extend support to a genuinely new SoundSwitch version or
-rendering feature, not to canonicalize ordinary new tracks.
+If a future file uses a new layout, changes while being read, references a
+deleted Attribute Cue, or lacks scripted parity proof, export fails before pack
+publication and names the exact file/GUID/proof gap. The operator action is to
+save/close the SoundSwitch edit, remove or replace the stale placement in
+SoundSwitch, save again, re-export, or run the approved offline oracle
+canonicalization workflow.
 
 ## Autoloop conclusion
 
@@ -330,7 +344,7 @@ that authority and does not emulate inactive SoundSwitch multi-deck policy.
 | --- | --- | --- | --- |
 | Cue identity is GUID-based | Venue/ClassId bytes, dictionary readers, controlled rename | confirmed | names never resolve identity |
 | Numeric cue index is metadata | dictionary key and runtime reference traces | confirmed | never persist name/index as identity |
-| Positive runtime reference is `raw-1` | A5, Autoloop wire, cold new-track wire; arm64 reader/writer path is direct-key | confirmed runtime, binary-bounded | version-locked one-based renderer |
+| Positive runtime reference is `raw-1` | A5, Autoloop wire, cold new-track wire; arm64 reader/writer path is direct-key; DD42028C exception | bounded default, not exact for all scripts | candidate renderer only until layout/oracle proof |
 | Storage provenance can look mixed/direct | controlled legacy edit and arm64 current writer | confirmed but not a runtime blocker | preserve bytes; reproduce emitted runtime |
 | Raw zero is clear/control | parser, binary, A5 2/2, file-3 zero output | confirmed | explicit clear semantics |
 | Cue application is sparse/persistent | controlled cues, renderer equality, cache binary | confirmed | omitted channels retain state |
@@ -340,20 +354,21 @@ that authority and does not emulate inactive SoundSwitch multi-deck policy.
 | Negative records are pre-roll | bytes, ordering, renderer | confirmed | apply before time zero |
 | Type-1 17-byte records are intensity | `AttrChangeEntry` reader/writer | confirmed | preserve; no current-profile channel write |
 | All active Autoloops are clean-byte exportable | 19 bindings, 42/42 parser, no missing GUIDs | confirmed | captures are optional validation |
-| All active scripted tracks are clean-byte exportable | 32 existing-path rows, supported layouts | confirmed | new matching tracks export directly |
+| All active scripted tracks are clean-byte exportable | 32 existing-path rows, supported layouts; DD42028C U0 mismatch | structural only | fail closed without structural or oracle parity proof |
 | Static Looks are GUID-keyed 32-slot arrays | manager/slot reader-writer and controlled diffs | confirmed | export all slots and values |
 | `StaticOverrideN` uses direct slot N | registry bytes + `EnableStaticLookOverride` | confirmed | DDJ note-on/off exact override |
 | MIDI mappings are complete-rescan data | recordable operators and save/load callers | confirmed | add/edit/delete picked up next export |
 | Current note-0 blackout is file 3 | registry, live config, AppLog/bridge/wire | confirmed | momentary zero then current-source rerender |
 | Channel-2 utilities have SoundSwitch targets | decoded registry | contradicted/obsolete | treat as bridge-owned, never guess |
-| Per-file oracle canonicalization is required | corrected physical grammar + runtime rule | obsolete for supported content | oracles remain independent verification only |
+| Per-file oracle canonicalization is required | DD42028C generated-content mismatch and inexact local containment patch | required when structural parity proof is absent | oracle-derived artifacts must pass every approved boundary |
 | Exact SoundSwitch multi-deck parity is required | bridge ownership contract | not a product requirement | consume bridge active deck |
 
 ## Remaining unknowns and unsupported boundaries
 
-No remaining behavioral unknown is currently known to block the bounded
-exporter/player assumptions for SoundSwitch 2.10.3 current content, but the
-evidence gates below must stay visible and fail closed.
+DD42028C is a known blocker for broad active-scripted exact-parity claims. The
+bounded exporter/player can still parse current content, but active scripted
+publication must fail closed unless each document/layout has structural parity
+proof or an oracle proof.
 
 The following are explicit compatibility or hardware boundaries:
 
@@ -362,6 +377,8 @@ The following are explicit compatibility or hardware boundaries:
   re-decompiled and compared;
 - a binary callsite for the runtime `raw-1` renderer rule, which was not located
   in the reader/writer path and remains wire-backed;
+- the exact DD42028C saved-byte/runtime mechanism beyond the inspected
+  `.ssfile` reader/cache path;
 - a changed primary Venue/profile, universe, or address layout until separately
   decoded and validated;
 - the inactive In-App Demo layout;
@@ -378,14 +395,15 @@ oracles, or guessed channel routing.
 
 ## Go/no-go
 
-**GO** for a perfect exporter/importer/player implementation specification.
+**GO** for an exporter/importer/player implementation specification with
+scripted parity proof gates.
 
 The specification must include complete atomic rescans, version/profile gates,
 all active Autoloops and scripted tracks, the full primary-Venue Attribute Cue
 bank, all 32 Static Looks, learned IAC and DDJ mappings, collision detection,
 momentary Static Override and blackout behavior, deterministic current-position
 rendering, a bridge-owned emergency mask, pack hashes, independent verification,
-and rollback/default-off phases.
+scripted structural/oracle parity gates, and rollback/default-off phases.
 
 Runtime implementation, bridge restart/toggle, MIDI/Art-Net/Enttec output, and
 physical hardware checks remain blocked pending their own reviewed phases and

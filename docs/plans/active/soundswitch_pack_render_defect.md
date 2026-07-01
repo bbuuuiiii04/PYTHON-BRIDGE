@@ -1,16 +1,27 @@
 ---
 doc_status: active-investigation
 truth_level: live-capture + deterministic-render + pack-data grounded
-last_verified_commit: 837c5a6
+last_verified_commit: 03af947
 last_verified_date: 2026-07-01
 validation_scope: local ignored canonical-pack patch from one operator-approved SoundSwitch U0 capture; software verification only; no restart or hardware validation
 ---
 
-# SoundSwitch Bridge Pack — Render Defect (scripted CH11 Strobe et al.)
+# SoundSwitch Bridge Pack - Render Defect (scripted CH11 Strobe et al.)
 
-The bridge's SoundSwitch pack renderer does not reproduce SoundSwitch's DMX output
-for a scripted track. Root cause is a **pack DATA defect** (wrong/missing channel
-values in the generated `rbss_canonical_pack`), NOT a runtime or render-logic bug.
+> **2026-07-01 routing update:** this document records the confirmed
+> DD42028C generated-pack defect and the ignored local containment patch. The
+> current root-cause implementation spec is
+> `docs/plans/active/soundswitch_pack_parity_root_cause_spec.md`. Do not treat
+> the `oracle_rendered` local pack as proof that the exporter/importer is
+> correct.
+
+The bridge's SoundSwitch pack renderer does not reproduce SoundSwitch's DMX
+output for this scripted track. For this witness, the immediate failure is a
+**pack DATA defect** (wrong/missing channel values in the generated
+`rbss_canonical_pack`), NOT a runtime or render-logic bug. The broader root
+cause is global: generated `.ssfile` cue replay was being treated as proven
+SoundSwitch DMX parity even though the verifier only checks the same internal
+cue-resolution model.
 
 ## Anchor facts (capture-free, solid)
 
@@ -87,6 +98,26 @@ Patch result: 14/91 boundary frames changed. Runtime render of this track now in
 `CH11 ∈ {0,227,245,255}` and `CH6=86`; event `27539ms` renders
 `(3,0,14,86,190,141,110,162,86,0,227,0,0,0,191,0,0,0,121)`.
 
+Later audit against `/tmp/rbss_parity_sniff.jsonl` found that this is not exact
+parity. Using first-lit U0 alignment, the old generated DD42028C boundaries
+matched nearest SoundSwitch U0 at 69/91 boundaries; the local patch improved the
+score to 81/91, but boundary 10 at `41202ms` regressed from a U0-matching old
+generated `(CH10,CH11)=(0,255)` to patched `(110,0)`. The patch is useful
+operator containment for the headline CH11=227 section, not a validated export
+algorithm.
+
+## Current binary/static finding
+
+The 2026-07-01 callable GhidraMCP pass did not find an addressed-footer,
+retained-prefix, or shared-table cue remap in the arm64 `.ssfile`
+reader/writer/cache path. `ReadAttributesCueTrack -> ReadEntry` reads the cue
+map plus timeline integer, resolves a cue GUID, and normal playback cache rebuild
+copies the prior cache then overlays the current cue's sparse attributes. That
+supports the renderer shape when cue identity is right, but it does not explain
+DD42028C's U0 row deltas. A simple offset change is also rejected: nearest-U0
+scores were `raw-2 = 6/91`, `raw-1 = 69/91`, direct `= 27/91`, and `raw+1 =
+1/91`.
+
 Tracked code support:
 
 - `soundswitch_laser_player.render_scripted_frame()` now prefers verified
@@ -101,3 +132,6 @@ Tracked code support:
 SoundSwitch-side values come from one operator-approved live capture (universe 0, clean).
 Not re-measured; treated as ground truth per operator direction (skip re-capture).
 No bridge restart or hardware validation has been performed after the local pack patch.
+A fresh **Export from SoundSwitch** may regenerate the old bad generated
+boundaries unless the exporter/importer fix in
+`soundswitch_pack_parity_root_cause_spec.md` is implemented.

@@ -1,8 +1,8 @@
 ---
 doc_status: research-current
 truth_level: byte-capture-and-binary-grounded
-last_verified_commit: 74febec
-last_verified_date: 2026-06-29
+last_verified_commit: 03af947
+last_verified_date: 2026-07-01
 validation_scope: SoundSwitch 2.10.3 current-project bytes, controlled diffs, static binary analysis, and passive software-visible Art-Net; hardware-unvalidated
 ---
 
@@ -92,6 +92,14 @@ raw_reference == 0: clear/control event
 raw_reference > 0:  stored_key = raw_reference - 1
 ```
 
+2026-07-01 caveat: this remains the best supported default for the legacy A5,
+legacy Autoloop, and cold-authored scripted evidence below, but it is not a
+complete exact-parity model for every active scripted document. Active scripted
+track `dd42028c-0823-4a8d-ad7e-b26e24180272` uses the
+`dictionary_timeline_addressed_footer` layout and has clean U0 boundary evidence
+where SoundSwitch resolves or composes cue content that no single global offset
+can produce. See `docs/plans/active/soundswitch_pack_parity_root_cause_spec.md`.
+
 Evidence:
 
 - legacy A5 scripted wire: 14/14 positive events one-based, 0/14 direct;
@@ -102,12 +110,19 @@ Evidence:
 Binary boundary:
 
 - current GhidraMCP inspection of the arm64 reader/writer confirms the physical
-  fields above, but does not prove the runtime `raw-1` renderer rule;
+  fields above, but does not prove the runtime `raw-1` renderer rule or the
+  DD42028C addressed-footer runtime composition;
 - `AttributesCueMap::AttributesCueMap(AttributesCueLibrary&)` assigns cue-map
   keys from zero, and `AttributeCueTrackEntry::ReadEntry` / `WriteEntry` use the
   stored map key directly;
 - therefore the `raw-1` rule is passive-wire/runtime evidence for SoundSwitch
   2.10.3 current content, not a `.ssfile` reader/writer storage rule.
+- the 2026-07-01 GhidraMCP expansion did not find any addressed-footer,
+  retained-prefix, or shared-table cue remap in `SoundSwitchDocData::Read`,
+  `MainTrack::ReadMain`, `AttributeCueTrack::ReadAttributesCueTrack`,
+  `AttributeCueTrackEntry::ReadEntry`, `ResolveAttributesCues`, cache rebuild,
+  or playback lookup. These bytes remain retained/provenance bytes until a
+  separate proof shows render participation.
 
 The editor selected RED/BLUE/GREEN for that cold track but runtime emitted
 PURPLE/RED/TURQOISE. The exporter reproduces runtime output from saved bytes; it

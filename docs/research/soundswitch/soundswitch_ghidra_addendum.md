@@ -1,9 +1,9 @@
 ---
 doc_status: research-current
 truth_level: binary-static-analysis-corroborating
-last_verified_commit: 74febec
-last_verified_date: 2026-06-29
-validation_scope: read-only static analysis of local SoundSwitch 2.10.3 binary; current GhidraMCP expansion is arm64-inspected and x86_64 parity remains a separate gate; no process attach or modification; hardware-unvalidated
+last_verified_commit: 03af947
+last_verified_date: 2026-07-01
+validation_scope: read-only static analysis of local SoundSwitch 2.10.3 binary; current GhidraMCP expansion is arm64-inspected with x86_64 symbol parity checked but not decompiled; no process attach or modification; hardware-unvalidated
 ---
 
 # SoundSwitch binary reverse-engineering addendum
@@ -19,8 +19,10 @@ The original analysis used `nm`, `c++filt`, `otool`, and headless Ghidra
 against the local SoundSwitch 2.10.3 universal binary. The 2026-06-29 expansion
 used GhidraMCP against the loaded thin arm64 program
 `SoundSwitch_2_10_3_arm64`; the thin x86_64 program was imported but not used as
-new evidence. No app bundle, project, or live process was patched, injected,
-attached, or modified.
+new evidence. The 2026-07-01 expansion used the same GhidraMCP path against the
+operator-open SoundSwitch project and confirmed the `.ssfile` reader/writer/cache
+path for the DD42028C parity investigation. No app bundle, project, or live
+process was patched, injected, attached, or modified.
 
 Inspected binary identity for the 2026-06-29 expansion:
 
@@ -30,6 +32,43 @@ Inspected binary identity for the 2026-06-29 expansion:
   `b8db8335d96d090faf281ef782426d7995a7ae35d0fb656c490f3fd7db8f2694`;
 - thin x86_64 SHA256
   `0e68b7273d456f44479fcca100724226780f5dfd6eedf8f7235cc465fce72593`.
+
+## DD42028C parity expansion - 2026-07-01
+
+GhidraMCP was callable in-session: `get_current_function` returned a function
+from the opened SoundSwitch program, and `list_methods` returned the loaded
+function table. The local universal binary still hashes to
+`636ed4aa48287d019a96c60f8d9107e75f3e72abe4f7b0aa8fa54aaa661984e9` and reports
+`x86_64 arm64`. Arm64 was decompiled; x86_64 was checked for corresponding
+symbols with `nm` but was not separately decompiled.
+
+Additional arm64 functions inspected for the DD42028C mechanism:
+
+| Function | Address | Finding |
+| --- | --- | --- |
+| `SoundSwitchDocData::Read` | `0x1003318e8` | reads document/version, venue data, beatgrid, `MainTrack`, and the 10-byte trailer fields; no observed post-trailer cue remap branch |
+| `MainTrack::ReadMain` | `0x1003cfb8c` | reads `SSTrack`, link/source/ref tracks, `AttributeCueTrack`, then resolves attributes cues |
+| `AttributeCueTrack::ReadAttributesCueTrack` | `0x1003c26e4` | reads one `AttributesCueMap`, a timeline count, and one `AttributeCueTrackEntry` per row |
+| `AttributesCueMap::Read` | `0x1003c0f00` | reads GUID plus `stored_key` records and builds GUID/key and key/GUID maps |
+| `AttributesCueMap::AttributesCueMap` | `0x1003c0c2c` | writer-side map builder assigns zero-based keys from `AttributesCueLibrary` order |
+| `AttributeCueTrackEntry::ReadEntry` | `0x1003c16ac` | reads version, constant, time, saved positive integer, and looks that integer up in the cue map |
+| `AttributeCueTrackEntry::WriteEntry` | `0x1003c17dc` | writes the cue-map key for the entry's selected cue GUID |
+| `AttributeCueTrack::WriteAttributesCueTrack` | `0x1003c2960` | writes the map plus every resolved entry |
+| `AttributeCueTrack::ResolveAttributesCues` | `0x1003c2c00` | resolves saved entry GUIDs through `AttributesCueLibrary` |
+| `AttributeCueTrackCache::Rebuild` | `0x1003c1e38` | starts from zero, then copies the previous cache entry and overlays converted cue attributes |
+| `AttributeCueTrackCacheEntry::Lookup` | `0x1003c4960` | returns cached attribute value by key, otherwise zero |
+| `SSPlaybacks::RefreshCache` | `0x100338198` | selects Static Override before normal Static Look, then playback cache path |
+| `SSPlaybacks::SetChannelAttributes` | `0x10033710c` | uses base cache values, then applies matching Static Look cache values and final global overrides |
+| `AutoLoopLayout::buildAutoLoopForStartingBeat` | `0x10025f22c` | stores Autoloop index/start/end/beat-count/document pointer |
+| `AutoLoopLayout::GetStateForTime` | `0x10025f000` | converts time to beat position and 600-ticks-per-beat phase tick |
+| `AutoLoopTrack::GetLightingState` | `0x10025e8b0` | renders the selected Autoloop document through venue lighting state |
+
+This pass rejects one tempting explanation for DD42028C: no inspected
+reader/writer/cache function consumes the addressed footer, retained prefix, or
+shared-table bytes as a cue identity, remap, composition, cache-rebuild, or
+runtime lookup table. DD42028C still proves generated cue replay is not exact
+U0 parity, but the exact saved-byte mechanism is not present in the inspected
+`.ssfile` path.
 
 ## `.ssfile` readers and writers
 
@@ -51,14 +90,15 @@ The paired writers establish:
   `u32 raw_reference`;
 - `SoundSwitchDocData` trailer: `u32, bool, u32, bool`, 10 physical bytes.
 
-The 2026-06-29 arm64 GhidraMCP pass shows the reader/writer path uses the stored
+The current arm64 GhidraMCP passes show the reader/writer path uses the saved
 integer without a provenance branch. `AttributesCueMap::AttributesCueMap` builds
 cue-map keys from zero, and `AttributeCueTrackEntry::ReadEntry` / `WriteEntry`
-read/write that direct key. Wire behavior remains the final product rule:
-current 2.10.3 runtime emits positive references as `raw-1`, including a
-cold-open newly authored track. The editor/writer can store the visually
-selected direct number; that mismatch is application behavior, not a second
-loader format.
+read/write cue-map keys. Wire behavior remains the final product rule for the
+legacy A5, legacy Autoloop, and cold-authored scripted evidence: current 2.10.3
+runtime emits positive references as `raw-1`. DD42028C is now the explicit
+exception proving that rule is not an exact-parity algorithm for every active
+scripted document. The editor/writer can store the visually selected direct
+number; that mismatch is application behavior, not a second loader format.
 
 `AttrChangeEntry::Read/Write` proves the 17-byte records are version-2
 intensity `AttributeTrack` entries. `Channel::SetIntensity` requires a channel
@@ -190,7 +230,10 @@ export until separately decoded and validated.
 The arm64 binary evidence confirms the physical `.ssfile`, Static Look, learned
 MIDI map, override precedence, blackout, current-profile intensity questions,
 and Autoloop beat-window/index machinery needed to bound the exporter/player
-research. It does not prove Native Autoloop DMX phase behavior. Remaining limits
-are x86_64 parity for this expansion, future version/profile compatibility, the
-wire-backed-but-not-reader/writer-binary-located runtime `raw-1` rule, the
-RW-7/T7d passive phase corpus, and hardware validation.
+research. It also rejects addressed-footer/prefix/shared-table cue remapping in
+the inspected reader/cache path. It does not prove Native Autoloop DMX phase
+behavior or the exact DD42028C U0 mechanism. Remaining limits are x86_64
+decompile parity for this expansion, future version/profile compatibility, the
+wire-backed-but-not-reader/writer-binary-located runtime `raw-1` rule outside
+the DD42028C exception, the RW-7/T7d passive phase corpus, and hardware
+validation.

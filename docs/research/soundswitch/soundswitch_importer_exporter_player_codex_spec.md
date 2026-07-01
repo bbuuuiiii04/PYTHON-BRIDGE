@@ -1,8 +1,8 @@
 ---
 doc_status: active-product-contract-implementation-partial
 truth_level: code-byte-binary-and-wire-verified
-last_verified_commit: b2ce63d
-last_verified_date: 2026-06-23
+last_verified_commit: 03af947
+last_verified_date: 2026-07-01
 validation_scope: original implementation/product contract reconciled with current partial implementation; SoundSwitch 2.10.3 canonical project/RAVE profile; hardware-unvalidated
 ---
 
@@ -19,6 +19,15 @@ drifts.
 `historical-draft` / superseded and MUST NOT be cited as implementation
 authority; it predates the DDJ Static Override closure, the exact 32-slot Static
 Look grammar, and learned-MIDI add/remove behavior.
+
+**Scripted parity correction (2026-07-01).** This original contract is
+superseded for active scripted exact-parity claims by
+`docs/plans/active/soundswitch_pack_parity_root_cause_spec.md`. DD42028C proves
+that generated `.ssfile` cue replay can be internally self-consistent and still
+mismatch SoundSwitch U0. Current GhidraMCP confirms the reader/cache shape but
+does not find a footer/prefix/shared-byte remap or global-offset fix. Active
+scripted documents therefore need structural proof, U0-oracle proof, or
+fail-closed publication.
 
 **Implementation reconciliation (2026-06-23).** The current canonical saved
 project was re-run through `tools/prove_soundswitch_pack_generation.py` at HEAD
@@ -290,8 +299,9 @@ Decoder requirements:
    must not crash decode, and must not be counted as one of the 232.
 2. Use only the corrected physical CAF grammar. Do not provide shifted-parser
    compatibility.
-3. Resolve positive references with the explicit 2.10.3 `raw-1` rule after the
-   version/profile gate. Raw zero remains a distinct clear/control record.
+3. Resolve positive references with the explicit 2.10.3 `raw-1` candidate rule
+   after the version/profile gate only for structurally proven or oracle-proven
+   layouts/documents. Raw zero remains a distinct clear/control record.
 4. Select the unique Static Looks collection by primary Venue GUID, require
    version 1/count 32, and retain every version-5 slot including empty slots.
 5. Decode the complete learned MIDI map. Preserve all devices/message types,
@@ -364,7 +374,10 @@ Requirements:
    IAC selections, and DDJ Static Overrides. Mark unlearned utility events as
    `no_project_target`; do not invent a target.
 6. Pre-render CH1-CH19 at event boundaries and static slots using the production
-   pure renderer. Captures remain verifier oracles, never pack input.
+   pure renderer only when the scripted layout/document has structural parity
+   proof. If structural proof is absent, an approved offline U0 oracle may become
+   pack input only as explicit `oracle_verified_boundaries`-style provenance;
+   otherwise publication must fail closed.
 7. Refuse a stale cue reference and report source file, physical record offset,
    elapsed/tick, raw reference, candidate key, and missing GUID. Remediation is
    to remove/replace the placement in SoundSwitch, save, and re-export.

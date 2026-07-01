@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 6c51eb8
-last_verified_date: 2026-06-29
+last_verified_commit: 03af947
+last_verified_date: 2026-07-01
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
 
@@ -80,7 +80,9 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/plans/completed/docs_orphan_check_spec.md` | COMPLETED / SUPERSEDED PLANNING | Active-doc lifecycle check (orphan + stale) — IMPLEMENTED in `tools/check_agent_contracts.py`; AWR-007 done. Historical record. |
 | `docs/plans/active/soundswitch_README.md` | ACTIVE PROJECT INDEX | Grouped routing for the SoundSwitch exporter/bridge-native DMX project. |
 | `docs/plans/active/soundswitch_exporter_remaining_work.md` | ACTIVE CHECKLIST / ROADMAP | Current landed-versus-remaining authority. RW-1 through RW-5 and native Autoloop DMX are implemented/software-tested; old T7d six-scenario gating is historical and no longer blocks native implementation; live/runtime validation, a real hardware run, and final closeout remain. |
-| `docs/plans/active/soundswitch_pack_render_defect.md` | ACTIVE INVESTIGATION / LOCAL PATCH RECORD | Scripted U0/U1 mismatch for `dd42028c-0823-4a8d-ad7e-b26e24180272`: mixer theory rejected; local ignored canonical pack patched with capture-derived `oracle_rendered` boundary frames; no post-patch hardware validation. |
+| `docs/plans/active/soundswitch_pack_parity_root_cause_spec.md` | PLAN / SPEC (ACTIVE) | Current global root-cause implementation spec for potential DMX cue mismatches in SoundSwitch `.ssfile` cue replay. DD42028C is the first concrete witness; current GhidraMCP evidence confirms the reader/cache path but does not find a footer/prefix/shared-byte remap, so every active scripted document must become structurally proven, U0-oracle verified, or fail-closed. Also separates Autoloop residual mismatches, Static Look evidence limits, native Autoloop risk, and runtime-driver non-cause. Tracked under AWR-112. |
+| `docs/plans/active/soundswitch_pack_render_defect.md` | ACTIVE INVESTIGATION / LOCAL PATCH RECORD | Scripted U0/U1 mismatch for `dd42028c-0823-4a8d-ad7e-b26e24180272`: mixer theory rejected; local ignored canonical pack patched with capture-derived `oracle_rendered` boundary frames; later audit shows the patch improves but does not exactly match U0 boundaries. |
+| `docs/plans/active/soundswitch_dmx_cue_mismatch_spec.md` | ACTIVE INVESTIGATION / REJECTED-THEORY WARNING | Contains a correction banner rejecting its playback-mixer theory. Do not resume mixer-renderer tasks from its body; use `soundswitch_pack_parity_root_cause_spec.md` for current parity work. |
 | `docs/plans/active/soundswitch_importer_exporter_player_codex_spec.md` | ACTIVE CONTRACT POINTER | Symlink to the original product/implementation contract. Read the active remaining-work roadmap for current status. |
 | `docs/plans/active/soundswitch_t7c_pack_driver_spec.md` | COMPATIBILITY POINTER | Preserves code/test links to the completed T7c spec; current status is in the SoundSwitch remaining-work roadmap. |
 | `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md` | PLAN / SPEC (ACTIVE) | Historical six-scenario T7d blocker plan retained as evidence/tooling provenance. It is not the active gate for native Autoloop DMX; the greenlit native path uses the authority doc, native runtime spec, offline equivalence oracle, and operator two-flight calibration/A-B run. |
