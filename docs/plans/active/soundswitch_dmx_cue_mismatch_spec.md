@@ -8,6 +8,29 @@ validation_scope: read-only investigation plus software tests; no bridge restart
 
 # Codex Implementation Spec - SoundSwitch DMX Cue Mismatch
 
+> **CORRECTION 2026-06-30 — root cause A2/A3 REJECTED; mixer Tasks 3-4 STRUCK.**
+> Operator ground truth overrides the Ghidra-derived blend theory: with the DMX
+> lasers connected and the bridge connected to SoundSwitch, the lasers render
+> fine, and two-deck lighting **blending does not happen and is not wanted**. So
+> "SoundSwitch renders a two/four-playback mixer composite" (A2/A3) is wrong —
+> the differing channels were pattern-matched to a second track (`528e...`) on a
+> coincidence. **Do not build the playback-mixer renderer (Tasks 3-4).**
+>
+> The ONLY goal: verify the bridge lighting-pack renderer produces the **same
+> DMX values at the same timing** as SoundSwitch — a **single-deck** value+timing
+> parity check. That check already exists: `tools/artnet_compare.py --live`
+> (U0 = SoundSwitch, U1 = bridge pack render).
+>
+> Evidence (autoloop 60s capture, `/tmp/rbss_artnet_autoloop_60_1782857387.json`):
+> the bridge already hits **byte-for-byte parity on thousands of frames**
+> (identical hashes `fe007ef3`, `ecb06ce7`, `40d28b19`, `76ca83e0`, `57e053ff`,
+> `67938e7b`). Real divergences are (1) **bridge-dark while SS-lit** (~1,671 fr;
+> the autoloop latch — Task-1 fix in worktree), (2) **off-by-one-channel** (~890
+> fr; single-deck cue/timing skew), (3) **frame-timing/rate skew** (SS ~4,400
+> fr/60s vs bridge far more). None are blends. Keep Tasks 1, 2, and the
+> `artnet_compare.py` hardening; drop 3-4; treat scripted parity as an unproven
+> single-deck check pending one fresh live capture (U0 is not persisted on disk).
+
 This spec fixes the bridge-vs-SoundSwitch DMX cue mismatch by matching the
 runtime model SoundSwitch actually uses. Do not reduce this to "truth mode" or
 "software zero frame". U1 truth proved the bridge is sending its own rendered
