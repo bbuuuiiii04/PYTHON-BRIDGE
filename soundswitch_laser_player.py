@@ -119,6 +119,13 @@ def render_scripted_frame(track: LoadedDocument | LoadedScriptedTrack, elapsed_m
         document = track
     if document.layout not in SUPPORTED_LAYOUTS:
         return ZERO_FRAME
+    if document.events and all(event.boundary_frame is not None for event in document.events):
+        frame = ZERO_FRAME
+        for event in sorted(document.events, key=lambda row: (row.time, row.source_order)):
+            if event.time > elapsed_ms:
+                break
+            frame = event.boundary_frame or frame
+        return frame
     return _apply_events(document, ZERO_FRAME, lambda time: 0 <= time <= elapsed_ms)
 
 

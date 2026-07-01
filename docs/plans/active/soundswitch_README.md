@@ -18,10 +18,11 @@ implementation authority. Research/format evidence remains grouped under
    checklist and roadmap**. It records landed software, native Autoloop
    implementation status, remaining live/hardware gates, task order, and
    completion definition.
-2. `soundswitch_dmx_cue_mismatch_spec.md` - root-cause verdict and fix plan for
-   bridge U1 truth frames that do not match SoundSwitch U0, including scripted
-   playback-mixer parity, autoloop bridge-dark latch behavior, fixture-group
-   filtering, and comparator classification.
+2. `soundswitch_dmx_cue_mismatch_spec.md` and
+   `soundswitch_pack_render_defect.md` - current scripted U0/U1 parity surface.
+   The playback-mixer theory is rejected; the confirmed issue is wrong generated
+   pack content for one scripted track, locally patched through capture-derived
+   `oracle_rendered` boundaries.
 3. `../../research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
    - original product/implementation contract. Use it for intended behavior,
    then use the remaining-work roadmap for actual landed status.

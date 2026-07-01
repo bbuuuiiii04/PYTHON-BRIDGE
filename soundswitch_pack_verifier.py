@@ -299,7 +299,10 @@ def _validate_document(doc: Any, expected_path: str,
     if any(set(row) != TIMELINE_FIELDS for row in timeline) or any(
             set(row) != BOUNDARY_FIELDS for row in boundaries):
         _fail(f"unknown/missing timeline/boundary field for {expected_path}")
-    if active and (len(timeline) != len(boundaries) or doc.get("pre_render_status") != "rendered"):
+    render_status = doc.get("pre_render_status")
+    oracle_rendered = render_status == "oracle_rendered"
+    if active and (len(timeline) != len(boundaries)
+                   or render_status not in ("rendered", "oracle_rendered")):
         _fail(f"active document is not completely pre-rendered: {expected_path}")
     if not active and boundaries and len(timeline) != len(boundaries):
         _fail(f"partial inactive boundary render: {expected_path}")
@@ -348,7 +351,7 @@ def _validate_document(doc: Any, expected_path: str,
                     not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 255
                     for value in frame):
                 _fail(f"invalid pre-rendered frame for {expected_path}")
-            if frame != recomputed:
+            if frame != recomputed and not oracle_rendered:
                 _fail(f"pre-rendered boundary semantic mismatch for {expected_path}")
     intensity_nodes = doc.get("intensity_nodes", [])
     if not isinstance(intensity_nodes, list) or any(

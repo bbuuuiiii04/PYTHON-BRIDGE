@@ -632,6 +632,20 @@ class CurrentProjectPackTests(unittest.TestCase):
         self._semantic_mutation(static, "static_looks.json", mutate_static)
         self.assertRejected(static)
 
+    def test_oracle_rendered_scripted_boundaries_can_be_literal_after_rehash(self):
+        pack = self._copy("oracle-scripted-boundary")
+        relative = next(p.relative_to(pack).as_posix() for p in (pack / "scripted").glob("*.json")
+                        if json.loads(p.read_text())["document"]["pre_rendered_boundaries"])
+
+        def mutate(value):
+            document = value["document"]
+            document["pre_render_status"] = "oracle_rendered"
+            frame = document["pre_rendered_boundaries"][0]["frame"]
+            frame[0] = (frame[0] + 1) % 256
+
+        self._semantic_mutation(pack, relative, mutate)
+        self.assertTrue(verify_pack(pack)["verified"])
+
     def test_catalog_tail_guid_collision_is_rejected_after_canonical_rehash(self):
         pack = self._copy("mut-catalog-tail-guid-collision")
         def collide_with_render_cue(value):

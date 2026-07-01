@@ -130,6 +130,17 @@ class PureRendererTests(unittest.TestCase):
         ))
         self.assertEqual(render_scripted_frame(track, 0)[0:3], (0, 0, 7))
 
+    def test_scripted_prefers_verified_boundary_frames_when_present(self):
+        boundary = (9,) + (0,) * 18
+        track = _document(LoadedTimelineEvent(
+            time=10, source_order=0, source_offset=100,
+            reference_kind="cue", raw_reference=1,
+            patch=(LoadedAttribute(0x493, 1, 1, 1),),
+            boundary_frame=boundary,
+        ))
+        self.assertEqual(render_scripted_frame(track, 9), ZERO_FRAME)
+        self.assertEqual(render_scripted_frame(track, 10), boundary)
+
     def test_autoloop_signed_preroll_steady_wrap_and_sparse_persistence(self):
         loop = _document(
             _event(-2, 0, ((1, 10),)),
