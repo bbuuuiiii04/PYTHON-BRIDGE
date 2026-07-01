@@ -10,11 +10,11 @@ validation_scope: Fable 5 one-shot prompt — adversarially audit the "parity is
 
 ## 0. Your mission and the one-shot rule
 
-You are **Fable 5**, the planner/auditor. You get **exactly one prompt — no follow-up round.** Two jobs, in order:
+You are **Fable 5**, the planner/auditor. You get **exactly one prompt — no follow-up round.** Your spec, once Codex implements it, must **FINALIZE the SoundSwitch exporter + bridge DMX runtime feature for shipping**: the bridge pack perfectly mimics SoundSwitch across everything the operator can do, the parity is *proven*, every runtime/exporter gap and edge case is fixed or fail-closed-flagged, and the only thing left is the operator's own physical hardware/optical/kill-path validation run. Treat this as the finishing spec for the entire feature, not a patch. Two jobs, in order:
 
 1. **ADVERSARIALLY AUDIT** the reframe in §2 (claim: the SoundSwitch exporter/pack content is already *faithful*, and perfect parity is blocked only by **3 runtime bridge bugs** — not by any exporter/cue-composition mechanism). Use **Ghidra/GhidraMCP** (authorized, §5) *and* the existing live U0/U1 capture (§3). **Try to REFUTE it.** The reframe rests on a thin sample: 4 scripted tracks (of 32), 3 static looks (of 4 mapped), 18 of 19 autoloops. Confirm it, bound it, or break it — and say which, with evidence.
 
-2. **AUTHOR the complete, self-contained, Codex-executable spec** for the fixes: the 3 runtime bugs if the reframe holds, **plus any exporter/composition fix your audit uncovers** if it doesn't. The spec must be complete enough for Codex to execute end-to-end with no further planning from you.
+2. **AUTHOR the complete, self-contained, Codex-executable spec that achieves PERFECT PARITY** — the end state is the bridge pack reproducing SoundSwitch's DMX (CH1-19) **bit-exactly** across **every** surface, mode transition, timing condition, and edge case the operator can reach, so the bridge can fully replace SoundSwitch live. The 3 runtime bugs (§6.1) are the **known floor, not the ceiling**: you must sweep the whole runtime + exporter for **every** divergence from SoundSwitch — known or not (§6.2) — and spec the fix for each (runtime or exporter). The spec must be complete enough for Codex to execute end-to-end and reach perfect parity with no further planning from you and no second Fable pass. Anything not yet provable must be explicitly fail-closed + flagged, with the exact capture that would prove it.
 
 Rules: You author a spec; you do NOT write production code and you do NOT run captures (the operator + Claude own captures — you get the existing one as evidence and may *specify* additional captures for them in the spec). Never defer to a "future spec." **Code wins over docs**; re-verify every file:line against current code.
 
@@ -78,19 +78,34 @@ Docs (verify vs code): `docs/plans/active/soundswitch_exporter_remaining_work.md
 
 ---
 
-## 6. The fixes to design (if the reframe holds) — Codex-executable
+## 6. The parity goal and the fixes — Codex-executable
 
-Order by value/safety:
+**Definition of done: the bridge pack PERFECTLY mimics SoundSwitch.** For the locked setup, at every scripted cue boundary, static-look trigger, autoloop phase, mode transition, precedence case, and timing condition the operator can produce, the bridge's emitted CH1-19 frame is **byte-identical** to SoundSwitch's, with correct timing. The three confirmed bugs (§6.1) are the *known floor*; your audit + the exhaustive sweep (§6.2) must find **everything else** in the way, and the spec must fix all of it or fail-closed + flag it with the capture that would prove it.
+
+**This spec is the FINISHER.** Once Codex implements it, the SoundSwitch exporter + bridge DMX runtime feature must be **ship-ready**: perfect parity implemented *and proven* (offline oracle + full-coverage operator+Claude capture exam, Part D), every edge case handled or fail-closed-flagged, all software gates green (`docs/plans/active/soundswitch_exporter_remaining_work.md` §"Required software gates"), and the ONLY remaining external gate is the operator's physical hardware/optical/kill-path run (which you cannot perform — define its procedure). Also fold in any still-open items from that doc's §"Remaining work" / §"Project completion definition" that block shipping. State an explicit **ship gate** (the checklist that means "done").
+
+### 6.1 Confirmed fixes (priority order)
 1. **Scripted zero-blip flicker (PRIORITY).** Root-cause the periodic full-zero frames in the pack render/driver path and fix so a steadily-playing scripted track emits a continuous frame — **without** regressing the intended real clears (genuine stop/unload/stale/track-change/discontinuity must still zero; only *transient* jitter must not). Likely in `state_manager._drive_pack_output`'s transport/fresh/discontinuity gates and/or `render_scripted_frame`. Pure-function test seam + a duty-cycle regression (steady playback ⇒ 0% spurious zero frames).
 2. **Static MIDI trigger authority.** Root-cause `[SS-MIDI] input port gone` (the port the operator's controllers use for static holds keeps dropping; the group-health-poison fix wasn't enough) and fix so held static looks reach the bridge and render. Preserve the group-health overlay-trust behavior already landed.
 3. **Autoloop phase + selection.** Lock the phrase-anchored 32-beat phase contract as derived (not guessed); ensure `render_autoloop_frame` reproduces U0 at each phase; root-cause and fix SSAutoLoop4 (note 96) never being selected. Build on the landed phase-zero fix; do not regress it.
-Plus: **any exporter/composition fix your audit uncovers** (if the reframe is wrong somewhere).
+
+### 6.2 Exhaustive DMX-runtime edge-case sweep (find EVERY divergence)
+Perfect mimicry means no divergence anywhere — so sweep the whole pack render/driver runtime **and** the exporter for ANY case where U1 would differ from SoundSwitch's U0 or emit unsafe DMX. Enumerate each, reproduce it (from the existing capture or a specified new operator+Claude capture), and spec a fix; explicitly list any you cannot yet prove and the capture that would. Cover at minimum:
+- **Transport / mode transitions:** scripted↔autoloop↔idle↔static, deck switch mid-cue, pause/resume, stop/unload, seek / elapsed-discontinuity, track-change — and whether EVERY state field is cleaned up on EVERY transition path (not only the path that sets it).
+- **Precedence / masking:** blackout/emergency override, static-overlay precedence, SoundSwitch-present suppression, the reload-wait latch — each must match SoundSwitch's real precedence, not just an internally-consistent one.
+- **Mirror integrity:** whether the 2-laser `0x493`/`0x496` mirror ever diverges on CH1-19.
+- **Reload / runtime-swap races:** pack reload or backend swap during live playback (the atomic `PackRuntime` swap).
+- **Timing / clocking:** BPM drift + tempo change (the capture already showed 160→155 BPM), phrase-boundary races, the 200 Hz push loop vs 60 Hz memory interpolation, phase quantization/rounding.
+- **Input health:** MIDI port-gone, a controller dropping mid-hold, the group-health overlay-trust path.
+- **Frame integrity:** anything nonzero beyond CH19, out-of-range channel values, non-primary fixture-group leakage, partial/garbled frames.
+- **Coverage completeness:** the reframe is proven on only 4 of 32 scripted tracks, 3 of 4 static looks, 18 of 19 autoloops — the spec MUST define exactly what additional operator+Claude captures close the gap to ALL 32 scripted tracks, all 4 mapped static looks, and all 19 autoloops, and must fail-closed + flag anything still unproven.
+- Plus **any exporter/composition fix your audit uncovers** if the reframe is wrong anywhere.
 
 ---
 
 ## 7. Deliverable — the Codex spec (Part A-E, self-contained)
 
-- **Part A — Audit result + root cause (read-only):** your verdict on the reframe per surface (CONFIRMED / BOUNDED / REFUTED) with Ghidra + capture evidence, every claim labeled confirmed/assumed/unknown. The confirmed mechanism/root-cause for each of the 3 runtime bugs (and any exporter issue found).
+- **Part A — Audit result + root cause (read-only):** your verdict on the reframe per surface (CONFIRMED / BOUNDED / REFUTED) with Ghidra + capture evidence, every claim labeled confirmed/assumed/unknown. The confirmed mechanism/root-cause for each of the 3 runtime bugs, the full §6.2 edge-case sweep results (every divergence found, its root cause, its proof status: proven / needs-capture / fail-closed-flagged), and any exporter issue found.
 - **Part B — Design:** the exact fix for each; the "unverified parity" flag model; how verification breaks the exporter/verifier self-reference (oracle grounded in U0/Ghidra, not a re-render). Keep the static step-function model; add no time-awareness.
 - **Part C — Tasks for Codex (ordered, commit after each):** files to change, exact change, a pure-function test seam per task, acceptance check. Scripted zero-blip first.
 - **Part D — Verification / capture protocol (run by operator + Claude, not you):** offline oracle per surface (must fail against today's renderer, pass after fix) + the live whole-show U0/U1 capture exam (what to capture, coverage, pass/fail). Specify additional captures needed (e.g. more of the 32 scripted tracks; SSAutoLoop4).
@@ -104,4 +119,4 @@ Plus: **any exporter/composition fix your audit uncovers** (if the reframe is wr
 - **Out of scope (fail-closed):** any project but the pinned UUID; any venue/profile/universe/fixture but RAVE/CH1-19; SoundSwitch ≠ 2.10.3; multi-deck/crossfade; time-varying/interpolated rendering; multi-fixture-group compositing beyond the mirror assert; `.ssproj` internals; hardware validation.
 
 ## 9. Self-review before finalizing
-Confirm: you attacked the reframe (didn't just accept it) and stated CONFIRMED/BOUNDED/REFUTED per surface with evidence; every mechanism is confirmed/assumed/unknown, never guessed; the zero-blip root cause is pinned in code and proven systemic-or-not; every Codex task has a pure-function seam and a must-fail-then-pass check; the capture protocol is executable by operator+Claude; nothing is deferred to a second pass; live-safety and pinned-scope fail-closed boundaries hold.
+Confirm: you attacked the reframe (didn't just accept it) and stated CONFIRMED/BOUNDED/REFUTED per surface with evidence; every mechanism is confirmed/assumed/unknown, never guessed; the zero-blip root cause is pinned in code and proven systemic-or-not; you swept the runtime EXHAUSTIVELY for every divergence (§6.2), not just the 3 known bugs; every Codex task has a pure-function seam and a must-fail-then-pass check; the capture protocol is executable by operator+Claude; nothing is deferred to a second pass; live-safety and pinned-scope fail-closed boundaries hold. Above all: **once Codex implements this spec, is the feature actually SHIP-READY** — perfect parity proven or fail-closed-flagged, all edge cases + closeout items covered, only the operator's physical hardware run remaining? If not, the spec is incomplete — finish it.
