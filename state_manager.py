@@ -4011,7 +4011,19 @@ class StateManager:
             else:
                 pack = player.pack
                 native_scene = self._native_captured_scene
-                if native_scene is None and self._laser_executor is not None:
+                # Only bootstrap from the laser executor's HELD scene when the
+                # resolver has not yet latched. current_autoloop_scene() returns
+                # the active scene every tick; feeding it on hold ticks (after a
+                # latch) re-anchors anchor_beat=abs_beat_pos every tick and pins
+                # phase_tick at 0. Once latched, hold ticks must pass scene=None so
+                # the anchor holds and phase advances; genuine refires still arrive
+                # via _native_captured_scene (the real edge). See 2026-07-01
+                # all_surface capture (every Autoloop row phase_tick=0).
+                if (
+                    native_scene is None
+                    and self._native_autoloop.state is None
+                    and self._laser_executor is not None
+                ):
                     current_autoloop_scene = getattr(
                         self._laser_executor, "current_autoloop_scene", None)
                     if callable(current_autoloop_scene):

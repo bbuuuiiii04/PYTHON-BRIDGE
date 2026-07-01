@@ -366,6 +366,39 @@ class PackDriverTests(unittest.TestCase):
             "SSAutoLoop4.ssfile",
         )
 
+    def test_native_autoloop_phase_advances_across_hold_ticks(self):
+        """Regression: with a HELD autoloop (laser executor keeps reporting the
+        active scene, but on_decision returns no fresh edge so
+        _native_captured_scene is None on hold ticks), phase_tick must ADVANCE
+        instead of re-anchoring to 0 every tick. Guards the
+        current_autoloop_scene() bootstrap fallback (state_manager.py:4013) from
+        manufacturing a fake edge each tick. See the 2026-07-01 all_surface
+        capture: every Autoloop row had phase_tick=0."""
+        be = _FakeBackend()
+        truth = _FakeTruthSink()
+        sm = _make_sm(
+            player=LaserPackPlayer(_native_pack()),
+            backend=be,
+            truth_sink=truth,
+            os2l_connected_provider=lambda: True,
+        )
+        # Live-like laser executor: HOLDS the active autoloop scene every call.
+        sm._laser_executor = SimpleNamespace(
+            current_autoloop_scene=lambda: _resolved_scene())
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+
+        # Edge tick: captured scene delivers the trigger; anchor latches at 64.0.
+        sm._native_captured_scene = _resolved_scene()
+        sm._native_abs_beat_pos = 64.0
+        sm._drive_pack_output(now=10.0)
+        self.assertEqual(truth.intents[-1]["native_autoloop"]["phase_tick"], 0)
+
+        # Hold tick: no fresh edge, laser still holds the scene, beat advanced +1.5.
+        sm._native_captured_scene = None
+        sm._native_abs_beat_pos = 65.5
+        sm._drive_pack_output(now=10.1)
+        self.assertEqual(truth.intents[-1]["native_autoloop"]["phase_tick"], 900)
+
     # D4
     def test_no_track_no_static_is_zero(self):
         be = _FakeBackend()
