@@ -141,7 +141,9 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
                 "SSAutoLoop18.ssfile",
                 "SSAutoLoop3.ssfile",
                 "SSAutoLoop5.ssfile",
+                "SSAutoLoop52.ssfile",
                 "SSAutoLoop53.ssfile",
+                "SSAutoLoop54.ssfile",
                 "SSAutoLoop55.ssfile",
             },
         )

@@ -142,20 +142,27 @@ class PureRendererTests(unittest.TestCase):
         self.assertEqual(render_scripted_frame(track, 9), ZERO_FRAME)
         self.assertEqual(render_scripted_frame(track, 10), boundary)
 
-    def test_autoloop_signed_preroll_steady_wrap_and_sparse_persistence(self):
+    def test_autoloop_signed_preroll_wrap_and_sparse_persistence(self):
         loop = _document(
             _event(-2, 0, ((1, 10),)),
             _event(0, 1, ((3, 20),)),
             _event(100, 2, ((1, 30),)),
             path="SSAutoLoop1.ssfile",
         )
-        # The prior-cycle end is inherited, then signed pre-roll is applied.
         self.assertEqual(render_autoloop_frame(loop, 0)[0:3], (10, 0, 20))
         self.assertEqual(render_autoloop_frame(loop, 100)[0:3], (30, 0, 20))
         self.assertEqual(render_autoloop_frame(loop, 19_200),
                          render_autoloop_frame(loop, 0))
         self.assertEqual(render_autoloop_frame(loop, 38_500),
                          render_autoloop_frame(loop, 100))
+
+    def test_autoloop_does_not_seed_from_prior_cycle_end(self):
+        loop = _document(
+            _event(-2, 0, ((1, 10),)),
+            _event(100, 1, ((3, 20),)),
+            path="SSAutoLoop1.ssfile",
+        )
+        self.assertEqual(render_autoloop_frame(loop, 0)[0:3], (10, 0, 0))
 
     def test_autoloop_equal_time_stored_order_and_raw_zero_control_persistence(self):
         loop = _document(
@@ -602,7 +609,7 @@ class CurrentPackGoldenTests(unittest.TestCase):
         self.assertEqual(len(loop13.events), 257)
         self.assertLess(loop13.events[0].time, 0)
         self.assertEqual(bytes(render_autoloop_frame(loop13, 0)).hex(),
-                         "3e003700005d8a89d600000000003e00000000")
+                         "3e00000000000089d600000000000000000000")
         self.assertEqual(bytes(render_autoloop_frame(loop13, 1)).hex(),
                          "3e003700005d8a89d600000000001400000000")
         self.assertEqual(render_autoloop_frame(loop13, 0),

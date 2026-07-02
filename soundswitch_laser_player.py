@@ -148,10 +148,9 @@ def render_autoloop_frame(loop: LoadedDocument | LoadedAutoloop,
                           phase_tick: int) -> tuple[int, ...]:
     """Render an Autoloop at an authoritative bridge beat/phrase tick.
 
-    The current verified profile uses a 19,200-tick cycle.  A zero-initialized
-    pass establishes the prior cycle's end state; the current pass inherits
-    that state, reapplies signed negative pre-roll, then applies events through
-    the wrapped phase.  This is intentionally more than ``tick % 19200``.
+    The current verified profile uses a 19,200-tick cycle.  Each cycle starts
+    from zero, applies signed negative pre-roll, then applies events through
+    the wrapped phase.
     """
     if type(phase_tick) is not int or phase_tick < 0:
         raise ValueError("phase_tick must be a non-negative integer")
@@ -163,10 +162,8 @@ def render_autoloop_frame(loop: LoadedDocument | LoadedAutoloop,
         return ZERO_FRAME
     if type(loop.cycle_ticks) is not int or loop.cycle_ticks <= 0:
         raise ValueError("Autoloop cycle_ticks must be a positive integer")
-    prior_cycle_end = _apply_events(loop, ZERO_FRAME, lambda _time: True)
     wrapped = phase_tick % loop.cycle_ticks
-    return _apply_events(loop, prior_cycle_end,
-                         lambda time: time < 0 or 0 <= time <= wrapped)
+    return _apply_events(loop, ZERO_FRAME, lambda time: time < 0 or 0 <= time <= wrapped)
 
 
 def _layer_diagnostic(skipped_count: int, skipped_slots: list[int]) -> PlayerDiagnostic | None:
