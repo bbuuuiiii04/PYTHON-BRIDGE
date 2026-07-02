@@ -638,10 +638,12 @@ class CurrentPackGoldenTests(unittest.TestCase):
         self.assertEqual(script_result.frame, ZERO_FRAME)
         self.assertEqual(script_result.diagnostic.code, "unsupported_scripted")
 
-    def test_catalog_tail_is_retained_distinctly_and_never_enters_player_patches(self):
+    def test_catalog_tail_records_are_absent_and_references_resolve_to_render_cues(self):
+        # Under the byte-proven precede-association model (2026-07-02) every
+        # venue record is a render-bearing cue; the old catalog-tail "cue" was
+        # an artifact of the double off-by-one and must stay absent.
         self.assertGreater(len(self.pack.render_cue_guids), 0)
-        self.assertGreater(len(self.pack.catalog_tail_guids), 0)
-        self.assertTrue(self.pack.render_cue_guids.isdisjoint(self.pack.catalog_tail_guids))
+        self.assertEqual(self.pack.catalog_tail_guids, frozenset())
         referenced = {
             event.resolved_cue_guid
             for row in self.pack.autoloops.values()
@@ -655,9 +657,12 @@ class CurrentPackGoldenTests(unittest.TestCase):
             for event in row.document.events
             if event.resolved_cue_guid is not None and event.patch
         )
-        self.assertTrue(referenced.isdisjoint(self.pack.catalog_tail_guids))
+        self.assertTrue(referenced.issubset(self.pack.render_cue_guids))
 
     def test_loader_rejects_catalog_tail_guid_collision_after_canonical_rehash(self):
+        # Current packs carry no catalog-tail records; inject one whose GUID
+        # collides with a render cue to prove the loader's defensive check
+        # still fails closed on a hostile or legacy pack.
         with tempfile.TemporaryDirectory() as tmp:
             mutated = Path(tmp) / "pack"
             shutil.copytree(self.pack_path, mutated)
@@ -665,9 +670,14 @@ class CurrentPackGoldenTests(unittest.TestCase):
             def collide(value):
                 render_guid = next(row["cue_guid"] for row in value["records"]
                                    if row["record_kind"] == "fixture_payload")
-                tail = next(row for row in value["records"]
-                            if row["record_kind"] == "minimal_default_catalog_tail")
-                tail["cue_guid"] = render_guid
+                last_offset = max(row["source_offset"] for row in value["records"])
+                value["records"].append({
+                    "record_kind": "minimal_default_catalog_tail",
+                    "cue_guid": render_guid,
+                    "source_offset": last_offset + 1,
+                })
+                value["catalog_tail_count"] = value.get("catalog_tail_count", 0) + 1
+                value["total_record_count"] = value.get("total_record_count", 0) + 1
 
             _rewrite_pack_artifact(mutated, "venue_cues.json", collide)
             with self.assertRaisesRegex(SoundSwitchPackLoadError, "catalog-tail GUID"):

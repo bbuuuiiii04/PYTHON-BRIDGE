@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 3f4bcc0
+last_verified_commit: 7d9ecdc
 last_verified_date: 2026-07-02
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
@@ -49,7 +49,7 @@ evidence, and physical validation remain open. The passive parity capture now
 feeds scripted, Autoloop, and Static Look evidence registries; Static Looks are
 generalized by the C6 assertion, capture-diverged Autoloop samples are recorded
 outside the positive registry, and a fresh export now reports active lanes
-`algorithm_generalized: 69`, `oracle_proven: 14`, `unverified_parity: 0`.
+`algorithm_generalized: 67`, `oracle_proven: 16`, `unverified_parity: 0`.
 Trusted publication is software-gated green; physical validation remains open.
 
 | Output | Status | Evidence | Notes |

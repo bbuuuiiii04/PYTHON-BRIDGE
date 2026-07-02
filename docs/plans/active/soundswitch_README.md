@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
-last_verified_commit: 3f4bcc0
+last_verified_commit: 7d9ecdc
 last_verified_date: 2026-07-02
 validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -86,7 +86,7 @@ artifacts, not planning documents. They are not moved into the authority tree.
   fixtures. Static Looks are now `algorithm_generalized` through the documented
   unavailable-window fallback plus the C6 non-generic assertion. Segment-aware
   Autoloop reduction plus supported-layout-family scripted generalization now
-  reports fresh active lanes `algorithm_generalized: 69`, `oracle_proven: 14`,
+  reports fresh active lanes `algorithm_generalized: 67`, `oracle_proven: 16`,
   `unverified_parity: 0`; trusted publication is software-gated green.
 - Pure scripted renderer: implemented/software-wire tested.
 - Config/startup/runtime command/StateManager/Enttec lane: implemented and

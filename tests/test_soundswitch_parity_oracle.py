@@ -114,14 +114,17 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
         self.assertEqual(failures, {})
 
     def test_divergence_ledger_documents_contamination_without_poisoning_pass_rows(self) -> None:
+        # After the byte-proven exact-R + precede-association correction
+        # (2026-07-02) the former ae9e/fc10 "contamination" turned out to be
+        # the double off-by-one and renders byte-exact; the scripted ledger
+        # collapsed to one genuine stale edit on 9947 while every witness
+        # keeps a non-empty pass-row set.
         ledger = self.fixture["capture_source_divergence"]
-        ae9e = "ae9e3c61-af40-4392-80b4-380d39c631b9"
-        fc10 = "fc10fc02-93c2-418f-8815-16088884da42"
-        self.assertGreater(len(self.fixture["scripted"][ae9e]), 0)
-        self.assertGreater(len(self.fixture["scripted"][fc10]), 0)
-        self.assertTrue({"stale_source_edit", "cross_deck_bleed"}.issubset(
-            {row["class"] for row in ledger[ae9e]}))
-        self.assertIn("stale_source_edit", {row["class"] for row in ledger[fc10]})
+        s9947 = "9947c65e-cfd1-476e-aa90-4aed65ae5f11"
+        for ssid in self.fixture["scripted"]:
+            self.assertGreater(len(self.fixture["scripted"][ssid]), 0)
+        self.assertEqual(set(ledger), {s9947})
+        self.assertEqual([row["class"] for row in ledger[s9947]], ["stale_source_edit"])
 
     def test_autoloop_capture_rows_identify_passes_and_blockers(self) -> None:
         passed = set()
@@ -135,13 +138,18 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
             else:
                 failures[identity] = dict(report.issues)
 
+        # SSAutoLoop14 and SSAutoLoop48 joined the pass set after the exact-R
+        # + precede-association correction (2026-07-02): their lit "capture
+        # divergence" was the double off-by-one, not contamination.
         self.assertEqual(
             passed,
             {
                 "SSAutoLoop13.ssfile",
+                "SSAutoLoop14.ssfile",
                 "SSAutoLoop16.ssfile",
                 "SSAutoLoop18.ssfile",
                 "SSAutoLoop3.ssfile",
+                "SSAutoLoop48.ssfile",
                 "SSAutoLoop5.ssfile",
                 "SSAutoLoop52.ssfile",
                 "SSAutoLoop53.ssfile",
@@ -151,12 +159,6 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
             },
         )
         divergence = self.autoloop_fixture["capture_source_divergence"]
-        self.assertEqual(self.autoloop_fixture["autoloop"]["SSAutoLoop14.ssfile"], [])
-        self.assertIn("value_diff", {
-            sample["issue"]
-            for entry in divergence["SSAutoLoop14.ssfile"]
-            for sample in entry["samples"]
-        })
         self.assertIn("pack_lit_u0_dark", {
             sample["issue"]
             for entry in divergence["SSAutoLoop8.ssfile"]
@@ -167,7 +169,9 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
         # sibling's evidence in the ledger, and must still be in the passed set.
         for identity in (
             "SSAutoLoop13.ssfile",
+            "SSAutoLoop14.ssfile",
             "SSAutoLoop16.ssfile",
+            "SSAutoLoop48.ssfile",
             "SSAutoLoop55.ssfile",
             "SSAutoLoop6.ssfile",
         ):

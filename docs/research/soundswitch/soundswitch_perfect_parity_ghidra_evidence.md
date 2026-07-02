@@ -340,3 +340,27 @@ into the current venue cue set. Fresh software export then reports active lanes
 inactive unverified documents remain reported separately. This clears the
 trusted publication software gate only. It is still not live sender, Enttec, or
 physical fixture validation.
+
+---
+
+## Addendum — 2026-07-02 (appended; recorded findings above are unchanged)
+
+Byte evidence (261/261 samples from capture `parity_20260701T185231Z`, plus the legacy A5 wire
+capture at 16/16, operator UI/timeline ground truth, the operator's live cue editor, and a fresh
+SoundSwitch re-bake of `{FC10FC02-…}.ssfile` used as a serialization Rosetta) resolved the Q2
+reconciliation recorded above:
+
+- **"The lookup IS exact" was literal.** Timeline reference resolution is `stored_key ==
+  raw_reference` in the file's own serialized numbers (ref 0 remains the clear sentinel). The
+  "raw−1 is a bridge label space" reconciliation is superseded.
+- The compensating error it was masking: **Venue cue values are precede-associated** — each
+  `(name, guid)` identity owns the attribute block that the linear scan frames under the
+  PREVIOUS record. The shipped `R − 1` + follow-values pipeline was two cancelling off-by-ones,
+  byte-equivalent wherever a document's dictionary is venue-consecutive (every witness), and
+  divergent exactly at splice points (DD42028C, ae9e3c61, fc10fc02, and the formerly
+  "capture-diverged" Autoloops).
+- Consequences: all 233 Venue records are render-bearing cues (the `minimal_default_catalog_tail`
+  "cue" was an artifact of the same framing bug; the catalog-index block is file-tail metadata);
+  the first identity's value block lives in the venue file's unparsed head region (recovered: the
+  cue named `OFF` writes all zeros); a `01000000` marker separates each value block from the next
+  record (232/232 gaps).

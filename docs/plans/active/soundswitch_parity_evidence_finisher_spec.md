@@ -1,7 +1,7 @@
 ---
 doc_status: active-spec
 truth_level: capture-grounded (parity_20260701T185231Z) + current-code-verified at commit 74cbf15
-last_verified_commit: 74cbf15
+last_verified_commit: 7d9ecdc
 last_verified_date: 2026-07-02
 validation_scope: Codex implementation spec for the REMAINING SoundSwitch perfect-parity work after
   the capture-proven cue-resolution + saved-order-selection fix landed in 74cbf15. Scripted
@@ -55,6 +55,15 @@ drive the full software ship gate green.
   contamination (A.3), NOT algorithm error.
 
 ### A.1 The proven mechanism (do not re-litigate)
+
+> **2026-07-02 correction:** the mechanism below was refined by byte evidence: resolution is
+> EXACT (`stored_key == R`, ref 0 clear) and Venue cue values are PRECEDE-associated (each cue
+> owns the value block the scanner framed under the previous record). The `R − 1` + follow-values
+> reading below was two cancelling off-by-ones — byte-equivalent on venue-consecutive
+> dictionaries (all witnesses), divergent exactly at the splice points this spec classified as
+> capture contamination. 261/261 capture samples + the A5 wire capture (16/16) confirm the
+> corrected model; the fixtures/registries were regenerated under it.
+
 
 [confirmed, capture `tools/ssfmt/captures/parity/parity_20260701T185231Z/`]:
 

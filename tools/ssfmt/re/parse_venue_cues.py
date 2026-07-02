@@ -220,6 +220,12 @@ def minimal_tail_cue_at(data: bytes, name_offset: int) -> dict | None:
 
 
 def parse_venue_cues(data: bytes) -> list[dict]:
+    # PHYSICAL scan: records are reported exactly as framed on disk
+    # ([name][guid][header][value block]). NOTE the byte-proven
+    # precede-association (2026-07-02): each framed value block semantically
+    # belongs to the NEXT (name, guid) identity. Structural tools consume
+    # this physical framing; semantic consumers must re-associate (see
+    # layered_renderer.venue_cue_records).
     cues = []
     offset = 0
     while offset + 4 <= len(data):

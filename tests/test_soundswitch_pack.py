@@ -698,16 +698,23 @@ class CurrentProjectPackTests(unittest.TestCase):
         self._semantic_mutation(pack, relative, mutate)
         self.assertTrue(verify_pack(pack)["verified"])
 
-    def test_catalog_tail_guid_collision_is_rejected_after_canonical_rehash(self):
-        pack = self._copy("mut-catalog-tail-guid-collision")
-        def collide_with_render_cue(value):
-            render_guid = next(row["cue_guid"] for row in value["records"]
-                               if row["record_kind"] == "fixture_payload")
-            tail = next(row for row in value["records"]
-                        if row["record_kind"] == "minimal_default_catalog_tail")
-            tail["cue_guid"] = render_guid
-        self._semantic_mutation(pack, "venue_cues.json", collide_with_render_cue)
-        with self.assertRaisesRegex(SoundSwitchPackVerificationError, "globally unique"):
+    def test_injected_catalog_tail_record_is_rejected_after_canonical_rehash(self):
+        # Under the byte-proven precede-association model (2026-07-02) packs
+        # carry no catalog-tail cues; inject a count-consistent one and prove
+        # the verifier's restated invariant fails closed on it.
+        pack = self._copy("mut-catalog-tail-injected")
+        def inject_tail(value):
+            last_offset = max(row["source_offset"] for row in value["records"])
+            value["records"].append({
+                "record_kind": "minimal_default_catalog_tail",
+                "cue_guid": "f" * 32,
+                "source_offset": last_offset + 1,
+            })
+            value["catalog_tail_count"] = value.get("catalog_tail_count", 0) + 1
+            value["total_record_count"] = value.get("total_record_count", 0) + 1
+        self._semantic_mutation(pack, "venue_cues.json", inject_tail)
+        with self.assertRaisesRegex(SoundSwitchPackVerificationError,
+                                    "not cues under the precede-association model"):
             verify_pack(pack)
 
     def test_active_script_reclassification_is_rejected_after_canonical_rehash(self):

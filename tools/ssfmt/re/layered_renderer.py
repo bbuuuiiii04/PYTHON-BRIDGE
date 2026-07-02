@@ -67,17 +67,25 @@ class LayeredState:
 
 
 def venue_cue_records(cues: Iterable[dict], fixture_group: str) -> dict[str, dict]:
-    return {
-        cue["cue_guid"]: {
+    # Byte-proven precede-association (2026-07-02, 261/261 capture samples +
+    # A5 wire 16/16): each physically framed value block belongs to the NEXT
+    # (name, guid) identity, so cue i's patch comes from scanned record i-1.
+    # The first identity's block lives in the unparsed head region (its key 0
+    # is unreachable: ref 0 is the clear sentinel), and the trailing
+    # catalog-index block is file-tail metadata, not cue content.
+    ordered = list(cues)
+    records: dict[str, dict] = {}
+    for index, cue in enumerate(ordered):
+        groups = ordered[index - 1].get("groups", {}) if index else {}
+        records[cue["cue_guid"]] = {
             "name": cue["name"],
             "offset": cue["offset"],
             "patch": {
                 int(channel): value
-                for channel, value in cue["groups"].get(fixture_group, {}).items()
+                for channel, value in groups.get(fixture_group, {}).items()
             },
         }
-        for cue in cues
-    }
+    return records
 
 
 def render_timeline(
