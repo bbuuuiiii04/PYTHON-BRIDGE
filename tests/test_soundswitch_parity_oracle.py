@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -23,6 +24,12 @@ from rb_ss_bridge_v2.soundswitch_parity_oracle import (
     classify_scripted,
     classify_static,
 )
+from rb_ss_bridge_v2.soundswitch_scripted_resolution import resolve_scripted_reference
+from rb_ss_bridge_v2.tools.export_soundswitch_pack import export_pack
+
+
+FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures/soundswitch/parity_oracle/scripted_reduced.json"
+SOURCE_PROJECT = Path.home() / "Music/SoundSwitch/default.ssproj"
 
 
 def _event(time: int, order: int, patch=(), *, clear: bool = False) -> LoadedTimelineEvent:
@@ -69,34 +76,93 @@ class PureParityOracleTests(unittest.TestCase):
         self.assertTrue(classify_static((3,) + (0,) * 18, StaticSample((3,) + (0,) * 18)).passed)
 
 
-@unittest.skipUnless(Path("local/soundswitch/rbss_canonical_pack/manifest.json").is_file(),
-                     "local canonical pack fixture is unavailable")
+@unittest.skipUnless(SOURCE_PROJECT.joinpath(".ssproj").is_file(),
+                     "canonical read-only SoundSwitch project is unavailable")
 class ReducedCaptureFixtureTests(unittest.TestCase):
-    def test_reduced_capture_rows_fail_known_broken_pack_and_pass_lit_matches(self) -> None:
-        fixture = json.loads(Path(
-            "tests/fixtures/soundswitch/parity_oracle/scripted_reduced.json").read_text())
-        pack = load_pack("local/soundswitch/rbss_canonical_pack")
-        failing = set()
-        matching = set()
-        for ssid, rows in fixture["scripted"].items():
-            samples = tuple(
-                ScriptedSample(row["elapsed_ms"], tuple(row["u0_frame"]), row["label"])
-                for row in rows
-            )
-            report = classify_scripted(pack.scripted[ssid], samples)
+    @classmethod
+    def setUpClass(cls):
+        cls.workspace = tempfile.TemporaryDirectory()
+        cls.pack_path = Path(cls.workspace.name) / "pack"
+        export_pack(SOURCE_PROJECT, cls.pack_path)
+        cls.pack = load_pack(cls.pack_path)
+        cls.fixture = json.loads(FIXTURE_PATH.read_text())
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.workspace.cleanup()
+
+    def _samples(self, ssid: str) -> tuple[ScriptedSample, ...]:
+        return tuple(
+            ScriptedSample(int(row["elapsed_ms"]), tuple(row["u0_frame"]), str(row.get("label") or ""))
+            for row in self.fixture["scripted"][ssid]
+        )
+
+    def test_reduced_capture_rows_match_fresh_export(self) -> None:
+        failures = {}
+        for ssid in self.fixture["scripted"]:
+            report = classify_scripted(self.pack.scripted[ssid], self._samples(ssid))
             if not report.passed:
-                failing.add(ssid)
-            for sample in report.samples:
-                if sample.label == "lit-region-match" and sample.class_name == "MATCH":
-                    matching.add(ssid)
-        self.assertTrue({
-            "ae9e3c61-af40-4392-80b4-380d39c631b9",
-            "fc10fc02-93c2-418f-8815-16088884da42",
-        }.issubset(failing))
-        self.assertTrue({
-            "528e8b22-bd17-41b9-a111-275d3e8b3031",
-            "9947c65e-cfd1-476e-aa90-4aed65ae5f11",
-        }.issubset(matching))
+                failures[ssid] = dict(report.counts)
+        self.assertEqual(failures, {})
+
+    def test_divergence_ledger_documents_contamination_without_poisoning_pass_rows(self) -> None:
+        ledger = self.fixture["capture_source_divergence"]
+        ae9e = "ae9e3c61-af40-4392-80b4-380d39c631b9"
+        fc10 = "fc10fc02-93c2-418f-8815-16088884da42"
+        self.assertGreater(len(self.fixture["scripted"][ae9e]), 0)
+        self.assertGreater(len(self.fixture["scripted"][fc10]), 0)
+        self.assertTrue({"stale_source_edit", "cross_deck_bleed"}.issubset(
+            {row["class"] for row in ledger[ae9e]}))
+        self.assertIn("stale_source_edit", {row["class"] for row in ledger[fc10]})
+
+    def _shifted_key_document(self, ssid: str) -> LoadedDocument:
+        scripted = json.loads((self.pack_path / f"scripted/{ssid}.json").read_text())["document"]
+        venue = json.loads((self.pack_path / "venue_cues.json").read_text())
+        patches = {
+            row["cue_guid"]: tuple(
+                LoadedAttribute(
+                    int(attribute["fixture_group"]),
+                    int(attribute["channel_id"]),
+                    int(attribute["dmx_channel"]),
+                    int(attribute["value"]),
+                )
+                for attribute in row["attributes"]
+            )
+            for row in venue["records"]
+        }
+        shifted_key_to_guid = {
+            int(row["stored_key"]) + 1: str(row["cue_guid"])
+            for row in scripted["cue_dictionary"]
+        }
+        events = []
+        for order, row in enumerate(scripted["timeline"]):
+            resolved = resolve_scripted_reference(int(row["raw_reference"]), shifted_key_to_guid)
+            events.append(LoadedTimelineEvent(
+                time=int(row["time"]),
+                source_order=order,
+                source_offset=int(row["source_offset"]),
+                reference_kind=resolved.reference_kind,
+                raw_reference=int(row["raw_reference"]),
+                patch=patches.get(resolved.resolved_cue_guid or "", ()),
+                record_version=int(row.get("record_version", 1)),
+                resolved_stored_key=resolved.resolved_stored_key,
+                resolved_cue_guid=resolved.resolved_cue_guid,
+                boundary_frame=None,
+            ))
+        return LoadedDocument(
+            scripted["relative_path"],
+            scripted["layout"],
+            tuple(events),
+            (),
+        )
+
+    def test_shifted_key_map_negative_control_fails(self) -> None:
+        passing_under_shifted_map = []
+        for ssid in self.fixture["scripted"]:
+            report = classify_scripted(self._shifted_key_document(ssid), self._samples(ssid))
+            if report.passed:
+                passing_under_shifted_map.append(ssid)
+        self.assertEqual(passing_under_shifted_map, [])
 
 
 if __name__ == "__main__":
