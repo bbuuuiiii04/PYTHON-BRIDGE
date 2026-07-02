@@ -29,11 +29,24 @@ from rb_ss_bridge_v2.soundswitch_pack_verifier import (  # noqa: E402
 from rb_ss_bridge_v2.soundswitch_project_decoder import (  # noqa: E402
     SoundSwitchDecodeError, decode_project,
 )
+from rb_ss_bridge_v2.tools.ssfmt.update_parity_registry import (  # noqa: E402
+    build_autoloop_registry, build_scripted_registry, build_static_registry,
+)
 
 
 CANONICAL_SOURCE_PROJECT = Path("~/Music/SoundSwitch/default.ssproj").expanduser()
 CANONICAL_PACK_DIR = REPO_ROOT / "local" / "soundswitch" / "rbss_canonical_pack"
 PARITY_REGISTRY_DIR = REPO_ROOT / "tests" / "fixtures" / "soundswitch"
+# Committed capture-derived U0 evidence. Registries are recomputed from these
+# fixtures against the pack actually being exported (see
+# `_compile_and_stage_with_self_healed_parity`) so a venue-cue ADDITION (which
+# changes SoundSwitchVenues.bin's sha and therefore every `venue_source_sha256`
+# pin) self-heals instead of permanently stranding witnessed documents in
+# `unverified_parity` until someone manually reruns the registry tool.
+PARITY_ORACLE_FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "soundswitch" / "parity_oracle"
+SCRIPTED_FIXTURE = PARITY_ORACLE_FIXTURE_DIR / "scripted_reduced.json"
+AUTOLOOP_FIXTURE = PARITY_ORACLE_FIXTURE_DIR / "autoloop_reduced.json"
+STATIC_FIXTURE = PARITY_ORACLE_FIXTURE_DIR / "static_reduced.json"
 
 _SIDECAR_SUFFIX = ".source.json"  # sibling of the pack dir; NEVER inside it
 _BINDING_SIDECAR_SUFFIX = ".midi_bindings.json"
@@ -78,6 +91,69 @@ def _load_parity_registries() -> dict[str, object]:
         "autoloop": _load_parity_registry(PARITY_REGISTRY_DIR / "autoloop_parity_registry.json"),
         "static": _load_parity_registry(PARITY_REGISTRY_DIR / "static_parity_registry.json"),
     }
+
+
+def _recomputed_parity_registries(
+    staging: Path, stale_registries: dict[str, object],
+) -> dict[str, object]:
+    """Recompute each parity surface's registry from its committed capture
+    fixture against the pack just staged.
+
+    A surface whose fixture file is absent falls back to the stale (pass-1,
+    committed-snapshot) registry for that surface only -- status quo when
+    there is no capture evidence file to (re)verify against. A fixture that
+    IS present but whose builder raises is deliberately NOT caught here: the
+    exception must propagate so a broken evidence pipeline fails the export
+    loudly instead of silently publishing with degraded/empty parity
+    evidence for that surface.
+    """
+    fresh: dict[str, object] = dict(stale_registries)
+    if SCRIPTED_FIXTURE.is_file():
+        fresh["scripted"] = build_scripted_registry(staging, SCRIPTED_FIXTURE)
+    if AUTOLOOP_FIXTURE.is_file():
+        fresh["autoloop"] = build_autoloop_registry(staging, AUTOLOOP_FIXTURE)
+    if STATIC_FIXTURE.is_file():
+        fresh["static"] = build_static_registry(staging, STATIC_FIXTURE)
+    return fresh
+
+
+def _compile_and_stage_with_self_healed_parity(
+    decoded, parent: Path, destination_name: str,
+) -> Path:
+    """Compile+stage the pack, self-healing its parity registries from the
+    committed capture fixtures before the pack can ever verify or publish.
+
+    Pass 1 compiles and stages using the committed registry snapshots exactly
+    as before. Pass 2 rebuilds each surface's registry from the fixtures
+    against that staged pack -- the builders are lane-independent (they read
+    documents/renders, not `parity_lane` fields), so the pass-1 lanes do not
+    bias the rebuild. If the fresh registries differ from the ones pass 1
+    used (e.g. a venue-cue ADDITION changed `venue_source_sha256` and would
+    otherwise strand every witnessed document in `unverified_parity` until a
+    human reruns the registry tool), the pack is recompiled with the fresh
+    registries and re-staged; the pass-1 staging is discarded. If identical
+    -- the common case once the committed snapshots are already current --
+    the pass-1 staging is returned unchanged and no second compile happens.
+    """
+    stale_registries = _load_parity_registries()
+    generator_commit = _generator_commit()
+    artifacts = compile_pack_artifacts(
+        decoded, generator_commit=generator_commit, parity_registry=stale_registries,
+    )
+    staging = _stage_artifacts(artifacts, parent, destination_name)
+    try:
+        fresh_registries = _recomputed_parity_registries(staging, stale_registries)
+        if fresh_registries == stale_registries:
+            return staging
+        recompiled = compile_pack_artifacts(
+            decoded, generator_commit=generator_commit, parity_registry=fresh_registries,
+        )
+        restaged = _stage_artifacts(recompiled, parent, destination_name)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    shutil.rmtree(staging, ignore_errors=True)
+    return restaged
 
 
 def _generator_commit() -> str:
@@ -454,10 +530,7 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
     if not parent.is_dir() or parent.is_symlink():
         raise ValueError("output parent must be an existing real directory")
     decoded = decode_project(source)
-    artifacts = compile_pack_artifacts(
-        decoded, generator_commit=_generator_commit(), parity_registry=_load_parity_registries(),
-    )
-    staging = _stage_artifacts(artifacts, parent, destination.name)
+    staging = _compile_and_stage_with_self_healed_parity(decoded, parent, destination.name)
     try:
         result = verify_pack(staging, source_project=source)
         os.replace(staging, destination)
@@ -511,10 +584,7 @@ def publish_pack(
             raise ValueError("destination must be a real directory or absent")
         first_export = not destination.exists()
         decoded = decode_project(source)
-        artifacts = compile_pack_artifacts(
-            decoded, generator_commit=_generator_commit(), parity_registry=_load_parity_registries(),
-        )
-        staging = _stage_artifacts(artifacts, parent, destination.name)
+        staging = _compile_and_stage_with_self_healed_parity(decoded, parent, destination.name)
         try:
             result = verify_pack(staging, source_project=source)
             _assert_publishable_parity(

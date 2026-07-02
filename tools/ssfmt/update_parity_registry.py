@@ -201,6 +201,46 @@ def build_static_registry(pack_path: Path, fixture_path: Path) -> dict[str, obje
     }
 
 
+def _autoloop_registry_record(
+    loop: LoadedAutoloop,
+    rows: list[dict[str, object]],
+    *,
+    capture_id: str,
+    divergence_entry: object,
+    source_sha: str,
+    layout: str,
+    venue_sha: str,
+) -> dict[str, object] | None:
+    """Pure per-identity record builder for ``build_autoloop_registry``.
+
+    Returns ``None`` when there is no capture evidence for this loop (``rows``
+    is empty): absence of evidence is not evidence of parity, so the loop gets
+    no registry entry and the compiler may still generalize it from its
+    layout family. When rows ARE present, the loop is pinned to whatever
+    verdict the oracle actually reaches -- PASS or FAIL -- so a
+    fixture-witnessed regression (e.g. a stale render no longer matching its
+    own capture rows) cannot silently fall through to
+    ``algorithm_generalized``; the compiler maps a FAIL registry entry to
+    ``unverified_parity`` and never treats an entry as absent.
+    """
+    if not rows:
+        return None
+    report = classify_autoloop(loop, _autoloop_samples(rows))
+    report_dict = report.to_dict()
+    return {
+        "capture_id": capture_id,
+        "divergence": list(divergence_entry) if isinstance(divergence_entry, list) else [],
+        "layout": layout,
+        "oracle_report_sha256": sha256_bytes(canonical_json_bytes(report_dict)),
+        "rows_passed": _passed_sample_count(report_dict),
+        "rows_total": len(report.samples),
+        "source_sha256": source_sha,
+        "truth_source": report.truth_source,
+        "venue_source_sha256": venue_sha,
+        "verdict": report.verdict,
+    }
+
+
 def build_autoloop_registry(pack_path: Path, fixture_path: Path) -> dict[str, dict[str, object]]:
     pack = load_pack(pack_path)
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
@@ -214,24 +254,16 @@ def build_autoloop_registry(pack_path: Path, fixture_path: Path) -> dict[str, di
         if not isinstance(loop, LoadedAutoloop):
             continue
         source_sha, layout = _autoloop_document_source(pack_path, identity)
-        if not rows:
-            continue
-        report = classify_autoloop(loop, _autoloop_samples(rows))
-        if not report.passed:
-            continue
-        report_dict = report.to_dict()
-        records[identity] = {
-            "capture_id": capture_id,
-            "divergence": list(divergence.get(identity, [])) if isinstance(divergence, dict) else [],
-            "layout": layout,
-            "oracle_report_sha256": sha256_bytes(canonical_json_bytes(report_dict)),
-            "rows_passed": _passed_sample_count(report_dict),
-            "rows_total": len(report.samples),
-            "source_sha256": source_sha,
-            "truth_source": report.truth_source,
-            "venue_source_sha256": venue_sha,
-            "verdict": report.verdict,
-        }
+        record = _autoloop_registry_record(
+            loop, rows,
+            capture_id=capture_id,
+            divergence_entry=divergence.get(identity, []) if isinstance(divergence, dict) else [],
+            source_sha=source_sha,
+            layout=layout,
+            venue_sha=venue_sha,
+        )
+        if record is not None:
+            records[identity] = record
     return records
 
 

@@ -36,6 +36,35 @@ from rb_ss_bridge_v2.tools.export_soundswitch_pack import (
 from rb_ss_bridge_v2.tools import export_soundswitch_pack as export_module
 from rb_ss_bridge_v2.soundswitch_project_decoder import SoundSwitchDecodeError
 
+_DISABLED_FIXTURE_PATCHES: list = []
+
+
+def setUpModule() -> None:
+    """This suite drives export_pack()/publish_pack() with mocked,
+    intentionally-incomplete `compile_pack_artifacts` output to test locking,
+    atomic-swap, sidecar, and rollback mechanics in isolation from the real
+    compiler. The export-time parity-registry self-heal
+    (`export_module._compile_and_stage_with_self_healed_parity`) would try to
+    `load_pack()` those incomplete staged packs against the real committed
+    capture fixtures and fail hard on structural verification. Point the
+    fixture-path constants at nonexistent files for this whole module so
+    self-heal falls back to the stale (pass-1) registry unchanged -- the same
+    outcome this suite already exercised before self-heal existed. The
+    dedicated self-heal tests (real committed fixtures, real project) live in
+    tests/test_export_pack_parity_self_heal.py.
+    """
+    missing_dir = Path("/nonexistent-parity-fixture-dir-for-tests")
+    for name in ("SCRIPTED_FIXTURE", "AUTOLOOP_FIXTURE", "STATIC_FIXTURE"):
+        patch = mock.patch.object(export_module, name, missing_dir / f"{name}.json")
+        patch.start()
+        _DISABLED_FIXTURE_PATCHES.append(patch)
+
+
+def tearDownModule() -> None:
+    for patch in _DISABLED_FIXTURE_PATCHES:
+        patch.stop()
+    _DISABLED_FIXTURE_PATCHES.clear()
+
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
