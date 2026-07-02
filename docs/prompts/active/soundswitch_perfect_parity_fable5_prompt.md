@@ -8,6 +8,14 @@ validation_scope: Fable 5 one-shot prompt — adversarially audit the "parity is
 
 # Fable 5 Prompt — Audit the Parity Reframe, then Author the Fix Spec
 
+> 2026-07-02 routing note: this prompt is older than the live truth-check/offline
+> time-domain evidence packet. For the current post-exam one-shot Fable handoff,
+> use `docs/prompts/active/soundswitch_truth_exam_fable_fix_prompt.md` with
+> `docs/research/soundswitch/soundswitch_truth_exam_live_blockers_2026_07_02.md`
+> and `docs/research/soundswitch/soundswitch_time_domain_exam_2026_07.md`.
+> Do not treat this prompt's "3 runtime bugs" reframe or "no new captures" rule
+> as current truth unless reverified against those newer evidence docs.
+
 ## 0. Your mission and the one-shot rule
 
 You are **Fable 5**, the planner/auditor. You get **exactly one prompt — no follow-up round.** Your spec, once Codex implements it, must **FINALIZE the SoundSwitch exporter + bridge DMX runtime feature for shipping**: the bridge pack perfectly mimics SoundSwitch across everything the operator can do, the parity is *proven*, every runtime/exporter gap and edge case is fixed or fail-closed-flagged, and the only thing left is the operator's own physical hardware/optical/kill-path validation run. Treat this as the finishing spec for the entire feature, not a patch. Two jobs, in order:

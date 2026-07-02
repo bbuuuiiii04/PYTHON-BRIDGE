@@ -18,26 +18,35 @@ doc index and active-work registry.
 
 Read in this order:
 
-1. `soundswitch_re_closure_report.md` — bounded reverse-engineering verdict and
+1. `soundswitch_truth_exam_live_blockers_2026_07_02.md` and
+   `soundswitch_time_domain_exam_2026_07.md` — current post-exam evidence for
+   SoundSwitch perfect-parity work: official comparator invalidity, diagnostic
+   byte/timing disagreements, offline timing outliers, source divergence, and
+   coverage gaps.
+2. `../../prompts/active/soundswitch_truth_exam_fable_fix_prompt.md` — current
+   one-shot Fable handoff that turns this evidence into a Codex-executable
+   perfect-parity fix spec.
+3. `../../plans/active/soundswitch_exporter_remaining_work.md` — current landed
+   implementation status, confirmed gaps, checklist, dependencies, and next
+   design/spec task.
+4. `soundswitch_re_closure_report.md` — bounded reverse-engineering verdict and
    supported source-format boundary. It is not current implementation status,
    and its broad active-scripted exact-parity implication is superseded by
    `../../plans/active/soundswitch_pack_parity_root_cause_spec.md`.
-2. `../../plans/active/soundswitch_pack_parity_root_cause_spec.md` — current
-   DD42028C/global cue-parity root-cause spec. It records the callable
+5. `../../plans/active/soundswitch_pack_parity_root_cause_spec.md` — baseline
+   DD42028C/global cue-parity root-cause context. It records the callable
    GhidraMCP pass, the rejected footer/global-offset theories, and the
-   fail-closed/oracle requirements for active scripted documents.
-3. `soundswitch_ssfile_format.md` — physical project, catalog, `.ssfile`,
+   fail-closed/oracle requirements for active scripted documents, but it is not
+   the current post-exam fix scope.
+6. `soundswitch_ssfile_format.md` — physical project, catalog, `.ssfile`,
    MIDI-map, and static-look formats.
-4. `soundswitch_ghidra_addendum.md` — binary-derived reader/writer and runtime
+7. `soundswitch_ghidra_addendum.md` — binary-derived reader/writer and runtime
    behavior.
-5. `soundswitch_validation_matrix.md` and
+8. `soundswitch_validation_matrix.md` and
    `soundswitch_authoring_mutation_matrix.md` — capture and mutation evidence.
-6. `research_tools.md` — reproduction commands and tool inventory.
-7. `soundswitch_importer_exporter_player_codex_spec.md` — original authorized
+9. `research_tools.md` — reproduction commands and tool inventory.
+10. `soundswitch_importer_exporter_player_codex_spec.md` — original authorized
    default-off product/implementation contract.
-8. `../../plans/active/soundswitch_exporter_remaining_work.md` — current landed
-   implementation status, confirmed gaps, checklist, dependencies, and next
-   design/spec task.
 
 Historical research artifacts are indexed in `history/README.md`. Their old
 readiness statements are superseded by the closure report for research truth and

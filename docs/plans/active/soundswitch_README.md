@@ -14,45 +14,46 @@ implementation authority. Research/format evidence remains grouped under
 
 ## Read now, in order
 
-1. `soundswitch_pack_parity_root_cause_spec.md` - **current global DMX cue
-   parity root-cause implementation spec**. DD42028C is the first concrete
-   witness, not the whole problem. The spec records that the shared `.ssfile`
-   cue-replay model is only internally self-consistent, that the
-   `oracle_rendered` local pack patch is containment, that current GhidraMCP
-   evidence rejects footer/shared-byte remap and global-offset fixes, and that
-   every active scripted document needs structural proof, U0 oracle proof, or
-   fail-closed publication.
+1. `../../prompts/active/soundswitch_truth_exam_fable_fix_prompt.md` - current
+   post-exam one-shot Fable handoff for perfect-parity spec synthesis. It
+   points at the durable evidence packet and must be preferred over older
+   "3 runtime bugs" or T7d framing.
 2. `soundswitch_exporter_remaining_work.md` - **single active completion
    checklist and roadmap**. It records landed software, native Autoloop
    implementation status, remaining live/hardware gates, task order, and
    completion definition.
-3. `soundswitch_pack_render_defect.md` - local containment record for
+3. `../../research/soundswitch/soundswitch_truth_exam_live_blockers_2026_07_02.md`
+   and `../../research/soundswitch/soundswitch_time_domain_exam_2026_07.md` -
+   current post-exam evidence: official comparator invalidity, diagnostic
+   byte/timing mismatches, offline timing outliers, source divergences, and
+   coverage gaps.
+4. `soundswitch_pack_parity_root_cause_spec.md` - baseline/context only. It
+   records the prior DD42028C/global cue-parity investigation and Ghidra map,
+   but the current active fix scope is broader than its old reframe.
+5. `soundswitch_pack_render_defect.md` - local containment record for
    `dd42028c-0823-4a8d-ad7e-b26e24180272`. Do not treat it as proof that the
    exporter/importer is correct. The patched pack improves the captured
    boundary score but is not exact and can be overwritten by a future export.
-4. `soundswitch_dmx_cue_mismatch_spec.md` - historical parity investigation.
+6. `soundswitch_dmx_cue_mismatch_spec.md` - historical parity investigation.
    Its playback-mixer theory is explicitly rejected for the current target.
-5. `../../research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
+7. `../../research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md`
    - original product/implementation contract. Use it for intended behavior,
    then use the remaining-work roadmap for actual landed status.
-6. `soundswitch_t7d_capture_evidence_plan.md` - historical T7d evidence
+8. `soundswitch_t7d_capture_evidence_plan.md` - historical T7d evidence
    requirements. It is not the active native Autoloop runtime gate.
-7. `soundswitch_t7d_capture_gate_handoff.md` - active operator workflow for the
+9. `soundswitch_t7d_capture_gate_handoff.md` - historical operator workflow for the
    six live scenarios: arm, refire, master-switch, drop-hold, buildup, and
    correction.
-8. `../../validation/soundswitch_t7d_phase_contract_evidence.md` and
+10. `../../validation/soundswitch_t7d_phase_contract_evidence.md` and
    `../../validation/soundswitch_t7d_phase_contract_blocked.md` - current honest
    evidence verdict: `INCOMPLETE_T7D_EVIDENCE`; two accepted arm and two
    accepted refire integrity captures exist, while four scenario pairs and the
    unique corpus oracle remain incomplete.
-9. `../../prompts/active/soundswitch_rw7_capture_agent_prompt.md` - the only
-   active SoundSwitch execution prompt. Use it only with the operator physically
-   present and the explicit live gates it names.
-10. `../../validation/soundswitch_hardware_validation_procedure.md` and
+11. `../../validation/soundswitch_hardware_validation_procedure.md` and
    `../../validation/soundswitch_hardware_runs/TEMPLATE.md` - non-Autoloop
    operator procedure and evidence schema with the independent-review revisions
    implemented. Their presence is not a hardware-validation result.
-11. `../../prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md`
+12. `../../prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md`
    - commit-scoped, review-only ChatGPT handoff for RW-5, the procedure/template,
    and this document-lifecycle cleanup.
 
@@ -64,7 +65,7 @@ The compatibility symlink
 | lifecycle | location | contents |
 | --- | --- | --- |
 | current planning authority | `docs/plans/active/soundswitch_*.md` | roadmap, T7d evidence plan/handoff, compatibility pointers; the separately scoped reconciliation spec is not part of this route |
-| current task prompt | `docs/prompts/active/soundswitch_rw7_capture_agent_prompt.md` | operator-conducted T7d capture only |
+| current task prompt | `docs/prompts/active/soundswitch_truth_exam_fable_fix_prompt.md` | post-exam Fable one-shot spec handoff for perfect parity |
 | current review prompt | `docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md` | independent review of the current non-live implementation checkpoint |
 | material implementation history | `docs/plans/completed/soundswitch/` | old ledger, every implemented SoundSwitch spec, shadow proof |
 | current RE authority | `docs/research/soundswitch/` | closure report, format/binary findings, evidence matrices, tool guide, product contract |
