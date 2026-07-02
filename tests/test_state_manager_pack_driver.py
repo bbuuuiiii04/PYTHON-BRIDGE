@@ -211,6 +211,7 @@ class PackOperationalStateTests(unittest.TestCase):
             ({"blackout": True, "input_degraded": True}, "blackout"),
             ({"input_degraded": True, "static_held": True}, "input_degraded"),
             ({"static_held": True, "scripted_active": True}, "static_held"),
+            ({"parity_live_blocked": True, "scripted_active": True}, "unverified_parity"),
             ({"scripted_active": True, "autoloop_phase_blocked": True}, "scripted_active"),
             ({"autoloop_phase_blocked": True}, "autoloop_phase_blocked"),
             ({}, "software_zero_frame"),
@@ -803,6 +804,55 @@ class PackDriverTests(unittest.TestCase):
         sm._drive_pack_output()
         self.assertEqual(be.frames, [])
 
+    def test_unverified_scripted_parity_live_fails_closed_with_status(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack(), parity_live=True), backend=be)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
+
+        sm._drive_pack_output()
+
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "unverified_parity")
+        self.assertTrue(status["parity_live_blocked"])
+        self.assertTrue(status["scripted_active"])
+        self.assertTrue(status["software_zero_frame"])
+
+    def test_unverified_scripted_parity_live_keeps_held_static_over_zero_base(self):
+        be = _FakeBackend()
+        inp = _FakeInput(held_layer_slot=8)
+        sm = _make_sm(
+            player=LaserPackPlayer(_pack(), parity_live=True),
+            backend=be,
+            midi_input=inp,
+        )
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
+
+        sm._drive_pack_output()
+
+        self.assertEqual(be.frames[-1][0], 200)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "unverified_parity")
+        self.assertTrue(status["parity_live_blocked"])
+        self.assertTrue(status["static_held"])
+        self.assertFalse(status["software_zero_frame"])
+
+    def test_unverified_parity_does_not_change_soundswitch_present_shadow_path(self):
+        be = _FakeBackend()
+        sm = _make_sm(
+            player=LaserPackPlayer(_pack(), parity_live=True),
+            backend=be,
+            os2l_connected_provider=lambda: True,
+        )
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
+
+        sm._drive_pack_output()
+
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "soundswitch_present_native_suppressed")
+        self.assertFalse(status["parity_live_blocked"])
+
     # D10
     def test_native_autoloop_renders_from_captured_scene_and_latches_phase(self):
         be = _FakeBackend()
@@ -856,6 +906,22 @@ class PackDriverTests(unittest.TestCase):
         self.assertEqual(status["operational_state"], "empty_dark_look")
         self.assertEqual(status["native_autoloop"]["status"], "empty_dark_look")
         self.assertFalse(status["autoloop_phase_blocked"])
+
+    def test_unverified_native_autoloop_parity_live_fails_closed_with_status(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_native_pack(), parity_live=True), backend=be)
+        _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
+        sm._native_captured_scene = _resolved_scene()
+        sm._native_abs_beat_pos = 64.0
+
+        sm._drive_pack_output()
+
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        status = sm.get_pack_status()
+        self.assertEqual(status["operational_state"], "unverified_parity")
+        self.assertTrue(status["parity_live_blocked"])
+        self.assertEqual(status["native_autoloop"]["status"], "unverified_parity")
+        self.assertTrue(status["autoloop_phase_blocked"])
 
     def test_native_missing_binding_fails_closed_and_does_not_select_autoloop(self):
         be = _FakeBackend()

@@ -108,10 +108,14 @@ class StartupMatrixTests(unittest.TestCase):
             captured["idle"] = idle_blackout_s
             return sender
 
+        def player_factory(pack, *, parity_live=False):
+            captured["parity_live"] = parity_live
+            return ("player", pack)
+
         bundle = bridge_main._build_soundswitch_pack_startup(
             result,
             pack_loader=pack_loader,
-            player_factory=lambda pack: ("player", pack),
+            player_factory=player_factory,
             frame_sender_factory=sender_factory,
             midi_input_factory=input_factory_override or input_factory,
         )
@@ -155,6 +159,7 @@ class StartupMatrixTests(unittest.TestCase):
         self.assertEqual(captured["aliases"], {"DDJ": "fake-midi"})
         self.assertEqual(captured["fixture_map"], {channel: 20 + channel for channel in range(1, 20)})
         self.assertEqual(captured["idle"], 0.25)
+        self.assertTrue(captured["parity_live"])
 
     def test_partial_start_failures_stop_both_and_preserve_legacy_midi(self):
         for input_fail, sender_fail in ((True, False), (False, True)):
@@ -238,7 +243,7 @@ class StartupMatrixTests(unittest.TestCase):
         bundle = bridge_main._build_soundswitch_pack_startup(
             _result(enttec_port=""),
             pack_loader=lambda _path: _pack(),
-            player_factory=lambda pack: ("player", pack),
+            player_factory=lambda pack, **_kw: ("player", pack),
             frame_sender_factory=sender_factory,
             midi_input_factory=input_factory,
             truth_sink_factory=truth_factory,
@@ -260,7 +265,7 @@ class StartupMatrixTests(unittest.TestCase):
         bundle = bridge_main._build_soundswitch_pack_startup(
             _result(enttec_port=""),
             pack_loader=lambda _path: _pack(),
-            player_factory=lambda pack: ("player", pack),
+            player_factory=lambda pack, **_kw: ("player", pack),
             frame_sender_factory=lambda *_a, **_kw: (_ for _ in ()).throw(
                 AssertionError("sender should not be constructed without Enttec port")
             ),

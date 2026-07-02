@@ -143,12 +143,15 @@ def _pack_operational_state(
     autoloop_phase_blocked: bool,
     software_zero_frame: bool,
     native_autoloop_status: str = "",
+    parity_live_blocked: bool = False,
 ) -> str:
     """Resolve the bounded display priority; companion booleans remain authoritative."""
     if not enabled:
         return "disabled"
     if blackout:
         return "blackout"
+    if parity_live_blocked:
+        return "unverified_parity"
     if input_degraded:
         return "input_degraded"
     if static_held:
@@ -3727,6 +3730,7 @@ class StateManager:
         blackout: bool,
         autoloop_phase_blocked: bool,
         software_zero_frame: bool,
+        parity_live_blocked: bool = False,
         native_autoloop: NativeAutoloopDecision | dict[str, Any] | None = None,
     ) -> None:
         """Publish one fresh software-intent snapshot with one atomic assignment."""
@@ -3750,6 +3754,7 @@ class StateManager:
                 blackout=bool(blackout),
                 input_degraded=bool(input_degraded),
                 static_held=bool(static_held),
+                parity_live_blocked=bool(parity_live_blocked),
                 scripted_active=bool(scripted_active),
                 autoloop_phase_blocked=bool(autoloop_phase_blocked),
                 software_zero_frame=bool(software_zero_frame),
@@ -3759,6 +3764,7 @@ class StateManager:
             "input_degraded": bool(input_degraded),
             "static_held": bool(static_held),
             "blackout": bool(blackout),
+            "parity_live_blocked": bool(parity_live_blocked),
             "autoloop_phase_blocked": bool(autoloop_phase_blocked),
             "software_zero_frame": bool(software_zero_frame),
             "native_autoloop": native_block,
@@ -3791,6 +3797,7 @@ class StateManager:
         blackout = False
         blackout_bindings: tuple[str, ...] = ()
         transport = None
+        parity_live_blocked = False
         try:
             soundswitch_connected = bool(
                 self._os2l_connected_provider is not None
@@ -3993,7 +4000,9 @@ class StateManager:
                 # dark. clear_selection() leaves held static + masks intact; static still
                 # loses to blackout/emergency (checked first in player.render()).
                 if scripted_result.diagnostic is not None:
-                    player.clear_selection()
+                    parity_live_blocked = scripted_result.diagnostic.code == "unverified_parity"
+                    if not parity_live_blocked:
+                        player.clear_selection()
                 native_decision = self._native_autoloop.resolve(
                     pack_sha12=rt.pack_sha12,
                     bindings={},
@@ -4049,6 +4058,7 @@ class StateManager:
                         authority="fresh",
                     )
                     native_decision = finalize_native_autoloop_render(native_decision, result)
+                    parity_live_blocked = native_decision.status == "unverified_parity"
                     if native_decision.status in ("missing_autoloop_file", "unsupported_layout"):
                         self._native_autoloop.reset()
                         player.clear_selection()
@@ -4121,6 +4131,7 @@ class StateManager:
                 input_degraded=input_degraded,
                 static_held=bool(layers),
                 blackout=bool(blackout),
+                parity_live_blocked=parity_live_blocked,
                 autoloop_phase_blocked=(
                     rt.active
                     and self._os.lighting_mode == "autoloop"

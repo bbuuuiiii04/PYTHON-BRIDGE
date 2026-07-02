@@ -17,6 +17,7 @@ from rb_ss_bridge_v2.soundswitch_laser_player import (
     ZERO_FRAME,
     LaserPackPlayer,
     apply_layers,
+    parity_live_blocks_document,
     render_autoloop_frame,
     render_scripted_frame,
 )
@@ -274,6 +275,42 @@ class PlayerStateTests(unittest.TestCase):
     def test_clear_selection_without_static_is_zero(self):
         result = self.player.clear_selection()
         self.assertEqual(result.frame, ZERO_FRAME)
+
+    def test_parity_live_blocks_unverified_base_but_keeps_manual_static(self):
+        ssid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        player = LaserPackPlayer(_pack(self.track, self.loop), parity_live=True)
+        self.assertTrue(parity_live_blocks_document(self.track, True))
+
+        scripted = player.select_scripted(ssid, 50)
+        self.assertEqual(scripted.frame, ZERO_FRAME)
+        self.assertEqual(scripted.diagnostic.code, "unverified_parity")
+
+        player.set_static_layers((_layer(8),))
+        with_static = player.select_scripted(ssid, 50)
+        self.assertEqual(with_static.frame[0], 8)
+        self.assertEqual(with_static.diagnostic.code, "unverified_parity")
+
+        autoloop = LaserPackPlayer(_pack(self.track, self.loop), parity_live=True)
+        loop_result = autoloop.select_autoloop("SSAutoLoop8.ssfile", 10)
+        self.assertEqual(loop_result.frame, ZERO_FRAME)
+        self.assertEqual(loop_result.diagnostic.code, "unverified_parity")
+
+    def test_parity_live_allows_algorithm_generalized_document(self):
+        ssid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        proven = LoadedDocument(
+            self.track.relative_path,
+            self.track.layout,
+            self.track.events,
+            self.track.intensity_nodes,
+            self.track.cycle_ticks,
+            parity_lane="algorithm_generalized",
+        )
+        player = LaserPackPlayer(_pack(proven, self.loop), parity_live=True)
+
+        result = player.select_scripted(ssid, 50)
+
+        self.assertEqual(result.frame[0], 9)
+        self.assertIsNone(result.diagnostic)
 
     def test_clear_selection_held_static_still_loses_to_blackout(self):
         self.player.set_static_layers((_layer(8),))

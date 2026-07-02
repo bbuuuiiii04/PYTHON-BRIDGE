@@ -18,6 +18,7 @@ NATIVE_AUTOLOOP_STATUSES = frozenset((
     "missing_binding",
     "missing_autoloop_file",
     "unsupported_layout",
+    "unverified_parity",
     "soundswitch_present_native_suppressed",
     "software_zero_frame",
 ))
@@ -126,6 +127,8 @@ def finalize_native_autoloop_render(
         return replace(decision, status="missing_autoloop_file", diagnostic=diagnostic)
     if diagnostic in ("inactive_autoloop", "unsupported_layout"):
         return replace(decision, status="unsupported_layout", diagnostic=diagnostic)
+    if diagnostic == "unverified_parity":
+        return replace(decision, status="unverified_parity", diagnostic=diagnostic)
     if diagnostic:
         return replace(decision, status="unsupported_layout", diagnostic=diagnostic)
     if result.frame == ZERO_FRAME:

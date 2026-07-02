@@ -452,6 +452,7 @@ def pack_export_status_line(
         "missing_binding": "autoloop missing binding",
         "missing_autoloop_file": "autoloop file missing",
         "unsupported_layout": "autoloop unsupported",
+        "unverified_parity": "unverified parity",
         "soundswitch_present_native_suppressed": "SoundSwitch owns lights",
         "autoloop_phase_blocked": "autoloop blocked",
         "software_zero_frame": "zeroed",

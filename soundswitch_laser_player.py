@@ -28,6 +28,7 @@ SUPPORTED_LAYOUTS = frozenset((
     "dictionary_timeline_addressed_footer",
     "dictionary_timeline_no_shared_anchor",
 ))
+UNVERIFIED_PARITY_LANE = "unverified_parity"
 ZERO_FRAME = (0,) * CHANNEL_COUNT
 
 
@@ -72,6 +73,13 @@ class _AutoloopSelection:
 def _diagnostic(code: str, message: str, **context: object) -> PlayerResult:
     return PlayerResult(ZERO_FRAME, PlayerDiagnostic(
         code, message, tuple(sorted((key, str(value)) for key, value in context.items()))))
+
+
+def parity_live_blocks_document(document: LoadedDocument, parity_live: bool) -> bool:
+    """True when an unverified document must not drive trusted parity-live output."""
+    if type(parity_live) is not bool:
+        raise ValueError("parity_live must be boolean")
+    return bool(parity_live and document.parity_lane == UNVERIFIED_PARITY_LANE)
 
 
 def _validate_frame(frame: tuple[int, ...], label: str) -> tuple[int, ...]:
@@ -231,8 +239,11 @@ def normalize_soundswitch_id(value: str | None) -> str | None:
 class LaserPackPlayer:
     """Small pure state controller around an already verified immutable pack."""
 
-    def __init__(self, pack: LoadedPack):
+    def __init__(self, pack: LoadedPack, *, parity_live: bool = False):
+        if type(parity_live) is not bool:
+            raise ValueError("parity_live must be boolean")
         self._pack = pack
+        self._parity_live = parity_live
         self._selection: _ScriptedSelection | _AutoloopSelection | None = None
         self._static_layers: tuple[LayerEntry, ...] = ()
         self._blackout = False
@@ -242,6 +253,10 @@ class LaserPackPlayer:
     @property
     def pack(self) -> LoadedPack:
         return self._pack
+
+    @property
+    def parity_live(self) -> bool:
+        return self._parity_live
 
     @property
     def static_layers(self) -> tuple[LayerEntry, ...]:
@@ -355,6 +370,12 @@ class LaserPackPlayer:
         if document.layout not in SUPPORTED_LAYOUTS:
             return _diagnostic("unsupported_layout", "active scripted layout is unsupported",
                                layout=document.layout)
+        if parity_live_blocks_document(document, self._parity_live):
+            return _diagnostic(
+                "unverified_parity",
+                "unverified scripted document cannot drive parity-live output",
+                kind="scripted",
+            )
         try:
             return PlayerResult(render_scripted_frame(document, selection.elapsed_ms))
         except (TypeError, ValueError) as exc:
@@ -383,6 +404,12 @@ class LaserPackPlayer:
         if document.layout not in SUPPORTED_LAYOUTS:
             return _diagnostic("unsupported_layout", "active Autoloop layout is unsupported",
                                layout=document.layout)
+        if parity_live_blocks_document(document, self._parity_live):
+            return _diagnostic(
+                "unverified_parity",
+                "unverified Autoloop document cannot drive parity-live output",
+                kind="autoloop",
+            )
         try:
             return PlayerResult(render_autoloop_frame(document, selection.phase_tick))
         except (TypeError, ValueError) as exc:
@@ -404,7 +431,10 @@ class LaserPackPlayer:
 
         # A manual Static Override may stand alone when no base selection is
         # active, but it must never bypass a known stop/stale/error condition.
-        if base.diagnostic is not None and base.diagnostic.code != "missing_selection":
+        if (
+            base.diagnostic is not None
+            and base.diagnostic.code not in ("missing_selection", "unverified_parity")
+        ):
             return base
         if self._static_layers:
             try:
@@ -412,7 +442,12 @@ class LaserPackPlayer:
                     base.frame, self._static_layers, self._pack.static_looks,
                     self._blackout, self._emergency,
                 )
-                return PlayerResult(layered.frame, layered.diagnostic)
+                diagnostic = (
+                    base.diagnostic
+                    if base.diagnostic is not None and base.diagnostic.code == "unverified_parity"
+                    else layered.diagnostic
+                )
+                return PlayerResult(layered.frame, diagnostic)
             except (TypeError, ValueError) as exc:
                 return _diagnostic("player_error", type(exc).__name__)
         return base
@@ -420,6 +455,7 @@ class LaserPackPlayer:
 
 __all__ = [
     "CHANNEL_COUNT", "CONTROL_CHANNELS", "LayerApplyResult", "LaserPackPlayer", "PlayerDiagnostic",
-    "PlayerResult", "ZERO_FRAME", "normalize_soundswitch_id", "render_autoloop_frame",
-    "render_scripted_frame", "apply_layers",
+    "PlayerResult", "UNVERIFIED_PARITY_LANE", "ZERO_FRAME", "normalize_soundswitch_id",
+    "parity_live_blocks_document", "render_autoloop_frame", "render_scripted_frame",
+    "apply_layers",
 ]

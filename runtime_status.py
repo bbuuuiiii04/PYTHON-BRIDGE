@@ -48,6 +48,7 @@ _DEFAULT_PACK_STATUS: dict[str, Any] = {
     "input_degraded": False,
     "static_held": False,
     "blackout": False,
+    "parity_live_blocked": False,
     "autoloop_phase_blocked": False,
     "software_zero_frame": True,
     "native_autoloop": {

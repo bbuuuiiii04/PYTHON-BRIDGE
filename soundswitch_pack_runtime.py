@@ -58,6 +58,7 @@ class PackRuntime:
             "unverified_documents": list(unverified[:10]),
             "static_binding_gap": bool(midi_status.get("static_binding_gap", False)),
             "static_binding_gap_count": int(midi_status.get("static_binding_gap_count", 0) or 0),
+            "parity_live_blocked": False,
             "pack_sha12": self.pack_sha12 or "",
             "pack_sha256": self.pack_sha256 or "",
             "phase_offset_beats": float(self.phase_offset_beats),

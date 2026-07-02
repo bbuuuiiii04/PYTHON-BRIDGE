@@ -388,6 +388,7 @@ class RuntimeStatusWriterTests(unittest.TestCase):
         default = writer.snapshot()["soundswitch_pack"]
         self.assertEqual(default["operational_state"], "disabled")
         self.assertTrue(default["software_zero_frame"])
+        self.assertFalse(default["parity_live_blocked"])
         self.assertEqual(default["frame_count"], 0)
 
         pack = dict(default, enabled=True, backend="pack",

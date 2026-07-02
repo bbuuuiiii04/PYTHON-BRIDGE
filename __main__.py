@@ -496,7 +496,7 @@ def _build_soundswitch_pack_startup(
             NoneBackend(), None, None, None, None, "pack_load_failed",
         )
 
-    player = player_factory(pack)
+    player = player_factory(pack, parity_live=True)
     truth_env = truth_env_loader()
     if truth_env.enabled:
         midi_input = midi_input_factory(

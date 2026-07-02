@@ -310,6 +310,13 @@ class NativeAutoloopResolverTests(unittest.TestCase):
             "unsupported_layout",
         )
         self.assertEqual(
+            finalize_native_autoloop_render(
+                decision,
+                PlayerResult(ZERO_FRAME, PlayerDiagnostic("unverified_parity", "blocked")),
+            ).status,
+            "unverified_parity",
+        )
+        self.assertEqual(
             finalize_native_autoloop_render(decision, PlayerResult(ZERO_FRAME)).status,
             "empty_dark_look",
         )
