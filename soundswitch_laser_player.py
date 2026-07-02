@@ -99,9 +99,11 @@ def _apply_attribute(frame: list[int], row: LoadedAttribute) -> None:
 
 def _apply_events(document: LoadedDocument, initial: tuple[int, ...], predicate) -> tuple[int, ...]:
     frame = list(_validate_frame(initial, "initial frame"))
-    # Stored source order breaks equal-time ties deterministically.  Sorting by
-    # time also makes render queries independent of artifact traversal history.
-    for event in sorted(document.events, key=lambda row: (row.time, row.source_order)):
+    # SoundSwitch's cue cache is cumulative in *serialized* order (saved order),
+    # which the loader preserves.  Saved order is not always time-monotonic —
+    # {528E8B22} serializes 60065 before 60064 and U0 proves the later-serialized
+    # event wins — so events must never be re-sorted by timestamp here.
+    for event in document.events:
         if not predicate(event.time):
             continue
         if event.reference_kind == "clear_control":

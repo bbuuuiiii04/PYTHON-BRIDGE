@@ -37,7 +37,9 @@ def _ssfile(*, cue_count: int = 3, timeline_count: int = 3,
             stored_keys: tuple[int, ...] | None = None,
             trailer: bytes | None = None) -> bytes:
     if stored_keys is None:
-        stored_keys = tuple(range(1, cue_count + 1))
+        # Real fresh exports write 0-based writer-index keys; timeline
+        # references are 1-based over them (0 = clear sentinel).
+        stored_keys = tuple(range(cue_count))
     if len(stored_keys) != cue_count:
         raise ValueError("stored_keys must match cue_count")
     data = bytearray(44)
@@ -137,47 +139,53 @@ class PhysicalDocumentTests(unittest.TestCase):
         self.assertEqual(len(parsed.trailer), 10)
         self.assertEqual(parsed.trailer, _trailer(8, 1, 0, 1))
 
-    def test_raw_zero_and_positive_references_resolve_by_exact_stored_key(self):
+    def test_raw_zero_and_positive_references_resolve_one_based(self):
+        # References are 1-based over the file's 0-based stored keys
+        # (U0-proven, capture parity_20260701T185231Z).
         parsed = decoder.decode_ssfile(_ssfile(), "synthetic.ssfile")
         self.assertEqual(
             [(row.reference_kind, row.resolved_stored_key) for row in parsed.timeline],
-            [("clear_control", None), ("cue", 1), ("cue", 3)],
+            [("clear_control", None), ("cue", 0), ("cue", 2)],
         )
 
-    def test_positive_raw_one_resolves_exact_key_one_not_zero(self):
+    def test_positive_raw_one_resolves_key_zero(self):
         parsed = decoder.decode_ssfile(
             _ssfile(cue_count=1, timeline_count=1, raw_references=(1,)), "cold.ssfile"
         )
-        self.assertEqual(parsed.timeline[0].resolved_stored_key, 1)
+        self.assertEqual(parsed.timeline[0].resolved_stored_key, 0)
+        self.assertIsNotNone(parsed.timeline[0].resolved_cue_guid)
 
-    def test_actual_dictionary_maximum_raw_232_resolves_to_key_232(self):
+    def test_actual_dictionary_maximum_raw_232_resolves_to_key_231(self):
         parsed = decoder.decode_ssfile(
             _ssfile(cue_count=232, timeline_count=1, raw_references=(232,)),
             "maximum.ssfile",
         )
-        self.assertEqual(parsed.timeline[0].resolved_stored_key, 232)
+        self.assertEqual(parsed.timeline[0].resolved_stored_key, 231)
+        self.assertIsNotNone(parsed.timeline[0].resolved_cue_guid)
 
-    def test_exact_key_lookup_ignores_dictionary_order(self):
+    def test_key_lookup_ignores_dictionary_order(self):
+        # Keys are a per-file permutation ({FC10FC02}: 214/216 rows have
+        # key != position); only stored_key == R-1 may match, never position.
         parsed = decoder.decode_ssfile(
             _ssfile(
                 cue_count=3,
                 timeline_count=2,
                 raw_references=(44, 99),
-                stored_keys=(44, 7, 99),
+                stored_keys=(43, 7, 98),
             ),
             "permuted.ssfile",
         )
-        self.assertEqual([row.resolved_stored_key for row in parsed.timeline], [44, 99])
+        self.assertEqual([row.resolved_stored_key for row in parsed.timeline], [43, 98])
         self.assertEqual(parsed.timeline[0].resolved_cue_guid, (0).to_bytes(16, "little").hex())
         self.assertEqual(parsed.timeline[1].resolved_cue_guid, (2).to_bytes(16, "little").hex())
 
-    def test_missing_exact_key_is_preserved_as_unresolved_cue(self):
+    def test_missing_key_is_preserved_as_unresolved_cue(self):
         parsed = decoder.decode_ssfile(
             _ssfile(cue_count=1, timeline_count=1, raw_references=(99,)),
             "missing-key.ssfile",
         )
         self.assertEqual(parsed.timeline[0].reference_kind, "cue")
-        self.assertEqual(parsed.timeline[0].resolved_stored_key, 99)
+        self.assertEqual(parsed.timeline[0].resolved_stored_key, 98)
         self.assertIsNone(parsed.timeline[0].resolved_cue_guid)
 
     def test_count_offset_eof_and_trailer_bounds_fail_closed(self):

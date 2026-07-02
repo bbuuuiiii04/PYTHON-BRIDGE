@@ -602,9 +602,9 @@ class CurrentPackGoldenTests(unittest.TestCase):
         self.assertEqual(len(loop13.events), 257)
         self.assertLess(loop13.events[0].time, 0)
         self.assertEqual(bytes(render_autoloop_frame(loop13, 0)).hex(),
-                         "3e003700005d8a000000ff0000001400000000")
+                         "3e003700005d8a89d600000000003e00000000")
         self.assertEqual(bytes(render_autoloop_frame(loop13, 1)).hex(),
-                         "3e003700005d8a000000ff0000001a00000000")
+                         "3e003700005d8a89d600000000001400000000")
         self.assertEqual(render_autoloop_frame(loop13, 0),
                          render_autoloop_frame(loop13, 19_200))
         loop3 = self.pack.autoloops["SSAutoLoop3.ssfile"].document
@@ -684,9 +684,9 @@ class CurrentPackGoldenTests(unittest.TestCase):
     def test_scripted_exported_boundary_golden_samples_and_stop_unload_zero(self):
         samples = {
             "025c1ddf-2cdc-4e54-bd8c-156b90dd8247": (
-                83_839, "3e001800006e8d98ff9b00000000b00000be00"),
+                83_839, "3e001530006e8b3ee000000000009400f10048"),
             "ae9e3c61-af40-4392-80b4-380d39c631b9": (
-                14_738, "00000000000000a25600000000000000000000"),
+                14_738, "000000000000005a7300000000000000000000"),
         }
         for soundswitch_id, (elapsed_ms, frame_hex) in samples.items():
             with self.subTest(soundswitch_id=soundswitch_id):
@@ -699,8 +699,8 @@ class CurrentPackGoldenTests(unittest.TestCase):
 
     def test_current_pack_override_and_blackout_release_full_frame_goldens(self):
         soundswitch_id = "025c1ddf-2cdc-4e54-bd8c-156b90dd8247"
-        at_83839 = "3e001800006e8d98ff9b00000000b00000be00"
-        at_84065 = "11001800006e8d56ff0000000000b00000be00"
+        at_83839 = "3e001530006e8b3ee000000000009400f10048"
+        at_84065 = "11001530006e8ba5ff00000000009400f10048"
         slot8 = "1800260000797c0000d6ff000000000000006e"
         player = LaserPackPlayer(self.pack)
         self.assertEqual(bytes(player.select_scripted(soundswitch_id, 83_839).frame).hex(),
