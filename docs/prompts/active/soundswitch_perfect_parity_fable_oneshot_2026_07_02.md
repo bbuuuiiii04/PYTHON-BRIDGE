@@ -24,6 +24,15 @@ validation pass and have it fully pass.
 This is a one-shot handoff. There is no back-and-forth with Brandon mid-task. Use the
 evidence packet below, verify it, act on it, and produce a finished, working result.
 
+## Benign scope
+
+This is benign local software work for Brandon's DJ lighting bridge: an exporter/runtime
+correctness and parity finalization task on a personal Python project. It is not a
+cybersecurity, exploit, malware, vulnerability-discovery, biology, chemistry,
+life-sciences, model-distillation, or hidden-reasoning extraction task. Treat all review
+and implementation work as normal software correctness, testing, maintainability, and
+runtime safety — nothing here is offensive-security or dual-use work.
+
 ## Why this matters
 
 Brandon has been chasing SoundSwitch parity for a long time across multiple capture and
@@ -49,15 +58,6 @@ existing LED color-engine (M2.5) Claude-implementation exception. For this task:
 This prompt **supersedes** `docs/prompts/active/soundswitch_truth_exam_fable_fix_prompt.md`
 for the SoundSwitch parity workstream. That earlier prompt forbade implementation; this one
 does not. Do not defer to the earlier prompt's "spec only" instruction if you encounter it.
-
-## Benign scope
-
-This is benign local software work for Brandon's DJ lighting bridge: an exporter/runtime
-correctness and parity finalization task on a personal Python project. It is not a
-cybersecurity, exploit, malware, vulnerability-discovery, biology, chemistry,
-life-sciences, model-distillation, or hidden-reasoning extraction task. Treat all review
-and implementation work as normal software correctness, testing, maintainability, and
-runtime safety — nothing here is offensive-security or dual-use work.
 
 ## Deliverable
 
@@ -135,6 +135,28 @@ Comparator note (read this, then do not spend budget here):
   working live comparator, say so explicitly as a residual risk rather than silently
   skipping it or silently trying to fix the comparator anyway.
 
+## Evidence skepticism — do not blindly trust any single source
+
+Brandon's explicit instruction: do not blindly trust the evidence packet, the canonical
+pack manifest's self-reported lane numbers, prior spec/plan docs, or your own subagents'
+reports.
+
+- Treat every doc, manifest field, and `/tmp/rbss_*` artifact as a claim to verify against
+  current code and against each other, not as ground truth by default. The manifest
+  reporting `unverified_parity=0` on active lanes is itself a claim from prior tooling —
+  confirm what that lane actually checked before treating "0 unverified" as "0 wrong."
+- Actively look for contradictions between sources (e.g. a doc claiming a row is fixed vs.
+  code that still shows the old behavior; two capture artifacts disagreeing with each
+  other; a prior plan/spec claiming something is done that tests don't confirm). When you
+  find one, resolve it by reading code and re-running verification, not by picking whichever
+  source is more convenient.
+- If a subagent you delegate to reports a fix as complete, do not accept that at face value
+  — require it to show the test/check that proves it, and spot-check at least the
+  high-severity ones yourself before including them in your final report.
+- Use the `rejected` claim label in your final report for anything in the evidence packet
+  or prior docs that you checked and found stale, wrong, or unsupported by current code —
+  don't silently drop it, say what was wrong and what you found instead.
+
 ## Source-of-truth order
 
 1. Current repo code and tests (`*.py`, `tests/`) — code wins over any doc below if they
@@ -183,7 +205,7 @@ every change:
   events/snapshots and never mutate `DeckState` directly.
 - `RBStateReader._tick_deck()` must keep enqueuing `ANLZ_PATH` before `TRACK_LOADED`.
 - Memory play bits must not override `DeckState.playing` directly; direct flags alone must
-  not bypass TL logic.
+  not circumvent TL logic.
 - Scripted/autoloop arm, clear, BPM, beat, elapsed, and beatpos sends must keep covering
   decks active, mirror, 3, and 4 as appropriate.
 - `LaserDirector` (policy) and `LaserSceneExecutor` (MIDI execution) must remain separate
