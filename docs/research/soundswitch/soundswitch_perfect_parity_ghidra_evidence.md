@@ -324,5 +324,19 @@ the accepted runtime proof chain is the passive SoundSwitch U0 capture plus the
 offline oracle/registry lanes. After the zero-seeded Autoloop-cycle fix, Static
 Looks are `algorithm_generalized` from the C6 assertion and the documented
 unavailable static windows, and `SSAutoLoop52.ssfile` / `SSAutoLoop54.ssfile`
-are oracle-proven. No new Ghidra fact promotes scripted blockers, and 13 active
-`unverified_parity` documents still block trusted publication.
+are oracle-proven. At that earlier checkpoint, no new Ghidra fact promoted the
+remaining scripted blockers and trusted publication was still blocked; see the
+closeout addendum below for the later software-gate result.
+
+## 2026-07-02 parity-evidence finisher closeout addendum
+
+The later software closeout did not add new Ghidra facts. It changed the proof
+chain by rebuilding the passive-capture Autoloop fixture with contiguous
+sidecar segments, keeping only PASS Autoloop rows in the positive registry,
+recording non-PASS capture segments in the divergence ledger, and generalizing
+only across the supported loaded-layout family when every positive cue resolves
+into the current venue cue set. Fresh software export then reports active lanes
+`algorithm_generalized: 69`, `oracle_proven: 14`, `unverified_parity: 0`;
+inactive unverified documents remain reported separately. This clears the
+trusted publication software gate only. It is still not live sender, Enttec, or
+physical fixture validation.

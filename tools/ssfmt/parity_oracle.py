@@ -91,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
         if loop is None:
             reports.append({"identity": identity, "verdict": "FAIL", "reason": "missing_autoloop_doc"})
             continue
+        if not rows:
+            reports.append({"identity": identity, "verdict": "SKIP", "reason": "no_promotable_u0_rows"})
+            continue
         reports.append({"identity": identity, **classify_autoloop(loop, _autoloop_samples(rows)).to_dict()})
     static_rows = fixture.get("static", {})
     if isinstance(static_rows, dict) and static_rows:

@@ -33,7 +33,7 @@ MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 | --- | --- |
 | Saved-project decode/export | Implemented for the bounded 2.10.3 canonical project/RAVE/CH1-CH19 profile. Complete dynamic rescans, stable identity, strict semantic validation, dynamic inventory reconciliation, and read-only source handling are software-tested. |
 | Pack compile/verify/load | Implemented. Deterministic compilation, independent verification, and mutation rejection are software-tested. |
-| Parity evidence lanes | Partially implemented from passive SoundSwitch U0 capture `parity_20260701T185231Z`. Scripted and Autoloop registry fixtures are venue/source-hash pinned; Static Looks now use the documented unavailable-window fallback plus the C6 non-generic assertion and export as `algorithm_generalized`. The zero-seeded Autoloop-cycle fix promotes `SSAutoLoop52.ssfile` and `SSAutoLoop54.ssfile`; fresh export now reports active lanes `algorithm_generalized: 59`, `oracle_proven: 11`, `unverified_parity: 13`; inactive lanes `algorithm_generalized: 29`, `oracle_proven: 0`, `unverified_parity: 6`. Trusted publication remains blocked while active unverified lanes remain. |
+| Parity evidence lanes | Implemented from passive SoundSwitch U0 capture `parity_20260701T185231Z`. Scripted and Autoloop registry fixtures are venue/source-hash pinned; Static Looks use the documented unavailable-window fallback plus the C6 non-generic assertion and export as `algorithm_generalized`. Segment-aware Autoloop reduction records capture-diverged non-PASS segments outside the positive registry; supported scripted layout variants generalize only when every positive reference resolves into the current cue set. Fresh export now reports active lanes `algorithm_generalized: 69`, `oracle_proven: 14`, `unverified_parity: 0`; inactive lanes `algorithm_generalized: 29`, `oracle_proven: 0`, `unverified_parity: 6`. Trusted publication is software-gated green. |
 | RW-1 export/publish/reload | Implemented, independently reviewed, and software-tested. Replacement is staged and verified; the required binding sidecar is staged before swap, and pre-swap sidecar failure preserves the prior pack. Reload stays conservative and never implies enable/backend/start. Source-fingerprint freshness drives the menubar state. Stable opaque backup/media/preset rewrites are ignored, but `recordable/*.dat` remains fingerprinted because it can later decode into learned-MIDI/control-state content; older sidecars that listed it fail open. |
 | RW-1A shutdown ownership | Implemented, independently reviewed, and software-tested. Graceful shutdown reaches the current runtime-swapped sender and attempts zero before close. Hard process death remains physically unsafe. |
 | RW-2 scripted transport | Implemented and software-tested. Pause rerenders/holds the authoritative elapsed frame; confirmed stop/unload/stale authority resolves the base to zero. |
@@ -172,13 +172,10 @@ validated.
 
 - [x] Build the current passive-capture parity evidence fixtures/registries for
   scripted tracks, native Autoloops, and Static Looks.
-- [ ] Resolve the active `unverified_parity` blockers before trusted
-  publication: Autoloops `SSAutoLoop13`, `SSAutoLoop14`, `SSAutoLoop15`,
-  `SSAutoLoop16`, `SSAutoLoop17`, `SSAutoLoop46`, `SSAutoLoop47`,
-  `SSAutoLoop48`, `SSAutoLoop50`, `SSAutoLoop52`, `SSAutoLoop54`,
-  `SSAutoLoop6`, `SSAutoLoop8`; scripted
-  `1a62cf25-0346-4ee5-bbaf-2553293fd5e9` and
-  `dd42028c-0823-4a8d-ad7e-b26e24180272`.
+- [x] Resolve the active `unverified_parity` blockers before trusted
+  publication. Fresh export now reports active lanes `algorithm_generalized: 69`,
+  `oracle_proven: 14`, `unverified_parity: 0`; inactive unverified documents
+  remain reported under `parity_lanes_inactive`.
 - [ ] Run the Art-Net U0/U1 truth-check capture exam with SoundSwitch U0 as
   ground truth, bridge U1 shadow output, fresh sidecar/run ID, full coverage, and
   `tools/artnet_compare.py --self-check` already passing.

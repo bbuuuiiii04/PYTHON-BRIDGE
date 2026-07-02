@@ -119,6 +119,14 @@ binary `−1` operation, and never let this conclusion overwrite the capture obs
 on tasks:** Task C4 = parse each scripted file's serialized key records and resolve by exact key;
 AE9E3C61 / FC10FC02 / DD42028C are witnesses of key-resolution defects, never hardcoded fixes.
 
+**2026-07-02 implementation reconciliation:** the follow-on parity-evidence finisher
+(`soundswitch_parity_evidence_finisher_spec.md` Part A) reconciles this wording with the U0 dwell
+evidence: SoundSwitch's lookup is exact in its internal 1-based reference space, while the bridge's
+decoded `stored_key` label is the file's 0-based writer index. The implemented bridge rule is
+therefore `raw_reference R -> decoded stored_key R-1`, with `R == 0` as clear-control, plus
+capture-backed negative controls against exact-R/global-offset interpretations. This note narrows
+the implementation instruction; it does not alter the recorded binary packet.
+
 **Finding 3 — Static non-generic maps. Status: BOUNDED.**
 Intensity, strobe, colour, and position are carried as **separate overlays** and applied through
 dedicated channel-setter paths **independently of the generic map**, gated by each channel's
@@ -654,6 +662,12 @@ Runs **after C4** — a held value is only correct if the cue that seeded it res
 
 ### Task C4 — Scripted cue-resolution: file-embedded exact-key lookup (runs before C3)
 The DD42028C-class fix, per §0.4 Finding 2.
+
+**2026-07-02 reconciliation:** implement the bridge-label form proven by the passive U0 evidence:
+`raw_reference R -> decoded stored_key R-1`, `R == 0 -> clear_control`, and miss -> skip/hold.
+Treat §0.4's "exact-key" wording as SoundSwitch's internal 1-based lookup space, not as an
+instruction to reintroduce exact decoded-key equality.
+
 Files: `soundswitch_project_decoder.py`, `soundswitch_pack_models.py`, `soundswitch_pack.py`,
 `soundswitch_pack_verifier.py`, `soundswitch_pack_loader.py`, `soundswitch_laser_player.py`, new pure
 `soundswitch_scripted_resolution.py`, `tools/prove_soundswitch_pack_generation.py`,

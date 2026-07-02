@@ -47,13 +47,15 @@ bridge a physical lighting authority. Copied status proves software intent only;
 sender health, native-Autoloop live/runtime evidence, final U0/U1 capture
 evidence, and physical validation remain open. The passive parity capture now
 feeds scripted, Autoloop, and Static Look evidence registries; Static Looks are
-generalized by the C6 assertion, but 13 active scripted/Autoloop documents still
-remain `unverified_parity` and block trusted publication.
+generalized by the C6 assertion, capture-diverged Autoloop samples are recorded
+outside the positive registry, and a fresh export now reports active lanes
+`algorithm_generalized: 69`, `oracle_proven: 14`, `unverified_parity: 0`.
+Trusted publication is software-gated green; physical validation remains open.
 
 | Output | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | SoundSwitch OS2L | implemented | code path exists | Exact SoundSwitch version support unknown. |
-| SoundSwitch scripted pack/direct DMX | partial, default-off | dynamic export/verifier tests plus player/startup/driver/sender/status/truth-check/parity-lane tests | Active existing-path scripts export when decoded and reconciled from the saved project; SoundSwitch-saved Static Override Press/Toggle interaction mode is honored; static-controller input auto-binds unless an alias overrides it, and missing/ambiguous input degrades manual Static Looks without disabling pack DMX; static parity lanes are now generalized, but active scripted/Autoloop unverified blockers remain; canonical pack lives at repo-local ignored `local/soundswitch/rbss_canonical_pack`; copied RW-5 status and Art-Net U1 truth-check are software/wire evidence only, sender health is not reported, and physical validation remains. |
+| SoundSwitch scripted pack/direct DMX | partial, default-off | dynamic export/verifier tests plus player/startup/driver/sender/status/truth-check/parity-lane tests | Active existing-path scripts export when decoded and reconciled from the saved project; SoundSwitch-saved Static Override Press/Toggle interaction mode is honored; static-controller input auto-binds unless an alias overrides it, and missing/ambiguous input degrades manual Static Looks without disabling pack DMX; active parity lanes now have zero `unverified_parity` in fresh software export, with direct U0 witnesses or supported-layout/static assertion generalization; canonical pack lives at repo-local ignored `local/soundswitch/rbss_canonical_pack`; copied RW-5 status and Art-Net U1 truth-check are software/wire evidence only, sender health is not reported, and physical validation remains. |
 | SoundSwitch native-DMX Autoloops | implemented, default-off | resolver/player/loader/StateManager software tests plus historical T7d tooling/captures | Uses canonical pack note-to-Autoloop bindings, bridge-owned 32-beat phase at 600 ticks/beat, and `phase_offset_beats`. Live/runtime and hardware evidence are pending; old T7d SoundSwitch-hidden-phase proof is historical and no longer blocks native output. |
 | Laser MIDI | implemented | code path plus lifecycle unit/integration tests | Default-on gated drop/post-drop cycling, shuffle-bag selection, static-impact fallback, and kill-switch-OFF legacy behavior are software-tested. Broad fixture/safety validation is not documented. |
 | LED/Govee cloud scene | implemented | code path exists | Scripted groove/drop/post-drop blackout mapping is software-tested and the shipped example config now enables the master switch (`true`) with the conservative blackout policy; device support and room-visible behavior are not generalized. |

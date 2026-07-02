@@ -23,6 +23,11 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (  # noqa: E402
     LoadedTimelineEvent,
     load_pack,
 )
+from rb_ss_bridge_v2.soundswitch_parity_oracle import (  # noqa: E402
+    AutoloopSample,
+    OracleReport,
+    classify_autoloop,
+)
 
 DEFAULT_CAPTURE = REPO_ROOT / "tools/ssfmt/captures/parity/parity_20260701T185231Z"
 DEFAULT_WITNESS_SSIDS = (
@@ -31,7 +36,8 @@ DEFAULT_WITNESS_SSIDS = (
     "9947c65e-cfd1-476e-aa90-4aed65ae5f11",
     "fc10fc02-93c2-418f-8815-16088884da42",
 )
-RUN_MARGIN_NS = 120_000_000
+AUTOLOOP_RUN_MARGIN_MS = 10
+AUTOLOOP_SEGMENT_GAP_NS = 1_000_000_000
 CONTROL_CHANNELS = frozenset((8, 9, 11))
 STATIC_UNAVAILABLE_REASON = (
     "actions.jsonl contains no completed static_held windows; slot 31 unavailable"
@@ -336,13 +342,34 @@ def _spread_phase_rows(rows: Sequence[dict[str, Any]], limit: int) -> list[dict[
     return [rows[index] for index in sorted(selected)][:limit]
 
 
+def split_autoloop_segments(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    max_gap_ns: int = AUTOLOOP_SEGMENT_GAP_NS,
+) -> list[tuple[dict[str, Any], ...]]:
+    segments: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    previous_mono: int | None = None
+    for row in sorted(rows, key=lambda item: int(item["mono_ns"])):
+        mono_ns = int(row["mono_ns"])
+        if previous_mono is not None and mono_ns - previous_mono > max_gap_ns:
+            if current:
+                segments.append(current)
+            current = []
+        current.append(dict(row))
+        previous_mono = mono_ns
+    if current:
+        segments.append(current)
+    return [tuple(segment) for segment in segments]
+
+
 def select_autoloop_rows(
     joined: Sequence[Mapping[str, Any]],
     runs: Sequence[Mapping[str, Any]],
     windows: Sequence[Mapping[str, Any]] = (),
     *,
     limit: int = 8,
-    margin_ms: int = 120,
+    margin_ms: int = AUTOLOOP_RUN_MARGIN_MS,
 ) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
     seen_phases: set[int] = set()
@@ -366,6 +393,94 @@ def select_autoloop_rows(
             "u0_frame": list(run["f"]),
         })
     return _spread_phase_rows(selected, limit)
+
+
+def _autoloop_samples(rows: Sequence[Mapping[str, Any]]) -> tuple[AutoloopSample, ...]:
+    return tuple(
+        AutoloopSample(
+            phase_tick=int(row["phase_tick"]),
+            u0_frame=tuple(int(value) for value in row["u0_frame"]),  # type: ignore[index]
+            label=str(row.get("label") or ""),
+        )
+        for row in rows
+    )
+
+
+def _passed_sample_count(report: OracleReport) -> int:
+    return sum(1 for row in report.samples if row.issue in ("match", "u0_dark"))
+
+
+def _event_summary(document: LoadedDocument) -> list[dict[str, Any]]:
+    return [
+        {
+            "source_order": event.source_order,
+            "time": event.time,
+            "raw_reference": event.raw_reference,
+            "reference_kind": event.reference_kind,
+            "channels": [
+                attribute.dmx_channel
+                for attribute in event.patch
+                if 1 <= attribute.dmx_channel <= CHANNEL_COUNT
+            ],
+        }
+        for event in document.events
+    ]
+
+
+def _autoloop_diagnostic(
+    identity: str,
+    loop: LoadedAutoloop,
+    rows: Sequence[Mapping[str, Any]],
+    report: OracleReport,
+    *,
+    segment_index: int,
+    segment_count: int,
+) -> dict[str, Any]:
+    by_phase = {int(row["phase_tick"]): row for row in rows}
+    return {
+        "class": "autoloop_capture_divergence",
+        "identity": identity,
+        "reason": "best_contiguous_segment_failed_oracle",
+        "segment_index": segment_index,
+        "segments_evaluated": segment_count,
+        "cycle_ticks": loop.document.cycle_ticks,
+        "rows_passed": _passed_sample_count(report),
+        "rows_total": len(report.samples),
+        "serialized_event_count": len(loop.document.events),
+        "serialized_events": _event_summary(loop.document),
+        "samples": [
+            {
+                "label": sample.label,
+                "phase_tick": sample.phase_tick,
+                "mono_ns": int(by_phase.get(sample.phase_tick, {}).get("mono_ns", 0)),
+                "run_ms": int(by_phase.get(sample.phase_tick, {}).get("run_ms", 0)),
+                "class_name": sample.class_name,
+                "issue": sample.issue,
+                "expected_disk_frame": list(sample.expected_frame),
+                "observed_u0_frame": list(sample.u0_frame),
+                "channel_diffs": _diffs(sample.expected_frame, sample.u0_frame),
+            }
+            for sample in report.samples
+        ],
+    }
+
+
+def _no_autoloop_rows_diagnostic(
+    identity: str,
+    loop: LoadedAutoloop,
+    *,
+    segment_count: int,
+) -> dict[str, Any]:
+    return {
+        "class": "autoloop_capture_divergence",
+        "identity": identity,
+        "reason": "no_steady_u0_rows_in_contiguous_segments",
+        "segments_evaluated": segment_count,
+        "cycle_ticks": loop.document.cycle_ticks,
+        "serialized_event_count": len(loop.document.events),
+        "serialized_events": _event_summary(loop.document),
+        "samples": [],
+    }
 
 
 def _diffs(expected: Sequence[int], observed: Sequence[int]) -> list[dict[str, int]]:
@@ -505,11 +620,44 @@ def build_autoloop_fixture(
             missing[identity] = [{"class": "join_ambiguity", "reason": "missing_autoloop_doc"}]
             autoloop[identity] = []
             continue
-        autoloop[identity] = select_autoloop_rows(
-            [row for row in joined.rows if row["identity"] == identity],
-            runs,
-            windows.get(identity, ()),
-        )
+        segments = split_autoloop_segments([row for row in joined.rows if row["identity"] == identity])
+        candidates: list[tuple[bool, int, int, int, list[dict[str, Any]], OracleReport]] = []
+        for segment_index, segment in enumerate(segments):
+            selected = select_autoloop_rows(segment, runs, windows.get(identity, ()))
+            if not selected:
+                continue
+            report = classify_autoloop(loop, _autoloop_samples(selected))
+            candidates.append((
+                report.passed,
+                _passed_sample_count(report),
+                len(selected),
+                -segment_index,
+                selected,
+                report,
+            ))
+        if not candidates:
+            autoloop[identity] = []
+            missing[identity] = [_no_autoloop_rows_diagnostic(
+                identity,
+                loop,
+                segment_count=len(segments),
+            )]
+            continue
+        passed = [candidate for candidate in candidates if candidate[0]]
+        choice = max(passed or candidates, key=lambda item: item[:4])
+        segment_index = -choice[3]
+        if choice[5].passed:
+            autoloop[identity] = choice[4]
+        else:
+            autoloop[identity] = []
+            missing[identity] = [_autoloop_diagnostic(
+                identity,
+                loop,
+                choice[4],
+                choice[5],
+                segment_index=segment_index,
+                segment_count=len(segments),
+            )]
     fixture = {
         "capture_id": capture.name,
         "autoloop": autoloop,

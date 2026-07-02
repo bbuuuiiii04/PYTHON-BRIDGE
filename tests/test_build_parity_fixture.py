@@ -20,6 +20,7 @@ from rb_ss_bridge_v2.tools.ssfmt.build_parity_fixture import (  # noqa: E402
     screen_rows,
     select_autoloop_rows,
     select_rows,
+    split_autoloop_segments,
 )
 
 
@@ -131,6 +132,21 @@ class BuildParityFixtureTests(unittest.TestCase):
         self.assertEqual(rows[0]["phase_tick"], 0)
         self.assertEqual(rows[-1]["phase_tick"], 9)
         self.assertEqual(rows[0]["u0_frame"], _frame(7))
+
+    def test_split_autoloop_segments_breaks_discontinuous_sidecar_windows(self) -> None:
+        rows = [
+            {"identity": "SSAutoLoop4.ssfile", "phase_tick": 200, "mono_ns": 3_000_000_000},
+            {"identity": "SSAutoLoop4.ssfile", "phase_tick": 0, "mono_ns": 1_000_000_000},
+            {"identity": "SSAutoLoop4.ssfile", "phase_tick": 100, "mono_ns": 1_200_000_000},
+            {"identity": "SSAutoLoop4.ssfile", "phase_tick": 300, "mono_ns": 3_100_000_000},
+        ]
+
+        segments = split_autoloop_segments(rows, max_gap_ns=500_000_000)
+
+        self.assertEqual(
+            [[row["phase_tick"] for row in segment] for segment in segments],
+            [[0, 100], [200, 300]],
+        )
 
     def test_select_rows_accepts_recovered_frame_index_windows(self) -> None:
         joined = [{"ssid": "aaaa", "elapsed_ms": 1150, "mono_ns": 10_200_000_000,

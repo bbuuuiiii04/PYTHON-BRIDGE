@@ -5,6 +5,11 @@ from typing import Any, Iterable, Literal, Mapping
 
 ParityLane = Literal["oracle_proven", "algorithm_generalized", "unverified_parity"]
 PARITY_LANES = frozenset(("oracle_proven", "algorithm_generalized", "unverified_parity"))
+GENERALIZED_RENDER_LAYOUTS = frozenset((
+    "shared_441_dictionary_timeline",
+    "dictionary_timeline_addressed_footer",
+    "dictionary_timeline_no_shared_anchor",
+))
 
 
 def classify_parity_lane(
@@ -51,11 +56,11 @@ def generalized_witness_passed(
     layout: str,
     document_fully_resolved: bool,
 ) -> bool:
-    if not document_fully_resolved:
+    if not document_fully_resolved or layout not in GENERALIZED_RENDER_LAYOUTS:
         return False
     rows = registry_docs.values() if isinstance(registry_docs, Mapping) else registry_docs
     return any(
-        row.get("layout") == layout
+        row.get("layout") in GENERALIZED_RENDER_LAYOUTS
         and row.get("verdict") == "PASS"
         and row.get("truth_source", "SoundSwitch U0") == "SoundSwitch U0"
         for row in rows
@@ -63,6 +68,6 @@ def generalized_witness_passed(
 
 
 __all__ = [
-    "PARITY_LANES", "ParityLane", "classify_parity_lane", "count_lanes",
+    "GENERALIZED_RENDER_LAYOUTS", "PARITY_LANES", "ParityLane", "classify_parity_lane", "count_lanes",
     "generalized_witness_passed", "parity_evidence",
 ]

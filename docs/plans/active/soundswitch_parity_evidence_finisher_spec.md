@@ -290,8 +290,9 @@ fixtures (wherever they live in `tests/`) stay untouched.
    - else `unverified_parity`.
    `parity_evidence` already carries `capture_id`/`oracle_report_sha256` fields
    ([confirmed] `soundswitch_parity_registry.py:25-39`) — populate them from the registry entry
-   for `oracle_proven` docs, and set `reason` to `"generalized_from_<layout>"` for generalized
-   docs.
+   for `oracle_proven` docs. The implemented generalized lane reason is
+   `"generalized_supported_layout_family_<layout>"`, reflecting that the supported loaded-layout
+   family shares one renderer path and still fails closed on unresolved or stale cue references.
    - **Lane-count scoping fix:** manifest `parity_lanes` counts ONLY active supported documents
      (scripted docs where `path in active_scripts` and doc parsed; autoloops where the loop is in
      the active/enabled set already computed for `_active_union`; every static slot). Add

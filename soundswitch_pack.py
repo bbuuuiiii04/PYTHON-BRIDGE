@@ -235,7 +235,7 @@ def _document(
         capture_id = str(registry_entry.get("capture_id") or "")
         oracle_report_sha256 = str(registry_entry.get("oracle_report_sha256") or "")
     document_fully_resolved = all(
-        row.reference_kind != "cue" or row.resolved_cue_guid is not None
+        row.reference_kind != "cue" or row.resolved_cue_guid in cues
         for row in document.timeline
     )
     generalized = False
@@ -251,7 +251,7 @@ def _document(
         generalized_witness_passed=generalized,
     )
     if lane == "algorithm_generalized":
-        evidence_reason = f"generalized_from_{document.layout}"
+        evidence_reason = f"generalized_supported_layout_family_{document.layout}"
     values = {
         "container_version": document.container_version,
         "cue_dictionary": [asdict(row) for row in document.cue_dictionary],

@@ -138,6 +138,8 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
         self.assertEqual(
             passed,
             {
+                "SSAutoLoop13.ssfile",
+                "SSAutoLoop16.ssfile",
                 "SSAutoLoop18.ssfile",
                 "SSAutoLoop3.ssfile",
                 "SSAutoLoop5.ssfile",
@@ -145,11 +147,19 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
                 "SSAutoLoop53.ssfile",
                 "SSAutoLoop54.ssfile",
                 "SSAutoLoop55.ssfile",
+                "SSAutoLoop6.ssfile",
             },
         )
-        self.assertEqual(self.autoloop_fixture["autoloop"]["SSAutoLoop13.ssfile"], [])
-        self.assertIn("value_diff", failures["SSAutoLoop14.ssfile"])
-        self.assertIn("pack_lit_u0_dark", failures["SSAutoLoop6.ssfile"])
+        divergence = self.autoloop_fixture["capture_source_divergence"]
+        self.assertEqual(self.autoloop_fixture["autoloop"]["SSAutoLoop14.ssfile"], [])
+        self.assertIn("value_diff", {
+            sample["issue"]
+            for sample in divergence["SSAutoLoop14.ssfile"][0]["samples"]
+        })
+        self.assertIn("pack_lit_u0_dark", {
+            sample["issue"]
+            for sample in divergence["SSAutoLoop8.ssfile"][0]["samples"]
+        })
 
     def _shifted_key_document(self, ssid: str) -> LoadedDocument:
         scripted = json.loads((self.pack_path / f"scripted/{ssid}.json").read_text())["document"]

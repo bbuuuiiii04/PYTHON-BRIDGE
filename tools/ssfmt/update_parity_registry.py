@@ -213,30 +213,23 @@ def build_autoloop_registry(pack_path: Path, fixture_path: Path) -> dict[str, di
         if not isinstance(loop, LoadedAutoloop):
             continue
         source_sha, layout = _autoloop_document_source(pack_path, identity)
-        if rows:
-            report = classify_autoloop(loop, _autoloop_samples(rows))
-            report_dict = report.to_dict()
-            verdict = report.verdict
-            truth_source = report.truth_source
-            rows_passed = _passed_sample_count(report_dict)
-            rows_total = len(report.samples)
-        else:
-            report_dict = _empty_fail_report("autoloop")
-            verdict = "FAIL"
-            truth_source = "SoundSwitch U0"
-            rows_passed = 0
-            rows_total = 0
+        if not rows:
+            continue
+        report = classify_autoloop(loop, _autoloop_samples(rows))
+        if not report.passed:
+            continue
+        report_dict = report.to_dict()
         records[identity] = {
             "capture_id": capture_id,
             "divergence": [],
             "layout": layout,
             "oracle_report_sha256": sha256_bytes(canonical_json_bytes(report_dict)),
-            "rows_passed": rows_passed,
-            "rows_total": rows_total,
+            "rows_passed": _passed_sample_count(report_dict),
+            "rows_total": len(report.samples),
             "source_sha256": source_sha,
-            "truth_source": truth_source,
+            "truth_source": report.truth_source,
             "venue_source_sha256": venue_sha,
-            "verdict": verdict,
+            "verdict": report.verdict,
         }
     return records
 

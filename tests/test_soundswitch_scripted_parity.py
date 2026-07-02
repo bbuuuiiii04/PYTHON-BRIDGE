@@ -211,6 +211,8 @@ class ParityLaneClassifierTests(unittest.TestCase):
     def test_generalized_witness_requires_u0_pass_and_resolved_document(self) -> None:
         registry = {WITNESS_ID: _registry_entry(source_sha=WITNESS_SHA)}
         self.assertTrue(generalized_witness_passed(registry, LAYOUT, True))
+        self.assertTrue(generalized_witness_passed(registry, "dictionary_timeline_addressed_footer", True))
+        self.assertTrue(generalized_witness_passed(registry, "dictionary_timeline_no_shared_anchor", True))
         self.assertFalse(generalized_witness_passed(registry, "other_layout", True))
         self.assertFalse(generalized_witness_passed(registry, LAYOUT, False))
         self.assertFalse(
@@ -262,7 +264,24 @@ class ParityLaneClassifierTests(unittest.TestCase):
         )
 
         self.assertEqual(document["parity_lane"], "algorithm_generalized")
-        self.assertEqual(document["parity_evidence"]["reason"], f"generalized_from_{LAYOUT}")
+        self.assertEqual(
+            document["parity_evidence"]["reason"],
+            f"generalized_supported_layout_family_{LAYOUT}",
+        )
+
+    def test_compiler_generalizes_supported_layout_family_from_current_witness(self) -> None:
+        witness = _document(WITNESS_ID, source_sha=WITNESS_SHA)
+        document, _ = _compile_script(
+            _document(layout="dictionary_timeline_addressed_footer"),
+            {WITNESS_ID: _registry_entry(source_sha=WITNESS_SHA)},
+            extra_documents=(witness,),
+        )
+
+        self.assertEqual(document["parity_lane"], "algorithm_generalized")
+        self.assertEqual(
+            document["parity_evidence"]["reason"],
+            "generalized_supported_layout_family_dictionary_timeline_addressed_footer",
+        )
 
     def test_compiler_does_not_generalize_unresolved_scripted_reference(self) -> None:
         witness = _document(WITNESS_ID, source_sha=WITNESS_SHA)
@@ -281,6 +300,29 @@ class ParityLaneClassifierTests(unittest.TestCase):
         )
         document, _ = _compile_script(
             unresolved,
+            {WITNESS_ID: _registry_entry(source_sha=WITNESS_SHA)},
+            extra_documents=(witness,),
+        )
+
+        self.assertEqual(document["parity_lane"], "unverified_parity")
+
+    def test_compiler_does_not_generalize_stale_scripted_reference(self) -> None:
+        witness = _document(WITNESS_ID, source_sha=WITNESS_SHA)
+        stale = _document(
+            timeline=(
+                TimelineRecord(
+                    source_offset=10,
+                    record_version=1,
+                    time=0,
+                    raw_reference=1,
+                    reference_kind="cue",
+                    resolved_stored_key=0,
+                    resolved_cue_guid="f" * 32,
+                ),
+            )
+        )
+        document, _ = _compile_script(
+            stale,
             {WITNESS_ID: _registry_entry(source_sha=WITNESS_SHA)},
             extra_documents=(witness,),
         )

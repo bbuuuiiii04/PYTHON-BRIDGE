@@ -84,12 +84,10 @@ artifacts, not planning documents. They are not moved into the authority tree.
 - Current parity evidence lanes: the passive SoundSwitch U0 capture
   `parity_20260701T185231Z` feeds scripted, Autoloop, and Static Look registry
   fixtures. Static Looks are now `algorithm_generalized` through the documented
-  unavailable-window fallback plus the C6 non-generic assertion. Fresh export at
-  the zero-seeded Autoloop-cycle fix reports active lanes
-  `algorithm_generalized: 59`, `oracle_proven: 11`,
-  `unverified_parity: 13`; trusted publication remains
-  blocked by the named unverified scripted/Autoloop documents in
-  `soundswitch_exporter_remaining_work.md`.
+  unavailable-window fallback plus the C6 non-generic assertion. Segment-aware
+  Autoloop reduction plus supported-layout-family scripted generalization now
+  reports fresh active lanes `algorithm_generalized: 69`, `oracle_proven: 14`,
+  `unverified_parity: 0`; trusted publication is software-gated green.
 - Pure scripted renderer: implemented/software-wire tested.
 - Config/startup/runtime command/StateManager/Enttec lane: implemented and
   default-off; RW-2 through RW-5 runtime authority/status work is
