@@ -1,7 +1,7 @@
 ---
 doc_status: active-plan
 truth_level: code-and-capture-grounded
-last_verified_commit: 74febec
+last_verified_commit: 3f4bcc0
 last_verified_date: 2026-06-29
 validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -58,7 +58,7 @@ validation_scope: capture-evidence plan only; SOFTWARE/WIRE-VALIDATED ONLY / HAR
 | Claim | Current evidence | Status |
 | --- | --- | --- |
 | The loaded autoloop cycle is 19,200 animation ticks. | `soundswitch_pack_loader.py:26`; `soundswitch_laser_player.py:135-140` wraps `phase_tick % loop.cycle_ticks`. | [confirmed] |
-| `render_autoloop_frame` applies the steady-loop prior-cycle state, signed negative pre-roll, then records through the wrapped phase. | `soundswitch_laser_player.py:118-140`. | [confirmed] |
+| `render_autoloop_frame` starts each cycle from zero, applies signed negative pre-roll, then records through the wrapped phase. | `soundswitch_laser_player.py:118-140`. | [confirmed] |
 | The bridge phrase-arm period is 32 beats. | `config.py:8` (`AUTOLOOP_ARM_PHRASE_BEATS = 32`). | [confirmed] |
 | `19_200 / 32 = 600` is the candidate ticks/beat value. | Arithmetic over two independently named constants. The code does not prove that the bridge arm phrase equals one SoundSwitch animation cycle. | [unknown] |
 | Initial arm stores a future phrase target in `autoloop_arm_sync_beat`; master correction can replace it; successful lock clears it back to zero. | `autoloop_controller.py:231-239`, `:488-498`, `:603-704`. | [confirmed] |

@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 871b5f9
+last_verified_commit: 3f4bcc0
 last_verified_date: 2026-07-02
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
@@ -47,7 +47,7 @@ bridge a physical lighting authority. Copied status proves software intent only;
 sender health, native-Autoloop live/runtime evidence, final U0/U1 capture
 evidence, and physical validation remain open. The passive parity capture now
 feeds scripted, Autoloop, and Static Look evidence registries; Static Looks are
-generalized by the C6 assertion, but 15 active scripted/Autoloop documents still
+generalized by the C6 assertion, but 13 active scripted/Autoloop documents still
 remain `unverified_parity` and block trusted publication.
 
 | Output | Status | Evidence | Notes |

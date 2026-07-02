@@ -321,7 +321,8 @@ This packet remains the static/binary evidence boundary, not the runtime proof
 itself. The static addendum confirms SoundSwitch's static/control lookup is
 data-driven and exact enough to support the C6 non-generic assertion path, but
 the accepted runtime proof chain is the passive SoundSwitch U0 capture plus the
-offline oracle/registry lanes. As of code commit `871b5f9`, Static Looks are
-`algorithm_generalized` from the C6 assertion and the documented unavailable
-static windows; no new Ghidra fact promotes scripted or Autoloop blockers, and
-active `unverified_parity` documents still block trusted publication.
+offline oracle/registry lanes. After the zero-seeded Autoloop-cycle fix, Static
+Looks are `algorithm_generalized` from the C6 assertion and the documented
+unavailable static windows, and `SSAutoLoop52.ssfile` / `SSAutoLoop54.ssfile`
+are oracle-proven. No new Ghidra fact promotes scripted blockers, and 13 active
+`unverified_parity` documents still block trusted publication.

@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against implementation commit `871b5f9` on 2026-07-02.
+Audited against implementation commit `3f4bcc0` on 2026-07-02.
 
 ## SoundSwitch Pack Component Boundary
 
@@ -33,10 +33,12 @@ Audited against implementation commit `871b5f9` on 2026-07-02.
   `StateManager` pack driver and `LaserPackPlayer.select_autoloop()` path.
   Selection is I/O-free, latches across no-edge ticks, may seed from the
   executor's latched active Autoloop scene when no fresh edge is present, uses
-  `AUTOLOOP_TICKS_PER_BEAT = 600` plus `phase_offset_beats`, resolves only
-  canonical-pack Autoloop bindings, fails closed on missing/unsupported content,
-  preserves scripted/static/blackout precedence, and remains suppressed while
-  SoundSwitch is present. Phase calibration, live runtime validation, and
+  `AUTOLOOP_TICKS_PER_BEAT = 600` plus `phase_offset_beats`, renders each
+  Autoloop cycle from zero with signed negative pre-roll and current-cycle
+  events, resolves only canonical-pack Autoloop bindings, fails closed on
+  missing/unsupported content, preserves scripted/static/blackout precedence,
+  and remains suppressed while SoundSwitch is present. Phase calibration,
+  live runtime validation, and
   hardware validation remain separate gates.
 - The direct-DMX lane remains hardware-unvalidated. The reviewed operator procedure requires an
   exact bridge-only process detector, a reachable physical kill, and a known-dark Enttec/DMX

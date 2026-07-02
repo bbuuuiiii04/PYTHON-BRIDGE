@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 871b5f9
+last_verified_commit: 3f4bcc0
 last_verified_date: 2026-07-02
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -93,9 +93,10 @@ Parity evidence tests add `tests/test_build_parity_fixture.py`,
 `tests/test_soundswitch_parity_oracle.py`,
 `tests/test_soundswitch_scripted_parity.py`, and `tests/test_static_looks.py`.
 They cover ordered capture joins, scripted divergence ledgers, Autoloop sample
-classification, static unavailable-window fixture generation, registry hash
-freshness, same-layout generalization, active/inactive lane summaries, and
-static non-generic assertion fallback. These are passive capture/software
+classification, zero-seeded Autoloop-cycle replay, static unavailable-window
+fixture generation, registry hash freshness, same-layout generalization,
+active/inactive lane summaries, and static non-generic assertion fallback.
+These are passive capture/software
 oracle tests only; remaining active `unverified_parity` documents block trusted
 publication.
 - relevant subsystem card

@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against implementation commit `871b5f9` on 2026-07-02. Treat code as the source of
+Audited against implementation commit `3f4bcc0` on 2026-07-02. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
 ## System Shape
@@ -48,9 +48,10 @@ The old exact-count closure snapshot is proof-only; live export accepts
 internally consistent saved edits. F9 and F10 proof seams remain covered.
 Capture-derived parity registries now feed the compiler for scripted,
 Autoloop, and Static Look lanes. Static Looks are generalized through the C6
-non-generic assertion plus the documented unavailable static windows, but a
-fresh export at `871b5f9` still has 15 active `unverified_parity` documents, so
-trusted publication remains blocked.
+non-generic assertion plus the documented unavailable static windows, and the
+zero-seeded Autoloop-cycle fix promotes `SSAutoLoop52.ssfile` and
+`SSAutoLoop54.ssfile`, but a fresh export still has 13 active
+`unverified_parity` documents, so trusted publication remains blocked.
 
 This lane remains subordinate to existing bridge authority. `__main__` loads
 the optional config and chooses one physical laser backend before workers start;

@@ -1,7 +1,7 @@
 ---
 doc_status: active-spec
 truth_level: code-and-capture-grounded
-last_verified_commit: e0eed61
+last_verified_commit: 3f4bcc0
 last_verified_date: 2026-06-29
 validation_scope: offline read-only analysis tool spec; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no bridge run, no StateManager change, no MIDI/serial/Art-Net/Enttec/DMX/hardware open, no SoundSwitch/project mutation
 ---
@@ -30,8 +30,8 @@ hardware.
 ### Verified code facts (file:line)
 - Renderer: `soundswitch_laser_player.py:125` `render_autoloop_frame(loop, phase_tick) ->
   tuple[int,...]`. Returns a 19-channel (CH1-19) frame. Internally does
-  `wrapped = phase_tick % loop.cycle_ticks` plus prior-cycle end-state inheritance and
-  signed negative pre-roll (`:144-147`). `phase_tick` is a **cumulative non-negative int
+  `wrapped = phase_tick % loop.cycle_ticks` and replays signed negative pre-roll plus
+  current-cycle events from zero (`:144-147`). `phase_tick` is a **cumulative non-negative int
   tick count**; the function wraps it. Returns `ZERO_FRAME` if `not loop.supported_active`
   or `loop.layout not in SUPPORTED_LAYOUTS`. [confirmed]
 - Cycle length: `soundswitch_pack_loader.py:26` `AUTOLOOP_CYCLE_TICKS = 19_200`; the loader

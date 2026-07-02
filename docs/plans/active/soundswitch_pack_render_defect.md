@@ -1,7 +1,7 @@
 ---
 doc_status: active-investigation
 truth_level: live-capture + deterministic-render + pack-data grounded
-last_verified_commit: 03af947
+last_verified_commit: 3f4bcc0
 last_verified_date: 2026-07-01
 validation_scope: local ignored canonical-pack patch from one operator-approved SoundSwitch U0 capture; software verification only; no restart or hardware validation
 ---
@@ -122,7 +122,7 @@ Tracked code support:
 
 - `soundswitch_laser_player.render_scripted_frame()` now prefers verified
   `boundary_frame` values when every scripted event has one. Autoloop rendering still
-  uses event replay because wrap/prior-cycle behavior is different.
+  uses event replay because wrap/negative-pre-roll behavior is different.
 - `soundswitch_pack_verifier.verify_pack()` still rejects accidental boundary mutation
   for normal generated documents, but accepts explicit `pre_render_status:
   oracle_rendered` documents as capture-derived literal boundaries.
