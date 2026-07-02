@@ -106,6 +106,17 @@ Primary evidence (read these first, in full):
   render cues/venue records, 32 static looks, active parity lanes
   `algorithm_generalized=67`, `oracle_proven=16`, `unverified_parity=0`; inactive lanes
   `algorithm_generalized=29`, `unverified_parity=6`.
+- `docs/research/soundswitch/soundswitch_live_capture_findings_2026_07_02_evening.md` —
+  **read this and treat it as superseding the truth-exam doc on the 4 rows it covers.** A
+  fresh live capture session (same day, after the truth-exam doc was written) closed 4 of
+  the previously-GAP rows: static/manual look hold (was "never observed," now **confirmed
+  working** with a named interruption mechanism, `smart_drop_blackout`, to check against
+  the manual-static policy invariant), autoloop BPM/pitch movement (now confirmed),
+  scripted-to-scripted transition with no autoloop deck involved (now confirmed, and
+  isolates the deck-split bug to autoloop-sourced handoffs specifically), and drag-seek
+  forward/backward (now confirmed for drag-seeks specifically; a large discrete
+  jump/hotcue-style seek is still unverified). Do not start from the truth-exam doc's
+  "static_held never observed" claim — it is out of date as of this newer doc.
 
 Fuller capture evidence — do not assume the truth-exam doc's excerpts are the only
 captures that exist:
