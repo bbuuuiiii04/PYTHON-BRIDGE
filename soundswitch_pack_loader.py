@@ -502,6 +502,9 @@ def _document(value: dict[str, Any], cue_patches: Mapping[str, tuple[LoadedAttri
               *, autoloop: bool, renderable: bool = True) -> LoadedDocument:
     timeline = value.get("timeline")
     boundaries = value.get("pre_rendered_boundaries")
+    relative = value.get("relative_path")
+    lane = _parity_lane(value.get("parity_lane"), f"{relative} document")
+    evidence = _parity_evidence(value.get("parity_evidence"), f"{relative} document")
     if not isinstance(timeline, list) or not isinstance(boundaries, list):
         _fail("verified timeline/boundary mismatch")
     if renderable and len(timeline) != len(boundaries):
@@ -518,7 +521,8 @@ def _document(value: dict[str, Any], cue_patches: Mapping[str, tuple[LoadedAttri
             _fail("unsupported timeline reference kind")
         guid = row.get("resolved_cue_guid")
         if kind == "cue":
-            if renderable and (not isinstance(guid, str) or guid not in cue_patches):
+            if renderable and (not isinstance(guid, str) or guid not in cue_patches) \
+                    and lane != "unverified_parity":
                 _fail("stale cue in verified timeline")
             patch = cue_patches.get(guid, ()) if isinstance(guid, str) else ()
         else:
@@ -547,7 +551,6 @@ def _document(value: dict[str, Any], cue_patches: Mapping[str, tuple[LoadedAttri
             resolved_cue_guid=guid if isinstance(guid, str) else None,
             boundary_frame=boundary_frame,
         ))
-    relative = value.get("relative_path")
     layout = value.get("layout")
     if not isinstance(relative, str) or not isinstance(layout, str):
         _fail("document identity/layout is missing")
@@ -556,8 +559,7 @@ def _document(value: dict[str, Any], cue_patches: Mapping[str, tuple[LoadedAttri
         _fail("document intensity nodes are missing")
     return LoadedDocument(relative, layout, tuple(events), tuple(_intensity(row) for row in nodes),
                           AUTOLOOP_CYCLE_TICKS if autoloop else None,
-                          _parity_lane(value.get("parity_lane"), f"{relative} document"),
-                          _parity_evidence(value.get("parity_evidence"), f"{relative} document"))
+                          lane, evidence)
 
 
 def load_pack(pack: str | Path) -> LoadedPack:

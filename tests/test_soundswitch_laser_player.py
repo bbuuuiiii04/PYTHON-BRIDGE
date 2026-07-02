@@ -565,9 +565,9 @@ class CurrentPackGoldenTests(unittest.TestCase):
         self.assertEqual(len(loop13.events), 257)
         self.assertLess(loop13.events[0].time, 0)
         self.assertEqual(bytes(render_autoloop_frame(loop13, 0)).hex(),
-                         "3e003700005d8a89d600000000003e00000000")
+                         "3e003700005d8a000000ff0000001400000000")
         self.assertEqual(bytes(render_autoloop_frame(loop13, 1)).hex(),
-                         "3e003700005d8a89d600000000001400000000")
+                         "3e003700005d8a000000ff0000001a00000000")
         self.assertEqual(render_autoloop_frame(loop13, 0),
                          render_autoloop_frame(loop13, 19_200))
         loop3 = self.pack.autoloops["SSAutoLoop3.ssfile"].document
@@ -602,14 +602,14 @@ class CurrentPackGoldenTests(unittest.TestCase):
             event.resolved_cue_guid
             for row in self.pack.autoloops.values()
             for event in row.document.events
-            if event.resolved_cue_guid is not None
+            if event.resolved_cue_guid is not None and event.patch
         }
         referenced.update(
             event.resolved_cue_guid
             for row in self.pack.scripted.values()
             if row.document is not None
             for event in row.document.events
-            if event.resolved_cue_guid is not None
+            if event.resolved_cue_guid is not None and event.patch
         )
         self.assertTrue(referenced.isdisjoint(self.pack.catalog_tail_guids))
 

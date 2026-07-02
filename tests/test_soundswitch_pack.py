@@ -143,17 +143,22 @@ class CurrentProjectPackTests(unittest.TestCase):
                         if row.get("active") and row.get("target_kind") == "autoloop"}
         active_scripts = {row["relative_path"] for row in track["scripted_inventory"]
                           if row.get("active_existing_path")}
+        venue = json.loads((pack / "venue_cues.json").read_text())
+        render_guids = {row["cue_guid"].lower() for row in venue["records"]
+                        if row["record_kind"] == "fixture_payload"}
         refs: set[str] = set()
         for path in (pack / "autoloops").glob("*.json"):
             document = json.loads(path.read_text())["document"]
             if document["relative_path"] in active_loops:
                 refs.update(row["resolved_cue_guid"].lower() for row in document["timeline"]
-                            if row.get("resolved_cue_guid"))
+                            if row.get("resolved_cue_guid")
+                            and row["resolved_cue_guid"].lower() in render_guids)
         for path in (pack / "scripted").glob("*.json"):
             document = json.loads(path.read_text()).get("document")
             if isinstance(document, dict) and document["relative_path"] in active_scripts:
                 refs.update(row["resolved_cue_guid"].lower() for row in document["timeline"]
-                            if row.get("resolved_cue_guid"))
+                            if row.get("resolved_cue_guid")
+                            and row["resolved_cue_guid"].lower() in render_guids)
         union = sorted(refs)
         return len(union), hashlib.sha256("\n".join(union).encode("ascii")).hexdigest()
 

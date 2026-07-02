@@ -215,8 +215,9 @@ def _active_union(project: DecodedSoundSwitchProject, active_scripts: set[str]) 
                     and row.target_kind == "autoloop" and row.target_identity}
     documents = [row for row in (*project.autoloops, *project.scripted_tracks)
                  if row.relative_path in active_loops or row.relative_path in active_scripts]
+    render_guids = {row.cue_guid for row in project.render_cues}
     guids = sorted({event.resolved_cue_guid.lower() for doc in documents for event in doc.timeline
-                    if event.resolved_cue_guid})
+                    if event.resolved_cue_guid in render_guids})
     return guids, sha256_bytes("\n".join(guids).encode("ascii"))
 
 

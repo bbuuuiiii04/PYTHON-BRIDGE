@@ -349,12 +349,11 @@ def _validate_document(doc: Any, expected_path: str,
             if guid is None:
                 if parity_lane != "unverified_parity":
                     _fail(f"unresolved positive reference is not unverified for {expected_path}")
-            elif not isinstance(guid, str) or (active and guid not in cue_patches):
-                if parity_lane != "unverified_parity":
-                    _fail(f"stale positive reference is not unverified for {expected_path}")
-            elif isinstance(guid, str):
+            elif isinstance(guid, str) and guid in cue_patches:
                 refs.add(guid.lower())
                 _apply_patch(recomputed, cue_patches[guid], expected_path)
+            elif parity_lane != "unverified_parity":
+                _fail(f"stale positive reference is not unverified for {expected_path}")
         else:
             _fail(f"unknown reference semantics for {expected_path}")
         if boundaries:
