@@ -33,6 +33,9 @@ DEFAULT_WITNESS_SSIDS = (
 )
 RUN_MARGIN_NS = 120_000_000
 CONTROL_CHANNELS = frozenset((8, 9, 11))
+STATIC_UNAVAILABLE_REASON = (
+    "actions.jsonl contains no completed static_held windows; slot 31 unavailable"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -520,19 +523,72 @@ def build_autoloop_fixture(
     return fixture
 
 
+def _slot_values(rows: Iterable[Mapping[str, Any]], label_suffix: str) -> tuple[int, ...]:
+    slots: list[int] = []
+    seen: set[int] = set()
+    for row in rows:
+        label = str(row.get("label") or "")
+        slot = row.get("look_slot")
+        if type(slot) is int and label.endswith(label_suffix) and slot not in seen:
+            slots.append(slot)
+            seen.add(slot)
+    return tuple(slots)
+
+
+def build_static_fixture(capture: Path, pack_path: Path) -> dict[str, Any]:
+    del pack_path
+    action_rows = tuple(iter_jsonl(capture / "actions.jsonl"))
+    attempted_slots = _slot_values(action_rows, "_incomplete_no_static_held")
+    unavailable_slots = _slot_values(action_rows, "_reclassified_unavailable_from_streamdeck")
+    summary: Mapping[str, Any] = {}
+    capture_end = capture / "capture_end.json"
+    if capture_end.exists():
+        data = json.loads(capture_end.read_text(encoding="utf-8"))
+        surfaces = data.get("surfaces")
+        if isinstance(surfaces, Mapping) and isinstance(surfaces.get("static"), Mapping):
+            summary = surfaces["static"]
+    if not attempted_slots:
+        attempted = summary.get("attempted_slots")
+        if isinstance(attempted, list):
+            attempted_slots = tuple(slot for slot in attempted if type(slot) is int)
+    if not unavailable_slots:
+        unavailable = summary.get("unavailable_slots")
+        if isinstance(unavailable, list):
+            unavailable_slots = tuple(slot for slot in unavailable if type(slot) is int)
+    attempted_slots = tuple(slot for slot in attempted_slots if slot not in set(unavailable_slots))
+    reason = str(summary.get("reason") or STATIC_UNAVAILABLE_REASON)
+    return {
+        "capture_id": capture.name,
+        "static": {},
+        "static_capture_windows": "unavailable",
+        "reason": reason,
+        "attempted_slots": list(attempted_slots),
+        "unavailable_slots": list(unavailable_slots),
+        "builder": {
+            "tool": "tools/ssfmt/build_parity_fixture.py",
+            "actions": {
+                "attempted_slots": list(attempted_slots),
+                "unavailable_slots": list(unavailable_slots),
+            },
+        },
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--capture", type=Path, default=DEFAULT_CAPTURE)
     parser.add_argument("--pack", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--surface", choices=("scripted", "autoloop"), default="scripted")
+    parser.add_argument("--surface", choices=("scripted", "autoloop", "static"), default="scripted")
     parser.add_argument("--ssid", action="append", default=None,
                         help="Scripted witness SoundSwitch ID. Defaults to the parity witnesses.")
     parser.add_argument("--autoloop-identity", action="append", default=None,
                         help="Autoloop identity. Defaults to autoloops covered by the capture alignment.")
     args = parser.parse_args(argv)
 
-    if args.surface == "autoloop":
+    if args.surface == "static":
+        fixture = build_static_fixture(args.capture, args.pack)
+    elif args.surface == "autoloop":
         fixture = build_autoloop_fixture(
             args.capture,
             args.pack,

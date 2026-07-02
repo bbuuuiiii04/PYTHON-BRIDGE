@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (  # noqa: E402
     LoadedTimelineEvent,
 )
 from rb_ss_bridge_v2.tools.ssfmt.build_parity_fixture import (  # noqa: E402
+    build_static_fixture,
     join_autoloop_to_mono,
     join_sidecar_to_mono,
     screen_rows,
@@ -157,6 +159,27 @@ class BuildParityFixtureTests(unittest.TestCase):
         self.assertEqual([row["label"] for row in witnesses], ["match"])
         self.assertEqual([row["class"] for row in divergence],
                          ["cross_deck_bleed", "stale_source_edit"])
+
+    def test_static_fixture_records_unavailable_capture_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            capture = Path(tmp)
+            (capture / "actions.jsonl").write_text(
+                "\n".join((
+                    '{"label":"static_slot_0_incomplete_no_static_held","look_slot":0}',
+                    '{"label":"static_slot_24_incomplete_no_static_held","look_slot":24}',
+                    '{"label":"static_slot_16_incomplete_no_static_held","look_slot":16}',
+                    '{"label":"static_slot_31_incomplete_no_static_held","look_slot":31}',
+                    '{"label":"static_slot_31_reclassified_unavailable_from_streamdeck","look_slot":31}',
+                )) + "\n",
+                encoding="utf-8",
+            )
+
+            fixture = build_static_fixture(capture, Path("unused"))
+
+        self.assertEqual(fixture["static"], {})
+        self.assertEqual(fixture["static_capture_windows"], "unavailable")
+        self.assertEqual(fixture["attempted_slots"], [0, 24, 16])
+        self.assertEqual(fixture["unavailable_slots"], [31])
 
 
 if __name__ == "__main__":

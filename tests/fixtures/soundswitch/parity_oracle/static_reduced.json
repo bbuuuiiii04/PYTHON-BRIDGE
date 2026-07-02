@@ -1,0 +1,27 @@
+{
+  "attempted_slots": [
+    0,
+    24,
+    16
+  ],
+  "builder": {
+    "actions": {
+      "attempted_slots": [
+        0,
+        24,
+        16
+      ],
+      "unavailable_slots": [
+        31
+      ]
+    },
+    "tool": "tools/ssfmt/build_parity_fixture.py"
+  },
+  "capture_id": "parity_20260701T185231Z",
+  "reason": "slots 0/24/16 were attempted but bridge static_held was never observed; slot 31 unavailable from StreamDeck/reserved for bridge MIDI IAC; U0 was recorded but static alignment is not accepted",
+  "static": {},
+  "static_capture_windows": "unavailable",
+  "unavailable_slots": [
+    31
+  ]
+}

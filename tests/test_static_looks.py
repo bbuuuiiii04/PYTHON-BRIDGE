@@ -13,6 +13,7 @@ MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
+from rb_ss_bridge_v2 import soundswitch_pack  # noqa: E402
 from rb_ss_bridge_v2.soundswitch_pack_models import (  # noqa: E402
     CueAttribute,
     FixtureChannel,
@@ -26,6 +27,12 @@ from rb_ss_bridge_v2.soundswitch_static_assertions import (  # noqa: E402
 
 
 GUID = bytes.fromhex("b8ad2201b9e4c94696c898a7e8f6a5a9")
+STATIC_REGISTRY = {
+    "static_capture_windows": "unavailable",
+    "truth_source": "SoundSwitch U0",
+    "venue_source_sha256": "venue-sha",
+    "verdict": "PASS",
+}
 
 
 def _caf_string(value: str) -> bytes:
@@ -125,6 +132,61 @@ class StaticLooksTests(unittest.TestCase):
             (CueAttribute(0, PRIMARY_FIXTURE_GROUP, 262, 11, 128),),
         )
         self.assertTrue(assert_static_non_generic_safe(look, channels).passed)
+
+    def test_compiler_generalizes_static_when_assertion_passes_and_capture_windows_unavailable(self):
+        channels = (FixtureChannel(0, 82, 1, "On/Off"),)
+        look = StaticLook(
+            0,
+            0,
+            5,
+            5,
+            "static",
+            (),
+            (),
+            (),
+            (),
+            (CueAttribute(0, PRIMARY_FIXTURE_GROUP, 82, 1, 7),),
+        )
+
+        row = soundswitch_pack._look(
+            look,
+            channels,
+            static_registry=STATIC_REGISTRY,
+            venue_source_sha256="venue-sha",
+        )
+
+        self.assertEqual(row["parity_lane"], "algorithm_generalized")
+        self.assertEqual(row["parity_evidence"]["reason"], "static_assertion_generalized")
+        self.assertTrue(row["parity_evidence"]["structural_supported"])
+
+    def test_compiler_keeps_static_unverified_when_non_generic_assertion_fails(self):
+        channels = (FixtureChannel(0, 262, 11, "Strobe"),)
+        look = StaticLook(
+            0,
+            0,
+            24,
+            5,
+            "static",
+            (),
+            (StaticScalarValue(0, PRIMARY_FIXTURE_GROUP, 0.5),),
+            (),
+            (),
+            (),
+        )
+
+        row = soundswitch_pack._look(
+            look,
+            channels,
+            static_registry=STATIC_REGISTRY,
+            venue_source_sha256="venue-sha",
+        )
+
+        self.assertEqual(row["parity_lane"], "unverified_parity")
+        self.assertEqual(
+            row["parity_evidence"]["reason"],
+            "non_generic_static_map_requires_dedicated_composition",
+        )
+        self.assertFalse(row["parity_evidence"]["structural_supported"])
 
 
 if __name__ == "__main__":

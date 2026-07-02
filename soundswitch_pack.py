@@ -136,13 +136,49 @@ def _cue(cue: AttributeCue) -> dict[str, Any]:
     }
 
 
-def _look(look: StaticLook, fixture_channels: Iterable[Any]) -> dict[str, Any]:
-    lane = classify_parity_lane(
-        structural_supported=True,
-        oracle_report=None,
-        generalized_witness_passed=False,
-    )
+def _look(
+    look: StaticLook,
+    fixture_channels: Iterable[Any],
+    *,
+    static_registry: dict[str, Any] | None = None,
+    venue_source_sha256: str = "",
+) -> dict[str, Any]:
     non_generic = assert_static_non_generic_safe(look, fixture_channels)
+    registry = static_registry or {}
+    registry_current = (
+        registry.get("venue_source_sha256") == venue_source_sha256
+        and registry.get("verdict") == "PASS"
+        and registry.get("truth_source", "SoundSwitch U0") == "SoundSwitch U0"
+    )
+    direct_entry = registry.get(str(look.slot_index))
+    oracle_report = None
+    evidence_reason = "no_u0_oracle"
+    capture_id = ""
+    oracle_report_sha256 = ""
+    if (
+        isinstance(direct_entry, dict)
+        and direct_entry.get("verdict") == "PASS"
+        and direct_entry.get("venue_source_sha256") == venue_source_sha256
+    ):
+        oracle_report = {"verdict": "PASS", "truth_source": "SoundSwitch U0"}
+        evidence_reason = "registry_u0_oracle"
+        capture_id = str(direct_entry.get("capture_id") or "")
+        oracle_report_sha256 = str(direct_entry.get("oracle_report_sha256") or "")
+    generalized = (
+        oracle_report is None
+        and non_generic.passed
+        and registry_current
+        and registry.get("static_capture_windows") == "unavailable"
+    )
+    lane = classify_parity_lane(
+        structural_supported=non_generic.passed,
+        oracle_report=oracle_report,
+        generalized_witness_passed=generalized,
+    )
+    if generalized:
+        evidence_reason = "static_assertion_generalized"
+    elif not non_generic.passed:
+        evidence_reason = "non_generic_static_map_requires_dedicated_composition"
     return {
         "colour_values": [{**asdict(row), "raw_value": _hex(row.raw_value)} for row in look.colour_values],
         "end_offset": look.end_offset, "generic_attributes": _attrs(look.generic_attributes),
@@ -151,9 +187,10 @@ def _look(look: StaticLook, fixture_channels: Iterable[Any]) -> dict[str, Any]:
         "non_generic_assertion": non_generic.as_json(),
         "parity_evidence": parity_evidence(
             lane=lane,
-            reason="no_u0_oracle" if non_generic.passed
-            else "non_generic_static_map_requires_dedicated_composition",
-            structural_supported=True,
+            reason=evidence_reason,
+            structural_supported=non_generic.passed,
+            capture_id=capture_id,
+            oracle_report_sha256=oracle_report_sha256,
         ),
         "parity_lane": lane,
         "pre_rendered_frame_ch1_ch19": list(render_static_look_frame(look)),
@@ -404,6 +441,7 @@ def compile_pack_artifacts(
     registry = parity_registry or {}
     scripted_registry = registry.get("scripted") if isinstance(registry.get("scripted"), dict) else {}
     autoloop_registry = registry.get("autoloop") if isinstance(registry.get("autoloop"), dict) else {}
+    static_registry = registry.get("static") if isinstance(registry.get("static"), dict) else {}
     venue_source_sha256 = _source_sha(project, "SoundSwitchVenues.bin")
     active_scripts = _active_script_paths(project)
     active_loops = _active_autoloop_paths(project)
@@ -452,7 +490,15 @@ def compile_pack_artifacts(
         catalog_tail_count=len(project.catalog_tail_cues), total_record_count=len(project.attribute_cues),
         records=[_cue(row) for row in project.attribute_cues]))
     add("static_looks.json", _root("static_looks", count=len(project.static_looks),
-        records=[_look(row, project.fixture_channels) for row in project.static_looks]))
+        records=[
+            _look(
+                row,
+                project.fixture_channels,
+                static_registry=static_registry,
+                venue_source_sha256=venue_source_sha256,
+            )
+            for row in project.static_looks
+        ]))
     add("midi_mappings.json", _root("midi_mappings", maps=[{
         "relative_path": m.relative_path, "source_sha256": m.source_sha256, "status": m.status,
         "version": m.version, "devices": [{"name": d.name, "feedback_hex": _hex(d.feedback_bytes),
