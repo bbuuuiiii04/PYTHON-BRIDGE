@@ -372,7 +372,73 @@ def _cue_candidate(data: bytes, offset: int, path: str) -> AttributeCue | None:
     return AttributeCue(offset, end, "fixture_payload", name, guid, fixture_guid, tuple(rows))
 
 
+def _leading_attribute_block(
+    data: bytes, end_offset: int
+) -> tuple[tuple[CueAttribute, ...], str | None]:
+    """Recover the value block physically preceding the first scanned cue.
+
+    Byte-proven 2026-07-02: every Venue cue's true attribute write-set is the
+    16-byte-row block that physically precedes its own name/guid record (see
+    ``decode_venue_cues``).  The first scanned record has no prior scanned
+    record to borrow from, so its true block must be recovered directly from
+    the unparsed head region it sits after.  Rows always abut the record that
+    follows them with no gap, so the recovered block's rows must end exactly
+    at ``end_offset``.  Uses the same row/header validation as
+    ``_cue_candidate``'s fixture-payload branch; returns an empty tuple and
+    ``None`` if nothing validates (structurally sound, no failure raised).
+    """
+    rows: list[CueAttribute] = []
+    keys: set[tuple[int, int]] = set()
+    cursor = end_offset
+    while cursor - 16 >= 0:
+        row_offset = cursor - 16
+        present, group, channel_id = struct.unpack_from("<III", data, row_offset)
+        repeated = data[row_offset + 12:row_offset + 16]
+        if present != 1 or group not in _FIXTURE_GROUPS or channel_id not in _CHANNEL_BY_ID \
+                or len(set(repeated)) != 1:
+            break
+        key = (group, channel_id)
+        if key in keys:
+            break
+        keys.add(key)
+        rows.insert(0, CueAttribute(row_offset, group, channel_id, _CHANNEL_BY_ID[channel_id],
+                                    repeated[0]))
+        cursor = row_offset
+    count = len(rows)
+    if count == 0:
+        return (), None
+    header_start = cursor - 60
+    if header_start < 0:
+        return (), None
+    flag_a, flag_b = struct.unpack_from("<II", data, header_start + 24)
+    flag_c, flag_d, header_count = struct.unpack_from("<III", data, header_start + 48)
+    if (flag_a, flag_b, flag_c, flag_d) != (1, 1, 1, 1) or header_count != count:
+        return (), None
+    fixture_guid = data[header_start + 32:header_start + 48].hex()
+    return tuple(rows), fixture_guid
+
+
 def decode_venue_cues(data: bytes, path: str = "SoundSwitchVenues.bin") -> tuple[AttributeCue, ...]:
+    """Decode Venue cue records with byte-proven precede-association values.
+
+    Byte-proven 2026-07-02 against capture ``parity_20260701T185231Z``
+    (261/261): each cue's true attribute write-set is the 16-byte-row block
+    that physically precedes its own name/guid record on disk, not the block
+    that immediately follows it. Scanning the file linearly finds each
+    record's name/guid together with the block that FOLLOWS it (the next
+    record's true values); this function keeps each cue's own identity
+    (name, guid, offsets, record_kind, catalog_indices) but re-associates the
+    attribute values (and the fixture profile GUID carried in the same
+    physical block) with the record whose values they truly are: record i's
+    values = the block scanned as record (i - 1)'s attributes. The first
+    record has no prior scanned record; its true block is recovered from the
+    unparsed head region via ``_leading_attribute_block`` (empty tuple if it
+    does not parse cleanly -- inert for all current capture evidence). The
+    last (``minimal_default_catalog_tail``) record inherits the last
+    fixture-payload block's values under the same uniform shift; whether it
+    carries attributes is inert since only render-bearing cues are ever
+    looked up by GUID for rendering.
+    """
     cues: list[AttributeCue] = []
     offset = 0
     while offset + 4 <= len(data):
@@ -385,7 +451,21 @@ def decode_venue_cues(data: bytes, path: str = "SoundSwitchVenues.bin") -> tuple
     guids = [row.cue_guid for row in cues]
     if len(guids) != len(set(guids)):
         _fail("duplicate_key", "duplicate Venue cue GUID", path)
-    return tuple(cues)
+    if not cues:
+        return ()
+    leading_attributes, leading_fixture_guid = _leading_attribute_block(data, cues[0].source_offset)
+    reassigned: list[AttributeCue] = []
+    for index, cue in enumerate(cues):
+        if index == 0:
+            attributes, fixture_guid = leading_attributes, leading_fixture_guid
+        else:
+            attributes = cues[index - 1].attributes
+            fixture_guid = cues[index - 1].fixture_profile_guid
+        reassigned.append(AttributeCue(
+            cue.source_offset, cue.end_offset, cue.record_kind, cue.name, cue.cue_guid,
+            fixture_guid, attributes, cue.catalog_indices,
+        ))
+    return tuple(reassigned)
 
 
 def _scalar_map(data: bytes, offset: int, path: str) -> tuple[tuple[StaticScalarValue, ...], int]:
@@ -1082,8 +1162,12 @@ def decode_project(project: str | os.PathLike[str], *,
     if render_count <= 0:
         _fail("venue_cue_split", "expected at least one render-bearing Venue cue",
               "SoundSwitchVenues.bin")
-    if any(cue.render_bearing and cue.record_kind != "fixture_payload" for cue in cues) \
-            or any((not cue.render_bearing) and cue.attributes for cue in cues):
+    if any(cue.render_bearing and cue.record_kind != "fixture_payload" for cue in cues):
+        # Non-render-bearing (catalog-tail) records may legitimately carry
+        # inherited attribute values under precede-association (they take
+        # the last fixture-payload block's values, byte-proven 2026-07-02);
+        # this is inert because only render-bearing cues are ever looked up
+        # by GUID for rendering (see `DecodedSoundSwitchProject.render_cues`).
         _fail("venue_cue_split",
               f"invalid render/catalog-tail split: {render_count} render + {tail_count} catalog-tail",
               "SoundSwitchVenues.bin")

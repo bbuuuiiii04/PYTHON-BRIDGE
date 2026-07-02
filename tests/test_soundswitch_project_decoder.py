@@ -38,7 +38,8 @@ def _ssfile(*, cue_count: int = 3, timeline_count: int = 3,
             trailer: bytes | None = None) -> bytes:
     if stored_keys is None:
         # Real fresh exports write 0-based writer-index keys; timeline
-        # references are 1-based over them (0 = clear sentinel).
+        # references resolve EXACTLY to a matching stored key (0 = clear
+        # sentinel).
         stored_keys = tuple(range(cue_count))
     if len(stored_keys) != cue_count:
         raise ValueError("stored_keys must match cue_count")
@@ -73,14 +74,26 @@ def _venue_identity(guid: str = decoder.CANONICAL_VENUE_GUID) -> bytes:
     return bytes(data)
 
 
-def _fixture_cue(index: int) -> bytes:
+def _fixture_cue(index: int, attributes: tuple[tuple[int, int, int], ...] = ()) -> bytes:
+    """Build one scanned Venue cue record: name + guid + attribute rows.
+
+    ``attributes`` is ``(fixture_group, channel_id, value)`` rows written
+    physically after this record's own name/guid -- i.e. the block a
+    ``decode_venue_cues`` linear scan would (pre-correction) have attached to
+    THIS record, but which byte-proven precede-association reassigns to the
+    NEXT scanned record.
+    """
     name = _plain_string(f"C{index}")
     header = bytearray(60)
     header[4:20] = index.to_bytes(16, "little")
     struct.pack_into("<III", header, 20, 0, 1, 1)
     header[32:48] = b"P" * 16
-    struct.pack_into("<III", header, 48, 1, 1, 0)
-    return name + header
+    struct.pack_into("<III", header, 48, 1, 1, len(attributes))
+    rows = b"".join(
+        struct.pack("<III", 1, group, channel_id) + bytes([value]) * 4
+        for group, channel_id, value in attributes
+    )
+    return name + bytes(header) + rows
 
 
 def _tail_cue(index: int = 999) -> bytes:
@@ -132,45 +145,53 @@ def _empty_catalog(version: int = 3, layout: int = 2) -> bytes:
 
 class PhysicalDocumentTests(unittest.TestCase):
     def test_count_257_and_exact_ten_byte_trailer(self):
+        # stored_keys=(1,) so the shared raw_reference=1 matches exactly
+        # (0 missing) and this is the unambiguous best physical candidate.
         data = _ssfile(cue_count=1, timeline_count=257, raw_references=(1,) * 257,
-                       trailer=_trailer(8, 1, 0, 1))
+                       stored_keys=(1,), trailer=_trailer(8, 1, 0, 1))
         parsed = decoder.decode_ssfile(data, "synthetic.ssfile")
         self.assertEqual(len(parsed.timeline), 257)
         self.assertEqual(len(parsed.trailer), 10)
         self.assertEqual(parsed.trailer, _trailer(8, 1, 0, 1))
 
-    def test_raw_zero_and_positive_references_resolve_one_based(self):
-        # References are 1-based over the file's 0-based stored keys
-        # (U0-proven, capture parity_20260701T185231Z).
-        parsed = decoder.decode_ssfile(_ssfile(), "synthetic.ssfile")
+    def test_raw_zero_and_positive_references_resolve_exact_key(self):
+        # References resolve EXACTLY against the file's own stored keys
+        # (byte-proven 2026-07-02, capture parity_20260701T185231Z, 261/261).
+        parsed = decoder.decode_ssfile(
+            _ssfile(cue_count=3, timeline_count=3, raw_references=(0, 1, 2)),
+            "synthetic.ssfile",
+        )
         self.assertEqual(
             [(row.reference_kind, row.resolved_stored_key) for row in parsed.timeline],
-            [("clear_control", None), ("cue", 0), ("cue", 2)],
+            [("clear_control", None), ("cue", 1), ("cue", 2)],
         )
+        self.assertEqual(parsed.timeline[1].resolved_cue_guid, (1).to_bytes(16, "little").hex())
+        self.assertEqual(parsed.timeline[2].resolved_cue_guid, (2).to_bytes(16, "little").hex())
 
-    def test_positive_raw_one_resolves_key_zero(self):
+    def test_positive_raw_one_resolves_key_one(self):
         parsed = decoder.decode_ssfile(
-            _ssfile(cue_count=1, timeline_count=1, raw_references=(1,)), "cold.ssfile"
+            _ssfile(cue_count=2, timeline_count=1, raw_references=(1,)), "cold.ssfile"
         )
-        self.assertEqual(parsed.timeline[0].resolved_stored_key, 0)
+        self.assertEqual(parsed.timeline[0].resolved_stored_key, 1)
         self.assertIsNotNone(parsed.timeline[0].resolved_cue_guid)
 
-    def test_actual_dictionary_maximum_raw_232_resolves_to_key_231(self):
+    def test_actual_dictionary_maximum_raw_232_resolves_to_key_232(self):
         parsed = decoder.decode_ssfile(
-            _ssfile(cue_count=232, timeline_count=1, raw_references=(232,)),
+            _ssfile(cue_count=233, timeline_count=1, raw_references=(232,)),
             "maximum.ssfile",
         )
-        self.assertEqual(parsed.timeline[0].resolved_stored_key, 231)
+        self.assertEqual(parsed.timeline[0].resolved_stored_key, 232)
         self.assertIsNotNone(parsed.timeline[0].resolved_cue_guid)
 
     def test_key_lookup_ignores_dictionary_order(self):
         # Keys are a per-file permutation ({FC10FC02}: 214/216 rows have
-        # key != position); only stored_key == R-1 may match, never position.
+        # key != position); only exact stored_key == R may match, never
+        # position.
         parsed = decoder.decode_ssfile(
             _ssfile(
                 cue_count=3,
                 timeline_count=2,
-                raw_references=(44, 99),
+                raw_references=(43, 98),
                 stored_keys=(43, 7, 98),
             ),
             "permuted.ssfile",
@@ -185,7 +206,7 @@ class PhysicalDocumentTests(unittest.TestCase):
             "missing-key.ssfile",
         )
         self.assertEqual(parsed.timeline[0].reference_kind, "cue")
-        self.assertEqual(parsed.timeline[0].resolved_stored_key, 98)
+        self.assertEqual(parsed.timeline[0].resolved_stored_key, 99)
         self.assertIsNone(parsed.timeline[0].resolved_cue_guid)
 
     def test_count_offset_eof_and_trailer_bounds_fail_closed(self):
@@ -209,6 +230,36 @@ class VenueAndStaticLookTests(unittest.TestCase):
         self.assertEqual(sum(not cue.render_bearing for cue in cues), 1)
         self.assertEqual(cues[-1].record_kind, "minimal_default_catalog_tail")
         self.assertFalse(cues[-1].render_bearing)
+
+    def test_precede_association_reassigns_attributes_to_next_record(self):
+        # Byte-proven 2026-07-02 (capture parity_20260701T185231Z, 261/261):
+        # each Venue cue's true attribute write-set is the block physically
+        # PRECEDING its own name/guid record.  A 3-record stream where
+        # scanner record i is written with distinct payload P_i must decode
+        # so cue i's attributes are record (i - 1)'s payload; record 0 has
+        # no predecessor in this synthetic stream, so it recovers nothing
+        # (empty attributes, not a decode failure). Anchor: MASTER STROBE
+        # (guid 9b5b1d84cefdb041886c7def04d494fa, record at offset 100981)
+        # truly carries the block scanned as the PRIOR record's (WHITE DOT
+        # STROBE's) attributes.
+        payload_a = ((0x493, 82, 11),)
+        payload_b = ((0x493, 83, 22),)
+        payload_c = ((0x493, 84, 33),)
+        data = (_fixture_cue(0, payload_a) + _fixture_cue(1, payload_b)
+                + _fixture_cue(2, payload_c))
+        cues = decoder.decode_venue_cues(data)
+        self.assertEqual([cue.cue_guid for cue in cues],
+                         [(0).to_bytes(16, "little").hex(), (1).to_bytes(16, "little").hex(),
+                          (2).to_bytes(16, "little").hex()])
+        self.assertEqual(cues[0].attributes, ())
+        self.assertEqual(
+            [(row.fixture_group, row.dmx_channel, row.value) for row in cues[1].attributes],
+            [(0x493, 1, 11)],
+        )
+        self.assertEqual(
+            [(row.fixture_group, row.dmx_channel, row.value) for row in cues[2].attributes],
+            [(0x493, 2, 22)],
+        )
 
     def test_unique_primary_guid_collection_retains_all_32_empty_slots(self):
         marker = bytes.fromhex(decoder.CANONICAL_VENUE_GUID) + struct.pack("<II", 1, 32)
@@ -412,8 +463,10 @@ class IdentityInventoryAndMidiTests(unittest.TestCase):
             decoder._reconcile_catalog_autoloops((catalog,), (alternate_document,))
 
     def test_missing_cue_surfaces_active_diagnostic_and_unsupported_layout_fails_closed(self):
+        # cue_count=2 so raw_reference=1 resolves EXACTLY to stored_key=1
+        # (present), matching but outside the (empty) venue cue GUID set.
         document = decoder.decode_ssfile(
-            _ssfile(cue_count=1, timeline_count=1, raw_references=(1,)),
+            _ssfile(cue_count=2, timeline_count=1, raw_references=(1,)),
             "{025C1DDF-2CDC-4E54-BD8C-156B90DD8247}.ssfile",
         )
         diagnostics = decoder._validate_document_cues(
@@ -459,7 +512,11 @@ class CurrentCorpusTests(unittest.TestCase):
         )
         self.assertGreater(len(decoded.render_cues), 0)
         self.assertTrue(all(row.record_kind == "fixture_payload" for row in decoded.render_cues))
-        self.assertTrue(all(not row.attributes for row in decoded.catalog_tail_cues))
+        # Under precede-association (byte-proven 2026-07-02) the
+        # catalog-tail record inherits the last fixture-payload block's
+        # attributes; this is inert since only render_cues are looked up by
+        # GUID for rendering (see soundswitch_pack.compile_pack_artifacts).
+        self.assertTrue(all(not row.render_bearing for row in decoded.catalog_tail_cues))
         self.assertEqual(len(decoded.static_looks), 32)
         self.assertGreater(len(decoded.autoloops), 0)
         statuses = [row.status for row in decoded.scripted_track_classifications]

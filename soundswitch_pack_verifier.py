@@ -354,7 +354,7 @@ def _validate_document(doc: Any, expected_path: str,
             recomputed = [value if channel + 1 in CONTROL_CHANNELS else 0
                           for channel, value in enumerate(recomputed)]
         elif kind == "cue":
-            if not isinstance(raw, int) or raw <= 0 or stored != raw - 1:
+            if not isinstance(raw, int) or raw <= 0 or stored != raw:
                 _fail(f"unresolved/stale positive reference for {expected_path}")
             if guid is None:
                 if parity_lane != "unverified_parity":
@@ -497,8 +497,11 @@ def verify_pack(
         _fail("Venue render/catalog-tail cue GUIDs must be valid and globally unique")
     if any(row.get("render_bearing") is not True for row in render):
         _fail("fixture-payload Venue cues must remain render-bearing")
-    if any(row.get("render_bearing") is not False or row.get("attributes") for row in tails):
+    if any(row.get("render_bearing") is not False for row in tails):
         _fail("catalog-tail must remain distinct and non-render-bearing")
+    # Catalog-tail records may carry inherited attribute values under
+    # precede-association (byte-proven 2026-07-02); inert since only
+    # render-bearing cues are looked up by GUID for rendering.
     cue_patches = {row.get("cue_guid"): row.get("attributes") for row in render}
     if len(cue_patches) != len(render) or any(not isinstance(rows, list) for rows in cue_patches.values()):
         _fail("duplicate Venue cue GUID")
