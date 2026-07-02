@@ -790,11 +790,13 @@ def load_pack(pack: str | Path) -> LoadedPack:
     for ssid, row in scripts.items():
         if row.document is None:
             continue
-        lanes.append(row.document.parity_lane)
+        if row.supported_active:
+            lanes.append(row.document.parity_lane)
         if row.supported_active and row.document.parity_lane == "unverified_parity":
             unverified.append(f"scripted:{ssid}")
     for identity, row in loops.items():
-        lanes.append(row.document.parity_lane)
+        if row.supported_active:
+            lanes.append(row.document.parity_lane)
         if row.supported_active and row.document.parity_lane == "unverified_parity":
             unverified.append(f"autoloop:{identity}")
 

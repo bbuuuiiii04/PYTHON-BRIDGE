@@ -1,7 +1,7 @@
 """Computed SoundSwitch parity lane helpers."""
 from __future__ import annotations
 
-from typing import Any, Literal, Mapping
+from typing import Any, Iterable, Literal, Mapping
 
 ParityLane = Literal["oracle_proven", "algorithm_generalized", "unverified_parity"]
 PARITY_LANES = frozenset(("oracle_proven", "algorithm_generalized", "unverified_parity"))
@@ -46,4 +46,23 @@ def count_lanes(lanes: list[str]) -> dict[str, int]:
     return counts
 
 
-__all__ = ["PARITY_LANES", "ParityLane", "classify_parity_lane", "count_lanes", "parity_evidence"]
+def generalized_witness_passed(
+    registry_docs: Mapping[str, Mapping[str, Any]] | Iterable[Mapping[str, Any]],
+    layout: str,
+    document_fully_resolved: bool,
+) -> bool:
+    if not document_fully_resolved:
+        return False
+    rows = registry_docs.values() if isinstance(registry_docs, Mapping) else registry_docs
+    return any(
+        row.get("layout") == layout
+        and row.get("verdict") == "PASS"
+        and row.get("truth_source", "SoundSwitch U0") == "SoundSwitch U0"
+        for row in rows
+    )
+
+
+__all__ = [
+    "PARITY_LANES", "ParityLane", "classify_parity_lane", "count_lanes",
+    "generalized_witness_passed", "parity_evidence",
+]

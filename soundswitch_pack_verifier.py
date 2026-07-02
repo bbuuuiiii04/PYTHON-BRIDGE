@@ -294,6 +294,13 @@ def _validate_parity(row: Any, label: str) -> None:
     for key, value in evidence.items():
         if not isinstance(key, str) or not isinstance(value, (str, int, bool)) and value is not None:
             _fail(f"unsanitized parity evidence for {label}")
+    if lane == "oracle_proven":
+        if evidence.get("truth_source") != "SoundSwitch U0" \
+                or not isinstance(evidence.get("capture_id"), str) \
+                or not evidence.get("capture_id") \
+                or not isinstance(evidence.get("oracle_report_sha256"), str) \
+                or not evidence.get("oracle_report_sha256"):
+            _fail(f"incomplete oracle parity evidence for {label}")
 
 
 def _validate_document(doc: Any, expected_path: str,
@@ -740,17 +747,23 @@ def verify_pack(
     if declared_union != {"count": len(union), "sha256": union_sha}:
         _fail("active-cue union count/hash drift")
     lane_values = [str(row.get("parity_lane", "unverified_parity")) for row in looks]
+    inactive_lane_values: list[str] = []
     for artifact in autoloop_paths:
         doc = values[artifact].get("document")
         if isinstance(doc, dict):
-            lane_values.append(str(doc.get("parity_lane", "unverified_parity")))
+            lane = str(doc.get("parity_lane", "unverified_parity"))
+            (lane_values if doc.get("relative_path") in active_loop_paths else inactive_lane_values).append(lane)
     for artifact in script_paths:
         doc = values[artifact].get("document")
         if isinstance(doc, dict):
-            lane_values.append(str(doc.get("parity_lane", "unverified_parity")))
+            lane = str(doc.get("parity_lane", "unverified_parity"))
+            (lane_values if doc.get("relative_path") in active_scripts else inactive_lane_values).append(lane)
     expected_lanes = {lane: lane_values.count(lane) for lane in sorted(PARITY_LANES)}
     if manifest.get("parity_lanes") != expected_lanes:
         _fail("parity lane summary mismatch")
+    expected_inactive_lanes = {lane: inactive_lane_values.count(lane) for lane in sorted(PARITY_LANES)}
+    if manifest.get("parity_lanes_inactive") != expected_inactive_lanes:
+        _fail("inactive parity lane summary mismatch")
     totals = manifest.get("totals", {})
     if not isinstance(totals, dict):
         _fail("malformed manifest totals")

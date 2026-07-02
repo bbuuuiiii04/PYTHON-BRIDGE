@@ -431,6 +431,8 @@ class CurrentProjectPackTests(unittest.TestCase):
         row = next(item for item in track["scripted_inventory"]
                    if item["active_existing_path"])
         row["active_existing_path"] = False
+        ssid = row["relative_path"].removeprefix("{").removesuffix("}.ssfile").lower()
+        lane = json.loads((pack / f"scripted/{ssid}.json").read_text())["document"]["parity_lane"]
         self._write_json_artifact(pack, "track_map.json", track)
         count, sha = self._active_union(pack)
         self._mutate_manifest(pack, lambda manifest: (
@@ -438,6 +440,14 @@ class CurrentProjectPackTests(unittest.TestCase):
             manifest["totals"].__setitem__("active_existing_path_scripted",
                                            manifest["totals"]["active_existing_path_scripted"] - 1),
             manifest["totals"].__setitem__("active_cue_union", count),
+            manifest["parity_lanes"].__setitem__(
+                lane,
+                manifest["parity_lanes"][lane] - 1,
+            ),
+            manifest["parity_lanes_inactive"].__setitem__(
+                lane,
+                manifest["parity_lanes_inactive"][lane] + 1,
+            ),
         ))
 
         self.assertTrue(verify_pack(pack)["verified"])
@@ -456,6 +466,7 @@ class CurrentProjectPackTests(unittest.TestCase):
             document = json.loads(path.read_text())["document"]
             if document["relative_path"] not in referenced:
                 removable = path
+                lane = document["parity_lane"]
                 break
         if removable is None:
             self.skipTest("no unreferenced autoloop artifact in the current saved project")
@@ -468,9 +479,9 @@ class CurrentProjectPackTests(unittest.TestCase):
             ),
             manifest["totals"].__setitem__("total_autoloops",
                                            manifest["totals"]["total_autoloops"] - 1),
-            manifest["parity_lanes"].__setitem__(
-                "unverified_parity",
-                manifest["parity_lanes"]["unverified_parity"] - 1,
+            manifest["parity_lanes_inactive"].__setitem__(
+                lane,
+                manifest["parity_lanes_inactive"][lane] - 1,
             ),
         ))
 
@@ -1096,6 +1107,55 @@ class ExportPackLaunchSafetyTests(unittest.TestCase):
                 json.loads(export_module._binding_sidecar_path(dest).read_text()),
                 [{"channel": 2, "interaction": "press", "name": "White",
                   "note": 44, "target_kind": "static_look"}],
+            )
+
+    def test_export_pack_threads_loaded_parity_registries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "pack"
+            registry_dir = root / "registries"
+            registry_dir.mkdir()
+            (registry_dir / "scripted_parity_registry.json").write_text(
+                '{"script-a":{"verdict":"PASS"}}\n',
+                encoding="utf-8",
+            )
+            (registry_dir / "autoloop_parity_registry.json").write_text(
+                '["not-a-registry"]\n',
+                encoding="utf-8",
+            )
+            (registry_dir / "static_parity_registry.json").write_text(
+                '{"slot-0":{"verdict":"PASS"}}\n',
+                encoding="utf-8",
+            )
+            decoded = SimpleNamespace(resolved_controls=())
+            artifacts = {"manifest.json": b"{}\n"}
+            observed = {}
+
+            def compile_observer(project, **kwargs):
+                observed["project"] = project
+                observed.update(kwargs)
+                return artifacts
+
+            with mock.patch.object(export_module, "PARITY_REGISTRY_DIR", registry_dir), \
+                 mock.patch.object(export_module, "decode_project", return_value=decoded), \
+                 mock.patch.object(export_module, "_generator_commit", return_value="0" * 40), \
+                 mock.patch.object(export_module, "compile_pack_artifacts",
+                                   side_effect=compile_observer), \
+                 mock.patch.object(
+                     export_module, "verify_pack",
+                     return_value={"verified": True, "manifest_sha256": "a" * 64,
+                                   "artifact_count": len(artifacts)},
+                 ):
+                export_pack(root / "ignored.ssproj", dest)
+
+            self.assertIs(observed["project"], decoded)
+            self.assertEqual(
+                observed["parity_registry"],
+                {
+                    "scripted": {"script-a": {"verdict": "PASS"}},
+                    "autoloop": {},
+                    "static": {"slot-0": {"verdict": "PASS"}},
+                },
             )
 
     def test_export_pack_sidecar_failure_removes_new_output(self):

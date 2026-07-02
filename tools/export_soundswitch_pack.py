@@ -33,6 +33,7 @@ from rb_ss_bridge_v2.soundswitch_project_decoder import (  # noqa: E402
 
 CANONICAL_SOURCE_PROJECT = Path("~/Music/SoundSwitch/default.ssproj").expanduser()
 CANONICAL_PACK_DIR = REPO_ROOT / "local" / "soundswitch" / "rbss_canonical_pack"
+PARITY_REGISTRY_DIR = REPO_ROOT / "tests" / "fixtures" / "soundswitch"
 
 _SIDECAR_SUFFIX = ".source.json"  # sibling of the pack dir; NEVER inside it
 _BINDING_SIDECAR_SUFFIX = ".midi_bindings.json"
@@ -59,6 +60,24 @@ class BindingSidecarWriteError(RuntimeError):
 
 class UnverifiedParityPublishError(RuntimeError):
     """A verified pack still contains documents that cannot publish as trusted parity."""
+
+
+def _load_parity_registry(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _load_parity_registries() -> dict[str, object]:
+    return {
+        "scripted": _load_parity_registry(PARITY_REGISTRY_DIR / "scripted_parity_registry.json"),
+        "autoloop": _load_parity_registry(PARITY_REGISTRY_DIR / "autoloop_parity_registry.json"),
+        "static": _load_parity_registry(PARITY_REGISTRY_DIR / "static_parity_registry.json"),
+    }
 
 
 def _generator_commit() -> str:
@@ -436,7 +455,7 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
         raise ValueError("output parent must be an existing real directory")
     decoded = decode_project(source)
     artifacts = compile_pack_artifacts(
-        decoded, generator_commit=_generator_commit(),
+        decoded, generator_commit=_generator_commit(), parity_registry=_load_parity_registries(),
     )
     staging = _stage_artifacts(artifacts, parent, destination.name)
     try:
@@ -493,7 +512,7 @@ def publish_pack(
         first_export = not destination.exists()
         decoded = decode_project(source)
         artifacts = compile_pack_artifacts(
-            decoded, generator_commit=_generator_commit(),
+            decoded, generator_commit=_generator_commit(), parity_registry=_load_parity_registries(),
         )
         staging = _stage_artifacts(artifacts, parent, destination.name)
         try:

@@ -27,7 +27,12 @@ from .soundswitch_project_decoder import (
     CANONICAL_SOUNDSWITCH_VERSION,
     CANONICAL_VENUE_GUID,
 )
-from .soundswitch_parity_registry import classify_parity_lane, count_lanes, parity_evidence
+from .soundswitch_parity_registry import (
+    classify_parity_lane,
+    count_lanes,
+    generalized_witness_passed,
+    parity_evidence,
+)
 
 PACK_SCHEMA_VERSION = "1.0.0"
 PRIMARY_FIXTURE_GROUP = 0x493
@@ -163,6 +168,9 @@ def _document(
     *,
     active: bool = True,
     autoloop_metadata: dict[str, int] | None = None,
+    registry_entry: dict[str, Any] | None = None,
+    registry_docs: dict[str, Any] | None = None,
+    venue_source_sha256: str = "",
 ) -> dict[str, Any]:
     try:
         boundaries = list(render_document_boundaries(document, cues))
@@ -177,11 +185,36 @@ def _document(
         "dictionary_timeline_addressed_footer",
         "dictionary_timeline_no_shared_anchor",
     ) and render_status == "rendered"
+    oracle_report = None
+    evidence_reason = "no_u0_oracle_evidence"
+    capture_id = ""
+    oracle_report_sha256 = ""
+    if registry_entry and registry_entry.get("verdict") == "PASS" \
+            and registry_entry.get("truth_source", "SoundSwitch U0") == "SoundSwitch U0" \
+            and registry_entry.get("source_sha256") == document.source_sha256 \
+            and registry_entry.get("venue_source_sha256") == venue_source_sha256:
+        oracle_report = {"verdict": "PASS", "truth_source": "SoundSwitch U0"}
+        evidence_reason = "registry_u0_oracle"
+        capture_id = str(registry_entry.get("capture_id") or "")
+        oracle_report_sha256 = str(registry_entry.get("oracle_report_sha256") or "")
+    document_fully_resolved = all(
+        row.reference_kind != "cue" or row.resolved_cue_guid is not None
+        for row in document.timeline
+    )
+    generalized = False
+    if registry_entry is None:
+        generalized = generalized_witness_passed(
+            registry_docs or {},
+            document.layout,
+            document_fully_resolved,
+        )
     lane = classify_parity_lane(
         structural_supported=structural_supported,
-        oracle_report=None,
-        generalized_witness_passed=False,
+        oracle_report=oracle_report,
+        generalized_witness_passed=generalized,
     )
+    if lane == "algorithm_generalized":
+        evidence_reason = f"generalized_from_{document.layout}"
     values = {
         "container_version": document.container_version,
         "cue_dictionary": [asdict(row) for row in document.cue_dictionary],
@@ -191,8 +224,10 @@ def _document(
         "layout": document.layout,
         "parity_evidence": parity_evidence(
             lane=lane,
-            reason="no_u0_oracle_evidence",
+            reason=evidence_reason,
             structural_supported=structural_supported,
+            capture_id=capture_id,
+            oracle_report_sha256=oracle_report_sha256,
         ),
         "parity_lane": lane,
         "pre_rendered_boundaries": boundaries, "pre_render_status": render_status,
@@ -232,6 +267,19 @@ def _active_union(project: DecodedSoundSwitchProject, active_scripts: set[str]) 
     guids = sorted({event.resolved_cue_guid.lower() for doc in documents for event in doc.timeline
                     if event.resolved_cue_guid in render_guids})
     return guids, sha256_bytes("\n".join(guids).encode("ascii"))
+
+
+def _active_autoloop_paths(project: DecodedSoundSwitchProject) -> set[str]:
+    return {row.target_identity for row in project.resolved_controls
+            if row.binding.enabled and row.binding.device_name == "IAC Driver Bus 1"
+            and row.target_kind == "autoloop" and row.target_identity}
+
+
+def _source_sha(project: DecodedSoundSwitchProject, relative_path: str) -> str:
+    for row in project.source_inventory:
+        if row.relative_path == relative_path:
+            return row.sha256
+    return ""
 
 
 def _autoloop_metadata(project: DecodedSoundSwitchProject) -> dict[str, dict[str, int]]:
@@ -332,6 +380,7 @@ def _selection_map(project: DecodedSoundSwitchProject) -> dict[str, Any]:
 def compile_pack_artifacts(
     project: DecodedSoundSwitchProject,
     *, generator_commit: str,
+    parity_registry: dict[str, Any] | None = None,
 ) -> dict[str, bytes]:
     if project.identity.project_uuid != CANONICAL_PROJECT_UUID or \
             project.identity.soundswitch_version != CANONICAL_SOUNDSWITCH_VERSION or \
@@ -352,7 +401,26 @@ def compile_pack_artifacts(
                 "relearn to a note-capable control in SoundSwitch, save, and re-export"
             )
     cues = {row.cue_guid: row for row in project.render_cues}
+    registry = parity_registry or {}
+    scripted_registry = registry.get("scripted") if isinstance(registry.get("scripted"), dict) else {}
+    venue_source_sha256 = _source_sha(project, "SoundSwitchVenues.bin")
     active_scripts = _active_script_paths(project)
+    active_loops = _active_autoloop_paths(project)
+    scripted_source_shas: dict[str, str] = {}
+    for doc in project.scripted_tracks:
+        try:
+            scripted_source_shas[_normalized_ssid(doc.relative_path)] = doc.source_sha256
+        except SoundSwitchPackCompileError:
+            continue
+    current_scripted_registry = {
+        identity: row for identity, row in scripted_registry.items()
+        if isinstance(identity, str)
+        and isinstance(row, dict)
+        and row.get("verdict") == "PASS"
+        and row.get("truth_source", "SoundSwitch U0") == "SoundSwitch U0"
+        and row.get("source_sha256") == scripted_source_shas.get(identity)
+        and row.get("venue_source_sha256") == venue_source_sha256
+    }
     union, union_sha = _active_union(project, active_scripts)
     deactivated_scripts = sorted(
         row.relative_path for row in project.scripted_track_classifications
@@ -398,6 +466,7 @@ def compile_pack_artifacts(
                 doc,
                 cues,
                 autoloop_metadata=autoloop_metadata[doc.relative_path],
+                venue_source_sha256=venue_source_sha256,
             ),
         ))
     classes = {row.relative_path: row for row in project.scripted_track_classifications}
@@ -405,8 +474,16 @@ def compile_pack_artifacts(
     for path, classification in sorted(classes.items()):
         identity = _normalized_ssid(path)
         doc = decoded.get(path)
+        registry_entry = scripted_registry.get(identity)
         add(f"scripted/{identity}.json", _root("scripted", classification=asdict(classification),
-            document=_document(doc, cues, active=path in active_scripts) if doc is not None else None,
+            document=_document(
+                doc,
+                cues,
+                active=path in active_scripts,
+                registry_entry=registry_entry if isinstance(registry_entry, dict) else None,
+                registry_docs=current_scripted_registry,
+                venue_source_sha256=venue_source_sha256,
+            ) if doc is not None else None,
             unsupported_inactive=doc is None))
     add("import_report.json", _root("import_report",
         diagnostics=sorted((asdict(row) for row in project.diagnostics),
@@ -426,16 +503,25 @@ def compile_pack_artifacts(
               "static_looks": len(project.static_looks), "total_autoloops": len(project.autoloops),
               "total_venue_records": len(project.attribute_cues)}
     lane_values: list[str] = []
+    inactive_lane_values: list[str] = []
     for path, data in artifacts.items():
         if path.startswith("scripted/") or path.startswith("autoloops/"):
             document = json.loads(data).get("document")
             if isinstance(document, dict):
-                lane_values.append(str(document.get("parity_lane", "unverified_parity")))
+                lane = str(document.get("parity_lane", "unverified_parity"))
+                relative = str(document.get("relative_path", ""))
+                active_document = (
+                    relative in active_scripts
+                    if path.startswith("scripted/")
+                    else relative in active_loops
+                )
+                (lane_values if active_document else inactive_lane_values).append(lane)
         elif path == "static_looks.json":
             static_root = json.loads(data)
             lane_values.extend(str(row.get("parity_lane", "unverified_parity"))
                                for row in static_root.get("records", []))
     parity_summary = count_lanes(lane_values)
+    inactive_parity_summary = count_lanes(inactive_lane_values)
     diagnostics_by_path: dict[str, list[str]] = {}
     for diagnostic in project.diagnostics:
         diagnostics_by_path.setdefault(diagnostic.relative_path, []).append(diagnostic.code)
@@ -458,6 +544,7 @@ def compile_pack_artifacts(
         artifact_hashes=artifact_rows, totals=totals,
         active_cue_union={"count": len(union), "sha256": union_sha},
         parity_lanes=parity_summary,
+        parity_lanes_inactive=inactive_parity_summary,
         supported_boundary={"channel_span": "CH1-CH19", "fixture_profile_guid": CANONICAL_VENUE_GUID,
                             "project_uuid": CANONICAL_PROJECT_UUID, "soundswitch_version": "2.10.3",
                             "universe": 0})
