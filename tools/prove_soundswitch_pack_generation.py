@@ -435,7 +435,7 @@ def check_inventory(proof: Proof, project: Path, venue_path: Path) -> dict[str, 
 def check_reference_rule(proof: Proof, project: Path) -> None:
     # C1 raw==0 clear/control on the live momentary-blackout autoloop (file 3).
     blackout = project / "SSAutoLoop3.ssfile"
-    parsed = autoloop_parser.parse_autoloop_structure(blackout.read_bytes(), "one_based")
+    parsed = autoloop_parser.parse_autoloop_structure(blackout.read_bytes(), "exact_key")
     raw_zero_rows = [r for r in parsed["timeline"] if r["raw_cue_reference"] == 0]
     raw_zero_clear = bool(raw_zero_rows) and all(
         r["resolved_dictionary_index"] is None for r in raw_zero_rows
@@ -447,28 +447,31 @@ def check_reference_rule(proof: Proof, project: Path) -> None:
         expected="raw-zero records resolve to no dictionary index (clear/control)",
         actual={"raw_zero_records": len(raw_zero_rows),
                 "all_unresolved": all(r["resolved_dictionary_index"] is None for r in raw_zero_rows)},
-        evidence="analyze_ssfile_structure.parse_autoloop_structure(SSAutoLoop3.ssfile, one_based)",
+        evidence="analyze_ssfile_structure.parse_autoloop_structure(SSAutoLoop3.ssfile, exact_key)",
         sources=[_rel(RE_DIR / "analyze_ssfile_structure.py"), "SSAutoLoop3.ssfile"],
         remediation="raw-zero must remain explicit clear/control, never a cue lookup.",
     )
 
-    # C2 raw>0 -> stored_key = raw-1 under one_based; direct keeps raw.
+    # C2 raw>0 -> exact serialized-key lookup; one_based remains a rejected
+    # historical comparison mode.
+    exact_key = scripted_parser.timeline_record(
+        struct.pack("<IIiI", 1, 1, 0, 21), 0, "exact_key"
+    )
     one_based = scripted_parser.timeline_record(
         struct.pack("<IIiI", 1, 1, 0, 21), 0, "one_based"
     )
-    direct = scripted_parser.timeline_record(struct.pack("<IIiI", 1, 1, 0, 21), 0, "direct")
-    raw1_ok = (one_based["resolved_dictionary_index"] == 20
-               and direct["resolved_dictionary_index"] == 21)
+    raw1_ok = (exact_key["resolved_dictionary_index"] == 21
+               and one_based["resolved_dictionary_index"] == 20)
     proof.record(
-        "C2-raw-minus-one",
-        "raw_reference > 0 resolves stored_key = raw-1 under the 2.10.3 one_based rule",
+        "C2-exact-key-reference",
+        "raw_reference > 0 resolves by exact serialized-key lookup",
         raw1_ok, foundation=True,
-        expected={"one_based(raw=21)": 20, "direct(raw=21)": 21},
-        actual={"one_based": one_based["resolved_dictionary_index"],
-                "direct": direct["resolved_dictionary_index"]},
+        expected={"exact_key(raw=21)": 21, "historical_one_based(raw=21)": 20},
+        actual={"exact_key": exact_key["resolved_dictionary_index"],
+                "historical_one_based": one_based["resolved_dictionary_index"]},
         evidence="analyze_scripted_ssfile.timeline_record",
         sources=[_rel(RE_DIR / "analyze_scripted_ssfile.py")],
-        remediation="The version-locked exporter must pass one_based explicitly with a 2.10.3 gate.",
+        remediation="The exporter must resolve against each file's embedded serialized key map.",
     )
 
     # C3 generic/unversioned renderer fails ambiguous rather than guessing.
@@ -500,9 +503,9 @@ def _check_a5_wire(proof: Proof, project: Path) -> None:
     a5_file = project / "{A5B0ACD1-D426-4BDB-9C8C-D05EA084F9CF}.ssfile"
     if not pcap.is_file() or not a5_file.is_file():
         proof.record(
-            "C4-a5-wire", "A5 legacy scripted wire discriminator (16/16, 14/14 one-based, 2/2 raw-zero)",
+            "C4-a5-wire", "A5 legacy scripted wire discriminator (16/16, exact-key/raw-zero)",
             False, foundation=False, incomplete=True,
-            expected="16/16 event frames, 14/14 one-based, 2/2 raw-zero exact",
+            expected="16/16 event frames, positive raw exact-key, raw-zero clear/control",
             actual="capture or A5 source file unavailable",
             evidence="passive Art-Net capture replay",
             sources=[_rel(pcap)],
@@ -514,7 +517,7 @@ def _check_a5_wire(proof: Proof, project: Path) -> None:
             [sys.executable, str(RE_DIR / "validate_scripted_capture.py"), str(pcap), str(a5_file),
              "--autoloop-reference", str(project / "SSAutoLoop5.ssfile"),
              "--venue", str(project / "SoundSwitchVenues.bin"),
-             "--reference-rule", "one_based", "--control-channels", "8,9,11"],
+             "--reference-rule", "exact_key", "--control-channels", "8,9,11"],
             capture_output=True, text=True, check=True,
         )
         data = json.loads(out.stdout)
@@ -527,7 +530,7 @@ def _check_a5_wire(proof: Proof, project: Path) -> None:
         ok = (events == 16 and exact == 16 and pos == 14 and pos_exact == 14
               and zero == 2 and zero_exact == 2)
         proof.record(
-            "C4-a5-wire", "A5 legacy scripted wire discriminator (16/16, 14/14 one-based, 2/2 raw-zero)",
+            "C4-a5-wire", "A5 legacy scripted wire discriminator (16/16, exact-key/raw-zero)",
             ok, foundation=False,
             expected={"events": 16, "exact": 16, "positive": 14, "positive_exact": 14,
                       "raw_zero": 2, "raw_zero_exact": 2},
@@ -542,7 +545,7 @@ def _check_a5_wire(proof: Proof, project: Path) -> None:
         proof.record(
             "C4-a5-wire", "A5 legacy scripted wire discriminator (16/16, 14/14 one-based, 2/2 raw-zero)",
             False, foundation=False, incomplete=True,
-            expected="16/16 event frames, 14/14 one-based, 2/2 raw-zero exact",
+            expected="16/16 event frames, positive raw exact-key, raw-zero clear/control",
             actual=f"validator did not complete: {exc!r}",
             evidence="passive Art-Net capture replay",
             sources=[_rel(RE_DIR / "validate_scripted_capture.py")],
@@ -604,16 +607,16 @@ def check_static_looks(proof: Proof, venue_data: bytes) -> None:
 # --------------------------------------------------------------------------- #
 def _synthetic_scripted() -> tuple[dict, dict]:
     parsed = {
-        "reference_rule": "one_based",
+        "reference_rule": "exact_key",
         "cues": [
-            {"cue_index": 0, "guid": "color", "offset": 100},
-            {"cue_index": 1, "guid": "position", "offset": 120},
+            {"cue_index": 1, "guid": "color", "offset": 100},
+            {"cue_index": 2, "guid": "position", "offset": 120},
         ],
         "timeline": [
             {"offset": 220, "elapsed": 2000, "raw_cue_reference": 2,
-             "resolved_dictionary_index": 1, "reference_kind": "cue"},
+             "resolved_dictionary_index": 2, "reference_kind": "cue"},
             {"offset": 200, "elapsed": 1000, "raw_cue_reference": 1,
-             "resolved_dictionary_index": 0, "reference_kind": "cue"},
+             "resolved_dictionary_index": 1, "reference_kind": "cue"},
             {"offset": 240, "elapsed": 3000, "raw_cue_reference": 0,
              "resolved_dictionary_index": None, "reference_kind": "clear_control"},
         ],
@@ -1114,7 +1117,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         lines.append("")
     lines += [
         "## Reference-rule, Static/DDJ, sparse, fail-closed summary",
-        "- Reference rule: raw==0 clear/control; raw>0 -> raw-1 (2.10.3 one_based); generic fails ambiguous.",
+        "- Reference rule: raw==0 clear/control; raw>0 exact serialized-key lookup; generic fails ambiguous.",
         "- Static/DDJ: 32 GUID-keyed v5 slots; DDJ slots 8/16/17/24 render exact CH1-CH19 frames.",
         "- Sparse: present channels update, omitted persist, raw-zero clears main, stop/unload -> zero.",
         "- Fail-closed: wrong UUID (same RAVE GUID), wrong version, wrong Venue, collision, missing cue, "
@@ -1127,7 +1130,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "# C4 sub-command (passive capture replay, no device opened):",
         "python3 tools/ssfmt/re/validate_scripted_capture.py <a5.pcap> <A5.ssfile> \\",
         "  --autoloop-reference <SSAutoLoop5.ssfile> --venue <SoundSwitchVenues.bin> \\",
-        "  --reference-rule one_based --control-channels 8,9,11",
+        "  --reference-rule exact_key --control-channels 8,9,11",
         "```",
         "",
         "## Hardware",

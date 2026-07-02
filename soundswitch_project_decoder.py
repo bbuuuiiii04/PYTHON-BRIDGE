@@ -45,6 +45,7 @@ from .soundswitch_pack_models import (
     TimelineRecord,
     TrackMapRecord,
 )
+from .soundswitch_scripted_resolution import resolve_scripted_reference
 
 CANONICAL_PROJECT_UUID = "{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}"
 CANONICAL_SOUNDSWITCH_VERSION = "2.10.3"
@@ -535,13 +536,11 @@ def _ssfile_candidates(data: bytes, expected_end: int, path: str) -> list[tuple[
             if version != 1 or constant != 1:
                 valid = False
                 break
-            resolved = raw - 1 if raw else None
-            if resolved is not None and resolved not in by_key:
-                valid = False
-                break
+            resolved = resolve_scripted_reference(raw, by_key)
             timeline.append(TimelineRecord(row_offset, version, time, raw,
-                                           "cue" if raw else "clear_control", resolved,
-                                           by_key.get(resolved)))
+                                           resolved.reference_kind,
+                                           resolved.resolved_stored_key,
+                                           resolved.resolved_cue_guid))
         if valid:
             candidates.append((offset, tuple(cues), tuple(timeline), timeline_offset))
     return candidates
@@ -574,6 +573,33 @@ def decode_ssfile(data: bytes, relative_path: str, source_sha256: str | None = N
             if start + 441 <= candidate[0] + 1
         )
     ]
+    if len(candidates) > 1:
+        exact = []
+        for candidate in candidates:
+            positive = [row for row in candidate[2] if row.raw_reference > 0]
+            missing = sum(1 for row in positive if row.resolved_cue_guid is None)
+            exact.append((missing, -len(positive) + missing, candidate))
+        complete = [candidate for missing, _, candidate in exact if missing == 0]
+        if complete:
+            candidates = complete
+        if len(candidates) > 1:
+            best_missing = min(missing for missing, _, _ in exact)
+            candidates = [
+                candidate for missing, _, candidate in exact
+                if missing == best_missing
+            ]
+        if len(candidates) > 1:
+            best_resolved = max(
+                sum(1 for row in candidate[2]
+                    if row.raw_reference > 0 and row.resolved_cue_guid is not None)
+                for candidate in candidates
+            )
+            candidates = [
+                candidate for candidate in candidates
+                if sum(1 for row in candidate[2]
+                       if row.raw_reference > 0 and row.resolved_cue_guid is not None)
+                == best_resolved
+            ]
     if len(candidates) != 1:
         _fail("ssfile_layout", f"expected one physical cue-map/timeline candidate, found {len(candidates)}",
               relative_path)
@@ -927,7 +953,8 @@ def _reconcile_catalog_autoloops(catalogs: tuple[AutoloopCatalog, ...],
 
 def _validate_document_cues(documents: tuple[LightingDocument, ...], venue_cue_guids: set[str],
                             primary_profile_guid: str,
-                            active_script_paths: set[str] | None = None) -> tuple[SourceDiagnostic, ...]:
+                            active_script_paths: set[str] | None = None,
+                            active_autoloop_paths: set[str] | None = None) -> tuple[SourceDiagnostic, ...]:
     diagnostics = []
     for document in documents:
         missing = sorted({row.resolved_cue_guid for row in document.timeline
@@ -936,18 +963,22 @@ def _validate_document_cues(documents: tuple[LightingDocument, ...], venue_cue_g
         if not missing:
             continue
         script_match = _SCRIPT_NAME.fullmatch(document.relative_path)
-        inactive = script_match is not None and (
+        autoloop_match = _AUTOLOOP_NAME.fullmatch(document.relative_path)
+        inactive_script = script_match is not None and (
             document.fixture_profile_guid != primary_profile_guid
             if active_script_paths is None
             else document.relative_path not in active_script_paths
         )
-        if not inactive:
-            _fail("missing_cue", f"{len(missing)} referenced Venue cue GUID(s) are missing",
-                  document.relative_path)
+        inactive_autoloop = autoloop_match is not None and (
+            active_autoloop_paths is not None
+            and document.relative_path not in active_autoloop_paths
+        )
+        inactive = inactive_script or inactive_autoloop
         diagnostics.append(SourceDiagnostic(
-            "inactive_missing_cue", document.relative_path,
+            "inactive_missing_cue" if inactive else "active_missing_cue",
+            document.relative_path,
             f"{len(missing)} referenced cue GUID(s) are outside the primary Venue",
-            active=False,
+            active=not inactive,
         ))
     return tuple(diagnostics)
 
@@ -1109,9 +1140,6 @@ def decode_project(project: str | os.PathLike[str], *,
         row.relative_path for row in script_classifications
         if row.status == "supported_mapped_primary"
     }
-    diagnostics.extend(_validate_document_cues(tuple((*autoloops, *scripts)), venue_cue_guids,
-                                                identity.venue_guid, active_script_paths))
-
     learned = []
     control_label_states = []
     decoded_paths = {".ssproj", "SoundSwitchVenues.bin", "SoundSwitchAutoLoops.bin",
@@ -1145,6 +1173,17 @@ def decode_project(project: str | os.PathLike[str], *,
     resolved = _resolve_controls(tuple(learned), catalogs, looks,
                                  {row.relative_path for row in autoloops},
                                  control_states_by_path)
+    active_autoloop_paths = {
+        row.target_identity for row in resolved
+        if row.binding.enabled and row.target_kind == "autoloop" and row.target_identity
+    }
+    diagnostics.extend(_validate_document_cues(
+        tuple((*autoloops, *scripts)),
+        venue_cue_guids,
+        identity.venue_guid,
+        active_script_paths,
+        active_autoloop_paths,
+    ))
     if any(not name or name.strip() != name for name in no_target_policy_inputs) \
             or len(no_target_policy_inputs) != len(set(no_target_policy_inputs)):
         _fail("no_target_policy", "policy names must be unique, nonempty, and trimmed")

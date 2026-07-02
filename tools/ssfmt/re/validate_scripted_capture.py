@@ -167,9 +167,9 @@ def parse_channels(raw: str) -> tuple[int, ...]:
 
 
 def require_resolvable_reference_rule(reference_rule: str) -> str:
-    if reference_rule not in {"direct", "one_based"}:
+    if reference_rule not in {"exact_key", "direct", "one_based"}:
         raise ValueError(
-            "scripted capture validation requires explicit direct or one_based "
+            "scripted capture validation requires explicit exact_key/direct/one_based "
             "provenance; ambiguous and mixed/edited files fail closed"
         )
     return reference_rule
@@ -351,7 +351,7 @@ def main() -> None:
         "--reference-rule",
         choices=(*REFERENCE_RULES, "mixed"),
         default="ambiguous",
-        help="legacy=one_based, newly-created=direct; ambiguous/mixed fail closed",
+        help="scripted exact_key is the product rule; ambiguous/mixed fail closed",
     )
     parser.add_argument("--control-channels", default="8,9,11")
     parser.add_argument("--sample-delay-ms", type=float, default=30.0)

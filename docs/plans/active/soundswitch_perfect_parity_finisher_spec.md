@@ -1,9 +1,9 @@
 ---
 doc_status: active-spec
 truth_level: capture-grounded (parity_20260701T185231Z) + current-code-verified + live-ghidra-evidence-packet (docs/research/soundswitch/soundswitch_perfect_parity_ghidra_evidence.md)
-last_verified_commit: 0a86521
-last_verified_date: 2026-07-01
-validation_scope: Fable 5 finisher spec for SoundSwitch exporter + bridge DMX runtime parity. Patched 2026-07-01 against the recorded live-GhidraMCP evidence packet (docs/research/soundswitch/soundswitch_perfect_parity_ghidra_evidence.md, recorded at commit 7b0bd6a), which closes A.3.d (no autoloop gap-fill; scripted = all-zero-seeded carry-forward hold), pins the scripted cue-resolution mechanism (file-embedded exact-key lookup), closes A.4.c (beatgrid-tiled autoloop windows, phase_tick=(beat_pos-window_start)*600), pins note-96 selection (bridge resolver gap), and re-bounds static composition (non-generic maps are independent overlays; Task C6 assertion mandatory). Target = BYTE-EXACT SoundSwitch-U0-equivalent CH1-19 output for ALL supported authored content, present and future, inside the locked scope. Bounded to SoundSwitch 2.10.3 / canonical project {3CCBCD6F-7C1B-44D8-882C-A52A74CC1827} / RAVE b8ad2201... / 2 mirrored lasers / Universe 0 / CH1-19 / snap-and-hold. Spec only; no production code written; no captures taken.
+last_verified_commit: c59d78c
+last_verified_date: 2026-07-02
+validation_scope: Fable 5 finisher spec for SoundSwitch exporter + bridge DMX runtime parity. Patched 2026-07-01 against the recorded live-GhidraMCP evidence packet (docs/research/soundswitch/soundswitch_perfect_parity_ghidra_evidence.md, recorded at commit 7b0bd6a), which closes A.3.d (no autoloop gap-fill; scripted = all-zero-seeded carry-forward hold), pins the scripted cue-resolution mechanism (file-embedded exact-key lookup), closes A.4.c (beatgrid-tiled autoloop windows, phase_tick=(beat_pos-window_start)*600), pins note-96 selection (bridge resolver gap), and re-bounds static composition (non-generic maps are independent overlays; Task C6 assertion mandatory). Patched 2026-07-02 by read-only implementation-surface audit at commit c59d78c so C1-C8 explicitly name decoder, model, exporter, verifier, loader, runtime, status/menubar, proof-tool, and test surfaces that can preserve stale raw_reference, carry-forward, static, autoloop, or unverified-parity assumptions. Target = BYTE-EXACT SoundSwitch-U0-equivalent CH1-19 output for ALL supported authored content, present and future, inside the locked scope. Bounded to SoundSwitch 2.10.3 / canonical project {3CCBCD6F-7C1B-44D8-882C-A52A74CC1827} / RAVE b8ad2201... / 2 mirrored lasers / Universe 0 / CH1-19 / snap-and-hold. Spec only; no production code written; no captures taken.
 supersedes_conclusions_of: docs/prompts/active/soundswitch_perfect_parity_fable5_prompt.md §2 reframe (bounded/refuted per surface below); builds on docs/plans/active/soundswitch_pack_parity_root_cause_spec.md (baseline, vindicated); this spec's own earlier [ghidra-prior] fail-closed placeholders for A.3.d/A.4.c (superseded by the live evidence packet, see §0.4)
 ---
 
@@ -166,7 +166,10 @@ assertion, decoder inspection, or the U0 oracle) — none needs more decompilati
   all-zero 512-byte DMX frame hashes to `076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560`
   [confirmed] — used to detect true full-frame zeros (the sidecar's `visible`/`active_dark` key on
   **CH1 only**, so they are *not* a full-zero signal).
-- **Code:** verified against current HEAD `0a86521`. All file:line below re-read now.
+- **Code:** verified against current HEAD `c59d78c`. The 2026-07-02 implementation-surface audit re-read
+  the C1-C8 decoder/model/exporter/verifier/loader/runtime/status/test surfaces named below; older
+  root-cause line anchors from the 2026-07-01 pass remain evidence references, not an implementation
+  file list.
 - **Ghidra:** the audit in this Part originally ran without live GhidraMCP and labelled binary
   claims **[ghidra-prior]** (recorded in `docs/plans/active/soundswitch_pack_parity_root_cause_spec.md:57-83`
   and `docs/research/soundswitch/soundswitch_ghidra_addendum.md`). A subsequent **live read-only
@@ -446,10 +449,12 @@ drive **parity-live output** as if SoundSwitch-equivalent.
 - **Live fail-closed gate (Task C8):** when the pack runtime is in a *parity-live* mode (bridge
   replacing SoundSwitch, i.e. `soundswitch_connected == False` and pack output enabled), a document
   whose lane is `unverified_parity` must **not** be rendered as trusted output. It renders only under an
-  explicit operator-acknowledged "unverified" state (a status flag + a distinct operational_state), and
-  otherwise emits the documented safe base (ZERO for scripted/autoloop; held manual static still
-  allowed). This never changes the SS-present shadow path (which already submits ZERO to the backend,
-  `state_manager.py:4116`). Export/visibility is unchanged.
+  explicit operator-acknowledged "unverified" state whose command/config surface is named and tested in
+  C8 (`runtime_status.py`, `soundswitch_pack_player_config.py`, `config/soundswitch_pack_player.example.json`,
+  `__main__.py`, and command/config tests). Without that named path, it emits the documented safe base
+  (ZERO for scripted/autoloop; held manual static still allowed). This never changes the SS-present
+  shadow path (which already submits ZERO to the backend, `state_manager.py:4116`). Export/visibility is
+  unchanged.
 
 ### B.3 Fix design per lane (rewritten against §0.4)
 
@@ -537,10 +542,31 @@ interact); task numbering is kept for reference stability.
 - **Out of scope (fail closed):** any project but the pinned UUID; any venue/profile/universe/fixture
   but RAVE/CH1-19; SoundSwitch ≠ 2.10.3; multi-deck/crossfade; `.ssproj` internals; hardware.
 
+### C.0 Implementation-surface coverage matrix (2026-07-02 audit patch)
+
+This matrix is part of the implementation contract. If a file is named here, the task must either
+change it, add a must-fail-then-pass test around it, or explicitly prove it already matches the
+target behavior. Leaving one of these surfaces untouched is allowed only with a written reason in the
+task closeout.
+
+| Task | Required behavior | Files already named in this spec before the audit | Additional repo files now explicit | Why the additional files matter / miss class | Exact section patched |
+| --- | --- | --- | --- | --- | --- |
+| C1 | U0-grounded oracle; no internal self-render proof | `soundswitch_parity_oracle.py`, `tools/ssfmt/parity_oracle.py`, `tests/test_soundswitch_parity_oracle.py`, oracle fixtures | `tools/artnet_compare.py`, `tools/ssfmt/re/validate_scripted_capture.py`, `tools/ssfmt/re/validate_autoloop_capture.py`, `tools/ssfmt/re/layered_renderer.py`, `tests/test_artnet_compare.py`, `tests/test_autoloop_oracle.py` | These are the existing parity/capture/oracle-adjacent instruments. If they keep treating U1 or self-render as proof, parity is silently weakened. | Task C1 Files and must-fail tests |
+| C2 | Per-document parity lanes through export, verification, load, runtime, and publication | parity registries, `soundswitch_pack_models.py`, `soundswitch_pack.py`, `soundswitch_pack_verifier.py`, `soundswitch_pack_loader.py`, `tools/export_soundswitch_pack.py`, `tests/test_soundswitch_scripted_parity.py` | `soundswitch_pack_runtime.py`, `state_manager.py`, `runtime_status.py`, `scripts/bridge_menubar.py`, `tests/test_runtime_status.py`, `tests/test_bridge_menubar.py`, `tests/test_soundswitch_pack_commands.py`, `tests/test_soundswitch_pack_controller.py`, `tests/test_soundswitch_pack_startup.py` | Lane metadata must survive pack load/reload and be visible operationally. Missing runtime/status surfaces can let `unverified_parity` look healthy or publish as trusted output. | Task C2 Files, verifier, and acceptance |
+| C3 | Scripted all-zero seed, sorted events, carry-forward gaps, skip-hold misses, stop/unload/track-change zeroing | `soundswitch_project_decoder.py`, `soundswitch_pack.py`, `soundswitch_laser_player.py`, `soundswitch_parity_oracle.py`, `tests/test_soundswitch_scripted_first_event.py` | `soundswitch_pack_models.py`, `soundswitch_pack_loader.py`, `soundswitch_pack_verifier.py`, `state_manager.py`, `tests/test_soundswitch_laser_player.py`, `tests/test_state_manager_pack_driver.py`, `tests/test_ssfile_reference_convention.py` | Loader/verifier define the boundary frames the runtime receives; `state_manager.py` owns stop/unload/track-change fail-closed behavior. Missing them can either blank gaps or hold stale nonzero frames. | Task C3 Files, intent, tests, acceptance |
+| C4 | Scripted `raw_reference` resolved by each `.ssfile`'s embedded exact key; no `raw-1`, library order, nearest key, name matching, or self-render proof | `soundswitch_project_decoder.py`, new `soundswitch_scripted_resolution.py`, `tests/test_soundswitch_scripted_resolution.py` | `soundswitch_pack_models.py`, `soundswitch_pack.py`, `soundswitch_pack_verifier.py`, `soundswitch_pack_loader.py`, `soundswitch_laser_player.py`, `tools/prove_soundswitch_pack_generation.py`, `tools/ssfmt/re/analyze_scripted_layouts.py`, `tools/ssfmt/re/analyze_scripted_ssfile.py`, `tools/ssfmt/re/analyze_ssfile_structure.py`, `tests/test_soundswitch_project_decoder.py`, `tests/test_soundswitch_pack.py`, `tests/test_prove_soundswitch_pack_generation.py`, `tests/test_ssfile_reference_convention.py` | The independent verifier currently has the same old assumption class, loader/player consume resolved fields, and proof/research tools can keep re-legitimizing `raw-1`. Missing verifier/loader blocks parity; missing proof-tool quarantine silently weakens it. | Task C4 Files, steps, must-fail tests, acceptance |
+| C5 | Static trigger authority from real MIDI port and learned-control binding coverage; status does not claim unseen static parity | `soundswitch_midi_input.py`, `tests/test_soundswitch_midi_input.py`, `runtime_status.py` | `soundswitch_pack_models.py`, `soundswitch_project_decoder.py`, `soundswitch_pack.py`, `soundswitch_pack_loader.py`, `state_manager.py`, `tools/export_soundswitch_pack.py`, `scripts/bridge_menubar.py`, `tests/test_state_manager_pack_driver.py`, `tests/test_runtime_status.py`, `tests/test_bridge_menubar.py`, `tests/test_soundswitch_pack.py` | Static binding coverage is decoded/exported/loaded before MIDI dispatch, and static precedence/status live in the driver/menubar. Missing these silently reports parity while no learned trigger fired. | Task C5 Files, binding gap, tests, acceptance |
+| C6 | Static non-generic maps either proven inert from profile/look data or composed in SS order | `soundswitch_pack.py`, `soundswitch_project_decoder.py`, `tests/test_static_looks.py` | `soundswitch_pack_models.py`, `soundswitch_pack_verifier.py`, `soundswitch_pack_loader.py`, `soundswitch_laser_player.py`, `tests/test_soundswitch_pack.py`, `tests/test_soundswitch_laser_player.py` | Verifier currently recomputes generic-only and loader/runtime carry the profile flag. Missing them can keep `has_intensity_channel=False` or generic-only runtime assumptions after export proves otherwise. | Task C6 Files, violation branch, tests, acceptance |
+| C7 | Autoloop selection from learned maps; beatCount from each loop document; beatgrid-tiled phase; no hardcoded 32-beat/19200/note list | `native_autoloop_resolver.py`, generic scene-selection source, `soundswitch_laser_player.py`, `tests/test_native_autoloop_resolver.py`, `tests/test_state_manager_pack_driver.py` | `config.py`, `laser_models.py`, `laser_executor.py`, `laser_director.py`, `laser_config.py`, `config/laser_director.json`, `soundswitch_project_decoder.py`, `soundswitch_pack.py`, `soundswitch_pack_verifier.py`, `soundswitch_pack_loader.py`, `state_manager.py`, `autoloop_controller.py`, `soundswitch_pack_player_config.py`, `soundswitch_pack_runtime.py`, `tools/artnet_compare.py`, `tests/test_laser_config.py`, `tests/test_laser_executor.py`, `tests/test_live_bpm_service.py`, `tests/test_autoloop_controller.py`, `tests/test_soundswitch_pack.py`, `tests/test_soundswitch_laser_player.py`, `tests/test_artnet_compare.py`, `tests/test_t7d_phase_contract.py`, `tests/test_autoloop_oracle.py`, `tests/test_inventory_project_artifacts.py` | The hardcoded 19,200/32-beat model is split across loader, resolver, config, phase tests, and proof tools; note 96 can stay unreachable through scene config/executor even if resolver changes. Missing any of these can block or silently weaken autoloop parity. | Task C7 Files, selection, anchor, tests, acceptance |
+| C8 | `unverified_parity` can never drive trusted live output; SS-present suppression/status/reload stay correct | `state_manager.py`, `runtime_status.py`, `tests/test_state_manager_pack_driver.py` | `soundswitch_pack_models.py`, `soundswitch_pack.py`, `soundswitch_pack_verifier.py`, `soundswitch_pack_loader.py`, `soundswitch_laser_player.py`, `soundswitch_pack_runtime.py`, `soundswitch_pack_controller.py`, `scripts/bridge_menubar.py`, `__main__.py`, `soundswitch_pack_player_config.py`, `config/soundswitch_pack_player.example.json`, `tests/test_runtime_status.py`, `tests/test_bridge_menubar.py`, `tests/test_soundswitch_pack_commands.py`, `tests/test_soundswitch_pack_controller.py`, `tests/test_soundswitch_pack_startup.py`, `tests/test_soundswitch_pack_player_config.py`, `tests/test_artnet_truth.py`, `tests/test_artnet_compare.py` | The live gate depends on lane propagation through pack load/reload and operator-visible status. Missing these can let unverified supported content publish, reload, or display as trusted. | Task C8 Files, gate, tests, acceptance |
+
 ### Task C1 — Offline parity oracle (pure core + CLI). *Foundation.*
 Files: `soundswitch_parity_oracle.py` (pure), `tools/ssfmt/parity_oracle.py` (CLI/IO),
-`tests/test_soundswitch_parity_oracle.py`, `tests/fixtures/soundswitch/parity_oracle/…` (small
-committed reduced fixtures derived from the existing capture: for each captured SSID, a table of
+`tools/artnet_compare.py`, `tools/ssfmt/re/validate_scripted_capture.py`,
+`tools/ssfmt/re/validate_autoloop_capture.py`, `tools/ssfmt/re/layered_renderer.py`,
+`tests/test_soundswitch_parity_oracle.py`, `tests/test_artnet_compare.py`,
+`tests/test_autoloop_oracle.py`, `tests/fixtures/soundswitch/parity_oracle/…` (small committed
+reduced fixtures derived from the existing capture: for each captured SSID, a table of
 `(elapsed_ms, U0_frame)` samples at cue boundaries + neighbors; the 3 static look U0 held frames; a
 handful of autoloop `(phase_tick, U0_frame)` per covered target; the DD42028C negative-control table).
 - Pure core API: `classify_scripted(document, samples) -> OracleReport`,
@@ -555,15 +581,20 @@ handful of autoloop `(phase_tick, U0_frame)` per covered target; the DD42028C ne
 - **Must-fail-then-pass:** against **today's** pack, the oracle MUST report FAIL for AE9E3C61,
   FC10FC02, and DD42028C, and the scripted first-event BLIP for Rihanna/9947C65E; and PASS for the
   Rihanna/9947C65E lit-region value match. A test asserts these exact starting verdicts (so a future
-  regression that "passes everything" is caught).
+  regression that "passes everything" is caught). Existing parity tools/tests must also prove they do
+  not use U1, pack self-render, `oracle_rendered` frames, or sidecar-only truth as the acceptance
+  oracle; those instruments may summarize coverage, but only U0 evidence can prove byte parity.
 - Acceptance: `python3 -m unittest tests.test_soundswitch_parity_oracle` green; oracle reproduces the
   Part A per-track numbers within tolerance from the committed fixtures (no live capture needed).
 
 ### Task C2 — Parity registry + fail-closed publication (extends baseline Tasks 1–2).
 Files: `tests/fixtures/soundswitch/scripted_parity_registry.json` (+ autoloop/static registries),
 `soundswitch_pack_models.py`, `soundswitch_pack.py`, `soundswitch_pack_verifier.py`,
-`soundswitch_pack_loader.py`, `tools/export_soundswitch_pack.py`,
-`tests/test_soundswitch_scripted_parity.py`.
+`soundswitch_pack_loader.py`, `soundswitch_pack_runtime.py`, `state_manager.py`, `runtime_status.py`,
+`scripts/bridge_menubar.py`, `tools/export_soundswitch_pack.py`,
+`tests/test_soundswitch_scripted_parity.py`, `tests/test_runtime_status.py`,
+`tests/test_bridge_menubar.py`, `tests/test_soundswitch_pack_commands.py`,
+`tests/test_soundswitch_pack_controller.py`, `tests/test_soundswitch_pack_startup.py`.
 - Add the 3-state lane (B.2) to each scripted/autoloop/static document's provenance. Lane assignment
   is **computed** by a pure classifier from `(document, oracle_report, structural checks)` — the
   registry stores evidence, never a hand-curated allow-list (§0.3). Expected initial verdicts (not
@@ -574,24 +605,37 @@ Files: `tests/fixtures/soundswitch/scripted_parity_registry.json` (+ autoloop/st
   assertion holds, else `unverified_parity`.
 - Verifier: `oracle_proven` requires committed U0-oracle evidence (source hash + capture id + per-
   boundary totals); export **fails closed** (raises) on an active document that is `unverified_parity`
-  *and* the operator has not chosen the explicit unverified-publish path.
+  unless the explicit unverified-publish path is implemented through the named C8 command/config
+  surfaces and tests. If that path is not implemented, `unverified_parity` active documents always
+  raise/fail closed.
+- Loader/runtime/status: the lane and its evidence summary must survive pack JSON, verifier output,
+  `LoadedDocument`, `PackRuntime`, pack reload/swap, `runtime_status`, and the menubar/status surface.
+  A document in `unverified_parity` must be visibly distinct from healthy output everywhere it is
+  reported; no status string may collapse it into "pack ok" or "oracle_proven".
 - **Must-fail-then-pass:** a test asserts that exporting today's pack marks AE9E3C61/FC10FC02/DD42028C
   `unverified_parity` and that publication of them fails closed; after Task C3/C4 fixes, they flip to
-  `oracle_proven` (or stay fail-closed with a recorded reason). Pure-function seam: registry
-  classification is a pure function of `(document, oracle_report)`.
+  `oracle_proven` (or stay fail-closed with a recorded reason). Runtime/status tests assert the lane is
+  present after a pack load/reload and appears as an explicit degraded/unverified status. Pure-function
+  seam: registry classification is a pure function of `(document, oracle_report)`.
 
 ### Task C3 — Scripted carry-forward / first-event fidelity (gap-fill branch DEAD — §0.4 Finding 1).
-Files: `soundswitch_project_decoder.py`, `soundswitch_pack.py`, `soundswitch_laser_player.py`
-(renderer hold semantics only if divergent from the model), `soundswitch_parity_oracle.py`
-(dropped-cue vs missing-hold classification), `tests/test_soundswitch_scripted_first_event.py`.
+Files: `soundswitch_project_decoder.py`, `soundswitch_pack_models.py`, `soundswitch_pack.py`,
+`soundswitch_pack_verifier.py`, `soundswitch_pack_loader.py`, `soundswitch_laser_player.py`
+(renderer hold semantics only if divergent from the model), `state_manager.py` (stop/unload/
+track-change zeroing and scripted suppression only), `soundswitch_parity_oracle.py` (dropped-cue vs
+missing-hold classification), `tests/test_soundswitch_scripted_first_event.py`,
+`tests/test_soundswitch_laser_player.py`, `tests/test_state_manager_pack_driver.py`,
+`tests/test_ssfile_reference_convention.py`.
 Runs **after C4** — a held value is only correct if the cue that seeded it resolved correctly.
 - **Intent:** make the exporter+renderer reproduce SS's cache model exactly (§0.4 Finding 1):
   frames form a step function seeded from **all-zero**; each boundary frame = previous boundary
   frame **plus this cue's converted attribute changes** (channels a cue does not touch keep their
   prior values); empty/unresolved cues are **skipped** — the prior hold continues, never a blank;
   output is dark only before the earliest cue; holds persist through gaps until the next cue. Do
-  **not** touch `native_autoloop_resolver.py`/`state_manager.py` scripted suppression — it is
-  correct.
+  **not** add autoloop-under-scripted output; `native_autoloop_resolver.py` scripted suppression stays
+  correct. If `state_manager.py` is touched, the only valid changes are tests or fail-closed/zeroing
+  preservation around stop, unload, track change, discontinuity, reload-wait, and SS-present
+  suppression.
 - Fix early-cue extraction: every timeline event SS serialized must appear in the pack with its
   time; the pack's first event must align with U0's first lit frame. Use the oracle's dropped-cue
   vs missing-hold classification per SSID to locate which shape each divergence is.
@@ -600,7 +644,9 @@ Runs **after C4** — a held value is only correct if the cue that seeded it res
   missing-hold→0 within timing tolerance) for all four captured SSIDs. A unit test feeds a
   synthetic document with a multi-cue timeline + a gap + an empty cue and asserts carry-forward
   (untouched channels persist) and skip-hold (an empty cue does not blank). Pure seam: the
-  dropped-cue/missing-hold classifier and the carry-forward composition are pure functions.
+  dropped-cue/missing-hold classifier and the carry-forward composition are pure functions. Driver
+  tests must also prove stop/unload/track-change/discontinuity still emit ZERO rather than holding the
+  last scripted nonzero frame.
 - **Acceptance / generalization:** captured witnesses show zero BLIP and zero missing-hold; the
   carry-forward property is asserted structurally (a property of the composition over *any*
   document), which is the generalization proof for future tracks. Divergence that survives ⇒
@@ -608,8 +654,14 @@ Runs **after C4** — a held value is only correct if the cue that seeded it res
 
 ### Task C4 — Scripted cue-resolution: file-embedded exact-key lookup (runs before C3)
 The DD42028C-class fix, per §0.4 Finding 2.
-Files: `soundswitch_project_decoder.py`, new pure `soundswitch_scripted_resolution.py`,
-`tests/test_soundswitch_scripted_resolution.py` (+ reuse baseline Task 3/4 oracle-canonicalization CLI).
+Files: `soundswitch_project_decoder.py`, `soundswitch_pack_models.py`, `soundswitch_pack.py`,
+`soundswitch_pack_verifier.py`, `soundswitch_pack_loader.py`, `soundswitch_laser_player.py`, new pure
+`soundswitch_scripted_resolution.py`, `tools/prove_soundswitch_pack_generation.py`,
+`tools/ssfmt/re/analyze_scripted_layouts.py`, `tools/ssfmt/re/analyze_scripted_ssfile.py`,
+`tools/ssfmt/re/analyze_ssfile_structure.py`, `tests/test_soundswitch_scripted_resolution.py`,
+`tests/test_soundswitch_project_decoder.py`, `tests/test_soundswitch_pack.py`,
+`tests/test_prove_soundswitch_pack_generation.py`, `tests/test_ssfile_reference_convention.py`
+(plus reuse baseline Task 3/4 oracle-canonicalization CLI).
 - **Step 1 — inspect the current decoder** (`soundswitch_project_decoder.py:538-544`): determine
   whether it already parses each `.ssfile`'s serialized `(GUID, stored_key)` records or
   reconstructs keys from library order / a `raw−1` rule. The evidence packet proves the **binary**
@@ -622,6 +674,13 @@ Files: `soundswitch_project_decoder.py`, new pure `soundswitch_scripted_resoluti
   healthy supported file usually means a decoder misparse — investigate, don't absorb). No offset,
   no library-order reconstruction, no nearest-key, no cue-name matching
   (`soundswitch_pack_parity_root_cause_spec.md:499-501`).
+- **Step 3 — sweep every consumer/proof path:** the pack model must document the exact semantics of
+  `raw_reference`, `stored_key`, `resolved_stored_key`, and `resolved_cue_guid`; `soundswitch_pack.py`
+  and `soundswitch_pack_loader.py` must preserve the resolved key/GUID without recomputing it; the
+  verifier must stop enforcing `stored == raw - 1` and must not accept `oracle_rendered`/pre-rendered
+  frames as parity proof without C1 U0 evidence. Historical proof/research tools that encode raw-1,
+  direct, nearest-key, or library-order candidates must be updated to call the pure resolver or be
+  explicitly labeled non-authoritative so they cannot satisfy an acceptance gate.
 - **DD42028C caveat (do not lose):** prior empirical data showed a `raw−1`-style match for DD42028C
   while the binary does **no** subtraction — this is a bridge **representation/label mismatch**
   (the file's stored keys equal `raw−1` on 69/91 rows, `direct` on 27/91, and **no single offset
@@ -633,7 +692,11 @@ Files: `soundswitch_project_decoder.py`, new pure `soundswitch_scripted_resoluti
   permutation fixture and AE9E3C61's divergent boundaries (the bridge picked the library-adjacent
   "MASTER STROBE" `(255,255)` where U0 shows "STROBE" `(110,0)` on CH10/CH11); after the fix it
   reproduces every fixture row exactly and AE9E3C61/FC10FC02 pass the U0 oracle. The global-offset
-  rejection test is retained (`raw-1`, direct, `raw±2/3` cannot satisfy all rows).
+  rejection test is retained (`raw-1`, direct, `raw±2/3` cannot satisfy all rows). Existing tests that
+  currently encode old assumptions must be flipped: `tests/test_soundswitch_project_decoder.py`
+  raw-one/raw-maximum cases, `tests/test_ssfile_reference_convention.py`, and any
+  `tests/test_soundswitch_pack.py` path that treats internal verifier/self-render as proof must fail
+  before the exact-key/U0-proof fix and pass after.
 - **Acceptance / generalization:** resolution consumes only the file's own bytes ⇒
   content-independent by construction; with the captured witnesses oracle-proven, every
   `shared_441_dictionary_timeline` document (and future authored tracks of the same serialization)
@@ -642,8 +705,11 @@ Files: `soundswitch_project_decoder.py`, new pure `soundswitch_scripted_resoluti
   never an offset fallback.
 
 ### Task C5 — Static MIDI trigger authority.
-Files: `soundswitch_midi_input.py`, `tests/test_soundswitch_midi_input.py`, `runtime_status.py` (status
-surface only).
+Files: `soundswitch_midi_input.py`, `soundswitch_pack_models.py`, `soundswitch_project_decoder.py`,
+`soundswitch_pack.py`, `soundswitch_pack_loader.py`, `state_manager.py`, `runtime_status.py`,
+`scripts/bridge_menubar.py`, `tools/export_soundswitch_pack.py`, `tests/test_soundswitch_midi_input.py`,
+`tests/test_state_manager_pack_driver.py`, `tests/test_runtime_status.py`, `tests/test_bridge_menubar.py`,
+`tests/test_soundswitch_pack.py`.
 - Root-cause `[SS-MIDI] input port gone` (`:454-484`): fix the exact-port matcher/retry so a present
   static-controller port is not spuriously declared gone (verify `_port_present` name-matching against
   the real enumerated port names; ensure the never-seen fast-retry churn does not corrupt a live port's
@@ -651,17 +717,23 @@ surface only).
 - Make the observed-vs-authored binding gap explicit: if the operator's held-static device/notes are not
   in the pack's learned controls (today: only `DDJ-800 StaticOverride16`), status reports "static
   trigger unobserved / binding gap" and static parity is **not** claimed (fail-closed), rather than
-  silently rendering base.
+  silently rendering base. The binding coverage check must be derived from decoded/exported learned
+  controls, preserved through `soundswitch_pack_loader.py`, consumed by the MIDI group, and surfaced in
+  `runtime_status.py`/`scripts/bridge_menubar.py`.
 - **Must-fail-then-pass:** a unit test injecting a present-then-flapping port asserts the port is NOT
-  declared gone while present; a test asserts an unbound held-static attempt surfaces the gap flag.
-  Pure seam: `_port_present(port_list, name)` tested directly.
+  declared gone while present; a test asserts an unbound held-static attempt surfaces the gap flag in
+  runtime status and menubar output; a state-manager test asserts static override precedence remains
+  above scripted/autoloop base after the new status path. Pure seam: `_port_present(port_list, name)`
+  and the learned-binding coverage classifier are tested directly.
 - **Acceptance / generalization:** the matcher/retry fix is device-name-general (no hardcoded port
   names beyond config); binding coverage is computed from the pack's learned controls — any future
   learned static binding is honored by the same coverage check, never a fixed list.
 
 ### Task C6 — Static non-generic export assertion (MANDATORY)
 §0.4 Finding 3 upgraded this from belt-and-suspenders to necessary.
-Files: `soundswitch_pack.py`, `soundswitch_project_decoder.py`, `tests/test_static_looks.py`.
+Files: `soundswitch_project_decoder.py`, `soundswitch_pack_models.py`, `soundswitch_pack.py`,
+`soundswitch_pack_verifier.py`, `soundswitch_pack_loader.py`, `soundswitch_laser_player.py`,
+`tests/test_static_looks.py`, `tests/test_soundswitch_pack.py`, `tests/test_soundswitch_laser_player.py`.
 - **Intent:** at export, for **every** static slot (the current 32 and any future edit), assert
   against the RAVE profile's per-channel attribute **types** and the look's stored map **values**
   that the four non-generic maps contribute nothing to CH1-19: **(a)** no intensity-typed channel
@@ -675,28 +747,43 @@ Files: `soundswitch_pack.py`, `soundswitch_project_decoder.py`, `tests/test_stat
   composition in SS's order (static maps overwrite intensity/colour/pan/tilt/strobe before the emit
   loop; attribute-typed channels emit from the dedicated setter path; default-type channels emit
   cue⊕static-generic — §0.4 Finding 3), proven against U0 evidence. A silent generic-only export of
-  a violating slot is forbidden.
+  a violating slot is forbidden. The verifier and loader must carry the profile/channel assertion
+  result; a hardcoded `has_intensity_channel=False` or generic-only recomputation in the verifier is
+  not an acceptance proof.
 - **Must-fail-then-pass:** a synthetic look with empty generic + a colour/strobe/position value that
   *would* map to a CH1-19 attribute type must be flagged; the real project slots (the authored
   looks, the OFF/BLACK OUT pair, and the empty defaults) pass — expected; if any real slot fails,
   that is a live blocker to surface, not to suppress. Pure seam: the assertion is a pure function of
-  `(look record, profile channel-type table)`.
+  `(look record, profile channel-type table)`. Existing generic-only static renderer/verifier tests
+  must be split into two classes: proven-inert profile/look data passes, and a synthetic non-generic
+  contribution fails until dedicated-path composition is implemented and U0-proven.
 - **Acceptance / generalization:** with the assertion in the export path, every future authored look
   either proves generic-only byte-exactness by construction or is loudly flagged — no new capture,
   no per-look manual approval.
 
 ### Task C7 — Autoloop selection (learned-map general) + beatgrid-derived anchor + edge-case unit sweep.
-Files: `native_autoloop_resolver.py`, the scene-selection source that maps musical context→note (the
-laser/autoloop resolver that produces `LaserResolvedScene`), `soundswitch_laser_player.py` (autoloop
-render only if a defect is proven), `tests/test_native_autoloop_resolver.py`,
-`tests/test_state_manager_pack_driver.py`.
+Files: `native_autoloop_resolver.py`, `config.py`, `laser_models.py`, `laser_executor.py`,
+`laser_director.py`, `laser_config.py`, `config/laser_director.json`, `soundswitch_project_decoder.py`,
+`soundswitch_pack.py`, `soundswitch_pack_verifier.py`, `soundswitch_pack_loader.py`, `state_manager.py`,
+`autoloop_controller.py`, `soundswitch_laser_player.py` (autoloop render only if a defect is proven),
+`soundswitch_pack_player_config.py`, `soundswitch_pack_runtime.py`, `tools/artnet_compare.py`,
+`tests/test_native_autoloop_resolver.py`, `tests/test_state_manager_pack_driver.py`,
+`tests/test_laser_config.py`, `tests/test_laser_executor.py`, `tests/test_live_bpm_service.py`,
+`tests/test_autoloop_controller.py`, `tests/test_soundswitch_pack.py`,
+`tests/test_soundswitch_laser_player.py`, `tests/test_artnet_compare.py`,
+`tests/test_t7d_phase_contract.py`, `tests/test_autoloop_oracle.py`,
+`tests/test_inventory_project_artifacts.py`.
 - **Selection (§0.4 Finding 5):** note 96 is a **bridge resolver gap** — the SS mechanism is a
   generic learned `(data_byte, channel, type) → control-path` map with no note-96 special case, and
   the `(0, 96) → SSAutoLoop4` binding **exists** in this pack. Fix the resolver's general selection
   rule so any binding present in the pack's selection map can fire (map the drop-policy condition to
   note 96 here), with **no hardcoded note list and no hardcoded autoloop count** — future packs with
   different or more bindings must work unchanged. The `unverified_parity`+surface branch applies
-  **only** to a pack whose mapping is genuinely absent — not this one.
+  **only** to a pack whose mapping is genuinely absent — not this one. The selection fix must include
+  the full scene chain: laser config/policy, `LaserResolvedScene`, executor/director note emission,
+  pack `selection_map`/`iac_selections`, verifier crosswalk, loader bindings, and state-manager runtime
+  wiring. A config/policy mismatch that keeps note 96 unreachable is the same parity defect as a
+  resolver miss.
 - **Anchor (§0.4 Finding 4):** replace the edge-observation anchor (`anchor_beat` at the first
   scene edge, `native_autoloop_resolver.py:191-199`) with the derived beatgrid tiling: `beatCount`
   from the loop document (`GetAutoLoopNumberBeats` semantics; default 32; never hardcoded),
@@ -704,7 +791,10 @@ render only if a defect is proven), `tests/test_native_autoloop_resolver.py`,
   `phase_tick = int((beat_pos − window_start) × 600)`, pre-roll/negative beats wrapped mod
   beatCount. Prove via the oracle that this reproduces U0 phase on the captured loops — that proof
   simultaneously settles the residual bridge-beatgrid beat-0 equivalence question (§D.2 U4). Do not
-  regress the landed phase-zero guard. Near-empty loop exports (SSAutoLoop5/18/3) must be
+  regress the landed phase-zero guard. Remove hardcoded 19,200/32-beat stamping from loader/resolver
+  paths (`AUTOLOOP_CYCLE_TICKS`, `AUTOLOOP_ARM_PHRASE_BEATS`, and derived 600-tick tests are allowed
+  only as defaults after the loop document supplies or defaults `beatCount`). Near-empty loop exports
+  (SSAutoLoop5/18/3) must be
   oracle-checked vs U0 (correct-dark vs exporter under-render ⇒ fix extraction) or flagged
   `unverified_parity` as temporary blockers.
 - Edge-case sweep unit tests (§6.2 items 10–13): precedence combinations
@@ -716,21 +806,38 @@ render only if a defect is proven), `tests/test_native_autoloop_resolver.py`,
   note 96) and reachable after the fix via the general rule (assert there is no note-96 literal
   special-case in the resolver); an anchor test proving the beatgrid-tiled phase matches the
   captured loops' U0 phase where an edge-anchored phase with an injected observation latency does
-  not.
+  not. Existing tests that hardcode `cycle_ticks=19200`, `AUTOLOOP_CYCLE_TICKS`, 32-beat wrapping,
+  `AUTOLOOP_TICKS_PER_BEAT == 600`, hardcoded note lists, or fixed autoloop counts must fail before
+  the per-document `beatCount`/learned-map fix and pass after by deriving those values from the loaded
+  document or explicit defaulted metadata.
 - **Acceptance / generalization:** selection reads bindings from the pack; the anchor reads
   beatCount from the loop document; both are content-independent, so future autoloops are covered by
   ≥1 oracle-proven captured witness + the structural rule (B.1), with no per-loop work.
 
 ### Task C8 — Live fail-closed parity gate (wire the flag model into the driver, read-only).
-Files: `state_manager.py` (`_drive_pack_output` selection only), `runtime_status.py`,
-`tests/test_state_manager_pack_driver.py`.
+Files: `soundswitch_pack_models.py`, `soundswitch_pack.py`, `soundswitch_pack_verifier.py`,
+`soundswitch_pack_loader.py`, `soundswitch_laser_player.py`, `soundswitch_pack_runtime.py`,
+`soundswitch_pack_controller.py`, `state_manager.py` (`_drive_pack_output` selection only),
+`runtime_status.py`, `scripts/bridge_menubar.py`, `__main__.py`,
+`soundswitch_pack_player_config.py`, `config/soundswitch_pack_player.example.json`,
+`tests/test_state_manager_pack_driver.py`, `tests/test_runtime_status.py`,
+`tests/test_bridge_menubar.py`, `tests/test_soundswitch_pack_commands.py`,
+`tests/test_soundswitch_pack_controller.py`, `tests/test_soundswitch_pack_startup.py`,
+`tests/test_soundswitch_pack_player_config.py`, `tests/test_artnet_truth.py`, `tests/test_artnet_compare.py`.
 - When parity-live (pack enabled AND `soundswitch_connected == False`), a document whose lane is
   `unverified_parity` must not render as trusted output: emit the safe base (ZERO scripted/autoloop;
   held manual static still honored) and publish an explicit `operational_state = "unverified_parity"`
   unless the operator has acknowledged it. No change to the SS-present shadow path (already ZERO to
-  backend, `:4116`). No blocking work added to the tick.
+  backend, `:4116`). No blocking work added to the tick. The gate must consume lane metadata from the
+  loaded pack, survive startup/reload/controller swaps, and update status/menubar output without
+  changing backend selection or SS-present suppression. If an operator-acknowledged unverified path is
+  implemented, its command/config surface must be named in this task (`runtime_status.py`,
+  `soundswitch_pack_player_config.py`, `config/soundswitch_pack_player.example.json`, `__main__.py`)
+  and tested before code changes; otherwise the only behavior is fail-closed safe base.
 - **Must-fail-then-pass:** a driver test with an `unverified_parity` scripted doc asserts safe-base +
-  the status flag when parity-live, and unchanged behavior when SS-present. Pure seam: the lane→action
+  the status flag when parity-live, and unchanged behavior when SS-present. Startup/reload/controller
+  tests assert an unverified lane cannot be promoted to trusted output during pack load, pack swap, or
+  command handling; runtime/menubar tests assert it is visibly degraded. Pure seam: the lane→action
   decision is a pure helper.
 - **Acceptance / generalization:** driver tests green; the gate reads lanes from the registry
   generically (no document-specific branches). The gate is a *temporary-state guard* per §0.1 —
@@ -759,9 +866,17 @@ Files: `state_manager.py` (`_drive_pack_output` selection only), `runtime_status
     tests.test_state_manager_pack_driver tests.test_soundswitch_pack_commands \
     tests.test_runtime_status tests.test_bridge_menubar tests.test_soundswitch_frame_sender \
     tests.test_enttec_dmx_pro tests.test_soundswitch_pack_startup \
+    tests.test_soundswitch_pack_controller tests.test_soundswitch_pack \
+    tests.test_soundswitch_pack_player_config \
+    tests.test_soundswitch_laser_player \
     tests.test_soundswitch_parity_oracle tests.test_soundswitch_scripted_parity \
     tests.test_soundswitch_scripted_resolution tests.test_soundswitch_scripted_first_event \
-    tests.test_static_looks tests.test_soundswitch_midi_input tests.test_native_autoloop_resolver
+    tests.test_soundswitch_project_decoder tests.test_ssfile_reference_convention \
+    tests.test_prove_soundswitch_pack_generation \
+    tests.test_static_looks tests.test_soundswitch_midi_input tests.test_native_autoloop_resolver \
+    tests.test_laser_config tests.test_laser_executor tests.test_live_bpm_service \
+    tests.test_autoloop_controller tests.test_artnet_compare tests.test_artnet_truth \
+    tests.test_t7d_phase_contract tests.test_autoloop_oracle tests.test_inventory_project_artifacts
   python3 -m unittest discover tests
   python3 tools/check_docs_metadata.py && python3 tools/check_agent_contracts.py && python3 tools/check_docs_drift.py
   python3 tools/check_docs_staleness.py --report
@@ -810,8 +925,10 @@ Files: `state_manager.py` (`_drive_pack_output` selection only), `runtime_status
 1. **Every claim labeled** confirmed/assumed/unknown — done in Part A + §0.4; the former unknowns
    (A.3.d gap-fill, A.4.c anchor origin) are now CLOSED by the recorded evidence packet; the live
    remaining unknowns are enumerated with closing instruments in §D.2.
-2. **Verified against CURRENT code** (HEAD `0a86521`) — every file:line re-read this session; the
-   phase-zero guard, driver gates, generic-only render, and constants confirmed present.
+2. **Verified against CURRENT code** (HEAD `c59d78c`) — the 2026-07-02 implementation-surface audit
+   re-read the C1-C8 decoder/model/exporter/verifier/loader/runtime/status/test surfaces; the
+   phase-zero guard, driver gates, generic-only render, old `raw_reference` assumptions, and
+   hardcoded autoloop constants were confirmed as implementation targets.
 3. **Pending-state guard** — Task C7/C8 assert precedence across *all* active pending states
    (blackout/emergency/static-override/reload-wait/SS-present), not only the new lane vs one other.
 4. **Mode-transition cleanup** — the new `unverified_parity` lane is read-only in the driver (no new

@@ -67,9 +67,10 @@ def _dictionary_timeline_candidates(data: bytes) -> list[dict[str, Any]]:
             valid = True
             for record_index in range(timeline_count):
                 try:
-                    # Version-locked SoundSwitch 2.10.3 runtime rule; generic
-                    # structural parsers still retain both candidates elsewhere.
-                    record = timeline_record(data, timeline_offset + record_index * 16, "one_based")
+                    # Scripted playback resolves positive raw references by
+                    # exact serialized key; generic structural parsers still
+                    # retain historical candidates elsewhere.
+                    record = timeline_record(data, timeline_offset + record_index * 16, "exact_key")
                 except ValueError:
                     valid = False
                     break
@@ -168,7 +169,7 @@ def analyze_file(path: Path, shared_table: bytes) -> dict[str, Any]:
         return {**row, "status": "unsupported", "unsupported_reason": "not a SoundSwitch container"}
     try:
         # Version-locked SoundSwitch 2.10.3 runtime playback rule.
-        parsed = parse_scripted_structure(data, shared_table, "one_based")
+        parsed = parse_scripted_structure(data, shared_table, "exact_key")
     except ValueError as shared_error:
         try:
             candidate = _select_fallback_candidate(data)
@@ -211,7 +212,7 @@ def analyze_file(path: Path, shared_table: bytes) -> dict[str, Any]:
             "footer_offset": footer_offset,
             "footer_size": len(data) - footer_offset if footer_offset is not None else 0,
             "footer_hex": data[footer_offset:].hex() if footer_offset is not None else "",
-            "reference_rule": "SoundSwitch 2.10.3 runtime playback: positive raw resolves to stored key raw-1; raw 0 is clear/control. Cold-open new and legacy captures are wire-proven.",
+            "reference_rule": "SoundSwitch scripted playback: positive raw resolves by exact serialized-key lookup; raw 0 is clear/control.",
             "reference_evidence": (
                 "same packed 16-byte record grammar and bounded references as the wire-validated "
                 "A5 layout; this layout itself has no representative wire capture"
@@ -238,8 +239,8 @@ def analyze_file(path: Path, shared_table: bytes) -> dict[str, Any]:
         "trailer_offset": parsed["trailer_offset"],
         "trailer_hex": parsed["trailer_hex"],
         "extra_size": parsed["extra_size"],
-        "reference_rule": "SoundSwitch 2.10.3 runtime playback: positive raw resolves to dictionary index raw - 1; raw 0 is clear/control",
-        "reference_evidence": "wire-validated for legacy A5, legacy autoloops, and a cold-open newly authored scripted track; structural for other files",
+        "reference_rule": "SoundSwitch scripted playback: positive raw resolves by exact serialized-key lookup; raw 0 is clear/control",
+        "reference_evidence": "live-Ghidra evidence packet; structural for other files",
         "referenced_cue_guids": _referenced_cue_guids(parsed["cues"], timeline),
         **_timeline_summary(timeline),
     }

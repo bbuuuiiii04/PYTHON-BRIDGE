@@ -307,6 +307,7 @@ def _validate_document(doc: Any, expected_path: str,
     timeline = doc.get("timeline")
     boundaries = doc.get("pre_rendered_boundaries")
     _validate_parity(doc, expected_path)
+    parity_lane = doc.get("parity_lane")
     if not isinstance(timeline, list) or not isinstance(boundaries, list):
         _fail(f"timeline/boundary count mismatch for {expected_path}")
     if any(not isinstance(row, dict) for row in timeline) or any(
@@ -343,13 +344,16 @@ def _validate_document(doc: Any, expected_path: str,
             recomputed = [value if channel + 1 in CONTROL_CHANNELS else 0
                           for channel, value in enumerate(recomputed)]
         elif kind == "cue":
-            if not isinstance(raw, int) or raw <= 0 or stored != raw - 1 \
-                    or not isinstance(guid, str) \
-                    or (active and guid not in cue_patches):
+            if not isinstance(raw, int) or raw <= 0 or stored != raw:
                 _fail(f"unresolved/stale positive reference for {expected_path}")
-            if isinstance(guid, str):
+            if guid is None:
+                if parity_lane != "unverified_parity":
+                    _fail(f"unresolved positive reference is not unverified for {expected_path}")
+            elif not isinstance(guid, str) or (active and guid not in cue_patches):
+                if parity_lane != "unverified_parity":
+                    _fail(f"stale positive reference is not unverified for {expected_path}")
+            elif isinstance(guid, str):
                 refs.add(guid.lower())
-            if guid in cue_patches:
                 _apply_patch(recomputed, cue_patches[guid], expected_path)
         else:
             _fail(f"unknown reference semantics for {expected_path}")

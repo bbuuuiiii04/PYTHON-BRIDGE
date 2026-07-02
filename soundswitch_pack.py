@@ -106,13 +106,9 @@ def render_document_boundaries(
         else:
             cue = cues_by_guid.get(row.resolved_cue_guid or "")
             if cue is None:
-                candidate = row.resolved_stored_key
-                raise SoundSwitchPackCompileError(
-                    f"stale cue: source={document.relative_path}; offset={row.source_offset}; "
-                    f"time={row.time}; raw_reference={row.raw_reference}; "
-                    f"candidate_key={candidate}; missing_guid={row.resolved_cue_guid}; "
-                    "remove/replace the placement in SoundSwitch, save, and re-export"
-                )
+                output.append({"frame": frame.copy(), "source_order": source_order,
+                               "source_offset": row.source_offset, "time": row.time})
+                continue
             for attribute in cue.attributes:
                 if (
                     attribute.fixture_group == PRIMARY_FIXTURE_GROUP
@@ -316,7 +312,7 @@ def compile_pack_artifacts(
             project.identity.soundswitch_version != CANONICAL_SOUNDSWITCH_VERSION or \
             project.identity.venue_guid != CANONICAL_VENUE_GUID:
         raise SoundSwitchPackCompileError("source identity is outside the pinned boundary")
-    if any(row.active for row in project.diagnostics):
+    if any(row.active and row.code != "active_missing_cue" for row in project.diagnostics):
         raise SoundSwitchPackCompileError("active unsupported diagnostics block publication")
     # F10: active render-affecting controls must use the "note" message type.
     # CC/pitch-bend bindings on static_look or autoloop targets are unsupported;

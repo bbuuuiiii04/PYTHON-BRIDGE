@@ -172,9 +172,9 @@ def render_at_elapsed(
     if elapsed_ms < 0:
         raise ValueError("scripted elapsed_ms must be non-negative")
     reference_rule = parsed.get("reference_rule")
-    if reference_rule not in {"direct", "one_based"}:
+    if reference_rule not in {"exact_key", "direct", "one_based"}:
         raise ValueError(
-            "scripted render requires explicit direct or one_based provenance; "
+            "scripted render requires explicit exact_key/direct/one_based provenance; "
             f"got {reference_rule or 'unspecified'}"
         )
 
@@ -248,9 +248,9 @@ def render_playback_state(
             f"got {transport_state!r}"
         )
     reference_rule = parsed.get("reference_rule")
-    if reference_rule not in {"direct", "one_based"}:
+    if reference_rule not in {"exact_key", "direct", "one_based"}:
         raise ValueError(
-            "scripted render requires explicit direct or one_based provenance; "
+            "scripted render requires explicit exact_key/direct/one_based provenance; "
             f"got {reference_rule or 'unspecified'}"
         )
     if transport_state in {"ended", "unloaded"}:

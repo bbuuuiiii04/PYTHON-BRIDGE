@@ -48,6 +48,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | Task playbooks | `docs/agents/task_playbooks/*.md` (8) | CURRENT AUTHORITATIVE — per-task reading routes. |
 | Subsystem cards | `docs/subsystems/{core_bridge,rekordbox_readers,soundswitch_output,laser,led_govee,runtime_commands,config,tests}.md` | CURRENT — compact, code-verified cards. |
 | Status / truth | `docs/status/*.md` (7) | CURRENT — project status, feature/support/validation matrices, known limitations, active work. |
+| Prompt authoring | `docs/prompts/README.md`, `docs/prompts/guides/*.md`, `docs/prompts/templates/*.md`, `.claude/skills/fable-prompt-writer/SKILL.md` | CURRENT SUPPORTING — reusable Fable 5 prompt-generation policy, templates, and repo-local skill; prompt-only, not active work. |
 | Setup / usage | `docs/setup/*.md` (5) | CURRENT. |
 | Validation policy | `docs/validation/{validation_policy,software_test_inventory,hardware_validation_log,soundswitch_hardware_validation_procedure}.md`, `docs/validation/soundswitch_hardware_runs/TEMPLATE.md` | CURRENT — SoundSwitch procedure/template are operator gates, not completed hardware evidence. |
 | Archive banner | `docs/archive/README.md` | CURRENT. |

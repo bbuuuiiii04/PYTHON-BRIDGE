@@ -39,3 +39,8 @@ When producing a Codex (or implementer) spec, use the operator's Part A–E form
 9-point pre-handoff checklist (verified claims, knowns/unknowns, pending-state + mode-transition
 guards, third-party API completeness, pure-function test seam, live-safety invariants, adversarial
 self-review). The relevant Codex spec skill, currently `rbss-codex-spec`, scaffolds this.
+
+When producing a Fable 5 prompt for Brandon, use `.claude/skills/fable-prompt-writer/SKILL.md` or
+read `docs/prompts/guides/fable5_prompt_generation_policy.md` first. The Fable prompt is for
+reasoning, planning, auditing, or review; Codex remains the implementation path unless a current
+repo instruction explicitly says otherwise.

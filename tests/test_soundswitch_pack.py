@@ -54,8 +54,8 @@ class PurePackCompilerTests(unittest.TestCase):
         cue_b = AttributeCue(3, 4, "fixture_payload", "b", "b" * 32, "p",
                              (CueAttribute(3, 0x493, 82, 1, 12),))
         timeline = (
-            TimelineRecord(100, 1, -1, 1, "cue", 0, cue_a.cue_guid),
-            TimelineRecord(116, 1, 0, 2, "cue", 1, cue_b.cue_guid),
+            TimelineRecord(100, 1, -1, 1, "cue", 1, cue_a.cue_guid),
+            TimelineRecord(116, 1, 0, 2, "cue", 2, cue_b.cue_guid),
             TimelineRecord(132, 1, 0, 0, "clear_control", None, None),
         )
         doc = LightingDocument("SSAutoLoop1.ssfile", "0" * 64, 1, 3, "p", "x", 1,
@@ -83,7 +83,7 @@ class PurePackCompilerTests(unittest.TestCase):
         cue = AttributeCue(1, 2, "fixture_payload", "a", "a" * 32, "p",
                            (CueAttribute(1, 0x493, 82, 0, 77),))
         doc = LightingDocument("SSAutoLoop1.ssfile", "0" * 64, 1, 3, "p", "x", 1, (), (
-            TimelineRecord(100, 1, -1, 1, "cue", 0, cue.cue_guid),), (), 1,
+            TimelineRecord(100, 1, -1, 1, "cue", 1, cue.cue_guid),), (), 1,
             b"0123456789", "1" * 64, None)
         self.assertEqual(render_document_boundaries(doc, {cue.cue_guid: cue})[0]["frame"],
                          [0] * 19)

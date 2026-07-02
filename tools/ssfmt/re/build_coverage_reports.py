@@ -116,10 +116,10 @@ def autoloop_report(
         path = project_dir / f"SSAutoLoop{file_number}.ssfile"
         data = path.read_bytes()
         capture = _capture_summary(capture_by_file.get(path.name, []))
-        # SoundSwitch 2.10.3 runtime playback is wire-proven one_based across
-        # legacy autoloops and a cold-open newly authored scripted track.
+        # Scripted runtime playback resolves positive references by exact
+        # serialized key; old one_based remains only for historical comparison.
         try:
-            parsed = parse_autoloop_structure(data, "one_based")
+            parsed = parse_autoloop_structure(data, "exact_key")
         except ValueError as error:
             rows.append(
                 {

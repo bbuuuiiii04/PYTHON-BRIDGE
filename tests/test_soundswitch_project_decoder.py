@@ -33,13 +33,19 @@ def _trailer(field_a: int = 0, bool_a: int = 0, field_b: int = 0, bool_b: int = 
 
 
 def _ssfile(*, cue_count: int = 3, timeline_count: int = 3,
-            raw_references: tuple[int, ...] = (0, 1, 3), trailer: bytes | None = None) -> bytes:
+            raw_references: tuple[int, ...] = (0, 1, 3),
+            stored_keys: tuple[int, ...] | None = None,
+            trailer: bytes | None = None) -> bytes:
+    if stored_keys is None:
+        stored_keys = tuple(range(1, cue_count + 1))
+    if len(stored_keys) != cue_count:
+        raise ValueError("stored_keys must match cue_count")
     data = bytearray(44)
     data[:16] = decoder._MAGIC + struct.pack("<III", 3, 0, 0)
     data[28:44] = bytes.fromhex(decoder.CANONICAL_VENUE_GUID)
     data += struct.pack("<II", 1, cue_count)
     for index in range(cue_count):
-        data += index.to_bytes(16, "little") + struct.pack("<I", index)
+        data += index.to_bytes(16, "little") + struct.pack("<I", stored_keys[index])
     data += struct.pack("<I", timeline_count)
     for index in range(timeline_count):
         data += struct.pack("<IIiI", 1, 1, index - 1, raw_references[index])
@@ -131,25 +137,48 @@ class PhysicalDocumentTests(unittest.TestCase):
         self.assertEqual(len(parsed.trailer), 10)
         self.assertEqual(parsed.trailer, _trailer(8, 1, 0, 1))
 
-    def test_raw_zero_one_and_maximum_resolve_raw_minus_one(self):
+    def test_raw_zero_and_positive_references_resolve_by_exact_stored_key(self):
         parsed = decoder.decode_ssfile(_ssfile(), "synthetic.ssfile")
         self.assertEqual(
             [(row.reference_kind, row.resolved_stored_key) for row in parsed.timeline],
-            [("clear_control", None), ("cue", 0), ("cue", 2)],
+            [("clear_control", None), ("cue", 1), ("cue", 3)],
         )
 
-    def test_cold_new_raw_one_regression(self):
+    def test_positive_raw_one_resolves_exact_key_one_not_zero(self):
         parsed = decoder.decode_ssfile(
             _ssfile(cue_count=1, timeline_count=1, raw_references=(1,)), "cold.ssfile"
         )
-        self.assertEqual(parsed.timeline[0].resolved_stored_key, 0)
+        self.assertEqual(parsed.timeline[0].resolved_stored_key, 1)
 
-    def test_actual_dictionary_maximum_raw_232_resolves_to_231(self):
+    def test_actual_dictionary_maximum_raw_232_resolves_to_key_232(self):
         parsed = decoder.decode_ssfile(
             _ssfile(cue_count=232, timeline_count=1, raw_references=(232,)),
             "maximum.ssfile",
         )
-        self.assertEqual(parsed.timeline[0].resolved_stored_key, 231)
+        self.assertEqual(parsed.timeline[0].resolved_stored_key, 232)
+
+    def test_exact_key_lookup_ignores_dictionary_order(self):
+        parsed = decoder.decode_ssfile(
+            _ssfile(
+                cue_count=3,
+                timeline_count=2,
+                raw_references=(44, 99),
+                stored_keys=(44, 7, 99),
+            ),
+            "permuted.ssfile",
+        )
+        self.assertEqual([row.resolved_stored_key for row in parsed.timeline], [44, 99])
+        self.assertEqual(parsed.timeline[0].resolved_cue_guid, (0).to_bytes(16, "little").hex())
+        self.assertEqual(parsed.timeline[1].resolved_cue_guid, (2).to_bytes(16, "little").hex())
+
+    def test_missing_exact_key_is_preserved_as_unresolved_cue(self):
+        parsed = decoder.decode_ssfile(
+            _ssfile(cue_count=1, timeline_count=1, raw_references=(99,)),
+            "missing-key.ssfile",
+        )
+        self.assertEqual(parsed.timeline[0].reference_kind, "cue")
+        self.assertEqual(parsed.timeline[0].resolved_stored_key, 99)
+        self.assertIsNone(parsed.timeline[0].resolved_cue_guid)
 
     def test_count_offset_eof_and_trailer_bounds_fail_closed(self):
         good = bytearray(_ssfile(cue_count=1, timeline_count=1, raw_references=(1,)))
@@ -374,13 +403,16 @@ class IdentityInventoryAndMidiTests(unittest.TestCase):
         with self.assertRaisesRegex(decoder.SoundSwitchDecodeError, "unsupported_active_layout"):
             decoder._reconcile_catalog_autoloops((catalog,), (alternate_document,))
 
-    def test_missing_cue_and_unsupported_active_layout_fail_closed(self):
+    def test_missing_cue_surfaces_active_diagnostic_and_unsupported_layout_fails_closed(self):
         document = decoder.decode_ssfile(
             _ssfile(cue_count=1, timeline_count=1, raw_references=(1,)),
             "{025C1DDF-2CDC-4E54-BD8C-156B90DD8247}.ssfile",
         )
-        with self.assertRaisesRegex(decoder.SoundSwitchDecodeError, "missing_cue"):
-            decoder._validate_document_cues((document,), set(), decoder.CANONICAL_VENUE_GUID)
+        diagnostics = decoder._validate_document_cues(
+            (document,), set(), decoder.CANONICAL_VENUE_GUID
+        )
+        self.assertEqual(diagnostics[0].code, "active_missing_cue")
+        self.assertTrue(diagnostics[0].active)
         with self.assertRaises(decoder.SoundSwitchDecodeError):
             decoder.decode_ssfile(b"unsupported", document.relative_path)
         normal = TrackMapRecord(0, "025C1DDF-2CDC-4E54-BD8C-156B90DD8247",

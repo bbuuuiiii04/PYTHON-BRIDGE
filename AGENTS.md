@@ -106,6 +106,8 @@ source/test confirmation, especially before any live-critical claim. Do not use 
 
 Human + machine change contracts: `docs/agents/change_contracts.md` and `docs/agents/change_contracts.yml`. Drift detection: `docs/agents/drift_detection.md`.
 
+Fable 5 prompt generation: before writing a Fable prompt, handoff, review prompt, or final-sufficiency prompt for Brandon, use `.claude/skills/fable-prompt-writer/SKILL.md` or read `docs/prompts/guides/fable5_prompt_generation_policy.md`. Fable reasons, plans, audits, and reviews; Codex implements bridge code. For prompt-generation/spec-only Fable tasks, default to no tools, no shell, no broad repo search, no accidental skill invocation, and no implementation unless the generated prompt states the exact allowed access and why.
+
 ## 4. Source map (modules are intentionally flat at repo root)
 
 | Area | Files | Card |

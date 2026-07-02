@@ -4,9 +4,9 @@ cue-reference candidate handling.
 These lock in the session findings (see docs/research/soundswitch/soundswitch_ssfile_format.md
 and memory project_ss_ref_convention):
   - timeline time is a full signed 32-bit value (negative pre-roll preserved);
-  - timeline records expose direct AND one-based candidate indices;
-  - generic parser resolution defaults to ``ambiguous``; the bounded 2.10.3
-    runtime/export path selects the wire-proven one-based rule.
+  - timeline records expose exact-key/direct and historical one-based candidate indices;
+  - generic parser resolution defaults to ``ambiguous``; the bounded runtime/export
+    path selects exact serialized-key lookup.
 
 The research tools live in tools/ssfmt/re and import each other by bare module
 name, so that directory is added to sys.path here.
@@ -84,6 +84,9 @@ class TimelineRecordCandidateTests(unittest.TestCase):
 
     def test_rule_selects_resolved_index(self):
         data = _make_record(0, 21)
+        self.assertEqual(
+            scripted.timeline_record(data, 0, "exact_key")["resolved_dictionary_index"], 21
+        )
         self.assertEqual(
             scripted.timeline_record(data, 0, "direct")["resolved_dictionary_index"], 21
         )
@@ -179,10 +182,10 @@ class SafeDefaultRegressionTests(unittest.TestCase):
 class ScriptedRenderAtElapsedTests(unittest.TestCase):
     def setUp(self):
         self.parsed = {
-            "reference_rule": "one_based",
+            "reference_rule": "exact_key",
             "cues": [
-                {"cue_index": 0, "guid": "color", "offset": 100},
-                {"cue_index": 1, "guid": "position", "offset": 120},
+                {"cue_index": 1, "guid": "color", "offset": 100},
+                {"cue_index": 2, "guid": "position", "offset": 120},
             ],
             # Deliberately stored out of chronological order. Equal elapsed values
             # would retain source order as the deterministic tie-break.
@@ -191,14 +194,14 @@ class ScriptedRenderAtElapsedTests(unittest.TestCase):
                     "offset": 220,
                     "elapsed": 2000,
                     "raw_cue_reference": 2,
-                    "resolved_dictionary_index": 1,
+                    "resolved_dictionary_index": 2,
                     "reference_kind": "cue",
                 },
                 {
                     "offset": 200,
                     "elapsed": 1000,
                     "raw_cue_reference": 1,
-                    "resolved_dictionary_index": 0,
+                    "resolved_dictionary_index": 1,
                     "reference_kind": "cue",
                 },
                 {
@@ -250,14 +253,14 @@ class ScriptedRenderAtElapsedTests(unittest.TestCase):
         parsed = {
             **self.parsed,
             "cues": self.parsed["cues"]
-            + [{"cue_index": 2, "guid": "color2", "offset": 140}],
+            + [{"cue_index": 3, "guid": "color2", "offset": 140}],
             "timeline": self.parsed["timeline"]
             + [
                 {
                     "offset": 260,
                     "elapsed": 2001,
                     "raw_cue_reference": 3,
-                    "resolved_dictionary_index": 2,
+                    "resolved_dictionary_index": 3,
                     "reference_kind": "cue",
                 }
             ],
@@ -279,7 +282,7 @@ class ScriptedRenderAtElapsedTests(unittest.TestCase):
 
     def test_ambiguous_provenance_fails_closed(self):
         self.parsed["reference_rule"] = "ambiguous"
-        with self.assertRaisesRegex(ValueError, "explicit direct or one_based"):
+        with self.assertRaisesRegex(ValueError, "explicit exact_key/direct/one_based"):
             self.render(2500)
 
     def test_transport_play_pause_end_unload_and_refire(self):
@@ -311,7 +314,7 @@ class ScriptedRenderAtElapsedTests(unittest.TestCase):
                 self.parsed, self.cues, 2500, "seeking", control_channels=(8, 9, 11)
             )
         self.parsed["reference_rule"] = "mixed"
-        with self.assertRaisesRegex(ValueError, "explicit direct or one_based"):
+        with self.assertRaisesRegex(ValueError, "explicit exact_key/direct/one_based"):
             layered.render_playback_state(
                 self.parsed, self.cues, 2500, "ended", control_channels=(8, 9, 11)
             )
@@ -319,7 +322,7 @@ class ScriptedRenderAtElapsedTests(unittest.TestCase):
 
 class ScriptedValidatorReferenceGateTests(unittest.TestCase):
     def test_explicit_rules_are_accepted(self):
-        for rule in ("direct", "one_based"):
+        for rule in ("exact_key", "direct", "one_based"):
             self.assertEqual(
                 scripted_validator.require_resolvable_reference_rule(rule), rule
             )

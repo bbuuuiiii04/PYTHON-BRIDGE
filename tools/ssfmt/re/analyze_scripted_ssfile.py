@@ -59,6 +59,7 @@ def timeline_record(
         "one_based_dictionary_index": one_based_index,
         "reference_rule": reference_rule,
         "resolved_dictionary_index": {
+            "exact_key": direct_index,
             "direct": direct_index,
             "one_based": one_based_index,
             "ambiguous": None,
@@ -72,14 +73,13 @@ def parse_scripted_structure(
 ) -> dict:
     """Parse a scripted-track .ssfile.
 
-    SoundSwitch 2.10.3 runtime playback is wire-proven one-based for both legacy
-    A5 and a cold-open newly authored three-cue track. The current editor wrote
-    raw keys matching the selected cue's stored key, but cold playback emitted
-    ``raw - 1`` frames for all three records. Raw zero is clear/control.
+    Scripted cue identity resolves by exact lookup of the positive raw reference
+    against this file's serialized key map. Raw zero is clear/control.
 
     Default remains ``ambiguous`` for generic structural inspection. The bounded
-    2.10.3 product path passes ``one_based`` explicitly and version/hash-locks its
-    source. ``direct`` remains useful for controlled writer-byte comparisons.
+    product path uses exact-key resolution and version/hash-locks its source.
+    Historical ``direct`` and ``one_based`` modes remain useful only for
+    controlled writer-byte comparisons.
     """
     if data[:4] != MAGIC:
         raise ValueError("not a SoundSwitch container")
@@ -212,9 +212,8 @@ def main() -> None:
         "--reference-rule",
         choices=REFERENCE_RULES,
         default="ambiguous",
-        help="default 'ambiguous' preserves both candidates; SoundSwitch 2.10.3 "
-        "runtime playback is wire-proven one_based for legacy and cold-open new "
-        "content; direct is retained for writer-byte analysis",
+        help="default 'ambiguous' preserves candidates; scripted playback uses "
+        "exact_key; direct/one_based remain for writer-byte analysis",
     )
     parser.add_argument("--full", action="store_true")
     args = parser.parse_args()

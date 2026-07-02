@@ -25,7 +25,7 @@ MINIMAL_SHARED_BLOCK_OFFSET = 87
 OBSERVED_SHARED_BLOCK_SHA256 = (
     "ef84f0902fac69c8836cab500cee88b61b71ce13f3bf544d8c3f9ecfb6e73fd1"
 )
-REFERENCE_RULES = ("one_based", "direct", "ambiguous")
+REFERENCE_RULES = ("exact_key", "direct", "one_based", "ambiguous")
 
 
 def _u32le(data: bytes, offset: int) -> int:
@@ -57,6 +57,7 @@ def _timeline_record(data: bytes, offset: int, reference_rule: str) -> dict:
     direct_index = raw_reference if raw_reference > 0 else None
     one_based_index = raw_reference - 1 if raw_reference > 0 else None
     resolved_index = {
+        "exact_key": direct_index,
         "direct": direct_index,
         "one_based": one_based_index,
         "ambiguous": None,
@@ -303,16 +304,14 @@ def parse_autoloop_structure(data: bytes, reference_rule: str = "ambiguous") -> 
     """Parse an autoloop .ssfile.
 
     Cue references index a GUID/key dictionary whose physical entries are
-    ``guid[16], u32le key``. SoundSwitch 2.10.3 playback is wire-proven to resolve
-    positive references one-based (``key = raw - 1``) for legacy autoloops,
-    legacy scripted tracks, and a cold-open newly authored scripted track. Raw
-    zero is the clear/control sentinel. Current editor writes can still have a
-    direct relation to the cue the operator selected; the cold-open capture proves
-    that relation does not describe the emitted runtime frame.
+    ``guid[16], u32le key``. Ghidra evidence for scripted playback resolves a
+    positive raw reference by exact serialized-key lookup. Raw zero is the
+    clear/control sentinel. Historical ``one_based`` and ``direct`` modes remain
+    exposed only for old research comparisons.
 
     The default remains ``ambiguous`` because this is a generic structural
-    research parser, not a version-locked player. The bounded 2.10.3 exporter must
-    pass ``one_based`` explicitly and retain the capture/version evidence.
+    research parser, not a version-locked player. The bounded scripted exporter
+    must use exact-key resolution.
     """
     if data[:4] != MAGIC:
         raise ValueError("not a SoundSwitch container")
@@ -375,9 +374,8 @@ def main() -> None:
         "--reference-rule",
         choices=REFERENCE_RULES,
         default="ambiguous",
-        help="default 'ambiguous' preserves both candidates; SoundSwitch 2.10.3 "
-        "runtime playback is wire-proven one_based for legacy and cold-open new "
-        "content, while direct remains available for controlled structural analysis",
+        help="default 'ambiguous' preserves candidates; exact_key is the "
+        "scripted playback rule, while direct/one_based remain for old research comparisons",
     )
     parser.add_argument("--full", action="store_true")
     args = parser.parse_args()
