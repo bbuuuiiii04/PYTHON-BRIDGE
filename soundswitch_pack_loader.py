@@ -154,6 +154,8 @@ class LoadedStaticLook:
     profile_has_intensity_channel: bool = False
     parity_lane: str = field(default="unverified_parity", repr=False)
     parity_evidence: Mapping[str, Any] = field(default_factory=lambda: _EMPTY_MAPPING, repr=False)
+    non_generic_assertion: Mapping[str, Any] = field(default_factory=lambda: _EMPTY_MAPPING,
+                                                     repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,6 +237,27 @@ def _parity_evidence(value: Any, label: str) -> Mapping[str, Any]:
             _fail(f"{label} parity_evidence is not sanitized")
         sanitized[key] = item
     return MappingProxyType(sanitized)
+
+
+def _sanitized_json(value: Any, label: str) -> Any:
+    if isinstance(value, (str, int, bool)) or value is None:
+        return value
+    if isinstance(value, list):
+        return tuple(_sanitized_json(item, label) for item in value)
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            _fail(f"{label} contains non-string metadata key")
+        return MappingProxyType({
+            key: _sanitized_json(item, label)
+            for key, item in value.items()
+        })
+    _fail(f"{label} contains unsupported metadata")
+
+
+def _metadata_mapping(value: Any, label: str) -> Mapping[str, Any]:
+    if not isinstance(value, dict):
+        _fail(f"{label} must be an object")
+    return _sanitized_json(value, label)
 
 
 def _runtime_metadata(
@@ -659,6 +682,10 @@ def load_pack(pack: str | Path) -> LoadedPack:
             profile_has_intensity_channel=has_intensity,
             parity_lane=_parity_lane(row.get("parity_lane"), f"Static Look {slot}"),
             parity_evidence=_parity_evidence(row.get("parity_evidence"), f"Static Look {slot}"),
+            non_generic_assertion=_metadata_mapping(
+                row.get("non_generic_assertion"),
+                f"Static Look {slot} non_generic_assertion",
+            ),
         )
 
     selection_value = values.get("selection_map.json", {})

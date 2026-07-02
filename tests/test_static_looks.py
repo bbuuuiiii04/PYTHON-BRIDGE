@@ -6,11 +6,23 @@ from pathlib import Path
 
 
 MODULE_PATH = Path(__file__).parents[1] / "tools" / "ssfmt" / "re" / "analyze_static_looks.py"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(MODULE_PATH.parent))
 SPEC = importlib.util.spec_from_file_location("analyze_static_looks", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
+
+from rb_ss_bridge_v2.soundswitch_pack_models import (  # noqa: E402
+    CueAttribute,
+    FixtureChannel,
+    StaticLook,
+    StaticScalarValue,
+)
+from rb_ss_bridge_v2.soundswitch_static_assertions import (  # noqa: E402
+    PRIMARY_FIXTURE_GROUP,
+    assert_static_non_generic_safe,
+)
 
 
 GUID = bytes.fromhex("b8ad2201b9e4c94696c898a7e8f6a5a9")
@@ -62,6 +74,57 @@ class StaticLooksTests(unittest.TestCase):
         data[28:44] = bytes(reversed(GUID))
 
         self.assertEqual(MODULE.parse_static_looks(bytes(data)), [])
+
+    def test_non_generic_assertion_allows_intensity_values_when_profile_has_no_intensity(self):
+        channels = (FixtureChannel(0, 82, 1, "On/Off"),)
+        look = StaticLook(
+            0,
+            0,
+            0,
+            5,
+            "static",
+            (StaticScalarValue(0, PRIMARY_FIXTURE_GROUP, 1.0),),
+            (),
+            (),
+            (),
+            (),
+        )
+        self.assertTrue(assert_static_non_generic_safe(look, channels).passed)
+
+    def test_non_generic_assertion_flags_primary_strobe_without_generic_equivalent(self):
+        channels = (FixtureChannel(0, 262, 11, "Strobe"),)
+        look = StaticLook(
+            0,
+            0,
+            0,
+            5,
+            "static",
+            (),
+            (StaticScalarValue(0, PRIMARY_FIXTURE_GROUP, 0.5),),
+            (),
+            (),
+            (),
+        )
+        assertion = assert_static_non_generic_safe(look, channels)
+        self.assertFalse(assertion.passed)
+        self.assertEqual(assertion.violations,
+                         ("strobe_map_targets_primary_without_generic_equivalent",))
+
+    def test_non_generic_assertion_accepts_primary_strobe_with_generic_equivalent(self):
+        channels = (FixtureChannel(0, 262, 11, "Strobe"),)
+        look = StaticLook(
+            0,
+            0,
+            0,
+            5,
+            "static",
+            (),
+            (StaticScalarValue(0, PRIMARY_FIXTURE_GROUP, 0.5),),
+            (),
+            (),
+            (CueAttribute(0, PRIMARY_FIXTURE_GROUP, 262, 11, 128),),
+        )
+        self.assertTrue(assert_static_non_generic_safe(look, channels).passed)
 
 
 if __name__ == "__main__":

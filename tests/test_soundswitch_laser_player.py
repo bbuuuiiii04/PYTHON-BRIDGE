@@ -647,9 +647,9 @@ class CurrentPackGoldenTests(unittest.TestCase):
     def test_scripted_exported_boundary_golden_samples_and_stop_unload_zero(self):
         samples = {
             "025c1ddf-2cdc-4e54-bd8c-156b90dd8247": (
-                83_839, "3e001530006e8b3ee000000000009400f10048"),
+                83_839, "3e001800006e8d98ff9b00000000b00000be00"),
             "ae9e3c61-af40-4392-80b4-380d39c631b9": (
-                14_738, "000000000000005a7300000000000000000000"),
+                14_738, "00000000000000a25600000000000000000000"),
         }
         for soundswitch_id, (elapsed_ms, frame_hex) in samples.items():
             with self.subTest(soundswitch_id=soundswitch_id):
@@ -662,8 +662,8 @@ class CurrentPackGoldenTests(unittest.TestCase):
 
     def test_current_pack_override_and_blackout_release_full_frame_goldens(self):
         soundswitch_id = "025c1ddf-2cdc-4e54-bd8c-156b90dd8247"
-        at_83839 = "3e001530006e8b3ee000000000009400f10048"
-        at_84065 = "11001530006e8ba5ff00000000009400f10048"
+        at_83839 = "3e001800006e8d98ff9b00000000b00000be00"
+        at_84065 = "11001800006e8d56ff0000000000b00000be00"
         slot8 = "1800260000797c0000d6ff000000000000006e"
         player = LaserPackPlayer(self.pack)
         self.assertEqual(bytes(player.select_scripted(soundswitch_id, 83_839).frame).hex(),

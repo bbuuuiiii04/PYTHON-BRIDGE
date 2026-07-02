@@ -21,6 +21,7 @@ from .soundswitch_pack_models import (
     ResolvedControlBinding,
     StaticLook,
 )
+from .soundswitch_static_assertions import assert_static_non_generic_safe
 from .soundswitch_project_decoder import (
     CANONICAL_PROJECT_UUID,
     CANONICAL_SOUNDSWITCH_VERSION,
@@ -130,20 +131,23 @@ def _cue(cue: AttributeCue) -> dict[str, Any]:
     }
 
 
-def _look(look: StaticLook) -> dict[str, Any]:
+def _look(look: StaticLook, fixture_channels: Iterable[Any]) -> dict[str, Any]:
     lane = classify_parity_lane(
         structural_supported=True,
         oracle_report=None,
         generalized_witness_passed=False,
     )
+    non_generic = assert_static_non_generic_safe(look, fixture_channels)
     return {
         "colour_values": [{**asdict(row), "raw_value": _hex(row.raw_value)} for row in look.colour_values],
         "end_offset": look.end_offset, "generic_attributes": _attrs(look.generic_attributes),
         "intensity_values": [asdict(row) for row in look.intensity_values],
         "name": look.name, "position_values": [asdict(row) for row in look.position_values],
+        "non_generic_assertion": non_generic.as_json(),
         "parity_evidence": parity_evidence(
             lane=lane,
-            reason="no_u0_oracle_or_static_profile_assertion",
+            reason="no_u0_oracle" if non_generic.passed
+            else "non_generic_static_map_requires_dedicated_composition",
             structural_supported=True,
         ),
         "parity_lane": lane,
@@ -349,7 +353,7 @@ def compile_pack_artifacts(
         catalog_tail_count=len(project.catalog_tail_cues), total_record_count=len(project.attribute_cues),
         records=[_cue(row) for row in project.attribute_cues]))
     add("static_looks.json", _root("static_looks", count=len(project.static_looks),
-        records=[_look(row) for row in project.static_looks]))
+        records=[_look(row, project.fixture_channels) for row in project.static_looks]))
     add("midi_mappings.json", _root("midi_mappings", maps=[{
         "relative_path": m.relative_path, "source_sha256": m.source_sha256, "status": m.status,
         "version": m.version, "devices": [{"name": d.name, "feedback_hex": _hex(d.feedback_bytes),

@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .soundswitch_static_assertions import assert_static_non_generic_safe
+
 from .soundswitch_parity_registry import PARITY_LANES
 
 SCHEMA_VERSION = "1.0.0"
@@ -27,7 +29,8 @@ BOUNDARY_FIELDS = {"frame", "source_offset", "source_order", "time"}
 INTENSITY_FIELDS = {"attribute_value", "enabled", "end_tick", "record_version",
                     "source_offset", "start_tick"}
 STATIC_LOOK_FIELDS = {"colour_values", "end_offset", "generic_attributes", "intensity_values",
-                      "name", "parity_evidence", "parity_lane", "position_values",
+                      "name", "non_generic_assertion", "parity_evidence", "parity_lane",
+                      "position_values",
                       "pre_rendered_frame_ch1_ch19",
                       "record_version", "slot_index", "source_offset", "strobe_values"}
 SCALAR_FIELDS = {"fixture_instance_id", "source_offset", "value"}
@@ -532,6 +535,11 @@ def verify_pack(
             _validate_static_colour(colour)
         for position in position_values:
             _validate_static_position(position)
+        expected_assertion = assert_static_non_generic_safe(row, channels).as_json()
+        if row.get("non_generic_assertion") != expected_assertion:
+            _fail(f"Static Look {row.get('slot_index')} non-generic assertion mismatch")
+        if not expected_assertion["passed"] and row.get("parity_lane") != "unverified_parity":
+            _fail(f"Static Look {row.get('slot_index')} violating non-generic maps are not unverified")
 
     track = values["track_map.json"]
     inventory = track.get("scripted_inventory", [])
