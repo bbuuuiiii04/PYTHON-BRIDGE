@@ -223,21 +223,35 @@ class PhysicalDocumentTests(unittest.TestCase):
 
 
 class VenueAndStaticLookTests(unittest.TestCase):
-    def test_venue_split_is_232_render_plus_one_catalog_tail(self):
-        data = b"".join(_fixture_cue(index) for index in range(232)) + _tail_cue()
+    def test_all_233_venue_records_are_render_bearing_cues(self):
+        # Under the byte-proven precede-association model (2026-07-02) every
+        # venue record is a fixture_payload cue: the last record inherits the
+        # 232nd fixture block, and the trailing 0xffffffff catalog-index
+        # structure is file metadata, not a cue (the old "232 render + 1
+        # catalog-tail" split was an artifact of the double off-by-one).
+        data = b"".join(
+            _fixture_cue(index, ((0x493, 82, index % 200),)) for index in range(232)
+        ) + _tail_cue()
         cues = decoder.decode_venue_cues(data)
-        self.assertEqual(sum(cue.render_bearing for cue in cues), 232)
-        self.assertEqual(sum(not cue.render_bearing for cue in cues), 1)
-        self.assertEqual(cues[-1].record_kind, "minimal_default_catalog_tail")
-        self.assertFalse(cues[-1].render_bearing)
+        self.assertEqual(len(cues), 233)
+        self.assertTrue(all(cue.render_bearing for cue in cues))
+        self.assertTrue(all(cue.record_kind == "fixture_payload" for cue in cues))
+        # The tail-named record keeps its own identity but takes the last
+        # fixture block's content; the catalog indices never become a cue's.
+        self.assertEqual(cues[-1].name, "Default")
+        self.assertEqual(
+            [(row.fixture_group, row.dmx_channel, row.value) for row in cues[-1].attributes],
+            [(0x493, 1, 231 % 200)],
+        )
+        self.assertEqual(cues[-1].catalog_indices, ())
 
     def test_precede_association_reassigns_attributes_to_next_record(self):
         # Byte-proven 2026-07-02 (capture parity_20260701T185231Z, 261/261):
-        # each Venue cue's true attribute write-set is the block physically
-        # PRECEDING its own name/guid record.  A 3-record stream where
-        # scanner record i is written with distinct payload P_i must decode
-        # so cue i's attributes are record (i - 1)'s payload; record 0 has
-        # no predecessor in this synthetic stream, so it recovers nothing
+        # each Venue cue's true content is the block physically PRECEDING
+        # its own name/guid record.  A 3-record stream where scanner record
+        # i is written with distinct payload P_i must decode so cue i's
+        # attributes are record (i - 1)'s payload; record 0 has no
+        # predecessor in this synthetic stream, so it recovers nothing
         # (empty attributes, not a decode failure). Anchor: MASTER STROBE
         # (guid 9b5b1d84cefdb041886c7def04d494fa, record at offset 100981)
         # truly carries the block scanned as the PRIOR record's (WHITE DOT
@@ -252,6 +266,7 @@ class VenueAndStaticLookTests(unittest.TestCase):
                          [(0).to_bytes(16, "little").hex(), (1).to_bytes(16, "little").hex(),
                           (2).to_bytes(16, "little").hex()])
         self.assertEqual(cues[0].attributes, ())
+        self.assertEqual(cues[0].record_kind, "fixture_payload")
         self.assertEqual(
             [(row.fixture_group, row.dmx_channel, row.value) for row in cues[1].attributes],
             [(0x493, 1, 11)],
@@ -512,11 +527,16 @@ class CurrentCorpusTests(unittest.TestCase):
         )
         self.assertGreater(len(decoded.render_cues), 0)
         self.assertTrue(all(row.record_kind == "fixture_payload" for row in decoded.render_cues))
-        # Under precede-association (byte-proven 2026-07-02) the
-        # catalog-tail record inherits the last fixture-payload block's
-        # attributes; this is inert since only render_cues are looked up by
-        # GUID for rendering (see soundswitch_pack.compile_pack_artifacts).
-        self.assertTrue(all(not row.render_bearing for row in decoded.catalog_tail_cues))
+        # Under precede-association (byte-proven 2026-07-02) every venue
+        # record is a render-bearing fixture_payload cue; the file-tail
+        # catalog-index structure is metadata, not a cue.
+        self.assertEqual(decoded.catalog_tail_cues, ())
+        self.assertEqual(len(decoded.render_cues), len(decoded.attribute_cues))
+        # Recovered head block: the 'OFF' cue truly writes 0 everywhere.
+        off = decoded.attribute_cues[0]
+        self.assertEqual(off.name, "OFF")
+        self.assertTrue(off.attributes)
+        self.assertTrue(all(row.value == 0 for row in off.attributes))
         self.assertEqual(len(decoded.static_looks), 32)
         self.assertGreater(len(decoded.autoloops), 0)
         statuses = [row.status for row in decoded.scripted_track_classifications]

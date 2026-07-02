@@ -497,11 +497,13 @@ def verify_pack(
         _fail("Venue render/catalog-tail cue GUIDs must be valid and globally unique")
     if any(row.get("render_bearing") is not True for row in render):
         _fail("fixture-payload Venue cues must remain render-bearing")
-    if any(row.get("render_bearing") is not False for row in tails):
-        _fail("catalog-tail must remain distinct and non-render-bearing")
-    # Catalog-tail records may carry inherited attribute values under
-    # precede-association (byte-proven 2026-07-02); inert since only
-    # render-bearing cues are looked up by GUID for rendering.
+    if tails:
+        # Under the byte-proven precede-association model (2026-07-02) every
+        # venue cue is a render-bearing fixture_payload record; the old
+        # "minimal_default_catalog_tail" record was an artifact of the
+        # double off-by-one (the file-tail catalog-index structure is
+        # metadata, not a cue, and never enters the pack).
+        _fail("catalog-tail records are not cues under the precede-association model")
     cue_patches = {row.get("cue_guid"): row.get("attributes") for row in render}
     if len(cue_patches) != len(render) or any(not isinstance(rows, list) for rows in cue_patches.values()):
         _fail("duplicate Venue cue GUID")

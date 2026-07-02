@@ -226,7 +226,232 @@
         ]
       }
     ],
-    "SSAutoLoop14.ssfile": [],
+    "SSAutoLoop14.ssfile": [
+      {
+        "label": "phase_530",
+        "mono_ns": 314265826673791,
+        "phase_tick": 530,
+        "run_ms": 2026,
+        "status": "rendering_active",
+        "u0_frame": [
+          17,
+          0,
+          0,
+          0,
+          0,
+          131,
+          90,
+          24,
+          0,
+          0,
+          227,
+          0,
+          0,
+          0,
+          186,
+          0,
+          0,
+          0,
+          255
+        ]
+      },
+      {
+        "label": "phase_3021",
+        "mono_ns": 314267386268333,
+        "phase_tick": 3021,
+        "run_ms": 2026,
+        "status": "rendering_active",
+        "u0_frame": [
+          17,
+          0,
+          0,
+          0,
+          0,
+          131,
+          90,
+          24,
+          0,
+          0,
+          227,
+          0,
+          0,
+          0,
+          186,
+          0,
+          0,
+          0,
+          255
+        ]
+      },
+      {
+        "label": "phase_5798",
+        "mono_ns": 314269123174500,
+        "phase_tick": 5798,
+        "run_ms": 2982,
+        "status": "rendering_active",
+        "u0_frame": [
+          17,
+          0,
+          0,
+          0,
+          0,
+          128,
+          93,
+          24,
+          0,
+          55,
+          227,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          169
+        ]
+      },
+      {
+        "label": "phase_8272",
+        "mono_ns": 314270667947916,
+        "phase_tick": 8272,
+        "run_ms": 2982,
+        "status": "rendering_active",
+        "u0_frame": [
+          17,
+          0,
+          0,
+          0,
+          0,
+          128,
+          93,
+          24,
+          0,
+          55,
+          227,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          169
+        ]
+      },
+      {
+        "label": "phase_10858",
+        "mono_ns": 314272280750541,
+        "phase_tick": 10858,
+        "run_ms": 1473,
+        "status": "rendering_active",
+        "u0_frame": [
+          17,
+          0,
+          0,
+          203,
+          0,
+          96,
+          141,
+          24,
+          0,
+          79,
+          175,
+          0,
+          255,
+          0,
+          0,
+          0,
+          0,
+          0,
+          220
+        ]
+      },
+      {
+        "label": "phase_13448",
+        "mono_ns": 314273902691166,
+        "phase_tick": 13448,
+        "run_ms": 4569,
+        "status": "rendering_active",
+        "u0_frame": [
+          3,
+          0,
+          0,
+          203,
+          0,
+          96,
+          141,
+          24,
+          0,
+          110,
+          0,
+          0,
+          255,
+          0,
+          0,
+          0,
+          0,
+          0,
+          220
+        ]
+      },
+      {
+        "label": "phase_16003",
+        "mono_ns": 314275499269708,
+        "phase_tick": 16003,
+        "run_ms": 4569,
+        "status": "rendering_active",
+        "u0_frame": [
+          3,
+          0,
+          0,
+          203,
+          0,
+          96,
+          141,
+          24,
+          0,
+          110,
+          0,
+          0,
+          255,
+          0,
+          0,
+          0,
+          0,
+          0,
+          220
+        ]
+      },
+      {
+        "label": "phase_19178",
+        "mono_ns": 314277481115666,
+        "phase_tick": 19178,
+        "run_ms": 4569,
+        "status": "rendering_active",
+        "u0_frame": [
+          3,
+          0,
+          0,
+          203,
+          0,
+          96,
+          141,
+          24,
+          0,
+          110,
+          0,
+          0,
+          255,
+          0,
+          0,
+          0,
+          0,
+          0,
+          220
+        ]
+      }
+    ],
     "SSAutoLoop15.ssfile": [],
     "SSAutoLoop16.ssfile": [
       {
@@ -909,7 +1134,232 @@
     ],
     "SSAutoLoop46.ssfile": [],
     "SSAutoLoop47.ssfile": [],
-    "SSAutoLoop48.ssfile": [],
+    "SSAutoLoop48.ssfile": [
+      {
+        "label": "phase_235",
+        "mono_ns": 314076647387083,
+        "phase_tick": 235,
+        "run_ms": 985,
+        "status": "rendering_active",
+        "u0_frame": [
+          3,
+          0,
+          28,
+          0,
+          0,
+          128,
+          134,
+          17,
+          0,
+          0,
+          227,
+          0,
+          0,
+          0,
+          148,
+          0,
+          0,
+          120,
+          41
+        ]
+      },
+      {
+        "label": "phase_3098",
+        "mono_ns": 314078440251750,
+        "phase_tick": 3098,
+        "run_ms": 1140,
+        "status": "rendering_active",
+        "u0_frame": [
+          10,
+          0,
+          28,
+          0,
+          0,
+          128,
+          134,
+          17,
+          0,
+          0,
+          227,
+          0,
+          0,
+          0,
+          148,
+          0,
+          0,
+          120,
+          41
+        ]
+      },
+      {
+        "label": "phase_5885",
+        "mono_ns": 314080181919083,
+        "phase_tick": 5885,
+        "run_ms": 1322,
+        "status": "rendering_active",
+        "u0_frame": [
+          255,
+          0,
+          48,
+          14,
+          0,
+          117,
+          145,
+          17,
+          0,
+          0,
+          214,
+          0,
+          0,
+          0,
+          159,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "label": "phase_8587",
+        "mono_ns": 314081873275625,
+        "phase_tick": 8587,
+        "run_ms": 1234,
+        "status": "rendering_active",
+        "u0_frame": [
+          3,
+          0,
+          48,
+          14,
+          0,
+          117,
+          145,
+          17,
+          0,
+          0,
+          227,
+          0,
+          0,
+          0,
+          159,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "label": "phase_11336",
+        "mono_ns": 314083590224083,
+        "phase_tick": 11336,
+        "run_ms": 6358,
+        "status": "rendering_active",
+        "u0_frame": [
+          31,
+          0,
+          28,
+          0,
+          0,
+          128,
+          141,
+          21,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          118,
+          0
+        ]
+      },
+      {
+        "label": "phase_13949",
+        "mono_ns": 314085224584708,
+        "phase_tick": 13949,
+        "run_ms": 6358,
+        "status": "rendering_active",
+        "u0_frame": [
+          31,
+          0,
+          28,
+          0,
+          0,
+          128,
+          141,
+          21,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          118,
+          0
+        ]
+      },
+      {
+        "label": "phase_16547",
+        "mono_ns": 314086847525208,
+        "phase_tick": 16547,
+        "run_ms": 6358,
+        "status": "rendering_active",
+        "u0_frame": [
+          31,
+          0,
+          28,
+          0,
+          0,
+          128,
+          141,
+          21,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          118,
+          0
+        ]
+      },
+      {
+        "label": "phase_19150",
+        "mono_ns": 314088472868791,
+        "phase_tick": 19150,
+        "run_ms": 6358,
+        "status": "rendering_active",
+        "u0_frame": [
+          31,
+          0,
+          28,
+          0,
+          0,
+          128,
+          141,
+          21,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          118,
+          0
+        ]
+      }
+    ],
     "SSAutoLoop5.ssfile": [
       {
         "label": "phase_0",
@@ -13006,238 +13456,10 @@
         "class": "autoloop_capture_divergence",
         "cycle_ticks": 19200,
         "identity": "SSAutoLoop14.ssfile",
-        "reason": "best_contiguous_segment_failed_oracle",
-        "rows_passed": 1,
+        "reason": "sibling_segment_failed_oracle",
+        "rows_passed": 5,
         "rows_total": 8,
         "samples": [
-          {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              17,
-              0,
-              0,
-              0,
-              0,
-              131,
-              90,
-              24,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              186,
-              0,
-              0,
-              0,
-              255
-            ],
-            "issue": "value_diff",
-            "label": "phase_530",
-            "mono_ns": 314265826673791,
-            "observed_u0_frame": [
-              17,
-              0,
-              0,
-              0,
-              0,
-              131,
-              90,
-              24,
-              0,
-              0,
-              227,
-              0,
-              0,
-              0,
-              186,
-              0,
-              0,
-              0,
-              255
-            ],
-            "phase_tick": 530,
-            "run_ms": 2026
-          },
-          {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              17,
-              0,
-              0,
-              0,
-              0,
-              131,
-              90,
-              24,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              186,
-              0,
-              0,
-              0,
-              255
-            ],
-            "issue": "value_diff",
-            "label": "phase_3021",
-            "mono_ns": 314267386268333,
-            "observed_u0_frame": [
-              17,
-              0,
-              0,
-              0,
-              0,
-              131,
-              90,
-              24,
-              0,
-              0,
-              227,
-              0,
-              0,
-              0,
-              186,
-              0,
-              0,
-              0,
-              255
-            ],
-            "phase_tick": 3021,
-            "run_ms": 2026
-          },
-          {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              17,
-              0,
-              0,
-              0,
-              0,
-              128,
-              93,
-              24,
-              0,
-              55,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              1,
-              0,
-              169
-            ],
-            "issue": "value_diff",
-            "label": "phase_5798",
-            "mono_ns": 314269123174500,
-            "observed_u0_frame": [
-              17,
-              0,
-              0,
-              0,
-              0,
-              128,
-              93,
-              24,
-              0,
-              55,
-              227,
-              0,
-              0,
-              0,
-              0,
-              0,
-              1,
-              0,
-              169
-            ],
-            "phase_tick": 5798,
-            "run_ms": 2982
-          },
-          {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              17,
-              0,
-              0,
-              0,
-              0,
-              128,
-              93,
-              24,
-              0,
-              55,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              1,
-              0,
-              169
-            ],
-            "issue": "value_diff",
-            "label": "phase_8272",
-            "mono_ns": 314270667947916,
-            "observed_u0_frame": [
-              17,
-              0,
-              0,
-              0,
-              0,
-              128,
-              93,
-              24,
-              0,
-              55,
-              227,
-              0,
-              0,
-              0,
-              0,
-              0,
-              1,
-              0,
-              169
-            ],
-            "phase_tick": 8272,
-            "run_ms": 2982
-          },
           {
             "channel_diffs": [],
             "class_name": "MATCH",
@@ -13245,509 +13467,6 @@
               17,
               0,
               0,
-              203,
-              0,
-              96,
-              141,
-              24,
-              0,
-              79,
-              175,
-              0,
-              255,
-              0,
-              0,
-              0,
-              0,
-              0,
-              220
-            ],
-            "issue": "match",
-            "label": "phase_10858",
-            "mono_ns": 314272280750541,
-            "observed_u0_frame": [
-              17,
-              0,
-              0,
-              203,
-              0,
-              96,
-              141,
-              24,
-              0,
-              79,
-              175,
-              0,
-              255,
-              0,
-              0,
-              0,
-              0,
-              0,
-              220
-            ],
-            "phase_tick": 10858,
-            "run_ms": 1473
-          },
-          {
-            "channel_diffs": [
-              {
-                "channel": 1,
-                "expected": 17,
-                "u0": 3
-              },
-              {
-                "channel": 10,
-                "expected": 255,
-                "u0": 110
-              },
-              {
-                "channel": 11,
-                "expected": 255,
-                "u0": 0
-              },
-              {
-                "channel": 19,
-                "expected": 0,
-                "u0": 220
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              17,
-              0,
-              0,
-              203,
-              0,
-              96,
-              141,
-              24,
-              0,
-              255,
-              255,
-              0,
-              255,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0
-            ],
-            "issue": "value_diff",
-            "label": "phase_13448",
-            "mono_ns": 314273902691166,
-            "observed_u0_frame": [
-              3,
-              0,
-              0,
-              203,
-              0,
-              96,
-              141,
-              24,
-              0,
-              110,
-              0,
-              0,
-              255,
-              0,
-              0,
-              0,
-              0,
-              0,
-              220
-            ],
-            "phase_tick": 13448,
-            "run_ms": 4569
-          },
-          {
-            "channel_diffs": [
-              {
-                "channel": 1,
-                "expected": 17,
-                "u0": 3
-              },
-              {
-                "channel": 10,
-                "expected": 255,
-                "u0": 110
-              },
-              {
-                "channel": 11,
-                "expected": 255,
-                "u0": 0
-              },
-              {
-                "channel": 19,
-                "expected": 0,
-                "u0": 220
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              17,
-              0,
-              0,
-              203,
-              0,
-              96,
-              141,
-              24,
-              0,
-              255,
-              255,
-              0,
-              255,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0
-            ],
-            "issue": "value_diff",
-            "label": "phase_16003",
-            "mono_ns": 314275499269708,
-            "observed_u0_frame": [
-              3,
-              0,
-              0,
-              203,
-              0,
-              96,
-              141,
-              24,
-              0,
-              110,
-              0,
-              0,
-              255,
-              0,
-              0,
-              0,
-              0,
-              0,
-              220
-            ],
-            "phase_tick": 16003,
-            "run_ms": 4569
-          },
-          {
-            "channel_diffs": [
-              {
-                "channel": 1,
-                "expected": 17,
-                "u0": 3
-              },
-              {
-                "channel": 10,
-                "expected": 255,
-                "u0": 110
-              },
-              {
-                "channel": 11,
-                "expected": 255,
-                "u0": 0
-              },
-              {
-                "channel": 19,
-                "expected": 0,
-                "u0": 220
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              17,
-              0,
-              0,
-              203,
-              0,
-              96,
-              141,
-              24,
-              0,
-              255,
-              255,
-              0,
-              255,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0
-            ],
-            "issue": "value_diff",
-            "label": "phase_19178",
-            "mono_ns": 314277481115666,
-            "observed_u0_frame": [
-              3,
-              0,
-              0,
-              203,
-              0,
-              96,
-              141,
-              24,
-              0,
-              110,
-              0,
-              0,
-              255,
-              0,
-              0,
-              0,
-              0,
-              0,
-              220
-            ],
-            "phase_tick": 19178,
-            "run_ms": 4569
-          }
-        ],
-        "segment_index": 0,
-        "segments_evaluated": 3,
-        "serialized_event_count": 10,
-        "serialized_events": [
-          {
-            "channels": [
-              1,
-              10,
-              11,
-              1,
-              10,
-              11
-            ],
-            "raw_reference": 3,
-            "reference_kind": "cue",
-            "source_order": 0,
-            "time": -104
-          },
-          {
-            "channels": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              10,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19,
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              10,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19
-            ],
-            "raw_reference": 195,
-            "reference_kind": "cue",
-            "source_order": 1,
-            "time": 1
-          },
-          {
-            "channels": [
-              1,
-              8,
-              1,
-              8
-            ],
-            "raw_reference": 22,
-            "reference_kind": "cue",
-            "source_order": 2,
-            "time": 3
-          },
-          {
-            "channels": [
-              1,
-              18,
-              1,
-              18
-            ],
-            "raw_reference": 7,
-            "reference_kind": "cue",
-            "source_order": 3,
-            "time": 3301
-          },
-          {
-            "channels": [],
-            "raw_reference": 0,
-            "reference_kind": "clear_control",
-            "source_order": 4,
-            "time": 4051
-          },
-          {
-            "channels": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19,
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19
-            ],
-            "raw_reference": 194,
-            "reference_kind": "cue",
-            "source_order": 5,
-            "time": 4650
-          },
-          {
-            "channels": [
-              1,
-              8,
-              1,
-              8
-            ],
-            "raw_reference": 22,
-            "reference_kind": "cue",
-            "source_order": 6,
-            "time": 4651
-          },
-          {
-            "channels": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              11,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19,
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              11,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19
-            ],
-            "raw_reference": 88,
-            "reference_kind": "cue",
-            "source_order": 7,
-            "time": 9451
-          },
-          {
-            "channels": [
-              1,
-              8,
-              1,
-              8
-            ],
-            "raw_reference": 22,
-            "reference_kind": "cue",
-            "source_order": 8,
-            "time": 9451
-          },
-          {
-            "channels": [
-              5,
-              10,
-              11,
-              19,
-              5,
-              10,
-              11,
-              19
-            ],
-            "raw_reference": 4,
-            "reference_kind": "cue",
-            "source_order": 9,
-            "time": 11850
-          }
-        ]
-      },
-      {
-        "class": "autoloop_capture_divergence",
-        "cycle_ticks": 19200,
-        "identity": "SSAutoLoop14.ssfile",
-        "reason": "sibling_segment_failed_oracle",
-        "rows_passed": 0,
-        "rows_total": 8,
-        "samples": [
-          {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              17,
-              0,
-              0,
               0,
               0,
               131,
@@ -13755,7 +13474,7 @@
               24,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -13765,7 +13484,7 @@
               0,
               255
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_61",
             "mono_ns": 314359964995625,
             "observed_u0_frame": [
@@ -13793,14 +13512,8 @@
             "run_ms": 2022
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               17,
               0,
@@ -13812,7 +13525,7 @@
               24,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -13822,7 +13535,7 @@
               0,
               255
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_1066",
             "mono_ns": 314360593879000,
             "observed_u0_frame": [
@@ -13850,14 +13563,8 @@
             "run_ms": 2022
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               17,
               0,
@@ -13869,7 +13576,7 @@
               24,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -13879,7 +13586,7 @@
               0,
               255
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_2062",
             "mono_ns": 314361218046041,
             "observed_u0_frame": [
@@ -13907,14 +13614,8 @@
             "run_ms": 2022
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               17,
               0,
@@ -13926,7 +13627,7 @@
               24,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -13936,7 +13637,7 @@
               0,
               255
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_3024",
             "mono_ns": 314361815480625,
             "observed_u0_frame": [
@@ -13964,14 +13665,8 @@
             "run_ms": 2022
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               0,
               0,
@@ -13983,7 +13678,7 @@
               24,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -13993,7 +13688,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_4146",
             "mono_ns": 314362518158791,
             "observed_u0_frame": [
@@ -14048,6 +13743,11 @@
                 "u0": 0
               },
               {
+                "channel": 11,
+                "expected": 227,
+                "u0": 0
+              },
+              {
                 "channel": 17,
                 "expected": 1,
                 "u0": 0
@@ -14070,7 +13770,7 @@
               24,
               0,
               55,
-              0,
+              227,
               0,
               0,
               0,
@@ -14135,6 +13835,11 @@
                 "u0": 0
               },
               {
+                "channel": 11,
+                "expected": 227,
+                "u0": 0
+              },
+              {
                 "channel": 17,
                 "expected": 1,
                 "u0": 0
@@ -14157,7 +13862,7 @@
               24,
               0,
               55,
-              0,
+              227,
               0,
               0,
               0,
@@ -14222,6 +13927,11 @@
                 "u0": 0
               },
               {
+                "channel": 11,
+                "expected": 227,
+                "u0": 0
+              },
+              {
                 "channel": 17,
                 "expected": 1,
                 "u0": 0
@@ -14244,7 +13954,7 @@
               24,
               0,
               55,
-              0,
+              227,
               0,
               0,
               0,
@@ -14291,9 +14001,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -14487,14 +14199,12 @@
           },
           {
             "channels": [
-              5,
+              1,
               10,
               11,
-              19,
-              5,
+              1,
               10,
-              11,
-              19
+              11
             ],
             "raw_reference": 4,
             "reference_kind": "cue",
@@ -14510,18 +14220,12 @@
         "cycle_ticks": 19200,
         "identity": "SSAutoLoop15.ssfile",
         "reason": "best_contiguous_segment_failed_oracle",
-        "rows_passed": 0,
+        "rows_passed": 7,
         "rows_total": 8,
         "samples": [
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -14533,7 +14237,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -14543,7 +14247,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_738",
             "mono_ns": 314142959923541,
             "observed_u0_frame": [
@@ -14571,14 +14275,8 @@
             "run_ms": 577
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -14590,7 +14288,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -14600,7 +14298,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_3339",
             "mono_ns": 314144582064791,
             "observed_u0_frame": [
@@ -14628,14 +14326,8 @@
             "run_ms": 666
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -14647,7 +14339,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -14657,7 +14349,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_6163",
             "mono_ns": 314146350790791,
             "observed_u0_frame": [
@@ -14685,14 +14377,8 @@
             "run_ms": 651
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -14704,7 +14390,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -14714,7 +14400,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_8784",
             "mono_ns": 314147987418250,
             "observed_u0_frame": [
@@ -14742,14 +14428,8 @@
             "run_ms": 687
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -14761,7 +14441,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -14771,7 +14451,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_11398",
             "mono_ns": 314149623813791,
             "observed_u0_frame": [
@@ -14799,14 +14479,8 @@
             "run_ms": 658
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -14818,7 +14492,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -14828,7 +14502,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_14016",
             "mono_ns": 314151260159916,
             "observed_u0_frame": [
@@ -14856,14 +14530,8 @@
             "run_ms": 691
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -14875,7 +14543,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -14885,7 +14553,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_16773",
             "mono_ns": 314152985330125,
             "observed_u0_frame": [
@@ -14935,6 +14603,11 @@
                 "u0": 0
               },
               {
+                "channel": 11,
+                "expected": 227,
+                "u0": 0
+              },
+              {
                 "channel": 15,
                 "expected": 223,
                 "u0": 0
@@ -14952,7 +14625,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -15011,9 +14684,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -16353,18 +16028,12 @@
         "cycle_ticks": 19200,
         "identity": "SSAutoLoop15.ssfile",
         "reason": "sibling_segment_failed_oracle",
-        "rows_passed": 0,
+        "rows_passed": 7,
         "rows_total": 8,
         "samples": [
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -16376,7 +16045,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -16386,7 +16055,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_43",
             "mono_ns": 314484476830041,
             "observed_u0_frame": [
@@ -16414,14 +16083,8 @@
             "run_ms": 29
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -16433,7 +16096,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -16443,7 +16106,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_2834",
             "mono_ns": 314486221403791,
             "observed_u0_frame": [
@@ -16471,14 +16134,8 @@
             "run_ms": 682
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -16490,7 +16147,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -16500,7 +16157,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_5530",
             "mono_ns": 314487908401708,
             "observed_u0_frame": [
@@ -16528,14 +16185,8 @@
             "run_ms": 662
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -16547,7 +16198,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -16557,7 +16208,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_8418",
             "mono_ns": 314489713094291,
             "observed_u0_frame": [
@@ -16585,14 +16236,8 @@
             "run_ms": 671
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -16604,7 +16249,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -16614,7 +16259,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_11144",
             "mono_ns": 314491418275791,
             "observed_u0_frame": [
@@ -16642,14 +16287,8 @@
             "run_ms": 681
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -16661,7 +16300,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -16671,7 +16310,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_13834",
             "mono_ns": 314493098416583,
             "observed_u0_frame": [
@@ -16699,14 +16338,8 @@
             "run_ms": 682
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               45,
               0,
@@ -16718,7 +16351,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -16728,7 +16361,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_16553",
             "mono_ns": 314494796826250,
             "observed_u0_frame": [
@@ -16778,6 +16411,11 @@
                 "u0": 0
               },
               {
+                "channel": 11,
+                "expected": 227,
+                "u0": 0
+              },
+              {
                 "channel": 15,
                 "expected": 223,
                 "u0": 0
@@ -16795,7 +16433,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -16854,9 +16492,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -40327,7 +39967,7 @@
         "cycle_ticks": 19200,
         "identity": "SSAutoLoop47.ssfile",
         "reason": "best_contiguous_segment_failed_oracle",
-        "rows_passed": 3,
+        "rows_passed": 5,
         "rows_total": 8,
         "samples": [
           {
@@ -40433,14 +40073,8 @@
             "run_ms": 1476
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               62,
               0,
@@ -40452,7 +40086,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -40462,7 +40096,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_2462",
             "mono_ns": 314219036797541,
             "observed_u0_frame": [
@@ -40490,14 +40124,8 @@
             "run_ms": 57
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               62,
               0,
@@ -40509,7 +40137,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -40519,7 +40147,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_4382",
             "mono_ns": 314220242277708,
             "observed_u0_frame": [
@@ -40625,6 +40253,11 @@
                 "u0": 0
               },
               {
+                "channel": 11,
+                "expected": 227,
+                "u0": 0
+              },
+              {
                 "channel": 15,
                 "expected": 44,
                 "u0": 0
@@ -40642,7 +40275,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -40707,6 +40340,11 @@
                 "u0": 0
               },
               {
+                "channel": 11,
+                "expected": 227,
+                "u0": 0
+              },
+              {
                 "channel": 15,
                 "expected": 56,
                 "u0": 0
@@ -40724,7 +40362,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -40789,6 +40427,11 @@
                 "u0": 0
               },
               {
+                "channel": 11,
+                "expected": 227,
+                "u0": 0
+              },
+              {
                 "channel": 15,
                 "expected": 44,
                 "u0": 0
@@ -40806,7 +40449,7 @@
               21,
               0,
               0,
-              0,
+              227,
               0,
               0,
               0,
@@ -40899,9 +40542,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -41599,9 +41244,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -43533,48 +43180,13 @@
         "cycle_ticks": 19200,
         "identity": "SSAutoLoop48.ssfile",
         "reason": "sibling_segment_failed_oracle",
-        "rows_passed": 5,
+        "rows_passed": 7,
         "rows_total": 8,
         "samples": [
           {
-            "channel_diffs": [
-              {
-                "channel": 10,
-                "expected": 110,
-                "u0": 0
-              },
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
-              3,
-              0,
-              28,
-              0,
-              0,
-              128,
-              134,
-              17,
-              0,
-              110,
-              0,
-              0,
-              0,
-              0,
-              148,
-              0,
-              0,
-              120,
-              41
-            ],
-            "issue": "value_diff",
-            "label": "phase_235",
-            "mono_ns": 314076647387083,
-            "observed_u0_frame": [
               3,
               0,
               28,
@@ -43595,777 +43207,7 @@
               120,
               41
             ],
-            "phase_tick": 235,
-            "run_ms": 985
-          },
-          {
-            "channel_diffs": [
-              {
-                "channel": 10,
-                "expected": 110,
-                "u0": 0
-              },
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              10,
-              0,
-              28,
-              0,
-              0,
-              128,
-              134,
-              17,
-              0,
-              110,
-              0,
-              0,
-              0,
-              0,
-              148,
-              0,
-              0,
-              120,
-              41
-            ],
-            "issue": "value_diff",
-            "label": "phase_3098",
-            "mono_ns": 314078440251750,
-            "observed_u0_frame": [
-              10,
-              0,
-              28,
-              0,
-              0,
-              128,
-              134,
-              17,
-              0,
-              0,
-              227,
-              0,
-              0,
-              0,
-              148,
-              0,
-              0,
-              120,
-              41
-            ],
-            "phase_tick": 3098,
-            "run_ms": 1140
-          },
-          {
-            "channel_diffs": [],
-            "class_name": "MATCH",
-            "expected_disk_frame": [
-              255,
-              0,
-              48,
-              14,
-              0,
-              117,
-              145,
-              17,
-              0,
-              0,
-              214,
-              0,
-              0,
-              0,
-              159,
-              0,
-              0,
-              0,
-              0
-            ],
             "issue": "match",
-            "label": "phase_5885",
-            "mono_ns": 314080181919083,
-            "observed_u0_frame": [
-              255,
-              0,
-              48,
-              14,
-              0,
-              117,
-              145,
-              17,
-              0,
-              0,
-              214,
-              0,
-              0,
-              0,
-              159,
-              0,
-              0,
-              0,
-              0
-            ],
-            "phase_tick": 5885,
-            "run_ms": 1322
-          },
-          {
-            "channel_diffs": [
-              {
-                "channel": 10,
-                "expected": 110,
-                "u0": 0
-              },
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              3,
-              0,
-              48,
-              14,
-              0,
-              117,
-              145,
-              17,
-              0,
-              110,
-              0,
-              0,
-              0,
-              0,
-              159,
-              0,
-              0,
-              0,
-              0
-            ],
-            "issue": "value_diff",
-            "label": "phase_8587",
-            "mono_ns": 314081873275625,
-            "observed_u0_frame": [
-              3,
-              0,
-              48,
-              14,
-              0,
-              117,
-              145,
-              17,
-              0,
-              0,
-              227,
-              0,
-              0,
-              0,
-              159,
-              0,
-              0,
-              0,
-              0
-            ],
-            "phase_tick": 8587,
-            "run_ms": 1234
-          },
-          {
-            "channel_diffs": [],
-            "class_name": "MATCH",
-            "expected_disk_frame": [
-              31,
-              0,
-              28,
-              0,
-              0,
-              128,
-              141,
-              21,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              118,
-              0
-            ],
-            "issue": "match",
-            "label": "phase_11336",
-            "mono_ns": 314083590224083,
-            "observed_u0_frame": [
-              31,
-              0,
-              28,
-              0,
-              0,
-              128,
-              141,
-              21,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              118,
-              0
-            ],
-            "phase_tick": 11336,
-            "run_ms": 6358
-          },
-          {
-            "channel_diffs": [],
-            "class_name": "MATCH",
-            "expected_disk_frame": [
-              31,
-              0,
-              28,
-              0,
-              0,
-              128,
-              141,
-              21,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              118,
-              0
-            ],
-            "issue": "match",
-            "label": "phase_13949",
-            "mono_ns": 314085224584708,
-            "observed_u0_frame": [
-              31,
-              0,
-              28,
-              0,
-              0,
-              128,
-              141,
-              21,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              118,
-              0
-            ],
-            "phase_tick": 13949,
-            "run_ms": 6358
-          },
-          {
-            "channel_diffs": [],
-            "class_name": "MATCH",
-            "expected_disk_frame": [
-              31,
-              0,
-              28,
-              0,
-              0,
-              128,
-              141,
-              21,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              118,
-              0
-            ],
-            "issue": "match",
-            "label": "phase_16547",
-            "mono_ns": 314086847525208,
-            "observed_u0_frame": [
-              31,
-              0,
-              28,
-              0,
-              0,
-              128,
-              141,
-              21,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              118,
-              0
-            ],
-            "phase_tick": 16547,
-            "run_ms": 6358
-          },
-          {
-            "channel_diffs": [],
-            "class_name": "MATCH",
-            "expected_disk_frame": [
-              31,
-              0,
-              28,
-              0,
-              0,
-              128,
-              141,
-              21,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              118,
-              0
-            ],
-            "issue": "match",
-            "label": "phase_19150",
-            "mono_ns": 314088472868791,
-            "observed_u0_frame": [
-              31,
-              0,
-              28,
-              0,
-              0,
-              128,
-              141,
-              21,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              118,
-              0
-            ],
-            "phase_tick": 19150,
-            "run_ms": 6358
-          }
-        ],
-        "segment_index": 0,
-        "segments_evaluated": 4,
-        "serialized_event_count": 13,
-        "serialized_events": [
-          {
-            "channels": [
-              1,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              11,
-              13,
-              15,
-              1,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              11,
-              13,
-              15
-            ],
-            "raw_reference": 1,
-            "reference_kind": "cue",
-            "source_order": 0,
-            "time": 0
-          },
-          {
-            "channels": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              11,
-              12,
-              13,
-              14,
-              18,
-              19,
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              11,
-              12,
-              13,
-              14,
-              18,
-              19
-            ],
-            "raw_reference": 85,
-            "reference_kind": "cue",
-            "source_order": 1,
-            "time": 2
-          },
-          {
-            "channels": [
-              1,
-              8,
-              1,
-              8
-            ],
-            "raw_reference": 26,
-            "reference_kind": "cue",
-            "source_order": 2,
-            "time": 4
-          },
-          {
-            "channels": [
-              1,
-              10,
-              11,
-              1,
-              10,
-              11
-            ],
-            "raw_reference": 3,
-            "reference_kind": "cue",
-            "source_order": 3,
-            "time": 5
-          },
-          {
-            "channels": [
-              1,
-              10,
-              11,
-              1,
-              10,
-              11
-            ],
-            "raw_reference": 6,
-            "reference_kind": "cue",
-            "source_order": 4,
-            "time": 1650
-          },
-          {
-            "channels": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              11,
-              12,
-              13,
-              14,
-              18,
-              19,
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              11,
-              12,
-              13,
-              14,
-              18,
-              19
-            ],
-            "raw_reference": 85,
-            "reference_kind": "cue",
-            "source_order": 5,
-            "time": 2324
-          },
-          {
-            "channels": [
-              1,
-              10,
-              11,
-              1,
-              10,
-              11
-            ],
-            "raw_reference": 3,
-            "reference_kind": "cue",
-            "source_order": 6,
-            "time": 2325
-          },
-          {
-            "channels": [
-              1,
-              8,
-              1,
-              8
-            ],
-            "raw_reference": 26,
-            "reference_kind": "cue",
-            "source_order": 7,
-            "time": 2326
-          },
-          {
-            "channels": [
-              1,
-              15,
-              18,
-              19,
-              1,
-              15,
-              18,
-              19
-            ],
-            "raw_reference": 13,
-            "reference_kind": "cue",
-            "source_order": 8,
-            "time": 4200
-          },
-          {
-            "channels": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              10,
-              11,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19,
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              10,
-              11,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19
-            ],
-            "raw_reference": 229,
-            "reference_kind": "cue",
-            "source_order": 9,
-            "time": 4801
-          },
-          {
-            "channels": [
-              1,
-              10,
-              11,
-              1,
-              10,
-              11
-            ],
-            "raw_reference": 3,
-            "reference_kind": "cue",
-            "source_order": 10,
-            "time": 6980
-          },
-          {
-            "channels": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              11,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19,
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              11,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19
-            ],
-            "raw_reference": 165,
-            "reference_kind": "cue",
-            "source_order": 11,
-            "time": 9000
-          },
-          {
-            "channels": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              11,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19,
-              1,
-              2,
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10,
-              11,
-              12,
-              13,
-              14,
-              15,
-              16,
-              17,
-              18,
-              19
-            ],
-            "raw_reference": 165,
-            "reference_kind": "cue",
-            "source_order": 12,
-            "time": 9600
-          }
-        ]
-      },
-      {
-        "class": "autoloop_capture_divergence",
-        "cycle_ticks": 19200,
-        "identity": "SSAutoLoop48.ssfile",
-        "reason": "best_contiguous_segment_failed_oracle",
-        "rows_passed": 6,
-        "rows_total": 8,
-        "samples": [
-          {
-            "channel_diffs": [
-              {
-                "channel": 10,
-                "expected": 110,
-                "u0": 0
-              },
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
-            "expected_disk_frame": [
-              3,
-              0,
-              28,
-              0,
-              0,
-              128,
-              134,
-              17,
-              0,
-              110,
-              0,
-              0,
-              0,
-              0,
-              148,
-              0,
-              0,
-              120,
-              41
-            ],
-            "issue": "value_diff",
             "label": "phase_58",
             "mono_ns": 314202534246291,
             "observed_u0_frame": [
@@ -44471,8 +43313,8 @@
                 "u0": 0
               },
               {
-                "channel": 10,
-                "expected": 110,
+                "channel": 11,
+                "expected": 227,
                 "u0": 0
               },
               {
@@ -44502,8 +43344,8 @@
               134,
               17,
               0,
-              110,
               0,
+              227,
               0,
               0,
               0,
@@ -44885,9 +43727,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -44953,9 +43797,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -45037,9 +43883,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -45145,23 +43993,12 @@
         "cycle_ticks": 19200,
         "identity": "SSAutoLoop48.ssfile",
         "reason": "sibling_segment_failed_oracle",
-        "rows_passed": 4,
+        "rows_passed": 7,
         "rows_total": 8,
         "samples": [
           {
-            "channel_diffs": [
-              {
-                "channel": 10,
-                "expected": 110,
-                "u0": 0
-              },
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               3,
               0,
@@ -45172,8 +44009,8 @@
               134,
               17,
               0,
-              110,
               0,
+              227,
               0,
               0,
               0,
@@ -45183,7 +44020,7 @@
               120,
               41
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_77",
             "mono_ns": 314364475624083,
             "observed_u0_frame": [
@@ -45211,19 +44048,8 @@
             "run_ms": 999
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 10,
-                "expected": 110,
-                "u0": 0
-              },
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               10,
               0,
@@ -45234,8 +44060,8 @@
               134,
               17,
               0,
-              110,
               0,
+              227,
               0,
               0,
               0,
@@ -45245,7 +44071,7 @@
               120,
               41
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_2904",
             "mono_ns": 314366247066333,
             "observed_u0_frame": [
@@ -45324,19 +44150,8 @@
             "run_ms": 1339
           },
           {
-            "channel_diffs": [
-              {
-                "channel": 10,
-                "expected": 110,
-                "u0": 0
-              },
-              {
-                "channel": 11,
-                "expected": 0,
-                "u0": 227
-              }
-            ],
-            "class_name": "VALUE_DIFF",
+            "channel_diffs": [],
+            "class_name": "MATCH",
             "expected_disk_frame": [
               3,
               0,
@@ -45347,8 +44162,8 @@
               145,
               17,
               0,
-              110,
               0,
+              227,
               0,
               0,
               0,
@@ -45358,7 +44173,7 @@
               0,
               0
             ],
-            "issue": "value_diff",
+            "issue": "match",
             "label": "phase_8446",
             "mono_ns": 314369708440750,
             "observed_u0_frame": [
@@ -45710,9 +44525,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -45778,9 +44595,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -45862,9 +44681,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -46475,9 +45296,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -46584,9 +45407,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -49497,9 +48322,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",
@@ -49606,9 +48433,11 @@
               1,
               10,
               11,
+              17,
               1,
               10,
-              11
+              11,
+              17
             ],
             "raw_reference": 3,
             "reference_kind": "cue",

@@ -30,8 +30,12 @@ from rb_ss_bridge_v2.tools import export_soundswitch_pack as export_module
 from rb_ss_bridge_v2.tools.export_soundswitch_pack import export_pack
 
 SOURCE_PROJECT = Path.home() / "Music/SoundSwitch/default.ssproj"
+# Lane split after the 2026-07-02 exact-R + precede-association correction:
+# SSAutoLoop14/48 moved from algorithm_generalized to oracle_proven when
+# their previously "lit divergent" fixture rows started matching byte-exactly
+# under the corrected render model.
 EXPECTED_ACTIVE_LANES = {
-    "algorithm_generalized": 69, "oracle_proven": 14, "unverified_parity": 0,
+    "algorithm_generalized": 67, "oracle_proven": 16, "unverified_parity": 0,
 }
 WITNESSED_SCRIPTED_SSID = "528e8b22-bd17-41b9-a111-275d3e8b3031"
 
