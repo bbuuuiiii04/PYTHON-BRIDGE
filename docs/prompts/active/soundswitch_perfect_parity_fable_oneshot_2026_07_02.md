@@ -227,7 +227,9 @@ in your final report instead of silently choosing one over the other.
 3. For each of the 14 completion-audit matrix rows, diagnose root cause from code + evidence,
    not just symptom. Group root causes (e.g. deck/mode state-authority bugs vs. exporter
    value-selection bugs vs. zero-frame/timing bugs) rather than patching each symptom
-   independently — if one root cause explains multiple matrix rows, say so and fix it once.
+   independently — if one root cause explains multiple matrix rows, **fix that root cause**,
+   not just name it. A grouped root cause is not closed until every row it touches is
+   closed.
 4. Implement the fix for each closable row, directly or via your own subagent(s). Prioritize
    by evidence severity, not row order.
 5. For every fix, identify or write the smallest test/check that would fail if the fix were
@@ -240,6 +242,10 @@ in your final report instead of silently choosing one over the other.
    (do not attempt to fix the missing `/dev/cu.usbserial-EN396681` device itself — that is
    a physical connection Brandon must make), and state your confidence for that row
    separately from the other 13.
+8. **Keep working until every row is actually closed.** If a fix doesn't work, doesn't fully
+   resolve the row, or surfaces a new problem, debug it and try again yourself. A row that
+   is diagnosed but not fixed, or fixed but not verified, is not done — keep iterating on it.
+   You have the authority and the capability to keep debugging; use it instead of stopping.
 
 ## Claim discipline
 
@@ -250,29 +256,46 @@ you ran, or an evidence artifact you actually read this session. Do not upgrade 
 
 ## Success criteria and stop conditions
 
-Stop and finalize your report only when:
+This is a one-shot handoff with no back-and-forth. Brandon is not going to review a partial
+result and send you back in for round 1.5 — finishing is your job, not his. The only
+acceptable final deliverable is:
 
-- Every one of the 14 matrix rows is either closed-in-code-with-evidence, or explicitly
-  marked as the hardware-only exception with a stated reason it cannot be closed without a
-  physical device.
-- `python3 -m unittest discover tests` passes (report the exact result; if something fails
+- Every one of the 14 matrix rows closed-in-code-with-evidence, or (for the Enttec/hardware
+  row only) explicitly marked as the hardware-only exception with a stated reason it cannot
+  be closed without a physical device.
+- `python3 -m unittest discover tests` passing (report the exact result; if something fails
   and you judge it pre-existing/unrelated, say so explicitly with evidence, don't hide it).
-- Any docs you touched still pass `tools/check_docs_metadata.py`,
+- Any docs you touched still passing `tools/check_docs_metadata.py`,
   `tools/check_agent_contracts.py`, and `tools/check_docs_drift.py`.
-- You have not violated any live-safety invariant above.
+- No live-safety invariant violated.
 
-Do not stop early with a partial fix presented as complete. If you run out of budget before
-closing all 14 rows, say so plainly, rank what's left by risk, and do not claim readiness
-you have not earned.
+**`NOT COMPLETE` and "hardware validation uncertain" are not acceptable resting states.**
+If a fix fails, doesn't fully close a row, or reveals a new problem, that is expected —
+debug it and keep going. Do not stop to ask Brandon "what would you like me to do next" or
+hand back a list of open questions; you have everything you need in this packet and full
+authority to keep implementing and delegating to your own subagents until every row is
+genuinely closed. Do not present a diagnosis as if it were a fix, and do not present an
+untested fix as if it were verified.
+
+The only legitimate reason this deliverable could end up incomplete is being cut off by a
+rate limit or quota exhaustion before you finish — that is an external constraint, not a
+choice, and not something to plan around or use as an early exit. If it happens, do not
+frame the result as a considered `NOT COMPLETE` verdict; report it plainly as
+`CUT OFF BEFORE COMPLETION` with exact progress state (which rows are actually closed and
+verified vs. which were mid-fix), so the next session can resume precisely instead of
+re-diagnosing from scratch.
 
 ## Output format
 
-1. **Verdict**: `SOFTWARE-COMPLETE, HARDWARE-VALIDATION-EXPECTED-TO-PASS`,
-   `SOFTWARE-COMPLETE, HARDWARE-VALIDATION-UNCERTAIN` (with reasons), or
-   `NOT COMPLETE` (with what's left and why).
+1. **Verdict**: `SOFTWARE-COMPLETE, HARDWARE-VALIDATION-EXPECTED-TO-PASS` is the only
+   acceptable completed verdict. If you were cut off before reaching it, use
+   `CUT OFF BEFORE COMPLETION` instead, with the exact resume state (see above) — do not
+   substitute `NOT COMPLETE` or a "hardware validation uncertain" verdict for a result you
+   simply stopped working on.
 2. **Matrix closeout**: all 14 rows, each with: root cause, fix made (file(s) touched),
    evidence/test that proves it, and a confidence label.
-3. **Root-cause groupings**: which matrix rows shared a root cause and were fixed together.
+3. **Root-cause groupings**: which matrix rows shared a root cause and were fixed together —
+   this must describe a completed fix, not an open finding.
 4. **Diff summary**: files changed, and why each change was necessary (not a raw diff dump
    unless Brandon's next step needs it).
 5. **Tests/checks run and their results.**
