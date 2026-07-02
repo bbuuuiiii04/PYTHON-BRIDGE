@@ -151,8 +151,10 @@ reports.
   find one, resolve it by reading code and re-running verification, not by picking whichever
   source is more convenient.
 - If a subagent you delegate to reports a fix as complete, do not accept that at face value
-  — require it to show the test/check that proves it, and spot-check at least the
-  high-severity ones yourself before including them in your final report.
+  — require it to show the test/check that proves it, and verify every row's closing claim
+  yourself before including it in your final report. Do not use severity to decide which
+  claims to check; a "minor" row reported closed on a false claim is still a false claim in
+  your final report.
 - Use the `rejected` claim label in your final report for anything in the evidence packet
   or prior docs that you checked and found stale, wrong, or unsupported by current code —
   don't silently drop it, say what was wrong and what you found instead.
@@ -215,8 +217,14 @@ every change:
   shutdown — do not regress this while fixing static-look or idle/zero-frame gaps.
 
 If closing a gap in the matrix below would require violating one of these invariants, do
-not violate it — implement the smallest safe alternative and flag the conflict explicitly
-in your final report instead of silently choosing one over the other.
+not violate it. But this is not a shortcut: before treating anything as an irreconcilable
+invariant conflict, you must first try every alternative implementation you can find — this
+exception should be rare to the point of almost never firing. A "smallest safe alternative"
+implementation must still fully close the underlying row; it is not permission to ship a
+partial or cosmetic fix and call the row closed. Only if you have genuinely exhausted
+alternatives is this a second named exception alongside the Enttec/hardware row — and it
+requires the same rigor: a specific, evidenced reason why no safe implementation exists, not
+a generic "this conflicts with an invariant." Expect to use this zero times.
 
 ## Required work procedure
 
@@ -232,20 +240,32 @@ in your final report instead of silently choosing one over the other.
    closed.
 4. Implement the fix for each closable row, directly or via your own subagent(s). Prioritize
    by evidence severity, not row order.
-5. For every fix, identify or write the smallest test/check that would fail if the fix were
-   wrong or regressed later.
-6. Re-run the offline verification tooling you have available (unit tests, offline
+5. For every fix, write the smallest test/check that would fail if the fix were wrong or
+   regressed later, **then actually run it and confirm it currently passes**. A test that
+   exists but was never executed does not count as verification.
+6. For rows where the evidence packet shows no existing capture ever exercised the behavior
+   (e.g. static-hold windows were "never observed," forward seek across a cue boundary was
+   "not cleanly covered," the full deck-transition matrix wasn't captured) — you cannot get
+   new live evidence, and the absence of a live capture is not a reason to leave the row
+   under-verified. Construct new offline/unit-level tests that exercise the logic directly
+   (simulate the relevant `BridgeEvent`/state transitions and assert the expected behavior)
+   so the row is verified by construction even without a fresh live capture.
+7. Re-run the offline verification tooling you have available (unit tests, offline
    time-domain/parity tooling against existing fixtures) to build evidence for your
    confidence claim. Do not claim confidence without re-running what you can.
-7. For the Enttec/hardware row specifically: get the software/pack-runtime side into a
+8. For the Enttec/hardware row specifically: get the software/pack-runtime side into a
    state where hardware output should work correctly once a serial device is present
    (do not attempt to fix the missing `/dev/cu.usbserial-EN396681` device itself — that is
    a physical connection Brandon must make), and state your confidence for that row
    separately from the other 13.
-8. **Keep working until every row is actually closed.** If a fix doesn't work, doesn't fully
+9. **Keep working until every row is actually closed.** If a fix doesn't work, doesn't fully
    resolve the row, or surfaces a new problem, debug it and try again yourself. A row that
    is diagnosed but not fixed, or fixed but not verified, is not done — keep iterating on it.
    You have the authority and the capability to keep debugging; use it instead of stopping.
+10. **Once every row is individually fixed, run one final full integration pass**: the
+    complete test suite plus every offline verification tool you used along the way, all
+    together, in one pass. A fix for one row that quietly regresses an already-closed row
+    is not acceptable — this final pass is what catches that before you report done.
 
 ## Claim discipline
 
@@ -253,6 +273,12 @@ Label every load-bearing claim in your final report `confirmed`, `assumed`, `unk
 `rejected`. A claim is `confirmed` only if you verified it against current code, a test
 you ran, or an evidence artifact you actually read this session. Do not upgrade an
 `assumed` claim to `confirmed` because it seems likely.
+
+A matrix row cannot be reported as closed while any claim its closure depends on is labeled
+`unknown` or `assumed`. `unknown`/`assumed` on a row-closing claim means that row is not
+actually closed yet — go verify it (write the test, run the code, read the source) until
+the claim earns `confirmed`, or keep debugging per the work procedure above. Do not let an
+`unknown` label stand in for real verification in the final report.
 
 ## Success criteria and stop conditions
 
@@ -263,8 +289,11 @@ acceptable final deliverable is:
 - Every one of the 14 matrix rows closed-in-code-with-evidence, or (for the Enttec/hardware
   row only) explicitly marked as the hardware-only exception with a stated reason it cannot
   be closed without a physical device.
-- `python3 -m unittest discover tests` passing (report the exact result; if something fails
-  and you judge it pre-existing/unrelated, say so explicitly with evidence, don't hide it).
+- `python3 -m unittest discover tests` passing (report the exact result). If a failing test
+  predates your changes, prove it — check it against the pre-change state (e.g. `git stash`
+  your diff and confirm the same test already failed, or `git log`/`git blame` the test) —
+  do not simply assert "pre-existing" without checking. A test you introduced or a test that
+  only started failing after your changes is your bug to fix, not a footnote.
 - Any docs you touched still passing `tools/check_docs_metadata.py`,
   `tools/check_agent_contracts.py`, and `tools/check_docs_drift.py`.
 - No live-safety invariant violated.
@@ -301,5 +330,8 @@ re-diagnosing from scratch.
 5. **Tests/checks run and their results.**
 6. **Residual risk for the hardware gate**: exact reasoning for why you expect Brandon's
    live hardware validation to pass, tied to evidence — not a generic assurance.
-7. **Anything you explicitly did not do and why** (forbidden action, missing evidence,
-   live-safety conflict, or genuinely out of budget).
+7. **Anything you explicitly did not do and why** — limited to: a forbidden action you
+   correctly declined, or (extremely rare, see the live-safety section) a genuinely
+   irreconcilable invariant conflict. "Out of budget" is not a valid entry here; if a rate
+   limit or quota cutoff actually terminates you before finishing, that produces a
+   `CUT OFF BEFORE COMPLETION` report instead of this output format, not an entry in this list.
