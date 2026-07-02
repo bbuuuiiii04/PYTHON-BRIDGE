@@ -64,10 +64,36 @@ does not. Do not defer to the earlier prompt's "spec only" instruction if you en
 A finished, working SoundSwitch exporter + DMX lighting pack runtime with every
 software-closable gap below resolved, such that:
 
-1. All 14 rows of the completion-audit matrix in the evidence packet (full list below) are
-   closed at the software/code level, or explicitly and individually justified as
-   structurally impossible to close without hardware (only the Enttec/hardware row
-   qualifies for this).
+1. Every row of the completion-audit matrix in the evidence packet is closed at the
+   software/code level, **except** the small set of explicitly-named non-closure
+   exceptions below. The matrix — the section titled **"Completion audit against the
+   original greenlight surface"** in `soundswitch_truth_exam_live_blockers_2026_07_02.md`
+   — has **15 rows**. Do not re-count or re-partition it; here is the canonical list and
+   the required disposition for each row:
+
+   | # | Row | Disposition |
+   | --- | --- | --- |
+   | 1 | Official U0/U1 comparator verdict | **TOOLING — OUT OF SCOPE.** This is validation tooling, not the runtime under test. Do not fix it (see "Comparator note"); build confidence from code review + existing valid captures + offline time-domain evidence. |
+   | 2 | Scripted output values | SOFTWARE-CLOSE |
+   | 3 | Scripted timeline timing | SOFTWARE-CLOSE |
+   | 4 | Autoloop output values | SOFTWARE-CLOSE |
+   | 5 | Autoloop cycling/wrap timing | SOFTWARE-CLOSE |
+   | 6 | Static looks | SOFTWARE-CLOSE |
+   | 7 | Manual blackout / static overlap | SOFTWARE-CLOSE |
+   | 8 | Playback edges | SOFTWARE-CLOSE |
+   | 9 | Rewinds/seeks | SOFTWARE-CLOSE |
+   | 10 | BPM/pitch changes | SOFTWARE-CLOSE |
+   | 11 | Transitions / active deck | SOFTWARE-CLOSE |
+   | 12 | Idle/zero-frame behavior | SOFTWARE-CLOSE |
+   | 13 | MIDI/control bindings | SOFTWARE-CLOSE |
+   | 14 | Unsupported/inactive inventory | SOFTWARE-CLOSE |
+   | 15 | Enttec/hardware parity | **HARDWARE EXCEPTION** — structurally impossible to close without a physical serial device (see procedure step 8). |
+
+   That is **13 rows you must close in software with evidence** (rows 2-14), plus two
+   named non-closure exceptions: the comparator/tooling row (1) and the Enttec/hardware
+   row (15). "All rows closed" means all 13 software rows closed-with-evidence and both
+   exceptions explicitly reported with their stated reason — not silently dropped, not
+   merged, not re-counted.
 2. Relevant tests pass (`python3 -m unittest discover tests`) and the repo's hard doc/CI
    checks still pass if you touch docs (`tools/check_docs_metadata.py`,
    `tools/check_agent_contracts.py`, `tools/check_docs_drift.py`).
@@ -81,17 +107,20 @@ make the code change.
 ## Perfect parity definition (Brandon's own words — do not redefine this)
 
 "Bridge lighting pack perfectly mimics bridge + SoundSwitch runtime in every important
-way." Operationalize this as: closing all 14 rows of the completion-audit matrix below,
-at the value + timing level where applicable.
+way." Operationalize this as: closing the 13 software rows of the completion-audit matrix
+(rows 2-14, see the Deliverable table), at the value + timing level where applicable, and
+correctly reporting the two named non-closure exceptions (comparator/tooling row 1, and
+Enttec/hardware row 15).
 
 ## Evidence packet
 
 Primary evidence (read these first, in full):
 
 - `docs/research/soundswitch/soundswitch_truth_exam_live_blockers_2026_07_02.md` — live
-  truth-check diagnostic evidence and the 14-row completion-audit matrix (near the end of
-  the doc) that defines the target surfaces. Also documents a known comparator topology
-  bug (see "Comparator note" below).
+  truth-check diagnostic evidence and the 15-row completion-audit matrix (near the end of
+  the doc) that defines the target surfaces — see the canonical enumeration and per-row
+  disposition in the Deliverable section above; that table governs, not any re-count of the
+  doc. Also documents a known comparator topology bug (see "Comparator note" below).
 - `docs/research/soundswitch/soundswitch_time_domain_exam_2026_07.md` — offline
   passive-capture timing report: scripted timing (436 boundaries, median 15.841ms, p95
   28.229ms, 5 over one 40ms wire frame), autoloop timing (1377 transitions, median
@@ -117,6 +146,14 @@ Primary evidence (read these first, in full):
   forward/backward (now confirmed for drag-seeks specifically; a large discrete
   jump/hotcue-style seek is still unverified). Do not start from the truth-exam doc's
   "static_held never observed" claim — it is out of date as of this newer doc.
+  **Important on what "closed" means here:** this newer doc removes the *capture/observation*
+  gap on those 4 rows (the behavior is now witnessed live), but it does **not** by itself
+  verify DMX value/timing parity for them — e.g. autoloop still shows heavy byte mismatches
+  in the truth-exam data, and static hold surfaces an open question about whether
+  `smart_drop_blackout` should be able to interrupt a held static look. Those 4 rows
+  (6/7 static, 9 seeks, 10 BPM, 11 transitions, as they map to the matrix) still require
+  code-level closure per the Deliverable; treat the newer doc as evidence you now have,
+  not as rows already done.
 
 Fuller capture evidence — do not assume the truth-exam doc's excerpts are the only
 captures that exist:
@@ -205,6 +242,12 @@ Forbidden, no exceptions:
 - Do not touch `config/led_look_director.json.backup_1781599611`, commit secrets
   (`GOVEE_API_KEY`), local IPs, or device IDs.
 - Do not create a new git branch; work on `main` per `AGENTS.md` §0 git workflow rules.
+- Do not modify, weaken, delete, skip, or `xfail` an existing test to make the suite pass
+  (`AGENTS.md` §8: "Do not modify tests to make [them] pass"). Adding new tests is expected;
+  editing an existing test's assertions/inputs to turn red green is not. If an existing test
+  is genuinely wrong (asserts behavior the current code/spec contradicts), say so explicitly
+  in your report with the evidence and fix the test's *correctness* — never silence it, and
+  never edit it solely to reach a green run.
 
 ## Live-safety invariants your implementation (and any subagent's implementation) must not violate
 
@@ -226,6 +269,17 @@ every change:
 - Manual-static policy: held static stays operator-controlled and visible during
   idle/stop/stale/error/track-change, and loses only to blackout/emergency/pack-disabled/
   shutdown — do not regress this while fixing static-look or idle/zero-frame gaps.
+- SoundSwitch pack-runtime safety invariants (from `soundswitch_pack_controller.py`, the
+  surface you are authorized to change — preserve every one while closing rows 2-14):
+  validate-first / no partial swap (build+verify the new `PackRuntime` before touching the
+  live one; on failure keep the old verified runtime or force safe disabled — never a
+  half-swapped state); stop-before-start on the shared Enttec serial port (publish disabled,
+  `zero_and_stop` the OLD sender, then start the new); a pack/start/verify failure must fail
+  closed to disabled/none and **never fall back to MIDI**; no implicit hot-enable
+  (`reload`/`backend` must never enable a disabled pack); and all runtime error details stay
+  sanitized (class/category strings, never paths/ports/aliases/UUIDs). If a fix to rows 2-14
+  appears to require relaxing any of these, treat it as the rare invariant-conflict case, not
+  a free edit.
 
 If closing a gap in the matrix below would require violating one of these invariants, do
 not violate it. But this is not a shortcut: before treating anything as an irreconcilable
@@ -233,9 +287,11 @@ invariant conflict, you must first try every alternative implementation you can 
 exception should be rare to the point of almost never firing. A "smallest safe alternative"
 implementation must still fully close the underlying row; it is not permission to ship a
 partial or cosmetic fix and call the row closed. Only if you have genuinely exhausted
-alternatives is this a second named exception alongside the Enttec/hardware row — and it
-requires the same rigor: a specific, evidenced reason why no safe implementation exists, not
-a generic "this conflicts with an invariant." Expect to use this zero times.
+alternatives is this an additional non-closure path (beyond the comparator/tooling and
+Enttec/hardware rows, which already have their own dispositions) — and it requires the same
+rigor: you must **list the specific alternative implementations you actually tried** and give
+a specific, evidenced reason why each failed and why no safe implementation exists — not a
+generic "this conflicts with an invariant." Expect to use this zero times.
 
 ## Required work procedure
 
@@ -243,7 +299,7 @@ a generic "this conflicts with an invariant." Expect to use this zero times.
    plan to rely on — do not treat doc excerpts as current truth without checking.
 2. Inventory the actually-available capture evidence (repo docs + existing `/tmp/rbss_*`
    artifacts + canonical pack manifest) before deciding what's provable from what you have.
-3. For each of the 14 completion-audit matrix rows, diagnose root cause from code + evidence,
+3. For each software-close row (rows 2-14 of the completion-audit matrix), diagnose root cause from code + evidence,
    not just symptom. Group root causes (e.g. deck/mode state-authority bugs vs. exporter
    value-selection bugs vs. zero-frame/timing bugs) rather than patching each symptom
    independently — if one root cause explains multiple matrix rows, **fix that root cause**,
@@ -297,9 +353,12 @@ This is a one-shot handoff with no back-and-forth. Brandon is not going to revie
 result and send you back in for round 1.5 — finishing is your job, not his. The only
 acceptable final deliverable is:
 
-- Every one of the 14 matrix rows closed-in-code-with-evidence, or (for the Enttec/hardware
-  row only) explicitly marked as the hardware-only exception with a stated reason it cannot
-  be closed without a physical device.
+- All 13 software rows (rows 2-14) closed-in-code-with-evidence. The comparator/tooling row
+  (1) and the Enttec/hardware row (15) are reported as their named exceptions with the stated
+  reason, per the Deliverable table. The only additional non-closure path is a genuinely
+  irreconcilable live-safety invariant conflict (see below) — expected to fire zero times and
+  subject to the same evidence bar; it is not a general escape and does not apply to the
+  comparator or Enttec rows, which already have their own dispositions.
 - `python3 -m unittest discover tests` passing (report the exact result). If a failing test
   predates your changes, prove it — check it against the pre-change state (e.g. `git stash`
   your diff and confirm the same test already failed, or `git log`/`git blame` the test) —
@@ -332,8 +391,11 @@ re-diagnosing from scratch.
    `CUT OFF BEFORE COMPLETION` instead, with the exact resume state (see above) — do not
    substitute `NOT COMPLETE` or a "hardware validation uncertain" verdict for a result you
    simply stopped working on.
-2. **Matrix closeout**: all 14 rows, each with: root cause, fix made (file(s) touched),
-   evidence/test that proves it, and a confidence label.
+2. **Matrix closeout**: all 15 rows, in the canonical order/numbering of the Deliverable
+   table. For each software row (2-14): root cause, fix made (file(s) touched), evidence/test
+   that proves it, and a confidence label. For the comparator row (1) and Enttec row (15):
+   the named-exception disposition and its stated reason. Do not omit, merge, or renumber
+   rows.
 3. **Root-cause groupings**: which matrix rows shared a root cause and were fixed together —
    this must describe a completed fix, not an open finding.
 4. **Diff summary**: files changed, and why each change was necessary (not a raw diff dump
