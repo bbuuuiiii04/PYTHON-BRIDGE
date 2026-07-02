@@ -175,6 +175,11 @@ Of the 4 gaps this session targeted:
   discrete jump/hotcue-style seek is still unverified.
 
 Remaining unconfirmed from the original gap list (unchanged by this
-session): crossfader/mixer-master handoff variations, cold-idle-into-
-multiple-tracks, exhaustive autoloop note/bank coverage, and all hardware/
+session): mixer-master-authority handoff variations (`rb_master_deck` /
+`mixer_authority` in `state_manager.py` — driven by OS2L-reported deck
+levels, not crossfader; the bridge subscribes to a `"crossfader"` OS2L
+trigger in `osl_output.py` but no code anywhere parses or acts on it, so
+that specific signal is dead/unused and not a real gap to chase), cold-
+idle-into-multiple-tracks, exhaustive autoloop note/bank coverage, and all
+hardware/
 Enttec parity (operator-only, out of Fable's authority).
