@@ -154,12 +154,29 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
         self.assertEqual(self.autoloop_fixture["autoloop"]["SSAutoLoop14.ssfile"], [])
         self.assertIn("value_diff", {
             sample["issue"]
-            for sample in divergence["SSAutoLoop14.ssfile"][0]["samples"]
+            for entry in divergence["SSAutoLoop14.ssfile"]
+            for sample in entry["samples"]
         })
         self.assertIn("pack_lit_u0_dark", {
             sample["issue"]
-            for sample in divergence["SSAutoLoop8.ssfile"][0]["samples"]
+            for entry in divergence["SSAutoLoop8.ssfile"]
+            for sample in entry["samples"]
         })
+
+        # Promoted loops with a failing sibling segment must still carry that
+        # sibling's evidence in the ledger, and must still be in the passed set.
+        for identity in (
+            "SSAutoLoop13.ssfile",
+            "SSAutoLoop16.ssfile",
+            "SSAutoLoop55.ssfile",
+            "SSAutoLoop6.ssfile",
+        ):
+            self.assertIn(identity, passed)
+            self.assertTrue(
+                any(entry["reason"] == "sibling_segment_failed_oracle"
+                    for entry in divergence.get(identity, [])),
+                f"{identity} missing sibling_segment_failed_oracle ledger entry",
+            )
 
     def _shifted_key_document(self, ssid: str) -> LoadedDocument:
         scripted = json.loads((self.pack_path / f"scripted/{ssid}.json").read_text())["document"]

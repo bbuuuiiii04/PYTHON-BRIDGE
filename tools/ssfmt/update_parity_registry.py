@@ -205,6 +205,7 @@ def build_autoloop_registry(pack_path: Path, fixture_path: Path) -> dict[str, di
     pack = load_pack(pack_path)
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     capture_id = str(fixture.get("capture_id") or "")
+    divergence = fixture.get("capture_source_divergence", {})
     manifest = _manifest(pack_path)
     venue_sha = _venue_sha(manifest)
     records: dict[str, dict[str, object]] = {}
@@ -221,7 +222,7 @@ def build_autoloop_registry(pack_path: Path, fixture_path: Path) -> dict[str, di
         report_dict = report.to_dict()
         records[identity] = {
             "capture_id": capture_id,
-            "divergence": [],
+            "divergence": list(divergence.get(identity, [])) if isinstance(divergence, dict) else [],
             "layout": layout,
             "oracle_report_sha256": sha256_bytes(canonical_json_bytes(report_dict)),
             "rows_passed": _passed_sample_count(report_dict),

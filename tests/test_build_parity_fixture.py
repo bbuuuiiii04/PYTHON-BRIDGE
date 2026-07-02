@@ -13,8 +13,10 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (  # noqa: E402
     LoadedDocument,
     LoadedTimelineEvent,
 )
+from rb_ss_bridge_v2.soundswitch_parity_oracle import OracleReport  # noqa: E402
 from rb_ss_bridge_v2.tools.ssfmt.build_parity_fixture import (  # noqa: E402
     build_static_fixture,
+    choose_autoloop_candidate,
     join_autoloop_to_mono,
     join_sidecar_to_mono,
     screen_rows,
@@ -175,6 +177,53 @@ class BuildParityFixtureTests(unittest.TestCase):
         self.assertEqual([row["label"] for row in witnesses], ["match"])
         self.assertEqual([row["class"] for row in divergence],
                          ["cross_deck_bleed", "stale_source_edit"])
+
+    def _report(self, verdict: str) -> OracleReport:
+        return OracleReport(surface="autoloop", verdict=verdict, counts={}, issues={}, samples=())
+
+    def test_choose_autoloop_candidate_promotes_pass_and_ledgers_failing_siblings(self) -> None:
+        # Mirrors ground truth for SSAutoLoop16: seg0 FAIL, seg1 PASS, seg2 FAIL.
+        candidates = [
+            (0, [{"phase_tick": 0}], self._report("FAIL")),
+            (1, [{"phase_tick": 1}], self._report("PASS")),
+            (2, [{"phase_tick": 2}], self._report("FAIL")),
+        ]
+        promoted, ledger = choose_autoloop_candidate(candidates)
+        self.assertIs(promoted, candidates[1])
+        self.assertEqual(
+            [(segment_index, reason) for segment_index, _, _, reason in ledger],
+            [(0, "sibling_segment_failed_oracle"), (2, "sibling_segment_failed_oracle")],
+        )
+
+    def test_choose_autoloop_candidate_ledgers_best_and_siblings_when_all_fail(self) -> None:
+        # Mirrors ground truth for SSAutoLoop48: seg0 FAIL 5/8, seg1 FAIL 6/8, seg2 FAIL 4/8.
+        candidates = [
+            (0, [{"n": 1}] * 5, self._report("FAIL")),
+            (1, [{"n": 1}] * 6, self._report("FAIL")),
+            (2, [{"n": 1}] * 4, self._report("FAIL")),
+        ]
+        promoted, ledger = choose_autoloop_candidate(candidates)
+        self.assertIsNone(promoted)
+        self.assertEqual(
+            [(segment_index, reason) for segment_index, _, _, reason in ledger],
+            [
+                (0, "sibling_segment_failed_oracle"),
+                (1, "best_contiguous_segment_failed_oracle"),
+                (2, "sibling_segment_failed_oracle"),
+            ],
+        )
+
+    def test_choose_autoloop_candidate_never_ledgers_pass_segments(self) -> None:
+        # Mirrors ground truth for SSAutoLoop18: seg1-5 all PASS.
+        candidates = [(index, [{"n": 1}], self._report("PASS")) for index in range(5)]
+        promoted, ledger = choose_autoloop_candidate(candidates)
+        self.assertIs(promoted, candidates[0])
+        self.assertEqual(ledger, [])
+
+    def test_choose_autoloop_candidate_handles_no_candidates(self) -> None:
+        promoted, ledger = choose_autoloop_candidate([])
+        self.assertIsNone(promoted)
+        self.assertEqual(ledger, [])
 
     def test_static_fixture_records_unavailable_capture_windows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

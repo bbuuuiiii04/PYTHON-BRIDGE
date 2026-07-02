@@ -435,12 +435,13 @@ def _autoloop_diagnostic(
     *,
     segment_index: int,
     segment_count: int,
+    reason: str = "best_contiguous_segment_failed_oracle",
 ) -> dict[str, Any]:
     by_phase = {int(row["phase_tick"]): row for row in rows}
     return {
         "class": "autoloop_capture_divergence",
         "identity": identity,
-        "reason": "best_contiguous_segment_failed_oracle",
+        "reason": reason,
         "segment_index": segment_index,
         "segments_evaluated": segment_count,
         "cycle_ticks": loop.document.cycle_ticks,
@@ -597,6 +598,54 @@ def build_scripted_fixture(
     }
 
 
+AutoloopCandidate = tuple[int, Sequence[dict[str, Any]], OracleReport]
+AutoloopLedgerEntry = tuple[int, Sequence[dict[str, Any]], OracleReport, str]
+
+
+def _autoloop_candidate_rank(candidate: AutoloopCandidate) -> tuple[bool, int, int, int]:
+    segment_index, selected, report = candidate
+    return (report.passed, _passed_sample_count(report), len(selected), -segment_index)
+
+
+def choose_autoloop_candidate(
+    candidates: Sequence[AutoloopCandidate],
+) -> tuple[AutoloopCandidate | None, list[AutoloopLedgerEntry]]:
+    """Pick the promoted segment (if any passed) and ledger every other non-PASS segment.
+
+    ``candidates`` holds one entry per contiguous capture segment that produced at
+    least one selected U0 row (segments with zero selected rows are excluded by the
+    caller before this is invoked). Returns ``(promoted, ledger)`` where ``promoted``
+    is ``None`` when no segment passed the oracle. PASS segments are never ledgered:
+    only the chosen best candidate (when nothing passed) and the non-promoted
+    non-PASS siblings are recorded, ordered by ``segment_index``.
+    """
+    if not candidates:
+        return None, []
+    ordered = sorted(candidates, key=lambda item: item[0])
+    passed = [candidate for candidate in candidates if candidate[2].passed]
+    if passed:
+        promoted = max(passed, key=_autoloop_candidate_rank)
+        ledger = [
+            (segment_index, selected, report, "sibling_segment_failed_oracle")
+            for segment_index, selected, report in ordered
+            if not report.passed
+        ]
+        return promoted, ledger
+    best = max(candidates, key=_autoloop_candidate_rank)
+    best_index = best[0]
+    ledger = [
+        (
+            segment_index,
+            selected,
+            report,
+            "best_contiguous_segment_failed_oracle" if segment_index == best_index
+            else "sibling_segment_failed_oracle",
+        )
+        for segment_index, selected, report in ordered
+    ]
+    return None, ledger
+
+
 def build_autoloop_fixture(
     capture: Path,
     pack_path: Path,
@@ -621,20 +670,13 @@ def build_autoloop_fixture(
             autoloop[identity] = []
             continue
         segments = split_autoloop_segments([row for row in joined.rows if row["identity"] == identity])
-        candidates: list[tuple[bool, int, int, int, list[dict[str, Any]], OracleReport]] = []
+        candidates: list[AutoloopCandidate] = []
         for segment_index, segment in enumerate(segments):
             selected = select_autoloop_rows(segment, runs, windows.get(identity, ()))
             if not selected:
                 continue
             report = classify_autoloop(loop, _autoloop_samples(selected))
-            candidates.append((
-                report.passed,
-                _passed_sample_count(report),
-                len(selected),
-                -segment_index,
-                selected,
-                report,
-            ))
+            candidates.append((segment_index, selected, report))
         if not candidates:
             autoloop[identity] = []
             missing[identity] = [_no_autoloop_rows_diagnostic(
@@ -643,21 +685,21 @@ def build_autoloop_fixture(
                 segment_count=len(segments),
             )]
             continue
-        passed = [candidate for candidate in candidates if candidate[0]]
-        choice = max(passed or candidates, key=lambda item: item[:4])
-        segment_index = -choice[3]
-        if choice[5].passed:
-            autoloop[identity] = choice[4]
-        else:
-            autoloop[identity] = []
-            missing[identity] = [_autoloop_diagnostic(
-                identity,
-                loop,
-                choice[4],
-                choice[5],
-                segment_index=segment_index,
-                segment_count=len(segments),
-            )]
+        promoted, ledger_entries = choose_autoloop_candidate(candidates)
+        autoloop[identity] = list(promoted[1]) if promoted is not None else []
+        if ledger_entries:
+            missing[identity] = [
+                _autoloop_diagnostic(
+                    identity,
+                    loop,
+                    selected,
+                    report,
+                    segment_index=segment_index,
+                    segment_count=len(segments),
+                    reason=reason,
+                )
+                for segment_index, selected, report, reason in ledger_entries
+            ]
     fixture = {
         "capture_id": capture.name,
         "autoloop": autoloop,
