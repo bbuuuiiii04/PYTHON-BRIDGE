@@ -128,11 +128,16 @@ def render_scripted_frame(track: LoadedDocument | LoadedScriptedTrack, elapsed_m
     if document.layout not in SUPPORTED_LAYOUTS:
         return ZERO_FRAME
     if document.events and all(event.boundary_frame is not None for event in document.events):
+        # SoundSwitch's cache is cumulative in *serialized* order, and playback
+        # holds the entry with the greatest serialized index whose time has
+        # arrived — NOT the latest by timestamp.  Two cues authored ~1ms apart
+        # (e.g. {528E8B22} at 60065 then 60064) resolve to the later-serialized
+        # one even though its timestamp is earlier, so select by saved order and
+        # never break early (saved order is not time-monotonic).
         frame = ZERO_FRAME
-        for event in sorted(document.events, key=lambda row: (row.time, row.source_order)):
-            if event.time > elapsed_ms:
-                break
-            frame = event.boundary_frame or frame
+        for event in document.events:
+            if event.time <= elapsed_ms:
+                frame = event.boundary_frame or frame
         return frame
     return _apply_events(document, ZERO_FRAME, lambda time: 0 <= time <= elapsed_ms)
 

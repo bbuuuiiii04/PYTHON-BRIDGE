@@ -347,7 +347,7 @@ def _validate_document(doc: Any, expected_path: str,
             recomputed = [value if channel + 1 in CONTROL_CHANNELS else 0
                           for channel, value in enumerate(recomputed)]
         elif kind == "cue":
-            if not isinstance(raw, int) or raw <= 0 or stored != raw:
+            if not isinstance(raw, int) or raw <= 0 or stored != raw - 1:
                 _fail(f"unresolved/stale positive reference for {expected_path}")
             if guid is None:
                 if parity_lane != "unverified_parity":
