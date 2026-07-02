@@ -721,7 +721,7 @@ class CurrentProjectPackTests(unittest.TestCase):
         self._semantic_mutation(
             autoloop, "autoloops/1.json",
             lambda value: value.__setitem__("document", []))
-        self.assertVerifierAndLoaderRejected(autoloop, "SSAutoLoop1.ssfile")
+        self.assertVerifierAndLoaderRejected(autoloop, "autoloops/1.json")
 
     def test_boolean_cue_attribute_integer_fields_are_rejected_after_rehash(self):
         for field in ("dmx_channel", "channel_id"):
