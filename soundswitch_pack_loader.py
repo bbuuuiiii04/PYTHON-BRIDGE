@@ -21,6 +21,7 @@ from typing import Any, Literal, Mapping
 _EMPTY_MAPPING: Mapping[Any, Any] = MappingProxyType({})
 
 from .soundswitch_pack_verifier import SoundSwitchPackVerificationError, verify_pack
+from .soundswitch_parity_registry import PARITY_LANES, count_lanes
 
 SUPPORTED_SCHEMA_MAJOR = 1
 AUTOLOOP_CYCLE_TICKS = 19_200
@@ -121,6 +122,8 @@ class LoadedDocument:
     events: tuple[LoadedTimelineEvent, ...]
     intensity_nodes: tuple[LoadedIntensityNode, ...]
     cycle_ticks: int | None = None
+    parity_lane: str = field(default="unverified_parity", repr=False)
+    parity_evidence: Mapping[str, Any] = field(default_factory=lambda: _EMPTY_MAPPING, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +152,8 @@ class LoadedStaticLook:
     colour_values: tuple[LoadedColourValue, ...]
     position_values: tuple[LoadedPositionValue, ...]
     profile_has_intensity_channel: bool = False
+    parity_lane: str = field(default="unverified_parity", repr=False)
+    parity_evidence: Mapping[str, Any] = field(default_factory=lambda: _EMPTY_MAPPING, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +175,8 @@ class LoadedPack:
     totals: Mapping[str, int] = field(default_factory=lambda: _EMPTY_MAPPING)
     render_cue_guids: frozenset[str] = frozenset()
     catalog_tail_guids: frozenset[str] = frozenset()
+    parity_summary: Mapping[str, int] = field(default_factory=lambda: _EMPTY_MAPPING, repr=False)
+    unverified_documents: tuple[str, ...] = field(default=(), repr=False)
 
 
 def _fail(message: str) -> None:
@@ -211,6 +218,23 @@ def _string(value: Any, label: str, *, allow_empty: bool = False) -> str:
     if not isinstance(value, str) or (not allow_empty and not value):
         _fail(f"{label} must be a {'string' if allow_empty else 'non-empty string'}")
     return value
+
+
+def _parity_lane(value: Any, label: str) -> str:
+    if value not in PARITY_LANES:
+        _fail(f"{label} parity_lane is invalid")
+    return str(value)
+
+
+def _parity_evidence(value: Any, label: str) -> Mapping[str, Any]:
+    if not isinstance(value, dict):
+        _fail(f"{label} parity_evidence must be an object")
+    sanitized: dict[str, Any] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not isinstance(item, (str, int, bool)) and item is not None:
+            _fail(f"{label} parity_evidence is not sanitized")
+        sanitized[key] = item
+    return MappingProxyType(sanitized)
 
 
 def _runtime_metadata(
@@ -531,7 +555,9 @@ def _document(value: dict[str, Any], cue_patches: Mapping[str, tuple[LoadedAttri
     if not isinstance(nodes, list):
         _fail("document intensity nodes are missing")
     return LoadedDocument(relative, layout, tuple(events), tuple(_intensity(row) for row in nodes),
-                          AUTOLOOP_CYCLE_TICKS if autoloop else None)
+                          AUTOLOOP_CYCLE_TICKS if autoloop else None,
+                          _parity_lane(value.get("parity_lane"), f"{relative} document"),
+                          _parity_evidence(value.get("parity_evidence"), f"{relative} document"))
 
 
 def load_pack(pack: str | Path) -> LoadedPack:
@@ -629,6 +655,8 @@ def load_pack(pack: str | Path) -> LoadedPack:
             colour_values=tuple(_colour(item) for item in row.get("colour_values", [])),
             position_values=tuple(_position(item) for item in row.get("position_values", [])),
             profile_has_intensity_channel=has_intensity,
+            parity_lane=_parity_lane(row.get("parity_lane"), f"Static Look {slot}"),
+            parity_evidence=_parity_evidence(row.get("parity_evidence"), f"Static Look {slot}"),
         )
 
     selection_value = values.get("selection_map.json", {})
@@ -709,6 +737,19 @@ def load_pack(pack: str | Path) -> LoadedPack:
     for binding in learned_midi_bindings:
         if binding.target_kind == "static_look" and binding.target_slot not in looks:
             _fail("controller binding references a missing Static Look")
+    lanes: list[str] = [look.parity_lane for look in looks.values()]
+    unverified = [f"static:{slot}" for slot, look in looks.items()
+                  if look.parity_lane == "unverified_parity"]
+    for ssid, row in scripts.items():
+        if row.document is None:
+            continue
+        lanes.append(row.document.parity_lane)
+        if row.supported_active and row.document.parity_lane == "unverified_parity":
+            unverified.append(f"scripted:{ssid}")
+    for identity, row in loops.items():
+        lanes.append(row.document.parity_lane)
+        if row.supported_active and row.document.parity_lane == "unverified_parity":
+            unverified.append(f"autoloop:{identity}")
 
     return LoadedPack(
         schema_version=schema_version,
@@ -726,6 +767,8 @@ def load_pack(pack: str | Path) -> LoadedPack:
         totals=totals,
         render_cue_guids=frozenset(cue_patches),
         catalog_tail_guids=frozenset(catalog_tail_guids),
+        parity_summary=MappingProxyType(count_lanes(lanes)),
+        unverified_documents=tuple(sorted(unverified)),
     )
 
 

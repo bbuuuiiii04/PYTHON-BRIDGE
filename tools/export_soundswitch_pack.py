@@ -57,6 +57,10 @@ class BindingSidecarWriteError(RuntimeError):
     """The required Stream Deck MIDI binding sidecar could not be written."""
 
 
+class UnverifiedParityPublishError(RuntimeError):
+    """A verified pack still contains documents that cannot publish as trusted parity."""
+
+
 def _generator_commit() -> str:
     try:
         result = subprocess.run(
@@ -452,8 +456,27 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
         raise
 
 
+def _assert_publishable_parity(pack: Path, *, allow_unverified_parity: bool) -> None:
+    if allow_unverified_parity:
+        return
+    try:
+        manifest = json.loads((pack / "manifest.json").read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return
+    lanes = manifest.get("parity_lanes")
+    if not isinstance(lanes, dict):
+        return
+    unverified = lanes.get("unverified_parity", 0)
+    if isinstance(unverified, int) and unverified > 0:
+        raise UnverifiedParityPublishError(
+            f"pack has {unverified} unverified_parity documents; "
+            "trusted publication requires oracle_proven or algorithm_generalized parity"
+        )
+
+
 def publish_pack(
     project: str | os.PathLike[str], destination_path: str | os.PathLike[str],
+    *, allow_unverified_parity: bool = False,
 ) -> dict[str, object]:
     source = Path(project).expanduser()
     destination = Path(destination_path).expanduser()
@@ -475,6 +498,10 @@ def publish_pack(
         staging = _stage_artifacts(artifacts, parent, destination.name)
         try:
             result = verify_pack(staging, source_project=source)
+            _assert_publishable_parity(
+                staging,
+                allow_unverified_parity=allow_unverified_parity,
+            )
             # Stage the REQUIRED binding sidecar before the swap so a sidecar that
             # cannot be produced/written fails the publish with the canonical pack
             # untouched (matching export_pack's all-or-nothing contract). It is a
@@ -536,6 +563,8 @@ def _publish_verdict(exc: Exception) -> str:
         return "swap_failed"
     if isinstance(exc, BindingSidecarWriteError):
         return "sidecar_failed"
+    if isinstance(exc, UnverifiedParityPublishError):
+        return "unverified_parity"
     return "unknown_error"
 
 

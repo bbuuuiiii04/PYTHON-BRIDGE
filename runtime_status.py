@@ -32,6 +32,13 @@ _DEFAULT_PACK_STATUS: dict[str, Any] = {
     "enabled": False,
     "backend": "disabled",
     "pack_loaded": False,
+    "parity_lanes": {
+        "algorithm_generalized": 0,
+        "oracle_proven": 0,
+        "unverified_parity": 0,
+    },
+    "unverified_parity_count": 0,
+    "unverified_documents": [],
     "pack_sha12": "",
     "pack_sha256": "",
     "operational_state": "disabled",

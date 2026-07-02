@@ -40,11 +40,17 @@ class PackRuntime:
 
     def sanitized_status(self) -> dict[str, Any]:
         """Sanitized status dict (no paths/ports/aliases/devices/UUIDs/raw errors)."""
+        pack = getattr(self.player, "pack", None)
+        parity_summary = dict(getattr(pack, "parity_summary", {}) or {})
+        unverified = tuple(getattr(pack, "unverified_documents", ()) or ())
         return {
             "available": self.player is not None or self.backend is not None,
             "enabled": bool(self.enabled),
             "backend": "pack" if self.active else "disabled",
             "pack_loaded": self.player is not None,
+            "parity_lanes": parity_summary,
+            "unverified_parity_count": int(parity_summary.get("unverified_parity", 0)),
+            "unverified_documents": list(unverified[:10]),
             "pack_sha12": self.pack_sha12 or "",
             "pack_sha256": self.pack_sha256 or "",
             "phase_offset_beats": float(self.phase_offset_beats),

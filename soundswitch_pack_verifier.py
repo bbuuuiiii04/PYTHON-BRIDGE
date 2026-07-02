@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .soundswitch_parity_registry import PARITY_LANES
+
 SCHEMA_VERSION = "1.0.0"
 PROJECT_UUID = "{3CCBCD6F-7C1B-44D8-882C-A52A74CC1827}"
 VENUE_GUID = "b8ad2201b9e4c94696c898a7e8f6a5a9"
@@ -25,7 +27,8 @@ BOUNDARY_FIELDS = {"frame", "source_offset", "source_order", "time"}
 INTENSITY_FIELDS = {"attribute_value", "enabled", "end_tick", "record_version",
                     "source_offset", "start_tick"}
 STATIC_LOOK_FIELDS = {"colour_values", "end_offset", "generic_attributes", "intensity_values",
-                      "name", "position_values", "pre_rendered_frame_ch1_ch19",
+                      "name", "parity_evidence", "parity_lane", "position_values",
+                      "pre_rendered_frame_ch1_ch19",
                       "record_version", "slot_index", "source_offset", "strobe_values"}
 SCALAR_FIELDS = {"fixture_instance_id", "source_offset", "value"}
 COLOUR_FIELDS = {"fixture_instance_id", "raw_value", "source_offset"}
@@ -278,6 +281,18 @@ def _validate_static_position(row: Any) -> None:
         _fail("malformed Static Look position row")
 
 
+def _validate_parity(row: Any, label: str) -> None:
+    if not isinstance(row, dict):
+        _fail(f"malformed parity object for {label}")
+    lane = row.get("parity_lane")
+    evidence = row.get("parity_evidence")
+    if lane not in PARITY_LANES or not isinstance(evidence, dict):
+        _fail(f"malformed parity lane for {label}")
+    for key, value in evidence.items():
+        if not isinstance(key, str) or not isinstance(value, (str, int, bool)) and value is not None:
+            _fail(f"unsanitized parity evidence for {label}")
+
+
 def _validate_document(doc: Any, expected_path: str,
                        cue_patches: dict[str, list[dict[str, Any]]],
                        source_hashes: dict[str, str], *, active: bool = True) -> set[str]:
@@ -291,6 +306,7 @@ def _validate_document(doc: Any, expected_path: str,
         _fail(f"profile mismatch for active document {expected_path}")
     timeline = doc.get("timeline")
     boundaries = doc.get("pre_rendered_boundaries")
+    _validate_parity(doc, expected_path)
     if not isinstance(timeline, list) or not isinstance(boundaries, list):
         _fail(f"timeline/boundary count mismatch for {expected_path}")
     if any(not isinstance(row, dict) for row in timeline) or any(
@@ -486,6 +502,7 @@ def verify_pack(
                 or type(row.get("end_offset")) is not int \
                 or not isinstance(row.get("name"), str):
             _fail("malformed Static Look primitive/field schema")
+        _validate_parity(row, f"Static Look {row.get('slot_index')}")
         frame = row.get("pre_rendered_frame_ch1_ch19")
         if row.get("record_version") != 5 or not isinstance(frame, list) or len(frame) != 19 \
                 or any(type(value) is not int or not 0 <= value <= 255 for value in frame):
@@ -704,6 +721,18 @@ def verify_pack(
     declared_union = manifest.get("active_cue_union", {})
     if declared_union != {"count": len(union), "sha256": union_sha}:
         _fail("active-cue union count/hash drift")
+    lane_values = [str(row.get("parity_lane", "unverified_parity")) for row in looks]
+    for artifact in autoloop_paths:
+        doc = values[artifact].get("document")
+        if isinstance(doc, dict):
+            lane_values.append(str(doc.get("parity_lane", "unverified_parity")))
+    for artifact in script_paths:
+        doc = values[artifact].get("document")
+        if isinstance(doc, dict):
+            lane_values.append(str(doc.get("parity_lane", "unverified_parity")))
+    expected_lanes = {lane: lane_values.count(lane) for lane in sorted(PARITY_LANES)}
+    if manifest.get("parity_lanes") != expected_lanes:
+        _fail("parity lane summary mismatch")
     totals = manifest.get("totals", {})
     if not isinstance(totals, dict):
         _fail("malformed manifest totals")

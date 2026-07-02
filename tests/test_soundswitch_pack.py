@@ -31,7 +31,7 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (
 )
 from rb_ss_bridge_v2 import soundswitch_pack_verifier as verifier_module
 from rb_ss_bridge_v2.tools.export_soundswitch_pack import (
-    ExportAlreadyRunningError, export_pack, publish_pack,
+    ExportAlreadyRunningError, UnverifiedParityPublishError, export_pack, publish_pack,
 )
 from rb_ss_bridge_v2.tools import export_soundswitch_pack as export_module
 from rb_ss_bridge_v2.soundswitch_project_decoder import SoundSwitchDecodeError
@@ -460,6 +460,10 @@ class CurrentProjectPackTests(unittest.TestCase):
             ),
             manifest["totals"].__setitem__("total_autoloops",
                                            manifest["totals"]["total_autoloops"] - 1),
+            manifest["parity_lanes"].__setitem__(
+                "unverified_parity",
+                manifest["parity_lanes"]["unverified_parity"] - 1,
+            ),
         ))
 
         self.assertTrue(verify_pack(pack)["verified"])
@@ -479,17 +483,17 @@ class CurrentProjectPackTests(unittest.TestCase):
 
     def test_publish_pack_first_replace_and_repeat_match_fresh_export(self):
         destination = self.root / "published"
-        first = publish_pack(self.project, destination)
+        first = publish_pack(self.project, destination, allow_unverified_parity=True)
         self.assertTrue(first["first_export"])
         self.assertEqual(self._copy_bytes(destination), self._copy_bytes(self.pack))
 
         (destination / "obsolete.json").write_bytes(b"obsolete\n")
-        second = publish_pack(self.project, destination)
+        second = publish_pack(self.project, destination, allow_unverified_parity=True)
         self.assertFalse(second["first_export"])
         self.assertEqual(self._copy_bytes(destination), self._copy_bytes(self.pack))
 
         before = self._copy_bytes(destination)
-        publish_pack(self.project, destination)
+        publish_pack(self.project, destination, allow_unverified_parity=True)
         self.assertEqual(self._copy_bytes(destination), before)
 
     def test_publish_verify_failure_preserves_loadable_pack_byte_identical(self):
@@ -1263,6 +1267,51 @@ class PublishPackReplaceTests(unittest.TestCase):
                     publish_pack(root / "source.ssproj", destination)
             self.assertEqual(self._files(destination), before)
             self.assertEqual(self._leftovers(root), [])
+
+    def test_unverified_parity_publish_fails_before_replacing_existing_pack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            destination.mkdir()
+            (destination / "manifest.json").write_bytes(b"old\n")
+            before = self._files(destination)
+            artifacts = {
+                "manifest.json": _canonical({
+                    "parity_lanes": {
+                        "algorithm_generalized": 0,
+                        "oracle_proven": 0,
+                        "unverified_parity": 1,
+                    },
+                }),
+            }
+            patches = self._patch_export(artifacts)
+            with patches[0], patches[1], patches[2], patches[3]:
+                with self.assertRaises(UnverifiedParityPublishError):
+                    publish_pack(root / "source.ssproj", destination)
+            self.assertEqual(self._files(destination), before)
+            self.assertEqual(self._leftovers(root), [])
+
+    def test_unverified_parity_publish_requires_explicit_allow_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "pack"
+            artifacts = {
+                "manifest.json": _canonical({
+                    "parity_lanes": {
+                        "algorithm_generalized": 0,
+                        "oracle_proven": 0,
+                        "unverified_parity": 1,
+                    },
+                }),
+            }
+            patches = self._patch_export(artifacts)
+            with patches[0], patches[1], patches[2], patches[3]:
+                publish_pack(
+                    root / "source.ssproj",
+                    destination,
+                    allow_unverified_parity=True,
+                )
+            self.assertEqual(self._files(destination), artifacts)
 
     def test_fallback_second_rename_failure_restores_old_pack(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -26,6 +26,7 @@ from .soundswitch_project_decoder import (
     CANONICAL_SOUNDSWITCH_VERSION,
     CANONICAL_VENUE_GUID,
 )
+from .soundswitch_parity_registry import classify_parity_lane, count_lanes, parity_evidence
 
 PACK_SCHEMA_VERSION = "1.0.0"
 PRIMARY_FIXTURE_GROUP = 0x493
@@ -134,11 +135,22 @@ def _cue(cue: AttributeCue) -> dict[str, Any]:
 
 
 def _look(look: StaticLook) -> dict[str, Any]:
+    lane = classify_parity_lane(
+        structural_supported=True,
+        oracle_report=None,
+        generalized_witness_passed=False,
+    )
     return {
         "colour_values": [{**asdict(row), "raw_value": _hex(row.raw_value)} for row in look.colour_values],
         "end_offset": look.end_offset, "generic_attributes": _attrs(look.generic_attributes),
         "intensity_values": [asdict(row) for row in look.intensity_values],
         "name": look.name, "position_values": [asdict(row) for row in look.position_values],
+        "parity_evidence": parity_evidence(
+            lane=lane,
+            reason="no_u0_oracle_or_static_profile_assertion",
+            structural_supported=True,
+        ),
+        "parity_lane": lane,
         "pre_rendered_frame_ch1_ch19": list(render_static_look_frame(look)),
         "record_version": look.record_version, "slot_index": look.slot_index,
         "source_offset": look.source_offset, "strobe_values": [asdict(row) for row in look.strobe_values],
@@ -154,6 +166,16 @@ def _document(document: LightingDocument, cues: dict[str, AttributeCue], *, acti
             raise
         boundaries = []
         render_status = "unsupported_inactive"
+    structural_supported = document.layout in (
+        "shared_441_dictionary_timeline",
+        "dictionary_timeline_addressed_footer",
+        "dictionary_timeline_no_shared_anchor",
+    ) and render_status == "rendered"
+    lane = classify_parity_lane(
+        structural_supported=structural_supported,
+        oracle_report=None,
+        generalized_witness_passed=False,
+    )
     return {
         "container_version": document.container_version,
         "cue_dictionary": [asdict(row) for row in document.cue_dictionary],
@@ -161,6 +183,12 @@ def _document(document: LightingDocument, cues: dict[str, AttributeCue], *, acti
         "fixture_profile_guid": document.fixture_profile_guid,
         "intensity_nodes": [asdict(row) for row in document.intensity_nodes],
         "layout": document.layout,
+        "parity_evidence": parity_evidence(
+            lane=lane,
+            reason="no_u0_oracle_evidence",
+            structural_supported=structural_supported,
+        ),
+        "parity_lane": lane,
         "pre_rendered_boundaries": boundaries, "pre_render_status": render_status,
         "relative_path": document.relative_path,
         "retained_footer_sha256": document.retained_footer_sha256,
@@ -368,6 +396,17 @@ def compile_pack_artifacts(
               "scripted_inventory": len(project.scripted_track_classifications),
               "static_looks": len(project.static_looks), "total_autoloops": len(project.autoloops),
               "total_venue_records": len(project.attribute_cues)}
+    lane_values: list[str] = []
+    for path, data in artifacts.items():
+        if path.startswith("scripted/") or path.startswith("autoloops/"):
+            document = json.loads(data).get("document")
+            if isinstance(document, dict):
+                lane_values.append(str(document.get("parity_lane", "unverified_parity")))
+        elif path == "static_looks.json":
+            static_root = json.loads(data)
+            lane_values.extend(str(row.get("parity_lane", "unverified_parity"))
+                               for row in static_root.get("records", []))
+    parity_summary = count_lanes(lane_values)
     diagnostics_by_path: dict[str, list[str]] = {}
     for diagnostic in project.diagnostics:
         diagnostics_by_path.setdefault(diagnostic.relative_path, []).append(diagnostic.code)
@@ -389,6 +428,7 @@ def compile_pack_artifacts(
                            "sha256": row.sha256, "size": row.size} for row in project.source_inventory],
         artifact_hashes=artifact_rows, totals=totals,
         active_cue_union={"count": len(union), "sha256": union_sha},
+        parity_lanes=parity_summary,
         supported_boundary={"channel_span": "CH1-CH19", "fixture_profile_guid": CANONICAL_VENUE_GUID,
                             "project_uuid": CANONICAL_PROJECT_UUID, "soundswitch_version": "2.10.3",
                             "universe": 0})

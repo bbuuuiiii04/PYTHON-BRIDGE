@@ -456,6 +456,8 @@ def pack_export_status_line(
         "autoloop_phase_blocked": "autoloop blocked",
         "software_zero_frame": "zeroed",
     }.get(pack.get("operational_state"), "unknown")
+    if pack.get("unverified_parity_count"):
+        light_label = "unverified parity"
     # Steady Exported / Ready-to-export is already on the button; only surface
     # progress, failure, or a save/reload result the button can't convey.
     note = ""
