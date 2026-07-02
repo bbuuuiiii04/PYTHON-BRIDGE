@@ -176,6 +176,13 @@ validated.
   publication. Fresh export now reports active lanes `algorithm_generalized: 67`,
   `oracle_proven: 16`, `unverified_parity: 0`; inactive unverified documents
   remain reported under `parity_lanes_inactive`.
+- [x] Run the offline time-domain exam against passive capture
+  `parity_20260701T185231Z`; see
+  `docs/research/soundswitch/soundswitch_time_domain_exam_2026_07.md`. It
+  measured scripted timing mostly within one wire frame but found named
+  scripted/autoloop timing outliers and left static, rewind, playback-edge,
+  pitch-change, transition, active-deck, and MIDI behavior for the targeted live
+  U0/U1 exam.
 - [ ] Run the Art-Net U0/U1 truth-check capture exam with SoundSwitch U0 as
   ground truth, bridge U1 shadow output, fresh sidecar/run ID, full coverage, and
   `tools/artnet_compare.py --self-check` already passing.
