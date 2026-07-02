@@ -344,7 +344,7 @@ class RBStateReader(threading.Thread):
                 self._enqueue(BridgeEvent(
                     kind=Ev.ANLZ_PATH,
                     deck=bridge,
-                    payload={'anlz_path': anlz},
+                    payload={'anlz_path': anlz, 'rb_raw_deck': d},
                     source='rb_state',
                 ))
         elif anlz:
@@ -359,11 +359,11 @@ class RBStateReader(threading.Thread):
             if title and title != self._last_track.get(d):
                 self._last_track[d] = title
                 if self._shadow_logs_enabled or Ev.TRACK_LOADED in self._authoritative_kinds:
-                    log.info("[TITLE][DIRECT] deck=%d title=%r", bridge, title)
+                    log.info("[TITLE][DIRECT] deck=%d rb_idx=%d title=%r", bridge, d, title)
                 self._enqueue(BridgeEvent(
                     kind=Ev.TRACK_LOADED,
                     deck=bridge,
-                    payload={'title': title},
+                    payload={'title': title, 'rb_raw_deck': d},
                     source='rb_state',
                 ))
             elif not title:

@@ -71,6 +71,18 @@ reload-command drift, missed one-shot auto-enable retry, or
 private-data leaks. The tests use fake/
 injected hardware seams. They do not prove Enttec/fixture behavior.
 
+The 2026-07-02 parity-finalization fixes add: idle manual-overlay driver tests
+(`PackDriverIdleManualOverlayTests`) proving static press/release and blackout
+stay operator-controlled at `active_deck` 0 with truthful status/truth-intent;
+a playing-scrub latch test (`PackDriverScrubLatchTests`) proving a waveform
+drag holds the automatic base dark and resumes after settling; playing-sibling
+load-guard tests (`PlayingSiblingLoadGuardTests`) proving an idle-sibling
+`TRACK_LOADED`/`ANLZ_PATH` cannot clobber a playing deck while owner loads and
+fail-open cases still pass (all in `tests/test_state_manager_pack_driver.py`);
+and selection-beat anchor tests in `tests/test_native_autoloop_resolver.py`
+(mid-grid trigger anchors phase 0 at the selection beat, negative-beat clamp,
+plus the corrected latch/non-32-cycle expectations).
+
 Art-Net truth-check tests add `tests/test_artnet_truth.py`,
 `tests/test_artnet_compare.py`, startup coverage in
 `tests/test_soundswitch_pack_startup.py`, and connected-shadow coverage in

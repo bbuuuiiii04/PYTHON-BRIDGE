@@ -1855,5 +1855,133 @@ class PackDriverInnerTickTests(unittest.TestCase):
         self.assertEqual(self.sm._os.lighting_mode, "idle")
 
 
+class PackDriverIdleManualOverlayTests(unittest.TestCase):
+    """Manual static/blackout stays operator-controlled during idle (active_deck
+    0): presses/releases/blackout keep applying while the automatic base is
+    cleared. Live 2026-07-02 gap: the driver's idle branch never read the MIDI
+    snapshot, so pads went dead between tracks."""
+
+    def test_static_press_and_release_during_idle(self):
+        be = _FakeBackend()
+        inp = _FakeInput()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        _set(sm, active=0)
+        sm._drive_pack_output(now=10.0)
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        inp._snap.held_layers = _layer_tuple(8)   # pad pressed mid-idle
+        sm._drive_pack_output(now=10.1)
+        self.assertEqual(be.frames[-1][0], 200)
+        self.assertTrue(sm._pack_status_snapshot["static_held"])
+        self.assertEqual(sm._pack_status_snapshot["operational_state"], "static_held")
+        inp._snap.held_layers = ()                # pad released mid-idle
+        sm._drive_pack_output(now=10.2)
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        self.assertFalse(sm._pack_status_snapshot["static_held"])
+
+    def test_blackout_during_idle_wins_over_held_static(self):
+        be = _FakeBackend()
+        inp = _FakeInput(held_layer_slot=8)
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        _set(sm, active=0)
+        sm._drive_pack_output(now=10.0)
+        self.assertEqual(be.frames[-1][0], 200)
+        inp._snap.blackout_held = True            # blackout pressed mid-idle
+        sm._drive_pack_output(now=10.1)
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        self.assertTrue(sm._pack_status_snapshot["blackout"])
+        self.assertEqual(sm._pack_status_snapshot["operational_state"], "blackout")
+        inp._snap.blackout_held = False
+        sm._drive_pack_output(now=10.2)
+        self.assertEqual(be.frames[-1][0], 200)
+
+    def test_idle_truth_intent_reports_manual_overlay(self):
+        be = _FakeBackend()
+        ts = _FakeTruthSink()
+        inp = _FakeInput(held_layer_slot=8)
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be,
+                      midi_input=inp, truth_sink=ts)
+        _set(sm, active=0)
+        sm._drive_pack_output(now=10.0)
+        self.assertTrue(ts.intents[-1]["static_held"])
+        self.assertEqual(ts.intents[-1]["static_slots"], [8])
+        self.assertEqual(ts.intents[-1]["mode"], "static")
+
+
+class PackDriverScrubLatchTests(unittest.TestCase):
+    """A playing waveform drag (per-tick elapsed jumps far beyond real playback)
+    must hold the automatic base dark like SoundSwitch, then resume shortly
+    after the drag settles — not strobe through every scrubbed cue."""
+
+    def test_playing_drag_scrub_stays_dark_until_settled(self):
+        be = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be)
+        _set(sm, ssid=SSID, elapsed_ms=50, playing=True)
+        sm._drive_pack_output(now=10.0)
+        self.assertEqual(be.frames[-1][0], 9)
+        # drag: successive 500-1100 ms jumps (below the 2000 ms seek threshold)
+        for elapsed, now in ((550, 10.005), (1650, 10.010), (2200, 10.015)):
+            _set(sm, ssid=SSID, elapsed_ms=elapsed, playing=True)
+            sm._drive_pack_output(now=now)
+            self.assertEqual(be.frames[-1], ZERO_FRAME)
+        # still dark inside the hold even once position advances normally
+        _set(sm, ssid=SSID, elapsed_ms=2205, playing=True)
+        sm._drive_pack_output(now=10.020)
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        # resumes rendering after the hold expires
+        _set(sm, ssid=SSID, elapsed_ms=2400, playing=True)
+        sm._drive_pack_output(now=10.7)
+        self.assertEqual(be.frames[-1][0], 9)
+
+
+class PlayingSiblingLoadGuardTests(unittest.TestCase):
+    """RB decks 1&3 share bridge deck 1: a transient load surfacing on the idle
+    sibling must not clobber the playing deck's metadata (live 2026-07-02
+    Wanton→BLACKPINK→Wanton flap armed the wrong scripted show mid-autoloop)."""
+
+    def setUp(self):
+        self.backend = _FakeBackend()
+        self.sm = _make_sm(player=LaserPackPlayer(_pack()), backend=self.backend)
+
+    def _event(self, kind, deck=1, payload=None):
+        self.sm._handle_event(BridgeEvent(
+            kind=kind, deck=deck, payload=payload or {}, source="sibling-test",
+        ))
+
+    def test_sibling_load_ignored_while_owner_playing(self):
+        self._event(Ev.TRACK_LOADED, 1, {"title": "wanton", "rb_raw_deck": 0})
+        gen = self.sm._deck[1].load_gen
+        self._event(Ev.PLAY, 1, {"rb_raw_deck": 0})
+        self.assertTrue(self.sm._deck[1].playing)
+        self._event(Ev.ANLZ_PATH, 1, {"anlz_path": "/x/blackpink.DAT", "rb_raw_deck": 2})
+        self._event(Ev.TRACK_LOADED, 1, {"title": "blackpink", "rb_raw_deck": 2})
+        self.assertEqual(self.sm._deck[1].load_gen, gen)
+        self.assertEqual(self.sm._deck[1].track_title_hint, "wanton")
+        self.assertNotEqual(self.sm._pending_anlz_path.get(1), "/x/blackpink.DAT")
+
+    def test_owner_load_accepted_while_playing(self):
+        self._event(Ev.TRACK_LOADED, 1, {"title": "wanton", "rb_raw_deck": 0})
+        gen = self.sm._deck[1].load_gen
+        self._event(Ev.PLAY, 1, {"rb_raw_deck": 0})
+        self._event(Ev.TRACK_LOADED, 1, {"title": "next", "rb_raw_deck": 0})
+        self.assertEqual(self.sm._deck[1].load_gen, gen + 1)
+        self.assertEqual(self.sm._deck[1].track_title_hint, "next")
+
+    def test_sibling_load_accepted_when_not_playing(self):
+        self._event(Ev.TRACK_LOADED, 1, {"title": "wanton", "rb_raw_deck": 0})
+        gen = self.sm._deck[1].load_gen
+        self._event(Ev.PLAY, 1, {"rb_raw_deck": 0})
+        self._event(Ev.PAUSE, 1, {"rb_raw_deck": 0})
+        self._event(Ev.TRACK_LOADED, 1, {"title": "blackpink", "rb_raw_deck": 2})
+        self.assertEqual(self.sm._deck[1].load_gen, gen + 1)
+        self.assertEqual(self.sm._deck[1].track_title_hint, "blackpink")
+
+    def test_load_without_raw_deck_accepted_fail_open(self):
+        self._event(Ev.TRACK_LOADED, 1, {"title": "wanton", "rb_raw_deck": 0})
+        gen = self.sm._deck[1].load_gen
+        self._event(Ev.PLAY, 1, {"rb_raw_deck": 0})
+        self._event(Ev.TRACK_LOADED, 1, {"title": "osc-load"})
+        self.assertEqual(self.sm._deck[1].load_gen, gen + 1)
+
+
 if __name__ == "__main__":
     unittest.main()

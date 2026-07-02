@@ -120,7 +120,12 @@ class NativeAutoloopResolverTests(unittest.TestCase):
 
         self.assertEqual(decision.status, "rendering_active")
         self.assertEqual(decision.target_identity, "SSAutoLoop4.ssfile")
-        self.assertEqual(decision.phase_tick, 6900)
+        # Selection-anchored phase (SS buildAutoLoopForStartingBeat semantics):
+        # armed at abs_beat 10.0 -> anchor int(10.0)=10; at 11.5 -> 1.5 beats
+        # * 600 = 900 ticks. (The old absolute-32-grid expectation, 6900, is the
+        # disproven contract: 2026-07-02 U0/U1 capture showed 16-beat offset
+        # bursts exactly when triggers landed at beat % 32 == 16.)
+        self.assertEqual(decision.phase_tick, 900)
 
     def test_same_scene_refire_and_role_change_reanchor(self) -> None:
         resolver = NativeAutoloopResolver()
@@ -199,10 +204,67 @@ class NativeAutoloopResolverTests(unittest.TestCase):
             soundswitch_present=False,
             abs_beat_pos=47.5,
         )
-        self.assertEqual(decision.window_start, 32.0)
+        # Selection-anchored: armed at abs_beat 34.0 -> window_start int(34.0)=34
+        # (not the 16-beat grid tile 32); at 47.5 -> 13.5 beats * 600 = 8100.
+        self.assertEqual(decision.window_start, 34.0)
         self.assertEqual(decision.beat_count, 16)
         self.assertEqual(decision.cycle_ticks, 9600)
-        self.assertEqual(decision.phase_tick, 9300)
+        self.assertEqual(decision.phase_tick, 8100)
+
+    def test_mid_grid_trigger_anchors_at_selection_beat(self) -> None:
+        """2026-07-02 capture fingerprint: a trigger at beat 80 (% 32 == 16)
+        must start the loop at phase 0 like SoundSwitch, not 16 beats into the
+        absolute 32-beat grid tile (the grid anchor produced exactly-16-beat
+        mismatch bursts that ended at the next 32-aligned trigger)."""
+        resolver = NativeAutoloopResolver()
+        decision = resolver.resolve(
+            pack_sha12="abc",
+            bindings={(0, 96): _binding()},
+            scene=_scene(),
+            lighting_mode="autoloop",
+            scripted_active=False,
+            playing=True,
+            fresh=True,
+            track_changed=False,
+            discontinuity=False,
+            soundswitch_present=False,
+            abs_beat_pos=80.01,
+        )
+        self.assertEqual(decision.window_start, 80.0)
+        self.assertEqual(decision.phase_tick, 6)  # (80.01 - 80) * 600
+        held = resolver.resolve(
+            pack_sha12="abc",
+            bindings={(0, 96): _binding()},
+            scene=None,
+            lighting_mode="autoloop",
+            scripted_active=False,
+            playing=True,
+            fresh=True,
+            track_changed=False,
+            discontinuity=False,
+            soundswitch_present=False,
+            abs_beat_pos=96.0,
+        )
+        self.assertEqual(held.phase_tick, 9600)  # (96 - 80) * 600
+
+    def test_negative_beat_anchor_clamps_to_zero(self) -> None:
+        resolver = NativeAutoloopResolver()
+        decision = resolver.resolve(
+            pack_sha12="abc",
+            bindings={(0, 96): _binding()},
+            scene=_scene(),
+            lighting_mode="autoloop",
+            scripted_active=False,
+            playing=True,
+            fresh=True,
+            track_changed=False,
+            discontinuity=False,
+            soundswitch_present=False,
+            abs_beat_pos=-0.5,
+        )
+        # SS clamps the build beat non-negative; pre-roll wraps mod beat_count.
+        self.assertEqual(decision.window_start, 0.0)
+        self.assertEqual(decision.phase_tick, int((-0.5 % 32) * 600))
 
     def test_missing_binding_and_ineligible_clear_state(self) -> None:
         resolver = NativeAutoloopResolver()

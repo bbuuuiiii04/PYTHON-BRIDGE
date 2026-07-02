@@ -37,7 +37,12 @@ Audited against implementation commit `3f4bcc0` on 2026-07-02.
   Autoloop cycle from zero with signed negative pre-roll and current-cycle
   events, resolves only canonical-pack Autoloop bindings, fails closed on
   missing/unsupported content, preserves scripted/static/blackout precedence,
-  and remains suppressed while SoundSwitch is present. Phase calibration,
+  and remains suppressed while SoundSwitch is present. The loop window anchors
+  at the integer-truncated selection beat and tiles `beat_count` from that
+  anchor (SoundSwitch `buildAutoLoopForStartingBeat` semantics) — not at the
+  absolute 32-beat beatgrid tile, which the 2026-07-02 live U0/U1 capture
+  disproved via exactly-16-beat mismatch bursts on mid-grid triggers. Phase
+  calibration,
   live runtime validation, and
   hardware validation remain separate gates.
 - The direct-DMX lane remains hardware-unvalidated. The reviewed operator procedure requires an
@@ -153,6 +158,12 @@ Audited against implementation commit `3f4bcc0` on 2026-07-02.
   `load_gen`.
 - Resolver and ANLZ worker results must carry `load_gen`; stale generations are
   ignored.
+- `ANLZ_PATH`/`TRACK_LOADED` carry `rb_raw_deck` (the RB deck index 0-3). While
+  a bridge deck is playing, a load/anlz event from the idle sibling RB deck
+  (1&3 share bridge 1, 2&4 share bridge 2) is ignored
+  (`StateManager._is_playing_sibling_load`) — a transient sibling buffer write
+  must not clobber the playing deck's metadata. Events without `rb_raw_deck`,
+  or with no recorded play owner, pass unchanged (fail-open).
 
 ## Position And Timing
 

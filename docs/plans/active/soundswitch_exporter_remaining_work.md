@@ -50,6 +50,34 @@ MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 | Art-Net truth-check gate | Implemented as a temporary default-off final-retirement measurement path. `RBSS_ARTNET_TRUTH_CHECK=1` plus a valid `RBSS_ARTNET_UNIVERSE` builds pack rendering without Enttec, emits bridge shadow-render ArtDMX U1 with JSONL sidecar evidence, and keeps production pack output software-zero while SoundSwitch is connected. `tools/artnet_compare.py --self-check` is software-tested with synthetic traces, and the live coverage ledger now requires matched sidecar rows for normalized scripted timeline events/rapid pairs, Autoloop visible/authored-dark phase buckets based on each loop's cycle, static/blackout overlay-release combinations, and active-deck/mode transition directions. Denser U1 streams are allowed only through ordered nearest-neighbor matches with valid sidecar evidence for every captured U1 packet, and extra U1 rows do not satisfy coverage. The actual U0/U1 capture exam is not yet run, so no PASS or hardware claim exists. |
 | Physical hardware | Unvalidated. No committed real-run evidence file exists. |
 
+### 2026-07-02 software finalization pass (Fable one-shot)
+
+Four runtime fixes landed from the live truth-exam/evening-capture evidence,
+each with regression tests (suite green, proof gate re-run 29/0/0):
+
+1. **Native Autoloop window anchor** (`native_autoloop_resolver.py`): the loop
+   window now anchors at the integer-truncated selection beat (SoundSwitch
+   `buildAutoLoopForStartingBeat` semantics) instead of the absolute 32-beat
+   beatgrid tile. The grid anchor — introduced 2026-07-02 00:19 from the Ghidra
+   Q4 tiling implication — was disproven the same day by live U0/U1 capture:
+   triggers at `beat % 32 == 16` produced exactly-16-beat phase-offset mismatch
+   bursts ending at the next 32-aligned trigger. See the Q4 anchor correction
+   addendum in `soundswitch_perfect_parity_ghidra_evidence.md`.
+2. **Manual overlay during idle** (`state_manager.py` pack driver): the
+   static/blackout MIDI snapshot is now read on every driver path including
+   `active_deck` 0, so pads stay operator-controlled between tracks; idle truth
+   intent and status now report the manual overlay truthfully.
+3. **Playing-deck scrub/seek latch** (`state_manager.py`): per-tick elapsed
+   jumps >= `_PACK_SCRUB_JUMP_MS` (400 ms) while playing hold the automatic base
+   dark until `_PACK_SCRUB_HOLD_S` (0.6 s) after the last jump — SoundSwitch
+   stays dark through a waveform drag; the pack no longer strobes through
+   scrubbed cues. Paused seeks keep RW-2 semantics.
+4. **Playing-sibling load guard** (`rb_state_reader.py` + `state_manager.py`):
+   `ANLZ_PATH`/`TRACK_LOADED` now carry `rb_raw_deck`, and a load surfacing on
+   the idle RB sibling of a playing bridge deck is ignored — closing the live
+   deck-1 Wanton→BLACKPINK→Wanton metadata flap that armed and tore down the
+   wrong scripted show mid-autoloop.
+
 The old 29 PASS / 0 FAIL / 0 INCOMPLETE proof record remains closure evidence
 for its recorded source snapshot only. Live export now reconciles the saved
 project dynamically, while the old snapshot totals are enforced only when proof

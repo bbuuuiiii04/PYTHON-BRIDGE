@@ -364,3 +364,26 @@ reconciliation recorded above:
   the first identity's value block lives in the venue file's unparsed head region (recovered: the
   cue named `OFF` writes all zeros); a `01000000` marker separates each value block from the next
   record (232/232 gaps).
+
+## Q4 anchor correction addendum — 2026-07-02 evening (Q4 mechanism unchanged; its Codex implication is superseded)
+
+The Q4 "implication for Codex" above told the bridge to derive `window_start`
+from the absolute beatgrid tiling (`beat0 + k·beatCount`), "not from the
+observed scene-change edge." The live 2026-07-02 U0/U1 truth capture disproved
+that reading for the reselection case the bridge actually drives:
+
+- Triggers landing at `beat % 32 == 16` (e.g. the beat-80 `house_drop_12`
+  note) produced sustained byte-mismatch bursts whose U0/U1 disagreement is
+  exactly a 16-beat phase offset, and which ended precisely at the next
+  32-aligned trigger (beat 96). 32-aligned triggers (beats 96, 128) matched
+  cleanly. That is the fingerprint of a grid anchor diverging from a
+  selection anchor.
+- This is consistent with the Q4 decompile itself: `buildAutoLoopForStartingBeat`
+  sets `start = max(0, (int)beat)` from the beat passed at (re)build time, so
+  every operator/bridge-driven selection re-anchors phase 0 at the selection
+  beat; the pure "tiling from beat 0" behavior applies only while no
+  reselection occurs. The decompiled mechanism was right; the tiling
+  implication drawn from it was wrong for note-driven reselection.
+- The bridge resolver (`native_autoloop_resolver.py`) now anchors
+  `window_start = max(0, int(selection_beat))` and tiles `beat_count` from
+  that anchor via the phase modulo.

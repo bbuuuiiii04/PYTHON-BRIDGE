@@ -55,6 +55,11 @@ Runtime flow:
 - Deck 1/2 transport support fails closed: once a transport path was available,
   becoming unreadable emits `PAUSE` with `reason=transport_unavailable`; raw
   Deck C/D transport remains suppressed for resolver eligibility
+- `ANLZ_PATH` and `TRACK_LOADED` payloads carry `rb_raw_deck` (the raw RB deck
+  index 0-3) so `StateManager` can reject a load surfacing on the idle RB
+  sibling of a playing bridge deck (RB decks 1&3 collapse onto bridge deck 1,
+  2&4 onto bridge deck 2 via `_bridge_deck`; the reader itself performs no
+  sibling arbitration)
 
 Config:
 - `config.py`

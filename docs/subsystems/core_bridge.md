@@ -73,6 +73,11 @@ Runtime flow:
   `deck_route(0)` or index `self._deck[0]`; entering idle also runs the existing
   fixed-deck SoundSwitch/OS2L clear/off body so stale previous-deck output is
   cleared without routing deck 0
+- while a bridge deck is playing, `TRACK_LOADED`/`ANLZ_PATH` events whose
+  `rb_raw_deck` differs from the RB deck that last drove `PLAY` are ignored
+  (`_is_playing_sibling_load`) so a transient idle-sibling buffer write cannot
+  clobber the playing deck's metadata or arm the wrong scripted show; events
+  without `rb_raw_deck` pass unchanged (fail-open)
 
 Config:
 - `config.py`

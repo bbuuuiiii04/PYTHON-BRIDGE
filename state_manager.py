@@ -124,6 +124,13 @@ _TC_LATENCY_WARN_MS = 250.0
 # should flag elapsed discontinuity. Err HIGH — a missed discontinuity just renders
 # the scripted frame at the new position; a false one ZEROs one tick.
 _PACK_SEEK_JUMP_MS = 2000
+# One-tick elapsed delta that cannot be real 1x playback (drag-scrub steps in the
+# 2026-07-02 capture were 408-1295 ms/tick; real playback is <=~20 ms/tick), and
+# how long the automatic base stays dark after the last such jump. SoundSwitch
+# stays dark through a waveform scrub and re-shows shortly after it settles; the
+# pack must not strobe through 100+ s of cues during a drag.
+_PACK_SCRUB_JUMP_MS = 400
+_PACK_SCRUB_HOLD_S = 0.6
 LIVE_BPM_FOLLOW_ENV = "RBSS_LIVE_BPM_FOLLOW"
 AUTOLOOP_MASTER_PHRASE_ARM_ENV = "RBSS_AUTOLOOP_MASTER_PHRASE_ARM"
 SMART_DROP_ENV = "RBSS_SMART_DROP"
@@ -414,6 +421,7 @@ class StateManager:
         # Push-thread-owned driver trackers (NOT part of the swappable bundle).
         self._pack_last_load_gen: tuple[int, int] | None = None   # (active, load_gen)
         self._pack_last_elapsed_ms: int | None = None
+        self._pack_scrub_hold_until: float = 0.0
         self._pack_last_static_layers: tuple[Any, ...] = ()
         self._pack_last_mail_drop_count: int = 0      # RW-4: monotonic mailbox-drop baseline
         self._pack_input_degraded_latched: bool = False  # RW-4: unified input-degradation latch
@@ -594,6 +602,13 @@ class StateManager:
         # consumed by _on_track_loaded to skip lsof
         self._pending_anlz_path: dict[int, str] = {}
         self._loaded_anlz_path: dict[int, tuple[str, int]] = {}
+
+        # RB raw deck index (0-3) that last drove PLAY per bridge deck. Two RB
+        # decks share one bridge slot (1&3→1, 2&4→2); while the owning RB deck
+        # is playing, a transient load surfacing on its idle sibling must not
+        # clobber the playing deck's metadata (live 2026-07-02: Wanton→
+        # BLACKPINK→Wanton flap mid-autoloop armed the wrong scripted show).
+        self._deck_play_owner: dict[int, int] = {}
 
         # Guards stale lsof results: each TRACK_LOADED increments this per deck
         # FilepathResolver echoes load_gen back in FILEPATH_RESOLVED
@@ -1297,6 +1312,12 @@ class StateManager:
             if d not in (1, 2):
                 log.info("[SM] load-ignored  deck=%s  reason=invalid_deck", d)
                 return
+            if self._is_playing_sibling_load(d, ev):
+                log.info(
+                    "[SM] load-ignored  deck=%d  reason=playing_sibling  rb_raw_deck=%s",
+                    d, ev.payload.get("rb_raw_deck"),
+                )
+                return
             self._on_track_loaded(d, ev.payload.get("title", ""), ev)
 
         elif ev.kind == Ev.PLAY:
@@ -1304,6 +1325,9 @@ class StateManager:
                 return
             if not self._deck[d].playing:
                 log.info("[SM] play  deck=%d  src=%s", d, ev.source)
+            raw_deck = ev.payload.get("rb_raw_deck")
+            if type(raw_deck) is int:
+                self._deck_play_owner[d] = raw_deck
             self._deck[d].playing = True
             self._rerun_active_deck_resolver("play")
 
@@ -1326,6 +1350,12 @@ class StateManager:
         elif ev.kind == Ev.ANLZ_PATH:
             if d not in (1, 2):
                 log.info("[SM] anlz-path-ignored  deck=%s  reason=invalid_deck", d)
+                return
+            if self._is_playing_sibling_load(d, ev):
+                log.info(
+                    "[SM] anlz-path-ignored  deck=%d  reason=playing_sibling  rb_raw_deck=%s",
+                    d, ev.payload.get("rb_raw_deck"),
+                )
                 return
             # Store ANLZ path; consumed by next TRACK_LOADED for this deck
             self._pending_anlz_path[ev.deck] = ev.payload.get('anlz_path', '')
@@ -2958,6 +2988,25 @@ class StateManager:
 
     # ── Track load → lsof trigger ─────────────────────────────────────────────
 
+    def _is_playing_sibling_load(self, deck: int, ev: BridgeEvent) -> bool:
+        """True when a load/anlz event comes from the idle RB sibling of a deck
+        whose owning RB deck is currently playing.
+
+        RB decks 1&3 share bridge deck 1 (2&4 share 2). The reader diffs each RB
+        deck's buffers independently, so a transient title/anlz write on the idle
+        sibling emits events onto the playing bridge slot and clobbers its
+        metadata (observed live 2026-07-02: mid-autoloop Wanton→BLACKPINK→Wanton
+        flap armed and then tore down the wrong scripted show). A real load onto
+        the playing RB deck itself is unaffected (RB stops the deck on load, and
+        same-owner events always pass). Fail-open: events without rb_raw_deck, or
+        with no recorded play owner, are accepted unchanged.
+        """
+        if not self._deck[deck].playing:
+            return False
+        raw_deck = ev.payload.get("rb_raw_deck")
+        owner = self._deck_play_owner.get(deck)
+        return type(raw_deck) is int and type(owner) is int and raw_deck != owner
+
     def _on_track_loaded(self, deck: int, title: str, ev: BridgeEvent) -> None:
         d = self._deck[deck]
         d.meta.clear()
@@ -3838,50 +3887,6 @@ class StateManager:
                 backend.submit_frame(_PACK_ZERO_FRAME)
                 return
 
-            active = self._os.active_deck
-            if active not in (1, 2):
-                player.clear_selection()
-                frame = player.render().frame
-                self._pack_frame_count += 1
-                self._enqueue_pack_truth_frame(
-                    runtime=rt,
-                    frame=frame,
-                    intent=self._pack_truth_intent(
-                        active_deck=active,
-                        lighting_mode=self._os.lighting_mode,
-                        scripted_active=False,
-                    ),
-                )
-                if soundswitch_connected:
-                    self._publish_pack_status(
-                        runtime=rt,
-                        scripted_active=False,
-                        input_degraded=False,
-                        static_held=False,
-                        blackout=False,
-                        autoloop_phase_blocked=True,
-                        software_zero_frame=True,
-                        native_autoloop=NativeAutoloopDecision(
-                            "soundswitch_present_native_suppressed",
-                            reason="soundswitch_present",
-                        ),
-                    )
-                    backend.submit_frame(_PACK_ZERO_FRAME)
-                    return
-                self._publish_pack_status(
-                    runtime=rt,
-                    scripted_active=False,
-                    input_degraded=False,
-                    static_held=False,
-                    blackout=False,
-                    autoloop_phase_blocked=False,
-                    software_zero_frame=frame == _PACK_ZERO_FRAME,
-                )
-                backend.submit_frame(frame)
-                return
-            d = self._deck[active]
-            snap = self._cache.get(active)
-
             # 1. Controller masks + static overrides (in-memory snapshot; no I/O).
             #    RW-4: an UNHEALTHY controller drops its MANUAL OVERLAY ONLY (held
             #    Static Look + blackout forced released); the automatic scripted base
@@ -3926,6 +3931,59 @@ class StateManager:
                 if layers != self._pack_last_static_layers:
                     player.set_static_layers(layers)
                     self._pack_last_static_layers = layers
+            input_degraded = midi_input is not None and not input_healthy
+
+            # 1b. No active deck (idle between tracks): the manual overlay above stays
+            #     operator-controlled — presses/releases/toggles/blackout keep applying
+            #     while the automatic base is cleared. Held static stands alone during
+            #     idle and still loses to blackout (manual-static policy).
+            active = self._os.active_deck
+            if active not in (1, 2):
+                player.clear_selection()
+                frame = player.render().frame
+                self._pack_frame_count += 1
+                self._enqueue_pack_truth_frame(
+                    runtime=rt,
+                    frame=frame,
+                    intent=self._pack_truth_intent(
+                        active_deck=active,
+                        lighting_mode=self._os.lighting_mode,
+                        scripted_active=False,
+                        input_degraded=input_degraded,
+                        static_layers=layers,
+                        blackout=blackout,
+                        blackout_bindings=blackout_bindings,
+                    ),
+                )
+                if soundswitch_connected:
+                    self._publish_pack_status(
+                        runtime=rt,
+                        scripted_active=False,
+                        input_degraded=False,
+                        static_held=False,
+                        blackout=False,
+                        autoloop_phase_blocked=True,
+                        software_zero_frame=True,
+                        native_autoloop=NativeAutoloopDecision(
+                            "soundswitch_present_native_suppressed",
+                            reason="soundswitch_present",
+                        ),
+                    )
+                    backend.submit_frame(_PACK_ZERO_FRAME)
+                    return
+                self._publish_pack_status(
+                    runtime=rt,
+                    scripted_active=False,
+                    input_degraded=input_degraded,
+                    static_held=bool(layers),
+                    blackout=bool(blackout),
+                    autoloop_phase_blocked=False,
+                    software_zero_frame=frame == _PACK_ZERO_FRAME,
+                )
+                backend.submit_frame(frame)
+                return
+            d = self._deck[active]
+            snap = self._cache.get(active)
 
             # 2. Derive the happy-path gate (fail-conservative; uncertain ⇒ ZERO base).
             load_key = (active, int(getattr(d, "load_gen", 0)))
@@ -3934,14 +3992,26 @@ class StateManager:
             )
             self._pack_last_load_gen = load_key
             elapsed_ms = max(0, int(getattr(d, "elapsed_ms", 0) or 0))
+            playing = bool(getattr(d, "playing", False))
+            delta_ms = (
+                abs(elapsed_ms - self._pack_last_elapsed_ms)
+                if not track_changed and self._pack_last_elapsed_ms is not None
+                else 0
+            )
+            if delta_ms >= _PACK_SCRUB_JUMP_MS and playing:
+                # Scrub/seek latch (playing only): each impossible-for-playback
+                # jump re-arms a short dark hold, so a sustained waveform drag
+                # stays dark (like SoundSwitch) instead of strobing through every
+                # scrubbed cue; rendering resumes _PACK_SCRUB_HOLD_S after the
+                # last jump. Paused seeks keep RW-2 semantics (one-tick zero on a
+                # >=_PACK_SEEK_JUMP_MS jump, then the pause-hold re-render).
+                self._pack_scrub_hold_until = now + _PACK_SCRUB_HOLD_S
             discont = (
-                not track_changed
-                and self._pack_last_elapsed_ms is not None
-                and abs(elapsed_ms - self._pack_last_elapsed_ms) >= _PACK_SEEK_JUMP_MS
+                delta_ms >= _PACK_SEEK_JUMP_MS
+                or (not track_changed and playing and now < self._pack_scrub_hold_until)
             )
             self._pack_last_elapsed_ms = elapsed_ms
             fresh = not (snap is None or snap.is_stale(MEM_STALE_S))
-            playing = bool(getattr(d, "playing", False))
             ssid = getattr(getattr(d, "meta", None), "soundswitch_id", "") or ""
             norm_ssid = _pack_normalize_id(ssid)              # RW-3: capture once
             metadata_ready = norm_ssid is not None
@@ -4090,7 +4160,6 @@ class StateManager:
             frame = player.render().frame
             native_status = native_decision.status
             self._pack_frame_count += 1
-            input_degraded = midi_input is not None and not input_healthy
             self._enqueue_pack_truth_frame(
                 runtime=rt,
                 frame=frame,

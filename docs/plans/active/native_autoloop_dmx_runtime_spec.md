@@ -312,11 +312,16 @@ Latched selection model:
    - if none is held yet (waiting for the first edge after a reset / master
      switch): status `software_zero_frame` (mirrors `hold_blackout_mask`).
 
-Phase, computed only when an identity is held:
+Phase, computed only when an identity is held (2026-07-02: the window anchors
+at the INTEGER-TRUNCATED selection beat, `max(0, int(anchor_beat))`, matching
+SoundSwitch `buildAutoLoopForStartingBeat`'s `(int)beat` clamp; an interim
+absolute-32-beat-grid anchor was disproven by the live U0/U1 capture's
+exactly-16-beat mismatch bursts on mid-grid triggers):
 
 ```python
-phase_tick = round(((abs_beat_pos - anchor_beat + phase_offset_beats) % 32)
-                   * AUTOLOOP_TICKS_PER_BEAT)
+window_start = max(0, int(anchor_beat))
+phase_tick = int(((abs_beat_pos - window_start + phase_offset_beats) % beat_count)
+                 * AUTOLOOP_TICKS_PER_BEAT)
 ```
 
 Decision output: `status` (one of `rendering_active`, `empty_dark_look`,

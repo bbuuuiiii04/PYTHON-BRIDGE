@@ -1,7 +1,6 @@
 """I/O-free native SoundSwitch Autoloop selection and phase resolver."""
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, replace
 from typing import Mapping
 
@@ -74,7 +73,20 @@ class NativeAutoloopDecision:
 
 
 def _window_start(abs_beat_pos: float, beat_count: int) -> float:
-    return math.floor(float(abs_beat_pos) / float(beat_count)) * float(beat_count)
+    """Anchor the loop window at the (integer) selection beat, SoundSwitch-style.
+
+    SS re-anchors phase 0 at the beat where a loop is (re)selected —
+    ``buildAutoLoopForStartingBeat`` sets ``start = max(0, (int)beat)`` — and
+    subsequent windows tile ``beat_count`` from that anchor (the phase modulo
+    below reproduces the expiry re-anchor). This is NOT the absolute 32-beat
+    beatgrid tiling: the 2026-07-02 live U0/U1 capture shows triggers landing at
+    ``beat % 32 == 16`` produced exactly-16-beat phase-offset mismatch bursts
+    that ended precisely at the next ``% 32 == 0`` trigger, while 32-aligned
+    triggers matched cleanly — the fingerprint of a grid anchor diverging from
+    SS's selection anchor.
+    """
+    del beat_count
+    return float(max(0, int(abs_beat_pos)))
 
 
 def _phase_tick(abs_beat_pos: float, window_start: float, phase_offset_beats: float,
