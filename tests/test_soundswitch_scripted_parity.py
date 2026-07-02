@@ -72,6 +72,24 @@ class ParityLaneClassifierTests(unittest.TestCase):
         self.assertEqual(status["unverified_parity_count"], 3)
         self.assertEqual(status["unverified_documents"], ["scripted:a", "autoloop:b", "static:1"])
 
+    def test_runtime_status_exposes_static_binding_gap(self) -> None:
+        pack = LoadedPack(
+            schema_version="1.0.0",
+            manifest_sha256="0" * 64,
+            has_intensity_channel=False,
+            scripted=MappingProxyType({}),
+            autoloops=MappingProxyType({}),
+            static_looks=MappingProxyType({}),
+        )
+        midi_input = SimpleNamespace(status=lambda: {
+            "static_binding_gap": True,
+            "static_binding_gap_count": 1,
+        })
+        runtime = PackRuntime(player=SimpleNamespace(pack=pack), midi_input=midi_input)
+        status = runtime.sanitized_status()
+        self.assertTrue(status["static_binding_gap"])
+        self.assertEqual(status["static_binding_gap_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -176,6 +176,17 @@ class TestRealMidiSource(unittest.TestCase):
             gen.close()
         self.assertEqual(inst.opened, 1)
 
+    def test_real_source_accepts_backend_numbered_exact_port_name(self):
+        fake, inst = self._fake_rtmidi(
+            ["DDJ-800 1"],
+            [([0x99, 8, 100], 0.0)],
+        )
+        with mock.patch.dict(sys.modules, {"rtmidi": fake}):
+            gen = SoundSwitchMidiInputAdapter._make_real_source("DDJ-800")()
+            self.assertEqual(next(gen), (0x99, 8, 100))
+            gen.close()
+        self.assertEqual(inst.opened, 0)
+
     def test_real_source_rejects_substring_only_match(self):
         fake, _ = self._fake_rtmidi(["DDJ-800 Port A", "DDJ-800 Port B"], [])
         with mock.patch.dict(sys.modules, {"rtmidi": fake}):
@@ -201,6 +212,16 @@ class TestRealMidiSource(unittest.TestCase):
 
     def test_non_string_port_entry_counts_absent(self):
         self.assertFalse(SoundSwitchMidiInputAdapter._port_present([None], "DDJ-800"))
+
+    def test_present_then_flapping_port_is_present_when_exact_or_numbered_name_exists(self):
+        self.assertTrue(SoundSwitchMidiInputAdapter._port_present(
+            ["DDJ-800 1", "Other"],
+            "DDJ-800",
+        ))
+        self.assertFalse(SoundSwitchMidiInputAdapter._port_present(
+            ["Other DDJ-800 Port"],
+            "DDJ-800",
+        ))
 
 
 # ---------------------------------------------------------------------------
@@ -751,13 +772,15 @@ class TestInputGroupAutoDetection(unittest.TestCase):
         self.assertEqual(tuple(layer.slot for layer in snapshot.held_layers), (8, 17))
         self.assertLess(snapshot.held_layers[0].seq, snapshot.held_layers[1].seq)
 
-    def test_blackout_only_output_bus_is_not_a_controller_alias_target(self):
-        with self.assertRaisesRegex(ValueError, "static-look"):
-            SoundSwitchMidiInputGroup(
-                (_BLACKOUT,),
-                {IAC: "IAC Driver Bus 1"},
-                adapter_factory=lambda *args, **kwargs: self.fail("must not construct"),
-            )
+    def test_unknown_static_alias_reports_binding_gap_without_adapter(self):
+        group = SoundSwitchMidiInputGroup(
+            (_BLACKOUT,),
+            {IAC: "IAC Driver Bus 1"},
+            adapter_factory=lambda *args, **kwargs: self.fail("must not construct"),
+        )
+        self.assertEqual(group.worker_count, 0)
+        self.assertEqual(group.status()["static_binding_gap_count"], 1)
+        self.assertTrue(group.status()["static_binding_gap"])
 
 
 # ---------------------------------------------------------------------------

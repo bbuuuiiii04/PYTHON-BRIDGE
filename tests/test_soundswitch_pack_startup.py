@@ -512,7 +512,7 @@ class StartupMatrixTests(unittest.TestCase):
 class InputGroupTests(unittest.TestCase):
     binding = PackMidiBinding("DDJ", "note", 0, 7, "static_look", target_slot=8)
 
-    def test_duplicate_port_and_unknown_device_rejected_before_construction(self):
+    def test_duplicate_port_rejected_before_construction_and_unknown_device_reports_gap(self):
         calls = []
         factory = lambda *args, **kwargs: calls.append((args, kwargs))
         with self.assertRaisesRegex(ValueError, "distinct ports"):
@@ -521,9 +521,8 @@ class InputGroupTests(unittest.TestCase):
                                                "static_look", target_slot=16)),
                 {"DDJ": "same", "OTHER": "same"}, adapter_factory=factory,
             )
-        with self.assertRaisesRegex(ValueError, "static-look binding"):
-            SoundSwitchMidiInputGroup((self.binding,), {"UNKNOWN": "port"},
-                                      adapter_factory=factory)
+        group = SoundSwitchMidiInputGroup((self.binding,), {"UNKNOWN": "port"})
+        self.assertEqual(group.status()["static_binding_gap_count"], 1)
         self.assertEqual(calls, [])
 
     def test_start_degrades_and_keeps_sanitized_status(self):

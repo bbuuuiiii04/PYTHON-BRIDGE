@@ -316,9 +316,20 @@ class SoundSwitchMidiInputAdapter:
                 log.debug("[SS-MIDI] note-off for non-render kind=%s (no-op)", kind)
 
     @staticmethod
+    def _port_name_matches(candidate: object, port_name: str) -> bool:
+        if not isinstance(candidate, str):
+            return False
+        name = " ".join(candidate.split())
+        target = " ".join(port_name.split())
+        if name == target:
+            return True
+        suffix = name.removeprefix(target)
+        return bool(suffix) and suffix.strip().isdecimal()
+
+    @staticmethod
     def _exact_port_index(ports: Sequence[object], port_name: str) -> int | None:
         matches = [i for i, name in enumerate(ports)
-                   if isinstance(name, str) and name == port_name]
+                   if SoundSwitchMidiInputAdapter._port_name_matches(name, port_name)]
         return matches[0] if len(matches) == 1 else None
 
     @staticmethod
@@ -530,9 +541,7 @@ class SoundSwitchMidiInputGroup:
         }
         if len(set(aliases.values())) != len(aliases):
             raise ValueError("controller input aliases must own distinct ports")
-        unknown = sorted(set(aliases) - input_devices)
-        if unknown:
-            raise ValueError("controller input alias has no verified static-look binding")
+        self._binding_gaps = tuple(sorted(set(aliases) - input_devices))
         self._entries: tuple[tuple[str, str, str, SoundSwitchMidiInputAdapter], ...] = tuple(
             (
                 device_name,
@@ -635,6 +644,8 @@ class SoundSwitchMidiInputGroup:
             "worker_alive": (all(s.worker_alive for s in snapshots) if snapshots else True),
             "has_error": any(s.error for s in snapshots),
             "mail_drop_count": sum(s.mail_drop_count for s in snapshots),
+            "static_binding_gap": bool(self._binding_gaps),
+            "static_binding_gap_count": len(self._binding_gaps),
         }
 
 

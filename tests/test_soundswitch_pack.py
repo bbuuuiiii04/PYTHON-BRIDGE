@@ -334,10 +334,11 @@ class CurrentProjectPackTests(unittest.TestCase):
         selection = json.loads((self.pack / "selection_map.json").read_text())
         self.assertTrue(any(row["resolution"] == "no_project_target"
                             for row in selection["bridge_scenes"]))
-        self.assertEqual(sorted(row["target_index"] for row in selection["learned_controls"]
-                                if row["active"] and row["target_kind"] == "static_look"
-                                and row["device_name"] == "DDJ-800"),
-                         [8, 16, 17, 24])
+        learned_ddj_static = sorted(row["target_index"] for row in selection["learned_controls"]
+                                    if row["active"] and row["target_kind"] == "static_look"
+                                    and row["device_name"] == "DDJ-800")
+        exported_ddj_static = sorted(row["target_index"] for row in selection["ddj_static_overrides"])
+        self.assertEqual(exported_ddj_static, learned_ddj_static)
         self.assertEqual(set(selection["classification_policy"]), {
             "pack_selection", "static_override", "blackout_mask", "bridge_owned_safety",
             "no_project_target", "inactive_report_only", "unsupported_fail_export"})
@@ -365,9 +366,11 @@ class CurrentProjectPackTests(unittest.TestCase):
                      if row["target_kind"] == "static_look" and row["active"]
                      and row["control_classification"] == "static_override"]
         self.assertTrue(all(row["control_classification"] == "static_override" for row in overrides))
+        ddj_overrides = [row for row in overrides if row["device_name"] == "DDJ-800"]
         self.assertEqual(
-            {row["target_index"]: row["interaction_mode"] for row in overrides},
-            {8: "press", 16: "press", 17: "press", 24: "press"},
+            {row["target_index"]: row["interaction_mode"] for row in ddj_overrides},
+            {row["target_index"]: row["interaction_mode"]
+             for row in selection["ddj_static_overrides"]},
         )
         self.assertFalse(any("interaction_mode" in row for row in selection["learned_controls"]
                              if row["target_kind"] != "static_look"))

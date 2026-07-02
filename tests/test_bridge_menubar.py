@@ -552,6 +552,15 @@ class BridgeMenubarTests(unittest.TestCase):
             ),
             "Lighting: scripted active",
         )
+        self.assertEqual(
+            bridge_menubar.pack_export_status_line(
+                {"operational_state": "scripted_active", "static_binding_gap": True},
+                stale=False,
+                export_phase="idle", export_state="idle",
+                export_up_to_date=True,
+            ),
+            "Lighting: static binding gap",
+        )
 
         # Bridge off wins over any stale snapshot content.
         self.assertEqual(

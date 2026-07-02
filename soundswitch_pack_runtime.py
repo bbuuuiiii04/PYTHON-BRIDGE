@@ -43,6 +43,11 @@ class PackRuntime:
         pack = getattr(self.player, "pack", None)
         parity_summary = dict(getattr(pack, "parity_summary", {}) or {})
         unverified = tuple(getattr(pack, "unverified_documents", ()) or ())
+        midi_status = (
+            self.midi_input.status()
+            if self.midi_input is not None and hasattr(self.midi_input, "status")
+            else {}
+        )
         return {
             "available": self.player is not None or self.backend is not None,
             "enabled": bool(self.enabled),
@@ -51,6 +56,8 @@ class PackRuntime:
             "parity_lanes": parity_summary,
             "unverified_parity_count": int(parity_summary.get("unverified_parity", 0)),
             "unverified_documents": list(unverified[:10]),
+            "static_binding_gap": bool(midi_status.get("static_binding_gap", False)),
+            "static_binding_gap_count": int(midi_status.get("static_binding_gap_count", 0) or 0),
             "pack_sha12": self.pack_sha12 or "",
             "pack_sha256": self.pack_sha256 or "",
             "phase_offset_beats": float(self.phase_offset_beats),

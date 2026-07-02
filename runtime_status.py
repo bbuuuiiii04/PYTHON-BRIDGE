@@ -39,6 +39,8 @@ _DEFAULT_PACK_STATUS: dict[str, Any] = {
     },
     "unverified_parity_count": 0,
     "unverified_documents": [],
+    "static_binding_gap": False,
+    "static_binding_gap_count": 0,
     "pack_sha12": "",
     "pack_sha256": "",
     "operational_state": "disabled",
