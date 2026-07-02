@@ -156,6 +156,7 @@ class AutoloopCatalogEntry:
     ordering: int
     app_log_index: int
     file_number: int
+    beat_count: int
     enabled: bool
     display_name: str
     category_index: int

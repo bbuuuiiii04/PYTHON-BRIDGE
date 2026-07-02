@@ -157,7 +157,13 @@ def _look(look: StaticLook, fixture_channels: Iterable[Any]) -> dict[str, Any]:
     }
 
 
-def _document(document: LightingDocument, cues: dict[str, AttributeCue], *, active: bool = True) -> dict[str, Any]:
+def _document(
+    document: LightingDocument,
+    cues: dict[str, AttributeCue],
+    *,
+    active: bool = True,
+    autoloop_metadata: dict[str, int] | None = None,
+) -> dict[str, Any]:
     try:
         boundaries = list(render_document_boundaries(document, cues))
         render_status = "rendered"
@@ -176,7 +182,7 @@ def _document(document: LightingDocument, cues: dict[str, AttributeCue], *, acti
         oracle_report=None,
         generalized_witness_passed=False,
     )
-    return {
+    values = {
         "container_version": document.container_version,
         "cue_dictionary": [asdict(row) for row in document.cue_dictionary],
         "cue_map_offset": document.cue_map_offset,
@@ -197,6 +203,9 @@ def _document(document: LightingDocument, cues: dict[str, AttributeCue], *, acti
         "timeline": [asdict(row) for row in document.timeline],
         "trailer_hex": _hex(document.trailer), "trailer_offset": document.trailer_offset,
     }
+    if autoloop_metadata is not None:
+        values.update(autoloop_metadata)
+    return values
 
 
 def _normalized_ssid(path: str) -> str:
@@ -223,6 +232,17 @@ def _active_union(project: DecodedSoundSwitchProject, active_scripts: set[str]) 
     guids = sorted({event.resolved_cue_guid.lower() for doc in documents for event in doc.timeline
                     if event.resolved_cue_guid in render_guids})
     return guids, sha256_bytes("\n".join(guids).encode("ascii"))
+
+
+def _autoloop_metadata(project: DecodedSoundSwitchProject) -> dict[str, dict[str, int]]:
+    return {
+        f"SSAutoLoop{entry.file_number}.ssfile": {
+            "beat_count": entry.beat_count,
+            "cycle_ticks": entry.beat_count * 600,
+        }
+        for catalog in project.autoloop_catalogs
+        for entry in catalog.entries
+    }
 
 
 def _control_classification(row: ResolvedControlBinding) -> str:
@@ -369,9 +389,17 @@ def compile_pack_artifacts(
         scripted_inventory=[asdict(row) | {"active_existing_path": row.relative_path in active_scripts}
                             for row in sorted(project.scripted_track_classifications,
                                               key=lambda item: item.soundswitch_id)]))
+    autoloop_metadata = _autoloop_metadata(project)
     for doc in sorted(project.autoloops, key=lambda row: int(re.search(r"(\d+)", row.relative_path).group(1))):
         number = int(re.search(r"(\d+)", doc.relative_path).group(1))
-        add(f"autoloops/{number}.json", _root("autoloop", document=_document(doc, cues)))
+        add(f"autoloops/{number}.json", _root(
+            "autoloop",
+            document=_document(
+                doc,
+                cues,
+                autoloop_metadata=autoloop_metadata[doc.relative_path],
+            ),
+        ))
     classes = {row.relative_path: row for row in project.scripted_track_classifications}
     decoded = {row.relative_path: row for row in project.scripted_tracks}
     for path, classification in sorted(classes.items()):

@@ -679,7 +679,7 @@ def decode_catalog(data: bytes, path: str, source_sha256: str | None = None) -> 
             _fail("duplicate_key", "duplicate AppLog index", path, start)
         indices.add(app_index)
         entries.append(AutoloopCatalogEntry(start, ordering, app_index, app_index + 1,
-                                            bool(enabled), name, category_index,
+                                            bars * 4, bool(enabled), name, category_index,
                                             raw_categories[category_index][2]))
     orders = []
     for category_index in range(category_count):

@@ -579,6 +579,13 @@ def verify_pack(
     for artifact in autoloop_paths:
         doc = values[artifact].get("document")
         expected = f"SSAutoLoop{Path(artifact).stem}.ssfile"
+        if not isinstance(doc, dict):
+            _fail(f"missing Autoloop document: {artifact}")
+        beat_count = doc.get("beat_count")
+        cycle_ticks = doc.get("cycle_ticks")
+        if type(beat_count) is not int or type(cycle_ticks) is not int \
+                or beat_count <= 0 or cycle_ticks != beat_count * 600:
+            _fail(f"invalid Autoloop cycle metadata: {artifact}")
         refs_by_source[expected] = _validate_document(doc, expected, cue_patches, source_hashes)
     parsed_scripted = 0
     for artifact in script_paths:

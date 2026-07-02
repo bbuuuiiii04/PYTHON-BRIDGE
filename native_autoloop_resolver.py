@@ -1,6 +1,7 @@
 """I/O-free native SoundSwitch Autoloop selection and phase resolver."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from typing import Mapping
 
@@ -31,6 +32,9 @@ class NativeAutoloopState:
     soundswitch_name: str
     target_identity: str
     anchor_beat: float
+    window_start: float
+    beat_count: int
+    cycle_ticks: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +47,9 @@ class NativeAutoloopDecision:
     soundswitch_name: str = ""
     target_identity: str = ""
     anchor_beat: float | None = None
+    window_start: float | None = None
+    beat_count: int | None = None
+    cycle_ticks: int | None = None
     phase_tick: int | None = None
     reason: str = ""
     diagnostic: str = ""
@@ -56,17 +63,25 @@ class NativeAutoloopDecision:
             "soundswitch_name": self.soundswitch_name,
             "target_identity": self.target_identity,
             "anchor_beat": self.anchor_beat,
+            "window_start": self.window_start,
+            "beat_count": self.beat_count,
+            "cycle_ticks": self.cycle_ticks,
             "phase_tick": self.phase_tick,
             "reason": self.reason,
             "diagnostic": self.diagnostic,
         }
 
 
-def _phase_tick(abs_beat_pos: float, anchor_beat: float, phase_offset_beats: float) -> int:
-    return round(
-        ((float(abs_beat_pos) - float(anchor_beat) + float(phase_offset_beats))
-         % AUTOLOOP_ARM_PHRASE_BEATS)
-        * AUTOLOOP_TICKS_PER_BEAT
+def _window_start(abs_beat_pos: float, beat_count: int) -> float:
+    return math.floor(float(abs_beat_pos) / float(beat_count)) * float(beat_count)
+
+
+def _phase_tick(abs_beat_pos: float, window_start: float, phase_offset_beats: float,
+                beat_count: int) -> int:
+    return int(
+        ((float(abs_beat_pos) - float(window_start) + float(phase_offset_beats))
+         % int(beat_count))
+        * 600
     )
 
 
@@ -79,7 +94,8 @@ def _decision_from_state(
     reason: str,
     diagnostic: str = "",
 ) -> NativeAutoloopDecision:
-    phase_tick = _phase_tick(abs_beat_pos, state.anchor_beat, phase_offset_beats)
+    phase_tick = _phase_tick(abs_beat_pos, state.window_start, phase_offset_beats,
+                             state.beat_count)
     return NativeAutoloopDecision(
         status=status,
         state=state,
@@ -89,6 +105,9 @@ def _decision_from_state(
         soundswitch_name=state.soundswitch_name,
         target_identity=state.target_identity,
         anchor_beat=state.anchor_beat,
+        window_start=state.window_start,
+        beat_count=state.beat_count,
+        cycle_ticks=state.cycle_ticks,
         phase_tick=phase_tick,
         reason=reason,
         diagnostic=diagnostic,
@@ -119,6 +138,9 @@ def finalize_native_autoloop_render(
             soundswitch_name=decision.soundswitch_name,
             target_identity=decision.target_identity,
             anchor_beat=decision.anchor_beat,
+            window_start=decision.window_start,
+            beat_count=decision.beat_count,
+            cycle_ticks=decision.cycle_ticks,
             phase_tick=decision.phase_tick,
             reason=decision.reason,
             diagnostic=diagnostic,
@@ -196,6 +218,9 @@ class NativeAutoloopResolver:
                 soundswitch_name=binding.target_name,
                 target_identity=binding.target_identity,
                 anchor_beat=float(abs_beat_pos),
+                window_start=_window_start(abs_beat_pos, binding.beat_count),
+                beat_count=binding.beat_count,
+                cycle_ticks=binding.cycle_ticks,
             )
 
         if self._state is None:

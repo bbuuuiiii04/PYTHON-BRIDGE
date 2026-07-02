@@ -321,7 +321,7 @@ class IdentityInventoryAndMidiTests(unittest.TestCase):
             decoder.decode_catalog(_empty_catalog(version=999), "synthetic.bin")
 
     def test_catalog_and_static_resolution_and_render_collision(self):
-        entry = AutoloopCatalogEntry(0, 0, 42, 43, True, "renamable", 0, "bank")
+        entry = AutoloopCatalogEntry(0, 0, 42, 43, 32, True, "renamable", 0, "bank")
         catalog = AutoloopCatalog("catalog", "0" * 64, 3, 2,
                                   (AutoloopCategory(0, 0, "bank", True, (42,)),), (entry,))
         empty_look = lambda index: StaticLook(0, 0, index, 5, f"look-{index}", (), (), (), (), ())
@@ -378,7 +378,7 @@ class IdentityInventoryAndMidiTests(unittest.TestCase):
             decoder._resolve_controls((cc_map,), (catalog,), looks, {"SSAutoLoop43.ssfile"}, states)
 
     def test_catalog_autoloop_reconciliation_detects_missing_and_orphan_files(self):
-        entry = AutoloopCatalogEntry(0, 0, 0, 1, True, "one", 0, "bank")
+        entry = AutoloopCatalogEntry(0, 0, 0, 1, 32, True, "one", 0, "bank")
         catalog = AutoloopCatalog("catalog", "0" * 64, 3, 2,
                                   (AutoloopCategory(0, 0, "bank", True, (0,)),), (entry,))
         document = decoder.decode_ssfile(

@@ -60,6 +60,8 @@ class LoadedAutoloopBinding:
     data_byte: int
     target_identity: str
     target_name: str
+    beat_count: int = 32
+    cycle_ticks: int = AUTOLOOP_CYCLE_TICKS
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,7 +455,17 @@ def _autoloop_bindings(
         key = (channel, data_byte)
         if key in bindings:
             _fail("duplicate active Autoloop note binding")
-        bindings[key] = LoadedAutoloopBinding(channel, data_byte, identity, name)
+        cycle_ticks = autoloops[identity].document.cycle_ticks
+        if type(cycle_ticks) is not int or cycle_ticks <= 0 or cycle_ticks % 600 != 0:
+            _fail("active IAC selection references Autoloop without cycle metadata")
+        bindings[key] = LoadedAutoloopBinding(
+            channel,
+            data_byte,
+            identity,
+            name,
+            cycle_ticks // 600,
+            cycle_ticks,
+        )
     return MappingProxyType(bindings)
 
 
@@ -580,9 +592,15 @@ def _document(value: dict[str, Any], cue_patches: Mapping[str, tuple[LoadedAttri
     nodes = value.get("intensity_nodes")
     if not isinstance(nodes, list):
         _fail("document intensity nodes are missing")
+    if autoloop:
+        beat_count = _integer(value.get("beat_count"), f"{relative} beat_count")
+        cycle_ticks = _integer(value.get("cycle_ticks"), f"{relative} cycle_ticks")
+        if beat_count <= 0 or cycle_ticks != beat_count * 600:
+            _fail(f"{relative} autoloop cycle metadata is invalid")
+    else:
+        cycle_ticks = None
     return LoadedDocument(relative, layout, tuple(events), tuple(_intensity(row) for row in nodes),
-                          AUTOLOOP_CYCLE_TICKS if autoloop else None,
-                          lane, evidence)
+                          cycle_ticks, lane, evidence)
 
 
 def load_pack(pack: str | Path) -> LoadedPack:

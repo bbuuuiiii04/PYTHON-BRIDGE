@@ -51,6 +51,14 @@ def _binding(identity: str = "SSAutoLoop4.ssfile", name: str = "Drop 1") -> Load
     return LoadedAutoloopBinding(0, 96, identity, name)
 
 
+def _binding_with_beats(
+    beat_count: int,
+    identity: str = "SSAutoLoop4.ssfile",
+    name: str = "Drop 1",
+) -> LoadedAutoloopBinding:
+    return LoadedAutoloopBinding(0, 96, identity, name, beat_count, beat_count * 600)
+
+
 class NativeAutoloopResolverTests(unittest.TestCase):
     def test_ticks_per_beat_matches_oracle(self) -> None:
         self.assertEqual(AUTOLOOP_TICKS_PER_BEAT, 600)
@@ -77,6 +85,7 @@ class NativeAutoloopResolverTests(unittest.TestCase):
         self.assertEqual(decision.target_identity, "SSAutoLoop4.ssfile")
         self.assertEqual(decision.soundswitch_name, "House Drop")
         self.assertEqual(decision.anchor_beat, 64.0)
+        self.assertEqual(decision.window_start, 64.0)
         self.assertEqual(decision.phase_tick, 0)
 
     def test_latches_across_none_and_advances_phase(self) -> None:
@@ -111,7 +120,7 @@ class NativeAutoloopResolverTests(unittest.TestCase):
 
         self.assertEqual(decision.status, "rendering_active")
         self.assertEqual(decision.target_identity, "SSAutoLoop4.ssfile")
-        self.assertEqual(decision.phase_tick, 900)
+        self.assertEqual(decision.phase_tick, 6900)
 
     def test_same_scene_refire_and_role_change_reanchor(self) -> None:
         resolver = NativeAutoloopResolver()
@@ -161,6 +170,39 @@ class NativeAutoloopResolverTests(unittest.TestCase):
         )
 
         self.assertEqual(decision.phase_tick, 750)
+
+    def test_phase_uses_selected_non_32_beat_cycle_window(self) -> None:
+        resolver = NativeAutoloopResolver()
+        resolver.resolve(
+            pack_sha12="abc",
+            bindings={(0, 96): _binding_with_beats(16)},
+            scene=_scene(),
+            lighting_mode="autoloop",
+            scripted_active=False,
+            playing=True,
+            fresh=True,
+            track_changed=False,
+            discontinuity=False,
+            soundswitch_present=False,
+            abs_beat_pos=34.0,
+        )
+        decision = resolver.resolve(
+            pack_sha12="abc",
+            bindings={(0, 96): _binding_with_beats(16)},
+            scene=None,
+            lighting_mode="autoloop",
+            scripted_active=False,
+            playing=True,
+            fresh=True,
+            track_changed=False,
+            discontinuity=False,
+            soundswitch_present=False,
+            abs_beat_pos=47.5,
+        )
+        self.assertEqual(decision.window_start, 32.0)
+        self.assertEqual(decision.beat_count, 16)
+        self.assertEqual(decision.cycle_ticks, 9600)
+        self.assertEqual(decision.phase_tick, 9300)
 
     def test_missing_binding_and_ineligible_clear_state(self) -> None:
         resolver = NativeAutoloopResolver()
