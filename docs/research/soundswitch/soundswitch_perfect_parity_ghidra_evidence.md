@@ -312,3 +312,16 @@ AE9E3C61 / FC10FC02 / DD42028C divergences — from a **live** GhidraMCP pass, n
   - Per-boundary **U0 value proof** for the resolved cues and the held gap frames — the offline oracle
     (Task C1) against the existing capture, not a decompile.
 - **No new capture, no bridge action, no hardware were required or performed for this packet.**
+
+---
+
+## 2026-07-02 parity-evidence finisher addendum
+
+This packet remains the static/binary evidence boundary, not the runtime proof
+itself. The static addendum confirms SoundSwitch's static/control lookup is
+data-driven and exact enough to support the C6 non-generic assertion path, but
+the accepted runtime proof chain is the passive SoundSwitch U0 capture plus the
+offline oracle/registry lanes. As of code commit `871b5f9`, Static Looks are
+`algorithm_generalized` from the C6 assertion and the documented unavailable
+static windows; no new Ghidra fact promotes scripted or Autoloop blockers, and
+active `unverified_parity` documents still block trusted publication.

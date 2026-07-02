@@ -1013,3 +1013,16 @@ rest fail closed".
   port-gone root cause; the note-96 resolver change; the C7 anchor proof (beatgrid-tiled phase vs
   U0); software-gate output; and the exact operator hardware/kill-path procedure that remains.
   State plainly what is byte-exact-proven vs blocked — no "done" without the oracle evidence.
+
+## 2026-07-02 parity-evidence finisher reconciliation
+
+The newer `soundswitch_parity_evidence_finisher_spec.md` superseded this plan's
+execution details for fixture construction, divergence-ledger handling, evidence
+registries, lane scoping, and the static fallback path. The broad C1-C8 safety
+model still stands: U0 capture/oracle evidence or construction proof is required,
+`unverified_parity` is a blocker for normal supported active content, and the
+live fail-closed gate is not a substitute for parity proof. As of code commit
+`871b5f9`, scripted, Autoloop, and Static Look evidence registries exist; Static
+Looks are `algorithm_generalized` via the C6 non-generic assertion plus the
+documented unavailable static windows; active publication remains blocked by 15
+active `unverified_parity` scripted/Autoloop documents.

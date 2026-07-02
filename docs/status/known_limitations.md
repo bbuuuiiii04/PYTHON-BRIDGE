@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 3918603
-last_verified_date: 2026-06-28
+last_verified_commit: 871b5f9
+last_verified_date: 2026-07-02
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -30,6 +30,7 @@ Current SoundSwitch exporter/importer work remains **SOFTWARE-VALIDATED ONLY / H
 - Native-DMX Autoloops are implemented in software but remain live/runtime and hardware-unvalidated. The bridge uses canonical pack bindings, 32-beat phase at 600 ticks/beat, and `phase_offset_beats`; old T7d captures remain historical evidence/tooling, not a runtime gate.
 - The ignored local pack config was absent in the 2026-06-23 audit; no live pack/Enttec setup is claimed.
 - The old exact-count pack proof is closure evidence for its recorded source snapshot only. Live export uses dynamic saved-project reconciliation; F9 mutation rejection and F10 active CC/pitch rejection remain proof seams.
+- Passive SoundSwitch U0 parity evidence now covers scripted witnesses, Autoloop samples, and the Static Look assertion fallback, but fresh export at `871b5f9` still has 15 active `unverified_parity` scripted/Autoloop documents. Trusted direct-DMX publication remains blocked until those active lanes are resolved.
 - Laser support depends on local MIDI mapping and fixture behavior.
 - Govee support is not generalized across devices.
 

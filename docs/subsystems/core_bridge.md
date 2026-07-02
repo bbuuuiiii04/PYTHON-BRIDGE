@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 6c51eb8
-last_verified_date: 2026-06-29
+last_verified_commit: 871b5f9
+last_verified_date: 2026-07-02
 validation_scope: software-only
 ---
 
@@ -33,6 +33,9 @@ SoundSwitch pack-player boundary:
   build pack rendering without Enttec, keep production output software-zero when
   SoundSwitch is connected, and enqueue the rendered shadow frame to a bounded
   U1 validation worker. UDP and sidecar writes stay outside `StateManager`.
+- Parity lane registries are offline export inputs. They do not change
+  `StateManager` ownership or add runtime work; active `unverified_parity`
+  documents still block trusted publication.
 - Mixer active-deck authority is now StateManager-owned through the pure
   `active_deck_resolver.py` helper. `active_deck` is the resolved show deck and
   may be `0` for idle/no audible deck; `rb_master_deck` is retained separately

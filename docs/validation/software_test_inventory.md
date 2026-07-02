@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 74febec
-last_verified_date: 2026-06-29
+last_verified_commit: 871b5f9
+last_verified_date: 2026-07-02
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -30,7 +30,7 @@ python -m pytest tests
 | Runtime commands | parser/handler/status writer tests | needed before command changes |
 | Logging visibility | bridge formatting/rate helpers and logging diagnostic coverage tests | verifies software-only log filtering and spam-control behavior |
 | Rekordbox readers | reader, offset, live BPM, active-deck resolver, StateManager authority, startup wiring, runtime status tests | cannot prove all app versions or hardware-visible behavior |
-| SoundSwitch | OS2L/output helpers; project/pack/player/native-Autoloop-resolver/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/Art-Net truth-check/T7d tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status, native Autoloop rendering, and U1 truth-check packets are software/wire intent and tests do not prove physical fixtures |
+| SoundSwitch | OS2L/output helpers; project/pack/player/native-Autoloop-resolver/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/Art-Net truth-check/T7d/parity-lane tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status, native Autoloop rendering, U1 truth-check packets, and passive U0 parity fixtures are software/wire evidence and tests do not prove physical fixtures |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety |
 | LED/Govee | LED config/director/color/realtime/renderer tests | cannot prove device compatibility |
 | Replay/session tooling | replay format and smoke tests | software-only |
@@ -48,7 +48,7 @@ When adding or changing tests, update:
 
 `tests/test_soundswitch_project_decoder.py` covers frozen source-model use and strict, read-only decoding: physical document bounds/trailers, venue/static-look parsing, canonical identity and stable inventory gates, learned MIDI/control reconciliation, catalog/script classification, malformed and unsupported-source rejection, render-vs-catalog-tail semantics, and at least one render-bearing cue. When the canonical local project is available, the current-corpus test also verifies decoded classifications.
 
-`tests/test_soundswitch_pack.py` covers deterministic export, independent verification, dynamic saved-project inventory reconciliation, proof-only strict snapshot rejection, byte-identical repeat export, atomic publish, source sidecar ignored-path derivation/sanitization, source/inventory/hash/canonicalization/semantic mutation rejection, the seven-class F-3 crosswalk, loader-superset runtime metadata rejections, and report-only import diagnostics. `tests/test_soundswitch_project_decoder.py` covers typed truncated-catalog rejection. `tests/test_prove_soundswitch_pack_generation.py` covers the proof-gate seams, including F9, F10, and structural Static Look frame validation without pinning operator recolours.
+`tests/test_soundswitch_pack.py` covers deterministic export, independent verification, dynamic saved-project inventory reconciliation, proof-only strict snapshot rejection, byte-identical repeat export, atomic publish, source sidecar ignored-path derivation/sanitization, source/inventory/hash/canonicalization/semantic mutation rejection, the seven-class F-3 crosswalk, loader-superset runtime metadata rejections, report-only import diagnostics, active/inactive parity-lane scoping, and export threading of scripted/Autoloop/Static Look parity registries. `tests/test_soundswitch_project_decoder.py` covers typed truncated-catalog rejection. `tests/test_prove_soundswitch_pack_generation.py` covers the proof-gate seams, including F9, F10, and structural Static Look frame validation without pinning operator recolours.
 
 `tests/test_shadow_soundswitch_pack.py` (Task 8 offline shadow proof) drives a synthetic verified `LaserPackPlayer` through scripted/static/blackout transitions with the physical backend forced to `none` (`tools/shadow_soundswitch_pack.py`), recording ONLY frame SHA-256 hashes and comparing each against an independently hand-computed expected frame. It proves stop/blackout/emergency/reload-wait resolve to a zero frame, that a held Static Override stands alone over a cleared base, twice-run hash determinism, report sanitization (no raw frames/paths/identities), backend-`none` enforcement (a frame sender is rejected), slots 8/16/17/24 plus a controlled slot-7 create/edit, and that the removed non-functional `--project` option is rejected. Pure explicit-`phase_tick` autoloop rendering is covered by `tests/test_soundswitch_laser_player.py`; only runtime beat-to-phase shadow coverage remains reported `deferred_t7d_phase_origin`. Software/offline only — no hardware claim.
 
@@ -88,6 +88,16 @@ normalized scripted timeline events/rapid pairs, matched Autoloop
 visible/authored-dark phase buckets based on each loop's cycle, static and
 blackout overlay/release combinations, and active-deck/mode transition
 directions.
+
+Parity evidence tests add `tests/test_build_parity_fixture.py`,
+`tests/test_soundswitch_parity_oracle.py`,
+`tests/test_soundswitch_scripted_parity.py`, and `tests/test_static_looks.py`.
+They cover ordered capture joins, scripted divergence ledgers, Autoloop sample
+classification, static unavailable-window fixture generation, registry hash
+freshness, same-layout generalization, active/inactive lane summaries, and
+static non-generic assertion fallback. These are passive capture/software
+oracle tests only; remaining active `unverified_parity` documents block trusted
+publication.
 - relevant subsystem card
 - relevant task playbook if test workflow changed
 

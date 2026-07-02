@@ -1,8 +1,8 @@
 ---
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
-last_verified_commit: 03af947
-last_verified_date: 2026-07-01
+last_verified_commit: 871b5f9
+last_verified_date: 2026-07-02
 validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -81,10 +81,14 @@ artifacts, not planning documents. They are not moved into the authority tree.
 
 - Decoder/exporter/compiler/verifier: implemented. Live export performs a
   dynamic saved-project rescan; the old closure-count gate is proof-only.
-- Current scripted content: 32 active existing-path tracks can be decoded and
-  reconciled against the saved project, but exact U0 parity is not proven for
-  the cue-replay model. DD42028C is a confirmed generated-content mismatch; the
-  other 31 active scripts are unproven until structural or oracle proof exists.
+- Current parity evidence lanes: the passive SoundSwitch U0 capture
+  `parity_20260701T185231Z` feeds scripted, Autoloop, and Static Look registry
+  fixtures. Static Looks are now `algorithm_generalized` through the documented
+  unavailable-window fallback plus the C6 non-generic assertion. Fresh export at
+  `871b5f9` reports active lanes `algorithm_generalized: 59`,
+  `oracle_proven: 9`, `unverified_parity: 15`; trusted publication remains
+  blocked by the named unverified scripted/Autoloop documents in
+  `soundswitch_exporter_remaining_work.md`.
 - Pure scripted renderer: implemented/software-wire tested.
 - Config/startup/runtime command/StateManager/Enttec lane: implemented and
   default-off; RW-2 through RW-5 runtime authority/status work is

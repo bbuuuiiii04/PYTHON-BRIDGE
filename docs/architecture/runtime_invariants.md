@@ -2,7 +2,7 @@
 
 Status: CURRENT AUTHORITATIVE
 
-Audited against implementation commit `6c51eb8` on 2026-06-29.
+Audited against implementation commit `871b5f9` on 2026-07-02.
 
 ## SoundSwitch Pack Component Boundary
 
@@ -25,6 +25,10 @@ Audited against implementation commit `6c51eb8` on 2026-06-29.
 - Absent/disabled config preserves the legacy MIDI path. Dry-run/none opens no physical pack output. Pack failure falls back to disabled/none, never physical MIDI.
 - Direct DMX and physical MIDI output are mutually exclusive at backend construction and port ownership. Owner-driven Enttec stop sends zero, but process death/`kill -9` can leave the last frame latched; hardware validation remains future work.
 - Art-Net truth-check output is a temporary validation-only shadow path. It is default-off, requires `RBSS_ARTNET_TRUTH_CHECK=1` plus a valid `RBSS_ARTNET_UNIVERSE`, and `RBSS_ARTNET_UNIVERSE` alone must not emit. Truth-check may construct pack rendering without Enttec by using a sender-free pack backend plus `ArtNetTruthSink`; it must not open serial/Enttec or become live physical authority. The StateManager hot path may only enqueue rendered frames to the bounded truth queue; UDP sends and sidecar writes stay on the truth worker.
+- Parity lanes are offline export evidence. Capture-derived registries can mark pack documents
+  `oracle_proven` or `algorithm_generalized`, but remaining active `unverified_parity` lanes block
+  trusted publication and must not be silently overridden. Lane classification does not add I/O or
+  blocking work to the 200 Hz runtime path.
 - Native pack Autoloop output is implemented in software through the existing
   `StateManager` pack driver and `LaserPackPlayer.select_autoloop()` path.
   Selection is I/O-free, latches across no-edge ticks, may seed from the

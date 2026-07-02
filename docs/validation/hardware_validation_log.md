@@ -1,8 +1,8 @@
 ---
 doc_status: current-incomplete
 truth_level: code-and-config-grounded
-last_verified_commit: cb31cf8
-last_verified_date: 2026-06-29
+last_verified_commit: 871b5f9
+last_verified_date: 2026-07-02
 validation_scope: software-validated only, except the Govee/LED color-engine, realtime-comet, and beat-sync paths (AWR-101–104) which carry operator hardware sign-off on Home Govee (2026-06-29); SoundSwitch / laser / Enttec remain hardware-unvalidated
 ---
 
@@ -17,7 +17,10 @@ The current exporter/importer evidence boundary is **SOFTWARE-VALIDATED ONLY / H
 The pinned SoundSwitch 2.10.3 project/pack tooling, immutable loader/player,
 MIDI-input adapter, output backends, Enttec sender, default-off config/startup,
 StateManager scripted driver, runtime controller, and copied RW-5 status have
-software validation only. Current ignored-config/runtime/device state was not
+software validation only. The passive SoundSwitch U0 parity fixtures and static
+assertion fallback are software/wire evidence only; they do not validate Enttec
+delivery or physical fixture output, and remaining active `unverified_parity`
+documents still block trusted direct-DMX publication. Current ignored-config/runtime/device state was not
 inspected during RW-5 implementation. Owner-driven Enttec stop sends zero, but process
 death/`kill -9` can leave the last frame latched; a physical kill path and
 explicit hardware gate remain mandatory.
