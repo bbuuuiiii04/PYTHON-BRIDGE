@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+"""Build reduced SoundSwitch U0 parity fixtures from a passive capture."""
+from __future__ import annotations
+
+import argparse
+import bisect
+import json
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Sequence
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_PARENT = REPO_ROOT.parent
+if str(PACKAGE_PARENT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_PARENT))
+
+from rb_ss_bridge_v2.soundswitch_laser_player import CHANNEL_COUNT, render_scripted_frame  # noqa: E402
+from rb_ss_bridge_v2.soundswitch_pack_loader import (  # noqa: E402
+    LoadedDocument,
+    LoadedScriptedTrack,
+    LoadedTimelineEvent,
+    load_pack,
+)
+
+DEFAULT_CAPTURE = REPO_ROOT / "tools/ssfmt/captures/parity/parity_20260701T185231Z"
+DEFAULT_WITNESS_SSIDS = (
+    "528e8b22-bd17-41b9-a111-275d3e8b3031",
+    "ae9e3c61-af40-4392-80b4-380d39c631b9",
+    "9947c65e-cfd1-476e-aa90-4aed65ae5f11",
+    "fc10fc02-93c2-418f-8815-16088884da42",
+)
+RUN_MARGIN_NS = 120_000_000
+CONTROL_CHANNELS = frozenset((8, 9, 11))
+
+
+@dataclass(frozen=True, slots=True)
+class JoinResult:
+    rows: tuple[dict[str, Any], ...]
+    stats: Mapping[str, int | float]
+
+
+def normalize_ssid(value: object) -> str:
+    text = str(value or "").strip()
+    if text.startswith("{") and text.endswith("}"):
+        text = text[1:-1]
+    return text.lower()
+
+
+def iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
+    with path.open("rb") as handle:
+        for raw in handle:
+            if raw.strip():
+                yield json.loads(raw)
+
+
+def iter_artdmx(path: Path, universe: int) -> Iterable[dict[str, Any]]:
+    marker = f'"universe":{universe},'.encode("ascii")
+    with path.open("rb") as handle:
+        for raw in handle:
+            if marker not in raw:
+                continue
+            row = json.loads(raw)
+            if row.get("universe") == universe:
+                yield row
+
+
+def build_u0_runs(packet_path: Path) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for row in iter_artdmx(packet_path, 0):
+        mono_ns = int(row["mono_ns"])
+        sha = str(row["dmx_sha256"])
+        frame = tuple(int(value) for value in row["ch1_32"][:CHANNEL_COUNT])
+        if current and current["dmx_sha256"] == sha:
+            current["e"] = mono_ns
+            current["n"] += 1
+            continue
+        if current:
+            runs.append(current)
+        current = {"s": mono_ns, "e": mono_ns, "n": 1, "dmx_sha256": sha, "f": frame}
+    if current:
+        runs.append(current)
+    return runs
+
+
+def _signature(row: Mapping[str, Any]) -> tuple[int, str]:
+    return int(row["sequence"]) & 0xFF, str(row["dmx_sha256"])
+
+
+def _sidecar_rows(
+    rows: Iterable[Mapping[str, Any]],
+    witness_ssids: set[str],
+) -> Iterable[dict[str, Any]]:
+    for row in rows:
+        ssid = normalize_ssid(row.get("soundswitch_id"))
+        if ssid in witness_ssids:
+            yield {
+                "ssid": ssid,
+                "sequence": int(row["sequence"]) & 0xFF,
+                "dmx_sha256": str(row["dmx_sha256"]),
+                "elapsed_ms": int(row["elapsed_ms"]),
+                "frame_index": int(row.get("frame_index", -1)),
+                "transport": str(row.get("transport") or ""),
+            }
+
+
+def _monotone_ratio(rows: Sequence[Mapping[str, Any]]) -> float:
+    total = 0
+    ok = 0
+    by_ssid: dict[str, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        by_ssid.setdefault(str(row["ssid"]), []).append(row)
+    for group in by_ssid.values():
+        for left, right in zip(group, group[1:]):
+            elapsed_delta = int(right["elapsed_ms"]) - int(left["elapsed_ms"])
+            mono_delta = int(right["mono_ns"]) - int(left["mono_ns"])
+            total += 1
+            if elapsed_delta == 0 or mono_delta == 0 or (elapsed_delta > 0) == (mono_delta > 0):
+                ok += 1
+    return 1.0 if total == 0 else ok / total
+
+
+def join_sidecar_to_mono(
+    sidecar_rows: Iterable[Mapping[str, Any]],
+    u1_rows: Iterable[Mapping[str, Any]],
+    *,
+    witness_ssids: Iterable[str] = DEFAULT_WITNESS_SSIDS,
+    lookahead: int = 10_000,
+) -> JoinResult:
+    witnesses = {normalize_ssid(value) for value in witness_ssids}
+    u1_iter = iter(u1_rows)
+    joined: list[dict[str, Any]] = []
+    consumed = 0
+    dropped = 0
+    for sidecar in _sidecar_rows(sidecar_rows, witnesses):
+        target = _signature(sidecar)
+        for offset in range(max(1, lookahead)):
+            try:
+                packet = next(u1_iter)
+            except StopIteration:
+                dropped += 1
+                break
+            consumed += 1
+            if _signature(packet) != target:
+                if offset + 1 >= lookahead:
+                    dropped += 1
+                continue
+            joined.append({
+                **sidecar,
+                "mono_ns": int(packet["mono_ns"]),
+            })
+            break
+    ratio = _monotone_ratio(joined)
+    if ratio < 0.99:
+        raise ValueError(f"sidecar/U1 join is not jointly monotone: {ratio:.3f}")
+    return JoinResult(
+        rows=tuple(joined),
+        stats={"joined": len(joined), "dropped": dropped, "u1_consumed": consumed,
+               "monotone_ratio": ratio},
+    )
+
+
+def load_alignment_windows(path: Path) -> dict[str, tuple[dict[str, Any], ...]]:
+    windows: dict[str, list[dict[str, Any]]] = {}
+    for row in iter_jsonl(path):
+        if row.get("surface") != "scripted":
+            continue
+        ssid = normalize_ssid(row.get("ssid") or str(row.get("label", "")).removeprefix("scripted_"))
+        if not ssid:
+            continue
+        windows.setdefault(ssid, []).append({
+            "t_start_mono": row.get("t_start_mono"),
+            "t_end_mono": row.get("t_end_mono"),
+            "frame_index_start": row.get("frame_index_start"),
+            "frame_index_end": row.get("frame_index_end"),
+        })
+    return {ssid: tuple(rows) for ssid, rows in windows.items()}
+
+
+def _inside_window(row: Mapping[str, Any], windows: Sequence[Mapping[str, Any]]) -> bool:
+    if not windows:
+        return True
+    mono_s = int(row["mono_ns"]) / 1_000_000_000
+    frame_index = int(row.get("frame_index", -1))
+    for window in windows:
+        start = window.get("t_start_mono")
+        end = window.get("t_end_mono")
+        if isinstance(start, (int, float)) and isinstance(end, (int, float)) \
+                and float(start) <= mono_s <= float(end):
+            return True
+        first = window.get("frame_index_start")
+        last = window.get("frame_index_end")
+        if isinstance(first, int) and isinstance(last, int) and first <= frame_index <= last:
+            return True
+    return False
+
+
+def _event_time(event: LoadedTimelineEvent | Mapping[str, Any]) -> int:
+    if isinstance(event, Mapping):
+        return int(event["time"])
+    return int(event.time)
+
+
+def _candidate_targets(events: Sequence[LoadedTimelineEvent | Mapping[str, Any]]) -> list[tuple[int, str]]:
+    times = sorted({time for event in events if (time := _event_time(event)) >= 0})
+    targets: list[tuple[int, str]] = []
+    for index, time in enumerate(times):
+        targets.append((time + 150, f"event_{index:04d}_post_boundary"))
+        if index + 1 < len(times) and times[index + 1] - time > 2_000:
+            targets.append(((time + times[index + 1]) // 2, f"event_{index:04d}_mid_hold"))
+    return targets
+
+
+def _nearest_elapsed(rows: Sequence[Mapping[str, Any]], target_ms: int) -> Mapping[str, Any] | None:
+    if not rows:
+        return None
+    elapsed = [int(row["elapsed_ms"]) for row in rows]
+    index = bisect.bisect_left(elapsed, target_ms)
+    choices = []
+    if index < len(rows):
+        choices.append(rows[index])
+    if index:
+        choices.append(rows[index - 1])
+    return min(choices, key=lambda row: abs(int(row["elapsed_ms"]) - target_ms))
+
+
+def _run_for_mono(runs: Sequence[Mapping[str, Any]], mono_ns: int, margin_ns: int) -> Mapping[str, Any] | None:
+    for run in runs:
+        start = int(run["s"])
+        end = int(run["e"])
+        if start <= mono_ns <= end and start + margin_ns <= mono_ns <= end - margin_ns:
+            return run
+    return None
+
+
+def select_rows(
+    joined: Sequence[Mapping[str, Any]],
+    runs: Sequence[Mapping[str, Any]],
+    events: Sequence[LoadedTimelineEvent | Mapping[str, Any]],
+    windows: Sequence[Mapping[str, Any]] = (),
+    *,
+    margin_ms: int = 120,
+) -> list[dict[str, Any]]:
+    rows = sorted(joined, key=lambda row: int(row["elapsed_ms"]))
+    selected: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for target_ms, label in _candidate_targets(events):
+        candidate = _nearest_elapsed(rows, target_ms)
+        if candidate is None or not _inside_window(candidate, windows):
+            continue
+        run = _run_for_mono(runs, int(candidate["mono_ns"]), margin_ms * 1_000_000)
+        if run is None:
+            continue
+        key = (str(candidate["ssid"]), int(candidate["mono_ns"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        run_ms = max(0, int(round((int(run["e"]) - int(run["s"])) / 1_000_000)))
+        selected.append({
+            "elapsed_ms": int(candidate["elapsed_ms"]),
+            "label": label,
+            "mono_ns": int(candidate["mono_ns"]),
+            "run_ms": run_ms,
+            "u0_frame": list(run["f"]),
+        })
+    return selected
+
+
+def _diffs(expected: Sequence[int], observed: Sequence[int]) -> list[dict[str, int]]:
+    return [
+        {"channel": index, "expected": int(left), "u0": int(right)}
+        for index, (left, right) in enumerate(zip(expected, observed), 1)
+        if int(left) != int(right)
+    ]
+
+
+def _document_from(value: LoadedDocument | LoadedScriptedTrack) -> LoadedDocument:
+    if isinstance(value, LoadedScriptedTrack):
+        if value.document is None:
+            raise ValueError("scripted track has no loaded document")
+        return value.document
+    return value
+
+
+def _reachable_by_channel(frame: Sequence[int], document: LoadedDocument) -> bool:
+    values: dict[int, set[int]] = {channel: set() for channel in range(1, CHANNEL_COUNT + 1)}
+    for event in document.events:
+        for attribute in event.patch:
+            if 1 <= attribute.dmx_channel <= CHANNEL_COUNT:
+                values[attribute.dmx_channel].add(attribute.value)
+    return all(value == 0 or int(value) in values[index]
+               for index, value in enumerate(frame, 1))
+
+
+def _nearest_event(document: LoadedDocument, elapsed_ms: int) -> LoadedTimelineEvent | None:
+    if not document.events:
+        return None
+    return min(document.events, key=lambda event: abs(event.time - elapsed_ms))
+
+
+def screen_rows(
+    rows: Sequence[Mapping[str, Any]],
+    document: LoadedDocument | LoadedScriptedTrack,
+    venue_values: Mapping[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    del venue_values
+    doc = _document_from(document)
+    witnesses: list[dict[str, Any]] = []
+    divergence: list[dict[str, Any]] = []
+    for row in rows:
+        observed = tuple(int(value) for value in row["u0_frame"])
+        if len(observed) != CHANNEL_COUNT:
+            raise ValueError("U0 frame must contain 19 channels")
+        expected = render_scripted_frame(doc, int(row["elapsed_ms"]))
+        if expected == observed:
+            witnesses.append(dict(row))
+            continue
+        event = _nearest_event(doc, int(row["elapsed_ms"]))
+        if not _reachable_by_channel(observed, doc):
+            class_name = "cross_deck_bleed"
+        elif event is not None:
+            class_name = "stale_source_edit"
+        else:
+            class_name = "join_ambiguity"
+        divergence.append({
+            "class": class_name,
+            "elapsed_ms": int(row["elapsed_ms"]),
+            "label": str(row.get("label") or ""),
+            "mono_ns": int(row.get("mono_ns", 0)),
+            "event_time": None if event is None else event.time,
+            "raw_reference": None if event is None else event.raw_reference,
+            "expected_disk_frame": list(expected),
+            "observed_u0_frame": list(observed),
+            "channel_diffs": _diffs(expected, observed),
+        })
+    return witnesses, divergence
+
+
+def build_scripted_fixture(
+    capture: Path,
+    pack_path: Path,
+    *,
+    witness_ssids: Iterable[str] = DEFAULT_WITNESS_SSIDS,
+) -> dict[str, Any]:
+    witnesses = tuple(normalize_ssid(value) for value in witness_ssids)
+    pack = load_pack(pack_path)
+    runs = build_u0_runs(capture / "artdmx_packets.jsonl")
+    joined = join_sidecar_to_mono(
+        iter_jsonl(capture / "rbss_artnet_truth_frames.slice.jsonl"),
+        iter_artdmx(capture / "artdmx_packets.jsonl", 1),
+        witness_ssids=witnesses,
+    )
+    windows = load_alignment_windows(capture / "alignment_index.jsonl")
+    scripted: dict[str, list[dict[str, Any]]] = {}
+    ledger: dict[str, list[dict[str, Any]]] = {}
+    for ssid in witnesses:
+        track = pack.scripted.get(ssid)
+        if not isinstance(track, LoadedScriptedTrack) or track.document is None:
+            ledger[ssid] = [{"class": "join_ambiguity", "reason": "missing_scripted_doc"}]
+            scripted[ssid] = []
+            continue
+        selected = select_rows(
+            [row for row in joined.rows if row["ssid"] == ssid],
+            runs,
+            track.document.events,
+            windows.get(ssid, ()),
+        )
+        witness_rows, divergence_rows = screen_rows(selected, track.document)
+        scripted[ssid] = witness_rows
+        if divergence_rows:
+            ledger[ssid] = divergence_rows
+    return {
+        "capture_id": capture.name,
+        "scripted": scripted,
+        "capture_source_divergence": ledger,
+        "builder": {
+            "tool": "tools/ssfmt/build_parity_fixture.py",
+            "join_stats": dict(joined.stats),
+        },
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--capture", type=Path, default=DEFAULT_CAPTURE)
+    parser.add_argument("--pack", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--ssid", action="append", default=None,
+                        help="Scripted witness SoundSwitch ID. Defaults to the parity witnesses.")
+    args = parser.parse_args(argv)
+
+    fixture = build_scripted_fixture(
+        args.capture,
+        args.pack,
+        witness_ssids=args.ssid or DEFAULT_WITNESS_SSIDS,
+    )
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(fixture, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
