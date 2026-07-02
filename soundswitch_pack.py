@@ -403,6 +403,7 @@ def compile_pack_artifacts(
     cues = {row.cue_guid: row for row in project.render_cues}
     registry = parity_registry or {}
     scripted_registry = registry.get("scripted") if isinstance(registry.get("scripted"), dict) else {}
+    autoloop_registry = registry.get("autoloop") if isinstance(registry.get("autoloop"), dict) else {}
     venue_source_sha256 = _source_sha(project, "SoundSwitchVenues.bin")
     active_scripts = _active_script_paths(project)
     active_loops = _active_autoloop_paths(project)
@@ -412,6 +413,7 @@ def compile_pack_artifacts(
             scripted_source_shas[_normalized_ssid(doc.relative_path)] = doc.source_sha256
         except SoundSwitchPackCompileError:
             continue
+    autoloop_source_shas = {doc.relative_path: doc.source_sha256 for doc in project.autoloops}
     current_scripted_registry = {
         identity: row for identity, row in scripted_registry.items()
         if isinstance(identity, str)
@@ -419,6 +421,15 @@ def compile_pack_artifacts(
         and row.get("verdict") == "PASS"
         and row.get("truth_source", "SoundSwitch U0") == "SoundSwitch U0"
         and row.get("source_sha256") == scripted_source_shas.get(identity)
+        and row.get("venue_source_sha256") == venue_source_sha256
+    }
+    current_autoloop_registry = {
+        identity: row for identity, row in autoloop_registry.items()
+        if isinstance(identity, str)
+        and isinstance(row, dict)
+        and row.get("verdict") == "PASS"
+        and row.get("truth_source", "SoundSwitch U0") == "SoundSwitch U0"
+        and row.get("source_sha256") == autoloop_source_shas.get(identity)
         and row.get("venue_source_sha256") == venue_source_sha256
     }
     union, union_sha = _active_union(project, active_scripts)
@@ -460,12 +471,15 @@ def compile_pack_artifacts(
     autoloop_metadata = _autoloop_metadata(project)
     for doc in sorted(project.autoloops, key=lambda row: int(re.search(r"(\d+)", row.relative_path).group(1))):
         number = int(re.search(r"(\d+)", doc.relative_path).group(1))
+        registry_entry = autoloop_registry.get(doc.relative_path)
         add(f"autoloops/{number}.json", _root(
             "autoloop",
             document=_document(
                 doc,
                 cues,
                 autoloop_metadata=autoloop_metadata[doc.relative_path],
+                registry_entry=registry_entry if isinstance(registry_entry, dict) else None,
+                registry_docs=current_autoloop_registry,
                 venue_source_sha256=venue_source_sha256,
             ),
         ))

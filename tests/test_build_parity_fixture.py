@@ -13,8 +13,10 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (  # noqa: E402
     LoadedTimelineEvent,
 )
 from rb_ss_bridge_v2.tools.ssfmt.build_parity_fixture import (  # noqa: E402
+    join_autoloop_to_mono,
     join_sidecar_to_mono,
     screen_rows,
+    select_autoloop_rows,
     select_rows,
 )
 
@@ -68,6 +70,24 @@ class BuildParityFixtureTests(unittest.TestCase):
         self.assertEqual(result.rows, ())
         self.assertEqual(result.stats["dropped"], 1)
 
+    def test_join_autoloop_to_mono_filters_identity_and_integer_phase(self) -> None:
+        sidecar = [
+            {"native_autoloop": {"target_identity": "SSAutoLoop4.ssfile", "phase_tick": 0,
+                                 "status": "rendering_active"},
+             "sequence": 1, "dmx_sha256": "a", "elapsed_ms": 10, "frame_index": 1},
+            {"native_autoloop": {"target_identity": "SSAutoLoop5.ssfile", "phase_tick": 10},
+             "sequence": 2, "dmx_sha256": "b", "elapsed_ms": 20, "frame_index": 2},
+            {"native_autoloop": {"target_identity": "SSAutoLoop4.ssfile", "phase_tick": None},
+             "sequence": 3, "dmx_sha256": "c", "elapsed_ms": 30, "frame_index": 3},
+        ]
+        u1 = [
+            {"sequence": 1, "dmx_sha256": "a", "mono_ns": 100},
+        ]
+        result = join_autoloop_to_mono(sidecar, u1, identities=["SSAutoLoop4.ssfile"])
+        self.assertEqual(len(result.rows), 1)
+        self.assertEqual(result.rows[0]["identity"], "SSAutoLoop4.ssfile")
+        self.assertEqual(result.rows[0]["phase_tick"], 0)
+
     def test_select_rows_keeps_only_steady_runs_inside_alignment_windows(self) -> None:
         joined = [
             {"ssid": "aaaa", "elapsed_ms": 1148, "mono_ns": 1_200_000_000,
@@ -87,6 +107,27 @@ class BuildParityFixtureTests(unittest.TestCase):
         )
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["elapsed_ms"], 1148)
+        self.assertEqual(rows[0]["u0_frame"], _frame(7))
+
+    def test_select_autoloop_rows_spreads_steady_phases_inside_alignment_windows(self) -> None:
+        joined = [
+            {"identity": "SSAutoLoop4.ssfile", "phase_tick": tick,
+             "mono_ns": 1_000_000_000 + tick * 1_000_000, "frame_index": tick,
+             "status": "rendering_active"}
+            for tick in range(10)
+        ]
+        runs = [
+            {"s": 800_000_000, "e": 1_300_000_000, "f": tuple(_frame(7))},
+        ]
+        rows = select_autoloop_rows(
+            joined,
+            runs,
+            [{"t_start_mono": 1.0, "t_end_mono": 1.1}],
+            limit=4,
+        )
+        self.assertGreaterEqual(len(rows), 4)
+        self.assertEqual(rows[0]["phase_tick"], 0)
+        self.assertEqual(rows[-1]["phase_tick"], 9)
         self.assertEqual(rows[0]["u0_frame"], _frame(7))
 
     def test_select_rows_accepts_recovered_frame_index_windows(self) -> None:

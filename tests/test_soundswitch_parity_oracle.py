@@ -29,6 +29,7 @@ from rb_ss_bridge_v2.tools.export_soundswitch_pack import export_pack
 
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures/soundswitch/parity_oracle/scripted_reduced.json"
+AUTOLOOP_FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures/soundswitch/parity_oracle/autoloop_reduced.json"
 SOURCE_PROJECT = Path.home() / "Music/SoundSwitch/default.ssproj"
 
 
@@ -86,6 +87,7 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
         export_pack(SOURCE_PROJECT, cls.pack_path)
         cls.pack = load_pack(cls.pack_path)
         cls.fixture = json.loads(FIXTURE_PATH.read_text())
+        cls.autoloop_fixture = json.loads(AUTOLOOP_FIXTURE_PATH.read_text())
 
     @classmethod
     def tearDownClass(cls):
@@ -95,6 +97,12 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
         return tuple(
             ScriptedSample(int(row["elapsed_ms"]), tuple(row["u0_frame"]), str(row.get("label") or ""))
             for row in self.fixture["scripted"][ssid]
+        )
+
+    def _autoloop_samples(self, identity: str) -> tuple[AutoloopSample, ...]:
+        return tuple(
+            AutoloopSample(int(row["phase_tick"]), tuple(row["u0_frame"]), str(row.get("label") or ""))
+            for row in self.autoloop_fixture["autoloop"][identity]
         )
 
     def test_reduced_capture_rows_match_fresh_export(self) -> None:
@@ -114,6 +122,32 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
         self.assertTrue({"stale_source_edit", "cross_deck_bleed"}.issubset(
             {row["class"] for row in ledger[ae9e]}))
         self.assertIn("stale_source_edit", {row["class"] for row in ledger[fc10]})
+
+    def test_autoloop_capture_rows_identify_passes_and_blockers(self) -> None:
+        passed = set()
+        failures = {}
+        for identity, rows in self.autoloop_fixture["autoloop"].items():
+            if not rows:
+                continue
+            report = classify_autoloop(self.pack.autoloops[identity], self._autoloop_samples(identity))
+            if report.passed:
+                passed.add(identity)
+            else:
+                failures[identity] = dict(report.issues)
+
+        self.assertEqual(
+            passed,
+            {
+                "SSAutoLoop18.ssfile",
+                "SSAutoLoop3.ssfile",
+                "SSAutoLoop5.ssfile",
+                "SSAutoLoop53.ssfile",
+                "SSAutoLoop55.ssfile",
+            },
+        )
+        self.assertEqual(self.autoloop_fixture["autoloop"]["SSAutoLoop13.ssfile"], [])
+        self.assertIn("value_diff", failures["SSAutoLoop14.ssfile"])
+        self.assertIn("pack_lit_u0_dark", failures["SSAutoLoop6.ssfile"])
 
     def _shifted_key_document(self, ssid: str) -> LoadedDocument:
         scripted = json.loads((self.pack_path / f"scripted/{ssid}.json").read_text())["document"]

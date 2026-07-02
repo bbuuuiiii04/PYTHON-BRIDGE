@@ -14,7 +14,9 @@ if str(PACKAGE_PARENT) not in sys.path:
 
 from rb_ss_bridge_v2.soundswitch_pack_loader import load_pack  # noqa: E402
 from rb_ss_bridge_v2.soundswitch_parity_oracle import (  # noqa: E402
+    AutoloopSample,
     ScriptedSample,
+    classify_autoloop,
     classify_scripted,
 )
 
@@ -30,11 +32,22 @@ def _scripted_samples(rows: list[dict[str, object]]) -> list[ScriptedSample]:
     return samples
 
 
+def _autoloop_samples(rows: list[dict[str, object]]) -> list[AutoloopSample]:
+    samples = []
+    for row in rows:
+        samples.append(AutoloopSample(
+            phase_tick=int(row["phase_tick"]),
+            u0_frame=tuple(int(value) for value in row["u0_frame"]),  # type: ignore[index]
+            label=str(row.get("label") or ""),
+        ))
+    return samples
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pack", default="local/soundswitch/rbss_canonical_pack")
     parser.add_argument("--fixture", required=True,
-                        help="Reduced JSON fixture containing scripted U0 rows.")
+                        help="Reduced JSON fixture containing scripted and/or autoloop U0 rows.")
     args = parser.parse_args(argv)
 
     pack = load_pack(args.pack)
@@ -46,6 +59,12 @@ def main(argv: list[str] | None = None) -> int:
             reports.append({"ssid": ssid, "verdict": "FAIL", "reason": "missing_scripted_doc"})
             continue
         reports.append({"ssid": ssid, **classify_scripted(track, _scripted_samples(rows)).to_dict()})
+    for identity, rows in sorted(fixture.get("autoloop", {}).items()):
+        loop = pack.autoloops.get(identity)
+        if loop is None:
+            reports.append({"identity": identity, "verdict": "FAIL", "reason": "missing_autoloop_doc"})
+            continue
+        reports.append({"identity": identity, **classify_autoloop(loop, _autoloop_samples(rows)).to_dict()})
     print(json.dumps({"reports": reports}, indent=2, sort_keys=True))
     return 1 if any(row.get("verdict") == "FAIL" for row in reports) else 0
 

@@ -17,6 +17,7 @@ if str(PACKAGE_PARENT) not in sys.path:
 
 from rb_ss_bridge_v2.soundswitch_laser_player import CHANNEL_COUNT, render_scripted_frame  # noqa: E402
 from rb_ss_bridge_v2.soundswitch_pack_loader import (  # noqa: E402
+    LoadedAutoloop,
     LoadedDocument,
     LoadedScriptedTrack,
     LoadedTimelineEvent,
@@ -105,13 +106,36 @@ def _sidecar_rows(
             }
 
 
-def _monotone_ratio(rows: Sequence[Mapping[str, Any]]) -> float:
+def _autoloop_rows(
+    rows: Iterable[Mapping[str, Any]],
+    identities: set[str],
+) -> Iterable[dict[str, Any]]:
+    for row in rows:
+        native = row.get("native_autoloop")
+        if not isinstance(native, Mapping):
+            continue
+        identity = str(native.get("target_identity") or "")
+        phase_tick = native.get("phase_tick")
+        if identity not in identities or type(phase_tick) is not int:
+            continue
+        yield {
+            "identity": identity,
+            "sequence": int(row["sequence"]) & 0xFF,
+            "dmx_sha256": str(row["dmx_sha256"]),
+            "elapsed_ms": int(row["elapsed_ms"]),
+            "frame_index": int(row.get("frame_index", -1)),
+            "phase_tick": phase_tick,
+            "status": str(native.get("status") or ""),
+        }
+
+
+def _monotone_ratio(rows: Sequence[Mapping[str, Any]], group_key: str = "ssid") -> float:
     total = 0
     ok = 0
-    by_ssid: dict[str, list[Mapping[str, Any]]] = {}
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
     for row in rows:
-        by_ssid.setdefault(str(row["ssid"]), []).append(row)
-    for group in by_ssid.values():
+        grouped.setdefault(str(row[group_key]), []).append(row)
+    for group in grouped.values():
         for left, right in zip(group, group[1:]):
             elapsed_delta = int(right["elapsed_ms"]) - int(left["elapsed_ms"])
             mono_delta = int(right["mono_ns"]) - int(left["mono_ns"])
@@ -121,20 +145,19 @@ def _monotone_ratio(rows: Sequence[Mapping[str, Any]]) -> float:
     return 1.0 if total == 0 else ok / total
 
 
-def join_sidecar_to_mono(
-    sidecar_rows: Iterable[Mapping[str, Any]],
+def _join_rows_to_mono(
+    rows: Iterable[Mapping[str, Any]],
     u1_rows: Iterable[Mapping[str, Any]],
     *,
-    witness_ssids: Iterable[str] = DEFAULT_WITNESS_SSIDS,
-    lookahead: int = 10_000,
+    group_key: str,
+    lookahead: int,
 ) -> JoinResult:
-    witnesses = {normalize_ssid(value) for value in witness_ssids}
     u1_iter = iter(u1_rows)
     joined: list[dict[str, Any]] = []
     consumed = 0
     dropped = 0
-    for sidecar in _sidecar_rows(sidecar_rows, witnesses):
-        target = _signature(sidecar)
+    for row in rows:
+        target = _signature(row)
         for offset in range(max(1, lookahead)):
             try:
                 packet = next(u1_iter)
@@ -147,11 +170,11 @@ def join_sidecar_to_mono(
                     dropped += 1
                 continue
             joined.append({
-                **sidecar,
+                **row,
                 "mono_ns": int(packet["mono_ns"]),
             })
             break
-    ratio = _monotone_ratio(joined)
+    ratio = _monotone_ratio(joined, group_key)
     if ratio < 0.99:
         raise ValueError(f"sidecar/U1 join is not jointly monotone: {ratio:.3f}")
     return JoinResult(
@@ -161,15 +184,49 @@ def join_sidecar_to_mono(
     )
 
 
-def load_alignment_windows(path: Path) -> dict[str, tuple[dict[str, Any], ...]]:
+def join_sidecar_to_mono(
+    sidecar_rows: Iterable[Mapping[str, Any]],
+    u1_rows: Iterable[Mapping[str, Any]],
+    *,
+    witness_ssids: Iterable[str] = DEFAULT_WITNESS_SSIDS,
+    lookahead: int = 10_000,
+) -> JoinResult:
+    witnesses = {normalize_ssid(value) for value in witness_ssids}
+    return _join_rows_to_mono(
+        _sidecar_rows(sidecar_rows, witnesses),
+        u1_rows,
+        group_key="ssid",
+        lookahead=lookahead,
+    )
+
+
+def join_autoloop_to_mono(
+    sidecar_rows: Iterable[Mapping[str, Any]],
+    u1_rows: Iterable[Mapping[str, Any]],
+    *,
+    identities: Iterable[str],
+    lookahead: int = 10_000,
+) -> JoinResult:
+    return _join_rows_to_mono(
+        _autoloop_rows(sidecar_rows, {str(value) for value in identities}),
+        u1_rows,
+        group_key="identity",
+        lookahead=lookahead,
+    )
+
+
+def load_alignment_windows(path: Path, *, surface: str = "scripted") -> dict[str, tuple[dict[str, Any], ...]]:
     windows: dict[str, list[dict[str, Any]]] = {}
     for row in iter_jsonl(path):
-        if row.get("surface") != "scripted":
+        if row.get("surface") != surface:
             continue
-        ssid = normalize_ssid(row.get("ssid") or str(row.get("label", "")).removeprefix("scripted_"))
-        if not ssid:
+        if surface == "autoloop":
+            key = str(row.get("loop_identity") or str(row.get("label", "")).removeprefix("autoloop_"))
+        else:
+            key = normalize_ssid(row.get("ssid") or str(row.get("label", "")).removeprefix("scripted_"))
+        if not key:
             continue
-        windows.setdefault(ssid, []).append({
+        windows.setdefault(key, []).append({
             "t_start_mono": row.get("t_start_mono"),
             "t_end_mono": row.get("t_end_mono"),
             "frame_index_start": row.get("frame_index_start"),
@@ -265,6 +322,47 @@ def select_rows(
             "u0_frame": list(run["f"]),
         })
     return selected
+
+
+def _spread_phase_rows(rows: Sequence[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    if len(rows) <= limit:
+        return list(rows)
+    selected = {0, len(rows) - 1}
+    for index in range(limit):
+        selected.add(round(index * (len(rows) - 1) / max(1, limit - 1)))
+    return [rows[index] for index in sorted(selected)][:limit]
+
+
+def select_autoloop_rows(
+    joined: Sequence[Mapping[str, Any]],
+    runs: Sequence[Mapping[str, Any]],
+    windows: Sequence[Mapping[str, Any]] = (),
+    *,
+    limit: int = 8,
+    margin_ms: int = 120,
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    seen_phases: set[int] = set()
+    for candidate in sorted(joined, key=lambda row: int(row["phase_tick"])):
+        if not _inside_window(candidate, windows):
+            continue
+        phase_tick = int(candidate["phase_tick"])
+        if phase_tick in seen_phases:
+            continue
+        run = _run_for_mono(runs, int(candidate["mono_ns"]), margin_ms * 1_000_000)
+        if run is None:
+            continue
+        seen_phases.add(phase_tick)
+        run_ms = max(0, int(round((int(run["e"]) - int(run["s"])) / 1_000_000)))
+        selected.append({
+            "label": f"phase_{phase_tick}",
+            "mono_ns": int(candidate["mono_ns"]),
+            "phase_tick": phase_tick,
+            "run_ms": run_ms,
+            "status": str(candidate.get("status") or ""),
+            "u0_frame": list(run["f"]),
+        })
+    return _spread_phase_rows(selected, limit)
 
 
 def _diffs(expected: Sequence[int], observed: Sequence[int]) -> list[dict[str, int]]:
@@ -381,20 +479,71 @@ def build_scripted_fixture(
     }
 
 
+def build_autoloop_fixture(
+    capture: Path,
+    pack_path: Path,
+    *,
+    identities: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    pack = load_pack(pack_path)
+    runs = build_u0_runs(capture / "artdmx_packets.jsonl")
+    windows = load_alignment_windows(capture / "alignment_index.jsonl", surface="autoloop")
+    selected_identities = tuple(sorted(str(value) for value in (identities or windows.keys())))
+    joined = join_autoloop_to_mono(
+        iter_jsonl(capture / "rbss_artnet_truth_frames.slice.jsonl"),
+        iter_artdmx(capture / "artdmx_packets.jsonl", 1),
+        identities=selected_identities,
+    )
+    autoloop: dict[str, list[dict[str, Any]]] = {}
+    missing: dict[str, list[dict[str, Any]]] = {}
+    for identity in selected_identities:
+        loop = pack.autoloops.get(identity)
+        if not isinstance(loop, LoadedAutoloop):
+            missing[identity] = [{"class": "join_ambiguity", "reason": "missing_autoloop_doc"}]
+            autoloop[identity] = []
+            continue
+        autoloop[identity] = select_autoloop_rows(
+            [row for row in joined.rows if row["identity"] == identity],
+            runs,
+            windows.get(identity, ()),
+        )
+    fixture = {
+        "capture_id": capture.name,
+        "autoloop": autoloop,
+        "builder": {
+            "tool": "tools/ssfmt/build_parity_fixture.py",
+            "join_stats": dict(joined.stats),
+        },
+    }
+    if missing:
+        fixture["capture_source_divergence"] = missing
+    return fixture
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--capture", type=Path, default=DEFAULT_CAPTURE)
     parser.add_argument("--pack", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--surface", choices=("scripted", "autoloop"), default="scripted")
     parser.add_argument("--ssid", action="append", default=None,
                         help="Scripted witness SoundSwitch ID. Defaults to the parity witnesses.")
+    parser.add_argument("--autoloop-identity", action="append", default=None,
+                        help="Autoloop identity. Defaults to autoloops covered by the capture alignment.")
     args = parser.parse_args(argv)
 
-    fixture = build_scripted_fixture(
-        args.capture,
-        args.pack,
-        witness_ssids=args.ssid or DEFAULT_WITNESS_SSIDS,
-    )
+    if args.surface == "autoloop":
+        fixture = build_autoloop_fixture(
+            args.capture,
+            args.pack,
+            identities=args.autoloop_identity,
+        )
+    else:
+        fixture = build_scripted_fixture(
+            args.capture,
+            args.pack,
+            witness_ssids=args.ssid or DEFAULT_WITNESS_SSIDS,
+        )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(fixture, indent=2, sort_keys=True) + "\n")
     return 0
