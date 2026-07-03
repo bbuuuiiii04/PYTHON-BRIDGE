@@ -35,7 +35,7 @@ python -m pytest tests
 | LED/Govee | LED config/director/color/realtime/renderer tests plus StateManager LED automation tests | cannot prove device compatibility or room-visible behavior |
 | Replay/session tooling | replay format and smoke tests | software-only |
 | Frontend tools | syntax and smoke tests | does not prove live safety |
-| Docs/agent workflow | docs metadata, agent contract, and drift checkers | docs-only validation |
+| Docs/agent workflow | docs metadata, agent contract, drift, and staleness checkers | docs-only validation |
 
 ## Required documentation update
 
@@ -119,6 +119,14 @@ publication.
 - relevant task playbook if test workflow changed
 
 Hardware behavior still needs manual validation logs.
+
+## Docs / Agent Workflow
+
+`tests/test_docs_orphan_check.py` covers active-doc classification matching for
+`tools/check_agent_contracts.py`. `tests/test_check_docs_staleness.py` covers
+`tools/check_docs_staleness.py` contract parsing, recursive glob expansion,
+contract-globbed tooling under `tools/`, literal/star glob behavior, and the
+`docs/data/*.yaml` implementation-data exception.
 
 ## Rekordbox Mixer Active-Deck Authority
 
