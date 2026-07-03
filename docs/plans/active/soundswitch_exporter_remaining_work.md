@@ -47,7 +47,7 @@ MIDI/serial/Enttec/DMX open, fixture connection, or hardware action.
 | Non-Autoloop hardware procedure | Independent-review revisions are implemented in the procedure/template; the latest software/wire implementation review is complete. No operator evidence run exists. |
 | T7d phase evidence | Historical/incomplete under the old six-scenario gate. It no longer blocks native Autoloop DMX; the active native path uses bridge-owned phase, `AUTOLOOP_TICKS_PER_BEAT = 600`, `phase_offset_beats`, the offline equivalence oracle, and an operator two-flight calibration/A-B run. |
 | Native Autoloop DMX | Implemented and software-tested under `docs/architecture/native_autoloop_pack_authority.md` and `docs/plans/active/native_autoloop_dmx_runtime_spec.md`. StateManager resolves the already-selected laser scene edge through canonical pack note bindings, latches across no-edge ticks, phases an 8-bar/32-beat timeline at 600 ticks/beat with `phase_offset_beats`, preserves scripted/static/blackout/SoundSwitch-present precedence, and fails closed on missing binding/file/layout. Live/runtime validation, oracle calibration, and hardware evidence remain open. |
-| Art-Net truth-check gate | Implemented as a temporary default-off final-retirement measurement path. `RBSS_ARTNET_TRUTH_CHECK=1` plus a valid `RBSS_ARTNET_UNIVERSE` builds pack rendering without Enttec, emits bridge shadow-render ArtDMX U1 with JSONL sidecar evidence, and keeps production pack output software-zero while SoundSwitch is connected. `tools/artnet_compare.py --self-check` is software-tested with synthetic traces, and the live coverage ledger now requires matched sidecar rows for normalized scripted timeline events/rapid pairs, Autoloop visible/authored-dark phase buckets based on each loop's cycle, static/blackout overlay-release combinations, and active-deck/mode transition directions. Denser U1 streams are allowed only through ordered nearest-neighbor matches with valid sidecar evidence for every captured U1 packet, and extra U1 rows do not satisfy coverage. The actual U0/U1 capture exam is not yet run, so no PASS or hardware claim exists. |
+| Art-Net truth-check gate | Implemented as a temporary default-off final-retirement measurement path. `RBSS_ARTNET_TRUTH_CHECK=1` plus a valid `RBSS_ARTNET_UNIVERSE` builds pack rendering without Enttec, emits bridge shadow-render ArtDMX U1 with JSONL sidecar evidence, and keeps production pack output software-zero while SoundSwitch is connected. `tools/artnet_compare.py --self-check` is software-tested with synthetic traces, and the live coverage ledger now requires matched sidecar rows for normalized scripted timeline events/rapid pairs, Autoloop visible/authored-dark phase buckets based on each loop's cycle, static/blackout overlay-release combinations, and active-deck/mode transition directions. Denser U1 streams are allowed only through ordered nearest-neighbor matches with valid sidecar evidence for every captured U1 packet, and extra U1 rows do not satisfy coverage. **Retired to dormant validation-only tooling (2026-07-02):** the official comparator was never made pass-capable (loopback topology bug, deliberately not fixed) and the finalization pass built its confidence from code review, the diagnostic captures, and the offline oracle/time-domain evidence instead. The lane stays in the bridge for future truth checks; normal watcher launches are truth-OFF, opt-in per launch via `RBSS_BRIDGE_TRUTH=1` (universe defaults to 1). No PASS or hardware claim exists or is required from this lane. |
 | Physical hardware | Unvalidated. No committed real-run evidence file exists. |
 
 ### 2026-07-02 software finalization pass (Fable one-shot)
@@ -217,13 +217,15 @@ validated.
   scripted/autoloop timing outliers and left static, rewind, playback-edge,
   pitch-change, transition, active-deck, and MIDI behavior for the targeted live
   U0/U1 exam.
-- [ ] Run the Art-Net U0/U1 truth-check capture exam with SoundSwitch U0 as
-  ground truth, bridge U1 shadow output, fresh sidecar/run ID, full coverage, and
-  `tools/artnet_compare.py --self-check` already passing.
-- [ ] Rerun the proof-only snapshot gate or refresh its approved source
-  snapshot after all software work, including any future Autoloop work.
-- [ ] Run focused tests, full tests, docs gates, and adversarial review at the
-  final software checkpoint.
+- [x] Art-Net U0/U1 truth-check exam: retired as a completion gate (2026-07-02).
+  The diagnostic captures plus the offline oracle/time-domain evidence closed
+  the software rows; the truth lane stays dormant for future checks
+  (`RBSS_BRIDGE_TRUTH=1` opt-in on the watcher; normal launches truth-off).
+- [x] Proof gate re-run at the final software checkpoint: 29 PASS / 0 FAIL /
+  0 INCOMPLETE (2026-07-02, twice, including after the witness auto-retire
+  change).
+- [x] Focused tests, full suite (2600+ OK), and docs gates green at the final
+  software checkpoint (2026-07-02).
 - [ ] Complete and commit a real operator hardware evidence record before any
   bounded local hardware-validation claim.
 - [ ] Keep all broader compatibility and maturity claims explicitly unsupported.
@@ -286,10 +288,10 @@ not enter status or the menubar.
 | Product/format contract | `docs/research/soundswitch/soundswitch_importer_exporter_player_codex_spec.md` |
 | Current RE routing | `docs/research/soundswitch/README.md` |
 | Completed implementation specs | `docs/plans/completed/soundswitch/` |
-| Historical T7d plan/handoff | `docs/plans/active/soundswitch_t7d_capture_evidence_plan.md`, `soundswitch_t7d_capture_gate_handoff.md` |
+| Historical T7d plan/handoff | `docs/plans/completed/soundswitch/soundswitch_t7d_capture_evidence_plan.md`, `soundswitch_t7d_capture_gate_handoff.md` |
 | Historical T7d result | `docs/validation/soundswitch_t7d_phase_contract_evidence.md`, `soundswitch_t7d_phase_contract_blocked.md` |
 | Native Autoloop authority/spec | `docs/architecture/native_autoloop_pack_authority.md`, `docs/plans/active/native_autoloop_dmx_runtime_spec.md` |
-| Autoloop equivalence oracle | `docs/plans/active/soundswitch_autoloop_equivalence_oracle_spec.md` |
+| Autoloop equivalence oracle | `docs/plans/completed/soundswitch/soundswitch_autoloop_equivalence_oracle_spec.md` |
 | Hardware procedure/template | `docs/validation/soundswitch_hardware_validation_procedure.md`, `soundswitch_hardware_runs/TEMPLATE.md` |
 | Latest independent review | `docs/validation/soundswitch_exporter_player_software_review.md`, `docs/validation/soundswitch_publish_sidecar_review.md` |
 | Reusable review prompt | `docs/prompts/reviews/soundswitch_rw5_hardware_validation_implementation_review_prompt.md` |

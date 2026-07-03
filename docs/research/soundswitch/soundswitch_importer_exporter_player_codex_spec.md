@@ -22,7 +22,7 @@ Look grammar, and learned-MIDI add/remove behavior.
 
 **Scripted parity correction (2026-07-01).** This original contract is
 superseded for active scripted exact-parity claims by
-`docs/plans/active/soundswitch_pack_parity_root_cause_spec.md`. DD42028C proves
+`docs/plans/completed/soundswitch/soundswitch_pack_parity_root_cause_spec.md`. DD42028C proves
 that generated `.ssfile` cue replay can be internally self-consistent and still
 mismatch SoundSwitch U0. Current GhidraMCP confirms the reader/cache shape but
 does not find a footer/prefix/shared-byte remap or global-offset fix. Active
