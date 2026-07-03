@@ -658,13 +658,28 @@ class LaserPadWebTests(unittest.TestCase):
     def test_enabled_toggle_round_trips_via_draft_patch(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service = LaserPadService(Path(td) / "laser_director.json")
+            commands_path = Path(td) / "commands.jsonl"
             before = service.get_config_payload()["config"]["enabled"]
             self.assertFalse(before)
 
-            result = service.apply_draft_patch({"patch": {"enabled": True}})
+            with patch("rb_ss_bridge_v2.tools.laser_pad_web.COMMANDS_PATH", str(commands_path)):
+                result = service.apply_draft_patch({"patch": {"enabled": True}})
             after = service.get_config_payload()["config"]["enabled"]
+            command = json.loads(commands_path.read_text(encoding="utf-8"))
 
         self.assertTrue(result["ok"])
+        self.assertTrue(after)
+        self.assertEqual(command, {"cmd": "set_laser_director", "enabled": True})
+
+    def test_enabled_toggle_reports_runtime_command_append_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            with patch.object(service, "_append_runtime_command", side_effect=OSError("no command file")):
+                result = service.apply_draft_patch({"patch": {"enabled": True}})
+            after = service.get_config_payload()["config"]["enabled"]
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "runtime_command_append_failed")
         self.assertTrue(after)
 
     def test_default_personality_round_trips_via_draft_patch(self) -> None:

@@ -64,7 +64,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/led_look_director_design.md` | CURRENT SUPPORTING — LED Look Director design. |
 | `docs/led_look_mapping_workflow.md` | CURRENT SUPPORTING — operator mapping workflow. |
 | `docs/govee_capability_notes.md` | CURRENT SUPPORTING — Govee device capability notes. |
-| `docs/guides/*.md` (5) | CURRENT SUPPORTING — laser MIDI mapping, rollout checklist, Laser Pad, LED Pad/Template Lab operator guide. |
+| `docs/guides/*.md` (5) | CURRENT SUPPORTING — laser MIDI mapping, rollout checklist, Laser Pad live-toggle/draft behavior, LED Pad/Template Lab operator guide. |
 | `docs/subsystems/logging.md` | CURRENT SUPPORTING — matches `logging_manager.py`. |
 | `docs/data/offsets-*.yaml` (3) | CURRENT SUPPORTING — Rekordbox offset reference data. |
 | `docs/data/cues_*.md` (2) | GENERATED OUTPUT — relocated cue dumps; not in the reading path. |
@@ -104,7 +104,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/prompts/active/streamdeck_phase2_codex_implementation_prompt.md` | AGENT PROMPT (ACTIVE) | Codex implementation handoff for Phase 2 Part F. Software-only; no bridge restart or hardware action authority. |
 | `docs/plans/active/streamdeck_phase2_plan_review.md`, `docs/plans/active/streamdeck_phase2_codex_review_prompt.md` | REVIEW / AUDIT | Phase 2 review evidence and pre-implementation review prompt. Evidence only; current implementation instructions are in the spec and active prompt. |
 | `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md` | PLAN / SPEC (ACTIVE) | Static Ghidra plus passive process-memory RE handoff that now has a software-tested runtime implementation. Validate any follow-up against `docs/architecture/active_deck_authority.md` and `docs/research/rekordbox_mixer_active_deck_re_evidence.md`; live/hardware actions remain separately gated. |
-| `docs/plans/active/audit_2026_07_03_fix_queue_spec.md` | PLAN / SPEC (ACTIVE) | Ordered Codex implementation queue P1-P4 for the 2026-07-03 codebase audit. Software-only; no live bridge or hardware authority. Tracked under AWR-116. |
+| `docs/plans/active/audit_2026_07_03_fix_queue_spec.md` | PLAN / SPEC (ACTIVE) | Ordered Codex implementation queue P1-P4 for the 2026-07-03 codebase audit; implementation is software-tested in current `main`, but the spec remains the audit provenance. Software-only; no live bridge or hardware authority. Tracked under AWR-116. |
 | `docs/prompts/reviews/rekordbox_mixer_active_deck_re_review_prompt.md` | REVIEW PROMPT (standing review handoff; re-verify before use) | Adversarial review handoff for the Rekordbox mixer RE process and implementation spec. Review-only. |
 | `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material RW-1 through RW-5, hardware-procedure, T7/T8 specs/proofs, and the old progress ledger. Historical evidence only. |
 | `docs/plans/completed/led_agent_orchestrator_workflow.md`, `docs/plans/completed/led_look_director_integration_plan_revised.md` | COMPLETED / SUPERSEDED PLANNING | Early Govee/LED bootstrap plans superseded by the landed LED color engine + LED Pad work. |

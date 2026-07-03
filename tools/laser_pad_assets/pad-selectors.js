@@ -871,7 +871,6 @@ window.LaserPad = window.LaserPad || {};
         'safe_scene',
         'default_scene',
         'transition_scene',
-        'pre_drop_scene',
       ];
       const personalities = this.config?.personalities || {};
       Object.entries(personalities).forEach(([personality, pdata]) => {

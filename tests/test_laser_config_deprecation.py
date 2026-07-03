@@ -21,6 +21,7 @@ _DEPRECATED_KEYS = (
     "buildup_hold_beats",
     "pre_drop_lookahead_beats",
     "buildup_max_drop_distance_beats",
+    "pre_drop_scene",
 )
 
 
@@ -39,7 +40,6 @@ def _config_with_personality(overrides: dict[str, object] | None = None) -> dict
         "default_scene": "safe_static",
         "phrase_scene": "safe_static",
         "buildup_scene": "safe_static",
-        "pre_drop_scene": "safe_static",
         "drop_scene": "safe_static",
         "post_drop_scene": "safe_static",
         "breakdown_scene": "safe_static",
@@ -82,6 +82,7 @@ class LaserConfigDeprecationTests(unittest.TestCase):
                 "buildup_hold_beats": False,
                 "pre_drop_lookahead_beats": "old",
                 "buildup_max_drop_distance_beats": 99,
+                "pre_drop_scene": "old_scene",
             }
         )
         with mock.patch.object(laser_config.log, "warning") as warning:

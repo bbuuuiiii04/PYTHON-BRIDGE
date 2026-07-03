@@ -86,7 +86,6 @@ def _personality() -> LaserPersonality:
         default_scene="phrase_a",
         phrase_scene="phrase_a",
         buildup_scene="buildup_a",
-        pre_drop_scene="",
         drop_scene="drop_a",
         post_drop_scene="post_a",
         breakdown_scene="break_a",

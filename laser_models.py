@@ -88,7 +88,6 @@ class LaserPersonality:
     default_scene: str
     phrase_scene: str
     buildup_scene: str
-    pre_drop_scene: str
     drop_scene: str
     post_drop_scene: str
     breakdown_scene: str
@@ -116,7 +115,7 @@ class LaserPersonality:
     drop_lifecycle_mirror: bool = True        # kill switch, default ON
     max_drops_in_a_row: int = 2
     drop_impact_beats: float = 32.0           # operator value; flat window
-    post_drop_cycle_beats: float = 32.0       # inert: not consumed by the laser decision/exec path
+    post_drop_cycle_beats: float = 32.0       # operator-reserved future post-drop laser cycling
 
 
 @dataclass(frozen=True)

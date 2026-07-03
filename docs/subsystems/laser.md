@@ -24,6 +24,17 @@ reason. Laser runtime behavior is unchanged in this patch.
 Audit P2 (2026-07-03): pack-status overlay diagnostics are SoundSwitch/pack-driver reporting only;
 Laser Director policy and laser MIDI execution are unchanged.
 
+Audit P4 (2026-07-03): laser MIDI send-error degradation can recover by reopening the output port
+after a 5-second cooldown; startup/dependency degradations stay fail-closed. Executor bank
+selection skips disallowed high-impact or missing bank entries when a usable replacement exists,
+and blocked/missing selections restore the previous cursor/active-scene state before reporting the
+failure. Scene config now rejects unknown `fallback_scene` references and negative
+`cooldown_beats`. `pre_drop_scene` is removed from the live personality model and tracked example,
+but leftover keys in ignored local configs are tolerated as deprecated. Laser Pad's master enable
+toggle now also appends the live `set_laser_director` runtime command while saving the draft.
+All of this is software-tested only; no laser hardware, MIDI device, SoundSwitch, Rekordbox, LED,
+Govee, DMX, or Enttec validation was performed.
+
 Offline SoundSwitch pack boundary:
 - Task 2 deterministically exports and independently verifies the repo-local canonical pack for the pinned SoundSwitch 2.10.3 canonical RAVE project, including the seven-class F-3 control crosswalk. Live export reconciles saved-project inventory dynamically; the old exact-count snapshot is proof-only. It does not replace or alter Laser Director policy, MIDI execution, mappings, blackout behavior, or status.
 - The pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender exist. `LaserSceneExecutor` has one injected backend slot; startup selects legacy MIDI, none/dry-run, or verified pack/Enttec from the optional default-off config. Physical MIDI and direct DMX remain mutually exclusive.
@@ -61,7 +72,7 @@ Config:
 - `config/laser_director.example.json`
 - local ignored `config/laser_director.json`
 - launcher environment for `RBSS_LASER_CONFIG`
-- personality knobs: `drop_lifecycle_mirror` (default `true`), `max_drops_in_a_row`, `drop_impact_beats`, and renderer-intent-only `post_drop_cycle_beats`; laser cycle cadence still comes from autoloop ticks
+- personality knobs: `drop_lifecycle_mirror` (default `true`), `max_drops_in_a_row`, `drop_impact_beats`, and operator-reserved future `post_drop_cycle_beats`; laser cycle cadence still comes from autoloop ticks. Deprecated leftover `pre_drop_scene` keys are ignored for load compatibility.
 
 Laser Pad (operator companion tool):
 - `tools/laser_pad_web.py` (local web service), `tools/laser_config_ops.py` (config read/write
@@ -69,10 +80,11 @@ Laser Pad (operator companion tool):
   `launchagents/com.bbui.laser-pad.plist` (always-on background launch), operator guide
   `docs/guides/laser_pad.md`. Tracked under the `laser_pad` change contract in
   `docs/agents/change_contracts.yml`.
-- The pad edits laser config and personality selection through a local browser UI. It is NOT part
-  of runtime laser policy (`LaserDirector`) or MIDI execution (`LaserSceneExecutor`); it writes
-  config that the bridge picks up separately (hot-reload or restart), the same way any other
-  config edit does.
+- The pad edits laser config and personality selection through a local browser UI. Most changes
+  write config that the bridge picks up separately (hot-reload or restart), the same way any other
+  config edit does. The master `enabled` toggle is the exception: it also appends a
+  `set_laser_director` runtime command to the bridge command file so the live director follows the
+  draft toggle immediately; append failure returns an error instead of success.
 - Status: implemented / software-tested / hardware-unvalidated.
 
 Tests:
@@ -80,6 +92,11 @@ Tests:
 - otherwise inspect `tests/` and run relevant unittest equivalents
 - lifecycle coverage: `tests/test_drop_lifecycle.py`, `tests/test_laser_director_lifecycle.py`, and `tests/test_laser_executor_lifecycle.py`
 - transitional mapping check: `python3 tools/check_laser_midi_sync.py`
+- Audit P4 coverage: `tests/test_midi_output.py`, `tests/test_laser_executor.py`,
+  `tests/test_laser_config.py`, `tests/test_laser_config_deprecation.py`,
+  `tests/test_laser_pad_web.py`, and lifecycle/status regression suites cover send-error recovery,
+  bank-gate cursor restore, config validation/deprecation, blackout-mask refcounting, and Laser Pad
+  live-toggle command append behavior.
 
 Change contract:
 - If modifying policy, inspect `laser_director.py`, `laser_models.py`, and smart phrasing state usage.

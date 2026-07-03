@@ -580,6 +580,22 @@ class InvalidSceneReferenceTests(unittest.TestCase):
         self.assertFalse(r.available)
         self.assertEqual(r.reason, "invalid_config")
 
+    def test_bad_scene_fallback_scene(self) -> None:
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["scenes"]["safe_static"]["fallback_scene"] = "missing_scene"
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertEqual(r.reason, "invalid_config")
+        self.assertTrue(any("fallback_scene" in e for e in r.errors))
+
+    def test_negative_scene_cooldown_beats(self) -> None:
+        cfg = copy.deepcopy(_MINIMAL_CONFIG)
+        cfg["scenes"]["safe_static"]["cooldown_beats"] = -1
+        r = load_laser_director_config(_write_config(cfg))
+        self.assertFalse(r.available)
+        self.assertEqual(r.reason, "invalid_config")
+        self.assertTrue(any("cooldown_beats" in e for e in r.errors))
+
     def test_missing_scenes_key(self) -> None:
         import copy
         cfg = copy.deepcopy(_MINIMAL_CONFIG)
@@ -873,7 +889,6 @@ class PersonalityValidationTests(unittest.TestCase):
             "default_scene": "safe_static",
             "phrase_scene": "safe_static",
             "buildup_scene": "safe_static",
-            "pre_drop_scene": "safe_static",
             "drop_scene": "safe_static",
             "post_drop_scene": "safe_static",
             "breakdown_scene": "safe_static",
@@ -1122,20 +1137,12 @@ class PersonalityValidationTests(unittest.TestCase):
         self.assertFalse(r.available)
         self.assertTrue(any("buildup_lookahead_beats" in e for e in r.errors))
 
-    def test_pre_drop_scene_is_optional(self) -> None:
-        p = self._valid_personality()
-        p.pop("pre_drop_scene")
-        cfg = self._cfg_with_personality(p)
-        r = load_laser_director_config(_write_config(cfg))
-        self.assertTrue(r.available, msg=r.errors)
-
-    def test_pre_drop_scene_must_reference_known_scene_when_present(self) -> None:
+    def test_pre_drop_scene_leftover_key_is_ignored(self) -> None:
         p = self._valid_personality()
         p["pre_drop_scene"] = "unknown_scene"
         cfg = self._cfg_with_personality(p)
         r = load_laser_director_config(_write_config(cfg))
-        self.assertFalse(r.available)
-        self.assertTrue(any("pre_drop_scene" in e for e in r.errors))
+        self.assertTrue(r.available, msg=r.errors)
 
     def test_scene_banks_are_optional(self) -> None:
         cfg = self._cfg_with_personality(self._valid_personality())
@@ -1261,10 +1268,9 @@ class ExampleFileTests(unittest.TestCase):
         result = load_laser_director_config(str(self._EXAMPLE))
         self.assertIn(result.config.default_personality, result.config.personalities)
 
-    def test_example_file_pre_drop_scene_not_active(self) -> None:
+    def test_example_file_buildup_lookahead(self) -> None:
         result = load_laser_director_config(str(self._EXAMPLE))
         house = result.config.personalities["house"]
-        self.assertEqual(house.pre_drop_scene, "")
         self.assertEqual(house.buildup_lookahead_beats, 32)
 
 
@@ -1305,7 +1311,7 @@ class LaserModelsTests(unittest.TestCase):
         p = LaserPersonality(
             name="house",
             safe_scene="s", default_scene="s", phrase_scene="s",
-            buildup_scene="s", pre_drop_scene="s", drop_scene="s",
+            buildup_scene="s", drop_scene="s",
             post_drop_scene="s", breakdown_scene="s", transition_scene="s",
         )
         with self.assertRaises((AttributeError, TypeError)):
@@ -1333,7 +1339,7 @@ class LaserModelsTests(unittest.TestCase):
         p = LaserPersonality(
             name="house",
             safe_scene="s", default_scene="s", phrase_scene="s",
-            buildup_scene="s", pre_drop_scene="s", drop_scene="s",
+            buildup_scene="s", drop_scene="s",
             post_drop_scene="s", breakdown_scene="s", transition_scene="s",
         )
         self.assertFalse(p.allow_high_impact)

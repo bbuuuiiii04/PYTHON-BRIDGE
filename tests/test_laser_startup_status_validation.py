@@ -51,7 +51,6 @@ def _config(*, enabled: bool, dry_run: bool = True, with_personality: bool = Tru
             default_scene="default_scene_cfg",
             phrase_scene="default_scene_cfg",
             buildup_scene="default_scene_cfg",
-            pre_drop_scene="default_scene_cfg",
             drop_scene="default_scene_cfg",
             post_drop_scene="default_scene_cfg",
             breakdown_scene="default_scene_cfg",

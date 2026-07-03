@@ -79,6 +79,25 @@ def _fake_mido_module(port):
         Message=lambda msg_type, **kwargs: _FakeMessage(msg_type, **kwargs),
     )
 
+def _fake_mido_sequence(ports):
+    class _FakeMessage:
+        def __init__(self, msg_type, **kwargs):
+            self.type = msg_type
+            self.kwargs = kwargs
+
+    opened = list(ports)
+
+    def _open_output(_name):
+        next_port = opened.pop(0)
+        if isinstance(next_port, BaseException):
+            raise next_port
+        return next_port
+
+    return SimpleNamespace(
+        open_output=_open_output,
+        Message=lambda msg_type, **kwargs: _FakeMessage(msg_type, **kwargs),
+    )
+
 
 class MidiOutputTests(unittest.TestCase):
     def test_dry_run_start_does_not_import_mido(self) -> None:
@@ -147,6 +166,47 @@ class MidiOutputTests(unittest.TestCase):
                 status = out.status()
                 self.assertTrue(status["degraded"])
                 self.assertEqual(status["degraded_reason"], "send_error")
+            finally:
+                out.stop()
+
+    def test_send_error_reopens_after_cooldown_and_sends(self) -> None:
+        first = _FailingPort()
+        second = _RecordingPort()
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_sequence([first, second])
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                self.assertTrue(out.trigger(LaserMidiMessage(kind="note_on", channel=1, note=65, velocity=110)))
+                self.assertTrue(_wait_until(lambda: out.status()["degraded_reason"] == "send_error"))
+                out._send_error_reopen_after = 0.0
+                self.assertTrue(out.trigger(LaserMidiMessage(kind="note_on", channel=1, note=66, velocity=110)))
+                self.assertTrue(_wait_until(lambda: any(m.type == "note_on" for _, m in second.messages)))
+                status = out.status()
+                self.assertFalse(status["degraded"])
+                self.assertEqual(status["degraded_reason"], "")
+            finally:
+                out.stop()
+
+    def test_send_error_reopen_failure_respects_cooldown(self) -> None:
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        fake_mido = _fake_mido_sequence([
+            _FailingPort(),
+            OSError("still missing"),
+            _RecordingPort(),
+        ])
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                self.assertTrue(out.trigger(LaserMidiMessage(kind="note_on", channel=1, note=65, velocity=110)))
+                self.assertTrue(_wait_until(lambda: out.status()["degraded_reason"] == "send_error"))
+                out._send_error_reopen_after = 0.0
+                self.assertFalse(out.trigger(LaserMidiMessage(kind="note_on", channel=1, note=66, velocity=110)))
+                rejected_after_first = out.status()["rejected_count"]
+                self.assertFalse(out.trigger(LaserMidiMessage(kind="note_on", channel=1, note=67, velocity=110)))
+                self.assertEqual(out.status()["rejected_count"], rejected_after_first + 1)
+                self.assertTrue(out.status()["degraded"])
+                self.assertEqual(out.status()["degraded_reason"], "send_error")
             finally:
                 out.stop()
 

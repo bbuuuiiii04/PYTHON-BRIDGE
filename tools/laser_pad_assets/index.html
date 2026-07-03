@@ -20,7 +20,7 @@
         <div class="header-row-1">
           <div class="header-left">
             <div class="title-chip">LASER PAD</div>
-            <label class="master-enable-toggle" title="Single tap enables or disables laser output immediately — no confirmation either way.">
+            <label class="master-enable-toggle" title="Immediate live toggle + saved to draft.">
               <input type="checkbox" :checked="!!config?.enabled" @change="setEnabled($event.target.checked)" />
               <span>Lasers enabled</span>
             </label>

@@ -167,6 +167,7 @@ class LaserSceneExecutor:
 
         scene_def = self._config.scenes.get(selected_scene)
         if scene_def is None:
+            self._restore_role_state(role, cursor_before, active_before)
             with self._lock:
                 self._missing_scene_count += 1
                 self._gated_count += 1
@@ -179,6 +180,7 @@ class LaserSceneExecutor:
             self._personality.allow_high_impact if self._personality is not None else False
         )
         if role != "emergency" and scene_def.safety_class == "high_impact" and not allow_high_impact:
+            self._restore_role_state(role, cursor_before, active_before)
             self._record_gate("high_impact_blocked")
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_high_impact_blocked")
@@ -454,15 +456,31 @@ class LaserSceneExecutor:
             return active_scene
 
     def _choose_bank_scene_locked(self, *, role: str, fallback_scene: str) -> str:
+        if role not in _AUTO_ROLES:
+            return fallback_scene
         bank = self._bank_for_role(role)
         if not bank:
-            bank = (fallback_scene,)
-        if not bank or not bank[0]:
-            self._role_active_scene[role] = ""
-            return ""
+            cursor = self._role_cursors.get(role, 0)
+            self._role_cursors[role] = cursor + 1
+            self._role_active_scene[role] = fallback_scene
+            return fallback_scene
+        allow_high_impact = bool(
+            self._personality.allow_high_impact if self._personality is not None else False
+        )
+        usable: list[str] = []
+        for name in bank:
+            if not name:
+                continue
+            scene_def = self._config.scenes.get(name)
+            if scene_def is None:
+                continue
+            if scene_def.safety_class == "high_impact" and not allow_high_impact:
+                continue
+            usable.append(name)
+        if not usable:
+            return fallback_scene
         cursor = self._role_cursors.get(role, 0)
-        index = cursor % len(bank)
-        scene = bank[index]
+        scene = usable[cursor % len(usable)]
         self._role_cursors[role] = cursor + 1
         self._role_active_scene[role] = scene
         return scene

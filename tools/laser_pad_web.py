@@ -21,7 +21,7 @@ import mido
 
 from ..laser_config import LaserConfigResult, load_laser_director_config_from_dict
 from ..personality_resolver import PersonalityResolver, canonicalize_text
-from ..runtime_status import STATUS_PATH
+from ..runtime_status import COMMANDS_PATH, STATUS_PATH
 from .laser_config_ops import (
     _DEFAULT_CONFIG_PATH,
     _DEFAULT_PERSONALITY,
@@ -224,10 +224,13 @@ class LaserPadService:
         return scene_name
 
     def apply_draft_patch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        enabled_live_value: bool | None = None
         with self._lock:
             patch = payload.get("patch")
             if isinstance(patch, dict):
                 self._validate_patch_payload(patch)
+                if "enabled" in patch:
+                    enabled_live_value = bool(patch["enabled"])
                 candidate = copy.deepcopy(self._draft)
                 self._deep_merge(candidate, patch)
                 if "personalities" in patch:
@@ -241,16 +244,33 @@ class LaserPadService:
                 mapped_scene = self._apply_mapping_patch(mapping)
             self._persist_draft_locked()
             config = copy.deepcopy(self._draft)
+        live_error = ""
+        if enabled_live_value is not None:
+            try:
+                self._append_runtime_command({
+                    "cmd": "set_laser_director",
+                    "enabled": enabled_live_value,
+                })
+            except OSError as exc:
+                live_error = f"{type(exc).__name__}: {exc}"
         loader_result = self._load_config_result(config)
         errors, warnings = validate_config_data(config, loader_result=loader_result)
         result: dict[str, Any] = {
-            "ok": True,
+            "ok": not live_error,
             "errors": errors,
             "warnings": warnings,
         }
+        if live_error:
+            result["reason"] = "runtime_command_append_failed"
+            result["error"] = live_error
         if mapped_scene:
             result["scene_name"] = mapped_scene
         return result
+
+    def _append_runtime_command(self, command: dict[str, Any]) -> None:
+        with open(COMMANDS_PATH, "a", encoding="utf-8") as fp:
+            fp.write(json.dumps(command, sort_keys=True))
+            fp.write("\n")
 
     def discard_draft(self) -> dict[str, Any]:
         with self._lock:

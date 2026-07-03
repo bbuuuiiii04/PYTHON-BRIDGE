@@ -113,7 +113,6 @@ def _director(
     normal_changes_only_on_phrase_boundary: bool = False,
     breakdown_scene: str = "",
     buildup_scene: str = "",
-    pre_drop_scene: str = "",
     drop_scene: str = "",
     post_drop_scene: str = "",
     buildup_lookahead_beats: int = 32,
@@ -132,7 +131,6 @@ def _director(
         normal_changes_only_on_phrase_boundary=normal_changes_only_on_phrase_boundary,
         breakdown_scene=breakdown_scene,
         buildup_scene=buildup_scene,
-        pre_drop_scene=pre_drop_scene,
         drop_scene=drop_scene,
         post_drop_scene=post_drop_scene,
         buildup_lookahead_beats=buildup_lookahead_beats,
@@ -243,7 +241,6 @@ class EmergencyTests(unittest.TestCase):
                     default_scene="d",
                     breakdown_scene="bd",
                     buildup_scene="up",
-                    pre_drop_scene="pre",
                     drop_scene="drop",
                 )
                 ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,)), now=_now())
@@ -333,7 +330,6 @@ class ManualOverrideTests(unittest.TestCase):
             default_scene="d",
             breakdown_scene="bd",
             buildup_scene="up",
-            pre_drop_scene="pre",
             drop_scene="drop",
         )
         ld.tick(_ctx(abs_beat=63.5, smart_drops=(64,)), now=_now())
@@ -712,7 +708,6 @@ class PhraseSceneTests(unittest.TestCase):
             default_scene="d",
             phrase_scene="custom_phrase",
             buildup_scene="safe_static",
-            pre_drop_scene="safe_static",
             drop_scene="safe_static",
             post_drop_scene="safe_static",
             breakdown_scene="safe_static",
@@ -738,7 +733,6 @@ class PhraseSceneTests(unittest.TestCase):
             default_scene="d",
             phrase_scene="p",
             buildup_scene="up",
-            pre_drop_scene="pre",
             drop_scene="drop",
             post_drop_scene="post",
             breakdown_scene="bd",
@@ -756,7 +750,6 @@ class PhraseSceneTests(unittest.TestCase):
             default_scene="dubstep_default",
             phrase_scene="dubstep_phrase",
             buildup_scene="up",
-            pre_drop_scene="pre",
             drop_scene="drop",
             post_drop_scene="post",
             breakdown_scene="bd",
@@ -1274,20 +1267,6 @@ class SmartObservationTests(unittest.TestCase):
         self.assertEqual(ld.status()["current_scene"], "d")
         self.assertNotEqual(ld.status()["last_reason"], "buildup_to_drop_window")
 
-    def test_pre_drop_scene_is_inert_in_active_policy(self) -> None:
-        ld = _director(
-            default_scene="d",
-            buildup_scene="up",
-            pre_drop_scene="pre",
-            drop_scene="drop",
-            buildup_lookahead_beats=32,
-        )
-        ld.tick(_ctx(abs_beat=63.0, smart_drops=(64,)), now=_now())
-        self.assertNotEqual(ld.status()["current_scene"], "pre")
-        ld.tick(_ctx(abs_beat=63.8, smart_drops=(64,)), now=_now())
-        self.assertNotEqual(ld.status()["current_scene"], "pre")
-        self.assertNotEqual(ld.status()["last_reason"], "pre_drop_window")
-
     def test_autoloop_not_ready_blocks_buildup_and_drop(self) -> None:
         ld = _director(
             default_scene="d",
@@ -1316,7 +1295,6 @@ class SmartObservationTests(unittest.TestCase):
             default_scene="d",
             breakdown_scene="bd",
             buildup_scene="up",
-            pre_drop_scene="pre",
             drop_scene="drop",
             post_drop_scene="post",
         )
@@ -1599,8 +1577,7 @@ class StatusShapeTests(unittest.TestCase):
         for key in ("available", "enabled", "dry_run", "current_scene",
                     "last_reason", "manual_override", "emergency", "last_error", "personality",
                     "phrase_scene", "phrase_interval_beats", "minimum_scene_hold_beats",
-                    "normal_changes_only_on_phrase_boundary", "breakdown_scene", "buildup_scene",
-                    "pre_drop_scene", "drop_scene", "post_drop_scene", "buildup_lookahead_beats",
+                    "normal_changes_only_on_phrase_boundary", "breakdown_scene", "buildup_scene","drop_scene", "post_drop_scene", "buildup_lookahead_beats",
                     "phrase_trigger_pending", "last_trigger_abs_beat"):
             self.assertIn(key, s, msg=f"missing key: {key}")
 

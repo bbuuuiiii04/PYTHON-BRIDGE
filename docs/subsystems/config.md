@@ -24,6 +24,12 @@ Audit P3 (2026-07-03): the unused zero-valued OS2L timing-compensation constant 
 `config.py`; elapsed values are now raw in runtime code. No local ignored config was read or
 changed.
 
+Audit P4 (2026-07-03): Laser scene validation now fails closed when `fallback_scene` references an
+unknown scene or `cooldown_beats` is negative. Laser personality `pre_drop_scene` was removed from
+the tracked schema and example, but leftover keys in ignored local configs are ignored as
+deprecated so existing operator configs can still load. Laser `post_drop_cycle_beats` remains as an
+operator-reserved future field. No local ignored config was read or changed.
+
 SoundSwitch pack-player boundary:
 - `soundswitch_pack_player_config.py` implements the T7a startup-only, never-raising config loader.
 - `config/soundswitch_pack_player.example.json` is tracked, disabled, dry-run, and `output_backend: "none"` by default. The ignored local copy is `config/soundswitch_pack_player.json`.
@@ -66,6 +72,9 @@ Config:
 - LED `scripted_mode` is an optional top-level object with `default_role` and `role_map`. Source/default roles exclude `utility`, but `utility` is accepted as a destination meaning the configured blackout bank. Absent config maps scripted groove/drop/post-drop to `utility`; a present partial map falls back to `default_role`.
 - M2.5 slotized generic LED looks such as `rt_groove_chase`, `rt_post_drop_chase`, Patch E1 nebula looks, Patch E2 `rt_post_drop_center_comet`, and Patch E3 `rt_twinkle` are additive config entries. Patch F moves legacy color-suffix looks out of the tracked example `default` bank into `legacy_color_suffix` storage while keeping their look definitions intact.
 - Local ignored `config/led_look_director.json` can legitimately lag the tracked example; mirror Patch F to live config only with explicit operator approval and a loader check.
+- Laser scene `fallback_scene` values must name an existing scene, and `cooldown_beats` must be
+  non-negative when present. Legacy `pre_drop_scene` personality keys are ignored, not accepted as
+  current schema. `post_drop_cycle_beats` is reserved for future post-drop laser behavior.
 - Point/mono palette ranges can collapse slot-color entries 0-4 to one solid RGB for any slot cue; `random_with_mono_chance` can also opt individual looks into probabilistic solid slots 0-4; slot 5 remains reserved pure white.
 - SoundSwitch pack-player path precedence is explicit argument, then `RBSS_SOUNDSWITCH_PACK_PLAYER_CONFIG`, then `config/soundswitch_pack_player.json`; an absent selected file returns `not_configured`.
 - Pack-player config defaults are `enabled=false`, `dry_run=true`, and `output_backend=none`. Supported configured backends are `none`, `midi`, and `pack`; runtime command switching to `midi` remains deliberately unsupported. Pack enable/reload/backend actions are explicit and validate-first.
@@ -80,6 +89,8 @@ Tests:
 - `tests/test_color_engine_config.py` covers LED color-engine slot-fill strategy defaults, accepted values, mono-chance parsing, locked-palette parsing, and invalid-value rejection.
 - `tests/test_led_config.py` covers the LED `scripted_mode` blackout defaults, accepted `utility` destinations and partial maps, and invalid role/schema rejection.
 - `tests/test_soundswitch_pack_player_config.py` covers T7a defaults, path precedence, inline/external fixture maps, strict validation, immutability, and the never-raising contract.
+- `tests/test_laser_config.py` and `tests/test_laser_config_deprecation.py` cover Laser Audit P4
+  scene fallback/cooldown validation and deprecated `pre_drop_scene` load compatibility.
 
 Change contract:
 - If schema changes, update loaders, example configs, setup docs, feature/status matrices, and tests.

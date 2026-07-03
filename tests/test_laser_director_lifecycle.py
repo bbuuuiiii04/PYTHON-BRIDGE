@@ -77,7 +77,6 @@ def _personality(*, mirror: bool = True, max_drops: int = 2, impact_beats: float
         default_scene="house_phrase_1",
         phrase_scene="house_phrase_1",
         buildup_scene="buildup_1",
-        pre_drop_scene="",
         drop_scene="house_drop_1",
         post_drop_scene="post_drop_1",
         breakdown_scene="breakdown_1",

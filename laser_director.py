@@ -76,7 +76,6 @@ class LaserDirector:
         normal_changes_only_on_phrase_boundary: bool = False,
         breakdown_scene: str = "",
         buildup_scene: str = "",
-        pre_drop_scene: str = "",
         drop_scene: str = "",
         post_drop_scene: str = "",
         buildup_lookahead_beats: int = 32,
@@ -97,7 +96,6 @@ class LaserDirector:
         )
         self._breakdown_scene = breakdown_scene
         self._buildup_scene = buildup_scene
-        self._pre_drop_scene = pre_drop_scene
         self._drop_scene = drop_scene
         self._post_drop_scene = post_drop_scene
         self._buildup_lookahead_beats = max(0, int(buildup_lookahead_beats))
@@ -197,7 +195,6 @@ class LaserDirector:
         )
         self._breakdown_scene = personality.breakdown_scene
         self._buildup_scene = personality.buildup_scene
-        self._pre_drop_scene = personality.pre_drop_scene
         self._drop_scene = personality.drop_scene
         self._post_drop_scene = personality.post_drop_scene
         self._buildup_lookahead_beats = max(0, int(personality.buildup_lookahead_beats))
@@ -861,7 +858,6 @@ class LaserDirector:
             "normal_changes_only_on_phrase_boundary": self._normal_changes_only_on_phrase_boundary,
             "breakdown_scene": self._breakdown_scene,
             "buildup_scene": self._buildup_scene,
-            "pre_drop_scene": self._pre_drop_scene,
             "drop_scene": self._drop_scene,
             "post_drop_scene": self._post_drop_scene,
             "buildup_lookahead_beats": self._buildup_lookahead_beats,

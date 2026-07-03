@@ -16,6 +16,11 @@ Audit P1 (2026-07-03): the tracked LED Look Director example removed an unread t
 Audit P3 (2026-07-03): the old zero-valued OS2L timing-compensation constant was removed from
 runtime code; there is no supported user config knob for elapsed compensation.
 
+Audit P4 (2026-07-03): Laser `pre_drop_scene` is no longer a current personality field. Old local
+configs that still contain it continue to load because the loader ignores it as deprecated. Laser
+scene `fallback_scene` must point at an existing scene, and `cooldown_beats` must not be negative.
+`post_drop_cycle_beats` remains reserved for future laser post-drop behavior.
+
 SoundSwitch Tasks T7a/T7b/T7c/T7e add a validated pack-player config schema,
 tracked inert example, startup construction, StateManager frame driver,
 validate-first runtime controls, and sanitized status. The default remains

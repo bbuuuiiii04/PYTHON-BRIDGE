@@ -24,6 +24,11 @@ Audit P3 (2026-07-03): no hardware, SoundSwitch app, Rekordbox, laser, LED, Gove
 Enttec validation was performed. Govee handoff threading, ANLZ read-failure recovery, raw elapsed
 OS2L sends, and startup spectral-cache eviction are software-tested only.
 
+Audit P4 (2026-07-03): no hardware, SoundSwitch app, Rekordbox, laser, LED, Govee, MIDI, DMX, or
+Enttec validation was performed. Laser MIDI send-error recovery, executor bank-gate restore,
+scene config validation, Laser Pad live-toggle command append, blackout-mask refcounting,
+`canon_alias` dedupe, and `pre_drop_scene` deprecation tolerance are software-tested only.
+
 The current exporter/importer evidence boundary is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
 The pinned SoundSwitch 2.10.3 project/pack tooling, immutable loader/player,
@@ -68,6 +73,7 @@ Rollback notes:
 | pending | SoundSwitch | pending | pending | reviewed procedure/template available | pending | pending | no repeatable repo evidence yet |
 | pending | Enttec exporter/player backend | pending | software/startup/status lane implemented; current live config not inspected | zero preflight, one scripted track, controls/masks, emergency physical kill, known-dark reset, graceful closeout | pending | pending | process death is not accepted as a hard kill; no operator run occurred |
 | pending | Laser MIDI | pending | lifecycle default-on; local ignored config | gated drop impact, 32-beat hold, post-drop/drop fallback cycling, shuffle-bag order, blackout release, and kill switch | pending | pending | lifecycle is software-tested only; verify no drop leak during groove/buildup and no dark initial hit before any hardware-validated claim |
+| pending | Laser Audit P4 resilience | pending | current Laser Director config; live MIDI port not inspected | transient MIDI send-error reopen, high-impact bank skip, missing-scene restore, Laser Pad master toggle live command, blackout-mask refcounting | pending | pending | software-tested only; no bridge restart, live MIDI, laser hardware, SoundSwitch, Rekordbox, LED/Govee, DMX, or Enttec action occurred |
 | 2026-06-29 | Govee/LED color/comet/beat-sync (AWR-101–104) | Home Govee (hardware) | bridge HEAD 2026-06-29; live LED config (gitignored) | operator ran the rig and observed M2.5 slot cues (Patch E1/E2/E3), color-engine core (decoupled color/drift/drop-snap), realtime comet (stutter/smoothness/pause), and beat-sync against spec | PASS — operator visual sign-off | this log entry | visual sign-off, not instrumented capture; code-milestone re-audit for AWR-102/103/104 not separately performed |
 | pending | Govee/LED remaining (AWR-105/106) | pending | pending | scripted groove/drop/post-drop blackout policy (AWR-105); Patch S solid-color outcomes + Patch F default-bank rotation (AWR-106); Patch D stable-hue sparkle; center-burst 0-2 / 2-4 accent band split | pending | pending | software-tested only; need operator visual sign-off. The AWR-101–104 paths were signed off 2026-06-29 (row above). |
 | pending | LED Pad Phase 3 Locked Palette + renderer param unlocks (AWR-113) | pending | pending | Locked Palette playback, locked-palette visual output, and renderer param unlock visual behavior for groove/drop/post-drop slot cues | pending | pending | software-tested only; no live Govee output or visual hardware validation performed |

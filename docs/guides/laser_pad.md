@@ -44,6 +44,11 @@ Open `http://127.0.0.1:8765`.
   the bad file. `POST /api/commit` deletes the draft file after a successful
   save; `POST /api/discard` reloads from the live config and deletes the
   draft file.
+- The master **Lasers enabled** toggle writes the enabled value to the draft and appends one
+  runtime command line to the bridge command file:
+  `{"cmd":"set_laser_director","enabled":true|false}`. That is the only Laser Pad draft patch that
+  directly changes the running bridge. If the command append fails, the API reports an error instead
+  of pretending the live toggle succeeded; the draft save remains durable.
 - Injects default additive `_pad_meta` when absent.
 - Displays channel-tagged bank tabs and note grid.
 - Tap note to test-fire MIDI (`/api/test_note`) honoring `dry_run`.
@@ -83,6 +88,13 @@ Open `http://127.0.0.1:8765`.
 
 ## Recent updates
 
+- `2026-07-03`: Audit P4 live-toggle truth pass — the master **Lasers enabled** toggle now says
+  "Immediate live toggle + saved to draft" and does both things. `/api/draft` still persists the
+  enabled value to the durable draft file, and enabled patches also append the canonical
+  `set_laser_director` runtime command using `runtime_status.COMMANDS_PATH`. Append failures return
+  `ok: false` with `reason: runtime_command_append_failed`; tests cover successful command-line
+  writing and append failure reporting. Software-tested only; no bridge restart or laser hardware
+  validation was performed.
 - `2026-07-03`: Visual reskin (software-tested only, no runtime/API behavior change) — Laser Pad
   now shares the LED Pad's "stage console" design system: the same `:root` token block (surfaces,
   AA text tiers, semantic colors, shared per-role color vocabulary, spacing scale) in

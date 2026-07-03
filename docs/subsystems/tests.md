@@ -59,6 +59,11 @@ Coverage expectations:
 - Audit P3 adds `tests/test_govee_realtime_runner.py` coverage for runner-thread handoff teardown,
   `tests/test_rb_state_reader.py` coverage for transient ANLZ read-failure recovery, and
   `tests/test_sound_switch_engine.py` coverage for explicit scripted elapsed threading.
+- Audit P4 adds `tests/test_midi_output.py` send-error reopen recovery coverage,
+  `tests/test_laser_executor.py` high-impact/missing bank restore and blackout-mask refcount
+  coverage, `tests/test_laser_config.py` fallback/cooldown validation coverage,
+  `tests/test_laser_config_deprecation.py` `pre_drop_scene` tolerance coverage, and
+  `tests/test_laser_pad_web.py` live-toggle command append/error coverage.
 
 Change contract:
 - Do not modify tests just to make docs changes pass.

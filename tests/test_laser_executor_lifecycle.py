@@ -109,7 +109,7 @@ class TestShuffleBag(unittest.TestCase):
         config = _make_config(scenes)
         personality = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
-            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            phrase_scene="d1", buildup_scene="d1",
             drop_scene="d_static", post_drop_scene="",
             breakdown_scene="d1", transition_scene="safe_static",
             drop_bank=("d1", "d2", "d3", "d_static"),
@@ -150,7 +150,7 @@ class TestShuffleBag(unittest.TestCase):
         config = _make_config(scenes)
         personality = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
-            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            phrase_scene="d1", buildup_scene="d1",
             drop_scene="d1", post_drop_scene="",
             breakdown_scene="d1", transition_scene="safe_static",
             drop_bank=("d1",),
@@ -179,7 +179,7 @@ class TestA8NeverDark(unittest.TestCase):
         config = _make_config(scenes)
         personality = LaserPersonality(
             name="dubstep", safe_scene="safe_static", default_scene="safe_static",
-            phrase_scene="safe_static", buildup_scene="safe_static", pre_drop_scene="",
+            phrase_scene="safe_static", buildup_scene="safe_static",
             drop_scene="house_drop_1", post_drop_scene="house_drop_1",
             breakdown_scene="safe_static", transition_scene="safe_static",
             drop_bank=("house_drop_1",),
@@ -209,7 +209,7 @@ class TestA8NeverDark(unittest.TestCase):
         config = _make_config(scenes)
         personality = LaserPersonality(
             name="house", safe_scene="safe_static", default_scene="d1",
-            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            phrase_scene="d1", buildup_scene="d1",
             drop_scene="d_static", post_drop_scene="",
             breakdown_scene="d1", transition_scene="safe_static",
             drop_bank=("d1", "d2", "d_static"),
@@ -244,7 +244,7 @@ class TestA7Regression(unittest.TestCase):
         config = _make_config(scenes)
         personality = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
-            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            phrase_scene="d1", buildup_scene="d1",
             drop_scene="d1", post_drop_scene="",
             breakdown_scene="d1", transition_scene="safe_static",
             drop_bank=("d1", "d2", "d3"),
@@ -305,7 +305,7 @@ class TestLaserBlackoutEquivalence(unittest.TestCase):
         # Flag ON
         pers_on = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
-            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            phrase_scene="d1", buildup_scene="d1",
             drop_scene="d1", post_drop_scene="",
             breakdown_scene="d1", transition_scene="safe_static",
             drop_bank=("d1",), drop_lifecycle_mirror=True,
@@ -319,7 +319,7 @@ class TestLaserBlackoutEquivalence(unittest.TestCase):
         # Flag OFF
         pers_off = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
-            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            phrase_scene="d1", buildup_scene="d1",
             drop_scene="d1", post_drop_scene="",
             breakdown_scene="d1", transition_scene="safe_static",
             drop_bank=("d1",), drop_lifecycle_mirror=False,
@@ -353,7 +353,7 @@ class TestLaserBlackoutEquivalence(unittest.TestCase):
         }
         pers = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
-            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            phrase_scene="d1", buildup_scene="d1",
             drop_scene="d1", post_drop_scene="",
             breakdown_scene="d1", transition_scene="safe_static",
             drop_bank=("d1",), drop_lifecycle_mirror=True,
@@ -384,7 +384,7 @@ class TestLaserBlackoutEquivalence(unittest.TestCase):
         }
         pers = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
-            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            phrase_scene="d1", buildup_scene="d1",
             drop_scene="d1", post_drop_scene="",
             breakdown_scene="d1", transition_scene="safe_static",
             drop_bank=("d1",), drop_lifecycle_mirror=True,
@@ -410,7 +410,7 @@ class TestShuffleBagEdgeCases(unittest.TestCase):
         config = _make_config(scenes)
         personality = LaserPersonality(
             name="test", safe_scene="safe_static", default_scene="d1",
-            phrase_scene="d1", buildup_scene="d1", pre_drop_scene="",
+            phrase_scene="d1", buildup_scene="d1",
             drop_scene="d1", post_drop_scene="",
             breakdown_scene="d1", transition_scene="safe_static",
             drop_bank=tuple(drop_bank), drop_lifecycle_mirror=True,

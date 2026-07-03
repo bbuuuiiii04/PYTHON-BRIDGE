@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .laser_models import LaserMidiMessage, LaserPersonality, LaserScene
+from .personality_resolver import canonicalize_text
 
 log = logging.getLogger("laser_config")
 
@@ -78,6 +79,7 @@ _DEPRECATED_PERSONALITY_TIMING_FIELDS = (
     "buildup_hold_beats",
     "pre_drop_lookahead_beats",
     "buildup_max_drop_distance_beats",
+    "pre_drop_scene",
 )
 _LIFECYCLE_SCENE_FIELDS = (
     "startup_scene",
@@ -339,8 +341,9 @@ def _validate(data: dict[str, Any]) -> list[str]:
         errors.append("'scenes' must be a non-empty object")
         scenes_raw = {}
     else:
+        scene_keys = set(str(name) for name in scenes_raw)
         for scene_name, scene_data in scenes_raw.items():
-            errors.extend(_validate_scene(scene_name, scene_data))
+            errors.extend(_validate_scene(scene_name, scene_data, scene_keys))
 
     scene_keys = set(scenes_raw.keys())
 
@@ -380,7 +383,7 @@ def _validate(data: dict[str, Any]) -> list[str]:
 
 
 def canon_alias(value: str) -> str:
-    return " ".join(value.strip().lower().split())
+    return canonicalize_text(value)
 
 
 def _validate_personality_aliases(personalities_raw: dict[str, Any]) -> list[str]:
@@ -495,7 +498,7 @@ def _validate_manual_commands(data: dict[str, Any], *, smart_drop_mode: str) -> 
     return errors
 
 
-def _validate_scene(name: str, data: Any) -> list[str]:
+def _validate_scene(name: str, data: Any, scene_keys: set[str]) -> list[str]:
     errors: list[str] = []
     prefix = f"scene '{name}'"
 
@@ -517,6 +520,16 @@ def _validate_scene(name: str, data: Any) -> list[str]:
         errors.append(f"{prefix}: 'midi' must be an object")
     else:
         errors.extend(_validate_midi(prefix, midi_raw))
+
+    fallback_scene = data.get("fallback_scene", "")
+    if fallback_scene and fallback_scene not in scene_keys:
+        errors.append(f"{prefix}: 'fallback_scene' references unknown scene '{fallback_scene}'")
+
+    cooldown_beats = data.get("cooldown_beats", 0.0)
+    if isinstance(cooldown_beats, bool) or not isinstance(cooldown_beats, (int, float)):
+        errors.append(f"{prefix}: 'cooldown_beats' must be a number >= 0")
+    elif float(cooldown_beats) < 0:
+        errors.append(f"{prefix}: 'cooldown_beats' must be >= 0")
 
     return errors
 
@@ -626,15 +639,6 @@ def _validate_personality(
     elif post_drop_ref and post_drop_ref not in scene_keys:
         errors.append(
             f"{prefix}: 'post_drop_scene' references unknown scene '{post_drop_ref}'"
-        )
-
-    # Deprecated: pre_drop_scene is optional/inert for active policy.
-    pre_drop_ref = data.get("pre_drop_scene", "")
-    if not isinstance(pre_drop_ref, str):
-        errors.append(f"{prefix}: 'pre_drop_scene' must be a string")
-    elif pre_drop_ref and pre_drop_ref not in scene_keys:
-        errors.append(
-            f"{prefix}: 'pre_drop_scene' references unknown scene '{pre_drop_ref}'"
         )
 
     phrase_interval_beats = data.get("phrase_interval_beats", 32)
@@ -850,7 +854,6 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
         default_scene=str(data.get("default_scene", "")),
         phrase_scene=str(data.get("phrase_scene", "")),
         buildup_scene=str(data.get("buildup_scene", "")),
-        pre_drop_scene=str(data.get("pre_drop_scene", "")),
         drop_scene=str(data.get("drop_scene", "")),
         post_drop_scene=str(data.get("post_drop_scene", "")),
         breakdown_scene=str(data.get("breakdown_scene", "")),

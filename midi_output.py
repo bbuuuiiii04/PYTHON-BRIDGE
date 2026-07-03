@@ -35,6 +35,7 @@ _PRIORITY_MAP = {
 _CMD_TRIGGER = "trigger"
 _CMD_PANIC = "panic"
 _CMD_STOP = "stop"
+_SEND_ERROR_REOPEN_COOLDOWN_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ class MidiOutput:
         self._running = False
         self._degraded = False
         self._degraded_reason = ""
+        self._send_error_reopen_after = 0.0
         self._last_error = ""
 
         self._trigger_count = 0
@@ -119,7 +121,10 @@ class MidiOutput:
         if not self._dry_run:
             with self._lock:
                 degraded = self._degraded
+                degraded_reason = self._degraded_reason
                 running = self._running
+            if degraded and degraded_reason == "send_error" and running:
+                degraded = not self._attempt_send_error_recovery()
             if degraded or not running:
                 self._record_rejection()
                 return False
@@ -428,8 +433,41 @@ class MidiOutput:
             self._degraded = True
             if not self._degraded_reason:
                 self._degraded_reason = "send_error"
+            self._send_error_reopen_after = time.monotonic() + _SEND_ERROR_REOPEN_COOLDOWN_S
         log.warning("[MIDI] send-error err=%s", exc)
         self._close_port()
+
+    def _attempt_send_error_recovery(self) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            if now < self._send_error_reopen_after:
+                return False
+            self._send_error_reopen_after = now + _SEND_ERROR_REOPEN_COOLDOWN_S
+            mido_mod = self._mido
+        if mido_mod is None:
+            try:
+                mido_mod = importlib.import_module("mido")
+            except Exception as exc:
+                with self._lock:
+                    self._last_error = f"{type(exc).__name__}: {exc}"
+                log.warning("[MIDI] reopen-failed reason=send_error err=%s", exc)
+                return False
+            with self._lock:
+                self._mido = mido_mod
+        try:
+            outport = mido_mod.open_output(self._port_name)
+        except Exception as exc:
+            with self._lock:
+                self._last_error = f"{type(exc).__name__}: {exc}"
+            log.warning("[MIDI] reopen-failed reason=send_error err=%s", exc)
+            return False
+        with self._lock:
+            self._outport = outport
+            self._degraded = False
+            self._degraded_reason = ""
+            self._last_error = ""
+        log.info("[MIDI] recovered reason=send_error")
+        return True
 
     def _set_degraded(self, reason: str, exc: Optional[Exception] = None) -> None:
         with self._lock:
