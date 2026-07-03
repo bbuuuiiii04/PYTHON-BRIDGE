@@ -123,7 +123,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/archive/prompts/*.md` (7) | ARCHIVE | Completed/superseded agent prompts. |
 | `docs/archive/plans/*.md` (3) | ARCHIVE | Completed autoloop spec + plan; deferred laser SM-net blackout-mask spec (do-not-implement in MIDI path, 2026-06-23 — reference design for future DMX-frame blackout). |
 | `docs/prompts/completed/graphify_install_prompt.md` | ARCHIVE / HISTORICAL | Completed Graphify install/tuning prompt for AWR-114; current workflow is `docs/setup/graphify.md`. |
-| `docs/prompts/completed/*.md` | ARCHIVE / HISTORICAL | Completed prompts; evidence only. Deletion candidates per the maintenance rule (Git history preserves them). |
+| `docs/prompts/completed/*.md` | ARCHIVE / HISTORICAL | Retained completed prompts are provenance still referenced by current docs; spent zero-reference prompts were deleted 2026-07-03 (Git history preserves them). |
 | `docs/prompts/reviews/*.md` | REVIEW / AUDIT | Current review handoffs plus non-SoundSwitch historical review briefs retained where code references them. Completed SoundSwitch review prompts were deleted; Git history preserves them. |
 | `docs/history/*.md` + `docs/history/archive/*.md` (5) | ARCHIVE / HISTORICAL | Rollout logs; kept in place (referenced by `current_architecture.md`, `subsystems/logging.md`, and a test name). |
 
