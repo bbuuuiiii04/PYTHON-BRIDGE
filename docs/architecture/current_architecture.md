@@ -9,6 +9,10 @@ Audit P1 note (2026-07-03): confirmed-unused internal event names, diagnostics h
 state, stale comments, and one unused StateManager shadow-log branch were removed. Runtime ownership
 and output ordering are unchanged.
 
+Audit P2 note (2026-07-03): OS2L injection tooling is default-off, SoundSwitch-connected pack
+suppression remains software ZERO with additive overlay diagnostics, and committed LED drop
+selection uses the same color-engine DIY eligibility predicate as normal tick automation.
+
 ## System Shape
 
 The bridge has one central authority thread: `StateManager`. It owns `DeckState`

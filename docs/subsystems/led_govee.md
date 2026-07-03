@@ -22,6 +22,10 @@ Audit P1 (2026-07-03):
   Stream Deck controls; callers outside `StateManager` must route through events/commands.
 - The tracked LED Look Director example no longer carries an unread top-level `metadata` key.
 
+Audit P2 (2026-07-03):
+- Committed drop-look selection now passes the same color-engine `diy_eligible` predicate used by
+  normal `tick()` automation, so a held smart-drop impact cannot bypass palette eligibility.
+
 Authoritative code:
 - `led_config.py`
 - `led_models.py`

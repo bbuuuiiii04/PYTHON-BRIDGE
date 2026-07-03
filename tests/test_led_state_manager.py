@@ -3,6 +3,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from typing import Callable
 from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -295,7 +296,12 @@ class _AutomationLEDLookDirector:
             return self.preview_decision
         return None
 
-    def commit_role(self, role: str) -> LEDLookDecision | None:
+    def commit_role(
+        self,
+        role: str,
+        *,
+        diy_eligible: Callable[[str], bool] | None = None,
+    ) -> LEDLookDecision | None:
         self.commit_calls.append(role)
         if role == "drop" and self.preview_decision is not None:
             return self.preview_decision

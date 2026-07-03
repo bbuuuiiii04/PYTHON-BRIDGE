@@ -34,7 +34,7 @@ from .filepath_resolver import (
 from .models import BridgeEvent, Ev
 from .mtc_reader import MTCReader
 from .osl_output import OS2LConnection, OS2LOutput, SoundSwitchDiscovery
-from .os2l_injector import OS2LInjector
+from .os2l_injector import INJECT_PATH_ENV, OS2LInjector
 from .rb_memory import PositionCache, RBMemoryReader
 from .rb_state_reader import (
     ANLZ_DIRECT_ENV,
@@ -1211,7 +1211,12 @@ def main() -> None:
     conn = OS2LConnection()
     conn.start()
     output = OS2LOutput(conn)
-    injector = OS2LInjector(conn)
+    injector: OS2LInjector | None = None
+    if os.environ.get("RBSS_OS2L_INJECT") == "1" or os.environ.get(INJECT_PATH_ENV):
+        injector = OS2LInjector(conn)
+        log.info("[MAIN] os2l-injector enabled  path=%s", injector.path)
+    else:
+        log.info("[MAIN] os2l-injector disabled  enable=RBSS_OS2L_INJECT=1")
 
     # DNS-SD discovery for SoundSwitch
     discovery = SoundSwitchDiscovery(conn)
@@ -1653,7 +1658,8 @@ def main() -> None:
         rb_state_reader.start()
     mem_reader.start()
     live_bpm.start()
-    injector.start()
+    if injector is not None:
+        injector.start()
     sm_thread = sm.start()
     command_reader.start()
     status_writer.start()
@@ -1788,7 +1794,8 @@ def main() -> None:
         mem_reader.stop()
         live_bpm.stop()
         mtc.stop()
-        injector.stop()
+        if injector is not None:
+            injector.stop()
         if midi_output is not None:
             midi_output.stop()
         if led_scene_adapter is not None:

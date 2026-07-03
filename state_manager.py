@@ -2024,11 +2024,7 @@ class StateManager:
             playing=d.playing,
             lighting_mode=self._os.lighting_mode,
             scripted_id=d.scripted_id,
-            diy_eligible=(
-                engine.diy_eligible
-                if (engine is not None and engine.enabled)
-                else None
-            ),
+            diy_eligible=self._led_diy_eligible_predicate(),
         )
         decision = None
         if role == "drop":
@@ -2428,7 +2424,7 @@ class StateManager:
         decision = None
         if callable(commit_role):
             try:
-                decision = commit_role("drop")
+                decision = commit_role("drop", diy_eligible=self._led_diy_eligible_predicate())
             except Exception:
                 decision = None
         if decision is None:
@@ -2437,6 +2433,10 @@ class StateManager:
             self._led_committed_drop_anchor_beat = float(anchor)
             self._led_committed_drop_decision = decision
         return decision
+
+    def _led_diy_eligible_predicate(self) -> Any:
+        engine = self._led_color_engine
+        return engine.diy_eligible if (engine is not None and engine.enabled) else None
 
     def _consume_led_committed_drop_decision(
         self,
@@ -3780,6 +3780,9 @@ class StateManager:
         software_zero_frame: bool,
         parity_live_blocked: bool = False,
         native_autoloop: NativeAutoloopDecision | dict[str, Any] | None = None,
+        overlay_suppressed_static_held: bool = False,
+        overlay_suppressed_blackout: bool = False,
+        overlay_suppressed_input_degraded: bool = False,
     ) -> None:
         """Publish one fresh software-intent snapshot with one atomic assignment."""
         rt = runtime or DISABLED_PACK_RUNTIME
@@ -3813,6 +3816,11 @@ class StateManager:
             "static_held": bool(static_held),
             "blackout": bool(blackout),
             "parity_live_blocked": bool(parity_live_blocked),
+            "overlay_suppressed": {
+                "static_held": bool(overlay_suppressed_static_held),
+                "blackout": bool(overlay_suppressed_blackout),
+                "input_degraded": bool(overlay_suppressed_input_degraded),
+            },
             "autoloop_phase_blocked": bool(autoloop_phase_blocked),
             "software_zero_frame": bool(software_zero_frame),
             "native_autoloop": native_block,
@@ -3851,41 +3859,6 @@ class StateManager:
                 self._os2l_connected_provider is not None
                 and self._os2l_connected_provider()
             )
-            if soundswitch_connected and truth_sink is None:
-                native_decision = self._native_autoloop.resolve(
-                    pack_sha12=rt.pack_sha12,
-                    bindings={},
-                    scene=None,
-                    lighting_mode=self._os.lighting_mode,
-                    scripted_active=False,
-                    playing=False,
-                    fresh=False,
-                    track_changed=False,
-                    discontinuity=False,
-                    soundswitch_present=True,
-                    abs_beat_pos=0.0,
-                    phase_offset_beats=rt.phase_offset_beats,
-                )
-                player.clear_selection()
-                player.set_static_layers(())
-                player.set_masks(blackout=False, emergency=False)
-                self._pack_last_static_layers = ()
-                self._pack_play_hold_key = None
-                self._pack_play_hold_deadline = 0.0
-                self._pack_frame_count += 1
-                self._publish_pack_status(
-                    runtime=rt,
-                    scripted_active=False,
-                    input_degraded=False,
-                    static_held=False,
-                    blackout=False,
-                    autoloop_phase_blocked=True,
-                    software_zero_frame=True,
-                    native_autoloop=native_decision,
-                )
-                backend.submit_frame(_PACK_ZERO_FRAME)
-                return
-
             # 1. Controller masks + static overrides (in-memory snapshot; no I/O).
             #    RW-4: an UNHEALTHY controller drops its MANUAL OVERLAY ONLY (held
             #    Static Look + blackout forced released); the automatic scripted base
@@ -3932,6 +3905,44 @@ class StateManager:
                     self._pack_last_static_layers = layers
             input_degraded = midi_input is not None and not input_healthy
 
+            if soundswitch_connected and truth_sink is None:
+                native_decision = self._native_autoloop.resolve(
+                    pack_sha12=rt.pack_sha12,
+                    bindings={},
+                    scene=None,
+                    lighting_mode=self._os.lighting_mode,
+                    scripted_active=False,
+                    playing=False,
+                    fresh=False,
+                    track_changed=False,
+                    discontinuity=False,
+                    soundswitch_present=True,
+                    abs_beat_pos=0.0,
+                    phase_offset_beats=rt.phase_offset_beats,
+                )
+                player.clear_selection()
+                player.set_static_layers(())
+                player.set_masks(blackout=False, emergency=False)
+                self._pack_last_static_layers = ()
+                self._pack_play_hold_key = None
+                self._pack_play_hold_deadline = 0.0
+                self._pack_frame_count += 1
+                self._publish_pack_status(
+                    runtime=rt,
+                    scripted_active=False,
+                    input_degraded=False,
+                    static_held=False,
+                    blackout=False,
+                    autoloop_phase_blocked=True,
+                    software_zero_frame=True,
+                    native_autoloop=native_decision,
+                    overlay_suppressed_static_held=bool(layers),
+                    overlay_suppressed_blackout=bool(blackout),
+                    overlay_suppressed_input_degraded=bool(input_degraded),
+                )
+                backend.submit_frame(_PACK_ZERO_FRAME)
+                return
+
             # 1b. No active deck (idle between tracks): the manual overlay above stays
             #     operator-controlled — presses/releases/toggles/blackout keep applying
             #     while the automatic base is cleared. Held static stands alone during
@@ -3967,6 +3978,9 @@ class StateManager:
                             "soundswitch_present_native_suppressed",
                             reason="soundswitch_present",
                         ),
+                        overlay_suppressed_static_held=bool(layers),
+                        overlay_suppressed_blackout=bool(blackout),
+                        overlay_suppressed_input_degraded=bool(input_degraded),
                     )
                     backend.submit_frame(_PACK_ZERO_FRAME)
                     return
@@ -4190,6 +4204,9 @@ class StateManager:
                         "soundswitch_present_native_suppressed",
                         reason="soundswitch_present",
                     ),
+                    overlay_suppressed_static_held=bool(layers),
+                    overlay_suppressed_blackout=bool(blackout),
+                    overlay_suppressed_input_degraded=bool(input_degraded),
                 )
                 backend.submit_frame(_PACK_ZERO_FRAME)
                 return

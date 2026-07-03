@@ -300,7 +300,7 @@ class PackDriverTests(unittest.TestCase):
         sm._drive_pack_output(now=10.0)
 
         self.assertEqual(be.frames, [ZERO_FRAME])
-        self.assertEqual(inp.calls, 0)
+        self.assertEqual(inp.calls, 1)
         self.assertEqual(sm._pack_last_static_layers, ())
         self.assertIsNone(sm._pack_play_hold_key)
         self.assertEqual(sm._pack_play_hold_deadline, 0.0)
@@ -308,6 +308,9 @@ class PackDriverTests(unittest.TestCase):
         self.assertEqual(status["operational_state"], "soundswitch_present_native_suppressed")
         self.assertEqual(status["native_autoloop"]["status"], "soundswitch_present_native_suppressed")
         self.assertTrue(status["autoloop_phase_blocked"])
+        self.assertTrue(status["overlay_suppressed"]["static_held"])
+        self.assertFalse(status["overlay_suppressed"]["blackout"])
+        self.assertFalse(status["overlay_suppressed"]["input_degraded"])
         self.assertTrue(status["software_zero_frame"])
         self.assertFalse(status["scripted_active"])
         self.assertFalse(status["static_held"])

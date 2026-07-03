@@ -227,11 +227,16 @@ class LEDLookDirector:
             role=role,
         )
 
-    def commit_role(self, role: str) -> LEDLookDecision | None:
+    def commit_role(
+        self,
+        role: str,
+        *,
+        diy_eligible: Optional[Callable[[str], bool]] = None,
+    ) -> LEDLookDecision | None:
         """Select the next automation look for a role and advance once."""
         if not self._config.enabled or not self._config.automation_enabled:
             return None
-        return self._automation_decision_for_role(role)
+        return self._automation_decision_for_role(role, diy_eligible=diy_eligible)
 
     def clear_queued_post_drop(self) -> None:
         """Drop any pending paired post_drop look.

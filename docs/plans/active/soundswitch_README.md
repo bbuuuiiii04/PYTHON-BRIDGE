@@ -86,6 +86,9 @@ artifacts, not planning documents. They are not moved into the authority tree.
   action=enable`): implemented and software-tested, including one bounded retry
   after a fresh disconnected `pack_start_failed`; no manual pack button and no
   implicit hot-enable.
+- Audit P2 makes file-driven OS2L injection opt-in and adds copied
+  `soundswitch_pack.overlay_suppressed` diagnostics under SoundSwitch-connected
+  ZERO suppression.
 - Static Override Press/Toggle interaction mode decoded from the SoundSwitch-saved
   byte and honored by the bridge MIDI input: implemented and software-tested;
   unknown saved mode fails closed to momentary. Static-controller input is

@@ -7,6 +7,10 @@ Audited against implementation commit `3f4bcc0` on 2026-07-02.
 2026-07-03 audit P1 did not change the runtime invariants below. It removed confirmed-unused
 internal helpers/events and made smart-drop/breakdown command callback failure reporting explicit.
 
+2026-07-03 audit P2 keeps the pack ZERO precedence while SoundSwitch is connected. It adds copied
+status diagnostics only, and does not add blocking/socket/MIDI/file/subprocess I/O to the 200 Hz
+push loop.
+
 ## SoundSwitch Pack Component Boundary
 
 - `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` provide frozen models and strict read-only decode; `soundswitch_pack.py` and `tools/export_soundswitch_pack.py` deterministically publish the repo-local canonical pack; `soundswitch_pack_verifier.py` independently verifies it with dynamic saved-project inventory reconciliation by default and an explicit proof-only snapshot gate. All are pinned to SoundSwitch 2.10.3 and the canonical UUID/RAVE profile.

@@ -37,6 +37,8 @@ Implementation notes:
 - Inspect `led_*`, `govee_*`, `beat_sync_engine.py`, `state_manager.py` dispatch seam.
 - LED color-engine live controls are operator-reserved future pad/deck surfaces; if they become live
   from outside `StateManager`, route through `BridgeEvent`s or runtime commands.
+- Committed drop-look selection must thread the same `diy_eligible` predicate used by normal
+  `LEDLookDirector.tick()` automation.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
 - For scripted-track LED automation, preserve the split between `safety.scripted_mode_automation` as the master switch (the shipped example config enables it; the `LEDSafety` dataclass default stays `false`) and the top-level `scripted_mode` role-remap policy. `utility` is a blackout destination only; verify active and off role transitions separately.

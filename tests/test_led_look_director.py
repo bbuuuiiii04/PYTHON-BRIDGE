@@ -172,6 +172,24 @@ class LEDLookDirectorPriorityTests(unittest.TestCase):
         self.assertIsNone(decision)
         self.assertEqual(director.status()["last_reason"], "automation_no_look:ambient")
 
+    def test_commit_role_filters_diy_eligibility_like_tick(self) -> None:
+        cfg = _director_config()
+        cfg["automation_enabled"] = True
+        cfg["looks"]["room_second"] = copy.deepcopy(cfg["looks"]["room_manual"])
+        cfg["banks"]["default"]["drop"] = ["room_manual", "room_second"]
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        director = LEDLookDirector(result.config)
+        director._role_cursors["drop"] = 0
+
+        decision = director.commit_role(
+            "drop",
+            diy_eligible=lambda name: name == "room_second",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.look, "room_second")
+
     def test_unknown_manual_override_returns_safe_default(self) -> None:
         director = self._build_director()
         self.assertFalse(director.set_manual_override("missing-look"))

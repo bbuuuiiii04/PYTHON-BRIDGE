@@ -39,6 +39,9 @@ SoundSwitch pack-player boundary (T7c/T7e):
   retirement gate. When enabled it exposes run ID, universe, targets, sidecar path, U1 sequence,
   queue overflow/drop counts, send errors, sidecar errors, pack SHA, and CH1 fixture-map address.
   It is not a runtime command surface and does not imply physical output authority.
+- The copied `soundswitch_pack.overlay_suppressed` diagnostic object is additive and stable. It
+  explains SoundSwitch-connected ZERO suppression when held static, blackout, or degraded input was
+  present; it does not change the ZERO output fields.
 - Runtime `backend=midi` is **deferred** (callback returns sanitized `unsupported_action`); no
   runtime command opens IAC/MidiOutput; pack failure falls back to disabled/none, never MIDI.
 - The menubar `Export from SS` workflow adds no command. After verified disk publication it reuses
