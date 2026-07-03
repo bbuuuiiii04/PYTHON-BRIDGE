@@ -3,7 +3,7 @@
   const moveBanks = ["ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility"];
   const bankLabels = {drafts:"Drafts", ambient:"Ambient", groove:"Groove", buildup:"Buildup", pre_drop:"Pre-Drop", drop:"Drop", post_drop:"Post-Drop", breakdown:"Breakdown", utility:"Utility", other:"Other"};
   const bankColors = {drafts:"var(--lab)", ambient:"#4cc9c0", groove:"#35b6ff", buildup:"#e8b13f", drop:"#f25f5c", post_drop:"#b48cff", breakdown:"#6f9bd1", utility:"#8b98a5", other:"var(--border)"};
-  const state = {config:null, banks:{}, renders:[], renderMap:new Map(), palettes:[], activeBank:"drafts", editor:null, openSnapshot:null, cleanSnapshot:null, updateTimer:null, lastFocus:null, playingLook:"", modalOpen:false};
+  const state = {config:null, banks:{}, renders:[], renderMap:new Map(), palettes:[], activeBank:"drafts", editor:null, openSnapshot:null, cleanSnapshot:null, updateTimer:null, lastFocus:null, playingLook:""};
   const $ = (id) => document.getElementById(id);
   const api = window.LedPadApi;
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -12,6 +12,7 @@
     $("errorBanner").hidden = false;
     $("errorBanner").textContent = err && err.message ? err.message : String(err);
   }
+  PadModal.setErrorHandler(showError);
   function clearError() { $("errorBanner").hidden = true; $("errorBanner").textContent = ""; $("errorBanner").classList.remove("warn-banner"); }
   function toast(text) {
     $("toast").textContent = text;
@@ -122,8 +123,11 @@
       if (action === "play") { await switchEditor(name, true); return; }
       if (action === "edit") { await switchEditor(name, false); return; }
       if (action === "duplicate") {
-        const newName = prompt("Duplicate name", `${name}_copy`);
-        if (newName) { await api.duplicate({source:name, new_name:newName}); await refresh(); await openEditor(newName, false); }
+        promptModal("Duplicate look", "", {label:"Duplicate name", value:`${name}_copy`, confirmText:"Duplicate"}, async (newName) => {
+          if (!newName) return;
+          try { await api.duplicate({source:name, new_name:newName}); await refresh(); await openEditor(newName, false); }
+          catch (err) { showError(err); }
+        });
         return;
       }
       if (action === "move") { moveModal(name); return; }
@@ -242,26 +246,16 @@
     }, 150);
   }
   function closeModal() {
-    $("modal").hidden = true;
-    state.modalOpen = false;
+    PadModal.close();
   }
   function modal(title, text, actions) {
-    $("modalTitle").textContent = title;
-    $("modalText").textContent = text;
-    $("modalActions").innerHTML = actions.map((a, i) => `<button type="button" class="${esc(a.className || "ghost")}" data-modal-action="${i}">${esc(a.label)}</button>`).join("");
-    $("modal").hidden = false;
-    state.modalOpen = true;
-    $("modalActions").querySelector("button").focus();
-    $("modalActions").querySelectorAll("button").forEach((btn, i) => btn.onclick = async () => {
-      closeModal();
-      try { await actions[i].run(); } catch (err) { showError(err); }
-    });
+    PadModal.show(title, text, actions);
   }
   function confirmModal(title, text, actionText, onConfirm) {
-    modal(title, text, [
-      {label:"Cancel", className:"ghost", run:() => {}},
-      {label:actionText, className:"danger-outline", run:onConfirm},
-    ]);
+    PadModal.confirm(title, text, actionText, onConfirm);
+  }
+  function promptModal(title, message, options, onConfirm) {
+    PadModal.prompt(title, message, options, onConfirm);
   }
   function threeWaySwitch(name, play) {
     modal("Unsaved changes", "Save this look before switching?", [
@@ -349,7 +343,7 @@
   }
   document.addEventListener("keydown", ev => {
     if (ev.key !== "Escape") return;
-    if (state.modalOpen) closeModal();
+    if (PadModal.isOpen()) closeModal();
     else if (!$("editorDrawer").hidden) closeEditor(false);
   });
   $("bpmInput").addEventListener("change", ev => api.session({bpm:Number(ev.target.value)}).catch(showError));

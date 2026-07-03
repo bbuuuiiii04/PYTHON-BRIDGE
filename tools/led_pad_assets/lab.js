@@ -8,6 +8,7 @@
     $("errorBanner").hidden = false;
     $("errorBanner").textContent = err && err.message ? err.message : String(err);
   }
+  PadModal.setErrorHandler(showError);
   function clearError() { $("errorBanner").hidden = true; $("errorBanner").textContent = ""; }
   function labScene(name) { return `lab_${name}`; }
   function cue() { return Number(($("cueCustom") || {}).value || (state.current || {}).cue_beats || 16); }
@@ -92,7 +93,7 @@
       await save();
       const res = await api.labPlay({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}"), cue_beats:cue(), takeover});
       if (!res.ok && res.error === "ownership_required") {
-        if (confirm("The bridge owns the LEDs right now. Take over? LEDs go dark on the bridge side until you release.")) await play(true);
+        PadModal.confirm("The bridge owns the LEDs right now. Take over?", "LEDs go dark on the bridge side until you release.", "Take over", () => play(true));
         return;
       }
       if (!res.ok) throw new Error(res.error || "lab play failed");
@@ -122,12 +123,13 @@
     $("labLive").hidden = !(state.current && state.playingLook === labScene(state.current.name));
   }
 
-  $("newDraftBtn").onclick = async () => {
-    const name = prompt("Draft name");
-    if (!name) return;
-    await api.labSave({name, kind:"slot", fn:name, params:{}, cue_beats:16, brief:"", notes:"", status:"iterating"});
-    await refresh();
-    selectDraft(name);
+  $("newDraftBtn").onclick = () => {
+    PadModal.prompt("New draft", "", {label:"Draft name", confirmText:"Create"}, async (name) => {
+      if (!name) return;
+      await api.labSave({name, kind:"slot", fn:name, params:{}, cue_beats:16, brief:"", notes:"", status:"iterating"});
+      await refresh();
+      selectDraft(name);
+    });
   };
   $("saveDraftBtn").onclick = () => save().catch(showError);
   $("playDraftBtn").onclick = () => play(false);
@@ -142,6 +144,7 @@
   $("loopToggle").onchange = ev => { $("loopLabel").textContent = ev.target.checked ? "On" : "Off"; api.session({loop:ev.target.checked}).catch(showError); };
   $("stopBtn").onclick = () => api.emergencyStop().then(updateRuntime).catch(showError);
   $("ownershipBtn").onclick = async () => { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); };
+  document.addEventListener("keydown", ev => { if (ev.key === "Escape" && PadModal.isOpen()) PadModal.close(); });
   setInterval(updateRuntime, 2000);
   refresh().catch(showError);
 }());

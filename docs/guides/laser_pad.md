@@ -73,12 +73,24 @@ Open `http://127.0.0.1:8765`.
 - In-app history drawer supports refresh, diff view, and restore-to-draft.
 - Drag/drop reassignment is supported on mapped note tiles.
 - Drop onto an already mapped target opens an overwrite modal and swaps notes.
+- The mapping drawer's "Move to pad" select is a touch fallback for drag/drop reassignment (iOS
+  Safari does not support HTML5 drag/drop): it goes through the same reassignment path a drop
+  would take, including the overwrite dialog and undo bar. Disabled for system-managed
+  (blackout) pads, matching "Move to bank".
 - Header controls include MIDI output port selection and `dry_run` toggle.
 - Personality timing controls expose phrase length, minimum hold, and buildup lookahead edits.
 - Hard duplicate view by `(channel, note)` and soft duplicate warning by `note`.
 
 ## Recent updates
 
+- `2026-07-03`: iOS/iPad touch pass (code-level, on-device verification pending): `viewport-fit=cover`
+  plus `env(safe-area-inset-*)` padding on the body and mobile drawer, a `dvh`-with-`vh`-fallback
+  drawer height, a `@media (pointer: coarse)` rule that raises interactive controls to a 44px touch
+  target without changing desktop density, a narrow-viewport (`max-width: 640px`) header stack so
+  the header no longer overflows horizontally on a phone, and a "Move to pad" select in the mapping
+  drawer as a touch-friendly alternative to HTML5 drag/drop reassignment (which iOS Safari does not
+  support) — it reuses the same reassignment code path as a drop, including the overwrite dialog
+  and undo bar.
 - `2026-07-03`: Vendored Alpine.js (`tools/laser_pad_assets/alpine.min.js`, SRI-verified against the previous CDN pin) so the pad works with no internet access. Added a durable `config/laser_director.draft.json` draft file (atomic writes, corrupt-file quarantine + fallback, cleared on commit/discard) so unsaved mapping work survives a LaunchAgent crash. Added a header Discard button with a confirm modal. Renamed the ▶ button/results panel to make clear the mapping check never fires lasers, and split the save badge into "Draft saved" vs "Applied" states.
 - `2026-05-14`: `_ensure_personality_exists` now backfills missing default keys on existing personalities (was: return-early). Legacy configs are self-healed on first load; explicitly-omitted defaults will be re-added.
 - `2026-05-13`: Retired the terminal wizard and made Laser Pad the only mapper.

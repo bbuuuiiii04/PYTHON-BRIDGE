@@ -309,3 +309,86 @@ body {
 .qr-wrap svg {
   display: block;
 }
+
+/* iOS/iPad touch pass: stack the header on narrow phones instead of letting
+   it overflow horizontally. Desktop/tablet layout above 640px is unchanged. */
+@media (max-width: 640px) {
+  .header-row-1 {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .header-left,
+  .header-center,
+  .header-right {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .header-center {
+    order: 3;
+    justify-content: flex-start;
+  }
+
+  .status-line {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .header-row-2 {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .header-group {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .header-separator {
+    display: none;
+  }
+
+  .wide-field select,
+  .personality-field select {
+    width: 100%;
+  }
+
+  .header-group .field-inline {
+    width: 100%;
+  }
+
+  .commit-cluster {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .save-badge {
+    max-width: 100%;
+  }
+}
+
+/* iOS/iPad touch pass: bump interactive controls to a 44px touch target on
+   coarse pointers only. Desktop (mouse/trackpad) density is unaffected. */
+@media (pointer: coarse) {
+  .icon-action,
+  .settings-trigger,
+  .icon-trio button {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .settings-close {
+    width: 44px;
+    height: 44px;
+  }
+
+  button,
+  select,
+  input[type="number"],
+  input[type="text"] {
+    min-height: 44px;
+  }
+}

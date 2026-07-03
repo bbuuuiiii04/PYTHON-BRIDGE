@@ -387,24 +387,7 @@ window.LaserPad = window.LaserPad || {};
       event.preventDefault();
       const sourceNote = this.draggedNote;
       this.dragEnd();
-      if (sourceNote === note) {
-        return;
-      }
-      const targetMeta = this.sceneDetailsByNote(note);
-      if (targetMeta.system) {
-        this.statusText = 'Cannot overwrite blackout system mappings.';
-        return;
-      }
-      if (targetMeta.mapped) {
-        this.overwriteDialog = {
-          open: true,
-          sourceNote,
-          targetNote: note,
-          pending: { sourceNote, targetNote: note },
-        };
-        return;
-      }
-      this.applyDragReassign(sourceNote, note, false);
+      this.reassignNoteTo(sourceNote, note);
     },
 
 

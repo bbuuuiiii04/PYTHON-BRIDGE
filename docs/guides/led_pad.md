@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: f8573fd
+last_verified_commit: 661edde
 last_verified_date: 2026-07-03
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, and QR same-network access; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, and the iOS/iPad touch pass; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -151,8 +151,21 @@ pgrep -f rb_ss_bridge_v2 | wc -l
 
 Expected value is `1`.
 
+## iOS/iPad touch pass
+
+The pad and Template Lab pages carry code-level iOS/iPad accommodations: `viewport-fit=cover` plus
+`env(safe-area-inset-*)` padding around the topbar, editor drawer footer, and toast so content
+does not sit under the iOS Safari toolbar or home indicator; a `dvh`-with-`vh`-fallback height on
+the editor drawer; and a `@media (pointer: coarse)` rule that raises buttons, selects, and number
+inputs to a 44px touch target without changing desktop density. `window.PadModal`
+(`tools/led_pad_assets/pad-core.js`) replaces the pad's and Template Lab's previous
+`prompt()`/`confirm()` calls with the app's own in-page modal (lazily-created DOM shared by both
+pages) so dialogs render consistently instead of relying on native browser prompts. This is
+code-level only — no iPad/iOS Safari device verification has been performed.
+
 ## Status
 
 Phases 1-3 and Template Lab Phase 2 are implemented/software-tested. Locked Palette and renderer
 param unlock behavior is covered by software tests only. All LED Pad and Template Lab playback/UI
-claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. The iOS/iPad touch pass is
+implemented/software-tested only; on-device verification is pending.

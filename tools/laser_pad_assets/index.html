@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Laser Pad</title>
     <script src="/static/pad-state.js?v=ux-5"></script>
     <script src="/static/pad-selectors.js?v=ux-5"></script>
@@ -269,6 +269,14 @@
                   <option value="">Select bank…</option>
                   <template x-for="bank in banks().filter((bank) => bank.id !== activeBankId)" :key="bank.id">
                     <option :value="bank.id" x-text="`${bank.name} · Ch${bank.channel || 1}`"></option>
+                  </template>
+                </select>
+              </label>
+              <label>Move to pad:
+                <select :disabled="drawer.system" @change="if ($event.target.value) moveOpenNoteToPad($event.target.value); $event.target.value = ''">
+                  <option value="">Select pad…</option>
+                  <template x-for="note in currentNotes().filter((note) => note !== openNote)" :key="'move-pad-' + note">
+                    <option :value="note" x-text="isMapped(note) ? `${note} · ${displayLabel(note)}` : note"></option>
                   </template>
                 </select>
               </label>

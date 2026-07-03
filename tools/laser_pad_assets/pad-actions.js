@@ -1351,6 +1351,45 @@ window.LaserPad = window.LaserPad || {};
 
 
 
+    // Shared reassignment entry point for both the drag/drop grid path and
+    // the touch-friendly "Move to pad" select in the mapping drawer. Mirrors
+    // dropOn's decision tree: refuses system (blackout) targets, routes an
+    // already-mapped target through the overwrite confirmation dialog, and
+    // otherwise applies the move directly.
+    reassignNoteTo(sourceNote, targetNote) {
+      if (sourceNote === null || sourceNote === undefined) return;
+      if (targetNote === null || targetNote === undefined) return;
+      if (sourceNote === targetNote) return;
+      const targetMeta = this.sceneDetailsByNote(targetNote);
+      if (targetMeta.system) {
+        this.statusText = 'Cannot overwrite blackout system mappings.';
+        return;
+      }
+      if (targetMeta.mapped) {
+        this.overwriteDialog = {
+          open: true,
+          sourceNote,
+          targetNote,
+          pending: { sourceNote, targetNote },
+        };
+        return;
+      }
+      this.applyDragReassign(sourceNote, targetNote, false);
+    },
+
+
+
+    // Touch fallback for drag/drop: moves the pad currently open in the
+    // mapping drawer onto another pad in the same bank via the same
+    // reassignment path a drop would take.
+    moveOpenNoteToPad(targetNote) {
+      if (this.openNote === null || this.openNote === undefined) return;
+      if (targetNote === null || targetNote === undefined || targetNote === '') return;
+      this.reassignNoteTo(Number(this.openNote), Number(targetNote));
+    },
+
+
+
     async applyDragReassign(sourceNote, targetNote, allowSwap) {
       const sourceMeta = this.sceneDetailsByNote(sourceNote);
       if (!sourceMeta.mapped || !sourceMeta.sceneName) {

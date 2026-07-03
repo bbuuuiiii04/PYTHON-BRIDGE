@@ -1184,7 +1184,7 @@ body {
 
 .drawer-top-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(200px, 260px);
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) minmax(160px, 220px);
   gap: 10px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
@@ -1959,6 +1959,9 @@ body {
 @media (max-width: 1023px) {
   body {
     padding: 10px;
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
 
   .control-strip {
@@ -2002,7 +2005,9 @@ body {
   .drawer {
     width: 100vw;
     max-height: 100vh;
+    max-height: 100dvh;
     border-radius: 0;
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   .drawer-top-grid,
