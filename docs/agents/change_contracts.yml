@@ -146,6 +146,31 @@ contracts:
       - H612D behavior does not imply all Govee devices work
       - software tests do not prove device compatibility
 
+  led_pad:
+    code_globs:
+      - tools/led_pad_*.py
+      - tools/led_pad_assets/**
+      - scripts/led_pad*.py
+      - led_pad_controls*.py
+    inspect:
+      - docs/guides/led_pad.md
+      - docs/subsystems/led_govee.md
+      - docs/architecture/doc_index.md
+      - docs/status/active_work_registry.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
+    docs_update:
+      - docs/guides/led_pad.md
+      - docs/subsystems/led_govee.md
+      - docs/architecture/doc_index.md
+      - docs/status/active_work_registry.md
+    forbidden_assumptions:
+      - LED Pad dry-run or software playback does not prove visual hardware behavior
+      - output ownership must stay explicit when the bridge is live
+
   laser:
     code_globs:
       - laser_config.py

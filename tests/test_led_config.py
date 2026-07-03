@@ -705,6 +705,42 @@ class RealtimeConfigTests(unittest.TestCase):
         self.assertFalse(result.available)
         self.assertTrue(any("width must be a number > 0" in err for err in result.errors))
 
+    def test_slot_cue_positive_beat_params_accept_numbers(self) -> None:
+        cases = [
+            ("groove_center_burst_retract", {"burst_beats": 1.0}),
+            ("breakdown_full_breathing", {"breath_beats": 2.0, "drift_beats": 4.0}),
+        ]
+        for scene_ref, params in cases:
+            cfg = self._realtime_config()
+            cfg["looks"]["rt_groove_chase_blue"]["scene_ref"] = scene_ref
+            cfg["looks"]["rt_groove_chase_blue"]["params"] = params
+            result = load_led_look_director_config_from_dict(cfg)
+            self.assertTrue(result.available, msg=f"{scene_ref}: {result.errors}")
+
+    def test_burst_beats_string_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["scene_ref"] = "groove_center_burst_retract"
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"burst_beats": "1"}
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("burst_beats must be a number > 0" in err for err in result.errors))
+
+    def test_breath_beats_string_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["scene_ref"] = "breakdown_full_breathing"
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"breath_beats": "1"}
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("breath_beats must be a number > 0" in err for err in result.errors))
+
+    def test_drift_beats_string_rejected(self) -> None:
+        cfg = self._realtime_config()
+        cfg["looks"]["rt_groove_chase_blue"]["scene_ref"] = "breakdown_full_breathing"
+        cfg["looks"]["rt_groove_chase_blue"]["params"] = {"drift_beats": "1"}
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertFalse(result.available)
+        self.assertTrue(any("drift_beats must be a number > 0" in err for err in result.errors))
+
     def test_max_pulses_zero_rejected(self) -> None:
         cfg = self._realtime_config()
         cfg["looks"]["rt_groove_chase_blue"]["params"] = {"max_pulses": 0}

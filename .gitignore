@@ -23,6 +23,8 @@ govee.env
 !.claude/skills/codex-spec/SKILL.md
 config/laser_director.json
 config/led_look_director.json
+config/led_look_director.draft.json
+config/led_lab/
 config/soundswitch_pack_player.json
 spec/*.npy
 local/

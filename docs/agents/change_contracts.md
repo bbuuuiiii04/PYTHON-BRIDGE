@@ -158,6 +158,43 @@ Forbidden assumptions:
 - Realtime packet output does not prove visual smoothness.
 - Software tests do not prove hardware compatibility.
 
+## LED Pad changes
+
+Triggered by changes to:
+
+- `tools/led_pad_*.py`
+- `tools/led_pad_assets/**`
+- `scripts/led_pad*.py`
+- `led_pad_controls*.py`
+
+Inspect:
+
+- `docs/guides/led_pad.md`
+- `docs/subsystems/led_govee.md`
+- `docs/architecture/doc_index.md`
+- `docs/status/active_work_registry.md`
+
+Run:
+
+```bash
+python -m unittest discover tests
+python tools/check_docs_metadata.py
+python tools/check_agent_contracts.py
+python tools/check_docs_drift.py
+```
+
+Update:
+
+- `docs/guides/led_pad.md`
+- `docs/subsystems/led_govee.md`
+- `docs/architecture/doc_index.md`
+- `docs/status/active_work_registry.md`
+
+Forbidden assumptions:
+
+- LED Pad dry-run or software playback does not prove visual hardware behavior.
+- Output ownership must stay explicit when the bridge is live.
+
 ## Laser changes
 
 Triggered by changes to:

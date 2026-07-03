@@ -547,10 +547,15 @@ def _validate_realtime_params(
             errors.append(f"{prefix} params.beat_division must be a number > 0")
     if "trail_beats" in params:
         _validate_non_negative_number(f"{prefix} params.trail_beats", params["trail_beats"], errors)
-    for field_name in ("travel_beats", "width"):  # divisors in the engine -> must be > 0
+    for field_name in ("travel_beats", "width", "burst_beats", "breath_beats", "drift_beats"):
         if field_name in params:
             value = params[field_name]
-            if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(float(value))
+                or value <= 0
+            ):
                 errors.append(f"{prefix} params.{field_name} must be a number > 0")
     for field_name in ("heads", "max_pulses"):
         if field_name in params:

@@ -62,7 +62,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/led_look_director_design.md` | CURRENT SUPPORTING — LED Look Director design. |
 | `docs/led_look_mapping_workflow.md` | CURRENT SUPPORTING — operator mapping workflow. |
 | `docs/govee_capability_notes.md` | CURRENT SUPPORTING — Govee device capability notes. |
-| `docs/guides/*.md` (4) | CURRENT SUPPORTING — laser MIDI mapping, rollout checklist, Laser Pad. |
+| `docs/guides/*.md` (5) | CURRENT SUPPORTING — laser MIDI mapping, rollout checklist, Laser Pad, LED Pad stub. |
 | `docs/subsystems/logging.md` | CURRENT SUPPORTING — matches `logging_manager.py`. |
 | `docs/data/offsets-*.yaml` (3) | CURRENT SUPPORTING — Rekordbox offset reference data. |
 | `docs/data/cues_*.md` (2) | GENERATED OUTPUT — relocated cue dumps; not in the reading path. |
