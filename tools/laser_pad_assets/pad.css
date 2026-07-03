@@ -16,6 +16,11 @@
   --line: #2a3345;
   --soft-line: #354155;
   --control: #0f1624;
+  /* LED-pad semantic aliases - shared vocabulary for future cross-pad components */
+  --surface: var(--panel);
+  --surface-2: var(--panel-alt);
+  --border: var(--line);
+  --text-dim: var(--muted);
 }
 
 * {
@@ -174,17 +179,10 @@ body {
 .icon-trio button,
 .icon-action,
 .settings-trigger {
-  width: 30px;
   min-width: 30px;
-  height: 30px;
-  border-radius: 5px;
-  border: 1px solid #354155;
-  background: #111827;
   color: var(--text);
   cursor: pointer;
   padding: 0;
-  display: inline-grid;
-  place-items: center;
   font-size: 0.92rem;
 }
 
@@ -1962,10 +1960,6 @@ body {
     padding-left: max(10px, env(safe-area-inset-left));
     padding-right: max(10px, env(safe-area-inset-right));
     padding-bottom: max(10px, env(safe-area-inset-bottom));
-  }
-
-  .control-strip {
-    align-items: stretch;
   }
 
   .wide-field select,

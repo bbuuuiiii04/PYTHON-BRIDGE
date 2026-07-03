@@ -781,7 +781,6 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
             "/api/history": service.history,
             "/api/runtime_status": service.runtime_status,
             "/api/lab/list": service.lab_list,
-            "/api/lab/reload": service.lab_reload,
         }
         _POST_ROUTES = {
             "/api/look/save": service.save_look,
@@ -868,7 +867,7 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send_json(route())
             except Exception as exc:
-                self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.OK)
+                self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
@@ -884,7 +883,7 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send_json(route(self._read_json()))
             except Exception as exc:
-                self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.OK)
+                self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
 
     return _LedPadHandler
 

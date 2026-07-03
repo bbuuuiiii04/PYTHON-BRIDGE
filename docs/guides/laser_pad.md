@@ -83,6 +83,14 @@ Open `http://127.0.0.1:8765`.
 
 ## Recent updates
 
+- `2026-07-03`: Hygiene pass — removed stale frontend assets (`index.granite.html`, `index.html.bak`,
+  `pad.css.bak`, `pad-overrides.granite.css`, the one-line `pad.js` compatibility stub) and the last
+  unpkg Alpine.js CDN references they carried; the vendored `alpine.min.js` is the only Alpine source
+  now. Removed dead CSS (`.control-strip` media-query rule with no matching markup; base
+  `.icon-action`/`.settings-trigger` size/border/background declarations fully superseded by
+  `pad-overrides.css`). Added LED-pad semantic CSS variable aliases (`--surface`, `--surface-2`,
+  `--border`, `--text-dim`) in `:root` for future shared components — no visual change, nothing
+  consumes them yet.
 - `2026-07-03`: iOS/iPad touch pass (code-level, on-device verification pending): `viewport-fit=cover`
   plus `env(safe-area-inset-*)` padding on the body and mobile drawer, a `dvh`-with-`vh`-fallback
   drawer height, a `@media (pointer: coarse)` rule that raises interactive controls to a 44px touch

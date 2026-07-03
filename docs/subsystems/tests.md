@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 3f4bcc0
-last_verified_date: 2026-07-02
+last_verified_commit: fe51608
+last_verified_date: 2026-07-03
 validation_scope: software-only
 ---
 
@@ -25,7 +25,7 @@ Authoritative locations:
 Common commands:
 - `python -m unittest discover tests`
 - `python -m pytest tests/test_laser_config.py tests/test_laser_executor.py -q` when pytest is available and relevant
-- `node --check tools/laser_pad_assets/pad.js` when touching Laser Pad frontend assets
+- `node --check tools/laser_pad_assets/pad-state.js tools/laser_pad_assets/pad-selectors.js tools/laser_pad_assets/pad-actions.js tools/laser_pad_assets/pad-ui.js` when touching Laser Pad frontend assets
 
 Coverage expectations:
 - Core/state changes need state manager or integration tests.

@@ -311,6 +311,21 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertIsNone(payload["lan_url"])
             self.assertEqual(payload["bound_host"], "127.0.0.1")
 
+    def test_http_smoke_post_invalid_look_save_returns_400(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, _path = self._service(td)
+            with self._running_server(service) as port:
+                status, payload = self._request_json(
+                    port,
+                    "POST",
+                    "/api/look/save",
+                    {"name": "Bad Name!", "look": {}, "params": {}},
+                )
+
+            self.assertEqual(status, 400)
+            self.assertFalse(payload["ok"])
+            self.assertIn("error", payload)
+
 
 if __name__ == "__main__":
     unittest.main()
