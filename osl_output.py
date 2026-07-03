@@ -20,7 +20,7 @@ from typing import Optional
 
 from .config import (
     OS2L_FALLBACK_HOST, OS2L_FALLBACK_PORT,
-    AUTOLOOP_BEATS, TIMING_COMPENSATION_MS,
+    AUTOLOOP_BEATS,
 )
 from .models import TrackMetadata
 from . import bridge_fmt as bf
@@ -276,6 +276,7 @@ class OS2LOutput:
         play: str = "on",
         include_loop: bool = True,
         fallback_bpm: float = 0.0,
+        elapsed_ms: int = 0,
     ) -> None:
         """Register a track with SoundSwitch.
 
@@ -319,14 +320,12 @@ class OS2LOutput:
         self._sub(f"{dn} get_filepath", meta.filepath, verbose=True)
         if meta.total_ms:
             self._sub(f"{dn} get_time total absolute", int(meta.total_ms), verbose=True)
-        self._sub(f"{dn} get_time elapsed absolute",
-                  int(meta.elapsed_ms if hasattr(meta, "elapsed_ms") else 0) + TIMING_COMPENSATION_MS,
-                  verbose=True)
+        self._sub(f"{dn} get_time elapsed absolute", int(elapsed_ms), verbose=True)
         self._sub(f"{dn} play", play, verbose=True)
 
     def send_elapsed(self, deck: int, elapsed_ms: int, beatpos: float) -> None:
         dn = f"deck {deck}"
-        self._sub(f"{dn} get_time elapsed absolute", elapsed_ms + TIMING_COMPENSATION_MS)
+        self._sub(f"{dn} get_time elapsed absolute", elapsed_ms)
         self._sub(f"{dn} get_beatpos", round(beatpos, 4))
 
     def send_bpm(self, deck: int, bpm: float) -> None:

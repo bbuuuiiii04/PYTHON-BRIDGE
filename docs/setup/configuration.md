@@ -13,6 +13,9 @@ This repo uses tracked example configs plus local ignored configs. Do not commit
 Audit P1 (2026-07-03): the tracked LED Look Director example removed an unread top-level
 `metadata` placeholder. This does not change local config semantics.
 
+Audit P3 (2026-07-03): the old zero-valued OS2L timing-compensation constant was removed from
+runtime code; there is no supported user config knob for elapsed compensation.
+
 SoundSwitch Tasks T7a/T7b/T7c/T7e add a validated pack-player config schema,
 tracked inert example, startup construction, StateManager frame driver,
 validate-first runtime controls, and sanitized status. The default remains

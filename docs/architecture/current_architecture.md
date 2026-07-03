@@ -141,6 +141,9 @@ path was previously available.
    backend when enabled, then creates the event queue, OS2L connection,
    resolver, live BPM service, status/command helpers, `StateManager`, optional
    `RBStateReader`, `RBMemoryReader`, `MTCReader`, and OSC listener.
+   If smart-rearm and spectral analysis are both enabled, startup also launches
+   one daemon spectral-cache eviction thread; the 200 Hz push loop never runs
+   that filesystem sweep.
 2. Startup master is seeded from direct master only when
    `RBSS_MASTER_SEED_DIRECT=1` and two direct reads are stable raw Deck A/B
    values. Raw Deck C/D falls back instead of aliasing to bridge Deck 1/2. With

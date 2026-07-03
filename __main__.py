@@ -47,6 +47,7 @@ from .rb_state_reader import (
 )
 from .rb_offsets import RBOffsetVersion, load_offsets_for_version
 from .scripted_tracks import resolve_filepaths
+from . import spectral_cache
 from .ss_library_scanner import start_ss_library_scan
 from .state_manager import (
     AUTOLOOP_MASTER_PHRASE_ARM_ENV,
@@ -1047,6 +1048,22 @@ def _shutdown_zero_pack_outputs(
             pass
 
 
+def _start_spectral_cache_eviction_if_enabled() -> threading.Thread | None:
+    if (
+        os.environ.get("RBSS_SMART_REARM_EXPERIMENT") != "1"
+        or os.environ.get("RBSS_SPECTRAL_ENABLE") != "1"
+    ):
+        return None
+
+    def _worker() -> None:
+        evicted = spectral_cache.evict_stale()
+        log.info("[MAIN] spectral-cache-evict  evicted=%d", evicted)
+
+    thread = threading.Thread(target=_worker, name="spectral-cache-evict", daemon=True)
+    thread.start()
+    return thread
+
+
 def main() -> None:
     if not _acquire_single_instance_lock():
         log.error("another rb_ss_bridge_v2 process is already running; exiting")
@@ -1206,6 +1223,7 @@ def main() -> None:
     if live_bpm.disabled:
         log.warning("[MAIN] live-bpm-disabled  reason=%s=1  fallback=engine-state-bpm",
                     LIVE_BPM_DISABLE_ENV)
+    _start_spectral_cache_eviction_if_enabled()
 
     # OS2L output
     conn = OS2LConnection()

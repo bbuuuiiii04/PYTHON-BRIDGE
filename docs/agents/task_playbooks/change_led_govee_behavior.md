@@ -43,6 +43,9 @@ Implementation notes:
 - Verify current behavior against code before updating docs.
 - For scripted-track LED automation, preserve the split between `safety.scripted_mode_automation` as the master switch (the shipped example config enables it; the `LEDSafety` dataclass default stays `false`) and the top-level `scripted_mode` role-remap policy. `utility` is a blackout destination only; verify active and off role transitions separately.
 - For StateManager LED automation timing changes, keep the push-loop path pure/non-blocking, keep source arming at the content-change event, and prove arm/release/cleanup in `tests/test_led_state_manager.py`.
+- For realtime-to-cloud handoff changes, `force_deactivate()` must not perform transport socket
+  calls on the caller/push-loop thread; prove teardown on the runner thread in
+  `tests/test_govee_realtime_runner.py`.
 - For color-engine slot behavior, verify `resolve_slot_colors()` invariants and slot strategy config validation before updating setup/status docs.
 - For M2.5 slotized cues, keep `SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED` language until operator hardware visual sign-off covers sparkle hue stability, center-burst band split, strobe gating, drop snap behavior, Patch E visual balance, Patch S probabilistic solid-color outcomes, and Patch F generic-default bank rotation.
 - `drop_lifecycle.py` is a pure flat-window parity seam used by laser policy. The live LED resolver remains in `StateManager`; do not redirect LED runtime through the shared resolver without a separate approved change.

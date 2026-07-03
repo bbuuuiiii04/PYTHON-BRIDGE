@@ -26,6 +26,10 @@ Audit P2 (2026-07-03): file-driven OS2L injection is default-off unless `RBSS_OS
 and copied status now adds `overlay_suppressed` booleans for held static, blackout, and degraded
 input that were present under that suppression.
 
+Audit P3 (2026-07-03): the old zero-valued OS2L timing-compensation knob was removed from runtime
+code. Scripted arm phase 1 now passes elapsed time as an explicit `elapsed_ms` argument to
+`OS2LOutput.send_deck_load`; regular elapsed fanout sends raw elapsed values.
+
 Offline project export:
 - `soundswitch_pack_models.py`, `soundswitch_project_decoder.py`, `soundswitch_pack.py`, `soundswitch_pack_verifier.py`, and `tools/export_soundswitch_pack.py` implement frozen source models, strict read-only decode, deterministic export of a repo-local canonical pack, and independent verification for the pinned SoundSwitch 2.10.3 canonical project UUID/RAVE profile. Live export performs a dynamic saved-project rescan and reconciles Venue, scripted, Autoloop, MIDI, artifact, manifest, and active-cue-union counts from the generated pack. The old closure snapshot counts remain proof-only via explicit strict verification. Software tests cover the dynamic default, proof-only snapshot gate, 32 Static Looks, seven-class F-3 crosswalk, and F9 mutation rejection.
 - The independent verifier now rejects the runtime-loader metadata failures before publication: duplicate active learned-controller events, duplicate active Static Override slot ownership, invalid device-agnostic Static Override targets, project-target bridge scenes that are not pack selections, missing Autoloop targets, and an empty bridge scene crosswalk. The clean canonical pack still verifies and loads; these checks only fail closed on packs the loader would refuse.

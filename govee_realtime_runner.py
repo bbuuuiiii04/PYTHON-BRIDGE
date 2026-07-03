@@ -73,6 +73,7 @@ class GoveeRealtimeRunner:
         self._beat_provider: Callable[[], Optional[BeatAnchor]] | None = None
         self._stop = threading.Event()
         self._emergency = threading.Event()
+        self._handoff_deactivate_pending = False
         self._thread: threading.Thread | None = None
 
         self._active = False
@@ -128,33 +129,11 @@ class GoveeRealtimeRunner:
         self._emergency.set()
 
     def force_deactivate(self) -> None:
-        """Synchronously blackout and deactivate the transport.
-
-        Called by the dispatch coordinator when transitioning from realtime to
-        cloud DIY.  Unlike the normal idle grace period (0.25 s of stale
-        frames), this cuts the realtime stream immediately so the cloud command
-        doesn't fight the UDP stream for the strip.
-        """
+        """Request immediate realtime teardown on the runner thread."""
         with self._lock:
             self._desired_spec = None
-        # Synchronously stop the transport so no more frames leak out while
-        # the runner thread processes the emergency on its next tick.
-        if self._active:
-            self._transport.blackout()
-            self._transport.deactivate()
-            self._log.info("[RGB] deactivate reason=handoff_to_cloud")
-        with self._lock:
-            self._active = False
-            self._active_signature = None
-            self._color_signature = None
-            self._color_applied_abs_beat = None
-            self._idle_since = None
-            self._pending_manual = 0
-            self._engine_status = {"sync_mode": "", "beat_division": 0.0, "instance_count": 0, "spawn_count": 0}
-            self._desired_spec = None
-        self._last_frame = None
-        self._engine.reset()
-        self._publish_engine_status(cleared=True)
+            self._handoff_deactivate_pending = True
+        self._emergency.set()
 
     def start(self) -> None:
         with self._lock:
@@ -431,9 +410,13 @@ class GoveeRealtimeRunner:
             self._transport.send_frame(self._last_frame)
 
     def _emergency_teardown(self) -> None:
-        if self._active:
+        with self._lock:
+            handoff = self._handoff_deactivate_pending
+        if self._active or handoff:
             self._transport.blackout()
             self._transport.deactivate()
+            if handoff:
+                self._log.info("[RGB] deactivate reason=handoff_to_cloud")
         self._last_frame = None
         with self._lock:
             self._active = False
@@ -443,6 +426,7 @@ class GoveeRealtimeRunner:
             self._idle_since = None
             self._desired_spec = None
             self._pending_manual = 0
+            self._handoff_deactivate_pending = False
         self._engine.reset()
         self._publish_engine_status(cleared=True)
 

@@ -34,7 +34,7 @@ from typing import Any, Callable, Optional
 
 from .config import (
     AUTOLOOP_ARM_PHRASE_BEATS, ARM_GUARD_S, STOP_DEBOUNCE_S,
-    PLAY_SETTLE_MS, TIMING_COMPENSATION_MS,
+    PLAY_SETTLE_MS,
     BPM_THRESHOLD_SCRIPTED, BPM_THRESHOLD_UNSCRIPTED,
     MEM_STALE_S, SMART_DROP_LOOKAHEAD_BEATS, SMART_DROP_IGNORE_INTRO_BEATS,
     SMART_DROP_IGNORE_OUTRO_BEATS, PHRASE_ANCHOR_BEATS,
@@ -3432,8 +3432,6 @@ class StateManager:
             elapsed_ms = snap.elapsed_ms
         else:
             elapsed_ms = self._deck[deck].elapsed_ms  # maintained by push loop
-        elapsed_ms += TIMING_COMPENSATION_MS
-
         mirror = 3 - deck
 
         log.info("[SM] arm-scripted  deck=%d  id=%d  elapsed=%s  bpm=%.1f  file=%s",
@@ -3452,8 +3450,6 @@ class StateManager:
             beatgrid_bpms=list(d.meta.beatgrid_bpms),
             beatgrid_source=d.meta.beatgrid_source,
         )
-        object.__setattr__(arm_meta, "elapsed_ms", elapsed_ms)
-
         self._pending_arm = ArmSequence(
             deck=deck,
             track_id=track_id,
@@ -3472,17 +3468,16 @@ class StateManager:
         self._pending_arm = None
         # Refresh elapsed in case position advanced since phase 0
         snap = self._cache.get(arm.deck)
-        elapsed_ms = (snap.elapsed_ms if snap and not snap.is_stale() else arm.elapsed_ms) + TIMING_COMPENSATION_MS
+        elapsed_ms = snap.elapsed_ms if snap and not snap.is_stale() else arm.elapsed_ms
         log.info("[SM] arm-phase2  deck=%d  id=%d  elapsed=%s", arm.deck, arm.track_id, bf.elapsed(elapsed_ms))
         arm_meta = arm.arm_meta
-        object.__setattr__(arm_meta, "elapsed_ms", elapsed_ms)
         # Use current active_deck, not the snapshot — deck may have switched in 100ms
         cur_active = self._os.active_deck
         # Send to all 4 SS deck slots: active + mirror bridge deck + VDJ layers 3/4.
         # Phase 0 clears all 4; if mirror is not reloaded here the push loop sends
         # elapsed to an empty SS deck, which confuses SS's scripted show engine.
         # Matches v1 behaviour: always load both bridge decks at arm time.
-        self._sse.send_scripted_arm_phase1(arm.deck, arm_meta, cur_active)
+        self._sse.send_scripted_arm_phase1(arm.deck, arm_meta, cur_active, elapsed_ms=elapsed_ms)
         self._log_status()
 
     def _arm_unscripted(self, deck: int) -> None:
@@ -4368,7 +4363,7 @@ class StateManager:
                 age_ms = (now - anchor_at) * 1000.0 * anchor_pitch
                 raw_elapsed_ms = anchor_ms + (age_ms if (mem_playing or d.playing) else 0.0)
 
-        elapsed_ms = int(raw_elapsed_ms) + TIMING_COMPENSATION_MS
+        elapsed_ms = int(raw_elapsed_ms)
         prev_elapsed_ms = d.elapsed_ms
         d.elapsed_ms = elapsed_ms
 

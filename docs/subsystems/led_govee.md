@@ -26,6 +26,11 @@ Audit P2 (2026-07-03):
 - Committed drop-look selection now passes the same color-engine `diy_eligible` predicate used by
   normal `tick()` automation, so a held smart-drop impact cannot bypass palette eligibility.
 
+Audit P3 (2026-07-03):
+- Realtime-to-cloud handoff no longer calls Govee realtime transport blackout/deactivate from the
+  StateManager push-loop caller; the runner thread now performs that teardown before another frame
+  is sent.
+
 Authoritative code:
 - `led_config.py`
 - `led_models.py`
@@ -103,6 +108,8 @@ Change contract:
 - If changing look policy, inspect director, models, config validation, and state manager dispatch seam.
 - If changing active-content timing or LED role gating in `StateManager`, keep the hot path non-blocking and update `tests/test_led_state_manager.py`.
 - If changing realtime output, inspect runner, transport, renderer, owner state, and beat sync engine.
+- If changing realtime/cloud ownership handoff, keep socket I/O on the runner/transport thread and
+  cover foreign-thread `force_deactivate()` behavior in `tests/test_govee_realtime_runner.py`.
 - If changing cloud output, inspect scene adapter and runtime sender.
 - If changing the shared drop resolver, prove parity against the existing StateManager LED resolver and do not assume that pure-resolver parity changes live LED output.
 - If changing LED Pad, follow the `led_pad` contract in `docs/agents/change_contracts.yml` and update `docs/guides/led_pad.md`, this card, `docs/architecture/doc_index.md`, and `docs/status/active_work_registry.md`.

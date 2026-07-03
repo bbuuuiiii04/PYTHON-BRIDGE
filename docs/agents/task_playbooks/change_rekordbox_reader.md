@@ -43,6 +43,8 @@ Implementation notes:
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.
+- For ANLZ/track-load ordering or cache changes, include `tests/test_rb_state_reader.py` coverage for
+  transient ANLZ read failures and recovery.
 - Run `python -m unittest discover tests` when practical for cross-subsystem changes.
 - Run docs checks for docs changes.
 
