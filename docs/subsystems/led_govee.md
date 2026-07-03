@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 1ee870f
-last_verified_date: 2026-07-02
-validation_scope: software-only
+last_verified_commit: 5db991f
+last_verified_date: 2026-07-03
+validation_scope: software-only; LED Pad Phase 1 software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem
@@ -31,6 +31,11 @@ Authoritative code:
 - `govee_owner_state.py`
 - `beat_sync_engine.py`
 - `state_manager.py` LED automation dispatch seam
+- `led_pad_controls.py` LED Pad render/control catalog
+- `tools/led_pad_playback.py` standalone LED Pad realtime playback shell
+- `tools/led_pad_web.py` local LED Pad web service
+- `tools/led_pad_assets/` vanilla LED Pad UI assets
+- `scripts/led_pad.py` LED Pad launcher
 
 Key symbols:
 - `StateManager`
@@ -63,6 +68,7 @@ Config:
 - Patch F collapses the tracked example `default` bank onto generic engine-colored slot looks and moves legacy color-suffix realtime looks into the storage-only `legacy_color_suffix` bank. `LEDLookDirector` still selects only `banks.default`, so the legacy bank preserves definitions without runtime rotation.
 - `safety.scripted_mode_automation` remains the master switch for scripted-track LED automation. The shipped example config sets it `true` (paired with the conservative blackout `scripted_mode` policy); set it to `false` to keep LEDs inert during scripted tracks. The code-level `LEDSafety` dataclass default stays `false`, but the loader requires the JSON key. When it is true and `StateManager` is in `lighting_mode == "scripted"`, automatic LED dispatch may proceed through the `scripted_mode` role-remap policy.
 - The top-level LED `scripted_mode` block defines `default_role` plus `role_map` for scripted-track automation. If the block is absent, groove, drop, and post-drop map to the `utility` blackout bank; buildup/pre-drop map to `buildup`, and breakdown maps to `breakdown`. `utility` is allowed only as a destination, and partial maps fall back to `default_role`.
+- LED Pad persists its edit draft in `config/led_look_director.draft.json` and commits only after the full draft passes `load_led_look_director_config_from_dict()`. The pad-only Drafts bank lives in root `_pad_meta.drafts`, so those looks are automation-invisible unless moved into `banks.default`.
 
 Tests:
 - inspect `tests/` for LED color engine, Govee realtime runner, frame renderer, state manager LED integration, and config tests
@@ -70,6 +76,7 @@ Tests:
 - scripted-mode LED policy coverage lives in `tests/test_led_config.py` and `tests/test_led_state_manager.py`, including blackout mapping for groove/drop/post-drop; this is software validation only and does not prove room-visible Govee behavior during scripted SoundSwitch tracks.
 - phrase-aware active-content hold coverage lives in `tests/test_led_state_manager.py`, including active deck switch, active-deck track load, the inclusive `1.0` beat release boundary, hold-until-next-marker behavior, missing-phrase-data indefinite hold until a crossing, idle/stop cleanup, inactive-deck load exclusion, and laser/SoundSwitch path confinement. This is software validation only.
 - shared flat-window lifecycle parity coverage lives in `tests/test_drop_lifecycle.py`; live LED per-look duration rewriting and backend latency offsets remain separate by design.
+- LED Pad Phase 1 coverage lives in `tests/test_led_pad_controls.py`, `tests/test_led_pad_playback.py`, and `tests/test_led_pad_service.py`. It validates metadata coverage, synthetic playback clock/ownership/strobe gates, draft mutation, commit blocking, color injection, ownership-required replies, and one HTTP smoke path. It uses fakes or dry-run paths only.
 - broad command: `python -m unittest discover tests`
 
 Change contract:
@@ -78,6 +85,7 @@ Change contract:
 - If changing realtime output, inspect runner, transport, renderer, owner state, and beat sync engine.
 - If changing cloud output, inspect scene adapter and runtime sender.
 - If changing the shared drop resolver, prove parity against the existing StateManager LED resolver and do not assume that pure-resolver parity changes live LED output.
+- If changing LED Pad, follow the `led_pad` contract in `docs/agents/change_contracts.yml` and update `docs/guides/led_pad.md`, this card, `docs/architecture/doc_index.md`, and `docs/status/active_work_registry.md`.
 - Update this card, feature matrix, validation matrix, active work registry, and config docs.
 
 M2.5 slot cues in SLOT_EFFECTS (govee_frame_renderer.py):

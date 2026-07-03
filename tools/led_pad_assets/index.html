@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LED Pad</title>
+  <link rel="stylesheet" href="/static/pad.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-row main-row">
+      <div class="brand">
+        <h1>LED Pad</h1>
+        <nav class="route-tabs" aria-label="Routes">
+          <a class="active" href="/">Pad</a>
+          <a href="/lab">Lab</a>
+        </nav>
+      </div>
+      <form id="sessionForm" class="session-controls" aria-label="Session controls">
+        <label>BPM <button type="button" data-step="-1" aria-label="Decrease BPM">−</button><input id="bpmInput" type="number" min="60" max="200" step="1"><button type="button" data-step="1" aria-label="Increase BPM">+</button></label>
+        <label>Test Palette <select id="paletteSelect"></select></label>
+        <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
+      </form>
+      <div class="transport">
+        <span id="ownershipPill" class="pill">Free</span>
+        <button id="ownershipBtn" type="button" class="ghost">Take over</button>
+        <button id="stopBtn" type="button" class="danger-outline" aria-label="Emergency stop">■</button>
+      </div>
+    </div>
+    <div class="topbar-row bank-row">
+      <nav id="bankTabs" class="bank-tabs" aria-label="Banks"></nav>
+      <div class="commit-actions">
+        <button id="commitBtn" type="button" class="primary">Commit <span id="commitCount" class="badge">0</span></button>
+        <button id="discardBtn" type="button" class="ghost">Discard</button>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div id="errorBanner" class="error-banner" hidden></div>
+    <section id="lookGrid" class="look-grid" aria-live="polite"></section>
+  </main>
+  <aside id="editorDrawer" class="drawer" role="dialog" aria-label="Look editor" aria-modal="true" hidden>
+    <div class="drawer-head">
+      <div><h2 id="editorTitle"></h2><div id="editorRegistry" class="mono dim"></div></div>
+      <span id="editorLive" class="live-chip" hidden>LIVE</span>
+      <button id="closeEditorBtn" type="button" class="icon" aria-label="Close editor" title="Close">✕</button>
+    </div>
+    <div class="editor-transport">
+      <button id="editorPlayBtn" type="button" class="primary">▶ Play</button>
+      <button id="editorStopBtn" type="button" class="ghost">■ Stop</button>
+      <div class="cue-group" role="group" aria-label="Cue Length"></div>
+      <div id="loopHint" class="dim"></div>
+    </div>
+    <form id="editorForm" class="editor-form">
+      <section>
+        <h3>Renderer</h3>
+        <select id="rendererSelect"></select>
+        <p id="rendererDescription" class="dim"></p>
+      </section>
+      <section>
+        <h3>Color</h3>
+        <div class="segmented" role="group" aria-label="Automation Color">
+          <button type="button" id="followColorBtn" class="active">Follow Show Color</button>
+          <button type="button" id="lockedPaletteBtn" disabled title="Coming with Phase 3">Locked Palette</button>
+        </div>
+        <label>Brightness <input id="brightnessInput" type="range" min="0" max="100" step="1"><output id="brightnessOutput"></output></label>
+        <label class="switch">Strobe allowed <input id="strobeInput" type="checkbox"><span id="strobeLabel">Off</span></label>
+        <p id="strobeWarning" class="warn-text"></p>
+      </section>
+      <section id="slotSection" hidden>
+        <h3>Slot colors</h3>
+        <label>Slot Fill <select id="slotFillSelect">
+          <option value="gradient_even">Even gradient</option>
+          <option value="random_with_replacement">Random per slot</option>
+          <option value="random_with_mono_chance">Random with solid chance</option>
+        </select></label>
+        <label id="monoChanceWrap">Solid chance <input id="monoChanceInput" type="range" min="0" max="1" step="0.05"><output id="monoChanceOutput"></output></label>
+      </section>
+      <section>
+        <h3>Motion Pattern</h3>
+        <div id="controlRows" class="controls"></div>
+        <details id="advancedDetails">
+          <summary>Advanced motion</summary>
+          <div id="advancedRows" class="controls"></div>
+        </details>
+      </section>
+    </form>
+    <footer class="drawer-foot">
+      <button id="saveLookBtn" type="button" class="primary">Save</button>
+      <button id="undoBtn" type="button" class="ghost">Undo</button>
+      <button id="cancelBtn" type="button" class="ghost">Cancel</button>
+      <span id="dirtyText" class="dim">Saved</span>
+    </footer>
+  </aside>
+  <div id="modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <h2 id="modalTitle"></h2>
+      <p id="modalText"></p>
+      <div id="modalActions" class="modal-actions"></div>
+    </div>
+  </div>
+  <script src="/static/pad-core.js"></script>
+  <script src="/static/pad-ui.js"></script>
+</body>
+</html>
