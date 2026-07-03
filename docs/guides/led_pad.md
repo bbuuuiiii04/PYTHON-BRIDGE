@@ -15,18 +15,55 @@ Govee behavior, strip restore behavior, or show readiness.
 ## Launch
 
 ```bash
-python3 -m rb_ss_bridge_v2.scripts.led_pad --port 8766 --dry-run
+cd /Users/bbui
+python3 -m rb_ss_bridge_v2.scripts.led_pad --host 127.0.0.1 --port 8766 --dry-run
 ```
 
 Open `http://127.0.0.1:8766/`.
 
 Template Lab is at `http://127.0.0.1:8766/lab`.
 
+For the always-on login server, install the tracked LaunchAgent:
+
+```bash
+cp launchagents/com.bbui.led-pad.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.bbui.led-pad.plist
+```
+
+The bridge menu bar includes **LED Pad...**, which opens `http://127.0.0.1:8766`.
+
 Options:
 - `--host` / `--bind`: bind address, default `127.0.0.1`.
 - `--port`: default `8766`.
 - `--config`: explicit LED config path. Otherwise `RBSS_LED_CONFIG` or `config/led_look_director.json`.
 - `--dry-run`: use the realtime dry-run transport. This is the safe local software smoke path.
+
+## Verification
+
+- `launchctl list | grep led-pad` shows the LaunchAgent loaded.
+- Clicking menu bar **LED Pad...** opens `http://127.0.0.1:8766` in the default browser.
+- `curl -sS http://127.0.0.1:8766/api/config | jq .config.schema` returns a number or `null` for older configs.
+
+## Picking up code changes
+
+The LaunchAgent only restarts on crash (`KeepAlive.SuccessfulExit=false`). After editing
+`scripts/led_pad.py`, `tools/led_pad_*.py`, `tools/led_pad_assets/**`, or pad control helpers,
+force the agent to reload:
+
+```bash
+launchctl kickstart -k gui/$UID/com.bbui.led-pad
+```
+
+Manual debugging launches must first unload the agent to avoid port 8766 collision:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.bbui.led-pad.plist
+python3 -m rb_ss_bridge_v2.scripts.led_pad --host 127.0.0.1 --port 8766 --dry-run
+# when done:
+launchctl load ~/Library/LaunchAgents/com.bbui.led-pad.plist
+```
+
+Logs are written to `/tmp/led_pad.log` and `/tmp/led_pad.err`.
 
 ## What It Can Do
 

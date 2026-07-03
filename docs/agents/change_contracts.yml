@@ -152,6 +152,7 @@ contracts:
       - tools/led_pad_assets/**
       - scripts/led_pad*.py
       - led_pad_controls*.py
+      - launchagents/com.bbui.led-pad.plist
     inspect:
       - docs/guides/led_pad.md
       - docs/subsystems/led_govee.md

@@ -34,6 +34,19 @@ class BridgeMenubarTests(unittest.TestCase):
         source = (scripts_dir / "bridge_menubar.py").read_text(encoding="utf-8")
         self.assertIn("Laser Pad…", source)
 
+    def test_led_pad_menu_opens_browser(self) -> None:
+        scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+        bridge_menubar = self._import_module()
+
+        handler = bridge_menubar.BridgeMenuBar.openLedPad_
+        with patch.object(bridge_menubar, "open_browser_url") as open_browser:
+            handler.callable(None, None)
+
+        open_browser.assert_called_once_with(bridge_menubar.LED_PAD_URL)
+        self.assertEqual(bridge_menubar.LED_PAD_URL, "http://127.0.0.1:8766")
+        source = (scripts_dir / "bridge_menubar.py").read_text(encoding="utf-8")
+        self.assertIn("LED Pad…", source)
+
     def test_toggle_record_session_appends_runtime_command(self) -> None:
         bridge_menubar = self._import_module()
 

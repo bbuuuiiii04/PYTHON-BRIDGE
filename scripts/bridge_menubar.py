@@ -40,6 +40,7 @@ MANUAL_LAUNCHCTL_LABEL = "rbss_bridge_manual"
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
 LASER_PAD_URL = "http://127.0.0.1:8765"
+LED_PAD_URL = "http://127.0.0.1:8766"
 RECORDING_PATH_TEMPLATE = "/tmp/rbss-session-{stamp}.jsonl"
 EXPORT_PROCESS_TIMEOUT_SECONDS = 120.0
 EXPORT_RELOAD_TIMEOUT_SECONDS = 8.0
@@ -804,6 +805,7 @@ class BridgeMenuBar(NSObject):
         self.validation_item = self._add_action("Run Health Check", "runValidation:")
         self.record_session_item = self._add_action("Record Session: Off", "toggleRecordSession:")
         self.map_lasers_item = self._add_action("Laser Pad…", "mapLasers:")
+        self.led_pad_item = self._add_action("LED Pad…", "openLedPad:")
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.quit_item = self._add_action("Quit Menu", "quit:")
         self.status_item.setMenu_(self.menu)
@@ -1143,6 +1145,9 @@ class BridgeMenuBar(NSObject):
 
     def mapLasers_(self, _sender):
         open_browser_url(LASER_PAD_URL)
+
+    def openLedPad_(self, _sender):
+        open_browser_url(LED_PAD_URL)
 
     def toggleSmartDrop_(self, _sender):
         append_command({"cmd": "toggle_smart_drop"})
