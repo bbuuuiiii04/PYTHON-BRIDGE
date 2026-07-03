@@ -1,5 +1,5 @@
 ---
-doc_status: active-spec
+doc_status: completed-spec
 truth_level: code-grounded-design-spec
 last_verified_commit: ab4d293
 last_verified_date: 2026-06-24

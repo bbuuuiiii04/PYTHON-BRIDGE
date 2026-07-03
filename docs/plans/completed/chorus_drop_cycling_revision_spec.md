@@ -8,7 +8,7 @@ validation_scope: spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 
 # Revision Spec — Laser drop-lifecycle: close audit gaps (tests, spec, claims)
 
-> Follow-up to `docs/plans/active/chorus_drop_cycling_spec.md`. Driven by an adversarial audit of
+> Follow-up to `docs/plans/completed/chorus_drop_cycling_spec.md`. Driven by an adversarial audit of
 > head `47c7a32` that found **no P0/P1 live-safety defects** and a set of P2/P3 test-accuracy,
 > spec-contradiction, and claim-overstatement gaps. This spec closes those gaps. **It must not
 > change runtime laser/LED behavior** except the single optional flag-gating in R4 (only if you
@@ -19,7 +19,7 @@ validation_scope: spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 - Accepted repo status: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. Do not upgrade it.
 - This is a REVISION of an audited, merged feature. You are closing P2/P3 gaps. **No runtime
   laser/LED behavior change is permitted EXCEPT** the optional flag-gating in R4 (R4-b, one line).
-- Read first: `AGENTS.md`; `docs/plans/active/chorus_drop_cycling_spec.md` (original spec);
+- Read first: `AGENTS.md`; `docs/plans/completed/chorus_drop_cycling_spec.md` (original spec);
   `docs/subsystems/laser.md`; `docs/agents/change_contracts.yml`. Then read the code named below.
 - House rules: code > tests > config > docs. Locate every edit by surrounding code, not by the line
   numbers quoted here (they drift). Commit after each R-item. Run AGENTS.md §8 hard checks and
@@ -100,13 +100,13 @@ Pick ONE and apply it (do NOT do both); state which you chose:
   this, add/extend a test proving flag-OFF resume does NOT reshuffle the executor while flag-ON does.
 
 ## R5 (P2-5 / SD-1) — Fix the spec's Task-1 verbatim block (docs-only)
-**File:** `docs/plans/active/chorus_drop_cycling_spec.md`, Task 1 code block. Replace the unconditional
+**File:** `docs/plans/completed/chorus_drop_cycling_spec.md`, Task 1 code block. Replace the unconditional
 `return DropResult(role="drop", armed_this_tick=True)` with the shipped conditional form
 (`armed_this_tick` set True only inside `if mutate:` after `arm()`), so the verbatim block matches
 `drop_lifecycle.py` and the prose at the end of Task 1.
 
 ## R6 (P2-3 / SD-5) — Correct the "instant kill switch" claim (docs-only)
-**Files:** `docs/plans/active/chorus_drop_cycling_spec.md` (kill-switch lines), `docs/subsystems/laser.md`.
+**Files:** `docs/plans/completed/chorus_drop_cycling_spec.md` (kill-switch lines), `docs/subsystems/laser.md`.
 Reword to the verified reality: `drop_lifecycle_mirror` is a config-driven kill switch applied on the
 next personality re-apply via the hot-reloader (`__main__.py` `_on_laser_config_reload`); it is
 restart-dependent if hot-reload is disabled (`HOT_RELOAD_DISABLE_ENV`) and is NOT a single runtime

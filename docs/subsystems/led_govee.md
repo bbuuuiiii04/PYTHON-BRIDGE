@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 6aa44fa
+last_verified_commit: fc56bb5
 last_verified_date: 2026-07-03
 validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, and the pad editor unset-param-defaults fix software-tested, hardware-unvalidated
 ---
@@ -29,6 +29,7 @@ Authoritative code:
 - `govee_realtime_transport.py`
 - `govee_frame_renderer.py`
 - `govee_owner_state.py`
+- `govee_lan_discovery.py`
 - `beat_sync_engine.py`
 - `state_manager.py` LED automation dispatch seam
 - `led_pad_controls.py` LED Pad render/control catalog. `CONTROL_META[key]["default"]` mirrors

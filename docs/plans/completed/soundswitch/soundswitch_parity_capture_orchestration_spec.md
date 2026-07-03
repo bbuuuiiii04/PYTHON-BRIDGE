@@ -1,5 +1,5 @@
 ---
-doc_status: active-plan
+doc_status: completed-spec
 truth_level: code-and-capture-corpus-grounded
 last_verified_commit: 3131aa7
 last_verified_date: 2026-07-01

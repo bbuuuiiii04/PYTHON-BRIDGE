@@ -1,12 +1,16 @@
 ---
-doc_status: active-plan
+doc_status: completed-spec
 truth_level: code-grounded
-last_verified_commit: c4edf97
-last_verified_date: 2026-06-22
+last_verified_commit: fc56bb5
+last_verified_date: 2026-07-03
 validation_scope: spec only; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Codex Implementation Spec — Laser drop/post-drop/chorus lifecycle (mirror the LED engine, gated)
+
+Status: Tasks 1-5 and Part D are implemented and software-tested (see `docs/status/active_work_registry.md`
+AWR-108). Live LED behavior is unchanged. Laser hardware/SoundSwitch observation and kill-switch
+rehearsal remain pending; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
 > **Live-critical / default-ON.** This ships **on by default** on every set (operator decision:
 > "default on always"). It is therefore NOT behind an opt-out-only flag — it has a **runtime

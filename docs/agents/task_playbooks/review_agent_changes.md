@@ -15,7 +15,7 @@ Read first:
 1. `AGENTS.md`
 2. `docs/agents/change_contracts.yml`
 3. `docs/agents/change_contracts.md`
-4. `docs/agents/change_contracts.md`
+4. `docs/agents/change_contracts.yml`
 
 Do not read first:
 - archive docs

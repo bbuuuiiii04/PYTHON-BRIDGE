@@ -1,5 +1,5 @@
 ---
-doc_status: active-spec
+doc_status: superseded-spec
 truth_level: code-capture-and-ghidra-grounded root-cause spec
 last_verified_commit: 03af947
 last_verified_date: 2026-07-01

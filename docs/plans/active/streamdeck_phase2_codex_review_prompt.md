@@ -1,3 +1,11 @@
+---
+doc_status: review-evidence
+truth_level: review-instructions
+last_verified_commit: fc56bb5
+last_verified_date: 2026-07-03
+validation_scope: adversarial pre-implementation review prompt; review-only, no implementation authority
+---
+
 # Codex Task — STRICT pre-implementation review of Phase 2 (Part F)
 
 **Role:** You are a strict, adversarial reviewer. **Do not implement. Do not edit any file.** Produce a

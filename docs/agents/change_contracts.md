@@ -369,7 +369,7 @@ Inspect first:
 - the exact code and tests named by the active roadmap item
 
 Update the active roadmap and every document listed under
-`soundswitch_pack_player.docs_update` in `change_contracts.yml`. Run the proof
+`soundswitch_pack_player.docs_update` in `docs/agents/change_contracts.yml`. Run the proof
 gate, affected tests, full suite, hard docs checks, staleness report, and
 `git diff --check` as required by the roadmap.
 
@@ -466,8 +466,7 @@ Triggered by changes to:
 Inspect:
 
 - `docs/architecture/doc_index.md`
-- `docs/architecture/doc_index.md`
-- `docs/architecture/doc_index.md`
+- `docs/status/active_work_registry.md`
 - `docs/agents/drift_detection.md`
 
 Run:
@@ -481,7 +480,7 @@ python tools/check_docs_drift.py
 Update:
 
 - `docs/architecture/doc_index.md`
-- `docs/architecture/doc_index.md`
+- `docs/status/active_work_registry.md`
 - affected docs' metadata headers
 - `docs/status/active_work_registry.md` if unfinished work changed
 

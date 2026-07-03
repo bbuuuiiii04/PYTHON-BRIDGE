@@ -1,5 +1,5 @@
 ---
-doc_status: active
+doc_status: completed-spec
 truth_level: operator-intent
 last_verified_commit: 8f57e49
 last_verified_date: 2026-06-25

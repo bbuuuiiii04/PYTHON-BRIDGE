@@ -1,11 +1,19 @@
+---
+doc_status: current-supporting
+truth_level: code-grounded
+last_verified_commit: fc56bb5
+last_verified_date: 2026-07-03
+validation_scope: software-validated only; hardware-unvalidated in repo evidence
+---
+
 # Govee Realtime — Phase 2 Integration Handoff
 
 > Status: **IMPLEMENTED / REVIEW HANDOFF**. Authored as a design note 2026-06-13;
 > updated after implementation on 2026-06-13.
 > Scope: add a LAN realtime (Razer/DreamView) backend to the LED Look Director,
 > alongside the existing cloud DIY path, for the single **proven** strip.
-> Companion to: `docs/current_architecture.md`, `docs/bridge_design.md`,
-> `docs/runtime_invariants.md`.
+> Companion to: `docs/architecture/current_architecture.md`, `docs/architecture/bridge_design.md`,
+> `docs/architecture/runtime_invariants.md`.
 
 ## Current implementation snapshot
 

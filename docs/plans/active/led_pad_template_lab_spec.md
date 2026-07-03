@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: implementation-spec, code-grounded (citations verified at 4077794)
-last_verified_commit: 944bc83
+last_verified_commit: fc56bb5
 last_verified_date: 2026-07-03
 validation_scope: spec only until phases land; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -21,6 +21,22 @@ operator instruction you were given**, in task order, then stop and report.
 | 1.1 | Phase 1 review fixes: cue tick, ownership/update flow, live-state UI | implemented/software-tested |
 | 2 | Template Lab: /lab route, lab loader/registry, skill file, tests, docs | implemented/software-tested |
 | 3 | Locked Palette + renderer param unlocks | implemented/software-tested |
+
+### Post-Phase-3 same-day additions (2026-07-03)
+
+Landed outside the phase-numbered task list above. All are implemented/software-tested;
+hardware-unvalidated; all visual/hardware outcomes need operator eyes-on sign-off.
+SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
+| Commit | Scope | Status |
+|---|---|---|
+| `d126533` | LED Pad menubar entry + always-on LaunchAgent. | implemented/software-tested |
+| `5f25a64` | LED Pad and Laser Pad gained a shared same-network QR access affordance (`GET /api/access` via `tools/pad_access.py`); it only reports the current bind address and never changes bind behavior itself. | implemented/software-tested; not hardware-relevant |
+| `661edde` | Laser Pad: vendored Alpine, persistent draft file, Discard button, honest check copy. | implemented/software-tested |
+| `fe51608` | LED Pad and Laser Pad gained an iOS/iPad touch pass: `viewport-fit=cover` + safe-area-inset padding, a `dvh`-with-`vh`-fallback drawer height, `pointer: coarse` 44px touch targets, a narrow-viewport Laser Pad header stack, a Laser Pad "Move to pad" touch fallback for drag/drop reassignment, and a shared `PadModal` (`tools/led_pad_assets/pad-core.js`) replacing LED Pad's/Template Lab's native `prompt()`/`confirm()` dialogs. | implemented/software-tested only; no iPad/iOS Safari device verification has been performed |
+| `3e3dc81` | LED/Laser Pad hygiene: removed stale assets and dead CSS, token aliases, 400 on API errors. | implemented/software-tested |
+| `c2162c3`+`0579fdf`+`6aa44fa` | LED Pad gained a stage-console visual reskin: shared design tokens + vendored Archivo font in `tools/led_pad_assets/`, "Apply" UI vocabulary for the draft commit (API routes unchanged), and a contained-scroll bank-tab strip that fixes a pre-existing horizontal-page-scroll defect at iPhone width caught by `tests/frontend` at baseline; Laser Pad gained the matching reskin plus a consolidated personality toolbar and an action-button hierarchy (one primary per group, danger-outline for destructive). | visual-only, software-tested |
+| `fc56bb5` | LED Pad's editor drawer gained an unset-param-defaults fix: unset controls previously rendered at the widget's minimum instead of the renderer's actual fallback (65 of 72 example-config looks store no `params` at all); the drawer now shows the real renderer default (or "auto" when no single fallback exists) with a **default** tag and a ↺ reset affordance, and the Renderer select no longer renders blank for cloud-scene looks. | software-tested only; no runtime/save-format change |
 
 ---
 

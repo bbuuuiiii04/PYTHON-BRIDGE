@@ -1,6 +1,14 @@
+---
+doc_status: completed-spec
+truth_level: code-grounded
+last_verified_commit: fc56bb5
+last_verified_date: 2026-07-03
+validation_scope: spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+---
+
 # Implementation Spec — Universal Beat-Sync Trigger Runtime (Govee Realtime LEDs)
 
-Status: ACTIVE. Implementer: Composer 2.5. Reviewer: Claude.
+Status: COMPLETED — landed; AWR-104 operator hardware sign-off 2026-06-29. Implementer: Composer 2.5. Reviewer: Claude.
 Package: `rb_ss_bridge_v2` (tests import `from rb_ss_bridge_v2...`).
 Live system — wrong behavior is visible to an audience. Implement exactly as written.
 

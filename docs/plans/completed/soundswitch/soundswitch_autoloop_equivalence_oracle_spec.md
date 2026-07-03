@@ -1,5 +1,5 @@
 ---
-doc_status: active-spec
+doc_status: completed-spec
 truth_level: code-and-capture-grounded
 last_verified_commit: 3f4bcc0
 last_verified_date: 2026-06-29

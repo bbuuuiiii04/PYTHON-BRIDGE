@@ -1,5 +1,5 @@
 ---
-doc_status: active-spec
+doc_status: completed-spec
 truth_level: capture-grounded (parity_20260701T185231Z) + current-code-verified + live-ghidra-evidence-packet (docs/research/soundswitch/soundswitch_perfect_parity_ghidra_evidence.md)
 last_verified_commit: c59d78c
 last_verified_date: 2026-07-02

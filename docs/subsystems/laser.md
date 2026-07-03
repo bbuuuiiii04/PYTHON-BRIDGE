@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 595fabd
-last_verified_date: 2026-06-27
+last_verified_commit: fc56bb5
+last_verified_date: 2026-07-03
 validation_scope: software-only
 ---
 
@@ -55,6 +55,18 @@ Config:
 - local ignored `config/laser_director.json`
 - launcher environment for `RBSS_LASER_CONFIG`
 - personality knobs: `drop_lifecycle_mirror` (default `true`), `max_drops_in_a_row`, `drop_impact_beats`, and renderer-intent-only `post_drop_cycle_beats`; laser cycle cadence still comes from autoloop ticks
+
+Laser Pad (operator companion tool):
+- `tools/laser_pad_web.py` (local web service), `tools/laser_config_ops.py` (config read/write
+  helpers), `tools/laser_pad_assets/` (UI assets), `scripts/laser_pad.py` (launcher), LaunchAgent
+  `launchagents/com.bbui.laser-pad.plist` (always-on background launch), operator guide
+  `docs/guides/laser_pad.md`. Tracked under the `laser_pad` change contract in
+  `docs/agents/change_contracts.yml`.
+- The pad edits laser config and personality selection through a local browser UI. It is NOT part
+  of runtime laser policy (`LaserDirector`) or MIDI execution (`LaserSceneExecutor`); it writes
+  config that the bridge picks up separately (hot-reload or restart), the same way any other
+  config edit does.
+- Status: implemented / software-tested / hardware-unvalidated.
 
 Tests:
 - `python -m pytest tests/test_laser_config.py tests/test_laser_executor.py -q` if pytest is available

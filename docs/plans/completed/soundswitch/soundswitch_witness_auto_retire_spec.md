@@ -1,5 +1,5 @@
 ---
-doc_status: active-plan
+doc_status: completed-spec
 truth_level: code-verified
 last_verified_commit: 87d5ed6
 last_verified_date: 2026-07-02

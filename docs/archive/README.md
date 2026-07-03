@@ -14,3 +14,5 @@ Archived docs are historical evidence only.
 They may explain why something was built, but they are not current source of truth. Before using any archived plan, prompt, or report, verify it against current code, tests, config examples, and status matrices.
 
 Do not execute archived prompts blindly. That is how old mistakes get a sequel.
+
+Archived docs are exempt from status headers; location in `docs/archive/` plus this banner IS their status.

@@ -1,5 +1,5 @@
 ---
-doc_status: active-investigation
+doc_status: completed-investigation
 truth_level: live-capture + deterministic-render + pack-data grounded
 last_verified_commit: 3f4bcc0
 last_verified_date: 2026-07-01

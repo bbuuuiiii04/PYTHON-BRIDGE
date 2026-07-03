@@ -44,7 +44,7 @@ Required tests:
 - Run docs checks for docs changes.
 
 Required docs updates:
-- `docs/architecture/doc_index.md`, `docs/architecture/doc_index.md`, status docs
+- `docs/architecture/doc_index.md`, `docs/status/active_work_registry.md`, status docs
 
 Stop and report if:
 - code and docs disagree

@@ -1,3 +1,11 @@
+---
+doc_status: review-evidence
+truth_level: review-grounded
+last_verified_commit: fc56bb5
+last_verified_date: 2026-07-03
+validation_scope: review evidence only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+---
+
 # Phase 2 (Part F) — Plan / Spec Review: generic layered static-look compositor
 
 Status: **review evidence / superseded by revised spec — SOFTWARE-VALIDATED ONLY /

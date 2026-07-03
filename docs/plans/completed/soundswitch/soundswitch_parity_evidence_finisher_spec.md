@@ -1,5 +1,5 @@
 ---
-doc_status: active-spec
+doc_status: completed-spec
 truth_level: capture-grounded (parity_20260701T185231Z) + current-code-verified at commit 74cbf15
 last_verified_commit: 7d9ecdc
 last_verified_date: 2026-07-02

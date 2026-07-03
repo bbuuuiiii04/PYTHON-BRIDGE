@@ -1,3 +1,11 @@
+---
+doc_status: active-spec
+truth_level: implementation-spec, code-grounded
+last_verified_commit: fc56bb5
+last_verified_date: 2026-07-03
+validation_scope: spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+---
+
 # Codex Implementation Spec — Stream Deck MIDI controller: robustness + bridge autostart
 
 Status: **Phase 1 implemented; Phase 2 (Part F) revised for Codex implementation.** Phase 2 remains

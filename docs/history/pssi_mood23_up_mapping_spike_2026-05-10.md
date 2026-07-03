@@ -1,5 +1,7 @@
 # PSSI mood 2/3 UP mapping spike (2026-05-10)
 
+Status: HISTORICAL spike record (2026-05-10); evidence only.
+
 Purpose: confirm mood `2/3` UP-kind mapping from real local Rekordbox ANLZ data
 before wiring Laser Director buildup gating.
 

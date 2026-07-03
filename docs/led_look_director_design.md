@@ -4,7 +4,7 @@ Status: CURRENT SUPPORTING
 
 This document describes the implemented LED Look Director lane. The controlling
 phase and gate rules remain in
-`docs/plans/led_agent_orchestrator_workflow.md`; code remains the final source
+`docs/plans/completed/led_agent_orchestrator_workflow.md`; code remains the final source
 of truth.
 
 ## Purpose

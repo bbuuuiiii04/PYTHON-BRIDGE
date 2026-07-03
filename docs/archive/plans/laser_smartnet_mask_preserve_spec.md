@@ -35,7 +35,7 @@ for Codex**. Cross-refs: `docs/subsystems/laser.md` (Blackout-mask migration) an
 
 > Original (now-deferred) hardening from the holistic laser-lifecycle review (head `b2ce63d`). Closes
 > the one laser-internal inconsistency surfaced as accepted-divergence **C2** in
-> `docs/plans/active/chorus_drop_cycling_spec.md`. Kept below as the reference design for the eventual
+> `docs/plans/completed/chorus_drop_cycling_spec.md`. Kept below as the reference design for the eventual
 > DMX-path blackout work — not for the MIDI path.
 
 ## Part A — Context & root cause (verified; read, do not implement)
@@ -209,7 +209,7 @@ Pure executor-level seam (no files/subprocess), using the existing `_FakeMidiOut
       breakdown/master_switch masks (it resolves only the drop-window pending). Bump that card's
       `last_verified_commit`. Update the `laser` change-contract docs list if required by
       `docs/agents/change_contracts.yml`.
-- [ ] `docs/plans/active/chorus_drop_cycling_spec.md` C2 note updated to "resolved" (the mask teardown
+- [ ] `docs/plans/completed/chorus_drop_cycling_spec.md` C2 note updated to "resolved" (the mask teardown
       on disallowed crossings is fixed), or a one-line pointer to this spec added.
 
 ## When you finish
