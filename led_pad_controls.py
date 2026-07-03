@@ -41,6 +41,7 @@ def _meta(
 
 CONTROL_META: dict[str, dict[str, Any]] = {
     "travel_beats": _meta("Motion Beats", "number", min=0.01, max=32, step=0.25, help="How many beats the motion takes.", advanced=True),
+    "loop_beats": _meta("Motion Beats (loop)", "number", min=0.01, max=32, step=0.25, help="How many beats the motion loop takes.", advanced=True),
     "breath_beats": _meta("Breath Beats", "number", min=0.01, max=32, step=0.25, help="How many beats a breathing cycle takes."),
     "burst_beats": _meta("Burst Beats", "number", min=0.01, max=16, step=0.25, help="How many beats the burst takes."),
     "drift_beats": _meta("Color Drift Beats", "number", min=0.01, max=64, step=0.25, help="How many beats color drift takes."),

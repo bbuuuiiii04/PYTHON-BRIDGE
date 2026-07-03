@@ -179,8 +179,9 @@ the room-visible absence of a mid-phrase pop.
 | tests/test_led_color_engine_m2_patch_e3.py | rt_twinkle slot fn, generic ambient config, legacy twinkle_blue regression, solid slot-color selection for rt_twinkle | Patch E3 |
 | tests/test_led_color_engine_m2_patch_s.py | random_with_mono_chance mono hit/miss behavior, chance 0 equality with random_with_replacement, determinism, stepping, fade tail, journey RNG isolation, allowlist regression | Patch S |
 | tests/test_led_color_engine_m2_patch_f.py | Patch F default-bank cleanup, legacy_color_suffix storage bank, scene_ref registration, generic drop pairing, no static slot_colors params, solid reachability through default generics | Patch F |
+| tests/test_color_engine_config.py, tests/test_led_color_engine.py, tests/test_govee_frame_renderer.py, tests/test_led_pad_service.py | Locked Palette config/engine/pad playback plus Phase 3 renderer param default parity and changed-value coverage | LED Pad Phase 3 |
 
-All M2.5 slot cue and strategy tests: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+All M2.5 slot cue, strategy, Locked Palette, and renderer-param tests: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
 ## Runtime Status Heartbeat
 

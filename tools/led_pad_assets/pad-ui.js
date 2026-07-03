@@ -28,7 +28,7 @@
   function currentSession() { return (((state.config || {}).config || {})._pad_meta || {}).ui || {}; }
   function editorPayload() {
     const e = state.editor;
-    return {look: e.look, params: e.params, cue_beats: e.cue_beats, slot_fill: e.slot_fill, mono_chance: e.mono_chance};
+    return {look: e.look, params: e.params, cue_beats: e.cue_beats, slot_fill: e.slot_fill, mono_chance: e.mono_chance, locked_palette: e.locked_palette || ""};
   }
   function snapshotEditor() { return JSON.stringify(editorPayload()); }
   function setDirty() {
@@ -133,7 +133,8 @@
   async function openEditor(name, play) {
     const look = JSON.parse(JSON.stringify(state.config.config.looks[name] || {}));
     const meta = (((state.config.config._pad_meta || {}).looks || {})[name] || {});
-    state.editor = {name, look, params: JSON.parse(JSON.stringify(look.params || {})), cue_beats: meta.cue_beats || 16, slot_fill: (((state.config.config.color_engine || {}).slot_fill_strategy_by_look || {})[name] || "gradient_even"), mono_chance: (((state.config.config.color_engine || {}).slot_mono_chance_by_look || {})[name] || 0)};
+    const engine = state.config.config.color_engine || {};
+    state.editor = {name, look, params: JSON.parse(JSON.stringify(look.params || {})), cue_beats: meta.cue_beats || 16, slot_fill: ((engine.slot_fill_strategy_by_look || {})[name] || "gradient_even"), mono_chance: ((engine.slot_mono_chance_by_look || {})[name] || 0), locked_palette: ((engine.locked_palette_by_look || {})[name] || "")};
     state.openSnapshot = snapshotEditor();
     state.cleanSnapshot = snapshotEditor();
     renderEditor();
@@ -153,6 +154,11 @@
     $("brightnessOutput").textContent = `${$("brightnessInput").value}%`;
     $("strobeInput").checked = Boolean(e.look.allow_strobe);
     $("strobeLabel").textContent = $("strobeInput").checked ? "On" : "Off";
+    $("lockedPaletteSelect").innerHTML = state.palettes.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+    $("lockedPaletteSelect").value = e.locked_palette || state.palettes[0] || "";
+    $("lockedPaletteWrap").hidden = !e.locked_palette;
+    $("followColorBtn").classList.toggle("active", !e.locked_palette);
+    $("lockedPaletteBtn").classList.toggle("active", Boolean(e.locked_palette));
     const safety = !!((state.config.config.safety || {}).allow_strobe);
     $("strobeInput").disabled = !safety;
     $("strobeWarning").textContent = !safety ? "Disabled because safety.allow_strobe is false." : (render && render.strobe && !e.look.allow_strobe ? "Strobe-class renderer requires Strobe allowed before Play." : "");
@@ -325,11 +331,14 @@
   $("discardBtn").addEventListener("click", () => confirmModal("Discard LED Pad draft", "Discard reloads the live config and deletes your draft changes.", "Discard", async () => { await api.discard(); await refresh(); }));
   $("closeEditorBtn").addEventListener("click", () => closeEditor(false));
   $("cancelBtn").addEventListener("click", () => closeEditor(false));
-  $("undoBtn").addEventListener("click", () => confirmModal("Undo editor changes", "Undo reverts this editor to the last saved or opened state.", "Undo", () => { const data = JSON.parse(state.cleanSnapshot); state.editor.look = data.look; state.editor.params = data.params; state.editor.cue_beats = data.cue_beats; state.editor.slot_fill = data.slot_fill; state.editor.mono_chance = data.mono_chance; renderEditor(); liveUpdate(); }));
+  $("undoBtn").addEventListener("click", () => confirmModal("Undo editor changes", "Undo reverts this editor to the last saved or opened state.", "Undo", () => { const data = JSON.parse(state.cleanSnapshot); state.editor.look = data.look; state.editor.params = data.params; state.editor.cue_beats = data.cue_beats; state.editor.slot_fill = data.slot_fill; state.editor.mono_chance = data.mono_chance; state.editor.locked_palette = data.locked_palette || ""; renderEditor(); liveUpdate(); }));
   $("saveLookBtn").addEventListener("click", async () => { try { await saveCurrentEditor(); await refresh(); setDirty(); } catch (err) { showError(err); } });
   $("editorPlayBtn").addEventListener("click", () => playEditor(false));
   $("editorStopBtn").addEventListener("click", () => api.stop().then(refresh).catch(showError));
   $("rendererSelect").addEventListener("change", ev => { const render = state.renderMap.get(ev.target.value); const allowed = new Set((render.controls || []).map(c => c.key)); state.editor.look.scene_ref = ev.target.value; state.editor.params = Object.fromEntries(Object.entries(state.editor.params).filter(([k]) => allowed.has(k))); renderEditor(); liveUpdate(); });
+  $("followColorBtn").addEventListener("click", () => { state.editor.locked_palette = ""; renderEditor(); setDirty(); liveUpdate(); });
+  $("lockedPaletteBtn").addEventListener("click", () => { state.editor.locked_palette = state.editor.locked_palette || state.palettes[0] || ""; renderEditor(); setDirty(); liveUpdate(); });
+  $("lockedPaletteSelect").addEventListener("change", ev => { state.editor.locked_palette = ev.target.value; setDirty(); liveUpdate(); });
   $("brightnessInput").addEventListener("input", ev => { state.editor.look.brightness = Number(ev.target.value); $("brightnessOutput").textContent = `${ev.target.value}%`; setDirty(); });
   $("strobeInput").addEventListener("change", ev => { state.editor.look.allow_strobe = ev.target.checked; $("strobeLabel").textContent = ev.target.checked ? "On" : "Off"; setDirty(); });
   $("slotFillSelect").addEventListener("change", ev => { state.editor.slot_fill = ev.target.value; $("monoChanceWrap").hidden = state.editor.slot_fill !== "random_with_mono_chance"; setDirty(); liveUpdate(); });

@@ -62,8 +62,9 @@
         <h3>Color</h3>
         <div class="segmented" role="group" aria-label="Automation Color">
           <button type="button" id="followColorBtn" class="active">Follow Show Color</button>
-          <button type="button" id="lockedPaletteBtn" disabled title="Coming with Phase 3">Locked Palette</button>
+          <button type="button" id="lockedPaletteBtn">Locked Palette</button>
         </div>
+        <label id="lockedPaletteWrap" hidden>Palette <select id="lockedPaletteSelect"></select></label>
         <label>Brightness <input id="brightnessInput" type="range" min="0" max="100" step="1"><output id="brightnessOutput"></output></label>
         <label class="switch">Strobe allowed <input id="strobeInput" type="checkbox"><span id="strobeLabel">Off</span></label>
         <p id="strobeWarning" class="warn-text"></p>

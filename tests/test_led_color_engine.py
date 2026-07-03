@@ -1139,6 +1139,72 @@ class TestResolveSlotColors(unittest.TestCase):
         # Fell back to gradient_even, not random and not empty.
         self.assertEqual(bogus, gradient)
 
+    def test_locked_palette_resolves_without_touching_journey_state(self) -> None:
+        cfg = _make_config(locked_palette_by_look={"locked_look": "red"})
+        e = LedColorEngine(cfg, set_seed=42)
+        e.set_palette("blue_cyan")
+        _dispatch(e, load_gen=1)
+        before = e.snapshot()
+
+        locked = e.resolve_color(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="locked_look",
+            color_source="engine",
+        )
+        after = e.snapshot()
+        unlocked = e.resolve_color(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="unlocked_look",
+            color_source="engine",
+        )
+
+        self.assertEqual(after, before)
+        self.assertGreater(locked["color"][0], locked["color"][2])
+        self.assertNotEqual(locked["color"], unlocked["color"])
+
+    def test_locked_slot_palette_and_absent_mapping_parity(self) -> None:
+        locked_cfg = _make_config(locked_palette_by_look={"locked_look": "red"})
+        locked_engine = LedColorEngine(locked_cfg, set_seed=7)
+        locked_engine.set_palette("blue_cyan")
+        _dispatch(locked_engine, load_gen=1)
+
+        locked = locked_engine.resolve_slot_colors(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="locked_look",
+            color_source="engine",
+        )["slot_colors"]
+
+        control_cfg = _make_config()
+        with_absent = LedColorEngine(locked_cfg, set_seed=7)
+        control = LedColorEngine(control_cfg, set_seed=7)
+        _dispatch(with_absent, load_gen=1)
+        _dispatch(control, load_gen=1)
+        self.assertEqual(
+            with_absent.resolve_slot_colors(
+                role="groove",
+                section_id="s1",
+                cycle=0,
+                look_name="unmapped_look",
+                color_source="engine",
+            ),
+            control.resolve_slot_colors(
+                role="groove",
+                section_id="s1",
+                cycle=0,
+                look_name="unmapped_look",
+                color_source="engine",
+            ),
+        )
+        self.assertEqual(len(locked), 6)
+        self.assertEqual(locked[5], (255, 255, 255))
+        self.assertTrue(all(color[0] >= color[2] for color in locked[:5]))
+
 # ---------------------------------------------------------------------------
 # Module-level import sanity
 # ---------------------------------------------------------------------------

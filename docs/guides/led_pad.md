@@ -3,7 +3,7 @@ doc_status: current
 truth_level: software-tested
 last_verified_commit: 5db991f
 last_verified_date: 2026-07-03
-validation_scope: Phase 1 LED Pad MVP only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3 and Template Lab Phase 2; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -36,6 +36,8 @@ Options:
   `config/led_look_director.draft.json`.
 - Preview realtime-razer looks with synthetic BPM, Test Palette, and Loop settings. Cloud scenes
   are shown but not previewed.
+- Lock a look to a named color-engine palette. Locked looks ignore the session Test Palette
+  during pad playback and keep using their saved palette until cleared.
 - Derive renderer controls from `REALTIME_EFFECT_PARAM_KEYS` and validate the full draft before
   writing live config.
 - Commit the draft to `config/led_look_director.json` with a `.bak-*` backup.
@@ -92,6 +94,6 @@ Expected value is `1`.
 
 ## Status
 
-Phase 1 and Phase 2 are implemented/software-tested. Locked Palette and renderer param unlocks
-remain pending phases. All LED Pad and Template Lab playback/UI claims are SOFTWARE-VALIDATED
-ONLY / HARDWARE-UNVALIDATED.
+Phases 1-3 and Template Lab Phase 2 are implemented/software-tested. Locked Palette and renderer
+param unlock behavior is covered by software tests only. All LED Pad and Template Lab playback/UI
+claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.

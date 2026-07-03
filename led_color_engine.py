@@ -532,11 +532,15 @@ class LedColorEngine:
         if look_name in self._config.exempt_looks:
             return {}
 
-        palette = self._config.palettes.get(self._current_palette)
+        palette_name = self._config.locked_palette_by_look.get(look_name, self._current_palette)
+        palette = self._config.palettes.get(palette_name)
         if palette is None:
             return {}
 
-        focus_lo, focus_hi = self._focus_window(role)
+        if look_name in self._config.locked_palette_by_look:
+            focus_lo, focus_hi = self._palette_p_interval(palette_name)
+        else:
+            focus_lo, focus_hi = self._focus_window(role)
 
         # Per-cue seed (deterministic per section / step)
         use_step = self._config.step_within_section.get(role, False)
@@ -618,11 +622,15 @@ class LedColorEngine:
         if look_name in self._config.exempt_looks:
             return {}
 
-        palette = self._config.palettes.get(self._current_palette)
+        palette_name = self._config.locked_palette_by_look.get(look_name, self._current_palette)
+        palette = self._config.palettes.get(palette_name)
         if palette is None:
             return {}
 
-        focus_lo, focus_hi = self._focus_window(role)
+        if look_name in self._config.locked_palette_by_look:
+            focus_lo, focus_hi = self._palette_p_interval(palette_name)
+        else:
+            focus_lo, focus_hi = self._focus_window(role)
 
         n = 6  # M2.5 slot invariant ignores caller slot_count
 

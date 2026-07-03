@@ -214,6 +214,21 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertEqual(colors[5], (255, 255, 255))
             self.assertEqual(first["spec"]["params"]["slot_colors"], second["spec"]["params"]["slot_colors"])
 
+    def test_locked_palette_ignores_session_test_palette(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, playback, _path = self._service(td)
+            service.save_look({"name": "rt_groove_chase", "look": {"scene_ref": "rt_groove_chase"}, "params": {}, "locked_palette": "crimson"})
+            service.session({"test_palette": "blue_cyan"})
+            service.play({"name": "rt_groove_chase"})
+            first = playback.play_calls[-1]["spec"]["params"]["slot_colors"]
+
+            service.session({"test_palette": "violet"})
+            service.play({"name": "rt_groove_chase"})
+            second = playback.play_calls[-1]["spec"]["params"]["slot_colors"]
+
+            self.assertEqual(first, second)
+            self.assertTrue(all(color[0] >= color[2] for color in first[:5]))
+
     def test_update_ignores_wrong_or_missing_playing_name(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service, playback, _path = self._service(td)

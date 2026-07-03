@@ -187,6 +187,7 @@ class TestColorEngineConfigDataclass(unittest.TestCase):
         self.assertTrue(cfg.drama_by_role)
         self.assertEqual(cfg.set_seed_mode, "random")
         self.assertEqual(cfg.slot_mono_chance_by_look, {})
+        self.assertEqual(cfg.locked_palette_by_look, {})
         self.assertEqual(cfg.exempt_looks, ())
         self.assertEqual(cfg.diy_color_tags, {})
         self.assertEqual(cfg.palettes, {})
@@ -373,6 +374,18 @@ class TestColorEngineValid(unittest.TestCase):
         self.assertEqual(ce.slot_mono_chance_by_look["rt_x"], 1.0)
         self.assertAlmostEqual(ce.slot_mono_chance_by_look["rt_y"], 0.15)
 
+    def test_locked_palette_valid_values_carried(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["locked_palette_by_look"] = {"rt_groove_chase": "red"}
+        cfg_data["color_engine"] = block
+
+        result = load_led_look_director_config_from_dict(cfg_data)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertIsNotNone(result.config.color_engine)
+        self.assertEqual(result.config.color_engine.locked_palette_by_look, {"rt_groove_chase": "red"})
+
 
 # ---------------------------------------------------------------------------
 # Tests for invalid color_engine blocks → engine=None, LED still available
@@ -454,6 +467,20 @@ class TestColorEngineInvalidDoesNotDisableLED(unittest.TestCase):
         block["slot_mono_chance_by_look"] = ["rt_groove_chase"]
         cfg_data["color_engine"] = block
         self._assert_engine_off_led_up(cfg_data, "slot_mono_chance not object")
+
+    def test_locked_palette_unknown_palette_engine_off_names_look(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["locked_palette_by_look"] = {"rt_groove_chase": "missing"}
+        cfg_data["color_engine"] = block
+        self._assert_engine_off_led_up(cfg_data, "rt_groove_chase")
+
+    def test_locked_palette_not_object_engine_off(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["locked_palette_by_look"] = ["rt_groove_chase"]
+        cfg_data["color_engine"] = block
+        self._assert_engine_off_led_up(cfg_data, "locked_palette not object")
 
     def test_range_endpoint_not_in_scale_stops(self) -> None:
         """range endpoint referencing a non-existent scale_stop → engine None, LED available."""
@@ -546,6 +573,7 @@ class TestExampleConfigRegression(unittest.TestCase):
         self.assertEqual(result.errors, ())
         self.assertIsNotNone(result.config.color_engine)
         self.assertEqual(result.config.color_engine.slot_mono_chance_by_look, {})
+        self.assertEqual(result.config.color_engine.locked_palette_by_look, {})
 
     def test_example_loads_with_color_engine_none(self) -> None:
         """The existing example config (no color_engine key) loads as before:

@@ -566,6 +566,36 @@ class GoveeFrameRendererTests(unittest.TestCase):
         for px in folded:
             self.assertLessEqual(max(px), 255)
 
+    def test_phase3_param_unlock_defaults_are_frame_identical(self) -> None:
+        renderer = GoveeFrameRenderer()
+        cases = {
+            "rt_groove_chase": ({"loop_beats": 4.0}, {"loop_beats": 5.0}, 1.25),
+            "rt_groove_nebula": ({"loop_beats": 4.0}, {"loop_beats": 5.0}, 1.25),
+            "rt_drop_chase": ({"travel_beats": 2.0, "width": 0.8}, {"travel_beats": 3.0, "width": 1.2}, 9.25),
+            "rt_post_drop_chase": ({"travel_beats": 2.0, "width": 0.8}, {"travel_beats": 3.0, "width": 1.2}, 1.25),
+            "rt_drop_nebula": ({"travel_beats": 2.0, "width": 0.8}, {"travel_beats": 3.0, "width": 1.2}, 9.25),
+            "rt_post_drop_nebula": ({"travel_beats": 2.0, "width": 0.8}, {"travel_beats": 3.0, "width": 1.2}, 1.25),
+            "groove_center_chase": ({"travel_beats": 1.0}, {"travel_beats": 2.0}, 0.5),
+            "post_drop_firework_chase": ({"travel_beats": 1.0}, {"travel_beats": 2.0}, 0.5),
+        }
+        slot_colors = {
+            "slot_colors": [
+                (255, 0, 0),
+                (255, 80, 0),
+                (0, 255, 0),
+                (0, 0, 255),
+                (180, 0, 255),
+                (255, 255, 255),
+            ]
+        }
+        for name, (defaults, changed, beat_pos) in cases.items():
+            with self.subTest(name=name):
+                absent = renderer.render(name, beat_pos=beat_pos, local_t=0.0, frame_index=3, params=slot_colors, segments=20, seed=11)
+                explicit_default = renderer.render(name, beat_pos=beat_pos, local_t=0.0, frame_index=3, params={**slot_colors, **defaults}, segments=20, seed=11)
+                explicit_changed = renderer.render(name, beat_pos=beat_pos, local_t=0.0, frame_index=3, params={**slot_colors, **changed}, segments=20, seed=11)
+                self.assertEqual(absent, explicit_default)
+                self.assertNotEqual(absent, explicit_changed)
+
 
 if __name__ == "__main__":
     unittest.main()

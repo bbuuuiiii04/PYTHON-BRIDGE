@@ -375,6 +375,13 @@ class LedPadService:
             engine.setdefault("slot_fill_strategy_by_look", {})[name] = str(payload.get("slot_fill"))
         if "mono_chance" in payload:
             engine.setdefault("slot_mono_chance_by_look", {})[name] = float(payload.get("mono_chance"))
+        if "locked_palette" in payload:
+            locked = engine.setdefault("locked_palette_by_look", {})
+            palette_name = str(payload.get("locked_palette") or "")
+            if palette_name:
+                locked[name] = palette_name
+            else:
+                locked.pop(name, None)
         meta = candidate.setdefault("_pad_meta", {}).setdefault("looks", {})
         meta.setdefault(name, {})
         if "cue_beats" in payload:
@@ -404,7 +411,7 @@ class LedPadService:
                 raise ValueError(f"unknown look: {source}")
             looks[new_name] = copy.deepcopy(looks[source])
             engine = candidate.setdefault("color_engine", {})
-            for key in ("slot_fill_strategy_by_look", "slot_mono_chance_by_look"):
+            for key in ("slot_fill_strategy_by_look", "slot_mono_chance_by_look", "locked_palette_by_look"):
                 mapping = engine.setdefault(key, {})
                 if source in mapping:
                     mapping[new_name] = copy.deepcopy(mapping[source])
@@ -450,7 +457,7 @@ class LedPadService:
             candidate["looks"].pop(name, None)
             _remove_from_pad_banks(candidate, name)
             engine = candidate.setdefault("color_engine", {})
-            for key in ("slot_fill_strategy_by_look", "slot_mono_chance_by_look"):
+            for key in ("slot_fill_strategy_by_look", "slot_mono_chance_by_look", "locked_palette_by_look"):
                 if isinstance(engine.get(key), dict):
                     engine[key].pop(name, None)
             candidate.setdefault("_pad_meta", {}).setdefault("looks", {}).pop(name, None)
@@ -548,6 +555,13 @@ class LedPadService:
             engine.setdefault("slot_fill_strategy_by_look", {})[name] = str(editor["slot_fill"])
         if "mono_chance" in editor:
             engine.setdefault("slot_mono_chance_by_look", {})[name] = float(editor["mono_chance"])
+        if "locked_palette" in editor:
+            locked = engine.setdefault("locked_palette_by_look", {})
+            palette_name = str(editor.get("locked_palette") or "")
+            if palette_name:
+                locked[name] = palette_name
+            else:
+                locked.pop(name, None)
         return config
 
     def _play_spec(self, config: dict[str, Any], name: str, editor: dict[str, Any] | None) -> tuple[dict[str, Any], float]:

@@ -547,7 +547,7 @@ def _validate_realtime_params(
             errors.append(f"{prefix} params.beat_division must be a number > 0")
     if "trail_beats" in params:
         _validate_non_negative_number(f"{prefix} params.trail_beats", params["trail_beats"], errors)
-    for field_name in ("travel_beats", "width", "burst_beats", "breath_beats", "drift_beats"):
+    for field_name in ("travel_beats", "width", "burst_beats", "breath_beats", "drift_beats", "loop_beats"):
         if field_name in params:
             value = params[field_name]
             if (
@@ -1032,6 +1032,19 @@ def _validate_color_engine(data: dict[str, Any]) -> list[str]:
             elif not (0.0 <= float(chance_val) <= 1.0):
                 errors.append(f"color_engine.slot_mono_chance_by_look.{look_name} must be in [0, 1]")
 
+    # locked_palette_by_look: dict of look -> existing palette name
+    locked_palette_by_look = data.get("locked_palette_by_look", {})
+    if not isinstance(locked_palette_by_look, dict):
+        errors.append("color_engine.locked_palette_by_look must be an object")
+    else:
+        palettes_for_lock = data.get("palettes", {})
+        palette_names = set(palettes_for_lock) if isinstance(palettes_for_lock, dict) else set()
+        for look_name, palette_name in locked_palette_by_look.items():
+            if not isinstance(palette_name, str):
+                errors.append(f"color_engine.locked_palette_by_look.{look_name} must be a palette name")
+            elif palette_name not in palette_names:
+                errors.append(f"color_engine.locked_palette_by_look.{look_name} references unknown palette '{palette_name}'")
+
     # fade_beats_by_role: dict of str → number
     fade_beats_by_role = data.get("fade_beats_by_role", {})
     if not isinstance(fade_beats_by_role, dict):
@@ -1218,6 +1231,10 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
     mono_chance_raw = raw.get("slot_mono_chance_by_look", {})
     slot_mono_chance_by_look: dict[str, float] = {k: float(v) for k, v in mono_chance_raw.items()}
 
+    # Build locked_palette_by_look
+    locked_palette_raw = raw.get("locked_palette_by_look", {})
+    locked_palette_by_look: dict[str, str] = {k: str(v) for k, v in locked_palette_raw.items()}
+
     # Build fade_beats_by_role
     fade_raw = raw.get(
         "fade_beats_by_role",
@@ -1243,6 +1260,7 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
         slot_fill_strategy_by_look=slot_fill_strategy_by_look,
         slot_fill_strategy_by_role=slot_fill_strategy_by_role,
         slot_mono_chance_by_look=slot_mono_chance_by_look,
+        locked_palette_by_look=locked_palette_by_look,
         exempt_looks=exempt_looks,
         diy_color_tags=diy_color_tags,
         set_seed_mode=str(raw.get("set_seed_mode", "random")),

@@ -1086,7 +1086,7 @@ def _slot_groove_center_chase(beat: float, local_t: float, frame_index: int,
     # Comet tail length (e.g. 15% of the half-strip)
     comet_width = max(2.0, center * 0.15)
 
-    travel_beats = 1.0
+    travel_beats = max(0.001, float(params.get("travel_beats", 1.0)))
 
     # Comets spawn every 1 beat. Travel time is 1 beat.
     for age_offset in range(int(math.ceil(travel_beats))):
@@ -1139,7 +1139,7 @@ def _slot_groove_chase(beat: float, local_t: float, frame_index: int,
     cue_beat = _edm_beat(beat, params)
     field = _empty_motion_field(segments)
 
-    loop_beats = 4.0
+    loop_beats = max(0.001, float(params.get("loop_beats", 4.0)))
     offset_beats = 2.0
     width = 0.8
 
@@ -1194,7 +1194,7 @@ def _slot_groove_nebula(beat: float, local_t: float, frame_index: int,
     cue_beat = _edm_beat(beat, params)
     field = _empty_motion_field(segments)
 
-    loop_beats = 4.0
+    loop_beats = max(0.001, float(params.get("loop_beats", 4.0)))
     width = 0.8
 
     pos1 = ((cue_beat / loop_beats) % 1.0) * segments
@@ -1248,8 +1248,8 @@ def _slot_post_drop_chase(beat: float, local_t: float, frame_index: int,
     if not strobe_on:
         return field
 
-    width = 0.8
-    travel_beats = 2.0
+    width = max(0.001, float(params.get("width", 0.8)))
+    travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
     for spawn_at, _spawn_idx in _drop_chase_spawn_times(cue_beat, start=0.0):
         progress = (cue_beat - spawn_at) / travel_beats
         pos = progress * segments
@@ -1284,8 +1284,8 @@ def _slot_post_drop_nebula(beat: float, local_t: float, frame_index: int,
     if not strobe_on:
         return field
 
-    width = 0.8
-    travel_beats = 2.0
+    width = max(0.001, float(params.get("width", 0.8)))
+    travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
     for spawn_at, spawn_idx in _drop_chase_spawn_times(cue_beat, start=0.0):
         progress = (cue_beat - spawn_at) / travel_beats
         pos = progress * segments
@@ -1338,8 +1338,8 @@ def _slot_drop_chase(beat: float, local_t: float, frame_index: int,
             field[idx][color_slot] = min(1.0, field[idx][color_slot] + intensity)
         return field
 
-    width = 0.8
-    travel_beats = 2.0
+    width = max(0.001, float(params.get("width", 0.8)))
+    travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
     for spawn_at, _spawn_idx in _drop_chase_spawn_times(cue_beat, start=8.0):
         progress = (cue_beat - spawn_at) / travel_beats
         pos = progress * segments
@@ -1390,8 +1390,8 @@ def _slot_drop_nebula(beat: float, local_t: float, frame_index: int,
             field[idx][color_slot] = min(1.0, field[idx][color_slot] + intensity)
         return field
 
-    width = 0.8
-    travel_beats = 2.0
+    width = max(0.001, float(params.get("width", 0.8)))
+    travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
     for spawn_at, spawn_idx in _drop_chase_spawn_times(cue_beat, start=8.0):
         progress = (cue_beat - spawn_at) / travel_beats
         pos = progress * segments
@@ -1522,7 +1522,7 @@ def _slot_post_drop_firework_chase(beat: float, local_t: float, frame_index: int
     # Comet tail length (e.g. 15% of the half-strip)
     comet_width = max(2.0, center * 0.15)
 
-    travel_beats = 1.0
+    travel_beats = max(0.001, float(params.get("travel_beats", 1.0)))
 
     # Comets spawn every 1 beat. Travel time is 1 beat.
     for age_offset in range(int(math.ceil(travel_beats))):
@@ -1840,22 +1840,22 @@ REALTIME_STROBE_EFFECTS = REALTIME_STROBE_EFFECTS | frozenset({
 # ALL LED.  slot_colors is RUNTIME-injected, NOT a static config key, so it is
 # deliberately NOT allowlisted.
 _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
-    "groove_center_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "groove_center_chase": frozenset({"duration_beats", "travel_beats"}) | _SYNC_PARAM_KEYS,
     "groove_center_burst_retract": (
         frozenset({"duration_beats", "burst_beats"}) | _SYNC_PARAM_KEYS
     ),
-    "post_drop_firework_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "post_drop_firework_chase": frozenset({"duration_beats", "travel_beats"}) | _SYNC_PARAM_KEYS,
     "breakdown_full_breathing": (
         frozenset({"duration_beats", "breath_beats", "drift_beats"}) | _SYNC_PARAM_KEYS
     ),
     "breakdown_star_twinkle": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "breakdown_star_twinkle_sand": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
-    "rt_groove_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
-    "rt_groove_nebula": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
-    "rt_post_drop_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
-    "rt_post_drop_nebula": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
-    "rt_drop_chase": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
-    "rt_drop_nebula": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_groove_chase": frozenset({"duration_beats", "loop_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_groove_nebula": frozenset({"duration_beats", "loop_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_post_drop_chase": frozenset({"duration_beats", "travel_beats", "width"}) | _SYNC_PARAM_KEYS,
+    "rt_post_drop_nebula": frozenset({"duration_beats", "travel_beats", "width"}) | _SYNC_PARAM_KEYS,
+    "rt_drop_chase": frozenset({"duration_beats", "travel_beats", "width"}) | _SYNC_PARAM_KEYS,
+    "rt_drop_nebula": frozenset({"duration_beats", "travel_beats", "width"}) | _SYNC_PARAM_KEYS,
     "rt_drop_center_burst": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "rt_post_drop_center_comet": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "rt_twinkle": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
