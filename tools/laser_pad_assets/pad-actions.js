@@ -183,6 +183,38 @@ window.LaserPad = window.LaserPad || {};
 
 
 
+    async openAccessPanel() {
+      this.accessOpen = true;
+      this.accessInfo = null;
+      this.accessQrSvg = '';
+      try {
+        const response = await fetch('/api/access');
+        const data = await response.json();
+        this.accessInfo = data;
+        if (data.lan_url) {
+          try {
+            const qr = qrcode(0, 'M');
+            qr.addData(data.lan_url);
+            qr.make();
+            this.accessQrSvg = qr.createSvgTag({ cellSize: 4, margin: 4 });
+          } catch (err) {
+            this.accessQrSvg = '';
+          }
+        }
+      } catch (err) {
+        this.statusText = `Couldn't check network access: ${err.message}`;
+        this.accessInfo = { ok: false, bound_host: '', port: 0, loopback_only: true, lan_url: null };
+      }
+    },
+
+
+
+    closeAccessPanel() {
+      this.accessOpen = false;
+    },
+
+
+
     syncTestUi() {
       const ui = this.config?._pad_meta?.ui || {};
       this.test.bpm = Number(ui.bpm_for_test_fire ?? this.test.bpm ?? 128);

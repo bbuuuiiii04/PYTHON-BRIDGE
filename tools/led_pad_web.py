@@ -25,6 +25,7 @@ from ..led_pad_controls import controls_for, render_catalog
 from ..runtime_status import STATUS_PATH
 from .led_pad_lab import LabRegistry, LabRenderer, load_lab_effects
 from .led_pad_playback import PadPlayback
+from .pad_access import _is_loopback_host, access_payload
 
 _ASSETS_DIR = Path(__file__).resolve().parent / "led_pad_assets"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -845,6 +846,11 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                 if path == "/lab":
                     self._send_file(_ASSETS_DIR / "lab.html")
                     return
+                if path == "/api/access":
+                    self._send_json(
+                        access_payload(self.server.server_address[0], self.server.server_address[1])
+                    )
+                    return
                 if path.startswith("/static/"):
                     target = (_ASSETS_DIR / path.removeprefix("/static/")).resolve()
                     if _ASSETS_DIR.resolve() not in target.parents:
@@ -883,6 +889,14 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
     return _LedPadHandler
 
 
+def _resolve_bind_host(value: str) -> str:
+    if value == "localhost":
+        return "127.0.0.1"
+    if value == "lan":
+        return "0.0.0.0"
+    return value
+
+
 def run_server(
     *,
     host: str = "127.0.0.1",
@@ -891,6 +905,12 @@ def run_server(
     dry_run: bool = False,
 ) -> ThreadingHTTPServer:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    host = _resolve_bind_host(host)
+    if not _is_loopback_host(host):
+        print(
+            f"WARNING: led_pad_web is exposed to non-loopback {host}; local-only safety assumption is disabled.",
+            file=sys.stderr,
+        )
     service = LedPadService(config_path=config_path, dry_run=dry_run)
     server = ThreadingHTTPServer((host, int(port)), build_handler(service))
     setattr(server, "led_pad_service", service)

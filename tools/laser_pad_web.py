@@ -41,6 +41,7 @@ from .laser_config_ops import (
     validate_personality_aliases_for_draft,
     verify_mappings_runtime,
 )
+from .pad_access import access_payload
 
 _ASSETS_DIR = Path(__file__).resolve().parent / "laser_pad_assets"
 logger = logging.getLogger("laser_pad_web")
@@ -713,6 +714,10 @@ _GET_ROUTES = {
     "/api/resolve-test": _send_resolve_test,
     "/api/history": lambda h, _parsed: h._send_json(
         HTTPStatus.OK, {"items": h.service.list_history()}
+    ),
+    "/api/access": lambda h, _parsed: h._send_json(
+        HTTPStatus.OK,
+        access_payload(h.server.server_address[0], h.server.server_address[1]),
     ),
 }
 

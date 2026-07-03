@@ -87,6 +87,8 @@ main { padding: var(--pad); }
 .modal-backdrop[hidden] { display: none; }
 .modal { width: min(420px, 100%); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); }
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--gap); margin-top: var(--pad); }
+.qr-wrap { background: #fff; padding: 12px; border-radius: 8px; display: inline-block; }
+.qr-wrap svg { display: block; }
 .empty { color: var(--text-dim); padding: 32px; border: 1px dashed var(--border); border-radius: var(--radius); }
 .lab-badge { color: var(--lab); border: 1px dashed var(--lab); border-radius: 999px; padding: 2px 8px; font-size: 12px; vertical-align: middle; }
 .lab-layout { display: grid; grid-template-columns: minmax(240px, 360px) 1fr; gap: var(--gap); }

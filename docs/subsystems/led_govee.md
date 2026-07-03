@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 944bc83
+last_verified_commit: f8573fd
 last_verified_date: 2026-07-03
-validation_scope: software-only; LED Pad Phases 1-3 and Template Lab Phase 2 software-tested, hardware-unvalidated
+validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, and QR same-network access software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem
@@ -73,6 +73,7 @@ Config:
 - LED Pad persists its edit draft in `config/led_look_director.draft.json` and commits only after the full draft passes `load_led_look_director_config_from_dict()`. The pad-only Drafts bank lives in root `_pad_meta.drafts`, so those looks are automation-invisible unless moved into `banks.default`.
 - LED Pad Locked Palette writes through `color_engine.locked_palette_by_look`; playback of a locked look ignores the session Test Palette. Renderer param unlocks are frame-identical when omitted: `loop_beats` on `rt_groove_chase`/`rt_groove_nebula`; `travel_beats` + `width` on `rt_drop_chase`, `rt_post_drop_chase`, `rt_drop_nebula`, and `rt_post_drop_nebula`; `travel_beats` on `groove_center_chase` and `post_drop_firework_chase`.
 - Template Lab persists draft metadata under gitignored `config/led_lab/drafts.json` and loads gitignored `config/led_lab/effects_lab.py` only inside the pad process. Lab scenes play as `lab_<name>` through `LabRenderer`; bridge runtime modules never import lab code, and production renderer registries are not mutated by lab playback.
+- LED Pad exposes `GET /api/access` (shared with Laser Pad via `tools/pad_access.py`), which reports the pad's current bind address/loopback state and, when non-loopback, a best-effort LAN URL for a QR "Open on another device" affordance. It never changes bind behavior itself; exposing the pad to the LAN stays an explicit `--host` operator action.
 
 Tests:
 - inspect `tests/` for LED color engine, Govee realtime runner, frame renderer, state manager LED integration, and config tests
@@ -81,6 +82,7 @@ Tests:
 - phrase-aware active-content hold coverage lives in `tests/test_led_state_manager.py`, including active deck switch, active-deck track load, the inclusive `1.0` beat release boundary, hold-until-next-marker behavior, missing-phrase-data indefinite hold until a crossing, idle/stop cleanup, inactive-deck load exclusion, and laser/SoundSwitch path confinement. This is software validation only.
 - shared flat-window lifecycle parity coverage lives in `tests/test_drop_lifecycle.py`; live LED per-look duration rewriting and backend latency offsets remain separate by design.
 - LED Pad Phase 1/3 coverage lives in `tests/test_led_pad_controls.py`, `tests/test_led_pad_playback.py`, and `tests/test_led_pad_service.py`. It validates metadata coverage, synthetic playback clock/ownership/strobe gates, draft mutation, commit blocking, color injection, Locked Palette playback, ownership-required replies, and one HTTP smoke path. Template Lab Phase 2 coverage lives in `tests/test_led_pad_lab.py` and validates registry persistence, name-collision rejection, hot reload, broken-module errors, lab rendering, and shared playback-slot preemption. It uses fakes or dry-run paths only. Phase 3 color-engine and renderer regressions live in `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`, and `tests/test_govee_frame_renderer.py`.
+- The shared `tools/pad_access.py` LAN-access payload (used by both pads' `GET /api/access`) is covered by `tests/test_pad_access.py` (pure-function, loopback/specific-IP/`0.0.0.0` detection cases), plus one HTTP smoke test each in `tests/test_led_pad_service.py` and `tests/test_laser_pad_web.py`.
 - broad command: `python -m unittest discover tests`
 
 Change contract:

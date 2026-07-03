@@ -82,8 +82,32 @@ Open `http://127.0.0.1:8765`.
 - `GET /api/history/<name>/diff`
 - `POST /api/history/<name>/restore`
 - `GET /api/midi_ports`
+- `GET /api/access`
 
 Historical parity notes are maintained in `docs/guides/laser_pad_parity.md`.
+
+## Open on another device (QR)
+
+The header has a 📱 button ("Open on another device"). It calls `GET /api/access`, which
+reports the pad's current bind address; it never changes bind behavior by itself —
+exposing the pad to the LAN is still the explicit `--host 0.0.0.0` / LaunchAgent edit
+described above.
+
+Three states:
+- **LAN URL available** (pad bound to a non-loopback host): shows a QR code and a
+  selectable plain URL for the pad's LAN address, plus a warning that anyone on the same
+  Wi-Fi can edit the laser config draft through this page.
+- **Loopback only** (default `--host 127.0.0.1`): no QR. Explains that reaching the pad
+  from another device requires restarting it with `--host lan`, or editing
+  `~/Library/LaunchAgents/com.bbui.laser-pad.plist` and running
+  `launchctl kickstart -k gui/$UID/com.bbui.laser-pad`, and that doing so exposes pad
+  control to the whole network.
+- **No LAN address detected**: bound non-loopback but LAN IP detection failed — check
+  Wi-Fi.
+
+This is plain HTTP, not HTTPS — the QR/URL is a convenience for typing a LAN address on
+a phone, not a security boundary. Firewalls or Wi-Fi client (AP) isolation can still
+block another device from reaching the LAN URL even when one is detected.
 
 ## Verification
 

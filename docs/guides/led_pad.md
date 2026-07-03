@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 944bc83
+last_verified_commit: f8573fd
 last_verified_date: 2026-07-03
-validation_scope: LED Pad Phases 1-3 and Template Lab Phase 2; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, and QR same-network access; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -43,6 +43,28 @@ Options:
 - `launchctl list | grep led-pad` shows the LaunchAgent loaded.
 - Clicking menu bar **LED Pad...** opens `http://127.0.0.1:8766` in the default browser.
 - `curl -sS http://127.0.0.1:8766/api/config | jq .config.schema` returns a number or `null` for older configs.
+
+## Open on another device (QR)
+
+The transport bar has a 📱 button ("Open on another device"). It calls `GET /api/access`,
+which reports the pad's current bind address; it never changes bind behavior by itself —
+exposing the pad to the LAN stays an explicit operator action taken elsewhere (`--host`).
+
+Three states:
+- **LAN URL available** (pad bound to a non-loopback host): shows a QR code and a
+  selectable plain URL for the pad's LAN address, plus a warning that anyone on the same
+  Wi-Fi can edit config through this page.
+- **Loopback only** (default `--host 127.0.0.1`): no QR. Explains that reaching the pad
+  from another device requires restarting it with `--host lan`, or editing
+  `~/Library/LaunchAgents/com.bbui.led-pad.plist` and running
+  `launchctl kickstart -k gui/$UID/com.bbui.led-pad`, and that doing so exposes pad
+  control to the whole network.
+- **No LAN address detected**: bound non-loopback but LAN IP detection failed — check
+  Wi-Fi.
+
+This is plain HTTP, not HTTPS — the QR/URL is a convenience for typing a LAN address on
+a phone, not a security boundary. Firewalls or Wi-Fi client (AP) isolation can still
+block another device from reaching the LAN URL even when one is detected.
 
 ## Picking up code changes
 

@@ -281,3 +281,15 @@ body {
   box-shadow: none !important;
   border-top: 1px solid rgba(255,255,255,0.04) !important;
 }
+
+/* "Open on another device" QR code — always dark-on-light so cameras can read it on the dark theme */
+.qr-wrap {
+  background: #fff;
+  padding: 12px;
+  border-radius: 8px;
+  display: inline-block;
+}
+
+.qr-wrap svg {
+  display: block;
+}

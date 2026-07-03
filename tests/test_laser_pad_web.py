@@ -2002,6 +2002,23 @@ class LaserPadWebTests(unittest.TestCase):
         self.assertEqual(commit_errors, [])
         self.assertEqual(note_errors, [])
 
+    def test_api_access_route_returns_loopback_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = LaserPadService(Path(td) / "laser_director.json")
+            with self._running_server(service) as port:
+                status, payload, _raw = self._request_json(
+                    port=port,
+                    method="GET",
+                    path="/api/access",
+                )
+
+        self.assertEqual(status, 200)
+        assert payload is not None
+        self.assertTrue(payload.get("ok"))
+        self.assertTrue(payload.get("loopback_only"))
+        self.assertIsNone(payload.get("lan_url"))
+        self.assertEqual(payload.get("bound_host"), "127.0.0.1")
+
 
 if __name__ == "__main__":
     unittest.main()

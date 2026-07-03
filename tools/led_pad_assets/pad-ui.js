@@ -287,6 +287,37 @@
   function ownershipDialog() {
     confirmModal("The bridge owns the LEDs right now. Take over?", "LEDs go dark on the bridge side until you release.", "Take over", () => playEditor(true));
   }
+  async function openAccessModal() {
+    modal("Open on another device", "Checking network access…", [{label:"Close", className:"ghost", run:() => {}}]);
+    try {
+      const info = await api.access();
+      renderAccessModal(info);
+    } catch (err) {
+      $("modalText").textContent = `Could not check network access: ${(err && err.message) || String(err)}`;
+    }
+  }
+  function renderAccessModal(info) {
+    let html = "";
+    if (info.lan_url) {
+      let svg = "";
+      try {
+        const qr = qrcode(0, "M");
+        qr.addData(info.lan_url);
+        qr.make();
+        svg = qr.createSvgTag({cellSize: 4, margin: 4});
+      } catch (err) { svg = ""; }
+      html += `<div class="qr-wrap">${svg}</div>`;
+      html += `<p class="mono" style="user-select:all">${esc(info.lan_url)}</p>`;
+      html += `<p class="warn-text">Anyone on this Wi-Fi can edit config through this page.</p>`;
+    } else if (info.loopback_only) {
+      html += `<p class="dim">This pad is only reachable from this Mac right now.</p>`;
+      html += `<p class="dim">To allow access from another device on this Wi-Fi, restart the pad with <span class="mono">--host lan</span>, or edit the LaunchAgent plist at <span class="mono">~/Library/LaunchAgents/com.bbui.led-pad.plist</span> and run <span class="mono">launchctl kickstart -k gui/$UID/com.bbui.led-pad</span>.</p>`;
+      html += `<p class="warn-text">Doing so exposes pad control to the whole network.</p>`;
+    } else {
+      html += `<p class="warn-text">No LAN address detected — check Wi-Fi.</p>`;
+    }
+    $("modalText").innerHTML = html;
+  }
   function closeEditor(force) {
     if (!force && snapshotEditor() !== state.openSnapshot) {
       confirmModal("Discard editor changes?", "Cancel discards changes since opening this editor.", "Discard", () => closeEditor(true));
@@ -327,6 +358,7 @@
   $("loopToggle").addEventListener("change", ev => { $("loopLabel").textContent = ev.target.checked ? "On" : "Off"; api.session({loop:ev.target.checked}).catch(showError); });
   $("stopBtn").addEventListener("click", () => api.emergencyStop().then(refresh).catch(showError));
   $("ownershipBtn").addEventListener("click", async () => { try { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); } catch (err) { showError(err); } });
+  $("qrBtn").addEventListener("click", openAccessModal);
   $("commitBtn").addEventListener("click", () => confirmModal("Commit LED Pad draft", `Commit writes the draft to live config - ${($("commitCount").textContent || "0")} looks affected.`, "Commit", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Committed - bridge restart required to take effect live."); await refresh(); }));
   $("discardBtn").addEventListener("click", () => confirmModal("Discard LED Pad draft", "Discard reloads the live config and deletes your draft changes.", "Discard", async () => { await api.discard(); await refresh(); }));
   $("closeEditorBtn").addEventListener("click", () => closeEditor(false));

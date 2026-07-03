@@ -8,6 +8,7 @@
     <script src="/static/pad-selectors.js?v=ux-5"></script>
     <script src="/static/pad-actions.js?v=ux-5"></script>
     <script src="/static/pad-ui.js?v=ux-5"></script>
+    <script src="/static/qrcode.js?v=1"></script>
     <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" integrity="sha384-l8f0VcPi/M1iHPv8egOnY/15TDwqgbOR1anMIJWvU6nLRgZVLTLSaNqi/TOoT5Fh" crossorigin="anonymous" defer></script>
     <link rel="stylesheet" href="/static/pad.css?v=ux-5" />
     <link rel="stylesheet" href="/static/pad-overrides.css?v=ux-overhaul" />
@@ -38,6 +39,7 @@
               <span class="save-badge" :class="saveBadgeClass()" x-text="saveBadgeText()" :title="saveState.kind === 'error' ? saveState.lastError : ''" aria-live="polite" aria-atomic="true"></span>
               <button class="primary-action" :class="{'has-changes': hasUnsavedChanges()}" :aria-label="hasUnsavedChanges() ? 'Save & Apply, unsaved changes' : 'Save & Apply'" title="Writes your unsaved changes to disk and tells the running bridge to reload." @click="commitDraft()">💾 Save &amp; Apply</button>
             </div>
+            <button class="icon-action" title="Open on another device" aria-label="Open on another device" @click="openAccessPanel()">📱</button>
             <button class="settings-trigger icon-action" @click="openSettingsPanel()" title="Settings" aria-label="Settings">⚙</button>
           </div>
         </div>
@@ -741,6 +743,42 @@
               </section>
             </div>
           </aside>
+        </div>
+      </template>
+
+      <template x-if="accessOpen">
+        <div class="modal-backdrop" @click.self="closeAccessPanel()" @keydown.escape.window="closeAccessPanel()">
+          <div class="modal panel">
+            <h3>Open on another device</h3>
+            <template x-if="!accessInfo">
+              <p>Checking network access…</p>
+            </template>
+            <template x-if="accessInfo && accessInfo.lan_url">
+              <div>
+                <div class="qr-wrap" x-html="accessQrSvg"></div>
+                <p style="font-family: var(--mono, monospace); user-select: all;" x-text="accessInfo.lan_url"></p>
+                <p class="field-error">Anyone on this Wi-Fi can edit config through this page.</p>
+              </div>
+            </template>
+            <template x-if="accessInfo && !accessInfo.lan_url && accessInfo.loopback_only">
+              <div>
+                <p>This pad is only reachable from this Mac right now.</p>
+                <p>
+                  To allow access from another device on this Wi-Fi, restart the pad with
+                  <code>--host lan</code>, or edit the LaunchAgent plist at
+                  <code>~/Library/LaunchAgents/com.bbui.laser-pad.plist</code> and run
+                  <code>launchctl kickstart -k gui/$UID/com.bbui.laser-pad</code>.
+                </p>
+                <p class="field-error">Doing so exposes pad control to the whole network.</p>
+              </div>
+            </template>
+            <template x-if="accessInfo && !accessInfo.lan_url && !accessInfo.loopback_only">
+              <p class="field-error">No LAN address detected — check Wi-Fi.</p>
+            </template>
+            <div class="drawer-actions">
+              <button @click="closeAccessPanel()">Close</button>
+            </div>
+          </div>
         </div>
       </template>
 

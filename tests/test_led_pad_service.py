@@ -299,6 +299,18 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertIn("config", payload)
 
+    def test_http_smoke_get_access_loopback(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, _path = self._service(td)
+            with self._running_server(service) as port:
+                status, payload = self._request_json(port, "GET", "/api/access")
+
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["ok"])
+            self.assertTrue(payload["loopback_only"])
+            self.assertIsNone(payload["lan_url"])
+            self.assertEqual(payload["bound_host"], "127.0.0.1")
+
 
 if __name__ == "__main__":
     unittest.main()

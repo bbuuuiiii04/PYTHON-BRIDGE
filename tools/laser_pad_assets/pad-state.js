@@ -196,6 +196,12 @@ window.LaserPad = window.LaserPad || {};
 
     settingsActiveTab: 'global',
 
+    accessOpen: false,
+
+    accessInfo: null,
+
+    accessQrSvg: '',
+
     settingsTabs: [
       { id: 'global', label: 'Global' },
       { id: 'personalities', label: 'Personalities' },
