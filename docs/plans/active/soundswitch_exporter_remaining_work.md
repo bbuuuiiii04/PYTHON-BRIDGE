@@ -77,6 +77,12 @@ each with regression tests (suite green, proof gate re-run 29/0/0):
    the idle RB sibling of a playing bridge deck is ignored — closing the live
    deck-1 Wanton→BLACKPINK→Wanton metadata flap that armed and tore down the
    wrong scripted show mid-autoloop.
+5. **Edited-witness parity retirement** (`tools/export_soundswitch_pack.py`):
+   when a captured scripted/Autoloop witness now FAILs only because its own
+   source or shared venue source sha changed since the last committed PASS, the
+   stale point evidence is retired for that export and the document can fall
+   back to the generalized lane. Identical-source FAILs still stay pinned as
+   `unverified_parity` and block trusted publication.
 
 The old 29 PASS / 0 FAIL / 0 INCOMPLETE proof record remains closure evidence
 for its recorded source snapshot only. Live export now reconciles the saved

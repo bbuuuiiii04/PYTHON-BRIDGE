@@ -108,6 +108,10 @@ They cover ordered capture joins, scripted divergence ledgers, Autoloop sample
 classification, zero-seeded Autoloop-cycle replay, static unavailable-window
 fixture generation, registry hash freshness, same-layout generalization,
 active/inactive lane summaries, and static non-generic assertion fallback.
+`tests/test_witness_auto_retire.py` covers edited-witness evidence retirement,
+including doc-sha retirement, identical-sha regression pinning, synthetic
+publish fallback to `algorithm_generalized`, and unchanged-source publish
+blocking through `UnverifiedParityPublishError`.
 These are passive capture/software
 oracle tests only; remaining active `unverified_parity` documents block trusted
 publication.
