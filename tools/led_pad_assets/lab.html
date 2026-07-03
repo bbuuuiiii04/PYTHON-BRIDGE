@@ -17,6 +17,7 @@
         </nav>
       </div>
       <form id="sessionForm" class="session-controls" aria-label="Session controls">
+        <span class="panel-label">Session</span>
         <label>BPM <button type="button" data-step="-1" aria-label="Decrease BPM">−</button><input id="bpmInput" type="number" min="60" max="200" step="1"><button type="button" data-step="1" aria-label="Increase BPM">+</button></label>
         <label>Test Palette <select id="paletteSelect"></select></label>
         <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
@@ -24,7 +25,7 @@
       <div class="transport">
         <span id="ownershipPill" class="pill">Free</span>
         <button id="ownershipBtn" type="button" class="ghost">Take over</button>
-        <button id="stopBtn" type="button" class="danger-outline" aria-label="Emergency stop">■</button>
+        <button id="stopBtn" type="button" class="danger" aria-label="Emergency stop">■ STOP</button>
       </div>
     </div>
   </header>
@@ -32,7 +33,7 @@
     <div id="errorBanner" class="error-banner" hidden></div>
     <section class="lab-layout">
       <aside class="lab-list-panel">
-        <div class="panel-head"><h2>Drafts</h2><button id="newDraftBtn" type="button" class="primary">New</button></div>
+        <div class="panel-head"><h2 class="panel-label">Drafts</h2><button id="newDraftBtn" type="button" class="primary">New</button></div>
         <div id="draftList" class="lab-list"></div>
       </aside>
       <section class="lab-detail-panel">
@@ -58,7 +59,7 @@
           <pre id="traceText"></pre>
         </details>
         <aside class="promotion-panel">
-          <h3>Promotion checklist</h3>
+          <h3 class="panel-label">Promotion checklist</h3>
           <ul>
             <li>Move accepted function into <span class="mono">govee_frame_renderer.py</span>.</li>
             <li>Register it and allowlist params with value validation.</li>

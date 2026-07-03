@@ -41,7 +41,7 @@
         <span>${esc(e.name)}</span>
         <span class="status-pill ${esc(e.status)}">${esc(e.status)}</span>
         <span class="dim">${esc((e.updated || "").slice(0, 10))}</span>
-      </button>`).join("") : `<p class="empty">No lab drafts yet.</p>`;
+      </button>`).join("") : `<div class="empty"><span class="panel-label">No drafts</span><span>Create one with New.</span></div>`;
     $("draftList").querySelectorAll("button").forEach(btn => btn.onclick = () => selectDraft(btn.dataset.name));
   }
 

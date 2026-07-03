@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 661edde
+last_verified_commit: 3e3dc81
 last_verified_date: 2026-07-03
 validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, and the iOS/iPad touch pass; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -91,7 +91,7 @@ Logs are written to `/tmp/led_pad.log` and `/tmp/led_pad.err`.
 
 - Show banks first: Drafts, Ambient, Groove, Buildup, Drop, Post-Drop, Breakdown, Utility, plus
   a read-only Other chip for `pre_drop` or unknown memberships.
-- Duplicate, move, delete, save, discard, and commit LED looks through
+- Duplicate, move, delete, save, discard, and apply LED looks through
   `config/led_look_director.draft.json`.
 - Preview realtime-razer looks with synthetic BPM, Test Palette, and Loop settings. Cloud scenes
   are shown but not previewed.
@@ -99,7 +99,7 @@ Logs are written to `/tmp/led_pad.log` and `/tmp/led_pad.err`.
   during pad playback and keep using their saved palette until cleared.
 - Derive renderer controls from `REALTIME_EFFECT_PARAM_KEYS` and validate the full draft before
   writing live config.
-- Commit the draft to `config/led_look_director.json` with a `.bak-*` backup.
+- Apply the draft to `config/led_look_director.json` with a `.bak-*` backup.
 
 ## Template Lab
 
@@ -138,9 +138,10 @@ Recovery one-liner if the bridge side remains blacked out after a pad session:
 printf '%s\n' '{"cmd":"led_clear_blackout"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
 ```
 
-## Commit Behavior
+## Apply Behavior
 
-Commit writes the draft to the live config only after
+The Apply button (the UI word for the draft commit; the API route stays `/api/commit`)
+writes the draft to the live config only after
 `load_led_look_director_config_from_dict()` accepts the full draft. A committed config affects
 the running bridge only after a bridge restart. Restarting the bridge remains a live-operation
 approval gate; do the existing single-process check before any restart:
@@ -162,6 +163,26 @@ inputs to a 44px touch target without changing desktop density. `window.PadModal
 `prompt()`/`confirm()` calls with the app's own in-page modal (lazily-created DOM shared by both
 pages) so dialogs render consistently instead of relying on native browser prompts. This is
 code-level only — no iPad/iOS Safari device verification has been performed.
+
+## Visual reskin (2026-07-03)
+
+The pad and Template Lab pages carry a "stage console" visual reskin (software-tested only, no
+runtime/API behavior change):
+
+- Shared design-token block in the `:root` of `tools/led_pad_assets/pad.css` (surfaces, AA text
+  tiers, semantic colors, a shared per-role color vocabulary, spacing scale); legacy var names
+  (`--play`, `--gap`, `--pad`, `--mono`, `--font`) are aliased to the new tokens. The LED pad's
+  identity mark is a cyan square before the "LED Pad" title; the Lab route keeps violet accents.
+- Vendored Archivo variable font at `tools/led_pad_assets/archivo-var.woff2`, served at
+  `/static/archivo-var.woff2` (no CDN or runtime network dependency).
+- UI vocabulary: the draft-commit button now reads **Apply** (confirm dialog "Apply draft to live
+  config"); the editor's look-level button stays **Save**, and `#dirtyText` reads "Draft saved" /
+  "Unsaved changes". API routes are unchanged (`/api/commit` keeps its name).
+- Bank tabs use a 3px bottom rail in the bank's role color and scroll inside the tab strip on
+  narrow viewports. This also fixes a pre-existing defect the frontend test harness caught at
+  baseline: the unwrapped tab row previously forced horizontal page scroll at iPhone width
+  (`tests/frontend/test_pad_touch.py::test_led_pad_loads_at_iphone_width_without_console_errors`).
+- Card load stagger and hover transitions are disabled under `prefers-reduced-motion: reduce`.
 
 ## Status
 

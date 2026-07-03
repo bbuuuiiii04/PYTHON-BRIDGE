@@ -2,7 +2,7 @@
   const bankOrder = ["drafts", "ambient", "groove", "buildup", "drop", "post_drop", "breakdown", "utility"];
   const moveBanks = ["ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility"];
   const bankLabels = {drafts:"Drafts", ambient:"Ambient", groove:"Groove", buildup:"Buildup", pre_drop:"Pre-Drop", drop:"Drop", post_drop:"Post-Drop", breakdown:"Breakdown", utility:"Utility", other:"Other"};
-  const bankColors = {drafts:"var(--lab)", ambient:"#4cc9c0", groove:"#35b6ff", buildup:"#e8b13f", drop:"#f25f5c", post_drop:"#b48cff", breakdown:"#6f9bd1", utility:"#8b98a5", other:"var(--border)"};
+  const bankColors = {drafts:"var(--lab)", ambient:"var(--role-ambient)", groove:"var(--role-groove)", buildup:"var(--role-buildup)", drop:"var(--role-drop)", post_drop:"var(--role-postdrop)", breakdown:"var(--role-breakdown)", utility:"var(--role-utility)", other:"var(--border)"};
   const state = {config:null, banks:{}, renders:[], renderMap:new Map(), palettes:[], activeBank:"drafts", editor:null, openSnapshot:null, cleanSnapshot:null, updateTimer:null, lastFocus:null, playingLook:""};
   const $ = (id) => document.getElementById(id);
   const api = window.LedPadApi;
@@ -35,7 +35,7 @@
   function setDirty() {
     const dirty = state.editor && snapshotEditor() !== state.cleanSnapshot;
     $("saveLookBtn").disabled = !dirty;
-    $("dirtyText").textContent = dirty ? "Unsaved changes" : "Saved";
+    $("dirtyText").textContent = dirty ? "Unsaved changes" : "Draft saved";
     $("dirtyText").className = dirty ? "warn-text" : "dim";
   }
   async function refresh() {
@@ -75,10 +75,13 @@
     const names = state.banks[state.activeBank] || [];
     const grid = $("lookGrid");
     if (!names.length) {
-      grid.innerHTML = `<div class="empty">${state.activeBank === "drafts" ? "New looks land here. Automation never plays drafts." : "Empty bank."}</div>`;
+      grid.innerHTML = state.activeBank === "drafts"
+        ? `<div class="empty"><span class="panel-label">No drafts</span><span>New looks land here. Automation never plays drafts.</span></div>`
+        : `<div class="empty"><span class="panel-label">Empty bank</span><span>Move or duplicate looks into this bank.</span></div>`;
       return;
     }
     grid.innerHTML = names.map(name => cardHtml(name)).join("");
+    grid.querySelectorAll(".look-card").forEach((card, i) => { card.style.animationDelay = `${Math.min(i * 20, 300)}ms`; });
     grid.querySelectorAll("[data-action]").forEach(btn => btn.addEventListener("click", onCardAction));
   }
   function cardHtml(name) {
@@ -92,14 +95,17 @@
     const label = render ? render.label : human(look.scene_ref || look.action);
     return `<article class="look-card ${esc(bank)} ${playing ? "playing" : ""}" style="--bank-color:${bankColors[bank]}">
       <div class="card-title"><span>${esc(name)}</span>${dirty ? "<span class='dirty-dot' title='Unsaved changes'>●</span>" : ""}</div>
-      <div class="dim">${esc(label)} · ${render && render.slot_based ? "<span class='gradient-dot'></span>show-colored" : "<span class='fixed-dot'></span>fixed colors"} ${render && render.strobe ? "<span class='badge strobe'>⚡ strobe</span>" : ""}${!realtime ? "<span class='badge'>☁ cloud</span>" : ""}</div>
-      <div><span class="badge">${cue} beats</span>${playing ? " <span class='live-chip'>LIVE</span>" : ""}</div>
+      <div class="card-sub">${esc(label)} · ${render && render.slot_based ? "<span class='gradient-dot'></span>show-colored" : "<span class='fixed-dot'></span>fixed colors"}</div>
+      <div class="card-ref">${esc(look.scene_ref || look.action || "")}</div>
+      <div class="badge-row"><span class="badge">${cue} beats</span>${render && render.strobe ? "<span class='badge strobe'>⚡ strobe</span>" : ""}${!realtime ? "<span class='badge'>☁ cloud</span>" : ""}${playing ? "<span class='live-chip'>LIVE</span>" : ""}</div>
       <footer class="card-footer">
         <button type="button" class="primary" data-action="play" data-name="${esc(name)}" ${!realtime ? "disabled title='Cloud scene - not previewable in the pad'" : ""}>▶ Play</button>
-        <button type="button" class="icon" data-action="edit" data-name="${esc(name)}" aria-label="Edit" title="Edit">✎</button>
-        <button type="button" class="icon" data-action="duplicate" data-name="${esc(name)}" aria-label="Duplicate" title="Duplicate">⧉</button>
-        <button type="button" class="icon" data-action="move" data-name="${esc(name)}" aria-label="Move" title="Move">⇄</button>
-        <button type="button" class="icon delete" data-action="delete" data-name="${esc(name)}" aria-label="Delete" title="Delete">🗑</button>
+        <div class="icon-actions">
+          <button type="button" class="icon" data-action="edit" data-name="${esc(name)}" aria-label="Edit" title="Edit">✎</button>
+          <button type="button" class="icon" data-action="duplicate" data-name="${esc(name)}" aria-label="Duplicate" title="Duplicate">⧉</button>
+          <button type="button" class="icon" data-action="move" data-name="${esc(name)}" aria-label="Move" title="Move">⇄</button>
+          <button type="button" class="icon delete" data-action="delete" data-name="${esc(name)}" aria-label="Delete" title="Delete">🗑</button>
+        </div>
       </footer>
     </article>`;
   }
@@ -353,8 +359,8 @@
   $("stopBtn").addEventListener("click", () => api.emergencyStop().then(refresh).catch(showError));
   $("ownershipBtn").addEventListener("click", async () => { try { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); } catch (err) { showError(err); } });
   $("qrBtn").addEventListener("click", openAccessModal);
-  $("commitBtn").addEventListener("click", () => confirmModal("Commit LED Pad draft", `Commit writes the draft to live config - ${($("commitCount").textContent || "0")} looks affected.`, "Commit", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Committed - bridge restart required to take effect live."); await refresh(); }));
-  $("discardBtn").addEventListener("click", () => confirmModal("Discard LED Pad draft", "Discard reloads the live config and deletes your draft changes.", "Discard", async () => { await api.discard(); await refresh(); }));
+  $("commitBtn").addEventListener("click", () => confirmModal("Apply draft to live config", `Apply writes the draft to live config - ${($("commitCount").textContent || "0")} looks affected. Bridge restart required to take effect live.`, "Apply", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Applied - bridge restart required to take effect live."); await refresh(); }));
+  $("discardBtn").addEventListener("click", () => confirmModal("Discard draft", "Discard reloads the live config and deletes your draft changes.", "Discard", async () => { await api.discard(); await refresh(); }));
   $("closeEditorBtn").addEventListener("click", () => closeEditor(false));
   $("cancelBtn").addEventListener("click", () => closeEditor(false));
   $("undoBtn").addEventListener("click", () => confirmModal("Undo editor changes", "Undo reverts this editor to the last saved or opened state.", "Undo", () => { const data = JSON.parse(state.cleanSnapshot); state.editor.look = data.look; state.editor.params = data.params; state.editor.cue_beats = data.cue_beats; state.editor.slot_fill = data.slot_fill; state.editor.mono_chance = data.mono_chance; state.editor.locked_palette = data.locked_palette || ""; renderEditor(); liveUpdate(); }));

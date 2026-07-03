@@ -17,6 +17,7 @@
         </nav>
       </div>
       <form id="sessionForm" class="session-controls" aria-label="Session controls">
+        <span class="panel-label">Session</span>
         <label>BPM <button type="button" data-step="-1" aria-label="Decrease BPM">−</button><input id="bpmInput" type="number" min="60" max="200" step="1"><button type="button" data-step="1" aria-label="Increase BPM">+</button></label>
         <label>Test Palette <select id="paletteSelect"></select></label>
         <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
@@ -25,13 +26,13 @@
         <span id="ownershipPill" class="pill">Free</span>
         <button id="ownershipBtn" type="button" class="ghost">Take over</button>
         <button id="qrBtn" type="button" class="ghost" title="Open on another device">📱</button>
-        <button id="stopBtn" type="button" class="danger-outline" aria-label="Emergency stop">■</button>
+        <button id="stopBtn" type="button" class="danger" aria-label="Emergency stop">■ STOP</button>
       </div>
     </div>
     <div class="topbar-row bank-row">
       <nav id="bankTabs" class="bank-tabs" aria-label="Banks"></nav>
       <div class="commit-actions">
-        <button id="commitBtn" type="button" class="primary">Commit <span id="commitCount" class="badge">0</span></button>
+        <button id="commitBtn" type="button" class="primary">Apply <span id="commitCount" class="badge">0</span></button>
         <button id="discardBtn" type="button" class="ghost">Discard</button>
       </div>
     </div>
@@ -55,12 +56,12 @@
     </div>
     <form id="editorForm" class="editor-form">
       <section>
-        <h3>Renderer</h3>
+        <h3 class="panel-label">Renderer</h3>
         <select id="rendererSelect"></select>
         <p id="rendererDescription" class="dim"></p>
       </section>
       <section>
-        <h3>Color</h3>
+        <h3 class="panel-label">Color</h3>
         <div class="segmented" role="group" aria-label="Automation Color">
           <button type="button" id="followColorBtn" class="active">Follow Show Color</button>
           <button type="button" id="lockedPaletteBtn">Locked Palette</button>
@@ -71,7 +72,7 @@
         <p id="strobeWarning" class="warn-text"></p>
       </section>
       <section id="slotSection" hidden>
-        <h3>Slot colors</h3>
+        <h3 class="panel-label">Slot colors</h3>
         <label>Slot Fill <select id="slotFillSelect">
           <option value="gradient_even">Even gradient</option>
           <option value="random_with_replacement">Random per slot</option>
@@ -80,7 +81,7 @@
         <label id="monoChanceWrap">Solid chance <input id="monoChanceInput" type="range" min="0" max="1" step="0.05"><output id="monoChanceOutput"></output></label>
       </section>
       <section>
-        <h3>Motion Pattern</h3>
+        <h3 class="panel-label">Motion Pattern</h3>
         <div id="controlRows" class="controls"></div>
         <details id="advancedDetails">
           <summary>Advanced motion</summary>
@@ -92,7 +93,7 @@
       <button id="saveLookBtn" type="button" class="primary">Save</button>
       <button id="undoBtn" type="button" class="ghost">Undo</button>
       <button id="cancelBtn" type="button" class="ghost">Cancel</button>
-      <span id="dirtyText" class="dim">Saved</span>
+      <span id="dirtyText" class="dim">Draft saved</span>
     </footer>
   </aside>
   <script src="/static/qrcode.js"></script>
