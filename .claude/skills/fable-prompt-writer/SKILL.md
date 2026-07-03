@@ -9,6 +9,8 @@ Write the prompt Brandon will hand to Claude Fable 5. The deliverable is the pro
 
 This file is the single source of truth for Fable 5 prompt authoring in this repo. Claude loads it as a repo skill; Codex reads it as a document via the `AGENTS.md` §3 pointer. Ready-to-paste blocks live in `docs/prompts/snippets/fable5_snippets.md`.
 
+If Fable 5 is unavailable, run existing Fable prompts on Opus 4.8 at max effort; author new prompts with opus-prompt-writer.
+
 ## Pick the right sibling first
 
 - **Fable 5 (this skill):** the hardest / most ambiguous / long-horizon / safety-sensitive reasoning, planning, and review one-shots.

@@ -157,6 +157,7 @@ Agent-facing summaries live in the subsystem cards; the four docs above are the 
 - The push loop must **not** gain blocking network, socket, MIDI, filesystem, or subprocess I/O.
 - Memory play bits do not override `DeckState.playing`; direct flags alone must not bypass TL — direct readiness must be currently true.
 - Scripted/autoloop arms, clears, BPM, beat, elapsed, and beatpos sends must cover decks active, mirror, 3, and 4 as appropriate.
+- Held SoundSwitch Static Override is a manual overlay, not an automatic base: with healthy input it can stand alone over idle/cleared scripted-autoloop selection, releases on the next healthy empty-layer snapshot, and loses to blackout/emergency masks and pack-disabled/shutdown zeroing.
 - Laser **policy** (`LaserDirector`) and laser MIDI **execution** (`LaserSceneExecutor`) are separate responsibilities.
 - Secrets (e.g. `GOVEE_API_KEY`), local IPs, device IDs, live config, and backup files must never be committed. Never commit `config/led_look_director.json.backup_1781599611`.
 - Docs-only work must not change runtime behavior. Old prompts/plans are never current truth without code verification.

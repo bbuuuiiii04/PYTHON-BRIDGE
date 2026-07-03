@@ -15,9 +15,8 @@ Also follow `AGENTS.md` §0 Brandon Communication Mode:
 * pause only for real decisions.
 
 ## Claude-side working rules
-- **Roles.** Claude = evidence / analysis / planning; **Codex implements bridge code.** Standing
-  exception: the **LED color-engine (M2.5) workstream is Claude-implemented** — that exception does
-  NOT generalize to other bridge-core work.
+- **Roles.** Claude = evidence / analysis / planning; **Codex implements bridge code.**
+  Per-workstream exceptions are operator-granted and none are standing (the LED color-engine M2.5 exception closed 2026-06-18).
 - **Verify before asserting.** Run tests / compile / inspect before presenting any plan or claim.
   Label every claim **confirmed / assumed / unknown**; surface unknowns, never guess. Memories and
   old plans may be stale — verify against current code.
