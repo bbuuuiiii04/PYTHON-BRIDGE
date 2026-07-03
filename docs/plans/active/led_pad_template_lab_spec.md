@@ -19,7 +19,7 @@ operator instruction you were given**, in task order, then stop and report.
 | 0 | Bridge prep: param value validation, gitignore, contract | implemented/software-tested |
 | 1 | LED Pad MVP: controls module, playback engine, web server + UI, launcher, tests, docs | implemented/software-tested |
 | 1.1 | Phase 1 review fixes: cue tick, ownership/update flow, live-state UI | implemented/software-tested |
-| 2 | Template Lab: /lab route, lab loader/registry, skill file, tests, docs | pending |
+| 2 | Template Lab: /lab route, lab loader/registry, skill file, tests, docs | implemented/software-tested |
 | 3 | Locked Palette + renderer param unlocks | pending |
 
 ---

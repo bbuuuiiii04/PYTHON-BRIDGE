@@ -24,6 +24,12 @@
     move: (body) => request("/api/look/move", {method: "POST", body}),
     deleteLook: (body) => request("/api/look/delete", {method: "POST", body}),
     commit: () => request("/api/commit", {method: "POST", body: {}}),
-    discard: () => request("/api/discard", {method: "POST", body: {}})
+    discard: () => request("/api/discard", {method: "POST", body: {}}),
+    labList: () => request("/api/lab/list"),
+    labSave: (body) => request("/api/lab/save", {method: "POST", body}),
+    labPlay: (body) => request("/api/lab/play", {method: "POST", body}),
+    labReload: () => request("/api/lab/reload", {method: "POST", body: {}}),
+    labAccept: (name) => request("/api/lab/accept", {method: "POST", body: {name}}),
+    labReject: (name) => request("/api/lab/reject", {method: "POST", body: {name}})
   };
 }());

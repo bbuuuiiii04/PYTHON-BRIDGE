@@ -23,6 +23,7 @@ from ..led_color_engine import LedColorEngine
 from ..led_config import LEDConfigResult, _resolve_path, load_led_look_director_config_from_dict
 from ..led_pad_controls import controls_for, render_catalog
 from ..runtime_status import STATUS_PATH
+from .led_pad_lab import LabRegistry, LabRenderer, load_lab_effects
 from .led_pad_playback import PadPlayback
 
 _ASSETS_DIR = Path(__file__).resolve().parent / "led_pad_assets"
@@ -201,18 +202,21 @@ class LedPadService:
         status_path: Path | str = STATUS_PATH,
         playback: Any | None = None,
         playback_factory: Callable[[Any], Any] | None = None,
+        lab_dir: Path | str | None = None,
     ) -> None:
         self._config_path = _resolved_config_path(config_path)
         self._draft_path = _draft_path_for(self._config_path)
         self._status_path = Path(status_path)
         self._lock = Lock()
         self._draft = self._load_initial_draft()
+        self._lab = LabRegistry(lab_dir or (self._config_path.parent / "led_lab"))
+        self._lab_renderer = LabRenderer(self._lab.module_path)
         self._playback = playback
         if self._playback is None:
             result = self._load_config_result(self._draft)
             if not result.available or result.config is None:
                 raise ValueError("; ".join(result.errors) or "LED config is not available")
-            self._playback = playback_factory(result.config) if playback_factory else PadPlayback(result.config, dry_run=dry_run)
+            self._playback = playback_factory(result.config) if playback_factory else PadPlayback(result.config, dry_run=dry_run, renderer=self._lab_renderer)
         self._playing_name = ""
         self._last_play_editor: dict[str, Any] | None = None
 
@@ -503,7 +507,7 @@ class LedPadService:
         params = dict(look.get("params") or {})
         return look, params, cue_beats
 
-    def _inject_engine_colors(self, config: dict[str, Any], name: str, look: dict[str, Any], params: dict[str, Any]) -> None:
+    def _inject_engine_colors(self, config: dict[str, Any], name: str, look: dict[str, Any], params: dict[str, Any], *, force_slot: bool = False) -> None:
         if str(look.get("color_source", "engine")) != "engine":
             return
         result = self._load_config_result(config)
@@ -517,7 +521,7 @@ class LedPadService:
         engine.lock()
         scene_ref = str(look.get("scene_ref", ""))
         role = _bank_for(config, name)
-        if scene_ref in SLOT_EFFECTS:
+        if force_slot or scene_ref in SLOT_EFFECTS:
             params.update(engine.resolve_slot_colors(
                 role=role,
                 section_id="led_pad",
@@ -564,6 +568,68 @@ class LedPadService:
             "allow_strobe": bool(look.get("allow_strobe")),
             "safety_allow_strobe": bool((config.get("safety") or {}).get("allow_strobe")),
         }, cue_beats
+
+    def lab_list(self) -> dict[str, Any]:
+        return {"ok": True, "entries": self._lab.list(), "module_path": str(self._lab.module_path)}
+
+    def lab_reload(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        result = load_lab_effects(self._lab.module_path)
+        return {
+            "ok": bool(result["ok"]),
+            "effects": sorted(result["effects"].keys()),
+            "error": result["error"],
+            "traceback": result["traceback"],
+            "module_path": str(self._lab.module_path),
+        }
+
+    def lab_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._lab.save(payload)
+
+    def lab_accept(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._lab.set_status(str(payload.get("name", "")).strip(), "accepted")
+
+    def lab_reject(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._lab.set_status(str(payload.get("name", "")).strip(), "rejected")
+
+    def _lab_play_spec(self, config: dict[str, Any], entry: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, Any], float]:
+        reload_result = self._lab_renderer.reload()
+        if not reload_result["ok"]:
+            raise RuntimeError(reload_result["traceback"] or reload_result["error"])
+        name = str(entry["name"])
+        kind = str(entry["kind"])
+        effects = reload_result["effects"]
+        if name not in effects:
+            raise ValueError(f"lab effect not registered: {name}")
+        params = copy.deepcopy(entry.get("params") or {})
+        if isinstance(payload.get("params"), dict):
+            params.update(copy.deepcopy(payload["params"]))
+        look = {"scene_ref": LabRegistry.scene_ref(name), "color_source": "engine"}
+        self._inject_engine_colors(config, LabRegistry.scene_ref(name), look, params, force_slot=(kind == "slot"))
+        return {
+            "look_name": LabRegistry.scene_ref(name),
+            "scene_ref": LabRegistry.scene_ref(name),
+            "params": params,
+            "allow_strobe": False,
+            "safety_allow_strobe": bool((config.get("safety") or {}).get("allow_strobe")),
+        }, float(payload.get("cue_beats", entry.get("cue_beats", 16)) or 16)
+
+    def lab_play(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("name", "")).strip()
+        entry = self._lab.get(name)
+        with self._lock:
+            config = copy.deepcopy(self._draft)
+            session = copy.deepcopy(self._session(config))
+        ownership = self._playback.ownership()
+        if ownership.get("state") == "bridge_owned":
+            if not bool(payload.get("takeover")):
+                return {"ok": False, "error": "ownership_required", "ownership": ownership}
+            self._playback.request_takeover()
+        spec, cue_beats = self._lab_play_spec(config, entry, payload)
+        self._playback.set_bpm(float(session.get("bpm") or 128))
+        self._playback.play(spec, cue_beats=cue_beats, loop=bool(session.get("loop", True)))
+        self._playing_name = str(spec["look_name"])
+        self._last_play_editor = None
+        return {"ok": True, "spec": spec, "cue_beats": cue_beats, "playback": self._playback.status()}
 
     def play(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()
@@ -699,6 +765,8 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
             "/api/palettes": service.get_palettes,
             "/api/history": service.history,
             "/api/runtime_status": service.runtime_status,
+            "/api/lab/list": service.lab_list,
+            "/api/lab/reload": service.lab_reload,
         }
         _POST_ROUTES = {
             "/api/look/save": service.save_look,
@@ -714,6 +782,11 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
             "/api/session": service.session,
             "/api/commit": service.commit,
             "/api/discard": service.discard,
+            "/api/lab/save": service.lab_save,
+            "/api/lab/play": service.lab_play,
+            "/api/lab/reload": service.lab_reload,
+            "/api/lab/accept": service.lab_accept,
+            "/api/lab/reject": service.lab_reject,
         }
 
         def log_message(self, fmt: str, *args: object) -> None:
@@ -756,7 +829,7 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                     self._send_file(_ASSETS_DIR / "index.html")
                     return
                 if path == "/lab":
-                    self._send_json({"ok": False, "error": "Template Lab lands in Phase 2"}, status=HTTPStatus.NOT_FOUND)
+                    self._send_file(_ASSETS_DIR / "lab.html")
                     return
                 if path.startswith("/static/"):
                     target = (_ASSETS_DIR / path.removeprefix("/static/")).resolve()

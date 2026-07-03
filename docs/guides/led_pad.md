@@ -20,6 +20,8 @@ python3 -m rb_ss_bridge_v2.scripts.led_pad --port 8766 --dry-run
 
 Open `http://127.0.0.1:8766/`.
 
+Template Lab is at `http://127.0.0.1:8766/lab`.
+
 Options:
 - `--host` / `--bind`: bind address, default `127.0.0.1`.
 - `--port`: default `8766`.
@@ -37,6 +39,21 @@ Options:
 - Derive renderer controls from `REALTIME_EFFECT_PARAM_KEYS` and validate the full draft before
   writing live config.
 - Commit the draft to `config/led_look_director.json` with a `.bak-*` backup.
+
+## Template Lab
+
+Template Lab is a second route in the same LED Pad server. It loads draft render code only in the
+pad process from `config/led_lab/effects_lab.py` and tracks draft metadata in
+`config/led_lab/drafts.json`. The bridge never imports lab code.
+
+Lab names must be lowercase identifiers and cannot collide with production realtime render names.
+They play as `lab_<name>` through the same standalone playback slot as LED Pad looks, so starting
+a lab draft preempts pad playback and starting a pad look preempts lab playback.
+
+The Lab page supports draft brief/notes, params JSON, cue length, Play/Stop, Reload code,
+traceback display, Accept/Reject status, and a static promotion checklist. Accepting a draft does
+not promote code by itself; promotion is a later agent task that moves tested code into
+`govee_frame_renderer.py`, updates allowlists/docs/tests, and then requires a safe bridge restart.
 
 ## Ownership And Recovery
 
@@ -75,6 +92,6 @@ Expected value is `1`.
 
 ## Status
 
-Phase 1 is implemented/software-tested. Template Lab, Locked Palette, and renderer param unlocks
-remain pending phases. All LED Pad playback and UI claims are SOFTWARE-VALIDATED ONLY /
-HARDWARE-UNVALIDATED.
+Phase 1 and Phase 2 are implemented/software-tested. Locked Palette and renderer param unlocks
+remain pending phases. All LED Pad and Template Lab playback/UI claims are SOFTWARE-VALIDATED
+ONLY / HARDWARE-UNVALIDATED.

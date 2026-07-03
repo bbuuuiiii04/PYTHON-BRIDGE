@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Template Lab</title>
+  <link rel="stylesheet" href="/static/pad.css">
+</head>
+<body class="lab-route">
+  <header class="topbar">
+    <div class="topbar-row main-row">
+      <div class="brand">
+        <h1>Template Lab <span class="lab-badge">LAB</span></h1>
+        <nav class="route-tabs" aria-label="Routes">
+          <a href="/">Pad</a>
+          <a class="active" href="/lab">Lab</a>
+        </nav>
+      </div>
+      <form id="sessionForm" class="session-controls" aria-label="Session controls">
+        <label>BPM <button type="button" data-step="-1" aria-label="Decrease BPM">−</button><input id="bpmInput" type="number" min="60" max="200" step="1"><button type="button" data-step="1" aria-label="Increase BPM">+</button></label>
+        <label>Test Palette <select id="paletteSelect"></select></label>
+        <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
+      </form>
+      <div class="transport">
+        <span id="ownershipPill" class="pill">Free</span>
+        <button id="ownershipBtn" type="button" class="ghost">Take over</button>
+        <button id="stopBtn" type="button" class="danger-outline" aria-label="Emergency stop">■</button>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div id="errorBanner" class="error-banner" hidden></div>
+    <section class="lab-layout">
+      <aside class="lab-list-panel">
+        <div class="panel-head"><h2>Drafts</h2><button id="newDraftBtn" type="button" class="primary">New</button></div>
+        <div id="draftList" class="lab-list"></div>
+      </aside>
+      <section class="lab-detail-panel">
+        <div class="panel-head">
+          <div><h2 id="draftTitle">Select a draft</h2><div id="draftFn" class="mono dim"></div></div>
+          <span id="labLive" class="live-chip" hidden>LIVE</span>
+        </div>
+        <label>Brief <textarea id="briefInput" rows="3"></textarea></label>
+        <label>Notes <textarea id="notesInput" rows="4"></textarea></label>
+        <div class="lab-meta"><span id="kindText" class="mono"></span><span id="statusText" class="status-pill">iterating</span></div>
+        <label>Params JSON <textarea id="paramsInput" class="mono" rows="8"></textarea></label>
+        <div class="editor-transport lab-actions">
+          <div class="cue-group" role="group" aria-label="Cue Length"></div>
+          <button id="saveDraftBtn" type="button" class="primary">Save</button>
+          <button id="playDraftBtn" type="button" class="primary">▶ Play</button>
+          <button id="stopDraftBtn" type="button" class="ghost">■ Stop</button>
+          <button id="reloadBtn" type="button" class="ghost">⟳ Reload code</button>
+          <button id="acceptBtn" type="button" class="ghost">Accept</button>
+          <button id="rejectBtn" type="button" class="ghost">Reject</button>
+        </div>
+        <details id="tracePanel" class="trace-panel">
+          <summary>Traceback</summary>
+          <pre id="traceText"></pre>
+        </details>
+        <aside class="promotion-panel">
+          <h3>Promotion checklist</h3>
+          <ul>
+            <li>Move accepted function into <span class="mono">govee_frame_renderer.py</span>.</li>
+            <li>Register it and allowlist params with value validation.</li>
+            <li>Add renderer tests for determinism, clamping, defaults, and slot-5 white if slot-based.</li>
+            <li>Update example config and LED docs, then run unittest plus hard docs checks.</li>
+            <li>Restart the bridge only at a safe approved moment.</li>
+          </ul>
+        </aside>
+      </section>
+    </section>
+  </main>
+  <script src="/static/pad-core.js"></script>
+  <script src="/static/lab.js"></script>
+</body>
+</html>
