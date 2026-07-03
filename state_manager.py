@@ -184,6 +184,9 @@ _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 LED_DEFAULT_DROP_IMPACT_BEATS = 8.0
 LED_DEFAULT_GROOVE_CYCLE_BEATS = 32.0
 LED_DEFAULT_POST_DROP_CYCLE_BEATS = 32.0
+# After an active content change, allow the incoming look immediately only near
+# the current phrase entry; otherwise hold the previous look until a crossing.
+LED_HOLD_RELEASE_BEATS = 1.0
 _LED_DROP_IMPACT_PREDECESSORS = frozenset({"up", "low", "buildup", "breakdown"})
 # Max drop impacts per drop lifecycle. The first fires off an Up/Low buildup;
 # this allows one extra back-to-back Chorus->Chorus drop before settling into
@@ -470,6 +473,8 @@ class StateManager:
         self._led_cloud_automation_offset_s = 0.0
         self._led_realtime_automation_offset_s = 0.0
         self._led_last_idle_role_key = ""
+        # Armed on active deck switch or active-deck track load; released by LED phrase timing.
+        self._led_hold_active: bool = False
         self._led_rt_permitted = False
         self._led_rt_beat: tuple[int, float, float, float, bool] | None = None
         self._led_color_engine_status: dict[str, Any] = {
@@ -1960,6 +1965,15 @@ class StateManager:
 
         self._led_rt_permitted = True
         self._led_last_idle_role_key = ""
+        if self._led_hold_active:
+            # Keep rendering the previous look; do not dispatch a new one until
+            # the incoming track is at or crossing a phrase entry.
+            bip = sp_state.beats_into_phrase
+            at_phrase_entry = bip is not None and bip <= LED_HOLD_RELEASE_BEATS
+            if at_phrase_entry or sp_state.phrase_start_crossing:
+                self._led_hold_active = False
+            else:
+                return
         if sp_state.smart_drop_crossing:
             # Pre-drop blackout may already be active; at the crossing beat the
             # state-aware LED role resolver decides whether this is an impact or
@@ -2903,10 +2917,11 @@ class StateManager:
             and not old_d.playing
         ):
             log.debug("[SM] scripted-transfer  %d→%d  id=%d  reason=osc-race",
-                      old_deck, new_deck, old_d.scripted_id)
+                old_deck, new_deck, old_d.scripted_id)
             new_d.scripted_id = old_d.scripted_id
             old_d.scripted_id = 0
         self._os.active_deck = new_deck
+        self._led_hold_active = True
         self._reset_for_active_deck_entry(new_deck, source)
 
     def _reset_for_active_deck_entry(self, new_deck: int, source: str) -> None:
@@ -2972,6 +2987,7 @@ class StateManager:
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
+        self._led_hold_active = False
         self._clear_led_drop_lifecycle()
         self._clear_smart_rearm_state()
         self._autoloop.clear_arm_phrase_lock()
@@ -3015,6 +3031,7 @@ class StateManager:
         d.load_gen += 1
         self._loaded_anlz_path.pop(deck, None)
         if deck == self._os.active_deck:
+            self._led_hold_active = True
             self._clear_led_drop_lifecycle()
             self._clear_smart_rearm_state()
             self._autoloop.clear_arm_phrase_lock()
@@ -5105,6 +5122,7 @@ class StateManager:
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
+        self._led_hold_active = False
         self._clear_led_drop_lifecycle()
         self._clear_smart_rearm_state()
         self._autoloop.clear_arm_phrase_lock()

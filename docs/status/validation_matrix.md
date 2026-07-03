@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 3f4bcc0
+last_verified_commit: e876cfb
 last_verified_date: 2026-07-02
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
@@ -42,6 +42,7 @@ Current repo-facing status remains:
 | SoundSwitch native-DMX Autoloops/T7d | software-tested implementation plus historical evidence partial | unvalidated | Native resolver/player/loader/StateManager tests cover note-to-Autoloop binding, latching, phase, refire/re-anchor, missing binding/file/layout, all-zero dark looks, post-drop fallback, scripted/static/SoundSwitch-present precedence, stale reload clearing, and single submit path. Historical T7d tracer/conductor/oracle tests and captures remain evidence/tooling only; live runtime and hardware validation are still required. |
 | Laser policy/executor | partial; lifecycle software-tested | unvalidated | Pure flat-window parity, A3 phrase gating, A4 blackout arm/clear preservation, lifecycle teardown, autoloop-tick cycling, usable-only shuffle bags, static-impact fallback, and kill-switch-OFF behavior have deterministic tests. `tools/check_laser_midi_sync.py` reports 0 errors on the live config. Fixture validation must be recorded separately. |
 | LED/Govee cloud | partial | unvalidated | Cloud path exists; device behavior must be logged. The new pure lifecycle resolver does not replace or alter live LED dispatch. |
+| LED phrase-aware active-content hold | software-tested partial | unvalidated | `tests/test_led_state_manager.py` covers immediate release at `0.5` and `1.0` beats into phrase, hold at `1.1` beats until the next phrase marker, active-deck switch arming, active-deck track-load arming, inactive-deck exclusion, idle/stop cleanup, and no laser/SoundSwitch calls from the hold gate. This does not prove room-visible Govee behavior. |
 | LED scripted-track automation policy | partial | unvalidated | `tests/test_led_config.py` covers the JSON blackout defaults and `utility` destination validation; `tests/test_led_state_manager.py` covers groove/drop/post-drop blackout mapping, active buildup/breakdown, opt-in overrides, and non-scripted identity behavior. This does not prove room-visible Govee behavior during scripted SoundSwitch tracks. |
 | LED/Govee realtime | partial/experimental | unvalidated | Realtime path exists; slot-color strategy behavior, Patch S `random_with_mono_chance`, generic groove/post_drop/drop slot cues, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, Patch E3 ambient twinkle slot cue, and Patch F default-bank cleanup have software tests, but a repeatable instrumented validation record is still pending. AWR-101–104 (M2.5 slot cues incl. Patch E1/E2/E3, color-engine core, realtime comet, beat-sync) have operator hardware sign-off — 2026-06-29, Home Govee, visual; see `docs/validation/hardware_validation_log.md`. The solid-color strategy (Patch S), role-mapping v2 (AWR-105/106), and Patch D sparkle remain SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
 | Laser Pad/frontend | partial | unvalidated | Syntax/frontend smoke tests do not prove live safety. |

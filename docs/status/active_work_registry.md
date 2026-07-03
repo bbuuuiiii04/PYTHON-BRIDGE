@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 3f4bcc0
+last_verified_commit: e876cfb
 last_verified_date: 2026-07-02
 validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; hardware-output unvalidated
 ---
@@ -67,6 +67,7 @@ Deprecated plans belong in `docs/architecture/doc_index.md` or `docs/archive/` w
 | HW-001 | SoundSwitch OS2L/local direct-DMX setup | version, interface, track, expected behavior, result, date | reviewed procedure/template exist; no run logged |
 | HW-002 | Laser MIDI path | fixture/mapping, blackout behavior, manual override, safety notes | not logged |
 | HW-003 | Govee realtime path | device model, firmware/app assumptions, effect, expected behavior, result | not logged |
+| HW-004 | Govee/LED phrase-aware active-content hold | deck switch and active-deck track load landing > `1.0` beat into phrase hold the previous look until the next phrase entry; <= `1.0` beat changes immediately; verify no laser/SoundSwitch behavior changes | not logged |
 
 ## Compatibility expansion tasks
 

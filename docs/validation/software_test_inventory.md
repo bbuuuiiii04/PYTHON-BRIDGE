@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 3f4bcc0
+last_verified_commit: e876cfb
 last_verified_date: 2026-07-02
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -32,7 +32,7 @@ python -m pytest tests
 | Rekordbox readers | reader, offset, live BPM, active-deck resolver, StateManager authority, startup wiring, runtime status tests | cannot prove all app versions or hardware-visible behavior |
 | SoundSwitch | OS2L/output helpers; project/pack/player/native-Autoloop-resolver/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/Art-Net truth-check/T7d/parity-lane tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status, native Autoloop rendering, U1 truth-check packets, and passive U0 parity fixtures are software/wire evidence and tests do not prove physical fixtures |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety |
-| LED/Govee | LED config/director/color/realtime/renderer tests | cannot prove device compatibility |
+| LED/Govee | LED config/director/color/realtime/renderer tests plus StateManager LED automation tests | cannot prove device compatibility or room-visible behavior |
 | Replay/session tooling | replay format and smoke tests | software-only |
 | Frontend tools | syntax and smoke tests | does not prove live safety |
 | Docs/agent workflow | docs metadata, agent contract, and drift checkers | docs-only validation |
@@ -152,6 +152,18 @@ The active-deck authority implementation is covered by focused software tests:
 This is software validation only. It does not validate live Rekordbox behavior,
 loaded-track play/stop survival, SoundSwitch, laser, LED/Govee, DMX, MIDI,
 Enttec, or hardware-visible output.
+
+## LED Phrase-Aware Active-Content Hold
+
+`tests/test_led_state_manager.py` covers the StateManager-only LED hold that is
+armed by nonzero active-deck switches and active-deck track loads. The focused
+tests cover immediate release within `0.5` and `1.0` beats of the incoming
+phrase entry, hold at `1.1` beats until the next phrase marker, same-active-deck
+track replacement, inactive-deck load exclusion, idle/stop cleanup, and no
+director/adapter or laser/SoundSwitch calls during the hold return.
+
+This is software validation only. It does not prove Govee device behavior or
+the room-visible absence of a mid-phrase pop.
 
 ## M2.5 LED slot-color workstream test files
 

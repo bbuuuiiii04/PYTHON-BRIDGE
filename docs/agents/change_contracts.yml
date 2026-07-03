@@ -2,8 +2,8 @@
 # If code in code_globs changes, update every doc in docs_update and run the checks.
 # key_symbols are verified to exist in code by tools/check_agent_contracts.py.
 version: 2
-last_verified_commit: 74febec
-last_verified_date: 2026-06-29
+last_verified_commit: e876cfb
+last_verified_date: 2026-07-02
 contracts:
   core_bridge:
     code_globs:
@@ -95,6 +95,7 @@ contracts:
 
   led_govee:
     code_globs:
+      - state_manager.py
       - led_config.py
       - led_models.py
       - led_look_director.py
@@ -110,6 +111,7 @@ contracts:
       - beat_sync_engine.py
       - config/led_look_director.example.json
     key_symbols:
+      - StateManager
       - LEDConfig
       - LEDScriptedModePolicy
       - LEDLookDirector
@@ -127,6 +129,7 @@ contracts:
       - docs/status/support_matrix.md
       - docs/status/validation_matrix.md
     tests:
+      - python3 -m unittest tests.test_led_state_manager
       - python3 -m unittest discover tests
       - python3 tools/check_docs_metadata.py
       - python3 tools/check_agent_contracts.py
@@ -136,6 +139,7 @@ contracts:
       - docs/status/support_matrix.md
       - docs/status/validation_matrix.md
       - docs/validation/hardware_validation_log.md
+      - docs/validation/software_test_inventory.md
       - docs/status/active_work_registry.md
       - docs/agents/task_playbooks/change_led_govee_behavior.md
     forbidden_assumptions:

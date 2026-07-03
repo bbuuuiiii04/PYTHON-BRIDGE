@@ -316,6 +316,9 @@ class _AutomationLEDLookDirector:
     def post_drop_cycle_beats(self) -> float:
         return 32.0
 
+    def reset_for_track(self) -> None:
+        pass
+
 
 def _make_sm(*, director=None, adapter=None) -> StateManager:
     return StateManager(
@@ -401,6 +404,36 @@ def _prepare_paused_push_tick(sm: StateManager) -> None:
     sm._os.lighting_mode = "autoloop"
     sm._os.last_armed_filepath = "/tracks/current.wav"
     sm._os.last_beat_elapsed_ms = 1000
+
+
+def _ready_led_active_deck(sm: StateManager, deck: int, *, filepath: str = "/tracks/current.wav") -> None:
+    d = sm._deck[deck]
+    d.playing = True
+    d.meta.filepath = filepath
+    d.scripted_id = 0
+    sm._os.active_deck = deck
+    sm._os.lighting_mode = "autoloop"
+    sm._led_manual_override = False
+    sm._led_emergency_blackout = False
+
+
+def _groove_sp(beats_into_phrase: float) -> SmartPhrasingState:
+    return SmartPhrasingState(
+        abs_beat=64.0 + beats_into_phrase,
+        current_phrase_label="other",
+        current_phrase_start_beat=64.0,
+        beats_into_phrase=beats_into_phrase,
+    )
+
+
+def _groove_cross_sp() -> SmartPhrasingState:
+    return SmartPhrasingState(
+        abs_beat=96.0,
+        current_phrase_label="other",
+        current_phrase_start_beat=96.0,
+        phrase_start_crossing=True,
+        beats_into_phrase=0.0,
+    )
 
 
 class LEDStateManagerTests(unittest.TestCase):
@@ -538,6 +571,116 @@ class LEDStateManagerTests(unittest.TestCase):
 
         self.assertEqual(adapter.trigger_called, 0)
         self.assertEqual(adapter.status_called, 0)
+
+    def test_deck_switch_at_marker_plus_half_beat_changes_immediately(self) -> None:
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=adapter)
+        _ready_led_active_deck(sm, 1)
+
+        sm._apply_nonzero_active_deck_switch(1, 2, "test")
+        _ready_led_active_deck(sm, 2, filepath="/tracks/next.wav")
+        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=_groove_sp(0.5))
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertFalse(sm._led_hold_active)
+
+    def test_deck_switch_at_marker_plus_one_beat_changes_immediately(self) -> None:
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=adapter)
+        _ready_led_active_deck(sm, 1)
+
+        sm._apply_nonzero_active_deck_switch(1, 2, "test")
+        _ready_led_active_deck(sm, 2, filepath="/tracks/next.wav")
+        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=_groove_sp(1.0))
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertFalse(sm._led_hold_active)
+
+    def test_deck_switch_at_marker_plus_1_1_beats_holds_until_next_marker(self) -> None:
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=adapter)
+        _ready_led_active_deck(sm, 1)
+
+        sm._apply_nonzero_active_deck_switch(1, 2, "test")
+        _ready_led_active_deck(sm, 2, filepath="/tracks/next.wav")
+        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=_groove_sp(1.1))
+
+        self.assertEqual(len(adapter.trigger_calls), 0)
+        self.assertTrue(sm._led_hold_active)
+
+        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=_groove_cross_sp())
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertFalse(sm._led_hold_active)
+
+    def test_same_deck_track_load_at_marker_plus_1_1_beats_holds_until_next_marker(self) -> None:
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=adapter)
+        _ready_led_active_deck(sm, 1)
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_groove_sp(0.5))
+
+        sm._on_track_loaded(
+            1,
+            "next",
+            BridgeEvent(kind=Ev.TRACK_LOADED, deck=1, payload={"title": "next"}, source="test"),
+        )
+        _ready_led_active_deck(sm, 1, filepath="/tracks/next.wav")
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_groove_sp(1.1))
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertTrue(sm._led_hold_active)
+
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_groove_cross_sp())
+
+        self.assertEqual(len(adapter.trigger_calls), 2)
+        self.assertFalse(sm._led_hold_active)
+
+    def test_hold_does_not_touch_laser_or_soundswitch_paths(self) -> None:
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _ready_led_active_deck(sm, 1)
+        sm._led_hold_active = True
+
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_groove_sp(1.1))
+
+        self.assertEqual(director.tick_calls, [])
+        self.assertEqual(adapter.trigger_calls, [])
+        self.assertIsNone(sm._laser_director)
+        self.assertIsNone(sm._laser_executor)
+        self.assertEqual(sm._out.method_calls, [])
+
+    def test_active_deck_switch_arms_led_hold(self) -> None:
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
+        _ready_led_active_deck(sm, 1)
+
+        sm._apply_nonzero_active_deck_switch(1, 2, "test")
+
+        self.assertTrue(sm._led_hold_active)
+
+    def test_active_deck_track_load_arms_hold_inactive_does_not(self) -> None:
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
+        _ready_led_active_deck(sm, 1)
+
+        sm._on_track_loaded(1, "active", BridgeEvent(Ev.TRACK_LOADED, 1, {}, "test"))
+        self.assertTrue(sm._led_hold_active)
+
+        sm._led_hold_active = False
+        sm._on_track_loaded(2, "inactive", BridgeEvent(Ev.TRACK_LOADED, 2, {}, "test"))
+
+        self.assertFalse(sm._led_hold_active)
+
+    def test_idle_and_stop_clear_led_hold(self) -> None:
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
+        sm._led_hold_active = True
+
+        sm._enter_idle_no_audible(reason="test")
+        self.assertFalse(sm._led_hold_active)
+
+        sm._led_hold_active = True
+        sm._do_stop(1, 1000)
+
+        self.assertFalse(sm._led_hold_active)
 
     def test_led_role_mapping_uses_up_to_chorus_for_drop_impact(self) -> None:
         sm = _make_sm()

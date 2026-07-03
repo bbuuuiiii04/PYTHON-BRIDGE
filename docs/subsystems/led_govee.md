@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 9918dd4
-last_verified_date: 2026-06-22
+last_verified_commit: e876cfb
+last_verified_date: 2026-07-02
 validation_scope: software-only
 ---
 
@@ -30,8 +30,10 @@ Authoritative code:
 - `govee_frame_renderer.py`
 - `govee_owner_state.py`
 - `beat_sync_engine.py`
+- `state_manager.py` LED automation dispatch seam
 
 Key symbols:
+- `StateManager`
 - `LEDConfig`
 - `LEDLookDirector`
 - `LedColorEngine`
@@ -47,6 +49,7 @@ Runtime flow:
 - decisions: manual override, blackout, role-entry look selection, color/slot-color resolution, cloud/realtime ownership, beat sync instances
 - outputs: cloud scene commands or realtime UDP frame packets
 - The live LED drop/post-drop resolver remains in `StateManager` and is unchanged. `drop_lifecycle.py` reproduces its flat-window drop-region state machine for laser use; `tests/test_drop_lifecycle.py` parity-checks that seam without routing LED output through the new module.
+- Active content changes now arm a phrase-aware LED hold in `StateManager`: a nonzero active-deck switch or active-deck track replacement keeps the previously shown look if the incoming track is more than `1.0` beat into its current phrase, then releases at the next phrase crossing. If the incoming track is already within the first beat of a phrase, it changes immediately. Missing phrase segments can keep the prior look for the whole track; this is software-tested only and still needs operator visual sign-off.
 
 Config:
 - `config/led_look_director.example.json`
@@ -65,11 +68,13 @@ Tests:
 - inspect `tests/` for LED color engine, Govee realtime runner, frame renderer, state manager LED integration, and config tests
 - slot-color coverage lives in `tests/test_led_color_engine.py`, `tests/test_led_color_engine_m2_phase1.py`, `tests/test_led_color_engine_m2_patch_b.py`, `tests/test_led_color_engine_m2_patch_c.py`, `tests/test_led_color_engine_m2_patch_d.py`, `tests/test_led_color_engine_m2_patch_e1.py`, `tests/test_led_color_engine_m2_patch_e2.py`, `tests/test_led_color_engine_m2_patch_e3.py`, `tests/test_led_color_engine_m2_patch_s.py`, `tests/test_led_color_engine_m2_patch_f.py`, and config validation coverage in `tests/test_color_engine_config.py`
 - scripted-mode LED policy coverage lives in `tests/test_led_config.py` and `tests/test_led_state_manager.py`, including blackout mapping for groove/drop/post-drop; this is software validation only and does not prove room-visible Govee behavior during scripted SoundSwitch tracks.
+- phrase-aware active-content hold coverage lives in `tests/test_led_state_manager.py`, including active deck switch, active-deck track load, the inclusive `1.0` beat release boundary, hold-until-next-marker behavior, idle/stop cleanup, inactive-deck load exclusion, and laser/SoundSwitch path confinement. This is software validation only.
 - shared flat-window lifecycle parity coverage lives in `tests/test_drop_lifecycle.py`; live LED per-look duration rewriting and backend latency offsets remain separate by design.
 - broad command: `python -m unittest discover tests`
 
 Change contract:
 - If changing look policy, inspect director, models, config validation, and state manager dispatch seam.
+- If changing active-content timing or LED role gating in `StateManager`, keep the hot path non-blocking and update `tests/test_led_state_manager.py`.
 - If changing realtime output, inspect runner, transport, renderer, owner state, and beat sync engine.
 - If changing cloud output, inspect scene adapter and runtime sender.
 - If changing the shared drop resolver, prove parity against the existing StateManager LED resolver and do not assume that pure-resolver parity changes live LED output.
@@ -107,3 +112,4 @@ Known risks:
 - confusing local H612D behavior with all Govee devices
 - beat-synced motion smoothness issues
 - config schema drift
+- un-analyzed tracks with no phrase segments can hold the previous LED look after an active content change until stop/idle or another content change

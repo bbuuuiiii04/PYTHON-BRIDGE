@@ -1,7 +1,7 @@
 ---
 doc_status: current-incomplete
 truth_level: code-and-config-grounded
-last_verified_commit: 871b5f9
+last_verified_commit: e876cfb
 last_verified_date: 2026-07-02
 validation_scope: software-validated only, except the Govee/LED color-engine, realtime-comet, and beat-sync paths (AWR-101–104) which carry operator hardware sign-off on Home Govee (2026-06-29); SoundSwitch / laser / Enttec remain hardware-unvalidated
 ---
@@ -58,6 +58,7 @@ Rollback notes:
 | pending | Laser MIDI | pending | lifecycle default-on; local ignored config | gated drop impact, 32-beat hold, post-drop/drop fallback cycling, shuffle-bag order, blackout release, and kill switch | pending | pending | lifecycle is software-tested only; verify no drop leak during groove/buildup and no dark initial hit before any hardware-validated claim |
 | 2026-06-29 | Govee/LED color/comet/beat-sync (AWR-101–104) | Home Govee (hardware) | bridge HEAD 2026-06-29; live LED config (gitignored) | operator ran the rig and observed M2.5 slot cues (Patch E1/E2/E3), color-engine core (decoupled color/drift/drop-snap), realtime comet (stutter/smoothness/pause), and beat-sync against spec | PASS — operator visual sign-off | this log entry | visual sign-off, not instrumented capture; code-milestone re-audit for AWR-102/103/104 not separately performed |
 | pending | Govee/LED remaining (AWR-105/106) | pending | pending | scripted groove/drop/post-drop blackout policy (AWR-105); Patch S solid-color outcomes + Patch F default-bank rotation (AWR-106); Patch D stable-hue sparkle; center-burst 0-2 / 2-4 accent band split | pending | pending | software-tested only; need operator visual sign-off. The AWR-101–104 paths were signed off 2026-06-29 (row above). |
+| pending | Govee/LED phrase-aware active-content hold | pending | current StateManager LED automation; live LED config not inspected | active deck switch and active-deck track load landing more than `1.0` beat into phrase should keep the previous look until the incoming track reaches a phrase entry; landing within `1.0` beat should change immediately | pending | pending | software-tested only; needs operator visual sign-off that mid-phrase switch/load no longer pops and that missing phrase data holding the prior look is acceptable live |
 
 ## Validation records
 

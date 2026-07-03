@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: e876cfb
+last_verified_date: 2026-07-02
 validation_scope: software-only
 ---
 
@@ -120,10 +120,12 @@ Triggered by changes to:
 - `govee_frame_renderer.py`
 - `govee_owner_state.py`
 - `beat_sync_engine.py`
+- `state_manager.py` LED dispatch seam
 - LED/Govee config examples
 
 Inspect:
 
+- `state_manager.py` when LED automation timing, role gating, or content-change behavior changes
 - `docs/subsystems/led_govee.md`
 - `docs/status/feature_status_matrix.md`
 - `docs/status/support_matrix.md`
@@ -133,6 +135,7 @@ Inspect:
 Run:
 
 ```bash
+python -m unittest tests.test_led_state_manager
 python tools/check_docs_metadata.py
 python tools/check_agent_contracts.py
 python -m unittest discover tests
@@ -144,6 +147,7 @@ Update:
 - `docs/status/feature_status_matrix.md`
 - `docs/status/support_matrix.md` only if compatibility evidence changed
 - `docs/status/validation_matrix.md` if software tests changed
+- `docs/validation/software_test_inventory.md` if test coverage changed
 - `docs/validation/hardware_validation_log.md` only with real repeatable validation evidence
 - `docs/status/active_work_registry.md` if unfinished LED work changed
 - `docs/agents/task_playbooks/change_led_govee_behavior.md` if workflow changed

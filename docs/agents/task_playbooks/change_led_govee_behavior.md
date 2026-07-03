@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 9918dd4
-last_verified_date: 2026-06-22
+last_verified_commit: e876cfb
+last_verified_date: 2026-07-02
 validation_scope: software-only
 ---
 
@@ -38,12 +38,14 @@ Implementation notes:
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
 - For scripted-track LED automation, preserve the split between `safety.scripted_mode_automation` as the master switch (the shipped example config enables it; the `LEDSafety` dataclass default stays `false`) and the top-level `scripted_mode` role-remap policy. `utility` is a blackout destination only; verify active and off role transitions separately.
+- For StateManager LED automation timing changes, keep the push-loop path pure/non-blocking, keep source arming at the content-change event, and prove arm/release/cleanup in `tests/test_led_state_manager.py`.
 - For color-engine slot behavior, verify `resolve_slot_colors()` invariants and slot strategy config validation before updating setup/status docs.
 - For M2.5 slotized cues, keep `SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED` language until operator hardware visual sign-off covers sparkle hue stability, center-burst band split, strobe gating, drop snap behavior, Patch E visual balance, Patch S probabilistic solid-color outcomes, and Patch F generic-default bank rotation.
 - `drop_lifecycle.py` is a pure flat-window parity seam used by laser policy. The live LED resolver remains in `StateManager`; do not redirect LED runtime through the shared resolver without a separate approved change.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.
+- For active-content LED hold or role-gate changes in `StateManager`, run `python3 -m unittest tests.test_led_state_manager`.
 - Run `python -m unittest discover tests` when practical for cross-subsystem changes.
 - Run docs checks for docs changes.
 - For M2.5 slot-cue work, include every existing `tests/test_led_color_engine_m2_patch_*.py` file, including the newest Patch F file when present.
