@@ -17,6 +17,10 @@ govee.env
 .claude/skills/*
 !.claude/skills/fable-prompt-writer/
 !.claude/skills/fable-prompt-writer/SKILL.md
+!.claude/skills/opus-prompt-writer/
+!.claude/skills/opus-prompt-writer/SKILL.md
+!.claude/skills/codex-spec/
+!.claude/skills/codex-spec/SKILL.md
 config/laser_director.json
 config/led_look_director.json
 config/soundswitch_pack_player.json

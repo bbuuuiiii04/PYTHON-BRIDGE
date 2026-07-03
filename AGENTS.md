@@ -106,7 +106,12 @@ source/test confirmation, especially before any live-critical claim. Do not use 
 
 Human + machine change contracts: `docs/agents/change_contracts.md` and `docs/agents/change_contracts.yml`. Drift detection: `docs/agents/drift_detection.md`.
 
-Fable 5 prompt generation: before writing a Fable prompt, handoff, review prompt, or final-sufficiency prompt for Brandon, use `.claude/skills/fable-prompt-writer/SKILL.md` or read `docs/prompts/guides/fable5_prompt_generation_policy.md`. Fable reasons, plans, audits, and reviews; Codex implements bridge code. For prompt-generation/spec-only Fable tasks, default to no tools, no shell, no broad repo search, no accidental skill invocation, and no implementation unless the generated prompt states the exact allowed access and why.
+Prompt/spec authoring — one repo skill per target agent (Claude autoloads them; Codex reads them as standalone documents from these paths):
+- Fable 5 prompt → `.claude/skills/fable-prompt-writer/SKILL.md` (hardest / most ambiguous / long-horizon / safety-sensitive reasoning, planning, and review one-shots).
+- Opus 4.8 prompt → `.claude/skills/opus-prompt-writer/SKILL.md` (default Claude coding / agentic / knowledge / frontend / code-review work).
+- Codex implementation/review spec → `.claude/skills/codex-spec/SKILL.md` (the spec Codex executes on bridge code; Part A–E format + pre-handoff checklist).
+
+Per-model drop-in blocks live under `docs/prompts/snippets/`. Rules across the suite: Fable/Opus reason, plan, audit, and review; Codex implements bridge code. Prompt-generation/spec-only tasks default to no tools, no shell, no broad repo search, no accidental skill invocation, and no implementation unless the generated prompt states the exact allowed access and why.
 
 ## 4. Source map (modules are intentionally flat at repo root)
 

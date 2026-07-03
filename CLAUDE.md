@@ -34,13 +34,15 @@ Also follow `AGENTS.md` §0 Brandon Communication Mode:
   Graphify output as confirmed architecture, ownership, call flow, blast radius, or live behavior.
   `INFERRED` / `AMBIGUOUS` edges and shortest paths require source/test confirmation.
 
-## Spec / handoff authoring
-When producing a Codex (or implementer) spec, use the operator's Part A–E format and run the
-9-point pre-handoff checklist (verified claims, knowns/unknowns, pending-state + mode-transition
-guards, third-party API completeness, pure-function test seam, live-safety invariants, adversarial
-self-review). The relevant Codex spec skill, currently `rbss-codex-spec`, scaffolds this.
-
-When producing a Fable 5 prompt for Brandon, use `.claude/skills/fable-prompt-writer/SKILL.md` or
-read `docs/prompts/guides/fable5_prompt_generation_policy.md` first. The Fable prompt is for
-reasoning, planning, auditing, or review; Codex remains the implementation path unless a current
-repo instruction explicitly says otherwise.
+## Prompt / spec authoring
+One repo skill per target agent — read the matching skill before writing:
+- Codex (or implementer) spec → `.claude/skills/codex-spec/SKILL.md`: the operator's Part A–E
+  format and 9-point pre-handoff checklist (verified claims, knowns/unknowns, pending-state +
+  mode-transition guards, third-party API completeness, pure-function test seam, live-safety
+  invariants, adversarial self-review).
+- Fable 5 prompt → `.claude/skills/fable-prompt-writer/SKILL.md` (hardest/ambiguous/long-horizon/
+  safety-sensitive one-shots; safeguard hygiene lives there).
+- Opus 4.8 prompt → `.claude/skills/opus-prompt-writer/SKILL.md` (default coding/agentic/knowledge/
+  frontend/review work).
+Fable/Opus prompts are for reasoning, planning, auditing, or review; Codex remains the
+implementation path unless a current repo instruction explicitly says otherwise.
