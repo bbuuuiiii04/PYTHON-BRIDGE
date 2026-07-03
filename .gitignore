@@ -21,6 +21,8 @@ govee.env
 !.claude/skills/opus-prompt-writer/SKILL.md
 !.claude/skills/codex-spec/
 !.claude/skills/codex-spec/SKILL.md
+!.claude/skills/template-lab/
+!.claude/skills/template-lab/SKILL.md
 config/laser_director.json
 config/laser_director.draft.json
 config/led_look_director.json

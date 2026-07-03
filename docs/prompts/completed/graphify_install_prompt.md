@@ -5,7 +5,7 @@ last_verified_commit: 56a505e
 last_verified_date: 2026-06-29
 validation_scope: historical agent task prompt; Graphify setup is complete and current workflow lives
   in docs/setup/graphify.md. Dev-tooling only; manual query access, no hooks, no runtime/bridge code,
-  no live-bridge interaction. Closed as AWR-112.
+  no live-bridge interaction. Closed as AWR-114 (Graphify integration; renumbered 2026-07-03).
 ---
 
 # Historical Prompt — Install & customize Graphify for rb_ss_bridge_v2
@@ -131,4 +131,4 @@ you wouldn't reach for it.
 - No secrets, local IPs, device IDs, or live config committed. No cloud API key.
 - If you touch any doc under `docs/`, follow the doc system: classify it in `doc_index.md` and run the
   three hard checks. Commit incrementally with real messages.
-- Update AWR-112 in `docs/status/active_work_registry.md` when done (mark the pilot result).
+- Update AWR-114 (Graphify integration; renumbered 2026-07-03) in `docs/status/active_work_registry.md` when done (mark the pilot result).

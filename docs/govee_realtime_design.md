@@ -39,7 +39,7 @@ Verification from the current implementation:
 - Focused realtime/LED regression: 97 tests passing.
 - Full unittest discovery: 1365 tests passing, 3 skipped, 1 expected failure.
 - Config load: `config/led_look_director.json` loads with realtime enabled for
-  `room_perimeter` at `192.168.0.219:4003`.
+  `room_perimeter` at `<govee-device-ip>:4003`.
 - Cue wiring: all 18 requested EDM cues from `play_effects.py` are present in
   the default bank alongside cloud cues and render valid 20-segment frames.
 - Timing offsets: cloud LED automation keeps a `0.6s` lead to compensate for

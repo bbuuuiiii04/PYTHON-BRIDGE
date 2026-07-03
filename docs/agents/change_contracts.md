@@ -357,8 +357,7 @@ Forbidden assumptions:
 
 Triggered by changes to the SoundSwitch project decoder, pack compiler/verifier,
 loader/player, MIDI adapter, output backend, Enttec sender, pack config,
-StateManager pack driver, startup/runtime controller, menubar export workflow,
-or their tests.
+StateManager pack driver, or startup/runtime controller.
 
 Inspect first:
 
@@ -380,6 +379,32 @@ Forbidden assumptions:
 - 600 ticks/beat or one universal Autoloop origin is known before T7d capture;
 - software/wire tests prove Enttec/fixture behavior;
 - reload implies permission to enable output, change backend, or restart.
+
+## Bridge menubar changes
+
+Triggered by changes to:
+
+- `scripts/bridge_menubar.py`
+
+Inspect first:
+
+- `docs/subsystems/runtime_commands.md`
+
+Run:
+
+```bash
+python3 -m unittest tests.test_bridge_menubar
+python3 tools/check_agent_contracts.py
+```
+
+Update:
+
+- `docs/subsystems/runtime_commands.md`
+- `docs/validation/software_test_inventory.md`
+
+Forbidden assumptions:
+
+- Menubar UI state does not prove bridge/watcher process state.
 
 ## Config schema changes
 

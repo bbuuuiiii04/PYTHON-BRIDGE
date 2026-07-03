@@ -303,26 +303,13 @@ contracts:
       - tools/*soundswitch*pack*.py
       - tools/export_soundswitch_pack.py
       - tools/artnet_compare.py
-      - scripts/bridge_menubar.py
       - config/soundswitch_pack_player*.json
-      - tests/test_soundswitch_pack_player_config.py
       - __main__.py
       - state_manager.py
       - laser_executor.py
       - midi_output.py
       - runtime_status.py
       - config.py
-      - tests/test_soundswitch_pack*.py
-      - tests/test_bridge_menubar.py
-      - tests/test_source_fingerprint_parity.py
-      - tests/test_soundswitch_project*.py
-      - tests/test_soundswitch_laser_player*.py
-      - tests/test_native_autoloop_resolver.py
-      - tests/test_soundswitch_midi_input*.py
-      - tests/test_soundswitch_frame_sender*.py
-      - tests/test_enttec*.py
-      - tests/test_artnet_compare.py
-      - tests/test_prove_soundswitch_pack_generation.py
     inspect:
       - docs/plans/active/soundswitch_exporter_remaining_work.md
       - docs/plans/active/soundswitch_README.md
@@ -350,20 +337,10 @@ contracts:
       - docs/plans/active/soundswitch_exporter_remaining_work.md
       - docs/plans/active/soundswitch_README.md
       - docs/subsystems/soundswitch_output.md
-      - docs/subsystems/core_bridge.md
-      - docs/subsystems/runtime_commands.md
       - docs/subsystems/laser.md
-      - docs/subsystems/config.md
-      - docs/subsystems/tests.md
-      - docs/architecture/current_architecture.md
-      - docs/architecture/runtime_invariants.md
-      - docs/architecture/laser_director_design.md
-      - docs/setup/configuration.md
       - docs/setup/runtime_commands.md
       - docs/status/feature_status_matrix.md
-      - docs/status/support_matrix.md
       - docs/status/validation_matrix.md
-      - docs/status/known_limitations.md
       - docs/validation/software_test_inventory.md
       - docs/validation/hardware_validation_log.md
     forbidden_assumptions:
@@ -374,6 +351,20 @@ contracts:
       - absent channel-2 utility notes imply hidden SoundSwitch targets
       - a missing MIDI note-off is safe
       - Enttec process death clears its last frame
+
+  bridge_menubar:
+    code_globs:
+      - scripts/bridge_menubar.py
+    inspect:
+      - docs/subsystems/runtime_commands.md
+    tests:
+      - python3 -m unittest tests.test_bridge_menubar
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/subsystems/runtime_commands.md
+      - docs/validation/software_test_inventory.md
+    forbidden_assumptions:
+      - menubar UI state does not prove bridge/watcher process state
 
   soundswitch_research:
     code_globs:

@@ -43,6 +43,7 @@ The maintainer is the project owner/operator, not a software engineer. Agents sh
 * Work directly on `main`. Do not create feature, topic, review, temporary, agent, or worktree branches unless the user explicitly authorizes one in the current request.
 * Do not create additional worktrees when they would create or require another branch. If a tool requires a branch or pull request, explain the conflict instead of creating one silently.
 * Before deleting an existing branch, prove its unique work is represented in `main`.
+* Never run `git clean -fd` here: multi-GB gitignored capture corpora (e.g. `tools/ssfmt/captures/`) were already lost to it once.
 
 ### Examples
 
@@ -110,6 +111,7 @@ Prompt/spec authoring — one repo skill per target agent (Claude autoloads them
 - Fable 5 prompt → `.claude/skills/fable-prompt-writer/SKILL.md` (hardest / most ambiguous / long-horizon / safety-sensitive reasoning, planning, and review one-shots).
 - Opus 4.8 prompt → `.claude/skills/opus-prompt-writer/SKILL.md` (default Claude coding / agentic / knowledge / frontend / code-review work).
 - Codex implementation/review spec → `.claude/skills/codex-spec/SKILL.md` (the spec Codex executes on bridge code; Part A–E format + pre-handoff checklist).
+- Template Lab prompt → `.claude/skills/template-lab/SKILL.md` (Template Lab design/spec handoffs).
 
 Per-model drop-in blocks live under `docs/prompts/snippets/`. Rules across the suite: Fable/Opus reason, plan, audit, and review; Codex implements bridge code. Prompt-generation/spec-only tasks default to no tools, no shell, no broad repo search, no accidental skill invocation, and no implementation unless the generated prompt states the exact allowed access and why.
 
@@ -117,16 +119,20 @@ Per-model drop-in blocks live under `docs/prompts/snippets/`. Rules across the s
 
 | Area | Files | Card |
 |---|---|---|
-| Runtime coordinator | `__main__.py`, `state_manager.py`, `models.py`, `config.py` | `docs/subsystems/core_bridge.md` |
+| Runtime coordinator | `__main__.py`, `state_manager.py`, `active_deck_resolver.py`, `models.py`, `config.py` | `docs/subsystems/core_bridge.md` |
 | Runtime status / commands | `runtime_status.py`, `validation_runner.py`, `diagnostics.py`, `logging_manager.py`, `bridge_fmt.py` | `docs/subsystems/runtime_commands.md` |
 | Rekordbox direct readers | `rb_state_reader.py`, `rb_memory.py`, `rb_offsets.py`, `live_bpm.py`, `probe_live_bpm.py`, `probe_deck2.py`, `mtc_reader.py` | `docs/subsystems/rekordbox_readers.md` |
 | Track metadata | `filepath_resolver.py`, `anlz_reader.py`, `scripted_tracks.py`, `ss_library_scanner.py` | — |
-| Phrasing / autoloop / beat | `smart_phrasing.py`, `smart_rearm.py`, `autoloop_controller.py`, `beat_math.py`, `energy_model.py`, `audio_spectral_features.py`, `spectral_cache.py` | — |
-| SoundSwitch output | `osl_output.py`, `sound_switch_engine.py`, `os2l_injector.py`, `soundswitch_pack_loader.py`, `soundswitch_laser_player.py`, `native_autoloop_resolver.py` | `docs/subsystems/soundswitch_output.md` |
+| Phrasing / autoloop / beat | `smart_phrasing.py`, `smart_rearm.py`, `autoloop_controller.py`, `drop_lifecycle.py`, `beat_math.py`, `energy_model.py`, `audio_spectral_features.py`, `spectral_cache.py` | — |
+| SoundSwitch output | `osl_output.py`, `sound_switch_engine.py`, `os2l_injector.py`, `soundswitch_pack_loader.py`, `soundswitch_laser_player.py` | `docs/subsystems/soundswitch_output.md` |
+| SoundSwitch pack player / exporter | `soundswitch_pack*.py`, `soundswitch_project_decoder.py`, `soundswitch_parity_oracle.py`, `soundswitch_parity_registry.py`, `soundswitch_scripted_resolution.py`, `soundswitch_static_assertions.py`, `soundswitch_frame_sender.py`, `soundswitch_midi_input.py`, `native_autoloop_resolver.py`, `scratch_check_fixture_groups.py` | `docs/subsystems/soundswitch_output.md` |
+| DMX / laser output backends | `enttec_dmx_pro.py`, `laser_output_backend.py`, `artnet_truth.py` (validation tap) | `docs/subsystems/laser.md` |
 | Laser | `laser_director.py`, `laser_executor.py`, `laser_config.py`, `laser_models.py`, `laser_decision_log.py`, `personality_resolver.py`, `midi_output.py` | `docs/subsystems/laser.md` |
-| LED / Govee | `led_config.py`, `led_models.py`, `led_look_director.py`, `led_color_engine.py`, `led_dispatch_coordinator.py`, `govee_scene_adapter.py`, `govee_runtime_sender.py`, `govee_realtime_runner.py`, `govee_realtime_transport.py`, `govee_frame_renderer.py`, `govee_owner_state.py`, `govee_lan_discovery.py`, `beat_sync_engine.py` | `docs/subsystems/led_govee.md` |
+| LED / Govee | `led_config.py`, `led_models.py`, `led_look_director.py`, `led_color_engine.py`, `led_dispatch_coordinator.py`, `govee_scene_adapter.py`, `govee_runtime_sender.py`, `govee_realtime_runner.py`, `govee_realtime_transport.py`, `govee_frame_renderer.py`, `govee_owner_state.py`, `govee_lan_discovery.py`, `beat_sync_engine.py`, `led_pad_controls.py` (LED/Laser Pad web tools live in `tools/`) | `docs/subsystems/led_govee.md` |
 | Config | `config.py`, `laser_config.py`, `led_config.py`, `config/*.example.json` | `docs/subsystems/config.md` |
-| Session tooling | `session_recorder.py`, `session_replayer.py` | — |
+| Session tooling | `session_recorder.py`, `session_replayer.py`, `session_phase_trace.py` | — |
+| Stream Deck controller | `streamdeck/` | `docs/plans/active/streamdeck_midi_bridge_integration_spec.md` |
+| Operator scripts | `scripts/` (menubar, pads, watcher, session recorder entry points) | — |
 | Tests | `tests/` | `docs/subsystems/tests.md` |
 
 Entrypoint: `python3 -m rb_ss_bridge_v2` (package name `rb_ss_bridge_v2`). Do not move modules to "fix" imports; use this map.

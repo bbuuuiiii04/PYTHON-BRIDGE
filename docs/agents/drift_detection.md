@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: c678788
-last_verified_date: 2026-06-17
+last_verified_commit: 61c7d2b
+last_verified_date: 2026-07-03
 validation_scope: software-only
 ---
 
@@ -27,6 +27,11 @@ The drift checker is intentionally lightweight. It currently verifies:
 - machine-readable change contracts exist and include required sections
 - current docs preserve `SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED`
 - AGENTS links to the context budget, change contracts, task playbooks, and subsystem map
+
+`tools/check_docs_staleness.py` treats files explicitly matched by a contract's
+`code_globs` as implementation unless they are under `docs/` or `.github/`;
+`docs/data/*.yaml|yml` still count as implementation data. Recursive globs such
+as `tools/led_pad_assets/**` resolve to nested files instead of being dropped.
 
 ## What must still be checked by agents
 

@@ -11,9 +11,8 @@ Advisory by default (prints, exit 0) so it never blocks routine commits. Use
 --strict to make staleness a hard failure (e.g. a release gate). --report always
 prints the full per-contract table. --base COMMIT overrides the baseline.
 
-Implementation files = bridge *.py (excluding tools/), config/*.json, and
-docs/data/*.yaml. Doc/.github/tooling paths are ignored: a doc changing does not
-make itself stale.
+Implementation files = files explicitly matched by a contract, except docs and
+.github paths; docs/data/*.yaml|yml still count as implementation data.
 """
 from __future__ import annotations
 
@@ -66,30 +65,28 @@ def parse_contracts(text: str) -> dict[str, dict[str, list[str]]]:
 
 
 def is_impl(path: str) -> bool:
-    if path.startswith("tools/"):
-        return False
-    if path.endswith(".py"):
-        return True
-    if path.startswith("config/") and path.endswith(".json"):
-        return True
     if path.startswith("docs/data/") and path.endswith((".yaml", ".yml")):
         return True
-    return False
+    if path.startswith("docs/") or path.startswith(".github/"):
+        return False
+    return True
 
 
-def resolve(item: str) -> list[str]:
-    if item.endswith("/**") or item.endswith("/"):
-        return []
+def resolve(item: str, root: Path = ROOT) -> list[str]:
+    if item.endswith("/**"):
+        item = item[:-3] + "/**/*"
+    elif item.endswith("/"):
+        item = item + "**/*"
     if "*" in item:
-        return [p.relative_to(ROOT).as_posix() for p in ROOT.glob(item) if p.is_file()]
+        return sorted(p.relative_to(root).as_posix() for p in root.glob(item) if p.is_file())
     return [item]
 
 
-def impl_files(code_globs: list[str]) -> list[str]:
+def impl_files(code_globs: list[str], root: Path = ROOT) -> list[str]:
     out: list[str] = []
     for g in code_globs:
-        for f in resolve(g):
-            if is_impl(f) and (ROOT / f).exists():
+        for f in resolve(g, root):
+            if is_impl(f) and (root / f).exists():
                 out.append(f)
     return sorted(set(out))
 
