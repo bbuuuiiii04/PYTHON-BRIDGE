@@ -159,8 +159,9 @@ Enttec, or hardware-visible output.
 armed by nonzero active-deck switches and active-deck track loads. The focused
 tests cover immediate release within `0.5` and `1.0` beats of the incoming
 phrase entry, hold at `1.1` beats until the next phrase marker, same-active-deck
-track replacement, inactive-deck load exclusion, idle/stop cleanup, and no
-director/adapter or laser/SoundSwitch calls during the hold return.
+track replacement, missing-phrase-data indefinite hold until a crossing,
+inactive-deck load exclusion, idle/stop cleanup, and no director/adapter or
+laser/SoundSwitch calls during the hold return.
 
 This is software validation only. It does not prove Govee device behavior or
 the room-visible absence of a mid-phrase pop.

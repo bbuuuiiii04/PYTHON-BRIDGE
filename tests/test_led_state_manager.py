@@ -635,6 +635,32 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(len(adapter.trigger_calls), 2)
         self.assertFalse(sm._led_hold_active)
 
+    def test_missing_phrase_data_holds_previous_look_until_crossing(self) -> None:
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=adapter)
+        _ready_led_active_deck(sm, 1)
+
+        sm._apply_nonzero_active_deck_switch(1, 2, "test")
+        _ready_led_active_deck(sm, 2, filepath="/tracks/next.wav")
+
+        # Incoming track has no phrase segments: beats_into_phrase is None and
+        # there is no phrase_start_crossing, so the hold must persist (do not
+        # invent timing) instead of releasing on the grace window.
+        no_phrase = SmartPhrasingState(current_phrase_label="other")
+        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=no_phrase)
+        self.assertEqual(len(adapter.trigger_calls), 0)
+        self.assertTrue(sm._led_hold_active)
+
+        # A later tick still lacking phrase data keeps holding indefinitely.
+        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=no_phrase)
+        self.assertEqual(len(adapter.trigger_calls), 0)
+        self.assertTrue(sm._led_hold_active)
+
+        # Only an observed phrase crossing releases the hold.
+        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=_groove_cross_sp())
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertFalse(sm._led_hold_active)
+
     def test_hold_does_not_touch_laser_or_soundswitch_paths(self) -> None:
         director = _AutomationLEDLookDirector()
         adapter = _StubLEDAdapter()
