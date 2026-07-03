@@ -4,6 +4,9 @@ Status: CURRENT AUTHORITATIVE
 
 Audited against implementation commit `3f4bcc0` on 2026-07-02.
 
+2026-07-03 audit P1 did not change the runtime invariants below. It removed confirmed-unused
+internal helpers/events and made smart-drop/breakdown command callback failure reporting explicit.
+
 ## SoundSwitch Pack Component Boundary
 
 - `soundswitch_pack_models.py` and `soundswitch_project_decoder.py` provide frozen models and strict read-only decode; `soundswitch_pack.py` and `tools/export_soundswitch_pack.py` deterministically publish the repo-local canonical pack; `soundswitch_pack_verifier.py` independently verifies it with dynamic saved-project inventory reconciliation by default and an explicit proof-only snapshot gate. All are pinned to SoundSwitch 2.10.3 and the canonical UUID/RAVE profile.

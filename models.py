@@ -252,9 +252,6 @@ class Ev:
     RB_RESTARTED      = "rb_restarted"      # global, payload={pid: int}
     SMART_DROP_TOGGLE = "smart_drop_toggle" # global runtime toggle from menu/command channel
     SMART_BREAKDOWN_TOGGLE = "smart_breakdown_toggle"
-    LIGHTING_SCRIPTED_ON = "lighting_scripted_on"  # master deck: scripted track playing
-    LIGHTING_AUTOLOOP_ON = "lighting_autoloop_on"  # master deck: unscripted track playing
-    LIGHTING_OFF         = "lighting_off"          # master deck: not playing
     # Laser Director events — all global (deck=0)
     LASER_TOGGLE               = "laser_toggle"               # toggle enabled state
     LASER_SET_ENABLED          = "laser_set_enabled"          # payload={enabled: bool}

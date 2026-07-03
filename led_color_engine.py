@@ -721,7 +721,8 @@ class LedColorEngine:
         return result
 
     # ------------------------------------------------------------------
-    # Live-control stubs (§8, §15.6 M3 precedence)
+    # Operator-reserved future LED Pad / Stream Deck controls. Future callers
+    # outside StateManager must route through BridgeEvents/runtime commands.
     # ------------------------------------------------------------------
 
     def lock(self) -> None:

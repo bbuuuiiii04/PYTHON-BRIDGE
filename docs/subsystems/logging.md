@@ -12,6 +12,9 @@ Current repo-facing status remains:
 
 > **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**
 
+Audit P1 (2026-07-03): unused transition/latency helper classes were removed from
+`diagnostics.py`; the remaining debug and drift-detection surfaces are unchanged.
+
 The bridge keeps normal logs readable by default:
 
 ```text

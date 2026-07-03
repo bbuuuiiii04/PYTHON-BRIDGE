@@ -17,6 +17,11 @@ Status:
 Purpose:
 - Own local status snapshots, the throttled `[BEAT]` operator heartbeat, and append-only JSONL runtime command handling.
 
+Audit P1 (2026-07-03):
+- `toggle_smart_drop` and `toggle_smart_breakdown` callbacks now report queue-full failures through
+  the same explicit `False` path used by the laser/LED runtime callbacks.
+- `ValidationRunner._check_singleton()` derives the singleton result from one process count.
+
 SoundSwitch pack-player boundary (T7c/T7e):
 - T7c wires the pack player into `StateManager` (`_drive_pack_output`); T7e adds the
   `set_soundswitch_pack` runtime command (`action` = `reload`|`backend`|`enable`) and a sanitized

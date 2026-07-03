@@ -1263,17 +1263,19 @@ def main() -> None:
         laser_status_provider=laser_status_provider,
     )
 
-    def _toggle_smart_drop() -> None:
+    def _toggle_smart_drop() -> bool:
         try:
             event_queue.put_nowait(BridgeEvent(
                 kind=Ev.SMART_DROP_TOGGLE,
                 deck=0,
                 source="runtime_command",
             ))
+            return True
         except queue.Full:
             log.warning("[MAIN] queue-full  event=smart-drop-toggle")
+            return False
 
-    def _toggle_smart_breakdown() -> None:
+    def _toggle_smart_breakdown() -> bool:
         try:
             event_queue.put_nowait(BridgeEvent(
                 kind=Ev.SMART_BREAKDOWN_TOGGLE,
@@ -1281,8 +1283,10 @@ def main() -> None:
                 source="runtime_command",
                 payload={},
             ))
+            return True
         except queue.Full:
             log.warning("[MAIN] queue-full  event=smart-breakdown-toggle")
+            return False
 
     def _toggle_laser_director() -> bool:
         try:

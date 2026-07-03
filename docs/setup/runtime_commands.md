@@ -11,6 +11,10 @@ validation_scope: software-validated only; hardware-unvalidated in repo evidence
 Runtime commands are append-only JSONL records read by `CommandReader` in `runtime_status.py`.
 The parser, not this document, is authoritative. If this document and `parse_command()` disagree, `parse_command()` wins, because apparently even documentation needs a leash.
 
+Audit P1 (2026-07-03): smart-drop and smart-breakdown runtime callbacks now return explicit
+success/failure booleans, so a full event queue is surfaced through `commands.last_error` instead
+of reporting a success-shaped command result.
+
 SoundSwitch T7e adds the accepted `set_soundswitch_pack` command and a sanitized
 `soundswitch_pack` status block. The callback is wired through
 `SoundSwitchPackController` on the command thread; blocking load/verify/serial

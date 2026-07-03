@@ -61,7 +61,6 @@ class MidiOutput:
         self._seq = 0
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
-        self._panic_event = threading.Event()
         self._sender_thread: Optional[threading.Thread] = None
 
         self._mido: Any = None
@@ -86,7 +85,6 @@ class MidiOutput:
             if self._running:
                 return
             self._stop_event.clear()
-            self._panic_event.clear()
             self._running = True
 
         # Dry-run must remain dependency-free: no import or port open.
@@ -103,7 +101,6 @@ class MidiOutput:
             thread = self._sender_thread
             self._running = False
         self._stop_event.set()
-        self._panic_event.set()
         self._enqueue_control(_CMD_STOP)
         if thread is not None and thread.is_alive():
             thread.join(timeout=0.5)
@@ -140,10 +137,9 @@ class MidiOutput:
         return True
 
     def panic(self) -> None:
-        """Interrupt active pulses and force all-notes-off in live mode."""
+        """Drain queued pulses and force all-notes-off in live mode."""
         with self._lock:
             self._panic_count += 1
-        self._panic_event.set()
         self._drain_queue()
         if self._dry_run:
             return
@@ -319,7 +315,6 @@ class MidiOutput:
         except Exception as exc:
             self._record_send_error(exc)
         finally:
-            self._panic_event.clear()
             self._clear_scheduled_note_offs()
 
     def _send_note_on(self, *, channel: int, note: int, velocity: int) -> None:

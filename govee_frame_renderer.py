@@ -1865,7 +1865,7 @@ for _name, _keys in _M2_PHASE2A_PARAM_KEYS.items():
 
 # Default slot_colors when a slot effect runs without an injected palette: a
 # single white slot, so a misconfigured slot effect fails bright-white (never
-# crashes).  Unused in Phase 1 because SLOT_EFFECTS is empty.
+# crashes).  Used by slot effects when no palette was injected.
 _DEFAULT_SLOT_COLORS: list[RGB] = [(255, 255, 255)]
 
 
@@ -1913,7 +1913,7 @@ class GoveeFrameRenderer:
         safe_params: Mapping[str, Any] = params if isinstance(params, Mapping) else {}
         seg_count = max(0, int(segments))
 
-        # M2 slot-effect dispatch (no-op in Phase 1: SLOT_EFFECTS is empty).
+        # M2 slot-effect dispatch.
         slot_effect = SLOT_EFFECTS.get(str(name))
         if slot_effect is not None:
             field = slot_effect(

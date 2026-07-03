@@ -35,6 +35,7 @@ Forbidden changes:
 
 Implementation notes:
 - Inspect `config.py`, `laser_config.py`, `led_config.py`, `config/*.example.json`.
+- Remove unread example-only placeholders instead of documenting them as schema.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
 - For LED `scripted_mode`, document that source/default roles exclude `utility`, destinations may use `utility` for blackout, absent-block defaults turn groove/drop/post-drop off, and `safety.scripted_mode_automation` remains the separate master switch (the shipped example config enables it; the `LEDSafety` dataclass default stays `false`).

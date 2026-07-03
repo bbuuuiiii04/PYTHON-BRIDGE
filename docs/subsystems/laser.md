@@ -17,6 +17,10 @@ Status:
 Purpose:
 - Choose laser roles/scenes and execute configured MIDI triggers with blackout, cooldown, and override behavior.
 
+Audit P1 (2026-07-03): `MidiOutput.panic()` documentation now matches the queue-drain/all-notes-off
+mechanism, and `LaserConfigResult` no longer documents the obsolete `dependency_missing` loader
+reason. Laser runtime behavior is unchanged in this patch.
+
 Offline SoundSwitch pack boundary:
 - Task 2 deterministically exports and independently verifies the repo-local canonical pack for the pinned SoundSwitch 2.10.3 canonical RAVE project, including the seven-class F-3 control crosswalk. Live export reconciles saved-project inventory dynamically; the old exact-count snapshot is proof-only. It does not replace or alter Laser Director policy, MIDI execution, mappings, blackout behavior, or status.
 - The pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender exist. `LaserSceneExecutor` has one injected backend slot; startup selects legacy MIDI, none/dry-run, or verified pack/Enttec from the optional default-off config. Physical MIDI and direct DMX remain mutually exclusive.

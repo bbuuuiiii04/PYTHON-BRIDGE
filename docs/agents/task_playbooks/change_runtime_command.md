@@ -35,6 +35,8 @@ Forbidden changes:
 
 Implementation notes:
 - Inspect `runtime_status.py`, `__main__.py`.
+- Runtime-command callbacks should return explicit `False` for rejected work so `CommandReader`
+  can set `commands.last_error`; `None` is treated as success for legacy callback compatibility.
 - For `StatusWriter` heartbeat/status changes, verify the `heartbeat` JSON payload and the
   throttled `[BEAT]` log path in `tests/test_runtime_status.py`, including stale
   `rb_master_deck` suppression when the field is present.

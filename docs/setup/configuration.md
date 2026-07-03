@@ -10,6 +10,9 @@ validation_scope: software-only
 
 This repo uses tracked example configs plus local ignored configs. Do not commit local device secrets, local IPs, API keys, or backup files.
 
+Audit P1 (2026-07-03): the tracked LED Look Director example removed an unread top-level
+`metadata` placeholder. This does not change local config semantics.
+
 SoundSwitch Tasks T7a/T7b/T7c/T7e add a validated pack-player config schema,
 tracked inert example, startup construction, StateManager frame driver,
 validate-first runtime controls, and sanitized status. The default remains

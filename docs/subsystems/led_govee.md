@@ -17,6 +17,11 @@ Status:
 Purpose:
 - Select LED room looks, resolve colors, coordinate cloud/realtime ownership, and send Govee-style cloud or realtime output.
 
+Audit P1 (2026-07-03):
+- The LED color-engine live-control methods remain intentionally reserved for future LED Pad and
+  Stream Deck controls; callers outside `StateManager` must route through events/commands.
+- The tracked LED Look Director example no longer carries an unread top-level `metadata` key.
+
 Authoritative code:
 - `led_config.py`
 - `led_models.py`

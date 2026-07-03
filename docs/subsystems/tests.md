@@ -30,6 +30,8 @@ Common commands:
 Coverage expectations:
 - Core/state changes need state manager or integration tests.
 - Runtime command changes need parser/handler tests.
+- Smart-drop/breakdown runtime-command rejection handling is covered in `tests/test_runtime_status.py`
+  by callbacks returning `False`, matching the queue-full path in `__main__.py`.
 - Runtime status heartbeat changes need `tests/test_runtime_status.py` coverage for payload shape,
   log formatting, throttling seam, show-deck versus Rekordbox-master separation,
   StateManager-published color status, and fail-soft provider behavior.

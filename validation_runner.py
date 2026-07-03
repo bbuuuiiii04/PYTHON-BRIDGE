@@ -129,9 +129,6 @@ class ValidationRunner:
             return {}
 
     def _check_singleton(self) -> tuple[str, str]:
-        status, detail = self._check_process(self._bridge_pattern, "bridge")
-        if status != STATUS_PASS:
-            return status, detail
         count = _pgrep_count(self._bridge_pattern)
         if count == 1:
             return STATUS_PASS, "one bridge process"

@@ -44,6 +44,13 @@ class RuntimeCommandTests(unittest.TestCase):
 
         callback.assert_called_once()
 
+    def test_toggle_smart_drop_callback_failure_sets_last_error(self) -> None:
+        reader = CommandReader(Mock(), smart_drop_toggle_callback=lambda: False)
+
+        reader.handle_command(json.loads('{"cmd": "toggle_smart_drop"}'))
+
+        self.assertIn("callback returned False", reader.status()["last_error"])
+
     def test_toggle_smart_breakdown_delegates_to_callback(self) -> None:
         callback = Mock()
         reader = CommandReader(Mock(), smart_breakdown_toggle_callback=callback)
@@ -51,6 +58,13 @@ class RuntimeCommandTests(unittest.TestCase):
         reader.handle_command(json.loads('{"cmd": "toggle_smart_breakdown"}'))
 
         callback.assert_called_once()
+
+    def test_toggle_smart_breakdown_callback_failure_sets_last_error(self) -> None:
+        reader = CommandReader(Mock(), smart_breakdown_toggle_callback=lambda: False)
+
+        reader.handle_command(json.loads('{"cmd": "toggle_smart_breakdown"}'))
+
+        self.assertIn("callback returned False", reader.status()["last_error"])
 
     def test_parse_command_accepts_toggle_record_session(self) -> None:
         command = parse_command(

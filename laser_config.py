@@ -123,7 +123,6 @@ class LaserConfigResult:
       "ok"               — config loaded and validated successfully.
       "not_configured"   — config file absent; Laser Director is disabled.
       "invalid_config"   — config present but failed validation.
-      "dependency_missing" — a required Python dependency is not installed.
     """
     available: bool
     reason: str

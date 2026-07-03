@@ -35,6 +35,8 @@ Forbidden changes:
 
 Implementation notes:
 - Inspect `laser_*`, `midi_output.py`, `personality_resolver.py`, `state_manager.py` laser seam.
+- Keep `MidiOutput.panic()` documented as queue-drain plus live all-notes-off; it is not a separate
+  panic-event state machine.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
 - For drop lifecycle work, keep the phrase-context gate in `DropLifecycle`, cycle selection in `LaserSceneExecutor`, and blackout ownership in the existing executor/StateManager paths. Preserve static one-shot impact fallback and the default-true `drop_lifecycle_mirror` kill switch.

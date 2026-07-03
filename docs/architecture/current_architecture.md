@@ -5,6 +5,10 @@ Status: CURRENT AUTHORITATIVE
 Audited against implementation commit `3f4bcc0` on 2026-07-02. Treat code as the source of
 truth; `docs/architecture/bridge_design.md` is the detailed companion reference.
 
+Audit P1 note (2026-07-03): confirmed-unused internal event names, diagnostics helpers, panic-event
+state, stale comments, and one unused StateManager shadow-log branch were removed. Runtime ownership
+and output ordering are unchanged.
+
 ## System Shape
 
 The bridge has one central authority thread: `StateManager`. It owns `DeckState`

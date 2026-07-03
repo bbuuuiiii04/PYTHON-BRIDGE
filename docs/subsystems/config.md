@@ -17,6 +17,9 @@ Status:
 Purpose:
 - Track config sources, config validation, local ignored config behavior, and schema-change obligations.
 
+Audit P1 (2026-07-03): `config/led_look_director.example.json` no longer includes the unread
+top-level `metadata` placeholder. No local ignored config was read or changed.
+
 SoundSwitch pack-player boundary:
 - `soundswitch_pack_player_config.py` implements the T7a startup-only, never-raising config loader.
 - `config/soundswitch_pack_player.example.json` is tracked, disabled, dry-run, and `output_backend: "none"` by default. The ignored local copy is `config/soundswitch_pack_player.json`.

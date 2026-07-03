@@ -17,6 +17,11 @@ Status:
 Purpose:
 - Own startup wiring, bridge state, event handling, timing, and top-level coordination.
 
+Audit P1 (2026-07-03):
+- Removed confirmed-unused legacy lighting events and the unused `RBSS_RB_STATE_SHADOW` branch.
+- Kept `LED_PHRASE_MONOTONIC_ENV` in `state_manager.py`; unused LED env-name constants were removed
+  because their consumers already read the same env names directly.
+
 SoundSwitch pack-player boundary:
 - The strict decoder/exporter/verifier and immutable pack loader/player remain outside `StateManager`. Optional MIDI-input, backend, and Enttec components are built by startup/command-thread orchestration and passed to `StateManager` as one immutable runtime bundle.
 - T7.0 keeps process signal ownership in `__main__`; T7.1 routes the existing laser executor through one injected backend while retaining the MIDI default path.

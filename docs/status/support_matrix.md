@@ -11,6 +11,9 @@ validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE
 
 This matrix is deliberately conservative. If evidence is missing, the answer is `unknown`, not “probably works.” Computers punish “probably.”
 
+Audit P1 (2026-07-03): internal cleanup and command-status truth changes are software-tested only;
+they add no new hardware or compatibility support claim.
+
 ## Rekordbox versions
 
 | Version | Status | Evidence | Notes |

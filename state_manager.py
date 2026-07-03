@@ -175,11 +175,6 @@ SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
 STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
 # WI-1/2/3/4/5/6/7 kill-switches (read once at startup; default ON except cooldown)
 LED_PHRASE_MONOTONIC_ENV   = "RBSS_LED_PHRASE_MONOTONIC"
-LED_MIN_DWELL_ENV          = "RBSS_LED_MIN_DWELL"
-LED_CANCEL_PENDING_ENV     = "RBSS_LED_CANCEL_PENDING"
-LED_RT_RECONCILE_ENV       = "RBSS_LED_RT_RECONCILE"
-LED_TRANSPORT_STICKY_ENV   = "RBSS_LED_TRANSPORT_STICKY"
-LED_TRANSPORT_COOLDOWN_ENV = "RBSS_LED_TRANSPORT_COOLDOWN"  # default OFF
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 LED_DEFAULT_DROP_IMPACT_BEATS = 8.0
 LED_DEFAULT_GROOVE_CYCLE_BEATS = 32.0
@@ -3309,19 +3304,6 @@ class StateManager:
         log.info("[SM] resolve  deck=%d  file=%s  bpm=%.1f  ssid=%s  latency_ms=%d",
                  deck, bf.short(payload["filepath"]), meta.bpm,
                  meta.soundswitch_id or "none", int(load_delta_ms))
-        if _os.environ.get("RBSS_RB_STATE_SHADOW") == "1":  # A6 shadow log
-            ssid = meta.soundswitch_id
-            if ssid:
-                scripted_id = next(
-                    (tid for tid, t in SCRIPTED_TRACKS.items() if t.get("ssid") == ssid),
-                    None,
-                )
-                log.info("[SM][SHADOW] scripted-match  deck=%d  id=%s  ssid=%s  latency_ms=%d",
-                         deck, scripted_id if scripted_id is not None else "none",
-                         ssid, int(load_delta_ms))
-            else:
-                log.info("[SM][SHADOW] scripted-clear  deck=%d  reason=no-ssid  latency_ms=%d",
-                         deck, int(load_delta_ms))
         LOG.stats.record_transition(deck, "filepath_resolved")
         if self._spectral_enable:
             loaded_anlz = self._loaded_anlz_path.pop(deck, None)
