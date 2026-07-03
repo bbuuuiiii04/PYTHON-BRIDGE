@@ -321,13 +321,13 @@
                 </label>
               </div>
               <div class="drawer-actions">
-                <button @click="sendTest(currentBank()?.channel || 1, openNote)" :disabled="drawer.system">Send test</button>
+                <button class="primary" @click="sendTest(currentBank()?.channel || 1, openNote)" :disabled="drawer.system">Send test</button>
                 <button
                   @click="setDrawerPrimary()"
                   :disabled="drawer.system || !drawerIsMapped() || drawerRoleChanged()"
                   :title="drawerRoleChanged() ? 'Apply song stage change first' : ''"
                 >Set as primary</button>
-                <button @click="removeDrawerMapping()" :disabled="drawer.system || !drawerIsMapped()">Remove mapping</button>
+                <button class="danger-outline" @click="removeDrawerMapping()" :disabled="drawer.system || !drawerIsMapped()">Remove mapping</button>
               </div>
             </section>
 
@@ -416,7 +416,7 @@
               </div>
               <div class="history-diff">
                 <div class="history-actions">
-                  <button @click="restoreSelectedHistory()" :disabled="!historySelected">Restore selected</button>
+                  <button class="primary" @click="restoreSelectedHistory()" :disabled="!historySelected">Restore selected</button>
                   <button @click="closeHistoryPanel()">Close</button>
                 </div>
                 <pre x-text="historyDiff || 'Pick a backup to see what changed.'"></pre>
@@ -476,7 +476,7 @@
                     </label>
                   </div>
                   <div class="drawer-actions">
-                    <button @click="fireQuickTest()">Send test</button>
+                    <button class="primary" @click="fireQuickTest()">Send test</button>
                   </div>
                 </div>
 
@@ -518,7 +518,7 @@
                     </label>
                   </div>
                   <div class="drawer-actions">
-                    <button @click="resolvePlaylistTest()" :disabled="resolverTest.loading">Test resolver</button>
+                    <button class="primary" @click="resolvePlaylistTest()" :disabled="resolverTest.loading">Test resolver</button>
                     <span class="resolver-test-result" x-show="resolverTest.result" x-text="resolverTestLabel()"></span>
                     <span class="field-error" x-show="resolverTest.error" x-text="resolverTest.error"></span>
                   </div>
@@ -594,7 +594,7 @@
                       <span class="settings-field-help">Separate aliases with commas or new lines. Matching is case-insensitive and collapses extra spaces.</span>
                     </div>
                     <div class="drawer-actions">
-                      <button @click="saveAliasesDraft()" :disabled="!canSaveAliasesDraft()">Apply aliases</button>
+                      <button class="primary" @click="saveAliasesDraft()" :disabled="!canSaveAliasesDraft()">Apply aliases</button>
                     </div>
                   </div>
 
@@ -609,7 +609,7 @@
                       </label>
                     </div>
                     <div class="drawer-actions">
-                      <button @click="saveBpmBandDraft()" :disabled="!canSaveBpmBandDraft()">Apply BPM band</button>
+                      <button class="primary" @click="saveBpmBandDraft()" :disabled="!canSaveBpmBandDraft()">Apply BPM band</button>
                     </div>
                   </div>
 
@@ -636,7 +636,7 @@
                       </label>
                     </div>
                     <div class="drawer-actions">
-                      <button @click="saveTimingDraft()" :disabled="!canSaveTimingDraft()">Apply timing</button>
+                      <button class="primary" @click="saveTimingDraft()" :disabled="!canSaveTimingDraft()">Apply timing</button>
                     </div>
                   </div>
 
@@ -696,8 +696,8 @@
                       </div>
                     </div>
                     <div class="drawer-actions">
-                      <button @click="saveBlackout(slot.key)">Save</button>
-                      <button @click="clearBlackout(slot.key)" :disabled="!blackoutConfigured(slot.key)">Remove</button>
+                      <button class="primary" @click="saveBlackout(slot.key)">Save</button>
+                      <button class="danger-outline" @click="clearBlackout(slot.key)" :disabled="!blackoutConfigured(slot.key)">Remove</button>
                     </div>
                   </div>
                 </template>
@@ -781,7 +781,7 @@
               Replace it with the one you're dragging?
             </p>
             <div class="drawer-actions">
-              <button @click="confirmOverwrite()">Replace</button>
+              <button class="primary" @click="confirmOverwrite()">Replace</button>
               <button @click="cancelOverwrite()">Cancel</button>
             </div>
           </div>

@@ -103,8 +103,14 @@ h3.panel-label, h4.panel-label, h5.panel-label { margin: 0 0 var(--sp-2); }
 .save-badge.saved { border-color: var(--ok); color: var(--ok); }
 .save-badge.error { border-color: var(--danger); color: var(--danger); }
 
-.primary-action { position: relative; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-.primary-action:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+/* Action hierarchy: exactly one .primary / .primary-action per button group;
+   everything else stays on the neutral base button; destructive actions get
+   .danger-outline (transparent bg, danger border/text — matches LED). */
+.primary, .primary-action { position: relative; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.primary:hover:not(:disabled), .primary-action:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+.ghost { background: transparent; }
+.danger-outline { background: transparent; border-color: var(--danger); color: var(--danger); }
+.danger-outline:hover:not(:disabled) { background: rgb(242 95 92 / .12); border-color: var(--danger); }
 /* Badge/count text inside primary buttons must inherit ink color, not the
    default badge muted color. */
 .primary-action .badge { color: inherit; }
@@ -331,7 +337,9 @@ h3.panel-label, h4.panel-label, h5.panel-label { margin: 0 0 var(--sp-2); }
 .scene-usage-list span { border: 1px solid var(--border); border-radius: 4px; padding: 2px var(--sp-2); color: var(--text); }
 
 .drawer-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-3); align-items: center; }
-.drawer-actions button { border: 1px solid var(--accent); border-radius: var(--radius-sm); min-height: 34px; padding: 7px var(--sp-3); background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+/* Neutral by default — the one dominant action in each group carries
+   .primary in the markup; destructive ones carry .danger-outline. */
+.drawer-actions button { min-height: 34px; padding: 7px var(--sp-3); }
 .drawer-actions button:disabled { opacity: .55; cursor: not-allowed; }
 
 .history-drawer { width: min(1100px, 96vw); }
@@ -401,7 +409,7 @@ h3.panel-label, h4.panel-label, h5.panel-label { margin: 0 0 var(--sp-2); }
 .settings-personality-default { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; padding: 2px 6px; border-radius: 4px; background: rgb(77 163 255 / .18); color: var(--accent); }
 .settings-personality-aliases { color: var(--text-dim); font-size: 11px; }
 .settings-personality-actions { display: flex; gap: var(--sp-1); flex-wrap: wrap; }
-.settings-personality-actions button.danger { background: rgb(242 95 92 / .12); color: var(--danger); border: 1px solid var(--danger); }
+.settings-personality-actions button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
 .settings-personality-actions button.danger:disabled { opacity: .4; cursor: not-allowed; }
 
 .scene-usage-list { margin: var(--sp-3) 0; }
