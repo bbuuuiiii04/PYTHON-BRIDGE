@@ -7,6 +7,7 @@ import ctypes
 import errno
 import hashlib
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -31,6 +32,7 @@ from rb_ss_bridge_v2.soundswitch_project_decoder import (  # noqa: E402
 )
 from rb_ss_bridge_v2.tools.ssfmt.update_parity_registry import (  # noqa: E402
     build_autoloop_registry, build_scripted_registry, build_static_registry,
+    reconcile_edited_witnesses,
 )
 
 
@@ -47,6 +49,7 @@ PARITY_ORACLE_FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "soundswitch" / "
 SCRIPTED_FIXTURE = PARITY_ORACLE_FIXTURE_DIR / "scripted_reduced.json"
 AUTOLOOP_FIXTURE = PARITY_ORACLE_FIXTURE_DIR / "autoloop_reduced.json"
 STATIC_FIXTURE = PARITY_ORACLE_FIXTURE_DIR / "static_reduced.json"
+logger = logging.getLogger("export_soundswitch_pack")
 
 _SIDECAR_SUFFIX = ".source.json"  # sibling of the pack dir; NEVER inside it
 _BINDING_SIDECAR_SUFFIX = ".midi_bindings.json"
@@ -119,7 +122,7 @@ def _recomputed_parity_registries(
 
 def _compile_and_stage_with_self_healed_parity(
     decoded, parent: Path, destination_name: str,
-) -> Path:
+) -> tuple[Path, list[dict[str, str]]]:
     """Compile+stage the pack, self-healing its parity registries from the
     committed capture fixtures before the pack can ever verify or publish.
 
@@ -143,8 +146,21 @@ def _compile_and_stage_with_self_healed_parity(
     staging = _stage_artifacts(artifacts, parent, destination_name)
     try:
         fresh_registries = _recomputed_parity_registries(staging, stale_registries)
+        retirements: list[dict[str, str]] = []
+        for surface in ("scripted", "autoloop"):
+            fresh_surface = fresh_registries.get(surface)
+            stale_surface = stale_registries.get(surface)
+            if isinstance(fresh_surface, dict) and isinstance(stale_surface, dict):
+                reconciled, retired = reconcile_edited_witnesses(fresh_surface, stale_surface)
+                fresh_registries[surface] = reconciled
+                retirements.extend(retired)
+        for retirement in retirements:
+            logger.info(
+                "[EXPORT] parity-evidence-retired identity=%s reason=witness_source_edited",
+                retirement["identity"],
+            )
         if fresh_registries == stale_registries:
-            return staging
+            return staging, retirements
         recompiled = compile_pack_artifacts(
             decoded, generator_commit=generator_commit, parity_registry=fresh_registries,
         )
@@ -153,7 +169,7 @@ def _compile_and_stage_with_self_healed_parity(
         shutil.rmtree(staging, ignore_errors=True)
         raise
     shutil.rmtree(staging, ignore_errors=True)
-    return restaged
+    return restaged, retirements
 
 
 def _generator_commit() -> str:
@@ -530,7 +546,9 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
     if not parent.is_dir() or parent.is_symlink():
         raise ValueError("output parent must be an existing real directory")
     decoded = decode_project(source)
-    staging = _compile_and_stage_with_self_healed_parity(decoded, parent, destination.name)
+    staging, retirements = _compile_and_stage_with_self_healed_parity(
+        decoded, parent, destination.name,
+    )
     try:
         result = verify_pack(staging, source_project=source)
         os.replace(staging, destination)
@@ -542,7 +560,7 @@ def export_pack(project: str | os.PathLike[str], output: str | os.PathLike[str])
             shutil.rmtree(destination, ignore_errors=True)
             _fsync_dir(parent)
             raise
-        return result
+        return {**result, "parity_evidence_retired": retirements}
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -584,7 +602,9 @@ def publish_pack(
             raise ValueError("destination must be a real directory or absent")
         first_export = not destination.exists()
         decoded = decode_project(source)
-        staging = _compile_and_stage_with_self_healed_parity(decoded, parent, destination.name)
+        staging, retirements = _compile_and_stage_with_self_healed_parity(
+            decoded, parent, destination.name,
+        )
         try:
             result = verify_pack(staging, source_project=source)
             _assert_publishable_parity(
@@ -617,7 +637,11 @@ def publish_pack(
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
-        return {**result, "first_export": first_export}
+        return {
+            **result,
+            "first_export": first_export,
+            "parity_evidence_retired": retirements,
+        }
 
 
 def _atomic_write_result(path: Path, result: object) -> None:
@@ -668,6 +692,7 @@ def _canonical_publish_result() -> dict[str, object]:
             "manifest_sha256": "",
             "artifact_count": 0,
             "first_export": False,
+            "parity_evidence_retired": [],
             "error_category": type(exc).__name__,
         }
     try:
@@ -684,6 +709,7 @@ def _canonical_publish_result() -> dict[str, object]:
         "manifest_sha256": result["manifest_sha256"],
         "artifact_count": result["artifact_count"],
         "first_export": result["first_export"],
+        "parity_evidence_retired": result.get("parity_evidence_retired", []),
         "error_category": "",
     }
 

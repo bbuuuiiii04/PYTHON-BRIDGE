@@ -1670,6 +1670,7 @@ class PublishPackCliTests(unittest.TestCase):
                 "manifest_sha256": "a" * 64,
                 "artifact_count": 95,
                 "first_export": False,
+                "parity_evidence_retired": [],
                 "error_category": "",
             })
 
