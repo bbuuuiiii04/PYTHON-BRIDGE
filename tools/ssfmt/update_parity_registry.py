@@ -201,6 +201,42 @@ def build_static_registry(pack_path: Path, fixture_path: Path) -> dict[str, obje
     }
 
 
+def reconcile_edited_witnesses(
+    fresh: dict[str, dict[str, object]],
+    committed: dict[str, dict[str, object]],
+) -> tuple[dict[str, dict[str, object]], list[dict[str, str]]]:
+    """Drop FAIL records whose sources were edited since the evidence last passed."""
+    reconciled = dict(fresh)
+    retirements: list[dict[str, str]] = []
+    for identity, fresh_record in fresh.items():
+        committed_record = committed.get(identity)
+        if (
+            fresh_record.get("verdict") != "FAIL"
+            or not isinstance(committed_record, dict)
+            or committed_record.get("verdict") != "PASS"
+        ):
+            continue
+        committed_source = str(committed_record.get("source_sha256") or "")
+        fresh_source = str(fresh_record.get("source_sha256") or "")
+        committed_venue = str(committed_record.get("venue_source_sha256") or "")
+        fresh_venue = str(fresh_record.get("venue_source_sha256") or "")
+        source_changed = bool(fresh_source) and fresh_source != committed_source
+        venue_changed = bool(fresh_venue and committed_venue) and fresh_venue != committed_venue
+        if not committed_source or not (source_changed or venue_changed):
+            continue
+        reconciled.pop(identity, None)
+        retirements.append({
+            "identity": identity,
+            "reason": "witness_source_edited",
+            "committed_source_sha256": committed_source,
+            "fresh_source_sha256": fresh_source,
+            "committed_venue_source_sha256": committed_venue,
+            "fresh_venue_source_sha256": fresh_venue,
+            "capture_id": str(fresh_record.get("capture_id") or ""),
+        })
+    return reconciled, sorted(retirements, key=lambda row: row["identity"])
+
+
 def _autoloop_registry_record(
     loop: LoadedAutoloop,
     rows: list[dict[str, object]],
