@@ -9,7 +9,7 @@
     <script src="/static/pad-actions.js?v=ux-5"></script>
     <script src="/static/pad-ui.js?v=ux-5"></script>
     <script src="/static/qrcode.js?v=1"></script>
-    <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" integrity="sha384-l8f0VcPi/M1iHPv8egOnY/15TDwqgbOR1anMIJWvU6nLRgZVLTLSaNqi/TOoT5Fh" crossorigin="anonymous" defer></script>
+    <script src="/static/alpine.min.js?v=3.14.1" defer></script>
     <link rel="stylesheet" href="/static/pad.css?v=ux-5" />
     <link rel="stylesheet" href="/static/pad-overrides.css?v=ux-overhaul" />
   </head>
@@ -38,6 +38,7 @@
             <div class="commit-cluster">
               <span class="save-badge" :class="saveBadgeClass()" x-text="saveBadgeText()" :title="saveState.kind === 'error' ? saveState.lastError : ''" aria-live="polite" aria-atomic="true"></span>
               <button class="primary-action" :class="{'has-changes': hasUnsavedChanges()}" :aria-label="hasUnsavedChanges() ? 'Save & Apply, unsaved changes' : 'Save & Apply'" title="Writes your unsaved changes to disk and tells the running bridge to reload." @click="commitDraft()">💾 Save &amp; Apply</button>
+              <button class="subtle-action" type="button" title="Revert all unapplied edits to the last applied config" aria-label="Discard draft changes" @click="discardDraftConfirm()">Discard</button>
             </div>
             <button class="icon-action" title="Open on another device" aria-label="Open on another device" @click="openAccessPanel()">📱</button>
             <button class="settings-trigger icon-action" @click="openSettingsPanel()" title="Settings" aria-label="Settings">⚙</button>
@@ -103,7 +104,7 @@
               <input type="number" min="1" max="300" x-model.number="test.bpm" @change="persistTestUi()" />
             </label>
             <button class="icon-action" title="Check config" @click="validateDraftOnly()">✓</button>
-            <button class="icon-action" title="Run live test" @click="verifyDraft()">▶</button>
+            <button class="icon-action" title="Check mappings — no lasers fired" @click="verifyDraft()">▶</button>
           </div>
         </div>
 
@@ -149,7 +150,7 @@
             </template>
             <template x-if="verifyResults.checks.length">
               <div style="margin-top: 10px;">
-                <strong style="font-size:0.78rem; color: var(--muted);">Live test results</strong>
+                <strong style="font-size:0.78rem; color: var(--muted);">Mapping check results</strong>
                 <ul class="result-list verify" style="margin-top: 6px;">
                   <template x-for="row in verifyResults.checks" :key="`${row.name}-${row.detail}`">
                     <li :class="row.ok ? 'ok' : 'bad'">

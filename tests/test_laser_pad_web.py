@@ -2019,6 +2019,85 @@ class LaserPadWebTests(unittest.TestCase):
         self.assertIsNone(payload.get("lan_url"))
         self.assertEqual(payload.get("bound_host"), "127.0.0.1")
 
+    def test_draft_patch_persists_to_disk_and_survives_new_service(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            service = LaserPadService(path)
+            service.apply_draft_patch({"patch": {"enabled": True}})
+
+            self.assertTrue(service.draft_path.exists())
+
+            service2 = LaserPadService(path)
+
+        self.assertTrue(service2._draft.get("enabled"))
+
+    def test_commit_removes_draft_file_and_new_service_sees_committed_state(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            service = LaserPadService(path)
+            service.apply_draft_patch({"patch": {"enabled": True}})
+            self.assertTrue(service.draft_path.exists())
+
+            result = service.commit_draft()
+            self.assertTrue(result["ok"])
+            self.assertFalse(service.draft_path.exists())
+
+            service2 = LaserPadService(path)
+
+        self.assertFalse(service2.draft_path.exists())
+        self.assertTrue(service2._draft.get("enabled"))
+
+    def test_discard_removes_draft_file_and_reverts_in_memory_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            service = LaserPadService(path)
+            # Establish a committed baseline (enabled=False) before mutating the draft.
+            service.commit_draft()
+            service.apply_draft_patch({"patch": {"enabled": True}})
+            self.assertTrue(service.draft_path.exists())
+
+            result = service.discard_draft()
+
+        self.assertFalse(service.draft_path.exists())
+        self.assertFalse(service._draft.get("enabled"))
+        self.assertFalse(result["config"].get("enabled"))
+
+    def test_corrupt_draft_file_is_quarantined_and_falls_back_to_live_config(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            draft_path = path.with_name("laser_director.draft.json")
+            draft_path.write_text("{not valid json", encoding="utf-8")
+
+            service = LaserPadService(path)
+
+            self.assertFalse(draft_path.exists())
+            corrupt_path = draft_path.with_name(draft_path.name + ".corrupt")
+            self.assertTrue(corrupt_path.exists())
+            self.assertIn("enabled", service._draft)
+            self.assertIn("personalities", service._draft)
+
+    def test_corrupt_draft_file_overwrites_stale_corrupt_quarantine(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            draft_path = path.with_name("laser_director.draft.json")
+            corrupt_path = draft_path.with_name(draft_path.name + ".corrupt")
+            corrupt_path.write_text("stale quarantine contents", encoding="utf-8")
+            draft_path.write_text("{not valid json", encoding="utf-8")
+
+            LaserPadService(path)
+
+            self.assertEqual(corrupt_path.read_text(encoding="utf-8"), "{not valid json")
+
+    def test_create_personality_persists_to_disk_before_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "laser_director.json"
+            service = LaserPadService(path)
+            service.create_personality({"name": "techno"})
+
+            service2 = LaserPadService(path)
+
+        self.assertIn("techno", service2._draft.get("personalities", {}))
+
 
 if __name__ == "__main__":
     unittest.main()

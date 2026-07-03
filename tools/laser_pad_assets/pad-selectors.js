@@ -55,8 +55,9 @@ window.LaserPad = window.LaserPad || {};
     saveBadgeText() {
       if (this.saveState.kind === 'saving') return 'Saving…';
       if (this.saveState.kind === 'error') return this.saveState.lastError || 'Save failed';
-      if (this.saveState.timestamp) return `Saved ${this.saveState.timestamp}`;
-      return 'Saved';
+      const label = this.saveState.applied ? 'Applied' : 'Draft saved';
+      if (this.saveState.timestamp) return `${label} ${this.saveState.timestamp}`;
+      return label;
     },
 
 

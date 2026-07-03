@@ -120,7 +120,7 @@ window.LaserPad = window.LaserPad || {};
 
     lastCommittedHash: '',
 
-    saveState: { kind: 'saved', timestamp: '', lastError: '' },
+    saveState: { kind: 'saved', timestamp: '', lastError: '', applied: true },
 
     modal: {
       open: false,

@@ -228,6 +228,17 @@ body {
   gap: 6px;
 }
 
+.commit-cluster .subtle-action {
+  background: transparent;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  border-radius: 5px;
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
 .save-badge {
   min-width: 110px;
   max-width: 220px;

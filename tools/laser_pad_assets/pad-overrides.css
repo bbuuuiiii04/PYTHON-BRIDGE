@@ -167,6 +167,22 @@ body {
   box-shadow: 0 0 0 2px var(--bg) !important;
 }
 
+.commit-cluster .subtle-action {
+  background: transparent !important;
+  border: 1px solid var(--line) !important;
+  color: var(--muted) !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+  padding: 8px 12px !important;
+  transition: all 0.2s;
+}
+
+.commit-cluster .subtle-action:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--text) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
 /* Master toggle special styling */
 .master-enable-toggle {
   background: rgba(255, 255, 255, 0.05);

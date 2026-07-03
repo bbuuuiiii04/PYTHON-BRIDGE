@@ -30,14 +30,39 @@ Open `http://127.0.0.1:8765`.
 ## Current capabilities
 
 - Reads in-memory draft from `config/laser_director.json` via `GET /api/config`.
+- The in-memory draft is durably backed by `config/laser_director.draft.json`
+  (gitignored). Every successful draft mutation (`/api/draft`, personality
+  create/rename/duplicate/delete, bank reset, role cooldown, history restore)
+  atomically writes the draft file while holding the service lock. On startup,
+  if the draft file exists it is loaded (and self-healed with the same
+  normalizers as `restore_history`) instead of the live config, so unsaved
+  mapping work survives a LaunchAgent crash/restart. If the draft file is
+  unreadable (bad JSON, non-dict root, or an OS read error), it is renamed in
+  place to `<name>.draft.json.corrupt` (overwriting any previous quarantine),
+  a warning is printed to stderr, and the service falls back to the live
+  config — it never crash-loops the LaunchAgent and never silently discards
+  the bad file. `POST /api/commit` deletes the draft file after a successful
+  save; `POST /api/discard` reloads from the live config and deletes the
+  draft file.
 - Injects default additive `_pad_meta` when absent.
 - Displays channel-tagged bank tabs and note grid.
 - Tap note to test-fire MIDI (`/api/test_note`) honoring `dry_run`.
 - Long-press note to open mapping drawer.
 - Drawer autosaves to draft via `/api/draft` with `apply_mapping` parity.
 - Drawer supports explicit **Set Primary** and **Remove Mapping** parity actions.
-- Commit/discard controls (`/api/commit`, `/api/discard`).
-- Validate and runtime verify actions (`/api/validate`, `/api/verify`).
+- Commit/discard controls (`/api/commit`, `/api/discard`), including a header
+  **Discard** button next to **Save & Apply** that opens an in-app confirm
+  modal (danger-styled) before reverting all unapplied edits to the last
+  applied config.
+- Validate and runtime verify actions (`/api/validate`, `/api/verify`). The ▶
+  button is labeled "Check mappings — no lasers fired": it runs `/api/verify`
+  against a mock MIDI backend (`_DryCheckMidiOutput`) and never fires
+  hardware. The results panel heading reads "Mapping check results".
+- The save badge distinguishes an unsaved draft ("Draft saved …") from a
+  committed config ("Applied …") so the badge never implies unsaved work has
+  reached the running bridge.
+- Alpine.js is vendored at `tools/laser_pad_assets/alpine.min.js` (no CDN
+  dependency) — the pad UI now loads and functions with no internet access.
 - Live runtime mirror from `GET /api/runtime_status`.
 - Verify failures mark note tiles inline.
 - Long-press note tiles show a progress indicator before opening the drawer.
@@ -54,6 +79,7 @@ Open `http://127.0.0.1:8765`.
 
 ## Recent updates
 
+- `2026-07-03`: Vendored Alpine.js (`tools/laser_pad_assets/alpine.min.js`, SRI-verified against the previous CDN pin) so the pad works with no internet access. Added a durable `config/laser_director.draft.json` draft file (atomic writes, corrupt-file quarantine + fallback, cleared on commit/discard) so unsaved mapping work survives a LaunchAgent crash. Added a header Discard button with a confirm modal. Renamed the ▶ button/results panel to make clear the mapping check never fires lasers, and split the save badge into "Draft saved" vs "Applied" states.
 - `2026-05-14`: `_ensure_personality_exists` now backfills missing default keys on existing personalities (was: return-early). Legacy configs are self-healed on first load; explicitly-omitted defaults will be re-added.
 - `2026-05-13`: Retired the terminal wizard and made Laser Pad the only mapper.
 - `2026-05-13`: Added always-on LaunchAgent support for the local pad server.

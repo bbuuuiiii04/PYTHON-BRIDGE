@@ -22,6 +22,7 @@ govee.env
 !.claude/skills/codex-spec/
 !.claude/skills/codex-spec/SKILL.md
 config/laser_director.json
+config/laser_director.draft.json
 config/led_look_director.json
 config/led_look_director.draft.json
 config/led_lab/

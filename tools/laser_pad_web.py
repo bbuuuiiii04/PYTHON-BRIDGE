@@ -47,6 +47,31 @@ _ASSETS_DIR = Path(__file__).resolve().parent / "laser_pad_assets"
 logger = logging.getLogger("laser_pad_web")
 
 
+def _draft_path_for(path: Path) -> Path:
+    return path.with_name(path.stem + ".draft.json")
+
+
+def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            delete=False,
+            dir=str(path.parent),
+            prefix=f"{path.name}.tmp-",
+        ) as fp:
+            temp_path = Path(fp.name)
+            json.dump(data, fp, indent=2, sort_keys=True)
+            fp.write("\n")
+        temp_path.replace(path)
+    except Exception:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise
+
+
 class LaserPadService:
     def __init__(
         self,
@@ -55,13 +80,52 @@ class LaserPadService:
         status_path: Path | str = STATUS_PATH,
     ) -> None:
         self._config_path = Path(config_path)
+        self._draft_path = _draft_path_for(self._config_path)
         self._status_path = Path(status_path)
         self._lock = Lock()
-        self._draft = load_or_create_config(self._config_path)
+        self._draft = self._load_initial_draft()
+
+    def _load_initial_draft(self) -> dict[str, Any]:
+        if self._draft_path.exists():
+            try:
+                with self._draft_path.open("r", encoding="utf-8") as fp:
+                    data = json.load(fp)
+                if not isinstance(data, dict):
+                    raise ValueError(f"{self._draft_path} root must be a JSON object")
+            except (json.JSONDecodeError, ValueError, OSError) as exc:
+                corrupt_path = self._draft_path.with_name(self._draft_path.name + ".corrupt")
+                try:
+                    self._draft_path.replace(corrupt_path)
+                except OSError as replace_exc:
+                    print(
+                        f"WARNING: laser_pad_web: corrupt draft {self._draft_path} "
+                        f"({exc}); failed to quarantine to {corrupt_path}: {replace_exc}",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"WARNING: laser_pad_web: corrupt draft {self._draft_path} ({exc}); "
+                        f"moved to {corrupt_path} and falling back to live config",
+                        file=sys.stderr,
+                    )
+            else:
+                _ensure_core_fields(data)
+                _ensure_scene_baselines(data)
+                _ensure_house_personality(data)
+                _ensure_pad_meta(data)
+                return data
+        return load_or_create_config(self._config_path)
+
+    def _persist_draft_locked(self) -> None:
+        _write_json_atomic(self._draft_path, self._draft)
 
     @property
     def config_path(self) -> Path:
         return self._config_path
+
+    @property
+    def draft_path(self) -> Path:
+        return self._draft_path
 
     def _load_config_result(self, config: dict[str, Any]) -> LaserConfigResult:
         return load_laser_director_config_from_dict(config)
@@ -175,6 +239,7 @@ class LaserPadService:
             mapped_scene = ""
             if isinstance(mapping, dict):
                 mapped_scene = self._apply_mapping_patch(mapping)
+            self._persist_draft_locked()
             config = copy.deepcopy(self._draft)
         loader_result = self._load_config_result(config)
         errors, warnings = validate_config_data(config, loader_result=loader_result)
@@ -190,6 +255,7 @@ class LaserPadService:
     def discard_draft(self) -> dict[str, Any]:
         with self._lock:
             self._draft = load_or_create_config(self._config_path)
+            self._draft_path.unlink(missing_ok=True)
         return self.get_config_payload()
 
     def commit_draft(self) -> dict[str, Any]:
@@ -216,6 +282,7 @@ class LaserPadService:
                     "warnings": save_warnings,
                 }
             backup = save_config_atomically(config_to_save, path=self._config_path)
+            self._draft_path.unlink(missing_ok=True)
         return {
             "ok": True,
             "backup_path": str(backup) if backup else "",
@@ -237,6 +304,7 @@ class LaserPadService:
             if name in personalities:
                 raise ValueError(f"personality '{name}' already exists")
             _ensure_personality_exists(self._draft, name)
+            self._persist_draft_locked()
         return {"ok": True, "name": name}
 
     def delete_personality(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -262,6 +330,7 @@ class LaserPadService:
                 ui = pad_meta.get("ui")
                 if isinstance(ui, dict) and ui.get("last_personality") == name:
                     ui["last_personality"] = new_default
+            self._persist_draft_locked()
         return {"ok": True, "deleted": name, "new_default": new_default}
 
     def duplicate_personality(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -285,6 +354,7 @@ class LaserPadService:
             ):
                 idx = bpm_priority.index(source)
                 bpm_priority.insert(idx + 1, new_name)
+            self._persist_draft_locked()
         return {"ok": True, "name": new_name, "source": source}
 
     def rename_personality(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -311,6 +381,7 @@ class LaserPadService:
                 ui = pad_meta.get("ui")
                 if isinstance(ui, dict) and ui.get("last_personality") == old_name:
                     ui["last_personality"] = new_name
+            self._persist_draft_locked()
         return {"ok": True, "name": new_name}
 
     def reset_banks_to_default(self) -> dict[str, Any]:
@@ -327,6 +398,7 @@ class LaserPadService:
             if not isinstance(pad_meta.get("ui"), dict):
                 pad_meta["ui"] = defaults["ui"]
             pad_meta.setdefault("schema_version", defaults["schema_version"])
+            self._persist_draft_locked()
         return {"ok": True}
 
     def apply_role_cooldown(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -345,6 +417,7 @@ class LaserPadService:
                 role=role,
                 cooldown_beats=cooldown_beats,
             )
+            self._persist_draft_locked()
             config = copy.deepcopy(self._draft)
         loader_result = self._load_config_result(config)
         errors, warnings = validate_config_data(config, loader_result=loader_result)
@@ -528,6 +601,7 @@ class LaserPadService:
         _ensure_pad_meta(restored)
         with self._lock:
             self._draft = restored
+            self._persist_draft_locked()
         return self.get_config_payload()
 
     def get_midi_ports(self) -> list[str]:

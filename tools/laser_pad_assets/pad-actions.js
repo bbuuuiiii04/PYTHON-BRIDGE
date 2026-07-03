@@ -10,7 +10,7 @@ window.LaserPad = window.LaserPad || {};
 
 
     markSaving() {
-      this.saveState = { ...this.saveState, kind: 'saving', lastError: '' };
+      this.saveState = { ...this.saveState, kind: 'saving', lastError: '', applied: false };
     },
 
 
@@ -970,6 +970,7 @@ window.LaserPad = window.LaserPad || {};
           await this.refreshConfig();
           this.lastCommittedHash = this.currentConfigHash;
           this.markSaved();
+          this.saveState.applied = true;
         } else {
           const msg = `Save failed: ${(data.errors || []).join('; ')}`;
           this.statusText = msg;
@@ -980,6 +981,19 @@ window.LaserPad = window.LaserPad || {};
         this.statusText = msg;
         this.markSaveError(msg);
       }
+    },
+
+
+
+    async discardDraftConfirm() {
+      const proceed = await this.openConfirmModal({
+        title: 'Discard draft changes?',
+        message: 'Reverts all unapplied edits to the last applied config.',
+        confirmText: 'Discard',
+        danger: true,
+      });
+      if (!proceed) return;
+      await this.discardDraft();
     },
 
 
