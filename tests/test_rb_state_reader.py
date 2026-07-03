@@ -847,6 +847,58 @@ class TickEventTests(unittest.TestCase):
         self.assertEqual(events[0].payload["anlz_path"], "/tmp/FRESH_ANLZ.DAT")
         self.assertEqual(events[1].payload["title"], "Fresh Direct Title")
 
+    def test_transient_anlz_read_failure_does_not_poison_recovery_diff(self) -> None:
+        auth_q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(
+            self.q,
+            self.offs,
+            authoritative_queue=auth_q,
+            authoritative_kinds={Ev.ANLZ_PATH, Ev.TRACK_LOADED},
+            drop_unrouted_events=True,
+            shadow_logs_enabled=False,
+            rb_pid=12345,
+            base_addr=self.base,
+        )
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base,
+            self.offs.anlz_path_per_deck[0],
+            payload=(0).to_bytes(8, "little"),
+        )
+        old_path_addr = 0xABCDEF20
+        self.mem.update_leaf(endpoint, old_path_addr.to_bytes(8, "little"))
+        self.mem.leaf[old_path_addr] = b"/tmp/OLD_ANLZ.DAT\x00"
+        self.mem.install_chain(
+            self.base,
+            self.offs.track_info_per_deck[0],
+            payload=b"Old ANLZ Title\x00",
+        )
+
+        reader._tick(0xCAFE, self.base)
+        _drain(auth_q)
+
+        missing_path_addr = 0xABCDEF40
+        self.mem.update_leaf(endpoint, missing_path_addr.to_bytes(8, "little"))
+        self.mem.update_leaf(
+            self.mem.install_chain(
+                self.base,
+                self.offs.track_info_per_deck[0],
+                payload=b"Late ANLZ Title\x00",
+            ),
+            b"Late ANLZ Title\x00",
+        )
+        reader._tick(0xCAFE, self.base)
+        self.assertEqual(reader._last_anlz[0], "/tmp/OLD_ANLZ.DAT")
+
+        recovered_path_addr = 0xABCDEF60
+        self.mem.update_leaf(endpoint, recovered_path_addr.to_bytes(8, "little"))
+        self.mem.leaf[recovered_path_addr] = b"/tmp/RECOVERED_ANLZ.DAT\x00"
+        reader._tick(0xCAFE, self.base)
+
+        events = _drain(auth_q)
+        self.assertEqual([e.kind for e in events], [Ev.TRACK_LOADED, Ev.ANLZ_PATH])
+        self.assertEqual(events[1].payload["anlz_path"], "/tmp/RECOVERED_ANLZ.DAT")
+
     def test_anlz_availability_sets_and_clears_with_direct_readability(self) -> None:
         states: list[tuple[int, bool]] = []
         reader = mod.RBStateReader(

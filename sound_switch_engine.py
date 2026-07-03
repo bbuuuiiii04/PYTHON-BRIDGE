@@ -77,7 +77,8 @@ class SoundSwitchEngine:
         deck: int,
         arm_meta: "TrackMetadata",
         active: int,
+        elapsed_ms: int = 0,
     ) -> None:
         """Phase 1 of scripted arm: send_deck_load(play="on") across the canonical 4-deck route for the armed deck."""
         for dk in self.deck_route(deck):
-            self._out.send_deck_load(dk, arm_meta, active, play="on")
+            self._out.send_deck_load(dk, arm_meta, active, play="on", elapsed_ms=elapsed_ms)

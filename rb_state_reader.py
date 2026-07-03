@@ -334,21 +334,22 @@ class RBStateReader(threading.Thread):
         # ANLZ path must be observed before TRACK_LOADED so StateManager
         # consumes the fresh path for the same load generation.
         anlz = self._follow_pointer_string(task, base, offs.anlz_path_per_deck[d])
-        prev_anlz = self._last_anlz.get(d)
-        if anlz != prev_anlz:
-            self._last_anlz[d] = anlz or ""
-            if anlz:
+        if anlz is not None:
+            prev_anlz = self._last_anlz.get(d)
+            if anlz != prev_anlz:
+                self._last_anlz[d] = anlz
+                if anlz:
+                    self._anlz_readable_this_tick.add(bridge)
+                    if self._shadow_logs_enabled or Ev.ANLZ_PATH in self._authoritative_kinds:
+                        log.info("[ANLZ][DIRECT] deck=%d path=%s", bridge, anlz)
+                    self._enqueue(BridgeEvent(
+                        kind=Ev.ANLZ_PATH,
+                        deck=bridge,
+                        payload={'anlz_path': anlz, 'rb_raw_deck': d},
+                        source='rb_state',
+                    ))
+            elif anlz:
                 self._anlz_readable_this_tick.add(bridge)
-                if self._shadow_logs_enabled or Ev.ANLZ_PATH in self._authoritative_kinds:
-                    log.info("[ANLZ][DIRECT] deck=%d path=%s", bridge, anlz)
-                self._enqueue(BridgeEvent(
-                    kind=Ev.ANLZ_PATH,
-                    deck=bridge,
-                    payload={'anlz_path': anlz, 'rb_raw_deck': d},
-                    source='rb_state',
-                ))
-        elif anlz:
-            self._anlz_readable_this_tick.add(bridge)
 
         # Track-info string from RB's packed 500-byte buffer.
         track_info = self._follow_string(task, base, offs.track_info_per_deck[d], 500)

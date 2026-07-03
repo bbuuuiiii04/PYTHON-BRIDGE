@@ -148,7 +148,7 @@ class DeckRouteTests(unittest.TestCase):
         sse.send_scripted_arm_phase1(2, arm_meta, 2)
         self.assertEqual(
             out.send_deck_load.call_args_list,
-            [call(dk, arm_meta, 2, play="on") for dk in (2, 1, 3, 4)],
+            [call(dk, arm_meta, 2, play="on", elapsed_ms=0) for dk in (2, 1, 3, 4)],
         )
 
     def test_send_scripted_arm_phase1_deck1_route_order(self) -> None:
@@ -158,7 +158,7 @@ class DeckRouteTests(unittest.TestCase):
         sse.send_scripted_arm_phase1(1, arm_meta, 1)
         self.assertEqual(
             out.send_deck_load.call_args_list,
-            [call(dk, arm_meta, 1, play="on") for dk in (1, 2, 3, 4)],
+            [call(dk, arm_meta, 1, play="on", elapsed_ms=0) for dk in (1, 2, 3, 4)],
         )
 
     def test_send_scripted_arm_phase1_active_differs_from_armed_deck(self) -> None:
@@ -168,7 +168,17 @@ class DeckRouteTests(unittest.TestCase):
         sse.send_scripted_arm_phase1(1, arm_meta, 2)
         self.assertEqual(
             out.send_deck_load.call_args_list,
-            [call(dk, arm_meta, 2, play="on") for dk in (1, 2, 3, 4)],
+            [call(dk, arm_meta, 2, play="on", elapsed_ms=0) for dk in (1, 2, 3, 4)],
+        )
+
+    def test_send_scripted_arm_phase1_threads_elapsed_ms(self) -> None:
+        out = Mock()
+        sse = SoundSwitchEngine(out)
+        arm_meta = Mock()
+        sse.send_scripted_arm_phase1(1, arm_meta, 1, elapsed_ms=1234)
+        self.assertEqual(
+            out.send_deck_load.call_args_list,
+            [call(dk, arm_meta, 1, play="on", elapsed_ms=1234) for dk in (1, 2, 3, 4)],
         )
 
 

@@ -70,7 +70,6 @@ LSOF_LEN_TOLERANCE_MS = 1_000   # ±1 s for track-length matching
 LSOF_COOLDOWN_S      = 2.0      # min seconds between lsof runs per deck
 
 # ── Timing and guards ────────────────────────────────────────────────────────
-TIMING_COMPENSATION_MS = 0
 STOP_DEBOUNCE_S        = 0.5    # confirm stop after playing=False for this long
 ARM_GUARD_S            = 3.0    # suppress stop-detection after arm or deck switch
 PLAY_SETTLE_MS         = 400    # delay before flash-arm after resume (BPM settle)

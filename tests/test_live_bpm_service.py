@@ -490,7 +490,7 @@ class FakeOutput:
     def _sub(self, *args, **kwargs):
         pass
 
-    def send_deck_load(self, deck, meta, active, play="on"):
+    def send_deck_load(self, deck, meta, active, play="on", elapsed_ms=0):
         self.loads.append((deck, meta, active, play))
 
     def send_loop_on(self, deck):

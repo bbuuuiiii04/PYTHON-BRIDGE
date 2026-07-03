@@ -26,6 +26,8 @@ Do not read first:
 Allowed changes:
 - The narrow files required by the task.
 - Docs/status/test inventory files required by the change contract.
+- Removing unused constants in `config.py` still requires updating config docs when the removed name
+  looked like a tunable operator knob.
 
 Forbidden changes:
 - unrelated runtime behavior

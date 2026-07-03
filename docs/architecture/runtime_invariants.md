@@ -201,6 +201,10 @@ push loop.
 - Autoloop arms send an empty SoundSwitch ID.
 - `OS2LConnection` owns socket I/O on sender/reconnect threads; the push loop
   should only enqueue sends.
+- Govee realtime-to-cloud handoff must not call realtime transport socket
+  methods on the StateManager caller thread. `force_deactivate()` marks the
+  handoff and the Govee runner thread performs blackout/deactivate before the
+  next realtime frame.
 
 ## Phrase Anchor
 

@@ -56,6 +56,9 @@ Coverage expectations:
 - Audit P2 adds `tests/test_state_manager_pack_driver.py` coverage for SoundSwitch-connected ZERO
   output with `soundswitch_pack.overlay_suppressed.static_held`, and
   `tests/test_led_look_director.py` coverage for committed-drop DIY eligibility filtering.
+- Audit P3 adds `tests/test_govee_realtime_runner.py` coverage for runner-thread handoff teardown,
+  `tests/test_rb_state_reader.py` coverage for transient ANLZ read-failure recovery, and
+  `tests/test_sound_switch_engine.py` coverage for explicit scripted elapsed threading.
 
 Change contract:
 - Do not modify tests just to make docs changes pass.

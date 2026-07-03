@@ -20,6 +20,10 @@ Audit P2 (2026-07-03): no hardware, SoundSwitch app, Rekordbox, laser, LED, Gove
 Enttec validation was performed. Injector gating, pack-status overlay diagnostics, and committed
 LED drop eligibility are software-tested only.
 
+Audit P3 (2026-07-03): no hardware, SoundSwitch app, Rekordbox, laser, LED, Govee, MIDI, DMX, or
+Enttec validation was performed. Govee handoff threading, ANLZ read-failure recovery, raw elapsed
+OS2L sends, and startup spectral-cache eviction are software-tested only.
+
 The current exporter/importer evidence boundary is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
 The pinned SoundSwitch 2.10.3 project/pack tooling, immutable loader/player,

@@ -27,6 +27,11 @@ Audit P2 (2026-07-03):
 - `StateManager` still submits software ZERO while SoundSwitch is connected; the copied pack status
   adds suppressed-overlay diagnostics without changing pack output precedence.
 
+Audit P3 (2026-07-03):
+- Startup can launch one daemon spectral-cache eviction thread only when both smart-rearm and
+  spectral analysis are explicitly enabled. Govee realtime handoff transport teardown is runner
+  thread work, not StateManager caller-thread work.
+
 SoundSwitch pack-player boundary:
 - The strict decoder/exporter/verifier and immutable pack loader/player remain outside `StateManager`. Optional MIDI-input, backend, and Enttec components are built by startup/command-thread orchestration and passed to `StateManager` as one immutable runtime bundle.
 - T7.0 keeps process signal ownership in `__main__`; T7.1 routes the existing laser executor through one injected backend while retaining the MIDI default path.

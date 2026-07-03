@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -12,33 +14,42 @@ from rb_ss_bridge_v2.led_models import BeatAnchor  # noqa: E402
 
 
 class _FakeTransport:
-    def __init__(self) -> None:
+    def __init__(self, *, after_return: threading.Event | None = None) -> None:
         self.calls: list[str] = []
+        self.thread_calls: list[tuple[str, int]] = []
         self.frames: list[list[tuple[int, int, int]]] = []
+        self.after_return = after_return
+        self.send_after_return = 0
+
+    def _record(self, call: str) -> None:
+        self.calls.append(call)
+        self.thread_calls.append((call, threading.get_ident()))
 
     def activate(self) -> bool:
-        self.calls.append("activate")
+        self._record("activate")
         return True
 
     def deactivate(self) -> bool:
-        self.calls.append("deactivate")
+        self._record("deactivate")
         return True
 
     def set_brightness(self, value: int) -> bool:
-        self.calls.append(f"brightness:{value}")
+        self._record(f"brightness:{value}")
         return True
 
     def send_frame(self, frame) -> bool:  # type: ignore[no-untyped-def]
-        self.calls.append("send_frame")
+        self._record("send_frame")
+        if self.after_return is not None and self.after_return.is_set():
+            self.send_after_return += 1
         self.frames.append(list(frame))
         return True
 
     def blackout(self) -> bool:
-        self.calls.append("blackout")
+        self._record("blackout")
         return True
 
     def close(self) -> None:
-        self.calls.append("close")
+        self._record("close")
 
     def status(self) -> dict:
         return {"frames_sent": len(self.frames), "send_error_count": 0, "last_error": ""}
@@ -465,7 +476,54 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         runner.set_desired(spec)
         runner._tick_once(_anchor(), 100.0)
         runner.force_deactivate()
+        runner._tick_once(_anchor(), 100.01)
         self.assertEqual(runner.status()["instance_count"], 0)
+
+    def test_force_deactivate_teardown_runs_on_runner_thread(self) -> None:
+        after_return = threading.Event()
+        transport = _FakeTransport(after_return=after_return)
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=120)
+        runner.set_beat_provider(lambda: _anchor(time.monotonic()))
+        runner.set_desired(
+            EffectSpec(
+                effect_name="solid",
+                params={"color": [1, 2, 3]},
+                seed=1,
+                applied_monotonic=time.monotonic(),
+            )
+        )
+        runner.start()
+        deadline = time.monotonic() + 1.0
+        while "send_frame" not in transport.calls and time.monotonic() < deadline:
+            time.sleep(0.005)
+        self.assertIn("send_frame", transport.calls)
+
+        caller_id: list[int] = []
+
+        def _caller() -> None:
+            caller_id.append(threading.get_ident())
+            runner.force_deactivate()
+            after_return.set()
+
+        caller = threading.Thread(target=_caller)
+        caller.start()
+        caller.join(timeout=1.0)
+        self.assertFalse(caller.is_alive())
+
+        deadline = time.monotonic() + 1.0
+        while "deactivate" not in transport.calls and time.monotonic() < deadline:
+            time.sleep(0.005)
+
+        runner_calls = [
+            ident for call, ident in transport.thread_calls
+            if call in {"blackout", "deactivate"}
+        ]
+        self.assertEqual(transport.calls.count("blackout"), 1)
+        self.assertEqual(transport.calls.count("deactivate"), 1)
+        self.assertTrue(runner_calls)
+        self.assertNotIn(caller_id[0], runner_calls)
+        self.assertEqual(transport.send_after_return, 0)
+        runner.stop()
 
     def test_emergency_teardown_clears_engine(self) -> None:
         transport = _FakeTransport()

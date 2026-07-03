@@ -60,6 +60,9 @@ Runtime flow:
   sibling of a playing bridge deck (RB decks 1&3 collapse onto bridge deck 1,
   2&4 onto bridge deck 2 via `_bridge_deck`; the reader itself performs no
   sibling arbitration)
+- A transient failed ANLZ pointer-chain read (`None`) must not overwrite the last
+  successful ANLZ cache entry; empty-string successful reads still represent
+  unloaded/empty state. `tests/test_rb_state_reader.py` covers the recovery path.
 
 Config:
 - `config.py`
