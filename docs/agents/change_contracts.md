@@ -195,6 +195,44 @@ Forbidden assumptions:
 - LED Pad dry-run or software playback does not prove visual hardware behavior.
 - Output ownership must stay explicit when the bridge is live.
 
+## Laser Pad changes
+
+Triggered by changes to:
+
+- `tools/laser_pad_web.py`
+- `tools/laser_config_ops.py`
+- `tools/laser_pad_assets/**`
+- `scripts/laser_pad.py`
+- `launchagents/com.bbui.laser-pad.plist`
+
+Inspect:
+
+- `docs/guides/laser_pad.md`
+- `docs/subsystems/laser.md`
+- `docs/architecture/doc_index.md`
+- `docs/status/active_work_registry.md`
+
+Run:
+
+```bash
+python -m unittest discover tests
+python tools/check_docs_metadata.py
+python tools/check_agent_contracts.py
+python tools/check_docs_drift.py
+```
+
+Update:
+
+- `docs/guides/laser_pad.md`
+- `docs/subsystems/laser.md`
+- `docs/architecture/doc_index.md`
+- `docs/status/active_work_registry.md`
+
+Forbidden assumptions:
+
+- Laser Pad dry-run test-fire does not prove laser hardware behavior.
+- Non-loopback binding is a deliberate operator exposure decision.
+
 ## Laser changes
 
 Triggered by changes to:

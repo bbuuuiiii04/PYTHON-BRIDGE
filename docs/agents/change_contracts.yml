@@ -172,6 +172,32 @@ contracts:
       - LED Pad dry-run or software playback does not prove visual hardware behavior
       - output ownership must stay explicit when the bridge is live
 
+  laser_pad:
+    code_globs:
+      - tools/laser_pad_web.py
+      - tools/laser_config_ops.py
+      - tools/laser_pad_assets/**
+      - scripts/laser_pad.py
+      - launchagents/com.bbui.laser-pad.plist
+    inspect:
+      - docs/guides/laser_pad.md
+      - docs/subsystems/laser.md
+      - docs/architecture/doc_index.md
+      - docs/status/active_work_registry.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
+    docs_update:
+      - docs/guides/laser_pad.md
+      - docs/subsystems/laser.md
+      - docs/architecture/doc_index.md
+      - docs/status/active_work_registry.md
+    forbidden_assumptions:
+      - Laser Pad dry-run test-fire does not prove laser hardware behavior
+      - non-loopback binding is a deliberate operator exposure decision
+
   laser:
     code_globs:
       - laser_config.py
