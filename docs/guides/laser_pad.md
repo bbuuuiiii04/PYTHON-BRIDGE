@@ -51,7 +51,7 @@ Open `http://127.0.0.1:8765`.
 - Drawer autosaves to draft via `/api/draft` with `apply_mapping` parity.
 - Drawer supports explicit **Set Primary** and **Remove Mapping** parity actions.
 - Commit/discard controls (`/api/commit`, `/api/discard`), including a header
-  **Discard** button next to **Save & Apply** that opens an in-app confirm
+  **Discard** button next to **Apply** that opens an in-app confirm
   modal (danger-styled) before reverting all unapplied edits to the last
   applied config.
 - Validate and runtime verify actions (`/api/validate`, `/api/verify`). The ▶
@@ -83,6 +83,34 @@ Open `http://127.0.0.1:8765`.
 
 ## Recent updates
 
+- `2026-07-03`: Visual reskin (software-tested only, no runtime/API behavior change) — Laser Pad
+  now shares the LED Pad's "stage console" design system: the same `:root` token block (surfaces,
+  AA text tiers, semantic colors, shared per-role color vocabulary, spacing scale) in
+  `tools/laser_pad_assets/pad.css`, with `pad-overrides.css` emptied out (it previously carried a
+  second, competing "premium aesthetic" theme with a Google Fonts `@import` — now removed, no CDN
+  dependency). The Laser Pad's identity mark is a green square before the "LASER PAD" title (LED's
+  is cyan). Vendored the same Archivo variable font at `tools/laser_pad_assets/archivo-var.woff2`.
+  The header "💾 Save & Apply" button is renamed **Apply** (same `.primary-action` class, same
+  explanatory `title` attribute, `POST /api/commit` route unchanged); `tests/frontend/test_pad_smoke.py`
+  and `tests/test_laser_pad_web.py` were updated to match the new button text (copy assertions
+  only). The header's personality select + new/rename/info icon trio were removed from row 2 — the
+  toolbar next to the note grid (`.pad-editor-toolbar`) already had its own "Editing" personality
+  select, so the icon trio moved there instead of staying duplicated in the header. Bank tabs now
+  use the LED pad's 3px-bottom-rail tab treatment with a contained horizontal scroll strip. Note
+  tiles: note number moved to top-left, personality chips moved to top-right, a 3px left rail in
+  the mapped scene's role color, firing state now rings in the pad's identity green, verify-fail
+  rings in danger red (previously a small corner dot). Fixed two latent bugs surfaced while
+  reviewing the reskin's screenshots, both pre-existing in the shipped Alpine markup and unrelated
+  to the visual changes themselves: (1) the note tile's `:class` binding used a mixed
+  string+object array (`:class="[roleClass(note), {...}]"`) that the vendored `alpine.min.js`
+  build does not merge — it fell back to `String(array)` and literally rendered the class
+  `[object Object]`, silently no-op'ing every state class (`mapped`, `in-active-personality`,
+  `pad-dim`, `drop-target`, `firing`, `pressing`, `verify-fail`); replaced with a single
+  string-returning `tileClasses(note)` selector in `pad-selectors.js`. (2) `isFiring`/`isPressing`
+  compared `Number(this.firingNote)`/`Number(this.pressProgress.note)` (both initialized to `null`)
+  against the note number with `===`; since `Number(null) === 0`, MIDI note 0 (a real pad — bank 1
+  starts at note 0) rendered as permanently firing/pressing from page load. Both now null-guard
+  first.
 - `2026-07-03`: Hygiene pass — removed stale frontend assets (`index.granite.html`, `index.html.bak`,
   `pad.css.bak`, `pad-overrides.granite.css`, the one-line `pad.js` compatibility stub) and the last
   unpkg Alpine.js CDN references they carried; the vendored `alpine.min.js` is the only Alpine source

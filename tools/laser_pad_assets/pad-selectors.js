@@ -468,14 +468,41 @@ window.LaserPad = window.LaserPad || {};
 
 
 
+    // firingNote/pressProgress.note start out `null`. Number(null) is 0, so
+    // without the explicit null guard, MIDI note 0 (a real, valid pad — bank 1
+    // starts at note 0) would render as permanently firing/pressing from page
+    // load, before anything ever fired.
     isFiring(note) {
-      return Number(this.firingNote) === Number(note);
+      return this.firingNote !== null && Number(this.firingNote) === Number(note);
+    },
+
+
+
+    // Single string-returning class binding. The bundled Alpine build does
+    // not merge mixed string+object arrays passed to :class (it falls back
+    // to a naive String(array) and literally renders "[object Object]"), so
+    // this pre-joins everything into one space-separated string instead of
+    // handing Alpine `[roleClass(note), {...}]`.
+    tileClasses(note) {
+      const classes = [];
+      const role = this.roleClass(note);
+      if (role) classes.push(role);
+      const mapped = this.isMapped(note);
+      const inActive = this.padInActivePersonality(note);
+      if (mapped) classes.push('mapped');
+      if (inActive) classes.push('in-active-personality');
+      if (mapped && !inActive && !this.sceneMetaByNote(note).system) classes.push('pad-dim');
+      if (this.isDropTarget(note)) classes.push('drop-target');
+      if (this.isFiring(note)) classes.push('firing');
+      if (this.isPressing(note)) classes.push('pressing');
+      if (this.verifyState(note)?.ok === false) classes.push('verify-fail');
+      return classes.join(' ');
     },
 
 
 
     isPressing(note) {
-      return Number(this.pressProgress.note) === Number(note);
+      return this.pressProgress.note !== null && Number(this.pressProgress.note) === Number(note);
     },
 
 

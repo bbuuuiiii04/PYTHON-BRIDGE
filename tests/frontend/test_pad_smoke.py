@@ -130,7 +130,7 @@ def test_save_apply_clean_draft_writes_backup(page: Page, laser_pad_server) -> N
     before = set(laser_pad_server.config_dir.glob("laser_director.json.bak-*"))
 
     with page.expect_response("**/api/commit"):
-        page.get_by_role("button", name=re.compile(r"Save & Apply")).click()
+        page.get_by_role("button", name=re.compile(r"^Apply$")).click()
     expect(page.locator(".save-badge")).to_contain_text("Applied")
     after = set(laser_pad_server.config_dir.glob("laser_director.json.bak-*"))
 

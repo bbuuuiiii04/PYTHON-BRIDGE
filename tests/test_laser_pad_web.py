@@ -1047,7 +1047,7 @@ class LaserPadWebTests(unittest.TestCase):
                 )
 
         self.assertEqual(status, 200)
-        self.assertIn("💾 Save &amp; Apply", raw)
+        self.assertIn(">Apply</button>", raw)
         self.assertIn("Manual MIDI Test", raw)
         self.assertIn("Automatic scenes", raw)
         self.assertIn("Resolver test", raw)
