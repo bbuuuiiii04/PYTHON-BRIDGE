@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: implementation-spec, code-grounded (citations verified at 4077794)
-last_verified_commit: 4077794
+last_verified_commit: 944bc83
 last_verified_date: 2026-07-03
 validation_scope: spec only until phases land; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---

@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: design-intent, code-grounded (all file:line citations verified at 4077794)
-last_verified_commit: 4077794
+last_verified_commit: 944bc83
 last_verified_date: 2026-07-03
 validation_scope: design only — nothing implemented; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED repo status unchanged
 ---

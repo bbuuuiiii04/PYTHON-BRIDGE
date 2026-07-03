@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 5db991f
+last_verified_commit: 944bc83
 last_verified_date: 2026-07-03
 validation_scope: software-only; LED Pad Phases 1-3 and Template Lab Phase 2 software-tested, hardware-unvalidated
 ---
