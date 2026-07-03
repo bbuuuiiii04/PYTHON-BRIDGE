@@ -265,8 +265,15 @@ class PadPlayback:
             raise ValueError("strobe playback requires safety.allow_strobe=true")
 
     def _poll_loop(self) -> None:
-        while not self._stop_poll.wait(2.0):
+        counter = 0
+        while not self._stop_poll.wait(0.25):
+            counter = self._poll_once(counter)
+
+    def _poll_once(self, counter: int) -> int:
+        self.tick()
+        if counter % 8 == 7:
             self._ownership.poll_owned()
+        return counter + 1
 
     def request_takeover(self) -> None:
         self._ownership.request_takeover()

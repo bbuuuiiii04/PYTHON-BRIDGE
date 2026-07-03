@@ -214,6 +214,42 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertEqual(colors[5], (255, 255, 255))
             self.assertEqual(first["spec"]["params"]["slot_colors"], second["spec"]["params"]["slot_colors"])
 
+    def test_update_ignores_wrong_or_missing_playing_name(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, playback, _path = self._service(td)
+
+            no_play = service.update({"name": "rt_groove_chase"})
+            service.play({"name": "rt_groove_chase"})
+            wrong_name = service.update({"name": "rt_twinkle"})
+
+            self.assertEqual(no_play, {"ok": True, "applied": False})
+            self.assertEqual(wrong_name, {"ok": True, "applied": False})
+            self.assertEqual(playback.update_calls, [])
+
+    def test_update_uses_unsaved_slot_fill_and_mono_chance(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, playback, _path = self._service(td)
+            service.session({"test_palette": "blue_cyan"})
+
+            service.play({"name": "rt_groove_chase"})
+            gradient = playback.play_calls[-1]["spec"]["params"]["slot_colors"]
+            updated = service.update(
+                {
+                    "name": "rt_groove_chase",
+                    "editor": {
+                        "look": {"scene_ref": "rt_groove_chase"},
+                        "params": {},
+                        "slot_fill": "random_with_mono_chance",
+                        "mono_chance": 1.0,
+                    },
+                }
+            )
+
+            self.assertTrue(updated["applied"])
+            mono = playback.update_calls[-1]["params"]["slot_colors"]
+            self.assertNotEqual(mono, gradient)
+            self.assertEqual(len({tuple(color) for color in mono[:5]}), 1)
+
     def test_ownership_required_and_takeover(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             playback = _FakePlayback()

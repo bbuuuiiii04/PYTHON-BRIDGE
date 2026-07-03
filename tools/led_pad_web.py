@@ -536,7 +536,18 @@ class LedPadService:
             multi=multi,
         ))
 
+    def _overlay_editor_slot_config(self, config: dict[str, Any], name: str, editor: dict[str, Any] | None) -> dict[str, Any]:
+        if not editor:
+            return config
+        engine = config.setdefault("color_engine", {})
+        if "slot_fill" in editor:
+            engine.setdefault("slot_fill_strategy_by_look", {})[name] = str(editor["slot_fill"])
+        if "mono_chance" in editor:
+            engine.setdefault("slot_mono_chance_by_look", {})[name] = float(editor["mono_chance"])
+        return config
+
     def _play_spec(self, config: dict[str, Any], name: str, editor: dict[str, Any] | None) -> tuple[dict[str, Any], float]:
+        config = self._overlay_editor_slot_config(config, name, editor)
         look, params, cue_beats = self._look_state(config, name, editor)
         scene_ref = str(look.get("scene_ref", ""))
         if scene_ref not in REALTIME_EFFECT_NAMES:
@@ -574,13 +585,19 @@ class LedPadService:
 
     def update(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name") or self._playing_name).strip()
+        playback_status = self._playback.status()
+        if not playback_status.get("playing"):
+            self._playing_name = ""
+            self._last_play_editor = None
+        if not self._playing_name or name != self._playing_name:
+            return {"ok": True, "applied": False}
         editor = payload.get("editor") if isinstance(payload.get("editor"), dict) else None
         with self._lock:
             config = copy.deepcopy(self._draft)
         spec, _cue_beats = self._play_spec(config, name, editor)
         self._playback.update(spec)
         self._last_play_editor = copy.deepcopy(editor) if editor else self._last_play_editor
-        return {"ok": True, "spec": spec, "playback": self._playback.status()}
+        return {"ok": True, "applied": True, "spec": spec, "playback": self._playback.status()}
 
     def stop(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
         self._playback.stop()

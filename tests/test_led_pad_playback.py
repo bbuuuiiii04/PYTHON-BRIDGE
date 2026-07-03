@@ -104,6 +104,20 @@ class LedPadPlaybackTests(unittest.TestCase):
         self.assertGreater(spec_a.beat_division, 0)
         self.assertTrue(spec_a.sync_mode)
 
+    def test_poll_once_ticks_every_wake_and_polls_every_eighth(self) -> None:
+        playback = PadPlayback.__new__(PadPlayback)
+        ticks: list[int] = []
+        polls: list[int] = []
+        playback.tick = lambda: ticks.append(1)
+        playback._ownership = type("Owner", (), {"poll_owned": lambda _self: polls.append(1)})()
+
+        counter = 0
+        for _ in range(8):
+            counter = playback._poll_once(counter)
+
+        self.assertEqual(len(ticks), 8)
+        self.assertEqual(len(polls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
