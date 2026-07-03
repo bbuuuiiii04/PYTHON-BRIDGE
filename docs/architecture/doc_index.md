@@ -47,6 +47,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | --- | --- | --- |
 | Change contracts | `docs/agents/change_contracts.md`, `docs/agents/change_contracts.yml` | CURRENT AUTHORITATIVE — what must update when code changes; enforced by checkers. |
 | Drift detection | `docs/agents/drift_detection.md` | CURRENT AUTHORITATIVE. |
+| Agent lessons | `docs/agents/lessons/*.md` | CURRENT AUTHORITATIVE — agent lessons; verify before reuse. |
 | Task playbooks | `docs/agents/task_playbooks/*.md` (8) | CURRENT AUTHORITATIVE — per-task reading routes. |
 | Subsystem cards | `docs/subsystems/{core_bridge,rekordbox_readers,soundswitch_output,laser,led_govee,runtime_commands,config,tests}.md` | CURRENT — compact, code-verified cards. |
 | Status / truth | `docs/status/*.md` (7) | CURRENT — project status, feature/support/validation matrices, known limitations, active work. |

@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: tooling-verified
-last_verified_commit: 56a505e
-last_verified_date: 2026-06-29
-validation_scope: local Graphify CLI 0.9.2, code-only graph, no cloud keys, no bridge/runtime/hardware action
+last_verified_commit: 9705363
+last_verified_date: 2026-07-03
+validation_scope: local Graphify CLI 0.9.2, code-only graph, no cloud keys, manual-query only, no bridge/runtime/hardware action
 ---
 
 # Graphify Setup
@@ -55,6 +55,29 @@ rm -rf graphify-out
 graphify extract . --no-cluster
 graphify cluster-only . --no-label
 ```
+
+## Freshness & Blind Spots
+
+Rebuild before orientation-heavy work, after deletion/refactor sweeps, or after multi-day commit
+bursts. A quick freshness check:
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+import subprocess
+git_ts = int(subprocess.check_output(["git", "log", "-1", "--format=%ct"]).strip())
+graph = Path("graphify-out/graph.json")
+print("graph_fresh", graph.exists() and int(graph.stat().st_mtime) >= git_ts)
+PY
+```
+
+Known blind spots: dynamic imports, config-driven dispatch, environment-flag paths, hardware-only
+behavior, gitignored `local/` data, generated captures, and any runtime state outside the checked-in
+code graph. The graph is an orientation lead, never authority. `INFERRED` and `AMBIGUOUS` edges
+need source and test confirmation before they become claims.
+
+Manual-only policy is unchanged: no hooks, no CI, no read-interception workflow, and no post-commit
+Graphify automation unless the operator explicitly changes that decision.
 
 For quick local orientation after small code edits, an incremental update is acceptable:
 

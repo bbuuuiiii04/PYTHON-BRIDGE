@@ -40,6 +40,7 @@ Each item points at an on-disk spec. **A spec is a plan, not proof of implementa
 | AWR-005 | Runtime command test inventory | open — standing follow-up; not yet exercised as of 2026-07-03 despite qualifying feature PRs | Map parser/handler tests and add missing ones only in a separate code/test PR. |
 | AWR-006 | Contract coverage audit | open — standing follow-up; not yet exercised as of 2026-07-03 despite qualifying feature PRs | After a feature PR, tighten `docs/agents/change_contracts.yml` around any files agents had to rediscover. |
 | AWR-007 | Active-doc lifecycle check (orphan + stale) | done | Implemented in `tools/check_agent_contracts.py`: orphan coverage (Codex, `574247d`/`1420aad`) + stale-classified flag (direct, 2026-06-29). Record at `docs/plans/completed/docs_orphan_check_spec.md`; tests in `tests/test_docs_orphan_check.py`. Resolved the one live stale instance by deleting the superseded rekordbox continuation prompt (Git preserves). |
+| AWR-115 | Agent lessons store | done | Seeded 2026-07-03 with 7 evidence-cited lessons (`docs/agents/lessons/`); add new lessons only with commit-cited evidence. |
 
 ## Future roadmap
 
