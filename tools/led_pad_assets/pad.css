@@ -113,7 +113,10 @@ main { padding: var(--pad); }
 .drawer-foot { bottom: 0; margin-top: auto; border-top: 1px solid var(--border); border-bottom: 0; padding-bottom: calc(var(--pad) + env(safe-area-inset-bottom)); }
 .editor-form { padding: var(--pad); overflow-y: auto; display: flex; flex-direction: column; gap: var(--pad); }
 .editor-form section { border-bottom: 1px solid var(--border); padding-bottom: var(--pad); }
-.editor-form label, .control-row { min-height: 40px; display: grid; grid-template-columns: minmax(120px, 1fr) 1.5fr auto; align-items: center; gap: 10px; margin: 8px 0; }
+.editor-form label:not(.control-row) { min-height: 40px; display: grid; grid-template-columns: minmax(120px, 1fr) 1.5fr auto; align-items: center; gap: 10px; margin: 8px 0; }
+.control-row { min-height: 40px; display: grid; grid-template-columns: minmax(120px, 1fr) 1.5fr auto auto; align-items: center; gap: 10px; margin: 8px 0; }
+.control-row output { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.default-tag { border: 1px solid var(--text-dim); color: var(--text-dim); border-radius: 999px; font-size: 10px; line-height: 1.6; padding: 1px 7px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
 .segmented, .cue-group { display: flex; gap: 6px; flex-wrap: wrap; }
 .segmented button.active, .cue-group button.active { background: var(--surface-3); border-color: var(--accent); }
 .cue-group input { width: 70px; min-height: 40px; }

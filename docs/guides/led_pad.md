@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 3e3dc81
+last_verified_commit: 6aa44fa
 last_verified_date: 2026-07-03
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, and the iOS/iPad touch pass; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, the iOS/iPad touch pass, and the editor unset-param-defaults fix; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -100,6 +100,31 @@ Logs are written to `/tmp/led_pad.log` and `/tmp/led_pad.err`.
 - Derive renderer controls from `REALTIME_EFFECT_PARAM_KEYS` and validate the full draft before
   writing live config.
 - Apply the draft to `config/led_look_director.json` with a `.bak-*` backup.
+
+## Editor unset-param defaults (2026-07-03)
+
+Most saved looks store no `params` at all — an unset key means "the renderer uses its built-in
+default," which is what actually plays, both in bridge automation and pad preview. The editor
+drawer now shows that real default instead of the control's minimum:
+
+- An unset control shows a small outline **default** tag next to its value. If the renderer has
+  no single fixed fallback for that control on the selected renderer (varies by renderer, or is
+  never actually read from `params`), the value reads **auto** instead of a guessed number.
+- Editing a control pins the value into the saved look (tag disappears) - this already matched
+  `save_look`'s behavior of only writing params actually set; only the display was wrong before.
+- A ghost **↺** "Reset to default" button appears once a control is set. Clicking it deletes the
+  key from the editor draft, which puts the row back to showing the renderer default/auto.
+- The Renderer dropdown for cloud-scene looks (a `scene_ref` not in the local realtime render
+  list) now shows the scene ref with a cloud icon instead of rendering blank.
+
+Defaults were hand-extracted from `govee_frame_renderer.py`'s literal `params.get(key, DEFAULT)`
+fallbacks into `led_pad_controls.py::CONTROL_META` (`travel_beats`/`width` differ by scene_ref via
+`PARAM_DEFAULT_OVERRIDES`); `tests/test_led_pad_controls.py::LedPadControlDefaultsTests` pins every
+hand-extracted value against the exact renderer source text, so an unrelated future change to a
+renderer fallback fails that test instead of silently drifting from the pad UI. Several
+sync-timing keys (`sync_mode`, `heads`, `max_pulses`, `spawn_on_wrap`, `reverse`) are allowlisted
+on every scene via `_SYNC_PARAM_KEYS` but are not actually consumed by most renderers; those show
+as auto rather than an invented number. Software-tested only; no runtime/API/save-format change.
 
 ## Template Lab
 

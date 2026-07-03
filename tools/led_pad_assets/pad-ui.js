@@ -202,8 +202,13 @@
   function renderRendererSelect() {
     const groups = {};
     for (const render of state.renders) (groups[render.group] ||= []).push(render);
-    $("rendererSelect").innerHTML = Object.entries(groups).map(([group, renders]) => `<optgroup label="${esc(group)}">${renders.map(r => `<option value="${esc(r.name)}">${esc(r.label)}</option>`).join("")}</optgroup>`).join("");
-    $("rendererSelect").value = state.editor.look.scene_ref;
+    let html = Object.entries(groups).map(([group, renders]) => `<optgroup label="${esc(group)}">${renders.map(r => `<option value="${esc(r.name)}">${esc(r.label)}</option>`).join("")}</optgroup>`).join("");
+    const sceneRef = state.editor.look.scene_ref;
+    if (sceneRef && !state.renderMap.has(sceneRef)) {
+      html = `<option value="${esc(sceneRef)}" selected disabled>☁ ${esc(sceneRef)} — cloud scene (not previewable)</option>` + html;
+    }
+    $("rendererSelect").innerHTML = html;
+    $("rendererSelect").value = sceneRef;
   }
   function renderControls(render) {
     const basic = $("controlRows"), adv = $("advancedRows");
@@ -221,16 +226,30 @@
       state.editor.params[key] = value;
       const out = document.querySelector(`[data-output="${CSS.escape(key)}"]`);
       if (out) out.textContent = String(value);
+      const resetBtn = document.querySelector(`[data-reset="${CSS.escape(key)}"]`);
+      if (resetBtn) { resetBtn.style.visibility = "visible"; resetBtn.removeAttribute("tabindex"); }
+      setDirty(); liveUpdate();
+    }));
+    document.querySelectorAll("[data-reset]").forEach(btn => btn.addEventListener("click", ev => {
+      const key = ev.currentTarget.dataset.reset;
+      delete state.editor.params[key];
+      renderControls(render);
       setDirty(); liveUpdate();
     }));
   }
   function controlRow(c) {
-    const value = state.editor.params[c.key] ?? (c.kind === "bool" ? false : c.min ?? "");
+    const isSet = Object.prototype.hasOwnProperty.call(state.editor.params, c.key);
+    const hasDefault = c.default !== null && c.default !== undefined;
+    const value = isSet ? state.editor.params[c.key] : (hasDefault ? c.default : (c.kind === "bool" ? false : c.min ?? ""));
+    const outputText = isSet ? String(value) : (hasDefault ? String(c.default) : "auto");
     let input = "";
     if (c.kind === "bool") input = `<input data-param="${esc(c.key)}" type="checkbox" ${value ? "checked" : ""}>`;
     else if (c.kind === "choice") input = `<select data-param="${esc(c.key)}">${(c.choices || []).map(v => `<option value="${esc(v)}" ${String(v)===String(value)?"selected":""}>${esc(v)}</option>`).join("")}</select>`;
     else input = `<input data-param="${esc(c.key)}" type="number" min="${esc(c.min ?? "")}" max="${esc(c.max ?? "")}" step="${esc(c.step ?? 1)}" value="${esc(value)}">`;
-    return `<label class="control-row"><span>${esc(c.label)}</span>${input}<output data-output="${esc(c.key)}">${esc(value)}</output></label>`;
+    const tag = isSet ? "" : `<span class="default-tag">default</span>`;
+    const resetHidden = isSet ? "" : ` style="visibility:hidden" tabindex="-1"`;
+    const reset = `<button type="button" class="icon ghost reset-param" data-reset="${esc(c.key)}" aria-label="Reset to default" title="Reset to default"${resetHidden}>↺</button>`;
+    return `<label class="control-row"><span>${esc(c.label)}</span>${input}<output data-output="${esc(c.key)}">${esc(outputText)}${tag}</output>${reset}</label>`;
   }
   async function playEditor(takeover) {
     try {

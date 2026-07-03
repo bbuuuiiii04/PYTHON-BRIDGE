@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: f8573fd
+last_verified_commit: 6aa44fa
 last_verified_date: 2026-07-03
-validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, and QR same-network access software-tested, hardware-unvalidated
+validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, and the pad editor unset-param-defaults fix software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem
@@ -31,7 +31,11 @@ Authoritative code:
 - `govee_owner_state.py`
 - `beat_sync_engine.py`
 - `state_manager.py` LED automation dispatch seam
-- `led_pad_controls.py` LED Pad render/control catalog
+- `led_pad_controls.py` LED Pad render/control catalog. `CONTROL_META[key]["default"]` mirrors
+  each renderer's actual unset-param fallback in `govee_frame_renderer.py` (hand-extracted, `None`
+  when no single static fallback exists); `PARAM_DEFAULT_OVERRIDES` covers the two keys
+  (`travel_beats`, `width`) whose real default differs by scene_ref. See `docs/guides/led_pad.md`
+  for the operator-facing summary and `tests/test_led_pad_controls.py` for the source-text pin.
 - `tools/led_pad_playback.py` standalone LED Pad realtime playback shell
 - `tools/led_pad_web.py` local LED Pad web service
 - `tools/led_pad_lab.py` Template Lab draft registry and pad-only renderer overlay

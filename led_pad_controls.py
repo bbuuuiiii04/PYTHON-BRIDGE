@@ -26,6 +26,7 @@ def _meta(
     choices: tuple[Any, ...] = (),
     help: str,
     advanced: bool = False,
+    default: Any = None,
 ) -> dict[str, Any]:
     return {
         "label": label,
@@ -36,33 +37,44 @@ def _meta(
         "choices": choices,
         "help": help,
         "advanced": advanced,
+        "default": default,
     }
 
 
+# `default` is the renderer's ACTUAL unset-param fallback, hand-extracted from
+# govee_frame_renderer.py (see tests/test_led_pad_controls.py for the source
+# lines this is audited against, and docs/guides/led_pad.md for the audit
+# table). `None` means "no single static fallback exists" for this key across
+# ALL scene_refs that expose it — either because the renderer never actually
+# reads that key from params (it is only present because it rides the
+# `_SYNC_PARAM_KEYS` blanket allowlist added to every scene), or because the
+# static fallback genuinely differs by scene_ref (see PARAM_DEFAULT_OVERRIDES
+# below). The UI shows "auto" for `None` defaults rather than inventing a
+# number.
 CONTROL_META: dict[str, dict[str, Any]] = {
-    "travel_beats": _meta("Motion Beats", "number", min=0.01, max=32, step=0.25, help="How many beats the motion takes.", advanced=True),
-    "loop_beats": _meta("Motion Beats (loop)", "number", min=0.01, max=32, step=0.25, help="How many beats the motion loop takes.", advanced=True),
-    "breath_beats": _meta("Breath Beats", "number", min=0.01, max=32, step=0.25, help="How many beats a breathing cycle takes."),
-    "burst_beats": _meta("Burst Beats", "number", min=0.01, max=16, step=0.25, help="How many beats the burst takes."),
-    "drift_beats": _meta("Color Drift Beats", "number", min=0.01, max=64, step=0.25, help="How many beats color drift takes."),
-    "duration_beats": _meta("Cycle Beats", "number", min=0, max=64, step=1, help="How many beats the cue cycle covers."),
-    "width": _meta("Head Width", "number", min=0.01, max=4, step=0.05, help="How wide the moving head appears.", advanced=True),
-    "trail_beats": _meta("Trail Beats", "number", min=0, max=8, step=0.25, help="How long the motion trail lasts.", advanced=True),
-    "trail": _meta("Trail Length", "int", min=0, max=60, step=1, help="How many LEDs remain behind the moving head."),
-    "heads": _meta("Comet Count", "int", min=1, max=16, step=1, help="How many comets can overlap.", advanced=True),
-    "span_beats": _meta("Span Beats", "number", min=0, max=32, step=0.25, help="How many beats the span covers."),
-    "period_beats": _meta("Breath Beats", "number", min=0, max=32, step=0.25, help="How many beats a pulse takes."),
-    "floor": _meta("Minimum Glow", "number", min=0, max=1, step=0.05, help="The dimmest point in the pulse."),
-    "density": _meta("Sparkle Density", "number", min=0, max=1, step=0.05, help="How many sparkles appear."),
-    "duty": _meta("Strobe Duty", "number", min=0, max=1, step=0.05, help="How much of the strobe cycle stays lit."),
-    "subdivision": _meta("Strobe Rate", "choice", choices=(1, 2, 4, 8), help="Beat subdivision used for strobe timing."),
-    "speed": _meta("Sweep Speed", "number", min=0, max=16, step=0.25, help="How quickly the sweep moves."),
-    "decay": _meta("Fade Decay", "number", min=0, max=16, step=0.25, help="How quickly the burst fades."),
-    "sync_mode": _meta("Sync Mode", "choice", choices=("retrigger", "overlap", "continuous"), help="How motion responds to beat triggers.", advanced=True),
-    "beat_division": _meta("Beat Division", "number", min=0.01, max=16, step=0.25, help="How often beat triggers fire.", advanced=True),
-    "max_pulses": _meta("Max Comets", "int", min=1, max=16, step=1, help="Maximum overlapping comets.", advanced=True),
-    "spawn_on_wrap": _meta("Spawn on Loop Wrap", "bool", help="Start a comet when the beat wraps backward.", advanced=True),
-    "reverse": _meta("Reverse Direction", "bool", help="Run motion in the opposite direction.", advanced=True),
+    "travel_beats": _meta("Motion Beats", "number", min=0.01, max=32, step=0.25, help="How many beats the motion takes.", advanced=True, default=None),
+    "loop_beats": _meta("Motion Beats (loop)", "number", min=0.01, max=32, step=0.25, help="How many beats the motion loop takes.", advanced=True, default=4.0),
+    "breath_beats": _meta("Breath Beats", "number", min=0.01, max=32, step=0.25, help="How many beats a breathing cycle takes.", default=8.0),
+    "burst_beats": _meta("Burst Beats", "number", min=0.01, max=16, step=0.25, help="How many beats the burst takes.", default=1.0),
+    "drift_beats": _meta("Color Drift Beats", "number", min=0.01, max=64, step=0.25, help="How many beats color drift takes.", default=32.0),
+    "duration_beats": _meta("Cycle Beats", "number", min=0, max=64, step=1, help="How many beats the cue cycle covers.", default=32.0),
+    "width": _meta("Head Width", "number", min=0.01, max=4, step=0.05, help="How wide the moving head appears.", advanced=True, default=None),
+    "trail_beats": _meta("Trail Beats", "number", min=0, max=8, step=0.25, help="How long the motion trail lasts.", advanced=True, default=None),
+    "trail": _meta("Trail Length", "int", min=0, max=60, step=1, help="How many LEDs remain behind the moving head.", default=3),
+    "heads": _meta("Comet Count", "int", min=1, max=16, step=1, help="How many comets can overlap.", advanced=True, default=None),
+    "span_beats": _meta("Span Beats", "number", min=0, max=32, step=0.25, help="How many beats the span covers.", default=1.0),
+    "period_beats": _meta("Breath Beats", "number", min=0, max=32, step=0.25, help="How many beats a pulse takes.", default=4.0),
+    "floor": _meta("Minimum Glow", "number", min=0, max=1, step=0.05, help="The dimmest point in the pulse.", default=0.1),
+    "density": _meta("Sparkle Density", "number", min=0, max=1, step=0.05, help="How many sparkles appear.", default=0.2),
+    "duty": _meta("Strobe Duty", "number", min=0, max=1, step=0.05, help="How much of the strobe cycle stays lit.", default=0.5),
+    "subdivision": _meta("Strobe Rate", "choice", choices=(1, 2, 4, 8), help="Beat subdivision used for strobe timing.", default=4),
+    "speed": _meta("Sweep Speed", "number", min=0, max=16, step=0.25, help="How quickly the sweep moves.", default=1.0),
+    "decay": _meta("Fade Decay", "number", min=0, max=16, step=0.25, help="How quickly the burst fades.", default=0.6),
+    "sync_mode": _meta("Sync Mode", "choice", choices=("retrigger", "overlap", "continuous"), help="How motion responds to beat triggers.", advanced=True, default=None),
+    "beat_division": _meta("Beat Division", "number", min=0.01, max=16, step=0.25, help="How often beat triggers fire.", advanced=True, default=1.0),
+    "max_pulses": _meta("Max Comets", "int", min=1, max=16, step=1, help="Maximum overlapping comets.", advanced=True, default=None),
+    "spawn_on_wrap": _meta("Spawn on Loop Wrap", "bool", help="Start a comet when the beat wraps backward.", advanced=True, default=None),
+    "reverse": _meta("Reverse Direction", "bool", help="Run motion in the opposite direction.", advanced=True, default=None),
     "color": _meta("Color", "rgb", help="Fixed RGB color."),
     "bg": _meta("Background Color", "rgb", help="Fixed RGB background color."),
     "color_a": _meta("Color A", "rgb", help="First fixed RGB color."),
@@ -71,6 +83,22 @@ CONTROL_META: dict[str, dict[str, Any]] = {
 
 for _key, _entry in CONTROL_META.items():
     _entry["color_sig"] = _key in _COLOR_SIG_KEYS
+
+
+# Per-scene_ref default overrides for keys whose renderer fallback genuinely
+# differs by scene_ref (confirmed by reading govee_frame_renderer.py; see
+# docs/guides/led_pad.md for the audit table with exact source lines). Only
+# `travel_beats` and `width` diverge today; every other key in CONTROL_META is
+# either uniform across every scene_ref that actually reads it from `params`,
+# or is never read from `params` at all (default None / "auto").
+PARAM_DEFAULT_OVERRIDES: dict[str, dict[str, Any]] = {
+    "groove_center_chase": {"travel_beats": 1.0},
+    "post_drop_firework_chase": {"travel_beats": 1.0},
+    "rt_post_drop_chase": {"travel_beats": 2.0, "width": 0.8},
+    "rt_post_drop_nebula": {"travel_beats": 2.0, "width": 0.8},
+    "rt_drop_chase": {"travel_beats": 2.0, "width": 0.8},
+    "rt_drop_nebula": {"travel_beats": 2.0, "width": 0.8},
+}
 
 
 RENDER_GROUPS: dict[str, tuple[str, ...]] = {
@@ -155,9 +183,12 @@ RENDER_LABELS: dict[str, str] = {
 
 def controls_for(scene_ref: str) -> list[dict[str, Any]]:
     controls: list[dict[str, Any]] = []
+    overrides = PARAM_DEFAULT_OVERRIDES.get(str(scene_ref), {})
     for key in sorted(REALTIME_EFFECT_PARAM_KEYS.get(str(scene_ref), frozenset())):
         meta = dict(CONTROL_META[key])
         meta["key"] = key
+        if key in overrides:
+            meta["default"] = overrides[key]
         controls.append(meta)
     controls.sort(key=lambda item: (bool(item.get("advanced")), str(item.get("label", ""))))
     return controls
