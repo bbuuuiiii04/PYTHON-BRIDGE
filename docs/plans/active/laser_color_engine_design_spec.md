@@ -115,8 +115,17 @@ pack render (position/movement/intensity + AUTHORED CH8/CH9)
   `led_models.py`, which contains neither). The design adds a public engine accessor
   returning the current anchor RGB (derived from `_anchor_p`/`_p_to_rgb`), called on the
   StateManager thread and published into the color producer's snapshot.
-- **RGB→(CH8, CH9) mapper = pure function** over the encoding chart (Part E #1); table-driven
-  config so chart updates never touch code.
+- **Fixed-color model (operator 2026-07-04).** The laser has **no RGB wheel** — CH8 selects from
+  a fixed color set: **Red, Green, Blue, Cyan, Yellow, Purple, White** (plus effect/multi-color
+  ranges). So the mapper is a **nearest-of-7 quantizer** over the LED anchor RGB, not a continuous
+  curve — table-driven config (one CH8 value per fixed color + effect ranges + CH9 semantics) so
+  chart updates never touch code. Notes: the LED hue band excludes yellow/orange, so nearest-color
+  will rarely/never select Yellow; White is reserved for the white-moment signal and `white_sand`
+  (Part E #5-6), never nearest-color output.
+- **Per-drop color variation comes for free** — the LED engine already varies color per drop
+  section (`drop_section_index`, per-cue seeded variation), and this design samples the LED engine
+  at phrase anchors, so each drop's laser color follows automatically (quantized to the fixed set).
+  A drop landing mid-override-fade (Stream Deck doc C.2) samples the blended color — acceptable.
 
 **Scripted vs non-scripted gate (locked, now structural).** The player's own selection type
 decides: `_AutoloopSelection` → merge injects; `_ScriptedSelection` → untouched. No separate
@@ -240,7 +249,10 @@ for its whole window.)
    - **Live visual validation** — required regardless for the **ambiguous CH8 multi-color
      effects** (operator: only knowable visually); a supervised sweep with the beam contained,
      scheduled by the operator.
-   The mapper is table-driven config, so the chart landing later costs no rework.
+   The mapper is table-driven config, so the chart landing later costs no rework. **The
+   fixed-color model (Part B) shrinks the ask to:** one CH8 value per fixed color (Red, Green,
+   Blue, Cyan, Yellow, Purple, White), the boundaries of the effect/multi-color/water-flow
+   ranges (the ambiguous part needing live visual validation), and CH9 speed/direction semantics.
 2. **Scripted stand-down mechanism — RESOLVED.** Structural: injection lives in the autoloop
    render path only (Part B merge seam); scripted/diagnostic/idle paths never inject.
 3. **Manual pad note — RESOLVED (corrected).** Same wire note as smart-drop's old note
@@ -270,6 +282,14 @@ for its whole window.)
 7. **CH11 strobe — deferred by operator (2026-07-04): the bridge does not touch it now**;
    whether the bridge may ever control laser strobe is a future decision. The chart work in #1
    should still record CH11 semantics when convenient.
+8. **Post-drop settle (operator-accepted 2026-07-04; chart-gated).** The drop fires at full
+   palette color/speed; across the **post-drop autoloop** CH9 speed eases down so the moment
+   decays instead of hard-stopping (CH8 keeps the family color). Rides the existing drop-lifecycle
+   events; pure mapper behavior. **Gated on exact CH8/CH9 behavior from the chart (#1)** — spec
+   the ease curve only once CH9's value→speed semantics are known.
+9. **Drop spotlight (cross-reference only — zero laser code).** The operator-armed one-shot
+   "lasers own the room" moment (Govees black out for the next drop window) is an LED-side
+   feature; design lives in `streamdeck_palette_control_design_spec.md` Part C.9.
 
 ## Part F — Evidence (file:line, HEAD `bd96b32`)
 

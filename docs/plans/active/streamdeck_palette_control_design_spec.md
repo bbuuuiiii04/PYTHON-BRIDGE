@@ -30,9 +30,15 @@ surface"** the color-engine spec already designed (`docs/plans/completed/led_col
 
 In scope (v1, LED):
 - Top-row pads select **color palettes**; a two-tap gesture **queues** (next track) then
-  **overrides** (current track); a dedicated pad **locks/unlocks**.
+  **overrides** (current track, applied as a beat-synced fade completing at the next phrase —
+  C.2); a dedicated pad **locks/unlocks**.
 - A manual-only **`white_sand`** palette (Stream-Deck-only, never auto-selected) that renders LEDs
   white/off-white and drives lasers white.
+- **LED-blackout toggle pad** (operator-accepted 2026-07-04): LEDs off / LEDs back on, so the
+  operator can compose LED-only, LED+laser, and laser-only moments live (C.8).
+- **Drop-spotlight arm pad** (operator-accepted 2026-07-04): a one-shot, operator-armed "next drop
+  is lasers-only" moment — Govees black out for the drop window, then auto-restore (C.9). Armed
+  manually so it stays special: never automatic, never every drop, never every track.
 - **Visual feedback**: each pad renders an icon reflecting its palette/action and live state.
 - **Pinned pad layout** (operator 2026-07-04): palette pads stay on fixed keys; static-look pads
   move to the bottom row (replaces today's "waterfall" fill — see Part C.1).
@@ -108,13 +114,15 @@ windows during scripted tracks; lasers stay fully authored (see laser doc Part A
 **1. Layout (LOCKED, operator 2026-07-04 — pinned rows, waterfall retired).** Stream Deck 3×5, ch3.
 - **Top row (keys 0-4)** = the 5 auto palettes in config order:
   `blue_cyan · deep_ocean · indigo · violet · crimson`.
-- **Row 2:** key 5 = `white_sand`, key 6 = lock/unlock. Keys 7-9 = spare (static-look overflow).
+- **Row 2:** key 5 = `white_sand`, key 6 = lock/unlock, key 7 = LED-blackout toggle (C.8),
+  key 8 = drop-spotlight arm (C.9). Key 9 = spare (static-look overflow).
 - **Bottom row (keys 10-14)** = static looks, **filling left→right** sorted by note (today: 3 bound).
-  Overflow beyond 5 goes to spare keys 9→7; anything past that is dropped with a log line.
-- **Palette pad notes are bridge-assigned, outside the 36-50 static-look range** so SS-learned
-  bindings can never collide: ch2 notes **51-55** (palettes, config order), **56** (`white_sand`),
-  **57** (lock). Declared once in bridge config (Part C.6) and carried to the deck via the feedback
-  file (Part C.7) — the deck script hardcodes no palette names or notes.
+  Overflow beyond 5 goes to spare key 9; anything past that is dropped with a log line.
+- **Palette/control pad notes are bridge-assigned, outside the 36-50 static-look range** so
+  SS-learned bindings can never collide: ch2 notes **51-55** (palettes, config order), **56**
+  (`white_sand`), **57** (lock), **58** (LED blackout), **59** (spotlight arm). Declared once in
+  bridge config (Part C.6) and carried to the deck via the feedback file (Part C.7) — the deck
+  script hardcodes no palette names or notes.
 
 **2. Gesture (LOCKED; state machine finalized 2026-07-04).** No timers, no double-press windows —
 the gesture is pure state:
@@ -125,10 +133,20 @@ the gesture is pure state:
   replaced by another pad. Pressing the currently-active palette's pad queues it (= "keep it next
   track too"); pressing it again overrides (= freeze it this track). No special-casing; `white_sand`
   follows the identical rules.
-- **Override mechanics:** apply immediately (`set_palette`) + suppress drop-snap for the remainder
-  of the current track (new engine flag, cleared in the new-track block — see C.4-engine). The
-  override **explicitly consumes the queue** (engine `set_palette` alone would leave a stale
-  `_queued_palette` to re-apply at the boundary — :736-741 does not clear it).
+- **Override mechanics (operator spin 2026-07-04 — fade, not jump):** on the override press the
+  LED color **fades from the current palette to the target as a beat-synced blend, completing at
+  the next smart-phrasing phrase anchor, capped at 32 beats** (whichever comes sooner; if the
+  anchor is unknown, the 32-beat cap alone applies). The blend interpolates the engine's anchor in
+  p-space, which by construction stays inside the allowed hue band (`_p_to_rgb` maps p∈[0,1] onto
+  the permitted stops only — no yellow/orange transit). After completion the target holds for the
+  rest of the track (drop-snap suppressed via a new engine flag, cleared in the new-track block —
+  see C.4-engine). The override **explicitly consumes the queue** (engine `set_palette` alone would
+  leave a stale `_queued_palette` to re-apply at the boundary — :736-741 does not clear it).
+  Interruption rules: any new manual action (queue, another override, `white_sand`, shift) restarts
+  or replaces the fade from the current blended position; lock pressed mid-fade lets the fade
+  complete, then locks the target. Laser side is unaffected — lasers are drop-visible only and
+  sample at phrase anchors, so a drop landing mid-fade simply quantizes the blended color
+  (acceptable; see laser doc Part B).
 
 **3. Lock & precedence (LOCKED, operator-decided 2026-07-04 — supersedes the plain M3 line).**
 **Manual input always wins; lock freezes only automatic selection.**
@@ -156,6 +174,9 @@ the gesture is pure state:
 3. `set_palette` on override path must clear `_queued_palette` (coordinator- or engine-side; pick
    one and test it).
 4. `white_sand` config entry with `weight: 0` (config + example config; no engine code).
+5. **Fade transition state** for override (C.2): `(from_anchor_p, to_anchor_p, start_beat,
+   end_beat)` advanced per render tick, target palette becomes `_current_palette` at completion;
+   cleared on new-track and replaced by any new manual action. Pure state + math — no I/O.
 
 **5. `white_sand` palette (LOCKED shape; color TBD).**
 - A 6th palette entry, **manual-only via `weight: 0`** (mechanism confirmed, Part B). Same gesture
@@ -190,10 +211,11 @@ the gesture is pure state:
   gitignored path), atomically (`tmp` + `rename`), from a **dedicated writer thread** in the
   coordinator — event-driven on palette-state change, debounced ~50 ms. **Never from the 200 Hz
   push loop** (no-filesystem-I/O invariant, AGENTS §6).
-- **Schema (v1):** `{v: 1, lock: bool, palettes: [{name, note, rgb: [r,g,b], state:
-  "active"|"queued"|"inactive"}], seq: int}` — list order = display order (5 palettes then
-  `white_sand`); `rgb` = representative swatch computed by the engine (`_palette_center`/`_p_to_rgb`
-  derivation); `seq` monotonic for staleness checks.
+- **Schema (v1):** `{v: 1, lock: bool, led_blackout: bool, spotlight: "off"|"armed"|"active",
+  palettes: [{name, note, rgb: [r,g,b], state: "active"|"queued"|"inactive"|"fading"}], seq: int}`
+  — list order = display order (5 palettes then `white_sand`); `rgb` = representative swatch
+  computed by the engine (`_palette_center`/`_p_to_rgb` derivation); `seq` monotonic for staleness
+  checks.
 - **The deck script reads + renders:** poll the file's mtime in its existing 1 Hz loop (and
   immediately after its own presses); palette pads render swatch + name with state treatment
   **active = highlighted, queued = pulsing/dim, inactive = muted**; lock pad renders a lock/unlock
@@ -202,6 +224,33 @@ the gesture is pure state:
   unaffected. Palette→color logic stays in the bridge; the script only draws.
 - *(Alternative considered: MIDI-back to the script — lower latency but needs an input port added;
   deferred in favor of the file. 1 s icon latency accepted; press feedback stays instant/local.)*
+
+**8. LED-blackout toggle pad (LOCKED, operator-accepted 2026-07-04).** Key 7 toggles the Govees
+off and **back on** — composing LED-only, LED+laser, and laser-only moments live (lasers are
+independently dark outside drops and have their own blackout pad).
+- Wiring is nearly free: `Ev.LED_BLACKOUT` / `Ev.LED_CLEAR_BLACKOUT` and the matching runtime
+  commands already exist (`models.py:267-268`, `runtime_status.py:427,440` — the LED Pad web
+  takeover path). The pad's note-on flips a coordinator-held toggle that emits the corresponding
+  event; the pad icon renders from `led_blackout` in the feedback file.
+- **Owner discipline (lesson from the laser blackout review):** the manual toggle and the
+  drop-spotlight window (C.9) both drive LED blackout — they must be **separate owners** (event
+  payload `reason`), OR'd at the LED dispatch layer, so a spotlight auto-restore can never clear a
+  manually-toggled blackout and vice versa. Codex spec pins the exact seam + test.
+
+**9. Drop-spotlight arm pad (LOCKED, operator-accepted 2026-07-04 — armed one-shot, never
+automatic).** Key 8 arms a one-shot "lasers own the room" moment:
+- **Arm** (press) → pad pulses (`spotlight: "armed"`). **At the next drop impact** on the active
+  deck, the coordinator black-outs the Govees (spotlight owner) for the drop window; lasers —
+  visible exactly then, per the drop-only setup — carry the moment alone. **Auto-restore** at the
+  end of the drop window, then the pad returns to `off` (one-shot; re-arm for another).
+- **Disarm** = press again while armed. Arming state **auto-clears on track change** (an armed
+  spotlight never carries into a track the operator didn't aim it at).
+- **Drop window** = drop impact → end of the drop role per smart-phrasing, capped at 32 beats
+  (defaulted; tune later). **Fail-open rules:** restore LEDs on ANY of window end / role change /
+  track change / stop / manual LED-blackout toggle interaction — a spotlight can never latch the
+  Govees dark. Uses only deterministic inputs (drop lifecycle + phrase roles), no heuristics —
+  rarity comes from the operator arming it, which is what keeps it a special moment.
+- Zero laser code; the laser doc carries a one-line cross-reference only.
 
 ## Part D — Open items
 
@@ -216,7 +265,11 @@ the gesture is pure state:
    dispatch first (or alongside); palette control second.
 4. **Closed this pass:** 1-track override mechanism (C.2/C.4), manual-only mechanism (weights,
    Part B), queue-vs-lock precedence (C.3, operator-decided), layout + notes + waterfall fix (C.1),
-   feedback schema/cadence (C.7), binding source (C.6).
+   feedback schema/cadence (C.7), binding source (C.6). **Feature-expansion round (operator picks
+   2026-07-04):** override-as-phrase-fade (C.2), LED-blackout toggle pad (C.8), drop-spotlight arm
+   pad (C.9); rejected: shift pad, per-drop laser hue variation as a feature (already emerges from
+   existing behavior), laser contrast mode (fixed-color fixture — see laser doc), final-drop
+   finisher.
 
 ## Part E — Evidence (file:line, HEAD `bd96b32`)
 
