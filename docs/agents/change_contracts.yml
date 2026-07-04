@@ -264,6 +264,9 @@ contracts:
       - midi_output.py
       - personality_resolver.py
       - state_manager.py
+      - laser_color_engine*.py
+      - soundswitch_laser_player.py
+      - config/laser_color_map.json
       - config/laser_director.example.json
     key_symbols:
       - LaserDirector
@@ -287,11 +290,45 @@ contracts:
       - docs/validation/hardware_validation_log.md
       - docs/agents/task_playbooks/change_laser_behavior.md
       - docs/architecture/laser_blackout_authority.md
+      - docs/architecture/laser_color_authority.md
       - docs/plans/active/laser_color_engine_design_spec.md
       - docs/status/active_work_registry.md
     forbidden_assumptions:
       - MIDI dry-run does not prove laser safety
       - mapped scene does not imply arbitrary fixture support
+
+  laser_color:
+    code_globs:
+      - led_color_engine.py
+      - led_dispatch_coordinator.py
+      - laser_color_engine*.py
+      - soundswitch_laser_player.py
+      - state_manager.py
+      - config/laser_color_map.json
+    inspect:
+      - docs/architecture/laser_color_authority.md
+      - docs/plans/active/laser_color_engine_design_spec.md
+      - docs/plans/active/laser_color_impl_spec.md
+      - docs/subsystems/laser.md
+      - docs/subsystems/led_govee.md
+      - docs/architecture/runtime_invariants.md
+    tests:
+      - python3 -m unittest tests.test_laser_color_engine
+      - python3 -m unittest tests.test_soundswitch_laser_player tests.test_led_color_engine tests.test_led_palette_control tests.test_state_manager_pack_driver
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
+    docs_update:
+      - docs/subsystems/laser.md
+      - docs/architecture/laser_color_authority.md
+      - docs/plans/active/laser_color_engine_design_spec.md
+      - docs/status/active_work_registry.md
+    forbidden_assumptions:
+      - enabled false, all-null tables, and missing snapshots must be byte-identical pass-through
+      - scripted, diagnostic, idle, stale, and masked frames must not inject color
+      - CH11 must never be written by laser color plumbing
+      - render and push-tick paths must not gain I/O, locks, sleeps, or blocking work
 
   rekordbox_readers:
     code_globs:
