@@ -474,10 +474,15 @@ class TestColorEngineValid(unittest.TestCase):
         }
         cfg_data["color_engine"] = block
 
-        result = load_led_look_director_config_from_dict(cfg_data)
+        with self.assertLogs("rb_ss_bridge_v2.led_config", level="WARNING") as logs:
+            result = load_led_look_director_config_from_dict(cfg_data)
 
-        self.assertFalse(result.available)
-        self.assertIn("color_engine.palette_control.long_press_s must be a number in 0.15..2.0", result.errors)
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertIsNone(result.config.color_engine)
+        self.assertIn(
+            "color_engine.palette_control.long_press_s must be a number in 0.15..2.0",
+            "\n".join(logs.output),
+        )
 
 
 # ---------------------------------------------------------------------------
