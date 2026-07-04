@@ -11,8 +11,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # The package imports from the repo parent; `python3 -m rb_ss_bridge_v2`
 # fails when launched from inside the repo directory.
 BRIDGE_DIR="$(dirname "${REPO_ROOT}")"
-LOG_FILE="/tmp/bridge.log"
-PYTHON="/opt/homebrew/bin/python3"
+LOG_FILE="${LOG_FILE:-/tmp/bridge.log}"
+PYTHON="${PYTHON:-/opt/homebrew/bin/python3}"
 MONITOR_MARKER="RBSS_BRIDGE_MONITOR"
 MANUAL_MODE="${RBSS_BRIDGE_MANUAL:-0}"
 # Art-Net truth-check (U1 shadow capture) is a validation-only mode kept for
