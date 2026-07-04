@@ -1,18 +1,18 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: bd96b32
+last_verified_commit: 26d357f
 last_verified_date: 2026-07-04
-validation_scope: behavior contract only; feature not implemented — no software, live, or hardware validation implied; CH8/CH9 value chart pending operator inputs
+validation_scope: behavior contract plus software-tested Package 4 plumbing; shipped config disabled/all-null for pass-through; no live or hardware validation; CH8/CH9 value chart pending operator inputs
 ---
 
 # Laser Color Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; NOT YET IMPLEMENTED (design approved by operator 2026-07-04)
+Status: AUTHORITATIVE TARGET BEHAVIOR; PACKAGE 4 PLUMBING IMPLEMENTED/SOFTWARE-TESTED (design approved by operator 2026-07-04)
 
-This document defines how laser color is expected to behave once the bridge
-owns it. Behavior that differs from this document is a regression unless this
-document is intentionally updated. Code-grounded design detail lives in
+This document defines how laser color is expected to behave now that the bridge
+has the Package 4 color plumbing. Behavior that differs from this document is a
+regression unless this document is intentionally updated. Code-grounded design detail lives in
 `docs/plans/active/laser_color_engine_design_spec.md`.
 
 Sibling authorities: `drop_presentation_authority.md` (whether lasers fire at
@@ -27,6 +27,11 @@ authority and the lasers follow it** — the bridge deliberately overwrites the
 pack's authored CH8/CH9 on those frames. On **scripted tracks, the authored
 show is sovereign**: lasers play exactly the cue colors baked into the pack,
 and the color engine stands down completely.
+
+Package 4 ships this behavior disabled by config: `config/laser_color_map.json`
+has `enabled: false` and all CH8/CH9 values are `null`, so the software-tested
+runtime path is authored pass-through until the operator chart is filled and
+explicitly enabled.
 
 ## Vocabulary
 
@@ -99,9 +104,10 @@ and the color engine stands down completely.
 ## Chart Gating
 
 13. The chart gates **only the mapper's value table** — one CH8 value per
-    fixed color, effect-family range boundaries, CH9 speed semantics. All
-    plumbing (sampling, snapshot, merge seam, white-moment signal, settle and
-    rainbow hooks) is implementable now against a pass-through table.
+    fixed color, effect-family range boundaries, CH9 speed semantics. Package
+    4 implements the plumbing (sampling, snapshot, merge seam, white-moment
+    signal, settle and rainbow hooks) against the disabled/all-null pass-through
+    table.
 14. Chart sources, in leverage order: the fixture profile (operator has it);
     labeling the CH8/CH9 values already present in the pack; a supervised
     live visual pass for the ambiguous multi-color effects (operator: only
@@ -125,10 +131,10 @@ and the color engine stands down completely.
 
 ## Implementation Notes
 
-Planned home: sampler/quantizer/producer in `laser_color_engine.py`
-(mirroring `led_color_engine.py`), the merge seam in
-`soundswitch_laser_player.py`'s autoloop path, the white-moment flag published
-from the LED render side, and the chart at `config/laser_color_map.json`.
-A new public LED-engine accessor for "current anchor RGB" is required — no
-such API exists today. Design detail:
+Implemented home: sampler/quantizer/producer in `laser_color_engine.py`, the
+merge seam in `soundswitch_laser_player.py`'s Autoloop success path, the
+white-moment flag in `led_dispatch_coordinator.py`, same-tick wiring in
+`state_manager.py`, and the chart at `config/laser_color_map.json`.
+`led_color_engine.py` now exposes `color_state()` for the current anchor RGB
+without advancing RNG or mutating journey state. Design detail:
 `docs/plans/active/laser_color_engine_design_spec.md` Parts B, D, E.

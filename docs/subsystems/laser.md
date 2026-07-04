@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 12ffb09
+last_verified_commit: 26d357f
 last_verified_date: 2026-07-04
 validation_scope: software-only
 ---
@@ -40,6 +40,7 @@ Offline SoundSwitch pack boundary:
 - The pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender exist. `LaserSceneExecutor` has one injected backend slot; startup selects legacy MIDI, none/dry-run, or verified pack/Enttec from the optional default-off config. Physical MIDI and direct DMX remain mutually exclusive.
 - Pack backend startup, `StateManager` scripted frame driving, commands, copied RW-5 status, and native pack Autoloop scene-edge handoff are implemented in software. Laser policy, MIDI execution, blackout, and configured mappings stay unchanged; the executor now exposes the already-selected Autoloop scene so the pack driver can resolve canonical Autoloop bindings even on no-new-edge ticks when SoundSwitch is absent. Hardware remains unvalidated.
 - Blackout-mask migration Package 1 is implemented/software-tested: smart-side blackout owners and pending drop-window latches survive pack-backend note rejection, and `StateManager` ORs that smart-side state with the existing manual MIDI-input blackout at the single pack-player mask writer. Manual blackouts remain owned by the MIDI-input binding refcount and survive smart-side lifecycle wipes. MIDI-mode accepting-backend note on/off sequences are unchanged. No laser hardware, SoundSwitch, Rekordbox, LED, Govee, MIDI device, DMX, or Enttec validation was performed.
+- Laser color plumbing Package 4 is implemented/software-tested: StateManager samples LED color state into a pure `LaserColorSnapshot` and the pack player can overwrite CH8/CH9 only on healthy native Autoloop frames. The shipped `config/laser_color_map.json` is `enabled: false` with an all-null table, so live output remains authored pass-through and should be byte-identical to pre-package behavior until the operator CH8/CH9 chart lands. Scripted, diagnostic, masked, static-override, and CH11 behavior stay unchanged. Hardware remains unvalidated.
 - Smart Drop exact cue landings are handled in the shared `SmartPhrasingEngine`: the first live tick after a reset fires an exact drop beat once, without rounding near-misses forward.
 
 Authoritative code:
@@ -49,6 +50,7 @@ Authoritative code:
 - `laser_director.py`
 - `laser_executor.py`
 - `laser_decision_log.py`
+- `laser_color_engine.py`
 - `midi_output.py`
 - `personality_resolver.py`
 
@@ -58,6 +60,7 @@ Key symbols:
 - `LaserScene`
 - `LaserDirector`
 - `LaserSceneExecutor`
+- `LaserColorEngine`
 - `MidiOutput`
 - `PersonalityResolver`
 
@@ -68,9 +71,11 @@ Runtime flow:
 - `drop_lifecycle_mirror` defaults on. Allowed phrase-context impacts hold for the configured flat `drop_impact_beats`, then `post_drop`/fallback drop cycles fire only on autoloop ticks. Drop and post-drop cycle banks use usable-only shuffle bags that reset per track; a static configured drop scene remains valid for the at-anchor impact so an empty cyclable bank does not make the hit dark.
 - Setting `drop_lifecycle_mirror` to false preserves the previous ungated crossing and fixed post-drop-hold path (flag-OFF is byte-identical to pre-change EXCEPT the resume transition, which now also resets the executor: a benign phrase-bank reshuffle + active-scene clear; no dark, no drop leak). Director and executor lifecycle state reset on master/track/stop/resume transitions; director state also resets on scripted/idle transitions and personality application rebuilds it.
 - Blackout-mask migration: the transition blackout — the held `manual_blackout_on/off` note refcounted by `breakdown`/`master_switch` owners in `LaserSceneExecutor`, plus the Smart-Drop drop-window pending — now also drives the pack player's frame-level blackout through `StateManager._drive_pack_output`. Backend note rejection no longer discards smart owners; accepted MIDI backends still receive the same note on/off sequence. The manual laser-pad/web blackout stays in the separate MIDI-input binding refcount and must not be routed through executor `_mask_owners`, because executor lifecycle wipes intentionally clear only smart-side covers.
+- Laser color Package 4: the mapper is pure in-memory math and publishes an immutable same-tick snapshot. `LaserPackPlayer` merges that snapshot by copying the rendered Autoloop frame and writing only CH8/CH9; absence of a same-tick snapshot, disabled config, null table entries, scripted tracks, diagnostics, blackout, and static override all fall back to authored pack output.
 
 Config:
 - `config/laser_director.example.json`
+- `config/laser_color_map.json` ships disabled/all-null; later CH8/CH9 chart updates are config-only and require operator validation before enabling.
 - local ignored `config/laser_director.json`
 - launcher environment for `RBSS_LASER_CONFIG`
 - personality knobs: `drop_lifecycle_mirror` (default `true`), `max_drops_in_a_row`, `drop_impact_beats`, and operator-reserved future `post_drop_cycle_beats`; laser cycle cadence still comes from autoloop ticks. Deprecated leftover `pre_drop_scene` keys are ignored for load compatibility.
@@ -93,6 +98,7 @@ Tests:
 - otherwise inspect `tests/` and run relevant unittest equivalents
 - lifecycle coverage: `tests/test_drop_lifecycle.py`, `tests/test_laser_director_lifecycle.py`, and `tests/test_laser_executor_lifecycle.py`
 - blackout re-wire coverage: `tests/test_laser_blackout_rewire.py`
+- laser color plumbing coverage: `tests/test_laser_color_engine.py`
 - transitional mapping check: `python3 tools/check_laser_midi_sync.py`
 - Audit P4 coverage: `tests/test_midi_output.py`, `tests/test_laser_executor.py`,
   `tests/test_laser_config.py`, `tests/test_laser_config_deprecation.py`,

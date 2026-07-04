@@ -1,26 +1,32 @@
 ---
-doc_status: draft
-truth_level: design-intent
-last_verified_commit: bd96b32
+doc_status: current
+truth_level: design-intent plus code-verified Package 4 plumbing
+last_verified_commit: 26d357f
 last_verified_date: 2026-07-04
 validation_scope: software-only
 ---
 
 # Laser Color — Design Spec (pre-handoff)
 
-> **Status: PLANNED / DESIGN-INTENT. Not implemented.**
-> Roles: Claude authors this spec (planning); **Codex implements the bridge code** once the
-> spec is finalized. **Fable reviewed (Phase 1) and expanded (Phase 2) this design on
-> 2026-07-04** with operator answers folded in; awaiting operator approval (gate 2).
+> **Status: DESIGN-INTENT WITH PACKAGE 4 PLUMBING IMPLEMENTED/SOFTWARE-TESTED.**
+> Roles: Claude authored this spec (planning); **Codex implements bridge code**. **Fable
+> reviewed (Phase 1) and expanded (Phase 2) this design on 2026-07-04** with operator
+> answers folded in.
 > Per AGENTS.md §1, **code wins over this doc** — verify every claim against current code.
 
-This is a forward-looking design doc. It is **not** current truth and is not in the active
-work registry yet. Claims are labelled **confirmed / assumed / unknown / operator-decided**;
-file:line evidence is in Part F.
+This is a design doc with current Package 4 plumbing notes. It is listed in the active work
+registry because later chart/drop-presentation work remains open. Claims are labelled
+**confirmed / assumed / unknown / operator-decided**; file:line evidence is in Part F.
 
 **Implementation gate:** the CH8/CH9 encoding chart (Part E #1) **gates Phase 3 implementation
 of the color mapper's value table only** — the operator will produce its inputs later. All other
 parts (merge seam, blackout re-wire, sampling plumbing) are implementable without it.
+
+**Implementation note (2026-07-04):** Package 4 landed the sampling, white-moment flag,
+pure mapper, same-tick snapshot wiring, Autoloop CH8/CH9 merge seam, disabled/all-null
+config, and acceptance tests. With the shipped config, laser output remains authored
+pass-through. The operator CH8/CH9 chart still lands later as config-only data before
+enabling the feature.
 
 ---
 
@@ -221,7 +227,8 @@ for its whole window.)
   nothing/neutral": per Part B the channels are authored, so pass-through IS the neutral.)
 - Blackout is the absolute override above everything (Part B seam); injected color can never
   defeat it by construction.
-- Color computation off the push loop; merge is pure in-loop compute (Part B).
+- Color computation is pure at LED dispatch time on the state-manager thread; merge is pure
+  in-loop compute (Part B). Neither path adds I/O or locks.
 - After any bridge restart: `pgrep -f rb_ss_bridge_v2 | wc -l` must be `1`.
 - **Live-safety flag:** the blackout re-wire is laser-blackout / runtime-invariant territory —
   re-verify on a high tier before any live show, before wiring `LaserSceneExecutor` owners
@@ -259,16 +266,15 @@ for its whole window.)
 4. **Pre-drop blackout: full-off (operator default stands).** Boolean blackout = full-off
    (slot 31 all-zero equivalent). If a non-black pre-drop look is ever wanted, blackout stops
    being a boolean and becomes a look-select — raise before implementing if it matters.
-5. **White-moment mirroring (operator-decided 2026-07-04).** Lasers go **white during the LED
+5. **White-moment mirroring (operator-decided 2026-07-04; Package 4 plumbing implemented).** Lasers go **white during the LED
    engine's cue-mandated white moments** — drop white-strobe (`govee_frame_renderer.py`
    `drop_white_aggressive`:505), white buildups (`buildup_white_*`:874-953), post-drop shatter
-   (:515), and the reserved slot-5 firework accent. No such signal exists anywhere today
-   (*confirmed* — white lives only inside renderer template functions as raw RGB). Design: the
-   LED dispatch path publishes a **"white moment" boolean** (template-name allowlist + firework
-   accent flag) into the color producer's snapshot; the mapper emits CH8 white while it holds.
+   (:515), and the reserved slot-5 firework accent. Package 4 publishes a **"white moment"
+   boolean** from the final dispatch template-name allowlist into the color producer's snapshot;
+   the mapper emits CH8 white while it holds when the chart provides a white value.
    Non-scripted only; scripted-track white already rides the pack cues. *(Exact publish point —
-   renderer template selection vs dispatch policy — is a Codex-spec detail; the source data is
-   the selected template name.)*
+   `led_dispatch_coordinator.py`'s finalized `scene_ref` — is now implemented; the source data
+   is the selected template name.)*
 6. **`white_sand` palette → laser white (operator-decided 2026-07-04).** The Stream-Deck-only
    `white_sand` palette (see `streamdeck_palette_control_design_spec.md`) maps, for lasers, to
    **CH8 white** — sustained until the palette's track/lock rules revert it. One shared
@@ -309,7 +315,7 @@ for its whole window.)
     (#1); until then the mode is LED-only-implementable. Breakdown/buildup laser white is moot
     (lasers dark there by authoring); scripted stand-down unchanged.
 
-## Part F — Evidence (file:line, HEAD `bd96b32`)
+## Part F — Evidence (file:line, implementation verified through `26d357f`)
 
 - Pack autoloops author CH8/CH9 (922 writes / 42 docs, incl. active): scan of loaded
   `rbss_canonical_pack` autoloop documents, 2026-07-04 (values listed in Part E #1).
