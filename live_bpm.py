@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import plistlib
+import re
 import struct
 import threading
 import time
@@ -19,19 +20,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Iterable, Optional, Protocol
 
-from .probe_live_bpm import (
-    Hit,
+from .config import RB_DECK1_OFF, RB_DECK2_OFF, RB_GLOBAL_OFF, RB_INNER_OFF, RB_SEC_OFF
+from .rb_memory import (
     _base_from_vmmap,
-    _collect_hits,
-    _dedupe_hits,
     _get_vmmap_output,
-    _read_float,
-    _resolve_anchors,
-    _results_from_samples,
-    _select_validation_hits,
+    _objc_regions_from_vmmap,
+    _read_bytes,
+    _read_u64,
+    _scan_objc_zone,
     _task_for_pid,
+    get_rb_pid,
 )
-from .rb_memory import _read_bytes, get_rb_pid
 from .rb_offsets import ChainEntry, RBOffsetVersion, load_offsets_for_version
 
 log = logging.getLogger("live_bpm")
@@ -53,6 +52,450 @@ LIVE_BPM_DIRECT_SOURCE = "offset_table"
 LIVE_BPM_DISCOVERY_SOURCE = "discovery"
 LIVE_BPM_FALLBACK_SOURCE = "fallback_meta"
 LIVE_BPM_DIAGNOSTICS_ENV = "RBSS_LIVE_BPM_DIAGNOSTICS"
+
+# Memory-scan discovery primitives. probe_live_bpm.py's CLI imports these back
+# from here; they live here because the always-running BPM service is what
+# actually depends on them.
+_ADDR_RE = re.compile(r"\b([0-9a-fA-F]+)-([0-9a-fA-F]+)\b")
+
+
+@dataclass(frozen=True)
+class Region:
+    start: int
+    size: int
+    label: str
+
+    @property
+    def end(self) -> int:
+        return self.start + self.size
+
+
+@dataclass(frozen=True)
+class Anchor:
+    name: str
+    addr: int
+
+
+@dataclass(frozen=True)
+class Hit:
+    addr: int
+    type_name: str
+    value: float
+    role: str
+    score: float
+    region: str
+    nearest_anchor: str
+    anchor_delta: int
+
+
+@dataclass(frozen=True)
+class WatchResult:
+    hit: Hit
+    samples: int
+    start: float
+    end: float
+    minimum: float
+    maximum: float
+    max_delta: float
+    verdict: str
+    started_at_zero: bool = False
+    ended_at_zero: bool = False
+    num_discontinuities: int = 0
+    timestamps: tuple[float, ...] = ()
+    values: tuple[float, ...] = ()
+
+
+def _safe_read_u64(task: int, addr: int) -> int | None:
+    try:
+        return _read_u64(task, addr)
+    except OSError:
+        return None
+
+
+def _nearest_anchor(addr: int, anchors: list[Anchor]) -> tuple[str, int]:
+    if not anchors:
+        return "<none>", 0
+    anchor = min(anchors, key=lambda a: abs(addr - a.addr))
+    return anchor.name, addr - anchor.addr
+
+
+def _rw_regions_from_vmmap(
+    vmmap_out: str,
+    max_region_size: int,
+    max_total_size: int,
+) -> list[Region]:
+    """Return bounded readable/writable regions from vmmap output.
+
+    The cap keeps broad scans interactive. Regions are listed in vmmap order so
+    anchor-adjacent malloc/nano pages tend to be scanned before large tail areas.
+    """
+    regions: list[Region] = []
+    total = 0
+    for line in vmmap_out.splitlines():
+        if "rw-" not in line:
+            continue
+        m = _ADDR_RE.search(line)
+        if not m:
+            continue
+        start = int(m.group(1), 16)
+        end = int(m.group(2), 16)
+        size = end - start
+        if size < 0x100 or size > max_region_size:
+            continue
+        if total + size > max_total_size:
+            break
+        label = line.split()[0] if line.split() else "rw_region"
+        regions.append(Region(start, size, f"vmmap:{label}"))
+        total += size
+    return regions
+
+
+def _readable_window_regions(
+    task: int,
+    anchors: list[Anchor],
+    window: int,
+    extra_regions: list[Region],
+) -> list[Region]:
+    regions: list[Region] = []
+    seen: set[tuple[int, int]] = set()
+
+    for anchor in anchors:
+        if anchor.addr <= 0:
+            continue
+        start = max(0, anchor.addr - window)
+        size = window * 2
+        key = (start, size)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            _read_bytes(task, start, min(size, 16))
+        except OSError:
+            continue
+        regions.append(Region(start, size, f"{anchor.name} +/-0x{window:x}"))
+
+    for region in extra_regions:
+        key = (region.start, region.size)
+        if key not in seen:
+            regions.append(region)
+            seen.add(key)
+
+    return regions
+
+
+def _score_value(
+    value: float,
+    expect_bpm: float | None,
+    library_bpm: float | None,
+    bpm_min: float,
+    bpm_max: float,
+    factor_min: float,
+    factor_max: float,
+    mode: str,
+) -> tuple[str, float] | None:
+    if not math.isfinite(value):
+        return None
+
+    best: tuple[str, float] | None = None
+    if mode != "factor" and bpm_min <= value <= bpm_max:
+        score = 0.0 if expect_bpm is None else abs(value - expect_bpm)
+        best = ("bpm", score)
+
+    if mode != "bpm" and factor_min <= value <= factor_max:
+        factor_score = 0.0
+        if expect_bpm is not None and library_bpm and library_bpm > 0:
+            factor_score = abs((library_bpm * value) - expect_bpm) / max(library_bpm, 1.0)
+        if best is None or factor_score < best[1]:
+            best = ("factor", factor_score)
+
+    return best
+
+
+def _scan_region(
+    task: int,
+    region: Region,
+    anchors: list[Anchor],
+    expect_bpm: float | None,
+    library_bpm: float | None,
+    bpm_min: float,
+    bpm_max: float,
+    factor_min: float,
+    factor_max: float,
+    mode: str,
+    max_hits_per_region: int,
+) -> list[Hit]:
+    try:
+        chunk = _read_bytes(task, region.start, region.size)
+    except OSError:
+        return []
+
+    hits: list[Hit] = []
+    for i in range(0, max(0, len(chunk) - 8), 4):
+        addr = region.start + i
+        f32 = struct.unpack_from("<f", chunk, i)[0]
+        scored = _score_value(f32, expect_bpm, library_bpm, bpm_min, bpm_max, factor_min, factor_max, mode)
+        if scored is not None:
+            role, score = scored
+            name, delta = _nearest_anchor(addr, anchors)
+            hits.append(Hit(addr, "f32", f32, role, score, region.label, name, delta))
+
+        if i % 8 == 0:
+            f64 = struct.unpack_from("<d", chunk, i)[0]
+            scored = _score_value(f64, expect_bpm, library_bpm, bpm_min, bpm_max, factor_min, factor_max, mode)
+            if scored is not None:
+                role, score = scored
+                name, delta = _nearest_anchor(addr, anchors)
+                hits.append(Hit(addr, "f64", f64, role, score, region.label, name, delta))
+
+    hits.sort(key=lambda h: (h.score, 0 if h.role == "bpm" else 1, abs(h.anchor_delta)))
+    return hits[:max_hits_per_region]
+
+
+def _read_float(task: int, addr: int, type_name: str) -> float:
+    if type_name == "f32":
+        return struct.unpack("<f", _read_bytes(task, addr, 4))[0]
+    if type_name == "f64":
+        return struct.unpack("<d", _read_bytes(task, addr, 8))[0]
+    raise ValueError(f"unsupported float type: {type_name}")
+
+
+def _resolve_anchors(
+    task: int,
+    base: int,
+    deck: int,
+    objc_window: int,
+    include_deck2_scan: bool,
+) -> list[Anchor]:
+    anchors: list[Anchor] = [Anchor("base", base)]
+    container = _safe_read_u64(task, base + RB_GLOBAL_OFF)
+    if container:
+        anchors.append(Anchor("container", container))
+        dpu1 = _safe_read_u64(task, container + RB_DECK1_OFF)
+        dpu2 = _safe_read_u64(task, container + RB_DECK2_OFF)
+        if dpu1:
+            anchors.append(Anchor("dpu1", dpu1))
+            inner1 = _safe_read_u64(task, dpu1 + RB_INNER_OFF)
+            if inner1:
+                anchors.append(Anchor("inner1", inner1))
+                sec1 = _safe_read_u64(task, inner1 + RB_SEC_OFF)
+                if sec1:
+                    anchors.append(Anchor("secondary1", sec1))
+                if deck == 2 and include_deck2_scan:
+                    for idx, inner2 in enumerate(_scan_objc_zone(task, inner1, window=objc_window), start=1):
+                        if inner2 != inner1:
+                            anchors.append(Anchor(f"deck2_zone_candidate{idx}", inner2))
+                            sec2 = _safe_read_u64(task, inner2 + RB_SEC_OFF)
+                            if sec2:
+                                anchors.append(Anchor(f"secondary2_candidate{idx}", sec2))
+                            break
+        if dpu2:
+            anchors.append(Anchor("container_dpu2_slot", dpu2))
+            inner2_slot = _safe_read_u64(task, dpu2 + RB_INNER_OFF)
+            if inner2_slot:
+                anchors.append(Anchor("container_dpu2_inner", inner2_slot))
+
+    if deck == 1:
+        return [a for a in anchors if not a.name.startswith(("deck2_", "secondary2_", "container_dpu2"))]
+    return anchors
+
+
+def _extra_regions_from_args(vmmap_out: str, args) -> list[Region]:
+    extra_regions: list[Region] = []
+    if getattr(args, "include_objc_regions", False):
+        for idx, (start, size) in enumerate(_objc_regions_from_vmmap(vmmap_out), start=1):
+            if size <= args.max_objc_region:
+                extra_regions.append(Region(start, size, f"objc_region{idx}"))
+    if getattr(args, "include_rw_regions", False):
+        extra_regions.extend(
+            _rw_regions_from_vmmap(vmmap_out, args.max_rw_region, args.max_rw_total)
+        )
+    return extra_regions
+
+
+def _collect_hits(task: int, vmmap_out: str, anchors: list[Anchor], args) -> list[Hit]:
+    extra_regions = _extra_regions_from_args(vmmap_out, args)
+    regions = _readable_window_regions(task, anchors, args.window, extra_regions)
+    all_hits: list[Hit] = []
+    for region in regions:
+        all_hits.extend(
+            _scan_region(
+                task,
+                region,
+                anchors,
+                args.expect_bpm,
+                args.library_bpm,
+                args.bpm_min,
+                args.bpm_max,
+                args.factor_min,
+                args.factor_max,
+                args.mode,
+                args.max_hits_per_region,
+            )
+        )
+
+    all_hits.sort(key=lambda h: (h.score, 0 if h.role == "bpm" else 1, h.region, abs(h.anchor_delta)))
+    return all_hits
+
+
+def _dedupe_hits(hits: Iterable[Hit]) -> list[Hit]:
+    out: list[Hit] = []
+    seen: set[tuple[int, str]] = set()
+    for hit in hits:
+        key = (hit.addr, hit.type_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(hit)
+    return out
+
+
+def _validation_rank(hit: Hit) -> tuple[float, int, float, float]:
+    label = hit.region.lower()
+    penalty = 0.0
+    if "malloc_tiny" in label or "malloc_small" in label or "malloc_large" in label:
+        penalty -= 0.25
+    if "+/-" in label:
+        penalty -= 0.10
+    if (
+        "ioaccelerator" in label
+        or "coreanimation" in label
+        or "skywalk" in label
+        or "__auth_const" in label
+        or "__data_const" in label
+        or "mapped" in label
+    ):
+        penalty += 5.0
+    type_rank = 0 if hit.type_name == "f32" else 1
+    return (hit.score + penalty, type_rank, abs(hit.anchor_delta), hit.addr)
+
+
+def _select_validation_hits(hits: list[Hit], limit: int) -> list[Hit]:
+    ranked = sorted(hits, key=_validation_rank)
+    selected: list[Hit] = []
+    seen_addr: set[tuple[int, str]] = set()
+    region_counts: dict[str, int] = {}
+    max_per_region = max(2, min(6, limit // 3 or 2))
+
+    for hit in ranked:
+        key = (hit.addr, hit.type_name)
+        if key in seen_addr:
+            continue
+        if region_counts.get(hit.region, 0) >= max_per_region:
+            continue
+        selected.append(hit)
+        seen_addr.add(key)
+        region_counts[hit.region] = region_counts.get(hit.region, 0) + 1
+        if len(selected) >= limit:
+            return selected
+
+    for hit in ranked:
+        key = (hit.addr, hit.type_name)
+        if key in seen_addr:
+            continue
+        selected.append(hit)
+        seen_addr.add(key)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _is_zeroish(value: float, tolerance: float = 1e-6) -> bool:
+    return math.isfinite(value) and abs(value) <= tolerance
+
+
+def _verdict_for_samples(
+    values: list[float],
+    expected_after: float | None,
+    tolerance: float,
+    min_delta: float,
+) -> str:
+    if not values:
+        return "read_error"
+    max_delta = max(values) - min(values)
+    if max_delta < min_delta:
+        return "stale"
+    if _is_zeroish(values[0]) and any(not _is_zeroish(value) for value in values[1:]):
+        return "zero_start_churn"
+    if _is_zeroish(values[-1]) and any(not _is_zeroish(value) for value in values[:-1]):
+        return "zero_end_decay"
+    if expected_after is None:
+        return "moved_unverified"
+    if abs(values[-1] - expected_after) <= tolerance:
+        return "pass"
+    return "moved_wrong_value"
+
+
+def _count_discontinuities(values: list[float], threshold: float = 1.0) -> int:
+    return sum(
+        1
+        for before, after in zip(values, values[1:])
+        if abs(after - before) > threshold
+    )
+
+
+def _results_from_samples(
+    hits: list[Hit],
+    values_by_hit: dict[tuple[int, str], list[float]],
+    timestamps_by_hit: dict[tuple[int, str], list[float]],
+    expected_after: float | None,
+    tolerance: float,
+    min_delta: float,
+) -> list[WatchResult]:
+    results: list[WatchResult] = []
+    for hit in hits:
+        key = (hit.addr, hit.type_name)
+        values = values_by_hit.get(key, [])
+        verdict = _verdict_for_samples(values, expected_after, tolerance, min_delta)
+        if values:
+            start = values[0]
+            end = values[-1]
+            minimum = min(values)
+            maximum = max(values)
+            max_delta = maximum - minimum
+            started_at_zero = _is_zeroish(start)
+            ended_at_zero = _is_zeroish(end)
+            num_discontinuities = _count_discontinuities(values)
+        else:
+            start = end = minimum = maximum = max_delta = float("nan")
+            started_at_zero = ended_at_zero = False
+            num_discontinuities = 0
+        results.append(
+            WatchResult(
+                hit,
+                len(values),
+                start,
+                end,
+                minimum,
+                maximum,
+                max_delta,
+                verdict,
+                started_at_zero,
+                ended_at_zero,
+                num_discontinuities,
+                tuple(timestamps_by_hit.get(key, [])),
+                tuple(values),
+            )
+        )
+
+    verdict_order = {
+        "pass": 0,
+        "moved_unverified": 1,
+        "moved_wrong_value": 2,
+        "zero_start_churn": 3,
+        "zero_end_decay": 4,
+        "stale": 5,
+        "read_error": 6,
+    }
+    results.sort(
+        key=lambda r: (
+            verdict_order.get(r.verdict, 99),
+            r.hit.score,
+            0 if r.hit.type_name == "f32" else 1,
+            -r.max_delta if math.isfinite(r.max_delta) else 0.0,
+            abs(r.hit.anchor_delta),
+        )
+    )
+    return results
 
 
 @dataclass(frozen=True)
