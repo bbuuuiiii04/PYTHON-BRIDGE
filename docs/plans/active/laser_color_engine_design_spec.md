@@ -104,13 +104,16 @@ pack render (position/movement/intensity + AUTHORED CH8/CH9)
     (:443-457) and keep winning over engine color, preserving the manual-overlay contract.
   - The push-tick crash path (`_push_tick` submits a direct ZERO frame on any raise,
     `state_manager.py:2092-2107`) is untouched.
-- **Color layer = async producer + in-loop merge** (corrects the earlier "runs on its own
-  thread" wording). The pack render **runs inside the 200 Hz push loop** (`_push_tick` →
-  `_drive_pack_output` → `render()`, `state_manager.py:2092-2107,2415,2635` — *confirmed*);
-  the invariant bans blocking I/O there, not pure compute. So: the **color computation/
-  sampling** (LED-engine sampling at phrase anchors, RGB→CH8/CH9 mapping, white-moment edges)
-  runs off-loop and publishes an **atomic immutable (CH8, CH9) snapshot**; `render()` reads
-  the snapshot non-blockingly at merge time. No locks, I/O, or allocation storms on the loop.
+- **Color layer = pure compute at dispatch + in-loop merge** (corrects the earlier "runs on
+  its own thread" wording, refined 2026-07-04). The pack render **runs inside the 200 Hz push
+  loop** (`_push_tick` → `_drive_pack_output` → `render()`,
+  `state_manager.py:2092-2107,2415,2635` — *confirmed*), and LED dispatch runs on the **same
+  state-manager thread** (`_dispatch_led_automation` ← `_push_tick_inner`,
+  `led_dispatch_policy.py:637` / `state_manager.py:3029` — *confirmed*); the invariant bans
+  blocking I/O there, not pure compute. So the **color computation** (sampling, RGB→CH8/CH9
+  mapping, white-moment edges) is pure math computed at dispatch time into an **immutable
+  (CH8, CH9) snapshot** that `render()` reads at merge time — same thread, no locks, no I/O,
+  no allocation storms on the loop.
 - **Color source accessor (new, small).** There is **no** "current RGB now" API on the LED
   engine today — `resolve_color` (`led_color_engine.py:507`) needs full per-cue context, and
   `snapshot()` returns a palette *name* (corrects the earlier Part F citation to

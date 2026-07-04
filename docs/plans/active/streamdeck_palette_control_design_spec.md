@@ -312,11 +312,15 @@ the bridge already maps); stop at the first beat that is anything else. 32-beat 
    case-insensitive, config `hotcue_marker`) placed on the drop marks it: that drop is
    `lasers_only` (+ pre-dark). Matched to the nearest smart drop within ±2 beats. **No budget
    gate — tagging is deliberate; if two tagged anthems play back-to-back, that was the plan.**
-   Mechanism: hot cues live in the ANLZ files the bridge already parses per track via
-   `pyrekordbox.AnlzFile` (`anlz_reader.py:184-201`); extraction is a new
-   `_extract_hot_cues(parsed)` in the same pattern as `_extract_pssi_phrases` (:227) reading the
-   PCOB/PCO2 cue tags — *[assumed: cue comments present in the operator's exported ANLZ files;
-   verify with one real file at spec time]*.
+   Mechanism (**corrected 2026-07-04 after ground-truth verification**): hot cues are read from
+   Rekordbox's **`master.db`**, NOT the ANLZ files — a full library scan found every on-disk ANLZ
+   cue tag empty (Rekordbox does not rewrite that cache on cue edits), while `master.db` holds
+   413 named cue points (verified: `Cues` JSON blobs on `ContentCue` rows, `Comment` + `InMsec`
+   per cue, keyed by `ContentID`). The bridge already reads this DB via
+   `pyrekordbox.db6.Rekordbox6Database` (`filepath_resolver.py:244-246` pattern). Cues are read
+   once per track load, off the push loop; ms→beat via the existing beat math. The operator
+   already names cues `DROP`/`BUILDUP` for navigation — those must NEVER trigger solos; only the
+   configured marker does.
 4. **Learned solo (operator-accepted 2026-07-04; one-press learning per operator) — the pad
    teaches.** Every manual solo is recorded per `(content_id, drop_index)` in a small gitignored
    state file (`local/state/laser_solo_learned.json`). **One manual solo is enough** — solo a
@@ -457,9 +461,10 @@ note 61).** A section-mapped color override that rides machinery this design alr
 - Scripted-mode LED gating (mechanism): `led_look_director.py:174-187`,
   `led_dispatch_policy.py:83-143`.
 - Drop presentation inputs: Smart-Drop selection `smart_phrasing.py:601-617`; drop-lifecycle
-  tension gate `drop_lifecycle.py:18`; ANLZ parsing via `pyrekordbox.AnlzFile`
-  `anlz_reader.py:184-201` (hot-cue extraction = new, same pattern as `_extract_pssi_phrases`
-  :227); base-suppression render state `soundswitch_laser_player.py:428-443`.
+  tension gate `drop_lifecycle.py:18`; hot-cue names from `master.db` via
+  `pyrekordbox.db6.Rekordbox6Database` (`filepath_resolver.py:244-246` pattern; ANLZ cue tags
+  verified empty/stale across the whole library 2026-07-04 — do not use them);
+  base-suppression render state `soundswitch_laser_player.py:428-443`.
 
 ## Change-contract note
 
