@@ -339,16 +339,22 @@ def resolve_presentation(
     exactly when this call consumed one of the once-per-track auto-solo tiers
     (learned/gear-shift/record) — the caller latches
     `SessionState.mark_auto_solo_used()` only then. Manual arm and hot-cue tags
-    are exempt from that cap and from the opening damper. The finale guarantee
-    (tier 8) is never blocked by the opening damper (tier 7): Required Behavior
-    Test 1 demands the last true drop always render at least `leds_plus_lasers`,
-    unconditionally.
+    are exempt from that cap and from the opening damper. The opening damper
+    (rung 7) PRECEDES the finale guarantee (rung 8) — first match wins: while
+    the damper is active, a non-exempt track's last true drop renders
+    `leds_only` like every other non-exempt drop (the damper's exemption list —
+    manual, hot-cue, learned — deliberately excludes the finale; "save the
+    night's first laser moment"). The finale guarantee applies outside the
+    damper (operator-approved ruling 2026-07-04; the design spec's "force
+    leds_only drops" wording and the ladder order settle Required Behavior
+    Test 1's "always" as damper-scoped).
 
     `vetoed=True` (the Solo pad's press-to-cancel gesture, authority doc
     §Solo Source Contracts) skips tiers 1-6 entirely for this specific drop
     occurrence — as if none of them applied — falling through to the same
-    finale/damper/personality tail. It never suppresses the finale guarantee
-    (a veto cancels a SOLO, not the "at least both" floor) or the damper.
+    damper/finale/personality tail. It never suppresses the damper or (outside
+    the damper) the finale guarantee: a veto cancels a SOLO, not the
+    "at least both" floor.
     """
     if not vetoed:
         if armed:
@@ -362,10 +368,10 @@ def resolve_presentation(
                 return (LASERS_ONLY, "solo_gearshift", True)
             if record_breaking and not auto_solo_used:
                 return (LASERS_ONLY, "solo_record", True)
-    if decision.is_finale:
-        return (LEDS_PLUS_LASERS, "both_finale", False)
     if damper_active:
         return (LEDS_ONLY, "leds_only_damper", False)
+    if decision.is_finale:
+        return (LEDS_PLUS_LASERS, "both_finale", False)
     if decision.personality_presentation == LEDS_PLUS_LASERS:
         return (LEDS_PLUS_LASERS, "both_personality", False)
     return (LEDS_ONLY, "leds_only_personality", False)

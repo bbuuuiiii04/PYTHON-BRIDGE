@@ -89,7 +89,11 @@ class RequiredTest1Personality(unittest.TestCase):
         self.assertEqual(plan.decision_for(32.0).personality_presentation, LEDS_ONLY)
         self.assertEqual(plan.decision_for(160.0).personality_presentation, LEDS_ONLY)
 
-    def test_finale_guarantee_applies_even_at_zero_ratio(self) -> None:
+    def test_finale_guarantee_applies_outside_damper_even_at_zero_ratio(self) -> None:
+        # Required Behavior Test 1: OUTSIDE the opening damper, the last true
+        # drop always renders at least leds_plus_lasers. (Under the damper it
+        # renders leds_only like every other non-exempt drop -- rung 7 precedes
+        # rung 8, first match wins; see RequiredTest6Damper.)
         plan = plan_track([32.0, 96.0], [], [], [], _cfg(laser_ratio=0.0))
         last = plan.decision_for(96.0)
         self.assertEqual(last.personality_presentation, LEDS_ONLY)  # ranking alone picks no one
@@ -352,6 +356,28 @@ class RequiredTest6Damper(unittest.TestCase):
             auto_solo_used=False, damper_active=True,
         )
         self.assertEqual((presentation, reason), (LEDS_ONLY, "leds_only_damper"))
+
+    def test_damper_blocks_even_the_finale_guarantee(self) -> None:
+        # Rung 7 precedes rung 8, first match wins: during the damper a
+        # non-exempt track's LAST true drop renders leds_only like every other
+        # non-exempt drop -- the damper's exemption list (manual, hot-cue,
+        # learned) deliberately excludes the finale ("save the night's first
+        # laser moment"). Operator-approved ruling 2026-07-04.
+        finale = DropDecision(
+            beat=96.0, tagged=False, learned=False, is_finale=True,
+            personality_presentation=LEDS_PLUS_LASERS, runway=8.0,
+        )
+        presentation, reason, fired = resolve_presentation(
+            finale, armed=False, gearshift_pending=False, record_breaking=False,
+            auto_solo_used=False, damper_active=True,
+        )
+        self.assertEqual((presentation, reason, fired), (LEDS_ONLY, "leds_only_damper", False))
+        # Outside the damper the same decision gets its guarantee back.
+        presentation, reason, _ = resolve_presentation(
+            finale, armed=False, gearshift_pending=False, record_breaking=False,
+            auto_solo_used=False, damper_active=False,
+        )
+        self.assertEqual((presentation, reason), (LEDS_PLUS_LASERS, "both_finale"))
 
     def test_manual_hotcue_and_learned_fire_anyway(self) -> None:
         tagged = DropDecision(beat=1.0, tagged=True, learned=False, is_finale=False,

@@ -231,8 +231,11 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
         # Verify the REAL player actually applied it, not just the bookkeeping flag.
         self.assertEqual(sm._pack_runtime.player.render().diagnostic.code, "base_suppressed")
 
-    def test_finale_drop_is_leds_plus_lasers_no_suppression_no_blackout(self) -> None:
+    def test_finale_drop_outside_damper_is_leds_plus_lasers_no_suppression_no_blackout(self) -> None:
         sm, d = self._sm_with_plan(drops=(32.0, 96.0))
+        # Clear the opening damper: the finale guarantee (rung 8) applies only
+        # OUTSIDE the damper (rung 7 precedes it, first match wins).
+        sm._drop_presentation_session.opening_tracks_counted = 3
         sm._drop_presentation_tick(
             active=1, d=d,
             sp_state=_sp_state(abs_beat=96.0, active_drop_beat=96.0, smart_drop_crossing=True),
@@ -241,6 +244,22 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
         self.assertFalse(sm._drop_presentation_base_suppressed_held)
         self.assertEqual(sm._led_blackout_owners, set())
         self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_PLUS_LASERS)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "both_finale")
+
+    def test_finale_drop_under_damper_is_leds_only_and_suppresses(self) -> None:
+        # Rung 7 precedes rung 8: a fresh session's damper forces the last true
+        # drop of a non-exempt track to leds_only like every other non-exempt
+        # drop ("save the night's first laser moment").
+        sm, d = self._sm_with_plan(drops=(32.0, 96.0), with_player=True)
+        self.assertTrue(sm._drop_presentation_session.damper_active(3))
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=96.0, active_drop_beat=96.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "leds_only_damper")
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+        self.assertEqual(sm._led_blackout_owners, set())
 
     def test_hotcue_tagged_drop_engages_led_blackout_owner_when_laser_visible(self) -> None:
         sm, d = self._sm_with_plan(drops=(32.0, 96.0), tags=(32.5,))

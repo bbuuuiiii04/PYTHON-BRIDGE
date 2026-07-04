@@ -64,7 +64,8 @@ First match wins, evaluated per true drop. Auto-solo tiers (4-6) fire at most
    `leds_only`; blocks tiers 5-6 and personality lasers; manual, hot-cue, and
    learned solos are exempt (explicit curation fires even early).
 8. **Finale guarantee** — a track's last true drop, when actually reached,
-   always renders at least `leds_plus_lasers`, never `leds_only`.
+   always renders at least `leds_plus_lasers`, never `leds_only` (subject to
+   the opening damper, rung 7 — first match wins).
 9. **Track personality** — everything else: rank the track's true drops by its
    own dramaturgy (last drop first, then longest runway); the top
    `ceil(laser_ratio × N)` (default 0.4) render `leds_plus_lasers`, the rest
@@ -175,9 +176,9 @@ unmatched hot-cue markers seen.
 
 ## Required Behavior Tests
 
-1. Personality: rank/ratio correctness across 1-, 2-, and 4-drop tracks; the
-   last true drop always at least `leds_plus_lasers`; identical plan across
-   repeated plays.
+1. Personality: rank/ratio correctness across 1-, 2-, and 4-drop tracks;
+   outside the opening damper, the last true drop always at least
+   `leds_plus_lasers`; identical plan across repeated plays.
 2. Ladder precedence: a drop that is simultaneously tagged, learned, and
    record-breaking fires exactly one solo with the highest-tier reason.
 3. Learned lifecycle: fire→learn→auto-solo next play→veto→un-learned;

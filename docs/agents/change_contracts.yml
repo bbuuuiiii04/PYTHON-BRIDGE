@@ -377,7 +377,7 @@ contracts:
       - suppression is not blackout -- blackout/mute owner systems must be untouched by presentation decisions
       - the state-manager tick path must not gain DB or file I/O; learned-store writes ride a background writer thread, never the tick path directly
       - scripted tracks get zero policy activity; mirrors (decks 3/4) generate no presentation decisions
-      - the finale guarantee (last true drop) is never blocked by the opening damper
+      - the opening damper (rung 7) precedes the finale guarantee (rung 8) -- first match wins; the finale guarantee applies outside the damper only
 
   rekordbox_readers:
     code_globs:
