@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Iterator, Literal, Mapping, Sequence
 
+from .models import BridgeEvent, Ev
 from .soundswitch_pack_loader import PackMidiBinding
 
 log = logging.getLogger("soundswitch_midi_input")
@@ -97,6 +98,7 @@ class SoundSwitchMidiInputAdapter:
         bindings: Sequence[PackMidiBinding],
         *,
         stale_timeout_ms: int = 2000,
+        event_sink: Callable[[BridgeEvent], None] | None = None,
     ) -> None:
         self._bindings: dict[tuple, PackMidiBinding] = {
             _key(b): b for b in bindings
@@ -117,6 +119,7 @@ class SoundSwitchMidiInputAdapter:
         # None means "accept from any device" (used in tests without a port).
         self._connected_device: str | None = None
         self._snapshot = self._build_snapshot_locked()
+        self._event_sink = event_sink
 
     # ------------------------------------------------------------------
     # Hot-path API (no MIDI API calls, no locks held for duration)
@@ -278,10 +281,22 @@ class SoundSwitchMidiInputAdapter:
                 self._refresh_snapshot_locked()
                 log.debug("[SS-MIDI] static slot selected: slot=%s", slot)
             elif kind == "blackout_mask":
+                key = _binding_key(binding)
+                if binding.interaction == "toggle":
+                    if key in self._blackout_bindings:
+                        self._blackout_bindings.remove(key)
+                    else:
+                        self._blackout_bindings.add(key)
+                    self._blackout_held = bool(self._blackout_bindings)
+                    self._refresh_snapshot_locked()
+                    log.debug("[SS-MIDI] blackout toggled held=%s", self._blackout_held)
+                    return
                 self._blackout_held = True
-                self._blackout_bindings.add(_binding_key(binding))
+                self._blackout_bindings.add(key)
                 self._refresh_snapshot_locked()
                 log.debug("[SS-MIDI] blackout held")
+            elif kind in {"palette_pad", "palette_lock_pad", "led_mute_pad", "rainbow_pad"}:
+                self._emit_pad_event(binding)
             # pack_selection / bridge_owned_safety / no_project_target /
             # inactive_report_only — inventoried but do not mutate player state.
             else:
@@ -306,6 +321,9 @@ class SoundSwitchMidiInputAdapter:
                 else:
                     log.debug("[SS-MIDI] note-off for non-current slot=%s; ignored", slot)
             elif kind == "blackout_mask":
+                if binding.interaction == "toggle":
+                    log.debug("[SS-MIDI] note-off ignored for toggle blackout")
+                    return
                 self._blackout_bindings.discard(_binding_key(binding))
                 self._blackout_held = False
                 if self._blackout_bindings:
@@ -314,6 +332,27 @@ class SoundSwitchMidiInputAdapter:
                 log.debug("[SS-MIDI] blackout released")
             else:
                 log.debug("[SS-MIDI] note-off for non-render kind=%s (no-op)", kind)
+
+    def _emit_pad_event(self, binding: PackMidiBinding) -> None:
+        if self._event_sink is None:
+            return
+        kind = binding.target_kind
+        if kind == "palette_pad":
+            ev = BridgeEvent(
+                kind=Ev.LED_PALETTE_PAD,
+                deck=0,
+                payload={"name": binding.target_name or binding.target_identity or ""},
+                source="midi_input",
+            )
+        elif kind == "palette_lock_pad":
+            ev = BridgeEvent(kind=Ev.LED_PALETTE_LOCK_PAD, deck=0, source="midi_input")
+        elif kind == "led_mute_pad":
+            ev = BridgeEvent(kind=Ev.LED_MUTE_PAD, deck=0, source="midi_input")
+        elif kind == "rainbow_pad":
+            ev = BridgeEvent(kind=Ev.LED_RAINBOW_PAD, deck=0, source="midi_input")
+        else:
+            return
+        self._event_sink(ev)
 
     @staticmethod
     def _port_name_matches(candidate: object, port_name: str) -> bool:
@@ -533,11 +572,20 @@ class SoundSwitchMidiInputGroup:
         *,
         stale_timeout_ms: int = 2000,
         adapter_factory=SoundSwitchMidiInputAdapter,
+        event_sink: Callable[[BridgeEvent], None] | None = None,
+        extra_bindings: Sequence[PackMidiBinding] = (),
     ) -> None:
+        bindings = tuple(bindings) + tuple(extra_bindings)
         input_devices = {
             binding.device_name
             for binding in bindings
-            if binding.target_kind == "static_look"
+            if binding.target_kind in {
+                "static_look",
+                "palette_pad",
+                "palette_lock_pad",
+                "led_mute_pad",
+                "rainbow_pad",
+            } or (binding.target_kind == "blackout_mask" and binding.interaction == "toggle")
         }
         if len(set(aliases.values())) != len(aliases):
             raise ValueError("controller input aliases must own distinct ports")
@@ -549,7 +597,11 @@ class SoundSwitchMidiInputGroup:
                 "override" if device_name in aliases else "auto",
                 adapter_factory(
                     [binding for binding in bindings if binding.device_name == device_name],
-                    stale_timeout_ms=stale_timeout_ms,
+                    **(
+                        {"stale_timeout_ms": stale_timeout_ms, "event_sink": event_sink}
+                        if event_sink is not None
+                        else {"stale_timeout_ms": stale_timeout_ms}
+                    ),
                 ),
             )
             for device_name in sorted(input_devices)

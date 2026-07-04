@@ -466,6 +466,7 @@ def _build_soundswitch_pack_startup(
     midi_input_factory=SoundSwitchMidiInputGroup,
     truth_sink_factory=ArtNetTruthSink,
     truth_env_loader=load_truth_check_env,
+    event_sink=None,
 ) -> SoundSwitchPackStartupBundle:
     """Choose pack-vs-legacy output before starting any output worker.
 
@@ -500,10 +501,13 @@ def _build_soundswitch_pack_startup(
     player = player_factory(pack, parity_live=True)
     truth_env = truth_env_loader()
     if truth_env.enabled:
+        midi_kwargs = {"stale_timeout_ms": cfg.controller_hold_timeout_ms}
+        if event_sink is not None:
+            midi_kwargs["event_sink"] = event_sink
         midi_input = midi_input_factory(
             pack.learned_midi_bindings,
             cfg.midi_input_aliases,
-            stale_timeout_ms=cfg.controller_hold_timeout_ms,
+            **midi_kwargs,
         )
         backend = PackOutputBackend(
             scene_to_identity=dict(pack.bridge_scene_crosswalk),
@@ -541,10 +545,13 @@ def _build_soundswitch_pack_startup(
     midi_input: Optional[SoundSwitchMidiInputGroup] = None
     frame_sender: Optional[SoundSwitchFrameSender] = None
     try:
+        midi_kwargs = {"stale_timeout_ms": cfg.controller_hold_timeout_ms}
+        if event_sink is not None:
+            midi_kwargs["event_sink"] = event_sink
         midi_input = midi_input_factory(
             pack.learned_midi_bindings,
             cfg.midi_input_aliases,
-            stale_timeout_ms=cfg.controller_hold_timeout_ms,
+            **midi_kwargs,
         )
         frame_sender = frame_sender_factory(
             cfg.enttec_port,
@@ -1095,6 +1102,7 @@ def main() -> None:
     soundswitch_pack_cfg_result = load_soundswitch_pack_player_config()
     soundswitch_pack_bundle = _build_soundswitch_pack_startup(
         soundswitch_pack_cfg_result,
+        event_sink=event_queue.put,
     )
     pack_output_owners["sender"] = soundswitch_pack_bundle.frame_sender
     pack_output_owners["midi_input"] = soundswitch_pack_bundle.midi_input

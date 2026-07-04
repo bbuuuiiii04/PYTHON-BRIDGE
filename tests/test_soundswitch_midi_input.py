@@ -15,6 +15,7 @@ from rb_ss_bridge_v2.soundswitch_midi_input import (
     SoundSwitchMidiInputAdapter,
     SoundSwitchMidiInputGroup,
 )
+from rb_ss_bridge_v2.models import Ev
 from rb_ss_bridge_v2.soundswitch_pack import SoundSwitchPackCompileError
 from rb_ss_bridge_v2.soundswitch_pack_models import (
     DecodedSoundSwitchProject,
@@ -69,6 +70,12 @@ _BLACKOUT = PackMidiBinding(
     device_name=IAC, message_type="note",
     channel_zero_based=0, data_byte=0,
     target_kind="blackout_mask",
+)
+_BLACKOUT_TOGGLE = PackMidiBinding(
+    device_name=IAC, message_type="note",
+    channel_zero_based=0, data_byte=1,
+    target_kind="blackout_mask",
+    interaction="toggle",
 )
 _PACK_SEL = PackMidiBinding(
     device_name=IAC, message_type="note",
@@ -401,6 +408,63 @@ class TestBlackoutMask(unittest.TestCase):
         _note_on_vel0(a, _BLACKOUT)
         self.assertFalse(a.snapshot().blackout_held)
 
+    def test_toggle_blackout_flips_on_note_on_and_ignores_note_off(self):
+        a = _adapter(_BLACKOUT_TOGGLE)
+        _note_on(a, _BLACKOUT_TOGGLE)
+        self.assertTrue(a.snapshot().blackout_held)
+        _note_off(a, _BLACKOUT_TOGGLE)
+        self.assertTrue(a.snapshot().blackout_held)
+        _note_on(a, _BLACKOUT_TOGGLE)
+        self.assertFalse(a.snapshot().blackout_held)
+
+    def test_toggle_blackout_coexists_with_press_hold(self):
+        a = _adapter(_BLACKOUT, _BLACKOUT_TOGGLE)
+        _note_on(a, _BLACKOUT_TOGGLE)
+        _note_on(a, _BLACKOUT)
+        _note_off(a, _BLACKOUT)
+        self.assertTrue(a.snapshot().blackout_held)
+        _note_on(a, _BLACKOUT_TOGGLE)
+        self.assertFalse(a.snapshot().blackout_held)
+
+
+class TestPadEvents(unittest.TestCase):
+    def test_new_pad_kinds_emit_bridge_events_and_note_off_noops(self):
+        seen = []
+        palette = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=51,
+            target_kind="palette_pad", target_name="blue_cyan",
+        )
+        lock = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=57,
+            target_kind="palette_lock_pad",
+        )
+        mute = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=58,
+            target_kind="led_mute_pad",
+        )
+        rainbow = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=61,
+            target_kind="rainbow_pad",
+        )
+        a = SoundSwitchMidiInputAdapter(
+            [palette, lock, mute, rainbow],
+            event_sink=seen.append,
+        )
+
+        for binding in (palette, lock, mute, rainbow):
+            _note_on(a, binding)
+            _note_off(a, binding)
+
+        self.assertEqual(
+            [event.kind for event in seen],
+            [Ev.LED_PALETTE_PAD, Ev.LED_PALETTE_LOCK_PAD, Ev.LED_MUTE_PAD, Ev.LED_RAINBOW_PAD],
+        )
+        self.assertEqual(seen[0].payload["name"], "blue_cyan")
+
 
 # ---------------------------------------------------------------------------
 # Non-render controls do not mutate player state
@@ -696,6 +760,28 @@ class TestInputGroupAutoDetection(unittest.TestCase):
         group.start()
 
         self.assertEqual(events, [("start", "Local Controller Port", DDJ, (DDJ,))])
+
+    def test_extra_bindings_create_streamdeck_adapter(self):
+        events = []
+        palette = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=51,
+            target_kind="palette_pad", target_name="blue_cyan",
+        )
+
+        def factory(bindings, *, stale_timeout_ms):
+            return self.Adapter(bindings, stale_timeout_ms=stale_timeout_ms, events=events)
+
+        group = SoundSwitchMidiInputGroup(
+            (_SLOT8,),
+            {},
+            extra_bindings=(palette,),
+            adapter_factory=factory,
+        )
+        group.start()
+
+        self.assertEqual(group.worker_count, 2)
+        self.assertIn(("start", "Stream Deck", "Stream Deck", ("Stream Deck",)), events)
 
     def test_missing_controller_degrades_without_raising(self):
         def factory(bindings, *, stale_timeout_ms):

@@ -48,9 +48,11 @@ class PackMidiBinding:
     target_kind: Literal[
         "static_look", "autoloop", "blackout_mask", "pack_selection",
         "bridge_owned_safety", "no_project_target", "inactive_report_only",
+        "palette_pad", "palette_lock_pad", "led_mute_pad", "rainbow_pad",
     ]
     target_slot: int | None = None
     target_identity: str | None = None
+    target_name: str | None = None
     interaction: Literal["press", "toggle"] = "press"
 
 
