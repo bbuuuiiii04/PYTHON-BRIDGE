@@ -41,6 +41,11 @@ PACK_DIR = Path(__file__).resolve().parents[1] / "local" / "soundswitch" / "rbss
 BINDING_SIDECAR = PACK_DIR.parent / f".{PACK_DIR.name}.midi_bindings.json"
 PALETTE_STATE_PATH = Path("/tmp/rb_ss_bridge_v2_palette_state.json")
 FEEDBACK_STALE_S = 10.0
+# Bridge->deck propagation is ~1s (event -> publish -> 0.1s writer debounce ->
+# 0.5s deck poll). A fresh local toggle needs to survive one contradicting
+# feedback tick before bridge truth catches up, or the pad would visibly
+# revert the operator's own press.
+STATIC_LATCH_LOCAL_ECHO_S = 2.0
 # Watchdog: a wedged HID write (or any main-thread hang) freezes pads silently
 # and the watcher only respawns dead processes — so a stalled main loop exits
 # hard and lets the watcher bring us back. Main loop ticks every 0.5s (3s while
@@ -572,6 +577,14 @@ def acquire_deck(log_errors: bool = True):
 
 
 def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
+    # Physical press/release only — independent of interaction type. active_keys
+    # is the toggle LATCH (on's toggle branch flips it on press only; release
+    # doesn't clear it), not the finger. Conflating the two here is the same
+    # bug ca98d3f fixed for render_key's pressed/latched contract: a hold-cue
+    # check against the latch can ghost-render on a released key or miss a
+    # genuine hold, depending on latch parity at press time.
+    held_keys: set[tuple[int, int]] = set()
+
     def schedule_hold_cue(key: int, row: dict) -> None:
         value = row.get("long_press_s", 0.5)
         delay = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else 0.5
@@ -583,7 +596,7 @@ def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
                 if not isinstance(latest_row, dict) or latest_row.get("target_kind") != "palette_pad":
                     return
                 latest_key = (CHANNEL, latest_row["note"])
-                if latest_key not in active_keys or latest_row.get("gesture") != 2:
+                if latest_key not in held_keys or latest_row.get("gesture") != 2:
                     return
                 deck.set_key_image(
                     key,
@@ -602,6 +615,10 @@ def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
             if row is None:
                 return
             pad_key = (CHANNEL, row["note"])
+            if pressed:
+                held_keys.add(pad_key)
+            else:
+                held_keys.discard(pad_key)
             port.send(key_to_message(key, pressed, sidecar))
             if row["interaction"] == "toggle":
                 if pressed:

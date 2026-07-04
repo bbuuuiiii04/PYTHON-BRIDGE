@@ -207,6 +207,61 @@ class StreamDeckRealCallerPathTests(unittest.TestCase):
             on_key(deck, 11, False)
             self.assertNotIn((sd.CHANNEL, 37), active_keys)
 
+    def test_hold_cue_tracks_physical_press_not_the_toggle_latch(self):
+        # Regression for the held_keys/active_keys split: schedule_hold_cue's
+        # show_if_still_held must key off physical press/release, not
+        # active_keys (which is a toggle latch for toggle-interaction rows
+        # and only happens to mirror physical state for press-interaction
+        # rows like palette pads today). Key 0 is blue_cyan, a palette_pad
+        # row with gesture: 2 from the _feedback() fixture.
+        layout, deck, port, active_keys, on_key = self._wire()
+        key = 0
+        self.assertEqual(layout[key]["target_kind"], "palette_pad")
+        self.assertEqual(layout[key]["gesture"], 2)
+        timers: list[tuple[float, object]] = []
+
+        def fake_timer(delay, fn):
+            timers.append((delay, fn))
+            return mock.MagicMock()
+
+        def hold_cue_callback():
+            return next(fn for _delay, fn in timers
+                        if fn.__name__ == "show_if_still_held")
+
+        with mock.patch.object(sd.threading, "Timer", side_effect=fake_timer):
+            # 1) a tap: press then release before the hold delay elapses -
+            # firing the captured callback afterwards must NOT re-render.
+            on_key(deck, key, True)
+            on_key(deck, key, False)
+            fn = hold_cue_callback()
+            writes_before = len(deck.writes)
+            fn()
+            self.assertEqual(len(deck.writes), writes_before)
+            timers.clear()
+
+            # 2) a genuine hold: press without releasing - firing the
+            # callback now must render exactly one extra frame (the padlock
+            # hold cue).
+            on_key(deck, key, True)
+            fn = hold_cue_callback()
+            writes_before = len(deck.writes)
+            fn()
+            self.assertEqual(len(deck.writes), writes_before + 1)
+            on_key(deck, key, False)  # end this hold
+            timers.clear()
+
+            # 3) run one more full press+release cycle first (this is what
+            # would flip a toggle latch's parity), then hold again - the cue
+            # must still render.
+            on_key(deck, key, True)
+            on_key(deck, key, False)
+            timers.clear()
+            on_key(deck, key, True)
+            fn = hold_cue_callback()
+            writes_before = len(deck.writes)
+            fn()
+            self.assertEqual(len(deck.writes), writes_before + 1)
+
     def test_callback_exception_is_contained_and_input_keeps_flowing(self):
         # The library read thread only survives TransportError: anything else
         # escaping on_key kills all pad input silently while the display keeps
