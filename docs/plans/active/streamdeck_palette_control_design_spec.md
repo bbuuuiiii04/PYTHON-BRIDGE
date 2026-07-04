@@ -470,6 +470,13 @@ points — do not implement from the older text above:
   indices (operator ruling — safer under re-analysis).
 - **`white_sand` color:** borrowed from the Dune Sand twinkle palette
   (`govee_frame_renderer.py:1758-1764`), Warm Ivory (255,235,200), Template Lab may refine.
+- **GESTURE v2 (operator-approved 2026-07-04 evening) supersedes C.2/C.3's two-tap-override +
+  dedicated-lock-pad surface:** tap = queue/unqueue toggle; long-press (~0.5 s) = take-and-hold
+  (override-fade + lock, padlock on the palette's own pad); tap the locked active pad = unlock;
+  key 6 goes dark; idle swatches dim by HSV value only (hue stays readable). Contract:
+  `palette_control_authority.md` rules 1-4/7-10 v2 banner; implementation:
+  `docs/plans/active/palette_gesture_v2_spec.md` (AWR-121, not yet implemented — Package 2's v1
+  gestures remain live behavior until it lands).
 
 ## Part E — Evidence (file:line, HEAD `bd96b32`)
 

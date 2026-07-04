@@ -55,7 +55,7 @@ stay outside the 36-50 range SoundSwitch-learned static looks use.
 | Row | Keys | Pads |
 | --- | --- | --- |
 | Top | 0-4 | The 5 auto palettes, in config order. |
-| Middle | 5-9 | `white_sand` · lock · LED mute · Laser mute · Laser Solo. |
+| Middle | 5-9 | `white_sand` · lock (v1; **dark/reserved in v2** — the lock pad is retired, lock rides the palette long-press) · LED mute · Laser mute · Laser Solo. |
 | Bottom | 10-13, 14 | Static looks filling left→right by note; key 14 = Rainbow mode. |
 
 The layout is **pinned**. Pads never auto-rearrange when new SoundSwitch
@@ -64,16 +64,29 @@ beyond 4 are dropped with a visible log line, never silently.
 
 ## Palette Selection Rules
 
-1. Pressing a palette pad **queues** that palette: it takes effect at the next
-   track boundary. Queuing replaces any previously queued palette.
-2. Pressing the pad of the palette that is **already queued** overrides now:
-   the palette applies to the current track, arriving as a **fade** (rule 5),
-   and holds for the rest of that track (no drop-snap, no drift).
-3. An override **consumes the queue**. A stale queue must never re-apply the
-   same palette at the following boundary as a side effect.
-4. There is no double-press timer. The queue-then-override gesture is pure
-   state: the "second press window" lasts until the queue is consumed at a
-   boundary or replaced by another pad.
+> **GESTURE v2 (operator-approved 2026-07-04 evening; NOT YET IMPLEMENTED —
+> AWR-121, `docs/plans/active/palette_gesture_v2_spec.md`).** Rules 1-4 and
+> 7-10 below define the approved v2 surface. The implemented v1 surface
+> (tap-queue / second-tap-override / dedicated lock pad, landed in Package 2)
+> remains the correct LIVE behavior until the v2 package lands; divergence
+> from v2 is not a regression until then.
+
+1. **Tap** (press shorter than `long_press_s`, default 0.5 s) toggles the
+   queue: tap queues that palette for the next track boundary (replacing any
+   other queued palette); tapping the **already-queued** palette unqueues it.
+   Tapping the **locked, active** palette unlocks it (rule 9). There are no
+   multi-tap windows and no double-press gestures — a single press's duration
+   is the only timing input, measured per press.
+2. **Long-press** (≥ `long_press_s`) is **take-and-hold**: the palette applies
+   to the current track NOW, arriving as a fade (rule 5), AND locks (rule 7).
+   Long-press on the already-active locked palette is an idempotent no-op.
+   The action fires on release; the pad shows the latch locally at the
+   threshold so the operator feels when a hold has become a take.
+3. A take-and-hold **consumes the queue**. A stale queue must never re-apply
+   at the following boundary as a side effect.
+4. The old one-track override is reachable by composition, not a gesture:
+   take-and-hold, then tap the same pad to unlock — the color stays for this
+   track and automatic selection resumes at the next boundary (rule 10).
 5. **Fade contract:** an override fades from the current color position to the
    target, beat-synced, completing at the next phrase anchor or 32 beats,
    whichever is sooner (unknown anchor → the 32-beat cap alone). The blend must
@@ -85,13 +98,17 @@ beyond 4 are dropped with a visible log line, never silently.
    press stores the queue **without touching the fade**; lock follows rule 9
    (the fade completes, then pins). No manual action ever hard-jumps the
    color.
-7. **Lock** pins the currently-active palette across track boundaries: it
-   blocks dwell re-picks, drift, and drop-snap.
+7. **Lock** (armed only via long-press take-and-hold in v2 — there is no
+   dedicated lock pad) pins the target palette across track boundaries: it
+   blocks dwell re-picks, drift, and drop-snap. The lock arms with the
+   take-and-hold and pins the fade's target once the fade completes (the
+   rule-6 lock-mid-fade behavior, reused).
 8. **A queued palette applies at the boundary even while locked, and the lock
    transfers to it** (stays locked on the new palette until unlocked). This is
    operator law: the queue is manual input, and manual input outranks lock.
-9. An override likewise applies under lock; the lock remains set on the new
-   palette. Lock pressed mid-fade lets the fade complete, then pins the target.
+9. A take-and-hold on another palette likewise applies under lock; the lock
+   transfers to the new palette. **Unlock is a tap on the locked, active
+   palette's own pad.**
 10. **Unlock does not trigger an immediate re-pick.** The current palette
     stays; automatic selection resumes at the next boundary.
 11. `white_sand` follows every rule above identically. It differs only in that
@@ -150,7 +167,13 @@ beyond 4 are dropped with a visible log line, never silently.
     draws what the file says and sends notes.
 22. Universal state grammar on every pad: **bright = engaged/on, dim =
     available/off, pulsing = pending/armed, brief white flash = press
-    acknowledged.**
+    acknowledged.** v2 additions: **a dim palette pad must still be
+    unmistakably its palette's color** (dim reduces brightness/value only,
+    never hue or saturation — crimson reads red even idle); **the locked
+    palette wears a padlock glyph on its own pad**; **during a long-press the
+    pad shows the latch locally when the hold crosses `long_press_s`** (the
+    deck renders the threshold cue from its own press timing — display only,
+    the bridge's own measurement decides the action).
 23. Color is rationed to meanings: **red only ever means "a fixture is
     muted"; amber only ever means solo.** Palette pads wear their own colors;
     the lock glyph is drawn over the currently-active palette's color so the
@@ -184,12 +207,17 @@ display state and a monotonic sequence number.
 
 ## Required Behavior Tests
 
-1. Queue → boundary applies it; queue → same-pad press → override fades now
-   and the queue is consumed (no re-apply at the next boundary).
+1. (v2) Tap queues → boundary applies it; tap the queued pad again → unqueued,
+   nothing applies at the boundary; tap-queue replaces any other queued
+   palette. (v1 until AWR-121 lands: second tap = override, per Package 2's
+   shipped tests.)
 2. Fade completes at the phrase anchor; caps at 32 beats without an anchor;
    never leaves the allowed hue space; cancels cleanly at a track boundary.
 3. Queue while locked: applies at the boundary, lock transfers, stays locked.
-4. Override while locked: applies, lock stays. Unlock: no immediate re-pick.
+4. (v2) Long-press = take-and-hold: fades now, consumes the queue, locks the
+   target (mid-fade lock pins on completion); long-press another palette
+   transfers the lock; tap the locked active pad → unlocked, color stays, no
+   immediate re-pick; sub-threshold release = tap, never a take.
 5. `white_sand` is never chosen by dwell, drift, drop-snap, or shift across a
    large simulated session; `set`/`queue` reach it.
 6. Mute toggles: automation cannot un-mute; solo restore cannot clear a manual
