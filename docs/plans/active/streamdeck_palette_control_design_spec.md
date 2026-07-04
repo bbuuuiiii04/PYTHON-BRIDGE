@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified for Package 2; design-intent for later packages
-last_verified_commit: cc895f8
+last_verified_commit: fce1169
 last_verified_date: 2026-07-04
 validation_scope: Package 2 software-tested; Laser Solo/drop-presentation later packages remain design-intent; hardware-unvalidated
 ---

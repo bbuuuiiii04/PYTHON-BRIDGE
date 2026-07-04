@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: cc895f8
+last_verified_commit: fce1169
 last_verified_date: 2026-07-04
 validation_scope: Package 2 behavior contract implemented and software-tested; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---

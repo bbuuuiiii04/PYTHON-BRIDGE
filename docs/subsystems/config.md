@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: cc895f8
+last_verified_commit: fce1169
 last_verified_date: 2026-07-04
 validation_scope: software-only; Stream Deck palette control config software-tested
 ---

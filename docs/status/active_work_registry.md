@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: cc895f8
+last_verified_commit: fce1169
 last_verified_date: 2026-07-04
 validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; Stream Deck palette control Package 2 software-tested; hardware-output unvalidated
 ---
