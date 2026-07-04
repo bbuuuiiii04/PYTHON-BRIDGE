@@ -211,15 +211,17 @@ upgrading status language; leaving playback running — especially a strobing dr
 Brandon steps away.
 ```
 
-## 5. Open decisions (Brandon)
+## 5. Decisions (operator, 2026-07-04)
 
-1. **Build scope for round one** — skill-rewrite-only vs Round 1 (live-apply + preview) vs
-   Rounds 1+2 vs all three. My recommendation: Round 1 now; it kills T1/T3 with one Codex spec.
-2. **Lab strobe rail** — code rail (preview-derived flash metric, warn/block with override) vs
-   discipline-only (skill §0). My recommendation: the code rail, since it rides on Round 1's
-   preview for ~free; but this is a live-safety/taste call.
-3. **First template target** (aesthetic): groove-time variety, breakdown/ambient moods, or more
-   drop/post-drop variants. Catalog is drop/post-drop-heavy today; most set-time is groove.
+1. **Build scope: ALL THREE ROUNDS**, sequenced one Codex spec at a time. Round 1 spec:
+   `docs/plans/active/template_lab_round1_codex_spec.md`. Rounds 2 and 3 specs get authored
+   after Round 1 lands.
+2. **Lab strobe rail: discipline only.** No code rail; the rewritten skill's §0 strobe rule is
+   the rail. Do not add flash-metric blocking in any round without a new operator decision.
+3. **First template target: everything** — the authoring campaign spans groove, breakdown/
+   ambient, and drop/post-drop once Round 1 tooling lands. Per-look targeting happens in the
+   skill's interview step.
 
-Once decided: I author the Codex spec(s) per `.claude/skills/codex-spec/SKILL.md`; Codex
-implements; the skill rewrite is applied verbatim from §4.
+The skill rewrite in §4 is superseded in one detail by Round 1: once live-apply lands, §2's
+"no live param apply" bullet becomes the live-tuning bullet — the Round 1 spec (Task 5) carries
+the final post-Round-1 skill text and is the authoritative version to apply.
