@@ -34,13 +34,13 @@ In scope (v1, LED):
   C.2); a dedicated pad **locks/unlocks**.
 - A manual-only **`white_sand`** palette (Stream-Deck-only, never auto-selected) that renders LEDs
   white/off-white and drives lasers white.
-- **LED-blackout toggle pad** (operator-accepted 2026-07-04): LEDs off / LEDs back on, so the
-  operator can compose LED-only, LED+laser, and laser-only moments live (C.8).
-- **Drop presentation policy + spotlight arm pad** (operator-directed 2026-07-04): every true
-  drop is dealt one of three presentations — **majority LEDs-only, some LEDs+lasers, rare
-  lasers-only** (with a pre-drop full-dark beat) — via seeded weights over the bridge's existing
-  Smart-Drop qualification, plus a one-shot arm pad that forces lasers-only on demand (C.9).
-  No energy model: phrase roles + drop lifecycle + seeded RNG only.
+- **Room-state kill pads** (operator-directed 2026-07-04): two per-fixture toggles — **LED kill**
+  and **laser kill** — compose all three room states live: LED-only, LED+laser, laser-only (C.8).
+- **Drop presentation policy + spotlight arm pad** (operator-directed 2026-07-04, converged via
+  brainstorm): **lasers-only is never random** — it fires only from the arm pad or a
+  **Rekordbox hotcue tag** on the drop; untagged tracks get a fixed **lighting personality** from
+  their own structure (lasers on the track's biggest drops, dark on the rest) (C.9). No energy
+  model, no RNG rolls except a per-track seeded coin for single-drop tracks.
 - **Visual feedback**: each pad renders an icon reflecting its palette/action and live state.
 - **Pinned pad layout** (operator 2026-07-04): palette pads stay on fixed keys; static-look pads
   move to the bottom row (replaces today's "waterfall" fill — see Part C.1).
@@ -116,15 +116,15 @@ windows during scripted tracks; lasers stay fully authored (see laser doc Part A
 **1. Layout (LOCKED, operator 2026-07-04 — pinned rows, waterfall retired).** Stream Deck 3×5, ch3.
 - **Top row (keys 0-4)** = the 5 auto palettes in config order:
   `blue_cyan · deep_ocean · indigo · violet · crimson`.
-- **Row 2:** key 5 = `white_sand`, key 6 = lock/unlock, key 7 = LED-blackout toggle (C.8),
-  key 8 = drop-spotlight arm (C.9). Key 9 = spare (static-look overflow).
+- **Row 2:** key 5 = `white_sand`, key 6 = lock/unlock, key 7 = LED kill toggle (C.8),
+  key 8 = laser kill toggle (C.8), key 9 = drop-spotlight arm (C.9).
 - **Bottom row (keys 10-14)** = static looks, **filling left→right** sorted by note (today: 3 bound).
-  Overflow beyond 5 goes to spare key 9; anything past that is dropped with a log line.
+  Overflow beyond 5 is dropped with a log line.
 - **Palette/control pad notes are bridge-assigned, outside the 36-50 static-look range** so
   SS-learned bindings can never collide: ch2 notes **51-55** (palettes, config order), **56**
-  (`white_sand`), **57** (lock), **58** (LED blackout), **59** (spotlight arm). Declared once in
-  bridge config (Part C.6) and carried to the deck via the feedback file (Part C.7) — the deck
-  script hardcodes no palette names or notes.
+  (`white_sand`), **57** (lock), **58** (LED kill), **59** (laser kill), **60** (spotlight arm).
+  Declared once in bridge config (Part C.6) and carried to the deck via the feedback file
+  (Part C.7) — the deck script hardcodes no palette names or notes.
 
 **2. Gesture (LOCKED; state machine finalized 2026-07-04).** No timers, no double-press windows —
 the gesture is pure state:
@@ -213,7 +213,8 @@ the gesture is pure state:
   gitignored path), atomically (`tmp` + `rename`), from a **dedicated writer thread** in the
   coordinator — event-driven on palette-state change, debounced ~50 ms. **Never from the 200 Hz
   push loop** (no-filesystem-I/O invariant, AGENTS §6).
-- **Schema (v1):** `{v: 1, lock: bool, led_blackout: bool, spotlight: "off"|"armed"|"active",
+- **Schema (v1):** `{v: 1, lock: bool, led_blackout: bool, laser_blackout: bool,
+  spotlight: "off"|"armed"|"active",
   palettes: [{name, note, rgb: [r,g,b], state: "active"|"queued"|"inactive"|"fading"}], seq: int}`
   — list order = display order (5 palettes then `white_sand`); `rgb` = representative swatch
   computed by the engine (`_palette_center`/`_p_to_rgb` derivation); `seq` monotonic for staleness
@@ -227,73 +228,88 @@ the gesture is pure state:
 - *(Alternative considered: MIDI-back to the script — lower latency but needs an input port added;
   deferred in favor of the file. 1 s icon latency accepted; press feedback stays instant/local.)*
 
-**8. LED-blackout toggle pad (LOCKED, operator-accepted 2026-07-04).** Key 7 toggles the Govees
-off and **back on** — composing LED-only, LED+laser, and laser-only moments live (lasers are
-independently dark outside drops and have their own blackout pad).
-- Wiring is nearly free: `Ev.LED_BLACKOUT` / `Ev.LED_CLEAR_BLACKOUT` and the matching runtime
-  commands already exist (`models.py:267-268`, `runtime_status.py:427,440` — the LED Pad web
-  takeover path). The pad's note-on flips a coordinator-held toggle that emits the corresponding
-  event; the pad icon renders from `led_blackout` in the feedback file.
-- **Owner discipline (lesson from the laser blackout review):** the manual toggle and the
+**8. Room-state kill pads (LOCKED, operator-directed 2026-07-04).** Two per-fixture toggles
+compose all three room states live — LED-only (laser kill on), LED+laser (neither), laser-only
+(LED kill on) — with the presentation policy (C.9) running underneath whenever the pads are
+untouched.
+- **LED kill (key 7):** toggles the Govees off / back on. Wiring is nearly free:
+  `Ev.LED_BLACKOUT` / `Ev.LED_CLEAR_BLACKOUT` and the matching runtime commands already exist
+  (`models.py:267-268`, `runtime_status.py:427,440` — the LED Pad web takeover path). The pad's
+  note-on flips a coordinator-held toggle that emits the corresponding event; the pad icon
+  renders from `led_blackout` in the feedback file.
+- **Laser kill (key 8):** toggles the laser frame dark / back. Rides the **existing**
+  `blackout_mask` machinery end-to-end: one new bridge-config binding row (device "Stream Deck",
+  ch2, note 59, kind `blackout_mask`, toggle interaction) joins the MIDI-input adapter's
+  refcounted blackout bindings (`soundswitch_midi_input.py:280-314`) — a **second manual owner**
+  alongside the laser-pad-web note, already OR'd correctly by the group merge (:621-635). Zero
+  new code paths; pad icon renders from `laser_blackout` in the feedback file.
+- **Owner discipline (lesson from the laser blackout review):** the manual LED kill and the
   drop-spotlight window (C.9) both drive LED blackout — they must be **separate owners** (event
   payload `reason`), OR'd at the LED dispatch layer, so a spotlight auto-restore can never clear a
-  manually-toggled blackout and vice versa. Codex spec pins the exact seam + test.
+  manually-toggled kill and vice versa. Same rule on the laser side: the kill pad's binding owner
+  is distinct from the laser-pad-web owner by construction (per-binding refcount). Codex spec pins
+  the exact seam + test.
 
-**9. Drop presentation policy + spotlight arm pad (arm pad LOCKED, operator-accepted 2026-07-04;
-policy shape operator-directed 2026-07-04 — "majority of drops LEDs-only, some LED+laser, some
-laser-only"; details below are Fable's PROPOSED design, confirm at gate 2).**
+**9. Drop presentation policy + spotlight arm pad (CONVERGED via operator brainstorm
+2026-07-04 — supersedes the earlier weighted-deal draft).**
 
-**Every true drop gets dealt one of three presentations.** "True drop" reuses the bridge's
-existing qualification, unchanged: a Smart-Drop impact — ANLZ drops filtered by
-`select_smart_drops` (`smart_phrasing.py:601`) landing with a tension predecessor per the
-drop-lifecycle gate (`drop_lifecycle.py:18` `impact_predecessors = {up, low, buildup,
-breakdown}`). No new drop detection is invented. Breakdown/groove/buildup stay LEDs-only by pack
-authoring, as today.
+**Governing idea (operator's own words): a lasers-only drop is "the whole club saw it coming"
+AND "the track everyone came for" — so lasers-only is NEVER random.** It fires only from the
+operator (live or curated ahead). Untagged tracks get a fixed **lighting personality** derived
+from their own structure. "True drop" reuses the bridge's existing qualification, unchanged:
+Smart-Drop selection (`smart_phrasing.py:601`) + the drop-lifecycle tension-predecessor gate
+(`drop_lifecycle.py:18` `impact_predecessors`). Breakdown/groove/buildup stay LEDs-only by pack
+authoring, as today. **Deleted from the earlier draft:** presentation weights, the random
+lasers-only tier, the ordinal-≥2 gate, the tracks-since-special budget, and the drought breaker
+(operator: every track played has a true drop, nearly all have 2+ — a drought never occurs).
 
-- **The deal (seeded weighted choice, the LED engine's existing idiom):** per true-drop impact,
-  choose from config weights `presentation_weights` (default `leds_only: 0.6,
-  leds_plus_lasers: 0.3, lasers_only: 0.1`), seeded per `(set_seed, track key,
-  drop_section_index)` — deterministic and replayable, same seeded-RNG pattern as the engine's
-  journey/`big_shift_chance` (no live randomness source).
-  - **`leds_only` (the majority):** lasers stay dark through the drop window. Mechanism is **base
-    suppression, NOT the blackout mask**: the player already renders "no selection → zero base
-    while a manually-held static override still stands alone"
-    (`soundswitch_laser_player.py:428-443`) — the suppression withholds the drop base the same
-    way, so a blackout would-be side effect (killing a held static look) cannot happen. Manual
-    overlay always survives automation.
-  - **`leds_plus_lasers` (some):** today's behavior, untouched.
-  - **`lasers_only` (rare = the spotlight):** extra-gated on top of its weight — **drop ordinal
-    ≥ 2 in the track** (`drop_section_index`; the post-mid-breakdown drop is the peak) AND
-    **budget open** (`tracks_since_special ≥ special_budget_tracks`, default 3 — a spacing
-    *floor*, not a scheduler: nothing fires because the budget refilled). When gated off, the
-    roll falls back to `leds_plus_lasers`. Fires with **pre-drop full-dark**: Govees join the
-    lasers' existing smart-drop pre-window for the final `led_predark_beats` (default 4) →
-    impact: Govees dark, lasers alone → auto-restore at window end. At most one per track.
-- **Manual arm (one-shot, unchanged):** key 8 press → pad pulses (`spotlight: "armed"`) → the
-  next true drop is dealt `lasers_only` regardless of weights/gates; resets the budget counter.
-  Disarm = press again; arming auto-clears on track change.
+**The ladder (first match wins, per drop):**
+1. **Kill pads (C.8)** — manual room state, absolute, continuous.
+2. **Arm pad (key 9)** — one-shot: next true drop is `lasers_only` (+ pre-dark). Pad pulses
+   while armed; disarm = press again; auto-clears on track change.
+3. **Hotcue tag (curation in Rekordbox)** — a hot cue named with the marker (default `LASER`,
+   case-insensitive, config `hotcue_marker`) placed on the drop marks it: that drop is
+   `lasers_only` (+ pre-dark). Matched to the nearest smart drop within ±2 beats. **No budget
+   gate — tagging is deliberate; if two tagged anthems play back-to-back, that was the plan.**
+   Mechanism: hot cues live in the ANLZ files the bridge already parses per track via
+   `pyrekordbox.AnlzFile` (`anlz_reader.py:184-201`); extraction is a new
+   `_extract_hot_cues(parsed)` in the same pattern as `_extract_pssi_phrases` (:227,) reading the
+   PCOB/PCO2 cue tags — *[assumed: cue comments present in the operator's exported ANLZ files;
+   verify with one real file at spec time]*.
+4. **Opening damper** — the first `opening_tracks` (default 3) of a session force `leds_only`
+   drops (save the night's first laser moment).
+5. **Track personality (everything else — deterministic, no RNG):** rank the track's true drops
+   by its own dramaturgy — **last drop first, then longest runway** (contiguous
+   breakdown+buildup beats before impact, from phrase roles). The top `ceil(laser_ratio × N)`
+   ranked drops (default ratio 0.4) render `leds_plus_lasers`; the rest `leds_only`.
+   Single-drop tracks flip a **track-identity-seeded** coin at `laser_ratio` (stable across
+   plays). Seeding is by `content_id`, NOT set seed, so **every track keeps the same lighting
+   identity every time it's played** — lasers land on its biggest drops, dark on the rest;
+   predictable for the performer, consistent craft for the crowd.
+
+**Presentation mechanics (unchanged from prior draft):**
+- **`leds_only`:** lasers stay dark through the drop window via **base suppression, NOT the
+  blackout mask** — the player already renders "no selection → zero base while a manually-held
+  static override still stands alone" (`soundswitch_laser_player.py:428-443`); suppression
+  withholds the drop base the same way, so a held static look survives automation.
+- **`lasers_only`:** pre-drop full-dark — Govees join the lasers' existing smart-drop pre-window
+  for the final `led_predark_beats` (default 4) → impact: Govees dark, lasers alone →
+  auto-restore at window end.
 - **Drop window** = drop impact → end of the smart-phrasing drop role (the shared phrase
-  authority both LED dispatch and the laser director key off — neither side's private timer),
-  capped at `drop_window_cap_beats` (default 32 ≈ 14 s at 140 BPM; 16 is the shorter taste
-  option).
-- **Darkness guard (`lasers_only`, manual AND auto):** before cutting the Govees at impact,
+  authority, neither side's private timer), capped at `drop_window_cap_beats` (default 32 ≈ 14 s
+  at 140 BPM; 16 is the shorter taste option).
+- **Darkness guard (`lasers_only`, manual AND tagged):** before cutting the Govees at impact,
   verify lasers will actually be visible — pack player live and rendering a drop autoloop, no
   laser blackout mask held, laser output enabled. Otherwise **fall back to `leds_plus_lasers`**
-  (a spotlight on dark lasers = a fully dark room; only the beat-capped pre-dark may ever be
-  fully dark, and it hard-restores at impact).
-- **Manual always wins:** a manually-held LED-blackout toggle (C.8) suspends the policy's LED
-  side; a manually-held laser static override survives `leds_only` suppression (base
-  suppression, above); any manual interaction during a spotlight window restores it. Separate
-  owners per C.8.
+  (only the beat-capped pre-dark may ever be fully dark, and it hard-restores at impact).
 - **Fail-open rules:** restore LEDs (and release base suppression) on ANY of window end / role
   change / track change / stop / manual interaction / laser-output loss mid-window — the policy
   can never latch either fixture dark.
 - **Config block** (proposed home `config/led_look_director.json` `/drop_presentation`):
-  `{enabled: true, presentation_weights: {leds_only: 0.6, leds_plus_lasers: 0.3,
-  lasers_only: 0.1}, lasers_only_min_drop_ordinal: 2, special_budget_tracks: 3,
-  led_predark_beats: 4, drop_window_cap_beats: 32}`. All deterministic; `enabled: false` restores
-  today's behavior exactly (every drop `leds_plus_lasers`; arm pad still works). First live set
-  is the validation pass for the default weights.
+  `{enabled: true, laser_ratio: 0.4, opening_tracks: 3, led_predark_beats: 4,
+  drop_window_cap_beats: 32, hotcue_marker: "LASER"}`. All deterministic; `enabled: false`
+  restores today's behavior exactly (every drop `leds_plus_lasers`; kill/arm pads still work).
+  First live set validates the defaults.
 - The `leds_only` base-suppression seam is laser-side plumbing (a per-drop selection withhold);
   the laser doc cross-references it. Everything else is zero laser code.
 
@@ -337,6 +353,10 @@ authoring, as today.
   (`drop_white_aggressive`:505, `post_drop_white_shatter`:515, `buildup_white_*`:874-953).
 - Scripted-mode LED gating (mechanism): `led_look_director.py:174-187`,
   `led_dispatch_policy.py:83-143`.
+- Drop presentation inputs: Smart-Drop selection `smart_phrasing.py:601-617`; drop-lifecycle
+  tension gate `drop_lifecycle.py:18`; ANLZ parsing via `pyrekordbox.AnlzFile`
+  `anlz_reader.py:184-201` (hot-cue extraction = new, same pattern as `_extract_pssi_phrases`
+  :227); base-suppression render state `soundswitch_laser_player.py:428-443`.
 
 ## Change-contract note
 

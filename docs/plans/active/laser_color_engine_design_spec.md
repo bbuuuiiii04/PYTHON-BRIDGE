@@ -298,8 +298,12 @@ for its whole window.)
    drop-lifecycle events; pure mapper behavior. **Gated on exact CH8/CH9 behavior from the chart
    (#1).**
 9. **Drop presentation policy (design lives in the Stream Deck doc; ONE laser-side seam).** The
-   per-drop deal — majority `leds_only`, some `leds_plus_lasers`, rare `lasers_only` spotlight
-   with pre-drop full-dark — is specced in `streamdeck_palette_control_design_spec.md` Part C.9.
+   converged ladder — manual kill pads > arm pad > Rekordbox hotcue tag (`lasers_only` with
+   pre-drop full-dark; never random) > opening damper > per-track lighting personality (lasers on
+   the track's biggest drops by last-drop/longest-runway ranking, `laser_ratio` 0.4, seeded by
+   track identity) — is specced in `streamdeck_palette_control_design_spec.md` Part C.9. A second
+   manual laser-blackout owner (the deck's laser-kill pad) joins the existing `blackout_mask`
+   binding refcount — no new laser code, one bridge-config binding row.
    The single laser-side piece is **`leds_only` base suppression**: withholding the drop's
    autoloop base for that window so lasers stay dark — **NOT via the blackout mask** (blackout
    zeroes held static overrides too). The player already renders the needed state — zero base
