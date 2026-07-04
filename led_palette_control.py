@@ -20,14 +20,27 @@ PALETTE_STATE_PATH = "/tmp/rb_ss_bridge_v2_palette_state.json"
 
 
 class PaletteFeedbackWriter(threading.Thread):
-    def __init__(self, path: str = PALETTE_STATE_PATH, *, debounce_s: float = 0.10) -> None:
+    def __init__(
+        self,
+        path: str = PALETTE_STATE_PATH,
+        *,
+        debounce_s: float = 0.10,
+        heartbeat_s: float | None = None,
+    ) -> None:
         super().__init__(name="palette-feedback-writer", daemon=True)
         self._path = path
         self._debounce_s = debounce_s
+        # When set, the last payload is rewritten every heartbeat_s while idle
+        # so mtime-based staleness checks (streamdeck_midi FEEDBACK_STALE_S)
+        # keep reading the file as live even when nothing changes. The
+        # learned-store writer instance passes None: a persistent store must
+        # only be written on real mutations.
+        self._heartbeat_s = heartbeat_s
         self._event = threading.Event()
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._pending: dict[str, Any] | None = None
+        self._last_payload: dict[str, Any] | None = None
         self._logged_error = False
 
     def submit(self, payload: dict[str, Any]) -> None:
@@ -41,18 +54,24 @@ class PaletteFeedbackWriter(threading.Thread):
 
     def run(self) -> None:
         while not self._stop_event.is_set():
-            self._event.wait()
+            fired = self._event.wait(timeout=self._heartbeat_s)
             self._event.clear()
             if self._stop_event.is_set():
                 return
-            time.sleep(self._debounce_s)
+            if fired:
+                time.sleep(self._debounce_s)
             with self._lock:
                 payload = self._pending
                 self._pending = None
             if payload is None:
+                # Heartbeat wake with nothing new: refresh mtime with the last
+                # written content (never invents a payload before first submit).
+                payload = self._last_payload
+            if payload is None:
                 continue
             try:
                 atomic_write_json(self._path, payload)
+                self._last_payload = payload
             except Exception as exc:
                 if not self._logged_error:
                     log.warning("[PALETTE] feedback_write_failed err=%s", type(exc).__name__)
@@ -91,7 +110,7 @@ class LedPaletteControl:
         self._last_input_healthy = True
         self._last_feedback_body: dict[str, Any] | None = None
         self._logged_snapshot_error = False
-        self._writer = PaletteFeedbackWriter(feedback_path)
+        self._writer = PaletteFeedbackWriter(feedback_path, heartbeat_s=5.0)
         self._writer.start()
         self.publish_feedback()
 
@@ -206,8 +225,12 @@ class LedPaletteControl:
         palettes = getattr(config, "palettes", {}) if config is not None else {}
         snap = self._engine_snapshot()
         result: list[dict[str, Any]] = []
-        for idx, (name, palette) in enumerate(palettes.items()):
-            note = self._palette_notes.get(name, 51 + idx)
+        for name, palette in palettes.items():
+            note = self._palette_notes.get(name)
+            if note is None:
+                # Not a pad (e.g. the rainbow-type mode target): never invent
+                # notes — an invented note can collide with a control pad.
+                continue
             state = "inactive"
             if name == snap.get("current_palette"):
                 state = "active"

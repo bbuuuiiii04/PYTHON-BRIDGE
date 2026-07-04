@@ -498,7 +498,13 @@ class StateManager(LEDDispatchPolicyMixin):
 
         self._init_led_dispatch_state(led_look_director, led_scene_adapter, led_color_engine)
         palette_control_config = led_palette_control_config or {}
-        palette_notes = palette_control_config.get("palette_notes", {})
+        raw_palette_notes = palette_control_config.get("palette_notes", {})
+        palette_notes = dict(raw_palette_notes) if isinstance(raw_palette_notes, dict) else {}
+        # white_sand rides its own config key; without this merge the feedback
+        # payload has no note for it and the deck blanks key 5.
+        ws_note = palette_control_config.get("white_sand_note")
+        if type(ws_note) is int and 0 <= ws_note <= 127:
+            palette_notes.setdefault("white_sand", ws_note)
         control_notes = {
             "lock": palette_control_config.get("lock_note"),
             "led_mute": palette_control_config.get("led_mute_note"),
@@ -519,7 +525,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 get_phrase_anchor=self._palette_control_phrase_anchor,
                 get_laser_blackout=lambda: bool(self._pack_status_snapshot.get("blackout", False)),
                 get_laser_solo=lambda: self._drop_presentation_solo_feedback,
-                palette_notes=palette_notes if isinstance(palette_notes, dict) else {},
+                palette_notes=palette_notes,
                 control_notes=control_notes,
             )
             if led_color_engine is not None

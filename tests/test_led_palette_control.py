@@ -198,6 +198,24 @@ class LedPaletteControlTests(unittest.TestCase):
         self.control.maybe_publish()
         self.assertEqual(len(writer.payloads), queued_count + 1)
 
+    def test_palette_payload_never_invents_notes_for_unconfigured_palettes(self) -> None:
+        control = LedPaletteControl(
+            engine=LedColorEngine(_config(), set_seed=3),
+            led_event_sink=self.events.append,
+            get_abs_beat=lambda: 8.0,
+            get_phrase_anchor=lambda _beat: 16.0,
+            get_laser_blackout=lambda: False,
+            palette_notes={"blue_cyan": 51, "violet": 52, "white_sand": 56},
+            control_notes={"lock": 57},
+        )
+        self.addCleanup(control.stop)
+        payload = _WriterStub.instances[-1].payloads[-1]
+        names = [row["name"] for row in payload["palettes"]]
+        self.assertNotIn("rainbow", names)  # no configured note -> not a pad
+        self.assertIn("white_sand", names)
+        allowed = {51, 52, 56}
+        self.assertTrue(all(row["note"] in allowed for row in payload["palettes"]))
+
 
 class PaletteFeedbackWriterTests(unittest.TestCase):
     def test_writer_uses_background_thread_and_atomic_replace(self) -> None:
@@ -217,6 +235,33 @@ class PaletteFeedbackWriterTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["seq"], 1)
             self.assertNotEqual(writer.ident, caller)
             self.assertFalse(path.with_suffix(".json.tmp").exists())
+
+    def test_heartbeat_refreshes_mtime_with_identical_payload_while_idle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "palette.json"
+            writer = PaletteFeedbackWriter(str(path), debounce_s=0.01, heartbeat_s=0.05)
+            writer.start()
+            try:
+                # No submit yet: heartbeat must not invent a file.
+                time.sleep(0.15)
+                self.assertFalse(path.exists())
+
+                writer.submit({"schema": 1, "seq": 7})
+                deadline = time.time() + 1.0
+                while time.time() < deadline and not path.exists():
+                    time.sleep(0.01)
+                first_mtime = path.stat().st_mtime_ns
+
+                # Idle across several heartbeats: mtime advances, content identical
+                # (this is what keeps streamdeck_midi's FEEDBACK_STALE_S check alive).
+                deadline = time.time() + 2.0
+                while time.time() < deadline and path.stat().st_mtime_ns == first_mtime:
+                    time.sleep(0.02)
+                self.assertGreater(path.stat().st_mtime_ns, first_mtime)
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["seq"], 7)
+            finally:
+                writer.stop()
+                writer.join(timeout=1.0)
 
 
 class StreamDeckPaletteLayoutTests(unittest.TestCase):
