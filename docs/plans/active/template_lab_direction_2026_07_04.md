@@ -86,31 +86,32 @@ exact-length, fail-dark (`:1943-1952`). The `frame` draft kind bypasses the colo
 North star: **the agent writes the shape once; Brandon tunes it by feel, live, without touching
 JSON.** Three build rounds, each one Codex spec, in this order:
 
-**Round 1 — close the tune loop (intuitive + practical).**
+**Round 1 — close the loop: live-apply, variant switching, preview (intuitive + practical).**
 1. `/api/lab/update`: mirror `_lab_play_spec` but call `PadPlayback.update()` instead of
    `play()`. The lab UI auto-applies param edits while its draft is playing: color-only edits
    apply in place, motion edits reconfigure from the current beat — exactly the semantics the
    runner already implements for pad looks.
-2. `/api/lab/preview`: server-side offline render of N beats × 40 fps through the pure
+2. `/api/lab/switch`: seamless swap to a *different* lab draft while one is playing — same
+   `update()` path, new scene ref, beat clock and cue window untouched. This is what makes the
+   variants-first workflow (§6) real: A/B/C on the strip without the lights stuttering.
+3. `/api/lab/preview`: server-side offline render of N beats × 40 fps through the pure
    `LabRenderer` (no transport, no ownership needed), returning frames; `lab.js` animates them on
-   a canvas strip. Doubles as the agent's self-check surface — and as the input to the strobe
-   metric below.
-3. Strobe rail (operator decision, see §5): compute a flash metric from the preview frames
-   (full-strip luma flips/sec); warn in the UI and optionally refuse `lab/play` above the house
-   ceiling (16th-note gate) without an explicit override.
+   a canvas strip. The agent's mandatory self-check surface before anything touches hardware.
 
-**Round 2 — sliders over JSON (intuitive + customizable).**
+**Round 2 — hands-on tuning, finger-first (intuitive + customizable).**
 Draft entries gain an optional `param_specs` map (`{key: {label, min, max, step, kind}}`) written
-by the agent at authoring time; the UI renders sliders/toggles above the JSON textarea (which
-stays, as the advanced fallback). `LabRegistry` is schema-free dicts already — passthrough is
-trivial. `param_specs` is also the concrete record of "controls Brandon actually tuned" that the
-skill's promotion step wants: what he moved gets exposed in production, what he never touched
-stays hardcoded. Plus: swatches showing the injected slot colors for the current test palette, so
-"slot 3" means something visible.
+by the agent at authoring time; the UI renders touch-sized sliders/toggles (≥40px targets — iPad
+on the couch is a first-class seat) that live-apply on drag. The raw JSON textarea collapses into
+an "Advanced" disclosure — on touch it is a non-starter and it should never be the primary
+surface again. `param_specs` is also the concrete record of "controls Brandon actually tuned":
+what he moved gets exposed in production, what he never touched stays hardcoded. Plus: swatches
+showing the injected slot colors for the current test palette, so "slot 3" means something
+visible.
 
 **Round 3 — housekeeping (practical).**
-Status filter in the drafts sidebar (default: hide rejected) and a `/api/lab/delete` endpoint.
-Small, no design risk.
+Status filter in the drafts sidebar (default: hide rejected), a `/api/lab/delete` endpoint, and —
+if variant sets prove messy as flat drafts — light variant grouping in the sidebar (decide when
+we see real use).
 
 **Deliberately not doing:** in-browser Python editing (the agent owns the code file; a textarea
 IDE is scope creep), multi-draft layering/compositing (that's the Stream Deck compositor
@@ -222,6 +223,28 @@ Brandon steps away.
    ambient, and drop/post-drop once Round 1 tooling lands. Per-look targeting happens in the
    skill's interview step.
 
-The skill rewrite in §4 is superseded in one detail by Round 1: once live-apply lands, §2's
-"no live param apply" bullet becomes the live-tuning bullet — the Round 1 spec (Task 5) carries
-the final post-Round-1 skill text and is the authoritative version to apply.
+The skill rewrite in §4 is a pre-Round-1 draft kept for the record; the Round 1 spec (Task 5)
+carries the final post-Round-1 skill text (live-apply, variant switching, variants-first
+workflow) and is the authoritative version to apply.
+
+## 6. Operator experience design (2026-07-04, second session)
+
+Brandon's answers to the four workflow questions, and what each commits us to:
+
+1. **Who drives: depends on the look.** Both modes are first-class. Talk-mode: he watches the
+   strip and reacts in plain language; the agent makes every change live (needs only the agent
+   API — Round 1). Knob-mode: the agent hands him a few real controls and he finds it with his
+   hands (Round 2 sliders). The skill teaches the agent to offer both.
+2. **Variants first, then tune.** A new idea starts as 2-3 authored takes, each differing on ONE
+   meaningful axis. He flips between them live on the strip (Round 1 `/api/lab/switch` — the
+   beat never stops), picks a winner, then tunes it. Losing variants get rejected with one line.
+3. **Devices: all of them** — laptop at the gear AND iPad/phone on the couch. Touch-first
+   applies to every new control; raw JSON is never the primary surface (Round 2 demotes it).
+4. **Beat source: fake clock is fine.** No Rekordbox-follow, no tap tempo. The synthetic BPM
+   clock stays; nothing to build.
+
+The session, as designed: Brandon describes the idea → agent interviews briefly → authors 2-3
+variants → previews them in the browser (self-check, no hardware) → plays variant A → Brandon
+switches A/B/C live and picks → tunes the winner by talking or by sliders → Accept → promotion
+pipeline. Everything above is reflected in the Round 1 spec; Rounds 2-3 get spec'd after it
+lands.

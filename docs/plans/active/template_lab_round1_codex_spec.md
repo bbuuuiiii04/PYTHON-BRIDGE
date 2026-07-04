@@ -6,10 +6,17 @@ last_verified_date: 2026-07-04
 validation_scope: spec only until tasks land; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED repo status unchanged
 ---
 
-# Codex Implementation Spec - Template Lab Round 1 (live-apply tuning + browser preview + skill adoption)
+# Codex Implementation Spec - Template Lab Round 1 (live-apply + variant switch + preview + skill adoption)
 
 Parent direction doc: `docs/plans/active/template_lab_direction_2026_07_04.md` (operator approved
-all three rounds 2026-07-04; this spec is Round 1 only). Recommended Codex effort: `medium`.
+all three rounds 2026-07-04; §6 records the operator workflow decisions this spec implements;
+this spec is Round 1 only). Recommended Codex effort: `medium`.
+
+Operator workflow decisions shaping this round (direction doc §6): sessions are **variants-first**
+(agent authors 2-3 takes, Brandon flips between them live on the strip and picks, then tunes),
+**both driving modes** are first-class (talk-and-react via the agent API; hands-on via the UI),
+devices include **iPad/phone** (touch-first for any new control), beat source stays the
+**synthetic clock** (no Rekordbox-follow, no tap tempo — do not build either).
 
 ## Part A - Context & Root Cause (verified; read, do not implement)
 
@@ -114,7 +121,7 @@ def render_preview_frames(
 Pure: no I/O, no clock, deterministic for fixed args. Callers are responsible for clamping
 `fps`/`bpm`/`beats` (Task 2 does).
 
-### Task 2 - `tools/led_pad_web.py`: `lab_update` + `lab_preview` + routes
+### Task 2 - `tools/led_pad_web.py`: `lab_update` + `lab_switch` + `lab_preview` + routes
 
 1. Extend the import at `:27` to `from .led_pad_playback import PadPlayback, stable_seed`, and
    the import at `:26` to also bring `render_preview_frames`.
@@ -143,6 +150,32 @@ def lab_update(self, payload: dict[str, Any]) -> dict[str, Any]:
    sandbox module, so live code edits apply too; a broken module raises (surfacing the traceback
    string) after the live renderer has swapped to `{}` — the strip goes dark until fixed
    (intended fail-dark).
+
+   Then the variant switch — seamless swap to a different lab draft while one is playing:
+
+```python
+def lab_switch(self, payload: dict[str, Any]) -> dict[str, Any]:
+    name = str(payload.get("name", "")).strip()
+    entry = self._lab.get(name)
+    scene = LabRegistry.scene_ref(name)
+    if not self._playback.status().get("playing") or not str(self._playing_name).startswith("lab_"):
+        return {"ok": False, "error": "no_lab_scene_playing"}
+    with self._lock:
+        config = copy.deepcopy(self._draft)
+    spec, _cue_beats = self._lab_play_spec(config, entry, payload)
+    self._playback.update(spec)
+    self._playing_name = scene
+    self._last_play_editor = None
+    return {"ok": True, "applied": True, "spec": spec, "playback": self._playback.status()}
+```
+
+   Same `update()` path as tuning, so the `SyntheticClock` and `CueTimer` are untouched: the
+   beat keeps running and the runner reconfigures the engine to the new effect from the current
+   beat — that is the point (A/B/C comparison without the lights stuttering). Deliberate limits:
+   refuses when nothing is playing or when a **pad** look is playing (the UI falls back to
+   `lab_play`, which carries the existing preempt + ownership semantics); with Loop off, the
+   previous draft's remaining cue window still governs auto-stop (accepted; switching is a
+   Loop-on workflow). Switching to a broken module fails dark exactly like `lab_update`.
 
 ```python
 def lab_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -185,8 +218,8 @@ def lab_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
    matches play (`stable_seed(scene_ref)` — same value `PadPlayback.build_spec` derives at
    `tools/led_pad_playback.py:251` since the lab spec's `look_name` is the scene ref).
 
-3. Register both in `_POST_ROUTES` (`:785-804`):
-   `"/api/lab/update": service.lab_update,` and `"/api/lab/preview": service.lab_preview,`.
+3. Register all three in `_POST_ROUTES` (`:785-804`): `"/api/lab/update": service.lab_update,`
+   `"/api/lab/switch": service.lab_switch,` and `"/api/lab/preview": service.lab_preview,`.
 
 ### Task 3 - `tools/led_pad_assets/pad-core.js`: API client methods
 
@@ -194,6 +227,7 @@ Next to the existing lab methods (`:141-144`):
 
 ```js
 labUpdate: (body) => request("/api/lab/update", {method: "POST", body}),
+labSwitch: (body) => request("/api/lab/switch", {method: "POST", body}),
 labPreview: (body) => request("/api/lab/preview", {method: "POST", body}),
 ```
 
@@ -286,7 +320,30 @@ $("previewBtn").onclick = () => previewDraft().catch(showError);
    Call `stopPreview()` at the top of `selectDraft(...)` so switching drafts kills the animation.
    Note `previewDraft` reuses the existing `save()` (which calls `refresh()`) — acceptable here
    because Preview is an explicit click, not mid-typing. Disable/enable `previewBtn` with the
-   other buttons in `renderDetail()` (add it to the disabled-ids list at `lab.js:57`).
+   other buttons in `renderDetail()` (add it to the disabled-ids list at `lab.js:57`). All new
+   controls keep ≥40px touch targets (iPad is a first-class seat — match the existing pad.css
+   sizing conventions).
+
+3. **Variant switch.** In `play(takeover)` (`lab.js:90-102`), after the `save()` call and before
+   the `labPlay` request: if a *different* lab draft is currently live, switch instead of
+   replaying —
+
+```js
+const mine = labScene(state.current.name);
+if (state.playingLook && state.playingLook.startsWith("lab_") && state.playingLook !== mine) {
+  const sw = await api.labSwitch({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}")});
+  if (sw.ok) { await updateRuntime(); return; }
+}
+```
+
+   (On `sw.ok === false` fall through to the existing `labPlay` path, which handles ownership
+   and pad-look preemption.) And make the button say what it will do — in `renderLive()`:
+
+```js
+$("playDraftBtn").textContent =
+  state.current && state.playingLook && state.playingLook.startsWith("lab_") &&
+  state.playingLook !== labScene(state.current.name) ? "⇄ Switch" : "▶ Play";
+```
 
 ### Task 5 - `.claude/skills/template-lab/SKILL.md`: replace entire file with this text
 
@@ -325,7 +382,8 @@ Confirm the sentence back before writing code.
   `/api/runtime_status`; `POST /api/lab/save` (draft fields), `/api/lab/reload` (syntax +
   registration check — never touches lights; use after every edit), `/api/lab/play`
   `{"name", "params", "cue_beats", "takeover"}`, `/api/lab/update` `{"name", "params"}`,
-  `/api/lab/preview` `{"name", "params"?, "beats"?, "bpm"?}`, `/api/stop`.
+  `/api/lab/switch` `{"name"}` (seamless swap to another lab draft while one plays — the beat
+  keeps running), `/api/lab/preview` `{"name", "params"?, "beats"?, "bpm"?}`, `/api/stop`.
 - Code: define the function in `config/led_lab/effects_lab.py`, register it in
   `LAB_EFFECTS = {"myname": ("slot", fn)}` — kind `"slot"` or `"frame"`. Create/update the
   draft entry via `/api/lab/save`, not by hand-editing `drafts.json` while the server runs.
@@ -360,12 +418,19 @@ Brandon's BPM and check: not all-dark, channels in range, motion actually moves,
 full-strip on/off flips — faster than the house 16th-note gate means stop and rethink before it
 reaches the strip.
 
-## 5. Play + tune loop
-Play through `/lab` with Test Palette at Brandon's BPM. ONE change per iteration; describe it in
-plain language ("comets now die at the ends instead of wrapping"). Prefer param-izing a constant
-over rewriting the shape. Keep a running list of constants Brandon actually adjusted — those
-become the promoted render's exposed controls; everything he never touched stays hardcoded.
-Stop playback whenever Brandon steps away (Stop is free).
+## 5. Variants first, then tune
+For a new idea, author 2-3 variants that each differ on ONE meaningful axis (motion pattern,
+density, white usage — not three random takes). Register each as its own draft (`idea_a`,
+`idea_b`, `idea_c`), self-check all of them (§4), then play one with Test Palette at Brandon's
+BPM and switch live (`/api/lab/switch`) while he watches — switching is seamless, the beat
+keeps running. He picks a winner; reject the losers with one line each. Then tune the winner in
+whichever mode Brandon wants that day:
+- Talk-mode: he describes, you change ONE thing per iteration (`/api/lab/update` while live)
+  and describe it back in plain language ("comets now die at the ends instead of wrapping").
+- Knob-mode: point him at the few params worth feeling out; his edits in the UI apply live.
+Prefer param-izing a constant over rewriting the shape. Keep a running list of constants
+Brandon actually adjusted — those become the promoted render's exposed controls; everything he
+never touched stays hardcoded. Stop playback whenever Brandon steps away (Stop is free).
 
 ## 6. Accept / reject
 Accepted = Brandon says so while watching it. Hand promotion to the codex-spec pipeline: move
@@ -409,6 +474,9 @@ Per `docs/agents/change_contracts.yml` `led_pad` (`:205-228`):
 - `lab_update` applies ONLY when the pad already owns playback and that exact draft is playing;
   it never calls `request_takeover()`, never activates the transport, never restarts the
   `CueTimer`/`SyntheticClock`.
+- `lab_switch` applies ONLY when a lab scene is already playing; it never takes over from the
+  bridge, never preempts a pad look, and never restarts the `CueTimer`/`SyntheticClock` — the
+  seamless-beat property is the feature.
 - `lab_preview` never constructs a transport, never sends UDP, never reads/writes ownership or
   the bridge status/commands files, never swaps the live `LabRenderer`'s effects.
 - Failure direction stays dark: broken sandbox module during live apply → blank frames, never a
@@ -439,7 +507,13 @@ constructor pattern):
 4. Live code swap: write `effects_lab.py` v1, play; rewrite with changed function, `lab_update`
    → the service's live `LabRenderer.effects` now contains the new function (assert via a
    rendered frame difference or fn identity), consistent with `_lab_play_spec`'s reload.
-5. Regression guard: pad-look `update()` for a production look still behaves as in the existing
+5. `lab_switch`: (a) lab draft A playing → switch to B: fake's `update()` called once with a
+   spec whose `scene_ref` is `lab_b...`, `play()` NOT called, and the service now reports B as
+   the playing name (subsequent `lab_update` for B applies); (b) nothing playing →
+   `{"ok": False, "error": "no_lab_scene_playing"}`; (c) a **pad** look playing (non-`lab_`
+   playing name) → same refusal, fake's `update()` NOT called; (d) unknown draft raises
+   `ValueError`.
+6. Regression guard: pad-look `update()` for a production look still behaves as in the existing
    tests (run the full suite).
 
 No JS test harness exists in this repo — frontend changes are covered by the manual checklist in
@@ -456,19 +530,21 @@ Part E only. Do not add a JS test framework.
       `implemented`/`software-tested`).
 - [ ] SKILL.md replaced verbatim with the Task 5 text.
 - [ ] Manual smoke (dry-run only, no hardware): start the pad server with `--dry-run`, open
-      `/lab`, create a trivial draft, Reload, Preview renders an animating strip, Play +
-      param-edit auto-applies without the cue restarting, Stop works. Do NOT take over from a
-      live bridge; if the bridge owns the LEDs, skip the Play step and say so.
+      `/lab`, create two trivial drafts, Reload, Preview renders an animating strip, Play +
+      param-edit auto-applies without the cue restarting, selecting the other draft shows
+      "⇄ Switch" and switching swaps the playing scene without a stop/start, Stop works. Do NOT
+      take over from a live bridge; if the bridge owns the LEDs, skip the Play steps and say so.
 
 ## When You Finish
 
 Report: changed files; tests/checks run with results; the dry-run smoke outcome; anything
 skipped and why. Then a plain-language operator summary: what tuning feels like now (edit a
-number while it plays → lights follow; Preview shows a draft in the browser before it ever
-touches the strip), what did not change (pad looks, ownership, emergency stop, strobe policy
-stays discipline-only), watchpoints (a syntax error while live-editing goes dark until fixed —
-that is intended), and that everything remains SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
-until Brandon runs it on the strip.
+number while it plays → lights follow; tap another draft while one runs → the look morphs
+without the beat stopping; Preview shows a draft in the browser before it ever touches the
+strip), what did not change (pad looks, ownership, emergency stop, strobe policy stays
+discipline-only), watchpoints (a syntax error while live-editing goes dark until fixed — that
+is intended), and that everything remains SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED until
+Brandon runs it on the strip.
 
 ## Adversarial self-review (spec author, pre-handoff)
 
@@ -478,7 +554,11 @@ writes don't fire `input` events. Attack: **cursor theft while typing** — same
 DOM rewrite on the auto-apply path). Attack: **preview swaps live effects mid-play** — prevented
 by the fresh local `LabRenderer` in `lab_preview`. Attack: **lab_update steals ownership or
 restarts the cue** — it has no takeover branch and `PadPlayback.update()` touches neither
-`CueTimer` nor `SyntheticClock` (`tools/led_pad_playback.py:296-302`). Attack: **fps=0 / bpm=0
-division** — clamps floor fps at 1, bpm at 40. Attack: **huge JSON response** — frames capped at
-2000. Attack: **pad update path regression** — `lab_update` is additive; `update()` untouched;
-regression test in Part D-5.
+`CueTimer` nor `SyntheticClock` (`tools/led_pad_playback.py:296-302`). Attack: **switch stomps a
+pad look or steals ownership** — `lab_switch` refuses unless a `lab_*` scene is already playing;
+the UI's fallback path is the existing `lab_play`, which already carries preempt + ownership
+semantics. Attack: **switch desyncs tuning** — it updates `_playing_name`, so auto-apply and
+`lab_update` immediately track the new draft. Attack: **fps=0 / bpm=0 division** — clamps floor
+fps at 1, bpm at 40. Attack: **huge JSON response** — frames capped at 2000. Attack: **pad
+update path regression** — `lab_update`/`lab_switch` are additive; `update()` untouched;
+regression test in Part D-6.
