@@ -77,7 +77,10 @@ STATIC_ROWS = [
 def _feedback(seq: int = 5, current: str = "blue_cyan") -> dict:
     return {
         "schema": 1,
+        "gesture": 2,
+        "long_press_s": 0.5,
         "seq": seq,
+        "lock": False,
         "current_palette": current,
         "palettes": [
             {"name": "blue_cyan", "note": 51, "rgb": [0, 160, 255],
@@ -179,7 +182,14 @@ class StreamDeckRealCallerPathTests(unittest.TestCase):
         self.assertEqual([m.note for m in port.messages], expected)
         for k in bound:
             self.assertIsInstance(deck.images[k], bytes)
-        self.assertEqual(len(clear_flashes), len(bound))  # one flash-clear per press
+        palette_bound = [
+            k for k in bound
+            if layout[k]["target_kind"] == "palette_pad"
+        ]
+        self.assertEqual(
+            len(clear_flashes),
+            len(bound) + len(palette_bound),
+        )  # one flash-clear per press, plus one hold-cue timer per palette press
         for fn in clear_flashes:
             fn()  # re-render from the latest layout must not raise
 
@@ -268,8 +278,8 @@ class RedrawScopeTests(unittest.TestCase):
     def test_changed_keys_finds_only_differing_positions(self):
         a = sd.compose_layout(_feedback(current="blue_cyan"), STATIC_ROWS, key_count=15)
         b = sd.compose_layout(_feedback(current="violet"), STATIC_ROWS, key_count=15)
-        # only the lock pad (key 6) wears the current palette's color
-        self.assertEqual(sd._changed_keys(a, b), {6})
+        # v2 has no separate lock pad; current_palette alone no longer redraws key 6.
+        self.assertEqual(sd._changed_keys(a, b), set())
         self.assertEqual(sd._changed_keys(a, a), set())
 
 

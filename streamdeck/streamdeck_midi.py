@@ -52,6 +52,7 @@ SHUTDOWN_STALL_S = 10.0
 ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
 # -----------------------------------------------------------------------------
 _LOCK_FILE = None
+_GESTURE_VERSION_WARNED = False
 
 
 def log(message: str) -> None:
@@ -159,6 +160,21 @@ def _palette_row(row: dict) -> dict:
     return out
 
 
+def _feedback_long_press_s(feedback: dict | None) -> float:
+    value = (feedback or {}).get("long_press_s")
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else 0.5
+
+
+def _warn_once_if_gesture_skew(feedback: dict | None) -> bool:
+    global _GESTURE_VERSION_WARNED
+    if feedback is None or feedback.get("gesture") == 2:
+        return False
+    if not _GESTURE_VERSION_WARNED:
+        log("palette feedback gesture version is not 2 - rendering without deck-local hold cue")
+        _GESTURE_VERSION_WARNED = True
+    return True
+
+
 def _control_row(feedback: dict | None, key: str, fallback_name: str) -> dict | None:
     controls = (feedback or {}).get("controls", {})
     row = controls.get(key) if isinstance(controls, dict) else None
@@ -180,8 +196,9 @@ def compose_layout(feedback: dict | None, sidecar: list[dict], key_count: int = 
     layout: list[dict | None] = [None] * key_count
     if feedback is not None:
         current_palette = str(feedback.get("current_palette") or "")
-        current_palette_row = _feedback_palette(feedback, current_palette)
-        current_rgb = current_palette_row.get("rgb") if current_palette_row is not None else None
+        locked = bool(feedback.get("lock", False))
+        gesture_skew = _warn_once_if_gesture_skew(feedback)
+        long_press_s = _feedback_long_press_s(feedback)
         auto_palettes = [
             row for row in feedback.get("palettes", [])
             if isinstance(row, dict)
@@ -189,12 +206,23 @@ def compose_layout(feedback: dict | None, sidecar: list[dict], key_count: int = 
             and type(row.get("note")) is int
         ][:5]
         for key, row in enumerate(auto_palettes):
-            layout[key] = _palette_row(row)
+            out = _palette_row(row)
+            if not gesture_skew:
+                out["gesture"] = 2
+                out["long_press_s"] = long_press_s
+            if locked and out["name"] == current_palette:
+                out["locked_current"] = True
+            layout[key] = out
         white_sand = _feedback_palette(feedback, "white_sand")
         if white_sand is not None and key_count > 5:
-            layout[5] = _palette_row(white_sand)
+            out = _palette_row(white_sand)
+            if not gesture_skew:
+                out["gesture"] = 2
+                out["long_press_s"] = long_press_s
+            if locked and out["name"] == current_palette:
+                out["locked_current"] = True
+            layout[5] = out
         controls = [
-            (6, "lock", "Lock"),
             (7, "led_mute", "LED Mute"),
             (8, "laser_mute", "Laser Mute"),
             (9, "laser_solo", "Laser Solo"),
@@ -203,8 +231,6 @@ def compose_layout(feedback: dict | None, sidecar: list[dict], key_count: int = 
         for key, control, label in controls:
             if key < key_count:
                 row = _control_row(feedback, control, label)
-                if row is not None and control == "lock" and current_rgb is not None:
-                    row["rgb"] = tuple(current_rgb)
                 layout[key] = row
 
     static_rows = list(sidecar)[:4]
@@ -428,7 +454,7 @@ def _draw_rainbow_arc(draw, w, h, vivid: bool):
 
 
 def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
-               latched: bool = False):
+               latched: bool = False, hold_cue: bool = False):
     """pressed = PHYSICAL key-down only (renders the ~150ms white ack flash).
     latched = the deck-local toggle latch (led_state) — honored ONLY by
     static-look rows, which have no feedback state. Palette and control pads
@@ -483,6 +509,8 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
             draw.rectangle([3, 3, w - 4, h - 4], outline=(255, 255, 255), width=4)
         elif state in ("queued", "fading") and pulse:
             draw.rectangle([3, 3, w - 4, h - 4], outline=(255, 255, 255), width=5)
+        if row.get("locked_current") or hold_cue:
+            _draw_padlock(draw, w, h, True)
     elif kind == "led_mute":
         muted = active
         draw.rectangle([0, 0, w, h], fill=_MUTE_RED if muted else _BG)
@@ -508,11 +536,6 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
     elif kind == "rainbow":
         draw.rectangle([0, 0, w, h], fill=_BG)
         _draw_rainbow_arc(draw, w, h, vivid=active)
-    elif kind == "lock":
-        locked = active
-        base = _normal_rgb(row.get("rgb")) if locked else _BG
-        draw.rectangle([0, 0, w, h], fill=base if locked else _BG)
-        _draw_padlock(draw, w, h, locked)
     else:  # static looks: the name is the identity — one clean label, no note text
         on = latched or active
         draw.rectangle([0, 0, w, h], fill=(0, 120, 210) if on else (26, 26, 30))
@@ -549,6 +572,29 @@ def acquire_deck(log_errors: bool = True):
 
 
 def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
+    def schedule_hold_cue(key: int, row: dict) -> None:
+        value = row.get("long_press_s", 0.5)
+        delay = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else 0.5
+
+        def show_if_still_held():
+            try:
+                latest = sidecar_ref() if callable(sidecar_ref) else sidecar_ref
+                latest_row = _row_for_key(key, latest)
+                if not isinstance(latest_row, dict) or latest_row.get("target_kind") != "palette_pad":
+                    return
+                latest_key = (CHANNEL, latest_row["note"])
+                if latest_key not in active_keys or latest_row.get("gesture") != 2:
+                    return
+                deck.set_key_image(
+                    key,
+                    render_key(deck, key, False, latest, hold_cue=True,
+                               latched=latest_key in active_keys),
+                )
+            except Exception:
+                pass
+
+        threading.Timer(delay, show_if_still_held).start()
+
     def on_key(_deck, key, pressed):
         try:
             sidecar = sidecar_ref() if callable(sidecar_ref) else sidecar_ref
@@ -570,6 +616,9 @@ def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
             deck.set_key_image(key, render_key(deck, key, pressed, sidecar,
                                                latched=pad_key in active_keys))
             if pressed:
+                if row.get("target_kind") == "palette_pad" and row.get("gesture") == 2:
+                    schedule_hold_cue(key, row)
+
                 def clear_flash():
                     try:
                         latest = sidecar_ref() if callable(sidecar_ref) else sidecar_ref
@@ -737,6 +786,9 @@ def selftest():
     assert key_to_message(0, True, rows).note == 40
     assert led_state(rows, {(CHANNEL, 40)}) == {(CHANNEL, 40): True, (CHANNEL, 41): False}
     feedback = {
+        "gesture": 2,
+        "long_press_s": 0.5,
+        "lock": True,
         "current_palette": "blue_cyan",
         "palettes": [
             {"name": "blue_cyan", "note": 51, "rgb": [0, 160, 255], "state": "active"},
@@ -754,13 +806,17 @@ def selftest():
     }
     layout = compose_layout(feedback, rows, key_count=15)
     assert [note_for(k, layout) for k in (0, 1, 5, 6, 8, 10, 11, 14)] == [
-        51, 52, 56, 57, 59, 40, 41, 61,
+        51, 52, 56, None, 59, 40, 41, 61,
     ]
-    assert layout[6]["rgb"] == (0, 160, 255)
+    assert layout[6] is None and layout[0]["locked_current"] is True
     blank_layout = compose_layout(None, rows, key_count=15)
     assert blank_layout[0] is None and blank_layout[10]["note"] == 40
     assert _row_active(layout[1], False, pulse=True)
     assert not _row_active(layout[1], False, pulse=False)
+    swatches = [(0, 255, 0), (0, 255, 255), (0, 0, 255), (160, 0, 255), (255, 0, 160)]
+    hues = [colorsys.rgb_to_hsv(*(part / 255.0 for part in rgb))[0] for rgb in swatches]
+    dim_hues = [colorsys.rgb_to_hsv(*(part / 255.0 for part in _dim(rgb)))[0] for rgb in swatches]
+    assert dim_hues == sorted(dim_hues) and all(abs(a - b) < 0.001 for a, b in zip(hues, dim_hues))
     assert CHANNEL not in (0, 1)
     print("selftest OK")
 
