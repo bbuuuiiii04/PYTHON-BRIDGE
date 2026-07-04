@@ -53,7 +53,9 @@ Out of scope (do not redesign away):
 - Firing a laser phrase decision **every phrase** is acceptable.
 - Pattern / movement / intensity come from the pack render. Breakdown/groove/buildup autoloops
   stay dark; only drop / post-drop autoloops carry visible laser content. *(operator-stated;
-  not re-verified against pack bytes)*
+  not re-verified against pack bytes)* **Further gated per drop (operator 2026-07-04):** the drop
+  presentation policy (`streamdeck_palette_control_design_spec.md` C.9) makes the majority of
+  drops LEDs-only — lasers fire on only some drops (see Part E #9 for the laser-side seam).
 - **CH11 (strobe) is untouched everywhere** — operator-decided 2026-07-04: strobe stays baked
   into authored cues; whether the bridge may ever control laser strobe is a future decision.
   The color engine writes CH8/CH9 only. (Note `CONTROL_CHANNELS = {8, 9, 11}` — CH11 shares
@@ -295,10 +297,17 @@ for its whole window.)
    (taste call for the operator when the effects are visually validated). Rides the existing
    drop-lifecycle events; pure mapper behavior. **Gated on exact CH8/CH9 behavior from the chart
    (#1).**
-9. **Drop spotlight & choreography (cross-reference only — zero laser code).** The operator-armed
-   one-shot "lasers own the room" moment plus the automated earned-drop policy (pre-drop
-   full-dark, lasers-only impact, track budget) are LED-side features; design lives in
-   `streamdeck_palette_control_design_spec.md` Part C.9.
+9. **Drop presentation policy (design lives in the Stream Deck doc; ONE laser-side seam).** The
+   per-drop deal — majority `leds_only`, some `leds_plus_lasers`, rare `lasers_only` spotlight
+   with pre-drop full-dark — is specced in `streamdeck_palette_control_design_spec.md` Part C.9.
+   The single laser-side piece is **`leds_only` base suppression**: withholding the drop's
+   autoloop base for that window so lasers stay dark — **NOT via the blackout mask** (blackout
+   zeroes held static overrides too). The player already renders the needed state — zero base
+   with a manually-held static override standing alone (`soundswitch_laser_player.py:428-443`) —
+   so suppression rides the missing-selection path's semantics; a manual overlay always survives
+   automation. Exact seam (selection withhold vs a suppress flag) is a Codex-spec detail; the
+   invariant is: suppression must be indistinguishable from "no drop autoloop selected" and must
+   never touch the blackout/emergency masks or their owners.
 
 ## Part F — Evidence (file:line, HEAD `bd96b32`)
 
