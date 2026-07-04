@@ -63,6 +63,7 @@ from .models import (
     ArmSequence, BridgeEvent, DeckState, Ev, MixerAuthoritySnapshot, OutputState,
     PositionSnapshot, SmartDropEnergyShadow, TrackMetadata,
 )
+from . import led_dispatch_policy as _led_dispatch_policy
 from .led_dispatch_policy import LEDDispatchPolicyMixin
 from .laser_models import LaserContext, LaserPersonality, LaserResolvedScene
 from .soundswitch_laser_player import (
@@ -114,6 +115,15 @@ from . import bridge_fmt as bf
 log = logging.getLogger("state_manager")
 LOG = get_logging_manager()
 __all__ = ["StateManager", "SmartDropTickResult"]
+
+
+def __getattr__(name: str) -> Any:
+    if name.startswith("LED_") or name.startswith("_LED_"):
+        try:
+            return getattr(_led_dispatch_policy, name)
+        except AttributeError:
+            pass
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 _LATENCY_WARN_MS = 50.0
 _TC_LATENCY_WARN_MS = 250.0
