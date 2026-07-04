@@ -14,7 +14,7 @@ if str(PACKAGE_PARENT) not in sys.path:
 
 from rb_ss_bridge_v2.soundswitch_pack import canonical_json_bytes, sha256_bytes  # noqa: E402
 from rb_ss_bridge_v2.soundswitch_pack_loader import LoadedAutoloop, LoadedScriptedTrack, load_pack  # noqa: E402
-from rb_ss_bridge_v2.soundswitch_parity_oracle import (  # noqa: E402
+from rb_ss_bridge_v2.tools.ssfmt.soundswitch_parity_oracle import (  # noqa: E402
     AutoloopSample,
     ScriptedSample,
     StaticSample,

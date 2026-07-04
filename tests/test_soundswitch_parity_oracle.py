@@ -16,7 +16,7 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (
     LoadedTimelineEvent,
     load_pack,
 )
-from rb_ss_bridge_v2.soundswitch_parity_oracle import (
+from rb_ss_bridge_v2.tools.ssfmt.soundswitch_parity_oracle import (
     AutoloopSample,
     ScriptedSample,
     StaticSample,

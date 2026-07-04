@@ -13,7 +13,7 @@ if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
 
 from rb_ss_bridge_v2.soundswitch_pack_loader import load_pack  # noqa: E402
-from rb_ss_bridge_v2.soundswitch_parity_oracle import (  # noqa: E402
+from rb_ss_bridge_v2.tools.ssfmt.soundswitch_parity_oracle import (  # noqa: E402
     AutoloopSample,
     ScriptedSample,
     StaticSample,

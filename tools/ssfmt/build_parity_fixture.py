@@ -23,7 +23,7 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (  # noqa: E402
     LoadedTimelineEvent,
     load_pack,
 )
-from rb_ss_bridge_v2.soundswitch_parity_oracle import (  # noqa: E402
+from rb_ss_bridge_v2.tools.ssfmt.soundswitch_parity_oracle import (  # noqa: E402
     AutoloopSample,
     OracleReport,
     classify_autoloop,

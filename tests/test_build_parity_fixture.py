@@ -13,7 +13,7 @@ from rb_ss_bridge_v2.soundswitch_pack_loader import (  # noqa: E402
     LoadedDocument,
     LoadedTimelineEvent,
 )
-from rb_ss_bridge_v2.soundswitch_parity_oracle import OracleReport  # noqa: E402
+from rb_ss_bridge_v2.tools.ssfmt.soundswitch_parity_oracle import OracleReport  # noqa: E402
 from rb_ss_bridge_v2.tools.ssfmt.build_parity_fixture import (  # noqa: E402
     build_static_fixture,
     choose_autoloop_candidate,
