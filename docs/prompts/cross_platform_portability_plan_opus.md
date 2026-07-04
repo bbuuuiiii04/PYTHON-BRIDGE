@@ -39,6 +39,7 @@ Lead with the outcome. When you have enough to recommend, recommend — don't su
 - **Where deck state is read and consumed.** The reader and its consumers live in `rb_memory.py`, `rb_state_reader.py`, and the deck-state model; the per-version field table is in `rb_offsets.py` (five builds: 7.2.8, 7.2.10, 7.2.11, 7.2.13, 7.2.14; an unsupported version yields no data). `state_manager.py` owns runtime state and the push loop. Use these to locate the seam and the platform-agnostic boundary; confirm the exact call flow against the code rather than assuming.
 - **The bridge is macOS-only today.** All existing platform-specific reading and the offset table target macOS Apple Silicon. Windows has no equivalent yet.
 - **The rig is fixed.** Same DDJ-800 / SoundSwitch / lasers / LEDs / Govee on every host; only the host computer varies.
+- **Per-version data can be refreshed.** A maintained external reference tracks new Rekordbox builds, so producing per-version field data for a new build is a repeatable task, not a one-off. The mechanism belongs to the reader spec; for part 2, treat "the fixed table can be kept current as builds ship" as a supported assumption when weighing table vs. version-adaptive.
 
 ## Locked constraints (Brandon's decisions — do not re-litigate)
 
@@ -46,6 +47,7 @@ Lead with the outcome. When you have enough to recommend, recommend — don't su
 2. **Targets are macOS Apple Silicon (arm64) and Windows 11 x64.** Intel Mac is out of scope.
 3. **Best-effort runtime accuracy is acceptable** — occasional wrong lighting on an unfamiliar machine is fine. The only hard floor is the strobe clamp above.
 4. **Raspberry-Pi / standalone (no-Rekordbox) operation is out of scope.** Note it once so the seam doesn't foreclose it; do not design for it.
+5. **No Windows machine is available in the short term.** Sequence the plan so the macOS-arm64 path is fully completable and shippable on its own, and so every Windows-x64 task is isolated into later phases that can begin once a Windows machine is available. Early Mac phases must not depend on Windows access, and a Windows VM on Apple Silicon is not assumed to be a valid substitute for native x64.
 
 ## Reader-side dependencies to flag (out of scope to solve — name them, don't design them)
 
