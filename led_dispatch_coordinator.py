@@ -15,6 +15,13 @@ from .bridge_fmt import log_changed
 
 log = logging.getLogger("led_dispatch_coordinator")
 
+_DEFAULT_WHITE_TEMPLATES = frozenset({
+    "drop_white_aggressive",
+    "post_drop_white_shatter",
+    "buildup_white_zone_strobe",
+    "buildup_white_half_strobe",
+})
+
 
 def _stable_seed(value: str) -> int:
     digest = hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest()
@@ -40,6 +47,9 @@ class LEDDispatchCoordinator:
         self._time_fn = time_fn or time.monotonic
         self._tactical_blackout_count = 0
         self._realtime_trigger_count = 0
+        configured_white = getattr(config, "laser_color_white_templates", None)
+        self._white_templates = frozenset(str(name) for name in (configured_white or _DEFAULT_WHITE_TEMPLATES))
+        self._last_white_moment = False
 
         # WI-3 min-dwell: suppress same-role re-picks inside the dwell window
         self._min_dwell_enabled: bool = _os.environ.get("RBSS_LED_MIN_DWELL", "1") != "0"
@@ -60,6 +70,7 @@ class LEDDispatchCoordinator:
         self._transport_cooldown_count: int = 0
 
     def trigger(self, decision: LEDLookDecision) -> bool:
+        self._last_white_moment = False
         # Operator blackout is unconditionally first — bypasses ALL gates.
         if self._is_operator_blackout(decision):
             self._runner.emergency_stop()
@@ -201,6 +212,9 @@ class LEDDispatchCoordinator:
         }
         return payload
 
+    def last_white_moment(self) -> bool:
+        return self._last_white_moment
+
     def shutdown(self) -> bool:
         runner_ok = self._runner.stop()
         adapter_shutdown = getattr(self._adapter, "shutdown", None)
@@ -221,6 +235,7 @@ class LEDDispatchCoordinator:
         params = dict(getattr(decision, "params", {}) or {})
         sync_mode = str(params.get("sync_mode") or default_sync_mode(scene_ref))
         beat_division = float(params.get("beat_division") or default_beat_division(scene_ref))
+        self._last_white_moment = scene_ref in self._white_templates
         return EffectSpec(
             effect_name=scene_ref,
             params=params,

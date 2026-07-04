@@ -144,6 +144,15 @@ class LEDDispatchCoordinatorTests(unittest.TestCase):
         self.assertEqual(owner.current(), OwnerState.REALTIME_RAZER)
         self.assertEqual(runner.desired[-1].effect_name, "groove_chase_blue")
 
+    def test_realtime_white_template_sets_white_moment_flag(self) -> None:
+        coordinator, adapter, runner, owner = self._coordinator(min_dwell_env="0")
+
+        self.assertTrue(coordinator.trigger(_decision(scene_ref="drop_white_aggressive")))
+        self.assertTrue(coordinator.last_white_moment())
+
+        self.assertTrue(coordinator.trigger(_decision(scene_ref="groove_chase_blue", look="rt_groove_2")))
+        self.assertFalse(coordinator.last_white_moment())
+
     def test_realtime_to_cloud_handoff_stands_down_runner_then_triggers_cloud(self) -> None:
         coordinator, adapter, runner, owner = self._coordinator()
         coordinator.trigger(_decision())
