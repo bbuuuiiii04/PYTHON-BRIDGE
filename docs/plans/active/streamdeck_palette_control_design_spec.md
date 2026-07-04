@@ -1,7 +1,7 @@
 ---
 doc_status: draft
 truth_level: design-intent
-last_verified_commit: bd96b32
+last_verified_commit: 267edd3
 last_verified_date: 2026-07-04
 validation_scope: software-only
 ---
@@ -438,6 +438,31 @@ note 61).** A section-mapped color override that rides machinery this design alr
    the operator performs the full ritual — no hidden budget or cooldown; rarity is entirely his
    white_sand discipline** (an every-breakdown white_sand habit would solo nearly every track).
    Disabled by default; revisit after the other tiers are felt live.
+
+## Part D.1 — Impl-spec deltas (adversarial review + operator rulings, 2026-07-04)
+
+The Codex impl spec (`streamdeck_palette_control_impl_spec.md`) supersedes this doc on these
+points — do not implement from the older text above:
+- **Feedback file:** `/tmp/rb_ss_bridge_v2_palette_state.json`, debounce ≥100 ms (not
+  `local/state/...` / ~50 ms as C.7 says).
+- **Coordinator home:** NEW `led_palette_control.py` owned by StateManager (not the dispatch
+  mixin as C.6 says).
+- **Notes confirmed:** solo=60, rainbow=61 (C.1 was right; the impl spec's first draft had
+  rainbow at 60 — fixed).
+- **LED blackout owner seam pinned:** owner SET in `led_dispatch_policy.py` (impl Task 2 item
+  4); web/legacy clear releases only its own hold (operator ruling).
+- **Both mutes drop on pad-input loss** (operator ruling — LED mute mirrors the laser mute's
+  overlay-trust release; C.8's implication that only automation can never clear stands).
+- **Laser mute needs `blackout_mask` toggle-interaction support in the adapter** (impl Task 4
+  item 3) — the "toggle interaction" C.8 assumed did not exist for this kind.
+- **Queue waits out Rainbow mode** and applies at the first post-Rainbow boundary (operator
+  ruling); boundary bookkeeping vs journey freeze pinned in impl Task 1.5.
+- **Fail-open triggers are the authority's EIGHT** (adds active-deck change +
+  predicted-impact-passed to C.9's six).
+- **Learned-solo keys are beat-position** (`content_id:round(beat)`, ±2 lookup), not drop
+  indices (operator ruling — safer under re-analysis).
+- **`white_sand` color:** borrowed from the Dune Sand twinkle palette
+  (`govee_frame_renderer.py:1758-1764`), Warm Ivory (255,235,200), Template Lab may refine.
 
 ## Part E — Evidence (file:line, HEAD `bd96b32`)
 

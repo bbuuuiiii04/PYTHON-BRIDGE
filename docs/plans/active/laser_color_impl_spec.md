@@ -1,7 +1,7 @@
 ---
 doc_status: active-spec
 truth_level: implementation-spec, code-grounded
-last_verified_commit: bd96b32
+last_verified_commit: 267edd3
 last_verified_date: 2026-07-04
 validation_scope: spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED; CH8/CH9 value table intentionally ships empty (pass-through)
 ---
@@ -114,10 +114,14 @@ four names above) so new Template-Lab whites join without code.
    index 7 (CH8) and index 8 (CH9) before returning. Scripted, diagnostic,
    reload-wait, missing-selection, and masked paths are untouched — they
    return before this line or bypass base render entirely.
-3. StateManager wiring: after each `LaserColorEngine.update(...)` in the
-   dispatch path, pass the snapshot to the player
-   (`player.set_color_snapshot(engine.snapshot())`); pass `None` while the
-   feature is disabled.
+3. StateManager wiring — **freshness is per-tick** (authority rule 12): on
+   every push tick, after the LED dispatch block, pass
+   `player.set_color_snapshot(engine.snapshot())` IF `update()` ran this
+   tick, ELSE `player.set_color_snapshot(None)` — manual LED override
+   (`led_dispatch_policy.py:665`), the scripted gate (:672), not-playing
+   (`state_manager.py:3027`), automation-off, and every other dispatch
+   early-return all yield `None`. A frame must never merge a snapshot older
+   than the current tick. Pass `None` while the feature is disabled.
 
 ### Task 5 — tests: `tests/test_laser_color_engine.py`
 1. **Byte-identity master test:** with `enabled: false`, an all-null table,
@@ -133,6 +137,9 @@ four names above) so new Template-Lab whites join without code.
    reverts to quantized color. `white_sand` → sustained white.
 5. Settle: CH9 monotonically non-increasing across post_drop_progress 0→1.
 6. `color_state()` mutates nothing (snapshot engine state before/after).
+7. Staleness: autoloop playing + LED manual override active (dispatch
+   early-return) → the very next tick renders authored pass-through (no
+   stale injection); dispatch resuming re-injects same-tick.
 
 ## Part C — Invariants That MUST Still Hold
 - Blackout/emergency absolute (frame ZERO regardless of snapshot); static

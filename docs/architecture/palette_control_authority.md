@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: bd96b32
+last_verified_commit: 267edd3
 last_verified_date: 2026-07-04
 validation_scope: behavior contract only; feature not implemented — no software, live, or hardware validation implied
 ---
@@ -79,8 +79,11 @@ beyond 4 are dropped with a visible log line, never silently.
    travel inside the engine's allowed hue space — it must never transit the
    excluded yellow/orange band. A track boundary arriving mid-fade cancels the
    fade; boundary logic proceeds normally.
-6. Any new manual action (queue, another override, `white_sand`, lock/unlock)
-   during a fade replaces or restarts it from the current blended position.
+6. During a fade: another override (including `white_sand`) restarts the
+   blend from the current blended position toward the new target; a queue
+   press stores the queue **without touching the fade**; lock follows rule 9
+   (the fade completes, then pins). No manual action ever hard-jumps the
+   color.
 7. **Lock** pins the currently-active palette across track boundaries: it
    blocks dwell re-picks, drift, and drop-snap.
 8. **A queued palette applies at the boundary even while locked, and the lock
@@ -92,7 +95,9 @@ beyond 4 are dropped with a visible log line, never silently.
     stays; automatic selection resumes at the next boundary.
 11. `white_sand` follows every rule above identically. It differs only in that
     automatic selection can never choose it (manual-only, weight zero). Its
-    exact LED color is a Template Lab calibration deliverable, not fixed here.
+    LED color is borrowed from the Dune Sand twinkle look's palette
+    (operator 2026-07-04; Warm Ivory 255,235,200 as the fixed value, sand
+    siblings as calibration alternates) — Template Lab may refine on-device.
 
 ## Mute Pads
 
@@ -101,7 +106,12 @@ beyond 4 are dropped with a visible log line, never silently.
     LED-only, LED+laser, laser-only.
 13. Mutes are **absolute**: all automation (palette engine, drop presentation,
     Rainbow mode) keeps running underneath but cannot make a muted fixture
-    emit, and no automatic release may clear a manually-held mute.
+    emit, and no automatic release may clear a manually-held mute. The single
+    exception is **input-health policy on the pad path itself** (operator
+    ruling 2026-07-04): if the pad input worker/device dies mid-hold, BOTH
+    mutes release — the laser mute via the existing overlay-trust gate, and
+    the LED mute deliberately mirroring it for consistency. Re-engaging after
+    recovery is a fresh press. Automation is never such a release.
 14. Each mute is its **own owner** in the relevant blackout/blackout-like
     system. An automatic restore (e.g. a solo window ending) releases only its
     own hold and can never release the operator's (see
@@ -123,7 +133,10 @@ beyond 4 are dropped with a visible log line, never silently.
 18. While on, the palette, lock, and `white_sand` pads are inactive (dimmed;
     presses acknowledge but do nothing). The palette journey — including any
     in-flight fade, which completes instantly at freeze — is frozen untouched
-    and resumes exactly where it was when the mode toggles off.
+    and resumes exactly where it was when the mode toggles off. Track
+    boundaries during Rainbow advance no journey state: dwell, re-picks, and
+    drop-snap are suspended, and **a queued palette waits, applying at the
+    first boundary after Rainbow ends** (operator 2026-07-04).
 19. On scripted tracks, Rainbow mode affects only the breakdown/buildup LED
     windows that render there (effectively: white). Lasers stay authored.
 20. The `white_sand` ritual (if ever enabled) cannot trigger while Rainbow
@@ -179,9 +192,12 @@ display state and a monotonic sequence number.
 5. `white_sand` is never chosen by dwell, drift, drop-snap, or shift across a
    large simulated session; `set`/`queue` reach it.
 6. Mute toggles: automation cannot un-mute; solo restore cannot clear a manual
-   mute; mute pads compose all three room states.
+   mute; input-path loss releases both mutes (the rule-13 policy exception);
+   mute pads compose all three room states.
 7. Rainbow on/off: journey (and an in-flight fade) freezes/restores exactly;
-   palette pads inert while on; role mapping correct on scripted vs autoloop.
+   a queued palette survives Rainbow and applies at the first post-Rainbow
+   boundary; palette pads inert while on; role mapping correct on scripted vs
+   autoloop.
 8. Feedback file: atomic writes, correct state transitions for every pad, and
    graceful blank-render on missing/stale file.
 

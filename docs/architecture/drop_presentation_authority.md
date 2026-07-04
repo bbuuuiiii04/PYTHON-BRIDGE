@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: bd96b32
+last_verified_commit: 267edd3
 last_verified_date: 2026-07-04
 validation_scope: behavior contract only; feature not implemented — no software, live, or hardware validation implied
 ---
@@ -46,7 +46,7 @@ zero randomness anywhere in this policy.**
 | drop window | Impact → end of the smart-phrasing drop role, capped at `drop_window_cap_beats` (default 32). The shared phrase authority — never an LED- or laser-private timer. |
 | pre-dark | Govees joining the lasers' existing pre-drop blackout for the final `led_predark_beats` (default 4) before a solo's impact: total darkness into the hit. |
 | session | One bridge process lifetime. Damper counters and the runway record reset with it; the learned store persists across sessions. |
-| learned store | The persistent per-track memory of the operator's manual solos (`local/state/laser_solo_learned.json`). |
+| learned store | The persistent per-track memory of the operator's manual solos (`local/state/laser_solo_learned.json`), keyed by `content_id` + the drop's **beat position** (±2-beat lookup tolerance — survives Rekordbox re-analysis reindexing; operator 2026-07-04). |
 
 ## The Ladder
 
@@ -93,8 +93,8 @@ tags a solo — the operator's existing `DROP`/`BUILDUP` navigation cue names
 must never trigger anything.**
 
 **Learned solo (tier 4).** One manual solo teaches: when a pad-armed solo
-actually **fires** on a drop, that `(track, drop)` is recorded and auto-solos
-on every future play. Rules: learning happens at fire, not at arm (an armed
+actually **fires** on a drop, that `(track, drop-beat)` is recorded
+(beat-position key, not list index) and auto-solos on every future play. Rules: learning happens at fire, not at arm (an armed
 solo that never met a drop teaches nothing); firing on a drop that is already
 tagged or learned records nothing new; the veto press on a pending learned
 solo cancels it AND un-learns it (the recovery path for a press that shouldn't
@@ -102,9 +102,11 @@ stick). A missing or corrupt learned store is treated as empty with a single
 logged warning — it must never crash or block the show.
 
 **Gear-shift solo (tier 5).** At a master handover where the incoming deck's
-BPM exceeds the outgoing deck's live BPM at the moment of transition by ≥
+live BPM exceeds the outgoing deck's live BPM at the moment of transition by ≥
 `gearshift_bpm_jump` (default +10, upward only), the incoming track's first
-true drop solos. The comparison is one mix, never a drift accumulated across
+true drop solos. **Live BPM on BOTH sides** (a pitched deck plays its live
+tempo, not its tag), falling back to tag BPM only where live is
+unavailable/stale. The comparison is one mix, never a drift accumulated across
 tracks; with no valid outgoing BPM (session's first master), it never fires.
 
 **Record-breaker solo (tier 6).** A drop whose runway strictly exceeds the

@@ -1,7 +1,7 @@
 ---
 doc_status: active-spec
 truth_level: implementation-spec, code-grounded
-last_verified_commit: bd96b32
+last_verified_commit: 267edd3
 last_verified_date: 2026-07-04
 validation_scope: spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -75,7 +75,13 @@ on the backend-rejection path, and the frame-level writer never consults it.
    MIDI-mode diagnostics stay visible.
 2. `trigger_blackout_on(ctx)`: set `_blackout_pending_for_drop_window = True`
    after the mode/duplicate gates **regardless of trigger success**; the note
-   send stays best-effort. (Consequence, intended: `_resolve_pending_blackout`
+   send stays best-effort. Move the `manual_blackout_on is None` early-return
+   (:296-299) so it guards ONLY the note send — the pending latch is set even
+   with no message configured (authority rule 7: frame-level actuation needs
+   no MIDI note). Demote the :306 "blackout_on rejected" warning to DEBUG —
+   in pack mode rejection is by-design and would otherwise warn once per
+   armed window; the `manual_blackout_on_rejected` gate counter keeps
+   MIDI-mode visibility. (Consequence, intended: `_resolve_pending_blackout`
    may emit a note-off whose note-on never went out — harmless; the off is a
    no-op to any listener.)
 3. Add a thread-safe read accessor:

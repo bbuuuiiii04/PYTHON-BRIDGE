@@ -293,17 +293,16 @@ class LaserSceneExecutor:
             if self._blackout_pending_for_drop_window:
                 log.debug("[LX] blackout_on skipped: already pending for drop window")
                 return
+            self._blackout_pending_for_drop_window = True
         msg = self._config.manual_blackout_on
         if msg is None:
             log.debug("[LX] blackout_on skipped: manual_blackout_on not configured")
             return
         if self._backend.trigger(msg, priority="high"):
-            with self._lock:
-                self._blackout_pending_for_drop_window = True
             log.info("[LX] blackout_on sent  note=%s  channel=%s", msg.note, msg.channel)
             return
         self._record_gate("manual_blackout_on_rejected")
-        log.warning("[LX] blackout_on rejected by midi_output")
+        log.debug("[LX] blackout_on rejected by midi_output")
 
     def _resolve_pending_blackout(self, *, reason: str) -> None:
         """Send blackout-off exactly once for each armed blackout window."""
@@ -324,19 +323,17 @@ class LaserSceneExecutor:
         """Hold the manual blackout note on behalf of *owner* (refcounted by name)."""
         if not self.smart_drop_blackout_enabled():
             return
-        msg = self._config.manual_blackout_on
-        if msg is None:
-            return
         with self._lock:
             already_dark = bool(self._mask_owners) or self._blackout_pending_for_drop_window
             self._mask_owners.add(owner)
         if already_dark:
             return
+        msg = self._config.manual_blackout_on
+        if msg is None:
+            return
         if self._backend.trigger(msg, priority="high"):
             log.info("[LX] mask_on  owner=%s  note=%s", owner, msg.note)
             return
-        with self._lock:
-            self._mask_owners.discard(owner)
         self._record_gate("manual_blackout_on_rejected")
 
     def release_blackout_mask(self, owner: str) -> None:
@@ -354,6 +351,11 @@ class LaserSceneExecutor:
             return
         if not self._backend.trigger(msg, priority="high"):
             self._record_gate("manual_blackout_off_rejected")
+
+    def mask_owners_active(self) -> bool:
+        """True while any smart-side blackout owner or drop-window latch holds."""
+        with self._lock:
+            return bool(self._mask_owners) or self._blackout_pending_for_drop_window
 
     def _release_all_masks(self) -> None:
         with self._lock:

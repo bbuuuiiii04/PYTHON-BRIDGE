@@ -2317,6 +2317,10 @@ class StateManager(LEDDispatchPolicyMixin):
         transport = None
         parity_live_blocked = False
         try:
+            smart_dark = (
+                self._laser_executor.mask_owners_active()
+                if self._laser_executor is not None else False
+            )
             soundswitch_connected = bool(
                 self._os2l_connected_provider is not None
                 and self._os2l_connected_provider()
@@ -2358,13 +2362,16 @@ class StateManager(LEDDispatchPolicyMixin):
                 ):
                     self._pack_input_degraded_latched = False
                 input_healthy = not self._pack_input_degraded_latched
-                blackout = blackout_held if input_healthy else False
+                blackout = (blackout_held if input_healthy else False) or smart_dark
                 blackout_bindings = tuple(getattr(s, "blackout_bindings", ())) if input_healthy else ()
                 layers = held_layers if input_healthy else ()
                 player.set_masks(blackout=blackout, emergency=False)
                 if layers != self._pack_last_static_layers:
                     player.set_static_layers(layers)
                     self._pack_last_static_layers = layers
+            else:
+                blackout = smart_dark
+                player.set_masks(blackout=blackout, emergency=False)
             input_degraded = midi_input is not None and not input_healthy
 
             if soundswitch_connected and truth_sink is None:
@@ -2384,6 +2391,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 )
                 player.clear_selection()
                 player.set_static_layers(())
+                # This clears derived bridge output only; held intent is recomputed next pass.
                 player.set_masks(blackout=False, emergency=False)
                 self._pack_last_static_layers = ()
                 self._pack_play_hold_key = None

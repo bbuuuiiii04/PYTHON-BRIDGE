@@ -1,7 +1,7 @@
 ---
 doc_status: active-spec
 truth_level: implementation-spec, code-grounded
-last_verified_commit: bd96b32
+last_verified_commit: 267edd3
 last_verified_date: 2026-07-04
 validation_scope: spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -60,6 +60,19 @@ Laser-mute config row depends on it conceptually; there is no code dependency.
 - [confirmed] Govee frames render on a separate `GoveeRealtimeRunner` thread
   (`govee_realtime_runner.py:138-147`); LED cue colors are resolved at
   dispatch time on the state-manager thread.
+- [confirmed] LED blackout today is a single bool with last-write-wins:
+  `Ev.LED_BLACKOUT`/`LED_CLEAR_BLACKOUT` set/clear `_led_emergency_blackout`
+  (`led_dispatch_policy.py:397-413`); the payload `reason` is never read; the
+  LED Pad web's `led_blackout` command rides the same bool
+  (`runtime_status.py:427,440`). Task 2 item 4 replaces this with owner
+  semantics — without it, ANY clear releases a held manual mute.
+- [confirmed] `PackMidiBinding.interaction` (`soundswitch_pack_loader.py:54`)
+  is honored ONLY for `static_look` (`soundswitch_midi_input.py:264-276,
+  296-298`); `blackout_mask` is hold-while-note-on unconditionally
+  (:280-284,:308-314), and the deck script sends note_off on key release
+  (`streamdeck/streamdeck_midi.py:130-137`) — so a plain blackout_mask row
+  would make the Laser mute momentary. Task 4 item 3 adds blackout_mask
+  toggle support.
 
 ## Part B — Tasks (implement exactly, in order; commit after each)
 
@@ -67,7 +80,9 @@ Laser-mute config row depends on it conceptually; there is no code dependency.
 - Out of scope: `soundswitch_laser_player.py`, `laser_executor.py`,
   `smart_*`, `drop_lifecycle.py`, `anlz_reader.py`, the drop presentation
   policy (Package 3), and the laser color engine (Package 4). No laser
-  behavior changes beyond the ONE config binding row in Task 5.
+  behavior changes beyond the ONE config binding row in Task 5 and the
+  `blackout_mask` toggle-interaction support in Task 4 item 3 (adapter-level,
+  manual system only — the mask writer and executor are untouched).
 - Behavior that must not change: automatic palette selection when no pads are
   used (drift/dwell/drop-snap outputs identical when `_queued_palette` is
   empty and `_lock`/fade/mode are off); Govee rendering; static-look pads;
@@ -86,6 +101,10 @@ Laser-mute config row depends on it conceptually; there is no code dependency.
    today :377); only the dwell decrement and dwell re-pick stay under
    `if not self._lock:`. Lock state itself is untouched by the apply
    (authority rules 8-10). Clear `_hold_track` and any active fade here too.
+   **A boundary that applied a queued palette performs NO dwell decrement and
+   NO dwell re-pick on that boundary** (preserve today's `elif` exclusion,
+   :374-396 — the apply's own dwell reset stands untouched); this keeps a
+   dwell-expired counter from re-picking over the just-applied queue.
 3. **One-track hold**: new field `_hold_track: bool = False`; add
    `and not self._hold_track` to the drop-snap condition (:408-411).
 4. **Override + fade**: new method
@@ -96,17 +115,26 @@ Laser-mute config row depends on it conceptually; there is no code dependency.
    `advance_fade(abs_beat: float)`: while fading, linearly interpolate
    `_anchor_p` from `_fade_from_p` toward `_palette_center(_fade_target)` in
    p-space; at `abs_beat >= _fade_end_beat`, set `_current_palette =
-   _fade_target`, `_anchor_p = center`, clear fade. Any manual action
-   (queue/override/shift/set) replaces the fade from the current blended
-   position; a new track cancels it (item 2). `snapshot()` gains
-   `fading: bool` and `fade_target`.
+   _fade_target`, `_anchor_p = center`, clear fade. Fade interruption
+   (authority rules 6/9): an override/`set_palette`/`shift` during a fade
+   restarts it from the current blended position; a QUEUE stores without
+   touching the fade; lock lets the fade complete, then pins the target. A
+   new track cancels the fade (item 2). `snapshot()` gains `fading: bool`
+   and `fade_target`.
 5. **Mode override (Rainbow)**: new field `_mode_override:
    dict[str, str] | None = None` + setters `set_mode_override(mapping)` /
    `clear_mode_override()`. When set, color resolution uses
    `mapping.get(role, mapping.get("*", …))` to choose the palette for that
    cue instead of `_current_palette`; ALL journey state (current, queued,
    lock, dwell, fade — fade completes instantly at freeze per authority rule
-   18) is untouched while set. `rainbow`-type palettes resolve as a full-hue
+   18) is untouched while set. **Exact `begin_dispatch` gating while
+   `_mode_override` is set:** the new-track block still performs its track
+   bookkeeping (recent-keys append, track seed, drop-section reset,
+   prev-color clear, focus reseed) but SKIPS dwell decrement, queue-apply,
+   dwell re-pick, and the drop-snap evaluation — a queued palette survives
+   Rainbow and applies at the first boundary after it ends (operator
+   2026-07-04); toggling Rainbow off performs no retroactive boundary
+   processing. `rainbow`-type palettes resolve as a full-hue
    wheel cycle (hue advances per cycle/section, full 0-360 range — the
    yellow/orange exclusion deliberately does not apply); `fixed_rgb` resolves
    to its constant.
@@ -134,6 +162,21 @@ Laser-mute config row depends on it conceptually; there is no code dependency.
    event uses the gesture.
 3. `_handle_event` (`state_manager.py:947`): route the four new kinds to the
    coordinator (Task 3).
+4. **LED blackout owner semantics** (`led_dispatch_policy.py:397-413`) —
+   prerequisite for the mute pad and for Package 3's spotlight: replace
+   `_led_emergency_blackout: bool` with an owner set
+   `_led_blackout_owners: set[str]`. `Ev.LED_BLACKOUT` adds
+   `payload.get("reason") or "legacy"`; `Ev.LED_CLEAR_BLACKOUT` discards ONLY
+   `payload.get("reason") or "legacy"` (operator ruling 2026-07-04: the web
+   command's clear releases only its own hold). LED blackout is active while
+   the set is non-empty; dispatch behavior is otherwise unchanged, and
+   existing no-reason callers (LED Pad web, current tests) behave exactly as
+   today whenever "legacy" is the only owner. Update the `models.py` Ev
+   comments (`reason` = owner key).
+5. **Status exposure** (authority §Observability): add to the bridge status
+   snapshot (the existing `StatusWriter` payload path): current palette,
+   queued palette, lock, fading + fade target, LED mute, laser mute (from
+   the MIDI-input snapshot), rainbow. (`laser_solo` joins in Package 3.)
 
 ### Task 3 — NEW `led_palette_control.py`: coordinator + feedback writer
 A plain object owned by StateManager (constructed with the engine, the LED
@@ -142,15 +185,26 @@ thread from `_handle_event`. Contents:
 1. **Gesture** (authority rules 1-6): on `LED_PALETTE_PAD {name}` — if
    `engine.snapshot()["queued_palette"] == name` → override:
    `engine.override_palette(name, start_beat=…, end_beat=min(next_phrase, start+32))`
-   (next phrase anchor beat from the smart-phrasing state already surfaced to
-   StateManager; unknown → start+32); else → `engine.queue_palette(name)`.
+   (unknown anchor → start+32). **Next-phrase-anchor derivation (no ready
+   field exists):** use smart-phrasing `phrase_anchor_target_beat` when set
+   and > start_beat; else `phrase_anchor_last_beat +
+   phrase_anchor_period_beats` (`smart_phrasing.py:41-42,76`) when both are
+   known and the sum > start_beat; else unknown. A computed end_beat ≤
+   start_beat is treated as unknown (32-beat cap — never an instant jump).
+   Otherwise → `engine.queue_palette(name)`.
 2. **Lock pad**: toggle `engine.lock()`/`unlock()` per current snapshot.
 3. **LED mute pad**: coordinator-held toggle emitting the EXISTING
-   `Ev.LED_BLACKOUT` / `Ev.LED_CLEAR_BLACKOUT` handling path with an
-   owner-tagged payload `{reason: "led_mute_pad"}` — distinct owner from any
-   future automation owner (authority rules 13-14; Package 3 adds the
-   spotlight owner). The mute state is coordinator state, surfaced in the
-   feedback file.
+   `Ev.LED_BLACKOUT` / `Ev.LED_CLEAR_BLACKOUT` handling path with owner
+   payload `{reason: "led_mute_pad"}` — a distinct owner in the Task 2 item 4
+   owner set (authority rules 13-14; Package 3 adds the spotlight owner). The
+   mute state is coordinator state, surfaced in the feedback file.
+   **Input-health release (operator ruling 2026-07-04):** StateManager calls
+   `coordinator.on_input_health(healthy)` from the same pass where
+   `_drive_pack_output` computes `input_healthy` (:2352-2361); on a
+   healthy→unhealthy transition the coordinator clears its mute toggle and
+   emits `LED_CLEAR_BLACKOUT {reason: "led_mute_pad"}` — the LED mute drops
+   on pad-device loss exactly like the laser mute's overlay-trust release.
+   Recovery does NOT re-engage the mute (fresh press required).
 4. **Rainbow pad**: toggle. On:
    `engine.set_mode_override({"breakdown": "white_sand", "buildup":
    "white_sand", "*": "rainbow"})`; off: `clear_mode_override()`. While on,
@@ -178,19 +232,35 @@ thread from `_handle_event`. Contents:
    pack's loaded bindings at adapter construction. `PackMidiBinding.target_kind`
    literal (`soundswitch_pack_loader.py:48-51`) gains the four new kinds plus
    a `target_name: str | None` field carrying the palette name.
+3. **`blackout_mask` toggle interaction** (for the Laser mute pad): when a
+   `blackout_mask` binding has `interaction == "toggle"`, note-on FLIPS the
+   binding's held state (add/remove its key in `_blackout_bindings`,
+   recompute `_blackout_held`); note-off is ignored for toggle rows.
+   Existing `press` rows are byte-identical in behavior; `_clear_held`
+   continues to clear toggled state on worker/port loss (existing
+   overlay-trust policy). This stays inside the one manual refcount system —
+   no new blackout mechanism (`laser_blackout_authority.md` rule 5).
 
 ### Task 5 — config: `led_config.py` + `config/led_look_director.example.json`
 1. New `/color_engine/palette_control` block: `{enabled: bool, device:
    "Stream Deck", channel: 2, palette_notes: {name: note, …} (51-55),
    white_sand_note: 56, lock_note: 57, led_mute_note: 58, laser_mute_note: 59,
-   rainbow_note: 60}`. Loader builds the `extra_bindings` rows (palette pads →
-   `palette_pad` with `target_name`; lock/mute/rainbow → their kinds;
-   `laser_mute_note` → an existing-kind `blackout_mask` row — zero new laser
-   code, per `laser_blackout_authority.md` rule 5).
+   laser_solo_note: 60, rainbow_note: 61}` (design spec C.1 layout — solo=60,
+   rainbow=61). Loader builds the `extra_bindings` rows (palette pads →
+   `palette_pad` with `target_name`; lock/LED-mute/rainbow → their kinds;
+   `laser_mute_note` → an existing-kind `blackout_mask` row with
+   `interaction: "toggle"` (Task 4 item 3) — rides the manual refcount, per
+   `laser_blackout_authority.md` rule 5). `laser_solo_note` is parsed and
+   RESERVED only — no binding row until Package 3 adds the `laser_solo_pad`
+   kind.
 2. Example config gains the block, the `white_sand` palette entry
-   (`weight: 0, type: fixed_rgb, rgb: [placeholder]`, comment: Template Lab
-   calibrates), and a `rainbow` palette entry (`weight: 0, type: rainbow`).
-   The live config is the operator's to mirror — note it in the report.
+   (`weight: 0, type: fixed_rgb, rgb: [255, 235, 200]` — "Warm Ivory",
+   borrowed from the Dune Sand twinkle palette per operator 2026-07-04,
+   `govee_frame_renderer.py:1758-1764`; the other sand tones
+   (255,250,235)/(255,210,150)/(255,180,100)/(255,140,50) are the
+   calibration alternates if Template Lab later refines it), and a `rainbow`
+   palette entry (`weight: 0, type: rainbow`). The live config is the
+   operator's to mirror — note it in the report.
 
 ### Task 6 — `streamdeck/streamdeck_midi.py`: pinned layout + icons
 1. Layout per authority §The Deck Surface: keys 0-5 palettes+white_sand and
@@ -211,14 +281,24 @@ thread from `_handle_event`. Contents:
    feedback-file → pad-state mapping assertions (pure functions).
 
 ### Task 7 — tests: `tests/test_led_palette_control.py` (+ engine test extensions)
-- Engine: queue-applies-under-lock with lock transfer; override consumes
+- Engine: queue-applies-under-lock with lock transfer; queue-apply boundary
+  performs no dwell re-pick (incl. a `dwell: 1` palette); override consumes
   queue; `_hold_track` suppresses snap and clears at boundary; fade
   interpolation stays in p-space, completes at end_beat, caps at 32, cancels
-  on new track, restarts from blended position on manual action; mode
-  override maps roles, leaves journey untouched, freeze/restore exact;
-  weight-0 exclusion for `white_sand`/`rainbow` across a large seeded run.
+  on new track, restarts from blended position on override/set/shift while a
+  queue press leaves it untouched; mode override maps roles, leaves journey
+  untouched (boundary during rainbow: bookkeeping runs, queue survives, no
+  re-pick/snap), freeze/restore exact; weight-0 exclusion for
+  `white_sand`/`rainbow` across a large seeded run.
+- LED blackout owners: mute owner survives a legacy/no-reason clear and a
+  `drop_spotlight` clear; legacy survives a mute clear; dark iff owner set
+  non-empty.
 - Coordinator: full gesture matrix (authority Required Tests 1-4), mute
-  toggle owner isolation, rainbow pad-inertness, feedback payload correctness.
+  toggle owner isolation, input-health transition releases the LED mute
+  owner (and only it), rainbow pad-inertness, feedback payload correctness.
+- MIDI adapter: `blackout_mask` toggle rows flip on note-on / ignore
+  note-off; toggle + pad-web press-hold coexistence (either alone keeps the
+  mask held); port-loss clears toggled state.
 - Writer: atomic write (tmp+replace), debounce, no writes from the calling
   thread (assert via thread identity in a test hook).
 - MIDI input: new kinds → events with correct payloads; note-off no-ops;
@@ -231,8 +311,11 @@ thread from `_handle_event`. Contents:
 - StateManager remains the engine's only runtime mutator; deck/web reach it
   only through BridgeEvents/runtime commands (`led_color_engine.py:724-725`).
 - LED hue-band invariant (no yellow/orange) everywhere except rainbow-type
-  resolution.
-- Manual always wins; automation can never un-mute (authority rules 12-15).
+  resolution and manual-only `fixed_rgb` palettes (`white_sand`'s warm sand
+  value is deliberate, weight-0, never auto-selected).
+- Manual always wins; automation can never un-mute (authority rules 12-15;
+  the input-health release is policy, not automation — both mutes drop
+  together on pad-path loss).
 - Deck script never emits on MIDI channels 1-2 (`--selftest` guard stays).
 - Static-look pads and the Phase-2 compositor path are byte-identical in
   behavior.
@@ -252,7 +335,9 @@ per existing `soundswitch_midi_input` tests).
 2. Tasks 1-7 green; full suite green; docs checks pass; contract docs updated
    with §10 status language (`implemented`/`software-tested` at most).
 3. No diff outside: the two engine files, `models.py`, `runtime_status.py`,
-   `__main__.py`, `soundswitch_midi_input.py`, `soundswitch_pack_loader.py`
+   `__main__.py`, `state_manager.py` (event routing, coordinator ownership,
+   input-health hook only), `led_dispatch_policy.py` (blackout owner set
+   only), `soundswitch_midi_input.py`, `soundswitch_pack_loader.py`
    (binding fields only), `led_config.py`, example config,
    `led_palette_control.py`, `streamdeck/streamdeck_midi.py`, tests, and the
    contract-mandated docs.

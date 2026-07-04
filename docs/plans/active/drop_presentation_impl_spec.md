@@ -1,7 +1,7 @@
 ---
 doc_status: active-spec
 truth_level: implementation-spec, code-grounded
-last_verified_commit: bd96b32
+last_verified_commit: 267edd3
 last_verified_date: 2026-07-04
 validation_scope: spec only; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -37,7 +37,7 @@ pads, events, coordinator, feedback file). Implement after both.
   (`state_manager.py:992,1488`), active-deck branch `if deck ==
   self._os.active_deck:` (:1497).
 - [confirmed] Gear-shift data: per-deck BPM persists across handover —
-  `DeckState.meta.bpm` (`models.py:35`; per-deck dict `state_manager.py:439`;
+  `DeckState.meta.bpm` (`models.py:37`; per-deck dict `state_manager.py:439`;
   only cleared by that deck's own next load :1490). Live BPM accessor:
   `AutoloopController.live_bpm_value(deck)` (`autoloop_controller.py:125`;
   used for active and mirror at `state_manager.py:2840,2851`).
@@ -60,10 +60,12 @@ pads, events, coordinator, feedback file). Implement after both.
   `rb_local_deleted == 0`. The operator's existing `DROP`/`BUILDUP` cue names
   are navigation aids and must never trigger anything; only the configured
   marker (`LASER`) tags a solo.
-- [confirmed] Package 2 provides: the Solo pad note (60) + binding kinds
-  pattern, the coordinator, the feedback file (`laser_solo` field), the LED
-  blackout owner pattern, and `atomic_write_json` (`runtime_status.py:631-636`)
-  for the learned store.
+- [confirmed] Package 2 provides: the reserved Solo pad note (60, config
+  `laser_solo_note` — row built by THIS package) + binding kinds pattern,
+  the coordinator + feedback-writer thread, the feedback file (`laser_solo`
+  field), the LED blackout OWNER SET (`led_dispatch_policy.py` per Package 2
+  Task 2 item 4 — this package's `drop_spotlight` owner rides it), and
+  `atomic_write_json` (`runtime_status.py:631-636`) for the learned store.
 
 ## Part B — Tasks (implement exactly, in order)
 
@@ -99,8 +101,11 @@ pads, events, coordinator, feedback file). Implement after both.
    count, per-track auto-solo-used latch, gear-shift pending flag. All
    in-memory; reset on construction (session = process lifetime).
 3. `LearnedStore`: load/save `local/state/laser_solo_learned.json` via
-   `atomic_write_json`; keys `f"{content_id}:{drop_index}"`; record on solo
-   FIRE (not arm; not when the drop was already tagged/learned); veto →
+   `atomic_write_json`; keys `f"{content_id}:{round(drop_beat)}"` —
+   **beat-position keys, not list indices** (operator 2026-07-04: survives
+   Rekordbox re-analysis reindexing); lookup matches a plan drop when
+   `|stored_beat − drop_beat| ≤ 2` (mirror the hot-cue tolerance). Record on
+   solo FIRE (not arm; not when the drop was already tagged/learned); veto →
    remove + save. Corrupt/missing file → empty store + one warning.
 4. `WindowMachine`: the pre-dark/solo/suppression state machine with every
    fail-open trigger from the authority doc (window end, role change, track
@@ -131,26 +136,43 @@ state or owners (authority rule: suppression ≠ blackout).
 1. Track load (active branch :1497): build the `TrackPlan` (drops arrive via
    `Ev.ANLZ_DATA`; plan finalizes when both ANLZ data and cue tags are in —
    until then, drops render `leds_plus_lasers` as today [fail-open]).
-   Increment the session track counter per the ≥16-beat rule.
-2. Master change (:958-979 vicinity): compute the gear-shift delta (incoming
-   `meta.bpm`/live vs outgoing live-then-meta fallback); ≥ +10.0 → set the
-   pending gear-shift flag consumed by the incoming track's first true drop.
+   Damper counting does NOT happen here — it cannot be decided at load time
+   (see item 3).
+2. Master change (:958-979 vicinity; hook where `active_deck` actually
+   flips, not just the raw event — both authority paths converge in the
+   resolver re-run): compute the gear-shift delta **live-then-meta on BOTH
+   sides** (`live_bpm_value(deck)` first, `meta.bpm` fallback when live is
+   None/stale — a pitched deck plays its live tempo, authority tier 5);
+   ≥ +10.0 → set the pending gear-shift flag consumed by the incoming
+   track's first true drop.
 3. Per push tick (inside existing dispatch flow, pure reads): feed the
    `WindowMachine` with `beats_to_next_drop`/`next_smart_drop_beat`, the
-   smart-drop arm signals (Part A), drop-role state, and the drop-lifecycle
-   impact events; apply its outputs — pre-dark = LED blackout with owner
-   `{reason: "drop_spotlight"}` (distinct from the manual mute owner, per
-   Package 2); solo window = same owner held through the window;
-   `leds_only` = `player.set_base_suppressed(True)` for the window.
-4. Darkness guard before pre-dark AND at impact: pack player live +
-   rendering a drop autoloop + no laser blackout/mute held (Package 1's
-   `mask_owners_active()` + the MIDI-input snapshot) + laser enabled; fail →
-   presentation downgraded to `leds_plus_lasers`, reason
-   `guard_fallback_both`.
+   smart-drop arm signals (Part A), drop-role state, the drop-lifecycle
+   impact events, AND the laser-output-live input: pack runtime active AND
+   the latest `_drive_pack_output` pass rendered an autoloop base with no
+   diagnostic (set a small SM-held bool where the drive path knows the
+   render result); mid-window loss = that input going false. Apply outputs —
+   pre-dark = LED blackout with owner `{reason: "drop_spotlight"}` (the
+   Package-2 owner set; distinct from the manual mute owner); solo window =
+   same owner held through the window; `leds_only` =
+   `player.set_base_suppressed(True)` for the window.
+   **Damper counting lives here too:** latch a track as counted once its
+   deck has been the audible active deck (playing) for ≥16 beats since load,
+   once per `(deck, load_gen)` — loaded-but-never-audible decks never count.
+4. Darkness guard before pre-dark AND at impact: the SAME laser-output-live
+   signal as item 3 + rendering a drop autoloop + no laser blackout/mute
+   held (Package 1's `mask_owners_active()` + the MIDI-input snapshot) +
+   laser enabled; fail → presentation downgraded to `leds_plus_lasers`,
+   reason `guard_fallback_both`.
 5. Solo pad events (binding kind `laser_solo_pad`, note 60 — add the kind in
-   the Package-2 pattern): arm/disarm/veto per the authority; learning on
-   fire via `LearnedStore`; feedback `laser_solo` field updated
-   (off/armed/active) through the Package-2 coordinator.
+   the Package-2 pattern; this package builds the binding row from Package
+   2's reserved `laser_solo_note` config): arm/disarm/veto per the
+   authority; learning on fire via `LearnedStore`; feedback `laser_solo`
+   field updated (off/armed/active) through the Package-2 coordinator.
+   **LearnedStore persistence never runs on the state-manager tick path:**
+   the coordinator enqueues the mutated store payload to the Package-2
+   feedback-writer thread, which serializes via `atomic_write_json`;
+   veto-unlearn rides the same path.
 6. Scripted exemption: every hook above no-ops while `lighting_mode ==
    "scripted"` for the active deck; arm state persists per the authority.
 
@@ -171,7 +193,14 @@ Implement the authority doc's Required Behavior Tests 1-9 verbatim, plus:
 - Planner determinism: identical plans across repeated runs/plays.
 - DB-read degradation: locked/missing DB → no tags, one warning, show runs.
 - Suppression vs static override vs blackout layering (with Package 1 masks).
-- WindowMachine: every fail-open trigger table-tested.
+- WindowMachine: every fail-open trigger table-tested (incl. the
+  laser-output-live input going false mid-window).
+- Gear-shift pitched-deck case: outgoing live 128 vs incoming tag 126 pitched
+  to live 138.6 → fires; meta-only comparison would miss it.
+- Damper ≥16-beat latch: loaded-but-never-audible counts nothing; once per
+  `(deck, load_gen)`.
+- Learned-store beat keys: ±2-beat lookup tolerance; a shifted re-analysis
+  beat within tolerance still matches; index-style keys rejected by test.
 
 ## Part C — Invariants That MUST Still Hold
 - Blackout absolute; manual mutes survive everything; suppression never

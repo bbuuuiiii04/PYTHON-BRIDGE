@@ -209,6 +209,7 @@ contracts:
       - laser_decision_log.py
       - midi_output.py
       - personality_resolver.py
+      - state_manager.py
       - config/laser_director.example.json
     key_symbols:
       - LaserDirector
@@ -231,6 +232,9 @@ contracts:
       - docs/status/validation_matrix.md
       - docs/validation/hardware_validation_log.md
       - docs/agents/task_playbooks/change_laser_behavior.md
+      - docs/architecture/laser_blackout_authority.md
+      - docs/plans/active/laser_color_engine_design_spec.md
+      - docs/status/active_work_registry.md
     forbidden_assumptions:
       - MIDI dry-run does not prove laser safety
       - mapped scene does not imply arbitrary fixture support
