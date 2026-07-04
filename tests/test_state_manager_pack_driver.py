@@ -1521,6 +1521,53 @@ class PackDriverInputHealthTests(unittest.TestCase):
         sm._drive_pack_output()
         self.assertEqual(new_be.frames[-1][0], 200)           # fresh player honors static 8
 
+    def test_inactive_runtime_updates_input_health_status(self):
+        inp = _FakeInput(worker_alive=False)
+        sm = _make_sm(
+            player=LaserPackPlayer(_pack()),
+            backend=None,
+            midi_input=inp,
+            enabled=False,
+        )
+        palette = _FakePaletteControl()
+        sm._led_palette_control = palette
+
+        sm._drive_pack_output()
+
+        self.assertTrue(sm.get_pack_status()["input_degraded"])
+        self.assertEqual(palette.health, [False])
+        first_status = sm._pack_status_snapshot
+        sm._drive_pack_output()
+        self.assertIs(sm._pack_status_snapshot, first_status)
+
+        inp._snap.worker_alive = True
+        inp._snap.error = None
+        inp._snap.held_layers = ()
+        inp._snap.blackout_held = False
+        sm._drive_pack_output()
+
+        self.assertFalse(sm.get_pack_status()["input_degraded"])
+        self.assertEqual(palette.health[-1], True)
+
+    def test_inactive_input_health_exception_degrades_without_raise(self):
+        class RaisingInput:
+            def snapshot(self):
+                raise RuntimeError("synthetic snapshot failure")
+
+        sm = _make_sm(
+            player=LaserPackPlayer(_pack()),
+            backend=None,
+            midi_input=RaisingInput(),
+            enabled=False,
+        )
+        palette = _FakePaletteControl()
+        sm._led_palette_control = palette
+
+        sm._drive_pack_output()
+
+        self.assertTrue(sm.get_pack_status()["input_degraded"])
+        self.assertEqual(palette.health, [False])
+
 
 class PackOperationalStatusTests(unittest.TestCase):
     def test_initial_enable_swap_reload_disable_snapshots(self):

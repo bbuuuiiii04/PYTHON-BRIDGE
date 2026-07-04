@@ -356,10 +356,14 @@ watcher reopens it (§2.8).
   `cat=prefix` tokens), `c` clears.
 - **Global keys:** `space` freeze/follow (buffering continues while frozen), `j`/`k` scroll when
   frozen, `q` quit. Repaint ≤10 Hz and on keypress; per-lens ring buffers (`deque(maxlen=2000)`).
-- **Alerting:** a new ERROR-level record flashes the header bar red for 3 s and rings the terminal
-  bell — Terminal.app bounces the Dock icon when unfocused, which is the actually-useful mid-set
-  alert. The OPERATOR strip keeps the last WARN+/health lines visible on every screen so an alert
-  can't scroll away.
+- **Alerting — latched, never transient (operator requirement 2026-07-04, ADHD-first):** a new
+  ERROR/WARNING rings the terminal bell once (Terminal.app bounces the Dock icon when unfocused —
+  the actually-useful mid-set grab) and **latches** the OPERATOR strip red/yellow with that line
+  **until the condition clears or the operator acknowledges (`a`)**. `health.*` categories clear
+  their own latch on the matching recovery record (circuit closed, reconnected, re-attached);
+  plain ERRORs with no recovery signal stay latched until acked. A missed alert must still be
+  there minutes later, in the same place — nothing important is ever communicated by a transient
+  flash alone, and nothing important can scroll away.
 - **Glanceable grammar for PERFORMANCE lines:** `HH:MM:SS.s  D<deck> ▶ <surface>  <value> (<reason>) @b<beat>`
   — deck first (which side of the booth), surface second (where to look), value third (what to
   expect), reason parenthesized, beat last. Rendered from `data`, so wording improves without
@@ -367,6 +371,42 @@ watcher reopens it (§2.8).
 - **Stream staleness:** header shows age of the newest record; yellow >5 s, red >15 s (the
   heartbeat guarantees ≥1 record/2 s from a healthy bridge). This is the honest liveness check for
   "bridge hung / writer died" — detectable from the read side with zero bridge-side machinery.
+
+**Readability contract (operator requirement 2026-07-04: optimize for inattentive ADHD + visual
+readability).** These are acceptance criteria for W6, not suggestions; the pure `format_line`/
+layout helpers make most of them unit-testable:
+
+1. **Stillness means healthy.** When the show is steady, the screen does not move — no spinners,
+   no ticking counters, no per-repaint flicker (only changed cells repaint). Motion is reserved
+   for meaning: if something moved, something changed.
+2. **State lives in fixed places, never in memory.** Current state is always readable from the
+   sticky header (same fields, same order, same positions); history explains, the header states.
+   He should never need to reconstruct "what's active" from scrolled lines.
+3. **One fact per line, no wrapping.** Long lines truncate with `…` (full text available frozen /
+   in DEBUG); columns (time / deck / surface / value) are fixed-width and vertically aligned so
+   the eye scans columns, not sentences.
+4. **Dim the plumbing, brighten the payload.** Timestamps, beats, and reasons render dim/grey;
+   the deck and the value (scene/look/palette name) render bright. The most important word on the
+   line is the most visible word on the line.
+5. **Color is a fixed vocabulary, reused from the repo's existing convention** (`docs/subsystems/`
+   logging card): green = applied/ok, cyan = periodic/active, yellow = pending/degraded-but-working,
+   orange = retry/suspicious, **red = broken, and red is never used decoratively**. One surface =
+   one accent color everywhere (laser/led/deck/drop/ss each keep a stable hue).
+6. **Plain words, not codes.** The viewer renders `laser`, `led`, `deck`, `autoloop` — never
+   `[LX]`, `[RBMEM]`, `[SM]`. Legacy records get a small friendly-name map in one place in
+   `bridge_view.py`; anything unmapped shows its logger name verbatim rather than a new code.
+7. **Relative time where it aids judgment.** The OPERATOR strip and per-category summaries show
+   ages ("2m ago"), not clock times — "how stale is this problem" should not require mental math.
+   The feed keeps absolute timestamps (post-mortem cross-reference).
+8. **Newest line is findable without reading.** A static `▸`/inverse marker on the most recent
+   feed line; no animation.
+9. **Zero-interaction default.** Screen 1 is complete for mid-set use with no keys pressed, and
+   the viewer never steals focus, opens popups, or requires acknowledgment to keep functioning —
+   `a` clears a latch, it is never required for the show to proceed.
+
+A practical lever outside the code, recorded for the runbook: the watcher's monitor window can
+target a dedicated Terminal profile (large font, dark background) via the existing osascript —
+worth one line in W7's watcher change, no code impact.
 
 ### 2.8 Files, retention, launch integration
 

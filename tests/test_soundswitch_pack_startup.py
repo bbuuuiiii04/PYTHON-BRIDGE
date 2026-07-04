@@ -180,6 +180,37 @@ class StartupMatrixTests(unittest.TestCase):
                     self.assertIsNotNone(bundle.midi_input)
                     self.assertEqual(bundle.reason, "pack_start_failed")
                     self.assertIn("sender.stop", events)
+                    self.assertNotIn("input.stop", events)
+
+    def test_frame_sender_construction_failure_keeps_constructed_midi_input(self):
+        events = []
+        controller = _LifecycleFake("input", events)
+
+        def input_factory(bindings, aliases, *, stale_timeout_ms):
+            return controller
+
+        def sender_factory(*_args, **_kwargs):
+            raise RuntimeError("synthetic construction failure")
+
+        bundle = bridge_main._build_soundswitch_pack_startup(
+            _result(),
+            pack_loader=lambda _path: _pack(),
+            player_factory=lambda pack, **_kw: ("player", pack),
+            frame_sender_factory=sender_factory,
+            midi_input_factory=input_factory,
+        )
+
+        self.assertEqual(bundle.reason, "pack_start_failed")
+        self.assertIs(bundle.midi_input, controller)
+        self.assertIsNone(bundle.frame_sender)
+        self.assertEqual(events, [])
+
+    def test_runtime_reload_prepare_uses_palette_event_wiring(self):
+        source = inspect.getsource(bridge_main.main)
+        prepare = source[source.index("def _prepare_pack_runtime"):]
+        prepare = prepare[:prepare.index("soundswitch_pack_controller =")]
+        self.assertIn("event_sink=_pad_event_sink", prepare)
+        self.assertIn("extra_midi_bindings=palette_control_bindings", prepare)
 
     def test_missing_controller_input_degrades_but_pack_sender_starts(self):
         events = []
