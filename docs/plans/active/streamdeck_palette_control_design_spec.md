@@ -34,13 +34,14 @@ In scope (v1, LED):
   C.2); a dedicated pad **locks/unlocks**.
 - A manual-only **`white_sand`** palette (Stream-Deck-only, never auto-selected) that renders LEDs
   white/off-white and drives lasers white.
-- **Room-state kill pads** (operator-directed 2026-07-04): two per-fixture toggles — **LED kill**
-  and **laser kill** — compose all three room states live: LED-only, LED+laser, laser-only (C.8).
-- **Drop presentation policy + spotlight arm pad** (operator-directed 2026-07-04, converged via
-  brainstorm): **lasers-only is never random** — it fires only from the arm pad or a
-  **Rekordbox hotcue tag** on the drop; untagged tracks get a fixed **lighting personality** from
-  their own structure (lasers on the track's biggest drops, dark on the rest) (C.9). No energy
-  model, no RNG rolls except a per-track seeded coin for single-drop tracks.
+- **Mixer-style mute pads** (operator-directed 2026-07-04, naming accepted): two per-fixture
+  toggles — **LED mute** and **Laser mute** — compose all three room states live: LED-only,
+  LED+laser, laser-only (C.8).
+- **Drop presentation policy + Laser Solo pad** (operator-directed 2026-07-04, converged via
+  brainstorm): **lasers-only is never random** — a Laser Solo drop fires only from the Laser Solo
+  pad or a **Rekordbox hotcue tag** on the drop; untagged tracks get a fixed **lighting
+  personality** from their own structure (lasers on the track's biggest drops, dark on the rest)
+  (C.9). No energy model, no RNG rolls except a per-track seeded coin for single-drop tracks.
 - **Visual feedback**: each pad renders an icon reflecting its palette/action and live state.
 - **Pinned pad layout** (operator 2026-07-04): palette pads stay on fixed keys; static-look pads
   move to the bottom row (replaces today's "waterfall" fill — see Part C.1).
@@ -116,13 +117,13 @@ windows during scripted tracks; lasers stay fully authored (see laser doc Part A
 **1. Layout (LOCKED, operator 2026-07-04 — pinned rows, waterfall retired).** Stream Deck 3×5, ch3.
 - **Top row (keys 0-4)** = the 5 auto palettes in config order:
   `blue_cyan · deep_ocean · indigo · violet · crimson`.
-- **Row 2:** key 5 = `white_sand`, key 6 = lock/unlock, key 7 = LED kill toggle (C.8),
-  key 8 = laser kill toggle (C.8), key 9 = drop-spotlight arm (C.9).
+- **Row 2:** key 5 = `white_sand`, key 6 = lock/unlock, key 7 = LED mute (C.8),
+  key 8 = Laser mute (C.8), key 9 = Laser Solo (C.9) — a mixer strip: mute, mute, solo.
 - **Bottom row (keys 10-14)** = static looks, **filling left→right** sorted by note (today: 3 bound).
   Overflow beyond 5 is dropped with a log line.
 - **Palette/control pad notes are bridge-assigned, outside the 36-50 static-look range** so
   SS-learned bindings can never collide: ch2 notes **51-55** (palettes, config order), **56**
-  (`white_sand`), **57** (lock), **58** (LED kill), **59** (laser kill), **60** (spotlight arm).
+  (`white_sand`), **57** (lock), **58** (LED mute), **59** (Laser mute), **60** (Laser Solo).
   Declared once in bridge config (Part C.6) and carried to the deck via the feedback file
   (Part C.7) — the deck script hardcodes no palette names or notes.
 
@@ -214,7 +215,7 @@ the gesture is pure state:
   coordinator — event-driven on palette-state change, debounced ~50 ms. **Never from the 200 Hz
   push loop** (no-filesystem-I/O invariant, AGENTS §6).
 - **Schema (v1):** `{v: 1, lock: bool, led_blackout: bool, laser_blackout: bool,
-  spotlight: "off"|"armed"|"active",
+  laser_solo: "off"|"armed"|"active",
   palettes: [{name, note, rgb: [r,g,b], state: "active"|"queued"|"inactive"|"fading"}], seq: int}`
   — list order = display order (5 palettes then `white_sand`); `rgb` = representative swatch
   computed by the engine (`_palette_center`/`_p_to_rgb` derivation); `seq` monotonic for staleness
@@ -228,30 +229,30 @@ the gesture is pure state:
 - *(Alternative considered: MIDI-back to the script — lower latency but needs an input port added;
   deferred in favor of the file. 1 s icon latency accepted; press feedback stays instant/local.)*
 
-**8. Room-state kill pads (LOCKED, operator-directed 2026-07-04).** Two per-fixture toggles
-compose all three room states live — LED-only (laser kill on), LED+laser (neither), laser-only
-(LED kill on) — with the presentation policy (C.9) running underneath whenever the pads are
-untouched.
-- **LED kill (key 7):** toggles the Govees off / back on. Wiring is nearly free:
+**8. Room-state mute pads (LOCKED, operator-directed 2026-07-04; mixer naming accepted).** Two
+per-fixture mutes compose all three room states live — LED-only (Laser mute on), LED+laser
+(neither), laser-only (LED mute on) — with the presentation policy (C.9) running underneath
+whenever the pads are untouched.
+- **LED mute (key 7):** toggles the Govees off / back on. Wiring is nearly free:
   `Ev.LED_BLACKOUT` / `Ev.LED_CLEAR_BLACKOUT` and the matching runtime commands already exist
   (`models.py:267-268`, `runtime_status.py:427,440` — the LED Pad web takeover path). The pad's
   note-on flips a coordinator-held toggle that emits the corresponding event; the pad icon
   renders from `led_blackout` in the feedback file.
-- **Laser kill (key 8):** toggles the laser frame dark / back. Rides the **existing**
+- **Laser mute (key 8):** toggles the laser frame dark / back. Rides the **existing**
   `blackout_mask` machinery end-to-end: one new bridge-config binding row (device "Stream Deck",
   ch2, note 59, kind `blackout_mask`, toggle interaction) joins the MIDI-input adapter's
   refcounted blackout bindings (`soundswitch_midi_input.py:280-314`) — a **second manual owner**
   alongside the laser-pad-web note, already OR'd correctly by the group merge (:621-635). Zero
   new code paths; pad icon renders from `laser_blackout` in the feedback file.
-- **Owner discipline (lesson from the laser blackout review):** the manual LED kill and the
-  drop-spotlight window (C.9) both drive LED blackout — they must be **separate owners** (event
-  payload `reason`), OR'd at the LED dispatch layer, so a spotlight auto-restore can never clear a
-  manually-toggled kill and vice versa. Same rule on the laser side: the kill pad's binding owner
+- **Owner discipline (lesson from the laser blackout review):** the manual LED mute and the
+  Laser Solo window (C.9) both drive LED blackout — they must be **separate owners** (event
+  payload `reason`), OR'd at the LED dispatch layer, so a solo's auto-restore can never clear a
+  manually-held mute and vice versa. Same rule on the laser side: the mute pad's binding owner
   is distinct from the laser-pad-web owner by construction (per-binding refcount). Codex spec pins
   the exact seam + test.
 
-**9. Drop presentation policy + spotlight arm pad (CONVERGED via operator brainstorm
-2026-07-04 — supersedes the earlier weighted-deal draft).**
+**9. Drop presentation policy + Laser Solo pad (CONVERGED via operator brainstorm
+2026-07-04 — supersedes the earlier weighted-deal draft; "Laser Solo" naming accepted).**
 
 **Governing idea (operator's own words): a lasers-only drop is "the whole club saw it coming"
 AND "the track everyone came for" — so lasers-only is NEVER random.** It fires only from the
@@ -264,9 +265,10 @@ lasers-only tier, the ordinal-≥2 gate, the tracks-since-special budget, and th
 (operator: every track played has a true drop, nearly all have 2+ — a drought never occurs).
 
 **The ladder (first match wins, per drop):**
-1. **Kill pads (C.8)** — manual room state, absolute, continuous.
-2. **Arm pad (key 9)** — one-shot: next true drop is `lasers_only` (+ pre-dark). Pad pulses
-   while armed; disarm = press again; auto-clears on track change.
+1. **Mute pads (C.8)** — manual room state, absolute, continuous.
+2. **Laser Solo pad (key 9)** — one-shot: arms the **next true drop** (not immediate; a press
+   during an already-playing drop arms the following one) as `lasers_only` (+ pre-dark). Pad
+   pulses while armed; disarm = press again; auto-clears on track change.
 3. **Hotcue tag (curation in Rekordbox)** — a hot cue named with the marker (default `LASER`,
    case-insensitive, config `hotcue_marker`) placed on the drop marks it: that drop is
    `lasers_only` (+ pre-dark). Matched to the nearest smart drop within ±2 beats. **No budget
@@ -308,7 +310,7 @@ lasers-only tier, the ordinal-≥2 gate, the tracks-since-special budget, and th
 - **Config block** (proposed home `config/led_look_director.json` `/drop_presentation`):
   `{enabled: true, laser_ratio: 0.4, opening_tracks: 3, led_predark_beats: 4,
   drop_window_cap_beats: 32, hotcue_marker: "LASER"}`. All deterministic; `enabled: false`
-  restores today's behavior exactly (every drop `leds_plus_lasers`; kill/arm pads still work).
+  restores today's behavior exactly (every drop `leds_plus_lasers`; mute/solo pads still work).
   First live set validates the defaults.
 - The `leds_only` base-suppression seam is laser-side plumbing (a per-drop selection withhold);
   the laser doc cross-references it. Everything else is zero laser code.
@@ -327,10 +329,11 @@ lasers-only tier, the ordinal-≥2 gate, the tracks-since-special budget, and th
 4. **Closed this pass:** 1-track override mechanism (C.2/C.4), manual-only mechanism (weights,
    Part B), queue-vs-lock precedence (C.3, operator-decided), layout + notes + waterfall fix (C.1),
    feedback schema/cadence (C.7), binding source (C.6). **Feature-expansion round (operator picks
-   2026-07-04):** override-as-phrase-fade (C.2), LED-blackout toggle pad (C.8), drop-spotlight arm
-   pad (C.9); rejected: shift pad, per-drop laser hue variation as a feature (already emerges from
-   existing behavior), laser contrast mode (fixed-color fixture — see laser doc), final-drop
-   finisher.
+   2026-07-04):** override-as-phrase-fade (C.2), LED/Laser mute pads (C.8), Laser Solo pad +
+   presentation policy (C.9); rejected: shift pad, per-drop laser hue variation as a feature
+   (already emerges from existing behavior), laser contrast mode (fixed-color fixture — see laser
+   doc), final-drop finisher, double-drop detection (operator doesn't do them), drought breaker
+   (no droughts — every track has true drops).
 
 ## Part E — Evidence (file:line, HEAD `bd96b32`)
 
