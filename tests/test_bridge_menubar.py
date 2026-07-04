@@ -47,6 +47,17 @@ class BridgeMenubarTests(unittest.TestCase):
         source = (scripts_dir / "bridge_menubar.py").read_text(encoding="utf-8")
         self.assertIn("LED Pad…", source)
 
+    def test_watcher_path_uses_repo_copy(self) -> None:
+        bridge_menubar = self._import_module()
+        repo_root = Path(__file__).resolve().parents[1]
+
+        self.assertEqual(
+            bridge_menubar.WATCHER,
+            str(repo_root / "scripts" / "ss_bridge_watcher.sh"),
+        )
+        self.assertIn("/scripts/ss_bridge_watcher\\.sh", bridge_menubar.WATCHER_PATTERN)
+        self.assertNotIn("/Users/bbui/ss_bridge_watcher", bridge_menubar.WATCHER_PATTERN)
+
     def test_toggle_record_session_appends_runtime_command(self) -> None:
         bridge_menubar = self._import_module()
 

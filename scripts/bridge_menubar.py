@@ -30,11 +30,11 @@ from AppKit import (
 from Foundation import NSAttributedString, NSMutableAttributedString, NSObject, NSTimer
 
 
-WATCHER = "/Users/bbui/ss_bridge_watcher.sh"
 REPO_ROOT = Path(__file__).resolve().parents[1]
+WATCHER = str(REPO_ROOT / "scripts" / "ss_bridge_watcher.sh")
 MENUBAR_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*[[:space:]]+/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar\.py$"
 BRIDGE_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*([[:space:]]+-u)?[[:space:]]+-m[[:space:]]+rb_ss_bridge_v2$"
-WATCHER_PATTERN = r"^(/bin/bash|bash)[[:space:]]+/Users/bbui/ss_bridge_watcher\.sh$"
+WATCHER_PATTERN = "^(/bin/bash|bash)[[:space:]]+" + WATCHER.replace(".", r"\.") + "$"
 MONITOR_PATTERN = r"RBSS_BRIDGE_MONITOR|^tail -n 100 -F /tmp/bridge\.log$"
 MANUAL_LAUNCHCTL_LABEL = "rbss_bridge_manual"
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"

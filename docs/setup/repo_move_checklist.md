@@ -42,12 +42,12 @@ Terminal, Python, and launchd before any live use.
 ## 3. Move And Rewire
 
 1. Move the repo folder to the chosen location.
-2. Update `~/ss_bridge_watcher.sh`:
-   - `BRIDGE_DIR`
-   - `STREAMDECK_SCRIPT`
-   - the osascript manual-session `cd`
+2. Confirm the repo watcher moved with the repo:
+   - `scripts/ss_bridge_watcher.sh` derives `REPO_ROOT`, `BRIDGE_DIR`, and
+     `STREAMDECK_SCRIPT` from its own location.
+   - Do not edit or depend on `~/ss_bridge_watcher.sh`; the menubar launches the
+     repo copy.
 3. Update `scripts/bridge_menubar.py`:
-   - `WATCHER`
    - `MENUBAR_PATTERN`
    - `ICON_DIR`
 
