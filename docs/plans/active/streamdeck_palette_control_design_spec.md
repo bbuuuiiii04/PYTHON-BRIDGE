@@ -426,10 +426,14 @@ note 61).** A section-mapped color override that rides machinery this design alr
 5. **white_sand handoff (operator: "flesh out more, then it could be added" — shipped DISABLED,
    `ws_handoff_enabled: false`).** Proposed flesh-out: holding `white_sand` continuously from
    inside a breakdown until the pre-dark point (≥ 16 beats of hold) makes the drop that ends it a
-   Laser Solo — the ritual completes; max once per track. **Firing frequency if enabled: exactly
-   as often as the operator performs the full ritual — no hidden budget or cooldown; rarity is
-   entirely his white_sand discipline** (an every-breakdown white_sand habit would solo nearly
-   every track). Disabled by default; revisit after the other tiers are felt live.
+   Laser Solo — the ritual completes; max once per track. The hold is about the PALETTE staying
+   active, not the roles underneath: a groove between the breakdown and the buildup does NOT
+   break the ritual (its beats count toward the 16; the room stays visibly white throughout) —
+   unlike the record-breaker runway, whose contiguity a groove deliberately resets (tension
+   released = saw-it-coming clock restarts). **Firing frequency if enabled: exactly as often as
+   the operator performs the full ritual — no hidden budget or cooldown; rarity is entirely his
+   white_sand discipline** (an every-breakdown white_sand habit would solo nearly every track).
+   Disabled by default; revisit after the other tiers are felt live.
 
 ## Part E — Evidence (file:line, HEAD `bd96b32`)
 
