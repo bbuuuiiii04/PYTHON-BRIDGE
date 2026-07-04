@@ -272,6 +272,7 @@ class CommandReader(threading.Thread):
         led_blackout_callback: Optional[Callable[[Optional[str], Optional[str]], Any]] = None,
         led_clear_blackout_callback: Optional[Callable[[], Any]] = None,
         led_clear_scene_override_callback: Optional[Callable[[], Any]] = None,
+        led_palette_callback: Optional[Callable[[str, Optional[str]], Any]] = None,
         record_session_toggle_callback: Optional[Callable[[Optional[str], bool], Any]] = None,
         pack_command_callback: Optional[Callable[..., Any]] = None,
     ) -> None:
@@ -290,6 +291,7 @@ class CommandReader(threading.Thread):
         self._led_blackout_callback = led_blackout_callback
         self._led_clear_blackout_callback = led_clear_blackout_callback
         self._led_clear_scene_override_callback = led_clear_scene_override_callback
+        self._led_palette_callback = led_palette_callback
         self._record_session_toggle_callback = record_session_toggle_callback
         self._pack_command_callback = pack_command_callback
         self._stop_event = threading.Event()
@@ -451,6 +453,23 @@ class CommandReader(threading.Thread):
                     with self._lock:
                         self._last_error = f"led_clear_scene_override callback failed: {detail}"
             return
+        if cmd in {
+            "led_palette_queue",
+            "led_palette_override",
+            "led_palette_lock",
+            "led_palette_unlock",
+            "led_rainbow_toggle",
+        }:
+            if self._led_palette_callback:
+                name_raw = command.get("name")
+                name = str(name_raw) if name_raw is not None else None
+                ok, detail = _invoke_callback(
+                    lambda: self._led_palette_callback(cmd, name)
+                )
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"{cmd} callback failed: {detail}"
+            return
         if cmd == "set_soundswitch_pack":
             if self._pack_command_callback:
                 kwargs = {k: command[k] for k in ("backend", "enabled") if k in command}
@@ -506,6 +525,11 @@ def parse_command(line: str) -> dict[str, Any]:
         "led_clear_blackout",
         "led_clear_scene_override",
         "set_led_look_director",
+        "led_palette_queue",
+        "led_palette_override",
+        "led_palette_lock",
+        "led_palette_unlock",
+        "led_rainbow_toggle",
         "set_soundswitch_pack",
     }
     if cmd not in allowed:
@@ -599,6 +623,19 @@ def parse_command(line: str) -> dict[str, Any]:
             obj = dict(obj)
             obj["target"] = target.strip()
     if cmd in {"led_clear_blackout", "led_clear_scene_override"}:
+        extra = set(obj.keys()) - {"cmd"}
+        if extra:
+            raise ValueError(f"{cmd} does not accept payload fields")
+    if cmd in {"led_palette_queue", "led_palette_override"}:
+        extra = set(obj.keys()) - {"cmd", "name"}
+        if extra:
+            raise ValueError(f"{cmd} has unknown fields")
+        name = obj.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{cmd} requires non-empty name")
+        obj = dict(obj)
+        obj["name"] = name.strip()
+    if cmd in {"led_palette_lock", "led_palette_unlock", "led_rainbow_toggle"}:
         extra = set(obj.keys()) - {"cmd"}
         if extra:
             raise ValueError(f"{cmd} does not accept payload fields")

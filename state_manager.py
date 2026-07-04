@@ -744,6 +744,13 @@ class StateManager(LEDDispatchPolicyMixin):
                     "reason": "provider_error",
                     "last_error": f"{type(exc).__name__}: {exc}",
                 }
+        color_engine_status["led_mute"] = bool(
+            getattr(self, "_led_blackout_owners", set())
+            or getattr(self, "_led_emergency_blackout", False)
+        )
+        color_engine_status["laser_mute"] = bool(
+            self._pack_status_snapshot.get("blackout", False)
+        )
         deck = {}
         for num, state in self._deck.items():
             deck[str(num)] = {
@@ -1212,6 +1219,15 @@ class StateManager(LEDDispatchPolicyMixin):
             Ev.LED_CLEAR_SCENE_OVERRIDE,
         }:
             self._handle_led_event(ev)
+        elif ev.kind in {
+            Ev.LED_PALETTE_PAD,
+            Ev.LED_PALETTE_LOCK_PAD,
+            Ev.LED_MUTE_PAD,
+            Ev.LED_RAINBOW_PAD,
+        }:
+            coordinator = getattr(self, "_led_palette_control", None)
+            if coordinator is not None:
+                coordinator.handle_event(ev)
 
         elif self._laser_director is not None:
             if ev.kind == Ev.LASER_TOGGLE:

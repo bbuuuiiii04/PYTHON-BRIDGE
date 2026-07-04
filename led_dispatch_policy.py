@@ -72,6 +72,7 @@ class LEDDispatchPolicyMixin:
         self._led_manual_override = ""
         self._led_manual_target_override = ""
         self._led_emergency_blackout = False
+        self._led_blackout_owners: set[str] = set()
         self._led_last_error = ""
         self._led_last_event = ""
         self._led_last_look = ""
@@ -182,7 +183,8 @@ class LEDDispatchPolicyMixin:
             "reason": reason,
             "manual_override": self._led_manual_override,
             "manual_target_override": self._led_manual_target_override,
-            "emergency_blackout": bool(self._led_emergency_blackout),
+            "emergency_blackout": self._led_blackout_active(),
+            "blackout_owners": tuple(sorted(self._led_blackout_owners)),
             "last_error": self._led_last_error,
             "last_event": self._led_last_event,
             "last_look": self._led_last_look,
@@ -245,6 +247,9 @@ class LEDDispatchPolicyMixin:
                 payload["last_error"] = f"adapter_status_error:{type(exc).__name__}"
 
         return payload
+
+    def _led_blackout_active(self) -> bool:
+        return bool(self._led_blackout_owners or self._led_emergency_blackout)
 
     def color_engine_status_provider(self) -> dict[str, Any]:
         """Return the latest StateManager-published color engine status copy."""
@@ -403,12 +408,14 @@ class LEDDispatchPolicyMixin:
                     self._led_rejected_count += 1
                     return
                 self._led_manual_target_override = target
-            self._led_emergency_blackout = True
+            self._led_blackout_owners.add(str(ev.payload.get("reason") or "legacy"))
+            self._led_emergency_blackout = bool(self._led_blackout_owners)
             self._dispatch_led_manual_command(reason="blackout")
             return
 
         if ev.kind == Ev.LED_CLEAR_BLACKOUT:
-            self._led_emergency_blackout = False
+            self._led_blackout_owners.discard(str(ev.payload.get("reason") or "legacy"))
+            self._led_emergency_blackout = bool(self._led_blackout_owners)
             self._dispatch_led_manual_command(reason="clear_blackout")
             return
 
@@ -456,12 +463,12 @@ class LEDDispatchPolicyMixin:
                     return
             set_emergency_blackout = getattr(self._led_look_director, "set_emergency_blackout", None)
             if callable(set_emergency_blackout):
-                set_emergency_blackout(self._led_emergency_blackout)
+                set_emergency_blackout(self._led_blackout_active())
             decision = self._led_look_director.tick(
                 LEDContext(
                     role="manual",
                     manual_look=manual_look,
-                    emergency_blackout=self._led_emergency_blackout,
+                    emergency_blackout=self._led_blackout_active(),
                     target_override=self._led_manual_target_override,
                 )
             )
@@ -651,7 +658,7 @@ class LEDDispatchPolicyMixin:
         if not self._led_automation_enabled_latch:
             self._gate_led_automation("automation_disabled", active_deck=active)
             return
-        if self._led_emergency_blackout:
+        if self._led_blackout_active():
             self._gate_led_automation("emergency_blackout", active_deck=active)
             return
         if not d.playing or not d.meta.filepath:
@@ -935,7 +942,7 @@ class LEDDispatchPolicyMixin:
         if not self._led_automation_enabled_latch:
             self._gate_led_automation("automation_disabled", active_deck=active, role="ambient")
             return
-        if self._led_emergency_blackout:
+        if self._led_blackout_active():
             self._gate_led_automation("emergency_blackout", active_deck=active, role="ambient")
             return
         if self._led_manual_override:

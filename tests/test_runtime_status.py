@@ -221,6 +221,24 @@ class LEDCommandParseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_command('{"cmd":"set_led_look_director","enabled":"true"}')
 
+    def test_parse_command_accepts_palette_queue_and_override(self) -> None:
+        self.assertEqual(
+            parse_command('{"cmd":"led_palette_queue","name":"blue_cyan"}')["name"],
+            "blue_cyan",
+        )
+        self.assertEqual(
+            parse_command('{"cmd":"led_palette_override","name":"white_sand"}')["name"],
+            "white_sand",
+        )
+
+    def test_parse_command_rejects_palette_queue_without_name(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_command('{"cmd":"led_palette_queue"}')
+
+    def test_parse_command_accepts_palette_toggles(self) -> None:
+        for cmd in ("led_palette_lock", "led_palette_unlock", "led_rainbow_toggle"):
+            self.assertEqual(parse_command(json.dumps({"cmd": cmd}))["cmd"], cmd)
+
 
 class LaserCommandCallbackTests(unittest.TestCase):
     def test_toggle_laser_director_callback_failure_sets_last_error(self) -> None:
@@ -317,6 +335,16 @@ class LEDCommandCallbackTests(unittest.TestCase):
         reader.handle_command({"cmd": "led_blackout", "reason": "operator"})
 
         self.assertIn("callback returned False", reader.status()["last_error"])
+
+    def test_led_palette_callback_receives_command_and_name(self) -> None:
+        callback = Mock(return_value=True)
+        reader = CommandReader(Mock(), led_palette_callback=callback)
+
+        reader.handle_command({"cmd": "led_palette_queue", "name": "blue_cyan"})
+        reader.handle_command({"cmd": "led_palette_lock"})
+
+        callback.assert_any_call("led_palette_queue", "blue_cyan")
+        callback.assert_any_call("led_palette_lock", None)
 
 
 class RuntimeStatusWriterTests(unittest.TestCase):

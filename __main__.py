@@ -1458,6 +1458,33 @@ def main() -> None:
             log.warning("[MAIN] queue-full  event=led-clear-scene-override")
             return False
 
+    def _led_palette_command(cmd: str, name: str | None = None) -> bool:
+        if cmd in ("led_palette_queue", "led_palette_override"):
+            kind = Ev.LED_PALETTE_PAD
+            payload = {
+                "name": str(name or ""),
+                "intent": "queue" if cmd == "led_palette_queue" else "override",
+            }
+        elif cmd in ("led_palette_lock", "led_palette_unlock"):
+            kind = Ev.LED_PALETTE_LOCK_PAD
+            payload = {"intent": "lock" if cmd == "led_palette_lock" else "unlock"}
+        elif cmd == "led_rainbow_toggle":
+            kind = Ev.LED_RAINBOW_PAD
+            payload = {}
+        else:
+            return False
+        try:
+            event_queue.put_nowait(BridgeEvent(
+                kind=kind,
+                deck=0,
+                payload=payload,
+                source="runtime_command",
+            ))
+            return True
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=%s", cmd)
+            return False
+
     def _toggle_record_session(path: Optional[str], dedup: bool) -> bool:
         if not path:
             path = f"/tmp/rbss-session-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
@@ -1511,6 +1538,7 @@ def main() -> None:
         led_blackout_callback=_led_blackout,
         led_clear_blackout_callback=_led_clear_blackout,
         led_clear_scene_override_callback=_led_clear_scene_override,
+        led_palette_callback=_led_palette_command,
         record_session_toggle_callback=_toggle_record_session,
         pack_command_callback=soundswitch_pack_controller.handle,
     )
