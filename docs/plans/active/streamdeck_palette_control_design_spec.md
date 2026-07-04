@@ -1,22 +1,30 @@
 ---
 doc_status: current
-truth_level: code-verified for Package 2; design-intent for later packages
-last_verified_commit: fce1169
+truth_level: code-verified for Packages 2-3; design-intent for anything still unimplemented
+last_verified_commit: 2cbca87
 last_verified_date: 2026-07-04
-validation_scope: Package 2 software-tested; Laser Solo/drop-presentation later packages remain design-intent; hardware-unvalidated
+validation_scope: Packages 2-3 software-tested; hardware-unvalidated
 ---
 
 # Stream Deck Palette Control — Design Spec (pre-handoff)
 
-> **Status: PACKAGE 2 IMPLEMENTED / SOFTWARE-TESTED; LATER PACKAGES DESIGN-INTENT.**
-> Roles: Claude authored this design (planning); **Codex implemented Package 2 bridge code**.
+> **Status: PACKAGES 2-3 IMPLEMENTED / SOFTWARE-TESTED.**
+> Roles: Claude authored this design (planning); **Codex implemented Package 2 bridge code; Claude
+> implemented Package 3 (drop presentation policy, this-repo-instance, 2026-07-04) per an
+> operator-sanctioned exception** — see `docs/architecture/drop_presentation_authority.md` for the
+> current behavior authority (the acceptance oracle for Package 3) and
+> `docs/plans/active/drop_presentation_impl_spec.md` for its implementation spec.
 > **Fable reviewed (Phase 1) and expanded (Phase 2) this design on 2026-07-04**
 > with operator answers folded in.
 > Per AGENTS.md §1, **code wins over this doc** — verify every claim against current code.
 > Claims are labelled **confirmed / assumed / unknown / operator-decided**.
 
-This is current truth for Package 2 only. Later Laser Solo, drop-presentation learning, track
-personality, and laser-color behavior remain design-intent until implemented and software-tested.
+This is current truth for Packages 2 and 3. Package 3 (Laser Solo pad, zero-RNG auto-solo tiers,
+finale guarantee, track personality, learned-solo memory) is now implemented/software-tested — see
+`docs/architecture/drop_presentation_authority.md` for the authoritative ladder and
+`docs/subsystems/laser.md` / `docs/subsystems/led_govee.md` for the current code-verified summary.
+Track personality and laser-color behavior beyond what those two cards describe remain design-intent
+until implemented and software-tested.
 
 ---
 

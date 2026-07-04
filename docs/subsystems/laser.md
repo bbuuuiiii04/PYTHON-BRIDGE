@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 26d357f
+last_verified_commit: 2cbca87
 last_verified_date: 2026-07-04
 validation_scope: software-only
 ---
@@ -40,7 +40,9 @@ Offline SoundSwitch pack boundary:
 - The pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender exist. `LaserSceneExecutor` has one injected backend slot; startup selects legacy MIDI, none/dry-run, or verified pack/Enttec from the optional default-off config. Physical MIDI and direct DMX remain mutually exclusive.
 - Pack backend startup, `StateManager` scripted frame driving, commands, copied RW-5 status, and native pack Autoloop scene-edge handoff are implemented in software. Laser policy, MIDI execution, blackout, and configured mappings stay unchanged; the executor now exposes the already-selected Autoloop scene so the pack driver can resolve canonical Autoloop bindings even on no-new-edge ticks when SoundSwitch is absent. Hardware remains unvalidated.
 - Blackout-mask migration Package 1 is implemented/software-tested: smart-side blackout owners and pending drop-window latches survive pack-backend note rejection, and `StateManager` ORs that smart-side state with the existing manual MIDI-input blackout at the single pack-player mask writer. Manual blackouts remain owned by the MIDI-input binding refcount and survive smart-side lifecycle wipes. MIDI-mode accepting-backend note on/off sequences are unchanged. No laser hardware, SoundSwitch, Rekordbox, LED, Govee, MIDI device, DMX, or Enttec validation was performed.
-- Laser color plumbing Package 4 is implemented/software-tested: StateManager samples LED color state into a pure `LaserColorSnapshot` and the pack player can overwrite CH8/CH9 only on healthy native Autoloop frames. The shipped `config/laser_color_map.json` is `enabled: false` with an all-null table, so live output remains authored pass-through and should be byte-identical to pre-package behavior until the operator CH8/CH9 chart lands. Scripted, diagnostic, masked, static-override, and CH11 behavior stay unchanged. Hardware remains unvalidated.
+- Laser color plumbing Package 4 is implemented/software-tested: StateManager samples LED color state into a pure `LaserColorSnapshot` and the pack player can overwrite CH8/CH9 only on healthy native Autoloop frames. The shipped `config/laser_color_map.json` is `enabled: false` with an all-null table, so live output remains authored pass-through and should be byte-identical to pre-package behavior until the operator CH8/CH9 chart lands. Scripted, diagnostic, masked, static-override, and CH11 behavior stay unchanged. Hardware remains unvalidated. A same-pass review landed three riders: `LaserColorSnapshot.ch9` is now `Optional[int]` and `_merge_color_snapshot` writes CH8/CH9 independently (a null channel leaves that channel authored); the map gained `fixed_ch9` (null by default) for the quantized-color path's CH9, eased through the existing settle logic; the white path's CH9 is always `None` (preserves authored speed) instead of a hardcoded 0. All-null config still injects nothing on either channel.
+- Package 4 review Rider B: `LEDDispatchCoordinator` now accepts an explicit `white_templates` override (used ahead of the never-populated `config.laser_color_white_templates` attribute); `__main__.py` loads `config/laser_color_map.json`'s `white_templates` at the coordinator's construction site, so editing that JSON actually changes white-moment detection instead of only feeding the coordinator's own hardcoded defaults.
+- Drop presentation policy Package 3 (AWR-119, 2026-07-04) is implemented/software-tested: the behavior authority is `docs/architecture/drop_presentation_authority.md`. `soundswitch_laser_player.py` gained `LaserPackPlayer.set_base_suppressed(held)` for the `leds_only` presentation — it withholds the automatic base exactly like the existing `missing_selection` path (ZERO base, held static layers still apply, masks/blackout untouched) WITHOUT clearing `_selection`, so the drop resumes rendering the instant suppression lifts. The ladder/session/learned-store/window-machine logic itself lives in the new pure module `drop_presentation.py`, wired from `state_manager.py`: per push tick it feeds beats-to-next-drop, phrase role, the Laser Director's own `drop_crossing` decision as "impact now", and a darkness-guard signal (pack live + last autoloop base diagnostic-free, combined with Package 1's `mask_owners_active()` and the MIDI-input blackout snapshot) into a `WindowMachine` that applies `leds_only` suppression or (for `lasers_only`) an LED blackout held under the Package-2 owner key `"drop_spotlight"`. `enabled: false` in `/drop_presentation` (config) is the master regression gate — every drop renders `leds_plus_lasers` exactly as today, byte-identical. Two known, reported limitations: impact detection is inert if the Laser Director is ever unconfigured (matches the operator's actual setup); the "manual interaction" fail-open trigger is implemented/tested at the window-machine level only, not yet wired to a state_manager detector. Hardware remains unvalidated.
 - Smart Drop exact cue landings are handled in the shared `SmartPhrasingEngine`: the first live tick after a reset fires an exact drop beat once, without rounding near-misses forward.
 
 Authoritative code:
@@ -75,10 +77,11 @@ Runtime flow:
 
 Config:
 - `config/laser_director.example.json`
-- `config/laser_color_map.json` ships disabled/all-null; later CH8/CH9 chart updates are config-only and require operator validation before enabling.
+- `config/laser_color_map.json` ships disabled/all-null (now also carries `fixed_ch9: null`); later CH8/CH9 chart updates are config-only and require operator validation before enabling.
 - local ignored `config/laser_director.json`
 - launcher environment for `RBSS_LASER_CONFIG`
 - personality knobs: `drop_lifecycle_mirror` (default `true`), `max_drops_in_a_row`, `drop_impact_beats`, and operator-reserved future `post_drop_cycle_beats`; laser cycle cadence still comes from autoloop ticks. Deprecated leftover `pre_drop_scene` keys are ignored for load compatibility.
+- `/drop_presentation` top-level block in `config/led_look_director.example.json` (`enabled`, `laser_ratio`, `opening_tracks`, `led_predark_beats`, `drop_window_cap_beats`, `hotcue_marker`, `solo_learn_threshold`, `gearshift_bpm_jump`, `record_min_drops`, `ws_handoff_enabled`); loaded independently of the main LED config's validate/build pipeline via `led_config.load_drop_presentation_config()`, so an unrelated `looks`/`banks` config error never blocks hot-cue tags or the presentation policy.
 
 Laser Pad (operator companion tool):
 - `tools/laser_pad_web.py` (local web service), `tools/laser_config_ops.py` (config read/write
@@ -98,7 +101,9 @@ Tests:
 - otherwise inspect `tests/` and run relevant unittest equivalents
 - lifecycle coverage: `tests/test_drop_lifecycle.py`, `tests/test_laser_director_lifecycle.py`, and `tests/test_laser_executor_lifecycle.py`
 - blackout re-wire coverage: `tests/test_laser_blackout_rewire.py`
-- laser color plumbing coverage: `tests/test_laser_color_engine.py`
+- laser color plumbing coverage: `tests/test_laser_color_engine.py` (includes the per-channel-independent CH9/`fixed_ch9` rider tests)
+- Rider B (white-templates plumb) coverage: `tests/test_led_dispatch_coordinator.py`
+- drop presentation policy coverage: `tests/test_drop_presentation.py` (the authority doc's Required Behavior Tests 1-9 plus runway/determinism/config coverage, all pure/hardware-free), `tests/test_soundswitch_laser_player.py` (base suppression), `tests/test_filepath_resolver_hotcue_tags.py` (hot-cue DB-read wiring and degradation), `tests/test_state_manager_drop_presentation.py` (state_manager wiring integration: plan build, per-tick ladder/window, Solo pad arm/disarm/veto/learn, darkness guard, damper, the `enabled: false` byte-identity regression gate)
 - transitional mapping check: `python3 tools/check_laser_midi_sync.py`
 - Audit P4 coverage: `tests/test_midi_output.py`, `tests/test_laser_executor.py`,
   `tests/test_laser_config.py`, `tests/test_laser_config_deprecation.py`,
@@ -110,6 +115,7 @@ Change contract:
 - If modifying policy, inspect `laser_director.py`, `laser_models.py`, and smart phrasing state usage.
 - If modifying execution, inspect `laser_executor.py`, `midi_output.py`, and blackout behavior.
 - If modifying the shared drop resolver, preserve flat-window parity with the existing StateManager LED resolver without redirecting live LED behavior through it.
+- If modifying drop presentation, inspect `docs/architecture/drop_presentation_authority.md` first (the acceptance oracle), then `drop_presentation.py`, the `state_manager.py` wiring, and `soundswitch_laser_player.py`'s base suppression. Follow the `drop_presentation` change contract in `docs/agents/change_contracts.yml`.
 - Update this card, feature status, validation matrix, and hardware validation log if manual testing occurs.
 
 Known risks:

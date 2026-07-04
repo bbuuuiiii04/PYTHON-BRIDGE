@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: fce1169
+last_verified_commit: 2cbca87
 last_verified_date: 2026-07-04
-validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, pad editor unset-param-defaults, and Stream Deck palette control Package 2 software-tested, hardware-unvalidated
+validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2, and drop presentation policy Package 3 software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem
@@ -42,6 +42,23 @@ Stream Deck palette control (Package 2, 2026-07-04):
   LED mute owner semantics, Rainbow mode, the palette feedback file, and the pinned Stream Deck
   palette/control surface. This is SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED until the
   operator performs a deck-in-hand validation.
+
+Drop presentation policy (Package 3, AWR-119, 2026-07-04):
+- The implemented behavior authority is `docs/architecture/drop_presentation_authority.md`; the
+  `drop_presentation` change contract covers it. The pure ladder/session/learned-store/window-machine
+  logic lives in the new module `drop_presentation.py` (not LED-specific; laser-side base suppression
+  lives in `soundswitch_laser_player.py`). The LED-side seam this card owns: pre-dark and a
+  `lasers_only` solo window hold an LED blackout through the EXISTING owner set in
+  `led_dispatch_policy.py` (`Ev.LED_BLACKOUT`/`Ev.LED_CLEAR_BLACKOUT`, payload `reason` = owner key
+  `"drop_spotlight"`) — a set union, so it never clears a separately-held manual mute owner and is
+  never touched by presentation decisions itself (suppression is not blackout). `led_palette_control.py`
+  gained an optional `get_laser_solo` callback (pulled fresh on every feedback publish, mirroring the
+  existing `get_laser_blackout` pattern) surfacing the Solo pad's `off`/`armed`/`active` state.
+  `soundswitch_midi_input.py` gained the `laser_solo_pad` binding kind (note-on emits
+  `Ev.LASER_SOLO_PAD`, note-off no-ops, same as the other three Stream Deck pad kinds), built from
+  Package 2's already-reserved `laser_solo_note` config key. `enabled: false` in the new
+  `/drop_presentation` config block is the master regression gate: every drop renders
+  `leds_plus_lasers` exactly as today, byte-identical. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
 Authoritative code:
 - `led_config.py`
@@ -110,6 +127,14 @@ Config:
 - LED Pad Locked Palette writes through `color_engine.locked_palette_by_look`; playback of a locked look ignores the session Test Palette. Renderer param unlocks are frame-identical when omitted: `loop_beats` on `rt_groove_chase`/`rt_groove_nebula`; `travel_beats` + `width` on `rt_drop_chase`, `rt_post_drop_chase`, `rt_drop_nebula`, and `rt_post_drop_nebula`; `travel_beats` on `groove_center_chase` and `post_drop_firework_chase`.
 - Template Lab persists draft metadata under gitignored `config/led_lab/drafts.json` and loads gitignored `config/led_lab/effects_lab.py` only inside the pad process. Lab scenes play as `lab_<name>` through `LabRenderer`; bridge runtime modules never import lab code, and production renderer registries are not mutated by lab playback.
 - LED Pad exposes `GET /api/access` (shared with Laser Pad via `tools/pad_access.py`), which reports the pad's current bind address/loopback state and, when non-loopback, a best-effort LAN URL for a QR "Open on another device" affordance. It never changes bind behavior itself; exposing the pad to the LAN stays an explicit `--host` operator action.
+- `/drop_presentation` top-level block (sibling of `color_engine`, `targets`, `banks`) — `enabled`,
+  `laser_ratio`, `opening_tracks`, `led_predark_beats`, `drop_window_cap_beats`, `hotcue_marker`,
+  `solo_learn_threshold`, `gearshift_bpm_jump`, `record_min_drops`, `ws_handoff_enabled` (parsed but
+  the ritual tier stays unimplemented and logs a not-implemented notice if ever enabled). Loaded via
+  `led_config.load_drop_presentation_config()`, independent of the main config's validate/build
+  pipeline so an unrelated `looks`/`banks` error never blocks the presentation policy or hot-cue
+  tags. `color_engine.palette_control.laser_solo_note` (already reserved by Package 2) now builds a
+  real `laser_solo_pad` MIDI binding row.
 
 Tests:
 - inspect `tests/` for LED color engine, Govee realtime runner, frame renderer, state manager LED integration, and config tests
@@ -125,6 +150,14 @@ Tests:
   pinned deck layout composition, MIDI pad event bindings, and runtime command parsing without
   hardware.
 - The shared `tools/pad_access.py` LAN-access payload (used by both pads' `GET /api/access`) is covered by `tests/test_pad_access.py` (pure-function, loopback/specific-IP/`0.0.0.0` detection cases), plus one HTTP smoke test each in `tests/test_led_pad_service.py` and `tests/test_laser_pad_web.py`.
+- Drop presentation policy Package 3 coverage lives in `tests/test_drop_presentation.py` (pure
+  planner/ladder/session/learned-store/window-machine logic; the authority doc's Required Behavior
+  Tests 1-9 verbatim plus additional coverage), `tests/test_state_manager_drop_presentation.py`
+  (state_manager wiring integration: plan build, per-tick ladder/window, LED blackout owner
+  `"drop_spotlight"` engage/release, Solo pad arm/disarm/veto/learn via real event dispatch, darkness
+  guard, damper, the `enabled: false` byte-identity regression gate), `tests/test_led_config.py`
+  (the `/drop_presentation` loader), `tests/test_led_palette_control.py` (the `get_laser_solo`
+  feedback callback), and `tests/test_soundswitch_midi_input.py` (the `laser_solo_pad` binding kind).
 - broad command: `python -m unittest discover tests`
 
 Change contract:
@@ -136,6 +169,7 @@ Change contract:
 - If changing cloud output, inspect scene adapter and runtime sender.
 - If changing the shared drop resolver, prove parity against the existing StateManager LED resolver and do not assume that pure-resolver parity changes live LED output.
 - If changing LED Pad, follow the `led_pad` contract in `docs/agents/change_contracts.yml` and update `docs/guides/led_pad.md`, this card, `docs/architecture/doc_index.md`, and `docs/status/active_work_registry.md`.
+- If changing drop presentation, inspect `docs/architecture/drop_presentation_authority.md` first (the acceptance oracle), then `drop_presentation.py` and its `state_manager.py` wiring. Follow the `drop_presentation` change contract in `docs/agents/change_contracts.yml`; the master regression gate (`enabled: false` byte-identical) must stay green.
 - Update this card, feature matrix, validation matrix, active work registry, and config docs.
 
 M2.5 slot cues in SLOT_EFFECTS (govee_frame_renderer.py):

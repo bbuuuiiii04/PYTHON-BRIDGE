@@ -1,14 +1,14 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 267edd3
+last_verified_commit: 2cbca87
 last_verified_date: 2026-07-04
-validation_scope: behavior contract only; feature not implemented — no software, live, or hardware validation implied
+validation_scope: behavior contract, implemented and software-tested against it; no live or hardware validation implied
 ---
 
 # Drop Presentation Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; NOT YET IMPLEMENTED (design approved by operator 2026-07-04)
+Status: AUTHORITATIVE TARGET BEHAVIOR; IMPLEMENTED / SOFTWARE-TESTED (Package 3 of AWR-119, landed 2026-07-04). SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED — the operator's live pass is the only remaining gate. Implementation: `drop_presentation.py` (planner/ladder/session/learned-store/window machine), base suppression in `soundswitch_laser_player.py`, wiring in `state_manager.py`, hot-cue tag reading in `filepath_resolver.py`, config in `led_config.py` / `config/led_look_director.example.json`. Two known limitations vs. this document, both deliberate and reported: (1) true-drop impact detection reuses the Laser Director's own `drop_crossing` decision rather than a second parallel drop-lifecycle instance, so the policy is inert if the Laser Director is ever unconfigured (matches the operator's actual setup); (2) the "manual interaction" fail-open trigger is implemented and tested at the window-machine level but has no wired state_manager-level detector yet (no sufficiently precise, low-risk signal was identified this pass).
 
 This document defines which fixtures fire on which drops. Behavior that
 differs from this document is a regression unless this document is
