@@ -357,6 +357,7 @@ contracts:
   bridge_menubar:
     code_globs:
       - scripts/bridge_menubar.py
+      - scripts/ss_bridge_watcher.sh
     inspect:
       - docs/subsystems/runtime_commands.md
     tests:

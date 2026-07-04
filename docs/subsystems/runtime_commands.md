@@ -52,12 +52,16 @@ SoundSwitch pack-player boundary (T7c/T7e):
   `set_soundswitch_pack action=enable`, with one bounded retry after a fresh disconnected
   `pack_start_failed`; there is still no implicit hot-enable without a real pack backend + Enttec
   port and no manual pack button.
+- The menubar bridge toggle launches the canonical repo watcher at
+  `scripts/ss_bridge_watcher.sh`. Menubar UI state is only a control surface; it
+  does not prove watcher or bridge process health.
 
 Authoritative code:
 - `runtime_status.py`
 - `validation_runner.py`
 - callback wiring in `__main__.py`
 - menubar caller in `scripts/bridge_menubar.py`
+- watcher launcher in `scripts/ss_bridge_watcher.sh`
 
 Key symbols:
 - `STATUS_PATH`
