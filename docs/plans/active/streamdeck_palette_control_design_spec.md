@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified for Packages 2-3; design-intent for anything still unimplemented
-last_verified_commit: 2cbca87
+last_verified_commit: 963d370
 last_verified_date: 2026-07-04
 validation_scope: Packages 2-3 software-tested; hardware-unvalidated
 ---
