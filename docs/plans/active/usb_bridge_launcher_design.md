@@ -9,7 +9,7 @@ validation_scope: >
   hardware run. Windows is deferred (out of scope). The memory-read authorization *mechanism*
   is the separate reader spec's job; this design only *invokes* that step. Code claims verified
   against HEAD and labelled confirmed/assumed/unknown.
-work_status: planned
+work_status: parked — operator 2026-07-04: the final project, resumes after bridge refinement completes; re-verify all code claims at pickup
 relates_to: cross_platform_portability_plan.md
 ---
 

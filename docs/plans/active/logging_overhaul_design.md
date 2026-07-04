@@ -370,22 +370,50 @@ watcher reopens it (§2.8).
 
 ### 2.8 Files, retention, launch integration
 
-- **Directory** `~/Library/Logs/rb_ss_bridge/` (survives reboots, standard macOS location, easy for
-  agents). One file per bridge run: `bridge-YYYYMMDD-HHMMSS.jsonl`. A `current.jsonl` symlink in
-  the same dir plus a convenience symlink `/tmp/bridge-events.jsonl` (preserves the established
-  /tmp discovery convention). Listener creates all three at init; prunes to the newest **20** runs.
-  [Both defaults for Brandon to veto — §4.]
-- **Watcher integration** (the only shell change; behavior otherwise identical):
+**Operator decisions folded in 2026-07-04:** (1) log location must fit the USB portability
+workstream (AWR-122); (2) one window, not two, in manual mode.
+
+- **Directory — one resolver, USB-aware.** `bridge_log.py` (and the viewer, via the same function)
+  resolves the log dir as: **`$RBSS_RUNTIME_DIR/logs/` when `RBSS_RUNTIME_DIR` is set, else
+  `~/Library/Logs/rb_ss_bridge/`**. `RBSS_RUNTIME_DIR` is not invented here — it is exactly the
+  knob the USB launcher design already names for relocating all fixed-path runtime state
+  (AWR-123 F8, `docs/plans/active/usb_bridge_launcher_design.md:159-162`); this design adopts it
+  for logs from day one, so the bundle's temporary mode ("stick is a key": payload staged to
+  `$TMPDIR/rbss-<version>/`, all run state under that prefix, wiped by End Set) gets correct log
+  placement by setting one env var. On Brandon's Mac (source runs, no env set) logs land in
+  `~/Library/Logs/rb_ss_bridge/` — survives reboots, standard location, easy for agents.
+- **Files:** one per bridge run, `bridge-YYYYMMDD-HHMMSS.jsonl`, plus a `current.jsonl` symlink in
+  the log dir. Retention: newest **20** runs, pruned at listener init. The `/tmp/bridge-events.jsonl`
+  convenience symlink is created **only in the default-dir case** — under `RBSS_RUNTIME_DIR` it
+  would add another fixed /tmp path to the USB End-Set cleanup list, defeating the one-prefix rule.
+- **USB post-mortem story (interface for AWR-122, not implemented here):** a run's diary is one
+  self-contained file; "carry the post-mortem home" = copy the `logs/` dir to the stick, a natural
+  step for AWR-122's explicit End Set action. Without that export, guest-Mac diaries are wiped by
+  End Set — deliberate, that's the no-trace goal. AWR-122 owns that flow decision; this design only
+  guarantees the copy-one-dir interface.
+- **Watcher integration — one window in both modes** (shell-only change, W7):
   - `open_monitor` (`scripts/ss_bridge_watcher.sh:223-232`): the Terminal command swaps
     `tail -n 100 -F /tmp/bridge.log` → `"$PYTHON" "$REPO_ROOT/bridge_view.py"`; the
-    `RBSS_BRIDGE_MONITOR` title marker and `close_monitor` logic stay.
-  - `monitor_open` (`:105-108`): pgrep pattern gains/replaces the tail pattern with `bridge_view.py`.
-  - **Manual mode** (`start_manual_terminal_bridge`, `:154-165`): unchanged bridge terminal (raw
-    stdout + Ctrl-C control + close-to-stop semantics), **plus** the watcher now also opens the
-    monitor/viewer window in manual mode. Two windows total; the viewer window is disposable.
-    [Operator-taste default — §4.]
-  - Viewer crash/close: watcher's existing 3 s loop re-runs `open_monitor` when `monitor_open`
-    fails — same self-healing the tail monitor has today.
+    `RBSS_BRIDGE_MONITOR` title marker and `close_monitor` logic stay. `monitor_open` (`:105-108`)
+    matches `bridge_view.py` instead of the tail pattern.
+  - **Manual mode collapses onto the auto launch path.** `start_manual_terminal_bridge`
+    (`:154-165`) is deleted; manual mode starts the bridge via the same `start_bridge` (background,
+    stdout → `/tmp/bridge.log`) and opens the same single viewer window. This kills a live defect
+    for free: the manual path's hand-copied env list has already drifted from the auto path's
+    (missing six `RBSS_LED_*` flags — found by the AWR-122 review,
+    `usb_bridge_launcher_design.md:58-63`), and it removes the manual-mode `tee` pipeline, which
+    was the one remaining stdout-pipe stall risk on the hot path (§2.10). Manual mode keeps its
+    lifecycle meaning: no crash-restart backoff, watcher exits when the bridge exits.
+  - **Closing the viewer window no longer stops the bridge** (it can't — the viewer is a
+    crash-isolated reader; a display crash must never end the show, and "window closed" is
+    indistinguishable from "viewer crashed" from the watcher's side). Stopping the bridge is the
+    menubar's job, which it already does (`bridge_menubar.py` start/stop). The watcher reopens a
+    missing viewer window within ~3 s, same self-healing as today's tail monitor. [Behavior change
+    from today's manual mode, consequence of the operator's one-window decision — flagged in §4.]
+  - **Bundle mode (AWR-122) integration point:** the bundled launcher opens no Terminal at all and
+    plans "menubar status/log access" instead (`usb_bridge_launcher_design.md:80-81`). The viewer
+    is stdlib-only and reads the log dir via the shared resolver, so a later `--run-viewer`
+    entrypoint / menubar "Open Viewer" item satisfies that — AWR-122's milestone, not this build's.
 - **Other processes:** `streamdeck_midi.py`, the pad web tools, and the menubar keep their own
   stdout logs (`/tmp/streamdeck.log`, plists) — out of scope; the stream is the *bridge process's*
   event log. (Their actions reach the stream anyway at the bridge boundary: `sys.cmd` +
@@ -503,17 +531,18 @@ Part C verbatim; the pure seams in W1/W6 are Part D; the contract's `docs_update
 
 ---
 
-## 4. Spec-readiness verdict: **READY WITH GAPS**
+## 4. Spec-readiness verdict: **READY**
 
-Blocking-adjacent gaps first (both are one-line answers from Brandon; the spec can be drafted with
-these as defaults and corrected in review):
+The two operator gaps from the first draft were answered 2026-07-04 and are folded into §2.8:
 
-1. **[operator default to confirm] Log location + retention** — `~/Library/Logs/rb_ss_bridge/`,
-   20 runs kept, `/tmp/bridge-events.jsonl` convenience symlink (§2.8). If Brandon prefers
-   everything under `/tmp`, only `bridge_log.init()` constants change.
-2. **[operator taste] Manual-mode window count** — bridge terminal + separate viewer window (2
-   windows, §2.8). Alternative (viewer replaces the manual terminal's raw output) changes watcher
-   semantics around close-to-stop and is not recommended.
+1. **Log location (resolved):** USB-aware single resolver — `$RBSS_RUNTIME_DIR/logs/` when set
+   (the AWR-122/AWR-123-F8 knob, adopted here rather than invented), else
+   `~/Library/Logs/rb_ss_bridge/`; 20-run retention; `/tmp` symlink only in the default case.
+2. **Window count (resolved):** one window in both modes; the viewer *is* the monitor window;
+   `start_manual_terminal_bridge` dies; **consequence the operator should be aware of:** closing
+   the viewer window no longer stops the bridge (menubar stop does, as in auto mode today) —
+   accepted as the price of one-window + crash isolation, and it removes the manual-path env drift
+   and the `tee` stall risk.
 
 Non-blocking pins Phase 2 must do (normal spec work, listed so they aren't lost):
 
@@ -523,7 +552,11 @@ Non-blocking pins Phase 2 must do (normal spec work, listed so they aren't lost)
    fields available on `smart_drop_result` (`state_manager.py:3709-3719` region at `02250de`);
    the drop *type* taxonomy (main vs continuation) is future work per operator memory — the record
    carries `type` as free text for now. [unknown: final type vocabulary]
-5. **Explicitly out of scope, named to prevent drift:** no read-back/reconciliation machinery
+5. **Coordination note, not a blocker:** if AWR-122's later milestone renames or reshapes
+   `RBSS_RUNTIME_DIR`, the log-dir resolver is one constant in `bridge_log.py`; the End-Set
+   "copy diaries to stick" export is AWR-122's flow to spec against the copy-one-dir interface
+   (§2.8).
+6. **Explicitly out of scope, named to prevent drift:** no read-back/reconciliation machinery
    (§2.6); no changes to `StatusWriter`/commands/menubar; no session_recorder changes; no
    streamdeck/pad logging changes; `sys.tick` unconditional overrun counter is optional — include
    or drop at spec time, either is fine.

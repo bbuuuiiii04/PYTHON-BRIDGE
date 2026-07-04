@@ -348,6 +348,9 @@ class FeedbackProducerDeckContractTests(unittest.TestCase):
             dropped = set(producer_row) - set(deck_row)
             self.assertFalse(dropped, f"palette fields dropped: {dropped}")
         for key, producer_row in payload["controls"].items():
+            if key == "lock":
+                self.assertNotIn(producer_row["note"], rows_by_note)
+                continue
             deck_row = rows_by_note[producer_row["note"]]
             dropped = set(producer_row) - set(deck_row)
             self.assertFalse(dropped, f"control '{key}' fields dropped: {dropped}")
