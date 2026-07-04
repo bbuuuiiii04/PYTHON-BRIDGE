@@ -298,7 +298,7 @@ class SoundSwitchMidiInputAdapter:
             elif kind in {
                 "palette_pad", "palette_lock_pad", "led_mute_pad", "rainbow_pad", "laser_solo_pad",
             }:
-                self._emit_pad_event(binding)
+                self._emit_pad_event(binding, phase="down")
             # pack_selection / bridge_owned_safety / no_project_target /
             # inactive_report_only — inventoried but do not mutate player state.
             else:
@@ -332,18 +332,23 @@ class SoundSwitchMidiInputAdapter:
                     self._blackout_held = True
                 self._refresh_snapshot_locked()
                 log.debug("[SS-MIDI] blackout released")
+            elif kind == "palette_pad":
+                self._emit_pad_event(binding, phase="up")
             else:
                 log.debug("[SS-MIDI] note-off for non-render kind=%s (no-op)", kind)
 
-    def _emit_pad_event(self, binding: PackMidiBinding) -> None:
+    def _emit_pad_event(self, binding: PackMidiBinding, *, phase: str | None = None) -> None:
         if self._event_sink is None:
             return
         kind = binding.target_kind
         if kind == "palette_pad":
+            payload = {"name": binding.target_name or binding.target_identity or ""}
+            if phase in ("down", "up"):
+                payload["phase"] = phase
             ev = BridgeEvent(
                 kind=Ev.LED_PALETTE_PAD,
                 deck=0,
-                payload={"name": binding.target_name or binding.target_identity or ""},
+                payload=payload,
                 source="midi_input",
             )
         elif kind == "palette_lock_pad":

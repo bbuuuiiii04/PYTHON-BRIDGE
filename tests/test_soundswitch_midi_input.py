@@ -428,7 +428,7 @@ class TestBlackoutMask(unittest.TestCase):
 
 
 class TestPadEvents(unittest.TestCase):
-    def test_new_pad_kinds_emit_bridge_events_and_note_off_noops(self):
+    def test_new_pad_kinds_emit_bridge_events_and_palette_note_off_phase(self):
         seen = []
         palette = PackMidiBinding(
             device_name="Stream Deck", message_type="note",
@@ -467,11 +467,14 @@ class TestPadEvents(unittest.TestCase):
         self.assertEqual(
             [event.kind for event in seen],
             [
-                Ev.LED_PALETTE_PAD, Ev.LED_PALETTE_LOCK_PAD, Ev.LED_MUTE_PAD,
+                Ev.LED_PALETTE_PAD, Ev.LED_PALETTE_PAD,
+                Ev.LED_PALETTE_LOCK_PAD, Ev.LED_MUTE_PAD,
                 Ev.LED_RAINBOW_PAD, Ev.LASER_SOLO_PAD,
             ],
         )
         self.assertEqual(seen[0].payload["name"], "blue_cyan")
+        self.assertEqual(seen[0].payload["phase"], "down")
+        self.assertEqual(seen[1].payload["phase"], "up")
 
 
 # ---------------------------------------------------------------------------

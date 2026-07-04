@@ -268,7 +268,7 @@ class Ev:
     LED_BLACKOUT               = "led_blackout"               # payload={reason?: str}; reason is owner key
     LED_CLEAR_BLACKOUT         = "led_clear_blackout"         # payload={reason?: str}; clear owner key
     LED_CLEAR_SCENE_OVERRIDE   = "led_clear_scene_override"   # clear manual scene only
-    LED_PALETTE_PAD            = "led_palette_pad"            # payload={name: str, intent?: queue|override}
+    LED_PALETTE_PAD            = "led_palette_pad"            # payload={name: str, phase: "down"|"up", intent?: queue|override}
     LED_PALETTE_LOCK_PAD       = "led_palette_lock_pad"       # payload={intent?: lock|unlock}
     LED_MUTE_PAD               = "led_mute_pad"               # toggle LED mute owner
     LED_RAINBOW_PAD            = "led_rainbow_pad"            # toggle Rainbow mode
