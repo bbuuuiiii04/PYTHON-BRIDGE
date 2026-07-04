@@ -112,6 +112,26 @@ explicitly enabled.
     labeling the CH8/CH9 values already present in the pack; a supervised
     live visual pass for the ambiguous multi-color effects (operator: only
     knowable visually). The chart lands as pure config — zero code rework.
+15. **Fixed-color half LANDED 2026-07-04** (operator-supplied camera
+    calibration from the virtuallasernode project, sweep 2026-06-05,
+    white-balanced): CH8 values 4-31 encode the seven fixed colors in
+    4-value bands, calibrated order **W, R, Y, G, C, B, M**
+    (`idx = (CH8-4)//4`). Cross-validation: every fixed-color CH8 value the
+    pack ever authored decodes cleanly (10=red, 17=green, 21=cyan,
+    24/25=blue, 28=magenta); all authored values ≥ 32 are effect-family
+    territory. `config/laser_color_map.json` now carries red=10, green=17,
+    cyan=21, blue=25, purple=28 (pack-proven in-band values), white=6,
+    yellow=14 (mid-band; never pack-authored). **`enabled` remains false**
+    — flipping it on is the operator's call and needs a bridge restart plus
+    a first supervised visual check. Still pending from the operator: the
+    CH8 effect/animation family ranges (≥ 32) and the CH9 speed curve —
+    those gate ONLY the Rainbow laser tier and the settle texture; fixed
+    color injection is complete without them (per-channel merge leaves
+    authored CH9 untouched). Enable-time code note: the config key `purple`
+    maps to the fixture's MAGENTA band (28-31); the quantizer's anchor for
+    that slot (`FIXED_COLOR_RGB` purple (160,0,255)) should become
+    (255,0,255) when enabling, so nearest-color boundaries match the real
+    emitted color — a one-line implementer change bundled with the enable.
 
 ## Required Behavior Tests
 

@@ -287,10 +287,22 @@ class LaserColorMapperTests(unittest.TestCase):
         self.assertEqual(values, sorted(values, reverse=True))
         self.assertEqual(values[-1], 0)
 
-    def test_loader_ships_disabled_all_null_table(self) -> None:
+    def test_loader_ships_disabled_with_calibrated_fixed_band_values(self) -> None:
+        # The shipped chart carries the operator-calibrated FIXED half
+        # (2026-07-04: virtuallasernode camera calibration — CH8 4-31 in
+        # 4-value bands, order W,R,Y,G,C,B,M) but stays DISABLED: flipping
+        # `enabled` is the operator's call. CH9 and the effect families are
+        # still pending operator data and must remain null.
         loaded = load_laser_color_map("config/laser_color_map.json")
         self.assertFalse(loaded.enabled)
-        self.assertTrue(all(value is None for value in (loaded.fixed or {}).values()))
+        fixed = loaded.fixed or {}
+        for name, value in fixed.items():
+            self.assertIsInstance(value, int, name)
+            # Every fixed color must sit inside the calibrated fixed band —
+            # never in the effect-family range (>= 32) or the 0-3 reserve.
+            self.assertTrue(4 <= value <= 31, f"{name}={value}")
+        self.assertEqual(fixed.get("red"), 10)     # pack-proven in-band values
+        self.assertEqual(fixed.get("purple"), 28)  # fixture magenta band
         self.assertIsNone(loaded.fixed_ch9)
         rainbow = (loaded.effects or {}).get("rainbow_family", {})
         self.assertIsNone(rainbow.get("ch8"))

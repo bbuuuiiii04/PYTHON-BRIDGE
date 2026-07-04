@@ -1,13 +1,13 @@
 {
   "enabled": false,
   "fixed": {
-    "red": null,
-    "green": null,
-    "blue": null,
-    "cyan": null,
-    "yellow": null,
-    "purple": null,
-    "white": null
+    "red": 10,
+    "green": 17,
+    "blue": 25,
+    "cyan": 21,
+    "yellow": 14,
+    "purple": 28,
+    "white": 6
   },
   "fixed_ch9": null,
   "effects": {
