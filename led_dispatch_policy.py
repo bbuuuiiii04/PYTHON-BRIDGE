@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 log = logging.getLogger("state_manager")
 
 LED_PHRASE_MONOTONIC_ENV   = "RBSS_LED_PHRASE_MONOTONIC"
-_SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 LED_DEFAULT_DROP_IMPACT_BEATS = 8.0
 LED_DEFAULT_GROOVE_CYCLE_BEATS = 32.0
 LED_DEFAULT_POST_DROP_CYCLE_BEATS = 32.0
@@ -39,8 +38,6 @@ _LED_DROP_IMPACT_PREDECESSORS = frozenset({"up", "low", "buildup", "breakdown"})
 # this allows one extra back-to-back Chorus->Chorus drop before settling into
 # post_drop (i.e. up to two drop hits in a row, then post_drop).
 LED_MAX_DROP_IMPACTS = 2
-_PROFILE_SUMMARY_INTERVAL_S = 10.0
-_PROFILE_WINDOW = 2048
 _LED_ADAPTER_STATUS_SAFE_KEYS = {
     "available",
     "running",
