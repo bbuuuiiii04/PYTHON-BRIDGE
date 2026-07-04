@@ -47,6 +47,14 @@ Surfaces covered per the brief: bundling/runtime → F1, F6, F9, F10; lifecycle 
 F8, F12; foreign-Mac first run → F4, F7, F11; live-show failure modes → F2, F5, F7, and
 the cleared checks (Rekordbox restart, second plug-in).
 
+**Post-delivery status (2026-07-04 evening):** the gesture-v2 session folded F1-F4 plus
+the F5/F7/F8/F9 mechanics into the design spec at `02250de`, after independently
+re-verifying the repo claims (record: `docs/prompts/usb_launcher_design_changes_handoff.md`);
+it also added two new §6 risky bits — the PyInstaller×Python-3.14 build gate and the M1
+memory-read stop-rule — both endorsed by this review. The M1 Codex spec the design points
+at is **not yet authored**. Still open: F6/F10-F12 as Codex-plan content, and the Part 2
+adopt labels (operator decision).
+
 ---
 
 ## Part 1 — Adversarial design review
@@ -113,11 +121,11 @@ resolved inside the Codex plan; **P3** = note/small fix. Labels: `confirmed` /
   one the operator actually uses via the menubar (`RBSS_BRIDGE_MANUAL=1`,
   `scripts/bridge_menubar.py:1123-1129`) — omits those six (`ss_bridge_watcher.sh:161`).
   So the "one launch profile" the design wants doesn't exist even today; there are two.
-  Softener: the divergence is probably behavior-neutral — five of six match code
-  defaults (`led_dispatch_coordinator.py:64,69,72`, `led_look_director.py:57`,
-  `govee_realtime_runner.py:91` — all default-on; `TRANSPORT_COOLDOWN` default-off);
-  `RBSS_LED_PHRASE_MONOTONIC`'s default is `unknown` (env name at
-  `led_dispatch_policy.py:29`; semantics not verified here).
+  Softener: the divergence is behavior-neutral today — all six now verified against
+  code defaults (`led_dispatch_coordinator.py:64,69,72`, `led_look_director.py:57`,
+  `govee_realtime_runner.py:91` default-on; `TRANSPORT_COOLDOWN` default-off;
+  `RBSS_LED_PHRASE_MONOTONIC` default-on, `led_dispatch_policy.py:119-121`, closed
+  post-delivery) — but neutrality-by-matching-defaults is luck, not design.
 - **Why it matters:** the design's §2 parity bar is "identical, not mostly works," and
   its own env inventory fails that bar. If the Codex plan copies the design's list, the
   bundle ships with a profile that never existed.
@@ -234,8 +242,10 @@ resolved inside the Codex plan; **P3** = note/small fix. Labels: `confirmed` /
   missing port degrades gracefully to `port_unavailable`, `midi_output.py:190-191`);
   MTC **in** (`mtc_reader.py:30`, substring `"IAC Driver Bus 1"`); SoundSwitch pack MIDI
   **in** (`soundswitch_midi_input.py:88`, hardcoded literal). Plus the Stream Deck's own
-  virtual **out** named `"Stream Deck"` — which is at `streamdeck/streamdeck_midi.py:530`
-  now, not `:431` as both docs cite (stale line ref; fix when folding). IAC is a shared
+  virtual **out** named `"Stream Deck"` — at `streamdeck/streamdeck_midi.py:654` at
+  current HEAD (was `:530` at review time, `:431` in both docs; gesture-v2 work keeps
+  moving it — cite the `mido.open_output(PORT_NAME, virtual=True)` call by symbol, not
+  line). IAC is a shared
   loopback *bus*; app-created virtual ports are directional endpoints — swapping one for
   the other changes who must point at what, and SoundSwitch's MIDI mappings are host-app
   state the stick cannot carry. External facts, `confirmed` (cited): IAC is **off** on a

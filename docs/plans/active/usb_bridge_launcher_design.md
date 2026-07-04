@@ -22,8 +22,11 @@ watcher-scope, eject-flow, PyInstaller-version findings) AND the parallel Fable 
 (AWR-123, `docs/plans/active/usb_bridge_launcher_fable_review.md`, verdict PASS WITH REQUIRED
 FIXES — its P1 fixes F1-F4 are folded in below; its repo claims were independently re-verified
 at HEAD before adoption; its F5-F12 are Codex-plan content). Next step after this spec is a
-Codex implementation plan: `docs/plans/active/usb_bridge_launcher_m1_codex_spec.md`
-(Milestone 1 only — the risk-killer; Milestones 2-4 get specced after M1's unknowns resolve).
+Milestone-1-only Codex implementation spec — target path
+`docs/plans/active/usb_bridge_launcher_m1_codex_spec.md`, **not yet authored** (the session
+that added this pointer was descoped before writing it; see
+`docs/prompts/usb_launcher_design_changes_handoff.md`). Milestones 2-4 get specced after M1's
+unknowns resolve.
 
 ## 1. Goal
 

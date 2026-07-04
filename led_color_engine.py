@@ -19,6 +19,7 @@ Public API (exactly as M1b integration expects):
         def unlock(self) -> None
         def set_palette(self, name: str) -> None
         def queue_palette(self, name: str) -> None
+        def unqueue_palette(self, name: str) -> None
         def shift(self) -> None
         def snapshot(self) -> dict
 
@@ -780,6 +781,11 @@ class LedColorEngine:
         """Stage a palette to take effect on the next track change."""
         if name in self._config.palettes:
             self._queued_palette = name
+
+    def unqueue_palette(self, name: str) -> None:
+        """Clear a staged palette only when it matches."""
+        if self._queued_palette == name:
+            self._queued_palette = ""
 
     def override_palette(self, name: str, *, start_beat: float, end_beat: float) -> None:
         """Fade to a palette now and hold it for this track."""
