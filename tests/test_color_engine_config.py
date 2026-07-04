@@ -422,6 +422,7 @@ class TestColorEngineValid(unittest.TestCase):
                 ("palette_lock_pad", 57, None, "press"),
                 ("led_mute_pad", 58, None, "press"),
                 ("rainbow_pad", 61, None, "press"),
+                ("laser_solo_pad", 60, None, "press"),
                 ("blackout_mask", 59, None, "toggle"),
             ],
         )

@@ -450,18 +450,26 @@ class TestPadEvents(unittest.TestCase):
             channel_zero_based=2, data_byte=61,
             target_kind="rainbow_pad",
         )
+        laser_solo = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=60,
+            target_kind="laser_solo_pad",
+        )
         a = SoundSwitchMidiInputAdapter(
-            [palette, lock, mute, rainbow],
+            [palette, lock, mute, rainbow, laser_solo],
             event_sink=seen.append,
         )
 
-        for binding in (palette, lock, mute, rainbow):
+        for binding in (palette, lock, mute, rainbow, laser_solo):
             _note_on(a, binding)
             _note_off(a, binding)
 
         self.assertEqual(
             [event.kind for event in seen],
-            [Ev.LED_PALETTE_PAD, Ev.LED_PALETTE_LOCK_PAD, Ev.LED_MUTE_PAD, Ev.LED_RAINBOW_PAD],
+            [
+                Ev.LED_PALETTE_PAD, Ev.LED_PALETTE_LOCK_PAD, Ev.LED_MUTE_PAD,
+                Ev.LED_RAINBOW_PAD, Ev.LASER_SOLO_PAD,
+            ],
         )
         self.assertEqual(seen[0].payload["name"], "blue_cyan")
 
@@ -776,6 +784,28 @@ class TestInputGroupAutoDetection(unittest.TestCase):
             (_SLOT8,),
             {},
             extra_bindings=(palette,),
+            adapter_factory=factory,
+        )
+        group.start()
+
+        self.assertEqual(group.worker_count, 2)
+        self.assertIn(("start", "Stream Deck", "Stream Deck", ("Stream Deck",)), events)
+
+    def test_laser_solo_pad_only_binding_still_opens_its_own_adapter(self):
+        events = []
+        laser_solo = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=60,
+            target_kind="laser_solo_pad",
+        )
+
+        def factory(bindings, *, stale_timeout_ms):
+            return self.Adapter(bindings, stale_timeout_ms=stale_timeout_ms, events=events)
+
+        group = SoundSwitchMidiInputGroup(
+            (_SLOT8,),
+            {},
+            extra_bindings=(laser_solo,),
             adapter_factory=factory,
         )
         group.start()

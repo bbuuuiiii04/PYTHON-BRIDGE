@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.govee_frame_renderer import REALTIME_EFFECT_NAMES  # noqa: E402
 from rb_ss_bridge_v2.govee_frame_renderer import REALTIME_STROBE_EFFECTS  # noqa: E402
 from rb_ss_bridge_v2.led_config import (  # noqa: E402
+    load_drop_presentation_config,
     load_led_look_director_config,
     load_led_look_director_config_from_dict,
 )
@@ -123,6 +124,50 @@ class MissingInvalidConfigTests(unittest.TestCase):
         result = load_led_look_director_config(path)
         self.assertFalse(result.available)
         self.assertEqual(result.reason, "invalid_config")
+
+
+class DropPresentationConfigLoaderTests(unittest.TestCase):
+    """led_config.load_drop_presentation_config: same path/env resolution as
+    load_led_look_director_config, but fully independent of its validate/build
+    pipeline -- an unrelated looks/banks error there must never block this."""
+
+    def test_missing_file_degrades_to_defaults(self) -> None:
+        cfg = load_drop_presentation_config("/definitely/not/found/led_look_director.json")
+        self.assertTrue(cfg.enabled)
+        self.assertEqual(cfg.hotcue_marker, "LASER")
+
+    def test_invalid_json_degrades_to_defaults_rather_than_raising(self) -> None:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+            fh.write("{not valid json")
+            path = fh.name
+        cfg = load_drop_presentation_config(path)
+        self.assertTrue(cfg.enabled)
+
+    def test_reads_the_block_independent_of_an_unrelated_validation_error(self) -> None:
+        # A config missing required top-level keys (targets/looks/etc.) fails
+        # load_led_look_director_config's validation entirely -- but the
+        # drop_presentation block must still be readable from the same file.
+        data = {"drop_presentation": {"enabled": False, "hotcue_marker": "LZR"}}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+            json.dump(data, fh)
+            path = fh.name
+        broken = load_led_look_director_config(path)
+        self.assertFalse(broken.available)
+        cfg = load_drop_presentation_config(path)
+        self.assertFalse(cfg.enabled)
+        self.assertEqual(cfg.hotcue_marker, "LZR")
+
+    def test_example_file_carries_the_documented_defaults(self) -> None:
+        cfg = load_drop_presentation_config(str(_EXAMPLE_PATH))
+        self.assertTrue(cfg.enabled)
+        self.assertEqual(cfg.laser_ratio, 0.4)
+        self.assertEqual(cfg.opening_tracks, 3)
+        self.assertEqual(cfg.led_predark_beats, 4)
+        self.assertEqual(cfg.drop_window_cap_beats, 32)
+        self.assertEqual(cfg.hotcue_marker, "LASER")
+        self.assertEqual(cfg.gearshift_bpm_jump, 10)
+        self.assertEqual(cfg.record_min_drops, 5)
+        self.assertFalse(cfg.ws_handoff_enabled)
 
 
 class ExampleConfigTests(unittest.TestCase):

@@ -295,7 +295,9 @@ class SoundSwitchMidiInputAdapter:
                 self._blackout_bindings.add(key)
                 self._refresh_snapshot_locked()
                 log.debug("[SS-MIDI] blackout held")
-            elif kind in {"palette_pad", "palette_lock_pad", "led_mute_pad", "rainbow_pad"}:
+            elif kind in {
+                "palette_pad", "palette_lock_pad", "led_mute_pad", "rainbow_pad", "laser_solo_pad",
+            }:
                 self._emit_pad_event(binding)
             # pack_selection / bridge_owned_safety / no_project_target /
             # inactive_report_only — inventoried but do not mutate player state.
@@ -350,6 +352,8 @@ class SoundSwitchMidiInputAdapter:
             ev = BridgeEvent(kind=Ev.LED_MUTE_PAD, deck=0, source="midi_input")
         elif kind == "rainbow_pad":
             ev = BridgeEvent(kind=Ev.LED_RAINBOW_PAD, deck=0, source="midi_input")
+        elif kind == "laser_solo_pad":
+            ev = BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="midi_input")
         else:
             return
         self._event_sink(ev)
@@ -585,6 +589,7 @@ class SoundSwitchMidiInputGroup:
                 "palette_lock_pad",
                 "led_mute_pad",
                 "rainbow_pad",
+                "laser_solo_pad",
             } or (binding.target_kind == "blackout_mask" and binding.interaction == "toggle")
         }
         if len(set(aliases.values())) != len(aliases):

@@ -1362,6 +1362,7 @@ def _build_palette_control_bindings(raw: dict[str, Any]) -> tuple[PackMidiBindin
         ("lock_note", "palette_lock_pad"),
         ("led_mute_note", "led_mute_pad"),
         ("rainbow_note", "rainbow_pad"),
+        ("laser_solo_note", "laser_solo_pad"),
     )
     for key, kind in fixed:
         bindings.append(PackMidiBinding(
