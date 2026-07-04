@@ -383,6 +383,27 @@ class TestStaticOverride(unittest.TestCase):
         _note_off(a, _SLOT17)
         self.assertEqual(_slots(a), (8,))
 
+    def test_toggle_layer_carries_binding_identity(self):
+        a = _adapter(_TOGGLE8)
+        _note_on(a, _TOGGLE8)
+        layer = a.snapshot().held_layers[0]
+        self.assertEqual(layer.channel, _TOGGLE8.channel_zero_based)
+        self.assertEqual(layer.note, _TOGGLE8.data_byte)
+
+    def test_press_layer_carries_binding_identity(self):
+        a = _adapter(_SLOT8)
+        _note_on(a, _SLOT8)
+        layer = a.snapshot().held_layers[0]
+        self.assertEqual(layer.channel, _SLOT8.channel_zero_based)
+        self.assertEqual(layer.note, _SLOT8.data_byte)
+
+    def test_note_off_pops_press_layer_regardless_of_identity_fields(self):
+        a = _adapter(_SLOT8)
+        _note_on(a, _SLOT8)
+        self.assertEqual(len(a.snapshot().held_layers), 1)
+        _note_off(a, _SLOT8)
+        self.assertEqual(a.snapshot().held_layers, ())
+
 
 # ---------------------------------------------------------------------------
 # Blackout mask

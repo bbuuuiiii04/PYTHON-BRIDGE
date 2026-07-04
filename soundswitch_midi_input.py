@@ -50,6 +50,8 @@ class LayerEntry:
     slot: int
     kind: Literal["toggle", "press"]
     seq: int
+    channel: int = -1   # zero-based MIDI channel of the binding that holds this layer
+    note: int = -1      # data byte (note) of that binding
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,11 +275,17 @@ class SoundSwitchMidiInputAdapter:
                     if len(self._layers) != prior_len:
                         log.debug("[SS-MIDI] static slot toggled off: slot=%s", slot)
                     else:
-                        self._layers.append(LayerEntry(slot, "toggle", _next_layer_seq()))
+                        self._layers.append(LayerEntry(
+                            slot, "toggle", _next_layer_seq(),
+                            channel=binding.channel_zero_based, note=binding.data_byte,
+                        ))
                         log.debug("[SS-MIDI] static slot toggled on: slot=%s", slot)
                     self._refresh_snapshot_locked()
                     return
-                self._layers.append(LayerEntry(slot, "press", _next_layer_seq()))
+                self._layers.append(LayerEntry(
+                    slot, "press", _next_layer_seq(),
+                    channel=binding.channel_zero_based, note=binding.data_byte,
+                ))
                 self._refresh_snapshot_locked()
                 log.debug("[SS-MIDI] static slot selected: slot=%s", slot)
             elif kind == "blackout_mask":
