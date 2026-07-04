@@ -84,7 +84,7 @@ class LedPaletteControlTests(unittest.TestCase):
             source="test",
         ))
 
-    def test_queue_same_pad_overrides_consumes_queue_and_fades(self) -> None:
+    def test_tap_same_pad_unqueues_without_fade(self) -> None:
         self._pad("violet")
         self.assertEqual(self.engine.snapshot()["queued_palette"], "violet")
 
@@ -92,8 +92,8 @@ class LedPaletteControlTests(unittest.TestCase):
         snap = self.engine.snapshot()
 
         self.assertEqual(snap["queued_palette"], "")
-        self.assertTrue(snap["fading"])
-        self.assertEqual(snap["fade_target"], "violet")
+        self.assertFalse(snap["fading"])
+        self.assertEqual(snap["fade_target"], "")
 
     def test_queue_applies_under_lock_and_lock_transfers(self) -> None:
         self.control.handle_event(BridgeEvent(
@@ -219,15 +219,15 @@ class LedPaletteControlTests(unittest.TestCase):
             control_notes={},
         )
         self.addCleanup(control.stop)
-        for _ in range(2):  # tap to queue, tap again to override (v1 gesture)
-            control.handle_event(BridgeEvent(
-                kind=Ev.LED_PALETTE_PAD, deck=0,
-                payload={"name": "blue_cyan"}, source="test",
-            ))
+        control.handle_event(BridgeEvent(
+            kind=Ev.LED_PALETTE_PAD, deck=0,
+            payload={"name": "blue_cyan", "intent": "override"}, source="test",
+        ))
         snap = control._engine.snapshot()
         self.assertEqual(snap["current_palette"], "blue_cyan")
         self.assertFalse(snap["fading"])
         self.assertEqual(snap["queued_palette"], "")
+        self.assertFalse(snap["lock"])
 
     def test_palette_payload_never_invents_notes_for_unconfigured_palettes(self) -> None:
         control = LedPaletteControl(

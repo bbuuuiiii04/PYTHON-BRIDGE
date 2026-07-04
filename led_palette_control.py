@@ -101,6 +101,7 @@ class LedPaletteControl:
         palette_notes: Mapping[str, int] | None = None,
         control_notes: Mapping[str, int] | None = None,
         feedback_path: str = PALETTE_STATE_PATH,
+        long_press_s: float = 0.5,
     ) -> None:
         self._engine = engine
         self._led_event_sink = led_event_sink
@@ -114,6 +115,8 @@ class LedPaletteControl:
         self._get_laser_solo = get_laser_solo
         self._palette_notes = dict(palette_notes or {})
         self._control_notes = dict(control_notes or {})
+        self._long_press_s = float(long_press_s)
+        self._pad_down: dict[str, float] = {}
         self._led_muted = False
         self._rainbow = False
         self._seq = 0
@@ -129,7 +132,13 @@ class LedPaletteControl:
 
     def handle_event(self, ev: BridgeEvent) -> None:
         if ev.kind == Ev.LED_PALETTE_PAD:
-            self._handle_palette(str(ev.payload.get("name") or ""), str(ev.payload.get("intent") or ""))
+            raw_intent = ev.payload.get("intent")
+            raw_phase = ev.payload.get("phase")
+            self._handle_palette(
+                str(ev.payload.get("name") or ""),
+                raw_intent if isinstance(raw_intent, str) else "",
+                raw_phase if raw_phase in ("down", "up") else None,
+            )
         elif ev.kind == Ev.LED_PALETTE_LOCK_PAD:
             self._handle_lock(str(ev.payload.get("intent") or ""))
         elif ev.kind == Ev.LED_MUTE_PAD:
@@ -168,6 +177,8 @@ class LedPaletteControl:
     def _publish_feedback(self, *, force: bool) -> None:
         body = {
             "schema": 1,
+            "gesture": 2,
+            "long_press_s": self._long_press_s,
             **self.snapshot(),
             "palettes": self._palette_payload(),
             "controls": self._control_payload(),
@@ -179,30 +190,70 @@ class LedPaletteControl:
         payload = {**body, "seq": self._seq}
         self._writer.submit(payload)
 
-    def _handle_palette(self, name: str, intent: str) -> None:
+    def _handle_palette(self, name: str, intent: str, phase: str | None = None) -> None:
+        if intent:
+            self._handle_palette_intent(name, intent)
+            return
+        if phase in ("down", "up"):
+            if not name or self._rainbow:
+                return
+            if phase == "down":
+                self._pad_down[name] = time.monotonic()
+                return
+            # Accepted edges: Rainbow can eat a release, full Rainbow blips can
+            # still count as holds, and a track boundary may consume a tap's
+            # queue before release; all are bounded/operator-visible.
+            now = time.monotonic()
+            held_s = now - self._pad_down.pop(name, now)
+            if held_s >= self._long_press_s:
+                self._handle_palette_hold(name)
+            else:
+                self._handle_palette_tap(name)
+            return
+        self._handle_palette_tap(name)
+
+    def _handle_palette_intent(self, name: str, intent: str) -> None:
         if not name or (self._rainbow and name != "rainbow"):
             return
         if intent == "queue":
             self._engine.queue_palette(name)
             return
         if intent == "override" or self._engine.snapshot().get("queued_palette") == name:
-            start = self._get_abs_beat()
-            if start is None:
-                # No beat authority (idle / nothing playing): there is no beat
-                # to sync a fade to, and advance_fade only ticks while a deck
-                # plays — a fade armed here would freeze at 0% until playback.
-                # Manual input wins NOW: apply instantly (set_palette clears
-                # the queue, kills any fade, and holds the track).
-                self._engine.set_palette(name)
-                return
-            start_beat = float(start)
-            anchor = self._get_phrase_anchor(start_beat)
-            end_beat = min(anchor, start_beat + 32.0) if anchor is not None else start_beat + 32.0
-            if end_beat <= start_beat:
-                end_beat = start_beat + 32.0
-            self._engine.override_palette(name, start_beat=start_beat, end_beat=end_beat)
+            self._override_palette_now(name)
             return
         self._engine.queue_palette(name)
+
+    def _handle_palette_tap(self, name: str) -> None:
+        if not name or self._rainbow:
+            return
+        snap = self._engine.snapshot()
+        if snap.get("lock") and snap.get("current_palette") == name:
+            self._engine.unlock()
+        elif snap.get("queued_palette") == name:
+            self._engine.unqueue_palette(name)
+        else:
+            self._engine.queue_palette(name)
+
+    def _handle_palette_hold(self, name: str) -> None:
+        snap = self._engine.snapshot()
+        if snap.get("lock") and snap.get("current_palette") == name:
+            return
+        self._override_palette_now(name)
+        self._engine.lock()
+
+    def _override_palette_now(self, name: str) -> None:
+        start = self._get_abs_beat()
+        if start is None:
+            # No beat authority (idle / nothing playing): there is no beat to
+            # sync a fade to, and advance_fade only ticks while a deck plays.
+            self._engine.set_palette(name)
+            return
+        start_beat = float(start)
+        anchor = self._get_phrase_anchor(start_beat)
+        end_beat = min(anchor, start_beat + 32.0) if anchor is not None else start_beat + 32.0
+        if end_beat <= start_beat:
+            end_beat = start_beat + 32.0
+        self._engine.override_palette(name, start_beat=start_beat, end_beat=end_beat)
 
     def _handle_lock(self, intent: str) -> None:
         if self._rainbow:
