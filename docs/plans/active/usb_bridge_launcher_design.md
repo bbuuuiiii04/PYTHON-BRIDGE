@@ -16,11 +16,14 @@ relates_to: cross_platform_portability_plan.md
 # USB Bridge Launcher — design spec (macOS-only)
 
 Approved design (2026-07-04). This is the Mac-only "USB-ify" concretization of the portability
-work; the Windows/cross-platform half is deferred. Reviewed + revised 2026-07-04 (adversarial
-review at `8abccdf`; env-list, process-discoverability, watcher-scope, eject-flow, and
-PyInstaller-version findings folded in). Next step after this spec is a Codex implementation
-plan: `docs/plans/active/usb_bridge_launcher_m1_codex_spec.md` (Milestone 1 only — the
-risk-killer; Milestones 2-4 get specced after M1's unknowns resolve).
+work; the Windows/cross-platform half is deferred. Reviewed + revised 2026-07-04, twice and
+independently: this session's adversarial review at `8abccdf` (env-list, process-discoverability,
+watcher-scope, eject-flow, PyInstaller-version findings) AND the parallel Fable design review
+(AWR-123, `docs/plans/active/usb_bridge_launcher_fable_review.md`, verdict PASS WITH REQUIRED
+FIXES — its P1 fixes F1-F4 are folded in below; its repo claims were independently re-verified
+at HEAD before adoption; its F5-F12 are Codex-plan content). Next step after this spec is a
+Codex implementation plan: `docs/plans/active/usb_bridge_launcher_m1_codex_spec.md`
+(Milestone 1 only — the risk-killer; Milestones 2-4 get specced after M1's unknowns resolve).
 
 ## 1. Goal
 
@@ -86,9 +89,18 @@ Brandon's Mac against a recorded/known session before any foreign-Mac use.
 
 ## 3. Components (four isolated units)
 
-**3.1 The bundle** — PyInstaller `--onedir --windowed` `.app` on the stick, carrying its own Python +
-all deps + the whole `rb_ss_bridge_v2` package. Ad-hoc signed (free; satisfies Apple-silicon's
+**3.1 The bundle** — PyInstaller `--onedir --windowed` `.app`, carrying its own Python + all deps +
+the whole `rb_ss_bridge_v2` package. Ad-hoc signed (free; satisfies Apple-silicon's
 must-be-signed-to-run rule). Purpose: package. Depends on: the repo + PyInstaller.
+> **Stick layout (AWR-123 F1, adopted):** the `.app` is NEVER raw on the stick — the parent plan
+> fixes the stick as exFAT, and PyInstaller 6 onedir bundles are symlink-load-bearing (exFAT has no
+> symlinks; a flattened copy breaks the signature seal → "damaged" dialog on the friend's Mac). Ship
+> **`RBSS Bridge.dmg` on the exFAT stick** (built with `hdiutil`, never Finder-zip); the DMG mounts
+> as a real symlink-capable volume. Keeps the stick Windows-readable for the parent plan.
+> **Build decisions (AWR-123 F9, adopted):** arm64-only (three deps ship no universal2 wheels;
+> runbook says "Apple silicon only"); minimum-macOS chosen and documented at build time; build
+> interpreter = a python.org arm64 Python the suite passes on (Homebrew Python inherits high
+> deployment targets; PyInstaller-vs-3.14 support is a Milestone-1 gate, §6).
 
 **3.2 Bridge runner (`--run-bridge`)** — the main rework. `confirmed`: today the menubar shells to
 `ss_bridge_watcher.sh` → host Homebrew Python → `python3 -m rb_ss_bridge_v2` **from the repo's parent
@@ -98,20 +110,25 @@ entrypoint runs the bridge in-bundle with the §2(a) launch profile. The bash wa
 (wait for Rekordbox + SoundSwitch present, adopt/restart exactly one process, backoff — plus the §2(b)
 watcher-scope items) ports into the app. Purpose: run exactly one bridge. `ss_bridge_watcher.sh` stays
 untouched for the current dev workflow.
-> **One-process invariant under a bundle (found in review — this is the invariant-killer):**
-> `confirmed`: both the operator check (`pgrep -f rb_ss_bridge_v2`) and the watcher's own
-> `bridge_pids()` regex (`ss_bridge_watcher.sh:97-99`) match the SOURCE-RUN command line
-> (`python3 -m rb_ss_bridge_v2`). A PyInstaller binary has a different argv — invisible to both. Two
-> failure modes: the operator's check reports 0 while a bundled bridge runs; and on Brandon's own Mac
-> the watcher and the launcher cannot see each other's bridge → **two bridges**. Requirements:
-> 1. **Discoverability:** name the bundled bridge executable so its process command line contains
->    `rb_ss_bridge_v2` (e.g. the `--run-bridge` child runs as `rb_ss_bridge_v2 --run-bridge`) — then
->    the operator's one check counts BOTH forms.
-> 2. **Mutual exclusion, launcher-side:** before starting a bridge, the launcher must count existing
->    bridge processes of EITHER form (source-run pattern + its own) and refuse/adopt rather than
->    double-start; plus a single-instance guard for the launcher itself (precedent:
->    `streamdeck_midi.py::_acquire_singleton_lock`). The watcher stays untouched, so the launcher owns
->    this entirely.
+> **One-process invariant under a bundle (both reviews converged here; flock fact re-verified):**
+> `confirmed`: the INVARIANT itself is already safe — the bridge takes an exclusive flock on
+> `/tmp/rb_ss_bridge_v2.lock` and a second bridge of ANY form refuses to start
+> (`__main__.py:772-785`, refusal in `main()` at `:1082-1084`). Command-line-agnostic: it holds
+> across any mix of source-run and bundled bridges. What BREAKS under a bundle is observability and
+> control: the operator check (`pgrep -f rb_ss_bridge_v2`), the watcher's `bridge_pids()` regex
+> (`ss_bridge_watcher.sh:97-99`), and the menubar's own patterns/start/stop
+> (`bridge_menubar.py:35-36` + `pkill -f`) all match the SOURCE-RUN command line only — a frozen
+> binary is invisible to every one of them (menubar shows "off" while the bundled bridge runs; the
+> stop button can't stop it). Requirements:
+> 1. **Discoverability:** name the bundled binary so its argv contains `rb_ss_bridge_v2` — the
+>    operator's one check then counts both forms.
+> 2. **Bundle-mode control is owned-child-pid based** (the menubar spawned `--run-bridge`; it holds
+>    the handle) + the flock + status.json liveness — no pattern matching when frozen. Menubar
+>    self-dedupe when frozen = `NSRunningApplication` by bundle id.
+> 3. **Coexistence note for Brandon's own Mac:** with the dev watcher running, a bundled launch is
+>    refused by the flock (correct) but the watcher will log adopt/start churn — quit the dev
+>    watcher/menubar first, or expect noise. The launcher must SURFACE a lock refusal ("bridge
+>    already running") instead of dying silently.
 
 **3.3 Setup controller** — first-run detection (is there a permanent install / LaunchAgent on this
 Mac?) and the two install modes (§4). Purpose: manage where the app lives + its lifecycle. Depends on:
@@ -123,19 +140,25 @@ Uninstall) above the current status display. Purpose: surface Setup + status.
 
 ## 4. The two modes
 
-**Temporary** — run the bridge off the stick. All logs/cache/config/`govee.env` go to **one scratch
-folder** (e.g. `$TMPDIR/rbss-<run-id>/`, under a stable `rbss-` prefix so a later run can sweep
-leftovers). Cleanup flow, revised in review:
-- **Primary: quit-from-menubar.** Quit stops the bridge, wipes the scratch folder, exits — THEN the
-  operator ejects. This is the documented flow because `confirmed` macOS behavior blocks unmounting a
-  volume whose binaries are running: while the app runs from the stick, a polite eject FAILS busy.
-- **Secondary: `NSWorkspaceWillUnmountNotification`** (not `Did` — by `Did` the app's own volume is
-  gone). On will-unmount of the stick's volume: stop bridge, wipe scratch, exit fast so the unmount
-  can proceed. `assumed` workable — Milestone 2 must verify the app can win that race in practice.
-- **Force-eject / yanked stick:** the app dies mid-flight; scratch survives until the NEXT temporary
-  run sweeps stale `rbss-*` folders (or the host's own `$TMPDIR` cleanup does). Accepted residual.
-Residual trace, per operator decision: the OS memory-permission grant (admin, sticky), possibly a TCC
-entry, and — after a force-eject only — a scratch folder that the next run or the OS sweeps.
+**Temporary** — **"the stick is a key, not a dependency" (AWR-123 F2, adopted — supersedes the
+original run-from-stick model).** Running the show off a pullable device converts a mid-set stick
+yank into a guaranteed outage, and macOS blocks polite ejects of a volume with running binaries
+anyway. Instead: first run **stages the payload to internal scratch**
+(`$TMPDIR/rbss-<version>/`, version-keyed so later runs skip the copy) and runs from the internal
+disk; from that moment the stick can be pulled at any time and nothing dies. All
+logs/cache/config/`govee.env` for the run live under the same stable `rbss-` prefix.
+- **Ending a set is an explicit menubar action ("End Set" / Quit):** stop bridge → wipe scratch →
+  "safe to pull the stick." Stick unmount is only a SIGNAL to offer cleanup, never a load-bearing
+  lifecycle event.
+- **Yank / force-eject mid-set:** non-event by construction (bridge runs from internal disk). A
+  scratch left behind by a crash is swept by the next run's stale-`rbss-*` sweep or the OS's own
+  `$TMPDIR` cleanup.
+- **Fixed `/tmp` state (AWR-123 F8):** the runtime also writes fixed `/tmp` paths outside any
+  scratch dir (status/commands IPC `runtime_status.py:16-17`, the instance lock, Govee caches,
+  palette state, logs). Cleanup must delete an enumerated fixed-path list, or a later milestone
+  threads one `RBSS_RUNTIME_DIR` knob through the launch profile (the Windows-shaped fix).
+Residual trace, restated honestly: the OS memory-permission grant (admin, sticky) and TCC entries
+persist (accepted); all bridge FILES are removed by End Set (or the next run's sweep after a crash).
 
 **Permanent** — copy the `.app` off the stick to `~/Applications`; install
 `~/Library/LaunchAgents/<id>.plist` with `StartOnMount` so future USB insertions auto-spawn the menubar
@@ -152,6 +175,21 @@ in the installed location, not the stick.
 - **MIDI port creation.** `confirmed`: laser/legacy MIDI opens a port **by name** — `MidiOutput(port_name=cfg.midi_output_port…)` (`__main__.py:417,429`), default IAC Bus 1; MTC fallback also reads RB over IAC Bus 1 (`__main__.py:1737`). A fresh Mac has no IAC bus enabled. **Fix:** on a machine without the named port, create a **virtual** port instead (Stream Deck already does exactly this — `mido.open_output(PORT_NAME, virtual=True)`, `streamdeck/streamdeck_midi.py:654` at `8abccdf`), or have Setup enable/create the IAC bus. Decide at implementation; the virtual-port path is the lazier and host-agnostic one.
 - **SoundSwitch host-side.** The rig is a given, but note once: SoundSwitch itself must be installed on the host and its MIDI input pointed at the bridge's port, and its project/packs present. If the MTC fallback matters on that host, Rekordbox's MIDI/MTC output over the bridge-visible port is a runbook item too. Out of scope to automate; name both in the operator runbook.
 - **Config/secrets resolution** — §2(c).
+- **Permission cascade (AWR-123 F4, adopted):** the foreign-Mac first run hits more than the memory
+  grant — **Local Network** (Sequoia+: silent denial kills zeroconf/Govee-LAN; requires
+  `NSLocalNetworkUsageDescription` in Info.plist or the app is never even prompted), **Input
+  Monitoring** for Stream Deck HID (sometimes no automatic prompt at all), the macOS 13+
+  "Background Items Added" notification for the permanent-mode LaunchAgent, and ad-hoc signing
+  re-triggering the whole cascade on every rebuild (TCC keys grants to the per-build cdhash).
+  Setup needs a permission inventory + plain-language concierge screens; a timeboxed Milestone-1
+  experiment: sign with a free personal-team Apple Development cert for a stable TCC identity.
+  Detail + sources: AWR-123 review F4.
+- **MIDI port map (AWR-123 F7):** three IAC-coupled endpoints in two directions (laser/look-select
+  OUT via laser config name; MTC IN `mtc_reader.py:30`; SoundSwitch pack MIDI IN hardcoded
+  `soundswitch_midi_input.py:88`) — the Codex plan carries a port-map table (endpoint, direction,
+  name source, consumer, foreign-Mac strategy). Default strategy: bridge-created virtual ports
+  (Stream Deck precedent); "enable IAC in Audio MIDI Setup" is runbook fallback only, never a code
+  path (it would fork the launch path Mac-only — portability ruling).
 - **Memory grant** — reader-spec dependency; Setup invokes it. `unknown` until that spec lands whether the grant works cleanly on a foreign Mac (the top open risk, carried from `cross_platform_portability_plan.md` §7).
 
 ## 6. Risky bits (Milestone 1 must prove)
@@ -178,10 +216,10 @@ in the installed location, not the stick.
    packages and runs with no host Python, PyObjC menubar works bundled, `--run-bridge` launches the
    full bridge, one-process invariant holds. **Verify:** subsystem-parity check (§2) vs a watcher run.
    Kills the biggest unknown for $0.
-2. **Temporary mode** — run-from-stick + scratch folder + the §4 cleanup flow (quit-first primary,
-   will-unmount secondary). **Verify:** after menubar-quit + eject, the scratch folder is gone, bridge
-   stopped, one-process count 0 (counting BOTH process forms per §3.2); after a will-unmount eject,
-   same; after a simulated force-eject, the next run sweeps the stale scratch.
+2. **Temporary mode** — stage-to-scratch launch + the §4 "stick is a key" model + End Set cleanup.
+   **Verify:** stick pulled mid-run → bridge keeps running (a literal yank test); End Set → scratch
+   + enumerated `/tmp` files gone, bridge stopped, one-process count 0 (counting BOTH process forms
+   per §3.2); a crashed run's scratch is swept by the next run.
 3. **Permanent mode** — copy-to-host + `StartOnMount` auto-spawn + Uninstall. **Verify:** replug
    auto-spawns exactly one menubar; Uninstall leaves nothing but the memory grant.
 4. **Foreign-Mac dry run** — take the stick to another Mac, do the one memory grant, temporary-run the
