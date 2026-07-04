@@ -1127,9 +1127,18 @@ def main() -> None:
         )
         else {}
     )
+    def _pad_event_sink(ev: BridgeEvent) -> None:
+        # LoggingEventQueue exposes put_nowait (not put); queue-full drops the
+        # pad event with a log line so the MIDI input worker can never die on
+        # a burst.
+        try:
+            event_queue.put_nowait(ev)
+        except queue.Full:
+            log.warning("[MAIN] queue-full  event=%s", ev.kind)
+
     soundswitch_pack_bundle = _build_soundswitch_pack_startup(
         soundswitch_pack_cfg_result,
-        event_sink=event_queue.put,
+        event_sink=_pad_event_sink,
         extra_midi_bindings=palette_control_bindings,
     )
     pack_output_owners["sender"] = soundswitch_pack_bundle.frame_sender
