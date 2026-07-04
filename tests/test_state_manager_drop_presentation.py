@@ -114,6 +114,55 @@ class ScriptedExemptionIntegrationTests(unittest.TestCase):
         self.assertFalse(sm._drop_presentation_base_suppressed_held)
 
 
+class DamperAudibleLatchIntegrationTests(unittest.TestCase):
+    """Task 4 item 3: the >=16-beat audible latch lives inside
+    _drop_presentation_tick itself (distinct from SessionState.mark_track_counted's
+    own idempotency, which tests/test_drop_presentation.py already covers)."""
+
+    def test_track_counts_only_after_16_beats_of_actual_playback(self) -> None:
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d = _deck_state(load_gen=6, playing=True)
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+
+        sm._drop_presentation_tick(
+            active=1, d=d, sp_state=_sp_state(abs_beat=100.0, smart_drop_crossing=False),
+            impact_now=False,
+        )
+        self.assertEqual(sm._drop_presentation_session.opening_tracks_counted, 0)
+
+        # 10 beats in: still short of the 16-beat threshold.
+        sm._drop_presentation_tick(
+            active=1, d=d, sp_state=_sp_state(abs_beat=110.0, smart_drop_crossing=False),
+            impact_now=False,
+        )
+        self.assertEqual(sm._drop_presentation_session.opening_tracks_counted, 0)
+
+        # 16 beats in: now counted, exactly once.
+        sm._drop_presentation_tick(
+            active=1, d=d, sp_state=_sp_state(abs_beat=116.0, smart_drop_crossing=False),
+            impact_now=False,
+        )
+        self.assertEqual(sm._drop_presentation_session.opening_tracks_counted, 1)
+        sm._drop_presentation_tick(
+            active=1, d=d, sp_state=_sp_state(abs_beat=120.0, smart_drop_crossing=False),
+            impact_now=False,
+        )
+        self.assertEqual(sm._drop_presentation_session.opening_tracks_counted, 1)
+
+    def test_loaded_but_never_playing_deck_never_counts(self) -> None:
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d = _deck_state(load_gen=6, playing=False)
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        for beat in (100.0, 116.0, 140.0):
+            sm._drop_presentation_tick(
+                active=1, d=d, sp_state=_sp_state(abs_beat=beat, smart_drop_crossing=False),
+                impact_now=False,
+            )
+        self.assertEqual(sm._drop_presentation_session.opening_tracks_counted, 0)
+
+
 class PlanAndTickIntegrationTests(unittest.TestCase):
     def _sm_with_plan(self, *, drops=(64.0,), tags=(), learned=(), with_player=False):
         if with_player:
