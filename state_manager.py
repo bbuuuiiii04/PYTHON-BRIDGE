@@ -532,6 +532,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 get_phrase_anchor=self._palette_control_phrase_anchor,
                 get_laser_blackout=lambda: bool(self._pack_status_snapshot.get("blackout", False)),
                 get_laser_solo=lambda: self._drop_presentation_solo_feedback,
+                get_static_held=self._palette_static_held,
                 palette_notes=palette_notes,
                 control_notes=control_notes,
                 long_press_s=long_press_s,
@@ -794,6 +795,21 @@ class StateManager(LEDDispatchPolicyMixin):
             return None
         target = float(snap.phrase_anchor_last_beat + snap.phrase_anchor_period_beats)
         return target if target > start_beat else None
+
+    def _palette_static_held(self) -> tuple:
+        rt = self._pack_runtime
+        midi_input = getattr(rt, "midi_input", None) if rt is not None else None
+        if midi_input is None:
+            return ()
+        try:
+            layers = midi_input.snapshot().held_layers
+        except Exception:
+            return ()
+        return tuple(
+            (layer.channel, layer.note, layer.kind)
+            for layer in layers
+            if getattr(layer, "note", -1) >= 0
+        )
 
     # ── Main loop ────────────────────────────────────────────────────────────
 

@@ -98,6 +98,7 @@ class LedPaletteControl:
         get_phrase_anchor: Callable[[float], Optional[float]],
         get_laser_blackout: Callable[[], bool],
         get_laser_solo: Callable[[], str] | None = None,
+        get_static_held: Callable[[], tuple] | None = None,
         palette_notes: Mapping[str, int] | None = None,
         control_notes: Mapping[str, int] | None = None,
         feedback_path: str = PALETTE_STATE_PATH,
@@ -113,6 +114,7 @@ class LedPaletteControl:
         # publish, so a state change is picked up by the next maybe_publish()
         # tick without a dedicated setter call to remember to make.
         self._get_laser_solo = get_laser_solo
+        self._get_static_held = get_static_held
         self._palette_notes = dict(palette_notes or {})
         self._control_notes = dict(control_notes or {})
         self._long_press_s = float(long_press_s)
@@ -182,6 +184,13 @@ class LedPaletteControl:
             **self.snapshot(),
             "palettes": self._palette_payload(),
             "controls": self._control_payload(),
+            "static_held": sorted(
+                (
+                    {"channel": int(c), "note": int(n), "kind": str(k)}
+                    for (c, n, k) in (self._get_static_held() if self._get_static_held else ())
+                ),
+                key=lambda row: (row["channel"], row["note"]),
+            ),
         }
         if not force and body == self._last_feedback_body:
             return

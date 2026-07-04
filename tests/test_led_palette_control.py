@@ -392,6 +392,50 @@ class LedPaletteControlTests(unittest.TestCase):
         self.assertEqual(control.snapshot()["laser_solo"], "active")
         self.assertEqual(control._control_payload()["laser_solo"]["state"], "active")
 
+    def test_static_held_payload_reflects_supplied_getter(self) -> None:
+        control = LedPaletteControl(
+            engine=self.engine,
+            led_event_sink=self.events.append,
+            get_abs_beat=lambda: 8.0,
+            get_phrase_anchor=lambda _beat: 16.0,
+            get_laser_blackout=lambda: False,
+            get_static_held=lambda: ((2, 36, "toggle"),),
+        )
+        self.addCleanup(control.stop)
+        writer = _WriterStub.instances[-1]
+        self.assertEqual(
+            writer.payloads[-1]["static_held"],
+            [{"channel": 2, "note": 36, "kind": "toggle"}],
+        )
+
+    def test_static_held_payload_empty_when_getter_absent(self) -> None:
+        writer = _WriterStub.instances[-1]
+        self.assertEqual(writer.payloads[-1]["static_held"], [])
+
+    def test_static_held_change_gate_fires_when_held_set_changes(self) -> None:
+        state = {"held": ()}
+        control = LedPaletteControl(
+            engine=self.engine,
+            led_event_sink=self.events.append,
+            get_abs_beat=lambda: 8.0,
+            get_phrase_anchor=lambda _beat: 16.0,
+            get_laser_blackout=lambda: False,
+            get_static_held=lambda: state["held"],
+        )
+        self.addCleanup(control.stop)
+        writer = _WriterStub.instances[-1]
+        before = len(writer.payloads)
+        control.maybe_publish()
+        self.assertEqual(len(writer.payloads), before)
+
+        state["held"] = ((2, 36, "toggle"),)
+        control.maybe_publish()
+        self.assertEqual(len(writer.payloads), before + 1)
+        self.assertEqual(
+            writer.payloads[-1]["static_held"],
+            [{"channel": 2, "note": 36, "kind": "toggle"}],
+        )
+
     def test_maybe_publish_only_submits_when_feedback_snapshot_changes(self) -> None:
         writer = _WriterStub.instances[-1]
         initial_count = len(writer.payloads)
