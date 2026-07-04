@@ -132,6 +132,23 @@ class RequiredTest2LadderPrecedence(unittest.TestCase):
         )
         self.assertEqual((presentation, reason, fired), (LASERS_ONLY, "solo_manual", False))
 
+    def test_veto_suppresses_tiers_1_6_but_never_finale(self) -> None:
+        tagged = DropDecision(beat=1.0, tagged=True, learned=False, is_finale=False,
+                               personality_presentation=LEDS_ONLY, runway=0.0)
+        presentation, reason, fired = resolve_presentation(
+            tagged, armed=False, gearshift_pending=False, record_breaking=False,
+            auto_solo_used=False, damper_active=False, vetoed=True,
+        )
+        self.assertEqual((presentation, reason, fired), (LEDS_ONLY, "leds_only_personality", False))
+
+        finale = DropDecision(beat=1.0, tagged=True, learned=True, is_finale=True,
+                               personality_presentation=LEDS_ONLY, runway=0.0)
+        presentation, reason, _ = resolve_presentation(
+            finale, armed=True, gearshift_pending=True, record_breaking=True,
+            auto_solo_used=False, damper_active=False, vetoed=True,
+        )
+        self.assertEqual((presentation, reason), (LEDS_PLUS_LASERS, "both_finale"))
+
     def test_learned_outranks_gearshift_and_record(self) -> None:
         decision = DropDecision(
             beat=1.0, tagged=False, learned=True, is_finale=False,
@@ -251,6 +268,23 @@ class RequiredTest4Gearshift(unittest.TestCase):
         self.assertTrue(session.consume_gearshift_pending((1, 5)))
         self.assertFalse(session.consume_gearshift_pending((1, 5)))
         self.assertFalse(session.consume_gearshift_pending((2, 9)))
+
+    def test_session_state_pending_peek_does_not_mutate(self) -> None:
+        session = SessionState()
+        session.set_gearshift_pending((1, 5))
+        self.assertTrue(session.gearshift_pending_for((1, 5)))
+        self.assertTrue(session.gearshift_pending_for((1, 5)))  # peeking twice is safe
+        self.assertTrue(session.consume_gearshift_pending((1, 5)))
+        self.assertFalse(session.gearshift_pending_for((1, 5)))
+
+
+class SessionStateVetoTests(unittest.TestCase):
+    def test_veto_beat_is_scoped_to_its_track_key(self) -> None:
+        session = SessionState()
+        session.veto_beat((1, 5), 64.0)
+        self.assertTrue(session.is_vetoed((1, 5), 64.0))
+        self.assertFalse(session.is_vetoed((1, 5), 96.0))
+        self.assertFalse(session.is_vetoed((1, 6), 64.0))  # a new load_gen is a fresh track
 
 
 # ---- Required Behavior Test 5: record-breaker ---------------------------

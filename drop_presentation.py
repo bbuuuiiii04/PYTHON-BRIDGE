@@ -43,6 +43,12 @@ _WINDOW_ACTIVE_ROLES = frozenset({"drop", "post_drop"})
 
 HOTCUE_TOLERANCE_BEATS = 2.0
 LEARNED_TOLERANCE_BEATS = 2.0
+
+# The learned store's persistent path (survives across sessions; everything
+# else in this module resets with the process). state_manager.py owns the
+# actual load()/write-thread lifecycle; this is just the shared path constant,
+# mirroring PALETTE_STATE_PATH's role in led_palette_control.py.
+LEARNED_STORE_PATH = "local/state/laser_solo_learned.json"
 AUDIBLE_DAMPER_BEATS = 16.0
 
 
@@ -325,6 +331,7 @@ def resolve_presentation(
     record_breaking: bool,
     auto_solo_used: bool,
     damper_active: bool,
+    vetoed: bool = False,
 ) -> tuple[str, str, bool]:
     """First-match-wins ladder for one true drop (authority doc §The Ladder).
 
@@ -336,18 +343,25 @@ def resolve_presentation(
     (tier 8) is never blocked by the opening damper (tier 7): Required Behavior
     Test 1 demands the last true drop always render at least `leds_plus_lasers`,
     unconditionally.
+
+    `vetoed=True` (the Solo pad's press-to-cancel gesture, authority doc
+    §Solo Source Contracts) skips tiers 1-6 entirely for this specific drop
+    occurrence — as if none of them applied — falling through to the same
+    finale/damper/personality tail. It never suppresses the finale guarantee
+    (a veto cancels a SOLO, not the "at least both" floor) or the damper.
     """
-    if armed:
-        return (LASERS_ONLY, "solo_manual", False)
-    if decision.tagged:
-        return (LASERS_ONLY, "solo_hotcue", False)
-    if decision.learned and not auto_solo_used:
-        return (LASERS_ONLY, "solo_learned", True)
-    if not damper_active:
-        if gearshift_pending and not auto_solo_used:
-            return (LASERS_ONLY, "solo_gearshift", True)
-        if record_breaking and not auto_solo_used:
-            return (LASERS_ONLY, "solo_record", True)
+    if not vetoed:
+        if armed:
+            return (LASERS_ONLY, "solo_manual", False)
+        if decision.tagged:
+            return (LASERS_ONLY, "solo_hotcue", False)
+        if decision.learned and not auto_solo_used:
+            return (LASERS_ONLY, "solo_learned", True)
+        if not damper_active:
+            if gearshift_pending and not auto_solo_used:
+                return (LASERS_ONLY, "solo_gearshift", True)
+            if record_breaking and not auto_solo_used:
+                return (LASERS_ONLY, "solo_record", True)
     if decision.is_finale:
         return (LEDS_PLUS_LASERS, "both_finale", False)
     if damper_active:
@@ -385,6 +399,7 @@ class SessionState:
         self._counted_tracks: set[tuple[int, int]] = set()
         self._auto_solo_used_tracks: set[tuple[int, int]] = set()
         self._gearshift_pending_track: Optional[tuple[int, int]] = None
+        self._vetoed_beats: dict[tuple[int, int], set[float]] = {}
 
     def damper_active(self, opening_tracks: int) -> bool:
         return self.opening_tracks_counted < max(0, opening_tracks)
@@ -425,9 +440,15 @@ class SessionState:
     def set_gearshift_pending(self, track_key: tuple[int, int]) -> None:
         self._gearshift_pending_track = track_key
 
+    def gearshift_pending_for(self, track_key: tuple[int, int]) -> bool:
+        """Pure read (no mutation) — safe to call repeatedly during lookahead."""
+        return self._gearshift_pending_track == track_key
+
     def consume_gearshift_pending(self, track_key: tuple[int, int]) -> bool:
         """One-shot: True (and clears the flag) only for the incoming track's
-        FIRST true drop after a qualifying handover."""
+        FIRST true drop after a qualifying handover. Call ONLY at the exact
+        impact tick, never during lookahead (gearshift_pending_for is the
+        non-mutating peek for that)."""
         if self._gearshift_pending_track == track_key:
             self._gearshift_pending_track = None
             return True
@@ -435,6 +456,19 @@ class SessionState:
 
     def clear_gearshift_pending(self) -> None:
         self._gearshift_pending_track = None
+
+    def veto_beat(self, track_key: tuple[int, int], beat: float) -> None:
+        """Solo pad press-to-cancel on a pending non-manual tier: suppresses
+        tiers 1-6 for this specific (track, beat) for the rest of the session
+        (the plan itself is static once built, so this is the only way a
+        vetoed hot-cue/learned/gear-shift/record solo stops re-appearing on
+        every subsequent tick's lookahead before its own impact)."""
+        self._vetoed_beats.setdefault(track_key, set()).add(beat)
+
+    def is_vetoed(self, track_key: tuple[int, int], beat: float) -> bool:
+        # Exact match: `beat` is always the SAME plan's decision.beat value on
+        # both the veto call and the later lookup, never a re-derived float.
+        return beat in self._vetoed_beats.get(track_key, ())
 
 
 # ---- Learned store (Task 1.3) ----------------------------------------------

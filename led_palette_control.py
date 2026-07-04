@@ -68,6 +68,7 @@ class LedPaletteControl:
         get_abs_beat: Callable[[], Optional[float]],
         get_phrase_anchor: Callable[[float], Optional[float]],
         get_laser_blackout: Callable[[], bool],
+        get_laser_solo: Callable[[], str] | None = None,
         palette_notes: Mapping[str, int] | None = None,
         control_notes: Mapping[str, int] | None = None,
         feedback_path: str = PALETTE_STATE_PATH,
@@ -77,6 +78,11 @@ class LedPaletteControl:
         self._get_abs_beat = get_abs_beat
         self._get_phrase_anchor = get_phrase_anchor
         self._get_laser_blackout = get_laser_blackout
+        # Pull, not push (mirrors get_laser_blackout): the drop presentation
+        # policy's CURRENT arm/pending/active state is read fresh on every
+        # publish, so a state change is picked up by the next maybe_publish()
+        # tick without a dedicated setter call to remember to make.
+        self._get_laser_solo = get_laser_solo
         self._palette_notes = dict(palette_notes or {})
         self._control_notes = dict(control_notes or {})
         self._led_muted = False
@@ -115,7 +121,7 @@ class LedPaletteControl:
         return {
             "led_blackout": self._led_muted,
             "laser_blackout": bool(self._get_laser_blackout()),
-            "laser_solo": "off",
+            "laser_solo": str(self._get_laser_solo()) if self._get_laser_solo is not None else "off",
             "rainbow": self._rainbow,
             "lock": bool(snap.get("lock", False)),
             "current_palette": str(snap.get("current_palette", "")),

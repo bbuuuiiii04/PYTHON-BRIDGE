@@ -65,7 +65,24 @@ from .models import (
 )
 from . import led_dispatch_policy as _led_dispatch_policy
 from .led_dispatch_policy import LEDDispatchPolicyMixin
-from .led_palette_control import LedPaletteControl
+from .led_palette_control import LedPaletteControl, PaletteFeedbackWriter
+from .led_config import load_drop_presentation_config
+from .drop_presentation import (
+    AUDIBLE_DAMPER_BEATS,
+    LEDS_ONLY,
+    LEDS_PLUS_LASERS,
+    LASERS_ONLY,
+    LEARNED_STORE_PATH,
+    LearnedStore,
+    SessionState,
+    TrackPlan,
+    WindowActions,
+    WindowInputs,
+    WindowMachine,
+    gearshift_qualifies,
+    plan_track,
+    resolve_presentation,
+)
 from .laser_color_engine import LaserColorEngine as LaserColorMapper, load_laser_color_map
 from .laser_models import LaserContext, LaserPersonality, LaserResolvedScene
 from .soundswitch_laser_player import (
@@ -408,6 +425,67 @@ class StateManager(LEDDispatchPolicyMixin):
         self._laser_color_updated_this_tick = False
         self._laser_color_snapshot_for_tick = None
         self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
+
+        # ── Drop presentation policy (Package 3, AWR-119) ─────────────────────
+        # Self-contained load, mirroring self._laser_color_engine above — no
+        # __main__.py wiring needed. enabled: false is checked at every
+        # consumption site below (master regression gate), not here, so a live
+        # config edit takes effect without a restart.
+        self._drop_presentation_config = load_drop_presentation_config()
+        self._drop_presentation_session = SessionState()
+        self._drop_presentation_window = WindowMachine(self._drop_presentation_config)
+        self._drop_presentation_plan: Optional[TrackPlan] = None
+        self._drop_presentation_plan_deck: int = 0
+        self._drop_presentation_plan_load_gen: int = 0
+        self._drop_presentation_plan_content_id: str = ""
+        # Per-deck "have both halves of a plan's inputs arrived for THIS load"
+        # latches (Task 4 item 1: the plan finalizes only once both ANLZ data
+        # and hot-cue tags are in; until then drops fail-open to leds_plus_lasers
+        # via _drop_presentation_pending_for_this_drop's None fallback below).
+        self._drop_presentation_anlz_ready: dict[int, int] = {1: -1, 2: -1}
+        self._drop_presentation_tags_ready: dict[int, int] = {1: -1, 2: -1}
+        self._drop_presentation_tag_beats: dict[int, tuple[float, ...]] = {1: (), 2: ()}
+        # Opening-damper ≥16-beat audible latch bookkeeping: first audible beat
+        # seen per (deck, load_gen); SessionState.mark_track_counted() is
+        # already idempotent, so no separate "already counted" set is needed
+        # here.
+        self._drop_presentation_audible_start_beat: dict[tuple[int, int], float] = {}
+        # Solo pad: one-shot manual arm state (tier 2), keyed on (deck, load_gen)
+        # so it auto-invalidates on track change without a separate clear call
+        # (authority doc: "an armed solo never carries into a track the
+        # operator didn't aim it at"). The feedback string is what
+        # LedPaletteControl's get_laser_solo pulls ("off" | "armed" | "active").
+        self._drop_presentation_armed_key: Optional[tuple[int, int]] = None
+        self._drop_presentation_solo_feedback: str = "off"
+        # Set by _drive_pack_output each tick: pack live AND the latest autoloop
+        # base render had no diagnostic (Task 4 items 3-4's darkness-guard input).
+        self._drop_presentation_base_live: bool = False
+        # Cached each tick by _drop_presentation_tick; read back by the Solo pad
+        # handler (arm/veto) and the feedback updater. Applied-output holds are
+        # tracked separately so _drop_presentation_apply_actions only calls
+        # into the owner-set/player exactly on a change, not every tick.
+        self._drop_presentation_last_pending: tuple[Optional[str], str, Optional[float]] = (None, "", None)
+        self._drop_presentation_last_actions: Optional[WindowActions] = None
+        self._drop_presentation_led_dark_held: bool = False
+        self._drop_presentation_base_suppressed_held: bool = False
+        # Fail-open detectors (authority doc: track change / active-deck change
+        # must restore any active window). Compared against each tick, updated
+        # every tick, so the very NEXT tick after either changes carries True
+        # exactly once. None (not 0) means "never seen this deck yet" -- load_gen
+        # 0/1 are real values, so a 0-sentinel would spuriously read as a track
+        # change on the very first tick a deck is ever evaluated.
+        self._drop_presentation_last_load_gen: dict[int, Optional[int]] = {1: None, 2: None}
+        self._drop_presentation_last_active_deck: Optional[int] = None
+        try:
+            _os.makedirs(_os.path.dirname(LEARNED_STORE_PATH) or ".", exist_ok=True)
+        except OSError as exc:
+            log.warning("[SM] drop-presentation-state-dir-failed  err=%s", type(exc).__name__)
+        self._drop_presentation_learned_store = LearnedStore.load(LEARNED_STORE_PATH)
+        self._drop_presentation_learned_writer = PaletteFeedbackWriter(
+            LEARNED_STORE_PATH, debounce_s=0.5,
+        )
+        self._drop_presentation_learned_writer.start()
+
         self._init_led_dispatch_state(led_look_director, led_scene_adapter, led_color_engine)
         palette_control_config = led_palette_control_config or {}
         palette_notes = palette_control_config.get("palette_notes", {})
@@ -430,6 +508,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 get_abs_beat=self._palette_control_abs_beat,
                 get_phrase_anchor=self._palette_control_phrase_anchor,
                 get_laser_blackout=lambda: bool(self._pack_status_snapshot.get("blackout", False)),
+                get_laser_solo=lambda: self._drop_presentation_solo_feedback,
                 palette_notes=palette_notes if isinstance(palette_notes, dict) else {},
                 control_notes=control_notes,
             )
@@ -624,6 +703,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._stop.set()
         if self._led_palette_control is not None:
             self._led_palette_control.stop()
+        self._drop_presentation_learned_writer.stop()
 
     def get_active_deck(self) -> int:
         return self._os.active_deck
@@ -1185,6 +1265,8 @@ class StateManager(LEDDispatchPolicyMixin):
                                 item.confidence,
                                 item.source,
                             )
+                    self._drop_presentation_anlz_ready[ev.deck] = gen
+                    self._maybe_build_drop_plan(ev.deck)
                 else:
                     log.debug("[SM] anlz-drops-stale  deck=%d  gen=%d  current=%d",
                               ev.deck, gen, d_obj.load_gen)
@@ -1291,6 +1373,9 @@ class StateManager(LEDDispatchPolicyMixin):
             coordinator = getattr(self, "_led_palette_control", None)
             if coordinator is not None:
                 coordinator.handle_event(ev)
+
+        elif ev.kind == Ev.LASER_SOLO_PAD:
+            self._drop_presentation_solo_pad_pressed()
 
         elif self._laser_director is not None:
             if ev.kind == Ev.LASER_TOGGLE:
@@ -1461,9 +1546,32 @@ class StateManager(LEDDispatchPolicyMixin):
                 old_deck, new_deck, old_d.scripted_id)
             new_d.scripted_id = old_d.scripted_id
             old_d.scripted_id = 0
+        self._drop_presentation_gearshift_check(old_deck, new_deck)
         self._os.active_deck = new_deck
         self._led_hold_active = True
         self._reset_for_active_deck_entry(new_deck, source)
+
+    def _drop_presentation_gearshift_check(self, old_deck: int, new_deck: int) -> None:
+        """Tier 5 (authority doc): compute the BPM-jump delta live-then-meta on
+        BOTH sides of a real deck-to-deck handover (a pitched deck plays its
+        live tempo, not its tag). Never fires on the session's first master
+        because this method is only reached from a deck->deck switch, never
+        the 0->deck entry path."""
+        if not self._drop_presentation_config.enabled:
+            return
+        outgoing = self._autoloop.live_bpm_value(old_deck)
+        if outgoing is None or outgoing <= 0:
+            outgoing = self._deck[old_deck].meta.bpm or None
+        incoming = self._autoloop.live_bpm_value(new_deck)
+        if incoming is None or incoming <= 0:
+            incoming = self._deck[new_deck].meta.bpm or None
+        if gearshift_qualifies(outgoing, incoming, self._drop_presentation_config.gearshift_bpm_jump):
+            new_d = self._deck[new_deck]
+            self._drop_presentation_session.set_gearshift_pending((new_deck, new_d.load_gen))
+            log.info(
+                "[SM] drop-presentation-gearshift  deck=%d→%d  bpm=%.1f→%.1f",
+                old_deck, new_deck, outgoing or 0.0, incoming or 0.0,
+            )
 
     def _reset_for_active_deck_entry(self, new_deck: int, source: str) -> None:
         new_d = self._deck[new_deck]
@@ -1508,6 +1616,10 @@ class StateManager(LEDDispatchPolicyMixin):
                 new_d.meta,
                 trigger="active_deck_changed",
             )
+        # The new master's ANLZ data / hot-cue tags may have already resolved
+        # while it was only "loaded" (not yet active) -- (re)attempt the plan
+        # now that _maybe_build_drop_plan's active-deck guard will pass.
+        self._maybe_build_drop_plan(new_deck)
 
     def _enter_idle_no_audible(self, *, reason: str) -> None:
         self._pending_arm = None
@@ -1838,6 +1950,13 @@ class StateManager(LEDDispatchPolicyMixin):
         meta.soundswitch_id = payload["soundswitch_id"]
         meta.total_ms       = payload["total_ms"]
         self._clear_phrase_segment_cache(deck)
+        # Drop presentation hot-cue tags (Task 2): absent on the lsof/title
+        # fallback paths, which simply carry no tags -- fail-open, never a crash.
+        self._drop_presentation_tag_beats[deck] = tuple(
+            float(b) for b in payload.get("laser_tag_beats", [])
+        )
+        self._drop_presentation_tags_ready[deck] = gen
+        self._maybe_build_drop_plan(deck)
         if self._live_bpm is not None and meta.bpm > 0:
             try:
                 self._live_bpm.update_hint(deck, meta.bpm, meta.bpm)
@@ -1923,6 +2042,277 @@ class StateManager(LEDDispatchPolicyMixin):
                 except queue.Full:
                     log.warning("[SM] queue-full  event=scripted-clear  deck=%d", deck)
                 self._resolve_personality_for_deck(deck, meta)
+
+    # ── Drop presentation: static per-track plan ──────────────────────────────
+
+    def _maybe_build_drop_plan(self, deck: int) -> None:
+        """Build the TrackPlan once BOTH ANLZ data and hot-cue tags have landed
+        for this exact load (Task 4 item 1). Before that, and for the inactive
+        deck, drops fail-open to leds_plus_lasers via the None-plan fallback in
+        the per-tick wiring below. Pure reads off already-published DeckState;
+        no I/O here (the DB read already happened in filepath_resolver; the
+        learned store was loaded once at startup)."""
+        if deck != self._os.active_deck:
+            return
+        d = self._deck.get(deck)
+        if d is None:
+            return
+        load_gen = d.load_gen
+        if (
+            self._drop_presentation_anlz_ready.get(deck) != load_gen
+            or self._drop_presentation_tags_ready.get(deck) != load_gen
+        ):
+            return
+        content_id = str(d.meta.content_id or "")
+        drop_beats = tuple(float(b) for b in d.meta.smart_drops)
+        phrase_roles = self._build_phrase_segments(d)
+        tag_beats = self._drop_presentation_tag_beats.get(deck, ())
+        learned_beats = (
+            self._drop_presentation_learned_store.beats_for_track(content_id)
+            if content_id else ()
+        )
+        self._drop_presentation_plan = plan_track(
+            drop_beats, phrase_roles, tag_beats, learned_beats,
+            self._drop_presentation_config,
+        )
+        self._drop_presentation_plan_deck = deck
+        self._drop_presentation_plan_load_gen = load_gen
+        self._drop_presentation_plan_content_id = content_id
+        if self._drop_presentation_plan.unmatched_tag_beats:
+            log.info(
+                "[SM] drop-presentation-unmatched-tags  deck=%d  beats=%s",
+                deck,
+                ",".join(f"{b:.1f}" for b in self._drop_presentation_plan.unmatched_tag_beats),
+            )
+
+    # ── Drop presentation: per-tick ladder + window ───────────────────────────
+
+    def _drop_presentation_tick(
+        self, *, active: int, d: DeckState, sp_state: SmartPhrasingState, impact_now: bool,
+    ) -> None:
+        """Feed the WindowMachine once per push tick (Task 4 item 3). Pure reads
+        off already-computed locals/DeckState; the only mutation is the
+        session/learned-store bookkeeping committed at the exact impact tick
+        below (in-memory only — the learned-store FILE write rides the
+        background writer thread, never this thread's tick path)."""
+        cfg = self._drop_presentation_config
+        if not cfg.enabled:
+            return
+        if self._os.lighting_mode == "scripted":
+            # Required Behavior Test 9: zero policy activity end-to-end on a
+            # scripted track -- no plan lookup, no ladder evaluation, no
+            # session/learned-store mutation. Still tick the window machine
+            # (scripted_mode=True) so a dark/suppressed state left over from a
+            # PRIOR autoloop track's window restores via its universal
+            # fail-open, rather than latching until the next autoloop track.
+            actions = self._drop_presentation_window.tick(
+                WindowInputs(
+                    abs_beat=sp_state.abs_beat, beats_to_next_drop=None, next_drop_beat=None,
+                    drop_role="none", impact_now=False, laser_visible=False,
+                    scripted_mode=True, stopped=not d.playing,
+                ),
+                pending_presentation=None, pending_reason="",
+            )
+            self._drop_presentation_apply_actions(actions)
+            self._drop_presentation_last_actions = actions
+            self._drop_presentation_last_pending = (None, "", None)
+            return
+        session = self._drop_presentation_session
+        track_key = (active, d.load_gen)
+        previous_load_gen = self._drop_presentation_last_load_gen.get(active)
+        track_changed = previous_load_gen is not None and previous_load_gen != d.load_gen
+        previous_active_deck = self._drop_presentation_last_active_deck
+        active_deck_changed = previous_active_deck is not None and previous_active_deck != active
+        self._drop_presentation_last_load_gen[active] = d.load_gen
+        self._drop_presentation_last_active_deck = active
+
+        # Opening-damper ≥16-beat audible latch: count a track once its deck
+        # has been the audible active deck (playing) for >=16 beats since
+        # load, once per (deck, load_gen). A loaded-but-never-audible deck
+        # never reaches d.playing here and so never counts.
+        if d.playing and sp_state.abs_beat is not None:
+            start_beat = self._drop_presentation_audible_start_beat.get(track_key)
+            if start_beat is None:
+                self._drop_presentation_audible_start_beat[track_key] = sp_state.abs_beat
+            elif (sp_state.abs_beat - start_beat) >= AUDIBLE_DAMPER_BEATS:
+                session.mark_track_counted(active, d.load_gen)
+
+        role = "none"
+        if sp_state.smart_drop_crossing:
+            role = "drop"
+        elif sp_state.current_phrase_is_chorus or sp_state.smart_post_drop_active:
+            role = "post_drop"
+
+        plan = self._drop_presentation_plan
+        plan_current = (
+            plan is not None
+            and self._drop_presentation_plan_deck == active
+            and self._drop_presentation_plan_load_gen == d.load_gen
+        )
+        eval_beat = sp_state.active_drop_beat if impact_now else sp_state.next_smart_drop_beat
+        decision = (
+            plan.decision_for(eval_beat)
+            if plan_current and eval_beat is not None
+            else None
+        )
+
+        pending_presentation: Optional[str] = None
+        pending_reason = ""
+        auto_solo_fired = False
+        armed = self._drop_presentation_armed_key == track_key
+        if decision is not None:
+            gearshift_pending = session.gearshift_pending_for(track_key)
+            record_breaking = session.is_record_breaking(decision.runway, cfg.record_min_drops)
+            auto_solo_used = session.auto_solo_used(track_key)
+            damper_active = session.damper_active(cfg.opening_tracks)
+            vetoed = session.is_vetoed(track_key, decision.beat)
+            pending_presentation, pending_reason, auto_solo_fired = resolve_presentation(
+                decision,
+                armed=armed,
+                gearshift_pending=gearshift_pending,
+                record_breaking=record_breaking,
+                auto_solo_used=auto_solo_used,
+                damper_active=damper_active,
+                vetoed=vetoed,
+            )
+        elif impact_now:
+            # Plan not finalized yet (ANLZ/tags still resolving) -- fail-open
+            # to today's behavior, exactly as the spec requires.
+            pending_presentation, pending_reason = LEDS_PLUS_LASERS, "plan_unavailable"
+
+        laser_masked = False
+        if self._laser_executor is not None:
+            laser_masked = bool(self._laser_executor.mask_owners_active())
+        midi_input = getattr(self._pack_runtime, "midi_input", None)
+        if midi_input is not None:
+            try:
+                laser_masked = laser_masked or bool(midi_input.snapshot().blackout_held)
+            except Exception:
+                laser_masked = True  # fail toward "not visible", never toward a dark room
+        laser_enabled = bool(
+            self._laser_director is not None and self._laser_director.is_enabled()
+        )
+        laser_visible = (
+            self._drop_presentation_base_live
+            and role in ("drop", "post_drop")
+            and not laser_masked
+            and laser_enabled
+        )
+
+        inputs = WindowInputs(
+            abs_beat=sp_state.abs_beat,
+            beats_to_next_drop=sp_state.beats_to_next_drop,
+            next_drop_beat=sp_state.next_smart_drop_beat,
+            drop_role=role,
+            impact_now=impact_now,
+            laser_visible=laser_visible,
+            stopped=not d.playing,
+            track_changed=track_changed,
+            active_deck_changed=active_deck_changed,
+        )
+        actions = self._drop_presentation_window.tick(
+            inputs, pending_presentation=pending_presentation, pending_reason=pending_reason,
+        )
+        self._drop_presentation_apply_actions(actions)
+        self._drop_presentation_last_pending = (pending_presentation, pending_reason, eval_beat)
+        self._drop_presentation_last_actions = actions
+
+        if impact_now and decision is not None:
+            if armed:
+                # One-shot: consumed by this drop's impact regardless of guard
+                # outcome (the arm targeted "the next true drop", which has now
+                # happened).
+                self._drop_presentation_armed_key = None
+            if auto_solo_fired:
+                session.mark_auto_solo_used(track_key)
+            if session.gearshift_pending_for(track_key):
+                session.consume_gearshift_pending(track_key)
+            if actions.reason == "solo_manual":
+                content_id = self._drop_presentation_plan_content_id
+                if content_id and self._drop_presentation_learned_store.record(content_id, decision.beat):
+                    self._drop_presentation_learned_writer.submit(
+                        self._drop_presentation_learned_store.to_dict()
+                    )
+            session.finalize_drop_observation(decision.runway, has_phrase_data=plan.has_phrase_data)
+            self._drop_presentation_update_solo_feedback()
+
+    def _drop_presentation_apply_actions(self, actions: WindowActions) -> None:
+        """Apply this tick's WindowMachine output. Idempotent: safe to call
+        every tick even when nothing changed. LED pre-dark/solo-window dark
+        rides the Package-2 owner SET (never touches other owners); base
+        suppression never touches masks/blackout (soundswitch_laser_player)."""
+        held = self._drop_presentation_led_dark_held
+        if actions.led_dark_hold and not held:
+            self._handle_led_event(BridgeEvent(
+                kind=Ev.LED_BLACKOUT, deck=0,
+                payload={"reason": "drop_spotlight"}, source="drop_presentation",
+            ))
+            self._drop_presentation_led_dark_held = True
+        elif not actions.led_dark_hold and held:
+            self._handle_led_event(BridgeEvent(
+                kind=Ev.LED_CLEAR_BLACKOUT, deck=0,
+                payload={"reason": "drop_spotlight"}, source="drop_presentation",
+            ))
+            self._drop_presentation_led_dark_held = False
+
+        player = getattr(self._pack_runtime, "player", None)
+        if player is not None and actions.base_suppressed != self._drop_presentation_base_suppressed_held:
+            player.set_base_suppressed(actions.base_suppressed)
+            self._drop_presentation_base_suppressed_held = actions.base_suppressed
+
+    def _drop_presentation_update_solo_feedback(self) -> None:
+        last_actions = self._drop_presentation_last_actions
+        if last_actions is not None and last_actions.presentation == LASERS_ONLY:
+            state = "active"
+        elif self._drop_presentation_armed_key is not None:
+            state = "armed"
+        else:
+            state = "armed" if self._drop_presentation_last_pending[0] == LASERS_ONLY else "off"
+        if state != self._drop_presentation_solo_feedback:
+            self._drop_presentation_solo_feedback = state
+            if self._led_palette_control is not None:
+                self._led_palette_control.maybe_publish()
+
+    def _drop_presentation_solo_pad_pressed(self) -> None:
+        """Ev.LASER_SOLO_PAD: arm / disarm / veto per the authority doc's Solo
+        Source Contracts. No-ops with no active deck; still allowed (and
+        arms) during a scripted track, which only affects an autoloop-mode
+        true drop later (authority doc §Scripted-Track Exemption)."""
+        cfg = self._drop_presentation_config
+        if not cfg.enabled:
+            return
+        active = self._os.active_deck
+        if active not in (1, 2):
+            return
+        d = self._deck[active]
+        track_key = (active, d.load_gen)
+        session = self._drop_presentation_session
+
+        if self._drop_presentation_armed_key == track_key:
+            self._drop_presentation_armed_key = None
+            self._drop_presentation_update_solo_feedback()
+            return
+
+        pending_presentation, pending_reason, pending_beat = self._drop_presentation_last_pending
+        if pending_presentation == LASERS_ONLY and pending_reason != "solo_manual" and pending_beat is not None:
+            # Veto: a non-manual tier is currently pending for the upcoming
+            # drop. Learned solos are additionally un-learned (the recovery
+            # path for a press that shouldn't stick); gear-shift/record simply
+            # stop pending for this specific drop (session bookkeeping for
+            # gear-shift's one-shot flag still clears normally at that drop's
+            # own impact, vetoed or not).
+            session.veto_beat(track_key, pending_beat)
+            if pending_reason == "solo_learned":
+                content_id = self._drop_presentation_plan_content_id
+                if content_id and self._drop_presentation_learned_store.remove(content_id, pending_beat):
+                    self._drop_presentation_learned_writer.submit(
+                        self._drop_presentation_learned_store.to_dict()
+                    )
+            self._drop_presentation_update_solo_feedback()
+            return
+
+        self._drop_presentation_armed_key = track_key
+        self._drop_presentation_update_solo_feedback()
 
     # ── Scripted arm / clear ──────────────────────────────────────────────────
 
@@ -2441,8 +2831,14 @@ class StateManager(LEDDispatchPolicyMixin):
         docs/plans/active/soundswitch_t7c_pack_driver_spec.md."""
         rt = self._pack_runtime
         if rt is None or not rt.active:
+            self._drop_presentation_base_live = False
             return
         now = time.monotonic() if now is None else now
+        # Drop presentation darkness-guard input (Task 4 items 3-4): defaults
+        # False every pass; only the exact autoloop-base-rendered-clean branch
+        # below sets it True. Any other path (scripted, idle, error, missing
+        # selection, unsupported layout) leaves lasers "not visible".
+        self._drop_presentation_base_live = False
         player, backend, midi_input = rt.player, rt.backend, rt.midi_input
         color_snapshot = (
             self._laser_color_snapshot_for_tick
@@ -2757,11 +3153,13 @@ class StateManager(LEDDispatchPolicyMixin):
                         native_decision.phase_tick,
                         authority="fresh",
                     )
+                    self._drop_presentation_base_live = result.diagnostic is None
                     native_decision = finalize_native_autoloop_render(native_decision, result)
                     parity_live_blocked = native_decision.status == "unverified_parity"
                     if native_decision.status in ("missing_autoloop_file", "unsupported_layout"):
                         self._native_autoloop.reset()
                         player.clear_selection()
+                        self._drop_presentation_base_live = False
                 else:
                     player.clear_selection()
 
@@ -2809,6 +3207,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 ),
             )
             if soundswitch_connected:
+                self._drop_presentation_base_live = False  # bridge render is discarded for ZERO
                 self._publish_pack_status(
                     runtime=rt,
                     scripted_active=False,
@@ -2845,6 +3244,9 @@ class StateManager(LEDDispatchPolicyMixin):
             )
             backend.submit_frame(frame)
         except Exception as exc:
+            # Fail-closed for the darkness guard: any error this pass means
+            # "lasers are not verifiably visible", never a stale True.
+            self._drop_presentation_base_live = False
             if not self._pack_logged_error:
                 log.error(
                     "[SM] pack driver error; resolving ZERO  error=%s",
@@ -3415,6 +3817,18 @@ class StateManager(LEDDispatchPolicyMixin):
             if self._laser_executor is not None:
                 self._laser_executor.on_tick(ctx)
                 self._native_captured_scene = self._laser_executor.on_decision(decision, ctx)
+        # Drop presentation policy (Package 3): reuses the Laser Director's own
+        # drop_crossing decision as "a true drop is impacting THIS tick" per
+        # the authority doc's "no new drop detection" rule -- assumed known
+        # limitation: if the Laser Director is never configured at all
+        # (self._laser_director is None), drop_presentation never sees an
+        # impact either. Matches the operator's actual setup (Laser Director
+        # configured and live); see the handoff report for the alternative
+        # considered (a second, parallel DropLifecycle instance) and why it
+        # was not built.
+        self._drop_presentation_tick(
+            active=active, d=d, sp_state=sp_state, impact_now=drop_crossing_decision_emitted,
+        )
         if smart_drop_result.crossing and smart_drop_blackout_mode:
             # Ordering requirement: in blackout mode keep os.drop_cut_armed true
             # through phrase-anchor processing so the coordinator suppresses

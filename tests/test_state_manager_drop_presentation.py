@@ -1,0 +1,391 @@
+"""Task 4/6 (drop_presentation): state_manager.py wiring integration tests.
+
+Exercises _maybe_build_drop_plan / _drop_presentation_tick / the Ev.LASER_SOLO_PAD
+event / the darkness guard / the master enabled:false regression gate directly
+against a StateManager instance, reusing the pack-driver test fixtures (the
+established cross-file pattern; see test_laser_blackout_rewire.py). This does
+NOT drive the full _push_tick_inner()/_run() loop -- it calls the narrow
+drop-presentation methods directly with controlled inputs, the same style
+test_state_manager_pack_driver.py already uses for _drive_pack_output().
+"""
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from rb_ss_bridge_v2.drop_presentation import (  # noqa: E402
+    LEDS_ONLY,
+    LEDS_PLUS_LASERS,
+    LASERS_ONLY,
+    DropPresentationConfig,
+)
+from rb_ss_bridge_v2.models import BridgeEvent, Ev  # noqa: E402
+from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState  # noqa: E402
+from rb_ss_bridge_v2.soundswitch_laser_player import LaserPackPlayer  # noqa: E402
+from rb_ss_bridge_v2.soundswitch_pack_runtime import PackRuntime  # noqa: E402
+
+from test_state_manager_pack_driver import (  # noqa: E402
+    SSID,
+    _FakeBackend,
+    _FakeInput,
+    _make_sm,
+    _pack,
+    _set,
+)
+
+
+def _deck_state(*, playing=True, load_gen=7, content_id="content-1", smart_drops=(64,),
+                 scripted_id=0):
+    return SimpleNamespace(
+        meta=SimpleNamespace(content_id=content_id, smart_drops=list(smart_drops)),
+        playing=playing,
+        load_gen=load_gen,
+        scripted_id=scripted_id,
+    )
+
+
+def _sp_state(**overrides):
+    defaults = dict(
+        abs_beat=64.0,
+        next_smart_drop_beat=None,
+        beats_to_next_drop=None,
+        active_drop_beat=64.0,
+        smart_drop_crossing=True,
+        current_phrase_is_chorus=False,
+        smart_post_drop_active=False,
+    )
+    defaults.update(overrides)
+    return SmartPhrasingState(**defaults)
+
+
+def _enable_drop_presentation(sm, **overrides) -> None:
+    sm._drop_presentation_config = DropPresentationConfig(**{
+        "enabled": True, "laser_ratio": 0.4, "opening_tracks": 3,
+        "led_predark_beats": 4, "drop_window_cap_beats": 32,
+        "hotcue_marker": "LASER", "solo_learn_threshold": 1,
+        "gearshift_bpm_jump": 10.0, "record_min_drops": 5,
+        "ws_handoff_enabled": False, **overrides,
+    })
+    # WindowMachine snapshots its config at construction time.
+    from rb_ss_bridge_v2.drop_presentation import WindowMachine
+    sm._drop_presentation_window = WindowMachine(sm._drop_presentation_config)
+
+
+class MasterRegressionGateTests(unittest.TestCase):
+    """With /drop_presentation enabled: false, this package must be inert."""
+
+    def test_disabled_config_never_touches_blackout_owner_or_suppression(self) -> None:
+        sm = _make_sm()
+        sm._drop_presentation_config = DropPresentationConfig(enabled=False)
+        d = _deck_state()
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        sm._drop_presentation_tick(active=1, d=d, sp_state=_sp_state(), impact_now=True)
+
+        self.assertEqual(sm._led_blackout_owners, set())
+        self.assertFalse(sm._drop_presentation_led_dark_held)
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+
+    def test_disabled_config_solo_pad_press_is_a_noop(self) -> None:
+        sm = _make_sm()
+        sm._drop_presentation_config = DropPresentationConfig(enabled=False)
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        sm._deck = {1: _deck_state()}
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        self.assertIsNone(sm._drop_presentation_armed_key)
+
+
+class ScriptedExemptionIntegrationTests(unittest.TestCase):
+    def test_scripted_lighting_mode_never_applies_suppression_or_blackout(self) -> None:
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d = _deck_state(scripted_id=999)
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="scripted")
+        sm._drop_presentation_tick(
+            active=1, d=d, sp_state=_sp_state(), impact_now=True,
+        )
+        self.assertEqual(sm._led_blackout_owners, set())
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+
+
+class PlanAndTickIntegrationTests(unittest.TestCase):
+    def _sm_with_plan(self, *, drops=(64.0,), tags=(), learned=(), with_player=False):
+        if with_player:
+            backend = _FakeBackend()
+            sm = _make_sm(player=LaserPackPlayer(_pack()), backend=backend)
+            self.backend = backend
+        else:
+            sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d = _deck_state(load_gen=3, smart_drops=[int(b) for b in drops])
+        sm._deck = {1: d}
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        sm._drop_presentation_anlz_ready[1] = 3
+        sm._drop_presentation_tags_ready[1] = 3
+        sm._drop_presentation_tag_beats[1] = tuple(tags)
+        sm._drop_presentation_learned_store._entries["content-1"] = list(learned)
+        sm._build_phrase_segments = lambda _d: ()
+        sm._maybe_build_drop_plan(1)
+        return sm, d
+
+    def test_leds_only_drop_suppresses_base_without_touching_blackout(self) -> None:
+        # Single drop track -> personality gives it lasers (ceil(0.4*1)=1) AND
+        # it's the finale, so use two drops so the FIRST one is leds_only.
+        sm, d = self._sm_with_plan(drops=(32.0, 96.0), with_player=True)
+        plan = sm._drop_presentation_plan
+        self.assertEqual(plan.decision_for(32.0).personality_presentation, LEDS_ONLY)
+        # A fresh session starts with the opening damper active; clear it so
+        # this test demonstrates the PERSONALITY reason, not the damper one
+        # (both render leds_only -- the damper interaction has its own test
+        # coverage in tests/test_drop_presentation.py).
+        sm._drop_presentation_session.opening_tracks_counted = 3
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "leds_only_personality")
+        self.assertTrue(sm._drop_presentation_last_actions.base_suppressed)
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+        self.assertEqual(sm._led_blackout_owners, set())
+        # Verify the REAL player actually applied it, not just the bookkeeping flag.
+        self.assertEqual(sm._pack_runtime.player.render().diagnostic.code, "base_suppressed")
+
+    def test_finale_drop_is_leds_plus_lasers_no_suppression_no_blackout(self) -> None:
+        sm, d = self._sm_with_plan(drops=(32.0, 96.0))
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=96.0, active_drop_beat=96.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+        self.assertEqual(sm._led_blackout_owners, set())
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_PLUS_LASERS)
+
+    def test_hotcue_tagged_drop_engages_led_blackout_owner_when_laser_visible(self) -> None:
+        sm, d = self._sm_with_plan(drops=(32.0, 96.0), tags=(32.5,))
+        sm._drop_presentation_base_live = True
+        laser_director = mock.Mock()
+        laser_director.is_enabled.return_value = True
+        sm._laser_director = laser_director
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        self.assertIn("drop_spotlight", sm._led_blackout_owners)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "solo_hotcue")
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+
+        # Fail-open: role drops out of drop/post_drop -> window ends, LED
+        # blackout owner releases (never touching any OTHER owner).
+        sm._led_blackout_owners.add("led_mute_pad")
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=40.0, active_drop_beat=None, smart_drop_crossing=False,
+                                current_phrase_is_chorus=False, smart_post_drop_active=False),
+            impact_now=False,
+        )
+        self.assertNotIn("drop_spotlight", sm._led_blackout_owners)
+        self.assertIn("led_mute_pad", sm._led_blackout_owners)
+
+    def test_darkness_guard_downgrades_when_laser_masked(self) -> None:
+        sm, d = self._sm_with_plan(drops=(32.0, 96.0), tags=(32.5,))
+        sm._drop_presentation_base_live = True
+        laser_director = mock.Mock()
+        laser_director.is_enabled.return_value = True
+        sm._laser_director = laser_director
+        laser_executor = mock.Mock()
+        laser_executor.mask_owners_active.return_value = True  # laser muted/blacked out
+        sm._laser_executor = laser_executor
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_PLUS_LASERS)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "guard_fallback_both")
+        self.assertEqual(sm._led_blackout_owners, set())
+
+    def test_plan_unavailable_at_impact_fails_open_to_both(self) -> None:
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d = _deck_state(load_gen=9)
+        sm._deck = {1: d}
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        # Deliberately do NOT build a plan (ANLZ/tags never marked ready).
+        sm._drop_presentation_tick(
+            active=1, d=d, sp_state=_sp_state(), impact_now=True,
+        )
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_PLUS_LASERS)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "plan_unavailable")
+
+
+class SoloPadIntegrationTests(unittest.TestCase):
+    def test_arm_fire_learn_disarm_round_trip_via_real_event_dispatch(self) -> None:
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d = _deck_state(load_gen=5, smart_drops=[32, 96])
+        sm._deck = {1: d}
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        sm._drop_presentation_anlz_ready[1] = 5
+        sm._drop_presentation_tags_ready[1] = 5
+        sm._build_phrase_segments = lambda _d: ()
+        sm._maybe_build_drop_plan(1)
+        sm._drop_presentation_base_live = True
+        laser_director = mock.Mock()
+        laser_director.is_enabled.return_value = True
+        sm._laser_director = laser_director
+
+        # Press: nothing pending -> arms.
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        self.assertEqual(sm._drop_presentation_armed_key, (1, 5))
+
+        # Impact on the FIRST drop (32.0, otherwise leds_only by personality)
+        # -> manual arm wins the ladder and fires.
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "solo_manual")
+        self.assertIsNone(sm._drop_presentation_armed_key)  # one-shot, consumed
+        self.assertEqual(sm._drop_presentation_learned_store.beats_for_track("content-1"), (32.0,))
+
+        # Second press with nothing pending now arms again for the NEXT drop.
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        self.assertEqual(sm._drop_presentation_armed_key, (1, 5))
+        # Disarm: pressing again while armed clears it.
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        self.assertIsNone(sm._drop_presentation_armed_key)
+
+    def test_veto_of_pending_learned_solo_unlearns_it(self) -> None:
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d = _deck_state(load_gen=11, smart_drops=[64])
+        sm._deck = {1: d}
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        sm._drop_presentation_anlz_ready[1] = 11
+        sm._drop_presentation_tags_ready[1] = 11
+        sm._drop_presentation_tag_beats[1] = ()
+        sm._drop_presentation_learned_store._entries["content-1"] = [64.0]
+        sm._build_phrase_segments = lambda _d: ()
+        sm._maybe_build_drop_plan(1)
+
+        # Lookahead tick (not yet impact) caches the pending learned solo.
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=60.0, active_drop_beat=None, smart_drop_crossing=False,
+                next_smart_drop_beat=64.0, beats_to_next_drop=4.0,
+            ),
+            impact_now=False,
+        )
+        self.assertEqual(sm._drop_presentation_last_pending[:2], (LASERS_ONLY, "solo_learned"))
+
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        self.assertEqual(sm._drop_presentation_learned_store.beats_for_track("content-1"), ())
+        self.assertTrue(sm._drop_presentation_session.is_vetoed((1, 11), 64.0))
+
+        # The vetoed drop now falls through to personality/finale at impact.
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=64.0, active_drop_beat=64.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        self.assertNotEqual(sm._drop_presentation_last_actions.reason, "solo_learned")
+
+
+class ByteIdentityRegressionTests(unittest.TestCase):
+    def _drive(self, *, enabled: bool) -> tuple:
+        backend = _FakeBackend()
+        midi_input = _FakeInput()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=backend, midi_input=midi_input)
+        _enable_drop_presentation(sm, enabled=enabled)
+        _set(sm, ssid=SSID, elapsed_ms=100, playing=True, load_gen=1, active=1,
+             scripted_id=1, lighting_mode="scripted")
+        for _ in range(3):
+            sm._drive_pack_output()
+        return tuple(backend.frames)
+
+    def test_scripted_track_frames_are_byte_identical_regardless_of_enabled(self) -> None:
+        self.assertEqual(self._drive(enabled=True), self._drive(enabled=False))
+
+    def test_disabled_config_is_the_default_master_regression_gate(self) -> None:
+        # enabled: false must restore pre-policy behavior exactly -- confirm the
+        # ONLY seam (set_base_suppressed) is provably never reached when
+        # disabled, for a track that WOULD otherwise suppress if enabled.
+        backend = _FakeBackend()
+        midi_input = _FakeInput()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=backend, midi_input=midi_input)
+        _enable_drop_presentation(sm, enabled=False)
+        d = _deck_state(load_gen=4, smart_drops=[32, 96])
+        sm._deck = {1: d}
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        with mock.patch.object(sm._pack_runtime.player, "set_base_suppressed") as suppressed:
+            sm._drop_presentation_tick(
+                active=1, d=d,
+                sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+                impact_now=True,
+            )
+            suppressed.assert_not_called()
+
+
+class LearnedStorePersistenceTests(unittest.TestCase):
+    def test_fire_enqueues_to_a_background_writer_not_the_tick_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "learned.json"
+            sm = _make_sm()
+            _enable_drop_presentation(sm)
+            sm._drop_presentation_learned_writer.stop()
+            sm._drop_presentation_learned_writer.join(timeout=1.0)
+            from rb_ss_bridge_v2.led_palette_control import PaletteFeedbackWriter
+            sm._drop_presentation_learned_writer = PaletteFeedbackWriter(str(path), debounce_s=0.01)
+            sm._drop_presentation_learned_writer.start()
+            self.addCleanup(sm._drop_presentation_learned_writer.stop)
+
+            d = _deck_state(load_gen=2, smart_drops=[64])
+            sm._deck = {1: d}
+            sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+            sm._drop_presentation_anlz_ready[1] = 2
+            sm._drop_presentation_tags_ready[1] = 2
+            sm._build_phrase_segments = lambda _d: ()
+            sm._maybe_build_drop_plan(1)
+            sm._drop_presentation_armed_key = (1, 2)
+            sm._drop_presentation_base_live = True
+            laser_director = mock.Mock()
+            laser_director.is_enabled.return_value = True
+            sm._laser_director = laser_director
+
+            sm._drop_presentation_tick(
+                active=1, d=d,
+                sp_state=_sp_state(abs_beat=64.0, active_drop_beat=64.0, smart_drop_crossing=True),
+                impact_now=True,
+            )
+
+            import time
+            deadline = time.time() + 1.0
+            while time.time() < deadline and not path.exists():
+                time.sleep(0.01)
+            self.assertTrue(path.exists())
+            import json
+            on_disk = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn("content-1:64", on_disk)
+
+
+if __name__ == "__main__":
+    unittest.main()

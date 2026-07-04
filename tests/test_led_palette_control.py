@@ -144,6 +144,33 @@ class LedPaletteControlTests(unittest.TestCase):
         self.assertIn({"name": "white_sand", "note": 56, "rgb": [255, 235, 200], "state": "inactive"},
                       payload["palettes"])
 
+    def test_laser_solo_defaults_to_off_when_no_callback_supplied(self) -> None:
+        self.assertEqual(self.control.snapshot()["laser_solo"], "off")
+        self.assertEqual(self.control._control_payload()["laser_solo"]["state"], "inactive")
+
+    def test_laser_solo_reads_the_supplied_callback_live(self) -> None:
+        state = {"value": "off"}
+        control = LedPaletteControl(
+            engine=self.engine,
+            led_event_sink=self.events.append,
+            get_abs_beat=lambda: 8.0,
+            get_phrase_anchor=lambda _beat: 16.0,
+            get_laser_blackout=lambda: False,
+            get_laser_solo=lambda: state["value"],
+            control_notes={"laser_solo": 60},
+        )
+        self.addCleanup(control.stop)
+        self.assertEqual(control.snapshot()["laser_solo"], "off")
+        self.assertEqual(control._control_payload()["laser_solo"]["state"], "inactive")
+
+        state["value"] = "armed"
+        self.assertEqual(control.snapshot()["laser_solo"], "armed")
+        self.assertEqual(control._control_payload()["laser_solo"]["state"], "queued")
+
+        state["value"] = "active"
+        self.assertEqual(control.snapshot()["laser_solo"], "active")
+        self.assertEqual(control._control_payload()["laser_solo"]["state"], "active")
+
     def test_maybe_publish_only_submits_when_feedback_snapshot_changes(self) -> None:
         writer = _WriterStub.instances[-1]
         initial_count = len(writer.payloads)
