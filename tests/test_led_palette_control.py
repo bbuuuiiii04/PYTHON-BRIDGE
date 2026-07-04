@@ -141,8 +141,15 @@ class LedPaletteControlTests(unittest.TestCase):
         self.assertEqual(controls["rainbow"]["note"], 61)
         self.assertEqual(controls["rainbow"]["state"], "active")
         self.assertEqual(controls["lock"]["note"], 57)
-        self.assertIn({"name": "white_sand", "note": 56, "rgb": [255, 235, 200], "state": "inactive"},
-                      payload["palettes"])
+        ws = next(row for row in payload["palettes"] if row["name"] == "white_sand")
+        self.assertEqual(ws["note"], 56)
+        self.assertEqual(ws["rgb"], [255, 235, 200])
+        self.assertEqual(ws["state"], "inactive")
+        # fixed_rgb palettes ship a flat ramp; journey palettes span their range
+        self.assertEqual(len(ws["ramp"]), 8)
+        self.assertTrue(all(c == [255, 235, 200] for c in ws["ramp"]))
+        bc = next(row for row in payload["palettes"] if row["name"] == "blue_cyan")
+        self.assertNotEqual(bc["ramp"][0], bc["ramp"][-1])
 
     def test_laser_solo_defaults_to_off_when_no_callback_supplied(self) -> None:
         self.assertEqual(self.control.snapshot()["laser_solo"], "off")

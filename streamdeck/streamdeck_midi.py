@@ -362,11 +362,26 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False)
         return PILHelper.to_native_format(deck, image)
 
     if kind == "palette_pad":
-        # The color IS the label — no text. dim = available, bright+border =
-        # playing, pulsing border = queued, bright+pulsing border = arriving.
-        rgb = _normal_rgb(row.get("rgb"))
-        base = rgb if state in ("active", "fading") else _dim(rgb)
-        draw.rectangle([0, 0, w, h], fill=base)
+        # The color IS the label — no text. The pad shows the palette's RANGE
+        # as a left-to-right gradient (bridge ships an 8-sample ramp; flat rgb
+        # fallback for older feedback payloads). dim = available, bright +
+        # border = playing, pulsing border = queued (dim) / arriving (bright).
+        ramp = row.get("ramp")
+        if isinstance(ramp, list) and len(ramp) >= 2:
+            colors = [_normal_rgb(c) for c in ramp]
+        else:
+            colors = [_normal_rgb(row.get("rgb"))] * 2
+        bright = state in ("active", "fading")
+        if not bright:
+            colors = [_dim(c) for c in colors]
+        n = len(colors)
+        for x in range(w):
+            t = x / max(1, w - 1) * (n - 1)
+            i = min(int(t), n - 2)
+            f = t - i
+            c0, c1 = colors[i], colors[i + 1]
+            col = tuple(int(c0[j] + (c1[j] - c0[j]) * f) for j in range(3))
+            draw.line([x, 0, x, h], fill=col)
         if state == "active":
             draw.rectangle([3, 3, w - 4, h - 4], outline=(255, 255, 255), width=4)
         elif state in ("queued", "fading") and pulse:

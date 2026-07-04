@@ -250,6 +250,7 @@ class LedPaletteControl:
                 "name": name,
                 "note": int(note),
                 "rgb": list(self._palette_rgb(name, palette)),
+                "ramp": [list(c) for c in self._palette_ramp(name, palette)],
                 "state": state,
             })
         return result
@@ -289,6 +290,22 @@ class LedPaletteControl:
                 "state": state,
             }
         return controls
+
+    def _palette_ramp(self, name: str, palette: Any, samples: int = 8) -> list[tuple[int, int, int]]:
+        """Colors sampled across the palette's own p-interval — the pad shows
+        the palette's actual RANGE as a gradient, not one center point."""
+        if getattr(palette, "type", "journey") == "fixed_rgb" and getattr(palette, "rgb", None):
+            return [tuple(palette.rgb)] * samples
+        try:
+            lo, hi = self._engine._palette_p_interval(name)
+            config = self._engine._config
+            stops = self._engine._stop_positions
+            return [
+                _p_to_rgb(lo + (hi - lo) * i / (samples - 1), config.scale_stops, stops)
+                for i in range(samples)
+            ]
+        except Exception:
+            return [self._palette_rgb(name, palette)] * samples
 
     def _palette_rgb(self, name: str, palette: Any) -> tuple[int, int, int]:
         if getattr(palette, "type", "journey") == "fixed_rgb" and getattr(palette, "rgb", None):
