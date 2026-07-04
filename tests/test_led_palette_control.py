@@ -198,6 +198,30 @@ class LedPaletteControlTests(unittest.TestCase):
         self.control.maybe_publish()
         self.assertEqual(len(writer.payloads), queued_count + 1)
 
+    def test_override_with_no_beat_authority_applies_instantly(self) -> None:
+        # Idle / nothing playing: advance_fade never ticks (dispatch runs only
+        # while a deck plays), so an armed fade would freeze at 0% forever.
+        # The coordinator must apply instantly instead (manual wins NOW).
+        control = LedPaletteControl(
+            engine=LedColorEngine(_config(), set_seed=3),
+            led_event_sink=self.events.append,
+            get_abs_beat=lambda: None,
+            get_phrase_anchor=lambda _beat: None,
+            get_laser_blackout=lambda: False,
+            palette_notes={"blue_cyan": 51, "violet": 52},
+            control_notes={},
+        )
+        self.addCleanup(control.stop)
+        for _ in range(2):  # tap to queue, tap again to override (v1 gesture)
+            control.handle_event(BridgeEvent(
+                kind=Ev.LED_PALETTE_PAD, deck=0,
+                payload={"name": "blue_cyan"}, source="test",
+            ))
+        snap = control._engine.snapshot()
+        self.assertEqual(snap["current_palette"], "blue_cyan")
+        self.assertFalse(snap["fading"])
+        self.assertEqual(snap["queued_palette"], "")
+
     def test_palette_payload_never_invents_notes_for_unconfigured_palettes(self) -> None:
         control = LedPaletteControl(
             engine=LedColorEngine(_config(), set_seed=3),

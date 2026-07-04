@@ -177,7 +177,15 @@ class LedPaletteControl:
             return
         if intent == "override" or self._engine.snapshot().get("queued_palette") == name:
             start = self._get_abs_beat()
-            start_beat = float(start if start is not None else 0.0)
+            if start is None:
+                # No beat authority (idle / nothing playing): there is no beat
+                # to sync a fade to, and advance_fade only ticks while a deck
+                # plays — a fade armed here would freeze at 0% until playback.
+                # Manual input wins NOW: apply instantly (set_palette clears
+                # the queue, kills any fade, and holds the track).
+                self._engine.set_palette(name)
+                return
+            start_beat = float(start)
             anchor = self._get_phrase_anchor(start_beat)
             end_beat = min(anchor, start_beat + 32.0) if anchor is not None else start_beat + 32.0
             if end_beat <= start_beat:
