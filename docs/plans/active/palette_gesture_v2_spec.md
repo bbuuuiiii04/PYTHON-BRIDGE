@@ -118,10 +118,10 @@ that the operator's live config should mirror both edits.
 2. Padlock glyph: when `feedback["lock"]` is true, draw the padlock over the
    ACTIVE palette's pad (the row whose name == `current_palette`), on top of
    its full-color fill.
-3. Legible dim (authority rule 22 v2): replace the `0.22` linear crush with a
-   value-only dim — `colorsys.rgb_to_hsv`, keep H and S, `v' = max(0.42,
-   v * DIM_VALUE)` with module constant `DIM_VALUE = 0.5`, convert back.
-   A dim crimson must still read red; a dim deep_ocean still cyan.
+3. Legible dim (authority rule 22 v2): LANDED EARLY 2026-07-04 in the
+   pad-rendering redesign (`d20a622` — `_dim()` HSV value-only dim, plus the
+   glyph-first no-text rendering). Verify it is present; do NOT re-implement.
+   The old `0.22` linear crush no longer exists.
 4. Deck-local long-press cue: while a palette key is physically held, once the
    local hold time crosses the feedback file's `long_press_s`, render the
    padlock-pulse on that key (display only — the bridge's own measurement
