@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: fce1169
+last_verified_commit: 662fbb5
 last_verified_date: 2026-07-04
-validation_scope: software-only; Stream Deck palette control runtime command rail software-tested
+validation_scope: software-only; Stream Deck palette control runtime command rail plus AWR-121 gesture v2 interactions software-tested
 ---
 
 # Runtime Commands Subsystem
@@ -26,6 +26,11 @@ Stream Deck palette control (Package 2, 2026-07-04):
   Deck pad rail: `led_palette_queue`, `led_palette_override`, `led_palette_lock`,
   `led_palette_unlock`, and `led_rainbow_toggle`. They are software command surfaces only; accepted
   commands do not prove MIDI pad wiring, Govee output, or hardware-visible behavior.
+- AWR-121 changes only the physical Stream Deck palette-pad gesture: tap toggles queue/unqueue and
+  long-press takes-and-locks. The runtime commands remain explicit debug/control intents:
+  `led_palette_override` still performs the one-track override path, `led_palette_lock` and
+  `led_palette_unlock` stay separate commands, and the no-beat fallback for runtime override does
+  not implicitly lock.
 - `ValidationRunner._check_singleton()` derives the singleton result from one process count.
 
 SoundSwitch pack-player boundary (T7c/T7e):

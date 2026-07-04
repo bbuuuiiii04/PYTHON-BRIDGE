@@ -1,15 +1,16 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 963d370
+last_verified_commit: 662fbb5
 last_verified_date: 2026-07-04
-validation_scope: Package 2 behavior contract implemented and software-tested; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: Package 2 plus AWR-121 gesture v2 implemented and software-tested; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Palette Control Authority (Stream Deck surface)
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; Package 2 is implemented/software-tested under
-`streamdeck_palette` in `docs/agents/change_contracts.yml` (operator hardware validation pending).
+Status: AUTHORITATIVE TARGET BEHAVIOR; Package 2 and AWR-121 gesture v2 are
+implemented/software-tested under `streamdeck_palette` in
+`docs/agents/change_contracts.yml` (operator hardware validation pending).
 
 This document defines how the operator's Stream Deck color-control surface is
 expected to behave. Behavior that differs from this document is a regression
@@ -64,12 +65,12 @@ beyond 4 are dropped with a visible log line, never silently.
 
 ## Palette Selection Rules
 
-> **GESTURE v2 (operator-approved 2026-07-04 evening; NOT YET IMPLEMENTED —
-> AWR-121, `docs/plans/active/palette_gesture_v2_spec.md`).** Rules 1-4 and
-> 7-10 below define the approved v2 surface. The implemented v1 surface
-> (tap-queue / second-tap-override / dedicated lock pad, landed in Package 2)
-> remains the correct LIVE behavior until the v2 package lands; divergence
-> from v2 is not a regression until then.
+> **GESTURE v2 (operator-approved 2026-07-04 evening; implemented/software-tested
+> under AWR-121, `docs/plans/active/palette_gesture_v2_spec.md`).** Rules 1-4
+> and 7-10 below define the current software behavior. The retired v1 surface
+> was tap-queue / second-tap-override / dedicated lock pad; runtime commands
+> keep their explicit debug semantics, but the physical Stream Deck surface now
+> uses tap-toggle plus long-press take-and-hold.
 
 1. **Tap** (press shorter than `long_press_s`, default 0.5 s) toggles the
    queue: tap queues that palette for the next track boundary (replacing any
@@ -219,10 +220,9 @@ display state and a monotonic sequence number.
 
 ## Required Behavior Tests
 
-1. (v2) Tap queues → boundary applies it; tap the queued pad again → unqueued,
+1. Tap queues → boundary applies it; tap the queued pad again → unqueued,
    nothing applies at the boundary; tap-queue replaces any other queued
-   palette. (v1 until AWR-121 lands: second tap = override, per Package 2's
-   shipped tests.)
+   palette.
 2. Fade completes at the phrase anchor; caps at 32 beats without an anchor;
    never leaves the allowed hue space; cancels cleanly at a track boundary.
 3. Queue while locked: applies at the boundary, lock transfers, stays locked.

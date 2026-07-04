@@ -1,14 +1,14 @@
 ---
 doc_status: current
-truth_level: code-verified for Packages 2-3; design-intent for anything still unimplemented
-last_verified_commit: 963d370
+truth_level: code-verified for Packages 2-3 and AWR-121; design-intent for anything still unimplemented
+last_verified_commit: 662fbb5
 last_verified_date: 2026-07-04
-validation_scope: Packages 2-3 software-tested; hardware-unvalidated
+validation_scope: Packages 2-3 plus AWR-121 gesture v2 software-tested; hardware-unvalidated
 ---
 
 # Stream Deck Palette Control — Design Spec (pre-handoff)
 
-> **Status: PACKAGES 2-3 IMPLEMENTED / SOFTWARE-TESTED.**
+> **Status: PACKAGES 2-3 + AWR-121 GESTURE v2 IMPLEMENTED / SOFTWARE-TESTED.**
 > Roles: Claude authored this design (planning); **Codex implemented Package 2 bridge code; Claude
 > implemented Package 3 (drop presentation policy, this-repo-instance, 2026-07-04) per an
 > operator-sanctioned exception** — see `docs/architecture/drop_presentation_authority.md` for the
@@ -19,8 +19,9 @@ validation_scope: Packages 2-3 software-tested; hardware-unvalidated
 > Per AGENTS.md §1, **code wins over this doc** — verify every claim against current code.
 > Claims are labelled **confirmed / assumed / unknown / operator-decided**.
 
-This is current truth for Packages 2 and 3. Package 3 (Laser Solo pad, zero-RNG auto-solo tiers,
-finale guarantee, track personality, learned-solo memory) is now implemented/software-tested — see
+This is current truth for Packages 2, 3, and AWR-121 gesture v2. Package 3
+(Laser Solo pad, zero-RNG auto-solo tiers, finale guarantee, track personality,
+learned-solo memory) is now implemented/software-tested — see
 `docs/architecture/drop_presentation_authority.md` for the authoritative ladder and
 `docs/subsystems/laser.md` / `docs/subsystems/led_govee.md` for the current code-verified summary.
 Track personality and laser-color behavior beyond what those two cards describe remain design-intent
@@ -35,10 +36,11 @@ color engine** now and the **laser color engine** when it exists. This is the **
 surface"** the color-engine spec already designed (`docs/plans/completed/led_color_engine_spec.md`
 §8 :343-356) — we are wiring an already-specified API, not inventing one.
 
-In scope (v1, LED):
-- Top-row pads select **color palettes**; a two-tap gesture **queues** (next track) then
-  **overrides** (current track, applied as a beat-synced fade completing at the next phrase —
-  C.2); a dedicated pad **locks/unlocks**.
+In scope (LED):
+- Top-row pads select **color palettes**. The current AWR-121 gesture is tap-toggle
+  for queue/unqueue, and long-press (default 0.5 s) for take-and-hold: override-fade
+  now plus lock. The old Package 2 v1 two-tap override and dedicated lock pad are
+  retired on the physical deck surface.
 - A manual-only **`white_sand`** palette (Stream-Deck-only, never auto-selected) that renders LEDs
   white/off-white and drives lasers white.
 - **Mixer-style mute pads** (operator-directed 2026-07-04, naming accepted): two per-fixture
@@ -125,18 +127,20 @@ windows during scripted tracks; lasers stay fully authored (see laser doc Part A
 
 ## Part C — Architecture & locked decisions
 
-**1. Layout (LOCKED, operator 2026-07-04 — pinned rows, waterfall retired).** Stream Deck 3×5, ch3.
+**1. Layout (LOCKED, operator 2026-07-04 — pinned rows, waterfall retired; AWR-121
+gesture v2 removes the dedicated lock pad).** Stream Deck 3×5, ch3.
 - **Top row (keys 0-4)** = the 5 auto palettes in config order:
   `blue_cyan · deep_ocean · indigo · violet · crimson`.
-- **Row 2:** key 5 = `white_sand`, key 6 = lock/unlock, key 7 = LED mute (C.8),
+- **Row 2:** key 5 = `white_sand`, key 6 = dark/reserved, key 7 = LED mute (C.8),
   key 8 = Laser mute (C.8), key 9 = Laser Solo (C.9) — a mixer strip: mute, mute, solo.
 - **Bottom row:** keys 10-13 = static looks, **filling left→right** sorted by note (today: 3
   bound; overflow beyond 4 dropped with a log line). **Key 14 (bottom-right) = Rainbow mode
   toggle** (C.10) — the party button gets the corner.
 - **Palette/control pad notes are bridge-assigned, outside the 36-50 static-look range** so
   SS-learned bindings can never collide: ch2 notes **51-55** (palettes, config order), **56**
-  (`white_sand`), **57** (lock), **58** (LED mute), **59** (Laser mute), **60** (Laser Solo),
-  **61** (Rainbow mode).
+  (`white_sand`), **58** (LED mute), **59** (Laser mute), **60** (Laser Solo), and **61**
+  (Rainbow mode). Note **57** was the Package 2 v1 lock pad; AWR-121 makes `lock_note`
+  optional/back-compatible and leaves key 6 dark when it is absent.
   Declared once in bridge config (Part C.6) and carried to the deck via the feedback file
   (Part C.7) — the deck script hardcodes no palette names or notes.
 
@@ -470,13 +474,14 @@ points — do not implement from the older text above:
   indices (operator ruling — safer under re-analysis).
 - **`white_sand` color:** borrowed from the Dune Sand twinkle palette
   (`govee_frame_renderer.py:1758-1764`), Warm Ivory (255,235,200), Template Lab may refine.
-- **GESTURE v2 (operator-approved 2026-07-04 evening) supersedes C.2/C.3's two-tap-override +
+- **GESTURE v2 (operator-approved 2026-07-04 evening; implemented/software-tested by AWR-121)
+  supersedes C.2/C.3's two-tap-override +
   dedicated-lock-pad surface:** tap = queue/unqueue toggle; long-press (~0.5 s) = take-and-hold
   (override-fade + lock, padlock on the palette's own pad); tap the locked active pad = unlock;
   key 6 goes dark; idle swatches dim by HSV value only (hue stays readable). Contract:
   `palette_control_authority.md` rules 1-4/7-10 v2 banner; implementation:
-  `docs/plans/active/palette_gesture_v2_spec.md` (AWR-121, not yet implemented — Package 2's v1
-  gestures remain live behavior until it lands).
+  `docs/plans/active/palette_gesture_v2_spec.md` (AWR-121). Runtime commands still keep their
+  explicit queue/override/lock/unlock command semantics for debugging and pad-web rails.
 
 ## Part D.2 — Deck-surface hardening pass (2026-07-04 evening, post-incident debug)
 

@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 2cbca87
+last_verified_commit: 662fbb5
 last_verified_date: 2026-07-04
-validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2, and drop presentation policy Package 3 software-tested, hardware-unvalidated
+validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, and drop presentation policy Package 3 software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem
@@ -42,6 +42,12 @@ Stream Deck palette control (Package 2, 2026-07-04):
   LED mute owner semantics, Rainbow mode, the palette feedback file, and the pinned Stream Deck
   palette/control surface. This is SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED until the
   operator performs a deck-in-hand validation.
+- AWR-121 updates the physical palette gesture surface: palette pad note-on/down records the press,
+  note-off/up resolves tap versus long-press, tap queues or unqueues, tap on the locked active pad
+  unlocks, and long-press takes the palette now via the existing override fade and then locks it.
+  `long_press_s` is configurable in `color_engine.palette_control` (default 0.5 s). `lock_note`
+  is now optional/back-compatible; when absent, no `palette_lock_pad` binding is built and Stream
+  Deck key 6 renders dark. Runtime commands keep explicit queue/override/lock/unlock semantics.
 - 2026-07-04 evening hardening pass (post-incident, authority rules 25-27; detail in the design
   spec's Part D.2): deck script exception containment + read-thread liveness + stall watchdog,
   feedback lost/restored + layout-change transition logging, latch clear on bridge restart,
@@ -152,9 +158,9 @@ Tests:
 - Stream Deck palette control Package 2 coverage lives in `tests/test_led_palette_control.py`,
   `tests/test_streamdeck_midi.py`, `tests/test_soundswitch_midi_input.py`,
   `tests/test_runtime_status.py`, and the existing LED color-engine/config suites. It validates
-  queue/override/lock rail behavior, LED mute owner release, feedback writer/thread behavior,
-  pinned deck layout composition, MIDI pad event bindings, and runtime command parsing without
-  hardware.
+  queue/override/lock rail behavior, AWR-121 tap/long-press gesture behavior, LED mute owner
+  release, feedback writer/thread behavior, pinned deck layout composition, MIDI pad event
+  bindings, and runtime command parsing without hardware.
 - The shared `tools/pad_access.py` LAN-access payload (used by both pads' `GET /api/access`) is covered by `tests/test_pad_access.py` (pure-function, loopback/specific-IP/`0.0.0.0` detection cases), plus one HTTP smoke test each in `tests/test_led_pad_service.py` and `tests/test_laser_pad_web.py`.
 - Drop presentation policy Package 3 coverage lives in `tests/test_drop_presentation.py` (pure
   planner/ladder/session/learned-store/window-machine logic; the authority doc's Required Behavior
