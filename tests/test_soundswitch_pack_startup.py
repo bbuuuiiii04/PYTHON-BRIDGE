@@ -161,19 +161,25 @@ class StartupMatrixTests(unittest.TestCase):
         self.assertEqual(captured["idle"], 0.25)
         self.assertTrue(captured["parity_live"])
 
-    def test_partial_start_failures_stop_both_and_preserve_legacy_midi(self):
+    def test_partial_start_failures_preserve_independent_survivors(self):
         for input_fail, sender_fail in ((True, False), (False, True)):
             with self.subTest(input_fail=input_fail, sender_fail=sender_fail):
                 bundle, events, _ = self._build(
                     _result(), input_fail=input_fail, sender_fail=sender_fail,
                 )
-                self.assertIsNone(bundle.laser_backend)
-                self.assertIsNone(bundle.frame_sender)
-                self.assertIsNone(bundle.midi_input)
-                self.assertIn("sender.stop", events)
-                self.assertIn("input.stop", events)
                 if input_fail:
-                    self.assertNotIn("sender.start", events)
+                    self.assertIsInstance(bundle.laser_backend, PackOutputBackend)
+                    self.assertIsNotNone(bundle.frame_sender)
+                    self.assertIsNone(bundle.midi_input)
+                    self.assertEqual(bundle.reason, "pack")
+                    self.assertIn("input.stop", events)
+                    self.assertIn("sender.start", events)
+                else:
+                    self.assertIsNone(bundle.laser_backend)
+                    self.assertIsNone(bundle.frame_sender)
+                    self.assertIsNotNone(bundle.midi_input)
+                    self.assertEqual(bundle.reason, "pack_start_failed")
+                    self.assertIn("sender.stop", events)
 
     def test_missing_controller_input_degrades_but_pack_sender_starts(self):
         events = []
