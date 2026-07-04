@@ -39,6 +39,13 @@ runtime is bundled on the stick. The **full** bridge runs, not a stripped-down s
 - Bundle everything (PyInstaller) — no host Python/dependency install. `confirmed` choice.
 - Accept the one-time admin memory-grant on foreign Macs (not literally zero-trace). `confirmed` choice.
 - No notarization / no $99 (from `cross_platform_portability_plan.md`). Ad-hoc signing only.
+- **USB mode drives lighting via the bridge-native pack player (AWR-107), not SoundSwitch on the
+  host** (operator 2026-07-04, recorded at parking). Voids §5's "SoundSwitch host-side" bullet —
+  no SS install or SS-MIDI-input setup on foreign hosts; pack assets ride the stick, which §2(c)
+  already provides for. Foreign-host MIDI needs shrink to Stream Deck + bridge-internal look
+  wiring; Enttec DMX output (pyserial — an undeclared dependency, AWR-124 R5) joins the §2(b)
+  bundle-parity surface. Re-scope §2(b)/§5 at pickup; AWR-107's pending live hardware run becomes
+  a pickup dependency of this bundle.
 
 ## 2. "Operates normally" — the acceptance bar
 
