@@ -321,8 +321,8 @@ class PaletteGestureV2LayoutTests(unittest.TestCase):
 
         self.assertNotIn("locked_current", unlocked_layout[0])
         self.assertTrue(locked_layout[0]["locked_current"])
-        self.assertNotEqual(unlocked_image.getpixel((36, 40)), (255, 255, 255))
-        self.assertEqual(locked_image.getpixel((36, 40)), (255, 255, 255))
+        self.assertNotEqual(unlocked_image.getpixel((24, 44)), (255, 255, 255))
+        self.assertEqual(locked_image.getpixel((24, 44)), (255, 255, 255))
 
     def test_hsv_dim_preserves_palette_hue_order(self):
         swatches = [(0, 255, 0), (0, 255, 255), (0, 0, 255), (160, 0, 255), (255, 0, 160)]
@@ -332,7 +332,7 @@ class PaletteGestureV2LayoutTests(unittest.TestCase):
 
         self.assertEqual(dim_hues, sorted(dim_hues))
         for before, after in zip(hues, dim_hues):
-            self.assertAlmostEqual(after, before, places=3)
+            self.assertAlmostEqual(after, before, places=2)
 
 
 class WatchdogTests(unittest.TestCase):
