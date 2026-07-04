@@ -2445,11 +2445,13 @@ class StateManager(LEDDispatchPolicyMixin):
                     self._pack_last_static_layers = layers
                 if self._led_palette_control is not None:
                     self._led_palette_control.on_input_health(input_healthy)
+                    self._led_palette_control.maybe_publish()
             else:
                 blackout = smart_dark
                 player.set_masks(blackout=blackout, emergency=False)
                 if self._led_palette_control is not None:
                     self._led_palette_control.on_input_health(False)
+                    self._led_palette_control.maybe_publish()
             input_degraded = midi_input is not None and not input_healthy
 
             if soundswitch_connected and truth_sink is None:

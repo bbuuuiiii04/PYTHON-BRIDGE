@@ -40,6 +40,7 @@ separate config key in M3+.
 from __future__ import annotations
 
 import collections
+import colorsys
 import random
 import struct
 from hashlib import blake2b
@@ -109,6 +110,11 @@ def _blend_white(rgb: tuple[int, int, int], white: float) -> tuple[int, int, int
     g = int(round(rgb[1] + w * (255 - rgb[1])))
     b = int(round(rgb[2] + w * (255 - rgb[2])))
     return (r, g, b)
+
+
+def _hue_to_rgb(hue: float) -> tuple[int, int, int]:
+    r, g, b = colorsys.hsv_to_rgb(hue % 1.0, 1.0, 1.0)
+    return (int(round(r * 255)), int(round(g * 255)), int(round(b * 255)))
 
 
 # ---------------------------------------------------------------------------
@@ -545,11 +551,11 @@ class LedColorEngine:
             return result
         if palette.type == "rainbow":
             p = ((cycle % 64) / 64.0 + (_blake2b_int(f"{section_id}:{role}") % 997) / 997.0) % 1.0
-            rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
+            rgb = _hue_to_rgb(p)
             result = {"color": rgb}
             if multi:
-                result["color_a"] = _p_to_rgb((p + 0.33) % 1.0, self._config.scale_stops, self._stop_positions)
-                result["color_b"] = _p_to_rgb((p + 0.66) % 1.0, self._config.scale_stops, self._stop_positions)
+                result["color_a"] = _hue_to_rgb(p + 0.33)
+                result["color_b"] = _hue_to_rgb(p + 0.66)
             return result
 
         if look_name in self._config.locked_palette_by_look or self._mode_override is not None:
@@ -649,7 +655,7 @@ class LedColorEngine:
         if palette.type == "rainbow":
             return {
                 "slot_colors": [
-                    _p_to_rgb(((cycle + i) / 6.0) % 1.0, self._config.scale_stops, self._stop_positions)
+                    _hue_to_rgb((cycle + i) / 6.0)
                     for i in range(5)
                 ] + [(255, 255, 255)]
             }

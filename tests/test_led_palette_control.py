@@ -144,6 +144,33 @@ class LedPaletteControlTests(unittest.TestCase):
         self.assertIn({"name": "white_sand", "note": 56, "rgb": [255, 235, 200], "state": "inactive"},
                       payload["palettes"])
 
+    def test_maybe_publish_only_submits_when_feedback_snapshot_changes(self) -> None:
+        writer = _WriterStub.instances[-1]
+        initial_count = len(writer.payloads)
+
+        self.control.maybe_publish()
+        self.assertEqual(len(writer.payloads), initial_count)
+
+        self._pad("violet")
+        queued_count = len(writer.payloads)
+        self.engine.begin_dispatch(
+            active_deck=1,
+            load_gen=1,
+            content_id="track-a",
+            filepath="",
+            role="groove",
+            section_id="groove-1",
+            cycle=0,
+        )
+
+        self.control.maybe_publish()
+        self.assertEqual(len(writer.payloads), queued_count + 1)
+        self.assertEqual(writer.payloads[-1]["current_palette"], "violet")
+        self.assertEqual(writer.payloads[-1]["queued_palette"], "")
+
+        self.control.maybe_publish()
+        self.assertEqual(len(writer.payloads), queued_count + 1)
+
 
 class PaletteFeedbackWriterTests(unittest.TestCase):
     def test_writer_uses_background_thread_and_atomic_replace(self) -> None:

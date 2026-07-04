@@ -83,6 +83,7 @@ class LedPaletteControl:
         self._rainbow = False
         self._seq = 0
         self._last_input_healthy = True
+        self._last_feedback_body: dict[str, Any] | None = None
         self._logged_snapshot_error = False
         self._writer = PaletteFeedbackWriter(feedback_path)
         self._writer.start()
@@ -124,14 +125,23 @@ class LedPaletteControl:
         }
 
     def publish_feedback(self) -> None:
-        self._seq += 1
-        payload = {
+        self._publish_feedback(force=True)
+
+    def maybe_publish(self) -> None:
+        self._publish_feedback(force=False)
+
+    def _publish_feedback(self, *, force: bool) -> None:
+        body = {
             "schema": 1,
-            "seq": self._seq,
             **self.snapshot(),
             "palettes": self._palette_payload(),
             "controls": self._control_payload(),
         }
+        if not force and body == self._last_feedback_body:
+            return
+        self._last_feedback_body = body
+        self._seq += 1
+        payload = {**body, "seq": self._seq}
         self._writer.submit(payload)
 
     def _handle_palette(self, name: str, intent: str) -> None:

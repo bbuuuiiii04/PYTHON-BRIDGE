@@ -150,6 +150,18 @@ class _FakeInput:
         return self._snap
 
 
+class _FakePaletteControl:
+    def __init__(self):
+        self.health: list[bool] = []
+        self.publish_count = 0
+
+    def on_input_health(self, healthy):
+        self.health.append(bool(healthy))
+
+    def maybe_publish(self):
+        self.publish_count += 1
+
+
 class _RunClock:
     def __init__(self, start=100.0):
         self.now = start
@@ -251,6 +263,19 @@ class PackDriverTests(unittest.TestCase):
         sm._drive_pack_output()
         self.assertNotEqual(be.frames[-1], ZERO_FRAME)
         self.assertEqual(be.frames[-1][0], 200)  # CH1 of static look slot 8
+
+    def test_palette_feedback_maybe_publish_runs_with_input_health_tick(self):
+        be = _FakeBackend()
+        inp = _FakeInput()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        palette = _FakePaletteControl()
+        sm._led_palette_control = palette
+        _set(sm, ssid="", playing=False, active=0, snap=FRESH)
+
+        sm._drive_pack_output()
+
+        self.assertEqual(palette.health, [True])
+        self.assertEqual(palette.publish_count, 1)
 
     def test_dead_controller_does_not_block_stream_deck_static_in_pack(self):
         # End-to-end regression for the group-health poison: a held Stream Deck static

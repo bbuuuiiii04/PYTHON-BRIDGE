@@ -1205,6 +1205,39 @@ class TestResolveSlotColors(unittest.TestCase):
         self.assertEqual(locked[5], (255, 255, 255))
         self.assertTrue(all(color[0] >= color[2] for color in locked[:5]))
 
+
+class TestRainbowPalette(unittest.TestCase):
+    def test_rainbow_uses_full_hue_wheel_for_color_and_slots(self) -> None:
+        palettes = dict(_DEFAULT_PALETTES)
+        palettes["rainbow"] = Palette(type="rainbow", weight=0.0)
+        engine = LedColorEngine(_make_config(palettes=palettes), set_seed=7)
+        engine.set_mode_override({"*": "rainbow"})
+
+        colors = [
+            engine.resolve_color(
+                role="drop",
+                section_id="rainbow-section",
+                cycle=cycle,
+                look_name="rainbow_look",
+                color_source="engine",
+            )["color"]
+            for cycle in range(64)
+        ]
+        slots = engine.resolve_slot_colors(
+            role="drop",
+            section_id="rainbow-section",
+            cycle=0,
+            look_name="rainbow_look",
+            color_source="engine",
+        )["slot_colors"]
+
+        def warm(rgb: tuple[int, int, int]) -> bool:
+            r, g, b = rgb
+            return r > 180 and g > 120 and b < 80
+
+        self.assertTrue(any(warm(rgb) for rgb in colors), colors)
+        self.assertTrue(any(warm(rgb) for rgb in slots[:5]), slots)
+
 # ---------------------------------------------------------------------------
 # Module-level import sanity
 # ---------------------------------------------------------------------------
