@@ -43,6 +43,9 @@ In scope (v1, LED):
   (≥ +10), or the **night's record runway**; untagged tracks get a fixed **lighting personality**
   from their own structure (lasers on the track's biggest drops, dark on the rest; last true drop
   always at least LED+laser) (C.9). No energy model, zero RNG.
+- **Rainbow mode pad** (operator-requested 2026-07-04, "fun crazy mode"): a toggle that remaps
+  colors by section — breakdowns/buildups go white/off-white (`white_sand`), grooves/drops/
+  post-drops go **rainbow** on LEDs and lasers alike (C.10).
 - **Visual feedback**: each pad renders an icon reflecting its palette/action and live state.
 - **Pinned pad layout** (operator 2026-07-04): palette pads stay on fixed keys; static-look pads
   move to the bottom row (replaces today's "waterfall" fill — see Part C.1).
@@ -120,11 +123,13 @@ windows during scripted tracks; lasers stay fully authored (see laser doc Part A
   `blue_cyan · deep_ocean · indigo · violet · crimson`.
 - **Row 2:** key 5 = `white_sand`, key 6 = lock/unlock, key 7 = LED mute (C.8),
   key 8 = Laser mute (C.8), key 9 = Laser Solo (C.9) — a mixer strip: mute, mute, solo.
-- **Bottom row (keys 10-14)** = static looks, **filling left→right** sorted by note (today: 3 bound).
-  Overflow beyond 5 is dropped with a log line.
+- **Bottom row:** keys 10-13 = static looks, **filling left→right** sorted by note (today: 3
+  bound; overflow beyond 4 dropped with a log line). **Key 14 (bottom-right) = Rainbow mode
+  toggle** (C.10) — the party button gets the corner.
 - **Palette/control pad notes are bridge-assigned, outside the 36-50 static-look range** so
   SS-learned bindings can never collide: ch2 notes **51-55** (palettes, config order), **56**
-  (`white_sand`), **57** (lock), **58** (LED mute), **59** (Laser mute), **60** (Laser Solo).
+  (`white_sand`), **57** (lock), **58** (LED mute), **59** (Laser mute), **60** (Laser Solo),
+  **61** (Rainbow mode).
   Declared once in bridge config (Part C.6) and carried to the deck via the feedback file
   (Part C.7) — the deck script hardcodes no palette names or notes.
 
@@ -216,7 +221,7 @@ the gesture is pure state:
   coordinator — event-driven on palette-state change, debounced ~50 ms. **Never from the 200 Hz
   push loop** (no-filesystem-I/O invariant, AGENTS §6).
 - **Schema (v1):** `{v: 1, lock: bool, led_blackout: bool, laser_blackout: bool,
-  laser_solo: "off"|"armed"|"active",
+  laser_solo: "off"|"armed"|"active", rainbow: bool,
   palettes: [{name, note, rgb: [r,g,b], state: "active"|"queued"|"inactive"|"fading"}], seq: int}`
   — list order = display order (5 palettes then `white_sand`); `rgb` = representative swatch
   computed by the engine (`_palette_center`/`_p_to_rgb` derivation); `seq` monotonic for staleness
@@ -348,6 +353,28 @@ the bridge already maps); stop at the first beat that is anything else. 32-beat 
   pads still work). First live set validates the defaults.
 - The `leds_only` base-suppression seam is laser-side plumbing (a per-drop selection withhold);
   the laser doc cross-references it. Everything else is zero laser code.
+
+**10. Rainbow mode pad (operator-requested 2026-07-04 — "fun crazy mode"; toggle, key 14 /
+note 61).** A section-mapped color override that rides machinery this design already builds:
+- **Toggle on → colors remap by phrase role**, the palette journey suspends: breakdown/buildup →
+  **`white_sand`** (the white/off-white palette this design already adds); groove/drop/post-drop
+  → **rainbow**.
+- **LED rainbow** = a new palette *type* `rainbow` cycling the **full hue wheel** — deliberately
+  bypassing the journey palettes' yellow/orange band exclusion (crazy mode gets the whole wheel;
+  flag: operator taste-check at Template Lab time). Small engine addition alongside the fixed-RGB
+  type `white_sand` already needs.
+- **Laser rainbow** = the CH8 **color-change / RGB color-change effect family** at a CH9 speed
+  (the taxonomy the operator supplied) instead of the nearest-of-7 quantizer — exact values
+  chart-gated (laser doc Part E #1/#10). Fires wherever lasers are already firing per the
+  presentation ladder.
+- **Mode changes COLORS, not presentation (default):** the ladder, mutes, solo, damper, and
+  personality all still apply — a `leds_only` drop stays LEDs-only, just rainbow. (Alternative,
+  operator's call later: "crazy = crazier" — mode forces LED+laser on all drops while on.)
+- **While on:** palette, lock, and `white_sand` pads go inactive (dimmed icons); the engine's
+  journey state is frozen untouched underneath and resumes exactly where it was on toggle-off.
+- **Scripted tracks:** unchanged rules — LEDs render only breakdown/buildup windows (white/
+  off-white under the mode); lasers stay authored (stand-down).
+- Feedback file: `rainbow: bool`; the pad renders a bright rainbow icon when on.
 
 ## Part D — Open items
 

@@ -313,6 +313,13 @@ for its whole window.)
    automation. Exact seam (selection withhold vs a suppress flag) is a Codex-spec detail; the
    invariant is: suppression must be indistinguishable from "no drop autoloop selected" and must
    never touch the blackout/emergency masks or their owners.
+10. **Rainbow mode (operator-requested 2026-07-04; chart-gated on the laser side).** While the
+    Stream Deck Rainbow toggle is on (`streamdeck_palette_control_design_spec.md` C.10), the
+    color layer replaces the nearest-of-7 quantizer with a **CH8 effect-family value** —
+    color-change / RGB color-change from the operator's taxonomy (Part B) — plus a CH9 speed,
+    wherever lasers fire per the presentation ladder. Exact CH8/CH9 values come from the chart
+    (#1); until then the mode is LED-only-implementable. Breakdown/buildup laser white is moot
+    (lasers dark there by authoring); scripted stand-down unchanged.
 
 ## Part F — Evidence (file:line, HEAD `bd96b32`)
 
