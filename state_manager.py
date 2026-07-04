@@ -65,6 +65,7 @@ from .models import (
 )
 from . import led_dispatch_policy as _led_dispatch_policy
 from .led_dispatch_policy import LEDDispatchPolicyMixin
+from .led_palette_control import LedPaletteControl
 from .laser_models import LaserContext, LaserPersonality, LaserResolvedScene
 from .soundswitch_laser_player import (
     ZERO_FRAME as _PACK_ZERO_FRAME,
@@ -403,6 +404,17 @@ class StateManager(LEDDispatchPolicyMixin):
         self._native_log_key: tuple[Any, ...] = ()
         self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
         self._init_led_dispatch_state(led_look_director, led_scene_adapter, led_color_engine)
+        self._led_palette_control = (
+            LedPaletteControl(
+                engine=led_color_engine,
+                led_event_sink=self._handle_led_event,
+                get_abs_beat=self._palette_control_abs_beat,
+                get_phrase_anchor=self._palette_control_phrase_anchor,
+                get_laser_blackout=lambda: bool(self._pack_status_snapshot.get("blackout", False)),
+            )
+            if led_color_engine is not None
+            else None
+        )
         # Constant-time connectivity check; must not build a dict or call status().
         self._os2l_connected_provider = os2l_connected_provider
         self._live_bpm_follow = (
@@ -589,6 +601,8 @@ class StateManager(LEDDispatchPolicyMixin):
 
     def stop(self) -> None:
         self._stop.set()
+        if self._led_palette_control is not None:
+            self._led_palette_control.stop()
 
     def get_active_deck(self) -> int:
         return self._os.active_deck
@@ -637,6 +651,24 @@ class StateManager(LEDDispatchPolicyMixin):
                     for deck, values in self._published_snapshot.get("deck", {}).items()
                 },
             }
+
+    def _palette_control_abs_beat(self) -> float | None:
+        sp = self._last_sp_state
+        if sp is not None and sp.abs_beat is not None:
+            return float(sp.abs_beat)
+        return None
+
+    def _palette_control_phrase_anchor(self, start_beat: float) -> float | None:
+        sp = self._last_sp_state
+        if sp is not None and sp.phrase_anchor_target_beat is not None:
+            target = float(sp.phrase_anchor_target_beat)
+            if target > start_beat:
+                return target
+        snap = self._last_sp_snapshot
+        if snap is None:
+            return None
+        target = float(snap.phrase_anchor_last_beat + snap.phrase_anchor_period_beats)
+        return target if target > start_beat else None
 
     # ── Main loop ────────────────────────────────────────────────────────────
 
@@ -751,6 +783,15 @@ class StateManager(LEDDispatchPolicyMixin):
         color_engine_status["laser_mute"] = bool(
             self._pack_status_snapshot.get("blackout", False)
         )
+        palette_control_status = {}
+        if self._led_palette_control is not None:
+            try:
+                palette_control_status = self._led_palette_control.snapshot()
+            except Exception as exc:
+                palette_control_status = {
+                    "reason": "provider_error",
+                    "last_error": f"{type(exc).__name__}: {exc}",
+                }
         deck = {}
         for num, state in self._deck.items():
             deck[str(num)] = {
@@ -855,6 +896,7 @@ class StateManager(LEDDispatchPolicyMixin):
             ),
             "recording": self.recording_status(),
             "led_color_engine": color_engine_status,
+            "palette_control": palette_control_status,
             "deck": deck,
         }
         with self._snapshot_lock:
@@ -2386,9 +2428,13 @@ class StateManager(LEDDispatchPolicyMixin):
                 if layers != self._pack_last_static_layers:
                     player.set_static_layers(layers)
                     self._pack_last_static_layers = layers
+                if self._led_palette_control is not None:
+                    self._led_palette_control.on_input_health(input_healthy)
             else:
                 blackout = smart_dark
                 player.set_masks(blackout=blackout, emergency=False)
+                if self._led_palette_control is not None:
+                    self._led_palette_control.on_input_health(False)
             input_degraded = midi_input is not None and not input_healthy
 
             if soundswitch_connected and truth_sink is None:

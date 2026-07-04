@@ -90,6 +90,11 @@ echo '{"cmd":"run_validation"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
 | `led_blackout` | none | `reason`, `target` | Rejects unknown fields. `reason` and `target`, when present, must be non-empty strings. | Invokes LED blackout callback if wired. |
 | `led_clear_blackout` | none | none | Rejects all payload fields except `cmd`. | Clears LED blackout callback if wired. |
 | `led_clear_scene_override` | none | none | Rejects all payload fields except `cmd`. | Clears LED scene override callback if wired. |
+| `led_palette_queue` | `name` | none | `name` must be a non-empty palette name string. | Queues a palette through the StateManager event rail when wired; software command surface only. |
+| `led_palette_override` | `name` | none | `name` must be a non-empty palette name string. | Overrides/fades to a palette through the StateManager event rail when wired; software command surface only. |
+| `led_palette_lock` | none | none | Rejects all payload fields except `cmd`. | Locks the current LED palette through the palette-control event rail when wired. |
+| `led_palette_unlock` | none | none | Rejects all payload fields except `cmd`. | Unlocks LED palette automation through the palette-control event rail when wired. |
+| `led_rainbow_toggle` | none | none | Rejects all payload fields except `cmd`. | Toggles Rainbow mode through the palette-control event rail when wired. |
 | `set_soundswitch_pack` | `action` | `backend`, `enabled` | Rejects unknown fields. `action` must be `reload`\|`backend`\|`enable`. `backend` action requires `backend` ∈ `pack`\|`none`\|`midi`. `enable` action requires boolean `enabled`. | Validate-first pack reload/backend/enable via `SoundSwitchPackController` (command thread). Runtime `backend=midi` is deferred (sanitized `unsupported_action`). No implicit hot-enable; pack failure falls back to disabled/none, never MIDI. Status/errors are sanitized. |
 
 ## Parser behavior
