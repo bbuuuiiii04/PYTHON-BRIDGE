@@ -989,6 +989,42 @@ class TestLiveControlStubs(unittest.TestCase):
         for key in required:
             self.assertIn(key, snap, msg=f"snapshot() missing '{key}'")
 
+    def test_color_state_reads_anchor_without_mutating_engine(self) -> None:
+        palettes = dict(_DEFAULT_PALETTES)
+        palettes["white_sand"] = Palette(type="fixed_rgb", weight=0.0, rgb=(255, 235, 200))
+        palettes["rainbow"] = Palette(type="rainbow", weight=0.0)
+        e = LedColorEngine(_make_config(palettes=palettes), set_seed=42)
+        _dispatch(e, load_gen=1)
+        e.override_palette("red", start_beat=0.0, end_beat=8.0)
+        e.advance_fade(4.0)
+
+        before = (
+            e.snapshot(),
+            e._journey_rng.getstate(),
+            dict(e._prev_color),
+            e._anchor_p,
+            e._current_palette,
+        )
+        state = e.color_state()
+        after = (
+            e.snapshot(),
+            e._journey_rng.getstate(),
+            dict(e._prev_color),
+            e._anchor_p,
+            e._current_palette,
+        )
+
+        self.assertEqual(after, before)
+        self.assertEqual(state["rgb"], _p_to_rgb(e._anchor_p, e._config.scale_stops, e._stop_positions))
+        self.assertEqual(state["palette"], e._current_palette)
+        self.assertFalse(state["white_sand_active"])
+        self.assertFalse(state["rainbow_active"])
+
+        e.set_mode_override({"breakdown": "white_sand", "*": "rainbow"})
+        state = e.color_state()
+        self.assertTrue(state["white_sand_active"])
+        self.assertTrue(state["rainbow_active"])
+
     def test_lock_suppresses_dwell_decrement(self) -> None:
         """When locked, dwell_remaining does NOT decrease on track changes."""
         two_pal = {

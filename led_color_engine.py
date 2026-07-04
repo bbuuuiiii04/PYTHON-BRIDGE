@@ -806,6 +806,15 @@ class LedColorEngine:
         t = max(0.0, min(1.0, (float(abs_beat) - start) / (end - start)))
         self._anchor_p = self._fade_from_p + (target_p - self._fade_from_p) * t
 
+    def color_state(self) -> dict[str, Any]:
+        mapped = tuple((self._mode_override or {}).values())
+        return {
+            "rgb": _p_to_rgb(self._anchor_p, self._config.scale_stops, self._stop_positions),
+            "palette": self._current_palette,
+            "white_sand_active": self._current_palette == "white_sand" or "white_sand" in mapped,
+            "rainbow_active": self._mode_override is not None,
+        }
+
     def set_mode_override(self, mapping: dict[str, str]) -> None:
         if self._fade_from_p is not None and self._fade_target:
             self._apply_palette_now(self._fade_target)
