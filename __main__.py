@@ -591,9 +591,21 @@ def _start_soundswitch_pack_workers(
 ) -> SoundSwitchPackStartupBundle:
     """Start a fully constructed pack bundle after cleanup authority exists."""
     if bundle.reason == "artnet_truth_check":
+        midi_input = bundle.midi_input
+        if midi_input is not None:
+            try:
+                midi_input.start()
+            except Exception as exc:
+                try:
+                    midi_input.stop()
+                except Exception:
+                    pass
+                midi_input = None
+                log.warning(
+                    "[MAIN] soundswitch-pack disabled  reason=worker_start_failed  error=%s",
+                    type(exc).__name__,
+                )
         try:
-            if bundle.midi_input is not None:
-                bundle.midi_input.start()
             if bundle.truth_sink is not None:
                 bundle.truth_sink.start()
         except Exception as exc:
@@ -602,34 +614,42 @@ def _start_soundswitch_pack_workers(
                     bundle.truth_sink.stop()
                 except Exception:
                     pass
-            if bundle.midi_input is not None:
-                try:
-                    bundle.midi_input.stop()
-                except Exception:
-                    pass
             log.warning(
                 "[MAIN] soundswitch-pack disabled  reason=worker_start_failed  error=%s",
                 type(exc).__name__,
             )
             return SoundSwitchPackStartupBundle(
-                None, bundle.pack, bundle.player, None, None, "pack_start_failed",
+                None, bundle.pack, bundle.player, midi_input, None, "pack_start_failed",
                 None, bundle.truth_check_reason,
             )
+        if midi_input is not bundle.midi_input:
+            return SoundSwitchPackStartupBundle(
+                bundle.laser_backend, bundle.pack, bundle.player, midi_input,
+                bundle.frame_sender, bundle.reason, bundle.truth_sink,
+                bundle.truth_check_reason,
+            )
         return bundle
-    if bundle.reason != "pack" or bundle.midi_input is None or bundle.frame_sender is None:
+    if bundle.reason != "pack" or bundle.frame_sender is None:
         return bundle
+    midi_input = bundle.midi_input
+    if midi_input is not None:
+        try:
+            midi_input.start()
+        except Exception as exc:
+            try:
+                midi_input.stop()
+            except Exception:
+                pass
+            midi_input = None
+            log.warning(
+                "[MAIN] soundswitch-pack disabled  reason=worker_start_failed  error=%s",
+                type(exc).__name__,
+            )
     try:
-        # Controller inputs are confirmed ready first. Direct DMX is the final
-        # exclusive port and must also confirm open before pack mode is live.
-        bundle.midi_input.start()
         bundle.frame_sender.start()
     except Exception as exc:
         try:
             bundle.frame_sender.stop()
-        except Exception:
-            pass
-        try:
-            bundle.midi_input.stop()
         except Exception:
             pass
         log.warning(
@@ -637,7 +657,12 @@ def _start_soundswitch_pack_workers(
             type(exc).__name__,
         )
         return SoundSwitchPackStartupBundle(
-            None, bundle.pack, bundle.player, None, None, "pack_start_failed",
+            None, bundle.pack, bundle.player, midi_input, None, "pack_start_failed",
+        )
+    if midi_input is not bundle.midi_input:
+        return SoundSwitchPackStartupBundle(
+            bundle.laser_backend, bundle.pack, bundle.player, midi_input,
+            bundle.frame_sender, bundle.reason,
         )
     return bundle
 
