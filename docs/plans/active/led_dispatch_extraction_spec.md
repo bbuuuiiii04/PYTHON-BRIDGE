@@ -1,7 +1,7 @@
 # Codex Implementation Spec - LED Dispatch Extraction (P5)
 
-status: planned
-last_verified_commit: 85aac85
+status: implemented (software-tested)
+last_verified_commit: bd1370a
 owner: operator (Brandon) via Claude Fable 5 orchestration session 2026-07-03
 
 Two phases, **one commit per phase** (P1 → P2). Every claim below was re-verified against HEAD
