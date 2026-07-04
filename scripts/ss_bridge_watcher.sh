@@ -284,6 +284,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'cleanup; exit 0' INT TERM
 
+if [ -z "${WATCHER_NO_LOOP:-}" ]; then
 while true; do
     if [ "$MANUAL_MODE" = "1" ]; then
         if [ "$MONITOR_OPENED" -eq 1 ] && ! monitor_open; then
@@ -298,9 +299,8 @@ while true; do
                 exit 0
             fi
             start_manual_terminal_bridge
-        else
-            start_streamdeck
         fi
+        start_streamdeck
         sleep 3
         continue
     fi
@@ -324,3 +324,4 @@ while true; do
     fi
     sleep 3
 done
+fi
