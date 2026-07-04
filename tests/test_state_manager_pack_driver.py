@@ -420,6 +420,7 @@ class PackDriverTests(unittest.TestCase):
         )
         # Live-like laser executor: HOLDS the active autoloop scene every call.
         sm._laser_executor = SimpleNamespace(
+            mask_owners_active=lambda: False,
             current_autoloop_scene=lambda: _resolved_scene())
         _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")
 
@@ -882,6 +883,7 @@ class PackDriverTests(unittest.TestCase):
         be = _FakeBackend()
         sm = _make_sm(player=LaserPackPlayer(_native_pack()), backend=be)
         sm._laser_executor = SimpleNamespace(
+            mask_owners_active=lambda: False,
             current_autoloop_scene=lambda: _resolved_scene(reason="latched_active")
         )
         _set(sm, ssid="", playing=True, scripted_id=0, lighting_mode="autoloop")

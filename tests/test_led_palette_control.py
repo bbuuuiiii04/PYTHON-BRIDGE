@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import threading
+import time
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from rb_ss_bridge_v2.led_color_engine import LedColorEngine
+from rb_ss_bridge_v2.led_models import ColorEngineConfig, Palette
+from rb_ss_bridge_v2.led_palette_control import LedPaletteControl, PaletteFeedbackWriter
+from rb_ss_bridge_v2.models import BridgeEvent, Ev
+from rb_ss_bridge_v2.streamdeck import streamdeck_midi as sd
+
+
+def _config() -> ColorEngineConfig:
+    return ColorEngineConfig(
+        enabled=True,
+        scale_stops={
+            "cyan": (0, 255, 255),
+            "blue": (0, 0, 255),
+            "purple": (160, 0, 255),
+            "magenta": (255, 0, 160),
+            "red": (255, 0, 0),
+        },
+        palettes={
+            "blue_cyan": Palette(range=("cyan", "blue"), weight=2.0, dwell=1),
+            "violet": Palette(range=("blue", "purple"), weight=1.0, dwell=1),
+            "white_sand": Palette(type="fixed_rgb", weight=0.0, rgb=(255, 235, 200)),
+            "rainbow": Palette(type="rainbow", weight=0.0),
+        },
+    )
+
+
+class _WriterStub:
+    instances: list["_WriterStub"] = []
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        self.payloads: list[dict] = []
+        self.stopped = False
+        _WriterStub.instances.append(self)
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def submit(self, payload: dict) -> None:
+        self.payloads.append(payload)
+
+
+class LedPaletteControlTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _WriterStub.instances.clear()
+        self.events: list[BridgeEvent] = []
+        self.engine = LedColorEngine(_config(), set_seed=3)
+        patcher = mock.patch("rb_ss_bridge_v2.led_palette_control.PaletteFeedbackWriter", _WriterStub)
+        self.addCleanup(patcher.stop)
+        patcher.start()
+        self.control = LedPaletteControl(
+            engine=self.engine,
+            led_event_sink=self.events.append,
+            get_abs_beat=lambda: 8.0,
+            get_phrase_anchor=lambda _beat: 16.0,
+            get_laser_blackout=lambda: False,
+            palette_notes={"blue_cyan": 51, "violet": 52, "white_sand": 56, "rainbow": 61},
+            control_notes={"lock": 57, "led_mute": 58, "laser_mute": 59, "laser_solo": 60, "rainbow": 61},
+        )
+
+    def tearDown(self) -> None:
+        self.control.stop()
+
+    def _pad(self, name: str, intent: str = "") -> None:
+        self.control.handle_event(BridgeEvent(
+            kind=Ev.LED_PALETTE_PAD,
+            deck=0,
+            payload={"name": name, "intent": intent},
+            source="test",
+        ))
+
+    def test_queue_same_pad_overrides_consumes_queue_and_fades(self) -> None:
+        self._pad("violet")
+        self.assertEqual(self.engine.snapshot()["queued_palette"], "violet")
+
+        self._pad("violet")
+        snap = self.engine.snapshot()
+
+        self.assertEqual(snap["queued_palette"], "")
+        self.assertTrue(snap["fading"])
+        self.assertEqual(snap["fade_target"], "violet")
+
+    def test_queue_applies_under_lock_and_lock_transfers(self) -> None:
+        self.control.handle_event(BridgeEvent(
+            kind=Ev.LED_PALETTE_LOCK_PAD,
+            deck=0,
+            payload={"intent": "lock"},
+            source="test",
+        ))
+        self._pad("violet")
+
+        self.engine.begin_dispatch(
+            active_deck=1,
+            load_gen=1,
+            content_id="track-a",
+            filepath="",
+            role="groove",
+            section_id="groove-1",
+            cycle=0,
+        )
+        snap = self.engine.snapshot()
+
+        self.assertEqual(snap["current_palette"], "violet")
+        self.assertTrue(snap["lock"])
+        self.assertEqual(snap["queued_palette"], "")
+
+    def test_mute_owner_isolated_and_input_health_releases_only_pad_owner(self) -> None:
+        self.control.handle_event(BridgeEvent(kind=Ev.LED_MUTE_PAD, deck=0, payload={}, source="test"))
+        self.assertEqual(self.events[-1].kind, Ev.LED_BLACKOUT)
+        self.assertEqual(self.events[-1].payload["reason"], "led_mute_pad")
+
+        self.control.on_input_health(False)
+
+        self.assertEqual(self.events[-1].kind, Ev.LED_CLEAR_BLACKOUT)
+        self.assertEqual(self.events[-1].payload["reason"], "led_mute_pad")
+
+    def test_rainbow_freezes_palette_pads_and_feedback_carries_notes(self) -> None:
+        self.control.handle_event(BridgeEvent(kind=Ev.LED_RAINBOW_PAD, deck=0, payload={}, source="test"))
+        before = self.engine.snapshot()
+        self._pad("violet")
+        after = self.engine.snapshot()
+
+        self.assertEqual(after["queued_palette"], before["queued_palette"])
+        payload = _WriterStub.instances[-1].payloads[-1]
+        controls = payload["controls"]
+        self.assertEqual(controls["rainbow"]["note"], 61)
+        self.assertEqual(controls["rainbow"]["state"], "active")
+        self.assertEqual(controls["lock"]["note"], 57)
+        self.assertIn({"name": "white_sand", "note": 56, "rgb": [255, 235, 200], "state": "inactive"},
+                      payload["palettes"])
+
+
+class PaletteFeedbackWriterTests(unittest.TestCase):
+    def test_writer_uses_background_thread_and_atomic_replace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "palette.json"
+            writer = PaletteFeedbackWriter(str(path), debounce_s=0.01)
+            writer.start()
+            caller = threading.get_ident()
+            writer.submit({"schema": 1, "seq": 1})
+            deadline = time.time() + 1.0
+            while time.time() < deadline and not path.exists():
+                time.sleep(0.01)
+            writer.stop()
+            writer.join(timeout=1.0)
+
+            self.assertTrue(path.exists())
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["seq"], 1)
+            self.assertNotEqual(writer.ident, caller)
+            self.assertFalse(path.with_suffix(".json.tmp").exists())
+
+
+class StreamDeckPaletteLayoutTests(unittest.TestCase):
+    def test_feedback_blank_leaves_static_looks_only(self) -> None:
+        static = [
+            {"channel": sd.CHANNEL, "note": 36, "target_kind": "static_look", "interaction": "press", "name": "A"},
+            {"channel": sd.CHANNEL, "note": 37, "target_kind": "static_look", "interaction": "press", "name": "B"},
+            {"channel": sd.CHANNEL, "note": 38, "target_kind": "static_look", "interaction": "press", "name": "C"},
+            {"channel": sd.CHANNEL, "note": 39, "target_kind": "static_look", "interaction": "press", "name": "D"},
+            {"channel": sd.CHANNEL, "note": 40, "target_kind": "static_look", "interaction": "press", "name": "E"},
+        ]
+
+        layout = sd.compose_layout(None, static, key_count=15)
+
+        self.assertIsNone(layout[0])
+        self.assertEqual([sd.note_for(k, layout) for k in range(10, 14)], [36, 37, 38, 39])
+        self.assertIsNone(sd.note_for(14, layout))
+
+
+if __name__ == "__main__":
+    unittest.main()

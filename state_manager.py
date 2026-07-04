@@ -2394,9 +2394,7 @@ class StateManager(LEDDispatchPolicyMixin):
         try:
             smart_dark = False
             if self._laser_executor is not None:
-                mask_owners_active = getattr(self._laser_executor, "mask_owners_active", None)
-                if mask_owners_active is not None:
-                    smart_dark = bool(mask_owners_active())
+                smart_dark = bool(self._laser_executor.mask_owners_active())
             soundswitch_connected = bool(
                 self._os2l_connected_provider is not None
                 and self._os2l_connected_provider()
