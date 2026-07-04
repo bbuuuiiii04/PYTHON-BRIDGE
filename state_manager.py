@@ -414,6 +414,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._pack_last_static_layers: tuple[Any, ...] = ()
         self._pack_last_mail_drop_count: int = 0      # RW-4: monotonic mailbox-drop baseline
         self._pack_input_degraded_latched: bool = False  # RW-4: unified input-degradation latch
+        self._pack_input_health_logged_error: bool = False
         self._pack_play_hold_key: tuple[int, int, int, str] | None = None  # play identity (active, load_gen, scripted_id, norm_ssid)
         self._pack_play_hold_deadline: float = 0.0                 # monotonic deadline; paused-hold expires here
         self._pack_logged_error = False
@@ -2682,6 +2683,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._pack_last_static_layers = ()
         self._pack_frame_count = 0
         self._pack_logged_error = False
+        self._pack_input_health_logged_error = False
         self._reset_native_autoloop()
         self._publish_pack_status(
             runtime=self._pack_runtime,
@@ -2845,6 +2847,70 @@ class StateManager(LEDDispatchPolicyMixin):
         self._native_abs_beat_pos = None
         self._native_log_key = ()
 
+    def _update_pack_input_health(
+        self,
+        midi_input: Any,
+    ) -> tuple[bool, bool, tuple[Any, ...], bool, tuple[Any, ...]]:
+        try:
+            s = midi_input.snapshot()
+            worker_alive = bool(s.worker_alive)
+            err = s.error
+            drops = int(s.mail_drop_count)
+            held_layers = s.held_layers
+            if type(held_layers) is not tuple:
+                raise TypeError("held_layers must be an immutable tuple")
+            blackout_held = bool(s.blackout_held)
+            blackout_bindings = tuple(getattr(s, "blackout_bindings", ()))
+        except Exception:
+            self._pack_input_degraded_latched = True
+            raise
+        self._pack_last_mail_drop_count = drops
+        if not worker_alive:
+            self._pack_input_degraded_latched = True
+        if (
+            self._pack_input_degraded_latched
+            and worker_alive and err is None
+            and not held_layers and not blackout_held
+        ):
+            self._pack_input_degraded_latched = False
+        input_healthy = not self._pack_input_degraded_latched
+        input_degraded = not input_healthy
+        if self._led_palette_control is not None:
+            self._led_palette_control.on_input_health(input_healthy)
+            self._led_palette_control.maybe_publish()
+        return input_healthy, input_degraded, held_layers, blackout_held, blackout_bindings
+
+    def _drive_pack_input_health_inactive(self, rt: PackRuntime) -> None:
+        input_degraded = True
+        try:
+            _, input_degraded, _, _, _ = self._update_pack_input_health(rt.midi_input)
+            self._pack_input_health_logged_error = False
+        except Exception as exc:
+            self._pack_input_degraded_latched = True
+            if self._led_palette_control is not None:
+                try:
+                    self._led_palette_control.on_input_health(False)
+                    self._led_palette_control.maybe_publish()
+                except Exception:
+                    pass
+            if not self._pack_input_health_logged_error:
+                log.error(
+                    "[SM] pack input health error; marking degraded  error=%s",
+                    type(exc).__name__,
+                )
+                self._pack_input_health_logged_error = True
+        if bool(self._pack_status_snapshot.get("input_degraded", False)) == input_degraded:
+            return
+        self._publish_pack_status(
+            runtime=rt,
+            scripted_active=False,
+            static_held=False,
+            blackout=False,
+            autoloop_phase_blocked=False,
+            software_zero_frame=True,
+            input_degraded=input_degraded,
+        )
+
     def _drive_pack_output(self, now: float | None = None) -> None:
         """T7c/T7e: drive the pack player from authoritative deck state; submit one
         CH1-CH19 frame. READ-ONLY w.r.t. DeckState; fail-safe to ZERO; never raises
@@ -2855,6 +2921,8 @@ class StateManager(LEDDispatchPolicyMixin):
         rt = self._pack_runtime
         if rt is None or not rt.active:
             self._drop_presentation_base_live = False
+            if rt is not None and rt.midi_input is not None:
+                self._drive_pack_input_health_inactive(rt)
             return
         now = time.monotonic() if now is None else now
         # Drop presentation darkness-guard input (Task 4 items 3-4): defaults
@@ -2872,6 +2940,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._reset_laser_color_tick()
         truth_sink = getattr(rt, "truth_sink", None)
         input_healthy = True
+        input_degraded = False
         layers: tuple[Any, ...] = ()
         blackout = False
         blackout_bindings: tuple[str, ...] = ()
@@ -2904,41 +2973,26 @@ class StateManager(LEDDispatchPolicyMixin):
             #    quiet, healthy snapshot (worker alive, no error, no held layers, no
             #    blackout), so a stale layer cannot resurface on mere worker recovery.
             if midi_input is not None:
-                s = midi_input.snapshot()
-                worker_alive = bool(s.worker_alive)
-                err = s.error
-                drops = int(s.mail_drop_count)
-                held_layers = s.held_layers
-                if type(held_layers) is not tuple:
-                    raise TypeError("held_layers must be an immutable tuple")
-                blackout_held = bool(s.blackout_held)
-                self._pack_last_mail_drop_count = drops
-                if not worker_alive:
-                    self._pack_input_degraded_latched = True
-                if (
-                    self._pack_input_degraded_latched
-                    and worker_alive and err is None
-                    and not held_layers and not blackout_held
-                ):
-                    self._pack_input_degraded_latched = False
-                input_healthy = not self._pack_input_degraded_latched
+                (
+                    input_healthy,
+                    input_degraded,
+                    held_layers,
+                    blackout_held,
+                    snapshot_blackout_bindings,
+                ) = self._update_pack_input_health(midi_input)
                 blackout = (blackout_held if input_healthy else False) or smart_dark
-                blackout_bindings = tuple(getattr(s, "blackout_bindings", ())) if input_healthy else ()
+                blackout_bindings = snapshot_blackout_bindings if input_healthy else ()
                 layers = held_layers if input_healthy else ()
                 player.set_masks(blackout=blackout, emergency=False)
                 if layers != self._pack_last_static_layers:
                     player.set_static_layers(layers)
                     self._pack_last_static_layers = layers
-                if self._led_palette_control is not None:
-                    self._led_palette_control.on_input_health(input_healthy)
-                    self._led_palette_control.maybe_publish()
             else:
                 blackout = smart_dark
                 player.set_masks(blackout=blackout, emergency=False)
                 if self._led_palette_control is not None:
                     self._led_palette_control.on_input_health(False)
                     self._led_palette_control.maybe_publish()
-            input_degraded = midi_input is not None and not input_healthy
 
             if soundswitch_connected and truth_sink is None:
                 native_decision = self._native_autoloop.resolve(
@@ -3276,10 +3330,14 @@ class StateManager(LEDDispatchPolicyMixin):
                     type(exc).__name__,
                 )
                 self._pack_logged_error = True
+            input_degraded = bool(
+                getattr(rt, "midi_input", None) is not None
+                and self._pack_input_degraded_latched
+            )
             self._publish_pack_status(
                 runtime=rt,
                 scripted_active=False,
-                input_degraded=False,
+                input_degraded=input_degraded,
                 static_held=False,
                 blackout=False,
                 autoloop_phase_blocked=False,
