@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified for Packages 2-3 and AWR-121; design-intent for anything still unimplemented
-last_verified_commit: 662fbb5
+last_verified_commit: daa8804
 last_verified_date: 2026-07-04
 validation_scope: Packages 2-3 plus AWR-121 gesture v2 software-tested; hardware-unvalidated
 ---
@@ -474,14 +474,15 @@ points — do not implement from the older text above:
   indices (operator ruling — safer under re-analysis).
 - **`white_sand` color:** borrowed from the Dune Sand twinkle palette
   (`govee_frame_renderer.py:1758-1764`), Warm Ivory (255,235,200), Template Lab may refine.
-- **GESTURE v2 (operator-approved 2026-07-04 evening; implemented/software-tested by AWR-121)
-  supersedes C.2/C.3's two-tap-override +
-  dedicated-lock-pad surface:** tap = queue/unqueue toggle; long-press (~0.5 s) = take-and-hold
-  (override-fade + lock, padlock on the palette's own pad); tap the locked active pad = unlock;
-  key 6 goes dark; idle swatches dim by HSV value only (hue stays readable). Contract:
-  `palette_control_authority.md` rules 1-4/7-10 v2 banner; implementation:
-  `docs/plans/active/palette_gesture_v2_spec.md` (AWR-121). Runtime commands still keep their
-  explicit queue/override/lock/unlock command semantics for debugging and pad-web rails.
+- **Gesture v2 delta (AWR-121), 2026-07-04 — implemented/software-tested at `daa8804`,
+  suite 2941 OK:** supersedes C.2/C.3's two-tap-override + dedicated-lock-pad surface: tap =
+  queue/unqueue toggle; long-press (~0.5 s) = take-and-hold (override-fade + lock, padlock on the
+  palette's own pad); tap the locked active pad = unlock; key 6 goes dark; idle swatches dim by
+  HSV value only (hue stays readable). Current contract: `palette_control_authority.md` rules
+  1-4/7-10 v2 banner; implementation: `docs/plans/active/palette_gesture_v2_spec.md` (AWR-121).
+  Runtime commands still keep their explicit queue/override/lock/unlock command semantics for
+  debugging and pad-web rails. The running bridge still serves v1 until the operator restarts
+  the bridge and deck script; the deck-in-hand validation pass is the remaining gate.
 
 ## Part D.2 — Deck-surface hardening pass (2026-07-04 evening, post-incident debug)
 

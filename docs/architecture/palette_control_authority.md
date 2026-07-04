@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 662fbb5
+last_verified_commit: daa8804
 last_verified_date: 2026-07-04
 validation_scope: Package 2 plus AWR-121 gesture v2 implemented and software-tested; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
@@ -56,7 +56,7 @@ stay outside the 36-50 range SoundSwitch-learned static looks use.
 | Row | Keys | Pads |
 | --- | --- | --- |
 | Top | 0-4 | The 5 auto palettes, in config order. |
-| Middle | 5-9 | `white_sand` · lock (v1; **dark/reserved in v2** — the lock pad is retired, lock rides the palette long-press) · LED mute · Laser mute · Laser Solo. |
+| Middle | 5-9 | `white_sand` · key 6 **dark** (the v1 lock pad is retired now that v2 is implemented — lock rides the palette long-press) · LED mute · Laser mute · Laser Solo. |
 | Bottom | 10-13, 14 | Static looks filling left→right by note; key 14 = Rainbow mode. |
 
 The layout is **pinned**. Pads never auto-rearrange when new SoundSwitch
@@ -66,11 +66,14 @@ beyond 4 are dropped with a visible log line, never silently.
 ## Palette Selection Rules
 
 > **GESTURE v2 (operator-approved 2026-07-04 evening; implemented/software-tested
-> under AWR-121, `docs/plans/active/palette_gesture_v2_spec.md`).** Rules 1-4
-> and 7-10 below define the current software behavior. The retired v1 surface
-> was tap-queue / second-tap-override / dedicated lock pad; runtime commands
-> keep their explicit debug semantics, but the physical Stream Deck surface now
-> uses tap-toggle plus long-press take-and-hold.
+> at `daa8804` under AWR-121, `docs/plans/active/palette_gesture_v2_spec.md`).**
+> Rules 1-4 and 7-10 below define the current software behavior. The retired v1
+> surface was tap-queue / second-tap-override / dedicated lock pad; runtime
+> commands keep their explicit debug semantics, but the physical Stream Deck
+> surface now uses tap-toggle plus long-press take-and-hold. **The running
+> bridge still serves v1 live** — code landed but the operator has not yet
+> restarted the bridge and the deck script, and a deck-in-hand validation pass
+> is the remaining gate before this is trusted at the deck.
 
 1. **Tap** (press shorter than `long_press_s`, default 0.5 s) toggles the
    queue: tap queues that palette for the next track boundary (replacing any
@@ -226,7 +229,7 @@ display state and a monotonic sequence number.
 2. Fade completes at the phrase anchor; caps at 32 beats without an anchor;
    never leaves the allowed hue space; cancels cleanly at a track boundary.
 3. Queue while locked: applies at the boundary, lock transfers, stays locked.
-4. (v2) Long-press = take-and-hold: fades now, consumes the queue, locks the
+4. Long-press = take-and-hold: fades now, consumes the queue, locks the
    target (mid-fade lock pins on completion); long-press another palette
    transfers the lock; tap the locked active pad → unlocked, color stays, no
    immediate re-pick; sub-threshold release = tap, never a take.

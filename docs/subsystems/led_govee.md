@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 662fbb5
+last_verified_commit: daa8804
 last_verified_date: 2026-07-04
 validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, and drop presentation policy Package 3 software-tested, hardware-unvalidated
 ---
