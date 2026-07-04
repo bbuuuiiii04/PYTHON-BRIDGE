@@ -113,6 +113,7 @@ def _color_map(**overrides) -> LaserColorMap:
             "purple": 60,
             "white": 70,
         },
+        "fixed_ch9": 0,
         "effects": {"rainbow_family": {"ch8": 80, "ch9": 100}},
         "settle": {"ease_beats": 8},
     }
@@ -290,9 +291,41 @@ class LaserColorMapperTests(unittest.TestCase):
         loaded = load_laser_color_map("config/laser_color_map.json")
         self.assertFalse(loaded.enabled)
         self.assertTrue(all(value is None for value in (loaded.fixed or {}).values()))
+        self.assertIsNone(loaded.fixed_ch9)
         rainbow = (loaded.effects or {}).get("rainbow_family", {})
         self.assertIsNone(rainbow.get("ch8"))
         self.assertIsNone(rainbow.get("ch9"))
+
+    def test_white_path_ch9_always_none_preserves_authored_speed(self) -> None:
+        # White (moment or white_sand) takes CH8 only; CH9 is left for whatever
+        # speed the pack already authored, regardless of fixed_ch9 configuration.
+        snap = self._snapshot({"rgb": (255, 0, 0)}, white_moment=True)
+        self.assertEqual(snap.ch8, 70)
+        self.assertIsNone(snap.ch9)
+        snap = self._snapshot({"rgb": (255, 0, 0), "white_sand_active": True})
+        self.assertIsNone(snap.ch9)
+
+    def test_quantized_path_ch9_null_fixed_ch9_leaves_channel_unset(self) -> None:
+        engine = LaserColorEngine(_color_map(fixed_ch9=None))
+        engine.update({"rgb": (250, 0, 0)}, white_moment=False, drop_phase=None, post_drop_progress=None)
+        snap = engine.snapshot()
+        self.assertEqual(snap.ch8, 10)
+        self.assertIsNone(snap.ch9)
+
+    def test_quantized_path_ch9_eases_configured_fixed_ch9_post_drop(self) -> None:
+        engine = LaserColorEngine(_color_map(fixed_ch9=200))
+        values = []
+        for progress in (0.0, 0.5, 1.0):
+            engine.update(
+                {"rgb": (250, 0, 0)},
+                white_moment=False,
+                drop_phase="post_drop",
+                post_drop_progress=progress,
+            )
+            values.append(engine.snapshot().ch9)
+        self.assertEqual(values, sorted(values, reverse=True))
+        self.assertEqual(values[0], 200)
+        self.assertEqual(values[-1], 0)
 
 
 class LaserColorPackMergeTests(unittest.TestCase):
@@ -323,6 +356,23 @@ class LaserColorPackMergeTests(unittest.TestCase):
         player.set_static_layers((_layer(8),))
         static = player.select_autoloop("SSAutoLoop8.ssfile", 0).frame
         self.assertEqual((static[7], static[8]), (8, 8))
+
+    def test_merge_writes_ch8_and_ch9_independently(self) -> None:
+        # ch9=None (e.g. white moments, or a null fixed_ch9) leaves CH9 authored
+        # while CH8 is still injected — and vice versa. Neither channel's
+        # validity gates the other; all-null still injects nothing anywhere.
+        player = LaserPackPlayer(_pack())
+        player.set_color_snapshot(LaserColorSnapshot(ch8=201, ch9=None, seq=1))
+        frame = player.select_autoloop("SSAutoLoop8.ssfile", 0).frame
+        self.assertEqual((frame[7], frame[8]), (201, 92))
+
+        player.set_color_snapshot(LaserColorSnapshot(ch8=None, ch9=202, seq=2))  # type: ignore[arg-type]
+        frame = player.select_autoloop("SSAutoLoop8.ssfile", 0).frame
+        self.assertEqual((frame[7], frame[8]), (82, 202))
+
+        player.set_color_snapshot(LaserColorSnapshot(ch8=None, ch9=None, seq=3))  # type: ignore[arg-type]
+        frame = player.select_autoloop("SSAutoLoop8.ssfile", 0).frame
+        self.assertEqual((frame[7], frame[8]), (82, 92))
 
     def test_missing_snapshot_clears_stale_injection_and_resuming_reinjects(self) -> None:
         player = LaserPackPlayer(_pack())

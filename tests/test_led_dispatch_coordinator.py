@@ -9,7 +9,10 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.govee_owner_state import GoveeOwnerStateMachine, OwnerState  # noqa: E402
-from rb_ss_bridge_v2.led_dispatch_coordinator import LEDDispatchCoordinator  # noqa: E402
+from rb_ss_bridge_v2.led_dispatch_coordinator import (  # noqa: E402
+    _DEFAULT_WHITE_TEMPLATES,
+    LEDDispatchCoordinator,
+)
 from rb_ss_bridge_v2.led_models import LEDLookDecision, LEDRateLimits  # noqa: E402
 
 
@@ -151,6 +154,27 @@ class LEDDispatchCoordinatorTests(unittest.TestCase):
         self.assertTrue(coordinator.last_white_moment())
 
         self.assertTrue(coordinator.trigger(_decision(scene_ref="groove_chase_blue", look="rt_groove_2")))
+        self.assertFalse(coordinator.last_white_moment())
+
+    def test_custom_white_template_from_loaded_map_is_flagged(self) -> None:
+        # A template name absent from the coordinator's own hardcoded defaults
+        # must still be recognized when it comes from the loaded LaserColorMap
+        # (config/laser_color_map.json's white_templates), proving the plumb.
+        self.assertNotIn("custom_white_flash", _DEFAULT_WHITE_TEMPLATES)
+        adapter = _Adapter()
+        runner = _Runner()
+        owner = GoveeOwnerStateMachine()
+        with patch.dict(os.environ, {"RBSS_LED_MIN_DWELL": "0"}):
+            coordinator = LEDDispatchCoordinator(
+                adapter, runner, owner, _Config(),
+                time_fn=lambda: 1000.0,
+                white_templates=("custom_white_flash",),
+            )
+
+        self.assertTrue(coordinator.trigger(_decision(scene_ref="custom_white_flash")))
+        self.assertTrue(coordinator.last_white_moment())
+
+        self.assertTrue(coordinator.trigger(_decision(scene_ref="drop_white_aggressive", look="rt_groove_2")))
         self.assertFalse(coordinator.last_white_moment())
 
     def test_realtime_to_cloud_handoff_stands_down_runner_then_triggers_cloud(self) -> None:

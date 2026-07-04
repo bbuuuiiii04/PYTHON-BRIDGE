@@ -39,6 +39,7 @@ class LEDDispatchCoordinator:
         config: LEDConfig,
         *,
         time_fn=None,
+        white_templates: Any = None,
     ) -> None:
         self._adapter = adapter
         self._runner = runner
@@ -47,7 +48,15 @@ class LEDDispatchCoordinator:
         self._time_fn = time_fn or time.monotonic
         self._tactical_blackout_count = 0
         self._realtime_trigger_count = 0
-        configured_white = getattr(config, "laser_color_white_templates", None)
+        # `white_templates` (explicit, from the loaded LaserColorMap — see
+        # laser_color_engine.load_laser_color_map) takes priority over a
+        # `laser_color_white_templates` attribute on `config`, which LEDConfig does
+        # not declare today; both fall back to the coordinator's own defaults.
+        configured_white = (
+            white_templates
+            if white_templates is not None
+            else getattr(config, "laser_color_white_templates", None)
+        )
         self._white_templates = frozenset(str(name) for name in (configured_white or _DEFAULT_WHITE_TEMPLATES))
         self._last_white_moment = False
 

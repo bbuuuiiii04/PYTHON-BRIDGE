@@ -30,7 +30,7 @@ DEFAULT_WHITE_TEMPLATES = (
 @dataclass(frozen=True)
 class LaserColorSnapshot:
     ch8: int
-    ch9: int
+    ch9: int | None
     seq: int
 
 
@@ -38,6 +38,7 @@ class LaserColorSnapshot:
 class LaserColorMap:
     enabled: bool = False
     fixed: Mapping[str, int | None] | None = None
+    fixed_ch9: int | None = None
     effects: Mapping[str, Mapping[str, int | None]] | None = None
     settle: Mapping[str, int] | None = None
     white_templates: tuple[str, ...] = DEFAULT_WHITE_TEMPLATES
@@ -62,6 +63,7 @@ class LaserColorMap:
         return cls(
             enabled=bool(src.get("enabled", False)),
             fixed={name: _byte_or_none(fixed_src.get(name)) for name in (*FIXED_COLOR_ORDER, "white")},
+            fixed_ch9=_byte_or_none(src.get("fixed_ch9")),
             effects={
                 "rainbow_family": {
                     "ch8": _byte_or_none(rainbow_src.get("ch8")),
@@ -116,13 +118,15 @@ class LaserColorEngine:
         white_moment: bool,
         drop_phase: str | None,
         post_drop_progress: float | None,
-    ) -> tuple[int, int] | None:
+    ) -> tuple[int, int | None] | None:
         if not self._map.enabled:
             return None
         fixed = self._map.fixed or {}
         if white_moment or bool(state.get("white_sand_active")):
             ch8 = fixed.get("white")
-            return None if ch8 is None else (ch8, 0)
+            # White preserves whatever speed (CH9) is already authored — None means
+            # "leave that channel alone" at the merge seam (soundswitch_laser_player).
+            return None if ch8 is None else (ch8, None)
         if bool(state.get("rainbow_active")):
             rainbow = (self._map.effects or {}).get("rainbow_family", {})
             ch8 = rainbow.get("ch8")
@@ -137,7 +141,9 @@ class LaserColorEngine:
         ch8 = fixed.get(name)
         if ch8 is None:
             return None
-        return (ch8, self._settled_ch9(0, drop_phase, post_drop_progress))
+        fixed_ch9 = self._map.fixed_ch9
+        ch9 = None if fixed_ch9 is None else self._settled_ch9(fixed_ch9, drop_phase, post_drop_progress)
+        return (ch8, ch9)
 
     def _settled_ch9(self, ch9: int, drop_phase: str | None, progress: float | None) -> int:
         ease_beats = int((self._map.settle or {}).get("ease_beats", 0) or 0)

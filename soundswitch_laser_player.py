@@ -117,16 +117,28 @@ def _apply_events(document: LoadedDocument, initial: tuple[int, ...], predicate)
     return tuple(frame)
 
 
+def _valid_channel_byte(value: object) -> bool:
+    return type(value) is int and 0 <= value <= 255
+
+
 def _merge_color_snapshot(frame: tuple[int, ...], snapshot: object | None) -> tuple[int, ...]:
+    """Overwrite CH8/CH9 independently; a channel with no valid byte is left authored.
+
+    ``snapshot.ch9`` may be ``None`` (e.g. white moments preserve authored speed;
+    a null ``fixed_ch9`` config leaves the quantized-color path's CH9 untouched).
+    An absent/invalid snapshot injects nothing on either channel.
+    """
     if snapshot is None:
         return frame
     ch8 = getattr(snapshot, "ch8", None)
     ch9 = getattr(snapshot, "ch9", None)
-    if type(ch8) is not int or type(ch9) is not int or not 0 <= ch8 <= 255 or not 0 <= ch9 <= 255:
+    if not _valid_channel_byte(ch8) and not _valid_channel_byte(ch9):
         return frame
     merged = list(frame)
-    merged[7] = ch8
-    merged[8] = ch9
+    if _valid_channel_byte(ch8):
+        merged[7] = ch8
+    if _valid_channel_byte(ch9):
+        merged[8] = ch9
     return tuple(merged)
 
 

@@ -75,6 +75,7 @@ from .midi_output import MidiOutput
 from .artnet_truth import ArtNetTruthSink, load_truth_check_env
 from .soundswitch_frame_sender import SoundSwitchFrameSender
 from .soundswitch_laser_player import LaserPackPlayer
+from .laser_color_engine import load_laser_color_map
 from .soundswitch_midi_input import SoundSwitchMidiInputGroup
 from .soundswitch_pack_loader import LoadedPack, load_pack
 from .soundswitch_pack_runtime import PackRuntime
@@ -741,6 +742,7 @@ def _build_led_startup_wiring(
                 realtime_runner,
                 GoveeOwnerStateMachine(),
                 cfg,
+                white_templates=load_laser_color_map().white_templates,
             )
     except Exception as exc:
         log.warning("[MAIN] led-startup-failed  err=%s", exc)
