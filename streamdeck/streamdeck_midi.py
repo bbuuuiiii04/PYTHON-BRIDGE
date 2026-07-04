@@ -308,6 +308,70 @@ def _changed_keys(prev_layout, next_layout) -> set[int]:
             != (next_layout[key] if key < len(next_layout) else None)}
 
 
+def _reconcile_static_latches(
+    layout,
+    feedback: dict | None,
+    active_keys: set[tuple[int, int]],
+    recent_local: dict[tuple[int, int], float],
+    now: float,
+) -> tuple[set[int], list[str]]:
+    """Adopt bridge static-look truth into the deck-local latch set.
+
+    Bridge truth is authoritative (SoundSwitchMidiInputAdapter._layers, not
+    the deck's own double-tracking) once the feedback payload carries
+    `static_held`. Feedback lacking that key (old bridge) is a no-op — the
+    deck's existing local-only latch behavior is unchanged, so this composes
+    with (does not replace) the seq-regression clear in FeedbackWatch.
+
+    A key the operator pressed within STATIC_LATCH_LOCAL_ECHO_S is left alone
+    so a fresh local toggle is not visibly reverted before bridge truth
+    arrives (propagation is ~1s; the grace window covers it with margin).
+
+    Mutates `active_keys` in place. Returns the set of deck key indices whose
+    latch changed (for the caller's redraw set) and zero-or-one human log
+    line — only on an actual transition, never per idle tick.
+    """
+    if not isinstance(feedback, dict) or "static_held" not in feedback:
+        return set(), []
+    raw = feedback.get("static_held")
+    bridge_held = {
+        (int(row["channel"]), int(row["note"]))
+        for row in (raw if isinstance(raw, list) else [])
+        if isinstance(row, dict)
+        and isinstance(row.get("channel"), int)
+        and isinstance(row.get("note"), int)
+    }
+    changed_keys: set[int] = set()
+    added = 0
+    removed = 0
+    for key, row in enumerate(layout):
+        if not isinstance(row, dict) or row.get("target_kind") != "static_look":
+            continue
+        note = row.get("note")
+        if not isinstance(note, int):
+            continue
+        pad_key = (CHANNEL, note)
+        echo_at = recent_local.get(pad_key)
+        if echo_at is not None and now - echo_at < STATIC_LATCH_LOCAL_ECHO_S:
+            continue
+        should_hold = pad_key in bridge_held
+        currently_held = pad_key in active_keys
+        if should_hold == currently_held:
+            continue
+        if should_hold:
+            active_keys.add(pad_key)
+            added += 1
+        else:
+            active_keys.discard(pad_key)
+            removed += 1
+        changed_keys.add(key)
+    messages = (
+        [f"static latch reconciled from bridge: +{added}/-{removed}"]
+        if added or removed else []
+    )
+    return changed_keys, messages
+
+
 def _watchdog(stop: threading.Event, tick: list[float]) -> None:
     # ponytail: process suicide + watcher respawn, not in-process recovery —
     # a hang here is wedged C-level USB I/O that no Python except can fix.
@@ -576,7 +640,10 @@ def acquire_deck(log_errors: bool = True):
     return None
 
 
-def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
+def make_on_key(
+    deck, port, sidecar_ref, active_keys: set[tuple[int, int]],
+    recent_local: dict[tuple[int, int], float] | None = None,
+):
     # Physical press/release only — independent of interaction type. active_keys
     # is the toggle LATCH (on's toggle branch flips it on press only; release
     # doesn't clear it), not the finger. Conflating the two here is the same
@@ -584,6 +651,13 @@ def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
     # check against the latch can ghost-render on a released key or miss a
     # genuine hold, depending on latch parity at press time.
     held_keys: set[tuple[int, int]] = set()
+    # recent_local is shared with the supervision loop's static-latch reconcile
+    # (_reconcile_static_latches) so a bridge-truth tick doesn't visibly
+    # revert a press the operator just made. None (tests that don't care)
+    # falls back to a private dict — no behavior change, nothing outside
+    # this closure ever reads it.
+    if recent_local is None:
+        recent_local = {}
 
     def schedule_hold_cue(key: int, row: dict) -> None:
         value = row.get("long_press_s", 0.5)
@@ -619,6 +693,7 @@ def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
                 held_keys.add(pad_key)
             else:
                 held_keys.discard(pad_key)
+            recent_local[pad_key] = time.monotonic()
             port.send(key_to_message(key, pressed, sidecar))
             if row["interaction"] == "toggle":
                 if pressed:
@@ -683,6 +758,9 @@ def main():
     # fresh-per-connection latch set would lie about bridge state. A bridge
     # restart (feedback seq regression, seen by FeedbackWatch) clears them.
     active_keys: set[tuple[int, int]] = set()
+    # Shared with on_key (make_on_key) so the reconcile below can see a fresh
+    # local press and hold off overwriting it with a contradicting bridge tick.
+    recent_local: dict[tuple[int, int], float] = {}
     watch = FeedbackWatch()
     tick = [time.monotonic()]
     threading.Thread(target=_watchdog, args=(stop, tick), daemon=True,
@@ -720,7 +798,8 @@ def main():
             port = mido.open_output(PORT_NAME, virtual=True)
             pulse = False
             _render_frame(deck, sidecar, range(deck.key_count()), active_keys, pulse)
-            deck.set_key_callback(make_on_key(deck, port, current_layout, active_keys))
+            deck.set_key_callback(
+                make_on_key(deck, port, current_layout, active_keys, recent_local))
             notes = [row["note"] for row in sidecar if isinstance(row, dict) and "note" in row]
             if notes:
                 log(f'"{PORT_NAME}" live - notes {min(notes)}-{max(notes)}, '
@@ -757,6 +836,11 @@ def main():
                 if changed:
                     with layout_lock:
                         sidecar = next_layout
+                reconciled_keys, reconcile_messages = _reconcile_static_latches(
+                    next_layout, feedback, active_keys, recent_local, time.monotonic(),
+                )
+                for message in reconcile_messages:
+                    log(message)
                 if clear_latches:
                     to_draw = set(range(deck.key_count()))
                 else:
@@ -765,6 +849,7 @@ def main():
                     # every 0.5s tick while one pad pulses.
                     to_draw = _changed_keys(prev_layout, next_layout) if changed else set()
                     to_draw |= _pulse_keys(sidecar)
+                to_draw |= reconciled_keys
                 _render_frame(deck, sidecar, to_draw, active_keys, pulse)
         except (TransportError, OSError) as exc:
             log(f"device error: {exc} - will reconnect")
