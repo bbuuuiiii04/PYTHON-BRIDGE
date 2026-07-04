@@ -944,6 +944,16 @@ class TestLiveControlStubs(unittest.TestCase):
         e.queue_palette("red")
         self.assertEqual(e.snapshot()["queued_palette"], "red")
 
+    def test_unqueue_palette_clears_only_matching_queue(self) -> None:
+        e = _engine(seed=42)
+        e.queue_palette("red")
+
+        e.unqueue_palette("green")
+        self.assertEqual(e.snapshot()["queued_palette"], "red")
+
+        e.unqueue_palette("red")
+        self.assertEqual(e.snapshot()["queued_palette"], "")
+
     def test_queue_palette_applied_on_next_track(self) -> None:
         e = _engine(seed=42)
         _dispatch(e, load_gen=1)

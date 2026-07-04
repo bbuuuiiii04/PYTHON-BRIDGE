@@ -9,7 +9,7 @@ validation_scope: >
   Windows field-data derivation, and any version-adaptive lookup mechanism are OUT OF SCOPE
   here (separate reader implementation/RE spec). Code claims verified against HEAD; external
   packaging/signing claims cited and labelled by confidence.
-work_status: planned
+work_status: parked — operator 2026-07-04: parked with the USB launcher final-project bundle (AWR-122); AWR-124 review findings R1-R11 + five composition stitches are NOT yet folded into this doc; re-verify all code claims at pickup
 ---
 
 # Cross-platform / cross-version portability — feasibility + plan (planning half)

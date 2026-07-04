@@ -301,6 +301,40 @@ class ProjectionPassThroughTests(unittest.TestCase):
         self.assertEqual(layout[0]["ramp"], [(0, 200, 255), (0, 80, 255)])
 
 
+class PaletteGestureV2LayoutTests(unittest.TestCase):
+    def test_layout_key_6_is_dark_and_lock_control_is_not_rendered(self):
+        layout = sd.compose_layout(_feedback(), STATIC_ROWS, key_count=15)
+
+        self.assertIsNone(layout[6])
+        self.assertNotIn(57, [row["note"] for row in layout if isinstance(row, dict)])
+
+    def test_padlock_draws_on_active_palette_only_when_locked(self):
+        unlocked = _feedback()
+        locked = _feedback()
+        locked["lock"] = True
+        with mock.patch.object(sd.PILHelper, "to_native_format",
+                               side_effect=lambda _deck, image: image):
+            unlocked_layout = sd.compose_layout(unlocked, STATIC_ROWS, key_count=15)
+            locked_layout = sd.compose_layout(locked, STATIC_ROWS, key_count=15)
+            unlocked_image = sd.render_key(FakeDeck(), 0, False, unlocked_layout)
+            locked_image = sd.render_key(FakeDeck(), 0, False, locked_layout)
+
+        self.assertNotIn("locked_current", unlocked_layout[0])
+        self.assertTrue(locked_layout[0]["locked_current"])
+        self.assertNotEqual(unlocked_image.getpixel((36, 40)), (255, 255, 255))
+        self.assertEqual(locked_image.getpixel((36, 40)), (255, 255, 255))
+
+    def test_hsv_dim_preserves_palette_hue_order(self):
+        swatches = [(0, 255, 0), (0, 255, 255), (0, 0, 255), (160, 0, 255), (255, 0, 160)]
+        hues = [sd.colorsys.rgb_to_hsv(*(part / 255.0 for part in rgb))[0] for rgb in swatches]
+        dim_hues = [sd.colorsys.rgb_to_hsv(*(part / 255.0 for part in sd._dim(rgb)))[0]
+                    for rgb in swatches]
+
+        self.assertEqual(dim_hues, sorted(dim_hues))
+        for before, after in zip(hues, dim_hues):
+            self.assertAlmostEqual(after, before, places=3)
+
+
 class WatchdogTests(unittest.TestCase):
     def _run_watchdog(self, stop, tick):
         exits = []

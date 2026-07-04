@@ -84,6 +84,24 @@ class LedPaletteControlTests(unittest.TestCase):
             source="test",
         ))
 
+    def _pad_phase(self, name: str, phase: str, now: float) -> None:
+        with mock.patch("rb_ss_bridge_v2.led_palette_control.time.monotonic",
+                        return_value=now):
+            self.control.handle_event(BridgeEvent(
+                kind=Ev.LED_PALETTE_PAD,
+                deck=0,
+                payload={"name": name, "phase": phase},
+                source="test",
+            ))
+
+    def _tap_v2(self, name: str, *, down: float = 10.0, up: float = 10.1) -> None:
+        self._pad_phase(name, "down", down)
+        self._pad_phase(name, "up", up)
+
+    def _hold_v2(self, name: str, *, down: float = 10.0, up: float = 10.6) -> None:
+        self._pad_phase(name, "down", down)
+        self._pad_phase(name, "up", up)
+
     def test_tap_same_pad_unqueues_without_fade(self) -> None:
         self._pad("violet")
         self.assertEqual(self.engine.snapshot()["queued_palette"], "violet")
@@ -94,6 +112,202 @@ class LedPaletteControlTests(unittest.TestCase):
         self.assertEqual(snap["queued_palette"], "")
         self.assertFalse(snap["fading"])
         self.assertEqual(snap["fade_target"], "")
+
+    def test_phase_tap_queues_and_replaces_existing_queue(self) -> None:
+        self._tap_v2("violet")
+        self.assertEqual(self.engine.snapshot()["queued_palette"], "violet")
+
+        self._tap_v2("blue_cyan", down=11.0, up=11.1)
+
+        self.assertEqual(self.engine.snapshot()["queued_palette"], "blue_cyan")
+
+    def test_phase_tap_again_unqueues_and_next_boundary_does_not_apply_it(self) -> None:
+        self._tap_v2("violet")
+        self._tap_v2("violet", down=11.0, up=11.1)
+
+        self.assertEqual(self.engine.snapshot()["queued_palette"], "")
+        self.engine.begin_dispatch(
+            active_deck=1,
+            load_gen=2,
+            content_id="track-b",
+            filepath="",
+            role="groove",
+            section_id="groove-1",
+            cycle=0,
+        )
+
+        self.assertEqual(self.engine.snapshot()["current_palette"], "blue_cyan")
+        self.assertEqual(self.engine.snapshot()["queued_palette"], "")
+
+    def test_phase_tap_locked_active_pad_unlocks_without_repick(self) -> None:
+        self.engine.set_palette("violet")
+        self.engine.lock()
+
+        self._tap_v2("violet")
+
+        snap = self.engine.snapshot()
+        self.assertFalse(snap["lock"])
+        self.assertEqual(snap["current_palette"], "violet")
+        self.assertEqual(snap["queued_palette"], "")
+
+    def test_phase_tap_different_pad_under_lock_queues_and_keeps_lock(self) -> None:
+        self.engine.set_palette("blue_cyan")
+        self.engine.lock()
+
+        self._tap_v2("violet")
+
+        snap = self.engine.snapshot()
+        self.assertTrue(snap["lock"])
+        self.assertEqual(snap["current_palette"], "blue_cyan")
+        self.assertEqual(snap["queued_palette"], "violet")
+
+    def test_phase_long_press_overrides_then_locks(self) -> None:
+        calls: list[str] = []
+        original_override = self.engine.override_palette
+        original_lock = self.engine.lock
+
+        def override_wrapper(*args, **kwargs):
+            calls.append("override")
+            return original_override(*args, **kwargs)
+
+        def lock_wrapper():
+            calls.append("lock")
+            return original_lock()
+
+        with mock.patch.object(self.engine, "override_palette",
+                               side_effect=override_wrapper), \
+                mock.patch.object(self.engine, "lock", side_effect=lock_wrapper):
+            self._hold_v2("violet")
+
+        snap = self.engine.snapshot()
+        self.assertEqual(calls, ["override", "lock"])
+        self.assertTrue(snap["lock"])
+        self.assertTrue(snap["fading"])
+        self.assertEqual(snap["fade_target"], "violet")
+        self.assertEqual(snap["queued_palette"], "")
+
+    def test_phase_long_press_consumes_existing_queue(self) -> None:
+        self._tap_v2("blue_cyan")
+        self.assertEqual(self.engine.snapshot()["queued_palette"], "blue_cyan")
+
+        self._hold_v2("violet")
+
+        snap = self.engine.snapshot()
+        self.assertTrue(snap["lock"])
+        self.assertEqual(snap["queued_palette"], "")
+        self.assertEqual(snap["fade_target"], "violet")
+
+    def test_phase_long_press_transfers_lock_to_another_palette(self) -> None:
+        self.engine.set_palette("blue_cyan")
+        self.engine.lock()
+
+        self._hold_v2("violet")
+        self.engine.advance_fade(16.0)
+
+        snap = self.engine.snapshot()
+        self.assertTrue(snap["lock"])
+        self.assertEqual(snap["current_palette"], "violet")
+        self.assertEqual(snap["fade_target"], "")
+
+    def test_phase_long_press_same_locked_palette_noops(self) -> None:
+        self.engine.set_palette("violet")
+        self.engine.lock()
+
+        with mock.patch.object(self.engine, "override_palette") as override, \
+                mock.patch.object(self.engine, "set_palette") as set_palette, \
+                mock.patch.object(self.engine, "lock") as lock:
+            self._hold_v2("violet")
+
+        override.assert_not_called()
+        set_palette.assert_not_called()
+        lock.assert_not_called()
+        self.assertEqual(self.engine.snapshot()["current_palette"], "violet")
+        self.assertTrue(self.engine.snapshot()["lock"])
+
+    def test_phase_long_press_without_beat_authority_applies_and_locks(self) -> None:
+        engine = LedColorEngine(_config(), set_seed=3)
+        control = LedPaletteControl(
+            engine=engine,
+            led_event_sink=self.events.append,
+            get_abs_beat=lambda: None,
+            get_phrase_anchor=lambda _beat: None,
+            get_laser_blackout=lambda: False,
+            palette_notes={"blue_cyan": 51, "violet": 52},
+            control_notes={},
+        )
+        self.addCleanup(control.stop)
+
+        def phase(name: str, value: str, now: float) -> None:
+            with mock.patch("rb_ss_bridge_v2.led_palette_control.time.monotonic",
+                            return_value=now):
+                control.handle_event(BridgeEvent(
+                    kind=Ev.LED_PALETTE_PAD,
+                    deck=0,
+                    payload={"name": name, "phase": value},
+                    source="test",
+                ))
+
+        phase("violet", "down", 20.0)
+        phase("violet", "up", 20.6)
+
+        snap = engine.snapshot()
+        self.assertEqual(snap["current_palette"], "violet")
+        self.assertTrue(snap["lock"])
+        self.assertFalse(snap["fading"])
+
+    def test_phase_subthreshold_release_and_missing_down_record_are_taps(self) -> None:
+        self._tap_v2("violet", down=10.0, up=10.49)
+        self.assertEqual(self.engine.snapshot()["queued_palette"], "violet")
+        self.engine.unqueue_palette("violet")
+
+        self._pad_phase("violet", "up", 12.0)
+
+        self.assertEqual(self.engine.snapshot()["queued_palette"], "violet")
+
+    def test_legacy_shape_empty_intent_is_a_tap(self) -> None:
+        self._pad("violet", intent="")
+
+        self.assertEqual(self.engine.snapshot()["queued_palette"], "violet")
+
+    def test_rainbow_makes_phase_pads_inert(self) -> None:
+        self.control.handle_event(BridgeEvent(kind=Ev.LED_RAINBOW_PAD, deck=0, payload={}, source="test"))
+        before = self.engine.snapshot()
+
+        self._pad_phase("violet", "down", 10.0)
+        self._pad_phase("violet", "up", 11.0)
+
+        self.assertEqual(self.engine.snapshot(), before)
+
+    def test_runtime_command_intents_keep_legacy_noops_and_no_beat_fallback(self) -> None:
+        self.control.handle_event(BridgeEvent(
+            kind=Ev.LED_PALETTE_PAD,
+            deck=0,
+            payload={"name": "", "intent": "queue"},
+            source="test",
+        ))
+        self.assertEqual(self.engine.snapshot()["queued_palette"], "")
+
+        engine = LedColorEngine(_config(), set_seed=3)
+        control = LedPaletteControl(
+            engine=engine,
+            led_event_sink=self.events.append,
+            get_abs_beat=lambda: None,
+            get_phrase_anchor=lambda _beat: None,
+            get_laser_blackout=lambda: False,
+            palette_notes={"blue_cyan": 51, "violet": 52},
+            control_notes={},
+        )
+        self.addCleanup(control.stop)
+        control.handle_event(BridgeEvent(
+            kind=Ev.LED_PALETTE_PAD,
+            deck=0,
+            payload={"name": "violet", "intent": "override"},
+            source="test",
+        ))
+
+        snap = engine.snapshot()
+        self.assertEqual(snap["current_palette"], "violet")
+        self.assertFalse(snap["lock"])
 
     def test_queue_applies_under_lock_and_lock_transfers(self) -> None:
         self.control.handle_event(BridgeEvent(
