@@ -1556,7 +1556,11 @@ def main() -> None:
         # construct backend/sender). Raises on failure so the controller keeps the old
         # runtime. No serial opens here — the controller starts the sender on publish.
         cfg_result = load_soundswitch_pack_player_config()
-        bundle = _build_soundswitch_pack_startup(cfg_result)
+        bundle = _build_soundswitch_pack_startup(
+            cfg_result,
+            event_sink=_pad_event_sink,
+            extra_midi_bindings=palette_control_bindings,
+        )
         if bundle.player is None or bundle.laser_backend is None:
             raise RuntimeError("pack_prepare_failed")
         if bundle.frame_sender is None and bundle.truth_sink is None:
