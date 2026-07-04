@@ -574,17 +574,12 @@ def _build_soundswitch_pack_startup(
                 frame_sender.stop()
             except Exception:
                 pass
-        if midi_input is not None:
-            try:
-                midi_input.stop()
-            except Exception:
-                pass
         log.warning(
             "[MAIN] soundswitch-pack disabled  reason=worker_start_failed  error=%s",
             type(exc).__name__,
         )
         return SoundSwitchPackStartupBundle(
-            None, pack, player, None, None, "pack_start_failed",
+            None, pack, player, midi_input, None, "pack_start_failed",
         )
     return SoundSwitchPackStartupBundle(
         backend, pack, player, midi_input, frame_sender, "pack",
