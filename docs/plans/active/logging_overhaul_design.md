@@ -342,8 +342,8 @@ watcher reopens it (§2.8).
 │ 21:14:03.6  D1 ▶ ss     midi-refire beat=128 src=phrase_anchor       │
 ├─ OPERATOR ───────────────────────────────────────────────────────────┤
 │ ✓ all quiet since 20:58:12                                           │  ← alert strip: green when
-└──────────────────────────────────────────────────────────────────────┘    empty; last 3 WARN+/health
-                                                                             + red flash + bell on ERROR
+└──────────────────────────────────────────────────────────────────────┘    empty; bell once + LATCHED
+                                                                             red until cleared/acked
 ```
 
 - **1 SHOW** (default): header (latest `perf.heartbeat` + stream-staleness age) + PERFORMANCE feed
