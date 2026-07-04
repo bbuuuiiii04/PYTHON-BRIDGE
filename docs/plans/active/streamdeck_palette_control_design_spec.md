@@ -226,12 +226,36 @@ the gesture is pure state:
   — list order = display order (5 palettes then `white_sand`); `rgb` = representative swatch
   computed by the engine (`_palette_center`/`_p_to_rgb` derivation); `seq` monotonic for staleness
   checks.
-- **The deck script reads + renders:** poll the file's mtime in its existing 1 Hz loop (and
-  immediately after its own presses); palette pads render swatch + name with state treatment
-  **active = highlighted, queued = pulsing/dim, inactive = muted**; lock pad renders a lock/unlock
-  glyph. The file also carries the pad layout (names + notes), so the deck script needs no bridge
-  config. File absent/stale → palette pads render blank (feature-off state); static-look pads are
+- **The deck script reads + renders:** poll the file's mtime in its existing supervision loop
+  (tightened to 0.5 s so pulses read as pulses) and immediately after its own presses. The file
+  also carries the pad layout (names + notes), so the deck script needs no bridge config. File
+  absent/stale → palette/control pads render blank (feature-off state); static-look pads are
   unaffected. Palette→color logic stays in the bridge; the script only draws.
+
+**Pad iconography (operator-requested 2026-07-04 — intuitive, practical, state-visible).**
+One universal state grammar across ALL pads, so every pad reads the same way at a glance:
+- **Bright/solid = engaged/on. Dim = available/off. Pulsing = pending/armed (something will
+  happen at the next boundary/drop — and on the Solo pad, pulsing means "press to cancel").**
+- **Every physical press flashes the pad white for ~150 ms** (tactile ack, replaces today's
+  blue tint), regardless of pad type.
+- All icons are **drawn programmatically with PIL** (the deck script already renders with PIL —
+  swatches, glyphs, and labels need no asset files, and palette colors come live from the
+  feedback file). The existing `icons/<n>.png` override mechanism stays for custom art.
+
+| Pad | Icon | Off/idle | On/engaged | Pending |
+|---|---|---|---|---|
+| Palettes (0-4) | color swatch + name | dim swatch | bright + white border (active) | pulsing (queued); override fade = pulse settling to bright |
+| `white_sand` (5) | sand-white swatch + "SAND" | dim | bright + border | pulsing (queued) |
+| Lock (6) | padlock drawn OVER the current palette's color | open padlock, dim | closed padlock, bright | — |
+| LED mute (7) | bulb/strip glyph + "LED" | dim gray | **solid red + slash** (mixer convention: lit = muted) | — |
+| Laser mute (8) | beam glyph + "LZR" | dim gray | **solid red + slash** | — |
+| Laser Solo (9) | starburst glyph, **amber** (mixer solo color) | dim amber | solid amber (solo firing now) | **pulsing amber = armed** (manual, hotcue, learned, gear-shift, or record — press to veto) |
+| Static looks (10-13) | look name label | dim | bright (held press / toggled on) | — |
+| Rainbow (14) | rainbow arc | desaturated, dim | full-color bright | — |
+
+Red is reserved for "a fixture is muted" (the two states worth noticing instantly), amber for
+solo, white for acknowledgment — nothing else uses those colors, so a glance at row 2 reads the
+whole room state.
 - *(Alternative considered: MIDI-back to the script — lower latency but needs an input port added;
   deferred in favor of the file. 1 s icon latency accepted; press feedback stays instant/local.)*
 
@@ -293,12 +317,13 @@ the bridge already maps); stop at the first beat that is anything else. 32-beat 
    `_extract_hot_cues(parsed)` in the same pattern as `_extract_pssi_phrases` (:227) reading the
    PCOB/PCO2 cue tags — *[assumed: cue comments present in the operator's exported ANLZ files;
    verify with one real file at spec time]*.
-4. **Learned solo (operator-accepted 2026-07-04) — the pad teaches.** Every manual solo is
-   recorded per `(content_id, drop_index)` in a small gitignored state file
-   (`local/state/laser_solo_learned.json`). After `solo_learn_threshold` (default 2) manual solos
-   on the same drop, it is promoted: that drop auto-solos on every future play, exactly like a
+4. **Learned solo (operator-accepted 2026-07-04; one-press learning per operator) — the pad
+   teaches.** Every manual solo is recorded per `(content_id, drop_index)` in a small gitignored
+   state file (`local/state/laser_solo_learned.json`). **One manual solo is enough** — solo a
+   drop once and it auto-solos on every future play (`solo_learn_threshold: 1`), exactly like a
    hotcue tag. The pad arms on track load so the intent is visible; the veto press (tier 2)
-   cancels AND un-learns. Per-track memory only — generalizes nothing across tracks.
+   cancels AND un-learns (the recovery path for an impulsive press that shouldn't stick).
+   Per-track memory only — generalizes nothing across tracks.
 5. **Gear-shift solo (operator-accepted 2026-07-04, operator-tuned).** When a master handover
    jumps the live BPM by ≥ `gearshift_bpm_jump` (default **+10**) **within that single mix** —
    incoming master's BPM vs the outgoing master's live BPM at the transition, never a drift
@@ -347,7 +372,7 @@ the bridge already maps); stop at the first beat that is anything else. 32-beat 
   can never latch either fixture dark.
 - **Config block** (proposed home `config/led_look_director.json` `/drop_presentation`):
   `{enabled: true, laser_ratio: 0.4, opening_tracks: 3, led_predark_beats: 4,
-  drop_window_cap_beats: 32, hotcue_marker: "LASER", solo_learn_threshold: 2,
+  drop_window_cap_beats: 32, hotcue_marker: "LASER", solo_learn_threshold: 1,
   gearshift_bpm_jump: 10, record_min_drops: 5, ws_handoff_enabled: false}`. All deterministic;
   `enabled: false` restores today's behavior exactly (every drop `leds_plus_lasers`; mute/solo
   pads still work). First live set validates the defaults.
@@ -401,8 +426,10 @@ note 61).** A section-mapped color override that rides machinery this design alr
 5. **white_sand handoff (operator: "flesh out more, then it could be added" — shipped DISABLED,
    `ws_handoff_enabled: false`).** Proposed flesh-out: holding `white_sand` continuously from
    inside a breakdown until the pre-dark point (≥ 16 beats of hold) makes the drop that ends it a
-   Laser Solo — the ritual completes; max once per track. Disabled by default because frequent
-   white_sand use would erode solo rarity; revisit after the operator feels the other tiers live.
+   Laser Solo — the ritual completes; max once per track. **Firing frequency if enabled: exactly
+   as often as the operator performs the full ritual — no hidden budget or cooldown; rarity is
+   entirely his white_sand discipline** (an every-breakdown white_sand habit would solo nearly
+   every track). Disabled by default; revisit after the other tiers are felt live.
 
 ## Part E — Evidence (file:line, HEAD `bd96b32`)
 
