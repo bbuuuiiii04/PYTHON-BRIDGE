@@ -48,19 +48,21 @@ input loss and lying pads are the two unforgivable failure modes.
    fixed: `pressed` = physical only; latch rides `latched`, honored only by
    static-look rows). The render smoke test passed booleans directly and
    never exercised the real caller.
-5. **UNEXPLAINED — your primary debug target.** `/tmp/streamdeck.log`:
-   `17:24:10 device error: Failed to write out report (-1) - will reconnect`
-   → the recovery instance came up `live - notes 36-43` (static-only layout:
-   `load_feedback_state()` returned None) while the bridge was up and the
-   feedback file heartbeat-fresh. Palette keys were unbound; the operator's
-   presses were silently dropped (`row is None → return`) — his "cannot
-   queue at all" window. Earlier instances (16:36, 16:50) also logged 36-43.
-   Explain why feedback read None at those instants (mtime race? time.time
-   vs writer cadence at exactly 10 s? exception class swallowed? layout
-   healed later but logline only prints once — did it heal?), then fix
-   whichever of these holds: the reader, the staleness window, the
-   once-only logline that hides recovery, and add a re-log on layout
-   change so a degraded layout is always visible in the log.
+5. **Static-only boots — mechanism CONFIRMED 17:44, hardening is yours.**
+   Every `live - notes 36-43` instance boots inside a bridge-restart (or
+   deck-restart-during-bridge-gap) window: the old bridge's heartbeat stops,
+   the feedback file crosses `FEEDBACK_STALE_S`, the deck boots, reads
+   stale → static-only layout, prints its ONE `live` logline — then heals
+   silently within ~1 s of the new bridge's first heartbeat (verified by
+   driving `load_feedback_state` + `compose_layout` against live files
+   while a "36-43" instance ran healed). The logline lies by omission,
+   which repeatedly masqueraded as a persistent input fault. Your work:
+   re-log whenever the composed layout gains/loses bound keys (state the
+   note range each time); consider logging feedback None→loaded
+   transitions; and audit the supervision loop's behavior under the USB
+   write-error flakiness this device showed (`Failed to write out report
+   (-1)` at 16:24:43 and 17:24:10) — a hung or thrown `set_key_image`
+   mid-heal must reconnect loudly, never freeze silently.
 
 ## Scope and evidence
 
