@@ -357,38 +357,81 @@ Codex plan; F5–F9 are Codex-plan content; F10–F12 are small but real.
 
 ---
 
-## Part 2 — Creative expansion (ranked; each idea = what / why it earns rent / cost)
+## Part 2 — Creative expansion (ranked; each idea = what / why it earns its complexity / cost)
+
+Ranked by operator value per unit of complexity, in this project's ethos: the best idea
+is the one that deletes work, the second-best is the one that reuses machinery the repo
+already has. The scope cut is deliberately ranked #1.
 
 ### Adopt now
 
-1. **"The stick is a key" — stage-to-scratch launch (F2's fix, framed as the product).**
-   What: first run copies the payload to internal scratch (cached by version), runs from
-   there; stick removable immediately; End Set wipes. Why: converts the worst live
-   failure (yank) into a non-event, fixes eject-blocked wipe, and makes every launch
-   after the first *faster* than running off USB. Cost: one staging step + version-keyed
-   cache dir (~15–45 s first copy, `assumed`); a progress line in the menubar during it.
+1. **Ship Guest-first: defer House Mac (permanent mode) until a House Mac exists.**
+   *(the temporary/permanent model itself, rethought — a delete, not an addition)*
+   What: v1 has **no first-run mode question**. Double-click → Guest run (leave no
+   trace). "Make this a House Mac…" ships later as a buried menu item, not a fork in the
+   first-run flow. Why it earns it: the mode choice lands on a non-engineer at the
+   moment of maximum time pressure, and the current population of House Macs is zero —
+   Brandon's own rig runs from the repo/watcher and friends' Macs are guests until
+   someone hosts repeatedly. Deferring deletes v1's entire launchd/BTM/uninstall surface
+   (F12), the scariest foreign-Mac moment ("Background items added" on someone else's
+   machine), and all of M3 — and the design's own build order already isolates M3, so
+   nothing is architecturally foreclosed; the locked decisions explicitly leave the two
+   modes challengeable. Cost: zero now; M3 later behind a trigger. Reversal condition:
+   the same friend hosts twice → build M3 then, with F12's mechanics ready on the shelf.
 2. **Show Doctor — one glanceable "Rig check" before doors.** What: menubar panel that
    probes and green/reds: RB running + build in the offsets table, SS running + OS2L
    connected, MIDI port present (or virtual port created), Govee cloud key + LAN reply,
    Stream Deck opened (Input Monitoring granted), Local Network state, memory grant
-   done. Why: F4/F7 failures are *silent*; this is the difference between "no lights,
-   no idea" and "one red row with a fix-it sentence" on a stranger's Mac at 21:45. Cost:
-   moderate — the bridge already computes most of it (`runtime_status`, midi
-   `degraded_reason`, pack status); this is aggregation + a few probes + strings. The
-   single highest UX-value item in this review.
-3. **Stick runbook as a stick file + operator-language mode names.** What:
-   `START HERE.html` on the stick root: the five host-prep steps (SS installed + project
-   + one-time MIDI mapping; RB running; permission cascade with "click Allow" framing;
-   Apple-silicon-only; never AirDrop the app). Rename modes: **"Guest Mac — leave no
-   trace"** / **"House Mac — auto-start when I plug in."** Why: §5 says "name it in the
-   operator runbook" but no runbook artifact exists anywhere in the design; the modes'
-   current names describe *mechanics*, not intent. Cost: near zero.
-4. **End Set button.** What: one menubar action — stop bridge → optional
-   save-diagnostics (idea 7) → wipe scratch + enumerated `/tmp` files (F8) → "Safe to
-   pull the stick" notification. Why: gives the temporary mode a *deliberate* ending
-   instead of an eject race; doubles as the trace-wipe proof moment (the friend watches
-   it clean up). Cost: small; every piece already exists as an operation.
-5. **$0 stable-identity experiment (timeboxed, in M1).** What: try signing with a free
+   done — each red row with a one-sentence fix. Why: F4/F7 failures are *silent*; this
+   is the difference between "no lights, no idea" and "one red row" on a stranger's Mac
+   at 21:45. Cost: moderate — the bridge already computes most of it (`runtime_status`,
+   midi `degraded_reason`, pack status); this is aggregation + a few probes + strings.
+   The highest UX-value *build* item in this review.
+3. **The stick is a key — stage-to-scratch launch.** *(F2's required change, kept here
+   because it is also the product's best behavior, not just a fix)* What: first run
+   copies the payload to internal scratch (cached by version), runs from there; the
+   stick is removable the moment the menubar appears; a "Setting up — one time, ~30 s"
+   progress line covers the copy so nobody double-clicks twice. Why: converts the worst
+   live failure (yank) into a non-event and makes every later launch faster than USB.
+   Cost: one staging step + version-keyed cache dir (~15–45 s first copy, `assumed`).
+4. **Crash posture: the lights keep playing, recovery is one click.** What: two halves.
+   (a) Make the existing fallback doctrine ("open SoundSwitch") automatic and *proven*:
+   M2's verify includes `kill -9` on the bridge mid-session → SoundSwitch continues its
+   own show, no stuck DMX frame, never frozen-dark. (b) The menubar already polls bridge
+   liveness every second — add a crash notification + a **Restart bridge** one-click,
+   and a red Doctor row. Why: this is the highest-value failure-recovery item because it
+   needs almost nothing — status polling and the restart path both exist; it turns a
+   mid-set death from booth-debugging into a ten-second blip the dance floor never
+   notices. Cost: a notification, a menu action, one M2 verify case.
+5. **Friend-facing consent card.** What: before the first Guest run (and before the
+   admin memory grant), one plain-language screen on *their* Mac: what the app reads
+   (Rekordbox's playback state), what it touches (lights on this network), what it
+   leaves (one admin approval + permission entries — nothing else after End Set), and
+   where Quit lives. The End Set completion notification is the matching receipt
+   ("Cleaned up — only the memory approval remains."). Why: it's the friend's machine
+   and the friend's admin password; thirty seconds of honesty converts the scariest
+   prompt an unsigned hobby app can make into an informed yes — and F8's fixes make the
+   claim literally true. Cost: one dialog + strings; zero new mechanism.
+6. **The stick presents itself: runbook, names, identity.** What: `START HERE.html` at
+   stick root — the five host-prep steps (SS installed + project + one-time MIDI
+   mapping; RB running; the permission cascade with "click Allow" framing;
+   Apple-silicon-only; never AirDrop the app) plus an "if macOS says it can't open"
+   rescue section (F11's Settings → Open Anyway path). Modes named **"Guest Mac — leave
+   no trace"** / **"House Mac — auto-start when I plug in."** Volume label, `.icns`, DMG
+   background so the thing reads as the *RBSS Show Stick*, not a folder of mystery
+   files. And one explicit decision: the Terminal tail monitor is **dev-only** — bundle
+   mode's answer is menubar status + an "Open log" item (no osascript/Automation prompt
+   on a stranger's Mac). Why: §5 promises a runbook no artifact backs; names are how a
+   non-engineer picks right; the monitor call closes a silent UX divergence. Cost: near
+   zero — an HTML file, strings, an icon.
+7. **End Set button.** What: one menubar action — stop bridge → optional show receipt
+   (idea 12) → wipe scratch + the enumerated fixed `/tmp` files (F8) → "Safe to pull the
+   stick." Why: gives Guest mode a *deliberate* ending instead of an eject race, and
+   it's the trace-wipe proof moment — the friend watches it clean up. Cost: small; every
+   piece already exists as an operation. (Later footnote: an idle auto-clean — bridge
+   idle + RB gone for hours → offer End Set — guards the "left it running on their Mac
+   overnight" case.)
+8. **$0 stable-identity experiment (timeboxed, in M1).** What: try signing with a free
    personal-team **Apple Development** cert instead of `-s -`; verify TCC grants survive
    a rebuild. Why: F4's re-grant-every-update churn disappears if it works — and it
    feeds the reader spec's grant-persistence question. Cost: ~an hour in M1; no $99, no
@@ -397,35 +440,74 @@ Codex plan; F5–F9 are Codex-plan content; F10–F12 are small but real.
 
 ### Adopt later
 
-6. **Update-on-insert for House Macs.** What: StartOnMount agent compares stick bundle
-   version vs installed copy; offers one-click update. Why: after F-fix iterations the
-   stick and installed copies *will* skew; this makes the stick the single source of
-   truth. Cost: version compare + staged copy + relaunch; wants idea 5 first (else every
-   update re-triggers the F4 cascade). Do after M3 proves permanent mode.
-7. **Save-diagnostics-to-stick.** What: menu action copying log tail, status snapshot,
-   and any session recording to `stick/diagnostics/<date>/`. Why: show-night bugs get
-   debugged at home with real evidence; pairs with the existing Record Session menu
-   item. Cost: small file copy; stick stays read-only except on explicit action.
-8. **Bundle the pad web tools as an optional entry mode.** What: `--run-pads` serving
-   `tools/laser_pad_web.py` / `led_pad_web.py` so the phone pads work on foreign Macs
-   too. Why: they're part of the live control surface at home; v1 greys the menu items
-   out (F6). Cost: another entry mode + LAN listener implications (F4 firewall note).
+9. **Lights-check without the decks (replay demo).** *(the flagship later feature)*
+   What: menubar **"Test the lights"** plays a bundled 60–90 s recorded session through
+   the real output stack — SoundSwitch rotation, look selection, laser scenes, LED/Govee
+   — with no Rekordbox needed. This is the parent plan's Phase-2 `ReplaySource` promoted
+   from test helper to show-day tool, plus one canned session file on the stick
+   (`session_replayer.py` already injects recorded events at the StateManager boundary —
+   the mechanism exists today; only the runtime selection doesn't). Why: the scariest
+   show-day question on a foreign Mac is "will the lights actually fire when the first
+   track drops?" — this answers it before the DJ gear is out of the bag, cleanly
+   separates bridge-works from host-config-broken for the Doctor to point at, and
+   doubles as the honest way to demo the rig to people. Why not now: rides plan Phase 2.
+   Cost: Phase-2 dependency + a recorded session + one menu item. Live-safety rule:
+   replay refuses to start while Rekordbox is running, so two drivers can never race.
+10. **Phone pad over QR — the forgot-the-Stream-Deck fallback.** What: once the pads
+    bundle (idea 15), "Control from phone" surfaces the existing QR flow (the AWR-113
+    QR/iOS work) so a phone becomes the blackout/look surface. Why: "the Stream Deck is
+    at home" is a real 1 a.m. failure and the phone is always in a pocket — a dead
+    control surface becomes a 20-second recovery. Cost: rides idea 15 + existing QR
+    work; F4's Local Network/firewall notes apply.
+11. **Clone-a-spare-stick button.** What: insert a blank stick → menubar copies DMG +
+    live configs + `govee.env` + runbook + canned session → hash-verifies → "Spare
+    ready." Why: the stick is now show-critical hardware whose *gitignored* state (live
+    configs, keys) a by-hand Finder copy of the DMG alone would silently miss — exactly
+    the copy a human gets wrong; two sticks in the bag beats one. Cost: small — `ditto`
+    + verify over the file list F3's profile module already knows.
+12. **Show receipt.** *(absorbs save-diagnostics)* What: End Set writes
+    `shows/<date>/` to the stick — set duration, tracks seen, drops fired, degradations,
+    log tail, optional session recording. Why: show-night bugs get debugged at home with
+    real evidence, and a set history is a free hobby artifact. Cost: aggregation of
+    existing status/log + one copy; the stick is written only on explicit action.
+13. **Update-on-insert for House Macs.** What: on stick insert, the House Mac compares
+    stick bundle version vs installed copy and offers a one-click update. Why: once
+    House Macs exist, stick/host skew is inevitable; this keeps the stick the single
+    source of truth. Cost: version compare + staged copy + relaunch. Contingent twice
+    over: needs idea 1's reversal (a House Mac existing at all) and wants idea 8 first
+    (else every update re-triggers the F4 permission cascade).
+14. **Venue profiles.** What: named config packs on the stick (Home / venue X: Govee
+    targets, laser personality, LED look defaults) with a launch-time picker. Why:
+    per-venue tuning is real — but Govee LAN auto-discovery already landed and covers
+    the drifting-IP case, so this earns rent only when a second *tuned* venue actually
+    exists. Cost: config schema + picker; moderate. Wait for venue #2.
+15. **Bundle the pad web tools as an optional entry mode.** What: `--run-pads` serving
+    `tools/laser_pad_web.py` / `led_pad_web.py` so the phone pads work on foreign Macs
+    too; v1 greys the menu items out (F6). Cost: another entry mode + LAN listener
+    implications (F4 firewall note).
 
 ### Explored and rejected
 
-9. **APFS second partition on the stick** — solves F1 without a DMG, but Windows can't
-   read APFS and older Windows exposes only the first partition; it quietly forecloses
-   the parent plan's one-stick future. DMG-on-exFAT gets the same result without the
-   fork. (Part 3, Contradiction A.)
-10. **universal2 build** — three deps ship no universal2 wheels (F9); Intel Macs are one
-    release from EOL; the audience is ~zero. Document "Apple silicon only" instead.
-11. **Bundle integrity manifest / hash-verify at launch** — safety theater for a solo
-    rig; the arm64 signature seal already fails loudly on a corrupted bundle.
-12. **A real auto-update framework** (Sparkle-style) — the stick *is* the update
-    channel; idea 6 covers the need with a file copy.
-13. **Automating SoundSwitch/Rekordbox host-side setup** — SS MIDI learn and RB prefs
-    are app-internal state; scripting them means fragile UI automation + an Automation
-    TCC prompt. The runbook line + doctor check is the honest version.
+- **R1 — APFS second partition on the stick.** Solves F1 without a DMG, but Windows
+  can't read APFS and older Windows exposes only the first partition; it quietly
+  forecloses the parent plan's one-stick future. DMG-on-exFAT gets the same result
+  without the fork. (Part 3, Contradiction A.)
+- **R2 — universal2 build.** Three deps ship no universal2 wheels (F9); Intel Macs are
+  one release from EOL; the audience is ~zero. Document "Apple silicon only" instead.
+- **R3 — Bundle integrity manifest / hash-verify at launch.** Safety theater for a solo
+  rig; the arm64 signature seal already fails loudly on a corrupted bundle.
+- **R4 — A real auto-update framework (Sparkle-style).** The stick *is* the update
+  channel; idea 13 covers the need with a file copy.
+- **R5 — Automating SoundSwitch/Rekordbox host-side setup.** SS MIDI learn and RB prefs
+  are app-internal state; scripting them means fragile UI automation + an Automation TCC
+  prompt. The runbook line + Doctor check is the honest version.
+- **R6 — Standalone no-Rekordbox "attract mode" (generative show).** New scope the
+  design already excludes (§8) and the plan only promises not to foreclose (§1.4); the
+  replay demo (idea 9) delivers the practical 90% — prove the rig, demo the rig — with
+  zero new scope.
+- **R7 — Auto-opening Terminal monitors / osascript UI on foreign Macs.** An Automation
+  TCC prompt plus a Terminal dependency, spent on a dev convenience; menubar status +
+  "Open log" covers it (idea 6).
 
 ---
 
