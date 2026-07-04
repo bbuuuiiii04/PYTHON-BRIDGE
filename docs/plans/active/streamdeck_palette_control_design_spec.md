@@ -523,6 +523,28 @@ Bridge-runtime siblings found in the same pass (adapter/state_manager/__main__ l
 implemented here) are written up in
 `docs/plans/active/streamdeck_surface_hardening_findings_2026_07_04.md`.
 
+## Part D.3 — Bridge-side hardening landed (2026-07-04 night, F-B1/F-B3/F-B4)
+
+The findings-doc riders were implemented per
+`docs/plans/active/streamdeck_bridge_side_hardening_impl_spec.md` (Codex Tasks 1-8;
+operator-sanctioned Sonnet-subagent fallback for Tasks 9-12 after a Codex quota stop).
+Software-tested; suite 2954 OK. What changed:
+
+- **F-B4** (`scripts/ss_bridge_watcher.sh` + new `tests/test_ss_bridge_watcher.py`): every
+  intentional deck-script stop writes a reason line into `/tmp/streamdeck.log`; manual mode
+  respawns the deck script during bridge gaps; `WATCHER_NO_LOOP=1` sources functions for tests.
+- **F-B1** (`__main__.py`, `state_manager.py`): frame-sender construction/start failure no
+  longer stops the MIDI input group (input and output start independently); the pack-reload
+  path passes `event_sink`/`extra_midi_bindings` so palette pads survive reloads; a new
+  `_update_pack_input_health` helper runs the RW-4 latch in BOTH active and inactive runtime
+  states, so `input_degraded` is truthful (change-gated publish, fail-closed on error) even
+  with pack output disabled.
+- **F-B3** (`soundswitch_midi_input.py`, `led_palette_control.py`, `state_manager.py`,
+  `streamdeck/streamdeck_midi.py`): `LayerEntry` carries binding channel+note; the feedback
+  payload publishes `static_held`; the deck reconciles static-look latches from it each tick
+  (pure helper `_reconcile_static_latches`, 2.0 s local-echo grace, old-payload no-op).
+  Authority rule 28.
+
 ## Part E — Evidence (file:line, HEAD `bd96b32`)
 
 - LED live-control stubs + state + routing note: `led_color_engine.py:724-768`; non-test caller

@@ -52,8 +52,14 @@ Stream Deck palette control (Package 2, 2026-07-04):
   spec's Part D.2): deck script exception containment + read-thread liveness + stall watchdog,
   feedback lost/restored + layout-change transition logging, latch clear on bridge restart,
   pass-through projections pinned by a producer↔deck contract test, and feedback-writer
-  fail/recover transition logs in `led_palette_control.py`. Bridge-side siblings are findings
-  only: `docs/plans/active/streamdeck_surface_hardening_findings_2026_07_04.md`.
+  fail/recover transition logs in `led_palette_control.py`. Bridge-side siblings
+  (F-B1/F-B3/F-B4) were implemented the same night per
+  `docs/plans/active/streamdeck_bridge_side_hardening_impl_spec.md`: the MIDI input group
+  survives frame-sender/Enttec failures and pack reloads, `input_degraded` stays truthful
+  while pack output is disabled, the feedback payload carries `static_held`, and the deck
+  renders static-look latches from that bridge truth (authority rule 28, design spec Part
+  D.3). F-B2 (retry log spam) remains open in
+  `docs/plans/active/streamdeck_surface_hardening_findings_2026_07_04.md`.
 
 Drop presentation policy (Package 3, AWR-119, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/drop_presentation_authority.md`; the

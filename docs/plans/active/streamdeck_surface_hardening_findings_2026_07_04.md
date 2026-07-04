@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified findings; design-intent for the proposed riders
-last_verified_commit: cb9b081
+last_verified_commit: d1a469f
 last_verified_date: 2026-07-04
-validation_scope: read-only analysis of bridge-runtime code + live logs; nothing here is implemented
+validation_scope: F-B1/F-B3/F-B4 implemented + software-tested (suite 2954 OK); F-B2 open; hardware-unvalidated
 ---
 
 # Stream Deck Surface — Bridge-Side Findings & Proposed Riders (2026-07-04)
@@ -11,9 +11,11 @@ validation_scope: read-only analysis of bridge-runtime code + live logs; nothing
 Companion to the deck-side hardening pass (design spec Part D.2, authority rules 25-27).
 These findings live in bridge-runtime lanes (`__main__.py`, `state_manager.py`,
 `soundswitch_midi_input.py`, `scripts/ss_bridge_watcher.sh`) and were **not** implemented in
-that pass — each needs an operator go and its own implementation handoff.
+that pass. **Update 2026-07-04 night:** F-B1, F-B3, and F-B4 are now IMPLEMENTED and
+software-tested per `docs/plans/active/streamdeck_bridge_side_hardening_impl_spec.md`
+(design spec Part D.3 has the summary; authority rule 28 the contract). F-B2 remains open.
 
-## F-B1 — Pack-runtime teardown still kills pad input (incident 1 architecture wart) — HIGH
+## F-B1 — Pack-runtime teardown still kills pad input (incident 1 architecture wart) — IMPLEMENTED 2026-07-04 (software-tested)
 
 `__main__.py` (`worker_start_failed` paths, lines ~549-641): a frame-sender/laser OUTPUT
 failure (e.g. Enttec serial absent) disables the whole pack bundle, stopping the
@@ -26,7 +28,7 @@ input group (and the palette/control pad events it feeds) alive when only the ou
 fails, and make `input_degraded` reflect "inputs configured but not serving" whenever the
 group is stopped/absent for any reason other than "no inputs configured".
 
-## F-B2 — Never-seen input port retries log WARNING every 5 s forever — MEDIUM (log health)
+## F-B2 — Never-seen input port retries log WARNING every 5 s forever — STILL OPEN (log health)
 
 `soundswitch_midi_input.py:524-527`: for a device that has never appeared (the absent
 DDJ-800), every 5 s retry logs `[SS-MIDI] input port gone; retrying exact port` — 83 lines in
@@ -37,7 +39,7 @@ outcomes/transitions.
 **Proposed rider:** log the outage once per episode (and the recovery), demote per-retry lines
 to DEBUG.
 
-## F-B3 — Static-look layer state is not in the feedback file — MEDIUM
+## F-B3 — Static-look layer state is not in the feedback file — IMPLEMENTED 2026-07-04 (software-tested)
 
 The deck-local toggle latch is display-only double-tracking; the true held-layer state lives
 in `SoundSwitchMidiInputAdapter._layers`. The deck-side pass makes the latch survive USB
@@ -49,7 +51,7 @@ feedback payload (StateManager already snapshots the adapter each pack tick; han
 `LedPaletteControl` a getter like the existing `get_laser_blackout` pull) and render
 static-look latches from feedback like every other pad. Deletes the deck-local latch model.
 
-## F-B4 — Watcher leaves the deck script unsupervised during bridge gaps — MEDIUM
+## F-B4 — Watcher leaves the deck script unsupervised during bridge gaps — IMPLEMENTED 2026-07-04 (software-tested)
 
 `scripts/ss_bridge_watcher.sh` manual mode: `start_streamdeck` runs only while `bridge_pids`
 is non-empty, and when the manual terminal closes the watcher itself exits (after

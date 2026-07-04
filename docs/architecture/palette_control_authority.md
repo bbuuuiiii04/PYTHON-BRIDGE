@@ -200,6 +200,16 @@ beyond 4 are dropped with a visible log line, never silently.
     only survives `TransportError`), a dead read thread forces a loud
     reconnect, and a wedged main loop (e.g. hung USB write) hard-exits so the
     watcher respawns the script.
+28. Static-look latches render from bridge truth, not deck guesses
+    (2026-07-04 bridge-side hardening, F-B3): the feedback payload carries
+    `static_held` (the input adapter's actually-held layers by channel+note);
+    the deck reconciles its local latch set to it every supervision tick,
+    with a ~2 s local-echo grace so a fresh press is never visibly reverted.
+    A feedback payload without `static_held` (older bridge) leaves the
+    deck-local latch behavior of rule 26 unchanged. Output-side failure never
+    silences input: the MIDI input group survives frame-sender/Enttec
+    failures and pack reloads, and `input_degraded` reports input health even
+    while pack output is disabled.
 
 ## Non-Inputs / Non-Goals
 

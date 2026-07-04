@@ -27,7 +27,7 @@ python -m pytest tests
 | Area | What to look for in `tests/` | Notes |
 | --- | --- | --- |
 | Core bridge | state manager, models, smart phrasing, integration tests | verifies software behavior only |
-| Runtime commands | parser/handler/status writer tests plus menubar watcher-launch tests | needed before command changes; menubar tests do not prove live watcher or bridge process health |
+| Runtime commands | parser/handler/status writer tests plus menubar watcher-launch tests and watcher function tests (`tests/test_ss_bridge_watcher.py`: attributable deck stops, bridge-gap respawn) | needed before command changes; menubar/watcher tests do not prove live watcher or bridge process health |
 | Logging visibility | bridge formatting/rate helpers and logging diagnostic coverage tests | verifies software-only log filtering and spam-control behavior |
 | Runtime audit P1 cleanup | `tests/test_runtime_status.py`; compile/docs checks | smart-drop/breakdown queue-full failures surface in command status; dead-code/stale-text cleanup is software-only |
 | Rekordbox readers | reader, offset, live BPM, active-deck resolver, StateManager authority, startup wiring, runtime status tests | cannot prove all app versions or hardware-visible behavior. Audit P3 adds ANLZ read-failure cache recovery coverage. |
