@@ -26,14 +26,16 @@ work_status: planned
 
 | Target | Verdict | Why |
 |---|---|---|
-| **macOS-arm64 packaging & first-launch trust** | `READY` | Well-documented $99/yr Developer-ID → notarize → staple pipeline gives a clean (at worst one-click) offline first launch. |
+| **macOS-arm64 packaging & first launch** | `READY` · $0 | **Notarization declined by operator (2026-07-04).** Free path: ad-hoc-signed `.app`. Non-issue on your own Macs; on a friend's Mac it's a one-time "Open Anyway". No paid pipeline needed. |
 | **The seam + version-resilience + strobe safety** | `READY` | All three are pure-Python refactors/additions above a seam that already *latently* exists; no new platform code needed to land them. |
 | **Windows non-reader stack** | `READY WITH GAPS` | The whole output chain is portable Python, **except one hard blocker**: the bridge creates *virtual MIDI ports*, which python-rtmidi cannot self-create on Windows. Needs a decision (bundle a loopback driver, or ship a Windows MIDI-backend variant). |
 | **Windows clean first launch** | `READY WITH GAPS` | Signing is cheap but **cannot guarantee** a wall-free SmartScreen first launch for a low-volume tool. Set expectations; don't overspend. |
 | **A working Windows reader** | `NOT READY` — **top Windows blocker** | Windows field data does not exist; it's the reader spec's job. This plan assumes it will exist. |
 | **Foreign-Mac memory authorization under a signed/notarized build** | `NOT READY` — **top macOS blocker** | Reader-spec territory, but it *intersects* this plan's signing work — see the critical finding in §4/§7. |
 
-**One-line recommendation:** the portability work is real and mostly de-riskable *without owning a Windows machine* (CI builds both targets). Do the cheap, high-information validations first — prove the reader survives a signed+notarized macOS build, and prove the output stack runs on Windows from a *replayed* deck-state — before committing to the expensive reader RE. Two findings dominate the risk and are called out in bold below: **Windows virtual-MIDI ports** and **macOS memory-access under Hardened Runtime**.
+**One-line recommendation:** the portability work is real and mostly de-riskable *without owning a Windows machine* (CI builds both targets). Do the cheap, high-information validations first — prove the reader still works from a *packaged (ad-hoc)* macOS build, and prove the output stack runs on Windows from a *replayed* deck-state — before committing to the expensive reader RE. With notarization declined (below), the one dominant remaining risk is **Windows virtual-MIDI ports** (§1.3).
+
+> **Operator decision (2026-07-04): notarization declined — will not pay the $99/yr.** Consequences: on Brandon's own Macs nothing is lost (signing was never involved). On a friend's Mac the app still runs — worst case a one-time "Open Anyway" in System Settings, or it may launch silently if a plain USB copy carries no quarantine flag. Upside: skipping notarization also drops the **Hardened Runtime** requirement, which *removes* one of the constraints behind the §7 memory-access risk — so this **lowers** the macOS risk, it doesn't raise it. The Developer-ID → notarize → staple pipeline in §3.4 is retained as **optional reference only**.
 
 ---
 
@@ -193,12 +195,12 @@ This is platform-independent and should land **early** (before any foreign-machi
 
 Ordering principle: cheapest, highest-information, no-new-hardware validations first; expensive reader RE last. Each phase has a deliverable, files/areas, verification, and a live-safety note.
 
-### Phase 1 — Prove the reader survives a signed + Hardened-Runtime + notarized macOS build ⭐ riskiest-assumption killer
-- **Why first:** the single cheapest thing that can *kill* the effort. The whole "clean first launch **and** a working reader" premise on macOS rests on an unproven assumption (see §7 critical finding). Needs only Brandon's Mac + $99 — no Windows, no new RE.
-- **Deliverable:** package **today's** macOS bridge with PyInstaller `--onedir --windowed`, sign with Developer ID + Hardened Runtime, notarize, staple; run on Brandon's Mac and (if possible) one friend's Mac; **confirm the memory reader still attaches and drives lighting** end-to-end.
-- **Files/areas:** build spec (`.spec`, CI); `--hidden-import mido.backends.rtmidi`; `--collect-data certifi` + `SSL_CERT_FILE` shim; entitlements (`com.apple.security.cs.debugger`, Hardened Runtime).
+### Phase 1 — Prove the packaged (ad-hoc) macOS build still reads memory + drives the rig
+- **Why first:** cheapest validation, and with notarization declined (no Hardened Runtime) the scary §7 memory-access risk is largely defused — so this is now a straightforward "does the frozen build still work like the source run" check, not a go/no-go gate. Needs only Brandon's Mac, $0.
+- **Deliverable:** package **today's** macOS bridge with PyInstaller `--onedir --windowed` (ad-hoc signed — PyInstaller's free default, which satisfies Apple-silicon's must-be-signed-to-run rule); run it on Brandon's Mac; **confirm the memory reader still attaches and drives lighting** end-to-end. Optionally try a friend's Mac (one-time "Open Anyway").
+- **Files/areas:** build spec (`.spec`, CI); `--hidden-import mido.backends.rtmidi`; `--collect-data certifi` + `SSL_CERT_FILE` shim; the `com.apple.security.cs.debugger` entitlement (still needed for memory access — that's separate from, and unaffected by, the notarization decision).
 - **Verify:** the packaged app attaches (`[RBMEM][ATTACH]`/`RBStateReader: attached`), emits `MASTER_CHANGED`/`BPM_UPDATE`, and rotates SoundSwitch. `pgrep -f rb_ss_bridge_v2 | wc -l == 1` after launch.
-- **Live-safety note:** run against a *test* Rekordbox session, not a live show; if the reader can't attach under the hardened build, stop — that's a go/no-go gate, not a bug to patch downstream.
+- **Live-safety note:** run against a *test* Rekordbox session, not a live show.
 
 ### Phase 2 — Extract the seam + replay reader + land the strobe floor (pure Python, macOS, no behavior change)
 - **Deliverable:** (a) hoist the five primitives behind `ProcessMemorySource`; make `RBStateReader`/`RBMemoryReader` consume it; add `FieldResolver` + `detect_target_version` seams (§1.2). (b) Wire a startup-selectable **`ReplaySource`**. `confirmed`: this is nearly free — `session_replayer.py` ("Offline replay helpers for recorded **StateManager input** sessions", `:1`) already parses recorded `BridgeEvent`s + `PositionSnapshot`s and `put_nowait`s them into a StateManager event queue (`:160,235`), and `session_recorder.py` captures at exactly that boundary (`record_event`/`record_position`, `:77,92`). So the replay path already injects at the reader→StateManager seam — **above** the `ProcessMemorySource` level, bypassing memory reads entirely. Phase 2(b) is promoting that offline test helper to a runtime-selectable source, not writing a new reader. (c) Land the §4 strobe clamps.
@@ -238,7 +240,7 @@ Ordering principle: cheapest, highest-information, no-new-hardware validations f
 4. **`READY WITH GAPS` — Windows clean first launch.** SmartScreen reputation may be structurally unreachable for a low-volume tool; signing buys legitimacy, not a guaranteed wall-free launch. Not a blocker (worst case: one "Run anyway" click) but set expectations.
 
 **Unknowns settleable only on real hardware / a live foreign host:**
-- Does today's reader still attach under Hardened Runtime + notarization? (Phase 1, Brandon's Mac.)
+- Does today's reader still attach from a packaged (ad-hoc) build? (Phase 1, Brandon's Mac.)
 - Does the whole output stack — especially MIDI look-selection — run on real Windows? (Phase 3.)
 - Does the per-host authorization actually work on a machine Brandon doesn't own? (reader spec + a live foreign Mac.)
 - Does a plain USB Finder-copy avoid quarantine in practice? (`xattr -l` on a target Mac.)
