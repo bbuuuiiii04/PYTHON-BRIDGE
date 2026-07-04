@@ -1,0 +1,27 @@
+{
+  "enabled": false,
+  "fixed": {
+    "red": null,
+    "green": null,
+    "blue": null,
+    "cyan": null,
+    "yellow": null,
+    "purple": null,
+    "white": null
+  },
+  "effects": {
+    "rainbow_family": {
+      "ch8": null,
+      "ch9": null
+    }
+  },
+  "settle": {
+    "ease_beats": 8
+  },
+  "white_templates": [
+    "drop_white_aggressive",
+    "post_drop_white_shatter",
+    "buildup_white_zone_strobe",
+    "buildup_white_half_strobe"
+  ]
+}
