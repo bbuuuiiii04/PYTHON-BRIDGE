@@ -34,6 +34,10 @@ from .led_models import (
     _DEFAULT_SCALE_STOPS,
 )
 from .soundswitch_pack_loader import PackMidiBinding
+from .drop_presentation import (
+    DropPresentationConfig,
+    load_drop_presentation_config as _load_drop_presentation_block,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "led_look_director.json"
@@ -124,6 +128,19 @@ def load_led_look_director_config_from_dict(data: dict[str, Any]) -> LEDConfigRe
             errors=tuple(errors),
         )
     return LEDConfigResult(available=True, reason="ok", config=_build_config(data))
+
+
+def load_drop_presentation_config(path: str | None = None) -> DropPresentationConfig:
+    """Read the top-level `/drop_presentation` block from the same config file
+    `load_led_look_director_config` uses (same path/env-override resolution),
+    independent of the main LED config's validation pipeline — an unrelated
+    `looks`/`banks` error there must never block hot-cue tags or the
+    presentation policy. Any failure (missing file, bad JSON, wrong shape)
+    degrades to defaults; never raises."""
+    resolved = _resolve_path(path)
+    if resolved is None:
+        return DropPresentationConfig()
+    return _load_drop_presentation_block(resolved)
 
 
 def _resolve_path(explicit: str | None) -> Path | None:

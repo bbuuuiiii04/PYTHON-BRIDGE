@@ -242,7 +242,8 @@ class Ev:
     PLAY              = "play"              # deck
     PAUSE             = "pause"             # deck
     FILEPATH_RESOLVED = "filepath_resolved" # deck, payload={filepath, bpm, content_id,
-                                            #   first_beat_ms, soundswitch_id, total_ms, load_gen}
+                                            #   first_beat_ms, soundswitch_id, total_ms, load_gen,
+                                            #   laser_tag_beats?: list[float] (ANLZ-resolved path only)}
     ANLZ_PATH         = "anlz_path"         # deck, payload={anlz_path: str} — fires before TRACK_LOADED
     ANLZ_DATA         = "anlz_data"         # deck, payload={drop_beat_indices: list[int], load_gen: int}
     BPM_UPDATE        = "bpm_update"        # deck, payload={bpm: float}
@@ -271,3 +272,5 @@ class Ev:
     LED_PALETTE_LOCK_PAD       = "led_palette_lock_pad"       # payload={intent?: lock|unlock}
     LED_MUTE_PAD               = "led_mute_pad"               # toggle LED mute owner
     LED_RAINBOW_PAD            = "led_rainbow_pad"            # toggle Rainbow mode
+    # Drop presentation policy (Package 3, AWR-119) — global (deck=0).
+    LASER_SOLO_PAD             = "laser_solo_pad"             # arm/disarm/veto the pending Laser Solo

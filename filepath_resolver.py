@@ -24,7 +24,9 @@ import warnings
 from pathlib import Path
 from typing import Optional
 
+from .beat_math import _compute_beatgrid_position
 from .config import AUDIO_EXTS, LSOF_LEN_TOLERANCE_MS, LSOF_COOLDOWN_S, RB_DB_PATH
+from .led_config import load_drop_presentation_config
 from .logging_manager import get_logging_manager
 from .models import BridgeEvent, Ev, PositionSnapshot
 from . import bridge_fmt as bf
@@ -223,6 +225,43 @@ def _extract_beatgrid_from_anlz(anlz_path: str) -> dict:
     return dict(_EMPTY_BEATGRID)
 
 
+def _hotcue_marker() -> str:
+    # `load_drop_presentation_config` degrades to a "LASER" default on any
+    # failure (missing/malformed config) — never raises, never blocks a load.
+    return load_drop_presentation_config().hotcue_marker
+
+
+def _fetch_laser_tag_beats(db, content_id: str, beatgrid_times_ms: list[float], marker: str) -> list[float]:
+    """Drop-presentation hot-cue tags (docs/architecture/drop_presentation_authority.md
+    §Solo Source Contracts, tier 3). Reads named hot cues from Rekordbox's
+    `DjmdCue` rows via ``db.get_cue()`` (verified live 2026-07-04: 413 named cue
+    points library-wide; the on-disk ANLZ cue cache is stale/empty and must
+    never be used instead). Converts each matching cue's ``InMsec`` to an
+    absolute beat position with the SAME beatgrid math the rest of the bridge
+    uses (``beat_math._compute_beatgrid_position``), so a marker beat lands in
+    the identical coordinate system as ``drop_beat_indices`` — no parallel
+    conversion. The caller (``_db_lookup_by_anlz``) wraps this call in its own
+    narrow try/except so a curation-data failure here degrades to "no tags"
+    without discarding an otherwise-successful track resolution.
+    """
+    marker_norm = marker.strip().lower()
+    if not marker_norm:
+        return []
+    beats: list[float] = []
+    for cue in db.get_cue(ContentID=content_id, rb_local_deleted=0):
+        comment = str(getattr(cue, "Comment", None) or "")
+        if marker_norm not in comment.lower():
+            continue
+        in_msec = getattr(cue, "InMsec", None)
+        if not isinstance(in_msec, (int, float)) or in_msec < 0:
+            continue
+        grid_pos = _compute_beatgrid_position(float(in_msec), beatgrid_times_ms)
+        if grid_pos is None:
+            continue
+        beats.append(grid_pos[1])
+    return beats
+
+
 def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
     """Look up track metadata using the ANLZ file path UUID.
 
@@ -249,14 +288,28 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                 fp   = c.FolderPath or ""
                 bpm  = (c.BPM / 100.0) if c.BPM else 0.0
                 ssid = _read_soundswitch_id(fp) if fp else ""
+                content_id = str(c.ID)
+                laser_tag_beats: list[float] = []
+                try:
+                    laser_tag_beats = _fetch_laser_tag_beats(
+                        db, content_id, beatgrid["beatgrid_times_ms"], _hotcue_marker(),
+                    )
+                except Exception as exc:
+                    # Curation-data failure only: the track resolution above
+                    # already succeeded and must not be discarded over this.
+                    log.warning(
+                        "[FRES] laser-tag-read-failed  content_id=%s  err=%s",
+                        content_id, type(exc).__name__,
+                    )
                 return {
                     'filepath':       fp,
                     'bpm':            bpm,
-                    'content_id':     str(c.ID),
+                    'content_id':     content_id,
                     'first_beat_ms':  first_beat_ms,
                     **beatgrid,
                     'soundswitch_id': ssid,
                     'total_ms':       float((c.Length * 1000) if c.Length else 0),
+                    'laser_tag_beats': laser_tag_beats,
                 }
         log.debug("_db_lookup_by_anlz: UUID %s not found in DB", anlz_uuid)
     except Exception as exc:

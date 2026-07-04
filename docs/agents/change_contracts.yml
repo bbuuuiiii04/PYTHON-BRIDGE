@@ -330,6 +330,55 @@ contracts:
       - CH11 must never be written by laser color plumbing
       - render and push-tick paths must not gain I/O, locks, sleeps, or blocking work
 
+  drop_presentation:
+    code_globs:
+      - drop_presentation.py
+      - filepath_resolver.py
+      - soundswitch_laser_player.py
+      - state_manager.py
+      - led_config.py
+      - soundswitch_midi_input.py
+      - led_palette_control.py
+      - models.py
+      - config/led_look_director.example.json
+    key_symbols:
+      - plan_track
+      - TrackPlan
+      - DropDecision
+      - resolve_presentation
+      - SessionState
+      - LearnedStore
+      - WindowMachine
+      - gearshift_qualifies
+      - DropPresentationConfig
+    inspect:
+      - docs/architecture/drop_presentation_authority.md
+      - docs/plans/active/drop_presentation_impl_spec.md
+      - docs/plans/active/streamdeck_palette_control_design_spec.md
+      - docs/subsystems/led_govee.md
+      - docs/subsystems/laser.md
+      - docs/status/active_work_registry.md
+    tests:
+      - python3 -m unittest tests.test_drop_presentation
+      - python3 -m unittest tests.test_filepath_resolver_hotcue_tags tests.test_soundswitch_laser_player tests.test_state_manager_pack_driver tests.test_led_palette_control tests.test_soundswitch_midi_input
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
+    docs_update:
+      - docs/subsystems/led_govee.md
+      - docs/subsystems/laser.md
+      - docs/architecture/drop_presentation_authority.md
+      - docs/plans/active/streamdeck_palette_control_design_spec.md
+      - docs/status/active_work_registry.md
+    forbidden_assumptions:
+      - enabled false must render every drop leds_plus_lasers exactly as today, byte-identical
+      - a Laser Solo is never a dice roll -- zero RNG anywhere in this policy
+      - suppression is not blackout -- blackout/mute owner systems must be untouched by presentation decisions
+      - the state-manager tick path must not gain DB or file I/O; learned-store writes ride a background writer thread, never the tick path directly
+      - scripted tracks get zero policy activity; mirrors (decks 3/4) generate no presentation decisions
+      - the finale guarantee (last true drop) is never blocked by the opening damper
+
   rekordbox_readers:
     code_globs:
       - rb_memory.py
