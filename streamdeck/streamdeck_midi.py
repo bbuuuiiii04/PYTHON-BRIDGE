@@ -338,7 +338,14 @@ def _draw_rainbow_arc(draw, w, h, vivid: bool):
         draw.arc([cx - r, base - r, cx + r, base + r], 180, 360, fill=c, width=4)
 
 
-def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False):
+def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
+               latched: bool = False):
+    """pressed = PHYSICAL key-down only (renders the ~150ms white ack flash).
+    latched = the deck-local toggle latch (led_state) — honored ONLY by
+    static-look rows, which have no feedback state. Palette and control pads
+    render from the feedback file's `state`; passing the latch as `pressed`
+    is the bug that froze control pads white (caller-contract regression,
+    2026-07-04)."""
     image = PILHelper.create_image(deck)
     row = _row_for_key(key, sidecar)
     if row is None:
@@ -354,7 +361,7 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False)
 
     draw = ImageDraw.Draw(image)
     w, h = image.width, image.height
-    active = _row_active(row, pressed, pulse)
+    active = _row_active(row, False, pulse)  # feedback-state truth, never the latch
     kind = row.get("target_kind")
     state = str(row.get("state") or "inactive")
 
@@ -418,10 +425,11 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False)
         draw.rectangle([0, 0, w, h], fill=base if locked else _BG)
         _draw_padlock(draw, w, h, locked)
     else:  # static looks: the name is the identity — one clean label, no note text
-        draw.rectangle([0, 0, w, h], fill=(0, 120, 210) if active else (26, 26, 30))
+        on = latched or active
+        draw.rectangle([0, 0, w, h], fill=(0, 120, 210) if on else (26, 26, 30))
         label = str(row.get("name") or key + 1).replace("_", " ")
         _fit_text(draw, label, (w / 2, h / 2), w - 8, size=16,
-                  fill=(255, 255, 255) if active else (185, 185, 190))
+                  fill=(255, 255, 255) if on else (185, 185, 190))
     return PILHelper.to_native_format(deck, image)
 
 
@@ -466,8 +474,8 @@ def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
                 active_keys.add(pad_key)
             else:
                 active_keys.discard(pad_key)
-            deck.set_key_image(key, render_key(deck, key, led_state(sidecar, active_keys)[pad_key],
-                                               sidecar))
+            deck.set_key_image(key, render_key(deck, key, pressed, sidecar,
+                                               latched=led_state(sidecar, active_keys)[pad_key]))
             if pressed:
                 def clear_flash():
                     try:
@@ -478,7 +486,8 @@ def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
                         latest_key = (CHANNEL, latest_row["note"])
                         deck.set_key_image(
                             key,
-                            render_key(deck, key, led_state(latest, active_keys).get(latest_key, False), latest),
+                            render_key(deck, key, False, latest,
+                                       latched=led_state(latest, active_keys).get(latest_key, False)),
                         )
                     except Exception:
                         pass
@@ -544,8 +553,9 @@ def main():
                     for k in range(deck.key_count()):
                         row = _row_for_key(k, sidecar)
                         pad_key = (CHANNEL, row["note"]) if row is not None else None
-                        active = pad_key in active_keys if pad_key is not None else False
-                        deck.set_key_image(k, render_key(deck, k, active, sidecar, pulse=pulse))
+                        latched = pad_key in active_keys if pad_key is not None else False
+                        deck.set_key_image(k, render_key(deck, k, False, sidecar, pulse=pulse,
+                                                         latched=latched))
         except (TransportError, OSError) as exc:
             log(f"device error: {exc} - will reconnect")
         finally:
