@@ -182,8 +182,20 @@ beyond 4 are dropped with a visible log line, never silently.
     cancel," regardless of which tier armed it.
 25. Feedback-file failure is cosmetic only: if the file is missing, stale, or
     unwritable, lighting behavior is unaffected; palette/control pads render
-    blank; static-look pads keep working; the fault is logged once, not
-    per-tick.
+    blank; static-look pads keep working; the fault is logged once per
+    episode (fail and recovery are transitions, never per-tick lines).
+26. The deck script never lies by omission about a degraded boot or a heal
+    (2026-07-04 incident: a static-only boot printed one plausible `live`
+    banner, healed silently, and masqueraded as an input fault): feedback
+    lost/restored and any gain/loss of bound keys are logged as transitions
+    with the live note range, and a feedback `seq` regression (= bridge
+    restart) clears deck-local toggle latches so a stale latch cannot invert
+    a static-look press.
+27. Silent input loss is a defect class, not a tolerated risk: the deck key
+    callback never lets an exception reach the HID library's read thread (it
+    only survives `TransportError`), a dead read thread forces a loud
+    reconnect, and a wedged main loop (e.g. hung USB write) hard-exits so the
+    watcher respawns the script.
 
 ## Non-Inputs / Non-Goals
 

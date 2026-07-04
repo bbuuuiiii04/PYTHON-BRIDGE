@@ -478,6 +478,45 @@ points — do not implement from the older text above:
   `docs/plans/active/palette_gesture_v2_spec.md` (AWR-121, not yet implemented — Package 2's v1
   gestures remain live behavior until it lands).
 
+## Part D.2 — Deck-surface hardening pass (2026-07-04 evening, post-incident debug)
+
+Five live failures in one day drove a debug/hardening pass over the deck script and the
+feedback producer (authority rules 25-27 record the resulting contract). Landed in
+`streamdeck/streamdeck_midi.py`, `led_palette_control.py`, and tests:
+
+- **on_key contains ALL exceptions** (was `TransportError`/`OSError` only): the HID library's
+  read thread survives only `TransportError`; anything else escaping the callback killed all
+  pad input silently. An rtmidi send failure is not an `OSError`.
+- **Read-thread liveness check** in the 0.5 s supervision loop: the library swallows read-side
+  `TransportError` by silently closing the device while `connected()` (a USB enumeration
+  check) can stay True — pads rendered fine with input dead. A dead reader now forces a loud
+  reconnect.
+- **Watchdog** (`WATCHDOG_STALL_S` 20 s): a wedged main loop (e.g. hung `hid_write`, which also
+  blocks the reader via the shared transport mutex) logs and hard-exits (`os._exit(70)`) so the
+  watcher respawns the script; a shutdown stalled >10 s does the same.
+- **`FeedbackWatch`**: logs feedback lost/restored and any gain/loss of bound keys with the
+  live note range (incident 5's lying-by-omission boot banner), and detects bridge restart via
+  feedback `seq` regression → clears deck-local toggle latches (which now deliberately survive
+  USB reconnects, matching the bridge's held layers).
+- **Projections pass-through-by-default** (`_palette_row`/`_control_row` start from
+  `dict(row)`): unknown producer fields survive; a whitelist here silently ate `ramp` once.
+  Pinned cross-module by `FeedbackProducerDeckContractTests`.
+- **Writer transition logging** (`PaletteFeedbackWriter._write_once`): write-failure and
+  recovery each log once per episode (a steady failure otherwise blanked every feedback pad
+  with a single log line ever).
+- **Redraw scope**: pulse ticks redraw only changed rows + pulse-dependent rows, not all 15
+  keys every 0.5 s.
+- **Retry-log rate limiting**: `waiting for Stream Deck`/open-error lines log once per outage
+  episode (the 3 s retry loop once wrote 3000+ identical lines).
+- **Real-caller-path tests**: `StreamDeckRealCallerPathTests` drives the REAL
+  `make_on_key`/`on_key` → `render_key` → `set_key_image` chain over a composed layout — the
+  class the old mock-based smoke tests missed (incident 4's frozen-white toggle pads shipped
+  because the smoke test passed booleans straight into `render_key`).
+
+Bridge-runtime siblings found in the same pass (adapter/state_manager/__main__ lanes — NOT
+implemented here) are written up in
+`docs/plans/active/streamdeck_surface_hardening_findings_2026_07_04.md`.
+
 ## Part E — Evidence (file:line, HEAD `bd96b32`)
 
 - LED live-control stubs + state + routing note: `led_color_engine.py:724-768`; non-test caller

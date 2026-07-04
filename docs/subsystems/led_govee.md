@@ -42,6 +42,12 @@ Stream Deck palette control (Package 2, 2026-07-04):
   LED mute owner semantics, Rainbow mode, the palette feedback file, and the pinned Stream Deck
   palette/control surface. This is SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED until the
   operator performs a deck-in-hand validation.
+- 2026-07-04 evening hardening pass (post-incident, authority rules 25-27; detail in the design
+  spec's Part D.2): deck script exception containment + read-thread liveness + stall watchdog,
+  feedback lost/restored + layout-change transition logging, latch clear on bridge restart,
+  pass-through projections pinned by a producer↔deck contract test, and feedback-writer
+  fail/recover transition logs in `led_palette_control.py`. Bridge-side siblings are findings
+  only: `docs/plans/active/streamdeck_surface_hardening_findings_2026_07_04.md`.
 
 Drop presentation policy (Package 3, AWR-119, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/drop_presentation_authority.md`; the
