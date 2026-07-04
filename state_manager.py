@@ -1695,21 +1695,13 @@ class StateManager:
             self._led_last_look = ""
             return
 
-        try:
-            accepted = bool(self._led_scene_adapter.trigger(decision))
-        except Exception as exc:
-            self._led_last_error = f"adapter_error:{type(exc).__name__}"
-            self._led_rejected_count += 1
-            return
-
-        if accepted:
-            self._led_trigger_count += 1
-            self._led_last_error = ""
-            self._led_last_look = str(getattr(decision, "look", ""))
-            return
-
-        self._led_rejected_count += 1
-        self._led_last_error = "adapter_rejected"
+        self._led_send_decision(
+            decision,
+            look=str(getattr(decision, "look", "")),
+            role="",
+            role_key="",
+            automation=False,
+        )
 
     def _dispatch_led_smart_drop_blackout(
         self,
@@ -1740,39 +1732,27 @@ class StateManager:
         ):
             self._led_last_auto_role_key = blackout_key
             self._led_last_event = f"automation:smart_drop_blackout:{phase}:realtime"
-            try:
-                accepted = bool(tactical_blackout(drop_preview))
-            except Exception as exc:
-                self._led_last_error = f"adapter_error:{type(exc).__name__}"
-                self._led_rejected_count += 1
-                self._led_automation_gated_count += 1
-                self._set_led_automation_gate_reason(
-                    "adapter_error",
-                    active_deck=active,
-                    role="smart_drop_blackout",
-                    role_key=blackout_key,
-                )
+            outcome = self._led_send_decision(
+                drop_preview,
+                look="realtime_blackout",
+                role="smart_drop_blackout",
+                role_key=blackout_key,
+                automation=True,
+                active_deck=active,
+                trigger_fn=tactical_blackout,
+            )
+            if outcome == "error":
                 log.warning(
                     "[RGB] tactical-blackout-error phase=%s look=%s role_key=%s active_deck=%d err=%s",
                     phase,
                     str(getattr(drop_preview, "look", "")) or "-",
                     blackout_key,
                     active,
-                    type(exc).__name__,
+                    self._led_last_error.removeprefix("adapter_error:"),
                 )
                 return
-            if accepted:
-                self._led_trigger_count += 1
-                self._led_automation_trigger_count += 1
+            if outcome == "accepted":
                 self._led_smart_drop_blackout_key = blackout_key
-                self._led_last_error = ""
-                self._led_last_look = "realtime_blackout"
-                self._set_led_automation_gate_reason(
-                    "",
-                    active_deck=active,
-                    role="smart_drop_blackout",
-                    role_key=blackout_key,
-                )
                 log.info(
                     "[RGB] tactical-blackout-accepted phase=%s next_drop=%s role_key=%s trigger_count=%d active_deck=%d",
                     phase,
@@ -1782,15 +1762,6 @@ class StateManager:
                     active,
                 )
                 return
-            self._led_rejected_count += 1
-            self._led_automation_gated_count += 1
-            self._led_last_error = "adapter_rejected"
-            self._set_led_automation_gate_reason(
-                "adapter_rejected",
-                active_deck=active,
-                role="smart_drop_blackout",
-                role_key=blackout_key,
-            )
             return
 
         context = LEDContext(
@@ -1802,25 +1773,21 @@ class StateManager:
             lighting_mode=self._os.lighting_mode,
             scripted_id=d.scripted_id,
         )
-        try:
-            decision = self._led_look_director.tick(context)
-        except Exception as exc:
-            self._led_last_error = f"director_error:{type(exc).__name__}"
-            self._led_rejected_count += 1
-            self._led_automation_gated_count += 1
-            self._set_led_automation_gate_reason(
-                "director_error",
-                active_deck=active,
-                role="smart_drop_blackout",
-                role_key=blackout_key,
-            )
+        decision, ok = self._led_tick_director(
+            context,
+            role="smart_drop_blackout",
+            role_key=blackout_key,
+            automation=True,
+            active_deck=active,
+        )
+        if not ok:
             log.warning(
                 "[RGB] director-error role=%s phase=%s role_key=%s active_deck=%d err=%s",
                 "smart_drop_blackout",
                 phase,
                 blackout_key,
                 active,
-                type(exc).__name__,
+                self._led_last_error.removeprefix("director_error:"),
             )
             self._led_last_auto_role_key = blackout_key
             return
@@ -1828,9 +1795,8 @@ class StateManager:
         self._led_last_auto_role_key = blackout_key
         self._led_last_event = f"automation:smart_drop_blackout:{phase}"
         if decision is None:
-            self._led_automation_gated_count += 1
-            self._set_led_automation_gate_reason(
-                "no_look:smart_drop_blackout",
+            self._led_gate_no_look(
+                reason="no_look:smart_drop_blackout",
                 active_deck=active,
                 role="smart_drop_blackout",
                 role_key=blackout_key,
@@ -1840,18 +1806,15 @@ class StateManager:
         look = str(getattr(decision, "look", ""))
         scene_ref = self._sanitize_led_scene_ref(getattr(decision, "scene_ref", ""))
         decision_reason = str(getattr(decision, "reason", ""))
-        try:
-            accepted = bool(self._led_scene_adapter.trigger(decision))
-        except Exception as exc:
-            self._led_last_error = f"adapter_error:{type(exc).__name__}"
-            self._led_rejected_count += 1
-            self._led_automation_gated_count += 1
-            self._set_led_automation_gate_reason(
-                "adapter_error",
-                active_deck=active,
-                role="smart_drop_blackout",
-                role_key=blackout_key,
-            )
+        outcome = self._led_send_decision(
+            decision,
+            look=look,
+            role="smart_drop_blackout",
+            role_key=blackout_key,
+            automation=True,
+            active_deck=active,
+        )
+        if outcome == "error":
             log.warning(
                 "[RGB] adapter-error role=%s phase=%s look=%s scene_ref=%s reason=%s role_key=%s active_deck=%d err=%s",
                 "smart_drop_blackout",
@@ -1861,22 +1824,12 @@ class StateManager:
                 decision_reason or "-",
                 blackout_key,
                 active,
-                type(exc).__name__,
+                self._led_last_error.removeprefix("adapter_error:"),
             )
             return
 
-        if accepted:
-            self._led_trigger_count += 1
-            self._led_automation_trigger_count += 1
+        if outcome == "accepted":
             self._led_smart_drop_blackout_key = blackout_key
-            self._led_last_error = ""
-            self._led_last_look = look
-            self._set_led_automation_gate_reason(
-                "",
-                active_deck=active,
-                role="smart_drop_blackout",
-                role_key=blackout_key,
-            )
             log.info(
                 "[RGB] trigger-accepted role=%s phase=%s look=%s scene_ref=%s reason=%s role_key=%s trigger_count=%d active_deck=%d",
                 "smart_drop_blackout",
@@ -1890,15 +1843,6 @@ class StateManager:
             )
             return
 
-        self._led_rejected_count += 1
-        self._led_automation_gated_count += 1
-        self._led_last_error = "adapter_rejected"
-        self._set_led_automation_gate_reason(
-            "adapter_rejected",
-            active_deck=active,
-            role="smart_drop_blackout",
-            role_key=blackout_key,
-        )
         log.warning(
             "[RGB] adapter-rejected role=%s phase=%s look=%s scene_ref=%s reason=%s role_key=%s active_deck=%d",
             "smart_drop_blackout",
@@ -2029,36 +1973,31 @@ class StateManager:
         decision = None
         if role == "drop":
             decision = self._consume_led_committed_drop_decision(sp_state)
-        try:
-            if decision is None:
-                decision = self._led_look_director.tick(context)
-        except Exception as exc:
-            self._led_last_error = f"director_error:{type(exc).__name__}"
-            self._led_rejected_count += 1
-            self._led_automation_gated_count += 1
-            self._set_led_automation_gate_reason(
-                "director_error",
-                active_deck=active,
+        if decision is None:
+            decision, ok = self._led_tick_director(
+                context,
                 role=role,
                 role_key=role_key,
+                automation=True,
+                active_deck=active,
             )
-            log.warning(
-                "[RGB] director-error role=%s role_key=%s active_deck=%d err=%s",
-                role,
-                role_key,
-                active,
-                type(exc).__name__,
-            )
-            self._led_last_auto_role_key = role_key
-            return
+            if not ok:
+                log.warning(
+                    "[RGB] director-error role=%s role_key=%s active_deck=%d err=%s",
+                    role,
+                    role_key,
+                    active,
+                    self._led_last_error.removeprefix("director_error:"),
+                )
+                self._led_last_auto_role_key = role_key
+                return
 
         self._led_last_auto_role_key = role_key
         self._led_last_event = f"automation:{role}"
         if decision is None:
-            self._led_automation_gated_count += 1
             no_look_reason = f"no_look:{role}"
-            self._set_led_automation_gate_reason(
-                no_look_reason,
+            self._led_gate_no_look(
+                reason=no_look_reason,
                 active_deck=active,
                 role=role,
                 role_key=role_key,
@@ -2146,18 +2085,15 @@ class StateManager:
         look = str(getattr(decision, "look", ""))
         scene_ref = self._sanitize_led_scene_ref(getattr(decision, "scene_ref", ""))
         decision_reason = str(getattr(decision, "reason", ""))
-        try:
-            accepted = bool(self._led_scene_adapter.trigger(decision))
-        except Exception as exc:
-            self._led_last_error = f"adapter_error:{type(exc).__name__}"
-            self._led_rejected_count += 1
-            self._led_automation_gated_count += 1
-            self._set_led_automation_gate_reason(
-                "adapter_error",
-                active_deck=active,
-                role=role,
-                role_key=role_key,
-            )
+        outcome = self._led_send_decision(
+            decision,
+            look=look,
+            role=role,
+            role_key=role_key,
+            automation=True,
+            active_deck=active,
+        )
+        if outcome == "error":
             log.warning(
                 "[RGB] adapter-error role=%s look=%s scene_ref=%s reason=%s role_key=%s active_deck=%d err=%s",
                 role,
@@ -2166,24 +2102,14 @@ class StateManager:
                 decision_reason or "-",
                 role_key,
                 active,
-                type(exc).__name__,
+                self._led_last_error.removeprefix("adapter_error:"),
             )
             return
 
-        if accepted:
-            self._led_trigger_count += 1
-            self._led_automation_trigger_count += 1
-            self._led_last_error = ""
-            self._led_last_look = look
+        if outcome == "accepted":
             self._led_smart_drop_blackout_key = ""
             if role == "drop":
                 self._led_note_drop_decision_accepted(decision, sp_state)
-            self._set_led_automation_gate_reason(
-                "",
-                active_deck=active,
-                role=role,
-                role_key=role_key,
-            )
             log.info(
                 "[RGB] trigger-accepted role=%s look=%s scene_ref=%s reason=%s role_key=%s trigger_count=%d active_deck=%d",
                 role,
@@ -2196,15 +2122,6 @@ class StateManager:
             )
             return
 
-        self._led_rejected_count += 1
-        self._led_automation_gated_count += 1
-        self._led_last_error = "adapter_rejected"
-        self._set_led_automation_gate_reason(
-            "adapter_rejected",
-            active_deck=active,
-            role=role,
-            role_key=role_key,
-        )
         log.warning(
             "[RGB] adapter-rejected role=%s look=%s scene_ref=%s reason=%s role_key=%s active_deck=%d",
             role,
@@ -2256,18 +2173,14 @@ class StateManager:
             lighting_mode="idle",
             scripted_id=d.scripted_id,
         )
-        try:
-            decision = self._led_look_director.tick(context)
-        except Exception as exc:
-            self._led_last_error = f"director_error:{type(exc).__name__}"
-            self._led_rejected_count += 1
-            self._led_automation_gated_count += 1
-            self._set_led_automation_gate_reason(
-                "director_error",
-                active_deck=active,
-                role="ambient",
-                role_key=role_key,
-            )
+        decision, ok = self._led_tick_director(
+            context,
+            role="ambient",
+            role_key=role_key,
+            automation=True,
+            active_deck=active,
+        )
+        if not ok:
             self._led_last_auto_role_key = role_key
             self._led_last_idle_role_key = role_key
             return
@@ -2276,9 +2189,8 @@ class StateManager:
         self._led_last_idle_role_key = role_key
         self._led_last_event = f"automation:idle_ambient:{reason}"
         if decision is None:
-            self._led_automation_gated_count += 1
-            self._set_led_automation_gate_reason(
-                "no_look:ambient",
+            self._led_gate_no_look(
+                reason="no_look:ambient",
                 active_deck=active,
                 role="ambient",
                 role_key=role_key,
@@ -2286,39 +2198,26 @@ class StateManager:
             return
 
         look = str(getattr(decision, "look", ""))
-        try:
-            accepted = bool(self._led_scene_adapter.trigger(decision))
-        except Exception as exc:
-            self._led_last_error = f"adapter_error:{type(exc).__name__}"
-            self._led_rejected_count += 1
-            self._led_automation_gated_count += 1
-            self._set_led_automation_gate_reason(
-                "adapter_error",
-                active_deck=active,
-                role="ambient",
-                role_key=role_key,
-            )
+        outcome = self._led_send_decision(
+            decision,
+            look=look,
+            role="ambient",
+            role_key=role_key,
+            automation=True,
+            active_deck=active,
+        )
+        if outcome == "error":
             log.warning(
                 "[RGB] adapter-error role=ambient look=%s reason=%s role_key=%s active_deck=%d err=%s",
                 look or "-",
                 reason,
                 role_key,
                 active,
-                type(exc).__name__,
+                self._led_last_error.removeprefix("adapter_error:"),
             )
             return
 
-        if accepted:
-            self._led_trigger_count += 1
-            self._led_automation_trigger_count += 1
-            self._led_last_error = ""
-            self._led_last_look = look
-            self._set_led_automation_gate_reason(
-                "",
-                active_deck=active,
-                role="ambient",
-                role_key=role_key,
-            )
+        if outcome == "accepted":
             log.info(
                 "[RGB] trigger-accepted role=ambient look=%s reason=%s role_key=%s trigger_count=%d active_deck=%d",
                 look or "-",
@@ -2329,15 +2228,6 @@ class StateManager:
             )
             return
 
-        self._led_rejected_count += 1
-        self._led_automation_gated_count += 1
-        self._led_last_error = "adapter_rejected"
-        self._set_led_automation_gate_reason(
-            "adapter_rejected",
-            active_deck=active,
-            role="ambient",
-            role_key=role_key,
-        )
 
     def _gate_led_automation(
         self,
@@ -2360,6 +2250,119 @@ class StateManager:
             role_key=role_key,
         )
         self._led_last_auto_role_key = ""
+
+    def _led_tick_director(
+        self,
+        context: LEDContext,
+        *,
+        role: str,
+        role_key: str,
+        automation: bool,
+        active_deck: Optional[int] = None,
+    ) -> tuple[Any, bool]:
+        """Single director.tick error ritual. Returns (decision, ok).
+
+        On director exception: records director_error bookkeeping (and, for
+        automation paths, the gated count + gate reason) and returns (None, False).
+        Per-path post-error effects (role-key latches, warning logs) stay at the
+        call sites because they intentionally differ per path.
+        """
+        try:
+            return self._led_look_director.tick(context), True
+        except Exception as exc:
+            self._led_last_error = f"director_error:{type(exc).__name__}"
+            self._led_rejected_count += 1
+            if automation:
+                self._led_automation_gated_count += 1
+                self._set_led_automation_gate_reason(
+                    "director_error",
+                    active_deck=active_deck,
+                    role=role,
+                    role_key=role_key,
+                )
+            return None, False
+
+    def _led_gate_no_look(
+        self,
+        *,
+        reason: str,
+        role: str,
+        role_key: str,
+        active_deck: Optional[int] = None,
+    ) -> None:
+        """Single decision-is-None gating ritual for automation-family paths."""
+        self._led_automation_gated_count += 1
+        self._set_led_automation_gate_reason(
+            reason,
+            active_deck=active_deck,
+            role=role,
+            role_key=role_key,
+        )
+
+    def _led_send_decision(
+        self,
+        decision: Any,
+        *,
+        look: str,
+        role: str,
+        role_key: str,
+        automation: bool,
+        active_deck: Optional[int] = None,
+        trigger_fn: Any = None,
+    ) -> str:
+        """Single adapter trigger/accept/reject bookkeeping ritual.
+
+        Returns "accepted", "rejected", or "error". Counters, _led_last_error,
+        _led_last_look, and the automation gate reason mutate ONLY here for
+        trigger outcomes. Per-path side effects (blackout keys, drop-lifecycle
+        notes, log lines) stay at the call sites because they intentionally
+        differ per path; none of them log between these field writes, so the
+        observable stream is unchanged.
+        """
+        if trigger_fn is None:
+            trigger_fn = self._led_scene_adapter.trigger
+        try:
+            accepted = bool(trigger_fn(decision))
+        except Exception as exc:
+            self._led_last_error = f"adapter_error:{type(exc).__name__}"
+            self._led_rejected_count += 1
+            if automation:
+                self._led_automation_gated_count += 1
+                self._set_led_automation_gate_reason(
+                    "adapter_error",
+                    active_deck=active_deck,
+                    role=role,
+                    role_key=role_key,
+                )
+            return "error"
+
+        if accepted:
+            self._led_trigger_count += 1
+            if automation:
+                self._led_automation_trigger_count += 1
+            self._led_last_error = ""
+            self._led_last_look = look
+            if automation:
+                self._set_led_automation_gate_reason(
+                    "",
+                    active_deck=active_deck,
+                    role=role,
+                    role_key=role_key,
+                )
+            return "accepted"
+
+        self._led_rejected_count += 1
+        if automation:
+            self._led_automation_gated_count += 1
+        self._led_last_error = "adapter_rejected"
+        if automation:
+            self._set_led_automation_gate_reason(
+                "adapter_rejected",
+                active_deck=active_deck,
+                role=role,
+                role_key=role_key,
+            )
+        return "rejected"
 
     def _led_should_smart_drop_blackout(self, sp_state: SmartPhrasingState) -> bool:
         """True when Govee should be in pre-drop blackout for Smart Drop."""
