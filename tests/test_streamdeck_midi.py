@@ -324,6 +324,98 @@ class FeedbackWatchTests(unittest.TestCase):
         self.assertFalse(clear)
 
 
+def _feedback_with_static_held(rows: list[dict], seq: int = 5) -> dict:
+    fb = _feedback(seq=seq)
+    fb["static_held"] = rows
+    return fb
+
+
+class StaticLatchReconcileTests(unittest.TestCase):
+    """Pure-function coverage for _reconcile_static_latches — no thread/loop
+    needed (Part D: the F-B3 reconcile gets a pure-function seam)."""
+
+    def _layout(self, feedback: dict | None) -> list:
+        return sd.compose_layout(feedback, STATIC_ROWS, key_count=15)
+
+    def test_bridge_held_sets_latch_and_marks_redraw(self):
+        feedback = _feedback_with_static_held(
+            [{"channel": sd.CHANNEL, "note": 36, "kind": "toggle"}])
+        layout = self._layout(feedback)
+        active_keys: set = set()
+        recent_local: dict = {}
+
+        changed, messages = sd._reconcile_static_latches(
+            layout, feedback, active_keys, recent_local, now=1000.0)
+
+        self.assertIn((sd.CHANNEL, 36), active_keys)
+        self.assertIn(10, changed)  # STATIC_ROWS[0] (note 36) lands at key 10
+        self.assertTrue(any("reconciled from bridge: +1/-0" in m for m in messages))
+
+    def test_bridge_empty_clears_previously_set_latch(self):
+        feedback = _feedback_with_static_held([])
+        layout = self._layout(feedback)
+        active_keys = {(sd.CHANNEL, 36)}
+        recent_local: dict = {}
+
+        changed, messages = sd._reconcile_static_latches(
+            layout, feedback, active_keys, recent_local, now=1000.0)
+
+        self.assertNotIn((sd.CHANNEL, 36), active_keys)
+        self.assertIn(10, changed)
+        self.assertTrue(any("reconciled from bridge: +0/-1" in m for m in messages))
+
+    def test_steady_state_reconcile_is_silent(self):
+        feedback = _feedback_with_static_held(
+            [{"channel": sd.CHANNEL, "note": 36, "kind": "toggle"}])
+        layout = self._layout(feedback)
+        active_keys = {(sd.CHANNEL, 36)}  # already agrees with bridge truth
+        recent_local: dict = {}
+
+        changed, messages = sd._reconcile_static_latches(
+            layout, feedback, active_keys, recent_local, now=1000.0)
+
+        self.assertEqual(changed, set())
+        self.assertEqual(messages, [])
+
+    def test_local_echo_grace_window_is_not_reverted(self):
+        feedback = _feedback_with_static_held([])  # bridge says: not held
+        layout = self._layout(feedback)
+        active_keys = {(sd.CHANNEL, 36)}  # operator just toggled it on locally
+        recent_local = {(sd.CHANNEL, 36): 1000.0}
+
+        changed, messages = sd._reconcile_static_latches(
+            layout, feedback, active_keys, recent_local, now=1001.0)  # 1s later
+
+        self.assertIn((sd.CHANNEL, 36), active_keys)  # not reverted
+        self.assertEqual(changed, set())
+        self.assertEqual(messages, [])
+
+    def test_reconcile_applies_once_grace_window_elapses(self):
+        feedback = _feedback_with_static_held([])
+        layout = self._layout(feedback)
+        active_keys = {(sd.CHANNEL, 36)}
+        recent_local = {(sd.CHANNEL, 36): 1000.0}
+
+        changed, messages = sd._reconcile_static_latches(
+            layout, feedback, active_keys, recent_local, now=1002.5)  # past 2.0s
+
+        self.assertNotIn((sd.CHANNEL, 36), active_keys)
+        self.assertIn(10, changed)
+
+    def test_feedback_without_static_held_key_leaves_latches_untouched(self):
+        feedback = _feedback()  # old-bridge shape: no static_held key at all
+        layout = self._layout(feedback)
+        active_keys = {(sd.CHANNEL, 36)}
+        recent_local: dict = {}
+
+        changed, messages = sd._reconcile_static_latches(
+            layout, feedback, active_keys, recent_local, now=1000.0)
+
+        self.assertEqual(active_keys, {(sd.CHANNEL, 36)})
+        self.assertEqual(changed, set())
+        self.assertEqual(messages, [])
+
+
 class RedrawScopeTests(unittest.TestCase):
     def test_pulse_keys_are_only_queued_or_fading_rows(self):
         layout = sd.compose_layout(_feedback(), STATIC_ROWS, key_count=15)
