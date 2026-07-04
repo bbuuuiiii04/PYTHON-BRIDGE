@@ -83,6 +83,7 @@ class LedPaletteControl:
         self._rainbow = False
         self._seq = 0
         self._last_input_healthy = True
+        self._logged_snapshot_error = False
         self._writer = PaletteFeedbackWriter(feedback_path)
         self._writer.start()
         self.publish_feedback()
@@ -109,7 +110,7 @@ class LedPaletteControl:
         self._last_input_healthy = healthy
 
     def snapshot(self) -> dict[str, Any]:
-        snap = self._engine.snapshot() if self._engine is not None else {}
+        snap = self._engine_snapshot()
         return {
             "led_blackout": self._led_muted,
             "laser_blackout": bool(self._get_laser_blackout()),
@@ -187,7 +188,7 @@ class LedPaletteControl:
     def _palette_payload(self) -> list[dict[str, Any]]:
         config = getattr(self._engine, "_config", None)
         palettes = getattr(config, "palettes", {}) if config is not None else {}
-        snap = self._engine.snapshot() if self._engine is not None else {}
+        snap = self._engine_snapshot()
         result: list[dict[str, Any]] = []
         for idx, (name, palette) in enumerate(palettes.items()):
             note = self._palette_notes.get(name, 51 + idx)
@@ -205,6 +206,18 @@ class LedPaletteControl:
                 "state": state,
             })
         return result
+
+    def _engine_snapshot(self) -> dict[str, Any]:
+        if self._engine is None:
+            return {}
+        try:
+            snap = self._engine.snapshot()
+        except Exception as exc:
+            if not self._logged_snapshot_error:
+                log.warning("[PALETTE] engine_snapshot_failed err=%s", type(exc).__name__)
+                self._logged_snapshot_error = True
+            return {}
+        return snap if isinstance(snap, dict) else {}
 
     def _control_payload(self) -> dict[str, dict[str, Any]]:
         snap = self.snapshot()
