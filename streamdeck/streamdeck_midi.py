@@ -596,6 +596,14 @@ def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
     return on_key
 
 
+def _render_frame(deck, layout, keys, active_keys: set[tuple[int, int]], pulse: bool) -> None:
+    for key in sorted(keys):
+        row = _row_for_key(key, layout)
+        latched = row is not None and (CHANNEL, row["note"]) in active_keys
+        deck.set_key_image(key, render_key(deck, key, False, layout, pulse=pulse,
+                                           latched=latched))
+
+
 def main():
     if not _acquire_singleton_lock():
         return
@@ -604,21 +612,39 @@ def main():
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
 
+    # Latches and feedback-link memory deliberately survive device reconnects:
+    # the bridge keeps its held layers when only the USB link blips, so a
+    # fresh-per-connection latch set would lie about bridge state. A bridge
+    # restart (feedback seq regression, seen by FeedbackWatch) clears them.
+    active_keys: set[tuple[int, int]] = set()
+    watch = FeedbackWatch()
+    tick = [time.monotonic()]
+    threading.Thread(target=_watchdog, args=(stop, tick), daemon=True,
+                     name="streamdeck-watchdog").start()
+
+    waiting_logged = False
     while not stop.is_set():
-        deck = acquire_deck()
+        tick[0] = time.monotonic()
+        deck = acquire_deck(log_errors=not waiting_logged)
         if deck is None:
-            log("waiting for Stream Deck (absent or held by Elgato app)...")
+            if not waiting_logged:
+                log("waiting for Stream Deck (absent or held by Elgato app)...")
+                waiting_logged = True
             stop.wait(RETRY_SECONDS)
             continue
+        waiting_logged = False
 
         port = None
         try:
             static_rows = load_sidecar(key_count=deck.key_count())
             if len(static_rows) > 4:
-                log(f"streamdeck_midi: dropping {len(static_rows) - 4} static-look binding(s) beyond key 14")
+                log(f"streamdeck_midi: dropping {len(static_rows) - 4} static-look binding(s) beyond key 13")
             feedback = load_feedback_state()
             sidecar = compose_layout(feedback, static_rows, key_count=deck.key_count())
-            active_keys: set[tuple[int, int]] = set()
+            boot_messages, clear_latches = watch.observe(feedback, sidecar)
+            if clear_latches and active_keys:
+                boot_messages.append(f"cleared {len(active_keys)} deck-local pad latch(es)")
+                active_keys.clear()
             layout_lock = threading.Lock()
 
             def current_layout():
@@ -627,8 +653,7 @@ def main():
 
             port = mido.open_output(PORT_NAME, virtual=True)
             pulse = False
-            for k in range(deck.key_count()):
-                deck.set_key_image(k, render_key(deck, k, False, sidecar, pulse=pulse))
+            _render_frame(deck, sidecar, range(deck.key_count()), active_keys, pulse)
             deck.set_key_callback(make_on_key(deck, port, current_layout, active_keys))
             notes = [row["note"] for row in sidecar if isinstance(row, dict) and "note" in row]
             if notes:
@@ -636,24 +661,45 @@ def main():
                     f"ch {CHANNEL + 1}")
             else:
                 log(f'"{PORT_NAME}" live - no bound notes, ch {CHANNEL + 1}')
+            for message in boot_messages:
+                log(message)
 
             # ponytail: poll-based disconnect detect; also refresh feedback-file rendering.
             while not stop.is_set() and deck.connected():
+                reader = getattr(deck, "read_thread", None)
+                if reader is not None and not reader.is_alive():
+                    # The library reader swallows TransportError by silently
+                    # closing the device; connected() can stay True with input
+                    # dead. Without this check the pads render fine forever
+                    # while presses go nowhere.
+                    log("input reader thread died - forcing reconnect")
+                    break
                 stop.wait(0.5)
+                tick[0] = time.monotonic()
                 pulse = not pulse
                 feedback = load_feedback_state()
                 next_layout = compose_layout(feedback, static_rows, key_count=deck.key_count())
+                messages, clear_latches = watch.observe(feedback, next_layout)
+                for message in messages:
+                    log(message)
+                if clear_latches and active_keys:
+                    log(f"cleared {len(active_keys)} deck-local pad latch(es)")
+                if clear_latches:
+                    active_keys.clear()
                 changed = next_layout != sidecar
+                prev_layout = sidecar
                 if changed:
                     with layout_lock:
                         sidecar = next_layout
-                if changed or any(str((row or {}).get("state")) in ("queued", "fading") for row in sidecar):
-                    for k in range(deck.key_count()):
-                        row = _row_for_key(k, sidecar)
-                        pad_key = (CHANNEL, row["note"]) if row is not None else None
-                        latched = pad_key in active_keys if pad_key is not None else False
-                        deck.set_key_image(k, render_key(deck, k, False, sidecar, pulse=pulse,
-                                                         latched=latched))
+                if clear_latches:
+                    to_draw = set(range(deck.key_count()))
+                else:
+                    # Redraw only what can differ: rows that changed plus rows
+                    # whose look depends on the pulse phase — not all 15 keys
+                    # every 0.5s tick while one pad pulses.
+                    to_draw = _changed_keys(prev_layout, next_layout) if changed else set()
+                    to_draw |= _pulse_keys(sidecar)
+                _render_frame(deck, sidecar, to_draw, active_keys, pulse)
         except (TransportError, OSError) as exc:
             log(f"device error: {exc} - will reconnect")
         finally:

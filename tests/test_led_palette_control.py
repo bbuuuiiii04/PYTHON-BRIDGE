@@ -295,6 +295,64 @@ class PaletteFeedbackWriterTests(unittest.TestCase):
                 writer.join(timeout=1.0)
 
 
+class PaletteFeedbackWriterTransitionTests(unittest.TestCase):
+    def test_write_failures_and_recovery_log_once_per_transition(self) -> None:
+        writer = PaletteFeedbackWriter("/tmp/unused_transition_test.json")
+
+        with mock.patch("rb_ss_bridge_v2.led_palette_control.atomic_write_json",
+                        side_effect=OSError("disk")):
+            with self.assertLogs("rbss.palette_control", level="WARNING") as captured:
+                writer._write_once({"seq": 1})
+                writer._write_once({"seq": 2})  # steady failure: silent
+        self.assertEqual(len(captured.output), 1)
+        self.assertIn("feedback_write_failed", captured.output[0])
+
+        with mock.patch("rb_ss_bridge_v2.led_palette_control.atomic_write_json"):
+            with self.assertLogs("rbss.palette_control", level="INFO") as captured:
+                writer._write_once({"seq": 3})
+                writer._write_once({"seq": 4})  # steady success: silent
+        self.assertEqual(len(captured.output), 1)
+        self.assertIn("feedback_write_recovered", captured.output[0])
+        self.assertEqual(writer._last_payload, {"seq": 4})
+
+
+class FeedbackProducerDeckContractTests(unittest.TestCase):
+    """Every field the producer publishes must survive the deck projection —
+    the class of bug that silently dropped `ramp` between the producer and
+    the renderer (2026-07-04 incident 3)."""
+
+    def test_all_producer_fields_survive_deck_projection(self) -> None:
+        _WriterStub.instances.clear()
+        events: list[BridgeEvent] = []
+        with mock.patch("rb_ss_bridge_v2.led_palette_control.PaletteFeedbackWriter",
+                        _WriterStub):
+            control = LedPaletteControl(
+                engine=LedColorEngine(_config(), set_seed=3),
+                led_event_sink=events.append,
+                get_abs_beat=lambda: 8.0,
+                get_phrase_anchor=lambda _beat: 16.0,
+                get_laser_blackout=lambda: False,
+                palette_notes={"blue_cyan": 51, "violet": 52, "white_sand": 56},
+                control_notes={"lock": 57, "led_mute": 58, "laser_mute": 59,
+                               "laser_solo": 60, "rainbow": 61},
+            )
+            self.addCleanup(control.stop)
+        payload = _WriterStub.instances[-1].payloads[-1]
+
+        layout = sd.compose_layout(payload, [], key_count=15)
+        rows_by_note = {row["note"]: row
+                        for row in layout if isinstance(row, dict)}
+
+        for producer_row in payload["palettes"]:
+            deck_row = rows_by_note[producer_row["note"]]
+            dropped = set(producer_row) - set(deck_row)
+            self.assertFalse(dropped, f"palette fields dropped: {dropped}")
+        for key, producer_row in payload["controls"].items():
+            deck_row = rows_by_note[producer_row["note"]]
+            dropped = set(producer_row) - set(deck_row)
+            self.assertFalse(dropped, f"control '{key}' fields dropped: {dropped}")
+
+
 class StreamDeckPaletteLayoutTests(unittest.TestCase):
     def test_feedback_blank_leaves_static_looks_only(self) -> None:
         static = [

@@ -69,13 +69,23 @@ class PaletteFeedbackWriter(threading.Thread):
                 payload = self._last_payload
             if payload is None:
                 continue
-            try:
-                atomic_write_json(self._path, payload)
-                self._last_payload = payload
-            except Exception as exc:
-                if not self._logged_error:
-                    log.warning("[PALETTE] feedback_write_failed err=%s", type(exc).__name__)
-                    self._logged_error = True
+            self._write_once(payload)
+
+    def _write_once(self, payload: dict[str, Any]) -> None:
+        # Log transitions, not ticks: one line when writes start failing, one
+        # when they recover (a steady failure otherwise blanks every feedback
+        # pad within FEEDBACK_STALE_S with a single log line ever).
+        try:
+            atomic_write_json(self._path, payload)
+        except Exception as exc:
+            if not self._logged_error:
+                log.warning("[PALETTE] feedback_write_failed err=%s", type(exc).__name__)
+                self._logged_error = True
+            return
+        self._last_payload = payload
+        if self._logged_error:
+            log.info("[PALETTE] feedback_write_recovered")
+            self._logged_error = False
 
 
 class LedPaletteControl:
