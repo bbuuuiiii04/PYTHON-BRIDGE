@@ -3,12 +3,13 @@ doc_status: current
 truth_level: operator-authoritative target behavior
 last_verified_commit: 267edd3
 last_verified_date: 2026-07-04
-validation_scope: behavior contract only; feature not implemented — no software, live, or hardware validation implied
+validation_scope: behavior contract plus active implementation target; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED once tests pass
 ---
 
 # Palette Control Authority (Stream Deck surface)
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; NOT YET IMPLEMENTED (design approved by operator 2026-07-04)
+Status: AUTHORITATIVE TARGET BEHAVIOR; Package 2 implementation is tracked by `streamdeck_palette`
+in `docs/agents/change_contracts.yml` (design approved by operator 2026-07-04).
 
 This document defines how the operator's Stream Deck color-control surface is
 expected to behave. Behavior that differs from this document is a regression

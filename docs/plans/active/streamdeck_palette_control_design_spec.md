@@ -493,6 +493,9 @@ points — do not implement from the older text above:
 
 ## Change-contract note
 
-Design-only; changes no runtime behavior, so no `change_contracts.yml` entry yet. Per AGENTS.md §7,
-**before** implementation begins, add/extend the `led_govee` (and a new `streamdeck_palette` /
-`runtime_commands`) contract with its `docs_update` list, then edit code.
+Package 2 implementation is covered by `docs/agents/change_contracts.yml` entries for `led_govee`
+and `streamdeck_palette`. Keep `docs/subsystems/led_govee.md`,
+`docs/subsystems/runtime_commands.md`, this design spec,
+`docs/architecture/palette_control_authority.md`, and
+`docs/status/active_work_registry.md` aligned with code before claiming more than
+SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.

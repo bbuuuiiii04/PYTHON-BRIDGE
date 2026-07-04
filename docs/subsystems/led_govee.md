@@ -36,6 +36,13 @@ Audit P5 (2026-07-03):
   `StateManager`. The `_led_*` fields remain on the `StateManager` instance, and the backend-routing
   adapter remains `led_dispatch_coordinator.py`; this is a pure code-layout/bookkeeping refactor.
 
+Stream Deck palette control (Package 2, 2026-07-04):
+- The active implementation target is `docs/architecture/palette_control_authority.md`.
+- The `streamdeck_palette` change contract covers palette queue/override-fade/lock, `white_sand`,
+  LED mute owner semantics, Rainbow mode, the palette feedback file, and the pinned Stream Deck
+  palette/control surface. This remains SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED until
+  software tests pass and the operator performs a deck-in-hand validation.
+
 Authoritative code:
 - `led_config.py`
 - `led_models.py`
@@ -43,6 +50,7 @@ Authoritative code:
 - `led_color_engine.py`
 - `led_dispatch_policy.py`
 - `led_dispatch_coordinator.py`
+- `led_palette_control.py`
 - `govee_scene_adapter.py`
 - `govee_runtime_sender.py`
 - `govee_realtime_runner.py`
@@ -62,6 +70,7 @@ Authoritative code:
 - `tools/led_pad_lab.py` Template Lab draft registry and pad-only renderer overlay
 - `tools/led_pad_assets/` vanilla LED Pad UI assets
 - `scripts/led_pad.py` LED Pad launcher
+- `streamdeck/streamdeck_midi.py` Stream Deck palette/control renderer and MIDI sender
 
 Key symbols:
 - `StateManager`
@@ -70,6 +79,7 @@ Key symbols:
 - `LEDLookDirector`
 - `LedColorEngine`
 - `LEDDispatchCoordinator`
+- `LedPaletteControl`
 - `GoveeSceneAdapter`
 - `GoveeRuntimeSender`
 - `GoveeRealtimeRunner`

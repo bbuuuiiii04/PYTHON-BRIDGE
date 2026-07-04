@@ -102,6 +102,7 @@ contracts:
       - led_look_director.py
       - led_color_engine.py
       - led_dispatch_coordinator.py
+      - led_palette_control.py
       - govee_scene_adapter.py
       - govee_runtime_sender.py
       - govee_realtime_runner.py
@@ -111,6 +112,7 @@ contracts:
       - govee_lan_discovery.py
       - beat_sync_engine.py
       - config/led_look_director.example.json
+      - streamdeck/streamdeck_midi.py
     key_symbols:
       - StateManager
       - LEDDispatchPolicyMixin
@@ -119,6 +121,7 @@ contracts:
       - LEDLookDirector
       - LedColorEngine
       - LEDDispatchCoordinator
+      - LedPaletteControl
       - GoveeSceneAdapter
       - GoveeRuntimeSender
       - GoveeRealtimeRunner
@@ -143,10 +146,61 @@ contracts:
       - docs/validation/hardware_validation_log.md
       - docs/validation/software_test_inventory.md
       - docs/status/active_work_registry.md
+      - docs/architecture/palette_control_authority.md
+      - docs/plans/active/streamdeck_palette_control_design_spec.md
       - docs/agents/task_playbooks/change_led_govee_behavior.md
     forbidden_assumptions:
       - H612D behavior does not imply all Govee devices work
       - software tests do not prove device compatibility
+
+  streamdeck_palette:
+    code_globs:
+      - led_models.py
+      - led_color_engine.py
+      - models.py
+      - runtime_status.py
+      - __main__.py
+      - state_manager.py
+      - led_dispatch_policy.py
+      - soundswitch_midi_input.py
+      - soundswitch_pack_loader.py
+      - led_config.py
+      - config/led_look_director.example.json
+      - led_palette_control.py
+      - streamdeck/streamdeck_midi.py
+    key_symbols:
+      - LedColorEngine
+      - LedPaletteControl
+      - Palette
+      - BridgeEvent
+      - CommandReader
+      - SoundSwitchMidiInputAdapter
+      - SoundSwitchMidiInputGroup
+      - PackMidiBinding
+      - LEDConfig
+    inspect:
+      - docs/architecture/palette_control_authority.md
+      - docs/plans/active/streamdeck_palette_control_design_spec.md
+      - docs/subsystems/led_govee.md
+      - docs/subsystems/runtime_commands.md
+      - docs/status/active_work_registry.md
+    tests:
+      - python3 -m unittest tests.test_led_palette_control
+      - python3 -m unittest tests.test_led_color_engine tests.test_color_engine_config tests.test_led_config tests.test_runtime_status tests.test_soundswitch_midi_input tests.test_streamdeck_midi tests.test_state_manager_pack_driver
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
+    docs_update:
+      - docs/subsystems/led_govee.md
+      - docs/subsystems/runtime_commands.md
+      - docs/architecture/palette_control_authority.md
+      - docs/plans/active/streamdeck_palette_control_design_spec.md
+      - docs/status/active_work_registry.md
+    forbidden_assumptions:
+      - Stream Deck feedback-file rendering does not prove lighting hardware behavior
+      - runtime commands accepting palette input does not prove MIDI pad wiring
+      - the StateManager push loop must not write files, open MIDI/HID, or perform blocking I/O
 
   led_pad:
     code_globs:

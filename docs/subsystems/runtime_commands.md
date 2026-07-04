@@ -20,6 +20,12 @@ Purpose:
 Audit P1 (2026-07-03):
 - `toggle_smart_drop` and `toggle_smart_breakdown` callbacks now report queue-full failures through
   the same explicit `False` path used by the laser/LED runtime callbacks.
+
+Stream Deck palette control (Package 2, 2026-07-04):
+- The `streamdeck_palette` contract adds LED palette debug/runtime commands that mirror the Stream
+  Deck pad rail: `led_palette_queue`, `led_palette_override`, `led_palette_lock`,
+  `led_palette_unlock`, and `led_rainbow_toggle`. They are software command surfaces only; accepted
+  commands do not prove MIDI pad wiring, Govee output, or hardware-visible behavior.
 - `ValidationRunner._check_singleton()` derives the singleton result from one process count.
 
 SoundSwitch pack-player boundary (T7c/T7e):
