@@ -386,6 +386,46 @@ class TestColorEngineValid(unittest.TestCase):
         self.assertIsNotNone(result.config.color_engine)
         self.assertEqual(result.config.color_engine.locked_palette_by_look, {"rt_groove_chase": "red"})
 
+    def test_palette_control_bindings_carried(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["palettes"]["white_sand"] = {
+            "type": "fixed_rgb",
+            "weight": 0,
+            "rgb": [255, 235, 200],
+        }
+        block["palettes"]["rainbow"] = {"type": "rainbow", "weight": 0}
+        block["palette_control"] = {
+            "enabled": True,
+            "device": "Stream Deck",
+            "channel": 2,
+            "palette_notes": {"blue_cyan": 51, "red": 52},
+            "white_sand_note": 56,
+            "lock_note": 57,
+            "led_mute_note": 58,
+            "laser_mute_note": 59,
+            "laser_solo_note": 60,
+            "rainbow_note": 61,
+        }
+        cfg_data["color_engine"] = block
+
+        result = load_led_look_director_config_from_dict(cfg_data)
+
+        ce = result.config.color_engine
+        self.assertIsNotNone(ce)
+        self.assertEqual(
+            [(b.target_kind, b.data_byte, b.target_name, b.interaction) for b in ce.palette_control_bindings],
+            [
+                ("palette_pad", 51, "blue_cyan", "press"),
+                ("palette_pad", 52, "red", "press"),
+                ("palette_pad", 56, "white_sand", "press"),
+                ("palette_lock_pad", 57, None, "press"),
+                ("led_mute_pad", 58, None, "press"),
+                ("rainbow_pad", 61, None, "press"),
+                ("blackout_mask", 59, None, "toggle"),
+            ],
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests for invalid color_engine blocks → engine=None, LED still available

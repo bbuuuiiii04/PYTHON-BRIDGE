@@ -33,6 +33,7 @@ from .led_models import (
     Palette,
     _DEFAULT_SCALE_STOPS,
 )
+from .soundswitch_pack_loader import PackMidiBinding
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "led_look_director.json"
@@ -1045,6 +1046,36 @@ def _validate_color_engine(data: dict[str, Any]) -> list[str]:
             elif palette_name not in palette_names:
                 errors.append(f"color_engine.locked_palette_by_look.{look_name} references unknown palette '{palette_name}'")
 
+    palette_control = data.get("palette_control", {})
+    if not isinstance(palette_control, dict):
+        errors.append("color_engine.palette_control must be an object")
+    elif palette_control:
+        if not isinstance(palette_control.get("enabled", False), bool):
+            errors.append("color_engine.palette_control.enabled must be a boolean")
+        if not isinstance(palette_control.get("device", "Stream Deck"), str):
+            errors.append("color_engine.palette_control.device must be a string")
+        channel = palette_control.get("channel", 2)
+        if not isinstance(channel, int) or isinstance(channel, bool) or not 0 <= channel <= 15:
+            errors.append("color_engine.palette_control.channel must be an integer 0..15")
+        palette_notes = palette_control.get("palette_notes", {})
+        palettes_for_control = data.get("palettes", {})
+        palette_names = set(palettes_for_control) if isinstance(palettes_for_control, dict) else set()
+        if not isinstance(palette_notes, dict):
+            errors.append("color_engine.palette_control.palette_notes must be an object")
+        else:
+            for name, note in palette_notes.items():
+                if not isinstance(name, str) or name not in palette_names:
+                    errors.append(f"color_engine.palette_control.palette_notes.{name} must name a configured palette")
+                if not isinstance(note, int) or isinstance(note, bool) or not 0 <= note <= 127:
+                    errors.append(f"color_engine.palette_control.palette_notes.{name} must be a MIDI note 0..127")
+        for key in (
+            "white_sand_note", "lock_note", "led_mute_note", "laser_mute_note",
+            "laser_solo_note", "rainbow_note",
+        ):
+            note = palette_control.get(key)
+            if not isinstance(note, int) or isinstance(note, bool) or not 0 <= note <= 127:
+                errors.append(f"color_engine.palette_control.{key} must be a MIDI note 0..127")
+
     # fade_beats_by_role: dict of str → number
     fade_beats_by_role = data.get("fade_beats_by_role", {})
     if not isinstance(fade_beats_by_role, dict):
@@ -1247,6 +1278,8 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
     # Build locked_palette_by_look
     locked_palette_raw = raw.get("locked_palette_by_look", {})
     locked_palette_by_look: dict[str, str] = {k: str(v) for k, v in locked_palette_raw.items()}
+    palette_control = dict(raw.get("palette_control", {}) or {})
+    palette_control_bindings = _build_palette_control_bindings(palette_control)
 
     # Build fade_beats_by_role
     fade_raw = raw.get(
@@ -1274,11 +1307,62 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
         slot_fill_strategy_by_role=slot_fill_strategy_by_role,
         slot_mono_chance_by_look=slot_mono_chance_by_look,
         locked_palette_by_look=locked_palette_by_look,
+        palette_control=palette_control,
+        palette_control_bindings=palette_control_bindings,
         exempt_looks=exempt_looks,
         diy_color_tags=diy_color_tags,
         set_seed_mode=str(raw.get("set_seed_mode", "random")),
         palettes=palettes,
     )
+
+
+def _build_palette_control_bindings(raw: dict[str, Any]) -> tuple[PackMidiBinding, ...]:
+    if not raw or not bool(raw.get("enabled", False)):
+        return ()
+    device = str(raw.get("device", "Stream Deck"))
+    channel = int(raw.get("channel", 2))
+    bindings: list[PackMidiBinding] = []
+    for name, note in (raw.get("palette_notes", {}) or {}).items():
+        bindings.append(PackMidiBinding(
+            device_name=device,
+            message_type="note",
+            channel_zero_based=channel,
+            data_byte=int(note),
+            target_kind="palette_pad",
+            target_name=str(name),
+        ))
+    white_sand_note = raw.get("white_sand_note")
+    if white_sand_note is not None:
+        bindings.append(PackMidiBinding(
+            device_name=device,
+            message_type="note",
+            channel_zero_based=channel,
+            data_byte=int(white_sand_note),
+            target_kind="palette_pad",
+            target_name="white_sand",
+        ))
+    fixed = (
+        ("lock_note", "palette_lock_pad"),
+        ("led_mute_note", "led_mute_pad"),
+        ("rainbow_note", "rainbow_pad"),
+    )
+    for key, kind in fixed:
+        bindings.append(PackMidiBinding(
+            device_name=device,
+            message_type="note",
+            channel_zero_based=channel,
+            data_byte=int(raw[key]),
+            target_kind=kind,  # type: ignore[arg-type]
+        ))
+    bindings.append(PackMidiBinding(
+        device_name=device,
+        message_type="note",
+        channel_zero_based=channel,
+        data_byte=int(raw["laser_mute_note"]),
+        target_kind="blackout_mask",
+        interaction="toggle",
+    ))
+    return tuple(bindings)
 
 
 def _build_scripted_mode(raw: Any) -> LEDScriptedModePolicy:

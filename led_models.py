@@ -114,6 +114,8 @@ class ColorEngineConfig:
     slot_fill_strategy_by_role: Dict[str, str] = field(default_factory=dict)
     slot_mono_chance_by_look: Dict[str, float] = field(default_factory=dict)
     locked_palette_by_look: Dict[str, str] = field(default_factory=dict)
+    palette_control: Mapping[str, Any] = field(default_factory=dict, compare=False)
+    palette_control_bindings: tuple[Any, ...] = field(default_factory=tuple, compare=False)
     exempt_looks: Tuple[str, ...] = field(default_factory=tuple)
     diy_color_tags: Dict[str, str] = field(default_factory=dict)
     set_seed_mode: str = "random"

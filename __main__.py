@@ -467,6 +467,7 @@ def _build_soundswitch_pack_startup(
     truth_sink_factory=ArtNetTruthSink,
     truth_env_loader=load_truth_check_env,
     event_sink=None,
+    extra_midi_bindings=(),
 ) -> SoundSwitchPackStartupBundle:
     """Choose pack-vs-legacy output before starting any output worker.
 
@@ -504,6 +505,8 @@ def _build_soundswitch_pack_startup(
         midi_kwargs = {"stale_timeout_ms": cfg.controller_hold_timeout_ms}
         if event_sink is not None:
             midi_kwargs["event_sink"] = event_sink
+        if extra_midi_bindings:
+            midi_kwargs["extra_bindings"] = extra_midi_bindings
         midi_input = midi_input_factory(
             pack.learned_midi_bindings,
             cfg.midi_input_aliases,
@@ -548,6 +551,8 @@ def _build_soundswitch_pack_startup(
         midi_kwargs = {"stale_timeout_ms": cfg.controller_hold_timeout_ms}
         if event_sink is not None:
             midi_kwargs["event_sink"] = event_sink
+        if extra_midi_bindings:
+            midi_kwargs["extra_bindings"] = extra_midi_bindings
         midi_input = midi_input_factory(
             pack.learned_midi_bindings,
             cfg.midi_input_aliases,
@@ -1098,11 +1103,24 @@ def main() -> None:
         enable_debug()
 
     log.info("[MAIN] starting")
+    # Shared authoritative event queue.
+    raw_event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)
+    event_queue = LOG.wrap_queue(raw_event_queue)
     laser_cfg_result = load_laser_director_config()
     soundswitch_pack_cfg_result = load_soundswitch_pack_player_config()
+    led_cfg_result = load_led_look_director_config()
+    palette_control_bindings = (
+        led_cfg_result.config.color_engine.palette_control_bindings
+        if (
+            led_cfg_result.config is not None
+            and led_cfg_result.config.color_engine is not None
+        )
+        else ()
+    )
     soundswitch_pack_bundle = _build_soundswitch_pack_startup(
         soundswitch_pack_cfg_result,
         event_sink=event_queue.put,
+        extra_midi_bindings=palette_control_bindings,
     )
     pack_output_owners["sender"] = soundswitch_pack_bundle.frame_sender
     pack_output_owners["midi_input"] = soundswitch_pack_bundle.midi_input
@@ -1176,7 +1194,6 @@ def main() -> None:
             else False
         ),
     )
-    led_cfg_result = load_led_look_director_config()
     led_bundle = _build_led_startup_wiring(led_cfg_result)
     led_look_director = led_bundle.led_director
     led_scene_adapter = led_bundle.led_adapter
@@ -1199,8 +1216,6 @@ def main() -> None:
         scripted_id_callback=seed_soundswitch_scripted_id_cache,
     )
 
-    # Shared authoritative event queue.
-    raw_event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)
     anlz_direct = os.environ.get(ANLZ_DIRECT_ENV) == "1"
     play_direct = os.environ.get(PLAY_DIRECT_ENV) == "1"
     track_load_direct = os.environ.get(TRACK_LOAD_DIRECT_ENV) == "1"
@@ -1223,8 +1238,6 @@ def main() -> None:
     track_load_direct_ready_lock = threading.Lock()
     master_direct_ready_flag: bool = False
     master_direct_ready_lock = threading.Lock()
-    event_queue = LOG.wrap_queue(raw_event_queue)
-
     # Position cache (RBMemoryReader → PositionCache → StateManager push loop)
     pos_cache = PositionCache()
     live_bpm = LiveBPMService()

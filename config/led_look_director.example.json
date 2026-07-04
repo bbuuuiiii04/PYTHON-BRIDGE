@@ -110,6 +110,24 @@
       "ambient_pb_halves": "blue"
     },
     "set_seed_mode": "random",
+    "palette_control": {
+      "enabled": true,
+      "device": "Stream Deck",
+      "channel": 2,
+      "palette_notes": {
+        "blue_cyan": 51,
+        "deep_ocean": 52,
+        "indigo": 53,
+        "violet": 54,
+        "crimson": 55
+      },
+      "white_sand_note": 56,
+      "lock_note": 57,
+      "led_mute_note": 58,
+      "laser_mute_note": 59,
+      "laser_solo_note": 60,
+      "rainbow_note": 61
+    },
     "palettes": {
       "blue_cyan": {
         "range": [
@@ -165,6 +183,19 @@
         "weight": 2,
         "spread": 0.08,
         "white": 0.0
+      },
+      "white_sand": {
+        "type": "fixed_rgb",
+        "weight": 0,
+        "rgb": [
+          255,
+          235,
+          200
+        ]
+      },
+      "rainbow": {
+        "type": "rainbow",
+        "weight": 0
       }
     }
   },
