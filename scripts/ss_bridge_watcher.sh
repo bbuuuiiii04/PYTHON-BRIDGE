@@ -147,7 +147,7 @@ start_bridge() {
     BRIDGE_MANAGED=1
     STARTED_AT=$(date +%s)
     WARNED_MULTIPLE=0
-    log_watcher "started bridge pid=$BRIDGE_PID follow=on anlz_direct=on pos_chain_direct=on master_seed_direct=on master_direct=on play_direct=on track_load_direct=on scripted_direct=on phrase_anchor=on smart_drop=on smart_breakdown=on laser_config=${LASER_CONFIG_PATH} manual=${MANUAL_MODE}"
+    log_watcher "started bridge pid=$BRIDGE_PID follow=on anlz_direct=on pos_chain_direct=on master_seed_direct=on master_direct=on play_direct=on track_load_direct=on scripted_direct=on smart_drop=on smart_breakdown=on laser_config=${LASER_CONFIG_PATH} manual=${MANUAL_MODE}"
 }
 
 start_manual_terminal_bridge() {
@@ -224,7 +224,7 @@ open_monitor() {
     osascript <<'EOF'
 tell application "Terminal"
     activate
-    do script "bash -c 'printf \"\\\\033]0;RBSS_BRIDGE_MONITOR\\\\007\"; echo \"━━━ Bridge Monitor ━━━\"; tail -n 100 -F /tmp/bridge.log & wait $!' RBSS_BRIDGE_MONITOR"
+    do script "bash -c 'printf \"\\033]0;RBSS_BRIDGE_MONITOR\\007\"; echo \"━━━ Bridge Monitor ━━━\"; tail -n 100 -F /tmp/bridge.log & wait $!' RBSS_BRIDGE_MONITOR"
     set custom title of selected tab of front window to "RBSS_BRIDGE_MONITOR"
 end tell
 EOF
