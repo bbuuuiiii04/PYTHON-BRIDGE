@@ -117,6 +117,19 @@ def _apply_events(document: LoadedDocument, initial: tuple[int, ...], predicate)
     return tuple(frame)
 
 
+def _merge_color_snapshot(frame: tuple[int, ...], snapshot: object | None) -> tuple[int, ...]:
+    if snapshot is None:
+        return frame
+    ch8 = getattr(snapshot, "ch8", None)
+    ch9 = getattr(snapshot, "ch9", None)
+    if type(ch8) is not int or type(ch9) is not int or not 0 <= ch8 <= 255 or not 0 <= ch9 <= 255:
+        return frame
+    merged = list(frame)
+    merged[7] = ch8
+    merged[8] = ch9
+    return tuple(merged)
+
+
 def render_scripted_frame(track: LoadedDocument | LoadedScriptedTrack, elapsed_ms: int) -> tuple[int, ...]:
     """Render a scripted track at authoritative integer milliseconds."""
     if type(elapsed_ms) is not int or elapsed_ms < 0:
@@ -253,6 +266,7 @@ class LaserPackPlayer:
         self._blackout = False
         self._emergency = False
         self._waiting_after_reload = False
+        self._color_snapshot = None
 
     @property
     def pack(self) -> LoadedPack:
@@ -319,6 +333,9 @@ class LaserPackPlayer:
         """
         self._selection = None
         return self.render()
+
+    def set_color_snapshot(self, snapshot: object | None) -> None:
+        self._color_snapshot = snapshot
 
     def set_blackout(self, held: bool) -> PlayerResult:
         return self.set_masks(blackout=held, emergency=self._emergency)
@@ -415,7 +432,8 @@ class LaserPackPlayer:
                 kind="autoloop",
             )
         try:
-            return PlayerResult(render_autoloop_frame(document, selection.phase_tick))
+            frame = render_autoloop_frame(document, selection.phase_tick)
+            return PlayerResult(_merge_color_snapshot(frame, self._color_snapshot))
         except (TypeError, ValueError) as exc:
             return _diagnostic("player_error", type(exc).__name__)
 

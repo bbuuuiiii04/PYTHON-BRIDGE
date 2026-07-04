@@ -66,6 +66,7 @@ from .models import (
 from . import led_dispatch_policy as _led_dispatch_policy
 from .led_dispatch_policy import LEDDispatchPolicyMixin
 from .led_palette_control import LedPaletteControl
+from .laser_color_engine import LaserColorEngine as LaserColorMapper, load_laser_color_map
 from .laser_models import LaserContext, LaserPersonality, LaserResolvedScene
 from .soundswitch_laser_player import (
     ZERO_FRAME as _PACK_ZERO_FRAME,
@@ -403,6 +404,9 @@ class StateManager(LEDDispatchPolicyMixin):
         self._native_captured_scene: LaserResolvedScene | None = None
         self._native_abs_beat_pos: float | None = None
         self._native_log_key: tuple[Any, ...] = ()
+        self._laser_color_engine = LaserColorMapper(load_laser_color_map())
+        self._laser_color_updated_this_tick = False
+        self._laser_color_snapshot_for_tick = None
         self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
         self._init_led_dispatch_state(led_look_director, led_scene_adapter, led_color_engine)
         palette_control_config = led_palette_control_config or {}
@@ -2173,6 +2177,7 @@ class StateManager(LEDDispatchPolicyMixin):
         state) so a crash can never retain non-zero DMX, then re-raise.
         """
         rt = self._pack_runtime
+        self._reset_laser_color_tick()
         try:
             self._push_tick_inner()
         except BaseException:
@@ -2188,6 +2193,61 @@ class StateManager(LEDDispatchPolicyMixin):
                 rt.backend.submit_frame(_PACK_ZERO_FRAME)
             except Exception:
                 pass
+
+    def _reset_laser_color_tick(self) -> None:
+        self._laser_color_updated_this_tick = False
+        self._laser_color_snapshot_for_tick = None
+
+    def _update_laser_color_from_led(
+        self,
+        *,
+        white_moment: bool,
+        drop_phase: str | None,
+        post_drop_progress: float | None,
+    ) -> None:
+        led_engine = self._led_color_engine
+        laser_engine = self._laser_color_engine
+        if led_engine is None or laser_engine is None:
+            return
+        try:
+            state = led_engine.color_state()
+            laser_engine.update(
+                state,
+                white_moment=white_moment,
+                drop_phase=drop_phase,
+                post_drop_progress=post_drop_progress,
+            )
+            self._laser_color_snapshot_for_tick = laser_engine.snapshot()
+            self._laser_color_updated_this_tick = True
+        except Exception:
+            self._laser_color_snapshot_for_tick = None
+            self._laser_color_updated_this_tick = True
+
+    def _laser_color_last_led_role(self) -> str | None:
+        event = str(getattr(self, "_led_last_event", "") or "")
+        if not event.startswith("automation:"):
+            return None
+        role = event.split(":", 2)[1]
+        if role not in {"ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility"}:
+            return None
+        return role
+
+    def _laser_color_white_moment(self) -> bool:
+        white_moment_fn = getattr(self._led_scene_adapter, "last_white_moment", None)
+        return bool(white_moment_fn()) if callable(white_moment_fn) else False
+
+    def _laser_color_post_drop_progress(
+        self,
+        role: str | None,
+        sp_state: SmartPhrasingState,
+    ) -> float | None:
+        if role != "post_drop" or sp_state.active_drop_beat is None:
+            return None
+        abs_beat = self._led_abs_beat(sp_state)
+        if abs_beat is None:
+            return None
+        cycle = self._led_post_drop_cycle_beats()
+        return max(0.0, min(1.0, (abs_beat - float(sp_state.active_drop_beat)) / cycle))
 
     def set_pack_runtime(self, runtime: PackRuntime) -> None:
         """Atomically publish a new pack runtime bundle (command thread → push loop).
@@ -2384,6 +2444,13 @@ class StateManager(LEDDispatchPolicyMixin):
             return
         now = time.monotonic() if now is None else now
         player, backend, midi_input = rt.player, rt.backend, rt.midi_input
+        color_snapshot = (
+            self._laser_color_snapshot_for_tick
+            if self._laser_color_updated_this_tick
+            else None
+        )
+        player.set_color_snapshot(color_snapshot)
+        self._reset_laser_color_tick()
         truth_sink = getattr(rt, "truth_sink", None)
         input_healthy = True
         layers: tuple[Any, ...] = ()
@@ -3114,12 +3181,21 @@ class StateManager(LEDDispatchPolicyMixin):
             self._pending_phrase_marker = True
         if d.playing:
             led_sp_state = self._led_sp_state_for_next_backend(sp_state, bpm)
+            led_trigger_count = self._led_automation_trigger_count
             self._dispatch_led_automation(
                 active=active,
                 d=d,
                 sp_state=led_sp_state,
                 position_stale=(snap is None or snap.is_stale(MEM_STALE_S)),
             )
+            if self._led_automation_trigger_count != led_trigger_count:
+                led_role = self._laser_color_last_led_role()
+                if led_role is not None:
+                    self._update_laser_color_from_led(
+                        white_moment=self._laser_color_white_moment(),
+                        drop_phase=led_role,
+                        post_drop_progress=self._laser_color_post_drop_progress(led_role, led_sp_state),
+                    )
         else:
             self._dispatch_led_idle_ambient(
                 active=active,
