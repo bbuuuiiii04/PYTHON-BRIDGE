@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 944bc83
+last_verified_commit: 56c5f90
 last_verified_date: 2026-07-03
 validation_scope: software-only
 ---
@@ -34,7 +34,7 @@ Forbidden changes:
 - test modifications just to hide failures
 
 Implementation notes:
-- Inspect `led_*`, `govee_*`, `beat_sync_engine.py`, `state_manager.py` dispatch seam.
+- Inspect `led_*`, `govee_*`, `beat_sync_engine.py`, `led_dispatch_policy.py`, and StateManager dispatch call sites.
 - LED color-engine live controls are operator-reserved future pad/deck surfaces; if they become live
   from outside `StateManager`, route through `BridgeEvent`s or runtime commands.
 - Committed drop-look selection must thread the same `diy_eligible` predicate used by normal

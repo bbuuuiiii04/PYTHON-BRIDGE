@@ -1,7 +1,7 @@
 ---
 doc_status: current-incomplete
 truth_level: code-and-config-grounded
-last_verified_commit: 944bc83
+last_verified_commit: 56c5f90
 last_verified_date: 2026-07-03
 validation_scope: software-validated only, except the Govee/LED color-engine, realtime-comet, and beat-sync paths (AWR-101–104) which carry operator hardware sign-off on Home Govee (2026-06-29); SoundSwitch / laser / Enttec remain hardware-unvalidated
 ---
@@ -28,6 +28,10 @@ Audit P4 (2026-07-03): no hardware, SoundSwitch app, Rekordbox, laser, LED, Gove
 Enttec validation was performed. Laser MIDI send-error recovery, executor bank-gate restore,
 scene config validation, Laser Pad live-toggle command append, blackout-mask refcounting,
 `canon_alias` dedupe, and `pre_drop_scene` deprecation tolerance are software-tested only.
+
+Audit P5 (2026-07-03): no hardware, SoundSwitch app, Rekordbox, laser, LED, Govee, MIDI, DMX, or
+Enttec validation was performed. LED dispatch bookkeeping centralization and the
+`led_dispatch_policy.py` mixin extraction are software-tested only.
 
 The current exporter/importer evidence boundary is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
