@@ -1,14 +1,14 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: bd96b32
+last_verified_commit: 12ffb09
 last_verified_date: 2026-07-04
-validation_scope: behavior contract only; re-wire not implemented — no software, live, or hardware validation implied
+validation_scope: Package 1 re-wire implemented and software-tested in current worktree; no live or hardware validation implied
 ---
 
 # Laser Blackout Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; RE-WIRE NOT YET IMPLEMENTED (design approved by operator 2026-07-04)
+Status: AUTHORITATIVE TARGET BEHAVIOR; PACKAGE 1 RE-WIRE IMPLEMENTED / SOFTWARE-TESTED / HARDWARE-UNVALIDATED
 
 This document defines who may hold the lasers dark, who may release them, and
 what can never be un-darkened by automation. Behavior that differs from this
@@ -97,9 +97,9 @@ distinctness for safety.
 
 ## Implementation Notes
 
-The re-wire is Package 1 of the implementation plan: decouple executor owner
-latching from backend trigger success, and OR the executor's owner state into
-the existing single mask-writer site in StateManager's pack driver. No new
-files. The known unconditional-release call sites and the SS-present clear
-path are enumerated with file:line in the design spec Part C; the spec's tests
-must cover the survival matrix above before any live use.
+Package 1 is implemented in software: executor owner latching no longer depends
+on backend trigger success, and the executor's owner state is ORed into the
+existing single mask-writer site in StateManager's pack driver. The focused
+software regression is `tests/test_laser_blackout_rewire.py`. Live laser,
+SoundSwitch, MIDI, DMX, Enttec, Rekordbox, LED, and Govee behavior remains
+hardware-unvalidated until an operator-approved live run.

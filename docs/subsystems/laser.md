@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: fc56bb5
-last_verified_date: 2026-07-03
+last_verified_commit: 12ffb09
+last_verified_date: 2026-07-04
 validation_scope: software-only
 ---
 
@@ -39,6 +39,7 @@ Offline SoundSwitch pack boundary:
 - Task 2 deterministically exports and independently verifies the repo-local canonical pack for the pinned SoundSwitch 2.10.3 canonical RAVE project, including the seven-class F-3 control crosswalk. Live export reconciles saved-project inventory dynamically; the old exact-count snapshot is proof-only. It does not replace or alter Laser Director policy, MIDI execution, mappings, blackout behavior, or status.
 - The pack loader/player, MIDI-input adapter, backend abstraction, and Enttec sender exist. `LaserSceneExecutor` has one injected backend slot; startup selects legacy MIDI, none/dry-run, or verified pack/Enttec from the optional default-off config. Physical MIDI and direct DMX remain mutually exclusive.
 - Pack backend startup, `StateManager` scripted frame driving, commands, copied RW-5 status, and native pack Autoloop scene-edge handoff are implemented in software. Laser policy, MIDI execution, blackout, and configured mappings stay unchanged; the executor now exposes the already-selected Autoloop scene so the pack driver can resolve canonical Autoloop bindings even on no-new-edge ticks when SoundSwitch is absent. Hardware remains unvalidated.
+- Blackout-mask migration Package 1 is implemented/software-tested: smart-side blackout owners and pending drop-window latches survive pack-backend note rejection, and `StateManager` ORs that smart-side state with the existing manual MIDI-input blackout at the single pack-player mask writer. Manual blackouts remain owned by the MIDI-input binding refcount and survive smart-side lifecycle wipes. MIDI-mode accepting-backend note on/off sequences are unchanged. No laser hardware, SoundSwitch, Rekordbox, LED, Govee, MIDI device, DMX, or Enttec validation was performed.
 - Smart Drop exact cue landings are handled in the shared `SmartPhrasingEngine`: the first live tick after a reset fires an exact drop beat once, without rounding near-misses forward.
 
 Authoritative code:
@@ -66,7 +67,7 @@ Runtime flow:
 - outputs: MIDI note/CC/pulse/hold events through `MidiOutput`
 - `drop_lifecycle_mirror` defaults on. Allowed phrase-context impacts hold for the configured flat `drop_impact_beats`, then `post_drop`/fallback drop cycles fire only on autoloop ticks. Drop and post-drop cycle banks use usable-only shuffle bags that reset per track; a static configured drop scene remains valid for the at-anchor impact so an empty cyclable bank does not make the hit dark.
 - Setting `drop_lifecycle_mirror` to false preserves the previous ungated crossing and fixed post-drop-hold path (flag-OFF is byte-identical to pre-change EXCEPT the resume transition, which now also resets the executor: a benign phrase-bank reshuffle + active-scene clear; no dark, no drop leak). Director and executor lifecycle state reset on master/track/stop/resume transitions; director state also resets on scripted/idle transitions and personality application rebuilds it.
-- Blackout-mask migration (forward-looking): the transition blackout — the held `manual_blackout_on/off` note refcounted by `breakdown`/`master_switch` owners in `LaserSceneExecutor`, plus the Smart-Drop drop-window pending and the StateManager SM-net clear (`smart_drop_crossing_without_drop_decision`) — is MIDI *actuation*. When the bridge-native direct-DMX/`PackOutputBackend` lane becomes the live laser output, the held note retires (DMX blacks out by rendering a zero CH1-CH19 frame; `manual_blackout_*` carry no `scene_name`, so the pack backend already no-ops them), but the masking *decision* (which transitions go dark, refcounted overlapping owners, teardown timing) must be ported to the frame-level blackout — not deleted. The known **C2** edge (a gated-off Smart-Drop crossing releasing a held breakdown/master_switch cover via `clear_pending_blackout`) is a MIDI-path-only artifact; settle the owner/teardown semantics when that DMX blackout is designed, not by patching the outgoing MIDI path. See `docs/archive/plans/laser_smartnet_mask_preserve_spec.md` (deferred reference design).
+- Blackout-mask migration: the transition blackout — the held `manual_blackout_on/off` note refcounted by `breakdown`/`master_switch` owners in `LaserSceneExecutor`, plus the Smart-Drop drop-window pending — now also drives the pack player's frame-level blackout through `StateManager._drive_pack_output`. Backend note rejection no longer discards smart owners; accepted MIDI backends still receive the same note on/off sequence. The manual laser-pad/web blackout stays in the separate MIDI-input binding refcount and must not be routed through executor `_mask_owners`, because executor lifecycle wipes intentionally clear only smart-side covers.
 
 Config:
 - `config/laser_director.example.json`
@@ -91,6 +92,7 @@ Tests:
 - `python -m pytest tests/test_laser_config.py tests/test_laser_executor.py -q` if pytest is available
 - otherwise inspect `tests/` and run relevant unittest equivalents
 - lifecycle coverage: `tests/test_drop_lifecycle.py`, `tests/test_laser_director_lifecycle.py`, and `tests/test_laser_executor_lifecycle.py`
+- blackout re-wire coverage: `tests/test_laser_blackout_rewire.py`
 - transitional mapping check: `python3 tools/check_laser_midi_sync.py`
 - Audit P4 coverage: `tests/test_midi_output.py`, `tests/test_laser_executor.py`,
   `tests/test_laser_config.py`, `tests/test_laser_config_deprecation.py`,

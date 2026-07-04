@@ -61,7 +61,8 @@ Out of scope (do not redesign away):
   The color engine writes CH8/CH9 only. (Note `CONTROL_CHANNELS = {8, 9, 11}` — CH11 shares
   the persistent-control behavior, `soundswitch_laser_player.py:25,109-111`.)
 - The MIDI scene path and existing laser policy/execution split are untouched by the *color*
-  feature; the *blackout re-wire* (Part D) is the one behavioral change to laser output.
+  feature; the implemented/software-tested *blackout re-wire* (Part C) is the one behavioral
+  change to laser output in Package 1.
 
 ## Part B — Architecture (locked, code-grounded)
 
@@ -155,32 +156,16 @@ that the operator's laser-pad-web blackout (note 0, breakdown section) triggers.
 anyway because in the target design **smart-drop stops emitting MIDI entirely** (below).
 
 **1. Smart-drop / smart-breakdown auto-blackout.**
-- *Today:* emits a MIDI note that pack-mode silently drops — `PackOutputBackend.trigger()`
-  resolves only by `scene_name`, and blackout messages carry none (*confirmed*,
-  `laser_output_backend.py:169-176`; `laser_config.py:803-819` builds them without
-  `scene_name`). So smart-drop blackout currently **does nothing** to the bridge's own DMX.
-  Documented open gap: `docs/subsystems/laser.md` §runtime-flow "Blackout-mask migration"
-  bullet (~:69), which also requires the masking *decision* be **ported, not deleted**, and
-  points at the deferred reference design
-  `docs/archive/plans/laser_smartnet_mask_preserve_spec.md`.
-- **Worse (found in review): the owner-refcount itself never latches in pack mode** —
-  `hold_blackout_mask` adds the owner, then **discards it when `backend.trigger()` returns
-  False** (`laser_executor.py:330-340`), which it always does in pack mode. It also
-  early-outs when `smart_drop_mode != "blackout_mask"` (:325) or `manual_blackout_on` is
-  unset (:327-329). So `_mask_owners` is permanently empty in pack mode today.
-- *Design:* smart-drop/breakdown blackout drives the pack player's **frame-level blackout**
-  directly — no MIDI note, frame-accurate — with the executor's owner-refcount
-  (`_mask_owners`) as its source of truth, **after two required changes**:
-  1. **Decouple owner bookkeeping from MIDI-send success**: hold/release must latch owners
-     unconditionally (the note send becomes MIDI-backend-only behavior, absent in pack mode).
-  2. **The OR happens at the single existing mask writer** — `state_manager.py:2361-2364`,
-     the only `set_masks` call site, which today computes `blackout` from the MIDI-input
-     snapshot alone and **rewrites it every push tick** (a naive extra `set_masks` call
-     elsewhere would be stomped within ~5 ms). New computation:
-     `blackout = (midi_input_blackout AND input_healthy) OR executor_mask_owners_active`.
-     The SS-present clear path (:2387) keeps clearing only the MIDI-input contribution's
-     latch state; it must not be able to wipe a live executor-side hold silently — Codex
-     spec pins the exact behavior + test.
+- *Implemented Package 1:* smart-drop/breakdown blackout drives the pack player's
+  **frame-level blackout** through the executor owner set plus pending drop-window latch.
+  `hold_blackout_mask` and `trigger_blackout_on` now latch smart-side intent regardless of
+  backend note-send success, so `PackOutputBackend` rejection no longer drops the owner.
+- **The OR happens at the single existing mask writer** in `StateManager._drive_pack_output`:
+  `blackout = (midi_input_blackout AND input_healthy) OR executor_mask_owners_active`.
+  A direct `set_masks` call elsewhere would still be overwritten by the push loop.
+- The SS-present clear path clears only derived bridge output for that pass; held manual or
+  smart intent is recomputed on the next pass. Covered by `tests/test_laser_blackout_rewire.py`.
+  This is software-tested only; no live laser/SoundSwitch/DMX/Enttec validation is implied.
 
 **2. Manual operator blackout (laser pad).**
 - **Already works end-to-end today** (*confirmed*, stronger than the earlier draft): laser
