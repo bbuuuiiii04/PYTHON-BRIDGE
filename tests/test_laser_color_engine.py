@@ -290,11 +290,12 @@ class LaserColorMapperTests(unittest.TestCase):
     def test_loader_ships_disabled_with_calibrated_fixed_band_values(self) -> None:
         # The shipped chart carries the operator-calibrated FIXED half
         # (2026-07-04: virtuallasernode camera calibration — CH8 4-31 in
-        # 4-value bands, order W,R,Y,G,C,B,M) but stays DISABLED: flipping
-        # `enabled` is the operator's call. CH9 and the effect families are
-        # still pending operator data and must remain null.
+        # 4-value bands, order W,R,Y,G,C,B,M), ENABLED by operator decision
+        # 2026-07-04 (supervised first visual pass still pending). CH9 and
+        # the effect families are still pending operator data and must
+        # remain null.
         loaded = load_laser_color_map("config/laser_color_map.json")
-        self.assertFalse(loaded.enabled)
+        self.assertTrue(loaded.enabled)
         fixed = loaded.fixed or {}
         for name, value in fixed.items():
             self.assertIsInstance(value, int, name)

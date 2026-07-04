@@ -17,7 +17,7 @@ FIXED_COLOR_RGB = {
     "blue": (0, 0, 255),
     "cyan": (0, 255, 255),
     "yellow": (255, 255, 0),
-    "purple": (160, 0, 255),
+    "purple": (255, 0, 255),  # fixture band 28-31 is MAGENTA (camera calibration 2026-06-05)
 }
 DEFAULT_WHITE_TEMPLATES = (
     "drop_white_aggressive",

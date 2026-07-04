@@ -121,17 +121,16 @@ explicitly enabled.
     24/25=blue, 28=magenta); all authored values ≥ 32 are effect-family
     territory. `config/laser_color_map.json` now carries red=10, green=17,
     cyan=21, blue=25, purple=28 (pack-proven in-band values), white=6,
-    yellow=14 (mid-band; never pack-authored). **`enabled` remains false**
-    — flipping it on is the operator's call and needs a bridge restart plus
-    a first supervised visual check. Still pending from the operator: the
-    CH8 effect/animation family ranges (≥ 32) and the CH9 speed curve —
-    those gate ONLY the Rainbow laser tier and the settle texture; fixed
-    color injection is complete without them (per-channel merge leaves
-    authored CH9 untouched). Enable-time code note: the config key `purple`
-    maps to the fixture's MAGENTA band (28-31); the quantizer's anchor for
-    that slot (`FIXED_COLOR_RGB` purple (160,0,255)) should become
-    (255,0,255) when enabling, so nearest-color boundaries match the real
-    emitted color — a one-line implementer change bundled with the enable.
+    yellow=14 (mid-band; never pack-authored). **ENABLED by operator
+    decision 2026-07-04** (takes effect at the next bridge start; the
+    supervised first visual pass is still the hardware gate). The bundled
+    enable-time change landed with it: the quantizer's `purple` anchor is
+    now (255,0,255) — the config key `purple` maps to the fixture's MAGENTA
+    band (28-31). Still pending from the operator: the CH8 effect/animation
+    family ranges (≥ 32) and the CH9 speed curve — those gate ONLY the
+    Rainbow laser tier and the settle texture; fixed color injection is
+    complete without them (per-channel merge leaves authored CH9
+    untouched).
 
 ## Required Behavior Tests
 
