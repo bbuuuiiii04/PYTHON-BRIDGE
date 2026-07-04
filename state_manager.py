@@ -432,6 +432,16 @@ class StateManager(LEDDispatchPolicyMixin):
         # consumption site below (master regression gate), not here, so a live
         # config edit takes effect without a restart.
         self._drop_presentation_config = load_drop_presentation_config()
+        if self._drop_presentation_config.ws_handoff_enabled:
+            # Task 5: parsed but deliberately not implemented in this package
+            # (authority doc's optional white_sand handoff tier). Named no-op
+            # guard so an operator who flips this on gets a clear signal
+            # instead of silent nothing.
+            log.warning(
+                "[SM] drop-presentation-ws-handoff-not-implemented  "
+                "reason=ws_handoff_enabled is parsed but its ritual tier is not "
+                "implemented in this package; no behavior change occurs"
+            )
         self._drop_presentation_session = SessionState()
         self._drop_presentation_window = WindowMachine(self._drop_presentation_config)
         self._drop_presentation_plan: Optional[TrackPlan] = None

@@ -78,6 +78,30 @@ def _enable_drop_presentation(sm, **overrides) -> None:
     sm._drop_presentation_window = WindowMachine(sm._drop_presentation_config)
 
 
+class WsHandoffNoOpGuardTests(unittest.TestCase):
+    """Task 5: ws_handoff_enabled is parsed but its ritual tier is not
+    implemented in this package; a named no-op guard must log a clear signal
+    if an operator ever flips it on, rather than doing silently nothing."""
+
+    def test_enabling_ws_handoff_logs_a_named_not_implemented_warning(self) -> None:
+        with mock.patch(
+            "rb_ss_bridge_v2.state_manager.load_drop_presentation_config",
+            return_value=DropPresentationConfig(ws_handoff_enabled=True),
+        ), self.assertLogs("state_manager", level="WARNING") as logs:
+            sm = _make_sm()
+        self.assertTrue(sm._drop_presentation_config.ws_handoff_enabled)
+        self.assertTrue(
+            any("ws-handoff-not-implemented" in r.getMessage() for r in logs.records)
+        )
+
+    def test_default_config_does_not_log_the_guard(self) -> None:
+        with mock.patch(
+            "rb_ss_bridge_v2.state_manager.load_drop_presentation_config",
+            return_value=DropPresentationConfig(ws_handoff_enabled=False),
+        ), self.assertNoLogs("state_manager", level="WARNING"):
+            _make_sm()
+
+
 class MasterRegressionGateTests(unittest.TestCase):
     """With /drop_presentation enabled: false, this package must be inert."""
 
