@@ -154,6 +154,19 @@ in the old MIDI-to-SS path, which exposed a long hold to the undo bug for its wh
    full-off (slot 31 all-zero). Design assumes **boolean blackout = full-off**. If a non-black
    pre-drop look is ever wanted, blackout stops being a boolean and becomes a *look-select* —
    Fable should raise this before implementing if it matters. **Default: full-off.**
+5. **White-moment mirroring (operator-decided 2026-07-04).** Lasers must go **white during the LED
+   color engine's cue-mandated white moments** — drop white-strobe (`govee_frame_renderer.py`
+   `drop_white_aggressive:505`), white buildups (`buildup_white_*`), and the reserved slot-5
+   firework accent. Non-scripted laser color otherwise **follows the LED palette hue**, which is
+   never white (palettes are colored, `white:0.0`) — so mirroring needs a dedicated **LED→laser
+   "white now" signal** for these cue moments, separate from palette-following. Scripted-track white
+   already rides the pack cues (no gap). Fable specs the signal source/shape — *unknown, design-new*.
+6. **`white_sand` palette → laser white (operator-decided 2026-07-04).** The Stream-Deck-only
+   `white_sand` palette (see `streamdeck_palette_control_design_spec.md`) maps, for lasers, to
+   **CH8 white** — a sustained white until the palette's track/lock rules revert it. One shared
+   palette **name**, per-engine value (LED = white/off-white "sand" via Template Lab calibration;
+   laser = CH8 white). Exact CH8 white value comes from the encoding chart in open item #1 above —
+   *unknown until the CH8/CH9 chart lands*.
 
 ## Part F — Evidence (file:line, this HEAD `955552f` / prior agent read)
 
