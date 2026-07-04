@@ -578,7 +578,7 @@ design's lock. The `runtime_commands` contract also names `docs/subsystems/loggi
 | W4 | `health.*` + demotions + hot-path hygiene | recategorize existing WARNINGs; add the 4 silent-signal emits (govee circuit, rt send-error, rb_memory queue swallow, thread-liveness try/finally); demote `[MIDI] tx` INFO→DEBUG (`midi_output.py:266,335,350` — 2+ lines per fired scene today); guard `state_manager.py:1114` | W2 | low |
 | W5 | Teardown | delete `logging_manager.py` (state_manager/filepath_resolver imports → `bridge_log`), `diagnostics` debug plumbing, preset JSON; rewrite `test_logging_diag_coverage.py` → `test_bridge_log.py` | W3, W4 | medium (wide mechanical diff, no behavior) |
 | W6 | `bridge_view.py` + tests | curses TUI per §2.7; pure helpers (`parse_record`, `lens_of` — incl. an explicit test that a CANDIDATE/REJECT-style DEBUG record routes to MAX DEBUG only —, `format_line`) | W1 (schema only) | none for the bridge; **parallelizable with W2-W5** |
-| W7 | Watcher + docs | watcher swap (§2.8); rewrite `docs/subsystems/logging.md`; update status matrices, software test inventory, tests card per contract; delete stale doc sections (control file, env maze, color table) | W2, W6 | low |
+| W7 | Watcher + docs | watcher swap (§2.8); rewrite `docs/subsystems/logging.md` (incl. the extension rule); re-verify `docs/architecture/logging_authority.md` against as-built behavior and bump its header; update status matrices, software test inventory, tests card per contract; delete stale doc sections (control file, env maze, color table) | W2, W6 | low |
 
 **Migration rule for the 41 stdlib files (the "~46-file" plan, made concrete):** default = **no
 change**. A file is touched only if it (a) hosts a §2.4 emit site (≈10 files), (b) has a duplicate
