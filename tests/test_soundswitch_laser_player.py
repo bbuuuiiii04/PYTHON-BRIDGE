@@ -329,6 +329,41 @@ class PlayerStateTests(unittest.TestCase):
         self.assertNotEqual(self.player.select_scripted(ssid, 50).frame, ZERO_FRAME)
         self.assertEqual(self.player.clear_selection().frame, ZERO_FRAME)
 
+    def test_base_suppressed_zeros_base_with_its_own_diagnostic_code(self):
+        self.assertNotEqual(self.player.select_autoloop("SSAutoLoop8.ssfile", 0).frame, ZERO_FRAME)
+        result = self.player.set_base_suppressed(True)
+        self.assertEqual(result.frame, ZERO_FRAME)
+        self.assertEqual(result.diagnostic.code, "base_suppressed")
+
+    def test_base_suppression_lets_held_static_stand_alone(self):
+        self.player.select_autoloop("SSAutoLoop8.ssfile", 0)
+        self.player.set_static_layers((_layer(8),))
+        result = self.player.set_base_suppressed(True)
+        self.assertIsNone(result.diagnostic)
+        self.assertNotEqual(result.frame, ZERO_FRAME)
+
+    def test_base_suppression_does_not_clear_selection_and_lifts_instantly(self):
+        base = self.player.select_autoloop("SSAutoLoop8.ssfile", 0).frame
+        self.assertNotEqual(base, ZERO_FRAME)
+        suppressed = self.player.set_base_suppressed(True)
+        self.assertEqual(suppressed.frame, ZERO_FRAME)
+        restored = self.player.set_base_suppressed(False)
+        # The SAME selection renders again the instant suppression lifts --
+        # no re-select() call was made.
+        self.assertEqual(restored.frame, base)
+        self.assertIsNone(restored.diagnostic)
+
+    def test_base_suppression_still_loses_to_blackout_and_emergency(self):
+        self.player.select_autoloop("SSAutoLoop8.ssfile", 0)
+        self.player.set_static_layers((_layer(8),))
+        self.player.set_base_suppressed(True)
+        self.player.set_masks(blackout=True, emergency=False)
+        self.assertEqual(self.player.render().frame, ZERO_FRAME)
+
+    def test_base_suppression_rejects_non_boolean(self):
+        result = self.player.set_base_suppressed("yes")  # type: ignore[arg-type]
+        self.assertEqual(result.diagnostic.code, "invalid_mask_state")
+
     def test_stop_end_unload_and_fail_closed_authority_diagnostics(self):
         ssid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         for transport in ("stopped", "ended", "unloaded"):

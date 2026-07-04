@@ -279,6 +279,7 @@ class LaserPackPlayer:
         self._emergency = False
         self._waiting_after_reload = False
         self._color_snapshot = None
+        self._base_suppressed = False
 
     @property
     def pack(self) -> LoadedPack:
@@ -348,6 +349,19 @@ class LaserPackPlayer:
 
     def set_color_snapshot(self, snapshot: object | None) -> None:
         self._color_snapshot = snapshot
+
+    def set_base_suppressed(self, held: bool) -> PlayerResult:
+        """Drop presentation `leds_only`: withhold the automatic base WITHOUT
+        clearing ``_selection`` — the drop keeps rendering the instant
+        suppression lifts. Mirrors ``clear_selection()``'s ZERO-base/held-static-
+        stands-alone shape (render() below), but is a distinct diagnostic code
+        so it is indistinguishable from "no drop autoloop selected" to anything
+        downstream while still being observable. Never touches blackout/
+        emergency state — suppression is not blackout (authority rule)."""
+        if type(held) is not bool:
+            return _diagnostic("invalid_mask_state", "base suppression state must be boolean")
+        self._base_suppressed = held
+        return self.render()
 
     def set_blackout(self, held: bool) -> PlayerResult:
         return self.set_masks(blackout=held, emergency=self._emergency)
@@ -455,7 +469,13 @@ class LaserPackPlayer:
         if self._waiting_after_reload:
             return _diagnostic("reload_waiting_authority",
                                "pack reloaded; waiting for fresh authoritative state")
-        if self._selection is None:
+        if self._base_suppressed:
+            # Drop presentation `leds_only`: withhold the base exactly like
+            # missing_selection, WITHOUT consulting/clearing `_selection` — the
+            # drop keeps rendering the instant suppression lifts.
+            base = PlayerResult(ZERO_FRAME, PlayerDiagnostic(
+                "base_suppressed", "laser base withheld by drop presentation policy"))
+        elif self._selection is None:
             base = PlayerResult(ZERO_FRAME, PlayerDiagnostic(
                 "missing_selection", "no authoritative pack selection is active"))
         elif isinstance(self._selection, _ScriptedSelection):
@@ -467,7 +487,7 @@ class LaserPackPlayer:
         # active, but it must never bypass a known stop/stale/error condition.
         if (
             base.diagnostic is not None
-            and base.diagnostic.code not in ("missing_selection", "unverified_parity")
+            and base.diagnostic.code not in ("missing_selection", "unverified_parity", "base_suppressed")
         ):
             return base
         if self._static_layers:
