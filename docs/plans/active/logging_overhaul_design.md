@@ -129,6 +129,18 @@ problem):
 4. `health.*` emits are transition-edge-triggered by construction (`log_changed`/first-in-streak
    guards, §2.6) — a failing backend produces one record per state change, not one per failure.
 
+**Extending for new features (standing rule; the W7 `docs/subsystems/logging.md` rewrite must
+carry it):** a new feature needs no lens, viewer, schema, or config work — the lenses are
+namespace predicates, so new categories route themselves. Three questions per feature: decides
+what the rig does → one `perf(<cat>, ...)` at the commit point (appears on the PERFORMANCE feed
+as-is); can fail/recover → one `health(<cat>, ...)` transition pair (appears on OPERATOR, latched);
+everything else → ordinary `log.*`, which lands in the stream automatically (MAX DEBUG; WARNING+
+reaches OPERATOR on severity). Optional polish: one friendly-name/accent entry in the viewer's
+single rendering map. A badly-logged feature can pollute MAX DEBUG only — it structurally cannot
+reach the mid-set screens. Feature specs should name the records they emit; the
+`logging_visibility` forbidden assumption (no hot-path blocking I/O, no per-frame INFO spam)
+applies to every new emit site.
+
 ### 2.2 The record schema
 
 One JSON object per line. Field order fixed for eyeball-ability; compact separators; unknown fields
