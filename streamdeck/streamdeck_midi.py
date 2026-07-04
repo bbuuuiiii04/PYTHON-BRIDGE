@@ -12,9 +12,11 @@ Quit:       Ctrl-C  (resets the deck on the way out)
 
 Quit Elgato's Stream Deck app first — only one process can hold the device.
 """
-import os
+import colorsys
 import fcntl
 import json
+import math
+import os
 import signal
 import sys
 import threading
@@ -266,12 +268,73 @@ def _normal_rgb(value) -> tuple[int, int, int]:
     return (60, 60, 60)
 
 
-def _draw_rainbow(draw, box):
-    colors = [(255, 0, 70), (255, 170, 0), (255, 245, 0), (0, 220, 90), (0, 170, 255), (160, 70, 255)]
-    x0, y0, x1, y1 = box
-    step = max(1, (x1 - x0) // len(colors))
-    for idx, color in enumerate(colors):
-        draw.rectangle([x0 + idx * step, y0, x0 + (idx + 1) * step, y1], fill=color)
+def _dim(rgb: tuple[int, int, int], value_scale: float = 0.45, floor: float = 0.30) -> tuple[int, int, int]:
+    """Dim by HSV value only — hue and saturation survive, so an idle crimson
+    pad still reads red instead of crushing to mud (the old linear 0.22)."""
+    h, s, v = colorsys.rgb_to_hsv(*(part / 255.0 for part in rgb))
+    r, g, b = colorsys.hsv_to_rgb(h, s, max(floor, v * value_scale))
+    return (int(r * 255), int(g * 255), int(b * 255))
+
+
+_BG = (14, 14, 16)          # idle background for glyph pads
+_MUTE_RED = (204, 18, 28)   # mixer convention: lit red = muted
+_AMBER = (255, 168, 22)     # solo
+
+
+def _draw_bulb(draw, w, h, on: bool):
+    color = (255, 255, 255) if on else (120, 120, 126)
+    cx = w / 2
+    draw.ellipse([cx - 14, 12, cx + 14, 40], outline=color, width=4,
+                 fill=color if on else None)
+    draw.rectangle([cx - 7, 42, cx + 7, 50], outline=color, width=3,
+                   fill=color if on else None)
+    draw.line([cx - 5, 55, cx + 5, 55], fill=color, width=3)
+
+
+def _draw_beam(draw, w, h, on: bool):
+    color = (255, 255, 255) if on else (120, 120, 126)
+    ox, oy = 14, h - 14
+    draw.ellipse([ox - 5, oy - 5, ox + 5, oy + 5], fill=color)
+    for tx, ty in ((w - 12, 12), (w - 12, 30), (w - 30, 12)):
+        draw.line([ox, oy, tx, ty], fill=color, width=4)
+
+
+def _draw_slash(draw, w, h):
+    draw.line([12, h - 12, w - 12, 12], fill=(255, 255, 255), width=6)
+
+
+def _draw_starburst(draw, w, h, color, spikes: int = 8, r_out: float = 26, r_in: float = 11):
+    cx, cy = w / 2, h / 2
+    points = []
+    for i in range(spikes * 2):
+        radius = r_out if i % 2 == 0 else r_in
+        angle = math.pi * i / spikes - math.pi / 2
+        points.append((cx + radius * math.cos(angle), cy + radius * math.sin(angle)))
+    draw.polygon(points, fill=color)
+
+
+def _draw_padlock(draw, w, h, locked: bool, color=(255, 255, 255)):
+    cx = w / 2
+    body = [cx - 16, 32, cx + 16, 56]
+    draw.rounded_rectangle(body, radius=6, fill=color if locked else None,
+                           outline=color, width=4)
+    if locked:
+        draw.arc([cx - 11, 12, cx + 11, 40], 180, 360, fill=color, width=5)
+        draw.ellipse([cx - 3, 39, cx + 3, 46], fill=_BG)
+    else:
+        # open shackle: swung to the side
+        draw.arc([cx - 2, 10, cx + 24, 38], 180, 340, fill=color, width=5)
+
+
+def _draw_rainbow_arc(draw, w, h, vivid: bool):
+    bands = [(255, 40, 70), (255, 150, 0), (255, 235, 0),
+             (0, 210, 90), (0, 160, 255), (170, 80, 255)]
+    cx, base = w / 2, h - 14
+    radius = 30
+    for idx, color in enumerate(bands):
+        c = color if vivid else _dim(color, 0.4, 0.22)
+        r = radius - idx * 4
+        draw.arc([cx - r, base - r, cx + r, base + r], 180, 360, fill=c, width=4)
 
 
 def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False):
@@ -286,52 +349,63 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False)
         image.paste(Image.open(icon).convert("RGB").resize(image.size))
         if pressed:  # blue tint so you still see the press on a custom icon
             image = Image.blend(image, Image.new("RGB", image.size, (0, 150, 255)), 0.35)
-    else:
-        draw = ImageDraw.Draw(image)
-        w, h = image.width, image.height
-        active = _row_active(row, pressed, pulse)
-        kind = row.get("target_kind")
-        state = str(row.get("state") or "inactive")
-        if pressed:
-            draw.rectangle([0, 0, w, h], fill=(245, 245, 245))
-            fg = (10, 10, 10)
-        elif kind == "palette_pad":
-            rgb = _normal_rgb(row.get("rgb"))
-            fill = rgb if active else tuple(max(12, int(part * 0.22)) for part in rgb)
-            draw.rectangle([0, 0, w, h], fill=fill)
-            fg = "white"
-            if state in ("queued", "fading"):
-                draw.rectangle([4, 4, w - 5, h - 5], outline=(255, 255, 255), width=3)
-        elif kind == "led_mute":
-            draw.rectangle([0, 0, w, h], fill=(190, 0, 25) if active else (45, 12, 16))
-            draw.line([16, h - 16, w - 16, 16], fill=(255, 235, 235), width=7)
-            fg = "white"
-        elif kind == "laser_mute":
-            draw.rectangle([0, 0, w, h], fill=(190, 0, 25) if active else (45, 12, 16))
-            draw.line([12, h - 14, w - 10, 14], fill=(255, 235, 235), width=7)
-            fg = "white"
-        elif kind == "laser_solo":
-            draw.rectangle([0, 0, w, h], fill=(245, 150, 20) if active else (52, 35, 12))
-            draw.regular_polygon((w / 2, h / 2 - 4, 21), n_sides=8, rotation=0, fill=(255, 205, 80))
-            fg = (30, 20, 0)
-        elif kind == "rainbow":
-            draw.rectangle([0, 0, w, h], fill=(20, 20, 22))
-            _draw_rainbow(draw, (10, 14, w - 10, 34))
-            fg = "white"
-        elif kind == "lock":
-            base = _normal_rgb(row.get("rgb"))
-            draw.rectangle([0, 0, w, h], fill=base if active else (32, 32, 34))
-            draw.rounded_rectangle([22, 30, w - 22, h - 14], radius=5, outline="white", width=3)
-            draw.arc([24, 14, w - 24, 46], 180, 360, fill="white", width=3)
-            fg = "white"
+        return PILHelper.to_native_format(deck, image)
+
+    draw = ImageDraw.Draw(image)
+    w, h = image.width, image.height
+    active = _row_active(row, pressed, pulse)
+    kind = row.get("target_kind")
+    state = str(row.get("state") or "inactive")
+
+    if pressed:  # tactile ack: full white flash, no glyph needed for ~150 ms
+        draw.rectangle([0, 0, w, h], fill=(245, 245, 245))
+        return PILHelper.to_native_format(deck, image)
+
+    if kind == "palette_pad":
+        # The color IS the label — no text. dim = available, bright+border =
+        # playing, pulsing border = queued, bright+pulsing border = arriving.
+        rgb = _normal_rgb(row.get("rgb"))
+        base = rgb if state in ("active", "fading") else _dim(rgb)
+        draw.rectangle([0, 0, w, h], fill=base)
+        if state == "active":
+            draw.rectangle([3, 3, w - 4, h - 4], outline=(255, 255, 255), width=4)
+        elif state in ("queued", "fading") and pulse:
+            draw.rectangle([3, 3, w - 4, h - 4], outline=(255, 255, 255), width=5)
+    elif kind == "led_mute":
+        muted = active
+        draw.rectangle([0, 0, w, h], fill=_MUTE_RED if muted else _BG)
+        _draw_bulb(draw, w, h, muted)
+        if muted:
+            _draw_slash(draw, w, h)
+    elif kind == "laser_mute":
+        muted = active
+        draw.rectangle([0, 0, w, h], fill=_MUTE_RED if muted else _BG)
+        _draw_beam(draw, w, h, muted)
+        if muted:
+            _draw_slash(draw, w, h)
+    elif kind == "laser_solo":
+        if state == "active":
+            draw.rectangle([0, 0, w, h], fill=_AMBER)
+            _draw_starburst(draw, w, h, (255, 255, 255))
+        elif state == "queued":  # armed: pulsing amber — press to cancel
+            draw.rectangle([0, 0, w, h], fill=(70, 46, 8) if pulse else _BG)
+            _draw_starburst(draw, w, h, _AMBER if pulse else _dim(_AMBER))
         else:
-            draw.rectangle([0, 0, w, h],
-                           fill=(0, 150, 255) if active else (35, 35, 35))
-            fg = "white"
+            draw.rectangle([0, 0, w, h], fill=_BG)
+            _draw_starburst(draw, w, h, _dim(_AMBER, 0.4, 0.24))
+    elif kind == "rainbow":
+        draw.rectangle([0, 0, w, h], fill=_BG)
+        _draw_rainbow_arc(draw, w, h, vivid=active)
+    elif kind == "lock":
+        locked = active
+        base = _normal_rgb(row.get("rgb")) if locked else _BG
+        draw.rectangle([0, 0, w, h], fill=base if locked else _BG)
+        _draw_padlock(draw, w, h, locked)
+    else:  # static looks: the name is the identity — one clean label, no note text
+        draw.rectangle([0, 0, w, h], fill=(0, 120, 210) if active else (26, 26, 30))
         label = str(row.get("name") or key + 1).replace("_", " ")
-        _fit_text(draw, label, (w / 2, h / 2 + 10), w - 10, size=15, fill=fg)
-        draw.text((w / 2, h - 8), f"n{row['note']}", anchor="mm",
-                  font=_font(11), fill=(210, 210, 210) if not pressed else (50, 50, 50))
+        _fit_text(draw, label, (w / 2, h / 2), w - 8, size=16,
+                  fill=(255, 255, 255) if active else (185, 185, 190))
     return PILHelper.to_native_format(deck, image)
 
 
