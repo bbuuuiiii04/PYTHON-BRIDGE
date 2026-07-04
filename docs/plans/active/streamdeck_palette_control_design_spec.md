@@ -36,9 +36,12 @@ In scope (v1, LED):
   white/off-white and drives lasers white.
 - **LED-blackout toggle pad** (operator-accepted 2026-07-04): LEDs off / LEDs back on, so the
   operator can compose LED-only, LED+laser, and laser-only moments live (C.8).
-- **Drop-spotlight arm pad** (operator-accepted 2026-07-04): a one-shot, operator-armed "next drop
-  is lasers-only" moment — Govees black out for the drop window, then auto-restore (C.9). Armed
-  manually so it stays special: never automatic, never every drop, never every track.
+- **Drop spotlight + drop choreography** (arm pad operator-accepted 2026-07-04; automation
+  requested 2026-07-04, design proposed — confirm at gate 2): a one-shot, operator-armed "next
+  drop is lasers-only" moment, **plus** a deterministic policy that automates the room's states —
+  LEDs-only / LEDs+lasers / lasers-only / full-dark pre-drop beat — sparsely, via an "earned drop"
+  rule with a track budget (C.9). No energy model, no heuristics: phrase roles + drop lifecycle
+  only.
 - **Visual feedback**: each pad renders an icon reflecting its palette/action and live state.
 - **Pinned pad layout** (operator 2026-07-04): palette pads stay on fixed keys; static-look pads
   move to the bottom row (replaces today's "waterfall" fill — see Part C.1).
@@ -237,19 +240,47 @@ independently dark outside drops and have their own blackout pad).
   payload `reason`), OR'd at the LED dispatch layer, so a spotlight auto-restore can never clear a
   manually-toggled blackout and vice versa. Codex spec pins the exact seam + test.
 
-**9. Drop-spotlight arm pad (LOCKED, operator-accepted 2026-07-04 — armed one-shot, never
-automatic).** Key 8 arms a one-shot "lasers own the room" moment:
-- **Arm** (press) → pad pulses (`spotlight: "armed"`). **At the next drop impact** on the active
-  deck, the coordinator black-outs the Govees (spotlight owner) for the drop window; lasers —
-  visible exactly then, per the drop-only setup — carry the moment alone. **Auto-restore** at the
-  end of the drop window, then the pad returns to `off` (one-shot; re-arm for another).
-- **Disarm** = press again while armed. Arming state **auto-clears on track change** (an armed
-  spotlight never carries into a track the operator didn't aim it at).
-- **Drop window** = drop impact → end of the drop role per smart-phrasing, capped at 32 beats
-  (defaulted; tune later). **Fail-open rules:** restore LEDs on ANY of window end / role change /
-  track change / stop / manual LED-blackout toggle interaction — a spotlight can never latch the
-  Govees dark. Uses only deterministic inputs (drop lifecycle + phrase roles), no heuristics —
-  rarity comes from the operator arming it, which is what keeps it a special moment.
+**9. Drop spotlight & drop choreography (arm pad LOCKED, operator-accepted 2026-07-04;
+automation requested by operator 2026-07-04 — policy below is Fable's PROPOSED design, confirm at
+gate 2).**
+
+**The state-automation insight:** the pack authoring already automates two of the three room
+states — breakdown/groove/buildup keep lasers dark (**LEDs-only**), drops light lasers
+(**LEDs+lasers**). Only **lasers-only** needs new logic, plus the natural fourth state:
+**full-dark**, riding smart-drop's existing pre-drop laser blackout window. One small
+deterministic policy covers all of it.
+
+- **Manual arm (one-shot, unchanged):** key 8 press → pad pulses (`spotlight: "armed"`) → next
+  drop impact on the active deck black-outs the Govees (spotlight owner) for the drop window;
+  lasers carry the moment alone; auto-restore at window end; pad returns to `off`. Disarm = press
+  again; arming auto-clears on track change. Manual arm bypasses the auto budget and resets its
+  counter (so auto never fires right after a manual spotlight).
+- **Auto "earned drop" rule (deterministic; no energy model):** a drop qualifies as special when
+  ALL hold: (a) **tension run** — the contiguous breakdown+buildup beats immediately preceding
+  impact (from smart-phrasing roles) ≥ `tension_min_beats` (default 32); (b) it is the **track's
+  first drop** (ANLZ drop map); (c) **budget** — `tracks_since_special ≥ special_budget_tracks`
+  (default 3). A qualifying drop gets the full choreography: **pre-drop full-dark** (Govees join
+  the lasers' existing pre-drop blackout for the final `led_predark_beats`, default 4, before
+  predicted impact — total darkness) → **impact = lasers-only spotlight** (Govees stay dark
+  through the drop window) → auto-restore. Non-qualifying drops run the default: LEDs+lasers,
+  no pre-dark. At most one auto-special per track; long build → big payoff is the whole rule.
+- **Pre-dark scope knob:** `predark_scope: special_only | all | off` (default `special_only` —
+  full-dark every drop would wear out).
+- **Darkness guard (manual AND auto):** before cutting the Govees at impact, verify lasers will
+  actually be visible — pack player live and rendering a drop autoloop, no laser blackout mask
+  held, laser output enabled. Otherwise **abort the spotlight and keep the LEDs** (a spotlight on
+  dark lasers = a fully dark room, which only the pre-dark beat is ever allowed to be, and that is
+  beat-capped with a hard restore at impact).
+- **Manual always wins:** a manually-held LED-blackout toggle (C.8) suspends the choreography;
+  any manual toggle interaction during a spotlight window restores/overrides it. Separate owners
+  per C.8.
+- **Drop window** = drop impact → end of the drop role per smart-phrasing, capped at 32 beats.
+  **Fail-open rules:** restore LEDs on ANY of window end / role change / track change / stop /
+  manual interaction / laser-output loss mid-window — a spotlight can never latch the Govees dark.
+- **Config block** (proposed home `config/led_look_director.json` `/drop_choreography`):
+  `{enabled, tension_min_beats: 32, special_budget_tracks: 3, led_predark_beats: 4,
+  predark_scope: "special_only", drop_window_cap_beats: 32}`. All deterministic knobs; no
+  learned/heuristic values anywhere.
 - Zero laser code; the laser doc carries a one-line cross-reference only.
 
 ## Part D — Open items
