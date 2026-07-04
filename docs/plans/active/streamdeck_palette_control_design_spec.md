@@ -38,10 +38,11 @@ In scope (v1, LED):
   toggles — **LED mute** and **Laser mute** — compose all three room states live: LED-only,
   LED+laser, laser-only (C.8).
 - **Drop presentation policy + Laser Solo pad** (operator-directed 2026-07-04, converged via
-  brainstorm): **lasers-only is never random** — a Laser Solo drop fires only from the Laser Solo
-  pad or a **Rekordbox hotcue tag** on the drop; untagged tracks get a fixed **lighting
-  personality** from their own structure (lasers on the track's biggest drops, dark on the rest)
-  (C.9). No energy model, no RNG rolls except a per-track seeded coin for single-drop tracks.
+  brainstorm): **a Laser Solo is never a dice roll** — it fires from the Solo pad, a **Rekordbox
+  hotcue tag**, **learned history** of the operator's own presses, a **one-mix BPM gear-shift**
+  (≥ +10), or the **night's record runway**; untagged tracks get a fixed **lighting personality**
+  from their own structure (lasers on the track's biggest drops, dark on the rest; last true drop
+  always at least LED+laser) (C.9). No energy model, zero RNG.
 - **Visual feedback**: each pad renders an icon reflecting its palette/action and live state.
 - **Pinned pad layout** (operator 2026-07-04): palette pads stay on fixed keys; static-look pads
   move to the bottom row (replaces today's "waterfall" fill — see Part C.1).
@@ -255,8 +256,10 @@ whenever the pads are untouched.
 2026-07-04 — supersedes the earlier weighted-deal draft; "Laser Solo" naming accepted).**
 
 **Governing idea (operator's own words): a lasers-only drop is "the whole club saw it coming"
-AND "the track everyone came for" — so lasers-only is NEVER random.** It fires only from the
-operator (live or curated ahead). Untagged tracks get a fixed **lighting personality** derived
+AND "the track everyone came for" — so a Laser Solo is NEVER a dice roll.** Every solo traces to
+an operator signal — a live press, a hot cue, the learned history of his own presses, his own
+mixing (a one-mix BPM gear-shift) — or to a night-relative superlative (the record runway).
+Zero RNG anywhere in the policy. Untagged tracks get a fixed **lighting personality** derived
 from their own structure. "True drop" reuses the bridge's existing qualification, unchanged:
 Smart-Drop selection (`smart_phrasing.py:601`) + the drop-lifecycle tension-predecessor gate
 (`drop_lifecycle.py:18` `impact_predecessors`). Breakdown/groove/buildup stay LEDs-only by pack
@@ -264,28 +267,57 @@ authoring, as today. **Deleted from the earlier draft:** presentation weights, t
 lasers-only tier, the ordinal-≥2 gate, the tracks-since-special budget, and the drought breaker
 (operator: every track played has a true drop, nearly all have 2+ — a drought never occurs).
 
-**The ladder (first match wins, per drop):**
+**Runway (definition, used throughout):** walk backward from a drop's impact beat, counting
+consecutive beats whose smart-phrasing role is **breakdown or buildup** (the ANLZ phrase roles
+the bridge already maps); stop at the first beat that is anything else. 32-beat breakdown +
+16-beat buildup into the drop = 48-beat runway; a drop straight out of groove = 0.
+
+**The ladder (first match wins, per drop; auto-solo tiers 4-6 fire at most ONCE per track):**
 1. **Mute pads (C.8)** — manual room state, absolute, continuous.
 2. **Laser Solo pad (key 9)** — one-shot: arms the **next true drop** (not immediate; a press
    during an already-playing drop arms the following one) as `lasers_only` (+ pre-dark). Pad
-   pulses while armed; disarm = press again; auto-clears on track change.
+   pulses while armed; disarm = press again; auto-clears on track change. **The pad is also the
+   veto:** whenever ANY lower tier (hotcue/learned/gear-shift/record) has a solo pending, the pad
+   shows "armed" — pressing it cancels that solo, and cancelling a learned solo un-learns it.
 3. **Hotcue tag (curation in Rekordbox)** — a hot cue named with the marker (default `LASER`,
    case-insensitive, config `hotcue_marker`) placed on the drop marks it: that drop is
    `lasers_only` (+ pre-dark). Matched to the nearest smart drop within ±2 beats. **No budget
    gate — tagging is deliberate; if two tagged anthems play back-to-back, that was the plan.**
    Mechanism: hot cues live in the ANLZ files the bridge already parses per track via
    `pyrekordbox.AnlzFile` (`anlz_reader.py:184-201`); extraction is a new
-   `_extract_hot_cues(parsed)` in the same pattern as `_extract_pssi_phrases` (:227,) reading the
+   `_extract_hot_cues(parsed)` in the same pattern as `_extract_pssi_phrases` (:227) reading the
    PCOB/PCO2 cue tags — *[assumed: cue comments present in the operator's exported ANLZ files;
    verify with one real file at spec time]*.
-4. **Opening damper** — the first `opening_tracks` (default 3) of a session force `leds_only`
-   drops (save the night's first laser moment).
-5. **Track personality (everything else — deterministic, no RNG):** rank the track's true drops
-   by its own dramaturgy — **last drop first, then longest runway** (contiguous
-   breakdown+buildup beats before impact, from phrase roles). The top `ceil(laser_ratio × N)`
-   ranked drops (default ratio 0.4) render `leds_plus_lasers`; the rest `leds_only`.
-   Single-drop tracks flip a **track-identity-seeded** coin at `laser_ratio` (stable across
-   plays). Seeding is by `content_id`, NOT set seed, so **every track keeps the same lighting
+4. **Learned solo (operator-accepted 2026-07-04) — the pad teaches.** Every manual solo is
+   recorded per `(content_id, drop_index)` in a small gitignored state file
+   (`local/state/laser_solo_learned.json`). After `solo_learn_threshold` (default 2) manual solos
+   on the same drop, it is promoted: that drop auto-solos on every future play, exactly like a
+   hotcue tag. The pad arms on track load so the intent is visible; the veto press (tier 2)
+   cancels AND un-learns. Per-track memory only — generalizes nothing across tracks.
+5. **Gear-shift solo (operator-accepted 2026-07-04, operator-tuned).** When a master handover
+   jumps the live BPM by ≥ `gearshift_bpm_jump` (default **+10**) **within that single mix** —
+   incoming master's BPM vs the outgoing master's live BPM at the transition, never a drift
+   accumulated across several tracks — the incoming track's **first true drop** solos. Plain
+   arithmetic on the master-change event.
+6. **Record-breaker solo (operator-accepted 2026-07-04).** A drop whose runway **strictly beats
+   the night's longest runway so far** solos — but only after `record_min_drops` (default 5)
+   true drops have been observed tonight (a real baseline exists). No absolute threshold, so
+   nothing to generalize: the night calibrates itself, and each record raises the bar, so it
+   naturally rarifies as the set peaks. The record is crossed **mid-buildup** (the accruing
+   runway passes the old record before impact), so the pad arms and pre-dark engages in time.
+   Records are tracked even when the solo doesn't fire (e.g. during the damper).
+7. **Opening damper** — the first `opening_tracks` (default 3) of a session force `leds_only`
+   drops and block tiers 5-6 (save the night's first laser moment). Manual, hotcue, and learned
+   solos are exempt — explicit curation fires even early.
+8. **Finale guarantee (operator flip of the "finale drop" idea, 2026-07-04):** the **last true
+   drop of a track, when actually reached, always renders at least `leds_plus_lasers`** — never
+   `leds_only`. (It already ranks #1 in the personality tier; this makes the guarantee explicit
+   and replaces the old single-drop coin: a single-drop track's drop is its last, so it gets
+   LED+laser when reached, no coin flip.)
+9. **Track personality (everything else — fully deterministic, zero RNG anywhere):** rank the
+   track's true drops by its own dramaturgy — **last drop first, then longest runway**. The top
+   `ceil(laser_ratio × N)` ranked drops (default ratio 0.4) render `leds_plus_lasers`; the rest
+   `leds_only`. A pure function of track structure, so **every track keeps the same lighting
    identity every time it's played** — lasers land on its biggest drops, dark on the rest;
    predictable for the performer, consistent craft for the crowd.
 
@@ -300,7 +332,8 @@ lasers-only tier, the ordinal-≥2 gate, the tracks-since-special budget, and th
 - **Drop window** = drop impact → end of the smart-phrasing drop role (the shared phrase
   authority, neither side's private timer), capped at `drop_window_cap_beats` (default 32 ≈ 14 s
   at 140 BPM; 16 is the shorter taste option).
-- **Darkness guard (`lasers_only`, manual AND tagged):** before cutting the Govees at impact,
+- **Darkness guard (`lasers_only`, ALL solo sources — manual, tagged, learned, gear-shift,
+  record):** before cutting the Govees at impact,
   verify lasers will actually be visible — pack player live and rendering a drop autoloop, no
   laser blackout mask held, laser output enabled. Otherwise **fall back to `leds_plus_lasers`**
   (only the beat-capped pre-dark may ever be fully dark, and it hard-restores at impact).
@@ -309,9 +342,10 @@ lasers-only tier, the ordinal-≥2 gate, the tracks-since-special budget, and th
   can never latch either fixture dark.
 - **Config block** (proposed home `config/led_look_director.json` `/drop_presentation`):
   `{enabled: true, laser_ratio: 0.4, opening_tracks: 3, led_predark_beats: 4,
-  drop_window_cap_beats: 32, hotcue_marker: "LASER"}`. All deterministic; `enabled: false`
-  restores today's behavior exactly (every drop `leds_plus_lasers`; mute/solo pads still work).
-  First live set validates the defaults.
+  drop_window_cap_beats: 32, hotcue_marker: "LASER", solo_learn_threshold: 2,
+  gearshift_bpm_jump: 10, record_min_drops: 5, ws_handoff_enabled: false}`. All deterministic;
+  `enabled: false` restores today's behavior exactly (every drop `leds_plus_lasers`; mute/solo
+  pads still work). First live set validates the defaults.
 - The `leds_only` base-suppression seam is laser-side plumbing (a per-drop selection withhold);
   the laser doc cross-references it. Everything else is zero laser code.
 
@@ -330,10 +364,18 @@ lasers-only tier, the ordinal-≥2 gate, the tracks-since-special budget, and th
    Part B), queue-vs-lock precedence (C.3, operator-decided), layout + notes + waterfall fix (C.1),
    feedback schema/cadence (C.7), binding source (C.6). **Feature-expansion round (operator picks
    2026-07-04):** override-as-phrase-fade (C.2), LED/Laser mute pads (C.8), Laser Solo pad +
-   presentation policy (C.9); rejected: shift pad, per-drop laser hue variation as a feature
-   (already emerges from existing behavior), laser contrast mode (fixed-color fixture — see laser
-   doc), final-drop finisher, double-drop detection (operator doesn't do them), drought breaker
-   (no droughts — every track has true drops).
+   presentation policy (C.9), auto-solo tiers (learned / gear-shift / record-breaker, C.9);
+   rejected: shift pad, per-drop laser hue variation as a feature (already emerges from existing
+   behavior), laser contrast mode (fixed-color fixture — see laser doc), double-drop detection
+   (operator doesn't do them), drought breaker (no droughts — every track has true drops),
+   **star-rating curation** (operator's ratings mix "really like" with energy-level tags —
+   semantics too polluted to drive solos; a dedicated Rekordbox playlist name remains the clean
+   future option for bulk curation).
+5. **white_sand handoff (operator: "flesh out more, then it could be added" — shipped DISABLED,
+   `ws_handoff_enabled: false`).** Proposed flesh-out: holding `white_sand` continuously from
+   inside a breakdown until the pre-dark point (≥ 16 beats of hold) makes the drop that ends it a
+   Laser Solo — the ritual completes; max once per track. Disabled by default because frequent
+   white_sand use would erode solo rarity; revisit after the operator feels the other tiers live.
 
 ## Part E — Evidence (file:line, HEAD `bd96b32`)
 

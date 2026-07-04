@@ -298,10 +298,11 @@ for its whole window.)
    drop-lifecycle events; pure mapper behavior. **Gated on exact CH8/CH9 behavior from the chart
    (#1).**
 9. **Drop presentation policy (design lives in the Stream Deck doc; ONE laser-side seam).** The
-   converged ladder — mute pads > Laser Solo pad > Rekordbox hotcue tag (`lasers_only` with
-   pre-drop full-dark; never random) > opening damper > per-track lighting personality (lasers on
-   the track's biggest drops by last-drop/longest-runway ranking, `laser_ratio` 0.4, seeded by
-   track identity) — is specced in `streamdeck_palette_control_design_spec.md` Part C.9. A second
+   converged ladder — mute pads > Laser Solo pad (manual + veto) > hotcue tag > learned solo
+   (pad presses teach per-track) > gear-shift solo (one-mix BPM jump ≥ +10) > record-breaker solo
+   (night's longest runway) > opening damper > finale guarantee (last true drop ≥ LED+laser) >
+   per-track lighting personality (last-drop/longest-runway ranking, `laser_ratio` 0.4; zero
+   RNG) — is specced in `streamdeck_palette_control_design_spec.md` Part C.9. A second
    manual laser-blackout owner (the deck's Laser-mute pad) joins the existing `blackout_mask`
    binding refcount — no new laser code, one bridge-config binding row.
    The single laser-side piece is **`leds_only` base suppression**: withholding the drop's
