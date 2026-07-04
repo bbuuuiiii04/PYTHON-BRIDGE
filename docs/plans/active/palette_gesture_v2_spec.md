@@ -76,14 +76,13 @@ operator schedules the landing.**
   handle time is sufficient for a 0.5 s threshold (queue-drain jitter is
   milliseconds). Do NOT read the `__enqueue_mono` payload stamp — it is a
   logging concern (`logging_manager.py:203`).
-- [confirmed] Baseline suite state at `7aef68f`: 2901 tests, **1 error** —
-  `tests/test_streamdeck_midi.py::test_missing_partial_sidecar_keys_are_inactive_noops`
-  errors because `ca98d3f` added `latched=` to the `render_key` call in
-  `on_key` (`streamdeck/streamdeck_midi.py:477-478`) without updating that
-  test's `render_key` mock lambda. 5 skipped / 1 expected failure are normal.
-  Run the suite FROM THE REPO ROOT (`python3 -m unittest discover tests`) —
-  running from the parent dir falsely fails a laser-color test on a
-  cwd-relative config path.
+- [confirmed] Baseline suite state at `8abccdf`: **2916 tests, OK** (5
+  skipped, 1 expected failure). A transient harness error at `7aef68f`
+  (`ca98d3f`'s `latched=` kwarg vs a stale `render_key` mock) was fixed by
+  the parallel session's test rewrite in `8abccdf` — Task 0 should be a
+  verify-and-skip unless it reproduces at your HEAD. Run the suite FROM THE
+  REPO ROOT (`python3 -m unittest discover tests`) — running from the parent
+  dir falsely fails a laser-color test on a cwd-relative config path.
 
 ## Part B — Tasks (implement exactly, in order; commit after each)
 
