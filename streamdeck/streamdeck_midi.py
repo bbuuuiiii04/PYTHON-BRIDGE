@@ -41,6 +41,12 @@ PACK_DIR = Path(__file__).resolve().parents[1] / "local" / "soundswitch" / "rbss
 BINDING_SIDECAR = PACK_DIR.parent / f".{PACK_DIR.name}.midi_bindings.json"
 PALETTE_STATE_PATH = Path("/tmp/rb_ss_bridge_v2_palette_state.json")
 FEEDBACK_STALE_S = 10.0
+# Watchdog: a wedged HID write (or any main-thread hang) freezes pads silently
+# and the watcher only respawns dead processes — so a stalled main loop exits
+# hard and lets the watcher bring us back. Main loop ticks every 0.5s (3s while
+# waiting for the device); 20s of silence means wedged, not busy.
+WATCHDOG_STALL_S = 20.0
+SHUTDOWN_STALL_S = 10.0
 # Drop 1.png .. 15.png in the icons/ folder beside this file to give pads
 # custom pictures (else the pad shows its number + note):
 ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
@@ -137,7 +143,10 @@ def _feedback_palette(feedback: dict | None, name: str) -> dict | None:
 
 
 def _palette_row(row: dict) -> dict:
-    return {
+    # Pass-through-by-default: unknown producer fields survive the projection.
+    # A whitelist here silently ate the `ramp` field once (incident 2026-07-04).
+    out = dict(row)
+    out.update({
         "channel": CHANNEL,
         "note": int(row["note"]),
         "target_kind": "palette_pad",
@@ -146,7 +155,8 @@ def _palette_row(row: dict) -> dict:
         "rgb": tuple(row.get("rgb") or (0, 0, 0)),
         "ramp": [tuple(c) for c in row.get("ramp") or []],
         "state": str(row.get("state") or "inactive"),
-    }
+    })
+    return out
 
 
 def _control_row(feedback: dict | None, key: str, fallback_name: str) -> dict | None:
@@ -154,14 +164,16 @@ def _control_row(feedback: dict | None, key: str, fallback_name: str) -> dict | 
     row = controls.get(key) if isinstance(controls, dict) else None
     if not isinstance(row, dict) or type(row.get("note")) is not int:
         return None
-    return {
+    out = dict(row)  # pass-through-by-default, same rationale as _palette_row
+    out.update({
         "channel": CHANNEL,
         "note": int(row["note"]),
         "target_kind": key,
         "interaction": "toggle",
         "name": str(row.get("name") or fallback_name),
         "state": str(row.get("state") or "inactive"),
-    }
+    })
+    return out
 
 
 def compose_layout(feedback: dict | None, sidecar: list[dict], key_count: int = 15) -> list[dict | None]:
@@ -201,6 +213,83 @@ def compose_layout(feedback: dict | None, sidecar: list[dict], key_count: int = 
         if key < key_count:
             layout[key] = dict(row)
     return layout
+
+
+class FeedbackWatch:
+    """Deck-side observability for the feedback link (2026-07-04 incident #5:
+    a static-only boot printed one plausible 'live' banner, healed silently,
+    and masqueraded as an input fault for days). Tracks transitions across
+    supervision ticks and reports:
+      - feedback lost/restored (the file going stale/missing and back),
+      - the composed layout gaining/losing bound keys (with the note range),
+      - a bridge restart (feedback seq regression) — the deck-local toggle
+        latches predate the restart and must be cleared or they lie."""
+
+    def __init__(self) -> None:
+        self._had_feedback: bool | None = None
+        self._last_seq: int | None = None
+        self._notes: set[int] | None = None
+
+    def observe(self, feedback: dict | None, layout) -> tuple[list[str], bool]:
+        messages: list[str] = []
+        clear_latches = False
+        have = feedback is not None
+        if self._had_feedback is None:
+            if not have:
+                messages.append(
+                    "feedback missing/stale - palette+control pads blank (static looks only)")
+        elif have != self._had_feedback:
+            messages.append(
+                "feedback restored" if have
+                else "feedback lost (stale or missing) - palette+control pads blank")
+        self._had_feedback = have
+        if have:
+            seq = feedback.get("seq")
+            if isinstance(seq, int):
+                if self._last_seq is not None and seq < self._last_seq:
+                    messages.append(
+                        f"bridge restart detected (feedback seq {self._last_seq} -> {seq})"
+                        " - clearing pad latches")
+                    clear_latches = True
+                self._last_seq = seq
+        notes = {row["note"] for row in layout
+                 if isinstance(row, dict) and type(row.get("note")) is int}
+        if self._notes is not None and notes != self._notes:
+            gained = len(notes - self._notes)
+            lost = len(self._notes - notes)
+            span = f"notes {min(notes)}-{max(notes)}" if notes else "no bound notes"
+            messages.append(f"layout changed (+{gained}/-{lost} bound keys) - {span}, "
+                            f"ch {CHANNEL + 1}")
+        self._notes = notes
+        return messages, clear_latches
+
+
+def _pulse_keys(layout) -> set[int]:
+    """Keys whose rendering depends on the 0.5s pulse phase."""
+    return {key for key, row in enumerate(layout)
+            if isinstance(row, dict) and str(row.get("state")) in ("queued", "fading")}
+
+
+def _changed_keys(prev_layout, next_layout) -> set[int]:
+    count = max(len(prev_layout), len(next_layout))
+    return {key for key in range(count)
+            if (prev_layout[key] if key < len(prev_layout) else None)
+            != (next_layout[key] if key < len(next_layout) else None)}
+
+
+def _watchdog(stop: threading.Event, tick: list[float]) -> None:
+    # ponytail: process suicide + watcher respawn, not in-process recovery —
+    # a hang here is wedged C-level USB I/O that no Python except can fix.
+    while True:
+        time.sleep(5.0)
+        if stop.is_set():
+            time.sleep(SHUTDOWN_STALL_S)
+            log(f"shutdown stalled >{SHUTDOWN_STALL_S:.0f}s - hard exit for watcher respawn")
+            os._exit(70)
+        if time.monotonic() - tick[0] > WATCHDOG_STALL_S:
+            log(f"main loop stalled >{WATCHDOG_STALL_S:.0f}s (wedged USB write?)"
+                " - hard exit for watcher respawn")
+            os._exit(70)
 
 
 def led_state(sidecar, pressed_set: set[tuple[int, int]]) -> dict[tuple[int, int], bool]:
@@ -433,11 +522,14 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
     return PILHelper.to_native_format(deck, image)
 
 
-def acquire_deck():
+def acquire_deck(log_errors: bool = True):
+    # log_errors=False after the first failed attempt: the retry loop runs
+    # every 3s and once filled /tmp/streamdeck.log with 3000+ identical lines.
     try:
         decks = DeviceManager().enumerate()
     except Exception as exc:
-        log(f"Stream Deck enumerate error: {exc}")
+        if log_errors:
+            log(f"Stream Deck enumerate error: {exc}")
         return None
 
     for deck in decks:
@@ -447,7 +539,8 @@ def acquire_deck():
             deck.set_brightness(60)
             return deck
         except Exception as exc:
-            log(f"Stream Deck open error: {exc}")
+            if log_errors:
+                log(f"Stream Deck open error: {exc}")
             try:
                 deck.close()
             except Exception:
@@ -475,7 +568,7 @@ def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
             else:
                 active_keys.discard(pad_key)
             deck.set_key_image(key, render_key(deck, key, pressed, sidecar,
-                                               latched=led_state(sidecar, active_keys)[pad_key]))
+                                               latched=pad_key in active_keys))
             if pressed:
                 def clear_flash():
                     try:
@@ -487,14 +580,19 @@ def make_on_key(deck, port, sidecar_ref, active_keys: set[tuple[int, int]]):
                         deck.set_key_image(
                             key,
                             render_key(deck, key, False, latest,
-                                       latched=led_state(latest, active_keys).get(latest_key, False)),
+                                       latched=latest_key in active_keys),
                         )
                     except Exception:
                         pass
 
                 threading.Timer(0.15, clear_flash).start()
-        except (TransportError, OSError) as exc:
-            log(f"key callback error: {exc}")
+        except Exception as exc:
+            # Broad on purpose: this runs on the library's read thread, which
+            # only survives TransportError. Any exception we let escape (e.g.
+            # an rtmidi send failure, which is NOT an OSError) kills that
+            # thread and every pad goes silently dead while the display keeps
+            # rendering — the unforgivable failure mode.
+            log(f"key callback error: {exc!r}")
     return on_key
 
 
