@@ -106,6 +106,12 @@ reviewed deployment/hardware gate.
 - Strategy maps accept only `gradient_even`, `random_with_replacement`, and `random_with_mono_chance`; invalid values disable the color engine while keeping the LED config loadable.
 - `color_engine.slot_mono_chance_by_look` defaults to `{}` and accepts per-look numeric probabilities in `[0, 1]`; bools, non-numbers, out-of-range values, and non-object values disable only the color engine.
 - `color_engine.locked_palette_by_look` defaults to `{}` and maps look names to existing palette names; unknown palette names, non-string values, and non-object values disable only the color engine.
+- `color_engine.palettes.*.type` defaults to `journey`. `fixed_rgb` palettes require `rgb: [r, g, b]`;
+  `rainbow` palettes are manual-only full-wheel entries. The tracked example adds weight-0
+  `white_sand` and `rainbow` entries for Stream Deck palette control.
+- `color_engine.palette_control`, when enabled, defines the Stream Deck device, zero-based MIDI
+  channel, palette notes, and control notes. `laser_solo_note` is accepted/reserved for a later
+  package; Package 2 binds palette pads, lock, LED mute, laser mute, and Rainbow.
 - M2.5 slot cues always resolve six slot colors; slot 5 is reserved pure white.
 - Point or mono palette selections can make slots 0-4 one solid RGB for any slot cue, including realtime chase/comet/twinkle cues. `random_with_mono_chance` can opt individual looks into probabilistic solid slots 0-4 without changing shipped behavior when its chance map is empty or zero.
 - In the tracked LED example, Patch F keeps generic slot looks in `banks.default` and stores legacy color-suffix realtime looks in `banks.legacy_color_suffix`. The director selects `banks.default`; the legacy bank is preservation storage unless future code explicitly selects it.

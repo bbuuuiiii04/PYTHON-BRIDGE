@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 944bc83
-last_verified_date: 2026-07-03
-validation_scope: software-only
+last_verified_commit: cc895f8
+last_verified_date: 2026-07-04
+validation_scope: software-only; Stream Deck palette control config software-tested
 ---
 
 # Configuration
@@ -69,6 +69,15 @@ Config:
 - Accepted LED slot-fill strategy values are `gradient_even`, `random_with_replacement`, and `random_with_mono_chance`; invalid values disable the color engine while leaving LED config availability intact.
 - LED `color_engine.slot_mono_chance_by_look` defaults to `{}` and accepts per-look numeric probabilities in `[0, 1]`; invalid, bool, or non-object values disable the color engine while leaving LED config availability intact.
 - LED `color_engine.locked_palette_by_look` defaults to `{}` and maps look names to existing `color_engine.palettes` names. Unknown palette names, non-string palette names, or non-object values disable the color engine while leaving LED config availability intact.
+- LED `color_engine.palettes.*.type` defaults to `journey`; `fixed_rgb` palettes use an explicit
+  `rgb: [r, g, b]` value and `rainbow` palettes resolve the full hue wheel manually. The tracked
+  example includes weight-0 manual-only `white_sand` and `rainbow` entries for Stream Deck palette
+  control.
+- LED `color_engine.palette_control` is an optional object. When `enabled: true`, it validates a
+  Stream Deck `device`, zero-based MIDI `channel`, `palette_notes` for existing palettes, and
+  control-note fields for lock, LED mute, laser mute, Laser Solo, and Rainbow. The loader turns
+  those notes into pack MIDI bindings; `laser_solo_note` is parsed/reserved for a later package and
+  does not emit a binding yet.
 - LED `scripted_mode` is an optional top-level object with `default_role` and `role_map`. Source/default roles exclude `utility`, but `utility` is accepted as a destination meaning the configured blackout bank. Absent config maps scripted groove/drop/post-drop to `utility`; a present partial map falls back to `default_role`.
 - M2.5 slotized generic LED looks such as `rt_groove_chase`, `rt_post_drop_chase`, Patch E1 nebula looks, Patch E2 `rt_post_drop_center_comet`, and Patch E3 `rt_twinkle` are additive config entries. Patch F moves legacy color-suffix looks out of the tracked example `default` bank into `legacy_color_suffix` storage while keeping their look definitions intact.
 - Local ignored `config/led_look_director.json` can legitimately lag the tracked example; mirror Patch F to live config only with explicit operator approval and a loader check.
@@ -86,7 +95,7 @@ Config:
 Tests:
 - inspect `tests/` for laser config and LED config tests
 - run config-specific tests when schema changes
-- `tests/test_color_engine_config.py` covers LED color-engine slot-fill strategy defaults, accepted values, mono-chance parsing, locked-palette parsing, and invalid-value rejection.
+- `tests/test_color_engine_config.py` covers LED color-engine slot-fill strategy defaults, accepted values, mono-chance parsing, locked-palette parsing, palette-control binding parsing, and invalid-value rejection.
 - `tests/test_led_config.py` covers the LED `scripted_mode` blackout defaults, accepted `utility` destinations and partial maps, and invalid role/schema rejection.
 - `tests/test_soundswitch_pack_player_config.py` covers T7a defaults, path precedence, inline/external fixture maps, strict validation, immutability, and the never-raising contract.
 - `tests/test_laser_config.py` and `tests/test_laser_config_deprecation.py` cover Laser Audit P4

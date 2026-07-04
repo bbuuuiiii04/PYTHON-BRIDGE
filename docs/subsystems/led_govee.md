@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 56c5f90
-last_verified_date: 2026-07-03
-validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, and the pad editor unset-param-defaults fix software-tested, hardware-unvalidated
+last_verified_commit: cc895f8
+last_verified_date: 2026-07-04
+validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, pad editor unset-param-defaults, and Stream Deck palette control Package 2 software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem
@@ -37,11 +37,11 @@ Audit P5 (2026-07-03):
   adapter remains `led_dispatch_coordinator.py`; this is a pure code-layout/bookkeeping refactor.
 
 Stream Deck palette control (Package 2, 2026-07-04):
-- The active implementation target is `docs/architecture/palette_control_authority.md`.
-- The `streamdeck_palette` change contract covers palette queue/override-fade/lock, `white_sand`,
+- The implemented behavior authority is `docs/architecture/palette_control_authority.md`.
+- The `streamdeck_palette` change contract implements palette queue/override-fade/lock, `white_sand`,
   LED mute owner semantics, Rainbow mode, the palette feedback file, and the pinned Stream Deck
-  palette/control surface. This remains SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED until
-  software tests pass and the operator performs a deck-in-hand validation.
+  palette/control surface. This is SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED until the
+  operator performs a deck-in-hand validation.
 
 Authoritative code:
 - `led_config.py`
@@ -118,6 +118,12 @@ Tests:
 - phrase-aware active-content hold coverage lives in `tests/test_led_state_manager.py`, including active deck switch, active-deck track load, the inclusive `1.0` beat release boundary, hold-until-next-marker behavior, missing-phrase-data indefinite hold until a crossing, idle/stop cleanup, inactive-deck load exclusion, and laser/SoundSwitch path confinement. This is software validation only.
 - shared flat-window lifecycle parity coverage lives in `tests/test_drop_lifecycle.py`; live LED per-look duration rewriting and backend latency offsets remain separate by design.
 - LED Pad Phase 1/3 coverage lives in `tests/test_led_pad_controls.py`, `tests/test_led_pad_playback.py`, and `tests/test_led_pad_service.py`. It validates metadata coverage, synthetic playback clock/ownership/strobe gates, draft mutation, commit blocking, color injection, Locked Palette playback, ownership-required replies, and one HTTP smoke path. Template Lab Phase 2 coverage lives in `tests/test_led_pad_lab.py` and validates registry persistence, name-collision rejection, hot reload, broken-module errors, lab rendering, and shared playback-slot preemption. It uses fakes or dry-run paths only. Phase 3 color-engine and renderer regressions live in `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`, and `tests/test_govee_frame_renderer.py`.
+- Stream Deck palette control Package 2 coverage lives in `tests/test_led_palette_control.py`,
+  `tests/test_streamdeck_midi.py`, `tests/test_soundswitch_midi_input.py`,
+  `tests/test_runtime_status.py`, and the existing LED color-engine/config suites. It validates
+  queue/override/lock rail behavior, LED mute owner release, feedback writer/thread behavior,
+  pinned deck layout composition, MIDI pad event bindings, and runtime command parsing without
+  hardware.
 - The shared `tools/pad_access.py` LAN-access payload (used by both pads' `GET /api/access`) is covered by `tests/test_pad_access.py` (pure-function, loopback/specific-IP/`0.0.0.0` detection cases), plus one HTTP smoke test each in `tests/test_led_pad_service.py` and `tests/test_laser_pad_web.py`.
 - broad command: `python -m unittest discover tests`
 

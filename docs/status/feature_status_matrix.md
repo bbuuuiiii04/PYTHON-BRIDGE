@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 56c5f90
-last_verified_date: 2026-07-03
-validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
+last_verified_commit: cc895f8
+last_verified_date: 2026-07-04
+validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; Stream Deck palette control Package 2 software-tested; hardware-unvalidated in repo evidence
 ---
 
 
@@ -47,6 +47,7 @@ Status vocabulary:
 | LED phrase-aware active-content hold | implemented | software-tested partially | hardware-unvalidated | `StateManager` LED automation now holds the previous look after a nonzero active-deck switch or active-deck track load when the incoming track is more than `1.0` beat into its current phrase, then releases at the next phrase crossing. `tests/test_led_state_manager.py` covers the boundary and arm/cleanup sites; room-visible behavior still needs operator hardware sign-off. |
 | LED scripted-track automation policy | implemented | software-tested partially | hardware-unvalidated | When enabled during `lighting_mode == "scripted"`, groove/drop/post-drop select the existing `utility` blackout bank while buildup/pre-drop and breakdown remain active. The shipped example config now enables the master switch (`true`) with the conservative blackout policy, so out-of-box scripted LED automation is active; room-visible behavior still needs hardware validation. |
 | LED color engine M2 work | implemented/partial | software-tested partially | local setup | Current code includes color engine paths, fixed six-slot slot-color output, configurable slot-fill strategies including Patch S `random_with_mono_chance`, software-tested generic groove/post_drop/drop chase, drop center-burst, Patch E1 nebula slot cues, Patch E2 center-comet slot cue, Patch E3 ambient twinkle slot cue, and Patch F default-bank cleanup into generic slot looks plus `legacy_color_suffix` storage. The M2.5 slot-cue (Patch E1/E2/E3), color-engine core (decoupled color/drift/drop-snap), realtime-comet, and beat-sync paths (AWR-101–104) have operator hardware sign-off — 2026-06-29, Home Govee, visual; see `docs/validation/hardware_validation_log.md`. The solid-color strategy (Patch S), role-mapping v2 (AWR-105/106), and Patch D sparkle remain SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. |
+| Stream Deck palette control Package 2 | implemented | software-tested | local setup; hardware-unvalidated | Palette queue/override-fade/lock, manual-only `white_sand`, LED mute owner, laser mute binding through existing blackout ownership, Rainbow mode, feedback-file writer, pinned 15-key deck layout, runtime commands, and tracked example config are implemented. Laser Solo display/note is reserved for a later package. No bridge restart, deck-in-hand pass, SoundSwitch, Rekordbox, laser, LED/Govee, MIDI-device, DMX, Enttec, or hardware-visible output validation was performed. |
 | LED Pad + Template Lab | implemented/partial | software-tested | local setup; hardware-unvalidated | LED Pad Phases 1-3 and Template Lab Phase 2 are implemented. Locked Palette writes `color_engine.locked_palette_by_look`, locked playback ignores Test Palette, and renderer param unlocks keep frames identical when params are absent. Tests cover service/editor plumbing, locked-palette config/engine behavior, and renderer default parity. No bridge restart, live Govee output, or visual hardware validation was performed. |
 | Govee cloud scene adapter | implemented | software-tested partially | local setup | Single API-key path, device compatibility not generalized. |
 | Govee realtime runner/transport | implemented/experimental | software-tested partially | local setup | H612D evidence exists in config examples, broad Govee support unknown. Realtime-to-cloud handoff teardown is runner-thread work, not caller-thread socket work. |

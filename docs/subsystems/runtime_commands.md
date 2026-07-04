@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 74febec
-last_verified_date: 2026-06-29
-validation_scope: software-only
+last_verified_commit: cc895f8
+last_verified_date: 2026-07-04
+validation_scope: software-only; Stream Deck palette control runtime command rail software-tested
 ---
 
 # Runtime Commands Subsystem
@@ -111,6 +111,11 @@ Accepted commands:
 - `led_blackout`
 - `led_clear_blackout`
 - `led_clear_scene_override`
+- `led_palette_queue`
+- `led_palette_override`
+- `led_palette_lock`
+- `led_palette_unlock`
+- `led_rainbow_toggle`
 - `set_soundswitch_pack`
 
 Detailed command table:

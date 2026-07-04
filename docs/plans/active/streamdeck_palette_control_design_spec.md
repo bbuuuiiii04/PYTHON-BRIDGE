@@ -1,23 +1,22 @@
 ---
-doc_status: draft
-truth_level: design-intent
-last_verified_commit: 267edd3
+doc_status: current
+truth_level: code-verified for Package 2; design-intent for later packages
+last_verified_commit: cc895f8
 last_verified_date: 2026-07-04
-validation_scope: software-only
+validation_scope: Package 2 software-tested; Laser Solo/drop-presentation later packages remain design-intent; hardware-unvalidated
 ---
 
 # Stream Deck Palette Control — Design Spec (pre-handoff)
 
-> **Status: PLANNED / DESIGN-INTENT. Not implemented.**
-> Roles: Claude authors this design (planning); **Codex implements the bridge code** once
-> finalized. **Fable reviewed (Phase 1) and expanded (Phase 2) this design on 2026-07-04**
-> with operator answers folded in; awaiting operator approval (gate 2) before the Codex spec.
+> **Status: PACKAGE 2 IMPLEMENTED / SOFTWARE-TESTED; LATER PACKAGES DESIGN-INTENT.**
+> Roles: Claude authored this design (planning); **Codex implemented Package 2 bridge code**.
+> **Fable reviewed (Phase 1) and expanded (Phase 2) this design on 2026-07-04**
+> with operator answers folded in.
 > Per AGENTS.md §1, **code wins over this doc** — verify every claim against current code.
 > Claims are labelled **confirmed / assumed / unknown / operator-decided**.
 
-This is a forward-looking design doc. It is **not** current truth and is not in the active work
-registry yet. It is the **LED-side** feature; the laser side is deferred (see Part D) and its two
-laser-specific decisions are cross-referenced into `laser_color_engine_design_spec.md`.
+This is current truth for Package 2 only. Later Laser Solo, drop-presentation learning, track
+personality, and laser-color behavior remain design-intent until implemented and software-tested.
 
 ---
 

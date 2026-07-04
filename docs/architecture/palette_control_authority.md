@@ -1,15 +1,15 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 267edd3
+last_verified_commit: cc895f8
 last_verified_date: 2026-07-04
-validation_scope: behavior contract plus active implementation target; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED once tests pass
+validation_scope: Package 2 behavior contract implemented and software-tested; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Palette Control Authority (Stream Deck surface)
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; Package 2 implementation is tracked by `streamdeck_palette`
-in `docs/agents/change_contracts.yml` (design approved by operator 2026-07-04).
+Status: AUTHORITATIVE TARGET BEHAVIOR; Package 2 is implemented/software-tested under
+`streamdeck_palette` in `docs/agents/change_contracts.yml` (operator hardware validation pending).
 
 This document defines how the operator's Stream Deck color-control surface is
 expected to behave. Behavior that differs from this document is a regression
@@ -204,9 +204,9 @@ display state and a monotonic sequence number.
 
 ## Implementation Notes
 
-Planned home: coordinator + feedback writer in `led_palette_control.py`;
+Implemented Package 2 home: coordinator + feedback writer in `led_palette_control.py`;
 engine changes (fade state, queue/lock reorder, `white_sand` + rainbow palette
 types) in `led_color_engine.py`; events in `models.py`; commands in
 `runtime_status.py`; pad bindings via bridge config into the existing MIDI
-input group; deck rendering in `streamdeck/streamdeck_midi.py`. Design detail:
-`docs/plans/active/streamdeck_palette_control_design_spec.md` Parts B-C.
+input group; deck rendering in `streamdeck/streamdeck_midi.py`. Laser Solo and
+drop-presentation learning remain later-package design intent.
