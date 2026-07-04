@@ -33,6 +33,12 @@ per-workstream exception for this overhaul — **Fable-family subagents implemen
 than Codex. The build runs software and tests only; Brandon performs any bridge restart and
 `bridge-verify` himself. This exception is scoped to the logging overhaul and expires with it.
 
+**Authority split (added 2026-07-04):** the operator-authoritative intent contract — what this
+system must do, permanently — lives at `docs/architecture/logging_authority.md`. This design doc
+carries the code-grounded evidence, teardown ledger, and build plan, and retires to
+`docs/plans/completed/` after Phase 3; the authority doc survives it. If they ever disagree, fix
+whichever is wrong in the same change (W7 keeps them in sync at build time).
+
 ---
 
 ## 1. What changed about the spine, and why
