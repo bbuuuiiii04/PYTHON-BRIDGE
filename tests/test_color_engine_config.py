@@ -427,6 +427,58 @@ class TestColorEngineValid(unittest.TestCase):
             ],
         )
 
+    def test_palette_control_omits_lock_binding_when_lock_note_absent(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["palettes"]["white_sand"] = {
+            "type": "fixed_rgb",
+            "weight": 0,
+            "rgb": [255, 235, 200],
+        }
+        block["palettes"]["rainbow"] = {"type": "rainbow", "weight": 0}
+        block["palette_control"] = {
+            "enabled": True,
+            "device": "Stream Deck",
+            "channel": 2,
+            "palette_notes": {"blue_cyan": 51, "red": 52},
+            "white_sand_note": 56,
+            "long_press_s": 0.5,
+            "led_mute_note": 58,
+            "laser_mute_note": 59,
+            "laser_solo_note": 60,
+            "rainbow_note": 61,
+        }
+        cfg_data["color_engine"] = block
+
+        result = load_led_look_director_config_from_dict(cfg_data)
+
+        self.assertTrue(result.available, msg=result.errors)
+        ce = result.config.color_engine
+        self.assertIsNotNone(ce)
+        self.assertNotIn("palette_lock_pad", [b.target_kind for b in ce.palette_control_bindings])
+
+    def test_palette_control_long_press_threshold_validated(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["palette_control"] = {
+            "enabled": True,
+            "device": "Stream Deck",
+            "channel": 2,
+            "palette_notes": {"blue_cyan": 51, "red": 52},
+            "white_sand_note": 56,
+            "long_press_s": 2.5,
+            "led_mute_note": 58,
+            "laser_mute_note": 59,
+            "laser_solo_note": 60,
+            "rainbow_note": 61,
+        }
+        cfg_data["color_engine"] = block
+
+        result = load_led_look_director_config_from_dict(cfg_data)
+
+        self.assertFalse(result.available)
+        self.assertIn("color_engine.palette_control.long_press_s must be a number in 0.15..2.0", result.errors)
+
 
 # ---------------------------------------------------------------------------
 # Tests for invalid color_engine blocks → engine=None, LED still available

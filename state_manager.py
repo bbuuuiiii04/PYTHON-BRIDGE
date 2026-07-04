@@ -505,6 +505,12 @@ class StateManager(LEDDispatchPolicyMixin):
         ws_note = palette_control_config.get("white_sand_note")
         if type(ws_note) is int and 0 <= ws_note <= 127:
             palette_notes.setdefault("white_sand", ws_note)
+        raw_long_press_s = palette_control_config.get("long_press_s", 0.5)
+        long_press_s = (
+            float(raw_long_press_s)
+            if isinstance(raw_long_press_s, (int, float)) and not isinstance(raw_long_press_s, bool)
+            else 0.5
+        )
         control_notes = {
             "lock": palette_control_config.get("lock_note"),
             "led_mute": palette_control_config.get("led_mute_note"),
@@ -527,6 +533,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 get_laser_solo=lambda: self._drop_presentation_solo_feedback,
                 palette_notes=palette_notes,
                 control_notes=control_notes,
+                long_press_s=long_press_s,
             )
             if led_color_engine is not None
             else None

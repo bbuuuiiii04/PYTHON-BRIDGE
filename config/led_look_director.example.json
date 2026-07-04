@@ -122,7 +122,7 @@
         "crimson": 55
       },
       "white_sand_note": 56,
-      "lock_note": 57,
+      "long_press_s": 0.5,
       "led_mute_note": 58,
       "laser_mute_note": 59,
       "laser_solo_note": 60,

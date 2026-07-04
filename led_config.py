@@ -1085,13 +1085,24 @@ def _validate_color_engine(data: dict[str, Any]) -> list[str]:
                     errors.append(f"color_engine.palette_control.palette_notes.{name} must name a configured palette")
                 if not isinstance(note, int) or isinstance(note, bool) or not 0 <= note <= 127:
                     errors.append(f"color_engine.palette_control.palette_notes.{name} must be a MIDI note 0..127")
+        long_press_s = palette_control.get("long_press_s", 0.5)
+        if (
+            not isinstance(long_press_s, (int, float))
+            or isinstance(long_press_s, bool)
+            or not 0.15 <= float(long_press_s) <= 2.0
+        ):
+            errors.append("color_engine.palette_control.long_press_s must be a number in 0.15..2.0")
         for key in (
-            "white_sand_note", "lock_note", "led_mute_note", "laser_mute_note",
+            "white_sand_note", "led_mute_note", "laser_mute_note",
             "laser_solo_note", "rainbow_note",
         ):
             note = palette_control.get(key)
             if not isinstance(note, int) or isinstance(note, bool) or not 0 <= note <= 127:
                 errors.append(f"color_engine.palette_control.{key} must be a MIDI note 0..127")
+        if "lock_note" in palette_control:
+            note = palette_control.get("lock_note")
+            if not isinstance(note, int) or isinstance(note, bool) or not 0 <= note <= 127:
+                errors.append("color_engine.palette_control.lock_note must be a MIDI note 0..127")
 
     # fade_beats_by_role: dict of str → number
     fade_beats_by_role = data.get("fade_beats_by_role", {})
@@ -1359,11 +1370,19 @@ def _build_palette_control_bindings(raw: dict[str, Any]) -> tuple[PackMidiBindin
             target_name="white_sand",
         ))
     fixed = (
-        ("lock_note", "palette_lock_pad"),
         ("led_mute_note", "led_mute_pad"),
         ("rainbow_note", "rainbow_pad"),
         ("laser_solo_note", "laser_solo_pad"),
     )
+    lock_note = raw.get("lock_note")
+    if lock_note is not None:
+        bindings.append(PackMidiBinding(
+            device_name=device,
+            message_type="note",
+            channel_zero_based=channel,
+            data_byte=int(lock_note),
+            target_kind="palette_lock_pad",
+        ))
     for key, kind in fixed:
         bindings.append(PackMidiBinding(
             device_name=device,
