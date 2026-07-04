@@ -1117,6 +1117,14 @@ def main() -> None:
         )
         else ()
     )
+    palette_control_config = (
+        led_cfg_result.config.color_engine.palette_control
+        if (
+            led_cfg_result.config is not None
+            and led_cfg_result.config.color_engine is not None
+        )
+        else {}
+    )
     soundswitch_pack_bundle = _build_soundswitch_pack_startup(
         soundswitch_pack_cfg_result,
         event_sink=event_queue.put,
@@ -1273,6 +1281,7 @@ def main() -> None:
         led_look_director=led_look_director,
         led_scene_adapter=led_scene_adapter,
         led_color_engine=led_bundle.led_color_engine,
+        led_palette_control_config=palette_control_config,
         os2l_connected_provider=conn.is_connected,
         soundswitch_pack_runtime=soundswitch_pack_runtime,
         mixer_authority_enabled=mixer_authority,

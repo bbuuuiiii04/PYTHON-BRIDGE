@@ -69,6 +69,7 @@ class LedPaletteControl:
         get_phrase_anchor: Callable[[float], Optional[float]],
         get_laser_blackout: Callable[[], bool],
         palette_notes: Mapping[str, int] | None = None,
+        control_notes: Mapping[str, int] | None = None,
         feedback_path: str = PALETTE_STATE_PATH,
     ) -> None:
         self._engine = engine
@@ -77,6 +78,7 @@ class LedPaletteControl:
         self._get_phrase_anchor = get_phrase_anchor
         self._get_laser_blackout = get_laser_blackout
         self._palette_notes = dict(palette_notes or {})
+        self._control_notes = dict(control_notes or {})
         self._led_muted = False
         self._rainbow = False
         self._seq = 0
@@ -127,6 +129,7 @@ class LedPaletteControl:
             "seq": self._seq,
             **self.snapshot(),
             "palettes": self._palette_payload(),
+            "controls": self._control_payload(),
         }
         self._writer.submit(payload)
 
@@ -202,6 +205,30 @@ class LedPaletteControl:
                 "state": state,
             })
         return result
+
+    def _control_payload(self) -> dict[str, dict[str, Any]]:
+        snap = self.snapshot()
+        definitions = {
+            "lock": ("Lock", bool(snap.get("lock"))),
+            "led_mute": ("LED Mute", bool(snap.get("led_blackout"))),
+            "laser_mute": ("Laser Mute", bool(snap.get("laser_blackout"))),
+            "laser_solo": ("Laser Solo", str(snap.get("laser_solo")) != "off"),
+            "rainbow": ("Rainbow", bool(snap.get("rainbow"))),
+        }
+        controls: dict[str, dict[str, Any]] = {}
+        for key, (label, active) in definitions.items():
+            note = self._control_notes.get(key)
+            if note is None:
+                continue
+            state = "active" if active else "inactive"
+            if key == "laser_solo" and str(snap.get("laser_solo")) in ("armed", "pending"):
+                state = "queued"
+            controls[key] = {
+                "name": label,
+                "note": int(note),
+                "state": state,
+            }
+        return controls
 
     def _palette_rgb(self, name: str, palette: Any) -> tuple[int, int, int]:
         if getattr(palette, "type", "journey") == "fixed_rgb" and getattr(palette, "rgb", None):

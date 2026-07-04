@@ -351,6 +351,7 @@ class StateManager(LEDDispatchPolicyMixin):
         led_look_director=None,
         led_scene_adapter=None,
         led_color_engine=None,
+        led_palette_control_config: Optional[dict[str, Any]] = None,
         os2l_connected_provider=None,
         recorder: Optional[SessionRecorder] = None,
         soundswitch_pack_runtime=None,
@@ -404,6 +405,20 @@ class StateManager(LEDDispatchPolicyMixin):
         self._native_log_key: tuple[Any, ...] = ()
         self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
         self._init_led_dispatch_state(led_look_director, led_scene_adapter, led_color_engine)
+        palette_control_config = led_palette_control_config or {}
+        palette_notes = palette_control_config.get("palette_notes", {})
+        control_notes = {
+            "lock": palette_control_config.get("lock_note"),
+            "led_mute": palette_control_config.get("led_mute_note"),
+            "laser_mute": palette_control_config.get("laser_mute_note"),
+            "laser_solo": palette_control_config.get("laser_solo_note"),
+            "rainbow": palette_control_config.get("rainbow_note"),
+        }
+        control_notes = {
+            key: int(note)
+            for key, note in control_notes.items()
+            if type(note) is int and 0 <= note <= 127
+        }
         self._led_palette_control = (
             LedPaletteControl(
                 engine=led_color_engine,
@@ -411,6 +426,8 @@ class StateManager(LEDDispatchPolicyMixin):
                 get_abs_beat=self._palette_control_abs_beat,
                 get_phrase_anchor=self._palette_control_phrase_anchor,
                 get_laser_blackout=lambda: bool(self._pack_status_snapshot.get("blackout", False)),
+                palette_notes=palette_notes if isinstance(palette_notes, dict) else {},
+                control_notes=control_notes,
             )
             if led_color_engine is not None
             else None
