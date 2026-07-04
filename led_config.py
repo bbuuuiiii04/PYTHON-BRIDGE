@@ -1090,9 +1090,20 @@ def _validate_color_engine(data: dict[str, Any]) -> list[str]:
             errors.append(f"color_engine.palettes.{palette_name} must be an object")
             continue
         p_prefix = f"color_engine.palettes.{palette_name}"
+        p_type = palette_data.get("type", "journey")
+        if p_type not in ("journey", "fixed_rgb", "rainbow"):
+            errors.append(f"{p_prefix}.type must be journey, fixed_rgb, or rainbow")
+        rgb = palette_data.get("rgb")
+        if p_type == "fixed_rgb":
+            if not isinstance(rgb, (list, tuple)) or len(rgb) != 3:
+                errors.append(f"{p_prefix}.rgb is required for fixed_rgb and must be an RGB list")
+            elif not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255 for v in rgb):
+                errors.append(f"{p_prefix}.rgb values must be integers 0..255")
+        elif rgb is not None:
+            errors.append(f"{p_prefix}.rgb is only allowed for fixed_rgb palettes")
 
-        # range: list of 2 strings, each must be a valid scale_stop key
-        p_range = palette_data.get("range")
+        # range: journey palettes require two stop names; fixed/rainbow palettes may omit it.
+        p_range = palette_data.get("range", ("blue", "cyan") if p_type != "journey" else None)
         if not isinstance(p_range, (list, tuple)) or len(p_range) != 2:
             errors.append(f"{p_prefix}.range must be a list of 2 stop names")
         else:
@@ -1189,7 +1200,7 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
     palettes_raw = raw["palettes"]
     palettes: dict[str, Palette] = {}
     for name, p in palettes_raw.items():
-        p_range_raw = p["range"]
+        p_range_raw = p.get("range", ("blue", "cyan"))
         p_range: tuple[str, str] = (str(p_range_raw[0]), str(p_range_raw[1]))
         focus_modes_raw = p.get("focus_modes") or {}
         focus_modes: dict[str, float] = {k: float(v) for k, v in focus_modes_raw.items()}
@@ -1201,6 +1212,8 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
             weight=float(p.get("weight", 1.0)),
             dwell=int(dwell_raw) if dwell_raw is not None else None,
             focus_modes=focus_modes,
+            type=str(p.get("type", "journey")),
+            rgb=tuple(int(v) for v in p["rgb"]) if p.get("type", "journey") == "fixed_rgb" else None,
         )
 
     # Build snap_eligible_drop_indices

@@ -288,6 +288,12 @@ class LedColorEngine:
         # --- live-control state ---
         self._lock: bool = False
         self._queued_palette: str = ""
+        self._hold_track: bool = False
+        self._mode_override: dict[str, str] | None = None
+        self._fade_from_p: float | None = None
+        self._fade_target: str = ""
+        self._fade_start_beat: float = 0.0
+        self._fade_end_beat: float = 0.0
 
         # --- journey state ---
         self._current_palette: str = self._pick_palette()
@@ -362,41 +368,31 @@ class LedColorEngine:
             # Reset drop tracking for this track
             self._drop_section_index = 0
             self._last_drop_section_id = ""
+            if self._mode_override is None:
+                self._hold_track = False
+                self._fade_from_p = None
+                self._fade_target = ""
             
             # Reset previous color memory
             self._prev_color.clear()
 
-            # Advance dwell (only when not locked)
-            if not self._lock:
-                self._dwell_remaining -= 1
-
-                # Apply queued palette on track change (highest precedence after lock)
+            if self._mode_override is None:
                 if self._queued_palette:
                     name = self._queued_palette
                     self._queued_palette = ""
                     if name in self._config.palettes:
-                        self._current_palette = name
-                        self._anchor_p = self._palette_center(name)
-                        # reset dwell for the newly applied palette
-                        dwell = self._config.palettes[name].dwell
-                        self._dwell_remaining = (
-                            dwell if dwell is not None
-                            else self._config.palette_dwell_tracks
-                        )
-                    # after applying queued, don't drift-re-pick this track
-                elif self._dwell_remaining <= 0:
-                    # Re-pick palette
-                    new_palette = self._pick_palette()
-                    self._current_palette = new_palette
-                    self._anchor_p = self._palette_center(new_palette)
-                    dwell = self._config.palettes[new_palette].dwell
-                    self._dwell_remaining = (
-                        dwell if dwell is not None
-                        else self._config.palette_dwell_tracks
-                    )
+                        self._apply_palette_now(name)
+                elif not self._lock:
+                    self._dwell_remaining -= 1
+                    if self._dwell_remaining <= 0:
+                        new_palette = self._pick_palette()
+                        self._apply_palette_now(new_palette)
 
             # Reseed per-track focus (after palette may have changed)
             self._reseed_focus()
+
+        if self._mode_override is not None:
+            return
 
         # --- Drop section tracking ---
         if role == "drop":
@@ -407,6 +403,7 @@ class LedColorEngine:
                 # Evaluate snap (§2 Drop-snap)
                 if (
                     not self._lock
+                    and not self._hold_track
                     and self._drop_section_index in self._config.snap_eligible_drop_indices
                 ):
                     if self._journey_rng.random() < self._config.big_shift_chance:
@@ -533,11 +530,29 @@ class LedColorEngine:
             return {}
 
         palette_name = self._config.locked_palette_by_look.get(look_name, self._current_palette)
+        if self._mode_override is not None:
+            palette_name = self._mode_override.get(role, self._mode_override.get("*", palette_name))
         palette = self._config.palettes.get(palette_name)
         if palette is None:
             return {}
 
-        if look_name in self._config.locked_palette_by_look:
+        if palette.type == "fixed_rgb" and palette.rgb is not None:
+            rgb = palette.rgb
+            result: dict[str, Any] = {"color": rgb}
+            if multi:
+                result["color_a"] = rgb
+                result["color_b"] = rgb
+            return result
+        if palette.type == "rainbow":
+            p = ((cycle % 64) / 64.0 + (_blake2b_int(f"{section_id}:{role}") % 997) / 997.0) % 1.0
+            rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
+            result = {"color": rgb}
+            if multi:
+                result["color_a"] = _p_to_rgb((p + 0.33) % 1.0, self._config.scale_stops, self._stop_positions)
+                result["color_b"] = _p_to_rgb((p + 0.66) % 1.0, self._config.scale_stops, self._stop_positions)
+            return result
+
+        if look_name in self._config.locked_palette_by_look or self._mode_override is not None:
             focus_lo, focus_hi = self._palette_p_interval(palette_name)
         else:
             focus_lo, focus_hi = self._focus_window(role)
@@ -623,11 +638,23 @@ class LedColorEngine:
             return {}
 
         palette_name = self._config.locked_palette_by_look.get(look_name, self._current_palette)
+        if self._mode_override is not None:
+            palette_name = self._mode_override.get(role, self._mode_override.get("*", palette_name))
         palette = self._config.palettes.get(palette_name)
         if palette is None:
             return {}
 
-        if look_name in self._config.locked_palette_by_look:
+        if palette.type == "fixed_rgb" and palette.rgb is not None:
+            return {"slot_colors": [palette.rgb, palette.rgb, palette.rgb, palette.rgb, palette.rgb, (255, 255, 255)]}
+        if palette.type == "rainbow":
+            return {
+                "slot_colors": [
+                    _p_to_rgb(((cycle + i) / 6.0) % 1.0, self._config.scale_stops, self._stop_positions)
+                    for i in range(5)
+                ] + [(255, 255, 255)]
+            }
+
+        if look_name in self._config.locked_palette_by_look or self._mode_override is not None:
             focus_lo, focus_hi = self._palette_p_interval(palette_name)
         else:
             focus_lo, focus_hi = self._focus_window(role)
@@ -737,24 +764,61 @@ class LedColorEngine:
         """Jump to a specific palette immediately."""
         if name not in self._config.palettes:
             return  # no-op for unknown names
-        self._current_palette = name
-        self._anchor_p = self._palette_center(name)
-        # Note: transport not yet wired; this is a pure state mutation stub.
+        self._queued_palette = ""
+        self._fade_from_p = None
+        self._fade_target = ""
+        self._hold_track = True
+        self._apply_palette_now(name)
 
     def queue_palette(self, name: str) -> None:
         """Stage a palette to take effect on the next track change."""
-        # Validate name; store even if not in palettes (will be rejected on apply)
-        self._queued_palette = name
+        if name in self._config.palettes:
+            self._queued_palette = name
+
+    def override_palette(self, name: str, *, start_beat: float, end_beat: float) -> None:
+        """Fade to a palette now and hold it for this track."""
+        if name not in self._config.palettes:
+            return
+        self._queued_palette = ""
+        self._hold_track = True
+        self._fade_from_p = self._anchor_p
+        self._fade_target = name
+        self._fade_start_beat = float(start_beat)
+        self._fade_end_beat = max(float(end_beat), self._fade_start_beat)
+
+    def advance_fade(self, abs_beat: float) -> None:
+        if self._fade_from_p is None or not self._fade_target:
+            return
+        end = self._fade_end_beat
+        start = self._fade_start_beat
+        target_p = self._palette_center(self._fade_target)
+        if end <= start or abs_beat >= end:
+            self._apply_palette_now(self._fade_target)
+            self._fade_from_p = None
+            self._fade_target = ""
+            return
+        t = max(0.0, min(1.0, (float(abs_beat) - start) / (end - start)))
+        self._anchor_p = self._fade_from_p + (target_p - self._fade_from_p) * t
+
+    def set_mode_override(self, mapping: dict[str, str]) -> None:
+        if self._fade_from_p is not None and self._fade_target:
+            self._apply_palette_now(self._fade_target)
+            self._fade_from_p = None
+            self._fade_target = ""
+        self._mode_override = {str(k): str(v) for k, v in mapping.items()}
+
+    def clear_mode_override(self) -> None:
+        self._mode_override = None
 
     def shift(self) -> None:
         """Re-select a distant palette immediately (manual dramatic shift)."""
+        self._fade_from_p = None
+        self._fade_target = ""
         new_palette = self._pick_palette(
             exclude=self._current_palette,
             bias=self._config.big_shift_weight_bias,
         )
-        self._current_palette = new_palette
-        self._anchor_p = self._palette_center(new_palette)
-        self._reseed_focus()
+        self._apply_palette_now(new_palette)
 
     def snapshot(self) -> dict:
         """Return current engine state for tests / status display."""
@@ -765,6 +829,10 @@ class LedColorEngine:
             "drop_section_index": self._drop_section_index,
             "lock": self._lock,
             "queued_palette": self._queued_palette,
+            "hold_track": self._hold_track,
+            "fading": self._fade_from_p is not None,
+            "fade_target": self._fade_target,
+            "rainbow": self._mode_override is not None,
         }
 
     # ------------------------------------------------------------------
@@ -799,6 +867,15 @@ class LedColorEngine:
     def _palette_center(self, name: str) -> float:
         lo, hi = self._palette_p_interval(name)
         return (lo + hi) / 2.0
+
+    def _apply_palette_now(self, name: str) -> None:
+        self._current_palette = name
+        self._anchor_p = self._palette_center(name)
+        dwell = self._config.palettes[name].dwell
+        self._dwell_remaining = (
+            dwell if dwell is not None else self._config.palette_dwell_tracks
+        )
+        self._reseed_focus()
 
     def _reseed_focus(self) -> None:
         """Re-draw per-track focus using current_track_seed."""

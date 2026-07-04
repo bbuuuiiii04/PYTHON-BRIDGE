@@ -728,6 +728,9 @@ class LEDDispatchPolicyMixin:
         engine = self._led_color_engine
         if engine is not None and engine.enabled:
             try:
+                abs_beat = self._led_abs_beat(sp_state)
+                if abs_beat is not None:
+                    engine.advance_fade(abs_beat)
                 engine.begin_dispatch(
                     active_deck=active,
                     load_gen=d.load_gen,

@@ -64,6 +64,8 @@ class Palette:
     weight: float = 1.0
     dwell: Optional[int] = None  # None → use global palette_dwell_tracks
     focus_modes: Dict[str, float] = field(default_factory=dict)  # empty → full-range roam
+    type: str = "journey"
+    rgb: Optional[Tuple[int, int, int]] = None
 
 
 # Canonical default scale stops (6 stops from §7/§15.5).
