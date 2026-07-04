@@ -371,7 +371,11 @@ watcher reopens it (§2.8).
 ### 2.8 Files, retention, launch integration
 
 **Operator decisions folded in 2026-07-04:** (1) log location must fit the USB portability
-workstream (AWR-122); (2) one window, not two, in manual mode.
+workstream (AWR-122); (2) one window, not two, in manual mode. **Same-day operator update:
+AWR-122 and the cross-platform project (AWR-120/AWR-124) are parked until further notice — nothing
+in this build depends on, waits for, or implements anything for either. The `RBSS_RUNTIME_DIR`
+support below is three dormant lines with the default path as the live behavior; it simply means
+the parked projects inherit a compatible log surface whenever (if ever) they resume.**
 
 - **Directory — one resolver, USB-aware.** `bridge_log.py` (and the viewer, via the same function)
   resolves the log dir as: **`$RBSS_RUNTIME_DIR/logs/` when `RBSS_RUNTIME_DIR` is set, else
@@ -552,10 +556,11 @@ Non-blocking pins Phase 2 must do (normal spec work, listed so they aren't lost)
    fields available on `smart_drop_result` (`state_manager.py:3709-3719` region at `02250de`);
    the drop *type* taxonomy (main vs continuation) is future work per operator memory — the record
    carries `type` as free text for now. [unknown: final type vocabulary]
-5. **Coordination note, not a blocker:** if AWR-122's later milestone renames or reshapes
-   `RBSS_RUNTIME_DIR`, the log-dir resolver is one constant in `bridge_log.py`; the End-Set
-   "copy diaries to stick" export is AWR-122's flow to spec against the copy-one-dir interface
-   (§2.8).
+5. **Coordination note, not a blocker:** AWR-122 and AWR-120/AWR-124 are parked until further
+   notice (operator, 2026-07-04) — no coordination is needed or expected during this build. If a
+   resumed AWR-122 ever renames or reshapes `RBSS_RUNTIME_DIR`, the log-dir resolver is one
+   constant in `bridge_log.py`; the End-Set "copy diaries to stick" export is that project's flow
+   to spec, at pickup, against the copy-one-dir interface (§2.8).
 6. **Explicitly out of scope, named to prevent drift:** no read-back/reconciliation machinery
    (§2.6); no changes to `StatusWriter`/commands/menubar; no session_recorder changes; no
    streamdeck/pad logging changes; `sys.tick` unconditional overrun counter is optional — include
