@@ -144,6 +144,7 @@ def _palette_row(row: dict) -> dict:
         "interaction": "press",
         "name": str(row.get("name") or ""),
         "rgb": tuple(row.get("rgb") or (0, 0, 0)),
+        "ramp": [tuple(c) for c in row.get("ramp") or []],
         "state": str(row.get("state") or "inactive"),
     }
 
