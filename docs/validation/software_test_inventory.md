@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 944bc83
+last_verified_commit: 56c5f90
 last_verified_date: 2026-07-03
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
@@ -33,7 +33,7 @@ python -m pytest tests
 | Rekordbox readers | reader, offset, live BPM, active-deck resolver, StateManager authority, startup wiring, runtime status tests | cannot prove all app versions or hardware-visible behavior. Audit P3 adds ANLZ read-failure cache recovery coverage. |
 | SoundSwitch | OS2L/output helpers; project/pack/player/native-Autoloop-resolver/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/Art-Net truth-check/T7d/parity-lane tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status, native Autoloop rendering, U1 truth-check packets, and passive U0 parity fixtures are software/wire evidence and tests do not prove physical fixtures. Audit P2 adds software coverage for SoundSwitch-connected `overlay_suppressed` status. Audit P3 adds explicit scripted elapsed threading coverage. |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety. Audit P4 adds send-error reopen recovery, bank-gate restore, config fallback/cooldown validation, deprecated `pre_drop_scene` tolerance, blackout-mask refcount, and Laser Pad live-toggle command append coverage. |
-| LED/Govee | LED config/director/color/realtime/renderer tests plus StateManager LED automation tests | cannot prove device compatibility or room-visible behavior. Audit P2 adds committed-drop DIY eligibility coverage. Audit P3 adds runner-thread realtime handoff teardown coverage. |
+| LED/Govee | LED config/director/color/realtime/renderer tests plus StateManager LED automation tests | cannot prove device compatibility or room-visible behavior. Audit P2 adds committed-drop DIY eligibility coverage. Audit P3 adds runner-thread realtime handoff teardown coverage. Audit P5 keeps existing LED state-manager coverage as the behavior oracle for dispatch bookkeeping extraction. |
 | Replay/session tooling | replay format and smoke tests | software-only |
 | Frontend tools | syntax and smoke tests | does not prove live safety |
 | Docs/agent workflow | docs metadata, agent contract, drift, and staleness checkers | docs-only validation |

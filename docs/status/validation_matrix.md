@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 944bc83
+last_verified_commit: 56c5f90
 last_verified_date: 2026-07-03
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
@@ -43,6 +43,7 @@ Current repo-facing status remains:
 | SoundSwitch native-DMX Autoloops/T7d | software-tested implementation plus historical evidence partial | unvalidated | Native resolver/player/loader/StateManager tests cover note-to-Autoloop binding, latching, phase, refire/re-anchor, missing binding/file/layout, all-zero dark looks, post-drop fallback, scripted/static/SoundSwitch-present precedence, stale reload clearing, and single submit path. Historical T7d tracer/conductor/oracle tests and captures remain evidence/tooling only; live runtime and hardware validation are still required. |
 | Laser policy/executor | partial; lifecycle software-tested | unvalidated | Pure flat-window parity, A3 phrase gating, A4 blackout arm/clear preservation, lifecycle teardown, autoloop-tick cycling, usable-only shuffle bags, static-impact fallback, send-error reopen recovery, high-impact/missing bank skip and restore behavior, blackout-mask refcounting, Laser Pad live-toggle command append, config fallback/cooldown validation, deprecated `pre_drop_scene` tolerance, and kill-switch-OFF behavior have deterministic tests. `tools/check_laser_midi_sync.py` reports 0 errors on the live config. Fixture validation must be recorded separately. |
 | LED/Govee cloud | partial | unvalidated | Cloud path exists; device behavior must be logged. The new pure lifecycle resolver does not replace or alter live LED dispatch. |
+| LED dispatch policy extraction | software-tested | unvalidated | `tests/test_led_state_manager.py` and the full unittest suite cover the pure refactor that centralizes LED trigger/accept/reject bookkeeping and moves dispatch policy into `led_dispatch_policy.py`. This does not prove room-visible Govee behavior. |
 | LED committed-drop eligibility | partial | unvalidated | `tests/test_led_look_director.py` covers `commit_role("drop", diy_eligible=...)` filtering like normal tick automation. |
 | LED phrase-aware active-content hold | software-tested partial | unvalidated | `tests/test_led_state_manager.py` covers immediate release at `0.5` and `1.0` beats into phrase, hold at `1.1` beats until the next phrase marker, active-deck switch arming, active-deck track-load arming, inactive-deck exclusion, idle/stop cleanup, and no laser/SoundSwitch calls from the hold gate. This does not prove room-visible Govee behavior. |
 | LED scripted-track automation policy | partial | unvalidated | `tests/test_led_config.py` covers the JSON blackout defaults and `utility` destination validation; `tests/test_led_state_manager.py` covers groove/drop/post-drop blackout mapping, active buildup/breakdown, opt-in overrides, and non-scripted identity behavior. This does not prove room-visible Govee behavior during scripted SoundSwitch tracks. |

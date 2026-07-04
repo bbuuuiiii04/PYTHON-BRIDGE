@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: fc56bb5
+last_verified_commit: 56c5f90
 last_verified_date: 2026-07-03
 validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, and the pad editor unset-param-defaults fix software-tested, hardware-unvalidated
 ---
@@ -31,11 +31,17 @@ Audit P3 (2026-07-03):
   StateManager push-loop caller; the runner thread now performs that teardown before another frame
   is sent.
 
+Audit P5 (2026-07-03):
+- LED dispatch policy now lives in `led_dispatch_policy.py` as `LEDDispatchPolicyMixin`, mixed into
+  `StateManager`. The `_led_*` fields remain on the `StateManager` instance, and the backend-routing
+  adapter remains `led_dispatch_coordinator.py`; this is a pure code-layout/bookkeeping refactor.
+
 Authoritative code:
 - `led_config.py`
 - `led_models.py`
 - `led_look_director.py`
 - `led_color_engine.py`
+- `led_dispatch_policy.py`
 - `led_dispatch_coordinator.py`
 - `govee_scene_adapter.py`
 - `govee_runtime_sender.py`
@@ -45,7 +51,7 @@ Authoritative code:
 - `govee_owner_state.py`
 - `govee_lan_discovery.py`
 - `beat_sync_engine.py`
-- `state_manager.py` LED automation dispatch seam
+- `state_manager.py` LED automation call sites and runtime ownership seam
 - `led_pad_controls.py` LED Pad render/control catalog. `CONTROL_META[key]["default"]` mirrors
   each renderer's actual unset-param fallback in `govee_frame_renderer.py` (hand-extracted, `None`
   when no single static fallback exists); `PARAM_DEFAULT_OVERRIDES` covers the two keys
@@ -59,6 +65,7 @@ Authoritative code:
 
 Key symbols:
 - `StateManager`
+- `LEDDispatchPolicyMixin`
 - `LEDConfig`
 - `LEDLookDirector`
 - `LedColorEngine`
@@ -71,7 +78,7 @@ Key symbols:
 
 Runtime flow:
 - inputs: phrase/role state, runtime LED commands, LED config, color engine state, beat/BPM state
-- decisions: manual override, blackout, role-entry look selection, color/slot-color resolution, cloud/realtime ownership, beat sync instances
+- decisions: manual override, blackout, role-entry look selection, color/slot-color resolution, cloud/realtime ownership, beat sync instances. LED dispatch policy is mixed into `StateManager` from `led_dispatch_policy.py`; it runs on the StateManager thread and owns no backend threads, locks, or blocking I/O.
 - outputs: cloud scene commands or realtime UDP frame packets
 - The live LED drop/post-drop resolver remains in `StateManager` and is unchanged. `drop_lifecycle.py` reproduces its flat-window drop-region state machine for laser use; `tests/test_drop_lifecycle.py` parity-checks that seam without routing LED output through the new module.
 - Active content changes now arm a phrase-aware LED hold in `StateManager`: a nonzero active-deck switch or active-deck track replacement keeps the previously shown look if the incoming track is more than `1.0` beat into its current phrase, then releases at the next phrase crossing. If the incoming track is already within the first beat of a phrase, it changes immediately. Missing phrase segments can keep the prior look for the whole track; this is software-tested only and still needs operator visual sign-off.
@@ -105,7 +112,7 @@ Tests:
 - broad command: `python -m unittest discover tests`
 
 Change contract:
-- If changing look policy, inspect director, models, config validation, and state manager dispatch seam.
+- If changing look policy, inspect director, models, config validation, `led_dispatch_policy.py`, and StateManager dispatch call sites.
 - If changing active-content timing or LED role gating in `StateManager`, keep the hot path non-blocking and update `tests/test_led_state_manager.py`.
 - If changing realtime output, inspect runner, transport, renderer, owner state, and beat sync engine.
 - If changing realtime/cloud ownership handoff, keep socket I/O on the runner/transport thread and
