@@ -94,7 +94,7 @@ attack_low_p90 lo 6.7     hi 38.875
 grit           lo 0.0137  hi 0.0776
 onset_mh_p90   lo 2.0     hi 4.0
 brightness_med lo 341.8   hi 1456.5
-synth_rate     lo 0.053   hi 0.725
+synth_rate     lo 0.053   hi 0.725   (hi ≈ p95)
 growl_timbre_p90 lo 0.1528 hi 0.377
 ```
 
@@ -144,15 +144,17 @@ True red is EMBERCORE-only — "rare and earned" is structural: only distortion 
 accents and laser pairing exist; they are accents, never zone families (lock honored).
 
 **Audit result (confirmed, all 666 tracks):** GLACIER 119 · DEEP_POOL 133 · TWILIGHT 81 ·
-ION 125 · VOLT 125 · EMBERCORE 83. Aggressive half = 334 tracks; largest aggressive zone
-share = 37% (ION and VOLT tie at 125/334) — inside the charter's ≤ ~40% line (OLC-3
+ION 125 · VOLT 125 · EMBERCORE 83. Aggressive half = 333 tracks (one boundary track
+rounds to the split in the summary artifact but assigns smooth-side — the
+rule-consistent count); largest aggressive zone share = 37.5% (ION and VOLT tie at
+125/333) — inside the charter's ≤ ~40% line (OLC-3
 sameness engineering). Anchors: **STARsound (pt3) → GLACIER** (aggression 0.268,
 luminance 0.436) and **Can't Say Nah → DEEP_POOL** (0.233, 0.267) — both anchor palette
 calls reproduced from measurements alone (charter criterion 3 ✅). Kai Wachi — ILL and
 Ray Volpe — DROP EM land EMBERCORE (both distortion 1.0); Knock2 — crank the bass lands
 ION; LUNCH lands VOLT (aggressive + dark, luminance 0.19). Genre lens (validation only,
-never an input): the six BY GENRE playlists pool coherently — hard techno pools
-DEEP_POOL/TWILIGHT dark; dubstep/trap pools EMBERCORE/ION; house spreads across the
+never an input): the BY GENRE playlists pool coherently — hard techno pools
+DEEP_POOL (17/23, dark); dubstep/trap pools EMBERCORE/ION; house spreads across the
 smooth half.
 
 **Note on the anchor axes (correction, confirmed):** the strict review's T2-9 anchor
@@ -168,12 +170,15 @@ than CSN — and the zone map above reproduces both calls from the correct file'
   across the zone's base-ramp hue range × 3 depth variants = 48 distinct dressings per
   zone. Neighbors differ visibly by construction (OLC-3): hue slot AND depth variant must
   both collide before two tracks twin (~1.4% chance per same-zone pair).
-- **Depth axis** (saturation floor + gradient span): from `bass` duty — rolling sub →
-  narrow, deep, saturated span; sparse sub → wider span, brighter, more white headroom
-  (locked design, F1 item 4).
+- **Depth axis** (saturation floor + gradient span): from `bass` duty — pinned starting
+  values (TUNE-LIVE): saturation floor = lerp(0.55 → 0.85, norm(bass)); gradient span =
+  lerp(0.8 → 0.35 of the zone ramp, norm(bass)); the hash's 3 depth variants offset the
+  floor by −0.05/0/+0.05. Rolling sub → narrow, deep, saturated; sparse sub → wider,
+  brighter, more white headroom (locked design, F1 item 4).
 - **Dynamics budget** (how far looks travel between breakdown and drop): from `drama`
-  normalized against corpus anchors (p5 7.0, p95 23.375, frozen). Budget drives excursion,
-  never the drop ceiling (law 5).
+  normalized against corpus anchors (p5 7.0, p95 23.375, frozen): excursion budget =
+  lerp(0.3 → 1.0, norm(drama)) of the look's brightness/span range (TUNE-LIVE). Budget
+  drives excursion, never the drop ceiling (law 5).
 - **Motion style**: punchy (norm(punch) ≥ 0.6) → sharp attacks, hard onsets; smooth →
   flowing sweeps (locked design; feeds §9's build-move selection).
 - **Permanence:** identity = pure function of (content_id, frozen v4 measurements) —
@@ -233,8 +238,9 @@ plain-text reason are published per drop (§12).
 
 **Audit result (confirmed, 3,936 drop windows):** HOUSE 1628 (41%) · WALL 812 (21%) ·
 COMET 439 (11%) · NEUTRAL 1057 (27%). Genre lens (classifier never sees genres): HARD
-TECHNO drops → 74% COMET; DUBSTEP/ISOXO/TRAPSTEP → 41–45% WALL; every house playlist →
-50–65% HOUSE. A house-heavy library reading house-heavy, with a ~27% honest safety net.
+TECHNO drops → 74% COMET; DUBSTEP/ISOXO/TRAPSTEP → 41–45% WALL; the major house
+playlists → 50–65% HOUSE (BASS HOUSE 64%, SYNTH HOUSE 65%, TECH HOUSE 57%, ODDMOB 53%;
+the small techno-house/progressive lists read lower). A house-heavy library reading house-heavy, with a ~27% honest safety net.
 
 ### 3.2 Exact rules — the intensity tier (corpus-absolute)
 
@@ -300,7 +306,8 @@ For drop marker `D`, with per-beat `sub_db`, `bass_db`, `full_db`, `growl_band_d
 2. **Tolerant scan** (S-1a): find the newest `gone` beat `e` with `D−4 ≤ e ≤ D−1`
    (pickup tolerance 3 beats); walk back to the run start; `raw_gap = e − start + 1`.
    No `e` found → step 6.
-3. **Busy-build test (decided — the discriminator the anchors demanded):**
+3. **Busy-build test (decided — a sixth member ADDED to the settled S-1 rule family;
+   the anchors demanded it):**
    `bass_duty` = fraction of run beats with `bass_db ≥ 8.0`. If `bass_duty > 0.85` the
    run is a build riding a gone sub (drums/riser fully busy) — **no blackout**; the
    buildup cues + "lows out" hue shift own the stretch; check step 5 then step 6.
@@ -315,7 +322,9 @@ For drop marker `D`, with per-beat `sub_db`, `bass_db`, `full_db`, `growl_band_d
    authoritative, always). **Floor-returned abort** (S-1c/OLC-B): darkness ends at the
    2nd consecutive floor-present beat inside (or immediately entering) the window —
    precomputed from the cache, reported as `abort_at`. A 1-beat pickup never aborts
-   (dark through the pickup); a genuinely returned floor does.
+   (dark through the pickup); a genuinely returned floor does. When the floor is already
+   back at window entry the blackout renders **zero** dark beats — the music landed, the
+   room deliberately does nothing (no flick either); 48 drops corpus-wide read this way.
 5. **Relative dip** (S-1d): for beat `b`,
    `dip_score(b) = (med(full_db[b−16..b−1]) − full_db[b]) + 0.25·clip(med(sub[..]) − sub_db[b], 0, 8)`,
    fires at `dip_score ≥ 4.0` with the floor present (`sub_db[b] ≥ 5`), capped 4 beats
@@ -346,12 +355,12 @@ ANLZ markers (confirmed):
 | ILL drop 261 | 2 beats | blackout **2** — window [259,261), the beat-260 riser pickup rides dark | ✅ exact |
 | ILL drop 141 | (Appendix B: 3-beat gap) | blackout **3** — window [138,141), duty 0.67 survives the busy test | ✅ |
 | CSN drop 352 | 26 → capped 16 | blackout **capped 16** — window [336,352); the sub-only run measures **99 beats** (the whole lows-out breakdown; the review's 26 was the AND-rule figure); preceding beats ride sparse-and-dim | ✅ same window, number corrected (§15.2) |
-| CSN drop 128 | walkthrough: 1-beat cut at 127 | busy build correctly refuses a 7-beat blackout (duty 1.00); **relative-dip/perc-cut 1-beat** fires at 127 | ✅ walkthrough behavior |
+| CSN drop 128 | walkthrough: 1-beat cut at 127 | busy build correctly refuses the 63-beat sub-only run (duty 1.00); **perc-cut 1-beat flick** fires at 127 | ✅ walkthrough behavior |
 | STARsound (pt3) drop 131 | 2 beats with floor-return abort | **relative-dip 2 beats** at [128,129] (score 8.4), light released before the marker; the sub never crosses the gone threshold there in the current cache (the review's gap-at-126–127 row matches the *stargirl interlude* file — §15.1). The abort mechanism itself is kept and fires at **150 drops corpus-wide** (e.g. crank the bass drop 96: gap 4, abort at 95 → 3 dark beats) | ✅ in substance; provenance corrected |
 | Snap-flick coverage | classifications where the operator described none | 1,366 snap flicks + 105 perc-cut flicks across the library | ✅ |
 
-Corpus distribution (confirmed): 1,320 blackouts (dark-beat histogram spreads 1→16 with
-219 at the 16-cap), 1,145 relative dips, 1,366 snap flicks, 105 perc-cut flicks, 150
+Corpus distribution (confirmed): 1,320 blackouts (dark beats 0→16: 219 at the 16-cap, 48
+aborted-at-entry with zero dark beats), 1,145 relative dips, 1,366 snap flicks, 105 perc-cut flicks, 150
 aborts — every one of 3,936 drops has a defined darkness decision.
 
 ---
@@ -405,7 +414,7 @@ white_share = clip(0.25 + 0.75·E, 0.15, 1.0)          # TUNE-LIVE
 
 Anchor (confirmed): CSN's build into drop 128 lands in the low band (the walkthrough's
 "white+blue mix instead of full white — this build is not too intense"). Corpus
-(confirmed): white share masses at 0.2–0.4 with a long tail — 85 builds ≥ 0.6, 9 ≥ 0.9 —
+(confirmed): white share masses at 0.2–0.4 with a long tail — 128 builds ≥ 0.6, only 6 ≥ 0.9 —
 monsters earn full white, ordinary builds get mixes. Applies to buildup-cue white
 fraction through the color-slot contract (slot 5 weight, §8).
 
@@ -419,8 +428,9 @@ can actually render it.
 **Exact rule (decided).** Sections (from `section_map`, marker-forced): tier `quiet` →
 rung 4 if simmer (§5.4), rung 2 if `med(attack_low_db) < 6`, else rung 1; tier `mid` →
 rung 1; tier `loud` → rung 1 (drop cues override with their own rung). Drops: tier 1 → 1;
-tier 2 → 0.5; tier 3 → 0.25 **only when BPM ≤ 113** (0.25-beat events at higher BPM fall
-between the 30 fps frame-divisible rates and alias — T2-10/F-6), else 0.5. Audit
+tier 2 → 0.5; tier 3 → 0.25 **only when BPM ≤ 113 or |BPM − 150| ≤ 2** (elsewhere 0.25-beat events
+fall between the 30 fps frame-divisible rates and alias — T2-10/F-6; 150 BPM is exactly
+10 Hz), else 0.5. Audit
 (confirmed): drop rungs 1.0/0.5/0.25 = 2159/1775/2 — the 0.25 rung is honestly rare in a
 128–160 BPM library; tier-3 aggression at high BPM is carried by intensity/width and
 micro-darkness instead (F-6's stepped-rate + rising-intensity design).
@@ -454,7 +464,7 @@ selection signal, deliberately permissive; the moment's owner still decides.
 
 Defined in §4.1 step 5. Standalone runs fire only outside `loud` sections, cap 4 beats,
 rendered as a short cut of the *current* look (not the blackout look). Audit (confirmed):
-median 4 dip runs per track; the dip-storm tail (≥12 runs) is outlier-flagged (§13).
+median 5 dip runs per track; the dip-storm tail (≥12 runs) is outlier-flagged (§13).
 
 ### 5.7 What is never promised (charter §6.3 — designed around, honestly)
 
@@ -482,13 +492,15 @@ boundary, never mid-move.
 | Rank | Moment | Claim window | Notes |
 |---|---|---|---|
 | 0 | Emergency blackout / manual holds / static overrides / LED mute | absolute, unchanged authority | never contested; a held manual look survives every v2 moment |
-| 1 | Pre-drop blackout + drop cue | `[D − gap, D + drop_hold)` | the floor-return abort acts *inside* this window (it ends darkness early; it never yields the window); the drop-cue variant seasoning (S-2, §5.1) rides inside the cue, claiming nothing |
+| 1 | Pre-drop blackout + drop cue | `[D − gap, D + drop_hold)`; drop_hold = the pair's `duration_beats` (8 default, `drop_pairs`) | the floor-return abort acts *inside* this window (it ends darkness early; it never yields the window); the drop-cue variant seasoning (S-2, §5.1) rides inside the cue, claiming nothing |
 | 2 | Landing build move (squeeze/fuse/swell, landing restore) | `[target − travel, target)` | if rank 1's blackout window overlaps, the build move ends where darkness begins (squeeze-into-black is the composed arc, §9) |
-| 3 | Blend resolve (one-bar bloom at blend cross-and-hold) | 1 bar | skipped entirely if it lands inside rank 1–2 claims |
-| 4 | Palate reset (hard genre pivot neutral dip) | 1–2 s | |
-| 5 | First-play bloom | 2 bars (after ~8-beat hold gate) | a bloom never brightens into a blackout — rank 1 wins (the F-4 scenario) |
-| 6 | Phrase step / turnaround stinger | phrase boundary ±1 bar | own short cooldown class (F-12): stingers/bursts get a short cooldown; drop-scale impacts keep the 12 s class |
-| 7 | Texture seasoning + simmer + euphoric flavoring | none (selection-only) | reads at cue selection/parameterization inside whatever the schedule chose; the scheduler never sees texture (S-2); simmer is the lowest-priority *look*, claimed only when nothing above is active in a quiet section |
+| 3 | Standalone relative-dip cut (§5.6) | the dip run, ≤ 4 beats | mid-track "lights cut" moments (STARsound 2:12.4); skipped inside rank 1–2 claims; pre-drop dips already live inside rank 1's decision |
+| 4 | Blend resolve (one-bar bloom at blend cross-and-hold) | 1 bar | skipped entirely if it lands inside rank 1–3 claims |
+| 5 | Palate reset (hard genre pivot neutral dip) | 1–2 s | |
+| 6 | First-play bloom | 2 bars (after ~8-beat hold gate) | a bloom never brightens into a blackout — rank 1 wins (the F-4 scenario) |
+| 7 | Phrase step / turnaround stinger | phrase boundary ±1 bar | own short cooldown class (F-12): stinger/burst class ~4 s TUNE-LIVE; drop-scale impacts keep the 12 s class |
+| 8 | Texture seasoning + euphoric flavoring | **none — selection-only, never a claim** | reads at cue selection/parameterization inside whatever the schedule chose; the scheduler never sees texture (S-2) |
+| 9 | Simmer floor | quiet-section span, when nothing above is active | the lowest-priority look; also the OLC-A sparse-and-dim floor for breakdown floor-out beats |
 
 Skip-not-queue is literal: a skipped bloom does not fire late; a skipped stinger waits for
 the next phrase end. The arbiter is engine-side and pure (testable as a table of
@@ -521,6 +533,9 @@ owning switch; flips take effect at the next look boundary.
 | White-share formula (§5.2) | F2 | buildup cues keep baked white behavior |
 | Rate-rung selector (§5.3) | F2 | cues' own baked rates |
 | Phrase-end turnaround stinger + cooldown classes (§6 rank 6) | F2 | no stingers; 12 s class untouched |
+| Palate reset on hard genre pivots (§6 rank 5) | F1 | no identities ⇒ no pivot to mark; no reset fires |
+| Standalone relative-dip cuts (§5.6, §6 rank 3) | F2 | no dips; looks ride uncut |
+| Breakdown sparse-and-dim floor (§4.1-7, OLC-A) | F2 | v1 breakdown looks as today (never black either way); note: this floor is F2's darkness behavior and survives F4-off — with F4 off it renders the zone's dimmest look at rung 2 without simmer detection |
 | Blend painter: accents-first entry, base morph, resolve, dipless, abandon breathing (authority §7) | **F3 blend** | handover = F1's soft flip only |
 | Texture classes (kick-prominence, thick/thin, tilt, stab/sustain, darkness, simmer §5.4, euphoric §5.5, bass-forward §5.1, busy-pulse) | **F4 texture** | role cues untouched by construction (containment); drop cues use family default variant |
 | WILD OUT / SET mode (authority §9) | mode toggle (not a kill) | n/a — WILD OUT is default; SET withholds slot-5/strobe/span on T1–T2 drops |
@@ -612,7 +627,8 @@ and lands on the drop's first beat — the one moment guests will describe out l
   stays pinned); backward jumps degrade to wall-clock completion or melt; instances stamp
   (deck, load_gen) and never retarget across decks (F-5). All seams confirmed by the
   design review at HEAD.
-- **Per-track move selection (decided — from measured character, per-track permanent):**
+- **Per-track move selection (decided — from measured character, per-track permanent;
+  travel defaults TUNE-LIVE: squeeze 8 beats, fuse 8, swell 32):**
 
 ```
 norm(punch) ≥ 0.60 and norm(attack_low_p90) ≥ 0.45              -> squeeze-explode
@@ -766,16 +782,16 @@ the regression tool — the constants and formulas in this document are the spec
 **Headline distributions (confirmed):**
 
 - **Zones:** GLACIER 119 / DEEP_POOL 133 / TWILIGHT 81 / ION 125 / VOLT 125 /
-  EMBERCORE 83 — six zones at 12–20% each; aggressive-half max share **37%** (≤ ~40%
+  EMBERCORE 83 — six zones at 12–20% each; aggressive-half max share **37.5%** (≤ ~40%
   criterion); every track assigned.
 - **Drop families:** HOUSE 1628 / WALL 812 / COMET 439 / NEUTRAL 1057 (a 27% safety
   net). Genre lens (the classifier never sees genres): HARD TECHNO → 74% COMET;
-  DUBSTEP/ISOXO/TRAPSTEP → 41–45% WALL; every house playlist → 50–65% HOUSE.
+  DUBSTEP/ISOXO/TRAPSTEP → 41–45% WALL; the major house playlists → 50–65% HOUSE.
 - **Tiers:** T1 2159 / T2 1176 / T3 601 (frozen p55/p85 cuts). DROP EM spans T1–T2 ✅.
-- **Darkness:** 1,320 blackouts (dark beats spread 1→16; 219 at the 16 cap), 1,145
+- **Darkness:** 1,320 blackouts (dark beats 0→16; 219 at the 16 cap; 48 abort at window entry to zero dark beats), 1,145
   relative dips, 1,366 snap flicks, 105 perc-cut flicks, 150 floor-return aborts. Every
   drop decided.
-- **Builds:** white share masses at 0.2–0.4 with a long tail — 85 builds ≥ 0.6, 9 ≥ 0.9.
+- **Builds:** white share masses at 0.2–0.4 with a long tail — 128 builds ≥ 0.6, 6 ≥ 0.9.
 - **Texture / sections:** 236 tracks carry simmer sections; 572 have euphoric-eligible
   runs; drop rungs 1.0×2159 / 0.5×1775 / 0.25×2.
 - **Charter criterion 7 ✅:** no cached track lacks a defined outcome at any decision
@@ -826,14 +842,14 @@ Rekordbox ANLZ marker; rank = arbiter rank (§6); switch per §7.
 | Growl-vs-driving alternation in drop | drop-cue variant seasoning | drop marker fires the cue | bass-forward pattern (§5.1) | F4 (selection) | inside 1 |
 | 3rd-chorus softness | **not promised** (§5.7) | — | measured indistinguishable | — | — |
 | Breakdown "lows cut, drums persist" | busy-build refusal → build/groove cues ride | markers | §4.1-3 bass duty | F2 | — |
-| Implosion build "sparse and dim" | simmer floor + dips | section + dip rule | §5.4 + §5.6 | F4/F2 | 7 / 1 |
+| Implosion build "sparse and dim" | simmer floor + dips | section + dip rule | §5.4 + §5.6 | F4/F2 | 9 / 3 |
 | Room blackout before CSN 2:42.5 | capped 16-beat blackout | drop marker 352 | §4.1-2/4 (run 99 → 16) | F2 | 1 |
 | 4-beat full-strobe drop; growl ranked more intense | WALL cue, tier profile; ranking **cut** | drop marker | §3 family+tier; §5.7 | F2 | 1 |
-| Twinkle/simmer atmospheric intro | simmer floor | quiet section | §5.4 medians | F4 | 7 |
+| Twinkle/simmer atmospheric intro | simmer floor | quiet section | §5.4 medians | F4 | 9 |
 | Hidden-energy ramp | buildup cues + §5.2 | buildup marker | full_db step (prior fact: 9→15 dB) | F2 | — |
 | Blackout→explosion at STARsound 0:52.9 | 2-beat relative-dip cut into the drop | drop-marker context | §4.1-5 (score 8.4 at 128–129) | F2 | 1 |
-| Bright cyan/white sustain sections | euphoric flavoring | scheduled look | §5.5 eligibility | F4 (selection) | 7 |
-| Lights-cut dips (2:12.4 / 2:16.5) | standalone relative dips | dip rule | §4.1-5 / §5.6 | F2 | 1 (short claim) |
+| Bright cyan/white sustain sections | euphoric flavoring | scheduled look | §5.5 eligibility | F4 (selection) | 8 |
+| Lights-cut dips (2:12.4 / 2:16.5) | standalone relative dips | dip rule | §4.1-5 / §5.6 | F2 | 3 |
 | Swordfish chase at 0.5-beat rate | drop cue at rung 0.5 | drop marker | tier→rung (§5.3) | F2 | 1 |
 
 ---
@@ -876,7 +892,7 @@ drop 96: gap 4, abort at 95)".
 
 ### 15.4 Veto-shaped design calls (defaults chosen; say the word to flip any)
 
-1. **Hard techno wears dark zones** (mostly DEEP_POOL/TWILIGHT), with red arriving
+1. **Hard techno wears dark zones** (mostly DEEP_POOL), with red arriving
    through the COMET drop cue rather than the identity — keeps true red rare and earned.
    Veto shape: "hard techno should read red all night" → one aggression-side re-split by
    BPM.
@@ -892,6 +908,10 @@ drop 96: gap 4, abort at 95)".
    Not a veto item; noted so the live pass isn't surprised.
 5. **SET-mode peak reservation keys on tier 3 only** (§3.3). Veto shape: "peak-time
    should be rarer/looser" → the tier-3 cut is one constant.
+6. **Two zone splits are anchor-sensitive** (spec-author caution, not a veto): CSN sits
+   0.013 under the DEEP_POOL/TWILIGHT split (lum 0.267 vs 0.28) and STARsound (pt3)
+   0.036 over the GLACIER gate (0.436 vs 0.40); retuning either constant live can flip
+   an anchor call — re-check §2.2's anchors after any zone-split retune.
 
 ### 15.5 Analysis gaps never promised (§6.3 restated as a hard boundary)
 
