@@ -25,6 +25,7 @@ from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
     _extract_waveform_context,
     _extract_waveform_phrases,
     _extract_waveform,
+<<<<<<< Updated upstream
     _amplitude_jump_at_c,
     _bass_sustain_1bar,
     _broad_onset_score,
@@ -48,6 +49,17 @@ from rb_ss_bridge_v2.anlz_reader import (  # noqa: E402
     _phrase_grid_alignment,
     _score_confidence,
     _silence_frame_pre,
+=======
+    _broad_onset_score,
+    _distance_penalty,
+    _downbeat_alignment,
+    _make_multi_feature_scorer,
+    _multi_feature_score,
+    _onset_score,
+    _post_lift,
+    _pre_valley_depth,
+    _score_confidence,
+>>>>>>> Stashed changes
     _v1_compute_shadows,
     read_anlz_drops,
 )
@@ -92,6 +104,7 @@ def _beat_heights(values: dict[int, int], total_beats: int = 120, default: int =
     return [values.get(beat, default) for beat in range(total_beats)]
 
 
+<<<<<<< Updated upstream
 def _spectral_features(
     values,
     kick=None,
@@ -142,6 +155,8 @@ _POST_DROP_FEATURE_NAMES = (
 )
 
 
+=======
+>>>>>>> Stashed changes
 def _shadow_v1_fields(shadow):
     return (
         shadow.anlz_beat,
@@ -337,6 +352,7 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         self.assertEqual(default[0].suggested_beat, 72)
         self.assertEqual(default[0].source, "v1")
 
+<<<<<<< Updated upstream
     def test_wide_window_scores_seventeen_candidates_when_enabled(self) -> None:
         def scorer(beat, _heights, _beatgrid, _anlz_beat, _spectral):
             return float(beat)
@@ -360,6 +376,8 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         self.assertEqual(default[0].suggested_beat, 8)
         self.assertEqual(wide[0].suggested_beat, 16)
 
+=======
+>>>>>>> Stashed changes
     def test_onset_score_uses_max_single_beat_jump_in_post_window(self) -> None:
         self.assertEqual(
             _onset_score(0, [1, 1, 4, 10, 10, 10], _beatgrid_ms(6)),
@@ -402,6 +420,7 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         self.assertEqual(_distance_penalty(68, 64), 0.5)
         self.assertEqual(_distance_penalty(72, 64), 0.0)
 
+<<<<<<< Updated upstream
     def test_distance_penalty_rescales_for_wide_window(self) -> None:
         self.assertEqual(_distance_penalty(72, 64, wide_window=True), 0.5)
         self.assertEqual(_distance_penalty(80, 64, wide_window=True), 0.0)
@@ -696,6 +715,8 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
             self.assertIsInstance(breakdown[name], float)
             self.assertTrue(math.isfinite(breakdown[name]))
 
+=======
+>>>>>>> Stashed changes
     def test_multi_feature_score_uses_known_feature_values(self) -> None:
         score = _multi_feature_score(
             0,
@@ -723,6 +744,7 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
             scorer(1, heights, beatgrid, 0, None),
         )
 
+<<<<<<< Updated upstream
     def test_v2_telemetry_appends_csv_when_enabled(self) -> None:
         scorer = _make_multi_feature_scorer({"onset_score": 1.0})
         beatgrid = _beatgrid_ms(12)
@@ -752,6 +774,8 @@ class SmartDropEnergyShadowTests(unittest.TestCase):
         self.assertEqual(candidates[0]["beat"], shadows[0].suggested_beat)
         self.assertIn("onset_score", json.loads(rows[0]["feature_breakdown_json"]))
 
+=======
+>>>>>>> Stashed changes
     def test_score_confidence_uses_best_second_best_margin(self) -> None:
         self.assertAlmostEqual(_score_confidence(10.0, 7.0), 0.3)
         self.assertEqual(_score_confidence(0.0, 0.0), 0.0)

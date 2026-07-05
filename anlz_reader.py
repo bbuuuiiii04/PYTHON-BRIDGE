@@ -18,8 +18,11 @@ import json
 import logging
 import os
 from pathlib import Path
+<<<<<<< Updated upstream
 import statistics
 import time
+=======
+>>>>>>> Stashed changes
 from typing import Any, Callable, Optional
 
 from .models import SmartDropEnergyShadow
@@ -60,6 +63,7 @@ _MIN_BEATGRID_INTERVAL_MS = 150.0
 _MAX_BEATGRID_INTERVAL_MS = 3000.0
 _PWV3_MS_PER_ENTRY_FALLBACK = 6.7
 
+<<<<<<< Updated upstream
 # Multi-feature smart-drop scoring weights.
 #
 # Produced by tools/eval_smart_drop_algorithm.py from the anchored-tuner-harness
@@ -124,6 +128,18 @@ _PHASE_1A_FEATURE_NAMES = {
     "drum_attack_sustained",
     "kick_max_locked_in",
     "drums_dominant_over_tonal",
+=======
+MULTI_FEATURE_WEIGHTS_V2: dict[str, float] = {
+    "onset_score": 0.5,
+    "broad_onset_score": 0.3,
+    "post_lift": 0.3,
+    "pre_valley_depth": 0.5,
+    "downbeat_alignment": 0.5,
+    "distance_penalty": 0.5,
+    "sub_bass_onset": 1.0,
+    "kick_attack": 1.0,
+    "pre_drop_filter_sweep": 0.6,
+>>>>>>> Stashed changes
 }
 
 MultiFeatureScorer = Callable[
@@ -365,8 +381,11 @@ def _calculate_smart_drop_energy_shadow(
     *,
     scorer: Optional[MultiFeatureScorer] = None,
     spectral_features: Optional[Any] = None,
+<<<<<<< Updated upstream
     wide_window: bool = False,
     phrases: Optional[Any] = None,
+=======
+>>>>>>> Stashed changes
 ) -> list[SmartDropEnergyShadow]:
     if not heights or waveform_duration_ms <= 0 or len(beatgrid_times_ms) < 8:
         return []
@@ -382,8 +401,11 @@ def _calculate_smart_drop_energy_shadow(
             selected_drops,
             scorer=scorer,
             spectral_features=spectral_features,
+<<<<<<< Updated upstream
             wide_window=wide_window,
             phrases=phrases,
+=======
+>>>>>>> Stashed changes
         )
     return _v1_compute_shadows(heights, ms_per_entry, beatgrid_times_ms, selected_drops)
 
@@ -439,6 +461,7 @@ def _v2_compute_shadows(
     *,
     scorer: MultiFeatureScorer,
     spectral_features: Optional[Any] = None,
+<<<<<<< Updated upstream
     wide_window: bool = False,
     phrases: Optional[Any] = None,
 ) -> list[SmartDropEnergyShadow]:
@@ -452,6 +475,9 @@ def _v2_compute_shadows(
     ``score_at_suggested`` does not equal
     ``sum(features[name] * weights[name])``.
     """
+=======
+) -> list[SmartDropEnergyShadow]:
+>>>>>>> Stashed changes
     shadows: list[SmartDropEnergyShadow] = []
     source = "v2_spectral" if spectral_features is not None else "v2_waveform"
     for drop_beat in sorted(set(int(beat) for beat in selected_drops)):
@@ -459,8 +485,12 @@ def _v2_compute_shadows(
             continue
 
         scored: list[tuple[int, float]] = []
+<<<<<<< Updated upstream
         window_end = drop_beat + (17 if wide_window else 9)
         for candidate_beat in range(drop_beat, window_end):
+=======
+        for candidate_beat in range(drop_beat, drop_beat + 9):
+>>>>>>> Stashed changes
             if candidate_beat < 0 or candidate_beat >= len(beatgrid_times_ms):
                 continue
             score = scorer(
@@ -482,6 +512,7 @@ def _v2_compute_shadows(
             0.0,
         )
         confidence = _score_confidence(best_score, second_score)
+<<<<<<< Updated upstream
         feature_breakdown = _multi_feature_breakdown(
             best_beat,
             heights,
@@ -492,6 +523,10 @@ def _v2_compute_shadows(
             phrases=phrases,
         )
         shadow = SmartDropEnergyShadow(
+=======
+
+        shadows.append(SmartDropEnergyShadow(
+>>>>>>> Stashed changes
             anlz_beat=drop_beat,
             suggested_beat=best_beat,
             anlz_elapsed_ms=int(round(beatgrid_times_ms[drop_beat])),
@@ -501,6 +536,7 @@ def _v2_compute_shadows(
             confidence=confidence,
             score_at_anlz=score_at_anlz,
             score_at_suggested=best_score,
+<<<<<<< Updated upstream
             feature_breakdown=feature_breakdown,
             source=source,
         )
@@ -558,6 +594,20 @@ def _append_smart_drop_telemetry(
         log.warning("smart-drop telemetry append failed", exc_info=True)
 
 
+=======
+            feature_breakdown=_multi_feature_breakdown(
+                best_beat,
+                heights,
+                beatgrid_times_ms,
+                drop_beat,
+                spectral_features,
+            ),
+            source=source,
+        ))
+    return shadows
+
+
+>>>>>>> Stashed changes
 def _score_confidence(best: float, second_best: float) -> float:
     if best <= 0.0:
         return 0.0
@@ -645,9 +695,14 @@ def _downbeat_alignment(beat: int) -> float:
     return 0.0
 
 
+<<<<<<< Updated upstream
 def _distance_penalty(beat: int, anlz_beat: int, *, wide_window: bool = False) -> float:
     divisor = 16.0 if wide_window else 8.0
     return max(0.0, 1.0 - (abs(int(beat) - int(anlz_beat)) / divisor))
+=======
+def _distance_penalty(beat: int, anlz_beat: int) -> float:
+    return max(0.0, 1.0 - (abs(int(beat) - int(anlz_beat)) / 8.0))
+>>>>>>> Stashed changes
 
 
 def _multi_feature_breakdown(
@@ -656,9 +711,12 @@ def _multi_feature_breakdown(
     beatgrid_times_ms: list[float],
     anlz_beat: int,
     spectral_features: Optional[Any],
+<<<<<<< Updated upstream
     *,
     wide_window: bool = False,
     phrases: Optional[Any] = None,
+=======
+>>>>>>> Stashed changes
 ) -> dict[str, float]:
     features = {
         "onset_score": _onset_score(beat, heights, beatgrid_times_ms),
@@ -666,6 +724,7 @@ def _multi_feature_breakdown(
         "post_lift": _post_lift(beat, heights, beatgrid_times_ms),
         "pre_valley_depth": _pre_valley_depth(beat, heights, beatgrid_times_ms),
         "downbeat_alignment": _downbeat_alignment(beat),
+<<<<<<< Updated upstream
         "distance_penalty": _distance_penalty(beat, anlz_beat, wide_window=wide_window),
     }
     def spectral_score(fn: Callable[[int, Any], float]) -> float:
@@ -693,6 +752,22 @@ def _multi_feature_breakdown(
         "post_drop_minus_pre_drop": spectral_score(_post_drop_minus_pre_drop),
         "no_bigger_drop_later": spectral_score(_no_bigger_drop_later),
     })
+=======
+        "distance_penalty": _distance_penalty(beat, anlz_beat),
+    }
+    if spectral_features is None:
+        features.update({
+            "sub_bass_onset": 0.0,
+            "kick_attack": 0.0,
+            "pre_drop_filter_sweep": 0.0,
+        })
+    else:
+        features.update({
+            "sub_bass_onset": _sub_bass_onset(beat, spectral_features),
+            "kick_attack": _kick_attack(beat, spectral_features),
+            "pre_drop_filter_sweep": _pre_drop_filter_sweep(beat, spectral_features),
+        })
+>>>>>>> Stashed changes
     return features
 
 
@@ -702,18 +777,24 @@ def _multi_feature_score(
     beatgrid_times_ms: list[float],
     anlz_beat: int,
     spectral_features: Optional[Any],
+<<<<<<< Updated upstream
     weights: Optional[dict[str, float]] = None,
     *,
     wide_window: bool = False,
     phrases: Optional[Any] = None,
 ) -> float:
     resolved = weights if weights is not None else MULTI_FEATURE_WEIGHTS_V2
+=======
+    weights: dict[str, float] = MULTI_FEATURE_WEIGHTS_V2,
+) -> float:
+>>>>>>> Stashed changes
     features = _multi_feature_breakdown(
         beat,
         heights,
         beatgrid_times_ms,
         anlz_beat,
         spectral_features,
+<<<<<<< Updated upstream
         wide_window=wide_window,
         phrases=phrases,
     )
@@ -733,6 +814,14 @@ def _make_multi_feature_scorer(
 ) -> MultiFeatureScorer:
     weight_copy = dict(weights)
     phrases_copy = tuple(phrases) if phrases else None
+=======
+    )
+    return sum(features[name] * weights.get(name, 0.0) for name in features)
+
+
+def _make_multi_feature_scorer(weights: dict[str, float]) -> MultiFeatureScorer:
+    weight_copy = dict(weights)
+>>>>>>> Stashed changes
 
     def scorer(
         beat: int,
@@ -748,13 +837,17 @@ def _make_multi_feature_scorer(
             anlz_beat,
             spectral_features,
             weight_copy,
+<<<<<<< Updated upstream
             wide_window=wide_window,
             phrases=phrases_copy,
+=======
+>>>>>>> Stashed changes
         )
 
     return scorer
 
 
+<<<<<<< Updated upstream
 def _kick_pattern_onset(beat: int, spectral_features: Any) -> float:
     return _pattern_onset(beat, _spectral_envelope(spectral_features, "kick_envelope"), window=8)
 
@@ -1031,6 +1124,44 @@ def _spectral_triplet(spectral_features: Any) -> tuple[list[float], list[float],
         _spectral_envelope(spectral_features, "sub_bass_envelope"),
         _spectral_envelope(spectral_features, "high_band_envelope"),
     )
+=======
+def _sub_bass_onset(beat: int, spectral_features: Any) -> float:
+    return _spectral_onset(beat, _spectral_envelope(spectral_features, "sub_bass_envelope"))
+
+
+def _kick_attack(beat: int, spectral_features: Any) -> float:
+    envelope = _spectral_envelope(spectral_features, "kick_envelope")
+    if not envelope:
+        return 0.0
+    best = 0.0
+    for index in range(max(1, beat), min(len(envelope), beat + 5)):
+        prior = envelope[index - 1]
+        current = envelope[index]
+        following = envelope[index + 1] if index + 1 < len(envelope) else current
+        best = max(best, current - max(prior, following))
+    return max(0.0, best)
+
+
+def _pre_drop_filter_sweep(beat: int, spectral_features: Any) -> float:
+    envelope = _spectral_envelope(spectral_features, "high_band_envelope")
+    if not envelope or beat < 4:
+        return 0.0
+    early = envelope[max(0, beat - 4):max(0, beat - 2)]
+    late = envelope[max(0, beat - 2):beat]
+    if not early or not late:
+        return 0.0
+    return max(0.0, (sum(early) / len(early)) - (sum(late) / len(late)))
+
+
+def _spectral_onset(beat: int, envelope: list[float]) -> float:
+    if not envelope:
+        return 0.0
+    start = max(0, beat)
+    stop = min(len(envelope), beat + 5)
+    if stop - start < 2:
+        return 0.0
+    return max(0.0, max(envelope[i + 1] - envelope[i] for i in range(start, stop - 1)))
+>>>>>>> Stashed changes
 
 
 def _spectral_envelope(spectral_features: Any, attr: str) -> list[float]:
