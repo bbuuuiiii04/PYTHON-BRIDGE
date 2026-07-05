@@ -302,6 +302,8 @@ def format_age(ts: float, now: float | None = None) -> str:
     now= convention); defaults to time.time(). Clock skew (ts in the
     "future") clamps to "just now" rather than showing a negative age.
     """
+    if not isinstance(ts, (int, float)):
+        return "?"  # corrupt record: tolerate, never crash the viewer
     current = time.time() if now is None else now
     seconds = max(0.0, current - ts)
     if seconds < 1:

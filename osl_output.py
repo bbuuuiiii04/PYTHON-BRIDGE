@@ -171,6 +171,9 @@ class OS2LConnection:
                         self._sock = sock
                         self._connected = True
                     bridge_log.health("os2l", "connected %s:%d", host, port, lvl=logging.INFO)
+                    # Re-arm the connect-fail edge guard so the NEXT outage
+                    # (even with the same error signature) emits again.
+                    bf.log_changed("os2l_conn_fail", None)
                     self.send(_HANDSHAKE)
                     if not self.fast_reconnect:
                         self._send_init_defaults()

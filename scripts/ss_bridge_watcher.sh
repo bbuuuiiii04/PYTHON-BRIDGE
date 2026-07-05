@@ -299,7 +299,7 @@ while true; do
         if bridge_alive; then
             start_streamdeck
         fi
-        if [ "$MONITOR_OPENED" -eq 0 ]; then
+        if ! monitor_open; then
             open_monitor
         fi
         sleep 3
@@ -317,7 +317,7 @@ while true; do
         if bridge_alive; then
             start_streamdeck
         fi
-        if [ "$MONITOR_OPENED" -eq 0 ] && ! monitor_open; then
+        if ! monitor_open; then
             open_monitor
         fi
     else

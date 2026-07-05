@@ -250,7 +250,10 @@ class _QueueRecordHandler(logging.Handler):
         except queue.Full:
             _bump_dropped()
         except Exception:
-            pass
+            # A malformed record (e.g. %-format mismatch) must never raise
+            # into the caller — but it should still show in the footer's
+            # dropped count instead of vanishing invisibly (final review).
+            _bump_dropped()
 
 
 # ── Writer thread: all the slow work lives here ───────────────────────────────
