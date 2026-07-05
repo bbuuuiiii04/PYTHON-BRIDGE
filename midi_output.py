@@ -439,7 +439,7 @@ class MidiOutput:
             self._send_error_reopen_after = time.monotonic() + _SEND_ERROR_REOPEN_COOLDOWN_S
         if newly_degraded:
             bridge_log.health(
-                "midi", "degraded reason=send_error err=%s", exc,
+                "midi", "laser midi degraded — sends failing (%s)", exc,
                 data={"reason": "send_error", "err": str(exc)},
             )
         self._close_port()
@@ -473,7 +473,7 @@ class MidiOutput:
             self._degraded = False
             self._degraded_reason = ""
             self._last_error = ""
-        bridge_log.health("midi", "recovered reason=send_error", lvl=logging.INFO)
+        bridge_log.health("midi", "laser midi recovered", lvl=logging.INFO)
         return True
 
     def _set_degraded(self, reason: str, exc: Optional[Exception] = None) -> None:

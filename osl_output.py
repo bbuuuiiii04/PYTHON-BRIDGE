@@ -127,7 +127,7 @@ class OS2LConnection:
         except queue.Full:
             self._drop_count += 1
             if bf.log_throttled("os2l_queue_full", 5.0):
-                bridge_log.health("queue", "os2l send queue full; dropping")
+                bridge_log.health("queue", "soundswitch send queue full; dropping updates")
 
     def _sender_loop(self) -> None:
         with bridge_log.thread_guard("os2l-sender"):
@@ -148,7 +148,7 @@ class OS2LConnection:
                     self._sent_count += 1
                 except OSError as exc:
                     self._send_error_count += 1
-                    bridge_log.health("os2l", "send-error err=%s; reconnecting", exc)
+                    bridge_log.health("os2l", "soundswitch send failed (%s); reconnecting", exc)
                     self.disconnect()
 
     def _reconnect_loop(self) -> None:
@@ -170,7 +170,7 @@ class OS2LConnection:
                     with self._lock:
                         self._sock = sock
                         self._connected = True
-                    bridge_log.health("os2l", "connected %s:%d", host, port, lvl=logging.INFO)
+                    bridge_log.health("os2l", "soundswitch link connected (%s:%d)", host, port, lvl=logging.INFO)
                     # Re-arm the connect-fail edge guard so the NEXT outage
                     # (even with the same error signature) emits again.
                     bf.log_changed("os2l_conn_fail", None)
@@ -181,7 +181,7 @@ class OS2LConnection:
                 except (OSError, ConnectionRefusedError) as exc:
                     if bf.log_changed("os2l_conn_fail", (host, port, type(exc).__name__)):
                         bridge_log.health(
-                            "os2l", "connect-fail %s:%d err=%s; retry=3s", host, port, exc,
+                            "os2l", "soundswitch not reachable at %s:%d (%s); retrying every 3s", host, port, exc,
                         )
                     time.sleep(3)
 

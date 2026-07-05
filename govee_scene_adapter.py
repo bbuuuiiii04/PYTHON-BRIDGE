@@ -350,7 +350,7 @@ class GoveeSceneAdapter:
                         self._set_degraded_locked(result.reason, result.reason)
                         if not was_failing and bf.log_changed("govee_cloud_ok", False):
                             bridge_log.health(
-                                "govee.cloud", "send failing reason=%s", self._last_error,
+                                "govee.cloud", "send failing (%s)", self._last_error,
                                 data={"reason": self._last_error},
                             )
                         if self._consecutive_send_failures >= _CIRCUIT_FAILURE_THRESHOLD:

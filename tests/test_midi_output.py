@@ -215,7 +215,7 @@ class MidiOutputTests(unittest.TestCase):
                 self.assertTrue(_wait_until(lambda: len(records) >= 1))
                 self.assertEqual(len(records), 1)
                 self.assertEqual(records[0].levelname, "WARNING")
-                self.assertIn("send_error", records[0].getMessage())
+                self.assertIn("laser midi degraded", records[0].getMessage())
             finally:
                 out.stop()
 

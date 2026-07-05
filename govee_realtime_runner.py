@@ -227,7 +227,7 @@ class GoveeRealtimeRunner:
             if was_failing and log_changed("govee_rt_ok", True):
                 bridge_log.health("govee.rt", "recovered", lvl=logging.INFO)
         elif log_changed("govee_rt_ok", False):
-            bridge_log.health("govee.rt", "send failing (transport_send_failed)")
+            bridge_log.health("govee.rt", "send failing — can't reach the led strip; retrying")
 
     def _tick_once(self, anchor: BeatAnchor | None, now: float) -> None:
         if self._emergency.is_set():

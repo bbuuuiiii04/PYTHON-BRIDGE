@@ -386,7 +386,7 @@ class LEDDispatchPolicyMixin:
             override_data["reason"] = ev.payload.get("reason")
         bridge_log.perf(
             "override",
-            "led %s src=%s",
+            "led %s (from %s)",
             override_action,
             ev.source,
             data=override_data,

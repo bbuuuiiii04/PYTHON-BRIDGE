@@ -203,8 +203,8 @@ class RBStateReader(threading.Thread):
             self._set_all_master_unavailable()
             return
         bridge_log.health(
-            "rb", "attached pid=%s base=0x%x version=%s",
-            self._rb_pid, base, self._offs.version, lvl=logging.INFO,
+            "rb", "attached to rekordbox pid=%s version=%s (base 0x%x)",
+            self._rb_pid, self._offs.version, base, lvl=logging.INFO,
         )
 
         next_tick = self._clock()

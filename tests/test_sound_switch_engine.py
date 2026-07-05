@@ -400,7 +400,7 @@ class OS2LConnectionHealthTransitionTests(unittest.TestCase):
 
         self.assertEqual(len(records), 1, f"{records!r}")
         self.assertEqual(records[0].levelname, "WARNING")
-        self.assertIn("connect-fail", records[0].getMessage())
+        self.assertIn("soundswitch not reachable", records[0].getMessage())
 
     def test_send_error_emits_health_os2l(self) -> None:
         conn = OS2LConnection()
@@ -416,7 +416,7 @@ class OS2LConnectionHealthTransitionTests(unittest.TestCase):
 
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].levelname, "WARNING")
-        self.assertIn("send-error", records[0].getMessage())
+        self.assertIn("soundswitch send failed", records[0].getMessage())
         self.assertFalse(conn.is_connected())
 
     def test_send_queue_full_emits_health_queue_throttled(self) -> None:

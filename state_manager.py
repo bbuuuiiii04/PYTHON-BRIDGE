@@ -1427,8 +1427,8 @@ class StateManager(LEDDispatchPolicyMixin):
                     )
                 bridge_log.perf(
                     "override",
-                    "laser toggle -> %s src=%s",
-                    self._laser_director.is_enabled(),
+                    "laser %s (from %s)",
+                    "on" if self._laser_director.is_enabled() else "off",
                     ev.source,
                     data={
                         "surface": "laser",
@@ -1446,8 +1446,8 @@ class StateManager(LEDDispatchPolicyMixin):
                     )
                 bridge_log.perf(
                     "override",
-                    "laser set_enabled -> %s src=%s",
-                    enabled,
+                    "laser %s (from %s)",
+                    "on" if enabled else "off",
                     ev.source,
                     data={
                         "surface": "laser",
@@ -1463,7 +1463,7 @@ class StateManager(LEDDispatchPolicyMixin):
                     self._laser_director.set_manual_override(scene, ttl_s)
                     bridge_log.perf(
                         "override",
-                        "laser scene %s src=%s",
+                        "laser manual scene %s (from %s)",
                         scene,
                         ev.source,
                         data={
@@ -1478,7 +1478,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 self._laser_director.set_emergency_blackout(True)
                 bridge_log.perf(
                     "override",
-                    "laser blackout src=%s",
+                    "laser blackout — all laser output off (from %s)",
                     ev.source,
                     data={"surface": "laser", "action": "blackout", "source": ev.source},
                 )
@@ -1486,7 +1486,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 self._laser_director.clear_emergency_blackout()
                 bridge_log.perf(
                     "override",
-                    "laser clear_blackout src=%s",
+                    "laser blackout released (from %s)",
                     ev.source,
                     data={"surface": "laser", "action": "clear_blackout", "source": ev.source},
                 )
@@ -1494,7 +1494,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 self._laser_director.clear_manual_override()
                 bridge_log.perf(
                     "override",
-                    "laser clear_scene_override src=%s",
+                    "laser manual scene released (from %s)",
                     ev.source,
                     data={
                         "surface": "laser",
@@ -1522,7 +1522,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 if applied:
                     bridge_log.perf(
                         "override",
-                        "laser set_personality %s src=%s",
+                        "laser personality %s (from %s)",
                         personality_name,
                         ev.source,
                         data={
