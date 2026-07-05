@@ -6,10 +6,19 @@
 # whole suite run -- the operator's Stream Deck visibly blinks (seq
 # regressions, latch clears, palette keys blanking) while tests are running.
 #
-# Set the override here, before any bridge module is imported, so
-# led_palette_control.PALETTE_STATE_PATH and streamdeck_midi.PALETTE_STATE_PATH
-# both read the env var at import time and pick up the redirected path. The
-# pid suffix keeps concurrent suite runs (this repo has multiple agents
+# The PRIMARY protection is now structural: led_palette_control.py resolves
+# its feedback path at construction time (LedPaletteControl.__init__ /
+# PaletteFeedbackWriter.__init__), defaulting to a per-pid throwaway file
+# unless RBSS_PALETTE_STATE_PATH is set -- only __main__.main() (the real
+# bridge, after it wins the single-instance lock) ever pins the live path.
+# That means an ad-hoc script that never imports this tests/ package (the
+# gap this override alone used to leave open) is ALSO safe by construction.
+#
+# This block is belt-and-suspenders for anything running under the test
+# suite: it sets the override here, before any bridge module is imported,
+# so a suite run gets a stable shared throwaway path for its whole
+# duration instead of a fresh one per StateManager construction. The pid
+# suffix keeps concurrent suite runs (this repo has multiple agents
 # testing at once) from fighting each other over one shared temp file.
 # setdefault() so an explicitly exported RBSS_PALETTE_STATE_PATH still wins.
 import os

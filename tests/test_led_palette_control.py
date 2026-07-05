@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import time
@@ -40,7 +41,11 @@ def _config() -> ColorEngineConfig:
 class _WriterStub:
     instances: list["_WriterStub"] = []
 
-    def __init__(self, *_args, **_kwargs) -> None:
+    def __init__(self, path: str = "", *_args, **_kwargs) -> None:
+        # Mirrors the real PaletteFeedbackWriter's `_path` attribute name so
+        # tests can assert on the path LedPaletteControl resolved without
+        # spinning up a real writer thread.
+        self._path = path
         self.payloads: list[dict] = []
         self.stopped = False
         _WriterStub.instances.append(self)
@@ -504,6 +509,43 @@ class LedPaletteControlTests(unittest.TestCase):
         self.assertIn("white_sand", names)
         allowed = {51, 52, 56}
         self.assertTrue(all(row["note"] in allowed for row in payload["palettes"]))
+
+    def test_default_feedback_path_never_falls_back_to_live_file(self) -> None:
+        # Ghost-writer regression (2026-07-04): an ad-hoc script that never
+        # imports tests/ (so tests/__init__.py's env override never runs)
+        # must still be structurally unable to default to the live operator
+        # feedback file. With RBSS_PALETTE_STATE_PATH absent, construction
+        # must fall back to a per-pid throwaway; with it present, the
+        # override must win.
+        live_path = "/tmp/rb_ss_bridge_v2_palette_state.json"
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RBSS_PALETTE_STATE_PATH", None)
+            control = LedPaletteControl(
+                engine=self.engine,
+                led_event_sink=self.events.append,
+                get_abs_beat=lambda: 8.0,
+                get_phrase_anchor=lambda _beat: 16.0,
+                get_laser_blackout=lambda: False,
+            )
+            try:
+                resolved = control._writer._path
+                self.assertNotEqual(resolved, live_path)
+                self.assertIn(str(os.getpid()), resolved)
+            finally:
+                control.stop()
+
+            os.environ["RBSS_PALETTE_STATE_PATH"] = "/tmp/rbss_test_override_marker.json"
+            control2 = LedPaletteControl(
+                engine=self.engine,
+                led_event_sink=self.events.append,
+                get_abs_beat=lambda: 8.0,
+                get_phrase_anchor=lambda _beat: 16.0,
+                get_laser_blackout=lambda: False,
+            )
+            try:
+                self.assertEqual(control2._writer._path, "/tmp/rbss_test_override_marker.json")
+            finally:
+                control2.stop()
 
 
 class PaletteFeedbackWriterTests(unittest.TestCase):

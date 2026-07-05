@@ -87,6 +87,7 @@ from .soundswitch_pack_player_config import (
 from .led_config import LEDConfigResult, load_led_look_director_config
 from .led_look_director import LEDLookDirector, LED_AUTOMATION_ROLE_ORDER
 from .led_color_engine import LedColorEngine
+from .led_palette_control import LIVE_PALETTE_STATE_PATH
 from .govee_scene_adapter import GoveeSceneAdapter
 from .govee_runtime_sender import GoveeRuntimeSender
 from .govee_frame_renderer import GoveeFrameRenderer
@@ -904,6 +905,17 @@ def main() -> None:
     if not _acquire_single_instance_lock():
         log.error("another rb_ss_bridge_v2 process is already running; exiting")
         return
+
+    # Pin the live palette feedback path now, long before any StateManager /
+    # LedPaletteControl is constructed below. This is the ONLY place that
+    # sets RBSS_PALETTE_STATE_PATH for the real bridge process; every other
+    # construction path (ad-hoc verification scripts, direct test-module
+    # runs, subagent scratch runs) never sets it and falls through to a
+    # per-pid throwaway file (led_palette_control._resolve_palette_state_path),
+    # so a stray process is structurally unable to write this live file and
+    # fight the real bridge's PaletteFeedbackWriter over it. setdefault() so
+    # an operator-exported override still wins.
+    os.environ.setdefault("RBSS_PALETTE_STATE_PATH", LIVE_PALETTE_STATE_PATH)
 
     # Install owner cleanup before any pack-controlled port is opened.  The
     # mutable slots let the handler/atexit path own resources even while the

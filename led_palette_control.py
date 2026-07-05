@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 import threading
 import time
 from typing import Any, Callable, Mapping, Optional
@@ -17,26 +18,54 @@ from .runtime_status import atomic_write_json
 
 log = logging.getLogger("rbss.palette_control")
 
-# Overridable so tests never write the live operator feedback file: the
-# production bridge and the Stream Deck controller both default to the same
-# /tmp path, but a test run sets RBSS_PALETTE_STATE_PATH before import (see
-# tests/__init__.py) to redirect writes to a throwaway file instead of
-# fighting a live bridge's PaletteFeedbackWriter over the real one.
-PALETTE_STATE_PATH = os.environ.get(
-    "RBSS_PALETTE_STATE_PATH", "/tmp/rb_ss_bridge_v2_palette_state.json"
-)
+# The real operator-facing feedback path the Stream Deck DECK script
+# (streamdeck/streamdeck_midi.py) reads. Ownership contract: only the real
+# bridge process pins this into RBSS_PALETTE_STATE_PATH -- __main__.main(),
+# immediately after it wins the single-instance flock, long before any
+# StateManager/LedPaletteControl is constructed. Every other construction
+# path (ad-hoc verification scripts, direct test-module runs, subagent
+# scratch runs) never sets that env var and falls through to a per-pid
+# throwaway file in _resolve_palette_state_path() below, so a stray process
+# is structurally unable to write the live file and fight the real bridge's
+# PaletteFeedbackWriter over it (2026-07-04 ghost-writer incident).
+LIVE_PALETTE_STATE_PATH = "/tmp/rb_ss_bridge_v2_palette_state.json"
+
+# Backward-compat name: no importer outside this module reads it (checked
+# via rg 2026-07-04). Nothing below defaults to it any more -- see
+# _resolve_palette_state_path().
+PALETTE_STATE_PATH = LIVE_PALETTE_STATE_PATH
+
+
+def _resolve_palette_state_path() -> str:
+    """Resolve the palette feedback path at CONSTRUCTION time, never at
+    import time -- at import time no caller has had a chance to set
+    RBSS_PALETTE_STATE_PATH yet, which is exactly how a stray process used
+    to inherit the literal live path. Honors an explicit env override
+    first (set by __main__.main() for the real bridge, or by an operator /
+    tests/__init__.py for anything else); otherwise falls back to a per-pid
+    throwaway so concurrent stray processes can't even collide with each
+    other, let alone the live bridge.
+    """
+    override = os.environ.get("RBSS_PALETTE_STATE_PATH")
+    if override:
+        return override
+    return os.path.join(tempfile.gettempdir(), f"rbss_palette_state_{os.getpid()}.json")
 
 
 class PaletteFeedbackWriter(threading.Thread):
     def __init__(
         self,
-        path: str = PALETTE_STATE_PATH,
+        path: str | None = None,
         *,
         debounce_s: float = 0.10,
         heartbeat_s: float | None = None,
     ) -> None:
         super().__init__(name="palette-feedback-writer", daemon=True)
-        self._path = path
+        # None (rather than a live-path default) so a caller that ever
+        # forgets to pass a path -- there is none in this repo today, but
+        # this class is public -- gets a per-pid throwaway, never the live
+        # operator feedback file.
+        self._path = path or _resolve_palette_state_path()
         self._debounce_s = debounce_s
         # When set, the last payload is rewritten every heartbeat_s while idle
         # so mtime-based staleness checks (streamdeck_midi FEEDBACK_STALE_S)
@@ -109,7 +138,7 @@ class LedPaletteControl:
         get_static_held: Callable[[], tuple] | None = None,
         palette_notes: Mapping[str, int] | None = None,
         control_notes: Mapping[str, int] | None = None,
-        feedback_path: str = PALETTE_STATE_PATH,
+        feedback_path: str | None = None,
         long_press_s: float = 0.5,
     ) -> None:
         self._engine = engine
@@ -133,7 +162,14 @@ class LedPaletteControl:
         self._last_input_healthy = True
         self._last_feedback_body: dict[str, Any] | None = None
         self._logged_snapshot_error = False
-        self._writer = PaletteFeedbackWriter(feedback_path, heartbeat_s=5.0)
+        # Resolve at construction time, not import time: only main() (the
+        # real bridge, after it wins the single-instance lock) pins
+        # RBSS_PALETTE_STATE_PATH to LIVE_PALETTE_STATE_PATH before this
+        # constructor ever runs; every other caller (ad-hoc scripts, tests,
+        # a StateManager built by a stray process) falls through to a
+        # per-pid throwaway -- see _resolve_palette_state_path().
+        resolved_feedback_path = feedback_path or _resolve_palette_state_path()
+        self._writer = PaletteFeedbackWriter(resolved_feedback_path, heartbeat_s=5.0)
         self._writer.start()
         self.publish_feedback()
 
