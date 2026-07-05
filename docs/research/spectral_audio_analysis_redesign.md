@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified + measured-corpus
-last_verified_commit: 2945c52
+last_verified_commit: f3c06bb
 last_verified_date: 2026-07-05
 validation_scope: software build + corpus validation only — v4 analysis layer built and validated against the local Rekordbox library (BY GENRE playlists as labeled ground truth); no lighting behavior change, no bridge execution, no hardware validation
 ---
@@ -16,8 +16,10 @@ run, or a primary source. Companion docs: the v2 design record
 (`docs/research/spectral_palettes_arrival_crossfade_exploration.md`) and its review
 (`docs/research/lighting_engine_v2_design_review.md`).
 
-Status of this document: written incrementally as the one-shot progresses; a section marked
-`PENDING` means that phase has not completed yet in this session.
+Status of this document: complete — every phase of the one-shot ran to completion in the
+2026-07-05 session (audit → research → design → adversarial review gate → build → corpus
+proofs → whole-library sweep). Audit rulings §2; design §4 (review gate §4.10); coverage
+§5; proofs §6; sweep §7; claim labels §7b; operator taste calls §8.
 
 ---
 
@@ -436,13 +438,158 @@ All **confirmed (measured this session)** unless labeled otherwise.
   works today — observed decoding during the sweep). If that fallback ever disappears,
   those ≤8 files degrade to the ANLZ-only tier per A12.
 
-### 6.5 Corpus proofs (held-out genre discrimination, calibration, outlines)
+### 6.5 Corpus proofs — all computed from the shipped extractor's cache entries via the
+shipped `spectral_profile` code paths (219 BY GENRE tracks with v4 entries; the RAP playlist
+excluded per the track-selection rule)
 
-PENDING — sweep in progress; appended when complete.
+**Corpus-scale calibration (review-gate change 6b).** Over ~112k beats of labeled EDM:
+the sub-band dB distribution is decisively bimodal — main mass at 25–36 dB (sub present),
+long sparse tail below, and the bottom-gone threshold (5 dB) sits in a genuine density
+valley (only 4.7% of beats within 8 dB below it, 5.7% within 8 dB above). The single-track
+ILL validation generalizes. True-silence threshold (−30 dB full-band) lies below the corpus
+p1 (−26) — only literal silence crosses it. Growl threshold 0.25 ≈ corpus p78 of harmonic
+mid-band flatness (a top-quartile distortion gate); roll threshold 3/beat > corpus p90
+(rolls are rare, as they should be). Mastering spread: per-track `loudness_ref_db` p5–p95 =
+15.3–19.3 dB — a 4 dB corpus spread, comfortably inside threshold tolerances (the
+corpus-absolute rule is sound).
 
-## 7. Whole-library sweep results
+**Identity-axes stability at corpus scale (n=219, even/odd-beat Spearman)** — the F-9 gate:
+**grit 0.929, punch 0.935, bass 0.967, drama 0.928** — all four inside/above the v3 band
+(0.902–0.957). The prototype's punch failure (0.769) was fixed by the compat-block CV
+formula, confirmed here. The stability contingency (§4.10 change 9) was not needed.
 
-PENDING — coverage, duration, cache size, stability spot-checks.
+**Held-out genre-discrimination proof (review-gate change 6a).** 1,266 drop windows from
+the six operator-named playlists; **1,086 of them from tracks the design process never
+touched**. Nearest-centroid, leave-one-track-out: **58.7% vs 16.7% chance (3.5×)** on the
+held-out windows — *higher* than the design-set number (53.1%), so the features generalize
+rather than overfit. Per-genre: HARD TECHNO 76%, DUBSTEP 71%, ODDMOB 65%, BASS HOUSE 54%,
+SYNTH HOUSE 48%, ISOXO 29% — every genre beats chance 2–4.5×, and the confusion structure
+is musically honest (ISOXO bleeds mostly into DUBSTEP: the catalog's ISOxo-era
+trap/dubstep hybridity; ODDMOB into the other ~130 BPM house styles). The operator's own
+descriptors are the measurable medians (held-out windows): BASS HOUSE = highest low-band
+attack (11.4 dB p90) and within-beat swing (14.5 dB) — *stabby, jumpy*; DUBSTEP = highest
+mid/high/air (12.3/6.6/1.7 dB) with top-quartile growl flatness — *scratchy, jabby*;
+HARD TECHNO = most bass (27.2 dB), darkest top (air −4.2 dB), 155 BPM — *pounding,
+driving*; ODDMOB = strong sub with the *lowest* mids (5.6 dB) — *bassy sustains, dark*;
+SYNTH HOUSE = cleanest harmonic timbre (flatness 0.12) — *euphoric sustain*; ISOXO = heavy
+consistent sub with sparse low-band attacks — *heavy but sparse*.
+
+**Within-dubstep drop characters (the operator's specific dubstep bar).** Per-drop vectors
+separate drop characters across and even within tracks: Ray Volpe — DROP EM's four drops
+span attack 2.7→16.1 dB and growl-flatness 0.30→0.42 (its growliest drop is measurably its
+own thing); Crankdat — STFU's seven drops cluster tightly (0.24–0.27 flatness, ~2.2
+onsets/beat — consistent stutter character); SPITFIRE reads cleaner/brighter; the trap-edit
+end (Fuckin' Problems x Type Shit) reads low-flatness sparse. Distinct drop characters are
+distinguishable in v4 output — requirement met.
+
+**Timestamped event outlines (the operator scrub test)** — final outlines from shipped
+code, for six named tracks (full listings preserved in the session's validation log;
+representative excerpts):
+
+- *Kai Wachi — ILL (DUBSTEP, 140):* intro riff gaps 0:00–0:16 (4–5-beat empty floors);
+  growl sections 0:30/0:33; percussion roll ×8 at 0:37.9 into the BUILDUP at 0:41.7; empty
+  floor through 0:43.0–0:46.9 ending exactly at the DROP (beat 109); 2-beat vacuum at
+  1:50.7 before the 1:52.0 DROP; growl blocks through both drop phrases; 1:44.3 growl ×15
+  through the buildup; **2:19.4 true silence ×14 (literal end-of-file)** — kind-split from
+  musical empty floor.
+- *Knock2 — crank the bass (BASS HOUSE, 132):* growl bass tease 0:35.9/0:39.1 before the
+  0:43.6 DROP with a roll ×3 riding in at 0:41.8; sustained-synth reads on the intro/mid
+  vocal-pad sections; 0:41.8 2-beat pre-drop vacuum; 34-beat outro empty floor at 3:12.7.
+- *ISOxo — just let da muzik TALK! (ISOXO, 140):* the trap verse signature — alternating
+  6–7-beat empty floors every other bar from 0:06 to 0:37; a 24-beat empty floor at 0:37.3
+  carrying a percussion roll ×10 (0:38.6) into the 0:47.6 DROP; screech-lead growl blocks
+  after both drops (×21 at 1:03.9, ×35 at 1:28.3).
+- *Pitch Mad Attak — Wanna Be (HARD TECHNO, 160):* sustained-synth reads throughout (the
+  rave hook — the class-semantics ruling in Appendix C); percussion roll ×14 at 2:48.0
+  through the buildup into the 3:00.0 DROP; sustained bass floor ×8 blocks in the intro
+  and mid-section; end-of-file true silence.
+- *it's murph — Lift Me Up (SYNTH HOUSE, 132):* solo-kick intro reads as heavy low-end
+  stabs ×32; **DROP at 0:29.1 opens a sustained-synth run ×77 beats — the euphoric wall
+  captured and outlined**; breakdown at 0:58.2 with sustained bass floor and a second
+  sustained-synth block ×63.
+- *Odd Mob — CUT TF UP (ODDMOB, 136):* heavy low-end stab blocks through the intro riff
+  (0:00–0:13, 5–6-beat runs) and again ×14 at 0:42.8 into the buildup; **a 15-beat empty
+  floor at 0:49.4 ending exactly at the 0:56.5 DROP** (the blackout sizer's input); a
+  sustained-synth block ×28 after the 1:10.6 DROP and ×76 through the 1:52.5 buildup
+  (the track's melodic mid-section); stabs ×35 at 2:15.5 driving into the 2:21.2 buildup;
+  percussion rolls at 2:38.0/3:11.5 near the late drops.
+
+**Operator anchor tracks** (the two reference drops from the design sessions; outlines from
+shipped code):
+
+- *it's murph — Chemicals (Feat. Nat Slater) (Extended) (SYNTH HOUSE, 132) — THE euphoric
+  synth reference:* the analysis captures it exactly — **sustained-synth blocks of ×138
+  beats (0:48.6 through the mid-build) and ×189 beats (2:44.1 through the long breakdown
+  build)**, a ×42 block after the 2:15.5 drop and a ×36 block landing at the 4:36.8 drop;
+  snare rolls at 2:02.7/2:17.7/4:00.5/4:13.6 riding the builds; solo-kick intro reads as
+  low-end stabs. Scrub 0:48.6 and 2:44.1 to hear the pads the class is naming.
+- *Odd Mob, Walker, Royce — Can't Say Nah (ODDMOB, 130) — THE bassy-sustain reference:*
+  the halftime mid-breakdown (2:13–2:33) shows the alternating empty-floor pattern ending
+  in a 26-beat empty floor into the 2:42.6 drop. At the drops themselves the character
+  lives in the **drop-window vector**, compared here against a bass-house stab reference
+  (Nikko — Gimme That): Can't Say Nah drop\@128: sub 31.2 dB, within-beat low swing 9.2 dB,
+  mid 3.1 dB (dark), vs Gimme That drop\@101/229: swing 12.6 dB, mid 11+ dB (bright),
+  attack p90 up to 35.8 dB — *held dark bass weight vs bright jumpy stabs*, measurably.
+  An honest class-semantics note recorded: the per-beat `sustained_bass` class (swing
+  < 4.5 dB) names only true continuous drones — a four-on-floor kick pumps the bass band
+  ~9 dB every beat, so "bassy sustain at the drop" in house music is a *relative,
+  window-level* property served by the vector (exactly where drop-type selection reads it,
+  review 2.9), not a per-beat absolute.
+
+Every event above is a description; ANLZ markers remain the only structural triggers.
+
+## 7. Whole-library sweep results (2026-07-05, `caffeinate -i python3 tools/spectral_sweep.py --jobs 2`)
+
+- **Scope**: 686 on-disk active tracks (whole library — every track the operator can play,
+  regardless of playlist filing, per the track-selection rule).
+- **Coverage**: **666 extracted OK (100% of decodable tracks with beatgrids)**; 19 `no_grid`
+  (FX one-shots — scratch noises, cymbals, airhorns with no ANLZ beatgrid; correctly absent
+  on both runtime and sweep sides); 1 `extract_failed` — GRiZ — "I Remember (flip)" flac,
+  which **also fails v3 extraction identically** (undecodable file; lives at the ANLZ-only
+  tier under both schemas — zero behavior change holds exactly).
+- **Duration**: **48.6 minutes** wall-clock at `--jobs 2` on the 8 GB MacBook Air — the
+  overnight budget is met with ~10× margin. Slowest single track: 23.7 s (RÜFÜS DU SOL —
+  Innerbloom, a 9+ minute file).
+- **Cache size**: **203.5 MB / 666 entries** (~306 KB median track) under
+  `~/Library/Application Support/RBSS Bridge/spectral_cache/v4/`. Above the design estimate
+  (~165 MB) by ~23% — the full-precision compat block plus the frame-rate growl envelope
+  cost more than the back-of-envelope; acceptable (v3 baseline 43 MB stays untouched
+  alongside). Startup eviction now parses ~204 MB of JSON in its existing background
+  thread — measured acceptable, never on the push loop.
+- **m4a**: decoded via the installed audioread fallback during the sweep (deprecation-
+  warned; works today). If it ever disappears, those ≤8 tracks degrade to the ANLZ tier.
+- Calibration, stability, and discrimination numbers from these entries: §6.5.
+
+## 7b. Claim-label index (load-bearing claims of this report)
+
+- v3 audit rulings (A1–A20) — **confirmed** (code read in full at `2945c52`; file:line cited
+  per ruling).
+- Measured facts reused from the v2 record (stability band, normalization destruction,
+  growl/bright non-separability, coverage counts, PSSI stats, empty-floor ear validation) —
+  **confirmed as the record's named measured facts** (not re-derived, per prompt).
+- librosa/scipy/MIR method claims — **confirmed (verified-primary-source)** where labeled in
+  Appendices B/C and §4 (research notes with URLs in the session log); production-lore items
+  (LFO-rate ranges, EDM mastering levels) — **assumed**, used only for non-load-bearing
+  framing.
+- v3-compat bit-identity (wav/mp3/flac real tracks + retained local test) — **confirmed
+  (measured §6.1)**.
+- v4 determinism run-over-run — **confirmed (measured §6.2)**.
+- Runtime↔sweep key parity — **confirmed (measured 60/60, §6.3)**; residual risk covered by
+  the `[SM] spectral-path` observability log.
+- Identity-axes corpus stability (grit 0.929 / punch 0.935 / bass 0.967 / drama 0.928,
+  n=219) — **confirmed (measured §6.5)**.
+- Held-out genre discrimination 58.7% vs 16.7% chance (1,086 held-out windows) —
+  **confirmed (measured §6.5)**.
+- Bottom-gone/silence calibration at corpus scale — **confirmed (measured §6.5)**.
+- Sweep coverage/duration/size — **confirmed (measured §7)**.
+- Per-beat LFO wobble rate/depth as a shipped class — **unproven → cut** (§4.9; storage-
+  provisioned via `growl_band_frames`; missing experiment named).
+- 20–150 Hz roughness — **unreachable** at the v4 frame rate (§4.9).
+- Perceptual/lighting-treatment claims (what reads "euphoric", what seasoning fits a class)
+  — **assumed**, deliberately left to consumers + the operator's live/scrub gates.
+- Suite result — **confirmed**: 3,251 tests, zero new failures; the single failure
+  (`test_laser_color_engine…fixed_band_values`) is **pre-existing at baseline `2945c52`**
+  (unrelated subsystem, untouched by this build).
 
 ## 8. Open questions for Brandon (taste calls only — defaults chosen, veto if wrong)
 
