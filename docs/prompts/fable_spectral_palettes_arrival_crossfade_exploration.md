@@ -6,9 +6,12 @@
 
 ## Mission
 
-Explore three chosen crowd-experience workstreams for Brandon's lighting bridge deeply enough to
-return a **GO / NO-GO verdict on each, backed by evidence from the actual repo and Brandon's actual
-analysis data** — so the next artifacts (Codex implementation specs) can be written without guessing.
+Act as both **creative lead and feasibility engineer** for three chosen crowd-experience workstreams
+on Brandon's lighting bridge. Two jobs, same pass: (1) return a **GO / NO-GO verdict on each,
+backed by evidence from the actual repo and Brandon's actual analysis data**, and (2) **creatively
+expand each workstream well beyond its one-line pitch** — design the experience, not just the
+plumbing, so the eventual Codex specs build something worth watching rather than a minimum viable
+version of the idea. Depth on both axes is the point of spending Fable on this.
 
 Why it matters: these three came out of a code-grounded creative brief as the ideas worth building.
 The open question that decides two of them is whether the bridge's audio-spectral features are
@@ -74,6 +77,14 @@ Answer, with measurements where possible:
 4. **Where it hooks in:** palette selection today is RNG-weighted from the config library at
    track/section boundaries — all off the 200 Hz push loop. Confirm the derivation can run at
    track-load time without touching the push loop.
+5. **Creative expansion — design the identity system, not just the mapping.** What does a track's
+   identity *feel* like beyond a base hue: gradient span, white usage, accent behavior, animation
+   texture (punchy vs flowing), how identity persists through the existing drop/breakdown/ambient
+   roles so the track stays recognizably itself across its own arc. Should identity have an
+   intensity dimension that moves with the track's energy arc while the hue identity holds? Is
+   there a worthwhile "identity reveal" moment on first play of the night? Propose the palette
+   *families* the curated library needs (with the feel each conveys) so Brandon can react to a
+   designed system rather than invent one. Every proposal still clears the generalization gate.
 
 ## Workstream B — Land on the One (arrival-phase choreography)
 
@@ -93,6 +104,15 @@ deck switch, and backward playhead jumps (`smart_phrasing.py:212-214` resets exi
 push-loop constraint — the scheduler must be pure math in the render path, no blocking I/O, no new
 threads doing I/O on the tick. List exactly what a Codex spec must pin (integration points with
 file:line, test seams, invariants) — as bullets, not the spec itself.
+
+**Creative expansion — the choreography vocabulary arrival scheduling unlocks.** Trigger-on-beat
+gives you flashes; arrival gives you *phrasing*. Explore what becomes possible once motion can land
+on a chosen future beat: anticipatory pull (motion gathers before the one, releases on it),
+cascades across strip segments that land in sequence, call-and-response between LEDs and lasers
+that resolves on the downbeat, arrivals at bar and 4/8-bar scale, not just per-beat. Which of these
+are Template Lab template families versus engine capabilities? Rank them by crowd impact per unit
+of build, and name the two or three the first Codex spec should make possible even if it doesn't
+ship them.
 
 ## Workstream C — track identity + mix-aware crossfade (conditional on A)
 
@@ -117,8 +137,27 @@ A is strong.** Structure your analysis to respect that:
   (manual static override, blackout/emergency win), the degraded path when fader data is stale
   (time-based proxy), and hard-cut transitions (instant snap is correct).
 
+**Creative expansion — the blend as a designed scene.** A crossfade is the most-watched, least-lit
+moment in DJing; design how it should *read*, not just that palettes interpolate: does the new
+identity enter spatially (one end of the strip first), rhythmically (gaining beats of presence per
+bar), or as accents before base? How does a harmonic mix (adjacent key hues, if key lands in A)
+read differently from a clash? Is there a moment worth marking when the blend completes — and what
+does a *double drop* deserve when both decks are beat-aligned at full fader? Sketch the transition
+grammar for the three real cases: long blend, quick cut, and botched/abandoned transition (the
+grammar must fail gracefully on that last one).
+
 Deliver a **combined verdict**: if A = GO, is C GO? If A = GO-with-constraints, what subset of C
 survives? Never let C silently assume spectral strength A didn't prove.
+
+## Beyond the three — adjacent creative ground (bounded)
+
+After the workstreams are settled, spend a bounded pass proposing at most **three further ideas**
+that the *same verified machinery* makes newly cheap (the fader signal, the arrival scheduler, the
+identity system, the mood/energy data). Each needs the same discipline as the shortlist that
+spawned this work: crowd-facing effect first, signals and surfaces named, generalization gate
+cleared, one-line lift/risk. No hardware beyond the current envelope, nothing touching the push
+loop. These are seeds for Brandon, not commitments — do not let this section grow at the expense
+of the three verdicts.
 
 ---
 
@@ -153,8 +192,13 @@ Write **one report**: `docs/research/spectral_palettes_arrival_crossfade_explora
 repo's standard doc header (`doc_status` / `truth_level` / `last_verified_commit` /
 `validation_scope` — mirror `docs/prompts/snippets/fable5_snippets.md`'s header shape;
 `validation_scope` must say software-exploration only, no hardware validation). Structure: verdicts
-first, then per-workstream findings with evidence, then the Codex-spec-must-pin bullets, then open
-questions for Brandon (only ones he can actually answer — taste calls and hardware gates).
+first, then per-workstream findings with evidence **and the creative design for that workstream**
+(the identity system, the choreography vocabulary, the transition grammar — written so Brandon can
+react to concrete designed moments, not abstractions), then the Codex-spec-must-pin bullets, then
+the bounded beyond-the-three seeds, then open questions for Brandon (only ones he can actually
+answer — taste calls and hardware gates). Feasibility discipline and creative ambition are both
+graded: a report that verifies everything but designs nothing has failed half the mission, and so
+has the reverse.
 
 Verdict taxonomy per workstream: `GO` / `GO WITH CONSTRAINTS` (name them) / `NO-GO` (name the
 disqualifying evidence) / `INSUFFICIENT EVIDENCE` (name the exact missing input and how to get it).
@@ -201,4 +245,8 @@ checked, or when you are blocked on input only he can provide — and say exactl
 - B's design names integration points at file:line, the per-frame retargeting approach, the
   broken-grid fallback, and the push-loop safety argument.
 - C's verdict is explicitly conditioned on A's, and its fader-signal assessment is evidence-backed.
+- Each workstream carries a designed creative expansion concrete enough for Brandon to say "yes,
+  that moment" or "no, not that" — palette families with feels, named choreography moves, a
+  transition grammar covering long blend / quick cut / abandoned blend.
+- At most three beyond-the-three seeds, each gate-cleared, none at the expense of the verdicts.
 - Every claim Brandon would act on carries a confirmed/assumed/unknown/rejected label.
