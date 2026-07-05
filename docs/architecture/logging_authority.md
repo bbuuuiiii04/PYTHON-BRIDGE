@@ -69,7 +69,7 @@ One stream; a lens is a predicate over `(cat, lvl)`. Records may match several l
 
 Intent (`perf.*`) covers at minimum: active-deck switches, drop detection + type, laser scene
 decisions **and** executed selections, LED look + palette selections, autoloop arm/lock/clear,
-scripted-track outcomes, SoundSwitch selection sends, manual overrides/blackouts, and a ≤2 s
+scripted-track outcomes, SoundSwitch selection sends, manual overrides/blackouts, and a ~2-3 s
 heartbeat snapshot (deck, bpm, phrase, laser, led, palette, health summary).
 
 Health (`health.*`) records are **edge-triggered transitions only** (fail → one record,
@@ -130,8 +130,10 @@ would silently start a new trace id for that leg, not an error, just a broken ch
   per line in aligned columns, no wrapping; plumbing dim, payload bright; a fixed color vocabulary
   where **red only ever means broken**; plain words (`laser`, `led`), never codes (`[LX]`,
   `[RBMEM]`); problem ages shown relative ("2m ago"); newest line statically marked.
-- Header shows stream staleness (heartbeat guarantees a fresh record ≤2 s from a healthy bridge);
-  a stalled stream is visibly flagged.
+- Header shows stream staleness (a healthy bridge produces a fresh heartbeat every ~2-3 s: the
+  2.0 s figure in `runtime_status.py` is a minimum-gap throttle riding the status tick, not a
+  timer — measured median cadence 2.29 s, 2026-07-05); a stalled stream is visibly flagged
+  (header age turns yellow >5 s, red >15 s, both comfortably above the real cadence).
 - One monitor window total, in both auto and manual launch modes.
 
 ## Files
