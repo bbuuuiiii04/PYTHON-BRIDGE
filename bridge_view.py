@@ -193,6 +193,13 @@ FRIENDLY: dict[str, str] = {
     "sys.crash": "crash",
 }
 
+# Surfaces that carry a stable identity hue in the feed (rule 5). The hue
+# itself lives in the curses layer's _ATTR_MAP ("surface:<name>" keys) so
+# taste tweaks touch exactly one map; heartbeat is absent (header-only).
+_SURFACE_HUED = frozenset(
+    {"deck", "drop", "laser", "led", "autoloop", "scripted", "ss", "override"}
+)
+
 _TIME_WIDTH = 10   # "21:14:03.5"
 _DECK_WIDTH = 3    # "D1 " / "D12" / "   " (blank-padded when absent)
 _SURFACE_WIDTH = 10
@@ -268,17 +275,31 @@ def format_line(rec: dict[str, Any], width: int) -> list[tuple[str, str]]:
     time_text = _format_time(rec.get("ts"))
     deck = rec.get("deck")
     deck_text = (f"D{deck}" if deck is not None else "").ljust(_DECK_WIDTH)
-    surface_text = _surface_of(rec).ljust(_SURFACE_WIDTH)
+    surface = _surface_of(rec)
+    surface_text = surface.ljust(_SURFACE_WIDTH)
     payload_text = str(rec.get("msg", ""))
+
+    # Rule 5: one surface = one stable hue, and level colors outrank identity
+    # hues (yellow = warning, red = broken and ONLY broken). Unknown surfaces
+    # (legacy/sys records) stay plain bright so nothing depends on the map.
+    lvl = _level_no(rec)
+    if lvl >= 40:  # ERROR+
+        value_key = "red"
+    elif lvl >= 30:  # WARNING
+        value_key = "yellow"
+    elif surface in _SURFACE_HUED:
+        value_key = f"surface:{surface}"
+    else:
+        value_key = "bright"
 
     segments: list[tuple[str, str]] = [
         (time_text, "dim"),
         ("  ", "dim"),
         (deck_text, "bright"),
         ("  ", "dim"),
-        (surface_text, "bright"),
+        (surface_text, value_key),
         ("  ", "dim"),
-        (payload_text, "bright"),
+        (payload_text, value_key),
     ]
 
     data = rec.get("data")
@@ -452,6 +473,8 @@ def _init_colors() -> None:
         _ATTR_MAP["yellow"] = curses.A_BOLD
         _ATTR_MAP["orange"] = curses.A_BOLD
         _ATTR_MAP["red"] = curses.A_BOLD | curses.A_REVERSE
+        for name in _SURFACE_HUED:
+            _ATTR_MAP[f"surface:{name}"] = curses.A_BOLD
         return
     curses.start_color()
     try:
@@ -463,6 +486,8 @@ def _init_colors() -> None:
     curses.init_pair(2, curses.COLOR_CYAN, bg)
     curses.init_pair(3, curses.COLOR_YELLOW, bg)
     curses.init_pair(4, curses.COLOR_RED, bg)
+    curses.init_pair(5, curses.COLOR_MAGENTA, bg)
+    curses.init_pair(6, curses.COLOR_BLUE, bg)
     _ATTR_MAP["green"] = curses.color_pair(1)
     _ATTR_MAP["cyan"] = curses.color_pair(2)
     _ATTR_MAP["yellow"] = curses.color_pair(3)
@@ -471,6 +496,30 @@ def _init_colors() -> None:
     # meaning broken and ONLY broken -- the exact orange hue is a nicety.
     _ATTR_MAP["orange"] = curses.color_pair(3) | curses.A_BOLD
     _ATTR_MAP["red"] = curses.color_pair(4) | curses.A_BOLD
+    # "dim" via a real grey when the terminal has one: macOS Terminal renders
+    # A_DIM as barely-off-white, which collapsed the plumbing/payload contrast
+    # (operator report, 2026-07-05). 244 = mid-grey in the xterm-256 palette.
+    if curses.COLORS >= 256:
+        try:
+            curses.init_pair(7, 244, bg)
+            _ATTR_MAP["dim"] = curses.color_pair(7)
+        except curses.error:
+            pass  # keep A_DIM
+    # Rule 5, second half: one surface = one stable hue, bold (payload rule 4).
+    # Red is NOT in this map -- red stays broken-only; drop uses bold yellow
+    # as its identity emphasis (a drop is an attention moment, not a fault).
+    _hue = {
+        "deck": curses.color_pair(2),      # cyan
+        "laser": curses.color_pair(5),     # magenta
+        "led": curses.color_pair(1),       # green
+        "autoloop": curses.color_pair(6),  # blue
+        "scripted": curses.color_pair(6),  # blue
+        "ss": curses.color_pair(6),        # blue
+        "drop": curses.color_pair(3),      # yellow
+        "override": 0,                     # white
+    }
+    for name in _SURFACE_HUED:
+        _ATTR_MAP[f"surface:{name}"] = _hue[name] | curses.A_BOLD
 
 
 def _draw_segments(win: Any, y: int, x: int, segments: list[tuple[str, str]], max_x: int) -> None:
