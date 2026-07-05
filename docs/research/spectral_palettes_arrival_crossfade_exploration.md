@@ -175,6 +175,59 @@ three, mostly scene-lore synthesis; only physics-solid or lore-consistent items 
 15. **Hardware note for the operator (not engine work):** physically diffuse the strips
     (milky channel) or bounce them off walls — exposed LED dots read amateur at close range.
 
+### Lighting Engine v1 → v2 mapping (verified inventory, 2026-07-05)
+
+v1 = the current LED stack, inventoried at HEAD from the live config and code. The controlling
+insight: **v1 already separates brain from body.** The body (transport, renderer, authority,
+surfaces) carries over to v2 unchanged; the brain (what look, what color, when) is what v2
+replaces — which is exactly where the master switch slots in.
+
+**v1 inventory (confirmed):**
+- *Body:* Govee realtime runner (30 fps LAN "razer") + frame renderer (~20 effect functions:
+  comets/chases/strobes/bursts/nebulas/sparkle/breathe/wipes, `govee_frame_renderer.py`),
+  cloud DIY scene adapter, `beat_sync_engine.py`, owner/emergency state, LAN discovery.
+- *Brain:* `led_look_director.py` priority ladder (emergency > manual/blackout > automation),
+  role banks over a **72-look library** (cloud `*_diy_*` + realtime `rt_*` looks),
+  `drop_pairs` (drop → post-drop pairing), color engine M2.5 (journey-RNG palettes + DIY
+  color-tag eligibility), `drop_presentation` (incl. `led_predark_beats` — the operator's
+  existing hand-tuned pre-drop blackout, confirmed in live config; plus laser_ratio,
+  opening_tracks).
+- *Surfaces:* Stream Deck 15-pad MIDI ch3 held looks (Static Override authority), LED Pad web
+  (:8766), Template Lab authoring (`config/led_lab`).
+- *Safety/pacing:* config caps (max_brightness 100, strobe 750 ms, high-impact cooldown 12 s,
+  drop_flash 750 ms) and dispatch rate limits.
+
+**KEEP unchanged (the body):** transport stack, renderer machinery, beat-sync core, the
+authority ladder (emergency/blackout/manual **always** beat v2 automation, exactly as they
+beat v1 automation), pads/LED Pad/Template Lab as surfaces, dispatch rate limits.
+
+**REPLACE (the brain — switchable, v1 brain kept intact as fallback):**
+- Journey-RNG palette selection → identity derivation (Feature 1).
+- Role-bank weighted-RNG look picking → identity+section-driven cue selection.
+- **Color-hardcoded look variants dissolve:** v1's library bakes color into cue names
+  (`rt_groove_chase_blue/_cyan/_red/_green…`, `rt_drop_chase_*` ×6 colors) — the 72 looks are
+  largely ~a dozen shapes repainted. v2 splits **shape from color**: one parameterized cue
+  per shape; the track's identity supplies the palette. The library collapses; variety goes
+  up.
+- Fixed `led_predark_beats` → the audio-matched pre-drop blackout (per-drop, content-derived).
+- `drop_pairs` concept (drop → post-drop continuity) survives, parameterized by identity.
+
+**UPGRADE (same organs, new tricks):** beat-sync engine gains arrival/landing;
+renderer gains the build-move family (squeeze/fuse/swell + vocal-flip wash) and white-burst
+decay; dispatch gains the blend painter (fader + two palettes); WILD/SET budget modes wrap
+brightness; v2 strobe rate operator-uncapped (v1 config caps untouched in v1 mode).
+
+**ADOPT from v1 (proven live):** the operator's DIY looks + color tags become v2 accent
+vocabulary; Template Lab remains the cue-authoring path — templates become
+identity-parameterized (author the *shape*, engine supplies the color); the reserved
+color-engine live controls (lock/queue_palette/shift — never-delete per standing note) map
+naturally onto v2 identity controls (lock identity, queue color) on future pads; the
+high-impact cooldowns are v1's rest-vs-fire discipline and carry into v2 pacing.
+
+**Switch architecture:** one master selector chooses which brain feeds the same
+dispatch/authority/transport chain. v2 off ⇒ v1 path byte-identical. Stream Deck / LED Pad
+gain: engine v1/v2 switch, WILD/SET toggle, per-feature kills.
+
 **Next step:** author the Codex implementation specs (Feature 1 → 2 → 3) per
 `.claude/skills/codex-spec/SKILL.md`, on Brandon's go.
 
