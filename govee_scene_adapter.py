@@ -184,8 +184,6 @@ class GoveeSceneAdapter:
             self._accepted_count += 1
             self._last_command = command
             self._last_command_at = now
-            if self._last_error and bf.log_changed("govee_cloud_ok", True):
-                bridge_log.health("govee.cloud", "recovered", lvl=logging.INFO)
             self._last_error = ""
             if worker_running:
                 self._pending_keys.add(dedupe_key)
@@ -337,9 +335,12 @@ class GoveeSceneAdapter:
                 with self._lock:
                     if result.ok:
                         self._send_count += 1
+                        was_failing = self._consecutive_send_failures > 0
                         self._consecutive_send_failures = 0
                         if self._degraded_reason.startswith("send_") or self._degraded_reason == "malformed_response":
                             self._degraded_reason = ""
+                        if was_failing and bf.log_changed("govee_cloud_ok", True):
+                            bridge_log.health("govee.cloud", "recovered", lvl=logging.INFO)
                     else:
                         self._send_error_count += 1
                         if result.malformed:

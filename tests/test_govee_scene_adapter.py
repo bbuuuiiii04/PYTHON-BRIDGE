@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import sys
 import time
 import unittest
@@ -9,9 +10,25 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from rb_ss_bridge_v2 import bridge_fmt  # noqa: E402
 from rb_ss_bridge_v2.govee_scene_adapter import GoveeSceneAdapter  # noqa: E402
 from rb_ss_bridge_v2.led_config import load_led_look_director_config_from_dict  # noqa: E402
 from rb_ss_bridge_v2.led_models import LEDLookDecision  # noqa: E402
+
+
+def _capture(logger_name: str):
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    logger.addHandler(handler)
+    prior_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    return logger, handler, prior_level, records
 
 
 def _adapter_config(
@@ -350,6 +367,74 @@ class GoveeSceneAdapterTests(unittest.TestCase):
         """WI-4: cancel_pending() on an already-empty queue returns 0."""
         adapter = self._build_adapter()
         self.assertEqual(adapter.cancel_pending(), 0)
+
+
+class GoveeSceneAdapterHealthTransitionTests(unittest.TestCase):
+    """AWR-125 W4: health.govee.cloud edge-triggered emits on the worker thread."""
+
+    def setUp(self) -> None:
+        bridge_fmt.reset_rate_state()
+
+    def _build_live_adapter(self, send_command) -> GoveeSceneAdapter:
+        cfg = copy.deepcopy(_adapter_config(dry_run=False, queue_maxsize=4, request_timeout_s=0.5))
+        loaded = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(loaded.available, msg=loaded.errors)
+        return GoveeSceneAdapter(loaded.config, send_command=send_command)
+
+    def _wait(self, predicate, timeout_s: float = 1.0) -> None:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline and not predicate():
+            time.sleep(0.01)
+
+    def test_send_failure_streak_emits_health_govee_cloud_once(self) -> None:
+        def _fail(_command, _timeout_s):
+            raise RuntimeError("boom")
+
+        adapter = self._build_live_adapter(_fail)
+        logger, handler, prior_level, records = _capture("health.govee.cloud")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+        try:
+            self.assertTrue(adapter.trigger(_decision()))
+            self._wait(lambda: bool(records))
+            # A second, distinct failing decision must not re-log the same streak.
+            self.assertTrue(adapter.trigger(_decision(look="room_safe_alt", scene_ref="Release-B")))
+            self._wait(lambda: adapter.status()["send_error_count"] >= 2)
+        finally:
+            adapter.shutdown()
+
+        self.assertEqual(len(records), 1, f"expected exactly one send-failing record, got {records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertIn("send failing", records[0].getMessage())
+
+    def test_send_recovers_after_failure_emits_once(self) -> None:
+        calls = {"n": 0}
+
+        def _flaky(_command, _timeout_s):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("boom")
+            return {"ok": True}
+
+        adapter = self._build_live_adapter(_flaky)
+        logger, handler, prior_level, records = _capture("health.govee.cloud")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+        try:
+            self.assertTrue(adapter.trigger(_decision()))
+            self._wait(lambda: bool(records))
+            self.assertTrue(records, "expected the send-failing record before recovery")
+
+            # trigger()'s acceptance path clears _last_error and is the recovery edge.
+            self.assertTrue(adapter.trigger(_decision(look="room_safe_alt", scene_ref="Release-B")))
+            self._wait(lambda: len(records) >= 2)
+        finally:
+            adapter.shutdown()
+
+        self.assertEqual(len(records), 2, f"expected failing+recovered only, got {records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertEqual(records[1].levelname, "INFO")
+        self.assertIn("recovered", records[1].getMessage())
 
 
 if __name__ == "__main__":
