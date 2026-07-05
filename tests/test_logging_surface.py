@@ -1,14 +1,15 @@
-"""Surface-level logging assertions ported off logging_manager.py (Task W5).
+"""Surface-level logging assertions ported off the retired legacy facade
+(Task W5, AWR-125 logging overhaul).
 
-logging_manager.py and tests/test_logging_diag_coverage.py were deleted as
-part of the AWR-125 logging overhaul teardown: the runtime module/deck/event
-filter maze, LogStats, the control-file watcher, and diagnostics.enable_debug/
-is_debug are all gone. Three properties from the old suite were still
-meaningful against the new bridge_log pipeline and are re-verified here:
+The old logging facade module and its coverage test were deleted as part of
+the teardown: the runtime module/deck/event filter maze, its stats sampler,
+the control-file watcher, and diagnostics.enable_debug/is_debug are all gone.
+Three properties from the old suite were still meaningful against the new
+bridge_log pipeline and are re-verified here:
 
   * ERROR-level records are never silently lost by a per-logger floor raised
-    via BRIDGE_LOG_LEVELS (the practical replacement for the old
-    LoggingManager.should_emit() ERROR bypass — there is no module/deck/event
+    via BRIDGE_LOG_LEVELS (the practical replacement for the old facade's
+    ERROR-bypass-the-filter behavior — there is no module/deck/event
     allow-list left to bypass, but the same "errors must always surface"
     guarantee still needs a regression test).
   * BRIDGE_LOG_LEVELS parsing: valid "name=LEVEL" entries apply; malformed

@@ -157,10 +157,10 @@ def emit(
     # Built manually rather than via Logger.log(extra={...}): stdlib's
     # makeRecord() raises KeyError if an extra key already exists on the
     # record, which happens whenever some other loaded module has installed
-    # a custom LogRecord factory carrying same-named attributes (e.g.
-    # logging_manager.BridgeLogRecord's own `.deck`). Setting attributes
-    # directly after the record exists always overwrites, never raises, and
-    # is exactly what Logger._log() does with extra internally anyway.
+    # a custom LogRecord factory carrying a same-named attribute (e.g. a
+    # subclass exposing its own `.deck`). Setting attributes directly after
+    # the record exists always overwrites, never raises, and is exactly what
+    # Logger._log() does with extra internally anyway.
     record = logger.makeRecord(logger.name, lvl, __file__, 0, msg, args, exc_info)
     record.cat = cat
     record.deck = deck
