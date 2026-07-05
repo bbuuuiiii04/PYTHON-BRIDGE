@@ -44,7 +44,12 @@
         <label>Brief <textarea id="briefInput" rows="3"></textarea></label>
         <label>Notes <textarea id="notesInput" rows="4"></textarea></label>
         <div class="lab-meta"><span id="kindText" class="mono"></span><span id="statusText" class="status-pill">iterating</span></div>
-        <label>Params JSON <textarea id="paramsInput" class="mono" rows="8"></textarea></label>
+        <div id="paramControls" class="param-controls"></div>
+        <div id="slotSwatches" class="slot-swatches" aria-label="Test palette slot colors"></div>
+        <details class="advanced-panel">
+          <summary>Advanced (raw JSON)</summary>
+          <label>Params JSON <textarea id="paramsInput" class="mono" rows="8"></textarea></label>
+        </details>
         <div class="editor-transport lab-actions">
           <div class="cue-group" role="group" aria-label="Cue Length"></div>
           <button id="saveDraftBtn" type="button" class="primary">Save</button>

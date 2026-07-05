@@ -707,7 +707,7 @@ class LedPadService:
             seed=stable_seed(scene), fps=fps, bpm=bpm, beats=beats,
         )
         return {"ok": True, "frames": frames, "fps": fps, "bpm": bpm, "beats": beats,
-                "segments": int(target.realtime.segments)}
+                "segments": int(target.realtime.segments), "slot_colors": params.get("slot_colors") or []}
 
     def play(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()

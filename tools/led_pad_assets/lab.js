@@ -47,6 +47,7 @@
 
   function selectDraft(name) {
     stopPreview();
+    renderSwatches(null);
     state.current = state.entries.find(e => e.name === name) || null;
     renderList();
     renderDetail();
@@ -56,7 +57,7 @@
     const e = state.current;
     const disabled = !e;
     for (const id of ["briefInput", "notesInput", "paramsInput", "saveDraftBtn", "playDraftBtn", "acceptBtn", "rejectBtn", "previewBtn"]) $(id).disabled = disabled;
-    if (!e) return;
+    if (!e) { $("paramControls").innerHTML = ""; return; }
     $("draftTitle").textContent = e.name;
     $("draftFn").textContent = `${e.kind} · ${e.fn}`;
     $("briefInput").value = e.brief || "";
@@ -65,6 +66,7 @@
     $("statusText").textContent = e.status;
     $("statusText").className = `status-pill ${e.status}`;
     $("paramsInput").value = JSON.stringify(e.params || {}, null, 2);
+    renderParamControls();
     renderCue();
     renderLive();
   }
@@ -95,7 +97,11 @@
       const mine = labScene(state.current.name);
       if (state.playingLook && state.playingLook.startsWith("lab_") && state.playingLook !== mine) {
         const sw = await api.labSwitch({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}")});
-        if (sw.ok) { await updateRuntime(); return; }
+        if (sw.ok) {
+          renderSwatches(sw.spec && sw.spec.params && sw.spec.params.slot_colors);
+          await updateRuntime();
+          return;
+        }
       }
       const res = await api.labPlay({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}"), cue_beats:cue(), takeover});
       if (!res.ok && res.error === "ownership_required") {
@@ -103,6 +109,7 @@
         return;
       }
       if (!res.ok) throw new Error(res.error || "lab play failed");
+      renderSwatches(res.spec && res.spec.params && res.spec.params.slot_colors);
       await updateRuntime();
     } catch (err) { showError(err); }
   }
@@ -130,6 +137,66 @@
     $("playDraftBtn").textContent =
       state.current && state.playingLook && state.playingLook.startsWith("lab_") &&
       state.playingLook !== labScene(state.current.name) ? "⇄ Switch" : "▶ Play";
+  }
+
+  let applyTimer = 0;
+  function queueAutoApply() {
+    clearTimeout(applyTimer);
+    applyTimer = setTimeout(async () => {
+      if (!state.current || state.playingLook !== labScene(state.current.name)) return;
+      let params;
+      try { params = JSON.parse($("paramsInput").value || "{}"); } catch { return; }
+      try {
+        const res = await api.labSave(currentPayload());
+        state.current = res.entry;
+        await api.labUpdate({name: state.current.name, params});
+        clearError();
+      } catch (err) { showError(err); }
+    }, 400);
+  }
+
+  function renderParamControls() {
+    const specs = (state.current && state.current.param_specs) || {};
+    const container = $("paramControls");
+    const keys = Object.keys(specs);
+    if (!keys.length) { container.innerHTML = ""; return; }
+    let params;
+    try { params = JSON.parse($("paramsInput").value || "{}"); } catch { params = {}; }
+    container.innerHTML = keys.map(key => {
+      const spec = specs[key];
+      if (spec.kind === "toggle") {
+        const checked = params[key] === undefined ? false : Boolean(params[key]);
+        return `<label class="param-row param-toggle"><span>${esc(spec.label)}</span><input type="checkbox" data-param="${esc(key)}" data-kind="toggle" ${checked ? "checked" : ""}></label>`;
+      }
+      const raw = params[key] === undefined ? spec.min : Number(params[key]);
+      return `<label class="param-row param-slider"><span>${esc(spec.label)}</span><input type="range" data-param="${esc(key)}" data-kind="slider" min="${spec.min}" max="${spec.max}" step="${spec.step}" value="${raw}"><output>${esc(raw)}</output></label>`;
+    }).join("");
+    container.querySelectorAll("[data-param]").forEach(input => { input.oninput = () => applyParamControl(input); });
+  }
+
+  function applyParamControl(input) {
+    let params;
+    try { params = JSON.parse($("paramsInput").value || "{}"); } catch (err) { showError(err); return; }
+    const key = input.dataset.param;
+    if (input.dataset.kind === "toggle") {
+      params[key] = input.checked;
+    } else {
+      params[key] = parseFloat(input.value);
+      const output = input.closest(".param-row").querySelector("output");
+      if (output) output.textContent = input.value;
+    }
+    $("paramsInput").value = JSON.stringify(params, null, 2);
+    queueAutoApply();
+  }
+
+  function renderSwatches(slotColors) {
+    const container = $("slotSwatches");
+    if (!Array.isArray(slotColors) || !slotColors.length) { container.innerHTML = ""; return; }
+    container.innerHTML = slotColors.map((rgb, i) => {
+      const [r, g, b] = Array.isArray(rgb) ? rgb : [0, 0, 0];
+      const label = i === 5 ? "white" : "";
+      return `<div class="swatch-chip" style="background: rgb(${Number(r) || 0},${Number(g) || 0},${Number(b) || 0})" title="slot ${i}${label ? " (" + label + ")" : ""}">${esc(label)}</div>`;
+    }).join("");
   }
 
   const preview = {frames: [], fps: 40, raf: 0};
@@ -188,21 +255,7 @@
   $("acceptBtn").onclick = () => state.current && api.labAccept(state.current.name).then(refresh).catch(showError);
   $("rejectBtn").onclick = () => state.current && api.labReject(state.current.name).then(refresh).catch(showError);
   $("paramsInput").onblur = () => { try { JSON.parse($("paramsInput").value || "{}"); clearError(); } catch (err) { showError(err); } };
-  let applyTimer = 0;
-  $("paramsInput").oninput = () => {
-    clearTimeout(applyTimer);
-    applyTimer = setTimeout(async () => {
-      if (!state.current || state.playingLook !== labScene(state.current.name)) return;
-      let params;
-      try { params = JSON.parse($("paramsInput").value || "{}"); } catch { return; }
-      try {
-        const res = await api.labSave(currentPayload());
-        state.current = res.entry;
-        await api.labUpdate({name: state.current.name, params});
-        clearError();
-      } catch (err) { showError(err); }
-    }, 400);
-  };
+  $("paramsInput").oninput = () => queueAutoApply();
   $("bpmInput").onchange = ev => api.session({bpm:Number(ev.target.value)}).catch(showError);
   document.querySelectorAll("[data-step]").forEach(btn => btn.onclick = () => { $("bpmInput").value = Number($("bpmInput").value || 128) + Number(btn.dataset.step); $("bpmInput").dispatchEvent(new Event("change")); });
   $("paletteSelect").onchange = ev => api.session({test_palette:ev.target.value}).catch(showError);

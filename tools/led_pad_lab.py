@@ -91,6 +91,7 @@ class LabRegistry:
             "notes": str(payload.get("notes", current.get("notes", ""))),
             "brief": str(payload.get("brief", current.get("brief", ""))),
             "status": str(payload.get("status", current.get("status", "iterating"))),
+            "param_specs": self._validate_param_specs(payload.get("param_specs", current.get("param_specs", {}))),
             "created": created,
             "updated": _now(),
         })
@@ -112,6 +113,30 @@ class LabRegistry:
     @staticmethod
     def scene_ref(name: str) -> str:
         return f"lab_{name}"
+
+    @staticmethod
+    def _validate_param_specs(value: Any) -> dict[str, dict[str, Any]]:
+        if value in (None, {}):
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("param_specs must be a dict of param -> spec")
+        out: dict[str, dict[str, Any]] = {}
+        for key, spec in value.items():
+            if not str(key) or not isinstance(spec, dict):
+                raise ValueError(f"param_specs[{key!r}] must be a dict")
+            kind = str(spec.get("kind", "slider"))
+            if kind not in ("slider", "toggle"):
+                raise ValueError(f"param_specs[{key!r}].kind must be slider or toggle")
+            clean: dict[str, Any] = {"kind": kind, "label": str(spec.get("label", key))}
+            if kind == "slider":
+                if "min" not in spec or "max" not in spec:
+                    raise ValueError(f"param_specs[{key!r}] slider needs min and max")
+                lo = float(spec["min"]); hi = float(spec["max"]); step = float(spec.get("step", 1))
+                if not (hi > lo) or step <= 0:
+                    raise ValueError(f"param_specs[{key!r}] needs max > min and step > 0")
+                clean.update({"min": lo, "max": hi, "step": step})
+            out[str(key)] = clean
+        return out
 
     @staticmethod
     def _validate_name(name: str) -> None:
