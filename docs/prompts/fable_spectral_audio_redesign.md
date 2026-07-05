@@ -186,7 +186,14 @@ cut or shipped disabled and labeled `unproven` with the exact experiment that wo
 
 Work autonomously, end to end: research → audit → design → implement → validate on his music
 (genre-folder samples) → run the whole-library sweep (background it and verify completion +
-coverage stats) → write the report. You may deploy **at most one Fable-tier subagent at a time** for
+coverage stats) → write the report. Two run-hardening rules for a shot this size: **before
+implementing, spend a Fable-tier subagent slot on a fresh-context adversarial review of the
+v4 design against this prompt's requirements, and fold its verdicts in** — design flaws cost
+minutes there and hours after code exists; and **write the report file incrementally as each
+phase completes** (audit rulings after the audit, design after the review gate, proofs as
+they land), so if this session dies, a fresh session can resume from the partial report plus
+the code on disk instead of starting over. Run the sweep under `caffeinate -i` so the Mac
+cannot sleep mid-sweep. You may deploy **at most one Fable-tier subagent at a time** for
 implementation or fresh-context adversarial review (operator grant); cheaper read-only
 subagents for research and corpus sweeps may run in parallel. Verify any claim you build on
 yourself. When you have enough information to act, act; do not re-derive the named measured
