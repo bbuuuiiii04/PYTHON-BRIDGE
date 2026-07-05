@@ -24,6 +24,7 @@ from .config import (
 )
 from .models import TrackMetadata
 from . import bridge_fmt as bf
+from . import bridge_log
 
 log = logging.getLogger("osl_output")
 
@@ -294,14 +295,27 @@ class OS2LOutput:
         self._sub(f"{dn} get_firstbeat", int(round(meta.first_beat_ms)), verbose=True)
 
         bpm_out = meta.bpm if meta.bpm > 0 else fallback_bpm
-        log.info("[OS2L] deck-load  deck=%d  active=%d  file=%s  ssid=%s"
-                 "  bpm=%.2f  loop=%s  play=%s",
-                 deck, active_deck,
-                 bf.short(meta.filepath),
-                 "yes" if meta.soundswitch_id else "no",
-                 bpm_out,
-                 AUTOLOOP_BEATS if include_loop and not meta.soundswitch_id else "off",
-                 play)
+        loop_val = AUTOLOOP_BEATS if include_loop and not meta.soundswitch_id else "off"
+        bridge_log.perf(
+            "ss",
+            "deck-load deck=%d active=%d file=%s bpm=%.2f loop=%s play=%s",
+            deck, active_deck,
+            bf.short(meta.filepath),
+            bpm_out,
+            loop_val,
+            play,
+            deck=deck,
+            data={
+                "action": "deck-load",
+                "deck": deck,
+                "active": active_deck,
+                "file": bf.short(meta.filepath),
+                "ssid": ss_id,
+                "bpm": bpm_out,
+                "loop": loop_val,
+                "play": play,
+            },
+        )
         if bpm_out:
             self._sub(f"{dn} get_bpm", round(bpm_out, 2), verbose=True)
 

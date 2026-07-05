@@ -1,3 +1,5 @@
+import contextlib
+import logging
 import os
 import queue
 import struct
@@ -31,6 +33,37 @@ from rb_ss_bridge_v2.state_manager import (
     _compute_beatgrid_position,
 )
 from rb_ss_bridge_v2.autoloop_controller import AutoloopTickContext
+from rb_ss_bridge_v2 import bridge_log
+
+
+class _PerfRecordCapture(logging.Handler):
+    """Captures build_record()-shaped dicts emitted to a perf.* logger."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[dict] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(bridge_log.build_record(record))
+
+
+@contextlib.contextmanager
+def _capture_perf(cat: str):
+    """Attach a capturing handler to logging.getLogger(f"perf.{cat}") for the block.
+
+    No bridge_log.init() involved — this is the AWR-125 Part D emit-assertion
+    pattern (a plain logging.Handler on the specific perf.* logger).
+    """
+    logger = logging.getLogger(f"perf.{cat}")
+    handler = _PerfRecordCapture()
+    prev_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield handler.records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prev_level)
 
 
 class FakeLiveBPMReader:
@@ -577,11 +610,19 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         deck.meta.filepath = "/tmp/test.wav"
         deck.meta.bpm = 120.0
 
-        sm._apply_lighting(1, "autoloop", 1000, 120.0)
+        with _capture_perf("autoloop") as records:
+            sm._apply_lighting(1, "autoloop", 1000, 120.0)
 
         self.assertEqual(sm._os.autoloop_arm_bpm, 123.45)
         self.assertTrue(output.loads)
         self.assertTrue(all(load[1].bpm == 123.45 for load in output.loads))
+        # Merge acceptance: the old INFO+DEBUG "arm-autoloop" pair now emits
+        # exactly ONE "arm" record.
+        arm_records = [r for r in records if r["data"]["action"] == "arm"]
+        self.assertEqual(len(arm_records), 1)
+        self.assertEqual(arm_records[0]["data"]["deck"], 1)
+        self.assertEqual(arm_records[0]["data"]["bpm"], 123.45)
+        self.assertEqual(arm_records[0]["data"]["bpm_source"], "live")
 
         live.bpm = 130.0
         self.assertEqual(sm._os.autoloop_arm_bpm, 123.45)
@@ -870,6 +911,58 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertEqual(sm._autoloop.previous_arm_phrase(33.9), 32)
         self.assertEqual(sm._autoloop.previous_arm_phrase(32.0), 32)
 
+    def test_maybe_lock_computes_pending_target_and_emits_arm_pending(self) -> None:
+        # os.autoloop_arm_target_elapsed_ms starts at 0 (not yet computed) -
+        # this is the second arm-pending emit site inside
+        # _maybe_lock_autoloop_arm, distinct from the one inside arm_autoloop.
+        sm = StateManager(
+            queue.Queue(), PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        sm._os.lighting_mode = "autoloop"
+        sm._os.autoloop_arm_deck = 1
+        sm._os.autoloop_arm_pending = True
+
+        with _capture_perf("autoloop") as records:
+            _autoloop_tick(sm, 1, 2, 120.0, 10.0, 5000)
+
+        self.assertTrue(sm._os.autoloop_arm_pending)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["data"]["action"], "arm-pending")
+        self.assertEqual(records[0]["data"]["deck"], 1)
+        self.assertEqual(records[0]["data"]["target_beat"], 32)
+
+    def test_maybe_lock_correction_reason_emits_correction_clear_then_lock(self) -> None:
+        # A second pass through _maybe_lock_autoloop_arm with a
+        # "correction-*" pending reason must clear the prior scripted
+        # correction load before re-locking - exactly two records fire.
+        sm = StateManager(
+            queue.Queue(), PositionCache(), FakeOutput(),
+            live_bpm=FakeLiveProvider(None), live_bpm_follow=False,
+        )
+        pending = TrackMetadata(filepath="/tmp/correction.flac", bpm=120.0)
+        sm._os.lighting_mode = "autoloop"
+        sm._os.autoloop_arm_deck = 1
+        sm._os.autoloop_arm_bpm = 120.0
+        sm._os.autoloop_arm_pending = True
+        sm._os.autoloop_arm_sync_beat = 64
+        sm._os.autoloop_arm_target_elapsed_ms = 32000
+        sm._os.autoloop_arm_target_source = "grid"
+        sm._os.pending_autoloop_arm_meta = pending
+        sm._os.pending_autoloop_arm_deck = 1
+        sm._os.pending_autoloop_arm_mirror = 2
+        sm._os.pending_autoloop_arm_active = 1
+        sm._os.pending_autoloop_arm_source = "master"
+        sm._os.pending_autoloop_arm_reason = "correction-late"
+
+        with _capture_perf("autoloop") as records:
+            _autoloop_tick(sm, 1, 2, 120.0, 64.0, 32000)
+
+        self.assertEqual(len(records), 2)
+        self.assertEqual([r["data"]["action"] for r in records], ["correction-clear", "lock"])
+        self.assertEqual(records[0]["data"]["reason"], "correction-late")
+        self.assertEqual(records[1]["data"]["late_ms"], 0)
+
     def test_autoloop_arm_phrase_lock_sends_arm_bpm_at_target(self) -> None:
         output = FakeOutput()
         sm = StateManager(
@@ -939,7 +1032,7 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.pending_autoloop_arm_active = 1
         sm._os.pending_autoloop_arm_source = "test"
 
-        with self.assertLogs("state_manager", level="WARNING") as logs:
+        with _capture_perf("autoloop") as records:
             _autoloop_tick(sm, 1, 2, 120.0, 129.2, 64200)
 
         self.assertEqual(output.beats, [])
@@ -950,7 +1043,18 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         self.assertEqual(sm._os.autoloop_arm_sync_beat, 160)
         self.assertEqual(sm._os.autoloop_arm_target_elapsed_ms, 80000)
         self.assertEqual(sm._os.pending_autoloop_arm_reason, "correction-late")
-        self.assertTrue(any("AUTOLOOP-MASTER-ARM-LATE-CORRECTION" in line for line in logs.output))
+        # Merge acceptance: the old two-line arm-locked + arm-locked-final pair
+        # now emits exactly ONE "lock" record, alongside the WARNING arm-late
+        # and the correction-pending record from schedule_master_correction.
+        by_action = {r["data"]["action"]: r for r in records}
+        self.assertEqual(
+            sorted(by_action), ["arm-late", "correction-pending", "lock"],
+        )
+        self.assertEqual(by_action["lock"]["lvl"], "INFO")
+        self.assertEqual(by_action["lock"]["data"]["deck"], 1)
+        self.assertEqual(by_action["arm-late"]["lvl"], "WARNING")
+        self.assertEqual(by_action["arm-late"]["data"]["late_ms"], 200)
+        self.assertEqual(by_action["correction-pending"]["data"]["deck"], 1)
 
     def test_master_phrase_lock_uses_target_elapsed_when_on_time(self) -> None:
         output = FakeOutput()
@@ -972,11 +1076,18 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.pending_autoloop_arm_active = 1
         sm._os.pending_autoloop_arm_source = "test"
 
-        _autoloop_tick(sm, 1, 2, 120.0, 128.0, 64000)
+        with _capture_perf("autoloop") as records:
+            _autoloop_tick(sm, 1, 2, 120.0, 128.0, 64000)
 
         self.assertEqual(output.beats, [])
         self.assertEqual(len(output.loads), 4)
         self.assertEqual(output.loads[0][1].elapsed_ms, 64000)
+        # Merge acceptance: on-time lock previously logged TWO lines
+        # (arm-locked + arm-locked-final); now exactly ONE "lock" record.
+        lock_records = [r for r in records if r["data"]["action"] == "lock"]
+        self.assertEqual(len(lock_records), 1)
+        self.assertEqual(lock_records[0]["data"]["late_ms"], 0)
+        self.assertEqual(lock_records[0]["data"]["bpm"], 120.0)
 
     def test_autoloop_phrase_lock_tolerates_small_lateness_without_miss_warning(self) -> None:
         sm = StateManager(
@@ -991,10 +1102,14 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.autoloop_arm_target_elapsed_ms = 16000
         sm._os.autoloop_arm_target_source = "grid"
 
-        with self.assertLogs("state_manager", level="INFO") as logs:
+        with _capture_perf("autoloop") as records:
             _autoloop_tick(sm, 1, 2, 120.0, 32.1, 16125)
 
-        self.assertFalse(any("AUTOLOOP-PHRASE-MISS" in line for line in logs.output))
+        self.assertFalse(any(r["data"]["action"] == "arm-phrase-miss" for r in records))
+        # Tolerated lateness (<= 125ms) still commits via the single-line lock
+        # fallback (no pending meta => no arm-locked merge branch involved).
+        lock_records = [r for r in records if r["data"]["action"] == "lock"]
+        self.assertEqual(len(lock_records), 1)
 
     def test_autoloop_phrase_lock_warns_on_large_lateness_but_commits(self) -> None:
         output = FakeOutput()
@@ -1010,12 +1125,15 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._os.autoloop_arm_target_elapsed_ms = 16000
         sm._os.autoloop_arm_target_source = "grid"
 
-        with self.assertLogs("state_manager", level="WARNING") as logs:
+        with _capture_perf("autoloop") as records:
             _autoloop_tick(sm, 1, 2, 120.0, 32.4, 16200)
 
         self.assertFalse(sm._os.autoloop_arm_pending)
         self.assertEqual(output.bpms[-4:], [(1, 120.0), (2, 120.0), (3, 120.0), (4, 120.0)])
-        self.assertTrue(any("AUTOLOOP-PHRASE-MISS" in line for line in logs.output))
+        by_action = {r["data"]["action"]: r for r in records}
+        self.assertEqual(sorted(by_action), ["arm-phrase-miss", "lock"])
+        self.assertEqual(by_action["arm-phrase-miss"]["lvl"], "WARNING")
+        self.assertEqual(by_action["arm-phrase-miss"]["data"]["late_ms"], 200)
 
     def test_autoloop_arm_phrase_lock_clears_on_master_change(self) -> None:
         sm = StateManager(
@@ -1577,11 +1695,20 @@ class StateManagerLiveBPMTests(unittest.TestCase):
             sm._push_tick()
 
         cache.update(PositionSnapshot(1, elapsed_ms=16000, playing=False, updated_at=time.monotonic()))
-        with self.assertLogs("state_manager", level="INFO") as logs:
+        # Rich tick diagnostics are demoted INFO -> DEBUG (kept for MAX DEBUG);
+        # the phrase-boundary itself now surfaces as exactly one perf.ss
+        # "midi-refire" record instead of an INFO line on state_manager.
+        with self.assertLogs("state_manager", level="DEBUG") as logs, \
+                _capture_perf("ss") as ss_records:
             sm._push_tick()
 
         self.assertTrue(any("[SS][AUTOLOOP-TICK]" in line for line in logs.output))
         self.assertIn((1, 120.0, 32, False), output.beats)
+        refire_records = [r for r in ss_records if r["data"]["action"] == "midi-refire"]
+        self.assertEqual(len(refire_records), 1)
+        self.assertEqual(refire_records[0]["lvl"], "INFO")
+        self.assertEqual(refire_records[0]["data"]["deck"], 1)
+        self.assertEqual(refire_records[0]["data"]["beat"], 32)
 
     def test_scripted_beat_boundary_keeps_wrapped_change_marker(self) -> None:
         cache = PositionCache()

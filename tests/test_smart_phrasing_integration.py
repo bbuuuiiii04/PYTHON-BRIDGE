@@ -12,6 +12,8 @@ Verifies:
   I. Final segment without next marker is skipped (no invented duration).
   J. Breakdown segments remain empty (start-marker-only data).
 """
+import contextlib
+import logging
 import sys
 import os
 import queue
@@ -37,11 +39,36 @@ from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
 )
 from rb_ss_bridge_v2.state_manager import SmartDropTickResult, StateManager  # noqa: E402
 from rb_ss_bridge_v2.smart_rearm import SmartRearmTickResult  # noqa: E402
+from rb_ss_bridge_v2 import bridge_log  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+class _PerfRecordCapture(logging.Handler):
+    """Captures build_record()-shaped dicts emitted to a perf.* logger."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[dict] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(bridge_log.build_record(record))
+
+
+@contextlib.contextmanager
+def _capture_perf(cat: str):
+    logger = logging.getLogger(f"perf.{cat}")
+    handler = _PerfRecordCapture()
+    prev_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield handler.records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prev_level)
 
 def _ctx(*, smart_phrasing=None, **kwargs):
     """Build a LaserContext with defaults suitable for director tests."""
@@ -586,16 +613,17 @@ class TestSmartPhrasingBlackoutArmParity(unittest.TestCase):
         sm._os.last_autoloop_status_phrase_beat = 32
         sm._os.last_beat_elapsed_ms = int(63 * 500)
 
-        with self.assertLogs("state_manager", level="INFO") as captured:
+        with _capture_perf("ss") as records:
             self._push_ctx(sm, 64)
 
-        output = "\n".join(captured.output)
-        self.assertIn("[SM] midi-refire", output)
-        self.assertIn("source=marker", output)
-        self.assertIn("origin_before=32", output)
-        self.assertIn("origin_after=64", output)
-        self.assertIn("previous=32", output)
-        self.assertIn("marker_latched=True", output)
+        refire_records = [r for r in records if r["data"]["action"] == "midi-refire"]
+        self.assertEqual(len(refire_records), 1)
+        data = refire_records[0]["data"]
+        self.assertEqual(data["source"], "marker")
+        self.assertEqual(data["origin_before"], 32)
+        self.assertEqual(data["origin_after"], 64)
+        self.assertEqual(data["previous"], 32)
+        self.assertTrue(data["marker_latched"])
 
     def test_arm_matches_legacy_normal_window(self):
         sm = self._prepare_manager(drop_beat=64)

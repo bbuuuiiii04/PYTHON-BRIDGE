@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import math
 import sys
@@ -15,6 +16,32 @@ from rb_ss_bridge_v2.autoloop_controller import (  # noqa: E402
     AutoloopTickContext,
 )
 from rb_ss_bridge_v2.models import DeckState, OutputState, TrackMetadata  # noqa: E402
+from rb_ss_bridge_v2 import bridge_log  # noqa: E402
+
+
+class _PerfRecordCapture(logging.Handler):
+    """Captures build_record()-shaped dicts emitted to a perf.* logger."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[dict] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(bridge_log.build_record(record))
+
+
+@contextlib.contextmanager
+def _capture_perf(cat: str):
+    logger = logging.getLogger(f"perf.{cat}")
+    handler = _PerfRecordCapture()
+    prev_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield handler.records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prev_level)
 
 
 class FakeLiveBPM:
@@ -31,11 +58,26 @@ class FakeLiveBPM:
         return self.status
 
 
+class FakeOut:
+    """Stands in for OS2LOutput as used by AutoloopController.arm_autoloop."""
+
+    def __init__(self):
+        self.subs = []
+        self.loop_ons = []
+
+    def _sub(self, trigger, value, verbose=False):
+        self.subs.append((trigger, value))
+
+    def send_loop_on(self, deck):
+        self.loop_ons.append(deck)
+
+
 class FakeSSE:
     def __init__(self):
         self.loads = []
         self.bpms = []
         self.clears = []
+        self._out = FakeOut()
 
     def send_autoloop_deck_load(self, deck, mirror, active, meta):
         self.loads.append((deck, mirror, active, meta))
@@ -45,6 +87,10 @@ class FakeSSE:
 
     def send_autoloop_clear(self, active):
         self.clears.append(active)
+
+    def deck_route(self, deck):
+        mirror = 3 - deck
+        return (deck, mirror, 3, 4)
 
 
 class FakeRecorder:
@@ -314,6 +360,62 @@ class AutoloopControllerTests(unittest.TestCase):
         self.assertFalse(os.autoloop_change_on_next_beat)
         self.assertIsNone(os.pending_autoloop_arm_meta)
         self.assertEqual(os.pending_autoloop_arm_deck, 0)
+
+    def test_arm_autoloop_master_switch_pending_emits_clear_and_arm_pending(self):
+        # Master-switch arm, NOT near a phrase start: should_delay_master_arm
+        # returns True, so arm_autoloop takes the "clear" + "arm-pending"
+        # branch (merge of what were 2 arm-pending log lines).
+        controller, os, decks, _ = self.make_controller()
+        decks[1].meta.filepath = "/tmp/pending.flac"
+        decks[1].meta.bpm = 120.0
+        os.autoloop_arm_after_master_change = True
+        os.autoloop_master_change_source = "test-master"
+
+        with _capture_perf("autoloop") as records:
+            controller.arm_autoloop(1, 10000, 120.0, True)
+
+        by_action = {r["data"]["action"]: r for r in records}
+        self.assertEqual(sorted(by_action), ["arm", "arm-pending", "clear"])
+        self.assertEqual(by_action["clear"]["data"]["src"], "test-master")
+        self.assertEqual(by_action["arm-pending"]["data"]["target_beat"], 32)
+        self.assertTrue(os.autoloop_arm_pending)
+
+    def test_arm_autoloop_master_switch_immediate_emits_arm_immediate(self):
+        # Master-switch arm with autoloop_master_phrase_arm=False:
+        # should_delay_master_arm short-circuits False, so this finalizes
+        # immediately instead of scheduling a pending arm.
+        controller, os, decks, _ = self.make_controller()
+        decks[1].meta.filepath = "/tmp/immediate.flac"
+        decks[1].meta.bpm = 120.0
+        os.autoloop_arm_after_master_change = True
+        os.autoloop_master_change_source = "test-master2"
+
+        with _capture_perf("autoloop") as records:
+            controller.arm_autoloop(1, 10000, 120.0, False)
+
+        by_action = {r["data"]["action"]: r for r in records}
+        self.assertEqual(sorted(by_action), ["arm", "arm-immediate"])
+        self.assertEqual(by_action["arm-immediate"]["data"]["deck"], 1)
+        self.assertFalse(os.autoloop_arm_pending)
+
+    def test_arm_autoloop_master_switch_grace_late_emits_warning_and_correction(self):
+        # Near a phrase start (is_near_phrase_start True) but arriving late
+        # relative to the previous phrase boundary: fires the grace-late
+        # WARNING and schedules a correction (correction-pending).
+        controller, os, decks, _ = self.make_controller()
+        decks[1].meta.filepath = "/tmp/grace.flac"
+        decks[1].meta.bpm = 120.0
+        os.autoloop_arm_after_master_change = True
+        os.autoloop_master_change_source = "test-master3"
+
+        with _capture_perf("autoloop") as records:
+            controller.arm_autoloop(1, 16150, 120.0, True)
+
+        by_action = {r["data"]["action"]: r for r in records}
+        self.assertEqual(sorted(by_action), ["arm", "clear", "correction-pending", "grace-late"])
+        self.assertEqual(by_action["grace-late"]["lvl"], "WARNING")
+        self.assertEqual(by_action["grace-late"]["data"]["late_ms"], 150)
+        self.assertTrue(os.autoloop_arm_pending)
 
 
 class AutoloopControllerPropertyTests(unittest.TestCase):

@@ -1,3 +1,5 @@
+import contextlib
+import logging
 import queue
 import sys
 import unittest
@@ -6,9 +8,37 @@ from unittest.mock import Mock, call
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from rb_ss_bridge_v2.models import TrackMetadata  # noqa: E402
+from rb_ss_bridge_v2.osl_output import OS2LOutput  # noqa: E402
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.sound_switch_engine import SoundSwitchEngine  # noqa: E402
 from rb_ss_bridge_v2.state_manager import StateManager, _send_direct_autoloop_rearm  # noqa: E402
+from rb_ss_bridge_v2 import bridge_log  # noqa: E402
+
+
+class _PerfRecordCapture(logging.Handler):
+    """Captures build_record()-shaped dicts emitted to a perf.* logger."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[dict] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(bridge_log.build_record(record))
+
+
+@contextlib.contextmanager
+def _capture_perf(cat: str):
+    logger = logging.getLogger(f"perf.{cat}")
+    handler = _PerfRecordCapture()
+    prev_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield handler.records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prev_level)
 
 
 class DeckRouteTests(unittest.TestCase):
@@ -217,11 +247,17 @@ class StateManagerRouteFanoutTests(unittest.TestCase):
         sm = self._sm()
         sm._sse.send_autoloop_deck_load = Mock()
         self._configure_active_deck(sm, active=1, bpm=130.0)
-        ok = _send_direct_autoloop_rearm(
-            sm, active=1, mirror=2, bpm=130.0, elapsed_ms=32_005, reason="test", target_beat=64
-        )
+        with _capture_perf("autoloop") as records:
+            ok = _send_direct_autoloop_rearm(
+                sm, active=1, mirror=2, bpm=130.0, elapsed_ms=32_005, reason="test", target_beat=64
+            )
         self.assertTrue(ok)
         self._assert_fanout(sm, [1, 2, 3, 4], 130.0)
+        rearm_records = [r for r in records if r["data"]["action"] == "rearm"]
+        self.assertEqual(len(rearm_records), 1)
+        self.assertEqual(rearm_records[0]["data"]["deck"], 1)
+        self.assertEqual(rearm_records[0]["data"]["reason"], "test")
+        self.assertEqual(rearm_records[0]["data"]["target_beat"], 64)
 
     def test_direct_autoloop_rearm_fanout_uses_deck2_route_order(self) -> None:
         sm = self._sm()
@@ -232,6 +268,71 @@ class StateManagerRouteFanoutTests(unittest.TestCase):
         )
         self.assertTrue(ok)
         self._assert_fanout(sm, [2, 1, 3, 4], 131.0)
+
+
+class OS2LOutputSendDeckLoadPerfTests(unittest.TestCase):
+    """send_deck_load's [OS2L] deck-load INFO line -> perf("ss", "deck-load ...")."""
+
+    def test_send_deck_load_emits_single_perf_ss_record(self) -> None:
+        out = OS2LOutput(Mock())
+        meta = TrackMetadata(
+            filepath="/tmp/track.mp3",
+            soundswitch_id="{aaaa}",
+            bpm=128.0,
+            first_beat_ms=0.0,
+            total_ms=180_000.0,
+        )
+
+        with _capture_perf("ss") as records:
+            out.send_deck_load(2, meta, active_deck=1, play="on", elapsed_ms=5000)
+
+        deck_load_records = [r for r in records if r["data"]["action"] == "deck-load"]
+        self.assertEqual(len(deck_load_records), 1)
+        data = deck_load_records[0]["data"]
+        self.assertEqual(data["deck"], 2)
+        self.assertEqual(data["active"], 1)
+        self.assertEqual(data["ssid"], "{aaaa}")
+        self.assertEqual(data["bpm"], 128.0)
+        self.assertEqual(data["play"], "on")
+        self.assertEqual(data["loop"], "off")  # scripted track (has soundswitch_id) -> loop off
+
+
+class ScriptedArmPerfEmitTests(unittest.TestCase):
+    """_arm_scripted / _check_pending_arm perf("scripted", ...) sites."""
+
+    def _sm(self) -> StateManager:
+        return StateManager(queue.Queue(), PositionCache(), Mock())
+
+    def test_arm_scripted_unregistered_no_ssid_emits_arm_fail_warning(self) -> None:
+        sm = self._sm()
+        with _capture_perf("scripted") as records:
+            sm._arm_scripted(1, 999)
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["lvl"], "WARNING")
+        self.assertEqual(records[0]["data"]["action"], "arm-fail")
+        self.assertEqual(records[0]["data"]["deck"], 1)
+        self.assertEqual(records[0]["data"]["id"], 999)
+
+    def test_arm_scripted_direct_mode_emits_arm_and_phase2(self) -> None:
+        sm = self._sm()
+        d = sm._deck[1]
+        d.meta.filepath = "/tmp/scripted-direct.wav"
+        d.meta.bpm = 128.0
+        d.meta.soundswitch_id = "ssid-direct"
+
+        with _capture_perf("scripted") as records:
+            sm._arm_scripted(1, 555)
+            self.assertIsNotNone(sm._pending_arm)
+            sm._pending_arm.fire_at = 0.0
+            sm._check_pending_arm()
+
+        by_action = {r["data"]["action"]: r for r in records}
+        self.assertEqual(sorted(by_action), ["arm", "arm-phase2"])
+        self.assertEqual(by_action["arm"]["data"]["deck"], 1)
+        self.assertEqual(by_action["arm"]["data"]["id"], 555)
+        self.assertEqual(by_action["arm-phase2"]["data"]["deck"], 1)
+        self.assertEqual(by_action["arm-phase2"]["data"]["id"], 555)
 
 
 if __name__ == "__main__":

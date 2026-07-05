@@ -2364,7 +2364,15 @@ class StateManager(LEDDispatchPolicyMixin):
                     "beatgrid_source":   d.meta.beatgrid_source,
                 }
             else:
-                log.warning("[SM] arm-fail  deck=%d  id=%d  reason=unregistered", deck, track_id)
+                bridge_log.perf(
+                    "scripted",
+                    "arm-fail deck=%d id=%d reason=unregistered",
+                    deck,
+                    track_id,
+                    lvl=logging.WARNING,
+                    deck=deck,
+                    data={"action": "arm-fail", "deck": deck, "id": track_id, "reason": "unregistered"},
+                )
                 return
 
         # Debounce concurrent arm calls
@@ -2401,9 +2409,21 @@ class StateManager(LEDDispatchPolicyMixin):
             elapsed_ms = self._deck[deck].elapsed_ms  # maintained by push loop
         mirror = 3 - deck
 
-        log.info("[SM] arm-scripted  deck=%d  id=%d  elapsed=%s  bpm=%.1f  file=%s",
-                 deck, track_id, bf.elapsed(elapsed_ms), d.meta.bpm,
-                 bf.short(track.get("filepath", "")))
+        bridge_log.perf(
+            "scripted",
+            "arm deck=%d id=%d elapsed=%s bpm=%.1f file=%s",
+            deck, track_id, bf.elapsed(elapsed_ms), d.meta.bpm,
+            bf.short(track.get("filepath", "")),
+            deck=deck,
+            data={
+                "action": "arm",
+                "deck": deck,
+                "id": track_id,
+                "elapsed_ms": elapsed_ms,
+                "bpm": d.meta.bpm,
+                "file": bf.short(track.get("filepath", "")),
+            },
+        )
 
         # Phase 0 (immediate): clear all 4 SS deck slots, stop playback + any autoloop
         self._sse.send_scripted_arm_phase0(deck)
@@ -2435,7 +2455,13 @@ class StateManager(LEDDispatchPolicyMixin):
         # Refresh elapsed in case position advanced since phase 0
         snap = self._cache.get(arm.deck)
         elapsed_ms = snap.elapsed_ms if snap and not snap.is_stale() else arm.elapsed_ms
-        log.info("[SM] arm-phase2  deck=%d  id=%d  elapsed=%s", arm.deck, arm.track_id, bf.elapsed(elapsed_ms))
+        bridge_log.perf(
+            "scripted",
+            "arm-phase2 deck=%d id=%d elapsed=%s",
+            arm.deck, arm.track_id, bf.elapsed(elapsed_ms),
+            deck=arm.deck,
+            data={"action": "arm-phase2", "deck": arm.deck, "id": arm.track_id, "elapsed_ms": elapsed_ms},
+        )
         arm_meta = arm.arm_meta
         # Use current active_deck, not the snapshot — deck may have switched in 100ms
         cur_active = self._os.active_deck
@@ -3832,19 +3858,26 @@ class StateManager(LEDDispatchPolicyMixin):
                         os.midi_refire_origin_beat = this_beat
                         os.last_autoloop_status_phrase_beat = this_beat
                         grid_status = d.meta.beatgrid_source if grid_pos is not None else "fallback"
-                        log.info(
-                            "[SM] midi-refire  deck=%d  beat=%d  source=%s  "
-                            "origin_before=%d  origin_after=%d  previous=%d  "
-                            "interval=%d  marker_latched=%s  grid=%s",
+                        bridge_log.perf(
+                            "ss",
+                            "midi-refire deck=%d beat=%d source=%s",
                             active,
                             this_beat,
                             refire_source,
-                            origin,
-                            os.midi_refire_origin_beat,
-                            previous_refire_beat,
-                            AUTOLOOP_ARM_PHRASE_BEATS,
-                            marker_crossed,
-                            grid_status,
+                            deck=active,
+                            beat=this_beat,
+                            data={
+                                "action": "midi-refire",
+                                "deck": active,
+                                "beat": this_beat,
+                                "source": refire_source,
+                                "origin_before": origin,
+                                "origin_after": os.midi_refire_origin_beat,
+                                "previous": previous_refire_beat,
+                                "interval": AUTOLOOP_ARM_PHRASE_BEATS,
+                                "marker_latched": marker_crossed,
+                                "grid": grid_status,
+                            },
                         )
                         self._autoloop.log_autoloop_tick(
                             active, elapsed_ms, beatpos_out, bpm, d.meta.bpm, grid_status

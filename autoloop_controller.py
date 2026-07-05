@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from . import bridge_fmt as bf
+from . import bridge_log
 from .beat_math import (
     _beatgrid_elapsed_for_abs_beat,
     _compute_beatgrid_position,
@@ -178,28 +179,41 @@ class AutoloopController:
         arm_source = os.autoloop_master_change_source
         os.autoloop_arm_after_master_change = False
         os.autoloop_master_change_source = ""
-        self._log.info(
-            "[SM] arm-autoloop  deck=%d  elapsed=%s  bpm=%.1f  src=%s  file=%s",
+        bridge_log.perf(
+            "autoloop",
+            "arm deck=%d elapsed=%s bpm=%.1f(%s) mirror=%d after_master=%s",
             deck,
             bf.elapsed(elapsed_ms),
             arm_bpm,
             bpm_source,
-            bf.short(d.meta.filepath),
-        )
-        self._log.debug(
-            "[SM] arm-autoloop  deck=%d  mirror=%d  loop=%d  meta_bpm=%.2f"
-            "  after_master=%s  master_src=%s  prev=%s",
-            deck,
             mirror,
-            AUTOLOOP_BEATS,
-            d.meta.bpm,
             arm_after_master,
-            arm_source or "<none>",
-            bf.short(os.last_armed_filepath),
+            deck=deck,
+            data={
+                "action": "arm",
+                "deck": deck,
+                "mirror": mirror,
+                "elapsed_ms": elapsed_ms,
+                "bpm": arm_bpm,
+                "bpm_source": bpm_source,
+                "loop": AUTOLOOP_BEATS,
+                "meta_bpm": d.meta.bpm,
+                "after_master": arm_after_master,
+                "master_src": arm_source or "",
+                "prev_file": bf.short(os.last_armed_filepath),
+                "file": bf.short(d.meta.filepath),
+            },
         )
         if arm_after_master and autoloop_master_phrase_arm:
             self._sse.send_autoloop_clear(deck)
-            self._log.info("[SM] clear-autoloop  deck=%d  src=%s", deck, arm_source or "<none>")
+            bridge_log.perf(
+                "autoloop",
+                "clear deck=%d src=%s",
+                deck,
+                arm_source or "<none>",
+                deck=deck,
+                data={"action": "clear", "deck": deck, "src": arm_source or ""},
+            )
         else:
             for dk in self._sse.deck_route(deck):
                 out._sub(f"deck {dk} get_filepath", "", verbose=True)
@@ -237,22 +251,28 @@ class AutoloopController:
                 os.pending_autoloop_arm_active = deck
                 os.pending_autoloop_arm_source = arm_source or "master"
                 os.pending_autoloop_arm_reason = pending_reason
-                self._log.info(
-                    "[SM] arm-pending  deck=%d  beat=%.1f→%d  until=%dms  file=%s",
+                bridge_log.perf(
+                    "autoloop",
+                    "arm-pending deck=%d beat=%.1f->%d until=%dms reason=%s",
                     deck,
                     abs_beat,
                     target,
                     target_elapsed_ms - elapsed_ms,
-                    bf.short(d.meta.filepath),
-                )
-                self._log.debug(
-                    "[SM] arm-pending  deck=%d  target_elapsed=%dms  grid=%s"
-                    "  src=%s  reason=%s",
-                    deck,
-                    target_elapsed_ms,
-                    target_source,
-                    arm_source or "<none>",
                     pending_reason,
+                    deck=deck,
+                    beat=abs_beat,
+                    data={
+                        "action": "arm-pending",
+                        "deck": deck,
+                        "beat": abs_beat,
+                        "target_beat": target,
+                        "until_ms": target_elapsed_ms - elapsed_ms,
+                        "target_elapsed_ms": target_elapsed_ms,
+                        "grid": target_source,
+                        "src": arm_source or "",
+                        "reason": pending_reason,
+                        "file": bf.short(d.meta.filepath),
+                    },
                 )
             else:
                 self._sse.send_autoloop_deck_load(deck, mirror, deck, arm_meta)
@@ -265,12 +285,22 @@ class AutoloopController:
                     self._sse.send_autoloop_bpm(deck, arm_bpm)
                     os.last_sent_bpm = arm_bpm
                     self.clear_arm_phrase_lock()
-                    self._log.info(
-                        "[SM] arm-immediate  deck=%d  beat=%.1f  bpm=%.2f  src=%s",
+                    bridge_log.perf(
+                        "autoloop",
+                        "arm-immediate deck=%d beat=%.1f bpm=%.2f src=%s",
                         deck,
                         abs_beat,
                         arm_bpm,
                         arm_source or "<none>",
+                        deck=deck,
+                        beat=abs_beat,
+                        data={
+                            "action": "arm-immediate",
+                            "deck": deck,
+                            "beat": abs_beat,
+                            "bpm": arm_bpm,
+                            "src": arm_source or "",
+                        },
                     )
                 if arm_after_master and autoloop_master_phrase_arm:
                     phrase_beat = self.previous_arm_phrase(abs_beat)
@@ -290,14 +320,23 @@ class AutoloopController:
                             arm_source or "master",
                             "phrase-grace-late",
                         )
-                        self._log.warning(
-                            "[SS][AUTOLOOP-MASTER-ARM-GRACE-LATE]"
-                            " [SM] arm-grace-late  deck=%d  beat=%d"
-                            "  late=%dms  tolerance=%dms",
+                        bridge_log.perf(
+                            "autoloop",
+                            "grace-late deck=%d beat=%d late=%dms tolerance=%dms",
                             deck,
                             phrase_beat,
                             lateness_ms,
                             _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS,
+                            lvl=logging.WARNING,
+                            deck=deck,
+                            beat=phrase_beat,
+                            data={
+                                "action": "grace-late",
+                                "deck": deck,
+                                "beat": phrase_beat,
+                                "late_ms": lateness_ms,
+                                "tolerance_ms": _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS,
+                            },
                         )
         else:
             os.last_armed_filepath = ""
@@ -349,7 +388,7 @@ class AutoloopController:
     ) -> None:
         os = self._output_state_ref()
         live_status = self.live_bpm_status_text(active)
-        self._log.info(
+        self._log.debug(
             "[SS][AUTOLOOP-TICK] [SM] autoloop-tick  deck=%d  elapsed=%s  beat=%.2f"
             "  bpm=%.2f  arm_bpm=%.2f  meta_bpm=%.2f  grid=%s  %s  %s  file=%s",
             active,
@@ -496,16 +535,26 @@ class AutoloopController:
         os.pending_autoloop_arm_active = active
         os.pending_autoloop_arm_source = source
         os.pending_autoloop_arm_reason = f"correction-{reason}"
-        self._log.info(
-            "[SM] arm-correction-pending  deck=%d  beat=%d  until=%dms"
-            "  reason=%s  grid=%s  src=%s  file=%s",
+        bridge_log.perf(
+            "autoloop",
+            "correction-pending deck=%d beat=%d until=%dms reason=%s src=%s",
             deck,
             target,
             target_elapsed_ms - current_elapsed_ms,
             reason,
-            target_source,
             source or "<none>",
-            bf.short(correction_meta.filepath),
+            deck=deck,
+            beat=target,
+            data={
+                "action": "correction-pending",
+                "deck": deck,
+                "beat": target,
+                "until_ms": target_elapsed_ms - current_elapsed_ms,
+                "reason": reason,
+                "grid": target_source,
+                "src": source or "",
+                "file": bf.short(correction_meta.filepath),
+            },
         )
 
     def next_arm_phrase(self, abs_beat_pos: float) -> int:
@@ -588,13 +637,24 @@ class AutoloopController:
                     self._deck_ref(active).meta,
                 )
             )
-            self._log.info(
-                "[SM] arm-pending  deck=%d  beat=%.1f→%d  until=%dms  grid=%s",
+            bridge_log.perf(
+                "autoloop",
+                "arm-pending deck=%d beat=%.1f->%d until=%dms grid=%s",
                 active,
                 abs_beat_pos,
                 os.autoloop_arm_sync_beat,
                 os.autoloop_arm_target_elapsed_ms - elapsed_ms,
                 os.autoloop_arm_target_source or "fallback",
+                deck=active,
+                beat=abs_beat_pos,
+                data={
+                    "action": "arm-pending",
+                    "deck": active,
+                    "beat": abs_beat_pos,
+                    "target_beat": os.autoloop_arm_sync_beat,
+                    "until_ms": os.autoloop_arm_target_elapsed_ms - elapsed_ms,
+                    "grid": os.autoloop_arm_target_source or "fallback",
+                },
             )
 
         if elapsed_ms < os.autoloop_arm_target_elapsed_ms:
@@ -607,6 +667,7 @@ class AutoloopController:
         arm_bpm = os.autoloop_arm_bpm if os.autoloop_arm_bpm > 0 else bpm
         pending_meta = os.pending_autoloop_arm_meta
         scheduled_correction = False
+        lock_logged = False
         if pending_meta is not None:
             pending_source = os.pending_autoloop_arm_source or "<none>"
             pending_reason = os.pending_autoloop_arm_reason or "scheduled"
@@ -622,11 +683,20 @@ class AutoloopController:
             object.__setattr__(pending_meta, "elapsed_ms", arm_elapsed_ms)
             if pending_reason.startswith("correction-"):
                 self._sse.send_autoloop_clear(active)
-                self._log.info(
-                    "[SM] arm-correction-clear  deck=%d  beat=%d  reason=%s",
+                bridge_log.perf(
+                    "autoloop",
+                    "correction-clear deck=%d beat=%d reason=%s",
                     active,
                     target_beat,
                     pending_reason,
+                    deck=active,
+                    beat=target_beat,
+                    data={
+                        "action": "correction-clear",
+                        "deck": active,
+                        "beat": target_beat,
+                        "reason": pending_reason,
+                    },
                 )
             self._sse.send_autoloop_deck_load(
                 os.pending_autoloop_arm_deck or active,
@@ -635,9 +705,9 @@ class AutoloopController:
                 pending_meta,
             )
             os.autoloop_change_on_next_beat = False
-            self._log.info(
-                "[SM] arm-locked  deck=%d  beat=%d  late=%dms"
-                "  bpm=%.2f  reason=%s  correction=%s  src=%s",
+            bridge_log.perf(
+                "autoloop",
+                "lock deck=%d beat=%d late=%dms bpm=%.2f reason=%s correction=%s src=%s",
                 active,
                 target_beat,
                 lateness_ms,
@@ -645,7 +715,20 @@ class AutoloopController:
                 pending_reason,
                 needs_correction,
                 pending_source,
+                deck=active,
+                beat=target_beat,
+                data={
+                    "action": "lock",
+                    "deck": active,
+                    "beat": target_beat,
+                    "late_ms": lateness_ms,
+                    "bpm": arm_bpm,
+                    "reason": pending_reason,
+                    "correction": needs_correction,
+                    "src": pending_source,
+                },
             )
+            lock_logged = True
             self.clear_pending_master_phrase_arm()
             if needs_correction:
                 reason = (
@@ -666,26 +749,46 @@ class AutoloopController:
                 )
                 scheduled_correction = True
                 if lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS:
-                    self._log.warning(
-                        "[SS][AUTOLOOP-MASTER-ARM-LATE-CORRECTION]"
-                        " [SM] arm-late  deck=%d  beat=%d  late=%dms"
-                        "  tolerance=%dms  grid=%s",
+                    bridge_log.perf(
+                        "autoloop",
+                        "arm-late deck=%d beat=%d late=%dms tolerance=%dms grid=%s",
                         active,
                         target_beat,
                         lateness_ms,
                         _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS,
                         target_source,
+                        lvl=logging.WARNING,
+                        deck=active,
+                        beat=target_beat,
+                        data={
+                            "action": "arm-late",
+                            "deck": active,
+                            "beat": target_beat,
+                            "late_ms": lateness_ms,
+                            "tolerance_ms": _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS,
+                            "grid": target_source,
+                        },
                     )
         elif lateness_ms > _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS:
-            self._log.warning(
-                "[SS][AUTOLOOP-PHRASE-MISS]"
-                " [SM] arm-phrase-miss  deck=%d  beat=%d  late=%dms"
-                "  tolerance=%dms  grid=%s",
+            bridge_log.perf(
+                "autoloop",
+                "arm-phrase-miss deck=%d beat=%d late=%dms tolerance=%dms grid=%s",
                 active,
                 target_beat,
                 lateness_ms,
                 _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS,
                 target_source,
+                lvl=logging.WARNING,
+                deck=active,
+                beat=target_beat,
+                data={
+                    "action": "arm-phrase-miss",
+                    "deck": active,
+                    "beat": target_beat,
+                    "late_ms": lateness_ms,
+                    "tolerance_ms": _AUTOLOOP_PHRASE_LATE_TOLERANCE_MS,
+                    "grid": target_source,
+                },
             )
         self._sse.send_autoloop_bpm(active, arm_bpm)
         os.last_sent_bpm = arm_bpm
@@ -695,13 +798,24 @@ class AutoloopController:
             os.autoloop_arm_target_elapsed_ms = 0
             os.autoloop_arm_target_source = ""
             os.autoloop_arm_pending_since = 0.0
-        self._log.info(
-            "[SM] arm-locked-final  deck=%d  beat=%d  late=%dms  bpm=%.2f",
-            active,
-            target_beat,
-            lateness_ms,
-            arm_bpm,
-        )
+        if not lock_logged:
+            bridge_log.perf(
+                "autoloop",
+                "lock deck=%d beat=%d late=%dms bpm=%.2f",
+                active,
+                target_beat,
+                lateness_ms,
+                arm_bpm,
+                deck=active,
+                beat=target_beat,
+                data={
+                    "action": "lock",
+                    "deck": active,
+                    "beat": target_beat,
+                    "late_ms": lateness_ms,
+                    "bpm": arm_bpm,
+                },
+            )
 
 
 def send_direct_autoloop_rearm(
@@ -744,17 +858,27 @@ def send_direct_autoloop_rearm(
     sm._sse.send_autoloop_deck_load(active, mirror, active, arm_meta)
     sm._sse.send_autoloop_bpm(active, arm_bpm)
     sm._os.last_sent_bpm = arm_bpm
-    logging.getLogger("state_manager").info(
-        "[SM] autoloop-rearm  deck=%d  reason=%s  beat=%s  elapsed=%s"
-        "  target_elapsed=%s  late=%dms  grid=%s  bpm=%.1f  file=%s",
+    bridge_log.perf(
+        "autoloop",
+        "rearm deck=%d reason=%s beat=%s late=%dms bpm=%.1f",
         active,
         reason,
         target_beat if target_beat is not None else "-",
-        bf.elapsed(elapsed_ms),
-        bf.elapsed(target_elapsed_ms),
         lateness_ms,
-        target_source,
         arm_bpm,
-        bf.short(d.meta.filepath),
+        deck=active,
+        beat=target_beat,
+        data={
+            "action": "rearm",
+            "deck": active,
+            "reason": reason,
+            "target_beat": target_beat,
+            "elapsed_ms": elapsed_ms,
+            "target_elapsed_ms": target_elapsed_ms,
+            "late_ms": lateness_ms,
+            "grid": target_source,
+            "bpm": arm_bpm,
+            "file": bf.short(d.meta.filepath),
+        },
     )
     return True
