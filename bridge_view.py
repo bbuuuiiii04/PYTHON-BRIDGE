@@ -33,6 +33,7 @@ import argparse
 import curses
 import json
 import os
+import re
 import select
 import sys
 import time
@@ -192,6 +193,24 @@ FRIENDLY: dict[str, str] = {
     "sys.config": "config",
     "sys.log": "log",
     "sys.crash": "crash",
+    # Legacy stdlib records carry cat == logger name (module). Map the known
+    # ones to plain words (rule 6) so e.g. "soundswitch_midi_input" doesn't
+    # blow out the surface column and read as code.
+    "soundswitch_midi_input": "soundswitch",
+    "osl_output": "soundswitch",
+    "os2l_injector": "soundswitch",
+    "state_manager": "bridge",
+    "runtime_status": "bridge",
+    "diagnostics": "bridge",
+    "live_bpm": "bpm",
+    "rb_memory": "rekordbox",
+    "rb_state": "rekordbox",
+    "pyrekordbox.db6.database": "rekordbox",
+    "pyrekordbox.anlz.file": "rekordbox",
+    "mtc_reader": "timecode",
+    "laser_config": "laser",
+    "led_config": "led",
+    "enttec_dmx_pro": "dmx",
 }
 
 # Surfaces that carry a stable identity hue in the feed (rule 5). The hue
@@ -203,8 +222,21 @@ _SURFACE_HUED = frozenset(
 
 _TIME_WIDTH = 10   # "21:14:03.5"
 _DECK_WIDTH = 3    # "D1 " / "D12" / "   " (blank-padded when absent)
-_SURFACE_WIDTH = 10
+_SURFACE_WIDTH = 11  # widest friendly name ("soundswitch"); longer names hard-cap
 _ELLIPSIS = "…"
+
+_CODE_PREFIX_RE = re.compile(r"^(?:\s*\[[A-Za-z0-9_.-]+\])+\s*")
+
+
+def display_msg(msg: Any) -> str:
+    """Message text with legacy [CODE][PREFIX] blocks stripped for display.
+
+    Rule 6 (plain words, never codes): old-style modules still write
+    "[SS-MIDI] input port gone" — the bracket codes duplicate the surface
+    column and read as noise mid-set. Display-only: the stream on disk is
+    untouched, agents keep the raw text.
+    """
+    return _CODE_PREFIX_RE.sub("", str(msg))
 
 
 def _format_time(ts: Any) -> str:
@@ -277,8 +309,9 @@ def format_line(rec: dict[str, Any], width: int) -> list[tuple[str, str]]:
     deck = rec.get("deck")
     deck_text = (f"D{deck}" if deck is not None else "").ljust(_DECK_WIDTH)
     surface = _surface_of(rec)
-    surface_text = surface.ljust(_SURFACE_WIDTH)
-    payload_text = str(rec.get("msg", ""))
+    # Hard-cap so an unmapped long source can never break column alignment.
+    surface_text = surface[:_SURFACE_WIDTH].ljust(_SURFACE_WIDTH)
+    payload_text = display_msg(rec.get("msg", ""))
 
     # Rule 5: one surface = one stable hue, and level colors outrank identity
     # hues (yellow = warning, red = broken and ONLY broken). Unknown surfaces
@@ -358,12 +391,12 @@ def format_strip(latched: list[dict[str, Any]], now: float) -> str:
     if len(latched) == 1:
         e = latched[0]
         age = format_age(e.get("ts", now), now=now)
-        return f"⚠ {_surface_of(e)} {e.get('msg', '')} ({age}) · a clears"
+        return f"⚠ {_surface_of(e)} {display_msg(e.get('msg', ''))} ({age}) · a clears"
     newest = max(latched, key=_latch_ts)
     age = format_age(newest.get("ts", now), now=now)
     return (
         f"⚠ {len(latched)} problems · newest: {_surface_of(newest)} "
-        f"{newest.get('msg', '')} ({age}) · a clears · 2 lists all"
+        f"{display_msg(newest.get('msg', ''))} ({age}) · a clears · 2 lists all"
     )
 
 
@@ -784,7 +817,7 @@ def _draw_operator(stdscr: Any, state: ViewerState, height: int, width: int, now
         if row >= height - 1:
             break
         rec = state.health_latest[cat]
-        line = f"{_surface_of(rec)}: {rec.get('msg', '')} ({format_age(rec.get('ts', now), now=now)})"
+        line = f"{_surface_of(rec)}: {display_msg(rec.get('msg', ''))} ({format_age(rec.get('ts', now), now=now)})"
         try:
             stdscr.addstr(row, 0, line[:width], _attr_for("dim"))
         except curses.error:

@@ -565,6 +565,44 @@ class ArgParserTest(unittest.TestCase):
         self.assertEqual(args.path, "/tmp/example.jsonl")
 
 
+class DisplayMsgTest(unittest.TestCase):
+    def test_single_code_prefix_stripped(self) -> None:
+        self.assertEqual(
+            bridge_view.display_msg("[SS-MIDI] input port gone; retrying exact port"),
+            "input port gone; retrying exact port",
+        )
+
+    def test_stacked_prefixes_stripped(self) -> None:
+        self.assertEqual(
+            bridge_view.display_msg("[LBPM][DIRECT] deck1 unavailable"),
+            "deck1 unavailable",
+        )
+
+    def test_plain_message_unchanged(self) -> None:
+        self.assertEqual(bridge_view.display_msg("look rt_twinkle"), "look rt_twinkle")
+
+    def test_mid_message_brackets_kept(self) -> None:
+        self.assertEqual(bridge_view.display_msg("err=[Errno 61] refused"), "err=[Errno 61] refused")
+
+
+class LegacySurfaceTest(unittest.TestCase):
+    def test_legacy_module_maps_to_plain_word(self) -> None:
+        rec = {"cat": "soundswitch_midi_input", "src": "soundswitch_midi_input",
+               "lvl": "WARNING", "msg": "[SS-MIDI] input port gone", "ts": 1.0}
+        segments = bridge_view.format_line(rec, 200)
+        text = "".join(t for t, _ in segments)
+        self.assertIn("soundswitch  input port gone", text)
+        self.assertNotIn("soundswitch_midi_input", text)
+        self.assertNotIn("[SS-MIDI]", text)
+
+    def test_unmapped_long_source_hard_capped(self) -> None:
+        rec = {"cat": "some_very_long_module_name", "src": "some_very_long_module_name",
+               "lvl": "INFO", "msg": "hello", "ts": 1.0}
+        segments = bridge_view.format_line(rec, 200)
+        surface_seg = segments[4][0]
+        self.assertEqual(len(surface_seg), bridge_view._SURFACE_WIDTH)
+
+
 class FormatStripTest(unittest.TestCase):
     def test_single_latch_renders_in_full(self) -> None:
         text = bridge_view.format_strip(
