@@ -570,6 +570,50 @@ class ArgParserTest(unittest.TestCase):
         self.assertEqual(args.path, "/tmp/example.jsonl")
 
 
+class AckWatermarkTest(unittest.TestCase):
+    def test_acked_old_warning_does_not_relatch(self) -> None:
+        latch = bridge_view.LatchState(ack_before=100.0)
+        self.assertFalse(latch.note({"ts": 50.0, "cat": "health.dmx", "lvl": "ERROR", "msg": "x"}))
+        self.assertTrue(latch.is_quiet())
+
+    def test_newer_warning_still_latches(self) -> None:
+        latch = bridge_view.LatchState(ack_before=100.0)
+        self.assertTrue(latch.note({"ts": 150.0, "cat": "health.dmx", "lvl": "ERROR", "msg": "x"}))
+        self.assertFalse(latch.is_quiet())
+
+    def test_corrupt_ts_latches_on_the_safe_side(self) -> None:
+        latch = bridge_view.LatchState(ack_before=100.0)
+        self.assertTrue(latch.note({"ts": "corrupt", "cat": "health.dmx", "lvl": "ERROR", "msg": "x"}))
+
+    def test_recovery_still_clears_regardless_of_watermark(self) -> None:
+        latch = bridge_view.LatchState(ack_before=100.0)
+        latch.note({"ts": 150.0, "cat": "health.midi", "lvl": "WARNING", "msg": "down"})
+        latch.note({"ts": 160.0, "cat": "health.midi", "lvl": "INFO", "msg": "recovered"})
+        self.assertTrue(latch.is_quiet())
+
+    def test_save_and_load_round_trip(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            acks = Path(tmp) / "viewer_acks.json"
+            bridge_view.save_ack_watermark(acks, "bridge-1.jsonl", 123.5)
+            bridge_view.save_ack_watermark(acks, "bridge-2.jsonl", 200.0)
+            self.assertEqual(bridge_view.load_ack_watermark(acks, "bridge-1.jsonl"), 123.5)
+            self.assertEqual(bridge_view.load_ack_watermark(acks, "bridge-2.jsonl"), 200.0)
+            self.assertEqual(bridge_view.load_ack_watermark(acks, "bridge-3.jsonl"), 0.0)
+
+    def test_missing_and_corrupt_sidecar_tolerated(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            acks = Path(tmp) / "viewer_acks.json"
+            self.assertEqual(bridge_view.load_ack_watermark(acks, "r"), 0.0)
+            acks.write_text("not json", encoding="utf-8")
+            self.assertEqual(bridge_view.load_ack_watermark(acks, "r"), 0.0)
+            bridge_view.save_ack_watermark(acks, "r", 5.0)  # must not raise
+            self.assertEqual(bridge_view.load_ack_watermark(acks, "r"), 5.0)
+
+
 class HealthAttrKeyTest(unittest.TestCase):
     def test_error_is_red(self) -> None:
         self.assertEqual(bridge_view.health_attr_key({"lvl": "ERROR"}), "red")

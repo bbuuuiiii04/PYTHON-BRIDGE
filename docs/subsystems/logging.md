@@ -159,7 +159,10 @@ Screens (number keys switch):
   a bottom OPERATOR strip (green "✓ all quiet since HH:MM:SS" when healthy). The heartbeat record
   itself is header-only: it never scrolls through the feed (a steady show is a still screen); it
   stays visible in DEBUG.
-- **2 OPERATOR**: a per-`health.*`-category last-state summary line, then the full OPERATOR feed.
+- **2 OPERATOR**: a per-`health.*`-category last-state summary line (colored by severity), then
+  the full OPERATOR feed. Acks (`a`) persist across viewer restarts within one run via a
+  `viewer_acks.json` sidecar in the log dir — the viewer's only write anywhere; run files stay
+  untouched. A new bridge run starts with a clean latch slate.
 - **3 SYSTEM**: the infra feed.
 - **4 DEBUG**: everything, with a `/`-filter (substring match on cat/msg, plus `deck=N` and
   `cat=prefix` tokens), `c` clears the filter.

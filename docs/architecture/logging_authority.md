@@ -122,6 +122,9 @@ would silently start a new trace id for that leg, not an error, just a broken ch
 - **Alerts latch.** A WARNING/ERROR rings the bell once and stays visibly latched (with the
   problem text) until the condition clears or the operator acknowledges. Nothing important is
   ever conveyed by a transient effect alone; nothing important can scroll away.
+  Acknowledgements persist across viewer restarts within one run (a tiny `viewer_acks.json`
+  sidecar in the log dir — the viewer's only write anywhere; it never touches a run file, so
+  non-negotiable 3 stands). A new bridge run always starts with a clean slate.
 - **ADHD-first readability rules are acceptance criteria, not style:** the screen is still when
   the show is steady (motion = meaning); current state lives in fixed screen positions; one fact
   per line in aligned columns, no wrapping; plumbing dim, payload bright; a fixed color vocabulary
