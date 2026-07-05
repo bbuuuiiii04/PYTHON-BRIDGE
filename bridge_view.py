@@ -96,18 +96,12 @@ def parse_record(line: str) -> dict[str, Any] | None:
 # still surface in SYSTEM. One tuple, read side only (design doc Section 2.1);
 # it shrinks as more of these modules migrate to perf.*/health.* emits.
 #
-# NOTE (confirmed drift, reported rather than silently fixed): the spec's
-# literal tuple names "rb_state_reader", but rb_state_reader.py actually does
-# `log = logging.getLogger("rb_state")` (rb_state_reader.py:58) -- so a real
-# record's src is "rb_state", not "rb_state_reader". Every other entry was
-# checked against its module's actual logger name and matches exactly
-# (rb_memory, live_bpm, mtc_reader, osl_output, os2l_injector, runtime_status,
-# bridge, diagnostics). Kept verbatim as specified rather than silently
-# renamed; flagged in the handoff report for an operator/orchestrator call on
-# which side to correct (rename this entry to "rb_state", or rename the
-# logger to match).
+# Entries are the modules' ACTUAL logger names, each verified against its
+# `logging.getLogger(...)` call — note rb_state_reader.py names its logger
+# "rb_state" (rb_state_reader.py:58), so that is the entry here (the W6 spec's
+# draft said "rb_state_reader"; corrected at orchestrator review 2026-07-04).
 LEGACY_INFRA = (
-    "rb_memory", "rb_state_reader", "live_bpm", "mtc_reader",
+    "rb_memory", "rb_state", "live_bpm", "mtc_reader",
     "osl_output", "os2l_injector", "runtime_status", "bridge", "diagnostics",
 )
 
