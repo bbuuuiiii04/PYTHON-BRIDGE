@@ -565,6 +565,23 @@ class ArgParserTest(unittest.TestCase):
         self.assertEqual(args.path, "/tmp/example.jsonl")
 
 
+class IngestHeartbeatTest(unittest.TestCase):
+    def test_heartbeat_feeds_header_not_show_feed(self) -> None:
+        state = bridge_view.ViewerState()
+        hb = {"ts": 1.0, "lvl": "INFO", "cat": "perf.heartbeat", "msg": "beat",
+              "src": "runtime_status", "data": {"deck": 1}}
+        state.ingest(hb)
+        self.assertEqual(state.last_heartbeat, hb)
+        self.assertEqual(len(state.feeds["PERFORMANCE"]), 0)
+        self.assertEqual(len(state.feeds["DEBUG"]), 1)
+
+    def test_other_perf_records_still_reach_show_feed(self) -> None:
+        state = bridge_view.ViewerState()
+        state.ingest({"ts": 1.0, "lvl": "INFO", "cat": "perf.deck",
+                      "msg": "switch 1->2 (x)", "src": "state_manager"})
+        self.assertEqual(len(state.feeds["PERFORMANCE"]), 1)
+
+
 class TtyHangupExitTest(unittest.TestCase):
     """The viewer must exit when its terminal dies, not spin headless.
 

@@ -606,11 +606,17 @@ class ViewerState:
         self.dirty: bool = True
 
     def ingest(self, rec: dict[str, Any]) -> None:
-        for lens in lens_of(rec):
-            self.feeds[lens].append(rec)
         cat = _str_field(rec, "cat")
+        lenses = lens_of(rec)
         if cat == "perf.heartbeat":
+            # Header-only: the heartbeat already drives the sticky header, so
+            # scrolling it through the SHOW feed is motion without meaning
+            # (readability rule 1: the screen is still when the show is
+            # steady). It stays in DEBUG for forensics.
+            lenses = lenses - {"PERFORMANCE"}
             self.last_heartbeat = rec
+        for lens in lenses:
+            self.feeds[lens].append(rec)
         if cat.startswith("health."):
             self.health_latest[cat] = rec
         self.dirty = True

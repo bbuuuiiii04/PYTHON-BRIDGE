@@ -154,7 +154,9 @@ Screens (number keys switch):
 - **1 SHOW** (default, zero keys pressed): sticky header from the latest `perf.heartbeat` record
   (deck, bpm, phrase, laser scene, LED look, palette) plus stream-staleness age (green ≤5s, yellow
   >5s, red >15s — a healthy bridge guarantees a fresh heartbeat every ≤2s) + the PERFORMANCE feed +
-  a bottom OPERATOR strip (green "✓ all quiet since HH:MM:SS" when healthy).
+  a bottom OPERATOR strip (green "✓ all quiet since HH:MM:SS" when healthy). The heartbeat record
+  itself is header-only: it never scrolls through the feed (a steady show is a still screen); it
+  stays visible in DEBUG.
 - **2 OPERATOR**: a per-`health.*`-category last-state summary line, then the full OPERATOR feed.
 - **3 SYSTEM**: the infra feed.
 - **4 DEBUG**: everything, with a `/`-filter (substring match on cat/msg, plus `deck=N` and

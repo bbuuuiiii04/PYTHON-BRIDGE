@@ -117,6 +117,8 @@ would silently start a new trace id for that leg, not an error, just a broken ch
 
 - Default screen shows, with **zero keys pressed**: a sticky current-state header (from the
   heartbeat), the PERFORMANCE feed, and an OPERATOR strip that is green/"all quiet" when healthy.
+  The heartbeat record itself feeds the header only — it does not scroll through the feed
+  (rule 1: a steady show is a still screen); it remains in MAX DEBUG.
 - **Alerts latch.** A WARNING/ERROR rings the bell once and stays visibly latched (with the
   problem text) until the condition clears or the operator acknowledges. Nothing important is
   ever conveyed by a transient effect alone; nothing important can scroll away.
