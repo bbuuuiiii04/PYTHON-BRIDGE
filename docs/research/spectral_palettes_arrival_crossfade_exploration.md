@@ -111,6 +111,51 @@ report's "Open questions for Brandon" section.
 8. Fader smoothing/hysteresis constants get tuned from one `RBSS_RECORD_SESSION` practice
    capture during the build — a build task, not an operator decision.
 
+### Addendum — research-informed refinements (operator session, 2026-07-05, later)
+
+Two Gemini deep-research reports were commissioned and reviewed
+(`docs/research/edm_lighting_color_research.md`, `..._round2.md`; prompts under
+`docs/prompts/gemini_lighting_color_research*.md`). Citation quality is mixed (some links are
+search-page/synthesized references) — numeric values below are **starting constants to tune
+live**, not verified facts; the practices themselves match established LD lore. Operator
+approved the following, which supersede earlier items where they conflict:
+
+1. **Color zones are NEON, not fire (supersedes "aggressive → warm zones"):** smooth/groovy →
+   deep blues/teals/purples; aggressive bass/trap → electric neons (hot magenta, acid cyan,
+   lime) with white violence at peaks; dubstep/riddim extreme also earns deep reds/purples;
+   true red stays rare/earned. Operator: "i like where we are going."
+2. **White is a burst, not a state:** white-hot peaks are short bursts (seconds) that decay
+   back into the track's color; sustained white is banned outside manual looks.
+3. **Audio-matched pre-drop blackout (operator-requested design):** per drop, the engine reads
+   backwards from the ANLZ drop beat through the cached per-beat envelopes (kick + sub-bass
+   near-zero = "bottom gone") and blacks out for **exactly the track's own silent/dropout
+   length** (capped ~4 bars): 4 silent beats → 4-beat blackout; 1 → 1; none (music slams
+   straight in) → short snap-to-black flick (~125–250 ms starting value). Precomputed at track
+   load per song (pure math at runtime), beat-denominated so it follows tempo bending.
+   Operator confirmation: this does not invalidate snappy color fades or the long 1–4 bar dark
+   hold — it *selects* per drop.
+4. **Strobe policy (operator decision): no rate cap in v2.** Build strobes accelerate
+   (~2–4 Hz beat-matched, rising into the drop; drop bursts may run high-Hz); v2 strobe rate
+   is operator-uncapped by explicit decision. v1's config caps remain untouched in v1.
+5. **Night budgeting is a selectable mode (resolves the "drops always 100%" conflict):**
+   - **WILD OUT mode** — every drop hits 100%, all night (the original lock; default).
+   - **SET mode** — pro-style pacing: early/mid-set drops held (~80% starting value), true
+     100% white-and-strobe ceiling reserved for peak-time / highest-energy-tier tracks.
+   Operator picks the mode per session (pad/config surface).
+6. **Blend grammar upgrades (Feature 3):** *dipless* blending — total room brightness never
+   dips mid-crossfade (colors trade, energy floor holds); *single-axis* transitioning — morph
+   color OR move intensity, never both simultaneously.
+7. **Complementary accent pairings (operator: "i like 5 a lot"):** accents/lasers follow
+   proven pairs against the base — cyan+magenta (bass/trap), deep blue+warm amber (house),
+   red+white (industrial extreme). Feeds the accent chooser and laser-vs-LED coloring.
+8. **Fade-time starting constants:** snap 0.0 s (drops/blackouts), snappy 0.1–0.3 s
+   (high-energy changes), smooth 1–3 s BPM-scaled (look-to-look/blends).
+9. **Strip idiom:** whole-strip monolithic flashes/washes read professional on consumer
+   strips; busy multi-color segment chases are banned. Simple single-head motion (comets,
+   sweeps — already operator-validated live) stays.
+10. **Operator practice already matches** pre-drop blackout + build strobe acceleration (his
+    v1 cues do both by hand) — v2's build move ships them as standard.
+
 **Next step:** author the Codex implementation specs (Feature 1 → 2 → 3) per
 `.claude/skills/codex-spec/SKILL.md`, on Brandon's go.
 
