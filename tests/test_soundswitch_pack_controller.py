@@ -40,9 +40,12 @@ class _Sender:
 class _Input:
     def __init__(self, log, name):
         self._log, self._name = log, name
+        self.fail_start = False
 
     def start(self):
         self._log.append(f"{self._name}.input_start")
+        if self.fail_start:
+            raise OSError("controller open failed")
 
     def stop(self):
         self._log.append(f"{self._name}.input_stop")
@@ -235,6 +238,89 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(h.published[-1].reason, "pack_start_failed")
         self.assertEqual(h.published[-1].pack_sha12, old_sha,
                          "pack_sha12 dropped on start-failure (drift vs other disabled publishes)")
+
+    def test_output_start_failure_keeps_started_input_alive(self):
+        # No Enttec attached: midi_input.start() succeeds, frame_sender.start()
+        # raises. The pad input must survive — it is the ONLY thing driving
+        # Stream Deck pads — mirroring the boot-path contract in
+        # __main__._start_soundswitch_pack_workers.
+        log: list[str] = []
+        built = {}
+
+        def prep():
+            rt = _unstarted(log, "new")
+            rt.frame_sender.fail_start = True
+            built["rt"] = rt
+            return rt
+
+        h = _Harness(prepare=prep)
+        ok, detail = h.ctrl.handle("enable", enabled=True)
+
+        self.assertEqual((ok, detail), (False, "RuntimeError"))
+        published = h.published[-1]
+        self.assertFalse(published.active)
+        self.assertEqual(published.reason, "pack_start_failed")
+        # SAME midi_input object that was started — not stopped, not replaced.
+        self.assertIs(published.midi_input, built["rt"].midi_input)
+        self.assertNotIn("new.input_stop", log)
+        # Output side was physically torn down.
+        self.assertTrue(
+            "new.zero_and_stop" in log or "new.stop" in log,
+            f"frame sender was not stopped: {log}",
+        )
+
+    def test_input_start_failure_still_tears_down_input(self):
+        # Pre-fix behavior preserved for the input-fails-first step: no started
+        # workers to keep, so the safe no-output teardown applies as before.
+        log: list[str] = []
+
+        def prep():
+            rt = _unstarted(log, "new")
+            rt.midi_input.fail_start = True
+            return rt
+
+        h = _Harness(prepare=prep)
+        ok, detail = h.ctrl.handle("enable", enabled=True)
+
+        self.assertEqual((ok, detail), (False, "OSError"))
+        published = h.published[-1]
+        self.assertFalse(published.active)
+        self.assertIsNone(published.midi_input)
+        self.assertIn("new.input_stop", log)
+        # Frame sender never started since input.start() raised first.
+        self.assertNotIn("new.start", log)
+
+    def test_retry_after_output_failure_converges_to_new_input(self):
+        # The menubar auto-retries "enable" ~8s after boot. The first attempt
+        # keeps a live input despite the missing Enttec (previous test); this
+        # models the retry: the kept input from attempt 1 must be stopped by
+        # the second swap, and the fresh input from attempt 2 is what ends up
+        # published (proving the retry converges to a live input, not the
+        # stale one from attempt 1).
+        log: list[str] = []
+
+        def prep_fail():
+            rt = _unstarted(log, "new1")
+            rt.frame_sender.fail_start = True
+            return rt
+
+        h = _Harness(prepare=prep_fail)
+        ok, detail = h.ctrl.handle("enable", enabled=True)
+        self.assertEqual((ok, detail), (False, "RuntimeError"))
+        kept_input = h.current.midi_input
+        self.assertIsNotNone(kept_input)
+        self.assertNotIn("new1.input_stop", log)
+
+        h.ctrl._prepare = lambda: _unstarted(log, "new2")
+        ok, detail = h.ctrl.handle("enable", enabled=True)
+
+        self.assertEqual((ok, detail), (True, "pack"))
+        self.assertTrue(h.current.active)
+        # The stale attempt-1 input was stopped by this swap ...
+        self.assertIn("new1.input_stop", log)
+        # ... and the published runtime carries the NEW input, not the old one.
+        self.assertIsNot(h.current.midi_input, kept_input)
+        self.assertEqual(h.current.midi_input._name, "new2")
 
     def test_unknown_action_is_unsupported(self):
         h = _Harness(prepare=lambda: PackRuntime())

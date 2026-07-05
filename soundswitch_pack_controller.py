@@ -31,8 +31,10 @@ def _sanitize_error(exc: BaseException) -> str:
     return type(exc).__name__
 
 
-def _safe_zero_and_stop(rt: PackRuntime) -> None:
-    """Physically zero + stop the runtime's frame sender, then stop its input."""
+def _safe_stop_output_only(rt: PackRuntime) -> None:
+    """Physically zero + stop the runtime's frame sender and truth sink, but
+    leave ``midi_input`` untouched (used when the input already started
+    successfully and only the output side failed)."""
     sender = getattr(rt, "frame_sender", None)
     if sender is not None:
         try:
@@ -42,16 +44,21 @@ def _safe_zero_and_stop(rt: PackRuntime) -> None:
                 sender.stop()
             except Exception:
                 pass
-    inp = getattr(rt, "midi_input", None)
-    if inp is not None:
-        try:
-            inp.stop()
-        except Exception:
-            pass
     truth_sink = getattr(rt, "truth_sink", None)
     if truth_sink is not None:
         try:
             truth_sink.stop()
+        except Exception:
+            pass
+
+
+def _safe_zero_and_stop(rt: PackRuntime) -> None:
+    """Physically zero + stop the runtime's frame sender, then stop its input."""
+    _safe_stop_output_only(rt)
+    inp = getattr(rt, "midi_input", None)
+    if inp is not None:
+        try:
+            inp.stop()
         except Exception:
             pass
 
@@ -108,17 +115,31 @@ class SoundSwitchPackController:
             phase_offset_beats=old.phase_offset_beats,
         ))
         _safe_zero_and_stop(old)
+        input_started = False
         try:
             if new_unstarted.midi_input is not None:
                 new_unstarted.midi_input.start()
+                input_started = True
             if new_unstarted.frame_sender is not None:
                 new_unstarted.frame_sender.start()
             if new_unstarted.truth_sink is not None:
                 new_unstarted.truth_sink.start()
         except Exception as exc:
-            _safe_zero_and_stop(new_unstarted)
+            # Pad input starts independently of pack output (F-B1): if it was
+            # already up when the frame sender/truth sink failed to start,
+            # keep it running and carry it into the published bundle instead
+            # of tearing it down — mirrors the boot-path contract in
+            # __main__._start_soundswitch_pack_workers on frame_sender.start()
+            # failure (started midi_input survives, reason=pack_start_failed).
+            if input_started:
+                _safe_stop_output_only(new_unstarted)
+                kept_input = new_unstarted.midi_input
+            else:
+                _safe_zero_and_stop(new_unstarted)
+                kept_input = None
             self._publish(PackRuntime(
-                enabled=False, reason="pack_start_failed", pack_sha12=old.pack_sha12,
+                enabled=False, reason="pack_start_failed", midi_input=kept_input,
+                pack_sha12=old.pack_sha12,
                 pack_sha256=old.pack_sha256,
                 phase_offset_beats=old.phase_offset_beats,
             ))
