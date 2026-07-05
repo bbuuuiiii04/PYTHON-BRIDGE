@@ -93,6 +93,15 @@ a reader who saw none of the work.
   1.1–5.20, findings F-1..F-17, OLC-1..4, proposals P-1..P-6, post-review operator
   decisions). Do not repeat its work — build on it; your added value is everything that
   changed since: the built v4, Appendices D–G, and the haze answer.
+- The research corpus behind the creative decisions: the four Gemini deep-research rounds
+  (`docs/research/edm_lighting_color_research.md`, `_round2.md`, `_round3.md`, `_round4.md`)
+  — genre color language, timing constants, blend grammar, drop archetypes, phrase lighting.
+  Known caveat (recorded in the design record and binding here): their citation quality is
+  mixed — some references are synthesized — so treat their practices as lore-consistent
+  starting points and their numbers as tune-live constants, never as verified facts; the
+  record's addenda mark what the operator actually adopted. The MIR/signal-processing
+  research grounding v4 (librosa primary sources, modulation-spectrum practice, HPSS,
+  loudness) is embedded with labels in the spectral report §4 and Appendices B/C.
 - The v1 stack the v2 design claims to reuse (feasibility grounding — verify the seams it
   relies on actually behave as the design assumes): `led_look_director.py`,
   `led_color_engine.py`, `led_dispatch_policy.py`, `govee_frame_renderer.py`,
