@@ -142,8 +142,9 @@ fits (§4.6).
 ### 4.3 Stored schema (cache payload, `schema_version: 4`)
 
 Key/staleness identical to v3 (A16): sha1(realpath + mtime_ns + size + beatgrid fingerprint),
-stored under `spectral_cache/v4/` (A17). All v4 series rounded (dB: 0.1; ratios: 3 decimals;
-centroid: 1 Hz) — rounding is part of the schema, so determinism includes it. The v3-compat
+stored under `spectral_cache/v4/` (A17). All v4 series rounded (dB: 0.1; ratios: 4 decimals;
+centroid: 0.1 Hz — figures corrected 2026-07-05 S-4 to match code) — rounding is part of the
+schema, so determinism includes it. The v3-compat
 block is stored at full float precision (bit-identity requirement).
 
 Per-beat series (length = len(beatgrid), v3 beat-window semantics A7):
@@ -324,8 +325,9 @@ duck-typed scorer). Every finding adopted:
    the runtime resolver uses (`DjmdContent.FolderPath`) and beatgrids via the same
    `read_anlz_drops` (whose `_candidate_anlz_paths` expands any sibling to the same ordered
    set); a parity check on real tracks (DB-derived path vs each sibling candidate →
-   identical fingerprints) is part of §6; and `_runtime_spectral_features` logs its path
-   (v4-hit / v3-fallback / fresh-extract) so silent non-convergence is observable.
+   identical fingerprints) is part of §6; and `_runtime_spectral_features` logs every
+   non-v4-hit path (v3-cache / v4-extract / v3-extract; the steady-state v4 hit stays
+   quiet — wording corrected 2026-07-05 S-4) so silent non-convergence is observable.
 4. **No threshold-dependent stored scalars:** the `bass` axis and `sub_weight_med` are
    derived at load from the stored raw series by `spectral_profile` (pure functions);
    stored scalars are threshold-free only (grit, punch, drama, brightness_med,
@@ -372,7 +374,7 @@ duck-typed scorer). Every finding adopted:
 | R3 dubstep jab/scratch outline | `attack_db`, `onset_density_midhigh`, `flat_midH`, `high_db`/`air_db`, `band_sub4` swing | round 1 signal confirmed; proof §6 |
 | R4 bass-house stab distinct | `attack_low_db`, low-band `band_sub4` swing, `perc_low`, `onset_density` | round 1 signal confirmed; proof §6 |
 | R5 snare rolls + acceleration | `onset_density_midhigh` + beat-to-beat rise (view) | round 2 validation; proof §6 |
-| R6 emptiness detected & sized | `sub_db`+`bass_db` bottom-gone runs, `full_db` true-silence split (the P-2 primitive) | validated on the ear-validated reference track (App. B) |
+| R6 emptiness detected & sized | `sub_db`+`bass_db` bottom-gone runs, `full_db` true-silence split (the P-2 primitive) | runs primitive validated (App. B) **[CORRECTED 2026-07-05, strict review S-1: the shipped sizing consumer (`pre_drop_gap_beats` strict adjacency + the sub∧bass AND-rule) returns 0 on every walkthrough drop; consumer rules (pickup tolerance, sub-only floor, floor-return abort, relative-dip) are required in the Feature-2 spec — see `lighting_engine_v2_strict_review.md` S-1]** |
 | R7 sustained horn ≠ hits | `growlH_db` duty + `band_sub4` flatness-of-shape + `perc_low` | proof §6 |
 | R8 identity axes stability | stored scalars `grit/punch/bass/drama` (formulas §4.3) | stability gate in §7 (≥ v3's 0.902–0.957) |
 | R9 drop-window genre separation | drop-window character vector (view over band/attack/onset/timbre series) | 53.3% LOO round 1 → final proof §6 |
@@ -413,7 +415,9 @@ All **confirmed (measured this session)** unless labeled otherwise.
   LaserColorMapperTests.test_loader_ships_disabled_with_calibrated_fixed_band_values`,
   **pre-existing at baseline `2945c52` before any edit of this session** (laser color
   engine config loader; unrelated subsystem, not touched). Zero new failures. Three hard
-  docs checks: all pass.
+  docs checks: all pass. **[UPDATE 2026-07-05: that failure was fixed by later work — at
+  `f30f1e6` the suite is fully green: 3,264 OK, 6 skipped, 1 deliberate expectedFailure
+  (smart-phrasing property test). Measured, strict review S-4.]**
 
 ### 6.2 Determinism
 
@@ -495,7 +499,9 @@ representative excerpts):
 
 - *Kai Wachi — ILL (DUBSTEP, 140):* intro riff gaps 0:00–0:16 (4–5-beat empty floors);
   growl sections 0:30/0:33; percussion roll ×8 at 0:37.9 into the BUILDUP at 0:41.7; empty
-  floor through 0:43.0–0:46.9 ending exactly at the DROP (beat 109); 2-beat vacuum at
+  floor through 0:43.0–0:46.9 ending exactly at the DROP (beat 109) **[CORRECTED 2026-07-05
+  S-4: the shipped AND-rule run is beats 100–107, ending 2 beats before the drop (pickup at
+  108); "exactly at the drop" holds only under a sub-only floor rule (beats 97–108)]**; 2-beat vacuum at
   1:50.7 before the 1:52.0 DROP; growl blocks through both drop phrases; 1:44.3 growl ×15
   through the buildup; **2:19.4 true silence ×14 (literal end-of-file)** — kind-split from
   musical empty floor.
@@ -600,7 +606,8 @@ Every event above is a description; ANLZ markers remain the only structural trig
 - Suite result — **confirmed**: 3,251 tests at the main build (3,264 after Appendix E),
   zero new failures; the single failure
   (`test_laser_color_engine…fixed_band_values`) is **pre-existing at baseline `2945c52`**
-  (unrelated subsystem, untouched by this build).
+  (unrelated subsystem, untouched by this build). **[UPDATE 2026-07-05 S-4: since fixed;
+  suite fully green at `f30f1e6`.]**
 
 ## 8. Open questions for Brandon (taste calls only — defaults chosen, veto if wrong)
 
@@ -669,7 +676,10 @@ land). Findings that shaped the v4 design:
   gone ≲ 5 dB with a sparse gap between); a sub<5 dB rule recovers: the 12-beat empty floor
   ending exactly at drop beat 109; a 4-beat vacuum immediately before drop 261 (the
   operator's "4 silent beats → 4-beat blackout" example, now measurable); a 3-beat gap
-  before drop 141; and the 2:18–2:25 run is literal end-of-file silence (full-band −80 dB),
+  before drop 141 **[CORRECTED 2026-07-05 S-4: these are sub-only prototype readings — the
+  shipped sub∧bass rule yields 8 beats (100–107) at drop 109, nothing visible at 141, and
+  the vacuum before 261 measures 2 beats (258–259) from the shipped cache under either
+  rule]**; and the 2:18–2:25 run is literal end-of-file silence (full-band −80 dB),
   cleanly separable from *musical* empty floor (full-band +1..+11 dB, other instruments
   playing) — the same distinction the 2026-07-05 ear test established.
 - **First genre-discrimination pass: 53.3% leave-one-out nearest-centroid accuracy over 180

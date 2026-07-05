@@ -39,10 +39,11 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/architecture/laser_director_design.md` | CURRENT AUTHORITATIVE — Laser Director design. |
 | `docs/architecture/led_pad_template_lab_design.md` | CURRENT AUTHORITATIVE — LED Pad + Template Lab intended-features design (browser UI, banks, editor, lab, output ownership). Implementation tracked under AWR-113; verify against code as phases land. |
 | `docs/architecture/native_autoloop_pack_authority.md` | CURRENT AUTHORITATIVE — native Autoloop pack authority (grounds AWR-107 native DMX runtime). |
-| `docs/architecture/palette_control_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative behavior for the Stream Deck palette/mute/solo/rainbow surface; NOT YET IMPLEMENTED (design approved 2026-07-04). |
-| `docs/architecture/drop_presentation_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative per-drop fixture presentation (LEDs-only majority, Laser Solo tiers, zero RNG); NOT YET IMPLEMENTED (design approved 2026-07-04). |
-| `docs/architecture/laser_color_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative laser color behavior (LED-follow quantizer, white rules, chart gating); NOT YET IMPLEMENTED (design approved 2026-07-04). |
-| `docs/architecture/laser_blackout_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative blackout ownership contract (two owner systems, survival matrix); RE-WIRE NOT YET IMPLEMENTED (design approved 2026-07-04). |
+| `docs/architecture/palette_control_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative behavior for the Stream Deck palette/mute/solo/rainbow surface; Package 2 + AWR-121 gesture v2 implemented/software-tested; hardware validation pending. |
+| `docs/architecture/drop_presentation_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative per-drop fixture presentation (LEDs-only majority, Laser Solo tiers, zero RNG); Package 3 implemented/software-tested (AWR-119); hardware validation pending. |
+| `docs/architecture/laser_color_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative laser color behavior (LED-follow quantizer, white rules, chart gating); Package 4 plumbing implemented/software-tested (AWR-111); CH8/CH9 value chart operator-gated. |
+| `docs/architecture/laser_blackout_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative blackout ownership contract (two owner systems, survival matrix); Package 1 re-wire implemented/software-tested (AWR-111). |
+| `docs/architecture/lighting_engine_v2_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative intended experience for LIGHTING ENGINE v2 (identity zones, landing moves, blackout rules, drop-presentation composition, haze-era lasers, blend, texture, modes, arbiter, kills); PLANNED — design authority for the expansion phase + Feature 1–4 specs, not yet implemented. |
 | `docs/architecture/doc_index.md` | CURRENT AUTHORITATIVE — this index. |
 
 ## Agent operating system — current

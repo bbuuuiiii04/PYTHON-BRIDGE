@@ -359,7 +359,8 @@ light-follows-audio yields ~12 s of near-black in a room where the strips are th
 governs the blackout; nothing yet governs how dark the *breakdown before it* is allowed to
 ride. Default chosen for the expansion phase: breakdown floor-absence maps to "sparse and
 dim" (the operator's own walkthrough words), reserving true black for the blackout window
-itself. Veto if long full-dark breakdowns are wanted as-is.
+itself. Veto if long full-dark breakdowns are wanted as-is. **[Operator 2026-07-05: no veto —
+default confirmed.]**
 
 **OLC-B — Markers are authoritative vs audio leading the marker (lock: phrase markers are
 operator-owned truth).** STARsound's sub returns 3 beats before its drop marker (measured;
@@ -367,7 +368,8 @@ S-1c). The lock stands — no marker-veto logic — but the blackout consumer mu
 *end darkness early* on measured floor return, or the room stays black over a landed drop.
 This is framed as an audio-abort on one cue, not as distrusting the marker (the drop cue
 still fires at the marker). Veto shape: if the operator prefers markers to control darkness
-end-to-end even against the audio, say so; the default is the abort.
+end-to-end even against the audio, say so; the default is the abort. **[Operator 2026-07-05:
+no veto — the abort stands.]**
 
 **OLC-C — Trap and dubstep share one expression (lock, Appendix E) vs walkthrough 2's
 distinct trap-vacuum imagery.** No conflict in substance (STARsound is a hybrid and the
@@ -411,8 +413,8 @@ originals.
 - The blackout consumer-rule family per S-1 (tolerance, sub-only floor, floor-returned abort,
   relative-dip class, 16-beat cap, snap flick on gap 0 *after* the tolerance search).
 - Breakdown floor-absence rides "sparse and dim" (the operator's own walkthrough words); true
-  black is reserved for the blackout window itself (OLC-A's chosen default; operator veto
-  open).
+  black is reserved for the blackout window itself (OLC-A default — operator confirmed
+  2026-07-05, no veto; OLC-B's floor-return abort likewise confirmed).
 
 ### 6.2 Must design (the open creative questions, each with its anchor)
 

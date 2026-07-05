@@ -167,6 +167,9 @@ three, mostly scene-lore synthesis; only physics-solid or lore-consistent items 
 12. **Hazeless laser reality (physics):** without haze, beams are invisible — the laser phase
     designs for surface patterns (ceiling/wall scans), rest-during-verses / fire-on-drops,
     colored to contrast the strip wash. If the operator runs haze, beam looks re-enter scope.
+    **[SUPERSEDED 2026-07-05: haze is IN — operator: "paired with the 2 DMX lasers in a haze
+    setting" (build record Appendix G). Beam-based designs are in scope; rest-vs-fire and
+    contrast-coloring survive for beams. See strict review T2-6.]**
 13. **Small-room brightness:** research caps drop strobes ~70% at 3 m viewing distance; the
     operator's WILD OUT 100% lock stands (his room, his call) — peak brightness ships as a
     live-tunable trim knob so the live pass can find the sweet spot.
@@ -308,6 +311,7 @@ comfort, and social/ambient modes matter more than venue lore assumes.
 5. **Haze status = UNKNOWN (operator flagged the no-haze claim as never-stated).** Round-3's
    surface-pattern-only conclusion holds *only if* no haze; both beam-based and
    surface-pattern laser designs stay in scope until the operator settles haze.
+   **[RESOLVED 2026-07-05: haze is IN (build record Appendix G) — beam designs in scope.]**
 6. **Laser look design process (answer to "how do we design what lasers actually do"):**
    (a) catalog the hardware's real vocabulary — every MIDI-selectable pattern/color/speed the
    laser personalities can reach; (b) Claude drafts personality packages per sound-character
@@ -460,7 +464,9 @@ Recurring tracks become recognizable; the room learns them.
 
 **Four identity dimensions, each from a measured axis (spectral tier):**
 
-1. **Hue family — "who the track is."** Musical key → Camelot wheel position → one of the
+1. **[stale/superseded — see Locked agreement Feature 1 item 1 + review F-1: key is OUT of
+   the color story; sound-character zones pick hue, a per-track hash spreads within the
+   zone.]** ~~Hue family — "who the track is."~~ Musical key → Camelot wheel position → one of the
    curated palette families below. Camelot is circular and so is hue: adjacent keys land in
    adjacent families, which is what makes harmonic mixing *look* harmonious in workstream C.
    Minor/major (A/B suffix) modulates within the family: minor = deeper, more saturated end of
@@ -487,7 +493,10 @@ smooth ones.
 **Tiered fallback (same track → same palette at every tier):**
 - **Tier 1 — spectral fingerprint:** all four dimensions + key hue. Pure function of
   (content_id, cached summary scalars, key). No RNG anywhere.
-- **Tier 2 — ANLZ-only (librosa absent or cache miss):** key hue (100% coverage) + structure:
+- **Tier 2 — ANLZ-only (librosa absent or cache miss):** **[stale/superseded — review
+  F-2/1.13 + the v4 sweep: key is cut and the library is swept (666/686), so Tier 2 is
+  re-specified as structure-only dynamics + neutral-safe zone and is now a corner case (a
+  brand-new purchase before its first load; the 20 uncoverable tracks).]** key hue (100% coverage) + structure:
   drop count and `energy_model` intensity classes give a coarse dynamics budget; mood nudges
   texture (weakly — measured 92.5% mood=1, so this tier's texture is mostly neutral). Identity
   quality here: hue family and dynamics remain solid; texture flattens toward default. Since key
@@ -501,7 +510,10 @@ smooth ones.
 per-track authoring; every tier degrades to a safe-neutral default; hue mapping is a fixed
 function, not tuning. Clears the gate at every tier.
 
-**The palette family library the curated config needs.** Today's library (live config,
+**The palette family library the curated config needs.** **[stale/superseded — review ruling
+1.12 + F-1: the Camelot anchoring in this table is dead; families are re-cut as zone-anchored
+neon sets (see addendum item 1 + the strict review's zone-map charter item). What survives:
+warm stops must still be added to `scale_stops`.]** Today's library (live config,
 verified) is 5 weighted families — blue_cyan 10, indigo 6, deep_ocean 4, violet 3, crimson 2 —
 all cool-side, plus zero-weight white_sand and rainbow utilities. The default color line only
 has six stops, green→cyan→blue→purple→magenta→red (`led_models.py:72-79`): **there is no warm
@@ -734,7 +746,9 @@ cases plus the special one:
   walking in from one strip end) is a variant worth having as a template flag for the long
   venue strip, but rhythmic-accent entry is the default — on short strips spatial splits can
   read as malfunction.
-- **Harmonic mix vs clash (needs A's key axis).** Adjacent Camelot keys → adjacent families →
+- **Harmonic mix vs clash (needs A's key axis).** **[stale/superseded — review 3.3 + F-1:
+  key is cut; "near/opposite" re-grounds in p-space hue distance between the two identities'
+  families. The no-muddy-midpoint rule survives.]** Adjacent Camelot keys → adjacent families →
   the base-morph passes through the families *between* them: the blend reads as one color
   evolving — visually consonant, the room feels the mix "working." Distant keys → **do not
   morph through the mud** (interpolating far hues crosses grey/brown); instead the grammar
@@ -749,7 +763,9 @@ cases plus the special one:
   bar at a time when the fader retreats and stays retreated. A blend that rises to 40% and
   comes back simply breathes in and back out — no identity flapping, no resolve moment fired
   (the resolve requires cross-and-hold). Stale data mid-blend freezes, then decays, as above.
-- **The double drop.** Both decks beat-aligned (per-deck beat state exists for both), both
+- **The double drop.** **[stale/superseded — operator lock: "i dont do double drops"; this
+  moment is CUT. The accidental both-decks-in-drops case is ruled by review 3.6/F-15:
+  active-deck resolution picks the leader, no new moment fires.]** Both decks beat-aligned (per-deck beat state exists for both), both
   upfaders top, and both tracks inside a drop section within ~a bar of each other — the one
   moment two identities *deserve* to coexist: interleaved dual-palette accents at full
   intensity with white peaks marking the shared downbeats. Rare by construction (the gate is
@@ -762,7 +778,8 @@ cases plus the special one:
 
 **Workstream A — identity derivation:**
 - Derivation function: pure, deterministic, keyed on `content_id` (fallback filepath) only — no
-  set_seed, no active_deck, no RNG; fixed published mapping from the four axes + key to family
+  set_seed, no active_deck, no RNG; fixed published mapping from the four axes to zone/family
+  **[corrected per F-1: "+ key" struck — key is out of the color story]**
   and texture/depth/dynamics parameters.
 - Integration: derive inside the existing resolve worker
   (`state_manager.py:1781-1814,2004-2016`), publish with `ANLZ_DATA`-pattern event → deck meta;
@@ -843,6 +860,10 @@ cases plus the special one:
 ---
 
 ## Open questions for Brandon (only ones he can answer)
+
+**[stale/superseded — the Locked functionality agreement above supersedes this section
+wholesale (governance: no further design questions to Brandon). Answers that arrived live in
+the locked agreement, the reviews' post-review decisions, and the strict review.]**
 
 1. **Palette family board (A):** react to the 10-family table — names, feels, and especially
    the three new warm families (Ember/Gold/Solar). Which families feel wrong for your rooms?
