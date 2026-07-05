@@ -1,6 +1,7 @@
 """
 Tests for Issue #10: MidiOutput transport for Laser Director.
 """
+import logging
 import sys
 import time
 import unittest
@@ -79,6 +80,22 @@ def _fake_mido_module(port):
         Message=lambda msg_type, **kwargs: _FakeMessage(msg_type, **kwargs),
     )
 
+def _capture_health(logger_name: str = "health.midi"):
+    """Attach a capture handler to a health.* logger; caller must remove it."""
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    logger.addHandler(handler)
+    prior_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    return logger, handler, prior_level, records
+
+
 def _fake_mido_sequence(ports):
     class _FakeMessage:
         def __init__(self, msg_type, **kwargs):
@@ -106,6 +123,30 @@ class MidiOutputTests(unittest.TestCase):
             out.start()
             out.stop()
         import_mod.assert_not_called()
+
+    def test_sender_loop_thread_guard_emits_started_and_exited(self) -> None:
+        # AWR-125 W4: _sender_loop wrapped in bridge_log.thread_guard("laser-midi-sender").
+        logger = logging.getLogger("sys.thread")
+        records: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handler = _Capture()
+        prior_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=True)
+        out.start()
+        self.assertTrue(
+            _wait_until(lambda: any("laser-midi-sender started" in r.getMessage() for r in records))
+        )
+        out.stop()
+        self.assertTrue(any("laser-midi-sender exited" in r.getMessage() for r in records))
 
     def test_dry_run_trigger(self) -> None:
         out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=True)

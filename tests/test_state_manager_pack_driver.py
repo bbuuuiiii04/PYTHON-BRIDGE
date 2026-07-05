@@ -1123,7 +1123,7 @@ class PackDriverTests(unittest.TestCase):
             sm._drain_events = drain
             sm._push_tick = mock.Mock()
             sm._maybe_publish_snapshot = publish
-            with self.assertLogs("state_manager", level="ERROR") as captured:
+            with self.assertLogs("health.tick", level="ERROR") as captured:
                 sm._run()
 
         self.assertEqual(drains, 2)
@@ -1156,7 +1156,7 @@ class PackDriverTests(unittest.TestCase):
 
             sm._push_tick_inner = inner
             sm._maybe_publish_snapshot = publish
-            with self.assertLogs("state_manager", level="ERROR") as captured:
+            with self.assertLogs("health.tick", level="ERROR") as captured:
                 sm._run()
 
         self.assertEqual(pushes, 2)
@@ -1187,7 +1187,7 @@ class PackDriverTests(unittest.TestCase):
                 return False
 
             sm._maybe_publish_snapshot = publish
-            with self.assertLogs("state_manager", level="ERROR") as captured:
+            with self.assertLogs("health.tick", level="ERROR") as captured:
                 sm._run()
 
         self.assertEqual(snapshots, 2)
@@ -1218,7 +1218,7 @@ class PackDriverTests(unittest.TestCase):
 
             sm._drain_events = drain
             sm._push_tick = mock.Mock()
-            with self.assertLogs("state_manager", level="ERROR") as captured:
+            with self.assertLogs("health.tick", level="ERROR") as captured:
                 sm._run()
 
         self.assertEqual(seen, failures)
@@ -1255,7 +1255,7 @@ class PackDriverTests(unittest.TestCase):
 
             sm._profiler = SimpleNamespace(record=record, maybe_log=mock.Mock())
             sm._maybe_publish_snapshot = publish
-            with self.assertLogs("state_manager", level="ERROR") as captured:
+            with self.assertLogs("health.tick", level="ERROR") as captured:
                 sm._run()
 
         self.assertEqual(records, 2)
