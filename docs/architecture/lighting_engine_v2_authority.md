@@ -63,6 +63,18 @@ may violate them):
    confirmed twice).
 7. **No double drops.** One song owns the room, no exceptions.
 
+**Every track, guaranteed.** v2 must hold for the whole library, not a demo set. Three
+mechanisms make that structural rather than hopeful: (a) every track that can be analyzed
+already is (666 of 686 on-disk files; the remainder are beatgrid-less FX one-shots and one
+corrupt file), and a new purchase analyzes itself at first load; (b) every selector has a
+safe default — an unmeasurable track gets a neutral zone, an ambiguous drop gets the
+neutral family, a track without a texture shows none of it — so no track can ever fall off
+the map; worst case is tasteful-generic, never broken; (c) before anything is built, the
+**library-wide dry-run audit** runs the complete decision pipeline over every cached track
+and reports the distributions and the strangest outliers — the ear-check list is targeted
+at the weirdest tracks in the library instead of trusting a handful of anchors. Coverage is
+demonstrated on all ~700 tracks, then taste is tuned live.
+
 ## 2. The room and the hardware (what is physically true)
 
 - **The Govee strips are the room's only light** — wall-strung around the living-room
@@ -174,6 +186,13 @@ ignites on the downbeat; an 8-bar swell completes precisely at the phrase turn.
   eat each other (drop-scale impacts keep the long 12 s cooldown).
 - **Fires at every true drop, never on a bare bar count.** A missing marker means no build
   move — safe absence.
+- **New animation vocabulary is a v2 deliverable in its own right** (operator ask,
+  2026-07-05): beyond the build family, landing restore, stingers, bloom, and the blend
+  painter — which are all new shapes — every role family (groove, buildup, drop, post-drop,
+  breakdown/atmospheric) gains at least 2–3 genuinely new shapes, designed in the expansion
+  phase, authored through Template Lab against the color-slot contract, and selected by
+  measured character and energy. v2 is not v1 repainted: the old library's dozen shapes
+  carry forward *and* the vocabulary grows in every role.
 
 ### 4.1 The pre-drop blackout (the rules, settled)
 
@@ -416,9 +435,12 @@ no feature is "done" until you sign off on the live look. The staged road:
 1. **Expansion one-shot** (next): designs the full experience from this document + the
    strict-review charter — the zone map, the arbiter, the kill matrix, the color-slot
    contract, the consumer-rule pack (blackout rules, bass-forward beats, build-intensity,
-   rate-ladder selection, simmer), the build-move details, and observability. Its work is
-   falsifiable: the blackout rules must reproduce your walkthrough gaps from the shipped
-   cache; the zone map must reproduce the STARsound/Can't Say Nah palette calls.
+   rate-ladder selection, simmer), the build-move details, the new-template roadmap (2–3
+   new shapes per role family), and observability. Its work is falsifiable: the blackout
+   rules must reproduce your walkthrough gaps from the shipped cache; the zone map must
+   reproduce the STARsound/Can't Say Nah palette calls; and the **library-wide dry-run
+   audit** must show every cached track with a defined outcome at every decision point,
+   plus a ranked outlier list that becomes the targeted scrub-check set.
 2. **The laser session** (you + Claude, separate conversation): catalog the two lasers'
    real MIDI vocabulary in haze; then beam personality packages per zone; then live
    audition and lock.

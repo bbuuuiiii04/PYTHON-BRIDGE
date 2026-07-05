@@ -439,6 +439,22 @@ originals.
 8. **Observability** (5.17 as amended): per-feature kills, drop-type + reason, blend scalar,
    identity log line, plus the S-1 blackout decision (gap found, length, rule fired) so live
    vetoes are precise.
+9. **The library-wide dry-run audit (operator ask 2026-07-05):** run the complete v2
+   decision pipeline as pure functions over every cached track (all 666) — zone + palette,
+   every drop's family + reason, every blackout decision + gap, texture-class firing rates,
+   section tiers, rate-ladder rungs — and report the distributions plus a ranked outlier
+   list (tracks with the strangest readings: all-neutral drops, zero texture anywhere,
+   extreme zone crowding, odd blackout gaps). The outliers become the targeted scrub-check
+   list — the ear goes where the data is weirdest, not to random samples. The same audit
+   re-runs through the real code after the build as a regression tool.
+10. **The new-template roadmap (operator ask 2026-07-05 — new animation templates are an
+    explicit v2 deliverable, not just repainted v1 shapes):** beyond the already-new build
+    family (squeeze-explode, fuse, swell), landing restore, stingers, bloom, and the blend
+    painter, the expansion phase designs at least 2–3 genuinely new shapes per role family
+    (groove, buildup, drop, post-drop, breakdown/atmospheric) — each described visually,
+    authored as Template Lab shapes against the color-slot contract, and selected by
+    measured character/energy, never hand-assigned per track. Authoring and tuning happen
+    in the build + live phase through the existing Template Lab flow.
 
 ### 6.3 Analysis gaps to design around (never promise these)
 
@@ -469,6 +485,11 @@ originals.
    arbiter behaviors under each single-feature kill.
 6. Codex specs for Features 1–4 can be authored from the expansion document + the records
    without reading this review's measurement scripts.
+7. The library-wide dry-run audit (§6.2 item 9) exists with distributions and a ranked
+   outlier list, and **no cached track lacks a defined outcome at any decision point**
+   (a zone, a drop family — neutral counts, a blackout decision — "none/snap flick"
+   counts, a texture read — "none" counts). Applicability to the whole library is
+   demonstrated, not assumed.
 
 ---
 
