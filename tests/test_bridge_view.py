@@ -194,7 +194,7 @@ class FormatLineTest(unittest.TestCase):
         rendered = "".join(text for text, _ in segments)
         self.assertEqual(rendered, expected)
 
-    def test_attr_keys_are_only_dim_or_bright(self) -> None:
+    def test_attr_keys_are_dim_bright_or_surface_hue(self) -> None:
         rec = {
             "ts": 1.0, "lvl": "INFO", "cat": "perf.led.look", "src": "led_dispatch_policy",
             "msg": "look drop_wash", "deck": 2, "beat": 64.0,
@@ -202,7 +202,30 @@ class FormatLineTest(unittest.TestCase):
         }
         segments = bridge_view.format_line(rec, width=200)
         attrs = {attr for _, attr in segments}
-        self.assertTrue(attrs <= {"dim", "bright"})
+        self.assertTrue(attrs <= {"dim", "bright", "surface:led"})
+        # Rule 5: the surface column and the payload carry the surface's hue.
+        self.assertIn("surface:led", attrs)
+
+    def test_known_surfaces_get_stable_hue_keys(self) -> None:
+        for cat, surface in [
+            ("perf.laser.scene", "laser"), ("perf.deck", "deck"),
+            ("perf.autoloop", "autoloop"), ("perf.drop", "drop"),
+        ]:
+            rec = {"ts": 1.0, "lvl": "INFO", "cat": cat, "src": "x", "msg": "m"}
+            attrs = {a for _, a in bridge_view.format_line(rec, width=200)}
+            self.assertIn(f"surface:{surface}", attrs, cat)
+
+    def test_level_colors_outrank_surface_hue(self) -> None:
+        warn = {"ts": 1.0, "lvl": "WARNING", "cat": "perf.autoloop", "src": "x", "msg": "late"}
+        err = {"ts": 1.0, "lvl": "ERROR", "cat": "perf.laser.scene", "src": "x", "msg": "boom"}
+        self.assertIn("yellow", {a for _, a in bridge_view.format_line(warn, width=200)})
+        self.assertIn("red", {a for _, a in bridge_view.format_line(err, width=200)})
+
+    def test_unknown_surface_stays_plain_bright(self) -> None:
+        rec = {"ts": 1.0, "lvl": "INFO", "cat": "rb_memory", "src": "rb_memory", "msg": "scan"}
+        attrs = {a for _, a in bridge_view.format_line(rec, width=200)}
+        self.assertNotIn("surface:rb_memory", attrs)
+        self.assertIn("bright", attrs)
 
     def test_time_and_reason_and_beat_are_dim(self) -> None:
         rec = {
@@ -218,14 +241,14 @@ class FormatLineTest(unittest.TestCase):
         self.assertIn("fader_top", segments[-2][0])
         self.assertIn("10.0", segments[-1][0])
 
-    def test_deck_and_surface_and_value_are_bright(self) -> None:
+    def test_deck_and_surface_and_value_are_emphasized(self) -> None:
         rec = {"ts": 1.0, "lvl": "INFO", "cat": "perf.deck", "src": "state_manager",
                "msg": "switch 1->2", "deck": 1}
         segments = bridge_view.format_line(rec, width=200)
-        bright_texts = "".join(text for text, attr in segments if attr == "bright")
-        self.assertIn("D1", bright_texts)
-        self.assertIn("deck", bright_texts)
-        self.assertIn("switch 1->2", bright_texts)
+        loud = "".join(t for t, a in segments if a in ("bright", "surface:deck"))
+        self.assertIn("D1", loud)
+        self.assertIn("deck", loud)
+        self.assertIn("switch 1->2", loud)
 
     def test_deck_column_blank_padded_when_absent(self) -> None:
         rec = {"ts": 1.0, "lvl": "INFO", "cat": "sys.boot", "src": "bridge", "msg": "bridge log opened"}
