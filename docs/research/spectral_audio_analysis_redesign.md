@@ -803,6 +803,93 @@ measurement the same session.
    **marker-quality rate confirmed (measured); the musical-falseness remainder: operator
    ground truth, unquantifiable from audio alone.**
 
+## Appendix G — operator lighting walkthroughs (2026-07-05; creative direction for the Feature 1–4 specs — recorded verbatim in intent, annotated with measured beats)
+
+The operator narrated how lighting should behave through two tracks, beat by beat, with the
+explicit framing: **generalizable, not hard-coded** — "not every tech house song should
+follow this EXACT pattern"; these are windows into how the engine should think. His close:
+"This is just my general idea in mind and does not replace all the context we've built up."
+
+**General principles (operator's own):**
+- The LED strips light the entire room, **paired with the 2 DMX lasers in a haze setting** —
+  ⚠️ this answers the v2 review's standing open question 3 (haze was UNKNOWN): haze is IN,
+  so beam-based laser designs are in scope. Must be folded into the v2 record.
+- **Amount of light in the room ≈ strength of the audio.**
+- **Animation-rate ladder:** atmospheric/slow-breakdown moments animate every 1/2/4 beats
+  (by musical character); regular grooves every beat; drops every 1 / 0.5 / 0.25 beats.
+- Fast color changes *within the track's palette* can also signal energy/musical elements.
+- Track palettes as examples: STARsound = blue/cyan/white, typically brighter; Can't Say
+  Nah = cool darker tones, primarily blue/cyan.
+
+**Walkthrough 1 — Odd Mob, Walker, Royce — Can't Say Nah** (annotated: his timestamps land
+on his own markers almost exactly):
+- 0:00→0:29.6 (beats 0–64, groove): beat-synced groove effect, cool blue/cyan — "basically
+  my rt groove chase looks."
+- 0:29.6 (buildup marker 64): lows drop out; groove looks continue with a **hue shift** to
+  signal the missing low end and slow build (darker or brighter — operator undecided).
+- 32 beats before the drop: buildup cues, but **white+blue mix instead of full white**
+  (this build is not too intense — build intensity should scale the white share).
+- 1 beat before the drop: a minor percussive cut → **1-beat blackout**.
+- Drop 0:59.1 (marker 128): a slightly intense low-end growl, ~4 beats, recurring (another
+  at 1:13.9 = marker 160) — "a lot of tech house drops have this characteristic."
+  **Growl beats get the strobing sparkle (rt drop chase); the regular driving beat gets
+  rt post drop chase (beat-synced strobing comets).** [Texture-reactive seasoning *within*
+  the drop — the growl/pulse classes are the natural inputs; role scheduling unchanged.]
+- 3rd chorus 1:28.7→1:58.2 (markers 192–256): **"not as intense (should be recognized by
+  spectral analysis)"** — honest verification note: the window vectors currently read
+  chorus 3 nearly identical to drop 1 (full 15.0 vs 14.9 dB, sub 31.0 vs 31.2, attack 12.5
+  vs 13.6) — the softness his ear hears is NOT yet shown by the primary energy measures;
+  open analysis question, candidate axes (layer thickness, mid/high content) unexplored.
+- 1:58.2 (breakdown marker 256): lows cut, drums persist.
+- 2:27.7: percussion cuts out into the build — LEDs **sparse and dim** into the drop; "this
+  buildup is more like an implosion waiting to happen."
+- 2:40.7: room blackout (measured: a 2-beat bottom-gone run at beats 348–349 — shorter than
+  the described ~4-beat window; partial agreement). Drop 2:42.5 (marker 352): **intense
+  full-LED strobe for 4 beats** complementing a growl *more intense than the first drop* —
+  verification note: the analysis reads the two growls near-equal in level (27–29 dB both)
+  with only slightly higher distortion late; his ear ranks late > first — a divergence the
+  analysis cannot currently rank; his ear wins for design.
+- 4 beats after: intense strobing post-drop chase. 2:49.8: another intense growl → full
+  blue/cyan strobe.
+
+**Walkthrough 2 — kohta x Bafu — STARsound (pt3)** (hard-hitting euphoric dubstep/trap):
+- 0:00→0:52.9 atmospheric: LEDs **twinkle and simmer** (measured: percussion-light, low-band
+  attack median 2.3 dB).
+- 0:28.1: hidden energy rise begins (= his buildup marker at beat 67, and full-band steps
+  9→15 dB — measurable): LEDs ramp and progress (exact animation open).
+- 0:52.9: blackout → **explosion of LEDs at the drop** (marker 131): strip fills with
+  blue/cyan/white intense strobe sparkles; the drop carries a loud driving low-mid melodic
+  element → a dubstep/trap drop variation strobing the room in the track's colors.
+- 1:21→1:34.3: atmospheric again (breakdown). 1:34.3: hidden ramp (= buildup marker 195).
+- 1:47.5 (breakdown marker 259): "low ends cut out + loud synthy mid-high sustained melodic
+  element" → room goes **bright cyan/white with reasonable animation speed** — measured
+  note: the sustain is confirmed (sustained-mid 20.4 dB) but the sub reads present
+  (29.2 dB) at that exact beat; the "cut" may be the kick (not sub) or sit at a nearby beat.
+- 2:00.8 (buildup marker 291): build with the low-profile percussion → buildup cue,
+  progressing.
+- 2:12.4: **lights cut for 4 beats on an audio dip** — measured note: this dip is a
+  RELATIVE full-band drop (~10.3 dB vs ~17 typical), NOT a bottom-gone event (sub still
+  25 dB): his "dip" vocabulary sometimes means relative energy drops, which the stored
+  `full_db` series shows directly — the blackout/dip consumer needs the relative-dip
+  reading alongside the bottom-gone primitive (both derivable from cache, no schema
+  change).
+- Next 8 beats: **very sparse cyan/white sparkles** until 2:16.5, where the just-introduced
+  bass cuts again for 2 beats → **2-beat blackout** (same relative-dip note), then the
+  drop at 2:17 (marker 331 ✓).
+- Drop 2:17: "mid-high pitched euphoric elements cutting through. Imagine a pack of
+  swordfish speeding past you in the ocean." → **energetic strobing cyan/white chase,
+  fast, chasing every 0.5 beats.**
+
+**Spec-mapping notes (for the fold-in, not decisions):** his cue vocabulary maps to the
+existing v1 library names (rt groove chase / buildup cues / rt drop chase / rt post drop
+chase) exactly as the v2 record's shape-vs-color split anticipates; growl-timed accents
+within drops = texture seasoning over role cues (operator correction 4 layering holds); the
+white-share-scales-with-build-intensity idea gives the buildup cue its measured input; the
+animation-rate ladder is the concrete form of "intensity moves with the arc." Three honest
+analysis gaps surfaced: chorus-softness recognition (unproven), growl-intensity ranking
+(unproven), and relative-dip detection (derivable from stored full_db, needs a consumer
+rule — no schema change).
+
 ## Appendix E — second follow-up build (2026-07-05): fast low-mid pulse + section map
 
 Operator session: two more wobble labels (Devault — Feels Like Us capochino flip; Dom Dolla —
