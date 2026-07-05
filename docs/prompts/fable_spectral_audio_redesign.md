@@ -68,6 +68,18 @@ that genre's sound. The operator's own genre map, in his words:
 - Hard techno: **pounding, driving** beats.
 - Synth house: the **euphoric synth sustain** drop examples live here.
 
+**Operator-named ground-truth anchor tracks (verified present in the DB 2026-07-05 — treat
+these as the definitive exemplars of their characteristic):**
+
+- `Chemicals (Feat. Nat Slater) (Extended)` by **it's murph** — THE euphoric synth drop.
+  Caution: the library also contains `Tiesto & Don Diablo - Chemicals (Studio Acapella)` —
+  match by artist, do not confuse them.
+- `Odd Mob, Walker, Royce - Can't Say Nah (Original Mix)` — THE bassy sustain drop.
+
+Your drop-character measurements must demonstrably capture what defines these two tracks'
+drops; include both in the timestamped event outlines so the operator can scrub-verify his
+own exemplars first.
+
 A v4 that cannot demonstrate these distinctions on the labeled playlists has not met the
 bar — genre-level discrimination of drop-window character is a required proof, not a
 nice-to-have. One honest exception: if a *specific* distinction proves genuinely unreachable
