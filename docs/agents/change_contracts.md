@@ -73,21 +73,18 @@ Forbidden assumptions:
 Triggered by changes to:
 
 - `bridge_fmt.py`
-- `logging_manager.py`
 - `diagnostics.py`
 - `runtime_status.py` when changing status or heartbeat log visibility
-- `docs/setup/logging_live_watch.json`
 
 Inspect:
 
 - `docs/subsystems/logging.md`
-- `docs/setup/logging_live_watch.json`
 - `docs/subsystems/runtime_commands.md` when heartbeat/status logs are involved
 
 Run:
 
 ```bash
-python -m unittest tests.test_bridge_fmt_rate tests.test_logging_diag_coverage
+python -m unittest tests.test_bridge_fmt_rate tests.test_logging_surface
 python tools/check_agent_contracts.py
 ```
 

@@ -57,7 +57,7 @@ from .state_manager import (
     SMART_REARM_EXPERIMENT_ENV,
     StateManager,
 )
-from .diagnostics import DriftDetector, enable_debug, is_debug
+from .diagnostics import DriftDetector
 from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService, read_rekordbox_version
 from . import bridge_log
 from .laser_config import LaserConfig, LaserConfigResult, load_laser_director_config
@@ -935,8 +935,12 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _early_shutdown)
     signal.signal(signal.SIGINT, _early_shutdown)
 
-    if is_debug() or "--debug" in sys.argv:
-        enable_debug()
+    if "--debug" in sys.argv:
+        # bridge_log.init() already applied BRIDGE_DEBUG=1 at module-import
+        # time (before argv parsing could see --debug); a direct root-level
+        # set here is the equivalent no-re-init fix so both paths land on
+        # the same DEBUG-everywhere behavior.
+        logging.root.setLevel(logging.DEBUG)
 
     log.info("[MAIN] starting")
     # Shared authoritative event queue.

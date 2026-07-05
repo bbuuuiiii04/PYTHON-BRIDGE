@@ -45,7 +45,7 @@ Coverage expectations:
   default-on startup wiring, heartbeat/status stale-master separation, and
   deck-0 idle clear safety.
 - Logging visibility changes need `tests/test_bridge_fmt_rate.py` for spam-control primitives and
-  `tests/test_logging_diag_coverage.py` for diagnostic coverage and the live-watch preset.
+  `tests/test_logging_surface.py` for diagnostic coverage.
 - Docs/agent workflow changes need `tests/test_docs_orphan_check.py` for active-doc
   classification and `tests/test_check_docs_staleness.py` for advisory staleness
   contract parsing, glob expansion, and implementation-file filtering.

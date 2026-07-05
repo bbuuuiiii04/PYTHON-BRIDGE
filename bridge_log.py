@@ -39,7 +39,7 @@ def _new_trace_id() -> str:
 
 
 def _redact(value: Any) -> Any:
-    """Mask dict keys naming secrets. Ported verbatim from logging_manager.py:36-48."""
+    """Mask dict keys naming secrets (token/secret/password/key), recursively."""
     if isinstance(value, dict):
         redacted = {}
         for key, item in value.items():
@@ -77,9 +77,9 @@ def event_scope(kind: str, *, deck: int = 0, trace_id: str = "") -> Iterator[str
 def stamp_trace(ev: Any) -> str:
     """Ensure ev.payload carries a trace id + enqueue timestamp; return the id.
 
-    Mirrors logging_manager.LoggingEventQueue.put_nowait (logging_manager.py:
-    216-225), minus LogStats bookkeeping. Preserves an existing trace id;
-    never touches any other payload key.
+    Mirrors the pre-W5 event-queue trace stamping, minus the retired stats
+    sampler's bookkeeping. Preserves an existing trace id; never touches any
+    other payload key.
     """
     payload = getattr(ev, "payload", None)
     if payload is None:

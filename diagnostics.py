@@ -1,15 +1,13 @@
 """
 Pipeline diagnostics and debug tooling.
 
-Enable per-module debug logging:
-  export BRIDGE_DEBUG=1   (or pass --debug on CLI)
-
-Drift detection for memory position reads.
+Drift detection for memory position reads. Per-module debug logging is now
+`bridge_log.init()`'s job (BRIDGE_DEBUG=1 / --debug set logging.root to
+DEBUG; see bridge_log.py and __main__.py:main()).
 """
 from __future__ import annotations
 
 import logging
-import os
 import time
 from typing import Optional
 
@@ -49,26 +47,3 @@ class DriftDetector:
                     f"{delta_wall:.0f} ms while playing")
 
         return None
-
-
-# ── Verbose mode toggle ────────────────────────────────────────────────────────
-
-def enable_debug() -> None:
-    """Set all bridge loggers to DEBUG level."""
-    for name in ("rb_memory", "filepath_resolver",
-                 "scripted_tracks", "osl_output", "state_manager",
-                 "diagnostics", "bridge", "logging_manager",
-                 # Laser
-                 "laser_director", "laser_executor", "laser_config",
-                 # LED / Govee
-                 "led_look_director", "led_color_engine", "beat_sync_engine",
-                 "led_dispatch_coordinator", "govee_scene_adapter",
-                 "govee_runtime_sender", "govee_realtime_runner",
-                 "govee_realtime_transport", "govee_frame_renderer",
-                 "govee_owner_state"):
-        logging.getLogger(name).setLevel(logging.DEBUG)
-    log.info("Verbose debug mode enabled")
-
-
-def is_debug() -> bool:
-    return bool(os.environ.get("BRIDGE_DEBUG"))

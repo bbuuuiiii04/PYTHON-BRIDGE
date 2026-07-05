@@ -70,12 +70,9 @@ contracts:
       - bridge_fmt.py
       - bridge_log.py
       - bridge_view.py
-      - logging_manager.py
       - diagnostics.py
       - runtime_status.py
-      - docs/setup/logging_live_watch.json
     key_symbols:
-      - LoggingManager
       - log_changed
       - log_throttled
       - emit
@@ -83,10 +80,9 @@ contracts:
       - health
     inspect:
       - docs/subsystems/logging.md
-      - docs/setup/logging_live_watch.json
       - docs/subsystems/runtime_commands.md
     tests:
-      - python3 -m unittest tests.test_bridge_fmt_rate tests.test_logging_diag_coverage
+      - python3 -m unittest tests.test_bridge_fmt_rate tests.test_logging_surface
       - python3 -m unittest tests.test_bridge_log
       - python3 -m unittest tests.test_bridge_view
       - python3 tools/check_agent_contracts.py
