@@ -156,6 +156,25 @@ approved the following, which supersede earlier items where they conflict:
 10. **Operator practice already matches** pre-drop blackout + build strobe acceleration (his
     v1 cues do both by hand) — v2's build move ships them as standard.
 
+Round 3 (`docs/research/edm_lighting_color_research_round3.md` — thinnest sourcing of the
+three, mostly scene-lore synthesis; only physics-solid or lore-consistent items adopted):
+
+11. **Pop-vocal flip treatment (the library's signature structure, automatable):** the
+    backward pre-drop scan distinguishes true silence (all bands near zero → blackout) from a
+    **vocal over an empty floor** (kick+sub near zero, mid/high active → singalong): singalong
+    beats get a warm, still wash (a brief role-level overlay, not an identity change), then
+    blackout lands on the final beat before the drop. Same cached envelopes, one extra check.
+12. **Hazeless laser reality (physics):** without haze, beams are invisible — the laser phase
+    designs for surface patterns (ceiling/wall scans), rest-during-verses / fire-on-drops,
+    colored to contrast the strip wash. If the operator runs haze, beam looks re-enter scope.
+13. **Small-room brightness:** research caps drop strobes ~70% at 3 m viewing distance; the
+    operator's WILD OUT 100% lock stands (his room, his call) — peak brightness ships as a
+    live-tunable trim knob so the live pass can find the sweet spot.
+14. **Palate reset on hard genre pivots:** quick cuts across genres may insert a 1–2 s neutral
+    dip before the new identity establishes (consistent with the existing quick-cut snap).
+15. **Hardware note for the operator (not engine work):** physically diffuse the strips
+    (milky channel) or bounce them off walls — exposed LED dots read amateur at close range.
+
 **Next step:** author the Codex implementation specs (Feature 1 → 2 → 3) per
 `.claude/skills/codex-spec/SKILL.md`, on Brandon's go.
 
