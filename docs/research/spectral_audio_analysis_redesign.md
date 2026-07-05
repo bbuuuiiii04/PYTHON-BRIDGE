@@ -602,11 +602,11 @@ Every event above is a description; ANLZ markers remain the only structural trig
    tracks. If any listed event reads wrong when you scrub there in Rekordbox, say which
    timestamp — every class threshold is a code constant, re-tunable in minutes without
    re-analyzing the library. **Default: calibrated thresholds ship as-is.**
-3. **Classic LFO-wobble detection stays unshipped** (§4.9): your current dubstep is
-   stab/scream-era and gave the measure nothing to calibrate against. If you ever want a
-   true wobble class, name (or buy) a handful of wobble-heavy tracks and it can be derived
-   from the already-stored data — no re-extraction. **Default: skip it; the growl/whir
-   timbre classes cover today's catalog.**
+3. **Classic LFO-wobble detection: first labeled positive received** — the operator named
+   Billie Eilish — LUNCH (Phrva Flip) post-build, and the wobble signature derived cleanly
+   from the already-stored cache data (Appendix D item 2 — no re-extraction, as designed).
+   **Default: the class still ships only after 2–3 more labeled wobble tracks confirm the
+   thresholds generalize** — name them whenever; each is a five-minute cache read.
 
 ---
 
@@ -743,3 +743,49 @@ the distortion axis stands in for roughness. Labeled as a v4 limitation, not hid
   `sustained_synth` (not "euphoric"); which *treatment* a sustained synth in a 160 BPM
   pounding track earns belongs to the consumer reading the whole vector. This is the
   containment rule expressing itself at the naming level.
+
+## Appendix D — operator follow-up session (2026-07-05, post-build; all measured from the shipped cache)
+
+The operator supplied four pieces of ground truth after the build; each was chased to a
+measurement the same session.
+
+1. **GRiZ — "I Remember" flip (the one failed extraction): the file itself is corrupt** —
+   libsndfile aborts mid-stream ("flac decoder lost sync") and CoreAudio's decoder errors
+   too; the header is valid (44.1 kHz/16-bit, 4:33) but frames are damaged. v3 fails
+   identically, so zero-behavior-change holds. Fix is operator-side: replace the file —
+   the cache keys off mtime+size, so the new copy analyzes automatically at next load or
+   sweep. **confirmed (measured)**.
+2. **Billie Eilish — LUNCH (Phrva Flip): the first labeled wobble positive — and the
+   derive-from-cache promise validated.** The operator named it as "the exact bass wobble
+   drop." The §4.9 experiment ran immediately, reading ONLY `growl_band_frames` from the
+   cache (no audio decode anywhere): LUNCH's drops show *concentrated* modulation-spectrum
+   peaks at **3.0, 4.0, and 6.0 cycles/beat** (6.99/9.35/14.03 Hz at 140 BPM — triplet,
+   16th, and sextuplet LFO, changing rate per drop: the "talking bass"), with sustained-tone
+   duty 0.72–0.79. Every negative behaves: Can't Say Nah / SIGNAL peak at the metric
+   1.0–2.0 cycles/beat (kick pattern), Wanna Be's techno offbeat pumps at exactly 2.0,
+   Gimme That's stabs fail the duty gate (0.39–0.41), ILL's briddim chug shows bar-level
+   phrasing. Candidate rule separating this set: duty ≥ 0.6 AND dominant rate ≥ 2.5
+   cycles/beat AND peak concentration ≥ 0.10. **Status upgrade: derivation-from-cache
+   proven on the operator's labeled example (no re-extraction — the F-9 insurance paid
+   off); the class remains unshipped until a few more labeled positives pin thresholds
+   that generalize.** confirmed (measured).
+3. **ISOKNOCK — SIGNAL (Party Foul Remix) reads exactly as the operator described**
+   ("full bassy but clear trap hit with a siren"): main drops show growl-flatness
+   0.017–0.035 (among the cleanest timbre in the corpus — *clear*), within-beat low-band
+   swing 19–20 dB with attack p90 14–19 dB (*discrete heavy hits*), sub 23.2 dB at the
+   main drop (*full bassy*), sparse mid/high onsets (~2/beat, halftime), and
+   sustained-synth runs riding straight through the drop sections (beats 140–149, 156–163,
+   172–186 — *the siren*). Bonus finding: its beat-12 intro "drop" marker carries sub
+   −12.7 dB — a concrete instance of item 4. **confirmed (measured)**.
+4. **Operator ground truth recorded: some ANLZ "chorus up" (drop) markers are not genuine
+   drops.** Corpus check over all 1,264 BY GENRE drop markers: only 14 (1.1%) are
+   *flagrantly* false by audio evidence (no ≥1 dB energy lift AND no real sub after the
+   marker — clustered in ISOXO intros/outros). The operator's caveat covers more than
+   those: a section can lift energetically yet not be a musical drop, which audio evidence
+   alone cannot adjudicate. Consequence for Feature 2 (recorded for its spec): the
+   drop-window character vector gives the classifier per-marker descriptive evidence
+   (sub weight, lift, coverage), so weak markers naturally land in the F-11
+   neutral/conservative default; whether to *suppress* any cue on a weak marker is a
+   Feature-2 locked-design decision, deliberately not this layer's call (containment).
+   **marker-quality rate confirmed (measured); the musical-falseness remainder: operator
+   ground truth, unquantifiable from audio alone.**
