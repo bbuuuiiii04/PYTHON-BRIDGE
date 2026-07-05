@@ -570,6 +570,24 @@ class ArgParserTest(unittest.TestCase):
         self.assertEqual(args.path, "/tmp/example.jsonl")
 
 
+class FormatTitleBarTest(unittest.TestCase):
+    def test_legend_right_aligned_at_80_cols(self) -> None:
+        text = bridge_view.format_title_bar(1, False, 80)
+        self.assertTrue(text.endswith("space freeze · a ack · q quit"))
+        self.assertLessEqual(len(text), 80)
+        self.assertIn("*1 SHOW*", text)
+
+    def test_legend_dropped_when_too_narrow(self) -> None:
+        text = bridge_view.format_title_bar(1, False, 50)
+        self.assertNotIn("q quit", text)
+        self.assertIn("*1 SHOW*", text)
+
+    def test_frozen_indicator_still_present(self) -> None:
+        text = bridge_view.format_title_bar(2, True, 120)
+        self.assertIn("FROZEN(space=resume)", text)
+        self.assertIn("q quit", text)
+
+
 class FormatHeaderTest(unittest.TestCase):
     def test_idle_deck_zero_reads_as_words(self) -> None:
         line = bridge_view.format_header(

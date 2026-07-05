@@ -739,14 +739,31 @@ class ViewerState:
         return True
 
 
-def _draw_title_bar(stdscr: Any, state: ViewerState, width: int) -> None:
-    """Row 0, always -- fixed position regardless of screen/content (rule 2)."""
+_KEY_LEGEND = "space freeze · a ack · q quit"
+
+
+def format_title_bar(screen: int, frozen: bool, width: int) -> str:
+    """Title-bar text: screen tabs left, key legend right (UX item 5).
+
+    First-run discoverability: nothing else on screen says 'a' clears alerts
+    or 'space' freezes scrolling. The legend is dropped (never wrapped or
+    overlapped) when the window is too narrow to fit it after the tabs.
+    """
     tabs = "  ".join(
-        f"*{n} {_SCREEN_NAMES[n]}*" if n == state.screen else f" {n} {_SCREEN_NAMES[n]} "
+        f"*{n} {_SCREEN_NAMES[n]}*" if n == screen else f" {n} {_SCREEN_NAMES[n]} "
         for n in (1, 2, 3, 4)
     )
-    frozen = "  FROZEN(space=resume)" if state.frozen else ""
-    text = f"{tabs}{frozen}"
+    frozen_text = "  FROZEN(space=resume)" if frozen else ""
+    left = f"{tabs}{frozen_text}"
+    gap = width - len(left) - len(_KEY_LEGEND)
+    if gap >= 2:
+        return f"{left}{' ' * gap}{_KEY_LEGEND}"
+    return left
+
+
+def _draw_title_bar(stdscr: Any, state: ViewerState, width: int) -> None:
+    """Row 0, always -- fixed position regardless of screen/content (rule 2)."""
+    text = format_title_bar(state.screen, state.frozen, width)
     try:
         stdscr.addstr(0, 0, text[:width].ljust(width), _attr_for("dim") | curses.A_REVERSE)
     except curses.error:
