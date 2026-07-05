@@ -53,8 +53,9 @@ Two different scopes, do not mix them:
   never enter calibration statistics or validation claims — cache them in the sweep, learn
   from them never. Query the playlist tree via the bridge's own DB layer
   (`personality_resolver.py` shows the playlist-membership pattern); the folder is named
-  "BY GENRE" (verified present in the DB 2026-07-05); if you cannot resolve it, stop and
-  report rather than sampling the whole collection.
+  "BY GENRE" (verified present in the DB 2026-07-05 — note the DB shows two nodes with that
+  name; use the playlist *folder* whose children are the per-genre playlists); if you cannot
+  resolve it, stop and report rather than sampling the whole collection.
 
 **The genre playlists are labeled ground truth — use them.** Each playlist under BY GENRE
 holds one genre; analyze tracks from each and prove your measurements capture what defines
@@ -69,7 +70,9 @@ that genre's sound. The operator's own genre map, in his words:
 
 A v4 that cannot demonstrate these distinctions on the labeled playlists has not met the
 bar — genre-level discrimination of drop-window character is a required proof, not a
-nice-to-have.
+nice-to-have. One honest exception: if a *specific* distinction proves genuinely unreachable
+from the signal, an evidence-backed `unreachable` ruling (what was tried, why it fails, what
+data would be needed) is an acceptable answer for that distinction — overclaiming is not.
 
 ## The operator's bar (requirements seed — a floor, not a ceiling)
 
@@ -241,7 +244,8 @@ calls — plain language, complete sentences, for a reader who saw none of the w
 - Every load-bearing v4 measurement is proven on genre-folder tracks; anything unproven is
   disabled and labeled with its missing experiment.
 - The genre-discrimination proof stands: the labeled BY GENRE playlists' defining drop
-  characters (per the operator's genre map) are demonstrably distinguishable in v4 output.
+  characters (per the operator's genre map) are demonstrably distinguishable in v4 output —
+  or a specific distinction carries its evidence-backed `unreachable` ruling.
 - The four identity axes (or justified better replacements) are derivable from v4 with
   stability evidence.
 - The whole-library sweep has run to completion with reported coverage, duration, and cache
