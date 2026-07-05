@@ -54,6 +54,8 @@ from .rb_memory import (
     get_rb_pid,
 )
 from .rb_offsets import ChainEntry, RBOffsetVersion, load_offsets_for_version
+from . import bridge_fmt as bf
+from . import bridge_log
 
 log = logging.getLogger("rb_state")
 
@@ -182,7 +184,7 @@ class RBStateReader(threading.Thread):
             self._set_all_master_unavailable()
             return
         if self._offs is None:
-            log.info("RBStateReader: no offsets for current RB version; not starting")
+            bridge_log.health("rb", "no offsets for current RB version; not starting")
             self._set_all_anlz_unavailable()
             self._set_all_transport_unavailable()
             self._set_all_track_load_unavailable()
@@ -191,35 +193,41 @@ class RBStateReader(threading.Thread):
         try:
             task, base = self._attach()
         except Exception:
-            log.exception("RBStateReader: attach failed; direct events unavailable")
+            bridge_log.health(
+                "rb", "attach failed; direct events unavailable",
+                lvl=logging.ERROR, exc_info=True,
+            )
             self._set_all_anlz_unavailable()
             self._set_all_transport_unavailable()
             self._set_all_track_load_unavailable()
             self._set_all_master_unavailable()
             return
-        log.info("RBStateReader: attached pid=%s base=0x%x version=%s",
-                 self._rb_pid, base, self._offs.version)
+        bridge_log.health(
+            "rb", "attached pid=%s base=0x%x version=%s",
+            self._rb_pid, base, self._offs.version, lvl=logging.INFO,
+        )
 
         next_tick = self._clock()
-        while not self._stop_event.is_set():
-            try:
-                self._tick(task, base)
-            except OSError as exc:
-                # mach_vm_read_overwrite failed — likely pointer chain broke
-                # mid-poll (common during track loads). Single-tick error is OK.
-                log.debug("RBStateReader: tick read error: %s", exc)
-            except Exception:
-                log.exception("RBStateReader: tick crashed; sleeping 1 s")
-                self._sleeper(1.0)
-                next_tick = self._clock()
-                continue
-            next_tick += self._period
-            sleep = next_tick - self._clock()
-            if sleep > 0:
-                self._sleeper(sleep)
-            else:
-                # Missed deadline; resync rather than spinning
-                next_tick = self._clock()
+        with bridge_log.thread_guard("rb-state-reader"):
+            while not self._stop_event.is_set():
+                try:
+                    self._tick(task, base)
+                except OSError as exc:
+                    # mach_vm_read_overwrite failed — likely pointer chain broke
+                    # mid-poll (common during track loads). Single-tick error is OK.
+                    log.debug("RBStateReader: tick read error: %s", exc)
+                except Exception:
+                    log.exception("RBStateReader: tick crashed; sleeping 1 s")
+                    self._sleeper(1.0)
+                    next_tick = self._clock()
+                    continue
+                next_tick += self._period
+                sleep = next_tick - self._clock()
+                if sleep > 0:
+                    self._sleeper(sleep)
+                else:
+                    # Missed deadline; resync rather than spinning
+                    next_tick = self._clock()
         self._set_all_anlz_unavailable()
         self._set_all_transport_unavailable()
         self._set_all_track_load_unavailable()
@@ -652,7 +660,8 @@ class RBStateReader(threading.Thread):
             target.put_nowait(ev)
         except queue.Full:
             # Drop on overflow rather than blocking the reader thread.
-            log.warning("RBStateReader: queue full; dropping %s", ev.kind)
+            if bf.log_throttled("rb_state_queue_full", 5.0):
+                bridge_log.health("queue", "rb_state queue full; dropping %s", ev.kind)
 
     # ── Pointer-chain primitives ─────────────────────────────────────────────
     def _follow_addr(self, task: int, base: int, ch: ChainEntry) -> Optional[int]:

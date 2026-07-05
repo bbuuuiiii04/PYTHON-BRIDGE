@@ -126,55 +126,61 @@ class OS2LConnection:
             self._send_q.put_nowait(payload)
         except queue.Full:
             self._drop_count += 1
-            log.warning("[OS2L] queue-full  action=drop")
+            if bf.log_throttled("os2l_queue_full", 5.0):
+                bridge_log.health("queue", "os2l send queue full; dropping")
 
     def _sender_loop(self) -> None:
-        while not self._stop.is_set():
-            try:
-                msg = self._send_q.get(timeout=1)
-            except queue.Empty:
-                continue
-            if msg is None:
-                break
-            with self._lock:
-                sock = self._sock if self._connected else None
-            if sock is None:
-                self._no_socket_drop_count += 1
-                continue
-            try:
-                sock.sendall(msg)
-                self._sent_count += 1
-            except OSError as exc:
-                self._send_error_count += 1
-                log.warning("[OS2L] send-error  err=%s  action=reconnect", exc)
-                self.disconnect()
+        with bridge_log.thread_guard("os2l-sender"):
+            while not self._stop.is_set():
+                try:
+                    msg = self._send_q.get(timeout=1)
+                except queue.Empty:
+                    continue
+                if msg is None:
+                    break
+                with self._lock:
+                    sock = self._sock if self._connected else None
+                if sock is None:
+                    self._no_socket_drop_count += 1
+                    continue
+                try:
+                    sock.sendall(msg)
+                    self._sent_count += 1
+                except OSError as exc:
+                    self._send_error_count += 1
+                    bridge_log.health("os2l", "send-error err=%s; reconnecting", exc)
+                    self.disconnect()
 
     def _reconnect_loop(self) -> None:
-        while not self._stop.is_set():
-            with self._lock:
-                connected = self._connected
-            if connected:
-                time.sleep(0.5)
-                continue
-
-            with self._lock:
-                host, port = self.host, self.port
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5)
-                sock.connect((host, port))
-                sock.settimeout(None)
+        with bridge_log.thread_guard("os2l-reconnect"):
+            while not self._stop.is_set():
                 with self._lock:
-                    self._sock = sock
-                    self._connected = True
-                log.info("[OS2L] connected  %s:%d", host, port)
-                self.send(_HANDSHAKE)
-                if not self.fast_reconnect:
-                    self._send_init_defaults()
-                self.fast_reconnect = False
-            except (OSError, ConnectionRefusedError) as exc:
-                log.info("[OS2L] connect-fail  %s:%d  err=%s  retry=3s", host, port, exc)
-                time.sleep(3)
+                    connected = self._connected
+                if connected:
+                    time.sleep(0.5)
+                    continue
+
+                with self._lock:
+                    host, port = self.host, self.port
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(5)
+                    sock.connect((host, port))
+                    sock.settimeout(None)
+                    with self._lock:
+                        self._sock = sock
+                        self._connected = True
+                    bridge_log.health("os2l", "connected %s:%d", host, port, lvl=logging.INFO)
+                    self.send(_HANDSHAKE)
+                    if not self.fast_reconnect:
+                        self._send_init_defaults()
+                    self.fast_reconnect = False
+                except (OSError, ConnectionRefusedError) as exc:
+                    if bf.log_changed("os2l_conn_fail", (host, port, type(exc).__name__)):
+                        bridge_log.health(
+                            "os2l", "connect-fail %s:%d err=%s; retry=3s", host, port, exc,
+                        )
+                    time.sleep(3)
 
     def _send_init_defaults(self) -> None:
         for d in range(1, 5):

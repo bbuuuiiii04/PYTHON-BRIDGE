@@ -9,6 +9,8 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable, Mapping
 
 from .led_models import LEDAdapterCommand, LEDAdapterStatus, LEDConfig, LEDLookDecision
+from . import bridge_fmt as bf
+from . import bridge_log
 
 log = logging.getLogger("govee_scene_adapter")
 
@@ -182,6 +184,8 @@ class GoveeSceneAdapter:
             self._accepted_count += 1
             self._last_command = command
             self._last_command_at = now
+            if self._last_error and bf.log_changed("govee_cloud_ok", True):
+                bridge_log.health("govee.cloud", "recovered", lvl=logging.INFO)
             self._last_error = ""
             if worker_running:
                 self._pending_keys.add(dedupe_key)
@@ -340,8 +344,14 @@ class GoveeSceneAdapter:
                         self._send_error_count += 1
                         if result.malformed:
                             self._malformed_response_count += 1
+                        was_failing = self._consecutive_send_failures > 0
                         self._consecutive_send_failures += 1
                         self._set_degraded_locked(result.reason, result.reason)
+                        if not was_failing and bf.log_changed("govee_cloud_ok", False):
+                            bridge_log.health(
+                                "govee.cloud", "send failing reason=%s", self._last_error,
+                                data={"reason": self._last_error},
+                            )
                         if self._consecutive_send_failures >= _CIRCUIT_FAILURE_THRESHOLD:
                             self._circuit_open_until = self._time_fn() + _CIRCUIT_OPEN_SECONDS
                             self._degraded_reason = "circuit_open"

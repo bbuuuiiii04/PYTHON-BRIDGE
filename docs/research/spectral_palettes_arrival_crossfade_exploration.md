@@ -41,6 +41,69 @@ trust bar, and the data clears it.
 
 ---
 
+## Locked functionality agreement (operator session, 2026-07-05)
+
+Settled with Brandon in the follow-up design session. **Governance: design authority is
+delegated — Claude designs everything; Brandon's approval gate is the live look on his own
+hardware.** No further design questions go to Brandon; remaining choices below marked
+*(delegated)* were made under that authority using the report's recommendations. This
+supersedes the report's "Open questions for Brandon" section — those questions are closed as
+follows.
+
+**Cross-cutting (new, from the governance agreement):**
+- Every one of the three features ships with its **own independent runtime kill switch**
+  (per-feature disable, usable mid-set, without affecting the rest of the show).
+- Per-feature status is **not "done" until Brandon signs off on the live look**;
+  software-tested is a build gate, not an acceptance gate.
+
+**A — track identity (Brandon-answered, rounds 1–2):**
+1. Hue driver: key picks the family, **character vetoes uncapped** — a genuinely aggressive
+   track always lands in its truest emotional (warm) family regardless of key. Accepted cost:
+   occasional harmonic mixes render with the clash grammar.
+2. Identity is **permanent across nights** (absolute key→family anchor).
+3. **Drops always render full-scale**; the dynamics budget shapes only
+   ambient/groove/breakdown range.
+4. Long single-family "chapters" during harmonic stretches are **a feature** — the room follows
+   the set's shape.
+5. Depth axis = **saturation floor + gradient span only**; brightness and white usage are owned
+   by energy/role, so a chill track can never out-shine a banger.
+6. Until C exists, track handover = **soft flip** (4–8 beat p-space fade at active-deck flip).
+7. Identity reveal: **in, with a hold-gate** (~8 beats held active before the 2-bar first-play
+   bloom can fire).
+8. Late-drop palette surprise **stays inside the track's own family** (big shift, within
+   identity).
+9. Track character drives **motion style** (punchy → sharp attacks; smooth → flowing), not just
+   color.
+
+**B — Land on the One (Brandon locked the move list; the rest delegated):**
+1. Build list: **all four** — landing comets (infrastructure), the Gather (squeeze-to-center →
+   explode on the drop), the Cascade, the Phrase Swell. Landing comets + Gather first.
+2. *(delegated)* Gather fires **only into detected real drops**, never on a bare cycle.
+3. *(delegated)* Confidence gating is **asymmetric**: the Gather requires a stable grid +
+   steady BPM and silently sits out otherwise (a skipped Gather is invisible; a late one looks
+   broken); small landing moves fire freely.
+4. *(delegated)* LED-first; lasers join later via the pre-arm pattern.
+
+**C — mix-aware crossfade (delegated in full, per the report's grammar):**
+1. Incoming identity enters **accents-first, rhythmically** (bar-quantized presence steps);
+   spatial entry stays a per-template variant.
+2. Harmonic mixes morph through adjacent families; distant/clash mixes **alternate then
+   snap-commit** — never a muddy mid-hue.
+3. Quick cut / deck switch = **instant snap**. Abandoned blends breathe back out
+   (monotonic-with-hysteresis, no flicker). Resolve bloom fires only on a held, completed long
+   blend.
+4. The **double-drop moment is in**, strictly gated (both decks beat-aligned, both faders top,
+   drop sections overlapping).
+5. Deck 1/2 only; the Rekordbox 7.2.11 offset pin is an accepted operating constraint (feature
+   silently degrades to the time-based proxy on other versions).
+6. Fader smoothing/hysteresis constants get tuned from one `RBSS_RECORD_SESSION` practice
+   capture during the build — a build task, not an operator decision.
+
+**Next step:** author the Codex implementation specs (A first, then B, then C) per
+`.claude/skills/codex-spec/SKILL.md`, on Brandon's go.
+
+---
+
 ## Workstream A — spectral features → per-track palettes: GO
 
 ### A1. What was measured (all numbers from this session's read-only sweep)

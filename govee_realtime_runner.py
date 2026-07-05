@@ -17,7 +17,8 @@ from .govee_frame_renderer import (
     resolve_fade,
 )
 from .led_models import BeatAnchor
-from .bridge_fmt import log_throttled
+from .bridge_fmt import log_changed, log_throttled
+from . import bridge_log
 
 _COLOR_SIG_KEYS = frozenset({
     "color", "color2", "color_a", "color_b",
@@ -206,18 +207,27 @@ class GoveeRealtimeRunner:
     def _loop(self) -> None:
         interval = 1.0 / float(self._fps)
         next_at = self._time_fn()
-        while not self._stop.is_set():
-            now = self._time_fn()
-            provider = None
-            with self._lock:
-                provider = self._beat_provider
-            anchor = provider() if provider is not None else None
-            self._tick_once(anchor, now)
-            next_at += interval
-            sleep_s = max(0.0, next_at - self._time_fn())
-            if sleep_s == 0.0:
-                next_at = self._time_fn()
-            self._sleep_fn(min(interval, sleep_s))
+        with bridge_log.thread_guard("GoveeRealtimeRunner"):
+            while not self._stop.is_set():
+                now = self._time_fn()
+                provider = None
+                with self._lock:
+                    provider = self._beat_provider
+                anchor = provider() if provider is not None else None
+                self._tick_once(anchor, now)
+                next_at += interval
+                sleep_s = max(0.0, next_at - self._time_fn())
+                if sleep_s == 0.0:
+                    next_at = self._time_fn()
+                self._sleep_fn(min(interval, sleep_s))
+
+    def _note_rt_send_health(self, sent_ok: bool, was_failing: bool) -> None:
+        """Edge-triggered health.govee.rt transition on transport send success/failure."""
+        if sent_ok:
+            if was_failing and log_changed("govee_rt_ok", True):
+                bridge_log.health("govee.rt", "recovered", lvl=logging.INFO)
+        elif log_changed("govee_rt_ok", False):
+            bridge_log.health("govee.rt", "send failing (transport_send_failed)")
 
     def _tick_once(self, anchor: BeatAnchor | None, now: float) -> None:
         if self._emergency.is_set():
@@ -262,12 +272,14 @@ class GoveeRealtimeRunner:
                 if self._emergency.is_set():
                     self._emergency_teardown()
                     return
+                was_failing = bool(self._last_error)
                 sent_ok = self._transport.send_frame(frame)
                 self._last_frame = frame
                 with self._lock:
                     self._last_error = "" if sent_ok else "transport_send_failed"
                     self._frame_index += 1
                     self._idle_since = None
+                self._note_rt_send_health(sent_ok, was_failing)
                 self._publish_engine_status(cleared=False)
                 return
             self._idle_tick(now)
@@ -322,11 +334,13 @@ class GoveeRealtimeRunner:
         if self._emergency.is_set():
             self._emergency_teardown()
             return
+        was_failing = bool(self._last_error)
         sent_ok = self._transport.send_frame(frame)
         self._last_frame = frame
         with self._lock:
             self._last_error = "" if sent_ok else "transport_send_failed"
             self._frame_index += 1
+        self._note_rt_send_health(sent_ok, was_failing)
         self._publish_engine_status(cleared=False)
         if log_throttled("rgb_rt_summary", 1.0, now):
             self._log.info(

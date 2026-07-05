@@ -36,6 +36,8 @@ from .config import (
 )
 from .models import PositionSnapshot
 from .rb_offsets import ChainEntry, RBOffsetVersion, load_offsets_for_version
+from . import bridge_fmt as bf
+from . import bridge_log
 
 log = logging.getLogger("rb_memory")
 POS_CHAIN_DIRECT_ENV = "RBSS_POS_CHAIN_DIRECT"
@@ -1045,6 +1047,17 @@ class RBMemoryReader(threading.Thread):
     def get_session(self) -> Optional[RBSession]:
         return self._session
 
+    def _log_drift(self, deck: int, warn: Optional[str]) -> None:
+        """Edge-triggered health.reader emit: DriftDetector can re-report the
+        same freeze/jump every tick while it persists — guard on the
+        per-deck ok/not-ok transition, not the (slightly-changing) message text.
+        """
+        if warn:
+            if bf.log_changed(f"rb_drift_deck_{deck}", True):
+                bridge_log.health("reader", "drift deck=%d: %s", deck, warn, deck=deck)
+        else:
+            bf.log_changed(f"rb_drift_deck_{deck}", False)
+
     def run(self) -> None:
         log.info("[RBMEM][STATUS] reader starting hz=%d", MEM_POLL_HZ)
         if self._pos_chain_direct:
@@ -1054,12 +1067,13 @@ class RBMemoryReader(threading.Thread):
             else:
                 log.info("[RBMEM][CHAIN] enabled via %s=1 version=%s",
                          POS_CHAIN_DIRECT_ENV, self._offsets.version)
-        while not self._stop.is_set():
-            t0 = time.monotonic()
-            self._tick()
-            remaining = self._interval - (time.monotonic() - t0)
-            if remaining > 0:
-                time.sleep(remaining)
+        with bridge_log.thread_guard("rb-memory-reader"):
+            while not self._stop.is_set():
+                t0 = time.monotonic()
+                self._tick()
+                remaining = self._interval - (time.monotonic() - t0)
+                if remaining > 0:
+                    time.sleep(remaining)
 
     def _tick(self) -> None:
         if self._session is None:
@@ -1070,7 +1084,7 @@ class RBMemoryReader(threading.Thread):
             import os as _os
             _os.kill(self._session.pid, 0)
         except (OSError, ProcessLookupError):
-            log.warning("[RBMEM][INVALID] rekordbox pid=%d gone; detaching", self._session.pid)
+            bridge_log.health("rb", "rekordbox pid=%d gone; detaching", self._session.pid)
             old_pid = self._session.pid
             self._session = None
             self._cache.clear()
@@ -1085,7 +1099,8 @@ class RBMemoryReader(threading.Thread):
                         source="memory",
                     ))
                 except Exception:
-                    pass
+                    # Bounded: this except only runs once per detected RB restart.
+                    log.warning("rb-restart enqueue failed")
             return
 
         now_t = time.monotonic()
@@ -1180,8 +1195,7 @@ class RBMemoryReader(threading.Thread):
                 self._cache.update(snap)
                 if self._drift is not None:
                     warn = self._drift.update(deck, snap.elapsed_ms, snap.playing)
-                    if warn:
-                        log.warning("drift deck=%d: %s", deck, warn)
+                    self._log_drift(deck, warn)
             if self._pos_chain_direct and self._offsets is not None:
                 previous = self._cache.get(deck)
                 chain_snap = s.read_live_pos_chain(deck, previous)
@@ -1224,8 +1238,7 @@ class RBMemoryReader(threading.Thread):
                 self._cache.update(snap)
                 if self._drift is not None:
                     warn = self._drift.update(deck, snap.elapsed_ms, snap.playing)
-                    if warn:
-                        log.warning("drift deck=%d: %s", deck, warn)
+                    self._log_drift(deck, warn)
 
     def _refresh_deck1_length(self, s: "RBSession", now_t: float) -> None:
         """Refresh deck-1 track_length_ms without disturbing chain position.

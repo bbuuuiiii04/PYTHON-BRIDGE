@@ -32,6 +32,9 @@ import time
 from collections import deque
 from typing import Callable
 
+from . import bridge_fmt as bf
+from . import bridge_log
+
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -183,16 +186,19 @@ class SoundSwitchDmxWorker:
         except Exception as exc:
             self._last_error = str(exc)
             self._error_count += 1
-            log.error("SoundSwitchDmxWorker: failed to open port %s: %s", self._port, exc)
+            bridge_log.health(
+                "dmx", "failed to open port %s: %s", self._port, exc, lvl=logging.ERROR,
+            )
             return
 
         try:
-            while not self._stop_event.is_set():
-                packet = self._drain_mailbox()
-                if packet is not None:
-                    self._send_packet(packet)
-                else:
-                    time.sleep(self._poll_s)
+            with bridge_log.thread_guard("SoundSwitchDmxWorker"):
+                while not self._stop_event.is_set():
+                    packet = self._drain_mailbox()
+                    if packet is not None:
+                        self._send_packet(packet)
+                    else:
+                        time.sleep(self._poll_s)
         finally:
             self._push_zero_and_close()
 
@@ -212,10 +218,15 @@ class SoundSwitchDmxWorker:
             self._ser.write(packet)
             self._ser.flush()
             self._sent_count += 1
+            # _last_error is sticky diagnostics (never cleared on success — status()
+            # behavior is unchanged); use it only as "has failed before" for the gate.
+            if self._last_error and bf.log_changed("dmx_write_err", False):
+                bridge_log.health("dmx", "write recovered", lvl=logging.INFO)
         except Exception as exc:
             self._last_error = str(exc)
             self._error_count += 1
-            log.warning("SoundSwitchDmxWorker: write error: %s", exc)
+            if bf.log_changed("dmx_write_err", True):
+                bridge_log.health("dmx", "write error: %s", exc)
 
     def _push_zero_and_close(self) -> None:
         """Push a zero packet before closing to reduce stuck-fixture risk.

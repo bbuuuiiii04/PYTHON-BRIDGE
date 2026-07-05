@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from .laser_models import LaserMidiMessage
+from . import bridge_log
 
 log = logging.getLogger("midi_output")
 
@@ -217,22 +218,23 @@ class MidiOutput:
             drained += 1
 
     def _sender_loop(self) -> None:
-        while not self._stop_event.is_set():
-            self._process_due_note_offs()
-            timeout = self._next_wait_timeout()
-            try:
-                _, _, cmd = self._queue.get(timeout=timeout)
-            except queue.Empty:
-                continue
+        with bridge_log.thread_guard("laser-midi-sender"):
+            while not self._stop_event.is_set():
+                self._process_due_note_offs()
+                timeout = self._next_wait_timeout()
+                try:
+                    _, _, cmd = self._queue.get(timeout=timeout)
+                except queue.Empty:
+                    continue
 
-            if cmd.kind == _CMD_STOP:
-                break
-            if cmd.kind == _CMD_PANIC:
-                self._clear_held_notes(send_note_off=True)
-                self._send_panic_all_notes_off()
-                continue
-            if cmd.kind == _CMD_TRIGGER and cmd.message is not None:
-                self._send_trigger(cmd.message)
+                if cmd.kind == _CMD_STOP:
+                    break
+                if cmd.kind == _CMD_PANIC:
+                    self._clear_held_notes(send_note_off=True)
+                    self._send_panic_all_notes_off()
+                    continue
+                if cmd.kind == _CMD_TRIGGER and cmd.message is not None:
+                    self._send_trigger(cmd.message)
         self._clear_held_notes(send_note_off=not self._dry_run)
 
     def _send_trigger(self, msg: LaserMidiMessage) -> None:
@@ -263,7 +265,7 @@ class MidiOutput:
                         value=value,
                     )
                 )
-                log.info(
+                log.debug(
                     "[MIDI] tx  type=control_change  port=%r  channel=%d  control=%d  value=%d",
                     self._port_name,
                     channel + 1,
@@ -332,7 +334,7 @@ class MidiOutput:
         if self._is_note_held(key):
             self._send_note_off(channel=channel, note=note)
         outport.send(mido.Message("note_on", channel=channel, note=note, velocity=velocity))
-        log.info(
+        log.debug(
             "[MIDI] tx  type=note_on  port=%r  channel=%d  note=%d  velocity=%d",
             self._port_name,
             channel + 1,
@@ -347,7 +349,7 @@ class MidiOutput:
         if outport is None or mido is None:
             return
         outport.send(mido.Message("note_off", channel=channel, note=note, velocity=0))
-        log.info(
+        log.debug(
             "[MIDI] tx  type=note_off  port=%r  channel=%d  note=%d  velocity=0",
             self._port_name,
             channel + 1,
@@ -431,10 +433,15 @@ class MidiOutput:
             self._send_error_count += 1
             self._last_error = f"{type(exc).__name__}: {exc}"
             self._degraded = True
-            if not self._degraded_reason:
+            newly_degraded = not self._degraded_reason
+            if newly_degraded:
                 self._degraded_reason = "send_error"
             self._send_error_reopen_after = time.monotonic() + _SEND_ERROR_REOPEN_COOLDOWN_S
-        log.warning("[MIDI] send-error err=%s", exc)
+        if newly_degraded:
+            bridge_log.health(
+                "midi", "degraded reason=send_error err=%s", exc,
+                data={"reason": "send_error", "err": str(exc)},
+            )
         self._close_port()
 
     def _attempt_send_error_recovery(self) -> bool:
@@ -466,7 +473,7 @@ class MidiOutput:
             self._degraded = False
             self._degraded_reason = ""
             self._last_error = ""
-        log.info("[MIDI] recovered reason=send_error")
+        bridge_log.health("midi", "recovered reason=send_error", lvl=logging.INFO)
         return True
 
     def _set_degraded(self, reason: str, exc: Optional[Exception] = None) -> None:
