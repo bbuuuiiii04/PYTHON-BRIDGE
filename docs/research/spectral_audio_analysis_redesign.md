@@ -867,3 +867,60 @@ extended (`lowmid_pulse_flags`, `section_map`). `drop_window_vector` accepts pre
 pulse flags (`pulse_frac`) so consumers pay the scan once. §8 question 3 is superseded by
 this appendix: the wobble-class ship condition (more labels) was met, the investigation ran,
 and the honest outcome is the renamed experimental class above, gated on the scrub test.
+
+## Appendix F — operator reference descriptions round 2 (2026-07-05; four ear-described tracks checked against shipped measurements, all from cache)
+
+The operator described four tracks' moments in his own words; each description was tested
+against the shipped cache data. Agreement is strong on three, partial on one — the miss is a
+documented structural limitation, not a threshold bug, and no constants were changed.
+
+1. **Katy Perry vs. SIDEPIECE — I Kissed Girl (Netgate Edit) — near-exact agreement.**
+   Operator: tech house, thumpy drums; 4 beats of vocal-filled silence before the drop, then
+   a 4-beat bassy horn/wail/growl, then thumpy drums. Measured: `pre_gap_beats = 4` at the
+   main drop (beat 192, 1:31.5) — beats 188–191 read bottom-gone with full-band 5–10 dB and
+   mids 8–13 dB (music present = the vocals; correctly *not* true silence); beat 191 carries
+   the 37.9 dB pickup hit; from beat 192 the growl band jumps to 30–32 dB sustained with
+   growl flags on (the horn/wail — flatness 0.29, top-quartile distortion) and the drum
+   thump shows as attack spikes (31.5/18.7 dB at beats 199–200). One nuance: the growl-band
+   level stays high past his "4 beats" (the bassline continues under the drums) — the
+   horn→drums handoff is visible in the attack pattern, not as a growl-flag flip.
+2. **Bangarang (BRLLNT Edit) — agreement.** Operator: energetic fast jabby quick horns over
+   a syncopating beat rhythm. Measured: onset density 2.8–3.6/beat at every drop (at or
+   above the corpus p90 — "fast jabby"), horn body in the mids (sustained-mid 13–15 dB,
+   centroid ~350 Hz: brassy-low horns, not bright), and the quarter-beat kick placement
+   shifts slot almost every beat (X.../..X./..X./.X../XX.. — the same syncopation signature
+   Murdah showed for jersey; his "syncopating rhythm" is directly visible in stored data).
+3. **Tomorrow Always Comes (Matias Faint Rmx) — strong agreement, one placement nuance.**
+   Operator: 2nd half = long breakdown → long loud synth-heavy build lacking low end →
+   4-beat silence with a "woww woww" + snare → grinding gritty bass roar over heavy kicks.
+   Measured chapter map: a 96-beat mid-tier section (2:53.9–3:35.7) = the long breakdown;
+   section 560–591 has the highest sustained-mid of the track (21 dB, synth-heavy) with the
+   sub dropping out through beats 580–586 (the low-end-lacking climax); the roar section
+   (4:17.4, beats 592–639) reads growl-flagged throughout with flatness 0.321–0.345 — among
+   the highest distortion readings in the corpus — over sub 32 dB and onset density 3–4
+   ("grinding gritty roar over thumpy kicks"). Nuance: the empty-floor stretch sits at beats
+   584–586 with a bass fill at 587–590 between it and the drop marker, so `pre_gap_beats`
+   at the marker reads 0 — the described silence exists but is separated from the roar by
+   the fill; consumer scans that look a few beats back (as the blackout scan does) see it.
+4. **Rock Ur World X Lights (Knock2 vs Dabin) — partial: character captured, melodic
+   patterning not.** Operator: first drop (0:51.7) = euphoric rhythmic melody dominant in
+   mids/highs, upper range "traveling at light speed in a 4-beat pattern"; second drop 32
+   beats later = hard-hitting dubstep switch-up in halftime, exhilarating/euphoric/colorful,
+   same melodic elements. Measured: drop 1 reads melodic-euphoric exactly (sustained-mid
+   20.9 dB — among the highest drop readings; attack only 2.2 dB — soft-edged; bright);
+   drop 2 (28 beats later per the markers) reads 3.4× the attack (7.5 dB), brighter still
+   (centroid 1295 vs 771 Hz), same harmonic content (sustained-mid 19.9) and *clean* timbre
+   (flatness 0.156) — i.e. a hard-hitting BRIGHT euphoric dubstep drop, not a dark growl
+   wall, which is precisely the distinction his "fan that shoots rainbows" image needs the
+   cue selector to see. NOT captured: the "4-beat pattern" of the fast upper-range arps —
+   per-beat high-band energy is nearly flat (lag-4 autocorrelation 0.25) because the
+   patterning lives in *pitch movement*, and v4 deliberately has no melody/pitch tracking
+   (§limitations). The arps are also invisible to onset density (they are harmonic, not
+   percussive — consistent by design). Recorded as operator design intent for Feature 2:
+   this track should be expressed distinctly; the measured signature (bright + hard +
+   clean + melodic) supports that without the pitch pattern.
+
+Cross-cutting: these four descriptions all validated against cache data alone — no
+re-analysis. The one repeated gap across rounds is melodic/pitch-domain structure (arp
+patterns, note movement), which is out of v4's scope by design; everything
+amplitude/timbre/structure-domain the operator described was measurable.
