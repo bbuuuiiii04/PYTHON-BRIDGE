@@ -353,3 +353,241 @@ ANLZ markers (confirmed):
 Corpus distribution (confirmed): 1,320 blackouts (dark-beat histogram spreads 1→16 with
 219 at the 16-cap), 1,145 relative dips, 1,366 snap flicks, 105 perc-cut flicks, 150
 aborts — every one of 3,936 drops has a defined darkness decision.
+
+---
+
+## 5. The rest of the consumer-rule pack (charter item 5: S-3, S-5)
+
+Each rule is a pure function over cached series, with a pinned formula, a walkthrough
+calibration anchor, and its own test seam (table-driven unit tests on synthetic series —
+the same seam pattern the strict review demanded).
+
+### 5.1 Bass-forward beats (S-3 — the tech-house "growl" answer)
+
+**What the room does.** Inside a tech-house drop, the beats where the bassline leads get
+the strobing sparkle, and the kick-driven beats get the driving post-drop chase — the
+alternation you narrated on Can't Say Nah — beat by beat, without ever touching when or
+whether the drop fires.
+
+**Exact rule (decided).** Within a drop window `W` (16 beats), with
+`ceil = p90(growl_band_db[W])`:
+
+```
+bass-forward(b) = growl_band_db[b] ≥ ceil − 3.0     # near the drop's own bass ceiling
+              and growl_band_db[b] ≥ 18.0            # real bass present
+              and attack_low_db[b] < 9.0             # sustained shape, not kick-spiked
+kick-driving(b) = attack_low_db[b] ≥ 9.0
+```
+
+Calibrated on CSN's drops (confirmed): the pattern at drop 128 reads
+`BKBBBKBBBKBBBKBB` — bassline-led beats with the kick accent landing every 4th — the
+walkthrough's growl-vs-driving alternation, at beat grain. Consumed only at drop-cue
+variant selection (S-2 containment: texture picks *which* drop-family variant seasons the
+beat, never whether/when). Honest name: bass-forward, not "growl" — the distortion class
+`growl_flags` keeps its own meaning (it measures distorted timbre and correctly reads 0
+on CSN — named prior fact). **Live-gated:** the B/K grain vs the operator's felt "~4-beat
+growl figures" is a seasoning-density taste call.
+
+### 5.2 Build intensity → white share (S-5.1)
+
+**What the room does.** A modest build gets white mixed into the track's color; a monster
+build earns full white at the top. The build's own measured energy sets the mix.
+
+**Exact rule (decided).** Over the buildup window (buildup marker → next drop marker,
+capped 64 beats), split the window in half:
+
+```
+flux_rise  = mean(fluxsum_midhigh[2nd half]) − mean(fluxsum_midhigh[1st half])
+level_rise = med(full_db[2nd half]) − med(full_db[1st half])
+E = clip(0.5·clip(flux_rise/40) + 0.5·clip(level_rise/6), 0, 1)
+white_share = clip(0.25 + 0.75·E, 0.15, 1.0)          # TUNE-LIVE
+```
+
+Anchor (confirmed): CSN's build into drop 128 lands in the low band (the walkthrough's
+"white+blue mix instead of full white — this build is not too intense"). Corpus
+(confirmed): white share masses at 0.2–0.4 with a long tail — 85 builds ≥ 0.6, 9 ≥ 0.9 —
+monsters earn full white, ordinary builds get mixes. Applies to buildup-cue white
+fraction through the color-slot contract (slot 5 weight, §8).
+
+### 5.3 Animation-rate rung selector (S-5.2)
+
+**What the room does.** Atmospheric moments move every 4, 2, or 1 beats by how sparse
+they are; grooves move every beat; drops move every beat, half-beat, or quarter-beat by
+tier. The 30 fps physics stays honored — quarter-beat strobing only where the frame clock
+can actually render it.
+
+**Exact rule (decided).** Sections (from `section_map`, marker-forced): tier `quiet` →
+rung 4 if simmer (§5.4), rung 2 if `med(attack_low_db) < 6`, else rung 1; tier `mid` →
+rung 1; tier `loud` → rung 1 (drop cues override with their own rung). Drops: tier 1 → 1;
+tier 2 → 0.5; tier 3 → 0.25 **only when BPM ≤ 113** (0.25-beat events at higher BPM fall
+between the 30 fps frame-divisible rates and alias — T2-10/F-6), else 0.5. Audit
+(confirmed): drop rungs 1.0/0.5/0.25 = 2159/1775/2 — the 0.25 rung is honestly rare in a
+128–160 BPM library; tier-3 aggression at high BPM is carried by intensity/width and
+micro-darkness instead (F-6's stepped-rate + rising-intensity design).
+
+### 5.4 Atmospheric simmer (S-5.3)
+
+**What the room does.** Percussion-free stretches read as a low simmer — the room breathes
+near-dark in the track's colors instead of playing a groove nobody hears.
+
+**Exact rule (decided).** A `quiet` section is a simmer when `med(attack_low_db) < 2.5`
+and `med(onset_density) < 0.5`. Anchors (named prior facts): Girl$ 1:32–2:12.4 (attack
+median 0.7 dB), STARsound's intro (2.3 dB). Audit (confirmed): 236 of 666 tracks carry at
+least one simmer section. Simmer rendering = the sparse-and-dim floor (OLC-A): dimmest
+zone colors, rung 4, near-black excursions allowed, never true black.
+
+### 5.5 Bright-euphoric treatment eligibility (S-5.4)
+
+**What the room does.** When a euphoric synth wall is playing — STARsound's "pack of
+swordfish" sustain, Chemicals' pads — the room is allowed the bright cyan/white sustain
+treatment at reasonable speed.
+
+**Exact rule (decided).** A window is euphoric-eligible when `sustained_synth_flags` runs
+≥ 8 consecutive beats (the class already requires clean timbre + real harmonic mids —
+`spectral_profile.py:245-255`); **never** `bright_tilt` (measured False on STARsound's
+euphoric sections — named prior fact). Treatment = selection-only within the scheduled
+moment (S-2): it flavors the playing role cue toward the zone's bright/white end, it
+schedules nothing. Audit (confirmed): 572 of 666 tracks have ≥1 eligible run — a
+selection signal, deliberately permissive; the moment's owner still decides.
+
+### 5.6 Relative dip (S-1d — standalone)
+
+Defined in §4.1 step 5. Standalone runs fire only outside `loud` sections, cap 4 beats,
+rendered as a short cut of the *current* look (not the blackout look). Audit (confirmed):
+median 4 dip runs per track; the dip-storm tail (≥12 runs) is outlier-flagged (§13).
+
+### 5.7 What is never promised (charter §6.3 — designed around, honestly)
+
+Chorus-vs-drop softness (measures identical on primary energy); growl-intensity ranking
+(ear ranks, levels read equal — drop growls treated uniformly); slow/formant "wow-wow"
+wobble (level-invisible; the named frame-rate-centroid schema extension stays deferred);
+kick-prominence under sidechained walls and `sustained_synth` on thick layered walls (two
+recorded limitations — scrub-gated, not retuned here); `lowmid_pulse` breadth (wobble,
+rolls, chugs, sirens all fire it — used strictly as busy/aggressive seasoning, never
+"wobble" semantics). No rule above reads any of these as a promise.
+
+---
+
+## 6. The moment arbiter (charter item 2, F-4 + S-1/S-2 members)
+
+**What the room does.** When designed moments collide on the same bars, exactly one wins
+and the losers are skipped — never queued, never stacked. Your hands and the emergency
+blackout beat everything, always.
+
+**Exact rules (decided).** One precedence list, applied at dispatch. A *claim* is a beat
+window `[start, end)`; while a claim is active, lower-ranked moments whose window overlaps
+are skipped outright (moments, not tasks). Mode/engine flips act at the next look
+boundary, never mid-move.
+
+| Rank | Moment | Claim window | Notes |
+|---|---|---|---|
+| 0 | Emergency blackout / manual holds / static overrides / LED mute | absolute, unchanged authority | never contested; a held manual look survives every v2 moment |
+| 1 | Pre-drop blackout + drop cue | `[D − gap, D + drop_hold)` | the floor-return abort acts *inside* this window (it ends darkness early; it never yields the window); the drop-cue variant seasoning (S-2, §5.1) rides inside the cue, claiming nothing |
+| 2 | Landing build move (squeeze/fuse/swell, landing restore) | `[target − travel, target)` | if rank 1's blackout window overlaps, the build move ends where darkness begins (squeeze-into-black is the composed arc, §9) |
+| 3 | Blend resolve (one-bar bloom at blend cross-and-hold) | 1 bar | skipped entirely if it lands inside rank 1–2 claims |
+| 4 | Palate reset (hard genre pivot neutral dip) | 1–2 s | |
+| 5 | First-play bloom | 2 bars (after ~8-beat hold gate) | a bloom never brightens into a blackout — rank 1 wins (the F-4 scenario) |
+| 6 | Phrase step / turnaround stinger | phrase boundary ±1 bar | own short cooldown class (F-12): stingers/bursts get a short cooldown; drop-scale impacts keep the 12 s class |
+| 7 | Texture seasoning + simmer + euphoric flavoring | none (selection-only) | reads at cue selection/parameterization inside whatever the schedule chose; the scheduler never sees texture (S-2); simmer is the lowest-priority *look*, claimed only when nothing above is active in a quiet section |
+
+Skip-not-queue is literal: a skipped bloom does not fire late; a skipped stinger waits for
+the next phrase end. The arbiter is engine-side and pure (testable as a table of
+overlapping claims → surviving moment).
+
+---
+
+## 7. The kill matrix (charter item 3, F-3)
+
+**What the room does.** Every behavior in this design belongs to exactly one switch. Kill
+a feature mid-night and the room degrades to something coherent — never undefined colors,
+never a stuck look, never a new dark-room failure.
+
+**Exact rules (decided).** Master switch: v1/v2, live-switchable; v2 off ⇒ v1
+byte-identical (teardown through the existing reset/idle machinery; the newly active brain
+takes over at next dispatch — no cross-engine blending). Every row lands in exactly one
+owning switch; flips take effect at the next look boundary.
+
+| Behavior (this document) | Owning switch | Off ⇒ |
+|---|---|---|
+| Zone map, hash spread, depth/dynamics axes (§2) | **F1 identity** | today's journey palettes (`_pick_palette`); texture keeps shapes with v1 colors |
+| Identity permanence store + palette-pad correction path (§2.3) | F1 | store unread; pads keep their v1 palette-override meaning |
+| First-play bloom (authority §3) | F1 | no bloom |
+| Identity handover soft flip on active-deck flip (F-10) | F1 | v1 deque behavior |
+| Motion-style + dynamics-budget selection (§2.3) | F1 | v1 look selection |
+| Arrival scheduler: landing comets/sweeps (authority §4) | **F2 landing** | cues trigger on the beat as today |
+| Build-move family + landing restore (§9) | F2 | no build moves; role changes as today |
+| Pre-drop blackout pack — all of §4 (blackout, abort, busy test, dips, flicks) | F2 | the fixed `led_predark_beats: 4` predark in live config (confirmed present) |
+| Drop family classifier + intensity tier + aggression profile (§3) | F2 | v1 drop cues (role banks / drop_pairs) |
+| White-share formula (§5.2) | F2 | buildup cues keep baked white behavior |
+| Rate-rung selector (§5.3) | F2 | cues' own baked rates |
+| Phrase-end turnaround stinger + cooldown classes (§6 rank 6) | F2 | no stingers; 12 s class untouched |
+| Blend painter: accents-first entry, base morph, resolve, dipless, abandon breathing (authority §7) | **F3 blend** | handover = F1's soft flip only |
+| Texture classes (kick-prominence, thick/thin, tilt, stab/sustain, darkness, simmer §5.4, euphoric §5.5, bass-forward §5.1, busy-pulse) | **F4 texture** | role cues untouched by construction (containment); drop cues use family default variant |
+| WILD OUT / SET mode (authority §9) | mode toggle (not a kill) | n/a — WILD OUT is default; SET withholds slot-5/strobe/span on T1–T2 drops |
+| Laser personality-by-zone + complement pairs (§11) | laser director config (existing enable/dry-run) | today's alias/default resolution (`personality_resolver.py`) |
+
+**Dependency rules (the three from F-3, plus one new):**
+1. **F1 off + F3 on** ⇒ blend auto-collapses to the soft flip (no identities to blend);
+   the blend scalar keeps computing (cheap), paints nothing.
+2. **F2 off** ⇒ blackout reverts to fixed 4-beat predark; landing moves and drop typing
+   off; F4's drop-variant seasoning has no v2 drop cue to season — v1 drop cues run
+   untouched.
+3. **F4 off** ⇒ §5.1/§5.4/§5.5 selection inputs read as "no texture" — family default
+   variants everywhere; nothing else changes (containment guarantees coherence).
+4. **F1 off + F2 on** (new, decided) ⇒ drop families/tiers still classify and fire, but
+   render through v1 palette colors (the family shapes take whatever color the v1 journey
+   supplies through the slot contract's defaults) — landing stays useful without identity.
+- **Scripted tracks:** v2 stands down completely — no identity repaint, no landing, no
+  audio-matched blackout, no texture, no drop typing; v1 scripted rendering exactly as
+  today (authority §11 boundary ruling; operator veto stays open).
+- **Realtime transport loss:** v2 features suspend to the existing v1 fallback; status
+  shows `engine=v2 (suspended: transport)`; nothing v2 adds may create a new dark-room
+  failure mode (authority §11).
+- **Mid-move master flip:** teardown through reset/idle machinery
+  (`beat_sync_engine.py:128-131` seam, confirmed by the design review); arrivals melt or
+  finish wall-clock; no v2 instance survives into v1 frames.
+
+---
+
+## 8. The color-slot contract (charter item 4, F-8)
+
+**What the room does.** Every look the engine can play takes its colors from six named
+slots instead of baking them in — so the track's identity, the blend painter, and SET
+mode all speak one language to every shape in the library.
+
+**Exact rules (decided).** The renderer already carries the seam: slot-parameterized
+shapes read `params["slot_colors"]` through `universal_colorizer`
+(`govee_frame_renderer.py:1026-1056`, validated by `_slots()` at `:42-62`; six-entry
+convention already in live use — confirmed by the renderer inventory this session). The
+contract formalizes it:
+
+| Slot | Meaning | Supplied by |
+|---|---|---|
+| 0–2 | **base ramp** (dark → core of the zone's base family) | identity (zone + hash) |
+| 3–4 | **accent ramp** (the zone's accent pair) | identity; the blend painter takes these FIRST (accents-first entry) |
+| 5 | **white** (the power channel) | white-share (§5.2) scales its weight; SET withholding removes it on held drops; sustained white banned outside manual looks (white-is-a-burst lock) |
+
+- **Authoring rule:** every NEW v2 shape (all of §10) is authored against slots only —
+  Template Lab supplies shapes, the engine supplies colors (locked design 5.12/5.14). No
+  new baked-color cue is ever added.
+- **Blend painter:** paints slots 3–4 from the incoming identity as presence steps rise,
+  morphs slots 0–2 in palette space past the midpoint, snap-commits distant identities
+  (no muddy midpoint — lock). The runner's `resolve_fade` already interpolates
+  `slot_colors_from/to` per frame (`govee_frame_renderer.py:74-97`, confirmed) — the
+  blend's per-frame color path exists.
+- **Legacy looks:** the 15 color-suffix names (3 shapes × 5 colors) and other baked cues
+  (e.g. `_drop_center_burst_blue_cyan`, hardcoded cyan/white nebulas — inventory,
+  confirmed) carry forward for v1 byte-identity and become selection-eligible in v2 only
+  through their slot-based siblings (`_slot_*` twins already exist for most). The
+  `color_source: engine|baked` flag (`led_models.py:54,241`, confirmed) marks
+  eligibility, exactly as today.
+- **Spec-author warnings (from the renderer inventory, confirmed):** (a) comet-family
+  names bypass `renderer.render()` on the live rig — `_compose_frame` routes them
+  straight to `render_comet` (`govee_realtime_runner.py:357-374`), so the slot contract
+  must be honored in `render_comet`'s color resolution too, not just `render()`;
+  (b) `render_comet`'s name-based color fallback freezes beat-dependent suffix colors at
+  beat 0 (`govee_frame_renderer.py:1882`) — engine-supplied slot colors make the fallback
+  dead weight rather than a bug; (c) buildup shapes currently have NO slot-parameterized
+  variants (6 baked white-only shapes — the §10 roadmap fills this); (d) `EffectSpec`
+  lives at `govee_realtime_runner.py:36-42` and `params` is the single conduit — the
+  color engine reaches every shape through it.
