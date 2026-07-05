@@ -216,6 +216,7 @@
       $("tracePanel").open = true;
       throw new Error(res.error || "preview failed");
     }
+    renderSwatches(res.slot_colors);
     const canvas = $("previewStrip");
     canvas.width = canvas.clientWidth || 600;
     const ctx = canvas.getContext("2d");
