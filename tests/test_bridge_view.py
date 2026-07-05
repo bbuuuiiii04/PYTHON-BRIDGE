@@ -565,5 +565,69 @@ class ArgParserTest(unittest.TestCase):
         self.assertEqual(args.path, "/tmp/example.jsonl")
 
 
+class TtyHangupExitTest(unittest.TestCase):
+    """The viewer must exit when its terminal dies, not spin headless.
+
+    Real-subprocess test: run bridge_view.py on a fresh pty, then close the
+    pty master (what happens when the Terminal window/tab goes away without a
+    SIGHUP reaching the viewer -- an orphaned process group). Before the
+    2026-07-05 fix the viewer's getch() returned ERR instantly forever: 100%
+    CPU, never exiting, and its surviving process made the watcher's
+    monitor_open() believe a viewer window was still open, so a menubar
+    bridge start produced no viewer window.
+    """
+
+    def test_viewer_exits_cleanly_when_pty_master_closes(self) -> None:
+        import os
+        import pty
+        import select
+        import subprocess
+        import tempfile
+
+        master, slave = pty.openpty()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "current.jsonl"
+            env = os.environ.copy()
+            env.setdefault("TERM", "xterm-256color")
+            proc = subprocess.Popen(
+                [sys.executable, str(Path(bridge_view.__file__)), "--path", str(log_path)],
+                stdin=slave,
+                stdout=slave,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                close_fds=True,
+            )
+            os.close(slave)
+            try:
+                # Wait for curses to paint its first bytes so we hang up a
+                # *running* viewer, not one still starting.
+                deadline = time.time() + 10
+                started = False
+                while time.time() < deadline:
+                    if proc.poll() is not None:
+                        break
+                    readable, _, _ = select.select([master], [], [], 0.25)
+                    if readable:
+                        started = True
+                        break
+                if proc.poll() is not None:
+                    self.skipTest(
+                        "curses could not start in this environment "
+                        f"(rc={proc.returncode})"
+                    )
+                self.assertTrue(started, "viewer never painted its first screen")
+
+                os.close(master)  # terminal gone
+                master = -1
+                rc = proc.wait(timeout=10)
+                self.assertEqual(rc, 0, "viewer must exit cleanly on tty hangup")
+            finally:
+                if master != -1:
+                    os.close(master)
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=10)
+
+
 if __name__ == "__main__":
     unittest.main()

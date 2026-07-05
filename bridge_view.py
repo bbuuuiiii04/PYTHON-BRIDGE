@@ -33,6 +33,7 @@ import argparse
 import curses
 import json
 import os
+import select
 import sys
 import time
 import traceback
@@ -801,6 +802,15 @@ def _repaint(stdscr: Any, state: ViewerState) -> None:
     stdscr.refresh()
 
 
+def _stdin_ready() -> bool:
+    """Zero-timeout poll: would a read on stdin return immediately (data OR
+    EOF/hangup)? Used to tell a getch() timeout apart from a dead terminal."""
+    try:
+        return bool(select.select([sys.stdin], [], [], 0)[0])
+    except (OSError, ValueError):
+        return True  # stdin fd unusable at all -> treat the terminal as gone
+
+
 def _run(stdscr: Any, path: Path) -> None:
     try:
         curses.curs_set(0)
@@ -829,6 +839,17 @@ def _run(stdscr: Any, path: Path) -> None:
                     pass
 
         ch = stdscr.getch()
+        if ch == -1 and _stdin_ready():
+            # getch() returning ERR while stdin reports "readable" means EOF/
+            # EIO -- the terminal is gone (window closed without a SIGHUP
+            # reaching an orphaned viewer). Without this exit the viewer spins
+            # headless at 100% CPU and its surviving process makes the
+            # watcher's monitor_open() think a window is still open (the
+            # 2026-07-05 menubar no-viewer-window regression). One more getch
+            # drains the race where a real key landed right after the timeout.
+            ch = stdscr.getch()
+            if ch == -1:
+                return
         if ch != -1 and not state.handle_key(ch):
             return
 

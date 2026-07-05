@@ -109,8 +109,22 @@ kill_bridge_processes() {
 }
 
 monitor_open() {
-    pgrep -f "$MONITOR_MARKER" > /dev/null 2>&1 || \
-        pgrep -f "bridge_view\.py" > /dev/null 2>&1
+    # Count only viewer processes that still own a terminal. A bare pgrep -f
+    # kept matching a headless orphan bridge_view.py (ppid 1, tty "??") left
+    # behind when a marker-only pkill killed the wrapper bash but not its
+    # python child -- which suppressed open_monitor forever (the 2026-07-05
+    # "menubar start but no viewer window" regression). Full path so an
+    # unrelated process merely mentioning bridge_view.py doesn't count.
+    local pid tty
+    for pid in $(pgrep -f "$MONITOR_MARKER" 2>/dev/null; \
+                 pgrep -f "${REPO_ROOT}/bridge_view\.py" 2>/dev/null); do
+        tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
+        case "$tty" in
+            ""|"??"|"?"|"-") ;;  # headless or already gone: not a window
+            *) return 0 ;;
+        esac
+    done
+    return 1
 }
 
 start_bridge() {
@@ -233,6 +247,10 @@ EOF
 
 close_monitor() {
     pkill -f "$MONITOR_MARKER" 2>/dev/null
+    # The marker lives on the wrapper bash's argv, not the python viewer's:
+    # kill the viewer by full path too, or it survives the marker pkill
+    # orphaned (its own tty-hangup exit is the backstop, this is the clean path).
+    pkill -f "${REPO_ROOT}/bridge_view\.py" 2>/dev/null
     pkill -f "^tail -n 100 -F ${LOG_FILE}$" 2>/dev/null
 
     osascript <<'EOF' >/dev/null 2>&1

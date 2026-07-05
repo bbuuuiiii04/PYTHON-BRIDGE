@@ -184,8 +184,12 @@ focus or requires acknowledgment to keep functioning.
 
 One monitor window, in both auto and manual launch modes. `open_monitor()` launches `"$PYTHON"
 "$REPO_ROOT/bridge_view.py"` inside a Terminal.app window tagged `RBSS_BRIDGE_MONITOR`;
-`monitor_open()`/`close_monitor()` track/close it by that marker (with a `bridge_view\.py` pgrep
-fallback).
+`monitor_open()` counts a viewer only if the matched process (marker or full-path
+`bridge_view.py`) still owns a terminal (`ps -o tty=` not `??`) — a headless orphan viewer must
+not suppress reopening (2026-07-05 no-window regression). `close_monitor()` kills both the
+marker-bearing wrapper and the full-path viewer process, then closes the Terminal tab; the viewer
+itself also exits when its terminal dies (tty-hangup check in `_run`), so no close path can leave
+an orphan behind.
 
 Manual mode (`RBSS_BRIDGE_MANUAL=1`) now starts the bridge through the exact same `start_bridge()`
 the auto path uses, instead of a separately hand-maintained launch string — this closes a real

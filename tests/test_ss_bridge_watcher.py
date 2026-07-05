@@ -46,10 +46,21 @@ class SSBridgeWatcherTests(unittest.TestCase):
                 bin_dir / "pgrep",
                 """
                 #!/bin/sh
+                if [ -n "${PGREP_PIDS:-}" ]; then
+                    printf '%s\\n' $PGREP_PIDS
+                    exit 0
+                fi
                 if [ "$(cat "$PGREP_STATE_FILE" 2>/dev/null)" = "running" ]; then
                     exit 0
                 fi
                 exit 1
+                """,
+            )
+            self._write_executable(
+                bin_dir / "ps",
+                """
+                #!/bin/sh
+                printf '%s\\n' "${PS_TTY:-??}"
                 """,
             )
             self._write_executable(
@@ -162,4 +173,56 @@ class SSBridgeWatcherTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(run.python_calls.count("streamdeck_midi.py"), 1)
         self.assertIn("started streamdeck pid=", run.watcher_log)
+
+    # monitor_open must only count a viewer that still owns a terminal: a
+    # headless orphan bridge_view.py (tty "??", ppid 1) left behind by a
+    # close race suppressed open_monitor forever -- the 2026-07-05 "menubar
+    # start but no viewer window" regression.
+    def test_monitor_open_ignores_headless_viewer(self) -> None:
+        run = self._run_watcher_functions(
+            """
+            export PGREP_PIDS="4242"
+            export PS_TTY="??"
+            if monitor_open; then echo MONITOR=open; else echo MONITOR=closed; fi
+            """
+        )
+
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("MONITOR=closed", run.stdout)
+
+    def test_monitor_open_counts_viewer_with_tty(self) -> None:
+        run = self._run_watcher_functions(
+            """
+            export PGREP_PIDS="4242"
+            export PS_TTY="ttys012"
+            if monitor_open; then echo MONITOR=open; else echo MONITOR=closed; fi
+            """
+        )
+
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("MONITOR=open", run.stdout)
+
+    def test_monitor_open_no_processes_reports_closed(self) -> None:
+        run = self._run_watcher_functions(
+            """
+            if monitor_open; then echo MONITOR=open; else echo MONITOR=closed; fi
+            """
+        )
+
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("MONITOR=closed", run.stdout)
+
+    # close_monitor must kill the python viewer by its full path, not just the
+    # RBSS_BRIDGE_MONITOR marker: the marker lives on the wrapper bash's argv
+    # only, so a marker-only pkill orphans the viewer.
+    def test_close_monitor_kills_viewer_by_full_path(self) -> None:
+        run = self._run_watcher_functions(
+            """
+            close_monitor
+            """
+        )
+
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("RBSS_BRIDGE_MONITOR", run.pkill_calls)
+        self.assertIn("bridge_view", run.pkill_calls)
 
