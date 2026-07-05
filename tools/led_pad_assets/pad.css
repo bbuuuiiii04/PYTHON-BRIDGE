@@ -138,6 +138,8 @@ main { padding: var(--pad); }
 .lab-layout { display: grid; grid-template-columns: minmax(240px, 360px) 1fr; gap: var(--gap); }
 .lab-list-panel, .lab-detail-panel, .promotion-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); }
 .trace-panel { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--danger); border-radius: var(--radius); padding: var(--pad); }
+.preview-row { display: flex; align-items: center; gap: var(--gap); }
+.preview-row canvas { flex: 1; width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .panel-head, .lab-meta, .lab-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--gap); flex-wrap: wrap; }
 .lab-list { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--gap); }
 .lab-row { width: 100%; min-height: 52px; display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: var(--sp-2); text-align: left; border-style: dashed; }

@@ -154,6 +154,34 @@ def load_lab_effects(path: Path | str) -> dict[str, Any]:
         return {"ok": False, "effects": {}, "error": str(exc), "traceback": traceback_mod.format_exc()}
 
 
+def render_preview_frames(
+    renderer: "LabRenderer",
+    scene_ref: str,
+    *,
+    params: Mapping[str, Any],
+    segments: int,
+    seed: int,
+    fps: int,
+    bpm: float,
+    beats: float,
+    max_frames: int = 2000,
+) -> list[Frame]:
+    total = min(int(max_frames), max(1, int(round(beats * 60.0 / bpm * fps))))
+    frames: list[Frame] = []
+    for index in range(total):
+        t = index / float(fps)
+        frames.append(renderer.render(
+            scene_ref,
+            beat_pos=t * bpm / 60.0,
+            local_t=t,
+            frame_index=index,
+            params=params,
+            segments=segments,
+            seed=seed,
+        ))
+    return frames
+
+
 class LabRenderer:
     def __init__(self, module_path: Path | str, delegate: GoveeFrameRenderer | None = None) -> None:
         self.module_path = Path(module_path)

@@ -46,6 +46,7 @@
   }
 
   function selectDraft(name) {
+    stopPreview();
     state.current = state.entries.find(e => e.name === name) || null;
     renderList();
     renderDetail();
@@ -54,7 +55,7 @@
   function renderDetail() {
     const e = state.current;
     const disabled = !e;
-    for (const id of ["briefInput", "notesInput", "paramsInput", "saveDraftBtn", "playDraftBtn", "acceptBtn", "rejectBtn"]) $(id).disabled = disabled;
+    for (const id of ["briefInput", "notesInput", "paramsInput", "saveDraftBtn", "playDraftBtn", "acceptBtn", "rejectBtn", "previewBtn"]) $(id).disabled = disabled;
     if (!e) return;
     $("draftTitle").textContent = e.name;
     $("draftFn").textContent = `${e.kind} · ${e.fn}`;
@@ -91,6 +92,11 @@
     if (!state.current) return;
     try {
       await save();
+      const mine = labScene(state.current.name);
+      if (state.playingLook && state.playingLook.startsWith("lab_") && state.playingLook !== mine) {
+        const sw = await api.labSwitch({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}")});
+        if (sw.ok) { await updateRuntime(); return; }
+      }
       const res = await api.labPlay({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}"), cue_beats:cue(), takeover});
       if (!res.ok && res.error === "ownership_required") {
         PadModal.confirm("The bridge owns the LEDs right now. Take over?", "LEDs go dark on the bridge side until you release.", "Take over", () => play(true));
@@ -121,7 +127,51 @@
 
   function renderLive() {
     $("labLive").hidden = !(state.current && state.playingLook === labScene(state.current.name));
+    $("playDraftBtn").textContent =
+      state.current && state.playingLook && state.playingLook.startsWith("lab_") &&
+      state.playingLook !== labScene(state.current.name) ? "⇄ Switch" : "▶ Play";
   }
+
+  const preview = {frames: [], fps: 40, raf: 0};
+  function stopPreview() {
+    cancelAnimationFrame(preview.raf);
+    preview.frames = [];
+    const canvas = $("previewStrip");
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+  }
+  async function previewDraft() {
+    if (!state.current) return;
+    stopPreview();
+    await save();
+    const res = await api.labPreview({name: state.current.name});
+    if (!res.ok) {
+      $("traceText").textContent = res.traceback || res.error || "preview failed";
+      $("tracePanel").open = true;
+      throw new Error(res.error || "preview failed");
+    }
+    const canvas = $("previewStrip");
+    canvas.width = canvas.clientWidth || 600;
+    const ctx = canvas.getContext("2d");
+    preview.frames = res.frames;
+    preview.fps = res.fps;
+    let start;
+    const step = (ts) => {
+      if (!preview.frames.length) return;
+      if (start === undefined) start = ts;
+      const frame = preview.frames[Math.floor((ts - start) / 1000 * preview.fps) % preview.frames.length];
+      const w = canvas.width / frame.length;
+      frame.forEach((rgb, i) => {
+        ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+        ctx.fillRect(i * w, 0, Math.ceil(w), canvas.height);
+      });
+      preview.raf = requestAnimationFrame(step);
+    };
+    preview.raf = requestAnimationFrame(step);
+  }
+  $("previewBtn").onclick = async () => {
+    $("previewBtn").disabled = true;
+    try { await previewDraft(); } catch (err) { showError(err); } finally { $("previewBtn").disabled = false; }
+  };
 
   $("newDraftBtn").onclick = () => {
     PadModal.prompt("New draft", "", {label:"Draft name", confirmText:"Create"}, async (name) => {
@@ -138,6 +188,21 @@
   $("acceptBtn").onclick = () => state.current && api.labAccept(state.current.name).then(refresh).catch(showError);
   $("rejectBtn").onclick = () => state.current && api.labReject(state.current.name).then(refresh).catch(showError);
   $("paramsInput").onblur = () => { try { JSON.parse($("paramsInput").value || "{}"); clearError(); } catch (err) { showError(err); } };
+  let applyTimer = 0;
+  $("paramsInput").oninput = () => {
+    clearTimeout(applyTimer);
+    applyTimer = setTimeout(async () => {
+      if (!state.current || state.playingLook !== labScene(state.current.name)) return;
+      let params;
+      try { params = JSON.parse($("paramsInput").value || "{}"); } catch { return; }
+      try {
+        const res = await api.labSave(currentPayload());
+        state.current = res.entry;
+        await api.labUpdate({name: state.current.name, params});
+        clearError();
+      } catch (err) { showError(err); }
+    }, 400);
+  };
   $("bpmInput").onchange = ev => api.session({bpm:Number(ev.target.value)}).catch(showError);
   document.querySelectorAll("[data-step]").forEach(btn => btn.onclick = () => { $("bpmInput").value = Number($("bpmInput").value || 128) + Number(btn.dataset.step); $("bpmInput").dispatchEvent(new Event("change")); });
   $("paletteSelect").onchange = ev => api.session({test_palette:ev.target.value}).catch(showError);

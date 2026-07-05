@@ -314,8 +314,15 @@ async function previewDraft() {
   };
   preview.raf = requestAnimationFrame(step);
 }
-$("previewBtn").onclick = () => previewDraft().catch(showError);
+$("previewBtn").onclick = async () => {
+  $("previewBtn").disabled = true;
+  try { await previewDraft(); } catch (err) { showError(err); } finally { $("previewBtn").disabled = false; }
+};
 ```
+
+   The disable-while-in-flight guard matters: without it, two rapid clicks spawn two concurrent
+   `previewDraft()` calls and `preview.raf` only tracks the latest animation loop — the orphaned
+   loop keeps drawing until its frames drain.
 
    Call `stopPreview()` at the top of `selectDraft(...)` so switching drafts kills the animation.
    Note `previewDraft` reuses the existing `save()` (which calls `refresh()`) — acceptable here
@@ -490,7 +497,13 @@ Per `docs/agents/change_contracts.yml` `led_pad` (`:205-228`):
 
 Extend `tests/test_led_pad_lab.py` (reuse its temp-dir + `_FakePlayback` harness) and/or
 `tests/test_led_pad_service.py` (whichever already builds a full `LedPadService`; follow its
-constructor pattern):
+constructor pattern). **First, augment the lab `_FakePlayback`** (`tests/test_led_pad_lab.py:35-68`):
+its `update()` is currently a no-op that records nothing — add
+`self.update_calls: list[dict] = []` in `__init__` and make `update(spec)` append the spec and
+set `self.playing = spec["look_name"]`, so the update/switch assertions below are actually
+checkable. (The service-test fake at `tests/test_led_pad_service.py:47-49` already records
+`update_calls`, but its `_service()` helper builds no lab dir — if you use it for lab tests,
+give it a temp `lab_dir` + `effects_lab.py`.)
 
 1. `render_preview_frames` (pure, no service): fixed args → deterministic (two calls equal);
    frame count = `round(beats*60/bpm*fps)` capped at `max_frames` and floored at 1; every frame

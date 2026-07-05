@@ -23,8 +23,8 @@ from ..led_color_engine import LedColorEngine
 from ..led_config import LEDConfigResult, _resolve_path, load_led_look_director_config_from_dict
 from ..led_pad_controls import controls_for, render_catalog
 from ..runtime_status import STATUS_PATH
-from .led_pad_lab import LabRegistry, LabRenderer, load_lab_effects
-from .led_pad_playback import PadPlayback
+from .led_pad_lab import LabRegistry, LabRenderer, load_lab_effects, render_preview_frames
+from .led_pad_playback import PadPlayback, stable_seed
 from .pad_access import _is_loopback_host, access_payload
 
 _ASSETS_DIR = Path(__file__).resolve().parent / "led_pad_assets"
@@ -646,6 +646,69 @@ class LedPadService:
         self._last_play_editor = None
         return {"ok": True, "spec": spec, "cue_beats": cue_beats, "playback": self._playback.status()}
 
+    def lab_update(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("name", "")).strip()
+        entry = self._lab.get(name)
+        scene = LabRegistry.scene_ref(name)
+        if not self._playback.status().get("playing"):
+            self._playing_name = ""
+            self._last_play_editor = None
+        if not self._playing_name or self._playing_name != scene:
+            return {"ok": True, "applied": False}
+        with self._lock:
+            config = copy.deepcopy(self._draft)
+        spec, _cue_beats = self._lab_play_spec(config, entry, payload)
+        self._playback.update(spec)
+        return {"ok": True, "applied": True, "spec": spec, "playback": self._playback.status()}
+
+    def lab_switch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("name", "")).strip()
+        entry = self._lab.get(name)
+        scene = LabRegistry.scene_ref(name)
+        if not self._playback.status().get("playing") or not str(self._playing_name).startswith("lab_"):
+            return {"ok": False, "error": "no_lab_scene_playing"}
+        with self._lock:
+            config = copy.deepcopy(self._draft)
+        spec, _cue_beats = self._lab_play_spec(config, entry, payload)
+        self._playback.update(spec)
+        self._playing_name = scene
+        self._last_play_editor = None
+        return {"ok": True, "applied": True, "spec": spec, "playback": self._playback.status()}
+
+    def lab_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("name", "")).strip()
+        entry = self._lab.get(name)
+        with self._lock:
+            config = copy.deepcopy(self._draft)
+            session = copy.deepcopy(self._session(config))
+        renderer = LabRenderer(self._lab.module_path)
+        result = renderer.reload()
+        if not result["ok"]:
+            return {"ok": False, "error": result["error"], "traceback": result["traceback"]}
+        if name not in renderer.effects:
+            raise ValueError(f"lab effect not registered: {name}")
+        params = copy.deepcopy(entry.get("params") or {})
+        if isinstance(payload.get("params"), dict):
+            params.update(copy.deepcopy(payload["params"]))
+        scene = LabRegistry.scene_ref(name)
+        look = {"scene_ref": scene, "color_source": "engine"}
+        self._inject_engine_colors(config, scene, look, params, force_slot=(str(entry["kind"]) == "slot"))
+        led_config = self._load_config_result(config).config
+        target = next((item for item in led_config.targets.values() if item.realtime.enabled), None) if led_config else None
+        if target is None:
+            raise ValueError("no realtime-enabled LED target in config")
+        fps = max(1, min(40, int(payload.get("fps") or target.realtime.fps)))
+        bpm = max(40.0, min(220.0, float(payload.get("bpm") or session.get("bpm") or 128)))
+        default_beats = min(float(entry.get("cue_beats", 16) or 16), 8.0)
+        beats = max(1.0, min(32.0, float(payload.get("beats") or default_beats)))
+        frames = render_preview_frames(
+            renderer, scene,
+            params=params, segments=int(target.realtime.segments),
+            seed=stable_seed(scene), fps=fps, bpm=bpm, beats=beats,
+        )
+        return {"ok": True, "frames": frames, "fps": fps, "bpm": bpm, "beats": beats,
+                "segments": int(target.realtime.segments)}
+
     def play(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()
         editor = payload.get("editor") if isinstance(payload.get("editor"), dict) else None
@@ -798,6 +861,9 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
             "/api/discard": service.discard,
             "/api/lab/save": service.lab_save,
             "/api/lab/play": service.lab_play,
+            "/api/lab/update": service.lab_update,
+            "/api/lab/switch": service.lab_switch,
+            "/api/lab/preview": service.lab_preview,
             "/api/lab/reload": service.lab_reload,
             "/api/lab/accept": service.lab_accept,
             "/api/lab/reject": service.lab_reject,
