@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 import time
@@ -8,9 +9,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from rb_ss_bridge_v2 import bridge_fmt  # noqa: E402
 from rb_ss_bridge_v2.govee_frame_renderer import GoveeFrameRenderer  # noqa: E402
 from rb_ss_bridge_v2.govee_realtime_runner import EffectSpec, GoveeRealtimeRunner  # noqa: E402
 from rb_ss_bridge_v2.led_models import BeatAnchor  # noqa: E402
+
+
+def _capture(logger_name: str):
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    logger.addHandler(handler)
+    prior_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    return logger, handler, prior_level, records
 
 
 class _FakeTransport:
@@ -592,6 +609,100 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
         self.assertIn("rt_reconcile_count", runner.status())
         self.assertEqual(runner.status()["rt_reconcile_count"], 0)
+
+
+class _FailableTransport(_FakeTransport):
+    """_FakeTransport with a togglable send_frame() failure for health-transition tests."""
+
+    def __init__(self, **kw) -> None:
+        super().__init__(**kw)
+        self.fail = False
+
+    def send_frame(self, frame) -> bool:
+        self._record("send_frame")
+        self.frames.append(list(frame))
+        return not self.fail
+
+
+class GoveeRealtimeRunnerHealthTransitionTests(unittest.TestCase):
+    """AWR-125 W4: health.govee.rt edge-triggered emits on transport send result."""
+
+    def setUp(self) -> None:
+        bridge_fmt.reset_rate_state()
+
+    def _spec(self) -> EffectSpec:
+        return EffectSpec(
+            effect_name="solid",
+            params={"color": [1, 2, 3]},
+            seed=1,
+            applied_monotonic=100.0,
+        )
+
+    def test_send_failure_streak_emits_once(self) -> None:
+        transport = _FailableTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        runner.set_desired(self._spec())
+        logger, handler, prior_level, records = _capture("health.govee.rt")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        transport.fail = True
+        runner._tick_once(_anchor(100.0), 100.0)
+        runner._tick_once(_anchor(100.1), 100.1)  # repeat failure: must not re-log
+
+        self.assertEqual(len(records), 1, f"expected exactly one send-failing record, got {records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertIn("send failing", records[0].getMessage())
+
+    def test_send_recovers_after_failure_emits_once(self) -> None:
+        transport = _FailableTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        runner.set_desired(self._spec())
+        logger, handler, prior_level, records = _capture("health.govee.rt")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        transport.fail = True
+        runner._tick_once(_anchor(100.0), 100.0)
+        transport.fail = False
+        runner._tick_once(_anchor(100.1), 100.1)
+        runner._tick_once(_anchor(100.2), 100.2)  # repeat success: must not re-log recovery
+
+        self.assertEqual(len(records), 2, f"expected failing+recovered only, got {records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertEqual(records[1].levelname, "INFO")
+        self.assertIn("recovered", records[1].getMessage())
+
+    def test_first_ever_success_does_not_log_false_recovery(self) -> None:
+        """A healthy runner that never failed must never claim 'recovered'."""
+        transport = _FailableTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        runner.set_desired(self._spec())
+        logger, handler, prior_level, records = _capture("health.govee.rt")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        runner._tick_once(_anchor(100.0), 100.0)
+
+        self.assertEqual(records, [])
+
+    def test_loop_thread_guard_emits_started_and_exited(self) -> None:
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        logger, handler, prior_level, records = _capture("sys.thread")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        runner.start()
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline and not any(
+            "GoveeRealtimeRunner started" in r.getMessage() for r in records
+        ):
+            time.sleep(0.01)
+        runner.stop(timeout_s=0.5)
+
+        self.assertTrue(any("GoveeRealtimeRunner started" in r.getMessage() for r in records))
+        self.assertTrue(any("GoveeRealtimeRunner exited" in r.getMessage() for r in records))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """Unit tests for RBStateReader using a fake mach-read backend."""
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import struct
@@ -11,9 +12,25 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from rb_ss_bridge_v2 import bridge_fmt
 from rb_ss_bridge_v2 import rb_state_reader as mod
 from rb_ss_bridge_v2.models import BridgeEvent, Ev
 from rb_ss_bridge_v2.rb_offsets import ChainEntry, RBOffsetVersion
+
+
+def _capture(logger_name: str):
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    logger.addHandler(handler)
+    prior_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    return logger, handler, prior_level, records
 
 
 class FakeMem:
@@ -1184,6 +1201,77 @@ class TrackInfoParserTests(unittest.TestCase):
 
     def test_extract_track_title_empty_on_blank(self) -> None:
         self.assertEqual(mod.extract_track_title(""), "")
+
+
+class HealthTransitionTests(unittest.TestCase):
+    """AWR-125 W4: health.rb / health.queue emits in RBStateReader.run()/_enqueue()."""
+
+    def setUp(self) -> None:
+        bridge_fmt.reset_rate_state()
+
+    def test_no_offsets_emits_health_rb_warning(self) -> None:
+        q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(q, None)
+        logger, handler, prior_level, records = _capture("health.rb")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        reader.start()
+        reader.join(timeout=1.0)
+
+        self.assertFalse(reader.is_alive())
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertIn("no offsets", records[0].getMessage())
+
+    def test_attach_failure_emits_health_rb_error_with_traceback(self) -> None:
+        q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(q, _make_offsets())
+        reader._attach = mock.Mock(side_effect=RuntimeError("synthetic attach failure"))
+        logger, handler, prior_level, records = _capture("health.rb")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        reader.start()
+        reader.join(timeout=1.0)
+
+        self.assertFalse(reader.is_alive())
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].levelname, "ERROR")
+        self.assertIsNotNone(records[0].exc_info)
+        self.assertIn("attach failed", records[0].getMessage())
+
+    def test_attached_emits_health_rb_info(self) -> None:
+        q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(q, _make_offsets())
+        reader._attach = mock.Mock(return_value=(0xCAFE, 0x100000000))
+        # No tick loop needed for this assertion: stop before run() enters it.
+        reader._stop_event.set()
+        logger, handler, prior_level, records = _capture("health.rb")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        reader.run()
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].levelname, "INFO")
+        self.assertIn("attached", records[0].getMessage())
+
+    def test_enqueue_full_emits_health_queue_throttled(self) -> None:
+        q: queue.Queue = queue.Queue(maxsize=1)
+        reader = mod.RBStateReader(q, _make_offsets())
+        q.put_nowait(object())  # fill the bounded queue
+        logger, handler, prior_level, records = _capture("health.queue")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        ev = BridgeEvent(kind=Ev.BPM_UPDATE, deck=1, payload={"bpm": 128.0})
+        reader._enqueue(ev)
+        reader._enqueue(ev)  # second consecutive drop must not re-log (throttled)
+
+        self.assertEqual(len(records), 1, f"expected exactly one throttled record, got {records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertIn("queue full", records[0].getMessage())
 
 
 if __name__ == "__main__":
