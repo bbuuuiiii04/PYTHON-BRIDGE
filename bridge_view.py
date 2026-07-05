@@ -371,6 +371,42 @@ def format_header(data: dict[str, Any]) -> str:
     )
 
 
+def load_ack_watermark(acks_path: Path, run_name: str) -> float:
+    """Ack watermark for *run_name* from the sidecar, 0.0 when absent/corrupt.
+
+    UX item 9: the sidecar (`viewer_acks.json` in the log dir) is the
+    viewer's only write anywhere -- it never touches any run file, keeping
+    non-negotiable 3 ("cannot write to the stream") intact.
+    """
+    try:
+        data = json.loads(acks_path.read_text(encoding="utf-8"))
+        value = data.get(run_name) if isinstance(data, dict) else None
+        return float(value) if isinstance(value, (int, float)) else 0.0
+    except (OSError, ValueError):
+        return 0.0
+
+
+def save_ack_watermark(acks_path: Path, run_name: str, ts: float) -> None:
+    """Record that everything up to *ts* in *run_name* is acknowledged.
+
+    Best-effort by design: an unwritable log dir must never crash the viewer
+    or block acking -- worst case the acks simply don't survive a restart.
+    """
+    try:
+        data = json.loads(acks_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+    data[run_name] = ts
+    try:
+        tmp = acks_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, acks_path)
+    except OSError:
+        pass
+
+
 def health_attr_key(rec: dict[str, Any]) -> str:
     """Color for a health-summary line by its record level (UX item 7).
 
@@ -492,11 +528,18 @@ class LatchState:
     ERROR outside health.* -- stays latched until acked, matching "nothing
     important can scroll away, nothing is ever communicated by a transient
     flash alone."
+
+    *ack_before* (UX item 9): records with ts at or before this watermark
+    were already acknowledged in a previous viewer session of the same run
+    -- they never re-latch on replay, so closing and reopening the viewer
+    doesn't resurrect every warning the operator already dealt with.
+    Recovery records still clear regardless of the watermark.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ack_before: float = 0.0) -> None:
         self._latched: dict[str, dict[str, Any]] = {}
         self._quiet_since: float = time.time()
+        self._ack_before = ack_before
 
     def note(self, rec: dict[str, Any]) -> bool:
         """Update latch state from one incoming record.
@@ -517,6 +560,9 @@ class LatchState:
             return False
 
         if levelno >= _LEVEL_NO["WARNING"]:
+            ts = rec.get("ts")
+            if isinstance(ts, (int, float)) and ts <= self._ack_before:
+                return False  # acked in a previous viewer session of this run
             is_new = cat not in self._latched
             self._latched[cat] = rec
             return is_new
@@ -684,13 +730,13 @@ class _FileFollower:
 class ViewerState:
     """Curses-layer mutable state: per-lens buffers, latch, screen, input mode."""
 
-    def __init__(self) -> None:
+    def __init__(self, ack_before: float = 0.0) -> None:
         self.screen: int = 1
         self.frozen: bool = False
         self.scroll: int = 0
         self.filter_text: str = ""
         self.filter_editing: bool = False
-        self.latch = LatchState()
+        self.latch = LatchState(ack_before=ack_before)
         self.last_heartbeat: dict[str, Any] | None = None
         self.health_latest: dict[str, dict[str, Any]] = {}
         self.feeds: dict[str, deque[dict[str, Any]]] = {
@@ -933,7 +979,13 @@ def _run(stdscr: Any, path: Path) -> None:
     _init_colors()
 
     follower = _FileFollower(path)
-    state = ViewerState()
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    run_name = resolved.name
+    acks_path = resolved.parent / "viewer_acks.json"
+    state = ViewerState(ack_before=load_ack_watermark(acks_path, run_name))
     last_paint = 0.0
     last_age_bucket: int | None = None
 
@@ -963,8 +1015,14 @@ def _run(stdscr: Any, path: Path) -> None:
             ch = stdscr.getch()
             if ch == -1:
                 return
-        if ch != -1 and not state.handle_key(ch):
-            return
+        if ch != -1:
+            was_editing = state.filter_editing
+            if not state.handle_key(ch):
+                return
+            if not was_editing and ch in (ord("a"), ord("A")):
+                # Persist the ack so a viewer restart doesn't resurrect every
+                # already-acknowledged warning from this run (UX item 9).
+                save_ack_watermark(acks_path, run_name, time.time())
 
         now = time.monotonic()
         age_bucket = int(now)  # once-a-second refresh so relative ages stay current
