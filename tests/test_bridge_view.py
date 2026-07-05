@@ -570,6 +570,20 @@ class ArgParserTest(unittest.TestCase):
         self.assertEqual(args.path, "/tmp/example.jsonl")
 
 
+class HealthAttrKeyTest(unittest.TestCase):
+    def test_error_is_red(self) -> None:
+        self.assertEqual(bridge_view.health_attr_key({"lvl": "ERROR"}), "red")
+
+    def test_warning_is_yellow(self) -> None:
+        self.assertEqual(bridge_view.health_attr_key({"lvl": "WARNING"}), "yellow")
+
+    def test_recovery_info_is_green(self) -> None:
+        self.assertEqual(bridge_view.health_attr_key({"lvl": "INFO"}), "green")
+
+    def test_missing_level_is_green(self) -> None:
+        self.assertEqual(bridge_view.health_attr_key({}), "green")
+
+
 class FormatTitleBarTest(unittest.TestCase):
     def test_legend_right_aligned_at_80_cols(self) -> None:
         text = bridge_view.format_title_bar(1, False, 80)

@@ -872,7 +872,7 @@ def _draw_operator(stdscr: Any, state: ViewerState, height: int, width: int, now
         rec = state.health_latest[cat]
         line = f"{_surface_of(rec)}: {display_msg(rec.get('msg', ''))} ({format_age(rec.get('ts', now), now=now)})"
         try:
-            stdscr.addstr(row, 0, line[:width], _attr_for("dim"))
+            stdscr.addstr(row, 0, line[:width], _attr_for(health_attr_key(rec)))
         except curses.error:
             pass
         row += 1
