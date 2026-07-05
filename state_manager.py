@@ -106,7 +106,11 @@ from .session_recorder import SessionRecorder
 from .session_phase_trace import AutoloopPhaseTracer, build_autoloop_phase_row
 from .sound_switch_engine import SoundSwitchEngine
 from . import spectral_cache
-from .audio_spectral_features import extract_spectral_features
+from . import spectral_profile
+from .audio_spectral_features import (
+    extract_spectral_features,
+    extract_spectral_features_v4,
+)
 from .anlz_reader import (
     MULTI_FEATURE_WEIGHTS_V2,
     TrackAnlzData,
@@ -238,15 +242,34 @@ def _read_runtime_anlz_data(
     return data
 
 
+# Longer grids defer v4 extraction to the offline sweep; the legacy v3 path
+# keeps today's behavior for them (design doc §4.10 change 5).
+_V4_AT_LOAD_MAX_S = 900.0
+
+
 def _runtime_spectral_features(audio_filepath: str, beatgrid_times_ms: list[float]):
     if not audio_filepath:
         return None
+    v4 = spectral_cache.get_cached_v4(audio_filepath, beatgrid_times_ms)
+    if v4 is not None:
+        return spectral_profile.compat_features(v4)
     cached = spectral_cache.get_cached(audio_filepath, beatgrid_times_ms)
     if cached is not None:
+        log.info("[SM] spectral-path  source=v3-cache  file=%s", bf.short(audio_filepath))
         return cached
+    grid_span_s = 0.0
+    if len(beatgrid_times_ms) >= 2:
+        grid_span_s = (float(beatgrid_times_ms[-1]) - float(beatgrid_times_ms[0])) / 1000.0
+    if grid_span_s <= _V4_AT_LOAD_MAX_S:
+        v4 = extract_spectral_features_v4(audio_filepath, beatgrid_times_ms)
+        if v4 is not None:
+            spectral_cache.put_cached_v4(audio_filepath, beatgrid_times_ms, v4)
+            log.info("[SM] spectral-path  source=v4-extract  file=%s", bf.short(audio_filepath))
+            return spectral_profile.compat_features(v4)
     features = extract_spectral_features(audio_filepath, beatgrid_times_ms)
     if features is not None:
         spectral_cache.put_cached(audio_filepath, beatgrid_times_ms, features)
+        log.info("[SM] spectral-path  source=v3-extract  file=%s", bf.short(audio_filepath))
     return features
 
 

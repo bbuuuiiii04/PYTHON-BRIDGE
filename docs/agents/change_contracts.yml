@@ -592,6 +592,41 @@ contracts:
     forbidden_assumptions:
       - do not commit secrets, local IPs, API keys, or backup files
 
+  spectral_analysis:
+    code_globs:
+      - audio_spectral_features.py
+      - spectral_cache.py
+      - spectral_profile.py
+      - tools/spectral_sweep.py
+    key_symbols:
+      - extract_spectral_features
+      - extract_spectral_features_v4
+      - SpectralFeaturesV4
+      - SCHEMA_VERSION_V4
+      - get_cached_v4
+      - put_cached_v4
+      - evict_stale_v4
+      - SPECTRAL_V4_CALIBRATION
+      - compat_features
+      - empty_floor_runs
+    inspect:
+      - docs/research/spectral_audio_analysis_redesign.md
+      - docs/subsystems/core_bridge.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/research/spectral_audio_analysis_redesign.md
+      - AGENTS.md
+    forbidden_assumptions:
+      - analysis outputs describe sound; no output may time or trigger a cue (worst-case wrong analysis = wrong seasoning, never a missed or phantom cue)
+      - v4 code must never modify or delete v3 cache entries, the Rekordbox DB, ANLZ files, or audio files
+      - absent analysis data reads as no signal, never as a false event
+      - the v3-compat block must stay bit-identical to the v3 extractor (the smart-drop scorer consumes it unchanged)
+      - every future schema version gets its own cache subdirectory; eviction never crosses versions
+      - calibration statistics and validation claims use BY GENRE playlist tracks only
+
   tests:
     code_globs:
       - tests/**

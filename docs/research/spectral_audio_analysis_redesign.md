@@ -107,25 +107,359 @@ describes; it never decides. Worst-case wrong output = wrong seasoning.
 
 ## 4. v4 design
 
-PENDING — written after the research synthesis and prototype measurements on BY GENRE tracks,
-then adversarially reviewed before implementation (per prompt execution shape).
+Adversarially reviewed before implementation (gate result recorded in §4.10).
+
+### 4.1 Design principles
+
+1. **Describe, never decide** — v4 stores measurements and derives per-beat descriptions;
+   no output is a trigger. Consumers (Features 1–4) map descriptions to cue *choices*;
+   timing stays with ANLZ markers and locked designs.
+2. **Store raw measurements; derive classes at load.** The v3→v4 epoch pain teaches:
+   classification thresholds must be re-tunable *without* re-extraction. The cache holds
+   absolute physical measurements; classes (bottom-gone, roll, growl…) are cheap pure
+   functions over cached arrays, with calibration constants in code — re-tuning is an edit +
+   restart, never a 2-hour re-analysis, and never an identity epoch.
+3. **One STFT pass** (A14) — every measurement derives from the same frames.
+4. **Absolute dB, fixed reference** — cross-band and cross-track comparable (A6);
+   corpus-absolute calibration per review ruling 4.5 (measured viable: Appendix B).
+5. **Beat-indexed, quarter-beat sub-grain** where within-beat shape matters (A7).
+6. **v3-compat block bit-identical** — computed by the same refactored code path on the same
+   decoded audio; the smart-drop scorer keeps its exact inputs (A20; proof gate §6).
+7. **Deterministic; optional-dep degradation preserved** (A12; research: every op used has
+   no randomness — librosa hpss/onset/spectral/load all deterministic, verified-primary-source).
+
+### 4.2 Extraction parameters
+
+sr=22050 mono (A1), n_fft=2048 / hop=512 (A2), mel n_mels=128 fmin=20 fmax=11025 (A3/A4).
+HPSS: `librosa.decompose.hpss(S_power, kernel_size=31, power=2.0, margin=1.0)` on the linear
+power STFT (defaults; Fitzgerald 2010 median-filter method — verified-primary-source). HPSS
+is the cost center (8.5 s of ~11.5 s/track); kept at full resolution because the harmonic-
+domain measures (growl timbre, whir level) are the load-bearing new capability and the budget
+fits (§4.6).
+
+### 4.3 Stored schema (cache payload, `schema_version: 4`)
+
+Key/staleness identical to v3 (A16): sha1(realpath + mtime_ns + size + beatgrid fingerprint),
+stored under `spectral_cache/v4/` (A17). All v4 series rounded (dB: 0.1; ratios: 3 decimals;
+centroid: 1 Hz) — rounding is part of the schema, so determinism includes it. The v3-compat
+block is stored at full float precision (bit-identity requirement).
+
+Per-beat series (length = len(beatgrid), v3 beat-window semantics A7):
+
+| Field | What it is | Primary requirements |
+|---|---|---|
+| `band_db` ×6: sub 20–60, bass 60–150, lowmid 150–500, mid 500–2000, high 2000–6000, air 6000–11025 | mean absolute dB per beat per band | R1 R6 R9 R10 R11 R14 R15 |
+| `band_sub4` ×6 | 4 quarter-beat mean-dB slots per beat per band | R3 R4 R7 R16 R20 |
+| `growl_band_db` + `growl_band_sub4` | harmonic-component 60–500 Hz level (beat + quarter-beat) | R7 R13 |
+| `growl_band_frames` (+ `frame_hop_s`) | the same harmonic 60–500 Hz envelope at full frame rate (43 Hz), 0.1 dB — future wobble/modulation derivations run from cache (review-gate change 2) | §4.9 provisioning |
+| `sustain_mid_db` (200–2000 H), `sustain_high_db` (2000–8000 H) | harmonic ("sustained/tonal") levels | R2 R7 R13 |
+| `growl_flatness` | spectral flatness of the harmonic 500–4000 band — distortion/growl timbre without kick pollution | R3 R13 (Appendix B round 2) |
+| `centroid_hz` | brightness | R2 R10 R13 |
+| `perc_low/mid/high/full` | HPSS percussive energy fraction per macro band (low <200, mid 200–2000, high >2000) | R1 R2 R7 R12 R16 |
+| `attack_db`, `attack_low_db` | max positive frame-to-frame dB rise within beat (full band; 20–200 band) | R3 R4 R16 R17 |
+| `onset_density`, `onset_density_midhigh` | onset counts per beat — superflux `max_size=3` on percussive mel (≥500 Hz variant for rolls), peak-picked on the raw dB-flux scale (`normalize=False`, delta=1.5 — the corpus-absolute rule applied to onsets; Appendix C) | R1 R3 R5 R9 |
+| `fluxsum_midhigh` | per-beat sum of the ≥500 Hz percussive superflux envelope — threshold-free roll/crescendo energy; R5's acceleration = its trailing slope | R5 R9 |
+| `full_db` | mean full-band dB per beat | R6 R14 R15 |
+| v3-compat block: the 8 v3 envelope fields | bit-identical values (A20) | zero-behavior-change; grit + punch axes |
+
+Beat aggregation rule for every dB series (incl. sub4 slots): **arithmetic mean of linear
+power over the frames in the window, then dB** — energy semantics (v3's), not a log-domain
+mean (Appendix C stability finding). Frame-native measures keep their own aggregation:
+attack = max positive frame-to-frame dB rise in the beat; flatness/centroid = mean of frame
+values (v3-identical for flatness).
+
+Per-track summary scalars (stored in the entry — the Feature 1 identity freeze source, F-9):
+
+- The four axes, exact formulas pinned in code: `grit` = median of the compat block's
+  `spectral_flatness_envelope` and `punch` = CV (std/mean) of the compat block's
+  `kick_envelope` — computed from bit-identical v3 series, so they provably inherit v3's
+  measured stability (0.922 / 0.902); `bass` = fraction of beats with `sub_db` above the
+  pinned absolute threshold; `drama` = p95 − p5 of `full_db` — these two are new-semantics
+  (absolute dB) and carry their own stability gate: even/odd Spearman on the BY GENRE corpus
+  ≥ the v3 band (smoke: 0.906 / 0.967 at n=36; corpus-scale numbers in §7).
+- New character scalars (threshold-free only, per review-gate change 4): `loudness_ref_db`
+  (p95 full_db), `brightness_med`, `growl_timbre_p90` (growl_flatness p90),
+  `attack_low_p90`, `onset_mh_p90`, `duration_s`, `n_beats`. Threshold-dependent scalars
+  (the `bass` duty axis, sub-weight) are **derived at load** by `spectral_profile` from the
+  stored raw series — never persisted, so threshold re-tuning can never desynchronize
+  cache entries (F-9 hazard closed).
+
+Estimated entry size: ~48 rounded values/beat + 8 full-precision compat values/beat ≈
+~240 KB at the median 514 beats → **~165 MB for the 686-track library** (measured actuals in
+§7; v3 baseline 43 MB/476). Acceptable on this machine; rounding widths are the knob if it
+ever matters.
+
+### 4.4 Derived views (computed at load; pure stdlib, no numpy)
+
+`spectral_profile.py` (new module) exposes:
+- **v3-compat view**: a `SpectralFeatures` built from the compat block — feeds
+  `anlz_reader`'s scorer unchanged.
+- **The silence primitive (P-2/F-16)**: `empty_floor_runs()` — per-beat `bottom_gone`
+  (sub_db AND bass_db below calibrated thresholds) merged into runs; `true_silence` (full_db
+  below threshold) separated from *musical* empty floor. One function, three consumers
+  (texture darkness, blackout sizing, landing eligibility).
+- **Per-beat texture descriptors**: kick-prominence (R12), thick/thin via band occupancy
+  (R11), bright/dark tilt (R10), stab vs sustain via within-beat swing + attack (R4/R7),
+  roll flag + acceleration (R5), growl (flat_midH × midH_db) and bright-whir (centroid ×
+  highH_db × low flat_midH × low perc) classes (R13).
+- **Drop-window character vector** (R9): given a drop beat, the descriptor dict the
+  drop-type classifier (Feature 2 spec) consumes; neutral-on-thin-data per F-11 is the
+  consumer's rule, fed by an explicit `coverage` count.
+- **Calibration constants**: one `SPECTRAL_V4_CALIBRATION` mapping with every threshold,
+  each carrying its provenance (BY GENRE corpus percentile, 2026-07-05). Constants are
+  consumer-retunable without re-extraction (principle 2).
+
+### 4.5 Module layout & seam changes
+
+- `audio_spectral_features.py`: internal refactor `_extract_v3_features(y, sr, grid)` (the
+  existing math, unchanged); public `extract_spectral_features` (v3) delegates to it —
+  byte-identical behavior; new `extract_spectral_features_v4()` decodes once and computes
+  compat block (same helper) + v4 measurements from one STFT. New frozen dataclass
+  `SpectralFeaturesV4` exposing the 8 v3 attribute names (compat) + v4 fields.
+- `spectral_cache.py`: `get_cached_v4` / `put_cached_v4` / `evict_stale_v4` operating on
+  `spectral_cache/v4/`; same atomic-write discipline (A15), same key function (A16). v3
+  functions untouched. (v3 `evict_stale` globs only the top-level `*.json` — verified it
+  cannot see the v4 subdirectory.)
+- `spectral_profile.py`: new, pure stdlib (importable and testable without numpy/librosa —
+  CI 3.11 safe).
+- `tools/spectral_sweep.py`: offline sweep CLI — enumerates tracks from the Rekordbox DB
+  (the `filepath_resolver` pyrekordbox pattern), resolves ANLZ beatgrids via
+  `read_anlz_drops`, extracts v4 (skips fresh cache hits), reports coverage/duration/size.
+  `--jobs N` process pool (spawn; `OMP_NUM_THREADS=1` per worker — research §9). Run under
+  `caffeinate -i` (documented in the tool's usage text).
+- `state_manager.py` seam (`_runtime_spectral_features`): read order v4-cache → v3-cache
+  (legacy, read-only) → extract v4 + write v4 cache → return the v3-compat view in every
+  path. The scorer receives identical numbers in all three paths (§6 proof). Flag gating
+  unchanged (A19).
+- `__main__.py`: the existing flag-gated eviction worker additionally calls
+  `evict_stale_v4()` — same thread, same flags, no new runtime surface.
+
+### 4.6 Budget (measured basis, Appendix A/B)
+
+- Per track ≈ 11.5–12.5 s (decode 2.3 + STFT 0.10 + mel 0.02 + HPSS 8.5 + v3-compat
+  recompute ≈ 0.4 + v4 aggregation ≈ 0.5). At-load extraction stays in the background ANLZ
+  worker (seconds-range requirement: met; and after the sweep, load-time extraction only
+  ever happens for brand-new files).
+- Honest timing note: on a cache-miss load (with the spectral flags on), the ANLZ_DATA
+  event already waits for extraction today (`state_manager.py:207-250` computes the energy
+  shadow from the features before posting); v4 moves that first-play-only wait from ~3–4 s
+  to ~12 s. Values are identical; only the arrival time of the background enrichment on a
+  never-before-analyzed track shifts. The whole-library sweep removes the case for every
+  existing track; a brand-new purchase pays it once. Consumers of ANLZ_DATA are async
+  enrichment consumers by design (they tolerate late/absent data — that is the existing v3
+  contract).
+- Whole-library sweep: 686 tracks ≈ 2.2 h serial, ≈ 40 min at `--jobs 4` — the overnight
+  requirement is met with ~10× margin either way.
+- Cache: ~165 MB estimate for the full library (measured in §7).
+
+### 4.7 Coexistence & cutover
+
+v3 entries: never read-modified or deleted by v4 code; v3 eviction continues to govern only
+top-level v3 files (verified glob scope). Runtime prefers v4, falls back to reading v3 for
+tracks the sweep hasn't covered (pre-sweep world), and extracts v4 on full miss. After this
+one-shot's sweep, every on-disk track has a v4 entry, so the v3 fallback is a vestigial
+safety path. Deleting v3 files is a later operator-approved cleanup, deliberately not part
+of this build.
+
+### 4.8 Failure modes
+
+Missing librosa/numpy → `extract_spectral_features_v4` returns None → ANLZ-only tier
+(unchanged v3 contract). Decode error / <2 beats / corrupt or stale cache → None → same.
+Derived classes on absent data → absent (no darkness, no growl, no roll — never a false
+event). m4a (≤8 files) decodes only if an audioread fallback exists; otherwise those tracks
+live at the ANLZ tier like any decode failure.
+
+### 4.9 Explicitly cut or deferred (honest rulings)
+
+- **Per-beat LFO wobble rate/depth: CUT from shipped classes, storage-provisioned.**
+  Round-1/round-2 prototyping (Appendix B) showed naive and beat-excluded modulation
+  measures both fail to separate wobble from offbeat-bass/kick pulsing on real tracks — and
+  this catalog's dubstep is stab/scream-dominated (briddim/tearout era), so a wobble class
+  has almost no labeled positive examples to calibrate against. `growl_band_frames` (the
+  frame-rate 43 Hz harmonic low-mid envelope — review-gate change 2; quarter-beat slots
+  alone cannot resolve 1/8–1/16-note LFO rates) is stored precisely so a future wobble
+  measure can be derived from cache without re-extraction. The missing experiment, exactly:
+  a labeled set of known LFO-wobble drops (operator-supplied or new tracks), then a
+  duty-gated modulation-spectrum measure over `growl_band_frames` validated against it.
+  Until then: `unproven`, not shipped.
+- **Roughness (20–150 Hz modulation)**: unreachable at 43 Hz frame rate (Nyquist 21.5 Hz);
+  the distortion axis (`flat_midH`) is the stand-in. Would require a dedicated band-passed
+  waveform envelope pass (Hilbert) — priced but not needed by any current requirement.
+- **Stem-level percussion isolation**: out of scope; HPSS macro-band ratios are the honest
+  full-mix approximation.
+- **K-weighted LUFS loudness normalization**: rejected as unnecessary — measured master
+  spread at drop windows is ~2.5 dB (Appendix B), well within threshold tolerances;
+  `loudness_ref_db` (p95 full_db) is stored per track so any consumer needing
+  loudness-relative reads has the reference without a new dependency.
+
+### 4.10 Adversarial review gate — result and folded changes
+
+Fresh-context Fable-tier adversarial review ran 2026-07-05 against this design + the prompt +
+the code at `2945c52`. **Verdict: APPROVE-WITH-REQUIRED-CHANGES** — architecture confirmed
+(absolute dB + within-beat shape + HPSS harmonic measures as the answer to v3's blindnesses;
+subdirectory coexistence verified safe; containment clean; compat-view seam correct for the
+duck-typed scorer). Every finding adopted:
+
+1. **Bit-identity carve-out (was a latent contradiction):** the v3-compat block is exempt
+   from the one-STFT principle. `_extract_v3_features(y, sr, grid)` keeps v3's exact three
+   librosa calls verbatim — mel with `fmax=12000.0`, `onset_strength(y=…)` and
+   `spectral_flatness(y=…)` with their own internal STFTs, the double normalization, the
+   `<2 beats` precondition, and the exact `librosa.load(str(path), sr=22050, mono=True)`
+   decode. The bit-identity check ships as a retained, locally-runnable test (skipped on CI
+   without librosa), not a one-time proof.
+2. **Real wobble provisioning:** quarter-beat slots cannot carry 1/8–1/16-note LFO rates
+   (Nyquist ≈ 4.7 Hz at 140 BPM). v4 stores the **frame-rate growl-band harmonic envelope**
+   (`growl_band_frames`, 0.1 dB rounding, with hop metadata; ~55–65 KB/track ≈ +40 MB
+   library) so any future wobble/roughness-adjacent derivation runs from cache. The wobble
+   *class* stays cut (§4.9).
+3. **Key parity proven, not assumed:** the sweep resolves audio paths from the same DB field
+   the runtime resolver uses (`DjmdContent.FolderPath`) and beatgrids via the same
+   `read_anlz_drops` (whose `_candidate_anlz_paths` expands any sibling to the same ordered
+   set); a parity check on real tracks (DB-derived path vs each sibling candidate →
+   identical fingerprints) is part of §6; and `_runtime_spectral_features` logs its path
+   (v4-hit / v3-fallback / fresh-extract) so silent non-convergence is observable.
+4. **No threshold-dependent stored scalars:** the `bass` axis and `sub_weight_med` are
+   derived at load from the stored raw series by `spectral_profile` (pure functions);
+   stored scalars are threshold-free only (grit, punch, drama, brightness_med,
+   loudness_ref_db, growl_timbre_p90, attack_low_p90, onset_mh_p90). Identity freezing
+   stays the consumer's job (review F-9 freeze-and-store), fed by these measurements.
+5. **At-load resource guard:** a process-wide single-flight lock (one v4 extraction at a
+   time — two decks can load simultaneously), plus a duration cap: tracks whose beatgrid
+   spans longer than the cap take the legacy v3 extraction path at load exactly as today
+   (zero behavior change for the pathological hour-long-file case) and leave v4 to the
+   sweep. Measured peak RSS reported in §4.6.
+6. **Uncontaminated final proof:** rounds 1–2 iterated features on the same 36 tracks, so
+   the final genre proof (§6) re-runs on the disjoint remainder of the six BY GENRE
+   playlists (held-out tracks the design never saw), and the bottom-gone threshold is
+   re-validated against corpus-scale sub-band bimodality before `empty_floor_runs()` ships
+   as the shared primitive.
+7. **Pinned details:** `onset_density` base band = full percussive mel (20–11025);
+   the v4 dir is derived `_cache_dir() / "v4"` so `RBSS_SPECTRAL_CACHE_DIR` moves both
+   (test isolation intact); scalar rounding pinned (dB 0.1, ratios/CV 4 decimals, Hz 1);
+   `get_cached_v4` validates every series length against the beat count before returning;
+   v4 extraction keeps v3's catch-all-Exception→None discipline; the `spectral_analysis`
+   change contract lands with the build.
+8. Eviction convention documented in code: every future schema gets its own subdirectory;
+   eviction never crosses versions (no A17 recurrence at v5).
+9. Stability contingency pinned: if `bass`/`drama` corpus-scale stability lands below the
+   v3 band, `bass` recomputes from the compat `sub_bass_envelope` duty (v3 semantics,
+   known-stable) — the absolute-dB series stays stored either way.
+10. Band-name hygiene: one `BAND_RANGES` table in code is the single source; harmonic aux
+    series are role-named (`growl_band_*` = H 60–500, `growl_flatness` = H-flatness
+    500–4000, `sustain_mid_db` = H 200–2000, `sustain_high_db` = H 2000–8000).
+11. Sweep memory priced: one worker's peak RSS measured before choosing the default
+    `--jobs` (machine RAM checked); overnight margin absorbs a conservative default.
+12. Zero-behavior-change scope stated precisely: v4's extra at-load seconds delay only the
+    energy-shadow *diagnostic* upgrade (drop/buildup markers arrive from the fast ANLZ
+    worker, verified `state_manager.py:1835-1842,1237`; the shadow's sole runtime consumer
+    is a log line, `state_manager.py:4155-4169`); a track where v4 fails but v3 would have
+    succeeded degrades the shadow source label only (log-visible, light-invisible).
 
 ## 5. Requirements coverage table
 
-PENDING — every R-item above → the v4 measurements that serve it, or an honest `unreachable`.
+| ID | Served by (v4 measurements / views) | Status |
+|---|---|---|
+| R1 percussion distinguished | `perc_low/mid/high/full`, `onset_density*`, `attack_*` | measured round 1; proof §6 |
+| R2 euphoric synth captured | `midH_db`+`highH_db` sustained runs, `centroid_hz`, low `flat_midH`, low `perc_full` | round 2 validation; proof §6 |
+| R3 dubstep jab/scratch outline | `attack_db`, `onset_density_midhigh`, `flat_midH`, `high_db`/`air_db`, `band_sub4` swing | round 1 signal confirmed; proof §6 |
+| R4 bass-house stab distinct | `attack_low_db`, low-band `band_sub4` swing, `perc_low`, `onset_density` | round 1 signal confirmed; proof §6 |
+| R5 snare rolls + acceleration | `onset_density_midhigh` + beat-to-beat rise (view) | round 2 validation; proof §6 |
+| R6 emptiness detected & sized | `sub_db`+`bass_db` bottom-gone runs, `full_db` true-silence split (the P-2 primitive) | validated on the ear-validated reference track (App. B) |
+| R7 sustained horn ≠ hits | `growlH_db` duty + `band_sub4` flatness-of-shape + `perc_low` | proof §6 |
+| R8 identity axes stability | stored scalars `grit/punch/bass/drama` (formulas §4.3) | stability gate in §7 (≥ v3's 0.902–0.957) |
+| R9 drop-window genre separation | drop-window character vector (view over band/attack/onset/timbre series) | 53.3% LOO round 1 → final proof §6 |
+| R10 bright/dark tilt | `centroid_hz`, `high_db`−`low` tilt | trivially derived; §6 |
+| R11 thick/thin | band occupancy count + `full_db` | derived view; §6 |
+| R12 kick-prominence | `attack_low_db`, `perc_low`, `bass_db` pattern | derived view; §6 |
+| R13 growl vs whir | `flat_midH` × `midH_db` (growl); `centroid` × `highH_db` × low `flat_midH` (whir) | round 2 validation; §6 |
+| R14 shared silence primitive | one `empty_floor_runs()` view, three consumers | design §4.4 |
+| R15 energy arc vs ANLZ structure | `full_db`, band series per beat | inherent; §6 outlines |
+| R16 attack shape / body language | `attack_*`, `band_sub4` swing, `perc_*` | round 1 signal; §6 |
+| R17 accent discipline inputs | scalars `punch`, `grit`, `attack_low_p90` | stored scalars |
+| R18 corpus-absolute calibration | `SPECTRAL_V4_CALIBRATION` from BY GENRE stats only | §7 |
+| R19 determinism/degrade/budget | design §4.1/4.6/4.8 | proofs §6/§7 |
+| R20 off-beat activity visibility | `band_sub4` (high/air bands: slots 2–3 vs 0–1) | derived view; §6 |
+| — LFO wobble rate | **unproven — cut, storage-provisioned** (§4.9) | honest ruling |
+| — 20–150 Hz roughness | **unreachable at v4 frame rate** (§4.9) | honest ruling |
 
 ## 6. Proofs on the operator's music
 
-PENDING — per-measurement validation on named BY GENRE tracks, timestamped event outlines,
-determinism and stability runs, v3-compat bit-identity proof.
+All **confirmed (measured this session)** unless labeled otherwise.
+
+### 6.1 Zero-behavior-change proofs
+
+- **v3-compat bit-identity on real audio, three formats**: v4's compat block equals the v3
+  extractor exactly (all 8 envelope fields, `==` on full-precision tuples) on Odd Mob —
+  "Dancing Boys, Dancing Girls" (wav, 480 beats), Odd Mob — "CUT TF UP" (mp3, 513 beats),
+  Odd Mob OMNOM — "Losing Control" (flac, 592 beats). The smart-drop scorer receives
+  identical numbers through every seam path.
+- **The bit-identity gate is a retained test, not a one-time run**
+  (`tests/test_audio_spectral_features.py::test_optional_real_audio_bit_identity`,
+  env-gated on `RBSS_SPECTRAL_FIXTURE_DIR`, skips cleanly on CI): exercised end-to-end this
+  session against real audio — PASS. Any future refactor that breaks compat bit-identity
+  fails this test locally.
+- **Structural compat test with fake deps** runs everywhere (CI-safe), asserting
+  v4-compat == v3 output on the same injected inputs.
+- **Suite**: 3,251 tests (was 3,226), 1 failure — `test_laser_color_engine.
+  LaserColorMapperTests.test_loader_ships_disabled_with_calibrated_fixed_band_values`,
+  **pre-existing at baseline `2945c52` before any edit of this session** (laser color
+  engine config loader; unrelated subsystem, not touched). Zero new failures. Three hard
+  docs checks: all pass.
+
+### 6.2 Determinism
+
+- Same file + same beatgrid → `SpectralFeaturesV4` dataclass equality (every rounded series,
+  sub4 slot, frame envelope, and scalar) across repeated runs, on wav, mp3, and flac real
+  tracks — **confirmed**. All operations used are documented-deterministic (librosa
+  hpss/onset/spectral/load; no RNG anywhere in the path — research §8, verified-primary-source).
+
+### 6.3 Runtime↔sweep cache-key parity (review-gate change 3)
+
+- `tools/spectral_sweep.py --verify 60`: for 60 real tracks, every ANLZ sibling candidate
+  (.DAT/.EXT/.2EX) yields the identical beatgrid fingerprint → identical cache keys from
+  the DB-derived path (sweep) and any runtime-provided sibling path — **60/60 consistent**.
+  Tracks with no beatgrid at all (FX one-shots: scratch/cymbal samples) produce no key on
+  either side — consistent absence. The runtime seam additionally logs `[SM] spectral-path`
+  whenever it takes a non-v4-hit path, so silent non-convergence is observable in the log.
+- Audio-path parity holds by construction: both sides read `DjmdContent.FolderPath` and the
+  key uses `os.path.realpath` of it.
+
+### 6.4 Budget measurements
+
+- Per-track v4 extraction on this machine: 8.1–9.8 s measured across the three formats
+  (v3 alone: 0.7–2.2 s). At-load extraction runs in the existing background ANLZ worker,
+  single-flight-locked, with grids >15 min taking the legacy v3 path (§4.10 change 5).
+- Peak RSS: ≤ ~1.0 GB for a process that ran three consecutive v4 extractions plus three
+  v3 extractions (upper bound on a single extraction's footprint). With the sweep default
+  `--jobs 2` on this 8 GB machine: ~2 GB worst case — sized deliberately (§4.10 change 11).
+- m4a decodes via the installed audioread fallback (deprecation-warned by librosa;
+  works today — observed decoding during the sweep). If that fallback ever disappears,
+  those ≤8 files degrade to the ANLZ-only tier per A12.
+
+### 6.5 Corpus proofs (held-out genre discrimination, calibration, outlines)
+
+PENDING — sweep in progress; appended when complete.
 
 ## 7. Whole-library sweep results
 
 PENDING — coverage, duration, cache size, stability spot-checks.
 
-## 8. Open questions for Brandon
+## 8. Open questions for Brandon (taste calls only — defaults chosen, veto if wrong)
 
-PENDING — taste calls only, each with a chosen default.
+1. **How long may a pre-drop blackout get?** The analysis now measures each drop's real
+   empty-floor gap (e.g. ILL has a 12-beat one). The v2 design caps the blackout at ~4 bars
+   (16 beats ≈ 7 s at 140 BPM). **Default: the 16-beat cap stands** — a 12-beat measured gap
+   means up to ~5 s of true black in the living room. Veto with a shorter cap if that ever
+   feels too long; it is one constant, no re-analysis.
+2. **The scrub test is your veto surface.** §6.5 lists timestamped events for six named
+   tracks. If any listed event reads wrong when you scrub there in Rekordbox, say which
+   timestamp — every class threshold is a code constant, re-tunable in minutes without
+   re-analyzing the library. **Default: calibrated thresholds ship as-is.**
+3. **Classic LFO-wobble detection stays unshipped** (§4.9): your current dubstep is
+   stab/scream-era and gave the measure nothing to calibrate against. If you ever want a
+   true wobble class, name (or buy) a handful of wobble-heavy tracks and it can be derived
+   from the already-stored data — no re-extraction. **Default: skip it; the growl/whir
+   timbre classes cover today's catalog.**
 
 ---
 
@@ -152,3 +486,113 @@ PENDING — taste calls only, each with a chosen default.
   Extended Remix)", 130 BPM, 253 s wav): ANLZ parse 0.37 s → 9 drops / 4 buildups /
   1 breakdown / mood 1 / 549-beat grid; decode 2.3 s; STFT 0.10 s; mel 0.02 s; HPSS 8.5 s;
   onset 0.01 s — **confirmed (measured this session)**. HPSS dominates the budget; sizing in §4.
+
+## Appendix B — prototype round 1 (36 sample tracks, 6 per operator genre, read-only)
+
+Candidate v4 measurements were extracted for 36 BY GENRE tracks (6 each from ODDMOB,
+BASS HOUSE, DUBSTEP, ISOXO, HARD TECHNO, SYNTH HOUSE — titles listed in §6 when the proofs
+land). Findings that shaped the v4 design:
+
+**What worked immediately (confirmed by measurement this session):**
+- **Absolute-dB cross-band structure discriminates the operator's genres** in exactly his
+  words: at drop windows, ISOXO (trap) shows the heaviest and most consistent sub floor
+  (sub p10 28 dB — 808 weight) with the *sparsest* low-band attacks (halftime); HARD TECHNO
+  is the bass-heaviest (24.6 dB median) and darkest (centroid 341 Hz, air −9.4 dB);
+  DUBSTEP is the brightest/most mid-heavy (mid 11.9 dB, high 6.6 dB, air 1.6 dB, flatness
+  0.06 — "scratchy"); BASS HOUSE and ODDMOB both show strong within-beat low-band swing and
+  attack (stab/punch), with BASS HOUSE brighter in mid/high.
+- **Mastering spread is small enough for corpus-absolute thresholds**: median drop-window
+  full-band level sits within ~2.5 dB across all six genres (14.7–17.1 dB) — the corpus-
+  absolute calibration rule (review 4.5) is viable on raw fixed-reference dB.
+- **The bottom-gone primitive works on absolute dB, validated on the ear-validated reference
+  track** (Kai Wachi — ILL, DUBSTEP): sub-band dB is strongly bimodal (present ≈ 20–35 dB,
+  gone ≲ 5 dB with a sparse gap between); a sub<5 dB rule recovers: the 12-beat empty floor
+  ending exactly at drop beat 109; a 4-beat vacuum immediately before drop 261 (the
+  operator's "4 silent beats → 4-beat blackout" example, now measurable); a 3-beat gap
+  before drop 141; and the 2:18–2:25 run is literal end-of-file silence (full-band −80 dB),
+  cleanly separable from *musical* empty floor (full-band +1..+11 dB, other instruments
+  playing) — the same distinction the 2026-07-05 ear test established.
+- **First genre-discrimination pass: 53.3% leave-one-out nearest-centroid accuracy over 180
+  drop windows vs 16.7% chance** — with two measures still broken (below) and no mid/high
+  bands in the drop vector yet. HARD TECHNO 26/36 correct; the one systematic failure was
+  SYNTH HOUSE→HARD TECHNO confusion (both dark + bass-sustained at the window level), fixed
+  in round 2 by adding the harmonic mid/high sustain measures the synth signature needs.
+
+**What round 1 proved broken (and round 2 fixes):**
+- **Naive modulation depth does not separate wobble**: percentile-swing depth on the
+  harmonic 60–500 Hz envelope reads 0.77–0.88 *everywhere* — note-gap pulsing (offbeat
+  basslines, kick bleed) counts as modulation, and the rate estimator locks onto 2× beat
+  frequency in techno/house (measured: HARD TECHNO drop mod-rate median 5.1 Hz ≈ 2×fb at
+  155 BPM). Round 2 adds a **sustained-tone duty gate** (wobble is modulation of a
+  continuous tone; note patterns have gaps) and a **mid-band flatness "growl timbre" axis**
+  (distortion), per the MIR research (modulation-spectrum practice; McKinney & Breebaart).
+- **Onset peak-picking was mis-parameterized** (density ≈ 1/beat everywhere; snare rolls
+  invisible). Round 2 uses superflux-style onset strength (`max_size=3`, suppresses wobble
+  AM being counted as onsets — verified-primary-source librosa behavior) on the percussive
+  mid/high mel with retuned peak-picking, validated against known buildup rolls.
+- **Full-band spectral flatness is kick-poisoned** (broadband transients dominate); the
+  growl/whir timbre axis needs **mid-band (500–4000 Hz) flatness** computed from the same
+  STFT (MIR research recommendation adopted).
+
+**Honest ceiling noted:** 20–150 Hz *roughness* modulation (the perceptual "grit" band) is
+not measurable from 43 Hz STFT frames (Nyquist 21.5 Hz); v4's wobble range is 0.5–16 Hz and
+the distortion axis stands in for roughness. Labeled as a v4 limitation, not hidden.
+
+## Appendix C — prototype round 2 (same 36 tracks, harmonic-domain measures; all confirmed-measured)
+
+- **Growl timbre works on the harmonic mid band**: `flat_midH` (flatness of the HPSS
+  harmonic component, 500–4000 Hz) at drop windows — DUBSTEP median 0.267 (ILL 0.365 and
+  DROP EM 0.326 top the list, the growliest tracks in the sample) vs SYNTH HOUSE 0.089
+  (lowest) at comparable harmonic levels. The axis describes *sound*, not genre: the one
+  high hard-techno track (Brain, 0.316) genuinely is distorted-industrial — "gritty" is the
+  correct seasoning for it. Full-spectrum flatness could not make this separation (kick
+  pollution, round 1).
+- **Whir re-anchored by data**: the euphoric synth-house signature is *warm sustained
+  harmonic mids with clean (low-flatness) timbre* — not treble brightness (measured: synth
+  house `highH` at drop start ≈ 0.5 dB vs dubstep 11.6 dB; its flat_midH 0.089 and its
+  mid-band within-beat swing 6.85 dB are both the lowest of all six genres = most sustained,
+  cleanest). Whir class = sustained `midH_db` + low `flat_midH` + low percussive fraction.
+- **Onset density needed the corpus-absolute lesson too**: librosa's default
+  `normalize=True` min-max scales the onset envelope per track — a peak-relative trap
+  (Laserbeam's counts collapsed to zero everywhere). Final: superflux envelope
+  (`max_size=3`) on percussive ≥500 Hz mel, `peak_pick` on the raw dB-flux scale
+  (`normalize=False`, delta=1.5, wait=1, pre/post_avg=8). Validated: real snare rolls read
+  3–6/beat with a clear pre-drop rise (ILL beats 98–108: flux sum 11→75 into the drop;
+  crank the bass 28→79), while Laserbeam's riser-only build correctly reads ~0 (no roll —
+  honest absence). A per-beat `fluxsum_midhigh` series is stored alongside counts as the
+  threshold-free crescendo/roll-energy signal (R5 acceleration = its trailing slope).
+- **Trap's rhythmic vacuum is measurable**: ISOXO is the only genre with a nonzero median
+  pre-drop bottom-gone gap (1.5 beats) across its drop windows — the operator's "heavy but
+  sparse" trap signature (addendum 16/17) directly confirmed.
+- **Genre-discrimination proof (final protocol)**: 179 drop windows, 18-descriptor vector,
+  nearest-centroid with **leave-one-track-out** (all windows of the test track excluded from
+  the centroids — round 1's 53.3% used plain leave-one-window-out and was inflated by
+  sibling drops of the same track): **53.1% vs 16.7% chance (3.2×)**. Confusion structure is
+  musically honest: HARD TECHNO 29/36 (81%); remaining confusion sits between genuinely
+  adjacent styles (ISOXO↔DUBSTEP — the catalog's ISOxo-era trap/dubstep hybridity;
+  ODDMOB↔BASS HOUSE/SYNTH HOUSE — all ~130 BPM house). Per-genre median signatures match the
+  operator's own genre map axis-by-axis (§6 table). The shipped drop-type selector (review
+  2.9) maps to four archetype families with a neutral default on ambiguity (F-11) — an
+  easier, safer problem than this 6-way benchmark.
+- **Identity-axes stability smoke (36 tracks, even/odd Spearman)**: grit 0.911, bass_duty
+  0.906, drama 0.967, brightness 0.914 pass the v3 band already at this small n; punch at
+  0.769 exposed a design error — log-domain beat aggregation (geometric mean) compresses
+  peaks. Two design corrections adopted: **(1) beat aggregation = arithmetic mean of linear
+  power within the beat, stored as dB** (v3's energy semantics, and what blackout sizing
+  wants); **(2) the punch and grit axes are computed from the v3-compat block itself**
+  (CV of `kick_envelope`, median of `spectral_flatness_envelope`) — bit-identical series,
+  so they provably inherit v3's measured 0.902/0.922 stability; bass_duty and drama come
+  from the v4 absolute series and are re-measured at corpus scale in §7.
+- **Outline rehearsal + a class-semantics ruling**: rehearsal outlines on six named tracks
+  read scrub-ready (ILL's is textbook: intro riff gaps, growl sections, roll into the
+  12-beat empty floor, both pre-drop vacuums; the ISOxo track shows the halftime
+  every-other-bar bottom-gone pattern of trap verses). One deliberate ruling came out of the
+  rehearsal: Pitch Mad Attak — "Wanna Be" (HARD TECHNO) reads `sustained synth` through its
+  drops, which initially looked like a rumble misread — measurement showed the track
+  genuinely carries a clean sustained rave-synth hook there (500–2500 Hz harmonic level
+  15.3 dB, flat_midH 0.093 — as synth-rich as the synth-house medians), while Brain
+  (rumble-only techno) correctly stays out of the class via its distorted timbre (0.316).
+  Ruling: **per-beat classes describe sound, never genre or emotion** — the class is named
+  `sustained_synth` (not "euphoric"); which *treatment* a sustained synth in a 160 BPM
+  pounding track earns belongs to the consumer reading the whole vector. This is the
+  containment rule expressing itself at the naming level.

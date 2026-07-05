@@ -29,8 +29,16 @@ Audit P2 (2026-07-03):
 
 Audit P3 (2026-07-03):
 - Startup can launch one daemon spectral-cache eviction thread only when both smart-rearm and
-  spectral analysis are explicitly enabled. Govee realtime handoff transport teardown is runner
-  thread work, not StateManager caller-thread work.
+  spectral analysis are explicitly enabled (it evicts both the v3 dir and the v4 subdir, never
+  crossing versions). Govee realtime handoff transport teardown is runner thread work, not
+  StateManager caller-thread work.
+
+Spectral v4 (2026-07-05):
+- The spectral ANLZ worker reads the schema-v4 cache first and falls back to v3 entries or a
+  fresh extraction (v4 preferred; grids longer than ~15 min take the legacy v3 extraction at
+  load and leave v4 to the offline sweep). Every path feeds the smart-drop scorer a
+  bit-identical v3-shaped view, and the chosen path is logged as `[SM] spectral-path`.
+  Details + proofs: `docs/research/spectral_audio_analysis_redesign.md`.
 
 SoundSwitch pack-player boundary:
 - The strict decoder/exporter/verifier and immutable pack loader/player remain outside `StateManager`. Optional MIDI-input, backend, and Enttec components are built by startup/command-thread orchestration and passed to `StateManager` as one immutable runtime bundle.

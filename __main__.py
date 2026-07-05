@@ -894,7 +894,12 @@ def _start_spectral_cache_eviction_if_enabled() -> threading.Thread | None:
 
     def _worker() -> None:
         evicted = spectral_cache.evict_stale()
-        log.info("[MAIN] spectral-cache-evict  evicted=%d", evicted)
+        evicted_v4 = spectral_cache.evict_stale_v4()
+        log.info(
+            "[MAIN] spectral-cache-evict  evicted=%d  evicted_v4=%d",
+            evicted,
+            evicted_v4,
+        )
 
     thread = threading.Thread(target=_worker, name="spectral-cache-evict", daemon=True)
     thread.start()

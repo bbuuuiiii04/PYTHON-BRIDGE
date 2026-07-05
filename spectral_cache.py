@@ -1,4 +1,11 @@
-"""Disk cache for optional per-beat spectral envelopes."""
+"""Disk cache for optional per-beat spectral analysis (v3 flat dir + v4 subdir).
+
+Versioning convention (do not regress): every schema version owns its own
+subdirectory (v3 = the top-level dir for historical reasons, v4 = ``v4/``, a
+future v5 = ``v5/``). Eviction never crosses versions — ``evict_stale`` globs
+only top-level v3 files, ``evict_stale_v4`` only ``v4/``. v4 code never
+modifies or deletes v3 entries.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -10,12 +17,31 @@ import struct
 import tempfile
 from typing import Optional, Sequence
 
-from .audio_spectral_features import SCHEMA_VERSION, SpectralFeatures
+from .audio_spectral_features import (
+    SCHEMA_VERSION,
+    SCHEMA_VERSION_V4,
+    SpectralFeatures,
+    SpectralFeaturesV4,
+    V4_SCALAR_KEYS,
+    V4_SERIES_KEYS,
+    V4_SUB4_KEYS,
+)
 
 log = logging.getLogger("spectral_cache")
 
 _DEFAULT_CACHE_DIR = (
     "~/Library/Application Support/RBSS Bridge/spectral_cache"
+)
+
+_COMPAT_FIELDS = (
+    "sub_bass_envelope",
+    "kick_envelope",
+    "low_mid_envelope",
+    "high_mid_envelope",
+    "high_band_envelope",
+    "kick_max_envelope",
+    "onset_strength_envelope",
+    "spectral_flatness_envelope",
 )
 
 
@@ -113,11 +139,186 @@ def evict_stale() -> int:
     return removed
 
 
+def get_cached_v4(
+    audio_filepath: str,
+    beatgrid_times_ms: Sequence[float],
+) -> Optional[SpectralFeaturesV4]:
+    key = _cache_key(audio_filepath, beatgrid_times_ms)
+    if key is None:
+        return None
+    path = _cache_dir_v4() / f"{key}.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log.debug("v4 spectral cache miss/corrupt key=%s: %s", key, exc)
+        return None
+    return _features_v4_from_payload(payload)
+
+
+def put_cached_v4(
+    audio_filepath: str,
+    beatgrid_times_ms: Sequence[float],
+    features: SpectralFeaturesV4,
+) -> None:
+    key = _cache_key(audio_filepath, beatgrid_times_ms)
+    if key is None:
+        return
+    cache_dir = _cache_dir_v4()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"{key}.json"
+    payload = _payload_v4_for_write(audio_filepath, beatgrid_times_ms, features)
+    if payload is None:
+        return
+
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=cache_dir,
+            prefix=f".{key}.",
+            suffix=".tmp",
+            delete=False,
+        ) as fp:
+            tmp_name = fp.name
+            json.dump(payload, fp, sort_keys=True)
+            fp.write("\n")
+            fp.flush()
+            os.fsync(fp.fileno())
+        os.replace(tmp_name, path)
+        _fsync_dir(cache_dir)
+    except OSError as exc:
+        log.debug("v4 spectral cache write failed key=%s: %s", key, exc)
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink()
+            except OSError:
+                pass
+
+
+def evict_stale_v4() -> int:
+    cache_dir = _cache_dir_v4()
+    if not cache_dir.exists():
+        return 0
+    removed = 0
+    for path in cache_dir.glob("*.json"):
+        if _cache_file_is_stale_v4(path):
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed
+
+
 def _cache_dir() -> Path:
     override = os.environ.get("RBSS_SPECTRAL_CACHE_DIR")
     if override:
         return Path(override).expanduser()
     return Path(_DEFAULT_CACHE_DIR).expanduser()
+
+
+def _cache_dir_v4() -> Path:
+    # Derived from _cache_dir() so RBSS_SPECTRAL_CACHE_DIR moves both versions.
+    return _cache_dir() / "v4"
+
+
+def _features_v4_from_payload(payload: dict) -> Optional[SpectralFeaturesV4]:
+    if payload.get("schema_version") != SCHEMA_VERSION_V4:
+        return None
+    try:
+        n_beats = int(payload["n_beats"])
+        compat = {
+            field: tuple(float(v) for v in payload[field]) for field in _COMPAT_FIELDS
+        }
+        series = {
+            key: tuple(float(v) for v in payload["series"][key])
+            for key in V4_SERIES_KEYS
+        }
+        sub4 = {
+            key: tuple(
+                tuple(float(v) for v in slot) for slot in payload["sub4"][key]
+            )
+            for key in V4_SUB4_KEYS
+        }
+        scalars = {key: float(payload["scalars"][key]) for key in V4_SCALAR_KEYS}
+        frames = tuple(float(v) for v in payload["growl_band_frames"])
+        for field, values in compat.items():
+            if len(values) != n_beats:
+                raise ValueError(f"compat length mismatch: {field}")
+        for key, values in series.items():
+            if len(values) != n_beats:
+                raise ValueError(f"series length mismatch: {key}")
+        for key, slots in sub4.items():
+            if len(slots) != n_beats or any(len(s) != 4 for s in slots):
+                raise ValueError(f"sub4 shape mismatch: {key}")
+        return SpectralFeaturesV4(
+            sr=int(payload["sr"]),
+            schema_version=SCHEMA_VERSION_V4,
+            n_beats=n_beats,
+            duration_s=float(payload["duration_s"]),
+            frame_hop_s=float(payload["frame_hop_s"]),
+            series=series,
+            sub4=sub4,
+            growl_band_frames=frames,
+            scalars=scalars,
+            **compat,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        log.debug("v4 spectral cache payload invalid: %s", exc)
+        return None
+
+
+def _payload_v4_for_write(
+    audio_filepath: str,
+    beatgrid_times_ms: Sequence[float],
+    features: SpectralFeaturesV4,
+) -> Optional[dict[str, object]]:
+    try:
+        realpath = os.path.realpath(audio_filepath)
+        stat = os.stat(realpath)
+    except OSError:
+        return None
+    payload: dict[str, object] = {
+        "schema_version": SCHEMA_VERSION_V4,
+        "audio_filepath": realpath,
+        "mtime_ns": int(stat.st_mtime_ns),
+        "size": int(stat.st_size),
+        "beatgrid_fingerprint": _beatgrid_fingerprint(beatgrid_times_ms),
+        "sr": int(features.sr),
+        "n_beats": int(features.n_beats),
+        "duration_s": float(features.duration_s),
+        "frame_hop_s": float(features.frame_hop_s),
+        "series": {key: list(features.series[key]) for key in V4_SERIES_KEYS},
+        "sub4": {
+            key: [list(slot) for slot in features.sub4[key]] for key in V4_SUB4_KEYS
+        },
+        "scalars": {key: float(features.scalars[key]) for key in V4_SCALAR_KEYS},
+        "growl_band_frames": list(features.growl_band_frames),
+    }
+    for field in _COMPAT_FIELDS:
+        payload[field] = list(getattr(features, field))
+    return payload
+
+
+def _cache_file_is_stale_v4(path: Path) -> bool:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return True
+    if payload.get("schema_version") != SCHEMA_VERSION_V4:
+        return True
+    audio_filepath = payload.get("audio_filepath")
+    if not isinstance(audio_filepath, str):
+        return True
+    try:
+        stat = os.stat(audio_filepath)
+    except OSError:
+        return True
+    return (
+        int(payload.get("mtime_ns", -1)) != int(stat.st_mtime_ns)
+        or int(payload.get("size", -1)) != int(stat.st_size)
+    )
 
 
 def _beatgrid_fingerprint(beatgrid_times_ms: Sequence[float]) -> str:
