@@ -371,6 +371,21 @@ def format_header(data: dict[str, Any]) -> str:
     )
 
 
+def health_attr_key(rec: dict[str, Any]) -> str:
+    """Color for a health-summary line by its record level (UX item 7).
+
+    Rule 4/5: a failed subsystem must not render identically to a healthy
+    one. ERROR+ = red (broken), WARNING = yellow (degraded), below = green
+    (the recovery/ok transition).
+    """
+    lvl = _level_no(rec)
+    if lvl >= _LEVEL_NO["ERROR"]:
+        return "red"
+    if lvl >= _LEVEL_NO["WARNING"]:
+        return "yellow"
+    return "green"
+
+
 def format_age(ts: float, now: float | None = None) -> str:
     """Render how long ago epoch-seconds *ts* was: 'just now'/'5s ago'/'2m ago'/...
 
