@@ -175,6 +175,32 @@ three, mostly scene-lore synthesis; only physics-solid or lore-consistent items 
 15. **Hardware note for the operator (not engine work):** physically diffuse the strips
     (milky channel) or bounce them off walls — exposed LED dots read amateur at close range.
 
+Round 4 (`docs/research/edm_lighting_color_research_round4.md` — genre motion + phrase
+lighting; citations again largely synthesized, adopted on known-lore consistency + live-veto
+basis):
+
+16. **Drop-archetype verdicts:** techno red beat-locked comet — confirmed canonical; bass
+    house center-out pulse-expand — confirmed. Two refinements adopted: dubstep/trap drop =
+    **stutter bursts on transients with darkness between**, not a sustained 16-bar 100% wall
+    (fatigue + pros' actual practice; micro-darkness makes hits read harder — a design
+    refinement, not a brightness cap; WILD OUT still 100% per burst); tech house post-drop
+    chase **rides the off-beats** (the "and"/hi-hat feel) rather than straight quarters.
+17. **Trap vs dubstep drop distinction** for the drop-type classifier: trap = sparse blinding
+    hits on halftime kick/snare with absolute darkness between ("rhythmic vacuum"); dubstep =
+    dense stutter bursts.
+18. **Phrase-boundary look stepping:** look changes snap to the 16/32-bar phrase grid
+    (smart_phrasing already tracks it); step *rate* is character-driven — techno-like tracks
+    hold long 32-bar+ arcs, punchy trap/bass tracks pivot every 8–16.
+19. **Intra-phrase development by character:** smooth/melodic tracks get the slow bloom
+    (linear intensity/warmth rise across the phrase); punchy tracks hold steady then snap at
+    the boundary.
+20. **Phrase-end turnaround stinger:** on the final 1–2 bars of a high-energy phrase, a brief
+    accelerating accent (faster strobe/wider motion) that **lands on the next downbeat** —
+    a direct application of the arrival scheduler; texture/energy-gated.
+21. **Span scaling ("size master" translation):** the physical width of motion effects scales
+    with energy — small center segment in verses, full strip at peaks. Concrete negative-space
+    mechanism for strips.
+
 ### Lighting Engine v1 → v2 mapping (verified inventory, 2026-07-05)
 
 v1 = the current LED stack, inventoried at HEAD from the live config and code. The controlling
