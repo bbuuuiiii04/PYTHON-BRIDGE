@@ -415,6 +415,14 @@ originals.
 - Breakdown floor-absence rides "sparse and dim" (the operator's own walkthrough words); true
   black is reserved for the blackout window itself (OLC-A default — operator confirmed
   2026-07-05, no veto; OLC-B's floor-return abort likewise confirmed).
+- Two boundary rulings (decided 2026-07-05, operator veto open, recorded in the authority
+  doc §11): scripted tracks = v2 stands down completely (authored show sovereign, v1
+  rendering exactly as today); realtime-transport loss = v2 features suspend to the
+  existing v1 fallback, never a new dark-room failure mode, state visible in status.
+  Related expansion notes: post-drop cues inherit their drop's intensity tier; drop-window
+  statistics must tolerate a few beats of marker-vs-audio skew (robust percentiles, already
+  the pattern); the build specs carry a 30 fps frame-time budget assertion for the runner
+  thread (new per-frame math: arrival retarget + palette interpolation + variant selection).
 
 ### 6.2 Must design (the open creative questions, each with its anchor)
 

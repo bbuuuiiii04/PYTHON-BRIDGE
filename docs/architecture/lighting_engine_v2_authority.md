@@ -405,6 +405,15 @@ a claimed window are **skipped, not queued** (they are moments, not tasks):
 - **Feature 3 off:** handover = soft flip only.
 - **Feature 4 off:** role cues untouched by construction — the containment law guarantees
   coherent remaining behavior.
+- **Scripted tracks (authored SoundSwitch shows): v2 stands down completely.** A scripted
+  track is a sovereign authored show — no identity repaint, no landing moves, no
+  audio-matched blackout, no texture, no drop-typing; LEDs and lasers render exactly as v1
+  does for scripted tracks today. Sovereignty over cleverness. (Operator veto open: if the
+  live pass ever wants identity colors on scripted LED windows, that is a one-rule change.)
+- **Realtime transport loss (LAN path down, strip unreachable): v2's realtime features
+  suspend and the existing v1 fallback behavior takes over exactly as today** — nothing v2
+  adds may create a new dark-room failure mode. Status shows engine=v2 (suspended:
+  transport) so the state is never silent.
 - The expansion phase delivers the full kill matrix: every behavior in this document mapped
   to exactly one owning switch, plus these dependency rules, before any spec is written.
 
