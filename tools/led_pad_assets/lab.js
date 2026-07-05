@@ -169,7 +169,7 @@
         return `<label class="param-row param-toggle"><span>${esc(spec.label)}</span><input type="checkbox" data-param="${esc(key)}" data-kind="toggle" ${checked ? "checked" : ""}></label>`;
       }
       const raw = params[key] === undefined ? spec.min : Number(params[key]);
-      return `<label class="param-row param-slider"><span>${esc(spec.label)}</span><input type="range" data-param="${esc(key)}" data-kind="slider" min="${spec.min}" max="${spec.max}" step="${spec.step}" value="${raw}"><output>${esc(raw)}</output></label>`;
+      return `<label class="param-row param-slider"><span>${esc(spec.label)}</span><input type="range" data-param="${esc(key)}" data-kind="slider" min="${esc(spec.min)}" max="${esc(spec.max)}" step="${esc(spec.step)}" value="${esc(raw)}"><output>${esc(raw)}</output></label>`;
     }).join("");
     container.querySelectorAll("[data-param]").forEach(input => { input.oninput = () => applyParamControl(input); });
   }
