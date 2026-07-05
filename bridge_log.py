@@ -125,6 +125,9 @@ class TraceQueue:
 
 # ── Intent/health emit helpers (the only way to reach PERFORMANCE/OPERATOR) ───
 
+_LOGGER_CACHE: dict[str, logging.Logger] = {}
+
+
 def emit(
     cat: str,
     msg: str,
@@ -135,7 +138,11 @@ def emit(
     data: Optional[dict[str, Any]] = None,
     exc_info: Any = None,
 ) -> None:
-    logger = logging.getLogger(cat)
+    # Cached: logging.getLogger takes the process-global logging lock on
+    # EVERY call, cache hit or not — avoid touching it near the 200 Hz path.
+    logger = _LOGGER_CACHE.get(cat)
+    if logger is None:
+        logger = _LOGGER_CACHE[cat] = logging.getLogger(cat)
     if not logger.isEnabledFor(lvl):
         return
     # exc_info normalization mirrors Logger._log(): True -> current
@@ -199,7 +206,10 @@ def build_record(record: logging.LogRecord) -> dict[str, Any]:
         d["trace"] = trace
     data = getattr(record, "data", None)
     if data is not None:
-        d["data"] = data
+        # Shallow-copy: the record crosses a thread boundary to the writer;
+        # a caller reusing/mutating its dict must not corrupt or lose the
+        # record mid-serialization (W2 review L-2).
+        d["data"] = dict(data) if isinstance(data, dict) else data
     if record.exc_info:
         d["exc"] = "".join(traceback.format_exception(*record.exc_info))
     return d

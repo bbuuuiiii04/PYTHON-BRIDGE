@@ -40,7 +40,12 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-import bridge_log
+try:
+    # Package context (tests run from the repo's parent dir, proof-gate style).
+    from rb_ss_bridge_v2 import bridge_log
+except ImportError:
+    # Script context (the watcher launches this file directly).
+    import bridge_log
 
 
 # ═══════════════════════════════════════════════════════════════════════════

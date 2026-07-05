@@ -1705,7 +1705,6 @@ def main() -> None:
         log.info("[MAIN] shutdown  sig=%d", sig)
         # Push direct-DMX zero before any potentially slow watcher/thread joins.
         _cleanup_pack_outputs()
-        bridge_log.shutdown()
         config_reloader.stop()
         status_writer.stop()
         command_reader.stop()
@@ -1727,6 +1726,9 @@ def main() -> None:
             led_bundle.realtime_runner.stop()
         discovery.stop()
         conn.stop()
+        # Last: keep the event stream alive through the whole teardown so a
+        # hang/crash in any join above still produces records (W2 review M-1).
+        bridge_log.shutdown()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _shutdown)
