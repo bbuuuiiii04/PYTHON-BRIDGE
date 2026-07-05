@@ -1,6 +1,8 @@
+import math
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -174,10 +176,153 @@ class DropWindowVectorTests(unittest.TestCase):
         self.assertIn("attack_low_p90", vec)
         self.assertIn("pre_gap_beats", vec)
         self.assertGreater(vec["bpm"], 0.0)
+        self.assertNotIn("pulse_frac", vec)  # omitted unless flags supplied
+
+    def test_vector_includes_pulse_frac_when_flags_supplied(self) -> None:
+        v4 = _v4()
+        flags = [False, False, True, True, False, False, False, False]
+        vec = spectral_profile.drop_window_vector(v4, 2, width=4, wobble=flags)
+        self.assertEqual(vec["pulse_frac"], 0.5)
 
     def test_vector_out_of_range_reports_zero_coverage(self) -> None:
         v4 = _v4()
         self.assertEqual(spectral_profile.drop_window_vector(v4, 99), {"coverage": 0.0})
+
+
+def _flat_series(n_beats):
+    return {
+        "full_db": (14.0,) * n_beats,
+        "sub_db": (30.0,) * n_beats,
+        "bass_db": (20.0,) * n_beats,
+        "perc_full": (0.3,) * n_beats,
+        "centroid_hz": (700.0,) * n_beats,
+        "growl_flatness": (0.1,) * n_beats,
+        "onset_density_midhigh": (1.0,) * n_beats,
+        "sustain_mid_db": (12.0,) * n_beats,
+    }
+
+
+def _pulse_v4(n_beats=32, frames_per_beat=20, mod_cpb=0.0, mod_db=3.0,
+              mod_range=None, base_db=20.0):
+    """Consistent fixture: beat = 0.5 s, frame hop = 25 ms, synthetic frames."""
+    n_frames = n_beats * frames_per_beat
+    frames = []
+    for i in range(n_frames):
+        beat_pos = i / frames_per_beat
+        level = base_db
+        in_mod = mod_range is None or (mod_range[0] <= beat_pos < mod_range[1])
+        if mod_cpb > 0.0 and in_mod:
+            level += mod_db * math.sin(2.0 * math.pi * mod_cpb * beat_pos)
+        frames.append(round(level, 1))
+    v4 = _v4(_flat_series(n_beats), n_beats=n_beats)
+    object.__setattr__(v4, "growl_band_frames", tuple(frames))
+    object.__setattr__(v4, "frame_hop_s", 0.025)
+    object.__setattr__(v4, "duration_s", n_beats * 0.5)
+    return v4, [i * 500.0 for i in range(n_beats)]
+
+
+class LowmidPulseTests(unittest.TestCase):
+    def test_fast_pulse_fires_and_slow_metric_pump_does_not(self) -> None:
+        fast, grid = _pulse_v4(mod_cpb=4.0)
+        flags = spectral_profile.lowmid_pulse_flags(fast, grid)
+        self.assertTrue(any(flags))
+        # 2.0 cycles/beat is a metric-rate pump (kick pattern) — must NOT flag
+        slow, grid2 = _pulse_v4(mod_cpb=2.0)
+        self.assertFalse(any(spectral_profile.lowmid_pulse_flags(slow, grid2)))
+
+    def test_measure_reads_correct_rate(self) -> None:
+        v4, grid = _pulse_v4(mod_cpb=4.0)
+        duty, cpb, conc = spectral_profile.lowmid_pulse_measure(v4, grid, 16)
+        self.assertGreaterEqual(duty, 0.9)
+        self.assertAlmostEqual(cpb, 3.881, delta=0.6)  # nearest grid bins to 4.0
+        self.assertGreaterEqual(conc, 0.10)
+
+    def test_silent_and_constant_windows_produce_no_flags(self) -> None:
+        silent, grid = _pulse_v4(mod_cpb=0.0, base_db=-100.0)
+        self.assertFalse(any(spectral_profile.lowmid_pulse_flags(silent, grid)))
+        constant, grid2 = _pulse_v4(mod_cpb=0.0, base_db=20.0)
+        self.assertFalse(any(spectral_profile.lowmid_pulse_flags(constant, grid2)))
+
+    def test_edge_beats_do_not_raise(self) -> None:
+        v4, grid = _pulse_v4(mod_cpb=4.0)
+        for b in (0, 1, v4.n_beats - 2, v4.n_beats - 1, -5, 999):
+            duty, cpb, conc = spectral_profile.lowmid_pulse_measure(v4, grid, b)
+            self.assertGreaterEqual(duty, 0.0)
+
+    def test_absent_grid_means_no_flags(self) -> None:
+        v4, _ = _pulse_v4(mod_cpb=4.0)
+        self.assertFalse(any(spectral_profile.lowmid_pulse_flags(v4, [])))
+        self.assertEqual(
+            spectral_profile.lowmid_pulse_measure(v4, [1.0, 2.0], 5), (0.0, 0.0, 0.0)
+        )
+
+    def test_persistence_drops_isolated_blips(self) -> None:
+        v4, grid = _pulse_v4()
+        firing = {5: (1.0, 4.0, 0.5), 10: (1.0, 4.0, 0.5), 11: (1.0, 4.0, 0.5)}
+
+        def fake_measure(_v4, _grid, beat):
+            return firing.get(beat, (0.0, 0.0, 0.0))
+
+        with patch.object(spectral_profile, "lowmid_pulse_measure", fake_measure):
+            flags = spectral_profile.lowmid_pulse_flags(v4, grid)
+        self.assertFalse(flags[5])          # isolated single beat: dropped
+        self.assertTrue(flags[10] and flags[11])  # 2-beat run: kept (min_run 2)
+
+    def test_goertzel_matches_direct_dft_at_non_integer_bin(self) -> None:
+        x = [0.3, -0.7, 1.1, 0.2, -0.4, 0.9, -1.2, 0.5, 0.1, -0.6]
+        cycles = 2.37  # deliberately not an integer bin
+        w = 2.0 * math.pi * cycles / len(x)
+        direct = abs(sum(v * complex(math.cos(w * n), -math.sin(w * n))
+                         for n, v in enumerate(x))) ** 2
+        self.assertAlmostEqual(
+            spectral_profile._goertzel_power(x, cycles), direct, places=6
+        )
+
+    def test_flags_are_deterministic(self) -> None:
+        v4, grid = _pulse_v4(mod_cpb=4.0, mod_range=(8, 20))
+        self.assertEqual(
+            spectral_profile.lowmid_pulse_flags(v4, grid),
+            spectral_profile.lowmid_pulse_flags(v4, grid),
+        )
+
+
+class SectionMapTests(unittest.TestCase):
+    def _two_character_v4(self, n_beats=64):
+        half = n_beats // 2
+        overrides = dict(_flat_series(n_beats))
+        overrides["full_db"] = (0.0,) * half + (16.0,) * half
+        overrides["centroid_hz"] = (400.0,) * half + (1400.0,) * half
+        return _v4(
+            overrides,
+            scalars_overrides={"loudness_ref_db": 16.0},
+            n_beats=n_beats,
+        )
+
+    def test_two_characters_yield_two_sections_with_tiers(self) -> None:
+        v4 = self._two_character_v4()
+        sections = spectral_profile.section_map(v4)
+        self.assertEqual(len(sections), 2)
+        self.assertEqual(sections[0]["start_beat"], 0)
+        self.assertEqual(sections[0]["energy_tier"], "quiet")
+        self.assertEqual(sections[1]["start_beat"], 32)
+        self.assertEqual(sections[1]["energy_tier"], "loud")
+
+    def test_uniform_track_merges_to_one_section(self) -> None:
+        v4 = _v4(_flat_series(64), n_beats=64)
+        self.assertEqual(len(spectral_profile.section_map(v4)), 1)
+
+    def test_drop_marker_splits_identical_blocks(self) -> None:
+        v4 = _v4(_flat_series(64), n_beats=64)
+        sections = spectral_profile.section_map(v4, drops=[32])
+        self.assertEqual(len(sections), 2)
+        self.assertEqual(sections[1]["start_beat"], 32)
+
+    def test_section_map_is_deterministic(self) -> None:
+        v4 = self._two_character_v4()
+        self.assertEqual(
+            spectral_profile.section_map(v4, drops=[40]),
+            spectral_profile.section_map(v4, drops=[40]),
+        )
 
 
 if __name__ == "__main__":

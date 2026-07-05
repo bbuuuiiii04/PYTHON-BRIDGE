@@ -609,6 +609,8 @@ contracts:
       - SPECTRAL_V4_CALIBRATION
       - compat_features
       - empty_floor_runs
+      - lowmid_pulse_flags
+      - section_map
     inspect:
       - docs/research/spectral_audio_analysis_redesign.md
       - docs/subsystems/core_bridge.md

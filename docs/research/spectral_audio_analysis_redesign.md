@@ -210,6 +210,9 @@ ever matters.
 - **Calibration constants**: one `SPECTRAL_V4_CALIBRATION` mapping with every threshold,
   each carrying its provenance (BY GENRE corpus percentile, 2026-07-05). Constants are
   consumer-retunable without re-extraction (principle 2).
+- **Added post-build (operator-approved, Appendix E)**: `lowmid_pulse_flags`/
+  `lowmid_pulse_measure` (experimental fast periodic low-mid movement, from
+  `growl_band_frames`) and `section_map` (chapter map for pacing consumers).
 
 ### 4.5 Module layout & seam changes
 
@@ -283,7 +286,10 @@ live at the ANLZ tier like any decode failure.
   measure can be derived from cache without re-extraction. The missing experiment, exactly:
   a labeled set of known LFO-wobble drops (operator-supplied or new tracks), then a
   duty-gated modulation-spectrum measure over `growl_band_frames` validated against it.
-  Until then: `unproven`, not shipped.
+  Until then: `unproven`, not shipped. **Superseded by Appendix E (2026-07-05
+  follow-up):** three operator labels arrived, the derivation ran from cache as promised,
+  and the honest outcome ships as the renamed experimental `lowmid_pulse` class (it cannot
+  isolate wobble from rolls/chugs/sirens — all genuinely fast low-mid movement).
 - **Roughness (20–150 Hz modulation)**: unreachable at 43 Hz frame rate (Nyquist 21.5 Hz);
   the distortion axis (`flat_midH`) is the stand-in. Would require a dedicated band-passed
   waveform envelope pass (Hilbert) — priced but not needed by any current requirement.
@@ -381,7 +387,8 @@ duck-typed scorer). Every finding adopted:
 | R18 corpus-absolute calibration | `SPECTRAL_V4_CALIBRATION` from BY GENRE stats only | §7 |
 | R19 determinism/degrade/budget | design §4.1/4.6/4.8 | proofs §6/§7 |
 | R20 off-beat activity visibility | `band_sub4` (high/air bands: slots 2–3 vs 0–1) | derived view; §6 |
-| — LFO wobble rate | **unproven — cut, storage-provisioned** (§4.9) | honest ruling |
+| — LFO wobble rate | **experimental** — ships as `lowmid_pulse` (fast low-mid movement; wobble/rolls/chugs all fire it; scrub-gated — Appendix E) | honest ruling |
+| — section chapter map | `section_map` view (16-beat blocks + marker boundaries + merge) | Appendix E |
 | — 20–150 Hz roughness | **unreachable at v4 frame rate** (§4.9) | honest ruling |
 
 ## 6. Proofs on the operator's music
@@ -587,7 +594,11 @@ Every event above is a description; ANLZ markers remain the only structural trig
 - 20–150 Hz roughness — **unreachable** at the v4 frame rate (§4.9).
 - Perceptual/lighting-treatment claims (what reads "euphoric", what seasoning fits a class)
   — **assumed**, deliberately left to consumers + the operator's live/scrub gates.
-- Suite result — **confirmed**: 3,251 tests, zero new failures; the single failure
+- `lowmid_pulse` firing rates on the 8 labeled tracks + section maps on 4 known tracks —
+  **confirmed (measured, Appendix E)**; the class's acceptability for texture seasoning —
+  **unproven pending the operator scrub gate** (timestamps listed).
+- Suite result — **confirmed**: 3,251 tests at the main build (3,264 after Appendix E),
+  zero new failures; the single failure
   (`test_laser_color_engine…fixed_band_values`) is **pre-existing at baseline `2945c52`**
   (unrelated subsystem, untouched by this build).
 
@@ -602,7 +613,9 @@ Every event above is a description; ANLZ markers remain the only structural trig
    tracks. If any listed event reads wrong when you scrub there in Rekordbox, say which
    timestamp — every class threshold is a code constant, re-tunable in minutes without
    re-analyzing the library. **Default: calibrated thresholds ship as-is.**
-3. **Classic LFO-wobble detection: first labeled positive received** — the operator named
+3. *(Superseded by Appendix E — labels arrived, investigation ran, renamed experimental
+   class shipped; the scrub timestamps in Appendix E are the remaining gate.)*
+   **Classic LFO-wobble detection: first labeled positive received** — the operator named
    Billie Eilish — LUNCH (Phrva Flip) post-build, and the wobble signature derived cleanly
    from the already-stored cache data (Appendix D item 2 — no re-extraction, as designed).
    **Default: the class still ships only after 2–3 more labeled wobble tracks confirm the
@@ -789,3 +802,68 @@ measurement the same session.
    Feature-2 locked-design decision, deliberately not this layer's call (containment).
    **marker-quality rate confirmed (measured); the musical-falseness remainder: operator
    ground truth, unquantifiable from audio alone.**
+
+## Appendix E — second follow-up build (2026-07-05): fast low-mid pulse + section map
+
+Operator session: two more wobble labels (Devault — Feels Like Us capochino flip; Dom Dolla —
+Girl$ YDG Remix), a ruling that **trap and dubstep get the same lighting expression** (the
+drop-type selector's families collapse to three + neutral; the weakest genre distinction
+leaves the consumer problem), stereo width deferred, **section-level understanding approved**,
+and Murdah (CELO & MO$HCA REMIX) named as a jersey-beat reference (its syncopated kick
+placement is visible in the stored quarter-beat slots — patterns like X..X / .XXX; a
+syncopation descriptor is derivable later without re-extraction; not built now). Operator
+instruction: plan → review → implement. A fresh-context Fable-tier review of the design ran
+before implementation: **APPROVE-WITH-REQUIRED-CHANGES**, two blockers both confirmed real
+(the persistence constant contradicted the design's own evidence table; the design cited beat
+times the cached dataclass does not carry) — every finding folded.
+
+**The wobble investigation, honestly.** The two new labels did NOT pass the LUNCH-validated
+fast-LFO rule at 16-beat windows (dilution: their wobble is localized). Hypotheses tested and
+rejected on the way: the distortion axis and growl-band *centroid* modulation both fail to
+separate slow "grinding wobble" from held bass (the negative control scored higher on
+centroid modulation). A 4-beat re-scan found the wobble in both (capochino beats 160–166,
+Girl$ 184–188, 2.5–4 cycles/beat). The mandatory re-derivation — running the SHIPPED rule
+per-beat on all 8 labeled tracks — then showed the fuller truth: **snare rolls (ILL beats
+86–96; Wanna Be's 448–471 build), briddim chug, and SIGNAL's siren all fire the same
+detector**, because they genuinely are fast periodic low-mid movement; and the reviewer's
+candidate rate-stability gate is *anti*-discriminative (steady rolls hold rate perfectly;
+real wobble varies its LFO — the positives would fail it; rejected per its own adoption
+condition). Ruling (the class-semantics rule §Appendix C applied again): the detector ships
+renamed for what it measures — **`lowmid_pulse_flags` / `lowmid_pulse_measure`**, experimental
+— "fast periodic low-mid harmonic movement, ≥2.5 cycles/beat, sustained tone, persistence
+≥2 beats (Girl$ fires in 2-beat bursts)". Wobble basses, dense rolls, chugs, and siren sweeps
+all exhibit it; for texture seasoning (busy/aggressive), that breadth is arguably correct
+behavior; whether it is *acceptable* is the operator scrub gate. Preprocessing is pinned to
+the validated math (linearize → mean-remove → Hann → Goertzel at a cycles/beat-native
+24-point log grid 0.5–8 c/b, local-window beat conversion, silence guards); constants were
+derived from the shipped rule's own outputs on the 8 tracks, not transplanted. The pure-python
+scan costs ~0.1 s per track on demand, never at load, never on the push loop.
+
+Measured firing rates (shipped rule): LUNCH 15.1% of beats (drop sections dominate — 0:42.4,
+0:45.9, 0:49.7), capochino 4.9% (1:19.3–1:27, 2:21–2:28), Girl$ 4.0% (0:46–0:58, 2:19+);
+Can't Say Nah 3.8% (short runs — the known-uncertain case), Wanna Be 4.0% (almost entirely
+its 2:48 snare-roll build — the roll confound, visible), ILL 12.1% (chug + rolls).
+**Scrub timestamps for the operator (the acceptance gate):** LUNCH 0:42.4 (expect yes),
+capochino 1:19.3 (expect yes), Girl$ 0:46.3 (expect yes), Can't Say Nah 0:22.7 (uncertain —
+ear rules), Wanna Be 2:48.0 (roll firing the class — is busy-pulse seasoning acceptable
+there?).
+
+**Section map (approved feature).** `section_map()` ships: 16-beat blocks with forced
+boundaries at ANLZ markers, single left-to-right merge on a normalized character distance
+(engineering scale constants in SPECTRAL_V4_CALIBRATION, annotated), never merging across a
+drop marker (a false "chorus up" marker therefore forces a spurious boundary — accepted,
+cross-ref Appendix D item 4; a phantom chapter break is a pacing hiccup, not a cue error),
+per-section `energy_tier` relative to the track's stored loudness reference (can read
+top-heavy on brickwalled masters — stated). Validated by eyeball against known structure on
+four tracks: ILL (16 sections — the intro riff blocks, the 97–108 pre-drop empty floor as its
+own quiet chapter, both drop phrases loud, the end-of-file silence separated), Chemicals
+(12 — the long pad build one coherent section, all drop phrases loud), crank the bass (15 —
+quiet intro/breakdown, loud drop phrases split at drop markers by design), LUNCH (10).
+Boundaries describe character change; cue timing stays with ANLZ markers and locked designs.
+
+Build state: +13 tests (suite 3,264, zero new failures — the laser-color loader failure
+remains the pre-existing baseline one), three docs checks green, contract `key_symbols`
+extended (`lowmid_pulse_flags`, `section_map`). `drop_window_vector` accepts precomputed
+pulse flags (`pulse_frac`) so consumers pay the scan once. §8 question 3 is superseded by
+this appendix: the wobble-class ship condition (more labels) was met, the investigation ran,
+and the honest outcome is the renamed experimental class above, gated on the scrub test.

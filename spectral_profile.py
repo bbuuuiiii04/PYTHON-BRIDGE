@@ -34,6 +34,27 @@ SPECTRAL_V4_CALIBRATION: dict[str, float] = {
     "bright_tilt_centroid_hz": 1500.0,
     "thick_min_bands": 4.0,          # bands above their floor => thick texture
     "thick_band_floor_db": 0.0,
+    # Fast low-mid pulse (experimental — derived by running the shipped rule
+    # on 3 operator-labeled wobble tracks + 5 negatives, 2026-07-05 follow-up;
+    # wobble basses, dense rolls, chugs, and siren sweeps ALL fire it — it
+    # measures fast periodic low-mid movement, not wobble specifically; the
+    # operator scrub test is the acceptance gate, design doc Appendix E):
+    "lowmid_pulse_min_duty": 0.6,    # sustained-tone gate
+    "lowmid_pulse_min_cpb": 2.5,     # dominant modulation, cycles per beat
+    "lowmid_pulse_min_conc": 0.10,   # dominant share of rate-grid power
+    "lowmid_pulse_min_run": 2.0,     # consecutive flagged beats to count (Girl$ fires in 2-beat bursts)
+    "lowmid_pulse_min_level_db": -70.0,  # window p90 must clear this (silence guard)
+    # Section map (engineering scale constants, not corpus-calibrated — they
+    # normalize feature diffs for a pacing-only chapter view):
+    "section_block_beats": 16.0,
+    "section_merge_threshold": 0.5,
+    "section_scale_db": 6.0,
+    "section_scale_frac": 0.25,
+    "section_scale_centroid_hz": 800.0,
+    "section_scale_flatness": 0.12,
+    "section_scale_onsets": 1.5,
+    "section_quiet_offset_db": -8.0, # below loudness_ref => quiet tier
+    "section_loud_offset_db": -3.0,  # within this of loudness_ref => loud tier
 }
 
 
@@ -252,13 +273,235 @@ def thick_flags(v4: SpectralFeaturesV4) -> list[bool]:
     return out
 
 
+def _goertzel_power(x: Sequence[float], cycles_per_window: float) -> float:
+    """Power of one DFT component at a (possibly non-integer) bin, pure python."""
+    n = len(x)
+    if n < 2:
+        return 0.0
+    import math
+
+    w = 2.0 * math.pi * cycles_per_window / n
+    coeff = 2.0 * math.cos(w)
+    s1 = 0.0
+    s2 = 0.0
+    for v in x:
+        s0 = v + coeff * s1 - s2
+        s2 = s1
+        s1 = s0
+    return s1 * s1 + s2 * s2 - coeff * s1 * s2
+
+
+# 24 log-spaced modulation rates, cycles per beat (BPM-independent decision grid).
+PULSE_RATE_GRID_CPB: tuple[float, ...] = tuple(
+    round(0.5 * (16.0 ** (k / 23.0)), 3) for k in range(24)
+)
+
+
+def lowmid_pulse_measure(
+    v4: SpectralFeaturesV4,
+    beatgrid_times_ms: Sequence[float],
+    beat: int,
+) -> tuple[float, float, float]:
+    """(duty, dominant cycles/beat, concentration) of the harmonic low-mid
+    envelope over a 4-beat window centered on ``beat``.
+
+    Preprocessing matches the validated derivation exactly (design doc App. E):
+    linearize the stored dB frames, divide by the window mean and subtract 1
+    (DC removal), Hann window, then Goertzel at the cycles/beat rate grid
+    converted through the window's actual beat span. Absent/short/silent data
+    → (0, 0, 0), never an error.
+    """
+    import math
+
+    n = v4.n_beats
+    grid = beatgrid_times_ms
+    if not grid or len(grid) != n or n < 4 or not v4.growl_band_frames:
+        return (0.0, 0.0, 0.0)
+    beat = max(0, min(int(beat), n - 1))
+    lo = max(0, beat - 2)
+    hi = min(n - 1, beat + 2)
+    if hi - lo < 3:
+        return (0.0, 0.0, 0.0)
+    start_ms = float(grid[lo])
+    end_ms = float(grid[hi])
+    if end_ms <= start_ms:
+        return (0.0, 0.0, 0.0)
+    hop_ms = v4.frame_hop_s * 1000.0
+    i0 = max(0, int(start_ms / hop_ms))
+    i1 = min(len(v4.growl_band_frames), int(end_ms / hop_ms))
+    seg_db = v4.growl_band_frames[i0:i1]
+    if len(seg_db) < 32:
+        return (0.0, 0.0, 0.0)
+    cal = SPECTRAL_V4_CALIBRATION
+    if percentile(seg_db, 90.0) < cal["lowmid_pulse_min_level_db"]:
+        return (0.0, 0.0, 0.0)
+    seg = [10.0 ** (v / 10.0) for v in seg_db]
+    mean = sum(seg) / len(seg)
+    if mean <= 0.0:
+        return (0.0, 0.0, 0.0)
+    p90 = percentile(seg, 90.0)
+    duty = sum(1 for v in seg if v > 0.1 * p90) / len(seg)
+    m = len(seg)
+    x = [
+        (seg[i] / mean - 1.0) * (0.5 - 0.5 * math.cos(2.0 * math.pi * i / (m - 1)))
+        for i in range(m)
+    ]
+    window_s = (end_ms - start_ms) / 1000.0
+    beats_in_window = hi - lo
+    nyquist_cycles = 0.45 * m  # stay clearly below the envelope Nyquist
+    powers: list[float] = []
+    for cpb in PULSE_RATE_GRID_CPB:
+        cycles = cpb * beats_in_window  # cycles across the window
+        if cycles < 1.5 or cycles > nyquist_cycles:
+            powers.append(0.0)
+            continue
+        powers.append(_goertzel_power(x, cycles))
+    total = sum(powers)
+    if total <= 0.0:
+        return (round(duty, 4), 0.0, 0.0)
+    top = max(range(len(powers)), key=lambda i: powers[i])
+    _ = window_s  # window span retained for clarity; rates are c/b-native
+    return (
+        round(duty, 4),
+        PULSE_RATE_GRID_CPB[top],
+        round(powers[top] / total, 4),
+    )
+
+
+def lowmid_pulse_flags(
+    v4: SpectralFeaturesV4, beatgrid_times_ms: Sequence[float]
+) -> list[bool]:
+    """Per beat: sustained low-mid tone with a fast periodic level movement
+    (LFO wobble). Experimental — calibrated on 3 operator-labeled positives +
+    5 negatives (design doc Appendix E); persistence removes isolated blips.
+    Descriptive only; absent data → all False.
+    """
+    cal = SPECTRAL_V4_CALIBRATION
+    n = v4.n_beats
+    raw = [False] * n
+    for b in range(n):
+        duty, cpb, conc = lowmid_pulse_measure(v4, beatgrid_times_ms, b)
+        raw[b] = (
+            duty >= cal["lowmid_pulse_min_duty"]
+            and cpb >= cal["lowmid_pulse_min_cpb"]
+            and conc >= cal["lowmid_pulse_min_conc"]
+        )
+    min_run = int(cal["lowmid_pulse_min_run"])
+    out = [False] * n
+    start: Optional[int] = None
+    for i, v in enumerate(raw + [False]):
+        if v and start is None:
+            start = i
+        elif not v and start is not None:
+            if i - start >= min_run:
+                for j in range(start, i):
+                    out[j] = True
+            start = None
+    return out
+
+
+def section_map(
+    v4: SpectralFeaturesV4,
+    drops: Sequence[int] = (),
+    buildups: Sequence[int] = (),
+    breakdowns: Sequence[int] = (),
+) -> list[dict[str, object]]:
+    """Chapter map: merged blocks of similar measured character.
+
+    Boundaries describe character change; cue timing stays with ANLZ markers
+    and locked designs — section starts are not cue times. Blocks are 16 beats
+    anchored at beat 0, with forced boundaries at every supplied marker beat
+    (markers are trusted structure; a false "chorus up" marker therefore forces
+    a spurious boundary — accepted, see design doc Appendix D item 4: a phantom
+    chapter break is a pacing hiccup, and the neighboring sections' near-equal
+    character makes it visible to consumers). Merging is a single left-to-right
+    pass; a growing section's character is recomputed over its full span before
+    each comparison; merging never crosses a drop marker. ``energy_tier`` is
+    relative to the track's stored loudness reference and can read top-heavy on
+    brickwalled masters (design doc Appendix E).
+    """
+    cal = SPECTRAL_V4_CALIBRATION
+    n = v4.n_beats
+    if n == 0:
+        return []
+    block = max(4, int(cal["section_block_beats"]))
+    marker_beats = {int(b) for b in list(drops) + list(buildups) + list(breakdowns) if 0 < int(b) < n}
+    drop_beats = {int(b) for b in drops if 0 < int(b) < n}
+    bounds = sorted({0, n} | {b for b in range(block, n, block)} | marker_beats)
+
+    gone = bottom_gone_flags(v4)
+
+    def character(a: int, b: int) -> dict[str, float]:
+        sl = slice(a, b)
+        span = max(1, b - a)
+        series = v4.series
+        return {
+            "full_db": round(sum(series["full_db"][sl]) / span, 1),
+            "sub_present": round(sum(1 for g in gone[sl] if not g) / span, 4),
+            "perc_full": round(sum(series["perc_full"][sl]) / span, 4),
+            "centroid_hz": round(percentile(series["centroid_hz"][sl], 50.0), 1),
+            "growl_flatness": round(percentile(series["growl_flatness"][sl], 50.0), 4),
+            "onset_mh": round(sum(series["onset_density_midhigh"][sl]) / span, 4),
+            "sustain_mid_db": round(percentile(series["sustain_mid_db"][sl], 50.0), 1),
+        }
+
+    def distance(c1: dict[str, float], c2: dict[str, float]) -> float:
+        d = (
+            abs(c1["full_db"] - c2["full_db"]) / cal["section_scale_db"]
+            + abs(c1["sub_present"] - c2["sub_present"]) / cal["section_scale_frac"]
+            + abs(c1["perc_full"] - c2["perc_full"]) / cal["section_scale_frac"]
+            + abs(c1["centroid_hz"] - c2["centroid_hz"]) / cal["section_scale_centroid_hz"]
+            + abs(c1["growl_flatness"] - c2["growl_flatness"]) / cal["section_scale_flatness"]
+            + abs(c1["onset_mh"] - c2["onset_mh"]) / cal["section_scale_onsets"]
+            + abs(c1["sustain_mid_db"] - c2["sustain_mid_db"]) / cal["section_scale_db"]
+        )
+        return d / 7.0
+
+    sections: list[list[int]] = []  # [start, end) pairs, merged in place
+    for a, b in zip(bounds, bounds[1:]):
+        if sections:
+            prev = sections[-1]
+            if a not in drop_beats and distance(
+                character(prev[0], prev[1]), character(a, b)
+            ) < cal["section_merge_threshold"]:
+                prev[1] = b
+                continue
+        sections.append([a, b])
+
+    ref = float(v4.scalars.get("loudness_ref_db", 0.0))
+    out: list[dict[str, object]] = []
+    for a, b in sections:
+        ch = character(a, b)
+        level = ch["full_db"]
+        if level < ref + cal["section_quiet_offset_db"]:
+            tier = "quiet"
+        elif level >= ref + cal["section_loud_offset_db"]:
+            tier = "loud"
+        else:
+            tier = "mid"
+        out.append({
+            "start_beat": a,
+            "end_beat": b - 1,
+            "energy_tier": tier,
+            "character": ch,
+        })
+    return out
+
+
 def drop_window_vector(
-    v4: SpectralFeaturesV4, drop_beat: int, *, width: int = 16
+    v4: SpectralFeaturesV4,
+    drop_beat: int,
+    *,
+    width: int = 16,
+    wobble: Optional[Sequence[bool]] = None,
 ) -> dict[str, float]:
     """Descriptors of one drop window for the drop-type cue selector.
 
     ``coverage`` counts the beats actually available — the consumer's neutral
     default (v2 review F-11) keys off thin coverage. Chooses nothing itself.
+    Pass precomputed ``wobble`` flags (from :func:`lowmid_pulse_flags`) to include
+    a ``pulse_frac`` field; omitted otherwise (the flags cost a full-track scan,
+    so callers compute them once).
     """
     n = v4.n_beats
     start = max(0, int(drop_beat))
@@ -275,7 +518,7 @@ def drop_window_vector(
 
     swing = [max(s) - min(s) for s in v4.sub4["bass"][w]]
     beat_s = (v4.duration_s / n) if n else 0.5
-    return {
+    vec = {
         "coverage": float(coverage),
         "sub_db": mean("sub_db", w),
         "bass_db": mean("bass_db", w),
@@ -296,3 +539,7 @@ def drop_window_vector(
         "pre_gap_beats": float(pre_drop_gap_beats(v4, start)),
         "bpm": round(60.0 / beat_s, 1) if beat_s > 0 else 0.0,
     }
+    if wobble is not None:
+        flags = list(wobble)[start:end]
+        vec["pulse_frac"] = round(sum(1 for f in flags if f) / coverage, 4)
+    return vec
