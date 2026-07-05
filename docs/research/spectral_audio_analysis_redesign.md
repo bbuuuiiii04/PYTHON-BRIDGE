@@ -902,25 +902,31 @@ documented structural limitation, not a threshold bug, and no constants were cha
    584–586 with a bass fill at 587–590 between it and the drop marker, so `pre_gap_beats`
    at the marker reads 0 — the described silence exists but is separated from the roar by
    the fill; consumer scans that look a few beats back (as the blackout scan does) see it.
-4. **Rock Ur World X Lights (Knock2 vs Dabin) — partial: character captured, melodic
-   patterning not.** Operator: first drop (0:51.7) = euphoric rhythmic melody dominant in
-   mids/highs, upper range "traveling at light speed in a 4-beat pattern"; second drop 32
-   beats later = hard-hitting dubstep switch-up in halftime, exhilarating/euphoric/colorful,
-   same melodic elements. Measured: drop 1 reads melodic-euphoric exactly (sustained-mid
-   20.9 dB — among the highest drop readings; attack only 2.2 dB — soft-edged; bright);
-   drop 2 (28 beats later per the markers) reads 3.4× the attack (7.5 dB), brighter still
-   (centroid 1295 vs 771 Hz), same harmonic content (sustained-mid 19.9) and *clean* timbre
-   (flatness 0.156) — i.e. a hard-hitting BRIGHT euphoric dubstep drop, not a dark growl
-   wall, which is precisely the distinction his "fan that shoots rainbows" image needs the
-   cue selector to see. NOT captured: the "4-beat pattern" of the fast upper-range arps —
-   per-beat high-band energy is nearly flat (lag-4 autocorrelation 0.25) because the
-   patterning lives in *pitch movement*, and v4 deliberately has no melody/pitch tracking
-   (§limitations). The arps are also invisible to onset density (they are harmonic, not
-   percussive — consistent by design). Recorded as operator design intent for Feature 2:
-   this track should be expressed distinctly; the measured signature (bright + hard +
-   clean + melodic) supports that without the pitch pattern.
+4. **Rock Ur World X Lights (Knock2 vs Dabin) — agreement after the operator corrected his
+   own description.** Original phrasing ("upper range traveling at light speed in a 4-beat
+   pattern") was initially read as melodic arp patterning and reported as a pitch-domain
+   gap; the operator then clarified: the "4-beat pattern" is a consistent untz-untz kick
+   grid, and "light speed travel" is his metaphor for the mid/high SUSTAIN. Both are
+   measured: the drop-1 kick grid is metronomic in the stored quarter-beat slots — every
+   beat 112–121 peaks on slot 0 at ~27.7 dB with ~15 dB clearance over the inter-kick
+   slots (a perfect four-on-floor) — and the sustain is the window's 20.9 dB sustained-mid
+   reading (among the highest drop values in the corpus). Drop 2 (28 beats later) reads
+   3.4× the attack (7.5 dB), brighter (centroid 1295 vs 771 Hz), same harmonic content,
+   *clean* timbre (flatness 0.156) — a hard-hitting BRIGHT euphoric dubstep drop, not a
+   dark growl wall: exactly the distinction his "fan that shoots rainbows" image needs the
+   cue selector to see. Recorded as operator design intent for Feature 2: this track
+   should be expressed distinctly.
+
+   Two class-threshold observations came out of this check (recorded, deliberately NOT
+   retuned on a single track): (a) `kick_prominence_flags` under-reads sidechain-pumped
+   four-on-floor under sustained walls (1/28 drop beats flagged) because it keys on attack
+   *rise* and this kick is soft-edged (1.5–2.2 dB) while being *level*-dominant on slot 0 —
+   the slot-0 dominance pattern in `sub4` is the better untz signature there and is
+   derivable without re-extraction; (b) `sustained_synth_flags` misses this wall (2/28)
+   because its cleanliness gate (flatness < 0.12) excludes thick layered walls at 0.169.
+   Both go to the scrub/live phase before any constant changes.
 
 Cross-cutting: these four descriptions all validated against cache data alone — no
-re-analysis. The one repeated gap across rounds is melodic/pitch-domain structure (arp
-patterns, note movement), which is out of v4's scope by design; everything
-amplitude/timbre/structure-domain the operator described was measurable.
+re-analysis. Melodic/pitch-domain structure (note patterns) remains out of v4's scope by
+design, but after the operator's correction no described moment in any validation round has
+actually required it; everything amplitude/timbre/structure-domain was measurable.
