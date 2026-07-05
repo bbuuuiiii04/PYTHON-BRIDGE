@@ -210,14 +210,15 @@ class MidiOutputTests(unittest.TestCase):
             finally:
                 out.stop()
 
-    def test_live_note_on_logs_after_transport_send(self) -> None:
+    def test_live_note_on_logs_at_debug_after_transport_send(self) -> None:
+        # AWR-125 W4: [MIDI] tx demoted INFO -> DEBUG (hot-path hygiene).
         port = _RecordingPort()
         out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
         fake_mido = _fake_mido_module(port)
         with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
             out.start()
             try:
-                with self.assertLogs("midi_output", level="INFO") as captured:
+                with self.assertLogs("midi_output", level="DEBUG") as captured:
                     self.assertTrue(
                         out.trigger(
                             LaserMidiMessage(
@@ -241,8 +242,11 @@ class MidiOutputTests(unittest.TestCase):
             finally:
                 out.stop()
 
-        output = "\n".join(captured.output)
-        self.assertIn("[MIDI] tx", output)
+        tx_lines = [line for line in captured.output if "[MIDI] tx" in line]
+        self.assertTrue(tx_lines, f"expected a [MIDI] tx line in {captured.output!r}")
+        for line in tx_lines:
+            self.assertTrue(line.startswith("DEBUG:"), f"[MIDI] tx must log at DEBUG, got: {line}")
+        output = "\n".join(tx_lines)
         self.assertIn("type=note_on", output)
         self.assertIn("channel=1", output)
         self.assertIn("note=32", output)
