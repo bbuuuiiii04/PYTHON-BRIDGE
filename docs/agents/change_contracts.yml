@@ -72,6 +72,7 @@ contracts:
       - bridge_view.py
       - diagnostics.py
       - runtime_status.py
+      - scripts/ss_bridge_watcher.sh
     key_symbols:
       - log_changed
       - log_throttled

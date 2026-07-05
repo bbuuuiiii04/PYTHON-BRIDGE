@@ -75,6 +75,7 @@ Triggered by changes to:
 - `bridge_fmt.py`
 - `diagnostics.py`
 - `runtime_status.py` when changing status or heartbeat log visibility
+- `scripts/ss_bridge_watcher.sh` when changing the monitor-window launch
 
 Inspect:
 

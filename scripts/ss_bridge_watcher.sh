@@ -1,8 +1,12 @@
 #!/bin/bash
 # ss_bridge_watcher.sh
-# Manual launcher for rb_ss_bridge_v2.
-# Watches for Rekordbox and SoundSwitch. When they are present, starts or adopts
-# one bridge process and opens one dedicated Terminal monitor.
+# Launcher for rb_ss_bridge_v2. Auto mode (default) watches for Rekordbox and
+# SoundSwitch and starts or adopts one bridge process; manual mode
+# (RBSS_BRIDGE_MANUAL=1) starts the bridge directly with the same env as auto.
+# Both modes open exactly one Terminal monitor window running bridge_view.py
+# (AWR-125), the read-only JSONL log viewer. Closing the viewer window never
+# stops the bridge -- only the menubar (auto mode) or the bridge process itself
+# exiting (manual mode) does that; the watcher just reopens a missing viewer.
 # Bridge uses direct Rekordbox memory paths (B1-B6) as primary signals, with
 # MTC available as the timecode fallback.
 
@@ -106,7 +110,7 @@ kill_bridge_processes() {
 
 monitor_open() {
     pgrep -f "$MONITOR_MARKER" > /dev/null 2>&1 || \
-        pgrep -f "^tail -n 100 -F ${LOG_FILE}$" > /dev/null 2>&1
+        pgrep -f "bridge_view\.py" > /dev/null 2>&1
 }
 
 start_bridge() {
@@ -151,19 +155,6 @@ start_bridge() {
     STARTED_AT=$(date +%s)
     WARNED_MULTIPLE=0
     log_watcher "started bridge pid=$BRIDGE_PID follow=on anlz_direct=on pos_chain_direct=on master_seed_direct=on master_direct=on play_direct=on track_load_direct=on scripted_direct=on smart_drop=on smart_breakdown=on laser_config=${LASER_CONFIG_PATH} manual=${MANUAL_MODE}"
-}
-
-start_manual_terminal_bridge() {
-    ensure_laser_config
-    MONITOR_OPENED=1
-    log_watcher "opening manual bridge terminal"
-    osascript <<EOF
-tell application "Terminal"
-    activate
-    do script "bash -lc 'printf \"\\\\033]0;RBSS_BRIDGE_MONITOR\\\\007\"; echo \"━━━ Bridge Manual Session ━━━\"; cd ${BRIDGE_DIR} || exit 1; echo \"Laser Director config: ${LASER_CONFIG_PATH}\"; echo \"Laser Director mode: enabled=true dry_run=false\"; GOVEE_ENV_FILE=\"${GOVEE_ENV_FILE}\"; if [ -f \"\$GOVEE_ENV_FILE\" ]; then set -a; . \"\$GOVEE_ENV_FILE\"; set +a; fi; env RBSS_GOVEE_REALTIME=1 RBSS_LIVE_BPM_FOLLOW=1 RBSS_ANLZ_DIRECT=1 RBSS_POS_CHAIN_DIRECT=1 RBSS_POS_CHAIN_SKIP_OBJC=1 RBSS_MASTER_SEED_DIRECT=1 RBSS_MASTER_DIRECT=1 RBSS_PLAY_DIRECT=1 RBSS_TRACK_LOAD_DIRECT=1 RBSS_SCRIPTED_DIRECT=1 RBSS_SCRIPTED_SHOWFILE_DIRECT=1 RBSS_SMART_REARM_EXPERIMENT=1 RBSS_SMART_DROP=1 RBSS_SMART_BREAKDOWN=1 RBSS_LASER_CONFIG=\"${LASER_CONFIG_PATH}\" ${TRUTH_ENV} ${PYTHON} -u -m rb_ss_bridge_v2 2>&1 | tee ${LOG_FILE}' RBSS_BRIDGE_MONITOR"
-    set custom title of selected tab of front window to "RBSS_BRIDGE_MONITOR"
-end tell
-EOF
 }
 
 adopt_existing_bridge() {
@@ -224,10 +215,17 @@ ensure_bridge() {
 
 open_monitor() {
     MONITOR_OPENED=1
-    osascript <<'EOF'
+    # Unquoted heredoc (deliberate): $PYTHON/$REPO_ROOT are static, operator-controlled
+    # paths that must expand here so bridge_view.py resolves without relying on the
+    # spawned Terminal shell's environment. Nothing else in this heredoc uses "$" --
+    # the quadruple backslash before 033/007 is not a typo: bash's own heredoc
+    # backslash-collapsing (unquoted here-docs only special-case \\, \$, \`) halves it
+    # once to \\033, then AppleScript's string-literal escaping halves it again to the
+    # single \033 printf needs for the terminal-title escape sequence.
+    osascript <<EOF
 tell application "Terminal"
     activate
-    do script "bash -c 'printf \"\\033]0;RBSS_BRIDGE_MONITOR\\007\"; echo \"━━━ Bridge Monitor ━━━\"; tail -n 100 -F /tmp/bridge.log & wait $!' RBSS_BRIDGE_MONITOR"
+    do script "bash -c 'printf \"\\\\033]0;RBSS_BRIDGE_MONITOR\\\\007\"; echo \"━━━ Bridge Monitor ━━━\"; \"$PYTHON\" \"$REPO_ROOT/bridge_view.py\"' RBSS_BRIDGE_MONITOR"
     set custom title of selected tab of front window to "RBSS_BRIDGE_MONITOR"
 end tell
 EOF
@@ -287,20 +285,23 @@ trap 'cleanup; exit 0' INT TERM
 if [ -z "${WATCHER_NO_LOOP:-}" ]; then
 while true; do
     if [ "$MANUAL_MODE" = "1" ]; then
-        if [ "$MONITOR_OPENED" -eq 1 ] && ! monitor_open; then
-            log_watcher "manual terminal closed; stopping bridge"
-            stop_streamdeck manual_terminal_closed
-            kill_bridge_processes
-            exit 0
-        fi
+        # Manual semantics: no crash-restart backoff (ensure_bridge is never
+        # called here) -- a bridge exit ends the watcher, same as today.
+        # Closing the viewer window must NOT stop the bridge (menubar/manual
+        # process-exit are the only things that do); no "viewer closed" check.
         if ! bridge_pids > /dev/null; then
             if [ "$MONITOR_OPENED" -eq 1 ]; then
-                log_watcher "manual terminal bridge exited"
+                log_watcher "manual bridge exited"
                 exit 0
             fi
-            start_manual_terminal_bridge
+            start_bridge
         fi
-        start_streamdeck
+        if bridge_alive; then
+            start_streamdeck
+        fi
+        if [ "$MONITOR_OPENED" -eq 0 ]; then
+            open_monitor
+        fi
         sleep 3
         continue
     fi
