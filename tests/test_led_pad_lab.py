@@ -102,6 +102,20 @@ class LedPadLabTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "collides"):
                 registry.save({"name": "rt_groove_chase", "kind": "slot", "fn": "pulse"})
 
+    def test_registry_delete_removes_entry_and_unknown_name_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+            registry.save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {}})
+
+            result = registry.delete("pulse")
+
+            self.assertEqual(result, {"ok": True, "deleted": "pulse"})
+            self.assertEqual(registry.list(), [])
+            with self.assertRaises(ValueError):
+                registry.get("pulse")
+            with self.assertRaises(ValueError):
+                registry.delete("pulse")
+
     def test_param_specs_round_trip_slider_and_toggle(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             registry = LabRegistry(Path(td) / "led_lab")
@@ -404,6 +418,25 @@ class LedPadLabTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 service.lab_switch({"name": "missing"})
+
+    def test_lab_delete_refuses_while_that_draft_is_playing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._service_with_pulse_draft(Path(td))
+            service.lab_play({"name": "pulse"})
+
+            result = service.lab_delete({"name": "pulse"})
+
+            self.assertEqual(result, {"ok": False, "error": "stop_playback_first"})
+            self.assertEqual(service._lab.get("pulse")["name"], "pulse")
+
+    def test_lab_delete_removes_non_playing_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._service_with_pulse_draft(Path(td))
+
+            result = service.lab_delete({"name": "pulse"})
+
+            self.assertEqual(result, {"ok": True, "deleted": "pulse"})
+            self.assertEqual(service.lab_list()["entries"], [])
 
 
 if __name__ == "__main__":

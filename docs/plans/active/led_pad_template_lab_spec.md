@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: implementation-spec, code-grounded (citations verified at 4077794)
-last_verified_commit: dd48a3c
+last_verified_commit: 2040c1f
 last_verified_date: 2026-07-04
-validation_scope: spec only until phases land; Template Lab Round 1 (AWR-126) implemented/software-tested; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: spec only until phases land; Template Lab Rounds 1-3 (AWR-126) implemented/software-tested; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Codex Implementation Spec — LED Pad + Template Lab (AWR-113)
@@ -38,6 +38,8 @@ SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 | `c2162c3`+`0579fdf`+`6aa44fa` | LED Pad gained a stage-console visual reskin: shared design tokens + vendored Archivo font in `tools/led_pad_assets/`, "Apply" UI vocabulary for the draft commit (API routes unchanged), and a contained-scroll bank-tab strip that fixes a pre-existing horizontal-page-scroll defect at iPhone width caught by `tests/frontend` at baseline; Laser Pad gained the matching reskin plus a consolidated personality toolbar and an action-button hierarchy (one primary per group, danger-outline for destructive). | visual-only, software-tested |
 | `fc56bb5` | LED Pad's editor drawer gained an unset-param-defaults fix: unset controls previously rendered at the widget's minimum instead of the renderer's actual fallback (65 of 72 example-config looks store no `params` at all); the drawer now shows the real renderer default (or "auto" when no single fallback exists) with a **default** tag and a ↺ reset affordance, and the Renderer select no longer renders blank for cloud-scene looks. | software-tested only; no runtime/save-format change |
 | Template Lab Round 1 (`docs/plans/active/template_lab_round1_codex_spec.md`, AWR-126) — commit hash not yet available at doc-write time; verify against `git log` for the landing commit | Live param apply on the pad's shared playback slot (`/api/lab/update`, no cue-timer/clock restart), seamless variant switching between lab drafts (`/api/lab/switch`, beat keeps running), an offline preview endpoint (`/api/lab/preview`, no transport/ownership/UDP, fresh local `LabRenderer`), matching auto-apply + a canvas preview strip in the `/lab` UI, and the rewritten `template-lab` agent skill covering the variants-first workflow. No code-level strobe rail added (discipline-only, per operator decision). | implemented/software-tested; hardware-unvalidated |
+| Template Lab Round 2 (`docs/plans/active/template_lab_round2_codex_spec.md`, AWR-126) — `2040c1f` | `param_specs`-driven slider/toggle touch controls and slot-color swatches above the raw JSON in the `/lab` UI; the raw Params JSON textarea is demoted under an Advanced disclosure. `param_specs` is UI metadata only — validated/persisted by `LabRegistry.save()` but never gates `lab_play`/`lab_update`. | implemented/software-tested; hardware-unvalidated |
+| Template Lab Round 3 (`docs/plans/active/template_lab_round3_codex_spec.md`, AWR-126) — housekeeping; not yet committed in this shared checkout, verify against `git log` for the landing commit | A default-hidden rejected-drafts filter chip (`Rejected (n)`) in the `/lab` drafts list — pure UI; `GET /api/lab/list` keeps returning every entry regardless of status. `LabRegistry.delete()` + `POST /api/lab/delete` remove a draft's `drafts.json` entry only, refusing with `{"ok": false, "error": "stop_playback_first"}` while that exact draft is the one currently playing, and never touching the corresponding function in `effects_lab.py`. | implemented/software-tested; hardware-unvalidated |
 
 ---
 
