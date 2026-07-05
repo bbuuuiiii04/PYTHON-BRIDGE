@@ -350,6 +350,7 @@ class _State:
         self.writer_thread: Optional[threading.Thread] = None
         self.prior_excepthook: Optional[Callable[..., Any]] = None
         self.prior_threading_excepthook: Optional[Callable[..., Any]] = None
+        self.prior_handlers: Optional[list[logging.Handler]] = None
 
 
 _state = _State()
@@ -379,6 +380,7 @@ def init() -> None:
         file_obj.flush()
 
         handler = _QueueRecordHandler()
+        prior_handlers = logging.root.handlers[:]
         logging.root.handlers = [handler]
         logging.root.setLevel(logging.INFO)
 
@@ -418,6 +420,7 @@ def init() -> None:
         _state.writer_thread = writer_thread
         _state.prior_excepthook = prior_excepthook
         _state.prior_threading_excepthook = prior_threading_excepthook
+        _state.prior_handlers = prior_handlers
         _state.initialized = True
 
         writer_thread.start()
@@ -434,8 +437,16 @@ def shutdown(timeout: float = 2.0) -> None:
         writer_thread = _state.writer_thread
         prior_excepthook = _state.prior_excepthook
         prior_threading_excepthook = _state.prior_threading_excepthook
+        prior_handlers = _state.prior_handlers
         _state.file = None
         _state.writer_thread = None
+        _state.prior_handlers = None
+
+    # Uninstall our handler BEFORE the sentinel: no new records can enqueue
+    # behind the STOP marker, so the FIFO drain below is complete. Late log
+    # calls fall back to stdlib's lastResort stderr handler for WARNING+.
+    if prior_handlers is not None:
+        logging.root.handlers = prior_handlers
 
     if prior_excepthook is not None:
         sys.excepthook = prior_excepthook
