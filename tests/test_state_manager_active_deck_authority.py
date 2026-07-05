@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue
 import sys
 import unittest
@@ -12,6 +13,27 @@ from rb_ss_bridge_v2.active_deck_resolver import ACTIVE_DECK_STABILITY_S
 from rb_ss_bridge_v2.models import BridgeEvent, Ev, MixerAuthoritySnapshot, MixerDeckReading
 from rb_ss_bridge_v2.rb_memory import PositionCache
 from rb_ss_bridge_v2.state_manager import StateManager
+
+
+def _capture_perf(test: unittest.TestCase, logger_name: str) -> list[logging.LogRecord]:
+    """Attach a capture handler to a perf.* logger for one test (AWR-125).
+
+    No bridge_log.init(); propagate stays default so root is untouched.
+    """
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    prior_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    test.addCleanup(logger.setLevel, prior_level)
+    test.addCleanup(logger.removeHandler, handler)
+    return records
 
 
 def _reading(deck: int, *, fader: str = "top", low: str = "neutral", low_norm: float = 0.5):
@@ -260,6 +282,22 @@ class StateManagerActiveDeckAuthorityTests(unittest.TestCase):
         self.sm._push_tick_inner()
 
         self.sm._sse.deck_route.assert_not_called()
+
+    def test_apply_resolved_active_deck_emits_perf_deck_switch(self):
+        records = _capture_perf(self, "perf.deck")
+        self.sm._os.active_deck = 1
+
+        self.sm._apply_resolved_active_deck(0, source="test", reason="idle_no_audible")
+
+        self.assertEqual(len(records), 1)
+        rec = records[0]
+        self.assertEqual(rec.cat, "perf.deck")
+        self.assertEqual(rec.deck, 0)
+        data = rec.data
+        self.assertEqual(data["old"], 1)
+        self.assertEqual(data["new"], 0)
+        self.assertEqual(data["src"], "test")
+        self.assertEqual(data["reason"], "idle_no_audible")
 
     def test_active_deck_zero_entry_clears_legacy_lighting_outputs_without_deck_route(self):
         self.sm._os.active_deck = 1

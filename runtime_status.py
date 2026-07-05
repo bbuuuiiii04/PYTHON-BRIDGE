@@ -9,6 +9,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from . import bridge_log
 from .active_deck_resolver import RB_MASTER_STALE_AFTER_S
 from .bridge_fmt import log_throttled
 
@@ -220,17 +221,7 @@ class StatusWriter(threading.Thread):
             time.monotonic(),
         ):
             return
-        log.info(
-            "[BEAT] deck=%s rb_master=%s bpm=%s phrase=%s laser=%s led=%s palette=%s rgb=%s",
-            heartbeat["deck"],
-            heartbeat["master"],
-            heartbeat["bpm"],
-            heartbeat["phrase"],
-            heartbeat["laser_scene"],
-            heartbeat["led_look"],
-            heartbeat["palette"],
-            heartbeat["rgb_health"],
-        )
+        bridge_log.perf("heartbeat", "beat", data=heartbeat)
 
     def _safe_led_status(self) -> dict[str, Any]:
         return _safe_provider_snapshot(

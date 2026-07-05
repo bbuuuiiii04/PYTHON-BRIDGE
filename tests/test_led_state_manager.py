@@ -2158,6 +2158,79 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(len(adapter.trigger_calls), 1)
         self.assertEqual(len(records), 0)
 
+    # ── AWR-125 W3d: perf("override") emit assertions ─────────────────────
+
+    def test_manual_scene_event_emits_perf_override(self) -> None:
+        records = _capture_perf(self, "perf.override")
+        director = _StubLEDLookDirector(enabled=True)
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+
+        sm._handle_event(
+            BridgeEvent(
+                kind=Ev.LED_SCENE,
+                deck=0,
+                payload={"look": "room_drop_white_burst", "target": "strip_light_mirror"},
+                source="stream_deck",
+            )
+        )
+
+        self.assertEqual(len(records), 1)
+        rec = records[0]
+        self.assertEqual(rec.cat, "perf.override")
+        data = rec.data
+        self.assertEqual(data["surface"], "led")
+        self.assertEqual(data["action"], "scene")
+        self.assertEqual(data["source"], "stream_deck")
+        self.assertEqual(data["target"], "strip_light_mirror")
+        self.assertNotIn("reason", data)
+
+    def test_blackout_event_emits_perf_override_with_reason(self) -> None:
+        records = _capture_perf(self, "perf.override")
+        director = _StubLEDLookDirector(enabled=True)
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+
+        sm._handle_event(
+            BridgeEvent(
+                kind=Ev.LED_BLACKOUT,
+                deck=0,
+                payload={"reason": "operator"},
+                source="pad",
+            )
+        )
+
+        self.assertEqual(len(records), 1)
+        data = records[0].data
+        self.assertEqual(data["action"], "blackout")
+        self.assertEqual(data["source"], "pad")
+        self.assertEqual(data["reason"], "operator")
+
+    def test_each_led_override_kind_emits_exactly_one_record(self) -> None:
+        records = _capture_perf(self, "perf.override")
+        director = _StubLEDLookDirector(enabled=True)
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+
+        for kind in (
+            Ev.LED_SET_ENABLED,
+            Ev.LED_SCENE,
+            Ev.LED_BLACKOUT,
+            Ev.LED_CLEAR_BLACKOUT,
+            Ev.LED_CLEAR_SCENE_OVERRIDE,
+        ):
+            payload = {"look": "room_drop_a"} if kind == Ev.LED_SCENE else (
+                {"enabled": True} if kind == Ev.LED_SET_ENABLED else {}
+            )
+            sm._handle_event(BridgeEvent(kind=kind, deck=0, payload=payload, source="test"))
+
+        self.assertEqual(len(records), 5)
+        actions = [r.data["action"] for r in records]
+        self.assertEqual(
+            actions,
+            ["set_enabled", "scene", "blackout", "clear_blackout", "clear_scene_override"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

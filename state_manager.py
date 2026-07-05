@@ -1424,6 +1424,18 @@ class StateManager(LEDDispatchPolicyMixin):
                     self._laser_executor.clear_pending_blackout(
                         reason="laser_director_disabled"
                     )
+                bridge_log.perf(
+                    "override",
+                    "laser toggle -> %s src=%s",
+                    self._laser_director.is_enabled(),
+                    ev.source,
+                    data={
+                        "surface": "laser",
+                        "action": "toggle",
+                        "source": ev.source,
+                        "enabled": self._laser_director.is_enabled(),
+                    },
+                )
             elif ev.kind == Ev.LASER_SET_ENABLED:
                 enabled = bool(ev.payload.get("enabled", False))
                 self._laser_director.set_enabled(enabled)
@@ -1431,17 +1443,64 @@ class StateManager(LEDDispatchPolicyMixin):
                     self._laser_executor.clear_pending_blackout(
                         reason="laser_director_disabled"
                     )
+                bridge_log.perf(
+                    "override",
+                    "laser set_enabled -> %s src=%s",
+                    enabled,
+                    ev.source,
+                    data={
+                        "surface": "laser",
+                        "action": "set_enabled",
+                        "source": ev.source,
+                        "enabled": enabled,
+                    },
+                )
             elif ev.kind == Ev.LASER_SCENE:
                 scene = str(ev.payload.get("scene", ""))
                 ttl_s = float(ev.payload.get("ttl_s", 4.0))
                 if scene:
                     self._laser_director.set_manual_override(scene, ttl_s)
+                    bridge_log.perf(
+                        "override",
+                        "laser scene %s src=%s",
+                        scene,
+                        ev.source,
+                        data={
+                            "surface": "laser",
+                            "action": "scene",
+                            "source": ev.source,
+                            "scene": scene,
+                            "ttl_s": ttl_s,
+                        },
+                    )
             elif ev.kind == Ev.LASER_BLACKOUT:
                 self._laser_director.set_emergency_blackout(True)
+                bridge_log.perf(
+                    "override",
+                    "laser blackout src=%s",
+                    ev.source,
+                    data={"surface": "laser", "action": "blackout", "source": ev.source},
+                )
             elif ev.kind == Ev.LASER_CLEAR_BLACKOUT:
                 self._laser_director.clear_emergency_blackout()
+                bridge_log.perf(
+                    "override",
+                    "laser clear_blackout src=%s",
+                    ev.source,
+                    data={"surface": "laser", "action": "clear_blackout", "source": ev.source},
+                )
             elif ev.kind == Ev.LASER_CLEAR_SCENE_OVERRIDE:
                 self._laser_director.clear_manual_override()
+                bridge_log.perf(
+                    "override",
+                    "laser clear_scene_override src=%s",
+                    ev.source,
+                    data={
+                        "surface": "laser",
+                        "action": "clear_scene_override",
+                        "source": ev.source,
+                    },
+                )
             elif ev.kind == Ev.LASER_SET_PERSONALITY:
                 if ev.source not in {"test", "unit_test", "internal"}:
                     log.warning(
@@ -1450,12 +1509,28 @@ class StateManager(LEDDispatchPolicyMixin):
                     )
                 personality_name = str(ev.payload.get("personality", ""))
                 provider = self._laser_personality_provider
+                applied = False
                 if provider is None:
                     self._laser_director.set_personality(personality_name)
+                    applied = True
                 else:
                     personality_cfg = provider(personality_name)
                     if personality_cfg is not None:
                         self._apply_personality_change(personality_name, personality_cfg)
+                        applied = True
+                if applied:
+                    bridge_log.perf(
+                        "override",
+                        "laser set_personality %s src=%s",
+                        personality_name,
+                        ev.source,
+                        data={
+                            "surface": "laser",
+                            "action": "set_personality",
+                            "source": ev.source,
+                            "personality": personality_name,
+                        },
+                    )
 
     def _mixer_valid_fresh(self, now: float) -> bool:
         if not self._mixer_authority_enabled:
@@ -1552,7 +1627,15 @@ class StateManager(LEDDispatchPolicyMixin):
             return
         if new_deck not in (0, 1, 2):
             return
-        log.info("[SM] switch  %d→%d  src=%s", old_deck, new_deck, source)
+        bridge_log.perf(
+            "deck",
+            "switch %d->%d (%s)",
+            old_deck,
+            new_deck,
+            reason,
+            deck=new_deck,
+            data={"old": old_deck, "new": new_deck, "src": source, "reason": reason},
+        )
         if old_deck in (1, 2) and new_deck in (1, 2):
             self._apply_nonzero_active_deck_switch(old_deck, new_deck, source)
             return
@@ -3454,8 +3537,20 @@ class StateManager(LEDDispatchPolicyMixin):
             switch_requested = False
             if not self._mixer_authority_enabled and not d.playing and not arm_guard:
                 if self._deck[mirror].playing:
-                    log.info("[SM] switch  %d→%d  src=auto  reason=idle+mirror-playing",
-                             active, mirror)
+                    bridge_log.perf(
+                        "deck",
+                        "switch %d->%d (%s)",
+                        active,
+                        mirror,
+                        "idle+mirror-playing",
+                        deck=mirror,
+                        data={
+                            "old": active,
+                            "new": mirror,
+                            "src": "auto",
+                            "reason": "idle+mirror-playing",
+                        },
+                    )
                     switch_requested = True
                     os.last_arm_mono = now
                     try:
@@ -3604,8 +3699,20 @@ class StateManager(LEDDispatchPolicyMixin):
 
         if stop_confirmed and os.was_playing:
             if other_playing and not arm_guard and not self._mixer_authority_enabled:
-                log.info("[SM] switch  %d→%d  src=auto  reason=stopped+mirror-playing",
-                         active, mirror)
+                bridge_log.perf(
+                    "deck",
+                    "switch %d->%d (%s)",
+                    active,
+                    mirror,
+                    "stopped+mirror-playing",
+                    deck=mirror,
+                    data={
+                        "old": active,
+                        "new": mirror,
+                        "src": "auto",
+                        "reason": "stopped+mirror-playing",
+                    },
+                )
                 os.not_playing_since = 0.0
                 os.last_arm_mono = now
                 # FM-2: post to queue so _on_master_changed runs in event-loop thread
@@ -3636,8 +3743,20 @@ class StateManager(LEDDispatchPolicyMixin):
             and not os.was_playing and not d.playing and not arm_guard
         ):
             if self._deck[mirror].playing:
-                log.info("[SM] switch  %d→%d  src=auto  reason=idle+mirror-playing",
-                         active, mirror)
+                bridge_log.perf(
+                    "deck",
+                    "switch %d->%d (%s)",
+                    active,
+                    mirror,
+                    "idle+mirror-playing",
+                    deck=mirror,
+                    data={
+                        "old": active,
+                        "new": mirror,
+                        "src": "auto",
+                        "reason": "idle+mirror-playing",
+                    },
+                )
                 idle_switch_requested = True
                 os.last_arm_mono = now
                 try:
@@ -3808,6 +3927,21 @@ class StateManager(LEDDispatchPolicyMixin):
                         change = True
                         if not smart_drop_blackout_mode:
                             autoloop_tick_just_fired = True
+                        bridge_log.perf(
+                            "drop",
+                            "crossing deck=%d beat=%d blackout=%s",
+                            active,
+                            this_beat,
+                            smart_drop_blackout_mode,
+                            deck=active,
+                            beat=float(this_beat),
+                            data={
+                                "deck": active,
+                                "beat": this_beat,
+                                "blackout_mode": smart_drop_blackout_mode,
+                                "blackout_armed": smart_drop_result.blackout_armed,
+                            },
+                        )
                     if smart_rearm_result.breakdown_fired:
                         change = True
                         autoloop_tick_just_fired = True
@@ -4228,7 +4362,15 @@ class StateManager(LEDDispatchPolicyMixin):
 
         # Deck mismatch correction: if active deck is empty but other has track, swap
         if not self._mixer_authority_enabled and not d.meta.filepath and m.meta.filepath:
-            log.info("[SM] switch  %d→%d  src=auto  reason=empty-deck", deck, mirror)
+            bridge_log.perf(
+                "deck",
+                "switch %d->%d (%s)",
+                deck,
+                mirror,
+                "empty-deck",
+                deck=mirror,
+                data={"old": deck, "new": mirror, "src": "auto", "reason": "empty-deck"},
+            )
             self._os.active_deck = mirror
             deck, mirror = mirror, deck
             d, m = m, d

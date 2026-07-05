@@ -374,6 +374,24 @@ class LEDDispatchPolicyMixin:
         )
 
     def _handle_led_event(self, ev: BridgeEvent) -> None:
+        override_action = ev.kind[4:] if ev.kind.startswith("led_") else ev.kind
+        override_data: dict[str, Any] = {
+            "surface": "led",
+            "action": override_action,
+            "source": ev.source,
+        }
+        if "target" in ev.payload:
+            override_data["target"] = ev.payload.get("target")
+        if "reason" in ev.payload:
+            override_data["reason"] = ev.payload.get("reason")
+        bridge_log.perf(
+            "override",
+            "led %s src=%s",
+            override_action,
+            ev.source,
+            data=override_data,
+        )
+
         if ev.kind == Ev.LED_SET_ENABLED:
             self._led_enabled_latch = bool(ev.payload.get("enabled", False))
             self._dispatch_led_manual_command(reason="set_enabled")

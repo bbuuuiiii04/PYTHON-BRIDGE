@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 import queue
 import time
 import unittest
@@ -347,6 +348,27 @@ def _phrase_anchor_tick(
             phrase_anchor_enabled=True,
         ),
     ).phrase_anchor_fired
+
+
+def _capture_perf(test: unittest.TestCase, logger_name: str) -> list:
+    """Attach a capture handler to a perf.* logger for one test (AWR-125).
+
+    No bridge_log.init(); propagate stays default so root is untouched.
+    """
+    logger = logging.getLogger(logger_name)
+    records: list = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    prior_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    test.addCleanup(logger.setLevel, prior_level)
+    test.addCleanup(logger.removeHandler, handler)
+    return records
 
 
 def _rearm_result(
@@ -1371,6 +1393,41 @@ class SmartDropBlackoutFallbackTests(unittest.TestCase):
             sm._push_tick()
         _, ctx = sm._laser_executor.on_decision.call_args.args
         self.assertFalse(ctx.smart_drop_blackout_arm)
+
+    def test_crossing_emits_perf_drop_once(self) -> None:
+        """The smart-drop crossing tick emits exactly one perf('drop') record
+        with deck, beat, and blackout status — never per-tick spam."""
+        sm = self._prepare_manager()
+        sm._os.drop_cut_armed = True
+        sm._os.drop_rearm_beat = 2
+        sm._deck[1].meta.smart_drops = [2]
+        sm._laser_director = Mock()
+        sm._laser_director.is_enabled.return_value = True
+        sm._laser_director.tick.return_value = SimpleNamespace(
+            scene="house_drop_1",
+            reason="drop_crossing",
+            role="drop",
+        )
+        records = _capture_perf(self, "perf.drop")
+        with patch.object(
+            sm._smart_rearm,
+            "tick",
+            return_value=_rearm_result(
+                SmartDropTickResult(crossing=True, blackout_armed=True, target_beat=2)
+            ),
+        ):
+            sm._push_tick()
+
+        self.assertEqual(len(records), 1)
+        rec = records[0]
+        self.assertEqual(rec.cat, "perf.drop")
+        self.assertEqual(rec.deck, 1)
+        self.assertEqual(rec.beat, 2.0)
+        data = rec.data
+        self.assertEqual(data["deck"], 1)
+        self.assertEqual(data["beat"], 2)
+        self.assertTrue(data["blackout_mode"])
+        self.assertTrue(data["blackout_armed"])
 
     def test_laser_set_enabled_false_clears_pending_blackout_once(self) -> None:
         sm = self._prepare_manager()

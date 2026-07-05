@@ -15,6 +15,27 @@ from rb_ss_bridge_v2.runtime_status import (  # noqa: E402
 )
 
 
+def _capture_perf(test: unittest.TestCase, logger_name: str) -> list[logging.LogRecord]:
+    """Attach a capture handler to a perf.* logger for one test (AWR-125).
+
+    No bridge_log.init(); propagate stays default so root is untouched.
+    """
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    prior_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    test.addCleanup(logger.setLevel, prior_level)
+    test.addCleanup(logger.removeHandler, handler)
+    return records
+
+
 class RuntimeCommandTests(unittest.TestCase):
     def test_parse_command_rejects_unknown_command(self) -> None:
         with self.assertRaises(ValueError):
@@ -641,15 +662,21 @@ class RuntimeStatusWriterTests(unittest.TestCase):
             color_status={"current_palette": "blue_green"},
         )
 
-        with self.assertLogs("runtime_status", level="INFO") as captured:
-            writer.snapshot()
+        records = _capture_perf(self, "perf.heartbeat")
 
-        line = "\n".join(captured.output)
-        self.assertIn("[BEAT] deck=1 rb_master=2 bpm=128.0", line)
-        self.assertIn("phrase=up", line)
-        self.assertIn("laser=house_up", line)
-        self.assertIn("led=rt_twinkle", line)
-        self.assertIn("palette=blue_green", line)
+        writer.snapshot()
+
+        self.assertEqual(len(records), 1)
+        rec = records[0]
+        self.assertEqual(rec.cat, "perf.heartbeat")
+        data = rec.data
+        self.assertEqual(data["deck"], 1)
+        self.assertEqual(data["master"], 2)
+        self.assertEqual(data["bpm"], "128.0")
+        self.assertEqual(data["phrase"], "up")
+        self.assertEqual(data["laser_scene"], "house_up")
+        self.assertEqual(data["led_look"], "rt_twinkle")
+        self.assertEqual(data["palette"], "blue_green")
 
     def test_status_writer_heartbeat_safe_for_idle_show_deck(self) -> None:
         writer = self._make_writer(
@@ -696,12 +723,12 @@ class RuntimeStatusWriterTests(unittest.TestCase):
             color_status={"current_palette": "blue_green"},
         )
 
-        with self.assertLogs("runtime_status", level="INFO") as captured:
-            writer.snapshot()
-            writer.snapshot()
+        records = _capture_perf(self, "perf.heartbeat")
 
-        messages = [record for record in captured.output if "[BEAT]" in record]
-        self.assertEqual(len(messages), 1)
+        writer.snapshot()
+        writer.snapshot()
+
+        self.assertEqual(len(records), 1)
 
     def test_status_writer_uses_published_color_engine_status(self) -> None:
         writer = self._make_writer(

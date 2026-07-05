@@ -144,6 +144,27 @@ def _now() -> float:
     return time.monotonic()
 
 
+def _capture_perf(test: unittest.TestCase, logger_name: str) -> list[logging.LogRecord]:
+    """Attach a capture handler to a perf.* logger for one test (AWR-125).
+
+    No bridge_log.init(); propagate stays default so root is untouched.
+    """
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    prior_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    test.addCleanup(logger.setLevel, prior_level)
+    test.addCleanup(logger.removeHandler, handler)
+    return records
+
+
 # ---------------------------------------------------------------------------
 # LaserContext and LaserSceneDecision — frozen
 # ---------------------------------------------------------------------------
@@ -1786,6 +1807,101 @@ class StateManagerLaserIntegrationTests(unittest.TestCase):
         sm._handle_event(BridgeEvent(
             kind=Ev.LASER_SET_PERSONALITY, deck=0, payload={"personality": "dubstep"}
         ))
+
+    # ── AWR-125 W3d: perf("override") emit assertions ─────────────────────
+
+    def test_laser_toggle_event_emits_perf_override(self) -> None:
+        from rb_ss_bridge_v2.models import BridgeEvent
+        records = _capture_perf(self, "perf.override")
+        ld = _director(enabled=False)
+        sm = _make_sm(laser_director=ld)
+
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_TOGGLE, deck=0, source="pad"))
+
+        self.assertEqual(len(records), 1)
+        rec = records[0]
+        self.assertEqual(rec.cat, "perf.override")
+        data = rec.data
+        self.assertEqual(data["surface"], "laser")
+        self.assertEqual(data["action"], "toggle")
+        self.assertEqual(data["source"], "pad")
+        self.assertTrue(data["enabled"])
+
+    def test_laser_scene_event_emits_perf_override_only_when_scene_set(self) -> None:
+        from rb_ss_bridge_v2.models import BridgeEvent
+        records = _capture_perf(self, "perf.override")
+        ld = _director()
+        sm = _make_sm(laser_director=ld)
+
+        sm._handle_event(BridgeEvent(
+            kind=Ev.LASER_SCENE, deck=0, payload={"scene": ""}, source="test",
+        ))
+        self.assertEqual(len(records), 0)
+
+        sm._handle_event(BridgeEvent(
+            kind=Ev.LASER_SCENE,
+            deck=0,
+            payload={"scene": "house_drop_1", "ttl_s": 8.0},
+            source="test",
+        ))
+        self.assertEqual(len(records), 1)
+        data = records[0].data
+        self.assertEqual(data["surface"], "laser")
+        self.assertEqual(data["action"], "scene")
+        self.assertEqual(data["scene"], "house_drop_1")
+        self.assertEqual(data["ttl_s"], 8.0)
+
+    def test_each_laser_override_kind_emits_exactly_one_record(self) -> None:
+        from rb_ss_bridge_v2.models import BridgeEvent
+        records = _capture_perf(self, "perf.override")
+        ld = _director()
+        sm = _make_sm(laser_director=ld)
+
+        events = [
+            BridgeEvent(kind=Ev.LASER_TOGGLE, deck=0, source="test"),
+            BridgeEvent(kind=Ev.LASER_SET_ENABLED, deck=0, payload={"enabled": True}, source="test"),
+            BridgeEvent(kind=Ev.LASER_SCENE, deck=0, payload={"scene": "house_drop_1"}, source="test"),
+            BridgeEvent(kind=Ev.LASER_BLACKOUT, deck=0, source="test"),
+            BridgeEvent(kind=Ev.LASER_CLEAR_BLACKOUT, deck=0, source="test"),
+            BridgeEvent(kind=Ev.LASER_CLEAR_SCENE_OVERRIDE, deck=0, source="test"),
+            BridgeEvent(
+                kind=Ev.LASER_SET_PERSONALITY, deck=0,
+                payload={"personality": "dubstep"}, source="internal",
+            ),
+        ]
+        for ev in events:
+            sm._handle_event(ev)
+
+        self.assertEqual(len(records), len(events))
+        actions = [r.data["action"] for r in records]
+        self.assertEqual(
+            actions,
+            [
+                "toggle",
+                "set_enabled",
+                "scene",
+                "blackout",
+                "clear_blackout",
+                "clear_scene_override",
+                "set_personality",
+            ],
+        )
+        self.assertTrue(all(r.data["surface"] == "laser" for r in records))
+
+    def test_laser_set_personality_invalid_emits_no_perf_override(self) -> None:
+        from rb_ss_bridge_v2.models import BridgeEvent
+        records = _capture_perf(self, "perf.override")
+        ld = _director()
+        provider = lambda name: None
+        sm = _make_sm(laser_director=ld)
+        sm._laser_personality_provider = provider
+
+        sm._handle_event(BridgeEvent(
+            kind=Ev.LASER_SET_PERSONALITY, deck=0,
+            payload={"personality": "unknown_personality"}, source="internal",
+        ))
+
+        self.assertEqual(len(records), 0)
 
     def test_existing_smart_drop_toggle_still_works(self) -> None:
         """SMART_DROP_TOGGLE must still reach toggle_smart_drop() without raising.
