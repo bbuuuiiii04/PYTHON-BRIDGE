@@ -44,8 +44,14 @@ Coverage expectations:
   transport fail-closed pause, resolver policy, StateManager bypass gates,
   default-on startup wiring, heartbeat/status stale-master separation, and
   deck-0 idle clear safety.
-- Logging visibility changes need `tests/test_bridge_fmt_rate.py` for spam-control primitives and
-  `tests/test_logging_surface.py` for diagnostic coverage.
+- Logging visibility changes need `tests/test_bridge_fmt_rate.py` for spam-control primitives,
+  `tests/test_bridge_log.py` for the JSONL record/queue/writer pipeline, `tests/test_bridge_view.py`
+  for the pure viewer layer (`parse_record`/`lens_of`/`format_line`/`LatchState`),
+  `tests/test_logging_surface.py` for error-visibility/env-var diagnostic coverage, and
+  `tests/test_bridge_log_integration.py` for the subprocess init→emit→shutdown round trip. New
+  `perf.*`/`health.*` emit sites need one capture-handler assertion in the test module that already
+  owns that behavior (see `docs/validation/software_test_inventory.md`'s Logging Visibility
+  section), not a new logging test file.
 - Docs/agent workflow changes need `tests/test_docs_orphan_check.py` for active-doc
   classification and `tests/test_check_docs_staleness.py` for advisory staleness
   contract parsing, glob expansion, and implementation-file filtering.

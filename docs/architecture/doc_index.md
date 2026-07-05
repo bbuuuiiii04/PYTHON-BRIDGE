@@ -69,7 +69,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/led_look_mapping_workflow.md` | CURRENT SUPPORTING — operator mapping workflow. |
 | `docs/govee_capability_notes.md` | CURRENT SUPPORTING — Govee device capability notes. |
 | `docs/guides/*.md` (5) | CURRENT SUPPORTING — laser MIDI mapping, rollout checklist, Laser Pad live-toggle/draft behavior, LED Pad/Template Lab operator guide. |
-| `docs/subsystems/logging.md` | CURRENT SUPPORTING — matches `logging_manager.py`. |
+| `docs/subsystems/logging.md` | CURRENT SUPPORTING — matches `bridge_log.py`/`bridge_view.py` (AWR-125; `logging_manager.py` is retired). |
 | `docs/data/offsets-*.yaml` (3) | CURRENT SUPPORTING — Rekordbox offset reference data. |
 | `docs/data/cues_*.md` (2) | GENERATED OUTPUT — relocated cue dumps; not in the reading path. |
 | `docs/research/*.md` | RESEARCH — ANLZ energy/waveform-tag evidence plus Rekordbox mixer active-deck RE proof. |

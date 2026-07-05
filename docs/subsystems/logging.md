@@ -2,317 +2,273 @@
 
 Status: CURRENT SUPPORTING
 
-Audited against implementation commit `74febec` on 2026-06-29.
-
-This is the canonical runtime logging guide. Historical implementation context
-is retained in `docs/history/logging_implementation_handoff.md`, but current
-runtime behavior should be documented here.
+Audited against implementation commit `4f4c1ad` on 2026-07-05 (AWR-125 W1-W7, one JSONL event
+stream + `bridge-view` TUI; replaces the retired `logging_manager.py` pipeline).
 
 Current repo-facing status remains:
 
 > **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**
 
-Audit P1 (2026-07-03): unused transition/latency helper classes were removed from
-`diagnostics.py`; the remaining debug and drift-detection surfaces are unchanged.
-
-The bridge keeps normal logs readable by default:
-
-```text
-14:23:45 [INFO   ] TRACK_LOADED title=Track Name load_gen=12 [deck=1 src=rb_state tr:a3f91c]
-14:23:45 [INFO   ] FILEPATH_RESOLVED path=track.mp3 bpm=128.4 ssid=yes latency=35.2ms [deck=1 src=lsof tr:a3f91c]
-14:23:45 [INFO   ] SCRIPTED_ARM id=5021 path=track.mp3 elapsed=1234ms bpm=128.4 first_beat=0.0ms [deck=1 tr:a3f91c]
-```
-
-Trace IDs are propagated through `BridgeEvent.payload["__trace_id"]` and are
-created automatically by the logging queue wrapper. Internal `__*` keys are not
-shown in event payload debug logs.
-
-## Runtime Controls
-
-Set these before launch:
-
-```bash
-export BRIDGE_LOG_MODULES=state_manager,filepath_resolver
-export BRIDGE_LOG_DECKS=1
-export BRIDGE_LOG_EVENTS=track_loaded,filepath_resolved,scripted_arm
-export BRIDGE_LOG_LEVELS=state_manager=DEBUG,filepath_resolver=DEBUG
-export BRIDGE_LOG_ANOMALIES=1
-```
-
-For live changes after launch, edit `/tmp/rb_ss_bridge_v2_logging.json`.
-The bridge watches this file and reloads it automatically:
-
-```json
-{
-  "modules": ["state_manager", "filepath_resolver"],
-  "decks": [1],
-  "events": ["track_loaded", "filepath_resolved", "scripted_arm"],
-  "levels": {
-    "state_manager": "DEBUG",
-    "filepath_resolver": "DEBUG"
-  },
-  "debug": false,
-  "anomalies": true
-}
-```
-
-Use `BRIDGE_LOG_CONTROL=/path/to/file.json` before launch to choose a different
-control file. `SIGHUP` still works as a manual reload fallback, but it is not
-needed for normal use.
-
-## Live Watch Preset
-
-For a clean operator watch stream, use the checked-in preset:
-
-```bash
-cp docs/setup/logging_live_watch.json /tmp/rb_ss_bridge_v2_logging.json
-```
-
-If the bridge is already running with the default control path, the logging
-watcher reloads the file automatically. If the bridge was launched with a
-different path, copy the preset there or launch with:
-
-```bash
-BRIDGE_LOG_CONTROL=/path/to/logging_live_watch.json python -m rb_ss_bridge_v2
-```
-
-The preset uses the existing control-file schema only. It filters to the
-operator-facing runtime loggers for:
-
-- `runtime_status` for the throttled `[BEAT]` heartbeat.
-- `state_manager`, `rb_state`, `rb_memory`, and `live_bpm` for show-deck,
-  Rekordbox-master, mixer-authority, and reader visibility.
-- `osl_output` and `os2l_injector` for SoundSwitch routing/output visibility.
-- `laser_director`, `laser_executor`, and `laser_config` for laser policy and
-  MIDI execution visibility.
-- `led_look_director`, `led_color_engine`, `led_dispatch_coordinator`,
-  `govee_scene_adapter`, `govee_runtime_sender`, `govee_realtime_runner`,
-  `govee_realtime_transport`, and `govee_owner_state` for current and
-  forward-referenced LED/Govee logger coverage. Current direct emitted lines
-  primarily come from dispatch, scene, and realtime runner paths; LED/color
-  current state is also visible through `[BEAT]`.
-
-The preset sets these loggers to `INFO` and leaves `debug` and `anomalies`
-disabled, so it should not turn on broad DEBUG noise. Errors still pass through
-even when their logger is not in the filtered module list.
-
-Healthy watch output should include a throttled `[BEAT]` line with show deck
-and separate non-stale `rb_master` when available, BPM, phrase, laser scene,
-LED look, palette, and RGB health, plus transition lines such as `[LASER]`, `[LX]`, `[LED] look=...`,
-`[RGB] activate`, `[RGB] summary`, `[OS2L]`, and StateManager master/play/load
-lines when those subsystems actually emit them. The preset does not send
-commands, change runtime state, or validate hardware-visible behavior.
-
-RW-5 pack status failures remain bounded: the status surface and pack-driver error line expose only
-an exception category, never a raw message that could contain a path, port, alias, device name, or
-identifier. `software_zero_frame` is software intent and must not be interpreted as physical
-darkness.
-
-Programmatic output:
-
-```bash
-BRIDGE_LOG_JSON=1 python -m rb_ss_bridge_v2
-```
-
-Full debug mode is unchanged:
-
-```bash
-BRIDGE_DEBUG=1 python -m rb_ss_bridge_v2
-python -m rb_ss_bridge_v2 --debug
-```
-
-## Color Meaning
-
-Terminal colors follow this convention:
-
-| Color | Meaning |
-|-------|---------|
-| green | Lifecycle applied / successful action / locked timing |
-| cyan | Periodic status / routing / currently active state |
-| yellow | Pending / fallback / corrective action / degraded-but-working |
-| orange | Late / retry / suspicious / recoverable failure |
-| red | Stop / stale / crash-risk / action needed |
-| magenta | Scripted-show lifecycle |
-| grey | Debug noise |
-
-Examples:
-
-```text
-[SS][AUTOLOOP-ARM]       green
-[SS][AUTOLOOP-ARM-PENDING] yellow
-[SS][AUTOLOOP-ARM-LOCKED]  green
-[SS][AUTOLOOP-MASTER-CLEAR] yellow
-[SS][AUTOLOOP-MASTER-CORRECTION-PENDING] yellow
-[SS][AUTOLOOP-MASTER-ARM-LATE-CORRECTION] orange
-[SS][AUTOLOOP-TICK]      cyan
-[SS][LIVE-BPM-APPLY]     green
-[LBPM][SCAN|CURRENT]     cyan
-[LBPM][ATTACH|VALIDATED] green
-[LBPM][INVALID|ERROR]    orange
-[RBMEM][SCAN|CANDIDATE]  cyan
-[RBMEM][VALIDATED]       green
-[RBMEM][REJECT|INVALID]  orange
-```
-
-Normal INFO output keeps `[LBPM][SCAN]`, `[LBPM][CURRENT]`,
-`[RBMEM][SCAN]`, and `[RBMEM][CANDIDATE]` visible because they show whether
-decks still need live-BPM or memory validation.
-
-## Autoloop And Live BPM Diagnostics
-
-Normal autoloop status logs at 32-beat phrase boundaries, not every beat and
-not on a wall-clock timer:
-
-```text
-[SS][AUTOLOOP-TICK] deck=1 elapsed=... beat=...
-  timing_bpm=134.30 arm_bpm=134.30 meta_bpm=134.30 grid=PQT2:ANLZ0000.EXT
-  live_bpm=134.30 live_age_ms=... live_addr=0x.../f32
-  follow=on pending_bpm=none file=...
-```
-
-BPM names:
-
-- `meta_bpm`: library/ENGINE STATE fallback.
-- `live_bpm`: validated Rekordbox displayed BPM from memory.
-- `arm_bpm`: BPM selected for the current autoloop timing epoch.
-- `timing_bpm`: BPM currently used for outgoing bridge beat timing.
-- `grid`: autoloop phase source. `PQT2:...` or `PQTZ:...` means ANLZ beatgrid
-  drove absolute beat position; `fallback` means constant-BPM math was used.
-
-VDJ-like live BPM follow is enabled by default. Set `RBSS_LIVE_BPM_FOLLOW=0`
-to disable active follow. During an active autoloop, validated live BPM changes
-are sent in place and logged when applied:
-
-```text
-[SS][LIVE-BPM-APPLY] deck=1 bpm=134.30 beat=129
-```
-
-BPM apply logs are rate-limited to avoid push-loop spam while still tracking
-pitch changes during playback. The phrase-boundary `AUTOLOOP-TICK` line shows
-whether active follow is on or disabled.
-
-After LIVE-BPM-APPLY, the next autoloop beat event sends absolute `beat.pos`
-with `change=True` once, then returns to steady `change=False`. Live testing
-confirmed this one-shot beat re-lock kept SoundSwitch autoloops phrase-synced
-during BPM changes.
-
-Apply means the bridge sent BPM to SoundSwitch:
-
-```text
-[SS][LIVE-BPM-APPLY] deck=1 bpm=134.30 beat=129
-```
-
-SoundSwitch has been observed to react to BPM sends and beat `change=True`
-re-locks. Treat `LIVE-BPM-APPLY` plus the next one-shot change beat as the
-validated active-autoloop tempo-change sync path.
-
-Master-transition autoloop arms do not use this beat re-lock path; they clear
-SoundSwitch and re-send the filepath/deck-load package on the selected phrase.
-
-Autoloop arm phrase-lock is separate from live BPM follow. Normal track-start
-autoloop arms fire immediately, then the push loop schedules one more BPM send
-at the next 32-beat phrase boundary:
-
-```text
-[SS][AUTOLOOP-ARM-PENDING] deck=1 current_beat=5.2 target_beat=32 ...
-[SS][AUTOLOOP-ARM-LOCKED] deck=1 target_beat=32 ... bpm=120.50
-```
-
-Master-switch autoloop arms are phrase-window aware by default. Set
-`RBSS_AUTOLOOP_MASTER_PHRASE_ARM=0` to disable this behavior. If the switch
-lands near the start of a phrase, the bridge clears SoundSwitch and arms
-immediately. If it lands later in the phrase, the bridge clears SoundSwitch and
-delays deck-load/autoloop activation until the next phrase target:
-
-```text
-[SS][AUTOLOOP-MASTER-CLEAR] deck=2 mirror=1 source=auto-detect
-[SS][AUTOLOOP-MASTER-ARM-PENDING] deck=2 mirror=1 current_beat=5.2 target_beat=32 ...
-[SS][AUTOLOOP-MASTER-ARM-LOCKED] deck=2 target_beat=32 target_elapsed_ms=16000 actual_elapsed_ms=16000 ...
-```
-
-Live testing showed beatpos/`change=True` tugging moves the progress bar but
-does not reliably restart the laser phrase. Master-transition rearm therefore
-uses clear plus filepath/deck-load on the selected phrase target.
-
-With `AUTOLOOP_ARM_PHRASE_BEATS=32`, phrase-lock targets are `(32 * n)`:
-`32, 64, 96, ...`. This is separate from `AUTOLOOP_BEATS`, which controls loop
-length.
-
-## Common Questions
-
-Why did a scripted track arm fail?
-
-Use:
-
-```json
-{
-  "events": ["track_loaded", "filepath_resolved", "scripted_arm", "scripted_clear"],
-  "levels": {
-    "state_manager": "DEBUG",
-    "scripted_tracks": "DEBUG",
-    "filepath_resolver": "DEBUG"
-  }
-}
-```
-
-Look for one trace ID across `TRACK_LOADED`, `FILEPATH_RESOLVED`, and
-`SCRIPTED_ARM`. Unknown scripted IDs now log an explicit `SCRIPTED_ARM failed`
-line and remediation hints are attached to common errors.
-
-What caused deck switch delay?
-
-Use:
-
-```json
-{
-  "events": ["master_changed", "play", "pause"],
-  "levels": {
-    "state_manager": "DEBUG"
-  }
-}
-```
-
-Debug logs include event processing latency and nearby event relationships, for
-example `play deck1 45.0ms after pause deck2`.
-
-Did Rekordbox restart?
-
-Search for:
-
-```text
-RB_RESTARTED
-RBMemoryReader: RB pid ... gone
-RBMemoryReader: attached pid=...
-```
-
-The memory reader posts `RB_RESTARTED` to the StateManager queue so the stop path
-and log trace are tied to the restart detection.
-
-Which constants or offsets matter?
-
-Memory offsets live in `rb_ss_bridge_v2/config.py`. Useful anchors are
-`RB_GLOBAL_OFF`, `RB_DECK1_OFF`, `RB_DECK2_OFF`, `RB_POS_OFF`,
-`OUTER_INNER1_OFF`, and `OUTER_INNER2_OFF`.
-
-## API
-
-Scoped logs:
+This is the canonical runtime logging guide. Historical implementation context for the RETIRED
+system (control-file watcher, env-var filter maze, anomaly engine, `LogStats`, three formatters)
+is retained in `docs/history/logging_implementation_handoff.md` — read it only for archaeology,
+never as current behavior. The operator-authoritative intent contract this system must keep
+matching is `docs/architecture/logging_authority.md`.
+
+## One-stream architecture
+
+The bridge writes exactly **one** authoritative JSONL event stream per run. stdlib `logging` stays
+the ordinary emission API everywhere (`logging.getLogger(name).info(...)`, `.debug(...)`,
+`.warning(...)`) — there was never a 46-file migration; ordinary records flow into the stream
+automatically with `cat` = logger name. On top of that, `bridge_log.py` (repo root) adds two
+structured intent/health helpers, `perf()` and `health()`, for the ~16 decision/health commit
+points that need to reach the operator-facing lenses on purpose. A separate, disposable, read-only
+viewer process (`bridge_view.py`, "bridge-view") renders four fixed lenses over that one stream;
+the bridge itself never filters, colors, or formats output for a human — that is entirely the
+viewer's job, on the read side.
+
+**Hot path (the 200 Hz push loop's logging cost, exhaustively):** level check → `build_record()`
+(a pure dict build, no I/O) → non-blocking `queue.Queue.put_nowait` onto a bounded queue
+(`maxsize=8192`; full queue drops the record and increments a counter, never blocks, never raises).
+One daemon writer thread (`bridge-log-writer`) owns everything slow: JSON serialization, `_redact()`
+secret scrubbing, buffered disk append, and mirroring WARNING+ records to stderr (which the watcher
+redirects into `/tmp/bridge.log` — a crash-catcher/banner file now, never a second event log).
+
+## The four lenses
+
+Lenses are read-side predicates evaluated by `bridge_view.py`'s `lens_of()` — verbatim
+(`bridge_view.py:114-155`); a record carries no lens field, and membership can overlap:
 
 ```python
-from .logging_manager import log_event_scope
+def lens_of(rec: dict[str, Any]) -> set[str]:
+    cat = _str_field(rec, "cat")
+    src = _str_field(rec, "src")
+    levelno = _level_no(rec)
 
-with log_event_scope("track_load", deck=1, source="rb_state") as trace_id:
-    log.info("TRACK_LOADED title=%s", title)
+    lenses = {"DEBUG"}
+    if cat.startswith("perf."):
+        lenses.add("PERFORMANCE")
+    if levelno >= _LEVEL_NO["WARNING"] or cat.startswith("health."):
+        lenses.add("OPERATOR")
+    if cat.startswith(("sys.", "health.")) or (
+        src in LEGACY_INFRA and levelno >= _LEVEL_NO["INFO"]
+    ):
+        lenses.add("SYSTEM")
+    return lenses
 ```
 
-On-demand stats:
+`LEGACY_INFRA` (`bridge_view.py:108-111`) is one read-side tuple of not-yet-namespaced infra
+loggers: `rb_memory`, `rb_state`, `live_bpm`, `mtc_reader`, `osl_output`, `os2l_injector`,
+`runtime_status`, `bridge`, `diagnostics`. Note `rb_state_reader.py`'s logger is actually named
+`"rb_state"` (`rb_state_reader.py:58`), not `rb_state_reader` — that is the literal string in the
+tuple. It shrinks as more infra modules migrate to explicit `perf.*`/`health.*` emits.
 
-```python
-from .logging_manager import get_logging_manager
+**Approved deviation (W6, 2026-07-04):** the design's literal SYSTEM predicate had no level
+qualifier on the `LEGACY_INFRA` clause, which would let a DEBUG-level record from, say,
+`rb_memory`'s per-candidate spam route into SYSTEM alongside real `sys.*`/`health.*` signal. That
+contradicted both the design's own noise guarantee ("a chatty subsystem can pollute MAX DEBUG
+only") and W6's own required test (a DEBUG record with `cat="rb_memory"` must route to DEBUG only).
+The legacy-infra branch above is gated on `levelno >= INFO`; every named SYSTEM-relevant legacy
+event (attach, RB gone, drift, queue drops) is already INFO/WARNING/ERROR, or has migrated to an
+explicit `health.*` cat that matches the first clause directly regardless of level.
 
-LOG = get_logging_manager()
-LOG.log_stats(log)
+| Lens | Predicate | Answers | Screen |
+|---|---|---|---|
+| PERFORMANCE | `cat` starts with `perf.` | What should the rig be doing right now? | 1 SHOW (feed) |
+| OPERATOR | level ≥ WARNING, or `cat` starts with `health.` | Is it working? What broke / recovered? | 1 SHOW (strip) + 2 OPERATOR |
+| SYSTEM | `cat` starts with `sys.`/`health.`, or (`src` legacy-infra AND level ≥ INFO) | Threads, attach, queues, timing, connections | 3 SYSTEM |
+| DEBUG | always | Forensic firehose | 4 DEBUG |
+
+Structural noise protection: PERFORMANCE can only be reached through the narrow `perf()` helper, so
+a badly-logged resolution loop cannot spam it regardless of level or text; OPERATOR only admits
+WARNING+ and `health.*`. The old `[RBMEM][CANDIDATE]`/`[REJECT]` 50-INFO-lines noise class is dead
+by predicate now, not by discipline.
+
+## The record schema
+
+One JSON object per line, built by `bridge_log.build_record()` — a pure function
+(`bridge_log.py:184-215`):
+
+```json
+{"ts": 1751685243.512, "mono": 8123.402, "lvl": "INFO", "cat": "perf.laser.fired",
+ "msg": "fired role=drop scene=strobe_sync note=52 reason=drop_crossing",
+ "src": "laser_executor", "deck": 1, "beat": 129.02, "trace": "a3f91c",
+ "data": {"role": "drop", "scene": "strobe_sync", "note": 52, "cursor": 3}}
 ```
 
-The stats snapshot includes latency percentiles, event counts, transition
-counts, error summaries, and the most recent bounded event samples.
+| Field | Required | Content |
+|---|---|---|
+| `ts` | yes | `record.created` (epoch seconds, wall clock) |
+| `mono` | yes | `time.monotonic()` at record-build time — ordering/latency math |
+| `lvl` | yes | stdlib level name: `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL` |
+| `cat` | yes | the emit-site category (`perf.*`/`health.*`/`sys.*`) or the logger name for ordinary stdlib records |
+| `msg` | yes | `record.getMessage()` (already %-merged) |
+| `src` | yes | `record.name` (logger/module name) |
+| `deck` | optional | explicit `deck=` kwarg, else the ambient deck contextvar when nonzero |
+| `beat` | optional | explicit `beat=` kwarg |
+| `trace` | optional | the ambient trace-id contextvar, when set |
+| `data` | optional | structured payload dict, passed through `_redact()` (masks `token`/`secret`/`password`/`key`-named entries) |
+| `exc` | optional | formatted traceback, when the call carried `exc_info` |
+
+A run opens with a header record (`cat="sys.boot"`, schema version + pid) and closes cleanly with a
+footer (`cat="sys.shutdown"`, dropped-record count). Every reader — the viewer, `jq`, an agent —
+must tolerate unknown fields/categories and a truncated trailing line (an unclean bridge death can
+leave the last JSONL line partial); this is a forward-compatibility rule enforced by
+`bridge_view.parse_record()`, not a suggestion.
+
+## The only two logging env vars
+
+- `BRIDGE_DEBUG=1` — root logger to DEBUG everywhere.
+- `BRIDGE_LOG_LEVELS=name=LEVEL,name2=LEVEL2` — per-logger level floors (e.g.
+  `BRIDGE_LOG_LEVELS=state_manager=DEBUG,filepath_resolver=DEBUG`).
+
+Both are read once, inside `bridge_log.init()`, at process start. The old nine-env-var maze
+(`BRIDGE_LOG_MODULES/DECKS/EVENTS/DIAG/ANOMALIES/JSON/CONTROL`), the `/tmp/rb_ss_bridge_v2_logging.json`
+control file, and `SIGHUP` reload are gone — nothing in the repo sets, reads, or reloads them
+anymore, and there is no live-watch preset file to copy.
+
+## Log files
+
+`bridge_log.resolve_log_dir()` (pure): `$RBSS_RUNTIME_DIR/logs` when that env var is set (the
+parked USB-launcher relocation knob, dormant until that project resumes), else
+`~/Library/Logs/rb_ss_bridge/`. Per run: `bridge-YYYYMMDD-HHMMSS.jsonl` plus a `current.jsonl`
+symlink pointed at the live file — always read `current.jsonl`, not a dated file, unless you are
+deliberately reading a past run. Retention: newest 20 runs kept (`prune_runs()`, run at `init()`).
+The `/tmp/bridge-events.jsonl` convenience symlink exists **only** when `RBSS_RUNTIME_DIR` is unset
+(the default case) — under the USB runtime dir it would add another fixed `/tmp` path outside that
+project's one-prefix cleanup rule.
+
+`/tmp/bridge.log` still exists, demoted to a plain console crash-catcher: it is the watcher's shell
+redirect of bridge stdout/stderr (startup banner prints, a WARNING+ text mirror, uncaught
+tracebacks). It carries no INFO lines and is not a second event log — the JSONL stream is the only
+source of truth for what the bridge decided.
+
+## Viewer (`bridge_view.py`, "bridge-view")
+
+Read-only, disposable, crash-isolated from the bridge: it opens `current.jsonl`, reads to EOF, then
+polls (~100 ms) and reopens on inode change (log rotation / bridge restart). It never writes to the
+stream and never touches the bridge process — closing or crashing it has zero effect on the show.
+
+Screens (number keys switch):
+
+- **1 SHOW** (default, zero keys pressed): sticky header from the latest `perf.heartbeat` record
+  (deck, bpm, phrase, laser scene, LED look, palette) plus stream-staleness age (green ≤5s, yellow
+  >5s, red >15s — a healthy bridge guarantees a fresh heartbeat every ≤2s) + the PERFORMANCE feed +
+  a bottom OPERATOR strip (green "✓ all quiet since HH:MM:SS" when healthy).
+- **2 OPERATOR**: a per-`health.*`-category last-state summary line, then the full OPERATOR feed.
+- **3 SYSTEM**: the infra feed.
+- **4 DEBUG**: everything, with a `/`-filter (substring match on cat/msg, plus `deck=N` and
+  `cat=prefix` tokens), `c` clears the filter.
+
+Keys: `1`-`4` switch screens, `space` freezes/resumes (buffering continues while frozen), `j`/`k`
+scroll when frozen, `a` acknowledges latched alerts, `q` quits.
+
+**Latching, never transient.** A new WARNING/ERROR rings the terminal bell once and latches the
+OPERATOR strip red with that problem text until it clears or is acknowledged. A `health.*` category
+clears its own latch on the matching recovery record (e.g. `health("midi", "recovered",
+lvl=INFO)`); a plain WARNING/ERROR outside `health.*` has no recovery signal and stays latched until
+`a`. Nothing important is ever conveyed by a flash alone, and nothing important can scroll away.
+
+Readability rules baked into the renderer (the design's nine-rule ADHD-first contract, all
+acceptance criteria): stillness means healthy — repaint ≤10 Hz and only on change, no spinners; state
+lives in fixed screen positions, never only in scrollback; one fact per line, fixed columns,
+truncate with `…`, never wrap; plumbing (time/reason/beat) renders dim, payload (deck/surface/
+value) renders bright — the most important word is the most visible word; a fixed color vocabulary
+where red only ever means broken; plain words (`laser`, `led`, `autoloop`) never legacy codes
+(`[LX]`, `[RBMEM]`, `[SM]`) — unmapped categories fall back to their raw name, never a new code;
+ages shown relative ("2m ago") outside the feed's own absolute timestamps; the newest feed line
+carries a static `▸` marker, no animation; screen 1 requires zero keys and the viewer never steals
+focus or requires acknowledgment to keep functioning.
+
+## Watcher behavior (`scripts/ss_bridge_watcher.sh`)
+
+One monitor window, in both auto and manual launch modes. `open_monitor()` launches `"$PYTHON"
+"$REPO_ROOT/bridge_view.py"` inside a Terminal.app window tagged `RBSS_BRIDGE_MONITOR`;
+`monitor_open()`/`close_monitor()` track/close it by that marker (with a `bridge_view\.py` pgrep
+fallback).
+
+Manual mode (`RBSS_BRIDGE_MANUAL=1`) now starts the bridge through the exact same `start_bridge()`
+the auto path uses, instead of a separately hand-maintained launch string — this closes a real
+env-drift bug where the old manual path was missing several `RBSS_LED_*` flags present in the auto
+path — and opens the same single viewer window. It keeps its own lifecycle meaning: no
+crash-restart backoff (a bridge exit ends the watcher, not a retry loop, same as before).
+
+**Closing the viewer window never stops the bridge.** The viewer is a separate, disposable, crash-
+isolated process; a display crash or an operator closing the window must never end the show. Only
+the menubar (auto mode's bridge lifecycle owner) or the bridge process itself exiting (manual mode)
+stops the bridge. The watcher's own job is only to reopen a missing viewer.
+
+## Extension rule (per new feature)
+
+No lens, viewer, schema, or config work is ever required for a new feature — categories route
+themselves by namespace. Three questions at the commit point:
+
+1. **Decides what the rig does right now?** → one `bridge_log.perf(<cat>, ...)` call at the commit
+   point. Appears on the PERFORMANCE feed as-is.
+2. **Can fail/recover?** → one `bridge_log.health(<cat>, ...)` transition pair, edge-triggered
+   (guard with `bridge_fmt.log_changed()`/`log_throttled()` or an existing streak counter — never
+   per-instance). Appears on OPERATOR, latched.
+3. **Everything else** → ordinary `logging.getLogger(name).info/debug/warning(...)`, which remains
+   the normal API for all code and lands in the stream automatically (MAX DEBUG; WARNING+ reaches
+   OPERATOR on severity alone, with no extra work).
+
+Every new emit site inherits the hot-path rule: no blocking I/O, no per-frame INFO. A badly-logged
+feature can pollute MAX DEBUG only — it structurally cannot reach the mid-set screens. Optional
+polish: one entry in `bridge_view.py`'s single `FRIENDLY` name map; unmapped categories already
+render their raw name rather than a new code, so this is never required.
+
+## Agent post-mortem guidance
+
+Read the current run directly — there is no control file, no live-watch preset, no reload to
+apply:
+
+```bash
+# Tail the live stream, pretty-printed
+tail -f ~/Library/Logs/rb_ss_bridge/current.jsonl | jq -c .
+
+# Everything at WARNING+ (the OPERATOR lens, offline)
+jq -c 'select(.lvl == "WARNING" or .lvl == "ERROR" or .lvl == "CRITICAL")' \
+  ~/Library/Logs/rb_ss_bridge/current.jsonl
+
+# One subsystem's intent records
+jq -c 'select(.cat | startswith("perf.laser"))' ~/Library/Logs/rb_ss_bridge/current.jsonl
+
+# Plain-text search still works — one JSON object per line
+rg '"cat":"health\.' ~/Library/Logs/rb_ss_bridge/current.jsonl
+```
+
+If `RBSS_RUNTIME_DIR` is set (parked USB-launcher mode), read `$RBSS_RUNTIME_DIR/logs/current.jsonl`
+instead; otherwise `/tmp/bridge-events.jsonl` is a convenience symlink to the same file.
+
+**Trace-id workflow.** `TRACK_LOADED` → `FILEPATH_RESOLVED` → `SCRIPTED_ARM` share one `trace` id
+when the chain runs, so a bad arm can be reconstructed end to end:
+
+```bash
+jq -c 'select(.trace == "a3f91c")' ~/Library/Logs/rb_ss_bridge/current.jsonl
+```
+
+How the id actually gets there (verified against code, `state_manager.py:1820-1850`,
+`filepath_resolver.py:367-396,556-573`): within the single-threaded event-drain loop,
+`bridge_log.event_scope()`'s contextvar carries the id automatically across nested handling in the
+*same* call — e.g. `SCRIPTED_ARM`'s enqueue never sets `__trace_id` explicitly, it inherits the
+ambient trace via `stamp_trace()`'s contextvar fallback. Across the filepath-resolver's
+worker-thread hop the propagation is **explicit, not automatic**: `_on_track_loaded` reads
+`ev.payload["__trace_id"]` and passes it as a `trace_id=` keyword through `resolve_by_anlz`/
+`resolve_by_title`/`resolve_async`, and each resolver worker thread re-stamps
+`payload["__trace_id"]` before enqueuing `FILEPATH_RESOLVED` — Python contextvars do not cross
+thread boundaries on their own, so any future cross-thread hop that skips this explicit parameter
+threading would silently break the chain for that hop.
+
+Other useful greps:
+
+- `jq -c 'select(.cat == "sys.thread")'` — thread start/exit/crash records: the design's one
+  genuinely new observation, since an unexpectedly-dead thread used to be invisible.
+- `jq -c 'select(.deck == 1)'` — everything for one deck.
+- `jq -c 'select(.cat | startswith("health."))'` — every edge-triggered health transition
+  (fail → one record, recover → one record; never per-failure spam).
+
+## Historical context
+
+`docs/history/logging_implementation_handoff.md` documents the retired `logging_manager.py`
+pipeline (control-file watcher, env-var filter maze, anomaly engine, `LogStats`, three competing
+formatters) — evidence of what this system replaced, never current behavior.

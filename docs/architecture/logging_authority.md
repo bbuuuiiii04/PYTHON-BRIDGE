@@ -1,18 +1,21 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 02250de
-last_verified_date: 2026-07-04
-validation_scope: intent contract only; AWR-125 design phase — nothing implemented yet; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+last_verified_commit: 4f4c1ad
+last_verified_date: 2026-07-05
+validation_scope: intent contract, re-verified against as-built W1-W7 code; implemented/software-tested; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # Logging Authority (event stream + `bridge-view`)
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; **planned** — the AWR-125 logging overhaul is designed
-(`docs/plans/active/logging_overhaul_design.md`) and not yet implemented. Once built, behavior
-that differs from this document is a regression unless this document is intentionally updated.
-Code-grounded design detail, evidence, teardown ledger, and the build decomposition live in the
-design doc; this document is the intent contract that survives implementation drift.
+Status: AUTHORITATIVE TARGET BEHAVIOR; **implemented/software-tested** — the AWR-125 logging
+overhaul (`docs/plans/active/logging_overhaul_spec.md`, Tasks W1-W7) is built and this document has
+been re-verified against the as-built `bridge_log.py`/`bridge_view.py`/`scripts/ss_bridge_watcher.sh`
+(see the two amendments below); a bridge restart, `bridge-verify`, and operator sign-off remain
+outstanding. Behavior that differs from this document is a regression unless this document is
+intentionally updated. Code-grounded design detail, evidence, teardown ledger, and the build
+decomposition live in the design doc; this document is the intent contract that survives
+implementation drift.
 
 Sibling authorities: `runtime_invariants.md` (push-loop and event rules this system must never
 violate), `palette_control_authority.md`, `drop_presentation_authority.md`,
@@ -41,8 +44,10 @@ Audiences, in priority order: **Brandon mid-set** (glance, verify the rig by eye
    console crash-catcher (banner, WARNING+ mirror, tracebacks), never a second event log.
 3. **The viewer is disposable and read-only.** It cannot write to the stream, cannot touch the
    bridge, and its crash or closure has zero effect on the show. Closing the viewer window does
-   **not** stop the bridge; the menubar owns bridge lifecycle. The watcher reopens a missing
-   viewer.
+   **not** stop the bridge in either launch mode: in auto mode the menubar owns bridge lifecycle;
+   in manual mode (`RBSS_BRIDGE_MANUAL=1`) the watcher's own loop owns it and exits only when the
+   bridge process itself exits (no crash-restart backoff), never on the viewer closing. The watcher
+   reopens a missing viewer.
 4. **Secrets never reach the stream.** Key-name redaction (`token`/`secret`/`password`/`key`)
    applies to all structured payloads; sanitized surfaces (e.g. pack error categories) stay
    sanitized.
@@ -59,7 +64,7 @@ One stream; a lens is a predicate over `(cat, lvl)`. Records may match several l
 |---|---|---|---|
 | **PERFORMANCE** | `cat` starts with `perf.` | "What *should* the rig be doing right now?" — authoritative intent; never discusses health | Brandon, eyes on the rig |
 | **OPERATOR** | level ≥ WARNING, or `cat` starts with `health.` | "Is it working? What broke, what recovered?" — quiet when healthy | Brandon, mid-set |
-| **SYSTEM** | `cat` starts with `sys.` or `health.`, or legacy infra module | Threads, attach, queues, timing, connections | Brandon + agents |
+| **SYSTEM** | `cat` starts with `sys.` or `health.`, or (legacy infra module AND level ≥ INFO)¹ | Threads, attach, queues, timing, connections | Brandon + agents |
 | **MAX DEBUG** | everything captured | Forensic firehose | AI agents |
 
 Intent (`perf.*`) covers at minimum: active-deck switches, drop detection + type, laser scene
@@ -75,13 +80,38 @@ WARNING+/health can reach OPERATOR — a chatty or badly-logged subsystem can po
 only. The old 50-INFO-lines-per-resolution failure mode is impossible by construction, not by
 discipline.
 
+¹ **Approved deviation, recorded during the W6 build (2026-07-04):** taken literally, the spine's
+SYSTEM predicate had no level qualifier on the legacy-infra clause, which would let a DEBUG-level
+record from a legacy module (e.g. `rb_memory`'s per-candidate spam, whose `src` is literally
+`rb_memory`) also match SYSTEM — contradicting the noise guarantee above and W6's own required test
+(a DEBUG record with `cat="rb_memory"` must route to DEBUG only). `bridge_view.lens_of()` gates the
+legacy-infra branch on `levelno >= INFO`; every named SYSTEM-relevant legacy event (attach, RB gone,
+drift, queue drops) is already INFO/WARNING/ERROR, or has migrated to an explicit `health.*` cat
+that matches the first clause directly regardless of level. This is an implementation-side
+clarification of an ambiguity in this contract, not a policy change: the intent ("legacy infra story
+without DEBUG firehose noise") is unchanged.
+
 ## The record (schema intent)
 
 One JSON object per line: `ts` (epoch), `mono`, `lvl`, `cat`, `msg`, `src` required; `deck`,
 `beat`, `trace`, `data`, `exc` optional. A run opens with a schema-versioned header record and
 closes (cleanly) with a footer carrying drop counts. Unknown fields and categories must be
-tolerated by every reader. Trace ids propagate per BridgeEvent so one event's chain
-(TRACK_LOADED → FILEPATH_RESOLVED → SCRIPTED_ARM) shares one id.
+tolerated by every reader.
+
+**Trace-id propagation, verified against as-built code** (`state_manager.py:1820-1850`,
+`filepath_resolver.py:367-396,556-573`): one event's chain (`TRACK_LOADED` → `FILEPATH_RESOLVED` →
+`SCRIPTED_ARM`) does share one `trace` id, but not through one uniform mechanism — this contract
+originally implied automatic propagation, which overstates it. Within the single-threaded event
+drain, `bridge_log.event_scope()`'s contextvar carries the id automatically to any event enqueued
+while handling another (e.g. `SCRIPTED_ARM`'s payload never sets `__trace_id` itself; it inherits
+the ambient trace via `stamp_trace()`'s contextvar fallback). Across the filepath-resolver's
+worker-thread hop, propagation is **explicit, by construction, not automatic**: `_on_track_loaded`
+reads `ev.payload["__trace_id"]` off the dequeued `TRACK_LOADED` event and passes it as a
+`trace_id=` keyword through `resolve_by_anlz`/`resolve_by_title`/`resolve_async`; each resolver
+worker thread re-stamps `payload["__trace_id"]` before enqueuing `FILEPATH_RESOLVED`. Python
+contextvars do not cross thread boundaries on their own, so this only holds because every call site
+on that path explicitly threads `trace_id=` through — a future cross-thread hop that omits this
+would silently start a new trace id for that leg, not an error, just a broken chain.
 
 ## Operator experience contract (`bridge-view`)
 

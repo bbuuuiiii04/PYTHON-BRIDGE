@@ -28,7 +28,7 @@ python -m pytest tests
 | --- | --- | --- |
 | Core bridge | state manager, models, smart phrasing, integration tests | verifies software behavior only |
 | Runtime commands | parser/handler/status writer tests plus menubar watcher-launch tests and watcher function tests (`tests/test_ss_bridge_watcher.py`: attributable deck stops, bridge-gap respawn) | needed before command changes; menubar/watcher tests do not prove live watcher or bridge process health |
-| Logging visibility | bridge formatting/rate helpers and logging diagnostic coverage tests | verifies software-only log filtering and spam-control behavior |
+| Logging visibility | `bridge_log`/`bridge_view` pipeline + viewer tests, `bridge_fmt` rate-control tests, and cross-subsystem `perf.*`/`health.*` emit assertions | verifies the JSONL event stream, viewer lens/latch logic, and spam-control behavior only — no lighting-hardware behavior |
 | Runtime audit P1 cleanup | `tests/test_runtime_status.py`; compile/docs checks | smart-drop/breakdown queue-full failures surface in command status; dead-code/stale-text cleanup is software-only |
 | Rekordbox readers | reader, offset, live BPM, active-deck resolver, StateManager authority, startup wiring, runtime status tests | cannot prove all app versions or hardware-visible behavior. Audit P3 adds ANLZ read-failure cache recovery coverage. |
 | SoundSwitch | OS2L/output helpers; project/pack/player/native-Autoloop-resolver/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/Art-Net truth-check/T7d/parity-lane tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status, native Autoloop rendering, U1 truth-check packets, and passive U0 parity fixtures are software/wire evidence and tests do not prove physical fixtures. Audit P2 adds software coverage for SoundSwitch-connected `overlay_suppressed` status. Audit P3 adds explicit scripted elapsed threading coverage. |
@@ -200,10 +200,47 @@ StateManager-published color-engine status, fail-soft provider behavior, and thr
 repeated provider-failure warnings. This is software-only observability coverage and does not
 validate SoundSwitch, laser, LED, Govee, or Rekordbox hardware behavior.
 
-## Logging Visibility
+## Logging Visibility (AWR-125 overhaul)
 
-`tests/test_bridge_fmt_rate.py` covers `log_changed()` and `log_throttled()` spam-control behavior,
-including a threaded independent-key throttle check. `tests/test_logging_diag_coverage.py` covers
-laser/LED/Govee debug coverage and the `docs/setup/logging_live_watch.json` preset, including
-`runtime_status` heartbeat visibility and error pass-through. This is software-only observability
-coverage and does not validate physical outputs.
+The retired `logging_manager.py` control-file/env-var-maze pipeline and its
+`tests/test_logging_diag_coverage.py` suite are gone, replaced by the one-JSONL-stream design
+(`bridge_log.py`) and its `bridge-view` curses viewer (`bridge_view.py`):
+
+- `tests/test_bridge_log.py` (45 tests) covers `build_record()` field order/optional-key
+  omission/contextvar pickup/exc formatting, drop-on-full queue behavior, the writer thread's JSONL
+  output and stderr WARNING+ mirror, `_redact()` secret masking, `resolve_log_dir()`/`prune_runs()`,
+  `event_scope()`/`stamp_trace()` semantics, `TraceQueue` callback passthrough, and idempotent
+  `init()`/`shutdown()` header/footer records.
+- `tests/test_bridge_view.py` (96 tests) covers the pure viewer layer: `parse_record` (tolerant of
+  truncated/malformed lines), `lens_of` (all four lens predicates, including the legacy-infra
+  DEBUG-record-routes-to-DEBUG-only case), `format_line`/truncation, `format_age`, filter
+  parsing/matching, and `LatchState` latch/clear/ack semantics.
+- `tests/test_logging_surface.py` (7 tests, replaces `test_logging_diag_coverage.py`) covers
+  errors-always-visible regardless of logger level, `BRIDGE_LOG_LEVELS` parsing, and `BRIDGE_DEBUG`
+  behavior against `bridge_log`.
+- `tests/test_bridge_log_integration.py` (9 tests) proves a real subprocess init→emit→shutdown round
+  trip, with real JSONL read back through the viewer's lens layer.
+- `tests/test_bridge_fmt_rate.py` continues to cover `log_changed()`/`log_throttled()` spam-control
+  primitives, including a threaded independent-key throttle check.
+
+The new `perf.*`/`health.*` emit sites added one assertion each to the tests already owning that
+behavior, rather than to the logging test files above: `tests/test_laser_director.py` (`perf.laser.
+scene`, `perf.laser.personality`, `perf.override`), `tests/test_laser_executor.py`
+(`perf.laser.fired`), `tests/test_led_color_engine.py` (`perf.led.palette`),
+`tests/test_led_state_manager.py` (`perf.led.look`, `perf.override`),
+`tests/test_state_manager_active_deck_authority.py` (`perf.deck`), `tests/test_smart_transitions.py`
+(`perf.drop`), `tests/test_autoloop_controller.py` / `tests/test_live_bpm_service.py`
+(`perf.autoloop`), `tests/test_live_bpm_service.py` / `tests/test_smart_phrasing_integration.py` /
+`tests/test_sound_switch_engine.py` (`perf.ss`), `tests/test_sound_switch_engine.py`
+(`perf.scripted`, `health.os2l`, `health.queue`), `tests/test_runtime_status.py`
+(`perf.heartbeat`), `tests/test_midi_output.py` (`health.midi`), `tests/test_enttec_dmx_pro.py`
+(`health.dmx`), `tests/test_govee_scene_adapter.py` (`health.govee.cloud`),
+`tests/test_govee_realtime_runner.py` (`health.govee.rt`), `tests/test_rb_state_reader.py`
+(`health.rb`, `health.queue`), `tests/test_rb_memory_skip_objc.py` (`health.rb`,
+`health.reader`), and `tests/test_state_manager_pack_driver.py` (`health.tick`).
+`tests/test_enttec_dmx_pro.py` / `tests/test_midi_output.py` / `tests/test_govee_realtime_runner.py`
+also cover `bridge_log.thread_guard()` wrapping those backends' worker-thread run loops.
+
+This is software-only observability coverage: it proves the log pipeline, the viewer's read-side
+lens/latch logic, and the watcher's monitor-window launch, and does not validate physical lighting
+outputs.
