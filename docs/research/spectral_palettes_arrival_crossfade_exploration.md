@@ -252,6 +252,40 @@ gain: engine v1/v2 switch, WILD/SET toggle, per-feature kills.
   (WILD/SET), active texture class + decision reason in runtime status; LED Pad gains a
   "now playing identity" chip.
 
+**Operator corrections + additions (2026-07-05, late session — these override earlier items):**
+1. **Vocal-flip treatment CUT** (operator: "doesn't even make sense. not sure i like it").
+   The pre-drop scan is silence-only: blackout length = the track's real bottom-gone gap.
+   No singalong detection, no amber vocal wash, anywhere.
+2. **Strobe acceleration correction:** it is not hand-operated — it is *built into specific
+   buildup LED cues*. v2 keeps those cues as the carriers of acceleration (role system still
+   schedules buildup cues; the acceleration is the cue's own behavior, not a new engine
+   feature).
+3. **Drop-type cue selection ADDED (operator design ask):** classify each drop's own
+   character from the beats after its marker (energy_model drop-lift intensity + texture
+   axes in the drop window) and select the drop cue family accordingly. Operator archetypes:
+   hard dubstep/trap drop → full-strip bright strobing sustained through the phrase; hard
+   techno drop → fast red comet chase locked to the beat; tech house drop (growl bar → groove)
+   → sparkle burst then post-drop chase; bass house drop (stabby) → looping motion with
+   aggressive on-beat pulsate/expand. Ear-test/live-gated like all texture work; drop cues
+   still fire only from Rekordbox markers (decorate-not-decide unaffected — this chooses
+   *which* cue, never *whether/when*).
+4. **Cue layering model clarified:** role system keeps scheduling cue kinds exactly as today
+   (drop cues at drops, buildup cues through builds); identity paints them; landing retimes
+   them; the texture layer seasons groove/ambient stretches only — it never displaces role
+   cues at big moments.
+5. **Haze status = UNKNOWN (operator flagged the no-haze claim as never-stated).** Round-3's
+   surface-pattern-only conclusion holds *only if* no haze; both beam-based and
+   surface-pattern laser designs stay in scope until the operator settles haze.
+6. **Laser look design process (answer to "how do we design what lasers actually do"):**
+   (a) catalog the hardware's real vocabulary — every MIDI-selectable pattern/color/speed the
+   laser personalities can reach; (b) Claude drafts personality packages per sound-character
+   zone (research-informed: rest-vs-fire, contrast-vs-strip colors); (c) live audition loop
+   with the operator (Template-Lab-style flipping, laser edition); (d) lock keepers into
+   personalities. Same measured-character picker as LEDs (replaces playlist/BPM resolution).
+7. **Feature 3 grounding note:** the blend consumes the same mixer/fader machinery the
+   existing active-deck rules already use — active-deck resolution stays the authority on
+   *which* deck leads; blend only paints the in-between.
+
 ### Feature 4 — the texture layer (operator-requested 2026-07-05, approved with containment)
 
 Per-beat texture map, precomputed at track load from the cached envelopes (lookup, not
