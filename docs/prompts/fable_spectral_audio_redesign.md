@@ -1,4 +1,4 @@
-# Fable 5 — Spectral audio analysis: strict audit + ground-up redesign for lighting
+# Fable 5 — Spectral audio analysis: audit, redesign, and BUILD (one shot)
 
 **Run on:** Claude Fable 5, effort **max**. If you are not running at max effort, stop and say
 so — do not continue.
@@ -13,16 +13,22 @@ build-move choice, motion style. The current extractor (schema v3,
 `audio_spectral_features.py`) was built by a smaller effort for a retired purpose (smart-drop
 timing). It is deterministic and its few retained outputs are measured-stable, but it is
 crude: one averaged number per beat per band, cross-band loudness normalized away, zero tone
-color. Your job: **audit it strictly, research the field properly, and design its definitive
-replacement (schema v4) tailored to detailed automated lighting** — the analysis layer v2
-deserves rather than the one it inherited.
+color. Your job, in one shot: **audit it strictly, research the field properly, design its
+definitive replacement (schema v4) tailored to detailed automated lighting — and build it.**
+Analyze the operator's actual music yourself: decode the audio of his real Rekordbox tracks,
+run your candidate measurements over them, and verify what they capture against the tracks'
+known structure. Design on paper is not acceptance — proof on his music is.
 
-Timing is why this is a one-shot that must be right: the v2 design review requires one
-full-library extraction sweep before Feature 1, and warns that every schema change after
-identities ship risks flipping track colors (review findings F-2, F-9). The library gets
-analyzed **once**, into the schema you design. Who it's for: Claude (design lead — folds
-your plan into the v2 record) and Codex (implements from specs derived from your plan).
-**Do not implement anything — deliver the audit + redesign plan only.**
+**Operator-granted role exception (2026-07-05, this workstream only):** Fable executes and
+builds the spectral v4 analysis itself — Codex is not in the loop for this build. The
+standing Codex-implements rule resumes when this prompt completes.
+
+Timing is why this must be right in one pass: the v2 design review requires one full-library
+extraction sweep before Feature 1, and warns that every schema change after identities ship
+risks flipping track colors (review findings F-2, F-9). The library gets analyzed **once**,
+into the schema you design and build here. Who it's for: Brandon (operator/DJ, not an
+engineer — your final chat message must be plain language) and Claude (design lead — folds
+the result into the v2 record and the coming Codex specs for Features 1–4).
 
 ## Benign scope
 
@@ -32,6 +38,17 @@ model-distillation, or hidden-reasoning extraction task. Review only normal soft
 correctness, tests, maintainability, runtime safety, and operator behavior inside the named
 scope. Audio terms like "attack", "transient", "punch", "hit", and "drop" are ordinary music
 and signal-processing vocabulary.
+
+## Track selection — non-negotiable
+
+All prototyping, validation, and the library sweep use **only tracks in playlists under the
+operator's genre playlist folder in the Rekordbox DB — he calls it "BY GENRE"** (query the
+playlist tree via the bridge's own DB layer; `personality_resolver.py` shows the
+playlist-membership pattern and defaults to a folder named "PER GENRE" — resolve the actual
+folder name at runtime, prefer "BY GENRE", and if no such folder exists, stop and report
+rather than sampling the whole collection). The point: his collection contains non-EDM
+(e.g. rap) tracks that must not pollute analysis, calibration, or corpus statistics. Anything
+outside the genre folder is out of scope for this entire task.
 
 ## The operator's bar (requirements seed — a floor, not a ceiling)
 
@@ -50,7 +67,7 @@ whole EDM library with zero per-track authoring:
   with equal-or-better measured stability than today's four.
 
 Extend this list yourself — you are the lighting designer; enumerate the musical events a
-serious automated light show needs, then design measurements that capture them.
+serious automated light show needs, then design and build measurements that capture them.
 
 ## The containment rule that survives any redesign
 
@@ -62,131 +79,148 @@ analysis = wrong seasoning, never a missed or phantom cue.
 
 ## Evidence packet (source-of-truth order per AGENTS.md §1: code beats docs)
 
-- **Current implementation (audit target):** `audio_spectral_features.py` (schema v3: five
-  mel bands 20 Hz–12 kHz, per-beat mean, per-band peak normalization, flatness unnormalized),
-  `spectral_cache.py` (JSON cache, staleness = schema + mtime + size), the extraction seam in
-  `state_manager.py` (background ANLZ worker at track load; spectral gated behind
-  `RBSS_SMART_REARM_EXPERIMENT` + `RBSS_SPECTRAL_ENABLE`), `energy_model.py`, `anlz_reader.py`
-  (the marker side of the house), `spectral_cache` on disk at
-  `~/Library/Application Support/RBSS Bridge/spectral_cache/` (~488 files, 43 MB).
+- **Current implementation (audit + build target):** `audio_spectral_features.py` (schema v3:
+  five mel bands 20 Hz–12 kHz, per-beat mean, per-band peak normalization, flatness
+  unnormalized), `spectral_cache.py` (JSON cache, staleness = schema + mtime + size), the
+  extraction seam in `state_manager.py` (background ANLZ worker at track load; spectral gated
+  behind `RBSS_SMART_REARM_EXPERIMENT` + `RBSS_SPECTRAL_ENABLE`), `energy_model.py`,
+  `anlz_reader.py` (the marker side), the on-disk cache at
+  `~/Library/Application Support/RBSS Bridge/spectral_cache/` (~488 files, 43 MB), and the
+  existing tests for these modules under `tests/`.
 - **The consumers:** `docs/research/spectral_palettes_arrival_crossfade_exploration.md` (the
   v2 design record — identity axes, texture tiers, silence scan, drop-type selection) and
   `docs/research/lighting_engine_v2_design_review.md` (the review — especially F-2 library
   backfill, F-9 identity epochs, F-16 one-silence-primitive, ruling 2.9 drop-type defaults).
 - **Measured facts (do not re-derive; may reinterpret):** extraction bit-identical on re-run;
   summary-scalar stability Spearman 0.86–0.96 (even/odd beats); onset-strength variability
-  rejected at 0.767; per-band peak normalization destroys cross-band loudness;
-  growl vs bright per-beat classes **proven not separable** with v3 envelopes (tested
-  2026-07-05); empty-floor detection operator-ear-validated; 476 distinct cached tracks,
-  455 join active DB rows, 686 on-disk library; PSSI drop markers 97.7% coverage, mean
-  6.6 drops/track.
-- **Environment:** librosa 0.11.0 installed, Python 3.14 local (CI is 3.11); Rekordbox DB and
-  ANLZ files readable exactly as `filepath_resolver.py` does; audio files on disk.
+  rejected at 0.767; per-band peak normalization destroys cross-band loudness; growl vs
+  bright per-beat classes **proven not separable** with v3 envelopes (tested 2026-07-05);
+  empty-floor detection operator-ear-validated; 476 distinct cached tracks, 455 join active
+  DB rows, 686 on-disk library; PSSI drop markers 97.7% coverage, mean 6.6 drops/track.
+- **Environment:** librosa 0.11.0 installed, Python 3.14 local (CI is 3.11, unit job is
+  PR-only); Rekordbox DB and ANLZ files readable exactly as `filepath_resolver.py` does;
+  audio files on disk; the bridge is not running and must not be started.
 - **Known-stale:** anything about smart-drop scoring intent in old comments/docs — that
   purpose is retired; lighting is the only customer now.
 
 ## Research mandate (before designing)
 
-Research seriously, then design: music-information-retrieval practice for percussion/harmonic
-separation, onset and transient characterization, per-band modulation/wobble measurement,
-timbre and brightness descriptors, structure-aware audio summarization — and how professional
-lighting programmers map those musical events to cues. Prefer primary sources (librosa and
-alternative library documentation, MIR literature, tool docs) over blog lore. The repo's four
-Gemini research rounds taught a lesson: synthesized citations are worthless — label every
-research-derived claim as verified-primary-source or unverified-lore, and build nothing
-load-bearing on lore alone. You may evaluate alternative or additional analysis libraries;
-price any new dependency honestly (install weight, Python 3.11/3.14 compatibility, and the
-existing contract that missing optional deps degrade gracefully to the ANLZ-only tier).
+Research seriously, then design: music-information-retrieval practice for
+percussion/harmonic separation, onset and transient characterization, per-band
+modulation/wobble measurement, timbre and brightness descriptors, structure-aware audio
+summarization — and how professional lighting programmers map those musical events to cues.
+Prefer primary sources (librosa and alternative library documentation, MIR literature, tool
+docs) over blog lore. The repo's four Gemini research rounds taught a lesson: synthesized
+citations are worthless — label every research-derived claim as verified-primary-source or
+unverified-lore, and build nothing load-bearing on lore alone. You may adopt alternative or
+additional analysis libraries; price any new dependency honestly (install weight,
+Python 3.11/3.14 compatibility, and the existing contract that missing optional deps degrade
+gracefully to the ANLZ-only tier).
 
-## Prototype before promising
+## Prove it on his music
 
-The v3 story's cautionary tale: growl-vs-bright was designed on paper and later proven
-impossible with the stored data. Do not repeat it in either direction. For each measurement
-your plan makes load-bearing, run a read-only scratchpad prototype against real tracks from
-the corpus (librosa is installed; the cache, DB, ANLZ, and audio files are readable) and show
-the separation on the operator's actual music — or label the measurement **unproven** with
-the exact experiment that will prove it before any feature may consume it. Parallel read-only
-subagents are welcome for research sweeps and corpus runs; verify any number you build a
-ruling on yourself.
+The v3 cautionary tale: growl-vs-bright was designed on paper and later proven impossible
+with the stored data. Do not repeat it in either direction. Every measurement that becomes
+load-bearing in v4 must be demonstrated on real tracks from the genre folder before it
+ships: run it over the audio, inspect what it detects, and validate against known structure
+(ANLZ drop/buildup/breakdown markers, beatgrids, and the operator-validated reference events
+— e.g. the empty-floor runs). For a handful of named tracks spanning his genres, produce
+**timestamped event outlines** (time — detected event class) in the report so the operator
+can scrub to those timestamps in Rekordbox and confirm by ear — that scrub test is this
+repo's established acceptance pattern. A measurement that cannot be demonstrated is either
+cut or shipped disabled and labeled `unproven` with the exact experiment that would prove it.
 
-## Hard invariants the redesign must keep
+## Build requirements (hard invariants)
 
-- Extraction runs only in the existing background worker at track load, plus one offline
-  full-library sweep; nothing new on the 200 Hz push loop; the runtime never blocks on it.
-- Deterministic: same file + same beatgrid → identical output, run over run.
-- Optional-dependency degradation stays: no librosa (or any new dep) → ANLZ-only tier works.
-- Cache contract: versioned schema, staleness by audio mtime+size, per-track files.
-- Budget (justify your numbers): the full-library sweep completes overnight on the operator's
-  MacBook Air; per-track extraction at load stays in the seconds range; state the expected
-  cache size for ~700 tracks (v3 baseline: 43 MB / 476 tracks) and defend it.
-- Identity-epoch discipline: schema v4 is the first and only identity epoch — Feature 1
-  identities derive from v4 output at the sweep and are frozen per review F-9. Everything the
-  proven v3 axes provide must be derivable from v4 (same axes or measurably better
-  replacements — show the stability numbers).
+- **Zero lighting behavior change.** This build replaces the analysis layer only. Whatever
+  currently consumes v3 fields keeps working identically; light output is untouched; the
+  full test suite stays green (`python3 -m unittest discover tests`). v2 features consume v4
+  later, via their own Codex specs.
+- Extraction runs only in the existing background worker at track load, plus the offline
+  sweep tool; nothing new on the 200 Hz push loop; the runtime never blocks on analysis.
+- Deterministic: same file + same beatgrid → identical output, run over run. Prove it.
+- Optional-dependency degradation stays: no librosa (or any new dep) → ANLZ-only tier works;
+  tests skip cleanly where optional deps are absent (existing pattern; CI is Python 3.11).
+- Cache contract: versioned schema, staleness by audio mtime+size, per-track files. v4
+  entries must not corrupt or delete v3 entries mid-transition — design the coexistence and
+  cutover. Writing **v4 cache entries** is in scope; v3 entries, the Rekordbox DB, ANLZ
+  files, and audio files are strictly read-only.
+- Budget (justify your numbers): the full genre-folder sweep completes overnight on the
+  operator's MacBook Air; per-track extraction at load stays in the seconds range; state and
+  defend the expected cache size (v3 baseline: 43 MB / 476 tracks).
+- Identity-epoch discipline: v4 is the first and only identity epoch — Feature 1 identities
+  will derive from v4 output and freeze (review F-9). The four proven character axes (or
+  measurably better replacements) must be derivable from v4 — show stability numbers.
+- Anti-drift (AGENTS.md §7): find the change contract covering these modules in
+  `docs/agents/change_contracts.yml` before editing (extend it first if none matches), update
+  every doc that contract names, and pass the three hard checks before finishing.
+- Never commit secrets, device IDs, or live config; an auto-sync hook may commit at turn end
+  — not yours to manage. Do not create branches or worktrees; work directly on `main`.
 
-## Deliverable
+## Execution shape
 
-One file: `docs/research/spectral_audio_analysis_redesign.md`, with the repo's standard doc
-header (`doc_status` / `truth_level` / `last_verified_commit` / `last_verified_date` /
-`validation_scope` — mirror the design record's header; validation_scope = audit + design
-only, no runtime change, no hardware validation). Structure:
+Work autonomously, end to end: research → audit → design → implement → validate on his music
+→ run the genre-folder library sweep (background it and verify completion + coverage stats)
+→ write the report. You may deploy **at most one Fable-tier subagent at a time** for
+implementation or fresh-context adversarial review (operator grant); cheaper read-only
+subagents for research and corpus sweeps may run in parallel. Verify any claim you build on
+yourself. When you have enough information to act, act; do not re-derive the named measured
+facts or re-litigate operator-locked v2 decisions. Brandon is not watching mid-run and
+cannot answer questions; end your turn only when the work is done and verified, or when you
+are blocked on input only he can provide — and say exactly which input.
 
-1. **Verdict on schema v3 first:** `FIT-FOR-PURPOSE` / `FIT WITH GAPS` / `NOT FIT` for v2's
-   needs, one plain-language paragraph.
-2. **Audit rulings:** every v3 element (each band, each envelope, the per-beat mean grain,
-   both normalization choices, the cache format, the extraction parameters — sample rate,
-   mel resolution, hop length) ruled `KEEP` / `CHANGE` / `REPLACE` / `CUT` with evidence.
-3. **The lighting requirements inventory:** the operator's seed list above plus your own
-   extensions — every musical event worth lighting, each mapped to the v2 consumer(s) it
-   serves.
-4. **The v4 design:** every measurement in the new schema, each specified with: what it
-   captures, which requirement(s) it serves, its extraction method and cost, its storage
-   shape, its validation gate (determinism, even/odd stability threshold, corpus spread,
-   ear-test where applicable), its failure mode (absent data must read as "no signal", never
-   as a false event), and its prototype result or `unproven` label with the planned proof.
-5. **Requirements coverage table:** every inventory item → the measurement(s) that answer it,
-   or an honest `unreachable` with the reason (an item with no row is a review gap).
-6. **Migration plan:** the one-sweep path — extraction order, expected duration, cache
-   coexistence during transition, identity-epoch handling, and what Codex specs come out of
-   this plan (list them; do not write them).
-7. **Open questions for Brandon** — taste calls only, phrased plainly, with your chosen
-   default per question so he can veto rather than decide.
+## Deliverables
 
-Label every load-bearing claim **confirmed / assumed / unknown / rejected / unproven**, tied
-to a file:line, a measured fact, a prototype run, or a primary source. After writing the
-report, run `python3 tools/check_docs_metadata.py`, `python3 tools/check_agent_contracts.py`,
-and `python3 tools/check_docs_drift.py`; fix the report (not the checkers) if one flags it.
+1. **The built v4 analysis layer** (extraction, cache, sweep tool, tests, contract + doc
+   updates), suite green, checks green.
+2. **The report:** `docs/research/spectral_audio_analysis_redesign.md`, with the repo's
+   standard doc header (`doc_status` / `truth_level` / `last_verified_commit` /
+   `last_verified_date` / `validation_scope` — mirror the design record's header;
+   validation_scope = software build + corpus validation, no lighting behavior change, no
+   hardware validation). Structure: v3 verdict first (`FIT-FOR-PURPOSE` / `FIT WITH GAPS` /
+   `NOT FIT` + one plain paragraph); audit rulings on every v3 element (each band, each
+   envelope, the per-beat grain, both normalization choices, cache format, extraction
+   parameters) ruled `KEEP` / `CHANGE` / `REPLACE` / `CUT` with evidence; the lighting
+   requirements inventory (the seed list above plus your extensions, each mapped to its v2
+   consumers); the v4 design — every measurement with what it captures, which requirements
+   it serves, method, cost, storage shape, validation gate, failure mode (absent data reads
+   as "no signal", never a false event), and its **proof on his music**; a requirements
+   coverage table (every inventory item → measurements, or an honest `unreachable` with the
+   reason — an item with no row is a review gap); sweep results (coverage, duration, cache
+   size, stability spot-checks); the timestamped event outlines for the named sample tracks;
+   and open questions for Brandon — taste calls only, each with your chosen default so he
+   can veto rather than decide.
+3. Label every load-bearing claim **confirmed / assumed / unknown / rejected / unproven**,
+   tied to a file:line, a measured run, or a primary source. Run
+   `python3 tools/check_docs_metadata.py`, `python3 tools/check_agent_contracts.py`,
+   `python3 tools/check_docs_drift.py`, and the unit suite; fix your work (not the checkers
+   or unrelated tests) if anything flags.
 
-Your final chat message: the v3 verdict, the three-to-five most consequential design
-decisions in v4, what the prototypes proved on his actual music, and any open taste calls —
-plain language, complete sentences, for a reader who saw none of the work.
+Your final chat message: the v3 verdict, what v4 now captures that v3 could not, what the
+proofs showed on his actual tracks (name the tracks), sweep results, and any open taste
+calls — plain language, complete sentences, for a reader who saw none of the work.
 
 ## Boundaries
 
-- **Read-only everywhere except the single deliverable file above.** No bridge code, test,
-  config, or cache edits; no writes to the spectral cache, Rekordbox DB, ANLZ files, or audio
-  files; no git state mutation (an auto-sync hook may commit at turn end — not yours to
-  manage); no running the bridge; no hardware; no Codex specs — do not implement anything.
-- Allowed: repo reads and searches; web research (WebSearch/WebFetch) under the research
-  mandate's sourcing rules; read-only scratchpad Python (including librosa runs over audio
-  files) for prototypes; read-only subagents; the three docs checkers.
+- Writes allowed: bridge analysis-layer code + its tests, the change contract + docs the
+  contract names, the report file, v4 cache entries, and scratchpad files. Everything else
+  read-only: v3 cache entries, Rekordbox DB, ANLZ files, audio files, live configs, laser/LED
+  runtime modules beyond the analysis seam.
+- Do not run the bridge; do not touch hardware; do not change what any light does.
+- Web research (WebSearch/WebFetch) under the research mandate's sourcing rules.
 - Do not modify or delete this prompt file.
-
-When you have enough information to act, act. Do not re-derive the named measured facts or
-re-litigate operator-locked v2 decisions. You are operating autonomously: Brandon is not
-watching mid-run and cannot answer questions; end your turn only when the deliverable is
-written and checked, or when you are blocked on input only he can provide — and say exactly
-which input.
 
 ## Done when
 
-- The deliverable exists, passes the three docs checks, and opens with the v3 verdict.
+- v4 is implemented, deterministic (proven), suite green, three docs checks green, contract
+  + docs updated.
 - Every v3 element carries an audit ruling; every requirements-inventory item appears in the
   coverage table with a measurement or an honest `unreachable`.
-- Every load-bearing v4 measurement has a prototype result on real corpus tracks or an
-  explicit `unproven` label with its planned proof experiment.
-- The four identity axes (or justified better replacements) are shown derivable from v4 with
+- Every load-bearing v4 measurement is proven on genre-folder tracks; anything unproven is
+  disabled and labeled with its missing experiment.
+- The four identity axes (or justified better replacements) are derivable from v4 with
   stability evidence.
-- The containment rule (describe, never decide) is applied across the whole v4 design.
-- The migration plan makes the one-sweep, one-identity-epoch path concrete.
-- Research claims are labeled primary-source vs lore, and nothing load-bearing rests on lore.
+- The genre-folder sweep has run to completion with reported coverage, duration, and cache
+  size — and only genre-folder tracks were analyzed.
+- The report exists, passes checks, opens with the v3 verdict, and includes the timestamped
+  event outlines the operator can verify by ear.
