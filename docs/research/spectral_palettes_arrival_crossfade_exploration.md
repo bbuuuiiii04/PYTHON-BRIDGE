@@ -228,6 +228,32 @@ high-impact cooldowns are v1's rest-vs-fire discipline and carry into v2 pacing.
 dispatch/authority/transport chain. v2 off ⇒ v1 path byte-identical. Stream Deck / LED Pad
 gain: engine v1/v2 switch, WILD/SET toggle, per-feature kills.
 
+### Feature 4 — the texture layer (operator-requested 2026-07-05, approved with containment)
+
+Per-beat texture map, precomputed at track load from the cached envelopes (lookup, not
+listening): what *kind* of motion plays at each beat — percussion-locked hits where drums
+dominate, sparkle where the sound is thick/aggressive, smooth flow in melodic passages,
+darkness on empty floors — so tracks read as scripted. Proof-of-concept ran on real tracks
+(empty-floor runs land exactly on breakdowns; per-beat structure clearly visible).
+
+**The hard containment rule (the smart-drop lesson, operator-validated concern): texture may
+DECORATE, never DECIDE.** Structural moments — blackouts, drop explosions, landing moves —
+are triggered only by Rekordbox markers + locked designs. The texture layer only modulates
+the flavor of already-playing motion (sparkle vs chase, dark vs bright tint). Worst-case
+misclassification = wrong seasoning for one beat, never a missed/phantom cue. Unlike the
+retired smart-drop work, this layer makes zero predictions and no point decisions — it
+describes every beat; there is no needle to find.
+
+- **Tier 1 (current cache, measured-supported):** kick-prominence beatmatch, empty-floor
+  detection, thick-vs-thin texture, within-track bright/dark tilt driving sparkle tone.
+- **Tier 2 (needs schema-v4 extraction upgrade — Codex work + one ~1.5–2 h background
+  re-analysis of the library):** intra-beat modulation depth (growl wobble) + tonal
+  brightness/chroma → growl vs euphoric-whir discrimination: growl → dark identity-colored
+  sparkle; bright major whir → cyan/white/violet sparkle with operator-sanctioned rainbow
+  bursts allowed exactly there (measured proof required before Tier 2 ships: current per-beat
+  averages provably cannot separate these — tested 2026-07-05).
+- Own kill switch like every v2 feature; live look is the acceptance gate.
+
 **Next step:** author the Codex implementation specs (Feature 1 → 2 → 3) per
 `.claude/skills/codex-spec/SKILL.md`, on Brandon's go.
 
