@@ -228,6 +228,30 @@ high-impact cooldowns are v1's rest-vs-fire discipline and carry into v2 pacing.
 dispatch/authority/transport chain. v2 off ⇒ v1 path byte-identical. Stream Deck / LED Pad
 gain: engine v1/v2 switch, WILD/SET toggle, per-feature kills.
 
+**v1→v2 mapping, part 2 (2026-07-05, dive continuation):**
+- *Pads/MIDI:* the MIDI input layer already understands pad kinds — layered `static_override`
+  (note-on stacks, note-off removes, recency-ordered), `palette_pad`, `palette_lock_pad`,
+  `led_mute_pad`, `rainbow_pad`, `laser_solo_pad` (`soundswitch_midi_input.py:8,307`). v2 adds
+  new kinds via the same pattern: engine v1/v2 switch, WILD/SET toggle, per-feature kills;
+  the palette pads become identity controls (lock identity / queue color) — the reserved
+  color-engine live controls get their surface.
+- *Stream Deck Phase 2 (Part F layered DMX compositor,
+  `docs/plans/active/streamdeck_midi_bridge_integration_spec.md`):* manual overlay system,
+  orthogonal to v2 automation — survives unchanged (F-B2 still open with Codex).
+- *Lasers:* the laser stack already has per-track "genre" resolution —
+  `PersonalityResolver` picks a `LaserPersonality` (role→scene map) via playlist-name or
+  BPM-range match, default "house" (`personality_resolver.py`, `config/laser_director.json:237`).
+  **v2 replaces only that picker** with measured-character resolution (same axes as color
+  zones); scenes/safety-classes/cooldowns/fallbacks/MIDI executor all keep. This is the
+  laser-side "genre gets treatment" slot, pre-built.
+- *Govee plumbing:* two paths — cloud DIY scenes (rate-limited; v1 automation + manual +
+  fallback) and 30 fps realtime razer (v2 automation primary). One configured target today
+  (`room_perimeter`, H612D, 60 segments, razer at .216); v2 renders per-target, second strip
+  slots in via config.
+- *Observability (new, small):* v2 must surface engine (v1/v2), current identity/zone, mode
+  (WILD/SET), active texture class + decision reason in runtime status; LED Pad gains a
+  "now playing identity" chip.
+
 ### Feature 4 — the texture layer (operator-requested 2026-07-05, approved with containment)
 
 Per-beat texture map, precomputed at track load from the cached envelopes (lookup, not
