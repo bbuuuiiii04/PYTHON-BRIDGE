@@ -41,65 +41,77 @@ trust bar, and the data clears it.
 
 ---
 
-## Locked functionality agreement (operator session, 2026-07-05)
+## Locked functionality agreement — LIGHTING ENGINE v2 (operator sessions, 2026-07-05)
 
-Settled with Brandon in the follow-up design session. **Governance: design authority is
-delegated — Claude designs everything; Brandon's approval gate is the live look on his own
-hardware.** No further design questions go to Brandon; remaining choices below marked
-*(delegated)* were made under that authority using the report's recommendations. This
-supersedes the report's "Open questions for Brandon" section — those questions are closed as
-follows.
+Settled with Brandon across two sessions (structured Q&A, then a step-by-step plain-language
+walkthrough — the walkthrough's revisions are what stand wherever they differ). **Governance:
+design authority is delegated — Claude designs everything; Brandon's approval gate is the live
+look on his own hardware.** No further design questions go to Brandon. This supersedes the
+report's "Open questions for Brandon" section.
 
-**Cross-cutting (new, from the governance agreement):**
-- Every one of the three features ships with its **own independent runtime kill switch**
-  (per-feature disable, usable mid-set, without affecting the rest of the show).
+**Packaging (operator-named):**
+- The full A+B+C bundle ships as **LIGHTING ENGINE v2**. Today's behavior is
+  **LIGHTING ENGINE v1** — frozen, untouched.
+- v1 and v2 coexist in the bridge; **one master switch, exactly one engine active at a time**,
+  switchable live mid-set. v2 off ⇒ behavior identical to today's, byte for byte.
+- Every v2 feature additionally has its **own independent runtime kill switch**.
 - Per-feature status is **not "done" until Brandon signs off on the live look**;
   software-tested is a build gate, not an acceptance gate.
 
-**A — track identity (Brandon-answered, rounds 1–2):**
-1. Hue driver: key picks the family, **character vetoes uncapped** — a genuinely aggressive
-   track always lands in its truest emotional (warm) family regardless of key. Accepted cost:
-   occasional harmonic mixes render with the clash grammar.
-2. Identity is **permanent across nights** (absolute key→family anchor).
-3. **Drops always render full-scale**; the dynamics budget shapes only
-   ambient/groove/breakdown range.
-4. Long single-family "chapters" during harmonic stretches are **a feature** — the room follows
-   the set's shape.
-5. Depth axis = **saturation floor + gradient span only**; brightness and white usage are owned
-   by energy/role, so a chill track can never out-shine a banger.
-6. Until C exists, track handover = **soft flip** (4–8 beat p-space fade at active-deck flip).
-7. Identity reveal: **in, with a hold-gate** (~8 beats held active before the 2-bar first-play
-   bloom can fire).
-8. Late-drop palette surprise **stays inside the track's own family** (big shift, within
-   identity).
-9. Track character drives **motion style** (punchy → sharp attacks; smooth → flowing), not just
-   color.
+**Feature 1 — track identity (colors):**
+1. **REVISED hue driver** (supersedes the key→family design and the round-1 Q&A answer;
+   operator veto: "I don't want every 2a track to be blue"): **sound character picks the color
+   zone** — grit (flatness), punch (kick_cv), bass (sub_duty), drama (dyn_range); aggressive →
+   warm zones, smooth/melodic → cool zones — and a **deterministic per-track hash spreads
+   tracks within their zone**, so no two tracks need match and **no key owns a color**. Musical
+   key is out of the color story entirely.
+2. Identity is **permanent across nights**: a pure function of the track's identity + measured
+   character. No RNG, no session seed, no deck salt.
+3. **Zones pick colors, never power.** Brightness and white usage are owned by in-the-moment
+   energy and role; **drops always render full-scale**, every track, every zone.
+4. Depth axis = saturation floor + gradient span only.
+5. Until Feature 3 exists, track handover = **soft flip** (4–8 beat p-space fade at
+   active-deck flip).
+6. First-play-of-the-night reveal: **in, with a hold gate** (~8 beats held active before the
+   2-bar bloom can fire).
+7. Late-drop palette surprise **stays inside the track's own colors**.
+8. Track character drives **motion style** (punchy → sharp attacks; smooth → flowing).
+9. Long single-zone stretches are **a feature** — the room follows the set's shape.
+10. Unmeasurable tracks land in a neutral-safe zone; a simple per-track operator correction
+    path must exist (the live-veto counterpart for zone misfires).
 
-**B — Land on the One (Brandon locked the move list; the rest delegated):**
-1. Build list: **all four** — landing comets (infrastructure), the Gather (squeeze-to-center →
-   explode on the drop), the Cascade, the Phrase Swell. Landing comets + Gather first.
-2. *(delegated)* Gather fires **only into detected real drops**, never on a bare cycle.
-3. *(delegated)* Confidence gating is **asymmetric**: the Gather requires a stable grid +
-   steady BPM and silently sits out otherwise (a skipped Gather is invisible; a late one looks
-   broken); small landing moves fire freely.
-4. *(delegated)* LED-first; lasers join later via the pre-arm pattern.
+**Feature 2 — Land on the One:**
+1. Build list: **landing behavior as infrastructure** (existing moves land on the beat instead
+   of starting after it) plus the build-move family: **squeeze-explode**, **fuse** (cascade),
+   **swell** (phrase). All in.
+2. **The track's character picks its build move and its body language** (sharp stabs vs smooth
+   glide), per-track consistent — the build becomes part of the track's identity.
+3. Fires at **every true drop — multiple per song** — never on a bare 16/32-bar cycle.
+4. **Tempo bending never causes a skip.** Per-frame retargeting follows the ridden pitch
+   continuously (operator: "the bridge is very sound — no unsureness"). The earlier
+   confidence-skip is reframed: **recalculate on backward playhead jumps only**
+   (spinback/scratch/seek) — the move re-forms if the drop is still ahead, melts away if the
+   jump passed it. It recalculates; it never wonders.
+5. LED-first; lasers join later via the established pre-arm pattern.
 
-**C — mix-aware crossfade (delegated in full, per the report's grammar):**
-1. Incoming identity enters **accents-first, rhythmically** (bar-quantized presence steps);
-   spatial entry stays a per-template variant.
-2. Harmonic mixes morph through adjacent families; distant/clash mixes **alternate then
-   snap-commit** — never a muddy mid-hue.
-3. Quick cut / deck switch = **instant snap**. Abandoned blends breathe back out
-   (monotonic-with-hysteresis, no flicker). Resolve bloom fires only on a held, completed long
-   blend.
-4. The **double-drop moment is in**, strictly gated (both decks beat-aligned, both faders top,
-   drop sections overlapping).
-5. Deck 1/2 only; the Rekordbox 7.2.11 offset pin is an accepted operating constraint (feature
-   silently degrades to the time-based proxy on other versions).
-6. Fader smoothing/hysteresis constants get tuned from one `RBSS_RECORD_SESSION` practice
+**Feature 3 — mix-aware crossfade:**
+1. **The fader is the boss.** Takeover speed always mirrors actual fader motion — the lights
+   never take longer than the operator's hands did.
+2. Incoming color enters **rhythmically, accents-first** (bar-quantized presence steps), then
+   takes the base.
+3. Near colors **glide**; opposite colors **trade ownership hit-by-hit, then commit** — never a
+   muddy mid-hue.
+4. Quick blend = compressed walk-in; **slam = instant snap; chops = the room chops along.**
+5. Abandoned blend **breathes back out** (monotonic-with-hysteresis, no flicker; no completion
+   moment fired).
+6. **Double-drop moment: CUT** (operator: "i dont do double drops"). One song owns the room,
+   no exceptions.
+7. Deck 1/2 only; the Rekordbox 7.2.11 offset pin is an accepted operating constraint
+   (degrades silently to a time-based proxy elsewhere).
+8. Fader smoothing/hysteresis constants get tuned from one `RBSS_RECORD_SESSION` practice
    capture during the build — a build task, not an operator decision.
 
-**Next step:** author the Codex implementation specs (A first, then B, then C) per
+**Next step:** author the Codex implementation specs (Feature 1 → 2 → 3) per
 `.claude/skills/codex-spec/SKILL.md`, on Brandon's go.
 
 ---
