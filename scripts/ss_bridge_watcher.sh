@@ -241,6 +241,10 @@ tell application "Terminal"
     activate
     do script "bash -c 'printf \"\\\\033]0;RBSS_BRIDGE_MONITOR\\\\007\"; echo \"━━━ Bridge Monitor ━━━\"; \"$PYTHON\" \"$REPO_ROOT/bridge_view.py\"' RBSS_BRIDGE_MONITOR"
     set custom title of selected tab of front window to "RBSS_BRIDGE_MONITOR"
+    try
+        set number of rows of front window to 40
+        set number of columns of front window to 140
+    end try
 end tell
 EOF
 }

@@ -187,7 +187,8 @@ focus or requires acknowledgment to keep functioning.
 ## Watcher behavior (`scripts/ss_bridge_watcher.sh`)
 
 One monitor window, in both auto and manual launch modes. `open_monitor()` launches `"$PYTHON"
-"$REPO_ROOT/bridge_view.py"` inside a Terminal.app window tagged `RBSS_BRIDGE_MONITOR`;
+"$REPO_ROOT/bridge_view.py"` inside a Terminal.app window tagged `RBSS_BRIDGE_MONITOR`, sized to
+140×40 (Terminal's default 80×24 truncated most real messages);
 `monitor_open()` counts a viewer only if the matched process (marker or full-path
 `bridge_view.py`) still owns a terminal (`ps -o tty=` not `??`) — a headless orphan viewer must
 not suppress reopening (2026-07-05 no-window regression). `close_monitor()` kills both the
