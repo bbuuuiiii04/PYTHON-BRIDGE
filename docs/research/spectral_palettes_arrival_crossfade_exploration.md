@@ -252,6 +252,15 @@ describes every beat; there is no needle to find.
   sparkle; bright major whir → cyan/white/violet sparkle with operator-sanctioned rainbow
   bursts allowed exactly there (measured proof required before Tier 2 ships: current per-beat
   averages provably cannot separate these — tested 2026-07-05).
+- **Absolute calibration requirement (operator 2026-07-05: "not every track has a growl or
+  bright synth"):** texture classes are detected against corpus-wide absolute standards,
+  never per-track percentile curves — per-track ranking falsely forces every texture to
+  appear in every track (the proof-of-concept's confirmed flaw). Tracks without a texture
+  show none of it.
+- **Ear-test gate:** no texture class ships until it passes the timestamp scrub test the
+  empty-floor detector passed on 2026-07-05 (operator-confirmed accurate on Kai Wachi — ILL;
+  GNARLY's detected "empty" run was literal end-of-file silence — detector right, claim
+  initially oversold; growl/bright 1–2-beat blips confirmed not-ready).
 - Own kill switch like every v2 feature; live look is the acceptance gate.
 
 **Next step:** author the Codex implementation specs (Feature 1 → 2 → 3) per
