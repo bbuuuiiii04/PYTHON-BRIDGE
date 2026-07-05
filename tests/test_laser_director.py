@@ -19,6 +19,7 @@ Covers:
   - StateManager accepts optional laser_director kwarg without breaking.
   - LaserContext and LaserSceneDecision are frozen dataclasses.
 """
+import logging
 import queue
 import sys
 import time
@@ -670,12 +671,15 @@ class PhraseSceneTests(unittest.TestCase):
 
     def test_no_per_tick_log_spam(self) -> None:
         ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
-        with patch("rb_ss_bridge_v2.laser_director.log.info") as info:
+        with patch("rb_ss_bridge_v2.laser_director.bridge_log.perf") as perf, \
+                patch("rb_ss_bridge_v2.laser_director.log.info") as info:
             ld.tick(_ctx(playing=True, position_stale=False, abs_beat=1.0), now=_now())
             ld.tick(_ctx(playing=True, position_stale=False, abs_beat=1.5), now=_now())
             for _ in range(100):
                 ld.tick(_ctx(playing=True, position_stale=False, abs_beat=1.5), now=_now())
-        self.assertEqual(info.call_count, 1)
+        # One perf record for the single scene change; no INFO spam per tick.
+        self.assertEqual(perf.call_count, 1)
+        self.assertEqual(info.call_count, 0)
 
     def test_same_scene_reason_update_is_not_new_trigger(self) -> None:
         ld = _director(default_scene="d", phrase_scene="p", phrase_interval_beats=32)
@@ -2244,6 +2248,85 @@ class EarlyReturnLaserTickTests(unittest.TestCase):
         )
         ctx = sm._build_laser_context(1, d, 1000, 128.0, 0.0, 0.0, old_snap, time.monotonic())
         self.assertTrue(ctx.position_stale)
+
+
+# ---------------------------------------------------------------------------
+# Task W3a (AWR-125): scene/personality commits emit perf records
+# ---------------------------------------------------------------------------
+
+class PerfEmitTests(unittest.TestCase):
+    """Scene changes and personality applies emit bridge_log perf records.
+
+    Records are captured with a plain logging.Handler on the category logger
+    (records propagate); bridge_log.init() is never called in tests.
+    """
+
+    def _capture(self, name: str) -> list[logging.LogRecord]:
+        logger = logging.getLogger(name)
+        records: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handler = _Capture()
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        self.addCleanup(logger.setLevel, old_level)
+        self.addCleanup(logger.removeHandler, handler)
+        return records
+
+    def test_scene_change_emits_one_perf_record_with_data_fields(self) -> None:
+        records = self._capture("perf.laser.scene")
+        ld = _director()
+        ld.tick(_ctx(), now=_now())
+        self.assertEqual(len(records), 1)
+        rec = records[0]
+        self.assertEqual(rec.cat, "perf.laser.scene")
+        self.assertEqual(rec.deck, 1)
+        self.assertEqual(rec.beat, 64.0)
+        self.assertEqual(rec.data["scene"], "house_phrase_1")
+        self.assertEqual(rec.data["prev"], "")
+        self.assertEqual(rec.data["reason"], "default_init")
+        self.assertEqual(rec.data["role"], "phrase")
+        self.assertTrue(rec.data["dry_run"])
+        self.assertIn("house_phrase_1", rec.getMessage())
+
+    def test_unchanged_scene_emits_no_further_record(self) -> None:
+        records = self._capture("perf.laser.scene")
+        ld = _director()
+        ld.tick(_ctx(), now=_now())
+        ld.tick(_ctx(), now=_now())
+        self.assertEqual(len(records), 1)
+
+    def test_personality_apply_emits_one_perf_record(self) -> None:
+        records = self._capture("perf.laser.personality")
+        ld = _director(default_scene="house_default", phrase_interval_beats=32)
+        personality = LaserPersonality(
+            name="dubstep",
+            safe_scene="safe_static",
+            default_scene="dubstep_default",
+            phrase_scene="dubstep_phrase",
+            buildup_scene="up",
+            drop_scene="drop",
+            post_drop_scene="post",
+            breakdown_scene="bd",
+            transition_scene="safe_static",
+        )
+        ld.queue_personality_change("dubstep", personality)
+        ld.tick(_ctx(abs_beat=31.0, autoloop_tick_just_fired=False), now=_now())
+        self.assertEqual(len(records), 0)
+
+        ld.tick(_ctx(abs_beat=32.0, autoloop_tick_just_fired=True), now=_now())
+
+        self.assertEqual(len(records), 1)
+        rec = records[0]
+        self.assertEqual(rec.cat, "perf.laser.personality")
+        self.assertEqual(rec.deck, 1)
+        self.assertEqual(rec.beat, 32.0)
+        self.assertEqual(rec.data["personality"], "dubstep")
+        self.assertIn("dubstep", rec.getMessage())
 
 
 if __name__ == "__main__":

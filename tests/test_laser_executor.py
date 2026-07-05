@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import logging
 import random
 import sys
 import unittest
@@ -447,7 +448,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
         ex = LaserSceneExecutor(config=_config(dry_run=False), backend=MidiOutputBackend(midi), personality=_personality())
         ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx(abs_beat=64.0))
 
-        with self.assertLogs("laser_executor", level="INFO") as captured:
+        with self.assertLogs("perf.laser.fired", level="INFO") as captured:
             ex.on_decision(
                 _decision("phrase_a", "phrase_boundary", "phrase"),
                 _ctx(abs_beat=96.0, autoloop_tick_just_fired=True),
@@ -1507,7 +1508,7 @@ class LaserSceneExecutorTests(unittest.TestCase):
             _ctx(abs_beat=72.0),
         )
 
-        with self.assertLogs("laser_executor", level="INFO") as captured:
+        with self.assertLogs("perf.laser.fired", level="INFO") as captured:
             ex.on_decision(
                 _decision("buildup_a", "buildup_to_drop_window", "buildup"),
                 _ctx(abs_beat=88.0, autoloop_tick_just_fired=True),
@@ -1914,6 +1915,88 @@ class BackendInjectionTests(unittest.TestCase):
         self.assertIs(ex._backend, spy)
         # No second backend / midi attribute exists to bypass the single slot.
         self.assertFalse(hasattr(ex, "_midi_output"))
+
+
+class PerfEmitTests(unittest.TestCase):
+    """Task W3a (AWR-125): fires emit perf.laser.fired records via bridge_log.
+
+    Records are captured with a plain logging.Handler on the category logger
+    (records propagate); bridge_log.init() is never called in tests.
+    """
+
+    def _capture(self, name: str) -> list[logging.LogRecord]:
+        logger = logging.getLogger(name)
+        records: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handler = _Capture()
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        self.addCleanup(logger.setLevel, old_level)
+        self.addCleanup(logger.removeHandler, handler)
+        return records
+
+    def test_fired_emits_one_perf_record_with_data_fields(self) -> None:
+        records = self._capture("perf.laser.fired")
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False),
+            backend=MidiOutputBackend(midi),
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx())
+        self.assertEqual(len(records), 1)
+        rec = records[0]
+        self.assertEqual(rec.cat, "perf.laser.fired")
+        self.assertEqual(rec.deck, 1)
+        self.assertEqual(rec.beat, 64.0)
+        self.assertEqual(rec.data["role"], "phrase")
+        self.assertEqual(rec.data["scene"], "phrase_a")
+        self.assertEqual(rec.data["note"], 37)
+        self.assertEqual(rec.data["reason"], "default_init")
+        self.assertEqual(rec.data["cursor"], 1)
+        self.assertFalse(rec.data["refire"])
+        self.assertIn("phrase_a", rec.getMessage())
+
+    def test_gated_decision_emits_no_perf_record(self) -> None:
+        records = self._capture("perf.laser.fired")
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False),
+            backend=MidiOutputBackend(midi),
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx(playing=False))
+        self.assertEqual(records, [])
+
+    def test_same_scene_refire_records_carry_refire_flag(self) -> None:
+        records = self._capture("perf.laser.fired")
+        midi = _FakeMidiOutput(dry_run=False)
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False),
+            backend=MidiOutputBackend(midi),
+            personality=_personality(),
+        )
+        ex.on_decision(_decision("phrase_a", "default_init", "phrase"), _ctx(abs_beat=64.0))
+        del records[:]
+        ex.on_decision(
+            _decision("phrase_a", "phrase_boundary", "phrase"),
+            _ctx(abs_beat=96.0, autoloop_tick_just_fired=True),
+        )
+        # A same-scene refire produces the refire announcement plus the fired
+        # record, mirroring today's two INFO lines; both carry refire=True.
+        self.assertEqual(len(records), 2)
+        self.assertIn("same-scene-refire", records[0].getMessage())
+        self.assertTrue(records[0].data["refire"])
+        self.assertEqual(records[0].data["role"], "phrase")
+        self.assertEqual(records[0].data["scene"], "phrase_a")
+        self.assertIn("fired", records[1].getMessage())
+        self.assertTrue(records[1].data["refire"])
+        self.assertEqual(len(midi.calls), 2)
 
 
 if __name__ == "__main__":

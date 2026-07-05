@@ -15,6 +15,7 @@ import threading
 import time
 from typing import Optional
 
+from . import bridge_log
 from .laser_config import LaserConfig
 from .laser_models import LaserContext, LaserPersonality, LaserResolvedScene, LaserSceneDecision
 from .laser_output_backend import LaserOutputBackend
@@ -202,6 +203,7 @@ class LaserSceneExecutor:
                 and selected_scene == self._last_triggered_scene
             )
             same_scene_refire = same_scene_candidate and refire_allowed
+            refire_cursor = self._role_cursors.get(role)
 
         if self._is_role_cooldown_blocked(
             role,
@@ -229,12 +231,23 @@ class LaserSceneExecutor:
                 self._resolve_pending_blackout(reason="drop_crossing_same_scene_skip")
             return None
         if same_scene_refire:
-            log.info(
-                "[LX] same-scene-refire  role=%s  scene=%s  reason=%s  beat=%.2f",
+            bridge_log.perf(
+                "laser.fired",
+                "same-scene-refire  role=%s  scene=%s  reason=%s  beat=%.2f",
                 role,
                 selected_scene,
                 decision.reason,
                 ctx.abs_beat,
+                deck=ctx.active_deck,
+                beat=ctx.abs_beat,
+                data={
+                    "role": role,
+                    "scene": selected_scene,
+                    "note": getattr(scene_def.midi, "note", None),
+                    "reason": decision.reason,
+                    "cursor": refire_cursor,
+                    "refire": True,
+                },
             )
 
         priority = self._priority_for_role(role)
@@ -273,13 +286,24 @@ class LaserSceneExecutor:
         # Observability: the scene the executor ACTUALLY fired (after bank
         # rotation), which the director's decision log cannot show. This is the
         # signal to confirm drop-bank rotation on the rig.
-        log.info(
-            "[LX] fired  role=%s  scene=%s  note=%s  reason=%s  cursor=%s",
+        bridge_log.perf(
+            "laser.fired",
+            "fired  role=%s  scene=%s  note=%s  reason=%s  cursor=%s",
             role,
             selected_scene,
             getattr(scene_def.midi, "note", None),
             decision.reason,
             fired_cursor,
+            deck=ctx.active_deck,
+            beat=ctx.abs_beat,
+            data={
+                "role": role,
+                "scene": selected_scene,
+                "note": getattr(scene_def.midi, "note", None),
+                "reason": decision.reason,
+                "cursor": fired_cursor,
+                "refire": same_scene_refire,
+            },
         )
         return resolved
 

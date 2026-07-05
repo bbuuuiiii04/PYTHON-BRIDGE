@@ -33,6 +33,7 @@ import logging
 import time
 from typing import Callable, Literal, Optional
 
+from . import bridge_log
 from .laser_decision_log import LaserDecision, LaserDecisionLog
 from .laser_models import LaserContext, LaserPersonality, LaserSceneDecision
 from .smart_phrasing import SmartPhrasingState
@@ -246,12 +247,21 @@ class LaserDirector:
                 now=now,
                 triggered_by="scene_change",
             )
-            log.info(
-                "[LASER] scene  %s->%s  reason=%s  dry_run=%s",
+            bridge_log.perf(
+                "laser.scene",
+                "scene %s->%s (%s)",
                 self._current_scene or "(none)",
                 decision.scene,
                 decision.reason,
-                self._dry_run,
+                deck=ctx.active_deck,
+                beat=ctx.abs_beat,
+                data={
+                    "scene": decision.scene,
+                    "prev": self._current_scene,
+                    "reason": decision.reason,
+                    "role": decision.role,
+                    "dry_run": self._dry_run,
+                },
             )
         elif reason_changed:
             self._record_decision(
@@ -673,7 +683,14 @@ class LaserDirector:
         else:
             self.set_personality(name)
             self.set_personality_config(config)
-        log.info("[LASER] personality  active=%s", name)
+        bridge_log.perf(
+            "laser.personality",
+            "personality active=%s",
+            name,
+            deck=ctx.active_deck,
+            beat=ctx.abs_beat,
+            data={"personality": name},
+        )
 
     def _pending_personality_can_apply(self, ctx: LaserContext) -> bool:
         if not ctx.playing or not ctx.active_track_loaded or ctx.lighting_mode == "idle":
