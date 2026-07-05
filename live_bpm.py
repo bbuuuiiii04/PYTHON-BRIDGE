@@ -32,6 +32,7 @@ from .rb_memory import (
     get_rb_pid,
 )
 from .rb_offsets import ChainEntry, RBOffsetVersion, load_offsets_for_version
+from . import bridge_log
 
 log = logging.getLogger("live_bpm")
 
@@ -956,12 +957,13 @@ class LiveBPMService(threading.Thread):
             log.info("[LBPM][INVALID] disabled by %s=1", LIVE_BPM_DISABLE_ENV)
             return
         log.info("[LBPM][SCAN] starting")
-        while not self._stop_event.is_set():
-            try:
-                self.tick()
-            except Exception as exc:
-                log.warning("[LBPM][ERROR] tick failed: %s", exc)
-            time.sleep(self._poll_interval)
+        with bridge_log.thread_guard("live-bpm-service"):
+            while not self._stop_event.is_set():
+                try:
+                    self.tick()
+                except Exception as exc:
+                    log.warning("[LBPM][ERROR] tick failed: %s", exc)
+                time.sleep(self._poll_interval)
 
     def tick(self) -> None:
         if self.disabled:

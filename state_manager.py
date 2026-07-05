@@ -816,56 +816,56 @@ class StateManager(LEDDispatchPolicyMixin):
         log.info("[SM] starting")
         loop_error_count = 0
         next_loop_error_log = 0.0
-        while not self._stop.is_set():
-            t0 = time.monotonic()
-            remaining = 0.0
-            push_started = False
-            push_completed = False
-            try:
-                profiler = self._profiler
-                if profiler is None:
-                    self._drain_events()
-                    push_started = True
-                    self._push_tick()
-                    push_completed = True
-                    self._maybe_publish_snapshot(time.monotonic())
-                    remaining = self._TICK_INTERVAL - (time.monotonic() - t0)
-                else:
-                    queue_depth = self._queue_depth()
-                    self._drain_events()
-                    t1 = time.monotonic()
-                    push_started = True
-                    self._push_tick()
-                    push_completed = True
-                    t2 = time.monotonic()
-                    did_publish = self._maybe_publish_snapshot(t2)
-                    t3 = time.monotonic()
-                    elapsed_s = t3 - t0
-                    remaining = self._TICK_INTERVAL - elapsed_s
-                    profiler.record(
-                        tick_ms=elapsed_s * 1000.0,
-                        drain_ms=(t1 - t0) * 1000.0,
-                        push_ms=(t2 - t1) * 1000.0,
-                        snapshot_ms=((t3 - t2) * 1000.0 if did_publish else None),
-                        overrun_ms=max(0.0, -remaining * 1000.0),
-                        queue_depth=queue_depth,
-                    )
-                    profiler.maybe_log(t3)
-            except Exception as exc:
-                loop_error_count += 1
-                now = time.monotonic()
-                if not push_started or push_completed:
-                    self._submit_pack_zero_frame()
-                if now >= next_loop_error_log:
-                    log.error(
-                        "[SM] push loop error; skipping tick  error=%s  count=%d",
-                        type(exc).__name__,
-                        loop_error_count,
-                    )
-                    next_loop_error_log = now + 1.0
-                remaining = self._TICK_INTERVAL - (now - t0)
-            if remaining > 0:
-                time.sleep(remaining)
+        with bridge_log.thread_guard("state-manager"):
+            while not self._stop.is_set():
+                t0 = time.monotonic()
+                remaining = 0.0
+                push_started = False
+                push_completed = False
+                try:
+                    profiler = self._profiler
+                    if profiler is None:
+                        self._drain_events()
+                        push_started = True
+                        self._push_tick()
+                        push_completed = True
+                        self._maybe_publish_snapshot(time.monotonic())
+                        remaining = self._TICK_INTERVAL - (time.monotonic() - t0)
+                    else:
+                        queue_depth = self._queue_depth()
+                        self._drain_events()
+                        t1 = time.monotonic()
+                        push_started = True
+                        self._push_tick()
+                        push_completed = True
+                        t2 = time.monotonic()
+                        did_publish = self._maybe_publish_snapshot(t2)
+                        t3 = time.monotonic()
+                        elapsed_s = t3 - t0
+                        remaining = self._TICK_INTERVAL - elapsed_s
+                        profiler.record(
+                            tick_ms=elapsed_s * 1000.0,
+                            drain_ms=(t1 - t0) * 1000.0,
+                            push_ms=(t2 - t1) * 1000.0,
+                            snapshot_ms=((t3 - t2) * 1000.0 if did_publish else None),
+                            overrun_ms=max(0.0, -remaining * 1000.0),
+                            queue_depth=queue_depth,
+                        )
+                        profiler.maybe_log(t3)
+                except Exception as exc:
+                    loop_error_count += 1
+                    now = time.monotonic()
+                    if not push_started or push_completed:
+                        self._submit_pack_zero_frame()
+                    if now >= next_loop_error_log:
+                        bridge_log.health(
+                            "tick", "push loop error; skipping tick error=%s count=%d",
+                            type(exc).__name__, loop_error_count, lvl=logging.ERROR,
+                        )
+                        next_loop_error_log = now + 1.0
+                    remaining = self._TICK_INTERVAL - (now - t0)
+                if remaining > 0:
+                    time.sleep(remaining)
 
     def _queue_depth(self) -> int:
         try:
@@ -1130,8 +1130,9 @@ class StateManager(LEDDispatchPolicyMixin):
     # ── Event dispatch ────────────────────────────────────────────────────────
 
     def _handle_event(self, ev: BridgeEvent) -> None:
-        payload = {k: v for k, v in ev.payload.items() if not k.startswith("__")}
-        log.debug("event received kind=%s src=%s payload=%s", ev.kind, ev.source, payload)
+        if log.isEnabledFor(logging.DEBUG):
+            payload = {k: v for k, v in ev.payload.items() if not k.startswith("__")}
+            log.debug("event received kind=%s src=%s payload=%s", ev.kind, ev.source, payload)
         d = ev.deck
 
         if ev.kind == Ev.MIXER_STATE:
@@ -3506,7 +3507,7 @@ class StateManager(LEDDispatchPolicyMixin):
         # and arm transitions are not blocked by a temporarily unreadable DPU.
         if snap is None or snap.is_stale(MEM_STALE_S):
             if os.was_playing:
-                log.warning("[SM] stop-stale  deck=%d", active)
+                bridge_log.health("reader", "stop-stale deck=%d", active, deck=active)
                 self._pending_arm = None
                 self._do_stop(active, os.last_beat_elapsed_ms)
                 if self._laser_director is not None:

@@ -24,6 +24,7 @@ import time
 from typing import Callable, Optional
 
 from .models import BridgeEvent, Ev
+from . import bridge_log
 
 log = logging.getLogger("mtc_reader")
 
@@ -69,26 +70,27 @@ class MTCReader:
             log.warning("MTCReader: mido not installed — MTC position fallback disabled")
             return
 
-        while not self._stop.is_set():
-            ports = mido.get_input_names()
-            port_name = next((p for p in ports if _PORT_SUBSTR in p), None)
-            if not port_name:
-                log.warning("MTCReader: %s not found — retry in %.0fs", _PORT_SUBSTR, _RETRY_S)
-                self._stop.wait(_RETRY_S)
-                continue
+        with bridge_log.thread_guard("mtc-reader"):
+            while not self._stop.is_set():
+                ports = mido.get_input_names()
+                port_name = next((p for p in ports if _PORT_SUBSTR in p), None)
+                if not port_name:
+                    log.warning("MTCReader: %s not found — retry in %.0fs", _PORT_SUBSTR, _RETRY_S)
+                    self._stop.wait(_RETRY_S)
+                    continue
 
-            log.info("MTCReader: opening %s", port_name)
-            try:
-                with mido.open_input(port_name) as port:
-                    log.info("MTCReader: listening for MTC on %s", port_name)
-                    self._qf = [None] * 8
-                    while not self._stop.is_set():
-                        for msg in port.iter_pending():
-                            self._handle(msg)
-                        time.sleep(0.002)   # 2 ms poll — well under 40 ms frame interval
-            except Exception as exc:
-                log.warning("MTCReader: port error: %s — retry in %.0fs", exc, _RETRY_S)
-                self._stop.wait(_RETRY_S)
+                log.info("MTCReader: opening %s", port_name)
+                try:
+                    with mido.open_input(port_name) as port:
+                        log.info("MTCReader: listening for MTC on %s", port_name)
+                        self._qf = [None] * 8
+                        while not self._stop.is_set():
+                            for msg in port.iter_pending():
+                                self._handle(msg)
+                            time.sleep(0.002)   # 2 ms poll — well under 40 ms frame interval
+                except Exception as exc:
+                    log.warning("MTCReader: port error: %s — retry in %.0fs", exc, _RETRY_S)
+                    self._stop.wait(_RETRY_S)
 
     def _handle(self, msg) -> None:
         if msg.type == 'quarter_frame':

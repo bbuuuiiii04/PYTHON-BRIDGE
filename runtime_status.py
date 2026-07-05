@@ -137,9 +137,10 @@ class StatusWriter(threading.Thread):
         self._stop_event.set()
 
     def run(self) -> None:
-        while not self._stop_event.is_set():
-            self.write_once()
-            self._stop_event.wait(0.5)
+        with bridge_log.thread_guard("runtime-status"):
+            while not self._stop_event.is_set():
+                self.write_once()
+                self._stop_event.wait(0.5)
 
     def write_once(self) -> None:
         data = self.snapshot()
@@ -304,12 +305,13 @@ class CommandReader(threading.Thread):
         _prepare_command_file()
         with open(COMMANDS_PATH, "r", encoding="utf-8") as fp:
             fp.seek(0, os.SEEK_END)
-            while not self._stop_event.is_set():
-                line = fp.readline()
-                if not line:
-                    self._stop_event.wait(0.2)
-                    continue
-                self.handle_line(line)
+            with bridge_log.thread_guard("runtime-command-reader"):
+                while not self._stop_event.is_set():
+                    line = fp.readline()
+                    if not line:
+                        self._stop_event.wait(0.2)
+                        continue
+                    self.handle_line(line)
 
     def handle_line(self, line: str) -> None:
         try:

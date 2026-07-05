@@ -1203,15 +1203,13 @@ class RBMemoryReader(threading.Thread):
                     self._cache.update(chain_snap)
                     if self._drift is not None:
                         warn = self._drift.update(deck, chain_snap.elapsed_ms, chain_snap.playing)
-                        if warn:
-                            log.warning("drift deck=%d: %s", deck, warn)
+                        self._log_drift(deck, warn)
 
     def _publish_chain(self, deck: int, chain_snap: PositionSnapshot) -> None:
         self._cache.update(chain_snap)
         if self._drift is not None:
             warn = self._drift.update(deck, chain_snap.elapsed_ms, chain_snap.playing)
-            if warn:
-                log.warning("drift deck=%d: %s", deck, warn)
+            self._log_drift(deck, warn)
 
     def _read_decks_chain_first(self, s: "RBSession", now_t: float) -> None:
         """Skip-ObjC path: chain is authoritative; read_deck only as fallback.
