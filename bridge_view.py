@@ -348,6 +348,29 @@ def format_line(rec: dict[str, Any], width: int) -> list[tuple[str, str]]:
     return _truncate_segments(segments, width)
 
 
+def format_header(data: dict[str, Any]) -> str:
+    """SHOW-header line 1 in plain words (UX item 4, operator-approved).
+
+    Deck 0 is the bridge's "no audible deck" sentinel: render it as words
+    ("idle — no deck playing"), never as the code "D0"; likewise a missing
+    bpm never renders as the glued-together "unknownbpm".
+    """
+    led = data.get("led_look", "?")
+    palette = data.get("palette", "?")
+    laser = data.get("laser_scene", "?")
+    laser_text = "laser off" if laser in (None, "", "none") else f"laser {laser}"
+    deck = data.get("deck")
+    if deck in (None, 0, "0"):
+        return f"idle — no deck playing · led {led} · palette {palette} · {laser_text}"
+    bpm = data.get("bpm")
+    bpm_text = "bpm ?" if bpm in (None, "", "?", "unknown") else f"{bpm} bpm"
+    phrase = data.get("phrase", "?")
+    return (
+        f"deck {deck} · {bpm_text} · {phrase} · {laser_text}"
+        f" · led {led} · palette {palette}"
+    )
+
+
 def format_age(ts: float, now: float | None = None) -> str:
     """Render how long ago epoch-seconds *ts* was: 'just now'/'5s ago'/'2m ago'/...
 
@@ -748,15 +771,13 @@ def _draw_header(stdscr: Any, state: ViewerState, width: int, now: float, top: i
         age_attr = "yellow"
     else:
         age_attr = "green"
-    line1 = "  ".join([
-        f"D{data.get('deck', '?')}",
-        f"{data.get('bpm', '?')}bpm",
-        f"phrase={data.get('phrase', '?')}",
-        f"laser={data.get('laser_scene', '?')}",
-        f"led={data.get('led_look', '?')}",
-        f"palette={data.get('palette', '?')}",
-    ])
+    line1 = format_header(data)
     line2 = f"last rec {format_age(ts, now=now)}" if isinstance(ts, (int, float)) else "last rec unknown"
+    rgb_health = data.get("rgb_health")
+    if rgb_health:
+        # The heartbeat's health summary (contract: "deck, bpm, ..., health
+        # summary") rides the roomy staleness line, not the state line.
+        line2 += f" · led health {rgb_health}"
     try:
         stdscr.addstr(top, 0, line1[:width], _attr_for("bright"))
         stdscr.addstr(top + 1, 0, line2[:width], _attr_for(age_attr))

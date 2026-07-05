@@ -570,6 +570,36 @@ class ArgParserTest(unittest.TestCase):
         self.assertEqual(args.path, "/tmp/example.jsonl")
 
 
+class FormatHeaderTest(unittest.TestCase):
+    def test_idle_deck_zero_reads_as_words(self) -> None:
+        line = bridge_view.format_header(
+            {"deck": 0, "bpm": "unknown", "phrase": "other",
+             "laser_scene": "none", "led_look": "rt_twinkle", "palette": "violet"}
+        )
+        self.assertEqual(
+            line, "idle — no deck playing · led rt_twinkle · palette violet · laser off"
+        )
+        self.assertNotIn("D0", line)
+        self.assertNotIn("unknownbpm", line)
+
+    def test_live_deck_reads_as_sentence(self) -> None:
+        line = bridge_view.format_header(
+            {"deck": 1, "bpm": 124.0, "phrase": "chorus",
+             "laser_scene": "wave", "led_look": "warm", "palette": "sunset"}
+        )
+        self.assertEqual(
+            line, "deck 1 · 124.0 bpm · chorus · laser wave · led warm · palette sunset"
+        )
+
+    def test_live_deck_with_unknown_bpm(self) -> None:
+        line = bridge_view.format_header({"deck": 2, "bpm": "unknown"})
+        self.assertIn("deck 2 · bpm ?", line)
+
+    def test_empty_data_never_raises(self) -> None:
+        line = bridge_view.format_header({})
+        self.assertIn("idle — no deck playing", line)
+
+
 class DisplayMsgTest(unittest.TestCase):
     def test_single_code_prefix_stripped(self) -> None:
         self.assertEqual(

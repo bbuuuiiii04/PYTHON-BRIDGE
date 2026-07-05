@@ -152,7 +152,9 @@ stream and never touches the bridge process — closing or crashing it has zero 
 Screens (number keys switch):
 
 - **1 SHOW** (default, zero keys pressed): sticky header from the latest `perf.heartbeat` record
-  (deck, bpm, phrase, laser scene, LED look, palette) plus stream-staleness age (green ≤5s, yellow
+  in plain words — "deck 1 · 124.0 bpm · chorus · laser wave · led warm · palette sunset", or
+  "idle — no deck playing · …" when no deck is audible (never the "D0" code); the heartbeat's
+  `rgb_health` summary rides the staleness line — plus stream-staleness age (green ≤5s, yellow
   >5s, red >15s — a healthy bridge guarantees a fresh heartbeat every ≤2s) + the PERFORMANCE feed +
   a bottom OPERATOR strip (green "✓ all quiet since HH:MM:SS" when healthy). The heartbeat record
   itself is header-only: it never scrolls through the feed (a steady show is a still screen); it
