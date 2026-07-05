@@ -36,6 +36,18 @@ the twenty-one addendum behaviors; and the living-room-is-the-only-light fact bi
 specific darkness moves that were designed from festival lore. All fixable on paper, none
 require hardware, and none invalidate the GO verdicts.
 
+**Post-review operator decisions (2026-07-05, same day — these override the matching rulings
+below):**
+1. **Ember floor VETOED — total darkness is completely okay.** Every darkness-softening
+   change in this review is withdrawn: pre-drop blackouts, trap-drop vacuum gaps, span-scaling
+   off-zones, and the genre-pivot reset all render true black as originally designed, in both
+   WILD OUT and SET modes. P-1 is dead; F-7 stands only as the record of the audit.
+2. **No wrong-color veto pad — the palette pads are the correction path** (operator design):
+   in v2 the existing palette pads override the playing track's color live (temporary, that
+   play only); pressing **palette lock** while an override is active writes it as the
+   permanent per-track correction; **unlock while that track plays clears the stored
+   correction**. The file-backed per-track store survives from P-6; the new pad kind does not.
+
 ---
 
 ## 2. Rulings — every v2 element
@@ -58,7 +70,7 @@ Findings referenced as F-n (§3), operator-locked challenges as OLC-n (§4), pro
 | 1.8 | Late-drop palette surprise stays inside the track's own colors | **KEEP** | Constrains the existing drop-snap (`led_color_engine.py:409-447`, confirmed) to within-identity — exactly what the record's spec bullets already pin. |
 | 1.9 | Character drives motion style (punchy → sharp, smooth → flow) | **KEEP** | kick_cv stability 0.902 (measured fact). |
 | 1.10 | Long single-zone stretches are a feature | **KEEP** | Operator-locked (chapters). See OLC-3 for the sameness edge. |
-| 1.11 | Unmeasurable tracks → neutral-safe zone + operator correction path | **KEEP** | Correction path made concrete as P-6 (wrong-color veto pad). |
+| 1.11 | Unmeasurable tracks → neutral-safe zone + operator correction path | **KEEP** | Correction path = palette pads + lock (operator design, post-review decision 2 — supersedes P-6's veto pad). |
 | 1.12 | 10-family Camelot palette board (Glacier…Solar table) | **REDESIGN** | Superseded inside the record itself: the neon-zone revision (addendum item 1) removed key from the color story, but the board still anchors families to Camelot neighborhoods. Replacement: re-cut the board as zone-anchored families — cool/deep set (blues/teals/purples) for smooth-melodic zones, electric-neon set (hot magenta, acid cyan, lime) for aggressive zones, deep red/purple for the dubstep-extreme zone, true red rare/earned — with the hash spreading hue within the family. Warm stops still get added to `scale_stops` (six cool-only stops today, `led_models.py:72-79`, confirmed) because earned ambers/reds need to exist in the scale; they are accents now, not key-owned families. F-1. |
 | 1.13 | Tiered fallback (spectral → ANLZ+key → hash → journey) | **CHANGE** | Tier 2 silently died when key was cut and must be re-priced — F-2. Replacement tiering: Tier 1 spectral character (full identity); Tier 2 ANLZ-structure-only (dynamics budget from drop count + energy classes at `energy_model.py:15-29`, confirmed; zone = neutral-safe, hash-spread within it); Tier 3 hash-only; journey fallback unchanged. Plus the coverage fix: run the one-time library backfill (P-part of F-2) so Tier 1 covers ~the whole on-disk library instead of 66%. |
 | 1.14 | Identity derivation decoupled from smart-rearm flags | **KEEP** | Still coupled at HEAD (`state_manager.py:566-569` requires `RBSS_SMART_REARM_EXPERIMENT` and `RBSS_SPECTRAL_ENABLE`, confirmed) — the record's own-flag decision stands. |
@@ -74,7 +86,7 @@ Findings referenced as F-n (§3), operator-locked challenges as OLC-n (§4), pro
 | 2.4 | Character picks the build move + body language, per-track consistent | **KEEP** | |
 | 2.5 | Fires at every true drop, never on a bare 16/32-bar cycle | **KEEP** | ANLZ drop markers: 97.7% coverage, mean 6.6/track (measured fact); markers already drive v1 drop cues live, so the trust is inherited, and a missing marker just means no build move — safe absence. |
 | 2.6 | Tempo bending: continuous retarget; recalc on backward jumps only | **KEEP with CHANGE** | Bind each arrival instance to (deck, load_gen); on anchor-deck change mid-flight, degrade (wall-clock finish or melt), never retarget across two decks' beat timelines — F-5 scenario 2. The wrap → wall-clock degrade and the jitter → trigger-on-beat degrade stand as written. |
-| 2.7 | Audio-matched pre-drop blackout (silence-length-matched, cap ~4 bars; snap flick ~125–250 ms when music slams in) | **KEEP with CHANGES** | (a) Living-room ruling: §3 F-7 — true black stays the WILD OUT default because the room's own music is near-silent in exactly those beats (the sound explains the darkness); SET mode gets the ember floor (P-1). (b) The silence scan must reuse the operator-ear-validated empty-floor detector, not a second new detector (P-2 / F-16). (c) Owned by Feature 2's kill switch; kill reverts to the fixed 4-beat predark that exists in live config today (`led_predark_beats: 4`, live config, confirmed) — F-3. |
+| 2.7 | Audio-matched pre-drop blackout (silence-length-matched, cap ~4 bars; snap flick ~125–250 ms when music slams in) | **KEEP with CHANGES** | (a) Darkness: true black in both modes (post-review decision 1). (b) The silence scan must reuse the operator-ear-validated empty-floor detector, not a second new detector (P-2 / F-16). (c) Owned by Feature 2's kill switch; kill reverts to the fixed 4-beat predark that exists in live config today (`led_predark_beats: 4`, live config, confirmed) — F-3. |
 | 2.8 | Strobe acceleration lives in specific buildup cues (operator correction 2) | **KEEP** | Cue-owned behavior, role system schedules it — matches how v1 buildup cues already work (`govee_frame_renderer.py:644-731`, confirmed buildup strobe/ramp cues exist). Rates: see F-6 physics. |
 | 2.9 | Drop-type cue selection (dubstep-wall / techno-comet / tech-house sparkle→groove / bass-house pulse-expand) | **KEEP with CHANGE** | Add an explicit low-confidence default: when the drop-window classification is ambiguous, select the track's neutral drop family (today's behavior, identity-painted). Misclassification consequence analysis in F-11. Chooses *which* cue, never *whether/when* — containment holds. |
 | 2.10 | Trap vs dubstep drop distinction (sparse halftime hits + vacuum vs dense stutter) | **KEEP** | As classifier classes. The rhythmic vacuum's darkness ruling is in F-7. |
@@ -129,7 +141,7 @@ Findings referenced as F-n (§3), operator-locked challenges as OLC-n (§4), pro
 | 5.15 | v1 DIY looks + color tags → v2 accent vocabulary | **KEEP** | |
 | 5.16 | High-impact cooldowns carry into v2 pacing | **KEEP with CHANGE** | 12 s cooldown confirmed in live config. Define which v2 classes are "high-impact": drop bursts yes; phrase-end stingers and turnaround accents must be their own (shorter) class or every second stinger silently vanishes — a 16-bar phrase at 140 BPM is ~27 s, but stinger + drop + white burst interactions inside one phrase will collide with a single global 12 s lockout. F-12. |
 | 5.17 | Observability: engine, identity/zone, mode, texture class + reason in status; LED Pad identity chip | **KEEP with CHANGE** | Add: per-feature kill states, last drop-type classification + its reason, live blend scalar, and a per-track identity log line at load (track → zone → color) so zone misfires are reportable precisely — feeds P-6. Cheap, all read-side. |
-| 5.18 | Addendum items not separately listed (2 white-burst decay, 7 complementary pairs, 8 fade constants, 9 monolithic strip idiom, 13 trim knob, 15 diffusion note, 16 archetype refinements, 18 phrase stepping, 19 intra-phrase development, 20 turnaround stinger) | **KEEP** | Item 18's dependency confirmed: phrase grid + crossing flags already flow into LED dispatch (`led_dispatch_policy.py:707-709`, confirmed). Item 20 rides the arrival scheduler (2.1) and the cooldown-class fix (5.16). Item 9 matches the renderer's whole-strip idiom (confirmed by inventory). Item 14 palate reset: **KEEP as a dim neutral wash, not a blackout** (living room, F-7). Item 21 span scaling: **CHANGE**, see F-7 — span scales, but off-span segments drop to a dim base, not black, outside short accents; "center" must be a configurable anchor point on a room-perimeter strip (60 segments around the room — live config, confirmed). |
+| 5.18 | Addendum items not separately listed (2 white-burst decay, 7 complementary pairs, 8 fade constants, 9 monolithic strip idiom, 13 trim knob, 15 diffusion note, 16 archetype refinements, 18 phrase stepping, 19 intra-phrase development, 20 turnaround stinger) | **KEEP** | Item 18's dependency confirmed: phrase grid + crossing flags already flow into LED dispatch (`led_dispatch_policy.py:707-709`, confirmed). Item 20 rides the arrival scheduler (2.1) and the cooldown-class fix (5.16). Item 9 matches the renderer's whole-strip idiom (confirmed by inventory). Item 14 palate reset: **KEEP as designed** (neutral dip; darkness fine per post-review decision 1). Item 21 span scaling: **KEEP as designed** (dark off-span accepted, same decision); one addition stands: "center" must be a configurable anchor point on a room-perimeter strip (60 segments around the room — live config, confirmed). |
 | 5.19 | Vocal-flip treatment | **CUT — confirmed already cut** | Operator correction 1 stands; silence-only scan. Round-3's pop-wash lore does not re-enter through any other item — checked. |
 | 5.20 | Record's seeds: drop-landing restore / texture-gated accent discipline / key-neighborhood pre-echo | **KEEP / KEEP / CHANGE** | Seed 1 elevated into Feature 2 proper (P-3). Seed 2 is a natural Feature 1 output (eligibility predicate seam confirmed, `led_color_engine.py:453`). Seed 3: replace "key-neighborhood" with "identity-family pre-echo" — key is out of the color story; the mechanism (ambient accents drift one step toward the incoming track's family on load) survives unchanged and needs no key at all. |
 
@@ -222,26 +234,17 @@ combination as continuous). This is physics, not a policy cap — the operator's
 untouched (see OLC-2 for the comfort challenge). **Confirmed** (code); perceptual claim
 **assumed** (standard, but the live pass is the gate).
 
-**F-7 (Medium) — Living-room darkness audit: four designs imported festival darkness into the
-room's only light source; two need floors, two are fine as-is.** The constraint (record
-§Venue reality) applied item by item: (a) **audio-matched pre-drop blackout (≤4 bars)** — KEEP
-true black in WILD OUT: the music itself is near-silent in exactly those beats, the operator
-already runs 4-beat hand-tuned blackouts live (`led_predark_beats: 4`, confirmed), and the
-sound explains the darkness to the room; SET mode defaults to the ember floor (P-1). At 140
-BPM the 4-bar cap is ~6.9 s of total darkness — flagged as the taste veto in §6 Q1. (b)
-**trap rhythmic vacuum** (items 16/17) — the drop phrase is mostly-dark with blinding hits
-for 30+ s; in a living room this is the single most likely "someone trips or asks for the
-lights" moment. CHANGE: vacuum gaps render at the ember floor by default in SET mode; WILD
-OUT keeps true 0% (operator-locked spirit), with the floor available as a per-cue param. (c)
-**span scaling** (item 21) — "small center segment in verses" would leave the room's only
-light at a fraction of one wall for minutes. CHANGE: off-span segments hold a dim identity
-base (depth-axis-scaled), not black; span contrast comes from motion living in the span, not
-from darkness outside it. (d) **palate reset** (item 14) — CHANGE to a 1–2 s dim neutral
-wash, never a blackout: a genre pivot is not a musical silence, and an unexplained 2 s
-room-blackout reads as a power cut. (e) **SET-mode dimming** — resolved by ruling 5.2
-(withhold layers, don't dim the room). (f) **breakdown ease-down** (P-3) — bounded by the
-track's dynamics budget and never below the ember floor in SET mode. **Confirmed** constraint
-(operator venue statement); each ruling is design judgment for the live-look gate.
+**F-7 (Medium → RESOLVED by post-review decision 1) — Living-room darkness audit.** The
+constraint (record §Venue reality) was applied to every darkness-using item: (a) audio-matched
+pre-drop blackout (≤4 bars — ~6.9 s of total darkness at 140 BPM); (b) trap rhythmic vacuum
+(items 16/17 — mostly-dark drop phrases for 30+ s with blinding hits); (c) span scaling
+(item 21 — room's only light shrunk to a fraction of one wall for whole verses); (d) palate
+reset (item 14 — 1–2 s neutral dip on genre pivots); (e) SET-mode dimming; (f) breakdown
+ease-down (P-3). The review proposed darkness floors for (a)–(d) and the ember floor (P-1).
+**Operator resolution (2026-07-05): total darkness is completely okay — all items render true
+black as originally designed, in both modes; ember floor vetoed.** Surviving pieces: (e) is
+resolved by ruling 5.2 (layer withholding); the audit itself stands as the record that the
+constraint was checked everywhere, and the live-look pass remains the final arbiter.
 
 **F-8 (Medium) — The blend painter and identity recoloring need a uniform per-cue color-slot
 contract that does not exist yet.** Location: record §v1→v2 mapping ("split shape from
@@ -369,7 +372,9 @@ punch vs grit), not abandoning neon.
 challenge to reverse the lock — a consequence it must carry: permanence means a wrong zone
 assignment is *permanently* wrong until corrected, every night, on a track the operator
 plays often. The correction path (locked item 10) is therefore a launch requirement, not a
-nice-to-have — it must exist the first night v2 paints identities (concrete form: P-6).
+nice-to-have — it must exist the first night v2 paints identities. Concrete form settled by
+post-review decision 2: palette pads override live, palette lock makes it permanent for that
+track.
 Scenario without it: one beloved track lands acid-lime forever, and the only fix is a config
 dive mid-week from memory.
 
@@ -378,14 +383,9 @@ dive mid-week from memory.
 ## 5. New proposals (each cleared against: reliable signals only / zero per-track authoring /
 safe-neutral failure / living-room reality / existing kill-switch + authority architecture)
 
-**P-1 — The ember floor.** A single global "minimum room light" layer: sustained dark states
-(anything darker than N% for more than ~2 bars outside a WILD OUT drop window or pre-drop
-blackout) render at a barely-there deep-red/amber glow (~3–5%, identity-tinted where one
-exists) instead of true 0%. SET mode: on by default. WILD OUT: off (locks honored). Gates:
-no signals needed (pure render policy — reliability trivially satisfied); zero authoring;
-failure mode is *more* light, never less (safe-neutral); it exists *because* of the living
-room; sits below manual/emergency authority and dies with the master switch. One multiply +
-clamp in frame composition (same seam as F-14).
+**P-1 — The ember floor. VETOED (post-review decision 1).** Proposed as a global "minimum
+room light" glow (~3–5%) for sustained dark states. Operator: total darkness is completely
+okay. Not built; recorded here so it isn't re-proposed.
 
 **P-2 — One silence primitive.** Promote the operator-ear-validated empty-floor detector to a
 single shared "bottom-gone" classifier consumed by the texture darkness class, the
@@ -401,8 +401,8 @@ drop's first beat* — the drop beat is known ahead of time from ANLZ (confirmed
 against a future beat is the proven autoloop pattern (confirmed). It is the same machinery as
 the build family, it composes the blackout + landing + drop-cue stack into one legible arc,
 and it is the single v2 moment guests will describe out loud. Gates: backbone signals (ANLZ
-markers + arrival engine); no authoring; marker absent ⇒ today's role change (safe); respects
-the ember floor; owned by Feature 2's kill.
+markers + arrival engine); no authoring; marker absent ⇒ today's role change (safe); owned by
+Feature 2's kill.
 
 **P-4 — Zone-complement laser pairing.** Make addendum item 7's proven pairs the laser
 personality rule: each color zone carries a fixed complementary accent pair (neon zones →
@@ -423,23 +423,21 @@ the same captured blends — no live iteration burned on tuning. Gates: it's a t
 (no runtime surface at all); fails safe by definition; directly converts the record's one
 labeled unknown (fader smoothness) into a repeatable asset.
 
-**P-6 — The wrong-color veto pad.** The concrete correction path locked item 10 requires:
-one pad/LED Pad action ("wrong color") that, for the currently-active track, logs content id
-+ current zone to a small corrections file and immediately re-derives identity with the next
-zone over (cycling on repeat presses). File-backed (survives restarts), per-track scoped,
-empty by default (zero authoring until the operator objects to a specific track — which is
-the *definition* of the correction path, not per-track authoring). Failure: file unreadable ⇒
-derived identity as computed (safe). Surfaces via the existing pad-kind pattern (confirmed
-seam) and shows in the status identity line (ruling 5.17).
+**P-6 — The wrong-color veto pad. SUPERSEDED by the operator's better design (post-review
+decision 2).** No new pad kind: the existing palette pads override the playing track's color
+live; **palette lock** while an override is active writes it as the permanent per-track
+correction; **unlock** while that track plays clears it. What survives from this proposal is
+the invisible half: the file-backed per-track corrections store (content id → chosen
+zone/color; survives restarts; empty by default; unreadable file ⇒ derived identity as
+computed — safe) and the status line showing when a track's color is operator-corrected
+(ruling 5.17). In v2 mode the palette pads map onto the zone families.
 
 ---
 
 ## 6. Open questions for Brandon (taste only — defaults are chosen; veto if wrong)
 
-1. **How dark is "blackout" allowed to get?** Default built: in WILD OUT mode the pre-drop
-   blackouts and trap-drop gaps go truly pitch black (the music is silent there — the room
-   will understand); in SET mode the room never drops below a barely-visible deep-red glow so
-   people can find their drinks. Veto either half.
+1. ~~How dark is "blackout" allowed to get?~~ **ANSWERED (post-review decision 1): total
+   darkness is completely okay — true black everywhere, both modes, ember floor vetoed.**
 2. **If the bridge restarts mid-night, tracks may do their first-play bloom again.** Default:
    we accept the re-bloom (it's rare and it's pretty). Veto if you'd rather it never repeat —
    that costs a small memory file.
