@@ -41,14 +41,35 @@ and signal-processing vocabulary.
 
 ## Track selection — non-negotiable
 
-All prototyping, validation, and the library sweep use **only tracks in playlists under the
-operator's genre playlist folder in the Rekordbox DB — he calls it "BY GENRE"** (query the
-playlist tree via the bridge's own DB layer; `personality_resolver.py` shows the
-playlist-membership pattern and defaults to a folder named "PER GENRE" — resolve the actual
-folder name at runtime, prefer "BY GENRE", and if no such folder exists, stop and report
-rather than sampling the whole collection). The point: his collection contains non-EDM
-(e.g. rap) tracks that must not pollute analysis, calibration, or corpus statistics. Anything
-outside the genre folder is out of scope for this entire task.
+Two different scopes, do not mix them:
+
+- **The sweep analyzes the whole on-disk library.** Every track gets a v4 cache entry, so
+  whatever the operator plays has data. Lots of his EDM is not filed into genre playlists —
+  that music still gets analyzed.
+- **Everything you hand-pick comes from the "BY GENRE" playlist folder**: manual sample
+  tracks, prototype targets, timestamped event outlines, corpus-absolute calibration
+  statistics, and every genre-discrimination proof. His collection also contains non-EDM
+  (e.g. rap); tracks outside the genre folder must never be chosen as examples and must
+  never enter calibration statistics or validation claims — cache them in the sweep, learn
+  from them never. Query the playlist tree via the bridge's own DB layer
+  (`personality_resolver.py` shows the playlist-membership pattern); the folder is named
+  "BY GENRE" (verified present in the DB 2026-07-05); if you cannot resolve it, stop and
+  report rather than sampling the whole collection.
+
+**The genre playlists are labeled ground truth — use them.** Each playlist under BY GENRE
+holds one genre; analyze tracks from each and prove your measurements capture what defines
+that genre's sound. The operator's own genre map, in his words:
+
+- Festival tech house (e.g. Odd Mob sound): bassy accent **sustains** at the drops.
+- Bass house: **stabby, jumpy** beats.
+- Dubstep: several distinct **drop characters** — the measurements should tell them apart.
+- Trap (e.g. ISOxo): **heavy but sparse** beat drops.
+- Hard techno: **pounding, driving** beats.
+- Synth house: the **euphoric synth sustain** drop examples live here.
+
+A v4 that cannot demonstrate these distinctions on the labeled playlists has not met the
+bar — genre-level discrimination of drop-window character is a required proof, not a
+nice-to-have.
 
 ## The operator's bar (requirements seed — a floor, not a ceiling)
 
@@ -145,9 +166,10 @@ cut or shipped disabled and labeled `unproven` with the exact experiment that wo
   entries must not corrupt or delete v3 entries mid-transition — design the coexistence and
   cutover. Writing **v4 cache entries** is in scope; v3 entries, the Rekordbox DB, ANLZ
   files, and audio files are strictly read-only.
-- Budget (justify your numbers): the full genre-folder sweep completes overnight on the
+- Budget (justify your numbers): the full whole-library sweep completes overnight on the
   operator's MacBook Air; per-track extraction at load stays in the seconds range; state and
-  defend the expected cache size (v3 baseline: 43 MB / 476 tracks).
+  defend the expected cache size (v3 baseline: 43 MB / 476 tracks; the on-disk library is
+  ~686 tracks and growing).
 - Identity-epoch discipline: v4 is the first and only identity epoch — Feature 1 identities
   will derive from v4 output and freeze (review F-9). The four proven character axes (or
   measurably better replacements) must be derivable from v4 — show stability numbers.
@@ -160,8 +182,8 @@ cut or shipped disabled and labeled `unproven` with the exact experiment that wo
 ## Execution shape
 
 Work autonomously, end to end: research → audit → design → implement → validate on his music
-→ run the genre-folder library sweep (background it and verify completion + coverage stats)
-→ write the report. You may deploy **at most one Fable-tier subagent at a time** for
+(genre-folder samples) → run the whole-library sweep (background it and verify completion +
+coverage stats) → write the report. You may deploy **at most one Fable-tier subagent at a time** for
 implementation or fresh-context adversarial review (operator grant); cheaper read-only
 subagents for research and corpus sweeps may run in parallel. Verify any claim you build on
 yourself. When you have enough information to act, act; do not re-derive the named measured
@@ -218,9 +240,12 @@ calls — plain language, complete sentences, for a reader who saw none of the w
   coverage table with a measurement or an honest `unreachable`.
 - Every load-bearing v4 measurement is proven on genre-folder tracks; anything unproven is
   disabled and labeled with its missing experiment.
+- The genre-discrimination proof stands: the labeled BY GENRE playlists' defining drop
+  characters (per the operator's genre map) are demonstrably distinguishable in v4 output.
 - The four identity axes (or justified better replacements) are derivable from v4 with
   stability evidence.
-- The genre-folder sweep has run to completion with reported coverage, duration, and cache
-  size — and only genre-folder tracks were analyzed.
+- The whole-library sweep has run to completion with reported coverage, duration, and cache
+  size — while every hand-picked sample, calibration statistic, and validation claim used
+  genre-folder tracks only.
 - The report exists, passes checks, opens with the v3 verdict, and includes the timestamped
   event outlines the operator can verify by ear.
