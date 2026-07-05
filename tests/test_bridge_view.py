@@ -266,11 +266,16 @@ class FormatLineTest(unittest.TestCase):
         rendered = "".join(text for text, _ in segments)
         self.assertIn("autoloop", rendered)
 
-    def test_unmapped_cat_falls_back_to_raw_cat_verbatim(self) -> None:
+    def test_unmapped_cat_falls_back_to_raw_cat_capped_to_column(self) -> None:
+        # Unmapped categories still route and render with no viewer change
+        # (extension rule), but the surface column hard-caps so alignment
+        # never breaks (UX item 3, operator-approved 2026-07-05).
         rec = {"ts": 1.0, "lvl": "INFO", "cat": "totally.unknown.category", "src": "x", "msg": "hi"}
         segments = bridge_view.format_line(rec, width=200)
         rendered = "".join(text for text, _ in segments)
-        self.assertIn("totally.unknown.category", rendered)
+        cap = bridge_view._SURFACE_WIDTH
+        self.assertIn("totally.unknown.category"[:cap], rendered)
+        self.assertNotIn("totally.unknown.category"[: cap + 1], rendered)
 
     def test_no_reason_segment_when_absent(self) -> None:
         rec = {"ts": 1.0, "lvl": "INFO", "cat": "perf.deck", "src": "state_manager", "msg": "switch"}

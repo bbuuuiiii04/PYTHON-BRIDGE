@@ -159,9 +159,9 @@ def lens_of(rec: dict[str, Any]) -> set[str]:
 
 # Friendly display names for known categories (design doc Section 2.1 rule 6:
 # plain words, never codes). Unmapped categories fall back to their raw
-# cat/src string verbatim -- a new perf.*/health.* category routes itself
-# with no viewer change required (the "extension rule",
-# docs/architecture/logging_authority.md).
+# cat/src string (hard-capped to the surface column width) -- a new
+# perf.*/health.* category routes itself with no viewer change required
+# (the "extension rule", docs/architecture/logging_authority.md).
 FRIENDLY: dict[str, str] = {
     "perf.deck": "deck",
     "perf.drop": "drop",
