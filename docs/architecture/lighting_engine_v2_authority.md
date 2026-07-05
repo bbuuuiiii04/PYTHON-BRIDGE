@@ -241,6 +241,23 @@ so ties always land neutral. Selection chooses *which* cue, never *whether or wh
 fires it). Held-out measurement already proves these families are separable well above
 chance. The classification and its reason are visible in status per drop.
 
+**Drop energy, within the family.** Every drop renders full-scale (law 5) — so a drop's
+energy level never scales its brightness down; it shapes its **aggression profile**. Each
+drop gets a measured intensity tier (corpus-absolute, from its window: absolute level, lift
+over the track's own loudness reference, low-end attack, onset density, pre-drop vacuum),
+and the tier sets the violence knobs *within* the chosen family: strobe density and burst
+structure (continuous wall vs stutter bursts vs no strobe at all), animation-rate rung
+(every beat / half-beat / quarter-beat), white share (white-hot core vs white accents
+riding the track's color), motion violence, and micro-darkness between hits. Concretely: a
+pounding hard-techno drop reads **relentless** — driving beat-locked red comet, white
+slamming on the one, no gaps, the room pounding as one light. An ISOxo-grade trap/dubstep
+monster reads **maximal** — full-strip white stutter-strobe at half/quarter-beat rates with
+darkness between the hits so each one lands harder. A groovy house drop is *just as
+bright* but reads **bounce** — color-forward pulse and sparkle, white as accents, no wall.
+The tier is per-drop, not per-track — a track's four drops measurably differ (Ray Volpe —
+DROP EM spans clean-to-growliest across its four) — and SET mode's "true ceiling reserved
+for peak-time" reads this same tier.
+
 ## 5. Which fixtures fire (drop presentation — v1 authority, carried forward)
 
 This is already implemented and software-tested, and v2 keeps it exactly (it is the

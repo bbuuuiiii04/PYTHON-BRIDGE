@@ -455,6 +455,16 @@ originals.
     authored as Template Lab shapes against the color-slot contract, and selected by
     measured character/energy, never hand-assigned per track. Authoring and tuning happen
     in the build + live phase through the existing Template Lab flow.
+11. **The drop intensity tier + aggression profile (operator ask 2026-07-05):** define the
+    per-drop measured intensity tier (corpus-absolute over the drop-window vector: absolute
+    level, lift vs the track's `loudness_ref_db`, `attack_low_p90`, onset density,
+    `pre_gap_beats`) and the mapping tier × family → profile knobs: strobe density/burst
+    structure, animation-rate rung, white share, motion violence, inter-hit micro-darkness.
+    The full-scale law is untouched — the tier shapes aggression, never the brightness
+    ceiling. Anchors: hard-techno relentless pound vs ISOxo-grade maximal strobe vs
+    groovy-house bounce; falsifiable: Ray Volpe — DROP EM's four drops (measured attack
+    2.7→16.1 dB, flatness 0.30→0.42) must not all land in one tier. SET mode's peak-time
+    ceiling reservation reads this same tier.
 
 ### 6.3 Analysis gaps to design around (never promise these)
 
