@@ -3,14 +3,16 @@ doc_status: current
 truth_level: design-intent, code-grounded (all file:line citations verified at 4077794)
 last_verified_commit: 944bc83
 last_verified_date: 2026-07-03
-validation_scope: design only — nothing implemented; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED repo status unchanged
+validation_scope: design artifact grounding an implemented/software-tested feature; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED repo status unchanged
 ---
 
 # LED Pad + Template Lab — Design, Delivery Plan, and Codex Spec
 
-Status: **planned** (design artifact — nothing here is implemented). All references verified
-against HEAD `4077794` on 2026-07-03. Repo status remains SOFTWARE-VALIDATED ONLY /
-HARDWARE-UNVALIDATED; nothing in this document upgrades that.
+Status: **implemented/software-tested** (design artifact whose phases have since landed; see
+`docs/plans/active/led_pad_template_lab_spec.md` for the current phase table). References below
+were verified against HEAD `4077794` on 2026-07-03 and are historical design context, not a live
+status feed. Repo status remains SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED; nothing in this
+document upgrades that.
 
 Claim labels used throughout: **[confirmed]** = read in current code this session,
 **[assumed]** = reasonable inference, not proven, **[decision]** = design choice this doc makes.

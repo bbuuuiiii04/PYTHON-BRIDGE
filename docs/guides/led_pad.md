@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 6aa44fa
-last_verified_date: 2026-07-03
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, QR same-network access, the iOS/iPad touch pass, and the editor unset-param-defaults fix; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+last_verified_commit: dd48a3c
+last_verified_date: 2026-07-04
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), QR same-network access, the iOS/iPad touch pass, and the editor unset-param-defaults fix; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -141,6 +141,30 @@ traceback display, Accept/Reject status, and a static promotion checklist. Accep
 not promote code by itself; promotion is a later agent task that moves tested code into
 `govee_frame_renderer.py`, updates allowlists/docs/tests, and then requires a safe bridge restart.
 
+### Live tuning (`/api/lab/update`) and variant switching (`/api/lab/switch`)
+
+While a lab draft is playing, editing its Params JSON in the UI auto-applies after a short debounce
+(`POST /api/lab/update {"name", "params"}`) instead of requiring a Play click — no cue-timer or
+clock restart, just a live re-apply through the same path production pad-look tuning already uses.
+The agent API can call `/api/lab/update` directly for talk-mode tuning. `cue_beats` changes still
+only take effect on the next Play.
+
+Selecting a different draft while one is already playing turns the Play button into **⇄ Switch**;
+clicking it calls `/api/lab/switch {"name"}` to seamlessly swap the live scene without stopping the
+beat (`CueTimer`/`SyntheticClock` untouched) — this is the A/B/C variant-comparison workflow.
+`lab_switch` only applies when a `lab_*` scene is already playing; if a pad look is playing instead,
+the UI falls back to the existing `/api/lab/play` request, which carries the normal preempt and
+ownership handling.
+
+### Offline preview (`/api/lab/preview`)
+
+`POST /api/lab/preview {"name", "params"?, "beats"?, "bpm"?}` renders a draft's frames offline —
+no transport, no ownership check, no UDP, and it never swaps the live `LabRenderer`'s effects (it
+builds a fresh one). The Lab page's **◉ Preview** button calls this endpoint and animates the
+returned frames on a canvas strip in the detail panel, so a draft can be eyeballed in the browser
+before it ever reaches the physical strip. A broken `effects_lab.py` returns
+`{"ok": false, "error", "traceback"}` and the UI shows the traceback panel instead of animating.
+
 ## Ownership And Recovery
 
 If the bridge is not live, LED Pad can play directly. If the bridge status file is fresh, the
@@ -211,7 +235,8 @@ runtime/API behavior change):
 
 ## Status
 
-Phases 1-3 and Template Lab Phase 2 are implemented/software-tested. Locked Palette and renderer
-param unlock behavior is covered by software tests only. All LED Pad and Template Lab playback/UI
-claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. The iOS/iPad touch pass is
+Phases 1-3, Template Lab Phase 2, and Template Lab Round 1 (`/api/lab/update`, `/api/lab/switch`,
+`/api/lab/preview`, auto-apply, preview strip) are implemented/software-tested. Locked Palette and
+renderer param unlock behavior is covered by software tests only. All LED Pad and Template Lab
+playback/UI claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. The iOS/iPad touch pass is
 implemented/software-tested only; on-device verification is pending.
