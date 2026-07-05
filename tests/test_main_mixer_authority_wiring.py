@@ -3,19 +3,28 @@ from __future__ import annotations
 import inspect
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2 import __main__ as main_mod  # noqa: E402
-from rb_ss_bridge_v2.__main__ import (  # noqa: E402
-    _direct_master_startup_seed,
-    _initial_show_deck_for_startup,
-    _offsets_have_mixer_authority,
-    _rb_state_authoritative_kinds,
-)
+# rb_ss_bridge_v2.__main__ calls bridge_log.init() at import time (Task W2
+# cutover). Redirect it into a throwaway dir so the import never touches the
+# operator's real ~/Library/Logs or /tmp/bridge-events.jsonl, then shut it
+# down immediately so test_bridge_log.py gets a clean, un-initialized
+# singleton to exercise.
+with mock.patch.dict(os.environ, {"RBSS_RUNTIME_DIR": tempfile.mkdtemp(prefix="rbss_test_runtime_")}):
+    from rb_ss_bridge_v2 import __main__ as main_mod  # noqa: E402
+    from rb_ss_bridge_v2.__main__ import (  # noqa: E402
+        _direct_master_startup_seed,
+        _initial_show_deck_for_startup,
+        _offsets_have_mixer_authority,
+        _rb_state_authoritative_kinds,
+    )
+from rb_ss_bridge_v2 import bridge_log  # noqa: E402
+bridge_log.shutdown()
 from rb_ss_bridge_v2.models import Ev  # noqa: E402
 from rb_ss_bridge_v2.rb_offsets import load_offsets_for_version  # noqa: E402
 from rb_ss_bridge_v2.rb_state_reader import DirectMasterStatus  # noqa: E402

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import inspect
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import MappingProxyType
@@ -10,7 +12,15 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import rb_ss_bridge_v2.__main__ as bridge_main
+# rb_ss_bridge_v2.__main__ calls bridge_log.init() at import time (Task W2
+# cutover). Redirect it into a throwaway dir so the import never touches the
+# operator's real ~/Library/Logs or /tmp/bridge-events.jsonl, then shut it
+# down immediately so test_bridge_log.py gets a clean, un-initialized
+# singleton to exercise.
+with mock.patch.dict(os.environ, {"RBSS_RUNTIME_DIR": tempfile.mkdtemp(prefix="rbss_test_runtime_")}):
+    import rb_ss_bridge_v2.__main__ as bridge_main
+from rb_ss_bridge_v2 import bridge_log
+bridge_log.shutdown()
 from rb_ss_bridge_v2.artnet_truth import TruthCheckEnv
 from rb_ss_bridge_v2.laser_config import LaserConfig, LaserConfigResult
 from rb_ss_bridge_v2.laser_models import LaserMidiMessage

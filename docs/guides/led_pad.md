@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: bd6369e
+last_verified_commit: 2040c1f
 last_verified_date: 2026-07-04
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview) and Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), QR same-network access, the iOS/iPad touch pass, and the editor unset-param-defaults fix; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), and Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, and the editor unset-param-defaults fix; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -190,6 +190,22 @@ returned frames on a canvas strip in the detail panel, so a draft can be eyeball
 before it ever reaches the physical strip. A broken `effects_lab.py` returns
 `{"ok": false, "error", "traceback"}` and the UI shows the traceback panel instead of animating.
 
+### Rejected filter and delete (Round 3)
+
+The drafts list hides `rejected`-status entries by default; a `Rejected (n)` chip next to **New**
+toggles them back into view (`n` = the rejected count). The filter is pure UI — `GET /api/lab/list`
+always returns every entry regardless of status, so an agent driving the API directly still sees
+rejected drafts (the "don't re-pitch this" record) even while the operator's list view hides them.
+Selecting a draft that the filter later hides keeps it selected; only the list row disappears, the
+detail panel is unaffected.
+
+`POST /api/lab/delete {"name"}` removes a draft's `drafts.json` entry only — it never touches the
+function inside `effects_lab.py` (that cleanup stays a separate manual/agent step) and it refuses
+while that exact draft is the one currently playing (`{"ok": false, "error": "stop_playback_first"}`)
+instead of stopping playback on the operator's behalf. The Lab page's **Delete** button sits at the
+end of the action row, away from **▶ Play**, confirms through the shared `PadModal`, shows "Stop
+playback first." on refusal, and otherwise clears the selection and refreshes the list.
+
 ## Ownership And Recovery
 
 If the bridge is not live, LED Pad can play directly. If the bridge status file is fresh, the
@@ -261,8 +277,9 @@ runtime/API behavior change):
 ## Status
 
 Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (`/api/lab/update`, `/api/lab/switch`,
-`/api/lab/preview`, auto-apply, preview strip), and Template Lab Round 2 (`param_specs`
-slider/toggle controls, slot swatches, JSON demoted under Advanced) are implemented/software-tested.
+`/api/lab/preview`, auto-apply, preview strip), Template Lab Round 2 (`param_specs`
+slider/toggle controls, slot swatches, JSON demoted under Advanced), and Template Lab Round 3
+(rejected-drafts filter, `/api/lab/delete`) are implemented/software-tested.
 Locked Palette and renderer param unlock behavior is covered by software tests only. All LED Pad
 and Template Lab playback/UI claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. The
 iOS/iPad touch pass is implemented/software-tested only; on-device verification is pending.

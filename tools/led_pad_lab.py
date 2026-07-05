@@ -110,6 +110,16 @@ class LabRegistry:
         entry["status"] = status
         return self.save(entry)
 
+    def delete(self, name: str) -> dict[str, Any]:
+        data = self._load()
+        entries = data["entries"]
+        existing = next((item for item in entries if item.get("name") == name), None)
+        if existing is None:
+            raise ValueError(f"unknown lab draft: {name}")
+        entries.remove(existing)
+        self._save(data)
+        return {"ok": True, "deleted": name}
+
     @staticmethod
     def scene_ref(name: str) -> str:
         return f"lab_{name}"

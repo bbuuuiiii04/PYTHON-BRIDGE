@@ -33,7 +33,7 @@
     <div id="errorBanner" class="error-banner" hidden></div>
     <section class="lab-layout">
       <aside class="lab-list-panel">
-        <div class="panel-head"><h2 class="panel-label">Drafts</h2><button id="newDraftBtn" type="button" class="primary">New</button></div>
+        <div class="panel-head"><h2 class="panel-label">Drafts</h2><button id="rejectedToggle" type="button" class="ghost"></button><button id="newDraftBtn" type="button" class="primary">New</button></div>
         <div id="draftList" class="lab-list"></div>
       </aside>
       <section class="lab-detail-panel">
@@ -58,6 +58,7 @@
           <button id="reloadBtn" type="button" class="ghost">⟳ Reload code</button>
           <button id="acceptBtn" type="button" class="ghost">Accept</button>
           <button id="rejectBtn" type="button" class="ghost">Reject</button>
+          <button id="deleteBtn" type="button" class="danger ghost">Delete</button>
         </div>
         <div class="preview-row">
           <button id="previewBtn" type="button" class="ghost">◉ Preview</button>

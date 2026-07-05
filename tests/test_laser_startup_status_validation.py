@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import queue
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -11,7 +13,15 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2.__main__ import _build_laser_startup_wiring  # noqa: E402
+# rb_ss_bridge_v2.__main__ calls bridge_log.init() at import time (Task W2
+# cutover). Redirect it into a throwaway dir so the import never touches the
+# operator's real ~/Library/Logs or /tmp/bridge-events.jsonl, then shut it
+# down immediately so test_bridge_log.py gets a clean, un-initialized
+# singleton to exercise.
+with patch.dict(os.environ, {"RBSS_RUNTIME_DIR": tempfile.mkdtemp(prefix="rbss_test_runtime_")}):
+    from rb_ss_bridge_v2.__main__ import _build_laser_startup_wiring  # noqa: E402
+from rb_ss_bridge_v2 import bridge_log  # noqa: E402
+bridge_log.shutdown()
 from rb_ss_bridge_v2.laser_config import LaserConfig, LaserConfigResult  # noqa: E402
 from rb_ss_bridge_v2.laser_models import LaserMidiMessage, LaserPersonality, LaserScene  # noqa: E402
 from rb_ss_bridge_v2.laser_models import LaserContext, LaserSceneDecision  # noqa: E402

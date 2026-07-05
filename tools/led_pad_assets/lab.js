@@ -2,7 +2,7 @@
   const api = window.LedPadApi;
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const state = {entries: [], current: null, playingLook: ""};
+  const state = {entries: [], current: null, playingLook: "", showRejected: false};
 
   function showError(err) {
     $("errorBanner").hidden = false;
@@ -36,7 +36,10 @@
   }
 
   function renderList() {
-    $("draftList").innerHTML = state.entries.length ? state.entries.map(e => `
+    const rejectedCount = state.entries.filter(e => e.status === "rejected").length;
+    $("rejectedToggle").textContent = `Rejected (${rejectedCount})`;
+    const visible = state.entries.filter(e => state.showRejected || e.status !== "rejected");
+    $("draftList").innerHTML = visible.length ? visible.map(e => `
       <button type="button" class="lab-row ${state.current && state.current.name === e.name ? "active" : ""}" data-name="${esc(e.name)}">
         <span>${esc(e.name)}</span>
         <span class="status-pill ${esc(e.status)}">${esc(e.status)}</span>
@@ -56,7 +59,7 @@
   function renderDetail() {
     const e = state.current;
     const disabled = !e;
-    for (const id of ["briefInput", "notesInput", "paramsInput", "saveDraftBtn", "playDraftBtn", "acceptBtn", "rejectBtn", "previewBtn"]) $(id).disabled = disabled;
+    for (const id of ["briefInput", "notesInput", "paramsInput", "saveDraftBtn", "playDraftBtn", "acceptBtn", "rejectBtn", "previewBtn", "deleteBtn"]) $(id).disabled = disabled;
     if (!e) { $("paramControls").innerHTML = ""; return; }
     $("draftTitle").textContent = e.name;
     $("draftFn").textContent = `${e.kind} · ${e.fn}`;
@@ -255,6 +258,17 @@
   $("reloadBtn").onclick = () => reloadCode().catch(showError);
   $("acceptBtn").onclick = () => state.current && api.labAccept(state.current.name).then(refresh).catch(showError);
   $("rejectBtn").onclick = () => state.current && api.labReject(state.current.name).then(refresh).catch(showError);
+  $("rejectedToggle").onclick = () => { state.showRejected = !state.showRejected; renderList(); };
+  $("deleteBtn").onclick = () => state.current && PadModal.confirm(`Delete draft ${state.current.name}?`, "Removes the drafts.json entry. Its function in effects_lab.py stays — clean that up separately.", "Delete", async () => {
+    try {
+      await api.labDelete({name: state.current.name});
+    } catch (err) {
+      if ((err && err.message) === "stop_playback_first") { showError("Stop playback first."); return; }
+      throw err;
+    }
+    state.current = null;
+    await refresh();
+  });
   $("paramsInput").onblur = () => { try { JSON.parse($("paramsInput").value || "{}"); clearError(); } catch (err) { showError(err); } };
   $("paramsInput").oninput = () => queueAutoApply();
   $("bpmInput").onchange = ev => api.session({bpm:Number(ev.target.value)}).catch(showError);
