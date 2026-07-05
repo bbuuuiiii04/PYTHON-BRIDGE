@@ -136,10 +136,35 @@ Lab names must be lowercase identifiers and cannot collide with production realt
 They play as `lab_<name>` through the same standalone playback slot as LED Pad looks, so starting
 a lab draft preempts pad playback and starting a pad look preempts lab playback.
 
-The Lab page supports draft brief/notes, params JSON, cue length, Play/Stop, Reload code,
-traceback display, Accept/Reject status, and a static promotion checklist. Accepting a draft does
-not promote code by itself; promotion is a later agent task that moves tested code into
+The Lab page supports draft brief/notes, param controls (see below), cue length, Play/Stop, Reload
+code, traceback display, Accept/Reject status, and a static promotion checklist. Accepting a draft
+does not promote code by itself; promotion is a later agent task that moves tested code into
 `govee_frame_renderer.py`, updates allowlists/docs/tests, and then requires a safe bridge restart.
+
+### Param controls and slot swatches (Round 2)
+
+A draft's saved `param_specs` (authored by the agent alongside the draft, via `/api/lab/save`) turn
+its tunable params into touch-first controls above the raw JSON: a `"slider"` spec
+(`{"kind": "slider", "label", "min", "max", "step"}`) renders a `<input type="range">` row with a
+live numeric readout, and a `"toggle"` spec renders a checkbox. Dragging a slider or flipping a
+toggle updates the underlying params object, writes it back into the Params JSON textarea, and
+routes through the same debounced auto-apply path as manual JSON edits — both surfaces call one
+`queueAutoApply()` function, so there is no divergent code path between touch and text editing.
+`param_specs` is UI metadata only: `LabRegistry.save()` validates and persists it (`ValueError` on
+a malformed shape — non-dict, missing `min`/`max`, `max <= min`, `step <= 0`, or an unknown
+`kind`), but it never gates or filters what `lab_play`/`lab_update` accept; lab params stay
+unvalidated by design.
+
+Below the param controls, a row of six fixed-size color chips shows the Test Palette colors
+actually driving the draft (`slot_colors`), with the sixth chip (index 5) labeled "white" to match
+the renderer's slot-5-is-white convention. The swatches populate after Play, Switch, and Preview
+and clear when a different draft is selected. Frame-kind drafts inject `color_a`/`color_b` instead
+of `slot_colors`, so an empty/missing swatch row for those is expected, not an error.
+
+The raw Params JSON textarea still exists and still drives everything underneath (`param_specs`
+controls just write into the same textarea) — it now lives collapsed under an **Advanced (raw
+JSON)** disclosure instead of being the primary editing surface, per the operator direction that
+raw JSON should never be the first thing offered to a touch-first (iPad/phone) session.
 
 ### Live tuning (`/api/lab/update`) and variant switching (`/api/lab/switch`)
 

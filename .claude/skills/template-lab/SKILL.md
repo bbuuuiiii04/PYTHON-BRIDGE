@@ -78,6 +78,9 @@ whichever mode Brandon wants that day:
 - Talk-mode: he describes, you change ONE thing per iteration (`/api/lab/update` while live)
   and describe it back in plain language ("comets now die at the ends instead of wrapping").
 - Knob-mode: point him at the few params worth feeling out; his edits in the UI apply live.
+  author `param_specs` for those params when you save the draft — the UI turns them into
+  sliders (`{key: {label, min, max, step}}`, `kind: "toggle"` for booleans). 2-5 knobs, never
+  the whole param dict.
 Prefer param-izing a constant over rewriting the shape. Keep a running list of constants
 Brandon actually adjusted — those become the promoted render's exposed controls; everything he
 never touched stays hardcoded. Stop playback whenever Brandon steps away (Stop is free).
