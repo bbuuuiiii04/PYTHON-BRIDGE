@@ -44,6 +44,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/architecture/laser_color_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative laser color behavior (LED-follow quantizer, white rules, chart gating); Package 4 plumbing implemented/software-tested (AWR-111); CH8/CH9 value chart operator-gated. |
 | `docs/architecture/laser_blackout_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative blackout ownership contract (two owner systems, survival matrix); Package 1 re-wire implemented/software-tested (AWR-111). |
 | `docs/architecture/lighting_engine_v2_authority.md` | CURRENT AUTHORITATIVE — operator-authoritative intended experience for LIGHTING ENGINE v2 (identity zones, landing moves, blackout rules, drop-presentation composition, haze-era lasers, blend, texture, modes, arbiter, kills); PLANNED — design authority for the expansion phase + Feature 1–4 specs, not yet implemented. |
+| `docs/architecture/LIGHTING_ENGINE_V2_DESIGN.md` | CURRENT AUTHORITATIVE — the complete LIGHTING ENGINE v2 experience design (expansion deliverable, 2026-07-05): zone map, drop families + intensity tiers, darkness rule pack, arbiter, kill matrix, color-slot contract, build moves, template roadmap, laser package, observability, and the 666-track dry-run audit; PLANNED — the Feature 1–4 Codex specs are authored from it; detailed companion to `lighting_engine_v2_authority.md`. |
 | `docs/architecture/doc_index.md` | CURRENT AUTHORITATIVE — this index. |
 
 ## Agent operating system — current

@@ -458,7 +458,7 @@ and why. The LED Pad gains a "now playing identity" chip.
 Software tests are build gates; **your eyes on the room are the only acceptance gate** —
 no feature is "done" until you sign off on the live look. The staged road:
 
-1. **Expansion one-shot** (next): designs the full experience from this document + the
+1. **Expansion one-shot** — **DELIVERED 2026-07-05: `docs/architecture/LIGHTING_ENGINE_V2_DESIGN.md`** (the complete experience design + 666-track dry-run audit; proposed amendments to this document are listed in its §15, not applied): designs the full experience from this document + the
    strict-review charter — the zone map, the arbiter, the kill matrix, the color-slot
    contract, the consumer-rule pack (blackout rules, bass-forward beats, build-intensity,
    rate-ladder selection, simmer), the build-move details, the new-template roadmap (2–3

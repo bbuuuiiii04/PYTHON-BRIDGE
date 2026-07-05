@@ -591,3 +591,356 @@ contract formalizes it:
   variants (6 baked white-only shapes — the §10 roadmap fills this); (d) `EffectSpec`
   lives at `govee_realtime_runner.py:36-42` and `params` is the single conduit — the
   color engine reaches every shape through it.
+
+---
+
+## 9. The build-move family, in detail (charter item 7)
+
+**What the room does.** Builds stop reacting and start aiming. Three physical shapes, all
+landing exactly on the one: **squeeze-explode** — the light contracts toward the strip's
+center and compresses brighter as the build climbs, then detonates outward on the
+downbeat; **fuse** — segments ignite one by one, a burning line racing the build, the
+last segment igniting exactly on the drop; **swell** — an 8-bar breath that rises and
+completes precisely at the phrase turn. And the marquee moment, **landing restore**: in a
+breakdown the room eases down within the track's dynamics budget, then light flies back in
+and lands on the drop's first beat — the one moment guests will describe out loud.
+
+**Exact rules.**
+- **Machinery:** all four are arrival-contract instances on `BeatSyncEngine`
+  (`target_abs_beat` = the drop marker / phrase boundary, `travel_beats` per move);
+  per-frame retarget from the live anchor (riding the pitch bends the flight, the landing
+  stays pinned); backward jumps degrade to wall-clock completion or melt; instances stamp
+  (deck, load_gen) and never retarget across decks (F-5). All seams confirmed by the
+  design review at HEAD.
+- **Per-track move selection (decided — from measured character, per-track permanent):**
+
+```
+norm(punch) ≥ 0.60 and norm(attack_low_p90) ≥ 0.45              -> squeeze-explode
+norm(onset_mh_p90) ≥ 0.5 and p50(within-beat low swing) ≥ 10 dB -> fuse
+otherwise                                                        -> swell
+```
+
+  The move is part of the track's identity (locked design F2 item 2); the white share it
+  carries comes from §5.2's per-build measurement.
+- **Squeeze + blackout compose:** when §4 sizes a blackout, the squeeze contracts INTO the
+  blackout window (light compresses to center, then to black, then the drop detonates) —
+  rank 1/2 composition per §6. Fuse and swell simply end where darkness begins.
+- **Landing restore eligibility (P-3):** a `quiet`/`mid` section run of ≥ 16 beats ending
+  at a drop marker, with the room already eased down (dynamics budget), arms a restore:
+  travel = min(16, section remainder), target = the drop beat. Marker absent ⇒ no move
+  (safe absence). Owned by F2.
+- **Strobe acceleration stays inside buildup cues** (operator correction 2): the §10
+  buildup shapes own their acceleration; the role system schedules them; §5.2 sets their
+  white; §5.3 sets their rung ceiling.
+
+---
+
+## 10. The new-template roadmap (charter item 10 — v2 is not v1 repainted)
+
+**What the room does.** Every role gets genuinely new shapes, not recolors. Below is the
+authoring menu — each described visually, authored in Template Lab against the color-slot
+contract (§8), and selected by measured character/energy, never hand-assigned per track.
+Authoring and tuning happen in the build + live phase through the existing Template Lab
+flow; this is the binding menu.
+
+**Selection inputs** (per §2/§3/§5): zone, motion style, drop family + tier, texture
+classes, section tier + rung.
+
+| Role | New shape | Visual (what you see) | Selected when |
+|---|---|---|---|
+| Groove | **Undertow** | the base wash flows slowly one direction while accent ticks ride the opposite way — quiet tension in motion | smooth motion style, mid sections |
+| Groove | **Heartbeat** | a two-pulse lub-dub swell on the kick, color-only, no white | kick-prominent texture, DEEP_POOL/TWILIGHT |
+| Groove | **Offbeat skip** | the chase head lands between the beats — the room rides the "and" like a hi-hat | HOUSE-family tracks, groove sections (round-4 off-beat idiom, TUNE-LIVE) |
+| Buildup | **Squeeze** (§9) | light contracts to center, compressing brighter | squeeze-explode tracks |
+| Buildup | **Fuse** (§9) | segment-by-segment ignition racing to the one | fuse tracks |
+| Buildup | **Riser stack** | sparkle density + white share climb the measured build energy; rate steps 1 → 0.5 → 0.25 beat as the drop nears | any build; white from §5.2; gives buildup its first slot-authored shapes (today's six are baked white-only — inventory, confirmed) |
+| Drop | **Wall-stutter** | full-strip white bursts with true black between hits — each hit lands harder for the darkness | WALL, tier 2–3 (micro-darkness per §3.3) |
+| Drop | **Red-line** | one relentless beat-locked comet, white slamming every downbeat, zero gaps | COMET (red only where the zone permits: EMBERCORE keeps red; other zones run their base-ramp core) |
+| Drop | **Shockwave** | center-out expanding hit on every beat — the strip breathes outward like a struck surface | HOUSE stab body |
+| Drop | **Sparkle-burst → groove** | one bright burst on the one, settling immediately into the off-beat groove chase | HOUSE growl-bar body (CSN's walkthrough drop) |
+| Post-drop | **Ember decay** | the drop's white hits cool into the zone color over 8 beats — the room exhales | any family, tier ≥ 2 |
+| Post-drop | **Afterglow ripple** | each hit leaves a slow-fading pool that drifts outward | smooth motion style |
+| Breakdown / atmospheric | **Simmer floor** | near-black shimmer in the zone's dimmest colors, moving every 4 beats | simmer sections (§5.4) |
+| Breakdown / atmospheric | **Tide** | one ultra-slow luminance wave crossing the room per 2–4 bars | quiet non-simmer sections, smooth tracks |
+| Breakdown / atmospheric | **Deep drift** | the base ramp itself slowly rotates hue within the zone — the room breathes color instead of brightness | long breakdowns, dynamics-budget-rich tracks |
+
+Carried forward as-is: the existing ~14 slot shapes and the validated comet/sweep idiom
+(landing-upgraded per §9), bloom, stingers, the blend painter. Banned stays banned: busy
+multi-color segment chases; sustained white outside manual looks.
+
+---
+
+## 11. The laser package (charter item 6 — haze era, gated on the hardware catalog)
+
+**What the room does.** Lasers rest through verses and fire on the track's biggest
+moments (the drop-presentation ladder already guarantees scarcity — unchanged). With haze
+confirmed, beams are the design material: aerial fans, sky effects, beam chases. Each
+color zone carries a fixed laser accent pair chosen to cut against the LED wash — deep
+blue walls get amber beams, neon walls get cyan/magenta, the extreme gets red/white. The
+exact beam vocabulary waits for one working session with the hardware.
+
+**Exact rules.**
+- **Picker replacement only** (authority §6): the same zone from §2 picks the laser
+  personality; scenes, safety classes, cooldowns, fallbacks, and the MIDI executor all
+  keep. Today's resolver order is alias → BPM band → default
+  (`personality_resolver.py:76-111`, confirmed), and the BPM tier is currently inert
+  (`bpm_priority: []` in `config/laser_director.json:236` — confirmed this session), so
+  v2's zone input replaces a resolution path that today only ever falls through to
+  `house`. Clean seam.
+- **Zone → personality map (decided):** GLACIER/DEEP_POOL/TWILIGHT → `smooth` personality
+  (accent pair deep blue + amber; TWILIGHT may ride violet + amber); ION/VOLT → `neon`
+  (cyan + magenta); EMBERCORE → `extreme` (red + white); NEUTRAL/unmeasured → existing
+  default (`house`) exactly as today (safe fallback confirmed,
+  `personality_resolver.py:107-111`).
+- **Color plumbing exists:** lasers already follow the LED engine on non-scripted tracks
+  (CH8 color / CH9 speed overwrite through `_merge_color_snapshot`,
+  `soundswitch_laser_player.py:124-129,462`; RGB→fixed-color quantizer — confirmed). The
+  complement pairs ride this: with a v2 identity active, the laser color engine quantizes
+  toward the zone's accent pair instead of nearest-LED-color. Scripted tracks stay
+  sovereign (untouched).
+- **Personality package skeletons (the config shape a new package must fill — from
+  `laser_models.py:80-118` + `laser_config.py:611-753`, confirmed):** per personality:
+  seven required role→scene refs (`safe/default/phrase/buildup/drop/breakdown/
+  transition_scene`), optional per-role rotation banks, `allow_high_impact`, timing knobs
+  (`phrase_interval_beats`, `pre_drop_blackout_beats`, `post_drop_hold_beats`,
+  `drop_impact_beats`, …). Three new packages (`smooth`, `neon`, `extreme`) are drafted
+  with today's 19 scenes as placeholders and **named TBD beam-scene slots**:
+
+  - `TBD smooth_beam_slow_fan` — wide slow aerial fan, amber/deep blue, phrase-scale sweep
+  - `TBD smooth_beam_liquid` — slow liquid-sky drift for breakdowns
+  - `TBD neon_beam_crossfire` — two fast crossing fans, cyan × magenta, drop-only
+  - `TBD neon_beam_chase` — beat-locked beam step-chase for post-drop
+  - `TBD extreme_beam_slam` — hard white/red center slam on the one, tier-3 drops
+  - `TBD extreme_beam_strobe_fan` — strobing fan burst inside WALL micro-darkness gaps
+
+  **Every TBD slot is gated on the operator+Claude hardware-vocabulary session**
+  (correction 6a): catalog the real MIDI-reachable patterns, size, motion/rotation speed,
+  color, strobe on CH8 (color/effects), CH9 (speed), CH11 (strobe). **No MIDI values are
+  invented here**; the session's catalog fills the slots, then packages are auditioned
+  live Template-Lab-style and locked. Beams-above-heads stays an authoring guideline
+  (S-6), never an engine rule.
+- **Rest vs fire:** unchanged drop-presentation authority (v1 carryover): LEDs carry most
+  drops; the top ~40% ranked drops earn lasers; Laser Solo stays operator-traceable-only;
+  damper/finale/fail-open rules untouched (confirmed at
+  `drop_presentation.py:100,293-311,326-377,628-745` by this session's inventory).
+
+---
+
+## 12. Observability (charter item 8)
+
+**What the room does.** When something looks wrong, the status screen says exactly what
+the engine decided and why — a live veto becomes one sentence, not a bug hunt.
+
+**Exact rules (decided).** Per track at load, one log line:
+`engine=v2 zone=<zone> colors=<hue-slot,depth> corrected=<bool> move=<squeeze|fuse|swell>`
+— zone misfires become precisely reportable. Per drop at classification:
+`family=<F> reason="<plain text>" tier=<1|2|3> rung=<r>` plus the darkness decision:
+`dark=<kind> gap=<n> window=[a,b) abort_at=<beat|-> reason="<plain text>"` (§4's
+decisions already carry reasons). Live: mode (WILD/SET), per-feature kill states, blend
+scalar, active texture class + why, transport-suspend state. LED Pad gains the
+"now playing identity" chip (authority §14). Everything is read-side and cheap; the
+dry-run audit (§13) prints the same fields, so audit lines and runtime lines stay
+comparable by construction.
+
+---
+
+## 13. The library-wide dry-run audit (charter item 9 — ran this session, read-only)
+
+**What the room does (for Brandon).** Before anything gets built, the whole decision
+pipeline above already ran over your entire analyzed library — 666 tracks, 3,936 drops —
+as pure math over the cached analysis. Every track got a zone; every drop got a family, a
+tier, and a darkness decision; every build got a white share; every quiet stretch got its
+simmer read. The strangest tracks are ranked below so your ear goes where the data is
+weirdest, not to random samples.
+
+**Method (confirmed, reproducible).** Read-only scripts in the session scratchpad:
+stage 1 enumerated tracks exactly like `tools/spectral_sweep.py` (same DB fields, same
+`read_anlz_drops`, same `get_cached_v4`) and extracted per-track decision records through
+the shipped `spectral_profile` code paths; stage 2 applied §2–§5's rules exactly as
+written above (same constants); stage 3 ranked outliers. Coverage: 686 on-disk tracks →
+**666 with v4 entries (100% of the shipped cache)**, 19 `no_grid` FX one-shots, 1 corrupt
+file (GRiZ — known) — matching the sweep's counts exactly. Wall-clock ~90 s for stage 1,
+seconds per rule pass. Post-build, the same audit re-runs through the real engine code as
+the regression tool — the constants and formulas in this document are the spec for it.
+
+**Headline distributions (confirmed):**
+
+- **Zones:** GLACIER 119 / DEEP_POOL 133 / TWILIGHT 81 / ION 125 / VOLT 125 /
+  EMBERCORE 83 — six zones at 12–20% each; aggressive-half max share **37%** (≤ ~40%
+  criterion); every track assigned.
+- **Drop families:** HOUSE 1628 / WALL 812 / COMET 439 / NEUTRAL 1057 (a 27% safety
+  net). Genre lens (the classifier never sees genres): HARD TECHNO → 74% COMET;
+  DUBSTEP/ISOXO/TRAPSTEP → 41–45% WALL; every house playlist → 50–65% HOUSE.
+- **Tiers:** T1 2159 / T2 1176 / T3 601 (frozen p55/p85 cuts). DROP EM spans T1–T2 ✅.
+- **Darkness:** 1,320 blackouts (dark beats spread 1→16; 219 at the 16 cap), 1,145
+  relative dips, 1,366 snap flicks, 105 perc-cut flicks, 150 floor-return aborts. Every
+  drop decided.
+- **Builds:** white share masses at 0.2–0.4 with a long tail — 85 builds ≥ 0.6, 9 ≥ 0.9.
+- **Texture / sections:** 236 tracks carry simmer sections; 572 have euphoric-eligible
+  runs; drop rungs 1.0×2159 / 0.5×1775 / 0.25×2.
+- **Charter criterion 7 ✅:** no cached track lacks a defined outcome at any decision
+  point (zone; family — neutral counts; darkness — snap flick counts; texture — none
+  counts; section/rung; build white share). Six tracks have zero drop markers: they never
+  fire drop machinery — defined absence.
+
+**The ranked outlier scrub list (confirmed): 330 tracks flagged; the top 48 (score ≥ 3)
+are the recommended ear-check set.** Top 15 by weirdness:
+
+| # | Track | Zone | Why it's weird |
+|---|---|---|---|
+| 1 | Odd Mob, OMNOM, HYPERBEAM — System | TWILIGHT | ALL 10 drops NEUTRAL; a 94-beat sub-only pre-drop run; 10 markers |
+| 2 | Ray Volpe — Laserbeam (Carlo Kalu Edit) | DEEP_POOL | all 3 drops NEUTRAL; 12 dip runs (the known riser-only oddball reads exactly this way) |
+| 3 | Jay Lumen — Bang To The Beat | DEEP_POOL | all 11 drops NEUTRAL; marker spam |
+| 4 | Ye/JAY-Z x Osamason x ISOxo edit | ION | all drops NEUTRAL; 14 dip runs |
+| 5 | fukumean (Crankdat Remix) | TWILIGHT | all drops NEUTRAL; sits on the aggression boundary |
+| 6 | Drake & Sexxy Redd x Viperactive — Sticky | VOLT | all drops NEUTRAL; dip storm |
+| 7 | Borne — Can I | EMBERCORE | all drops NEUTRAL; 15 dip runs |
+| 8 | Odd Mob — XTC | DEEP_POOL | all 9 drops NEUTRAL; a 63-beat pre-drop run |
+| 9 | Anti Up — Maximum | DEEP_POOL | all 8 drops NEUTRAL; a 60-beat run |
+| 10 | Lobsta B — UP TO NO GOOD | VOLT | all 6 drops NEUTRAL; 15 dip runs |
+| 11 | Fuckin' Problems x Type Shit | ION | all drops NEUTRAL; BPM 175 |
+| 12 | Rae Sremmurd x Knock2 x 4B — No Type (BENZI) | VOLT | single NEUTRAL drop; BPM 72 (half-time grid) |
+| 13 | Kesha x FTP x Twinsick — Die Young | GLACIER | single NEUTRAL drop; 13 dip runs |
+| 14 | EYES CUT DEEPER (VIRX REMIX) | GLACIER | all drops NEUTRAL; 15 dip runs |
+| 15 | BLACKPINK — JUMP (JAY ESKAR REMIX) | DEEP_POOL | ALL 15 drops NEUTRAL; 15 markers |
+
+The tail pattern is itself a finding: all-NEUTRAL tracks are overwhelmingly mashups/edits
+with unusual masters or marker spam — exactly where a neutral, identity-painted drop is
+the safe right answer, and exactly where the ear should confirm. (Full 330-row list with
+per-track reasons: `audit_out/outliers.json` in the session scratchpad; the audit re-runs
+from this document's constants at any time.)
+
+---
+
+## 14. Walkthrough coverage map (charter criterion 1 — zero unmapped lines)
+
+Every behavior in the strict review's §3 one-line list, mapped. Trigger "marker" =
+Rekordbox ANLZ marker; rank = arbiter rank (§6); switch per §7.
+
+| Walkthrough behavior | Cue/behavior | Trigger | Inputs | Switch | Rank |
+|---|---|---|---|---|---|
+| Groove chase in track colors | groove shapes (§10) in zone colors | role schedule | zone, hash, motion style | F1 | base look |
+| Buildup hue shift on "lows out" | buildup-cue hue shift | buildup marker | sub-only floor signal (§4.1-1) | F2 | inside build look |
+| White share scales with build intensity | buildup-cue slot-5 weight | buildup marker | §5.2 formula | F2 | — |
+| 1-beat pre-drop cut on percussive cut | perc-cut flick / pre-drop dip | drop-marker context | §4.1-5/6 | F2 | 1 |
+| Growl-vs-driving alternation in drop | drop-cue variant seasoning | drop marker fires the cue | bass-forward pattern (§5.1) | F4 (selection) | inside 1 |
+| 3rd-chorus softness | **not promised** (§5.7) | — | measured indistinguishable | — | — |
+| Breakdown "lows cut, drums persist" | busy-build refusal → build/groove cues ride | markers | §4.1-3 bass duty | F2 | — |
+| Implosion build "sparse and dim" | simmer floor + dips | section + dip rule | §5.4 + §5.6 | F4/F2 | 7 / 1 |
+| Room blackout before CSN 2:42.5 | capped 16-beat blackout | drop marker 352 | §4.1-2/4 (run 99 → 16) | F2 | 1 |
+| 4-beat full-strobe drop; growl ranked more intense | WALL cue, tier profile; ranking **cut** | drop marker | §3 family+tier; §5.7 | F2 | 1 |
+| Twinkle/simmer atmospheric intro | simmer floor | quiet section | §5.4 medians | F4 | 7 |
+| Hidden-energy ramp | buildup cues + §5.2 | buildup marker | full_db step (prior fact: 9→15 dB) | F2 | — |
+| Blackout→explosion at STARsound 0:52.9 | 2-beat relative-dip cut into the drop | drop-marker context | §4.1-5 (score 8.4 at 128–129) | F2 | 1 |
+| Bright cyan/white sustain sections | euphoric flavoring | scheduled look | §5.5 eligibility | F4 (selection) | 7 |
+| Lights-cut dips (2:12.4 / 2:16.5) | standalone relative dips | dip rule | §4.1-5 / §5.6 | F2 | 1 (short claim) |
+| Swordfish chase at 0.5-beat rate | drop cue at rung 0.5 | drop marker | tier→rung (§5.3) | F2 | 1 |
+
+---
+
+## 15. Corrections, proposed amendments, and veto-shaped items (never silently applied)
+
+### 15.1 Correction (confirmed): the strict review's STARsound rows measured a sibling file
+
+Two independent signatures prove it: (a) T2-9's anchor axes (brightness_med 1059, drama
+14.2, punch .85) match **"stargirl interlude starsound"** exactly; the walkthrough track
+**"kohta x Bafu — STARsound (pt3)"** measures 671.3 / 9.2 / 0.851 (this session).
+(b) S-1's STARsound row (gap at beats 126–127 before the drop) matches the stargirl
+file's data — it has precisely a 2-beat sub-only gap at 126–127 before its own drop at
+128; the (pt3) file's beats 126–127 read sub 24.2/28.3 dB (floor fully present).
+Consequences absorbed here: the zone map calibrates on the correct (pt3) file and still
+reproduces the anchor call (§2.2); the (pt3) 0:52.9 blackout reproduces as a relative dip
+(§4.2). **Proposed amendment** to `lighting_engine_v2_strict_review.md` (T2-9 + the S-1
+STARsound row) and to the authority doc §3's "twice as bright, far punchier, and more
+dramatic" sentence: correct to the (pt3) numbers (brighter ×1.29, far punchier .85 vs
+.51, drama ~equal 9.2 vs 8.7 — the separation carries on punch + luminance, not drama).
+Not applied by me — records stay untouched per the charter.
+
+### 15.2 Proposed amendment: CSN 352 acceptance figure
+
+Authority §4.1 acceptance names "Can't Say Nah (26 → capped 16 at drop 352)". Under the
+final sub-only floor rule the run measures **99 beats** (the AND-rule read 26); both cap
+to the identical 16-beat window [336,352). Proposed wording: "99 sub-only (26 under the
+AND-rule) → capped 16".
+
+### 15.3 Proposed amendment: STARsound acceptance line
+
+Authority §4.1 acceptance names "STARsound (2 beats at 131 with the abort)". From the
+current cache the 2 dark beats at 128–129 come from the **relative-dip class** (a
+full-band duck with the sub tail ringing above the gone threshold; §4.2), and darkness
+still ends before the marker — the same protective outcome. The floor-return abort stays
+a required mechanism (OLC-B confirmed) and demonstrably fires at 150 drops corpus-wide.
+Proposed wording: "STARsound (pt3): a 2-beat relative-dip cut at beats 128–129 ending
+before the marker; the floor-return abort demonstrated corpus-wide (e.g. crank the bass
+drop 96: gap 4, abort at 95)".
+
+### 15.4 Veto-shaped design calls (defaults chosen; say the word to flip any)
+
+1. **Hard techno wears dark zones** (mostly DEEP_POOL/TWILIGHT), with red arriving
+   through the COMET drop cue rather than the identity — keeps true red rare and earned.
+   Veto shape: "hard techno should read red all night" → one aggression-side re-split by
+   BPM.
+2. **NEUTRAL drop share ~27%.** Ties land invisible by design (F-11). Veto shape: "too
+   many plain drops" → loosen §3.1 gates; the outlier list shows exactly which tracks
+   move.
+3. **The busy-build rule (§4.1-3) can refuse a blackout your ear wants.** Calibrated so
+   CSN's builds never black out while ILL's and CUT TF UP's gaps do. Veto shape: name a
+   track+drop where you wanted black and didn't get it — the 0.85 duty threshold is one
+   constant.
+4. **The quarter-beat rung is nearly extinct at your BPMs** (2 drops) — tier-3 aggression
+   at 140+ BPM rides 0.5-beat + intensity + micro-darkness instead (30 fps physics, F-6).
+   Not a veto item; noted so the live pass isn't surprised.
+5. **SET-mode peak reservation keys on tier 3 only** (§3.3). Veto shape: "peak-time
+   should be rarer/looser" → the tier-3 cut is one constant.
+
+### 15.5 Analysis gaps never promised (§6.3 restated as a hard boundary)
+
+Chorus softness; growl-intensity ranking; slow/formant wobble (the deferred
+centroid-series extension stays deferred); the two Appendix-F class limitations
+(sidechained kick-prominence, thick-wall sustained-synth — scrub-gated, not retuned
+here); busy-pulse breadth (seasoning only). Nothing in §2–§12 reads any of them.
+
+---
+
+## 16. Provenance and claim labels
+
+- **Decision sources:** `lighting_engine_v2_authority.md` (operator contract),
+  `lighting_engine_v2_strict_review.md` (charter §6; S-1..S-7; T2-1..T2-11; OLC-A..C),
+  `lighting_engine_v2_design_review.md` (rulings 1.1–5.20, F-1..F-17, P-2..P-5 as
+  amended), `spectral_palettes_arrival_crossfade_exploration.md` (locked agreement +
+  addenda 1–21 + corrections; superseded passages marked in place),
+  `spectral_audio_analysis_redesign.md` (v4 layer; Appendices A–G operator ground truth,
+  S-4 corrections applied). Research rounds 1–4: **lore only** — every number imported
+  from them is TUNE-LIVE with no citation; the two known-fabricated safety citations are
+  not imported.
+- **Measured this session (confirmed):** all §13 audit numbers; the §4.2 acceptance
+  table; §2.2 zone distributions and anchor placements; per-beat values quoted for
+  ILL / CSN / STARsound (pt3) / stargirl / DROP EM / crank the bass; the corpus
+  normalization anchors and frozen splits; the renderer and laser inventories
+  (subagent-gathered, line-cited). Method: read-only scripts over the shipped v4 cache
+  (666 entries), the Rekordbox DB (opened exactly as `filepath_resolver.py` does), and
+  current ANLZ markers via `read_anlz_drops`, through the shipped
+  `spectral_profile`/`spectral_cache` code paths.
+- **Named prior facts (not re-derived):** identity-axes corpus stability
+  (.929/.935/.967/.928, n=219); held-out genre discrimination 58.7% vs 16.7%; the
+  sub<5 dB corpus valley; cache 666 entries / 203.5 MB; LUNCH pulse timestamps; CSN
+  drop@128 swing 9.2 dB (reproduced exactly this session); DROP EM attack span
+  2.7→16.1 dB (reproduced exactly this session).
+- **Decided (this document's delegated design authority):** the zone set, splits, and
+  palette families; family gates; tier cuts and profile knobs; the busy-build
+  discriminator; the dip score; the perc-cut flick; move selection; arbiter windows;
+  kill-matrix rows; slot semantics; the template menu; the laser zone→personality map.
+  Each carries its reason in place.
+- **Live-gated:** every perceptual claim (what reads bright/violent/comfortable), all
+  TUNE-LIVE constants, seasoning densities, palette RGB ramps, beam looks. Brandon's
+  eyes are the acceptance gate — software tests are build gates only.
+- **Unknown (inherited, unchanged):** fader physical smoothness (the one recorded
+  practice session, F3), Govee device latency, the Rekordbox 7.2.11 mixer-offset pin,
+  DB-rebuild content-id stability (filepath fallback pinned).
+- **Status:** everything here is design intent — `planned`. The audit is read-only
+  measurement. Nothing is implemented, and nothing above claims otherwise.
+
+**Road from here** (authority §15): this document → the laser hardware-catalog session
+(fills §11's TBD slots) → Codex specs Feature 1 → 2 → 3 (texture rides 1/2), each with
+tests, contracts, kill switches; Codex implements; Brandon gates live.
+
