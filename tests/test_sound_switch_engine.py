@@ -3,16 +3,18 @@ import logging
 import queue
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 from unittest.mock import Mock, call
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.models import TrackMetadata  # noqa: E402
-from rb_ss_bridge_v2.osl_output import OS2LOutput  # noqa: E402
+from rb_ss_bridge_v2.osl_output import OS2LConnection, OS2LOutput  # noqa: E402
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.sound_switch_engine import SoundSwitchEngine  # noqa: E402
 from rb_ss_bridge_v2.state_manager import StateManager, _send_direct_autoloop_rearm  # noqa: E402
+from rb_ss_bridge_v2 import bridge_fmt  # noqa: E402
 from rb_ss_bridge_v2 import bridge_log  # noqa: E402
 
 
@@ -36,6 +38,27 @@ def _capture_perf(cat: str):
     logger.setLevel(logging.DEBUG)
     try:
         yield handler.records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prev_level)
+
+
+@contextlib.contextmanager
+def _capture_health(sub: str):
+    """Captures raw LogRecords emitted to a health.* logger (AWR-125 W4)."""
+    logger = logging.getLogger(f"health.{sub}")
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    prev_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield records
     finally:
         logger.removeHandler(handler)
         logger.setLevel(prev_level)
@@ -333,6 +356,81 @@ class ScriptedArmPerfEmitTests(unittest.TestCase):
         self.assertEqual(by_action["arm"]["data"]["id"], 555)
         self.assertEqual(by_action["arm-phase2"]["data"]["deck"], 1)
         self.assertEqual(by_action["arm-phase2"]["data"]["id"], 555)
+
+
+class OS2LConnectionHealthTransitionTests(unittest.TestCase):
+    """AWR-125 W4: health.os2l / health.queue edge-triggered emits.
+
+    _reconnect_loop/_sender_loop are only ever called directly here (never
+    .start()'d) so no real thread, socket, or sleep is exercised: socket.socket
+    is patched out entirely, and time.sleep is patched to set the stop Event so
+    each call performs exactly one loop iteration.
+    """
+
+    def setUp(self) -> None:
+        bridge_fmt.reset_rate_state()
+
+    def _run_reconnect_once(self, conn: OS2LConnection) -> None:
+        conn._stop.clear()
+
+        def _fast_sleep(_secs: float) -> None:
+            conn._stop.set()
+
+        with mock.patch("rb_ss_bridge_v2.osl_output.time.sleep", side_effect=_fast_sleep):
+            conn._reconnect_loop()
+
+    def test_connect_success_emits_health_os2l_info(self) -> None:
+        conn = OS2LConnection()
+        fake_sock = Mock()
+        with mock.patch("rb_ss_bridge_v2.osl_output.socket.socket", return_value=fake_sock):
+            with _capture_health("os2l") as records:
+                self._run_reconnect_once(conn)
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].levelname, "INFO")
+        self.assertIn("connected", records[0].getMessage())
+        self.assertTrue(conn.is_connected())
+
+    def test_connect_failure_streak_emits_once(self) -> None:
+        conn = OS2LConnection()
+        with mock.patch("rb_ss_bridge_v2.osl_output.socket.socket", side_effect=OSError("refused")):
+            with _capture_health("os2l") as records:
+                self._run_reconnect_once(conn)
+                self._run_reconnect_once(conn)  # same failure again: must not re-log
+
+        self.assertEqual(len(records), 1, f"{records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertIn("connect-fail", records[0].getMessage())
+
+    def test_send_error_emits_health_os2l(self) -> None:
+        conn = OS2LConnection()
+        failing_sock = Mock()
+        failing_sock.sendall.side_effect = OSError("broken pipe")
+        conn._sock = failing_sock
+        conn._connected = True
+        conn._send_q.put_nowait(b'{"evt":"beat"}\n')
+        conn._send_q.put_nowait(None)  # sentinel: _sender_loop exits right after
+
+        with _capture_health("os2l") as records:
+            conn._sender_loop()
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertIn("send-error", records[0].getMessage())
+        self.assertFalse(conn.is_connected())
+
+    def test_send_queue_full_emits_health_queue_throttled(self) -> None:
+        conn = OS2LConnection()
+        conn._send_q = queue.Queue(maxsize=1)
+        conn.send({"evt": "beat"})  # fills the single slot
+
+        with _capture_health("queue") as records:
+            conn.send({"evt": "beat"})  # drop #1: logs
+            conn.send({"evt": "beat"})  # drop #2: throttled, silent
+
+        self.assertEqual(len(records), 1, f"{records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertIn("queue full", records[0].getMessage())
 
 
 if __name__ == "__main__":

@@ -7,16 +7,34 @@ per-tick fallback when the chain misses.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from rb_ss_bridge_v2 import bridge_fmt
 from rb_ss_bridge_v2 import rb_memory as mod
 from rb_ss_bridge_v2.models import PositionSnapshot
+
+
+def _capture(logger_name: str):
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    logger.addHandler(handler)
+    prior_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    return logger, handler, prior_level, records
 
 
 def snap(deck: int, elapsed_ms: int, *, playing=False, length=0, updated_at=1.0):
@@ -135,6 +153,82 @@ class ChainFirstReadTests(unittest.TestCase):
         cur = self.reader._cache.get(1)
         self.assertEqual(cur.track_length_ms, 123)   # unchanged
         self.assertEqual(cur.elapsed_ms, 5000)
+
+
+class HealthTransitionTests(unittest.TestCase):
+    """AWR-125 W4: health.rb / health.reader edge-triggered emits + bounded warning."""
+
+    def setUp(self) -> None:
+        bridge_fmt.reset_rate_state()
+        self.reader = make_reader()
+
+    def test_log_drift_emits_once_per_failure_streak(self) -> None:
+        logger, handler, prior_level, records = _capture("health.reader")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        self.reader._log_drift(1, "deck 1: backward jump 1000->500 ms (-500 ms)")
+        self.reader._log_drift(1, "deck 1: backward jump 1000->500 ms (-500 ms)")  # repeat: silent
+
+        self.assertEqual(len(records), 1, f"expected exactly one drift record, got {records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertEqual(records[0].deck, 1)
+        self.assertIn("backward jump", records[0].getMessage())
+
+    def test_log_drift_clear_then_new_streak_relogs(self) -> None:
+        logger, handler, prior_level, records = _capture("health.reader")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        self.reader._log_drift(1, "deck 1: backward jump")
+        self.reader._log_drift(1, None)  # DriftDetector reports healthy again
+        self.reader._log_drift(1, "deck 1: backward jump (2nd incident)")
+
+        self.assertEqual(len(records), 2, f"expected two distinct incidents, got {records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertEqual(records[1].levelname, "WARNING")
+
+    def test_log_drift_is_per_deck(self) -> None:
+        logger, handler, prior_level, records = _capture("health.reader")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        self.reader._log_drift(1, "deck 1 drift")
+        self.reader._log_drift(2, "deck 2 drift")
+
+        self.assertEqual(len(records), 2)
+        self.assertEqual({r.deck for r in records}, {1, 2})
+
+    def test_rb_gone_emits_health_rb(self) -> None:
+        self.reader._session = SimpleNamespace(pid=999999)
+        logger, handler, prior_level, records = _capture("health.rb")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        with mock.patch("os.kill", side_effect=ProcessLookupError()):
+            self.reader._tick()
+
+        self.assertIsNone(self.reader._session)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertIn("gone; detaching", records[0].getMessage())
+
+    def test_rb_restart_enqueue_failure_gets_bounded_warning(self) -> None:
+        class _BoomQueue:
+            def put_nowait(self, _item) -> None:
+                raise RuntimeError("synthetic enqueue failure")
+
+        self.reader._session = SimpleNamespace(pid=999999)
+        self.reader._eq = _BoomQueue()
+
+        with mock.patch("os.kill", side_effect=ProcessLookupError()):
+            with self.assertLogs("rb_memory", level="WARNING") as captured:
+                self.reader._tick()
+
+        self.assertTrue(
+            any("rb-restart enqueue failed" in line for line in captured.output),
+            captured.output,
+        )
 
 
 if __name__ == "__main__":
