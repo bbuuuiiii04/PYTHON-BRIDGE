@@ -121,6 +121,7 @@ Per-model drop-in blocks live under `docs/prompts/snippets/`. Rules across the s
 |---|---|---|
 | Runtime coordinator | `__main__.py`, `state_manager.py`, `active_deck_resolver.py`, `models.py`, `config.py` | `docs/subsystems/core_bridge.md` |
 | Runtime status / commands | `runtime_status.py`, `validation_runner.py`, `diagnostics.py`, `bridge_fmt.py` | `docs/subsystems/runtime_commands.md` |
+| Logging (event stream + viewer) | `bridge_log.py`, `bridge_view.py`, `scripts/ss_bridge_watcher.sh` (monitor window) | `docs/subsystems/logging.md` |
 | Rekordbox direct readers | `rb_state_reader.py`, `rb_memory.py`, `rb_offsets.py`, `live_bpm.py`, `probe_live_bpm.py`, `probe_deck2.py`, `mtc_reader.py` | `docs/subsystems/rekordbox_readers.md` |
 | Track metadata | `filepath_resolver.py`, `anlz_reader.py`, `scripted_tracks.py`, `ss_library_scanner.py` | — |
 | Phrasing / autoloop / beat | `smart_phrasing.py`, `smart_rearm.py`, `autoloop_controller.py`, `drop_lifecycle.py`, `beat_math.py`, `audio_spectral_features.py`, `spectral_cache.py` | — |
