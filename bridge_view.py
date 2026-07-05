@@ -342,6 +342,31 @@ def format_age(ts: float, now: float | None = None) -> str:
     return f"{days}d ago"
 
 
+def _latch_ts(rec: dict[str, Any]) -> float:
+    ts = rec.get("ts")
+    return ts if isinstance(ts, (int, float)) else 0.0
+
+
+def format_strip(latched: list[dict[str, Any]], now: float) -> str:
+    """Red OPERATOR-strip text: the NEWEST problem first, plus a count.
+
+    One line must carry the most urgent fact. The old oldest-first " | " join
+    let a stale config nag hide a seconds-old failure behind the right edge
+    (operator review, 2026-07-05). A single latch renders in full; several
+    render as a count + the newest, with the key hints for the rest.
+    """
+    if len(latched) == 1:
+        e = latched[0]
+        age = format_age(e.get("ts", now), now=now)
+        return f"⚠ {_surface_of(e)} {e.get('msg', '')} ({age}) · a clears"
+    newest = max(latched, key=_latch_ts)
+    age = format_age(newest.get("ts", now), now=now)
+    return (
+        f"⚠ {len(latched)} problems · newest: {_surface_of(newest)} "
+        f"{newest.get('msg', '')} ({age}) · a clears · 2 lists all"
+    )
+
+
 def parse_filter(text: str) -> dict[str, Any]:
     """Parse a DEBUG-screen filter string into {substring, deck, cat_prefix}.
 
@@ -734,11 +759,7 @@ def _draw_operator_strip(stdscr: Any, row: int, width: int, state: ViewerState, 
         text = f"✓ all quiet since {since}"
         attr = "green"
     else:
-        parts = [
-            f"{_surface_of(e)} {e.get('msg', '')} ({format_age(e.get('ts', now), now=now)})"
-            for e in state.latch.latched
-        ]
-        text = "⚠ " + " | ".join(parts)
+        text = format_strip(state.latch.latched, now)
         attr = "red"
     try:
         stdscr.addstr(row, 0, text[:width].ljust(width), _attr_for(attr))

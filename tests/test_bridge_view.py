@@ -565,6 +565,34 @@ class ArgParserTest(unittest.TestCase):
         self.assertEqual(args.path, "/tmp/example.jsonl")
 
 
+class FormatStripTest(unittest.TestCase):
+    def test_single_latch_renders_in_full(self) -> None:
+        text = bridge_view.format_strip(
+            [{"ts": 90.0, "cat": "health.rb", "msg": "rekordbox gone"}], now=100.0
+        )
+        self.assertEqual(text, "⚠ rb rekordbox gone (10s ago) · a clears")
+
+    def test_multiple_latches_show_count_and_newest_first(self) -> None:
+        latched = [
+            {"ts": 10.0, "cat": "health.dmx", "msg": "old problem"},
+            {"ts": 95.0, "cat": "health.reader", "msg": "position glitch"},
+            {"ts": 50.0, "cat": "health.os2l", "msg": "middle problem"},
+        ]
+        text = bridge_view.format_strip(latched, now=100.0)
+        self.assertIn("3 problems", text)
+        self.assertIn("newest: reader position glitch (5s ago)", text)
+        self.assertIn("2 lists all", text)
+        self.assertNotIn("old problem", text)
+
+    def test_bad_ts_tolerated(self) -> None:
+        latched = [
+            {"ts": "corrupt", "cat": "health.dmx", "msg": "a"},
+            {"ts": 95.0, "cat": "health.reader", "msg": "b"},
+        ]
+        text = bridge_view.format_strip(latched, now=100.0)
+        self.assertIn("newest: reader b", text)
+
+
 class IngestHeartbeatTest(unittest.TestCase):
     def test_heartbeat_feeds_header_not_show_feed(self) -> None:
         state = bridge_view.ViewerState()
