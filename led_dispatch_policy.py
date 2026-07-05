@@ -14,6 +14,7 @@ import re
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Optional
 
+from . import bridge_log
 from .config import LED_BACKSTEP_SEEK_BEATS
 from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS, MAX_SLOTS
 from .led_models import BeatAnchor, LEDContext
@@ -527,6 +528,7 @@ class LEDDispatchPolicyMixin:
                 automation=True,
                 active_deck=active,
                 trigger_fn=tactical_blackout,
+                phase=phase,
             )
             if outcome == "error":
                 log.warning(
@@ -600,6 +602,7 @@ class LEDDispatchPolicyMixin:
             role_key=blackout_key,
             automation=True,
             active_deck=active,
+            phase=phase,
         )
         if outcome == "error":
             log.warning(
@@ -617,17 +620,6 @@ class LEDDispatchPolicyMixin:
 
         if outcome == "accepted":
             self._led_smart_drop_blackout_key = blackout_key
-            log.info(
-                "[RGB] trigger-accepted role=%s phase=%s look=%s scene_ref=%s reason=%s role_key=%s trigger_count=%d active_deck=%d",
-                "smart_drop_blackout",
-                phase,
-                look or "-",
-                scene_ref or "-",
-                decision_reason or "-",
-                blackout_key,
-                self._led_automation_trigger_count,
-                active,
-            )
             return
 
         log.warning(
@@ -831,7 +823,7 @@ class LEDDispatchPolicyMixin:
                         else:
                             log_msg = f"slot_colors={slot_count}"
                         
-                        log.info(
+                        log.debug(
                             "[RGB] color-inject look=%s palette=%s %s role=%s role_key=%s",
                             decision.look,
                             palette_name,
@@ -857,7 +849,7 @@ class LEDDispatchPolicyMixin:
                     )
                     if computed:
                         palette_name = engine.snapshot().get("current_palette", "")
-                        log.info(
+                        log.debug(
                             "[RGB] color-inject look=%s palette=%s color=%s role=%s role_key=%s",
                             decision.look,
                             palette_name,
@@ -900,16 +892,6 @@ class LEDDispatchPolicyMixin:
             self._led_smart_drop_blackout_key = ""
             if role == "drop":
                 self._led_note_drop_decision_accepted(decision, sp_state)
-            log.info(
-                "[RGB] trigger-accepted role=%s look=%s scene_ref=%s reason=%s role_key=%s trigger_count=%d active_deck=%d",
-                role,
-                look or "-",
-                scene_ref or "-",
-                decision_reason or "-",
-                role_key,
-                self._led_automation_trigger_count,
-                active,
-            )
             return
 
         log.warning(
@@ -1008,14 +990,6 @@ class LEDDispatchPolicyMixin:
             return
 
         if outcome == "accepted":
-            log.info(
-                "[RGB] trigger-accepted role=ambient look=%s reason=%s role_key=%s trigger_count=%d active_deck=%d",
-                look or "-",
-                reason,
-                role_key,
-                self._led_automation_trigger_count,
-                active,
-            )
             return
 
 
@@ -1099,14 +1073,17 @@ class LEDDispatchPolicyMixin:
         automation: bool,
         active_deck: Optional[int] = None,
         trigger_fn: Any = None,
+        phase: str = "",
     ) -> str:
         """Single adapter trigger/accept/reject bookkeeping ritual.
 
         Returns "accepted", "rejected", or "error". Counters, _led_last_error,
         _led_last_look, and the automation gate reason mutate ONLY here for
-        trigger outcomes. Per-path side effects (blackout keys, drop-lifecycle
-        notes, log lines) stay at the call sites because they intentionally
-        differ per path; none of them log between these field writes, so the
+        trigger outcomes. The accepted path emits the one perf("led.look")
+        record (AWR-125); *phase* is a log-only field for pre-drop blackout
+        callers. Per-path side effects (blackout keys, drop-lifecycle notes,
+        warning logs) stay at the call sites because they intentionally differ
+        per path; none of them log between these field writes, so the
         observable stream is unchanged.
         """
         if trigger_fn is None:
@@ -1139,6 +1116,35 @@ class LEDDispatchPolicyMixin:
                     role=role,
                     role_key=role_key,
                 )
+            scene_ref = self._sanitize_led_scene_ref(getattr(decision, "scene_ref", ""))
+            reason = str(getattr(decision, "reason", ""))
+            data: dict[str, Any] = {
+                "role": role,
+                "look": look,
+                "scene_ref": scene_ref,
+                "reason": reason,
+                "role_key": role_key,
+                "backend": str(getattr(decision, "backend", "")),
+            }
+            if phase:
+                data["phase"] = phase
+            engine = getattr(self, "_led_color_engine", None)
+            if engine is not None and engine.enabled:
+                try:
+                    data["palette"] = str(engine.snapshot().get("current_palette", ""))
+                except Exception:
+                    pass
+            if active_deck is not None:
+                data["active_deck"] = active_deck
+            bridge_log.perf(
+                "led.look",
+                "look %s role=%s (%s)",
+                look or "-",
+                role or "-",
+                reason or "-",
+                deck=active_deck,
+                data=data,
+            )
             return "accepted"
 
         self._led_rejected_count += 1

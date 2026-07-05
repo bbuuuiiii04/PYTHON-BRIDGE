@@ -1,7 +1,9 @@
 """LED Color Engine — M1 implementation.
 
 Pure, self-contained module.  No imports from other bridge modules except
-led_models.  No side-effects, no I/O.
+led_models and bridge_log (perf("led.palette") emits at palette-change
+commits only — AWR-125; bridge_log import has no side effects).  No other
+side-effects, no I/O.
 
 Public API (exactly as M1b integration expects):
 
@@ -47,6 +49,7 @@ import struct
 from hashlib import blake2b
 from typing import Any
 
+from . import bridge_log
 from .led_models import ColorEngineConfig, Palette
 
 
@@ -388,12 +391,13 @@ class LedColorEngine:
                     name = self._queued_palette
                     self._queued_palette = ""
                     if name in self._config.palettes:
-                        self._apply_palette_now(name)
+                        # Operator-queued palette commits here (on track change).
+                        self._apply_palette_now(name, reason="operator")
                 elif not self._lock:
                     self._dwell_remaining -= 1
                     if self._dwell_remaining <= 0:
                         new_palette = self._pick_palette()
-                        self._apply_palette_now(new_palette)
+                        self._apply_palette_now(new_palette, reason="dwell")
 
             # Reseed per-track focus (after palette may have changed)
             self._reseed_focus()
@@ -415,6 +419,7 @@ class LedColorEngine:
                 ):
                     if self._journey_rng.random() < self._config.big_shift_chance:
                         # re-pick a DIFFERENT palette, biased toward rarer ones
+                        prev = self._current_palette
                         new_palette = self._pick_palette(
                             exclude=self._current_palette,
                             bias=self._config.big_shift_weight_bias,
@@ -424,6 +429,22 @@ class LedColorEngine:
                         # NOTE: no dwell reset on snap — next track change handles it
                         # Reseed focus for this snapped palette
                         self._reseed_focus()
+                        # AWR-125: snap deliberately bypasses _apply_palette_now
+                        # (no dwell reset), so its palette-change record is
+                        # emitted inline here.
+                        bridge_log.perf(
+                            "led.palette",
+                            "palette %s->%s (%s)",
+                            prev,
+                            new_palette,
+                            "drop_snap",
+                            data={
+                                "palette": new_palette,
+                                "prev": prev,
+                                "reason": "drop_snap",
+                                "locked": self._lock,
+                            },
+                        )
 
     # ------------------------------------------------------------------
     # DIY eligibility (§6, §15.6)
@@ -775,7 +796,7 @@ class LedColorEngine:
         self._fade_from_p = None
         self._fade_target = ""
         self._hold_track = True
-        self._apply_palette_now(name)
+        self._apply_palette_now(name, reason="operator")
 
     def queue_palette(self, name: str) -> None:
         """Stage a palette to take effect on the next track change."""
@@ -805,7 +826,7 @@ class LedColorEngine:
         start = self._fade_start_beat
         target_p = self._palette_center(self._fade_target)
         if end <= start or abs_beat >= end:
-            self._apply_palette_now(self._fade_target)
+            self._apply_palette_now(self._fade_target, reason="fade")
             self._fade_from_p = None
             self._fade_target = ""
             return
@@ -823,7 +844,7 @@ class LedColorEngine:
 
     def set_mode_override(self, mapping: dict[str, str]) -> None:
         if self._fade_from_p is not None and self._fade_target:
-            self._apply_palette_now(self._fade_target)
+            self._apply_palette_now(self._fade_target, reason="fade")
             self._fade_from_p = None
             self._fade_target = ""
         self._mode_override = {str(k): str(v) for k, v in mapping.items()}
@@ -839,7 +860,7 @@ class LedColorEngine:
             exclude=self._current_palette,
             bias=self._config.big_shift_weight_bias,
         )
-        self._apply_palette_now(new_palette)
+        self._apply_palette_now(new_palette, reason="operator")
 
     def snapshot(self) -> dict:
         """Return current engine state for tests / status display."""
@@ -889,7 +910,8 @@ class LedColorEngine:
         lo, hi = self._palette_p_interval(name)
         return (lo + hi) / 2.0
 
-    def _apply_palette_now(self, name: str) -> None:
+    def _apply_palette_now(self, name: str, *, reason: str = "dwell") -> None:
+        prev = self._current_palette
         self._current_palette = name
         self._anchor_p = self._palette_center(name)
         dwell = self._config.palettes[name].dwell
@@ -897,6 +919,22 @@ class LedColorEngine:
             dwell if dwell is not None else self._config.palette_dwell_tracks
         )
         self._reseed_focus()
+        # AWR-125: one perf record per palette-change commit, never per-tick
+        # (every caller is edge-triggered: dwell expiry, queued apply, fade
+        # completion, or an operator control).
+        bridge_log.perf(
+            "led.palette",
+            "palette %s->%s (%s)",
+            prev,
+            name,
+            reason,
+            data={
+                "palette": name,
+                "prev": prev,
+                "reason": reason,
+                "locked": self._lock,
+            },
+        )
 
     def _reseed_focus(self) -> None:
         """Re-draw per-track focus using current_track_seed."""
