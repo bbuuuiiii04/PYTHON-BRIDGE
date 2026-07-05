@@ -199,6 +199,9 @@ class MidiOutputTests(unittest.TestCase):
     def test_send_error_increments_counter(self) -> None:
         out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
         fake_mido = _fake_mido_module(_FailingPort())
+        logger, handler, prior_level, records = _capture_health()
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
         with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
             out.start()
             try:
@@ -207,6 +210,12 @@ class MidiOutputTests(unittest.TestCase):
                 status = out.status()
                 self.assertTrue(status["degraded"])
                 self.assertEqual(status["degraded_reason"], "send_error")
+                # AWR-125 W4: degraded-enter emits exactly one health.midi WARNING
+                # (edge-triggered on the healthy->degraded transition).
+                self.assertTrue(_wait_until(lambda: len(records) >= 1))
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0].levelname, "WARNING")
+                self.assertIn("send_error", records[0].getMessage())
             finally:
                 out.stop()
 
@@ -215,6 +224,9 @@ class MidiOutputTests(unittest.TestCase):
         second = _RecordingPort()
         out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
         fake_mido = _fake_mido_sequence([first, second])
+        logger, handler, prior_level, records = _capture_health()
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
         with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
             out.start()
             try:
@@ -226,6 +238,12 @@ class MidiOutputTests(unittest.TestCase):
                 status = out.status()
                 self.assertFalse(status["degraded"])
                 self.assertEqual(status["degraded_reason"], "")
+                # AWR-125 W4: exactly one degraded-enter WARNING + one recovered INFO.
+                self.assertTrue(_wait_until(lambda: len(records) >= 2))
+                self.assertEqual(len(records), 2)
+                self.assertEqual(records[0].levelname, "WARNING")
+                self.assertEqual(records[1].levelname, "INFO")
+                self.assertIn("recovered", records[1].getMessage())
             finally:
                 out.stop()
 
