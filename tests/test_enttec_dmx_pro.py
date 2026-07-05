@@ -8,6 +8,7 @@ Byte-equivalence target is the VLN reference (~/virtuallasernode/calib/dmx_pro.p
 confirmed 2026-06-21.  The known-good blackout packet (518 bytes) is:
   7E 06 01 02 00 <512x00> E7
 """
+import logging
 import signal
 import sys
 import threading
@@ -18,6 +19,7 @@ from pathlib import Path
 # Ensure the package parent is importable regardless of how tests are discovered.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from rb_ss_bridge_v2 import bridge_fmt
 from rb_ss_bridge_v2.enttec_dmx_pro import (
     MSG_START,
     MSG_END,
@@ -27,6 +29,21 @@ from rb_ss_bridge_v2.enttec_dmx_pro import (
     _ZERO_PACKET,
     SoundSwitchDmxWorker,
 )
+
+
+def _capture(logger_name: str):
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    logger.addHandler(handler)
+    prior_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    return logger, handler, prior_level, records
 
 # ---------------------------------------------------------------------------
 # Known-good reference packet (from VLN confirmed output)
@@ -283,6 +300,105 @@ class TestSoundSwitchDmxWorker(unittest.TestCase):
             )
         finally:
             worker.stop()
+
+
+class TestSoundSwitchDmxWorkerHealthTransitions(unittest.TestCase):
+    """AWR-125 W4: health.dmx edge-triggered emits + thread_guard coverage.
+
+    CONFIRMATION: No serial/Enttec/hardware port opened in any test in this class.
+    """
+
+    def setUp(self) -> None:
+        bridge_fmt.reset_rate_state()
+
+    def _make_worker(self, fake, **kwargs) -> "SoundSwitchDmxWorker":
+        return SoundSwitchDmxWorker(
+            port="/dev/fake_test_port",
+            port_factory=lambda *_a, **_kw: fake,
+            **kwargs,
+        )
+
+    def _feed_frames_until(self, worker, predicate, *, timeout_s: float = 1.0) -> None:
+        """Keep queuing frames (mailbox maxlen=2, worker drains repeatedly) until
+        *predicate* is satisfied or *timeout_s* elapses."""
+        pkt = build_dmx_packet(bytearray(512))
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline and not predicate():
+            worker.put_frame(pkt)
+            time.sleep(0.01)
+
+    def test_write_error_emits_once_per_failure_streak(self):
+        fake = FakeSerial(fail_write=True)
+        worker = self._make_worker(fake, poll_s=0.005)
+        logger, handler, prior_level, records = _capture("health.dmx")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        worker.start()
+        self._feed_frames_until(worker, lambda: bool(records))
+        # Keep feeding briefly after the first record to prove the streak stays silent.
+        self._feed_frames_until(worker, lambda: False, timeout_s=0.1)
+        worker.stop()
+
+        self.assertEqual(len(records), 1, f"expected exactly one write-error record, got {records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertIn("write error", records[0].getMessage())
+
+    def test_write_recovers_emits_once_after_failure_streak(self):
+        fake = FakeSerial(fail_write=True)
+        worker = self._make_worker(fake, poll_s=0.005)
+        logger, handler, prior_level, records = _capture("health.dmx")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        worker.start()
+        self._feed_frames_until(worker, lambda: bool(records))
+        self.assertTrue(records, "expected the write-error record before flipping to healthy")
+
+        fake.fail_write = False
+        self._feed_frames_until(worker, lambda: len(records) >= 2)
+        worker.stop()
+
+        self.assertEqual(len(records), 2, f"expected error+recovered only, got {records!r}")
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertEqual(records[1].levelname, "INFO")
+        self.assertIn("recovered", records[1].getMessage())
+
+    def test_port_open_failure_emits_health_dmx_error(self):
+        def _boom(*_a, **_kw):
+            raise RuntimeError("synthetic open failure")
+
+        worker = SoundSwitchDmxWorker(port="/dev/fake_failure", port_factory=_boom)
+        logger, handler, prior_level, records = _capture("health.dmx")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        worker.start()
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline and not records:
+            time.sleep(0.01)
+        worker.stop()
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].levelname, "ERROR")
+        self.assertIn("failed to open port", records[0].getMessage())
+
+    def test_run_loop_thread_guard_emits_started_and_exited(self):
+        worker = self._make_worker(FakeSerial(), poll_s=0.01)
+        logger, handler, prior_level, records = _capture("sys.thread")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        worker.start()
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline and not any(
+            "SoundSwitchDmxWorker started" in r.getMessage() for r in records
+        ):
+            time.sleep(0.01)
+        worker.stop()
+
+        self.assertTrue(any("SoundSwitchDmxWorker started" in r.getMessage() for r in records))
+        self.assertTrue(any("SoundSwitchDmxWorker exited" in r.getMessage() for r in records))
 
 
 if __name__ == "__main__":
