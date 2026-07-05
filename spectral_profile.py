@@ -131,34 +131,45 @@ def bottom_gone_flags(v4: SpectralFeaturesV4) -> list[bool]:
 
 def empty_floor_runs(
     v4: SpectralFeaturesV4, *, min_len: int = 2
-) -> list[tuple[int, int, str]]:
-    """Merged runs of floor absence: (start_beat, end_beat, kind).
+) -> list[tuple[int, int, str, float]]:
+    """Merged runs of floor absence: (start_beat, end_beat, kind, level_db).
 
     kind is "true_silence" (full band gone — literal silence) or "empty_floor"
-    (bottom gone, other instruments still playing). One primitive, three
-    consumers (texture darkness, blackout sizing, landing eligibility) —
-    review P-2/F-16.
+    (bottom gone, other instruments still playing). ``level_db`` is the run's
+    median full-band level: bottom-gone spans a continuum from vocal-over-
+    silence (~5 dB) to loud bass-less synth builds (~10+ dB; operator-verified
+    "no audible dip" — the corpus distribution is unimodal, so no class
+    boundary is drawn here). Darkness consumers set their own level cutoff,
+    and build sections are covered by authoritative ANLZ markers regardless.
+    One primitive, three consumers (texture darkness, blackout sizing, landing
+    eligibility) — review P-2/F-16.
     """
     cal = SPECTRAL_V4_CALIBRATION
     gone = bottom_gone_flags(v4)
-    silent = [v < cal["true_silence_full_db"] for v in v4.series["full_db"]]
+    full = v4.series["full_db"]
+    silent = [v < cal["true_silence_full_db"] for v in full]
     # per-beat kind; runs split where the kind changes (a breakdown fading to
     # literal silence is two different things to a blackout consumer)
     kinds = [
         ("true_silence" if s else "empty_floor") if g else None
         for g, s in zip(gone, silent)
     ]
-    runs: list[tuple[int, int, str]] = []
+    runs: list[tuple[int, int, str, float]] = []
+
+    def emit(start: int, end: int, kind: str) -> None:
+        level = percentile(full[start : end + 1], 50.0)
+        runs.append((start, end, kind, round(level, 1)))
+
     start: Optional[int] = None
     current: Optional[str] = None
     for i, kind in enumerate(kinds):
         if kind != current:
             if current is not None and start is not None and i - start >= min_len:
-                runs.append((start, i - 1, current))
+                emit(start, i - 1, current)
             start = i if kind is not None else None
             current = kind
     if current is not None and start is not None and len(kinds) - start >= min_len:
-        runs.append((start, len(kinds) - 1, current))
+        emit(start, len(kinds) - 1, current)
     return runs
 
 

@@ -77,7 +77,7 @@ class SilencePrimitiveTests(unittest.TestCase):
         full = (15.0, 15.0, 15.0, 8.0, 8.0, -80.0, -80.0, -80.0)
         v4 = _v4({"sub_db": sub, "bass_db": bass, "full_db": full})
         runs = spectral_profile.empty_floor_runs(v4)
-        self.assertEqual(runs, [(3, 4, "empty_floor"), (5, 7, "true_silence")])
+        self.assertEqual(runs, [(3, 4, "empty_floor", 8.0), (5, 7, "true_silence", -80.0)])
 
     def test_no_floor_absence_yields_no_runs(self) -> None:
         v4 = _v4({

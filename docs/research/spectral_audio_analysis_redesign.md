@@ -848,6 +848,36 @@ capochino 1:19.3 (expect yes), Girl$ 0:46.3 (expect yes), Can't Say Nah 0:22.7 (
 ear rules), Wanna Be 2:48.0 (roll firing the class — is busy-pulse seasoning acceptable
 there?).
 
+**SCRUB RESULTS (operator ear, 2026-07-05):** LUNCH 0:42.4 — *dead on* (fast amplitude
+wobble confirmed). capochino 1:19.3 — the flag fired on a 2-bar mini-buildup that *does*
+sound wobbly (sound-accurate, structural role differs from a drop). Girl$ 0:46.3 — **wrong:
+a percussive snare buildup** (the roll confound, now ear-confirmed as a false positive for
+wobble semantics). Two ear-identified wobble moments the shipped class MISSES: Girl$ 1:16.1
+(high-pitched wobble — the raw measure fires there in isolated windows but the persistence
+pass drops them) and the low-end wobbly drop at Girl$ 2:25.6 (flags land 5–6 beats early,
+none at the drop itself). Deeper miss, measured: capochino's real drop (1:01.7, after the
+0:54.8 rumbly *fake* drop) carries a ". wow wow wow" pattern the operator hears clearly —
+the growl-band level there is FLAT (~30 dB across all quarter-slots): the wows are
+formant/filter movement (timbre), not level movement, structurally invisible to v4's level
+envelopes. **Net class verdict: honest for fast AMPLITUDE wobble only (LUNCH-style);
+rolls ear-confirmed as false positives; slow/formant wobble is an open family.** The named
+unlock if lights ever need it: a frame-rate growl-band *centroid* series (timbre movement) —
+an additive schema field + one overnight re-sweep; deferred per the operator's priority
+ruling below.
+
+**Operator rulings from the same session (load-bearing for Feature specs):**
+1. **Phrase markings are authoritative** — setting them correctly is the operator's own
+   responsibility (he fixed Girl$'s markers during this session; the fix flowed through
+   immediately with the cache intact, since markers live in ANLZ files, not in the v4
+   cache). This refines Appendix D item 4: consumers TRUST markers; no marker-veto logic;
+   the F-11 neutral default remains as a safety net only.
+2. **Priority: "what really matters is how the lights capitalize on this"** — expression
+   over taxonomy; analysis accuracy stays important but is in service of the looks.
+3. **Atmospheric-simmer design intent:** Girl$ 1:32–2:12.4 has no percussive elements at
+   all (measured: low-band attack median 0.7 dB across those 97 beats vs ~8–15 dB in drop
+   sections — the percussion-free signature is derivable from cache) — sections like this
+   should read as "lights simmer, more atmospheric" in the v2 feature specs.
+
 **Section map (approved feature).** `section_map()` ships: 16-beat blocks with forced
 boundaries at ANLZ markers, single left-to-right merge on a normalized character distance
 (engineering scale constants in SPECTRAL_V4_CALIBRATION, annotated), never merging across a
@@ -898,10 +928,17 @@ documented structural limitation, not a threshold bug, and no constants were cha
    sub dropping out through beats 580–586 (the low-end-lacking climax); the roar section
    (4:17.4, beats 592–639) reads growl-flagged throughout with flatness 0.321–0.345 — among
    the highest distortion readings in the corpus — over sub 32 dB and onset density 3–4
-   ("grinding gritty roar over thumpy kicks"). Nuance: the empty-floor stretch sits at beats
-   584–586 with a bass fill at 587–590 between it and the drop marker, so `pre_gap_beats`
-   at the marker reads 0 — the described silence exists but is separated from the roar by
-   the fill; consumer scans that look a few beats back (as the blackout scan does) see it.
+   ("grinding gritty roar over thumpy kicks"). Correction from the operator (same day): there is **no audible dip**
+   at 4:13–4:14 — that section marks a buildup. The measurement agrees: beats 584–586 are
+   bottom-gone but the full-band level holds at ~9–10 dB with the synth wall at ~20 dB
+   sustained-mid — only the BASS is absent, the music never dips. The earlier "empty-floor
+   stretch" wording overstated it. Consequence folded into the primitive:
+   `empty_floor_runs` now returns each run's median full-band level (`level_db`) — a corpus
+   scan of all 912 bottom-gone runs showed a smooth unimodal continuum from vocal-over-
+   silence (~5 dB, IKG — operator: "silence") to loud bass-less builds (~10 dB, this track —
+   operator: "no dip"), so no hard class boundary was drawn (it would overfit two labeled
+   points 4 dB apart); darkness consumers set their own level cutoff at the live pass, and
+   build sections are excluded by authoritative markers regardless.
 4. **Rock Ur World X Lights (Knock2 vs Dabin) — agreement after the operator corrected his
    own description.** Original phrasing ("upper range traveling at light speed in a 4-beat
    pattern") was initially read as melodic arp patterning and reported as a pitch-domain
