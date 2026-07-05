@@ -230,10 +230,12 @@ class FormatLineTest(unittest.TestCase):
     def test_deck_column_blank_padded_when_absent(self) -> None:
         rec = {"ts": 1.0, "lvl": "INFO", "cat": "sys.boot", "src": "bridge", "msg": "bridge log opened"}
         segments = bridge_view.format_line(rec, width=200)
-        rendered = "".join(text for text, _ in segments)
-        # No deck token anywhere; the blank-padded deck field is still present
-        # (fixed-width column even when the field is empty).
-        self.assertNotIn("D", rendered.split("  ")[1])
+        # segments[2] is the deck field (time, sep, deck, sep, surface, ...):
+        # blank-padded (not omitted) when absent, so surface still starts at
+        # a fixed offset regardless of whether a line carries a deck (rule 3).
+        deck_field_text, deck_field_attr = segments[2]
+        self.assertEqual(deck_field_text.strip(), "")
+        self.assertEqual(len(deck_field_text), bridge_view._DECK_WIDTH)
 
     def test_friendly_name_used_for_known_cat(self) -> None:
         rec = {"ts": 1.0, "lvl": "INFO", "cat": "perf.autoloop", "src": "autoloop_controller", "msg": "arm"}
