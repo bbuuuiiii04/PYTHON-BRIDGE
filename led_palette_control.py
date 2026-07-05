@@ -6,6 +6,7 @@ serializes already-built snapshots to the feedback file.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from typing import Any, Callable, Mapping, Optional
@@ -16,7 +17,14 @@ from .runtime_status import atomic_write_json
 
 log = logging.getLogger("rbss.palette_control")
 
-PALETTE_STATE_PATH = "/tmp/rb_ss_bridge_v2_palette_state.json"
+# Overridable so tests never write the live operator feedback file: the
+# production bridge and the Stream Deck controller both default to the same
+# /tmp path, but a test run sets RBSS_PALETTE_STATE_PATH before import (see
+# tests/__init__.py) to redirect writes to a throwaway file instead of
+# fighting a live bridge's PaletteFeedbackWriter over the real one.
+PALETTE_STATE_PATH = os.environ.get(
+    "RBSS_PALETTE_STATE_PATH", "/tmp/rb_ss_bridge_v2_palette_state.json"
+)
 
 
 class PaletteFeedbackWriter(threading.Thread):

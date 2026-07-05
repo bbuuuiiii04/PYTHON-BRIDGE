@@ -39,7 +39,9 @@ LOCK_PATH = "/tmp/streamdeck_midi.lock"
 RETRY_SECONDS = 3
 PACK_DIR = Path(__file__).resolve().parents[1] / "local" / "soundswitch" / "rbss_canonical_pack"
 BINDING_SIDECAR = PACK_DIR.parent / f".{PACK_DIR.name}.midi_bindings.json"
-PALETTE_STATE_PATH = Path("/tmp/rb_ss_bridge_v2_palette_state.json")
+PALETTE_STATE_PATH = Path(
+    os.environ.get("RBSS_PALETTE_STATE_PATH", "/tmp/rb_ss_bridge_v2_palette_state.json")
+)
 FEEDBACK_STALE_S = 10.0
 # Bridge->deck propagation is ~1s (event -> publish -> 0.1s writer debounce ->
 # 0.5s deck poll). A fresh local toggle needs to survive one contradicting
