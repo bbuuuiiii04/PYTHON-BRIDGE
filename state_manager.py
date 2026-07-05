@@ -99,7 +99,7 @@ from .soundswitch_pack_runtime import PackRuntime, DISABLED_PACK_RUNTIME
 from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
-from .logging_manager import get_logging_manager
+from . import bridge_log
 from .filepath_resolver import has_soundswitch_scripted_id
 from .personality_resolver import PersonalityResolver, PlaylistCache
 from .session_recorder import SessionRecorder
@@ -132,7 +132,6 @@ from .smart_rearm import (
 from . import bridge_fmt as bf
 
 log = logging.getLogger("state_manager")
-LOG = get_logging_manager()
 __all__ = ["StateManager", "SmartDropTickResult"]
 
 
@@ -1109,28 +1108,24 @@ class StateManager(LEDDispatchPolicyMixin):
                 self._recorder.record_event(ev)
             try:
                 payload = ev.payload or {}
-                anomaly = LOG.detect_anomaly(ev)
-                with LOG.event_scope(
+                with bridge_log.event_scope(
                     ev.kind,
                     deck=ev.deck,
-                    source=ev.source,
                     trace_id=str(payload.get("__trace_id", "")),
-                    anomaly=anomaly,
                 ):
                     self._handle_event(ev)
-                    latency_ms, prev = LOG.finish_event(ev)
+                    enqueue_mono = payload.pop("__enqueue_mono", None)
+                    latency_ms = (
+                        (time.monotonic() - float(enqueue_mono)) * 1000.0
+                        if enqueue_mono is not None else 0.0
+                    )
                     warn_ms = _TC_LATENCY_WARN_MS if ev.kind == Ev.TC_UPDATE else _LATENCY_WARN_MS
                     if latency_ms > warn_ms:
                         log.warning("[SM] event-late  kind=%s  latency_ms=%d", ev.kind, int(latency_ms))
                     elif log.isEnabledFor(logging.DEBUG):
-                        if prev and prev.kind != ev.kind:
-                            delta_ms = (time.monotonic() - prev.mono) * 1000.0
-                            log.debug("event relation: %s deck%d %.1fms after %s deck%d",
-                                      ev.kind, ev.deck, delta_ms, prev.kind, prev.deck)
                         log.debug("event processed %.1fms kind=%s", latency_ms, ev.kind)
             except Exception:
-                LOG.log_error(log, "StateManager: error handling %s", ev.kind,
-                              payload=getattr(ev, "payload", {}), exc_info=True)
+                log.error("StateManager: error handling %s", ev.kind, exc_info=True)
 
     # ── Event dispatch ────────────────────────────────────────────────────────
 
@@ -1558,8 +1553,6 @@ class StateManager(LEDDispatchPolicyMixin):
         if new_deck not in (0, 1, 2):
             return
         log.info("[SM] switch  %d→%d  src=%s", old_deck, new_deck, source)
-        if new_deck in (1, 2):
-            LOG.stats.record_transition(new_deck, reason)
         if old_deck in (1, 2) and new_deck in (1, 2):
             self._apply_nonzero_active_deck_switch(old_deck, new_deck, source)
             return
@@ -1746,7 +1739,6 @@ class StateManager(LEDDispatchPolicyMixin):
         self._load_mono[deck] = time.monotonic()
         log.info("[SM] load  deck=%d  title=%s  gen=%d  src=%s",
                  deck, title or "<unknown>", d.load_gen, ev.source)
-        LOG.stats.record_transition(deck, "track_loaded")
 
         if self._resolver is None:
             return
@@ -2009,7 +2001,6 @@ class StateManager(LEDDispatchPolicyMixin):
         log.info("[SM] resolve  deck=%d  file=%s  bpm=%.1f  ssid=%s  latency_ms=%d",
                  deck, bf.short(payload["filepath"]), meta.bpm,
                  meta.soundswitch_id or "none", int(load_delta_ms))
-        LOG.stats.record_transition(deck, "filepath_resolved")
         if self._spectral_enable:
             loaded_anlz = self._loaded_anlz_path.pop(deck, None)
             if loaded_anlz is not None:
@@ -2413,7 +2404,6 @@ class StateManager(LEDDispatchPolicyMixin):
         log.info("[SM] arm-scripted  deck=%d  id=%d  elapsed=%s  bpm=%.1f  file=%s",
                  deck, track_id, bf.elapsed(elapsed_ms), d.meta.bpm,
                  bf.short(track.get("filepath", "")))
-        LOG.stats.record_transition(deck, "scripted_arm")
 
         # Phase 0 (immediate): clear all 4 SS deck slots, stop playback + any autoloop
         self._sse.send_scripted_arm_phase0(deck)

@@ -408,7 +408,7 @@ class StartupMatrixTests(unittest.TestCase):
                         source.index("_start_soundswitch_pack_workers("))
         shutdown = source[source.index("def _shutdown(sig, frame):"):]
         self.assertLess(shutdown.index("_cleanup_pack_outputs()"),
-                        shutdown.index("LOG.stop_control_watcher()"))
+                        shutdown.index("bridge_log.shutdown()"))
         self.assertLess(shutdown.index("_cleanup_pack_outputs()"),
                         shutdown.index("sm.stop()"))
 

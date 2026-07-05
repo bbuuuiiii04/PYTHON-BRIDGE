@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: dd48a3c
+last_verified_commit: bd6369e
 last_verified_date: 2026-07-04
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), QR same-network access, the iOS/iPad touch pass, and the editor unset-param-defaults fix; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview) and Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), QR same-network access, the iOS/iPad touch pass, and the editor unset-param-defaults fix; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -260,8 +260,9 @@ runtime/API behavior change):
 
 ## Status
 
-Phases 1-3, Template Lab Phase 2, and Template Lab Round 1 (`/api/lab/update`, `/api/lab/switch`,
-`/api/lab/preview`, auto-apply, preview strip) are implemented/software-tested. Locked Palette and
-renderer param unlock behavior is covered by software tests only. All LED Pad and Template Lab
-playback/UI claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. The iOS/iPad touch pass is
-implemented/software-tested only; on-device verification is pending.
+Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (`/api/lab/update`, `/api/lab/switch`,
+`/api/lab/preview`, auto-apply, preview strip), and Template Lab Round 2 (`param_specs`
+slider/toggle controls, slot swatches, JSON demoted under Advanced) are implemented/software-tested.
+Locked Palette and renderer param unlock behavior is covered by software tests only. All LED Pad
+and Template Lab playback/UI claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. The
+iOS/iPad touch pass is implemented/software-tested only; on-device verification is pending.

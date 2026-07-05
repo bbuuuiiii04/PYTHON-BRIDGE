@@ -59,7 +59,7 @@ from .state_manager import (
 )
 from .diagnostics import DriftDetector, enable_debug, is_debug
 from .live_bpm import LIVE_BPM_DISABLE_ENV, LiveBPMService, read_rekordbox_version
-from .logging_manager import get_logging_manager
+from . import bridge_log
 from .laser_config import LaserConfig, LaserConfigResult, load_laser_director_config
 from .laser_director import LaserDirector
 from .laser_executor import LaserSceneExecutor
@@ -104,205 +104,7 @@ GOVEE_REALTIME_ENV = "RBSS_GOVEE_REALTIME"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
-class _ColorFormatter(logging.Formatter):
-    _RESET    = "\033[0m"
-    _GREY     = "\033[90m"
-    _WHITE    = "\033[37m"
-    _YELLOW   = "\033[33m"
-    _RED      = "\033[31m"
-    _BRED     = "\033[91m"
-    _BGREEN   = "\033[92m"
-    _BCYAN    = "\033[96m"
-    _BMAGENTA = "\033[95m"
-    _BPINK    = "\033[38;5;213m"
-    _ORANGE   = "\033[38;5;214m"
-    _LIME     = "\033[1;38;5;82m"
-
-    _LEVEL = {
-        logging.DEBUG:    _GREY,
-        logging.INFO:     _WHITE,
-        logging.WARNING:  _ORANGE,
-        logging.ERROR:    _RED,
-        logging.CRITICAL: _BRED,
-    }
-
-    # First match wins. Patterns are checked against lowercased message text.
-    _PATTERNS = [
-        # Pink: Laser Director config and scene policy.
-        ("[laser] scene",           _BPINK),
-        ("[laser] reason-update",   _BPINK),
-        ("[laser_config]",          _BPINK),
-        ("[main] laser-config",     _BPINK),
-        ("[sm] energy-suggest",     _LIME),
-
-        # ── Laser / LED / Govee subsystem tags (bridge log visibility) ──────────
-        # First-match-wins: each specific state line MUST stay above its generic
-        # tag fallback. Do not reorder.
-        ("[laser] personality",       _BGREEN),
-        ("[laser] buildup-gate",      _BCYAN),
-        ("[laser]",                   _BPINK),
-        ("[lx] fired",                _BGREEN),
-        ("[lx] same-scene-refire",    _BGREEN),
-        ("[lx] blackout_on sent",     _BGREEN),
-        ("[lx] mask_on",              _BGREEN),
-        ("[lx] mask_off",             _BGREEN),
-        ("[lx] blackout_on rejected", _BRED),
-        ("[lx] gate-block",           _GREY),
-        ("[lx] blackout skipped",     _GREY),
-        ("[lx] blackout arming",      _GREY),
-        ("[lx]",                      _BCYAN),
-        ("[led] blackout",            _BRED),
-        ("[led] override",            _YELLOW),
-        ("[led] look",                _BGREEN),
-        ("[led]",                     _BCYAN),
-        ("[color] queue",             _YELLOW),
-        ("[color] palette",           _BGREEN),
-        ("[color]",                   _BCYAN),
-        ("[rgb] connected",           _BGREEN),
-        ("[rgb] error",               _BRED),
-        ("[rgb] disconnect",          _BRED),
-        ("[rgb] drop",                _ORANGE),
-        ("[rgb] retry",               _ORANGE),
-        ("[rgb] summary",             _BCYAN),
-        ("[rgb]",                     _BCYAN),
-
-        # Red: requires attention / playback stopped.
-        ("rb-restart",              _BRED),
-        ("stop-stale",              _BRED),
-        ("[sm] stop ",              _BRED),
-        ("[sm] pause",              _BRED),
-        ("osc listener failed",     _BRED),
-        ("[os2l] send-error",       _BRED),
-        ("→idle",                   _BRED),
-
-        # Orange: degraded, late, or retrying — still running but needs watch.
-        ("[sm] event-late",         _ORANGE),
-        ("[sm] arm-grace-late",     _ORANGE),
-        ("[sm] arm-late",           _ORANGE),
-        ("[sm] arm-phrase-miss",    _ORANGE),
-        ("queue-full",              _ORANGE),
-        ("connect-fail",            _ORANGE),
-        ("resolve-fail",            _ORANGE),
-        ("attach failed",           _ORANGE),
-        ("port error",              _ORANGE),
-        ("failed",                  _ORANGE),
-        ("retry",                   _ORANGE),
-        ("[lbpm][error]",           _ORANGE),
-        ("[lbpm][invalid]",         _ORANGE),
-        ("[rbmem][error]",          _ORANGE),
-        ("[rbmem][invalid]",        _ORANGE),
-        ("[rbmem][reject]",         _ORANGE),
-
-        # Yellow: pending, fallback, or degraded-but-working.
-        ("[sm] arm-pending",        _YELLOW),
-        ("[sm] arm-correction-pending", _YELLOW),
-        ("[sm] arm-correction-clear", _YELLOW),
-        ("[sm] clear-autoloop",     _YELLOW),
-        ("fallback",                _YELLOW),
-        ("disabled",                _YELLOW),
-        ("not installed",           _YELLOW),
-        ("[rbmem][pending]",        _YELLOW),
-        ("[rbmem][inconclusive]",   _YELLOW),
-        ("shutdown signal",         _YELLOW),
-        ("cooldown",                _YELLOW),
-        ("resolve-stale",           _YELLOW),
-        ("no peers",                _YELLOW),
-
-        # Cyan: deck routing and master-deck decisions.
-        ("[sm] switch",             _BCYAN),
-        ("[sm] status",             _BCYAN),
-        ("master_changed",          _BCYAN),
-        ("master changed",          _BCYAN),
-        ("[master-seed]",           _BCYAN),
-        ("[rbmaster]",              _BCYAN),
-
-        # Cyan: steady-state scan-friendly status.
-        ("[lbpm][scan]",            _BCYAN),
-        ("[lbpm][current]",         _BCYAN),
-        ("[rbmem][scan]",           _BCYAN),
-        ("[rbmem][candidate]",      _BCYAN),
-        ("[rbmem][status]",         _BCYAN),
-
-        # Magenta: scripted show lifecycle.
-        ("[sm] arm-scripted",       _BMAGENTA),
-        ("[sm] arm-phase2",         _BMAGENTA),
-        ("[sm] clear-scripted",     _BMAGENTA),
-        ("[sm][shadow]",            _BMAGENTA),
-        ("[main][shadow]",          _BMAGENTA),
-        ("scripted_arm",            _BMAGENTA),
-        ("scripted_clear",          _BMAGENTA),
-        ("[ss-scan] complete",      _BMAGENTA),
-        ("[ss-scan] candidate",     _GREY),
-        ("[ss-scan]",               _GREY),
-
-        # Green: successful user-facing state.
-        ("rb_ss_bridge_v2 starting", _BGREEN),
-        ("rb_ss_bridge_v2 running", _BGREEN),
-        ("[main] startup",          _BGREEN),
-        ("[main] starting",         _BGREEN),
-        ("[main] running",          _BGREEN),
-        ("osc listener on",         _BGREEN),
-        ("[sm] load",               _BGREEN),
-        ("[sm] resolve",            _BGREEN),
-        ("[fres] resolve",          _BGREEN),
-        ("[fres] match",            _BGREEN),
-        ("[sm] play",               _BGREEN),
-        ("[sm] resume",             _BGREEN),
-        ("[sm] arm-autoloop",       _BGREEN),
-        ("[sm] rearm-autoloop",     _BGREEN),
-        ("[sm] arm-locked",         _BGREEN),
-        ("[sm] bpm-apply",          _BGREEN),
-        ("[os2l] connected",        _BGREEN),
-        ("► ",                      _BGREEN),
-        ("attached pid",            _BGREEN),
-        ("[lbpm][attach]",          _BGREEN),
-        ("[lbpm][validated]",       _BGREEN),
-        ("[rbmem][attach]",         _BGREEN),
-        ("[rbmem][validated]",      _BGREEN),
-
-        # Grey: high-frequency diagnostic noise.
-        ("[tl] tc",                 _GREY),
-        ("[mtc]",                   _GREY),
-        ("event processed",         _GREY),
-        ("scripted_tracks: registry", _GREY),
-    ]
-
-    def formatTime(self, record: logging.LogRecord, datefmt=None) -> str:
-        import time as _time
-        ct = self.converter(record.created)
-        s = _time.strftime("%H:%M:%S", ct)
-        return f"{s}.{int(record.msecs):03d}"
-
-    def format(self, record: logging.LogRecord) -> str:
-        msg, args = record.msg, record.args
-        prefix = LOG.indent(record)
-        if prefix:
-            record.msg = prefix + str(record.msg)
-        try:
-            text = super().format(record)
-        finally:
-            record.msg, record.args = msg, args
-        text += LOG.annotate(record)
-        msg = record.getMessage().lower()
-        color = self._WHITE
-        for pattern, c in self._PATTERNS:
-            if pattern in msg:
-                color = c
-                break
-        else:
-            color = self._LEVEL.get(record.levelno, self._WHITE)
-        return f"{color}{text}{self._RESET}"
-
-
-LOG = get_logging_manager()
-logging.basicConfig(level=logging.INFO, datefmt="%H:%M:%S", stream=sys.stdout)
-LOG.configure(json_output=bool(os.environ.get("BRIDGE_LOG_JSON")), root_level=logging.INFO)
-LOG.reload_from_env()
-_handler = logging.root.handlers[0]
-if not os.environ.get("BRIDGE_LOG_JSON"):
-    _handler.setFormatter(_ColorFormatter(
-        "%(asctime)s [%(levelname)-7s] %(message)s", datefmt="%H:%M:%S"
-    ))
+bridge_log.init()
 log = logging.getLogger("bridge")
 MASTER_SEED_DIRECT_ENV = "RBSS_MASTER_SEED_DIRECT"
 SCRIPTED_DIRECT_ENV = "RBSS_SCRIPTED_DIRECT"
@@ -818,7 +620,7 @@ def start_osc_listener(
         from pythonosc import dispatcher as osc_dispatcher  # type: ignore
         from pythonosc import osc_server                    # type: ignore
     except ImportError:
-        LOG.log_error(log, "python-osc not installed - scripted arm triggers will not work")
+        log.error("python-osc not installed - scripted arm triggers will not work")
         return
 
     disp = osc_dispatcher.Dispatcher()
@@ -892,7 +694,7 @@ def start_osc_listener(
     try:
         srv = osc_server.ThreadingOSCUDPServer(("0.0.0.0", OSC_LISTEN_PORT), disp)
     except OSError as exc:
-        LOG.log_error(log, "OSC listener failed on port %d: %s", OSC_LISTEN_PORT, exc)
+        log.error("OSC listener failed on port %d: %s", OSC_LISTEN_PORT, exc)
         return
 
     log.info("[MAIN] osc-listen  port=%d", OSC_LISTEN_PORT)
@@ -1127,7 +929,7 @@ def main() -> None:
     log.info("[MAIN] starting")
     # Shared authoritative event queue.
     raw_event_queue: queue.Queue[BridgeEvent] = queue.Queue(maxsize=512)
-    event_queue = LOG.wrap_queue(raw_event_queue)
+    event_queue = bridge_log.TraceQueue(raw_event_queue)
     laser_cfg_result = load_laser_director_config()
     soundswitch_pack_cfg_result = load_soundswitch_pack_player_config()
     led_cfg_result = load_led_look_director_config()
@@ -1798,7 +1600,7 @@ def main() -> None:
         "[MAIN] running  state=on  active_deck=%d  seed=%s  rb_version=%s"
         "  rsr=%s  direct=%s  live_bpm=%s  follow=%s"
         "  phrase_arm=%s  smart_rearm=%s  smart_drop=%s  phrase_anchor=%s"
-        "  scripted_direct=%s  osc=%d  log_control=%s",
+        "  scripted_direct=%s  osc=%d",
         initial_show_deck,
         initial_active_source.replace(" ", "_"),
         rb_version_for_direct_master or "unknown",
@@ -1818,9 +1620,7 @@ def main() -> None:
         ),
         _onoff(_env_enabled(SCRIPTED_DIRECT_ENV, "1")),
         OSC_LISTEN_PORT,
-        os.environ.get("BRIDGE_LOG_CONTROL", "/tmp/rb_ss_bridge_v2_logging.json"),
     )
-    LOG.start_control_watcher(log)
 
     def _on_laser_config_reload(result: LaserConfigResult) -> None:
         if not result.available or result.config is None:
@@ -1893,7 +1693,7 @@ def main() -> None:
         log.info("[MAIN] shutdown  sig=%d", sig)
         # Push direct-DMX zero before any potentially slow watcher/thread joins.
         _cleanup_pack_outputs()
-        LOG.stop_control_watcher()
+        bridge_log.shutdown()
         config_reloader.stop()
         status_writer.stop()
         command_reader.stop()
@@ -1919,14 +1719,6 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT,  _shutdown)
-
-    def _reload_logging(sig, frame):
-        LOG.reload_from_env()
-        LOG.log_stats(log)
-        log.info("[MAIN] log-reload  src=BRIDGE_LOG_*")
-
-    if hasattr(signal, "SIGHUP"):
-        signal.signal(signal.SIGHUP, _reload_logging)
 
     # Block main thread
     sm_thread.join()

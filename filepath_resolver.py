@@ -27,12 +27,10 @@ from typing import Optional
 from .beat_math import _compute_beatgrid_position
 from .config import AUDIO_EXTS, LSOF_LEN_TOLERANCE_MS, LSOF_COOLDOWN_S, RB_DB_PATH
 from .led_config import load_drop_presentation_config
-from .logging_manager import get_logging_manager
 from .models import BridgeEvent, Ev, PositionSnapshot
 from . import bridge_fmt as bf
 
 log = logging.getLogger("filepath_resolver")
-LOG = get_logging_manager()
 
 _EMPTY_BEATGRID = {
     "beatgrid_times_ms": [],

@@ -102,6 +102,49 @@ class LedPadLabTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "collides"):
                 registry.save({"name": "rt_groove_chase", "kind": "slot", "fn": "pulse"})
 
+    def test_param_specs_round_trip_slider_and_toggle(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+            specs = {
+                "level": {"kind": "slider", "label": "Level", "min": 0, "max": 1, "step": 0.05},
+                "flip": {"kind": "toggle", "label": "Flip"},
+            }
+            registry.save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {}, "param_specs": specs})
+
+            reloaded = registry.get("pulse")["param_specs"]
+
+            self.assertEqual(reloaded["level"], {"kind": "slider", "label": "Level", "min": 0.0, "max": 1.0, "step": 0.05})
+            self.assertEqual(reloaded["flip"], {"kind": "toggle", "label": "Flip"})
+
+    def test_param_specs_validation_rejects_malformed_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+            base = {"name": "pulse", "kind": "slot", "fn": "pulse", "params": {}}
+
+            with self.assertRaises(ValueError):
+                registry.save({**base, "param_specs": []})
+            with self.assertRaises(ValueError):
+                registry.save({**base, "param_specs": {"level": {"kind": "slider", "max": 1}}})
+            with self.assertRaises(ValueError):
+                registry.save({**base, "param_specs": {"level": {"kind": "slider", "min": 1, "max": 1}}})
+            with self.assertRaises(ValueError):
+                registry.save({**base, "param_specs": {"level": {"kind": "slider", "min": 0, "max": 1, "step": 0}}})
+            with self.assertRaises(ValueError):
+                registry.save({**base, "param_specs": {"level": {"kind": "bogus"}}})
+            self.assertEqual(registry.list(), [])
+
+    def test_save_without_param_specs_preserves_existing_entry_specs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+            specs = {"level": {"kind": "slider", "label": "Level", "min": 0, "max": 1, "step": 0.1}}
+            registry.save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {}, "param_specs": specs})
+
+            registry.save({"name": "pulse", "notes": "updated notes"})
+
+            entry = registry.get("pulse")
+            self.assertEqual(entry["notes"], "updated notes")
+            self.assertEqual(entry["param_specs"]["level"]["min"], 0.0)
+
     def test_hot_reload_and_broken_module_are_structured(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             module = Path(td) / "effects_lab.py"
@@ -210,6 +253,17 @@ class LedPadLabTests(unittest.TestCase):
             self.assertEqual(playback.play_calls, [])
             self.assertEqual(playback.update_calls, [])
             self.assertEqual(playback.playing, "")
+
+    def test_lab_preview_returns_slot_colors_for_slot_kind_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._service_with_pulse_draft(Path(td))
+
+            result = service.lab_preview({"name": "pulse", "beats": 1.0, "bpm": 120.0})
+
+            self.assertTrue(result["ok"])
+            self.assertIn("slot_colors", result)
+            self.assertIsInstance(result["slot_colors"], list)
+            self.assertTrue(result["slot_colors"])
 
     def test_lab_preview_unknown_draft_raises(self) -> None:
         with tempfile.TemporaryDirectory() as td:

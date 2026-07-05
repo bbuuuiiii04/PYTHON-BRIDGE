@@ -9,7 +9,9 @@ validation_scope: AI-workflow design analysis only; transcript/memory evidence v
 
 **Task:** design and adversarially challenge a system that turns past AI-agent mistakes into durable
 workflow improvements, without depending on Brandon to notice and hand-correct each failure.
-**This document is analysis only. Nothing here is implemented, and nothing outside this file was modified.**
+**Authored 2026-07-04 as analysis only. Operator approved the build the same day ("go ahead and
+build it"); Phase 1 was built and its first-run digest applied 2026-07-04 — current state lives in
+§3's checklists and the AWR-127 registry row.**
 
 ---
 
@@ -310,32 +312,39 @@ rule file, hook, or setting without Brandon approving the digest line that propo
 ### Phase 1 — The retro skill + first-run backlog clear (smallest useful unit)
 
 Deliverables:
-- [ ] A global skill file (working name `/retro`) specifying: sweep scope (transcripts + memory
-      stores since high-water mark), the measured mining recipe (harness-noise exclusions, short-
-      message priority, LLM judgment pass, mandatory line-level verification of every citation),
-      the three-way classification (novel-lesson / compliance-failure / already-captured), the
-      staleness spot-check, the ≤5-proposal digest format with per-item citations and explicit
-      DELETE/MERGE proposals, provenance labeling for anything mined (`source: retro YYYY-MM-DD`),
-      and the high-water-mark update.
-- [ ] First run executed. It must, at minimum, put these in its digest: the three live
-      contradictions from Finding 3 (watcher path ×2 files, `RBSS_SPECTRAL_ENABLE`, AWR-121 status);
-      an archive/status split for closed workstreams in `MEMORY.md`; a one-paragraph lesson-placement
-      rule (universal → `~/.claude/CLAUDE.md`; repo workflow → `docs/agents/lessons/`; project state
-      → project memory; agent procedure → the matching skill).
-- [ ] Brandon has approved/rejected each digest item and approved items are applied.
+- [x] A global skill file (`/retro`, live at `~/.claude/skills/retro/SKILL.md`, 2026-07-04)
+      specifying: sweep scope (transcripts + memory stores since high-water mark), the measured
+      mining recipe (harness-noise exclusions, short-message priority, LLM judgment pass, mandatory
+      line-level verification of every citation), the three-way classification (novel-lesson /
+      compliance-failure / already-captured), the staleness spot-check, the ≤5-proposal digest
+      format with per-item citations and explicit DELETE/MERGE proposals, provenance labeling for
+      anything mined, and the high-water-mark update.
+- [x] First run executed (2026-07-04 — this document's evidence sweep WAS the first run's mining;
+      the digest was the five items below). Applied: the three live contradictions from Finding 3
+      (watcher path ×2 memory files, `RBSS_SPECTRAL_ENABLE` env-flag correction, AWR-121 status);
+      the closed-workstream split in `MEMORY.md`; the lesson-placement rule added to
+      `~/.claude/CLAUDE.md` (universal → CLAUDE.md; repo workflow → `docs/agents/lessons/`; project
+      state → project memory; agent procedure → the matching skill).
+- [x] Brandon approved the build ("go ahead and build it", 2026-07-04); recommended defaults
+      adopted; all five digest items applied. High-water marks recorded in each store's
+      `memory/retro_state.md`.
 
 Completion marker: the second retro run (a few weeks later) can measure the first — did any lesson
 captured in run 1 get violated again? That number is the system's honest effectiveness metric.
 
 ### Phase 2 — One deterministic guard (Codex)
 
-- [ ] Codex spec + implementation for the raw-launch PreToolUse guard (bridge project scope,
-      exact-pattern deny + pointer to `scripts/ss_bridge_watcher.sh` with `RBSS_BRIDGE_MANUAL=1`).
-      Must not match the watcher script itself or documentation edits.
-- [ ] Verified by attempting a raw launch in a test session and seeing the deny message.
+- [x] Codex spec authored 2026-07-04: `docs/plans/active/retro_launch_guard_spec.md`. Scope changed
+      from the original bridge-project registration to GLOBAL `~/.claude/settings.json` — both
+      historical violations happened in home-directory sessions, outside bridge-repo hook scope.
+      Exact-pattern deny + pointer to `scripts/ss_bridge_watcher.sh` with `RBSS_BRIDGE_MANUAL=1`;
+      must not match the watcher script itself, `pgrep`/`ps` checks, or submodule runs. AWAITING
+      CODEX implementation.
+- [ ] Codex implements (script + tests + settings registration per the spec).
+- [ ] Verified by attempting a raw launch in a fresh session and seeing the deny message.
 
-Gate: only after Phase 1's first run, so the guard inherits the corrected watcher path, not the
-stale one.
+Gate satisfied: Phase 1's first run applied the corrected watcher path before this spec was
+authored, so the guard's deny message points at the repo script, not the deleted home-dir copy.
 
 ### Phase 3 — Conditional scheduling (default: not built)
 
@@ -410,6 +419,15 @@ lessons, and heuristic real-time correction detectors on measured false-positive
 wrong-lesson amplification risk, and standing-infrastructure cost that a solo hobby workflow cannot
 justify. The first phase is one skill file and one retro run, shippable and evaluable on its own;
 its success metric (lessons from run N violated again before run N+1) is checkable at run N+1.
+
+> **2026-07-04 resolution:** Brandon approved the build ("go ahead and build it"). Recommended
+> defaults adopted for 1, 2, 3, 4, 6, 7: on-demand cadence, cap 5, bridge-focus after the first
+> run (the first run's sweep included the home-dir backlog — its ~24 corrections all matched
+> already-captured lessons or dead workstreams, so no new memories were needed from it), launch
+> guard now (spec authored, awaiting Codex), no role-split hook, chat-only digests, Claude applies
+> memory/docs + Codex implements hooks. Decision 5 (frontmatter status field across ~61 files)
+> DEFERRED — no mechanical consumer exists yet; the `MEMORY.md` closed-workstream split covers the
+> at-a-glance need. The list below is preserved for the record.
 
 ### Decisions only Brandon can make
 

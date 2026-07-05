@@ -101,7 +101,7 @@ class MainMixerAuthorityWiringTests(unittest.TestCase):
 
     def test_running_log_uses_initialized_show_deck(self):
         source = inspect.getsource(main_mod.main)
-        running_log = source[source.index("[MAIN] running"): source.index("LOG.start_control_watcher")]
+        running_log = source[source.index("[MAIN] running"): source.index("def _on_laser_config_reload")]
         self.assertIn("initial_show_deck,\n        initial_active_source", running_log)
         self.assertNotIn("initial_active_deck,\n        initial_active_source", running_log)
 
