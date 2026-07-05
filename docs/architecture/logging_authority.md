@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 4f4c1ad
+last_verified_commit: 18689e9
 last_verified_date: 2026-07-05
 validation_scope: intent contract, re-verified against as-built W1-W7 code; implemented/software-tested; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
