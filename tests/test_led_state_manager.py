@@ -1,3 +1,4 @@
+import logging
 import queue
 import sys
 import time
@@ -440,6 +441,27 @@ def _groove_cross_sp() -> SmartPhrasingState:
         phrase_start_crossing=True,
         beats_into_phrase=0.0,
     )
+
+
+def _capture_perf(test: unittest.TestCase, logger_name: str) -> list[logging.LogRecord]:
+    """Attach a capture handler to a perf.* logger for one test (AWR-125).
+
+    No bridge_log.init(); propagate stays default so root is untouched.
+    """
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    prior_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    test.addCleanup(logger.setLevel, prior_level)
+    test.addCleanup(logger.removeHandler, handler)
+    return records
 
 
 class LEDStateManagerTests(unittest.TestCase):
@@ -2047,5 +2069,95 @@ class LEDStateManagerTests(unittest.TestCase):
                 current_phrase_start_beat=s, beats_into_phrase=112.0 - s))(start)
             sm._push_tick()
         self.assertGreaterEqual(len([c for c in adapter.trigger_calls if c.role == "groove"]), 2)
+
+    # ── AWR-125 W3b: perf("led.look") emit assertions ─────────────────────
+
+    def test_accepted_automation_dispatch_emits_perf_led_look(self) -> None:
+        records = _capture_perf(self, "perf.led.look")
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(
+            sm,
+            SmartPhrasingState(
+                smart_buildup_active=True,
+                current_phrase_is_up=True,
+                next_smart_drop_beat=96.0,
+                beats_to_next_drop=16.0,
+            ),
+        )
+
+        sm._push_tick()
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(len(records), 1)
+        rec = records[0]
+        self.assertEqual(rec.cat, "perf.led.look")
+        self.assertEqual(rec.deck, 1)
+        data = rec.data
+        self.assertEqual(data["role"], "buildup")
+        self.assertEqual(data["look"], "room_buildup")
+        self.assertEqual(data["scene_ref"], "Scene-buildup")
+        self.assertEqual(data["reason"], "role_entry:buildup")
+        self.assertEqual(data["backend"], "cloud_diy")
+        self.assertEqual(data["active_deck"], 1)
+        self.assertTrue(data["role_key"])
+        self.assertNotIn("phase", data)
+
+    def test_idle_ambient_accepted_emits_perf_led_look(self) -> None:
+        records = _capture_perf(self, "perf.led.look")
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_paused_push_tick(sm)
+
+        sm._push_tick()
+        sm._push_tick()
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].cat, "perf.led.look")
+        self.assertEqual(records[0].data["role"], "ambient")
+        self.assertEqual(records[0].data["look"], "room_ambient")
+
+    def test_smart_drop_blackout_accepted_emits_perf_led_look_with_phase(self) -> None:
+        records = _capture_perf(self, "perf.led.look")
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(
+            sm,
+            SmartPhrasingState(
+                transition_mask_arm_latched=True,
+                transition_window_active=True,
+                next_smart_drop_beat=64.0,
+            ),
+        )
+
+        sm._push_tick()
+        sm._push_tick()
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(len(records), 1)
+        data = records[0].data
+        self.assertEqual(data["role"], "smart_drop_blackout")
+        self.assertEqual(data["look"], "room_blackout")
+        self.assertEqual(data["phase"], "pre_drop")
+        # scene_ref "23259999" is digits-only → sanitizer parity with old lines
+        self.assertEqual(data["scene_ref"], "<redacted>")
+
+    def test_rejected_dispatch_emits_no_perf_led_look(self) -> None:
+        records = _capture_perf(self, "perf.led.look")
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter(accept=False)
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(sm, SmartPhrasingState())
+
+        sm._push_tick()
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(len(records), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

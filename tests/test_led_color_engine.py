@@ -18,6 +18,7 @@ Coverage:
 """
 from __future__ import annotations
 
+import logging
 import random
 import sys
 import unittest
@@ -1308,6 +1309,132 @@ class TestImport(unittest.TestCase):
         cfg_off = _make_config(enabled=False)
         self.assertTrue(LedColorEngine(cfg_on, set_seed=0).enabled)
         self.assertFalse(LedColorEngine(cfg_off, set_seed=0).enabled)
+
+
+# ---------------------------------------------------------------------------
+# AWR-125 W3b: perf("led.palette") emit assertions
+# ---------------------------------------------------------------------------
+
+class TestPalettePerfEmits(unittest.TestCase):
+    """Capture-handler pattern on logging.getLogger("perf.led.palette");
+    no bridge_log.init() — the pure engine must emit through plain stdlib
+    logging with zero pipeline setup."""
+
+    def setUp(self) -> None:
+        self._logger = logging.getLogger("perf.led.palette")
+        self.records: list[logging.LogRecord] = []
+        outer = self
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                outer.records.append(record)
+
+        self._handler = _Capture()
+        self._prior_level = self._logger.level
+        self._logger.addHandler(self._handler)
+        self._logger.setLevel(logging.DEBUG)
+
+    def tearDown(self) -> None:
+        self._logger.setLevel(self._prior_level)
+        self._logger.removeHandler(self._handler)
+
+    def test_dwell_expiry_emits_reason_dwell_per_commit(self) -> None:
+        minimal_pal = {
+            "p1": Palette(range=("blue", "blue"), weight=1.0, dwell=1),
+            "p2": Palette(range=("red", "red"), weight=1.0, dwell=1),
+        }
+        cfg = _make_config(palettes=minimal_pal, palette_dwell_tracks=1)
+        e = LedColorEngine(cfg, set_seed=7)
+
+        _dispatch(e, load_gen=1)
+        _dispatch(e, load_gen=2)
+        _dispatch(e, load_gen=3)
+
+        # dwell=1 → every new track expires dwell → one commit each
+        self.assertEqual(len(self.records), 3)
+        for rec in self.records:
+            self.assertEqual(rec.cat, "perf.led.palette")
+            self.assertEqual(rec.data["reason"], "dwell")
+            self.assertIn("palette", rec.data)
+            self.assertIn("prev", rec.data)
+            self.assertFalse(rec.data["locked"])
+
+    def test_same_track_dispatch_emits_nothing(self) -> None:
+        e = _engine(seed=42)  # default palettes: all dwell >= 4
+        _dispatch(e, load_gen=1)
+        for _ in range(10):
+            _dispatch(e, load_gen=1)
+        self.assertEqual(len(self.records), 0)
+
+    def test_queued_palette_applies_with_reason_operator(self) -> None:
+        e = _engine(seed=42)
+        _dispatch(e, load_gen=1)
+        initial = e.snapshot()["current_palette"]
+        target = next(n for n in _DEFAULT_PALETTES if n != initial)
+
+        e.queue_palette(target)
+        self.assertEqual(len(self.records), 0)  # queueing alone emits nothing
+
+        _dispatch(e, load_gen=2)  # queued palette commits on track change
+
+        self.assertEqual(len(self.records), 1)
+        rec = self.records[0]
+        self.assertEqual(rec.cat, "perf.led.palette")
+        self.assertEqual(rec.data["reason"], "operator")
+        self.assertEqual(rec.data["palette"], target)
+        self.assertEqual(rec.data["prev"], initial)
+
+    def test_set_palette_emits_reason_operator(self) -> None:
+        e = _engine(seed=42)
+        initial = e.snapshot()["current_palette"]
+        target = next(n for n in _DEFAULT_PALETTES if n != initial)
+
+        e.set_palette(target)
+
+        self.assertEqual(len(self.records), 1)
+        self.assertEqual(self.records[0].data["reason"], "operator")
+        self.assertEqual(self.records[0].data["palette"], target)
+        self.assertEqual(self.records[0].data["prev"], initial)
+
+    def test_drop_snap_emits_reason_drop_snap(self) -> None:
+        e = _engine(
+            seed=42,
+            big_shift_chance=1.0,
+            snap_eligible_drop_indices=(1,),
+        )
+        initial = e.snapshot()["current_palette"]
+
+        _dispatch(e, load_gen=1, role="drop", section_id="d1")
+
+        self.assertEqual(len(self.records), 1)
+        rec = self.records[0]
+        self.assertEqual(rec.data["reason"], "drop_snap")
+        self.assertEqual(rec.data["prev"], initial)
+        self.assertNotEqual(rec.data["palette"], initial)  # snap excludes current
+
+    def test_override_fade_emits_reason_fade_only_at_completion(self) -> None:
+        e = _engine(seed=42)
+        _dispatch(e, load_gen=1)
+        initial = e.snapshot()["current_palette"]
+        target = next(n for n in _DEFAULT_PALETTES if n != initial)
+
+        e.override_palette(target, start_beat=0.0, end_beat=8.0)
+        e.advance_fade(2.0)
+        e.advance_fade(4.0)
+        self.assertEqual(len(self.records), 0)  # mid-fade ticks emit nothing
+
+        e.advance_fade(8.0)  # completion commit
+        e.advance_fade(9.0)  # fade cleared — no further emits
+
+        self.assertEqual(len(self.records), 1)
+        self.assertEqual(self.records[0].data["reason"], "fade")
+        self.assertEqual(self.records[0].data["palette"], target)
+
+    def test_shift_emits_reason_operator(self) -> None:
+        e = _engine(seed=42)
+        e.shift()
+        self.assertEqual(len(self.records), 1)
+        self.assertEqual(self.records[0].data["reason"], "operator")
 
 
 if __name__ == "__main__":
