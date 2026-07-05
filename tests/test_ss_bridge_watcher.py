@@ -212,6 +212,22 @@ class SSBridgeWatcherTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn("MONITOR=closed", run.stdout)
 
+    # start_bridge truncates the console log in the parent BEFORE writing its
+    # own lines; the old subshell-side truncation raced the watcher's writes
+    # and wiped them, leaving no [watcher] evidence to diagnose launches.
+    def test_start_bridge_keeps_watcher_log_lines(self) -> None:
+        run = self._run_watcher_functions(
+            """
+            echo old-run-junk > "$LOG_FILE"
+            start_bridge
+            wait
+            """
+        )
+
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("started bridge pid=", run.watcher_log)
+        self.assertNotIn("old-run-junk", run.watcher_log)
+
     # close_monitor must kill the python viewer by its full path, not just the
     # RBSS_BRIDGE_MONITOR marker: the marker lives on the wrapper bash's argv
     # only, so a marker-only pkill orphans the viewer.

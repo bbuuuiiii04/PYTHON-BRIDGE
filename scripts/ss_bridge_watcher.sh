@@ -128,6 +128,11 @@ monitor_open() {
 }
 
 start_bridge() {
+    # Fresh console log per bridge run: truncate HERE in the parent, then let
+    # the subshell append. The old subshell-side "> $LOG_FILE" truncation
+    # raced the parent's log_watcher writes and wiped them -- the 2026-07-05
+    # launch-bug investigation found zero [watcher] lines to read.
+    : > "$LOG_FILE"
     (
         cd "$BRIDGE_DIR" || exit 1
         ensure_laser_config
@@ -163,7 +168,7 @@ start_bridge() {
             RBSS_LASER_CONFIG="$LASER_CONFIG_PATH" \
             $TRUTH_ENV \
             "$PYTHON" -m rb_ss_bridge_v2
-    ) > "$LOG_FILE" 2>&1 &
+    ) >> "$LOG_FILE" 2>&1 &
     BRIDGE_PID=$!
     BRIDGE_MANAGED=1
     STARTED_AT=$(date +%s)
