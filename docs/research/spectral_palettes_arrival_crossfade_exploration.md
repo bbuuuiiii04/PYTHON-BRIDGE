@@ -278,6 +278,12 @@ gain: engine v1/v2 switch, WILD/SET toggle, per-feature kills.
   (WILD/SET), active texture class + decision reason in runtime status; LED Pad gains a
   "now playing identity" chip.
 
+**Venue reality (operator, 2026-07-05 — applies to every design item):** the Govee strips are
+strung on the wall around a **living room and are the room's literal primary light source** —
+not accent lighting. Full blackout = pitch-black room with people in it; "darkness as
+negative space" and multi-bar blackouts must be judged against that; brightness floors,
+comfort, and social/ambient modes matter more than venue lore assumes.
+
 **Operator corrections + additions (2026-07-05, late session — these override earlier items):**
 1. **Vocal-flip treatment CUT** (operator: "doesn't even make sense. not sure i like it").
    The pre-drop scan is silence-only: blackout length = the track's real bottom-gone gap.
