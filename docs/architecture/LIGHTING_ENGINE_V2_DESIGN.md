@@ -1022,6 +1022,19 @@ backable today via `fixed_rgb`/`set_mode_override`, green is a default stop; lay
   sidechained kick-prominence, thick-wall sustained-synth are not reliably computed; texture does
   not react to them.
 
+**Stream Deck "max-energy drop queue" (new feature this session — F1 pad + queue, F2 rendering):**
+a pad that **pre-arms the next drop to fire at maximum energy** — the zone's highest-energy template
+(full-strip strobe idiom, rendered in the track's own colors), for the duration of that chorus
+phrase — as a **manual override** (arbiter rank 0) that beats the automatic family/tier
+classification. The "I know this drop is huge — make it huge" hype button. Decided defaults
+(veto-able): armed like `queue_palette` but **fires on the next drop marker**
+(`_led_drop_marker_anchor`, `led_dispatch_policy.py:1340-1348`), **one-shot** (disarms after firing),
+**toggle to cancel**, **keeps the pre-drop blackout** (dark → max strobe hits harder), **overrides
+even NEUTRAL drops** (manual wins), armed state lit on the pad. Realized when F2's drop templates
+exist (it needs the highest-energy template); the pad + arming ride the F1 Stream Deck surface. Adds
+an 11th control to the ~5-free 15-key deck — reinforces the layout operator-veto (may need a shift
+layer).
+
 **Runtime toggles this session adds** (kill matrix / control surface): v1↔v2 master (live-switchable,
 v2-off ⇒ v1 byte-identical); F3 transition-mode (blend/handover); F3 within-vibe hold-tightness; F4
 seasoning density.

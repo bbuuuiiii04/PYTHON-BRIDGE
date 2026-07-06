@@ -68,7 +68,7 @@ Per feature (F1 first): a spec at `docs/plans/active/lighting_engine_v2_f<N>_spe
 ## Gaps to consider and close
 
 **F1 — resolve in the spec and implement:**
-- Stream Deck surface: gesture→intent wiring for zone pads (correction) vs manual pads (live-only); the 10-control **key layout on the 15-key deck** (repurpose 0–5; **mark operator-veto**); lock = store-correction plus its residual freeze behavior in a world with no dwell-rotation; queue = current-track-at-phrase; active-deck stamp; per-key active-zone feedback rendering.
+- Stream Deck surface: gesture→intent wiring for zone pads (correction) vs manual pads (live-only); the **key layout on the 15-key deck** (~11 controls onto ~5 free keys — repurpose 0–5, likely a shift layer; **mark operator-veto**); lock = store-correction plus its residual freeze behavior in a world with no dwell-rotation; queue = current-track-at-phrase; active-deck stamp; per-key active-zone feedback rendering. The pad + arming for the **max-energy drop-queue** feature (§15.6) also live here (F1); its max-energy *rendering* is realized with F2.
 - Correction granularity: does a zone pad set zone-only (hash picks the variant) or zone+variant — decide and justify.
 - The permanence store: content_id-keyed, file-backed, holds derived identity + corrections; never silently repaints on analysis upgrade.
 
