@@ -853,3 +853,89 @@ Cancelled plan items with reasons. Then a plain-language operator summary coveri
 - Unverified hardware assumptions (Govee latency, deck feedback latency) and rollback: flip
   `led_engine v1` live, or set `v2.enabled=false` / remove the block and restart via the menubar
   watcher (never a raw launch).
+
+---
+
+## Part F — Acceptance review round 1 (2026-07-06): REQUIRED FIXES
+
+Two independent reviews of f9172e8..a481d01 (implementation reviewer + spec author, both
+verified against the code). Structural verdict: safe — no push-loop I/O, v2-off byte-identity
+intact, no dark-room mode. But three locked F1 behaviors are functionally broken and the
+integration layer is untested. Implement ALL items below, in order; the Part E acceptance
+checklist then applies to the whole (original + fixes).
+
+### FR-1 (MAJOR) — Clock-unit bug: v2 windows armed with `cycle`, expired with `abs_beat`
+`_v2_begin_dispatch` uses `now = float(cycle)` to arm flip/reset/bloom windows, but `cycle` is
+the per-phrase step counter (`led_dispatch_policy.py:1700` builds it as
+`int((abs_beat − phrase_anchor)//32)`-scale), while `_v2_advance(abs_beat)` expires the same
+windows against the absolute beat. Result: bloom NEVER arms (the 8-beat hold never elapses in
+cycle units), and the palate reset collapses after one dispatch instead of holding 4 beats.
+**Fix: one clock — the abs_beat domain — via pending-stamp arming:** arm each window as
+*pending with a duration*; the first `_v2_advance(abs_beat)` tick after arming stamps
+`start = abs_beat`. This also handles the deck-flip timeline jump correctly (abs_beat is
+per-deck; a window armed at a flip gets stamped on the NEW deck's first tick). Bloom hold
+counting likewise: `_v2_first_seen_beat` stamps from `_v2_advance`'s abs_beat, per-track.
+Do not pass wall-clock or cycle into any window math.
+
+### FR-2 (MAJOR) — `moments_blocked` is hardcoded False
+`led_dispatch_policy.py:821` passes `moments_blocked=False`. Wire it for real: compute at that
+call site from the SAME gate state that drives `reset_fade_memory` (`led_dispatch_policy.py:
+1071-1072` — blackout / manual-override gate) OR an active `pre_dark` phase; pass the result.
+While True: no bloom arm/fire, no palate-reset start (pending windows still expire).
+
+### FR-3 (MAJOR) — D5 provisional→measured upgrade bypassed in the consumer
+`_handle_led_track_identity` (`state_manager.py:1722-1735`) calls `store.freeze` only when
+`store_record is None`. A track corrected early (provisional record exists) never gets its
+measured base — the exact F-6 trap D5 was written to close. **Fix:** for a `measured` event
+record, ALWAYS call `store.freeze(key, record)` (the store method already implements
+measured-first-write-wins and provisional-upgrade-preserving-correction), then re-read the
+record; submit to the writer on any mutation.
+
+### FR-4 (MAJOR) — Missing integration tests (Part D groups 5/6)
+Add to `tests/test_led_state_manager.py` (or the pack-driver harness, matching existing
+conventions): (a) `LED_TRACK_IDENTITY` consumer — set + freeze + writer-submit exactly once for
+fresh measured, zero for store-hit; (b) stale `load_gen` event dropped; (c) the FR-3 sequence:
+correct-early → measured event → unlock → track wears its MEASURED identity; (d) max-energy
+consumed only under `mutate=True` (a preview pass must not consume); (e) `moments_blocked`
+wiring: with the blackout/manual gate active, a pending bloom expires unfired; (f) cache-HIT
+through the real `_read_runtime_anlz_data` path for a fixture (guards beatgrid-key drift).
+Add to `tests/test_led_color_engine.py`: (g) golden flip-resume — run v2 excursion (several
+dispatches), flip back to v1, assert `_journey_rng.getstate()` and all v1 journey fields are
+bit-equal to their pre-flip values (paused-and-resumed), and subsequent v1 outputs match a
+never-flipped engine driven with only the v1-phase calls; (h) FR-1 behavior: bloom fires after
+8 abs-beats hold and lasts 8 beats; palate reset holds 4 abs-beats.
+
+### FR-5 (MINOR) — Palate reset must render a dimmed NEUTRAL dressing
+`led_color_engine.py:1111,1149` dim the ACTIVE dressing's core. Spec resolve step 3 / D6:
+NEUTRAL dressing (the configured NEUTRAL ramp) scaled by `palate_reset_dim` — the dip is
+neutral by design.
+
+### FR-6 (MINOR) — Delete the TypeError compat shim
+`led_dispatch_policy.py:1313-1320` (commit b35d3d8) retries `commit_role` without
+`look_preference` on TypeError. Banned success-shaped fallback (Part B Absolute Rules). Delete
+the TypeError branch; update any test doubles to accept the new keyword instead.
+
+### FR-7 (MINOR) — Restore the spec's zone-ramp starting values
+The shipped example-config ramps deviate per-zone from Task 9's table (e.g. VOLT gold/orange
+instead of hot magenta, ION green instead of electric blue→acid cyan). The Task 9 values are
+what the operator approved at checkpoint — restore them verbatim (they remain TUNE-LIVE).
+
+### FR-8 (MINOR) — Add the `TEMPORARY (v2 rollout)` comment to the menubar item (D18).
+
+### FR-9 (MINOR) — Observability cleanups
+Replace the broad `except Exception: pass` snapshot-copy at `led_dispatch_policy.py:216-225`
+with key-specific handling (or drop it); make `snapshot()["store_degraded"]` reflect the real
+store flag or remove the field (no dead always-False surface).
+
+### FR-10 (MINOR) — Scripted stand-down made explicit (Part C invariant 5)
+`begin_dispatch` gains `scripted: bool = False`, supplied by the dispatch policy from
+`scripted_led_mode`. When scripted and v2-active: the dispatch renders through the v1 body
+(fall through) and a dispatch-scoped stand-down flag makes `resolve_color`/`resolve_slot_colors`
+use their v1 paths too; v2 bloom/session bookkeeping must NOT advance or consume on scripted
+plays. Cover with a test (scripted dispatch under v2 latch → v1-identical output, bloom flag
+unconsumed).
+
+### Part F acceptance
+Full suite + both contracts' test lists + `tests.test_bridge_menubar` + the three hard doc
+checks green; every FR item ticked; commit per logical group; push; report per "When You
+Finish" including which FR items changed operator-visible behavior.
