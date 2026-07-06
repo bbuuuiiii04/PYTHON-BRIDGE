@@ -1,10 +1,19 @@
 ---
 doc_status: current
-truth_level: codex implementation spec — verified against code, not yet implemented
+truth_level: implementation spec — IMPLEMENTED/software-tested (operator-directed, by Claude)
 last_verified_commit: 030bc63
 last_verified_date: 2026-07-06
-validation_scope: standalone v1-baseline stabilization pass (NOT folded into LIGHTING ENGINE v2); covers the two on-v2-path CONFIRMED findings from lighting_v1_foundation_audit.md; software-only, no hardware validation
+validation_scope: standalone v1-baseline stabilization pass (NOT folded into LIGHTING ENGINE v2); covers the two on-v2-path CONFIRMED findings from lighting_v1_foundation_audit.md; IMPLEMENTED and software-tested, no hardware validation
 ---
+
+> **IMPLEMENTED 2026-07-06 (operator directed Claude to fix directly, no subagents).** Both
+> tasks landed and are software-tested: Task 1 in `state_manager.py`
+> (`_drop_presentation_release_on_stop` + `_do_stop` call), Task 2 the `led_color_engine.py`
+> `lock()` docstring. Regression coverage:
+> `tests/test_state_manager_drop_presentation.py::StopFailOpenReleaseTests` (3 tests, incl. a
+> negative check proving the pre-fix bug reproduces without the fix). Full suite green; no
+> golden re-baselining needed. Operator live visual pass is the remaining gate. The Part A–E
+> spec below is retained as the implementation record.
 
 # Codex Implementation Spec — LIGHTING v1 baseline stabilization (2 fixes)
 

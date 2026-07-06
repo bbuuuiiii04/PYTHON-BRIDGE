@@ -781,7 +781,9 @@ class LedColorEngine:
     # ------------------------------------------------------------------
 
     def lock(self) -> None:
-        """Freeze palette (suppresses drift + drop-snap + queued apply)."""
+        """Freeze automatic palette selection (dwell drift + drop-snap). A
+        queued palette still applies at the next track boundary and the lock
+        transfers to it (palette_control_authority.md Rule 8)."""
         self._lock = True
 
     def unlock(self) -> None:

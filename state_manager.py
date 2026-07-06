@@ -2403,6 +2403,36 @@ class StateManager(LEDDispatchPolicyMixin):
             player.set_base_suppressed(actions.base_suppressed)
             self._drop_presentation_base_suppressed_held = actions.base_suppressed
 
+    def _drop_presentation_release_on_stop(self) -> None:
+        """Fail-open the drop-presentation window on a hard stop.
+
+        The reader-stale stop branch (and any stop path that short-circuits
+        before _drop_presentation_tick's sole call site) would otherwise leave a
+        Laser-Solo / pre-dark LED dark-hold latched: _do_stop resets the lasers
+        but never releases the drop_spotlight LED blackout owner, and
+        _dispatch_led_idle_ambient then renders nothing while that owner is held
+        -- a dark room until the reader recovers and the window ends on its own.
+        Reuse the WindowMachine's universal stopped=True fail-open (tick returns
+        _IDLE_ACTIONS regardless of phase) plus the idempotent action applier, so
+        this releases the drop_spotlight owner and base suppression and returns
+        the machine to idle. No-op when the policy is disabled (keeps
+        enabled:false byte-identical) and idempotent (safe on every stop path,
+        including healthy stops that also reach _drop_presentation_tick this
+        tick). Pure/in-memory -- no I/O added to the 200 Hz path."""
+        if not self._drop_presentation_config.enabled:
+            return
+        actions = self._drop_presentation_window.tick(
+            WindowInputs(
+                abs_beat=None, beats_to_next_drop=None, next_drop_beat=None,
+                drop_role="none", impact_now=False, laser_visible=False,
+                scripted_mode=False, stopped=True,
+            ),
+            pending_presentation=None, pending_reason="",
+        )
+        self._drop_presentation_apply_actions(actions)
+        self._drop_presentation_last_actions = actions
+        self._drop_presentation_last_pending = (None, "", None)
+
     def _drop_presentation_update_solo_feedback(self) -> None:
         last_actions = self._drop_presentation_last_actions
         if last_actions is not None and last_actions.presentation == LASERS_ONLY:
@@ -4384,6 +4414,10 @@ class StateManager(LEDDispatchPolicyMixin):
         if self._laser_director is not None:
             self._laser_director.reset_runtime_state(reason="stop")
         self._reset_native_autoloop()
+        # Fail-open any held drop-presentation LED dark hold: every stop routes
+        # through here, so a reader-stale stop can't leave the room latched dark
+        # (the stale branch returns before _drop_presentation_tick would).
+        self._drop_presentation_release_on_stop()
 
     def _do_resume(self, deck: int, elapsed_ms: int, bpm: float) -> None:
         if deck not in (1, 2):

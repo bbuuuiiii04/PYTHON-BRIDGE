@@ -479,5 +479,67 @@ class LearnedStorePersistenceTests(unittest.TestCase):
             self.assertIn("content-1:64", on_disk)
 
 
+class StopFailOpenReleaseTests(unittest.TestCase):
+    """DD1 regression: a held Laser-Solo / pre-dark LED dark-hold must fail-open
+    on stop -- including the reader-stale stop branch that returns before
+    _drop_presentation_tick, whose owner-clear was previously the only release."""
+
+    def _held_sm(self):
+        # Real player so base suppression is exercised end-to-end, not just the
+        # bookkeeping flag.
+        backend = _FakeBackend()
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=backend)
+        _enable_drop_presentation(sm)
+        sm._deck = {1: _deck_state(playing=True), 2: _deck_state(playing=False)}
+        # Simulate a live solo window holding the Govees dark + laser base
+        # suppressed (the exact state _drop_presentation_apply_actions leaves).
+        sm._handle_led_event(BridgeEvent(
+            kind=Ev.LED_BLACKOUT, deck=0,
+            payload={"reason": "drop_spotlight"}, source="drop_presentation"))
+        sm._drop_presentation_led_dark_held = True
+        sm._pack_runtime.player.set_base_suppressed(True)
+        sm._drop_presentation_base_suppressed_held = True
+        return sm
+
+    def test_release_clears_dark_hold_and_base_suppression_but_not_other_owners(self):
+        sm = self._held_sm()
+        # A manually-held mute must survive the fail-open (owner isolation).
+        sm._handle_led_event(BridgeEvent(
+            kind=Ev.LED_BLACKOUT, deck=0,
+            payload={"reason": "led_mute_pad"}, source="palette_control"))
+        self.assertIn("drop_spotlight", sm._led_blackout_owners)
+        self.assertEqual(
+            sm._pack_runtime.player.render().diagnostic.code, "base_suppressed")
+
+        sm._drop_presentation_release_on_stop()
+
+        self.assertNotIn("drop_spotlight", sm._led_blackout_owners)
+        self.assertIn("led_mute_pad", sm._led_blackout_owners)  # isolation
+        self.assertFalse(sm._drop_presentation_led_dark_held)
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+        self.assertNotEqual(
+            sm._pack_runtime.player.render().diagnostic.code, "base_suppressed")
+
+    def test_do_stop_fails_open_a_held_dark_hold(self):
+        # The real bug path: _do_stop is the single stop chokepoint; every stop
+        # (stale or healthy) must release the hold through it.
+        sm = self._held_sm()
+        self.assertIn("drop_spotlight", sm._led_blackout_owners)
+        sm._do_stop(1, 0)
+        self.assertNotIn("drop_spotlight", sm._led_blackout_owners)
+        self.assertFalse(sm._drop_presentation_led_dark_held)
+
+    def test_disabled_release_is_a_noop(self):
+        # enabled:false byte-identity gate: the helper returns before building
+        # any WindowInputs or touching an owner.
+        sm = _make_sm()
+        _enable_drop_presentation(sm, enabled=False)
+        self.assertFalse(sm._drop_presentation_config.enabled)
+        before = set(sm._led_blackout_owners)
+        sm._drop_presentation_release_on_stop()
+        self.assertEqual(sm._led_blackout_owners, before)
+        self.assertFalse(sm._drop_presentation_led_dark_held)
+
+
 if __name__ == "__main__":
     unittest.main()

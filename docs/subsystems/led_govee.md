@@ -78,6 +78,21 @@ Drop presentation policy (Package 3, AWR-119, 2026-07-04):
   `/drop_presentation` config block is the master regression gate: every drop renders
   `leds_plus_lasers` exactly as today, byte-identical. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
+Drop presentation stop fail-open (v1 foundation audit fix DD1, 2026-07-06):
+- The `drop_spotlight` LED dark-hold (and laser base suppression) is now released on EVERY stop
+  via `StateManager._drop_presentation_release_on_stop()`, called from `_do_stop`. Previously the
+  reader-stale stop branch (`state_manager.py` FM-11) returned before `_drop_presentation_tick`
+  (the only owner-clear), so a stop during a Laser-Solo / pre-dark window could latch the room dark
+  (lasers stopped + LEDs gated by the still-held `drop_spotlight` owner) until the reader recovered
+  and the window ended on its own — violating `drop_presentation_authority.md` §Presentation
+  Mechanics ("fail-open on stop / laser-output loss mid-window; never latch a fixture dark"). The
+  release reuses the WindowMachine's universal `stopped=True` fail-open + the idempotent
+  `_drop_presentation_apply_actions`; it is gated on `cfg.enabled` (so `enabled: false` stays
+  byte-identical), owner-scoped (a manual mute owner survives), and adds no I/O to the 200 Hz path.
+  Coverage: `tests/test_state_manager_drop_presentation.py` (`StopFailOpenReleaseTests`).
+  Audit + spec: `docs/plans/active/lighting_v1_foundation_audit.md`,
+  `docs/plans/active/lighting_v1_foundation_fix_spec.md`. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
 Authoritative code:
 - `led_config.py`
 - `led_models.py`
