@@ -199,13 +199,12 @@ blackout (out of F1).
   time. All other anchors are frozen from design §2.1/§2.3 verbatim.
 - **D12 — Key layout (operator-veto, feedback-file-driven so cheap to change):**
   - v2 config absent → deck byte-identical to today (no code path change).
-  - Config on + **v1 latched**: today's exact layout, plus key 6 (dark today when `lock_note` is
-    absent — [confirmed] AWR-121) becomes the `→ v2` pad (sends `engine_v2_note`, absolute, D18).
+  - Config on + **v1 latched**: the deck is EXACTLY today's layout — no visible change at all
+    (the engine switch is the menubar item, D18).
   - Config on + **v2 latched**: keys 0-5 = GLACIER, DEEP_POOL, TWILIGHT, ION, VOLT, EMBERCORE;
     key 6 = white/sand (manual); keys 7/8/9 mutes/solo unchanged; 10-13 static looks unchanged;
     key 14 = **shift layer toggle** (deck-local). Shift layer: 0=RED, 1=GREEN, 2=BLUE,
-    3=MAX-ENERGY arm, 4=RAINBOW, 5=`→ v1` pad (sends `engine_v1_note`, absolute); 6 dark;
-    7-13 unchanged; 14 exits.
+    3=MAX-ENERGY arm, 4=RAINBOW, 5-6 dark; 7-13 unchanged; 14 exits.
 - **D13 — Runtime commands:** reuse `led_palette_queue/override/lock/unlock` with v2 semantics when
   v2 is latched (zone names accepted; lock/unlock = store/clear correction); add `led_engine
   <v1|v2>`, `led_manual_override <white_sand|red|green|blue>`, `led_manual_clear`,
@@ -224,10 +223,16 @@ blackout (out of F1).
   v1/v2. The engine's `_v2_active` is a mirror written only by the latch consumer; the feedback
   `engine` field and status read the latch; the worker's identity gate is config-static
   (`v2` block enabled), independent of the latch (D4).
-- **D18 — Engine-switch pads use absolute targets, not a toggle** (idempotent under the ≤10 s
-  stale-feedback window): config binds `engine_v1_note` and `engine_v2_note`; the v1-latched
-  layout's key 6 sends `engine_v2_note` ("→ v2"), the v2 shift layer's key 5 sends
-  `engine_v1_note` ("→ v1"). A double-press is harmless. There is no relative toggle anywhere.
+- **D18 — The v1↔v2 engine switch lives in the MENU BAR, not on the Stream Deck** (operator
+  decision 2026-07-06, superseding the earlier pad design): `scripts/bridge_menubar.py` gains a
+  checkbox-style menu item ("LED Engine v2") that appends `{"command": "led_engine", "mode":
+  "v1"|"v2"}` to the existing command channel (`append_command`, `:291`,
+  `/tmp/rb_ss_bridge_v2_commands.jsonl`), absolute targets only — idempotent, no relative toggle
+  anywhere. Its checked state reads the `engine` field from the bridge status snapshot the
+  menubar already polls (follow the pack auto-enable menu-item precedent, `:396,920-941`). The
+  item is **explicitly temporary**: once v2 is adopted as the only engine, the menu item and the
+  latch surface get removed — mark it with a `TEMPORARY (v2 rollout)` code comment. No engine
+  pad exists on the deck in any mode.
 - **D19 — Staging is per-track by design:** a staged zone not yet committed is dropped by any
   new-track/deck flip (intended — the stage belonged to the outgoing track). Tap on the active
   zone with no stored correction is a no-op (DEBUG log).
@@ -424,14 +429,14 @@ frozen hash/axis inputs recorded at freeze time (store the three norm inputs in 
 - Extend `_build_palette_control_bindings` (`:1347-1399`; validation helper
   `_validate_color_engine` is at `led_config.py:938`) with new optional keys inside
   `palette_control`: `zone_notes` (dict zone→note; validate zone names), `manual_notes` (dict over
-  `red/green/blue`; `white_sand_note` stays the manual white in v2), `max_energy_note`,
-  `engine_v1_note`, `engine_v2_note` (D18 — absolute targets, no toggle key exists). **A note
-  collision is fatal only when it involves a v2-introduced note** (v1↔v1 collisions keep today's
-  silent tolerance — no duplicate-note check exists at HEAD, and a live config with a
-  pre-existing tolerated collision must not start failing because v2 was enabled); a v2-note
-  collision rejects the v2 block only. Each binding carries a distinct `target_kind`:
-  `"zone_pad"`, `"manual_pad"`, `"max_energy_pad"`, `"engine_v1_pad"`, `"engine_v2_pad"` (follow
-  the existing binding tuple shape the builder emits for palette/control pads).
+  `red/green/blue`; `white_sand_note` stays the manual white in v2), `max_energy_note`.
+  (No engine notes exist — the engine switch is menubar-only, D18.) **A note collision is fatal
+  only when it involves a v2-introduced note** (v1↔v1 collisions keep today's silent tolerance —
+  no duplicate-note check exists at HEAD, and a live config with a pre-existing tolerated
+  collision must not start failing because v2 was enabled); a v2-note collision rejects the v2
+  block only. Each binding carries a distinct `target_kind`: `"zone_pad"`, `"manual_pad"`,
+  `"max_energy_pad"` (follow the existing binding tuple shape the builder emits for
+  palette/control pads).
 
 ### Task 4 — `models.py`: new event kinds
 
@@ -601,10 +606,9 @@ handful (Task 9) so the path is testable.
 
 - `soundswitch_midi_input.py`: emit the new event kinds for the new binding target kinds —
   `zone_pad` gets down/up phases exactly like `palette_pad` (`:260-346` note-on/off paths);
-  `manual_pad`, `max_energy_pad`, `engine_v1_pad`, `engine_v2_pad` are press-only (`phase`
-  omitted). The engine pads emit `Ev.LED_ENGINE_MODE` with their ABSOLUTE target
-  (`{"mode": "v1"}` / `{"mode": "v2"}`, D18) — idempotent under stale feedback; no toggle
-  resolution anywhere.
+  `manual_pad` and `max_energy_pad` are press-only (`phase` omitted). No engine pads exist
+  (D18); `Ev.LED_ENGINE_MODE` is emitted only by the `led_engine` runtime command with an
+  absolute `{"mode": "v1"|"v2"}` — idempotent, no toggle resolution anywhere.
 - `LedPaletteControl` gains three constructor callables (pull/push pattern, like
   `get_laser_blackout`): `get_engine_mode: Callable[[], str]` (reads the D17 latch),
   `apply_zone_correction: Callable[[str], None]`, `clear_zone_correction: Callable[[], None]`
@@ -637,19 +641,19 @@ handful (Task 9) so the path is testable.
   `"engine": "v1"|"v2"` (read from the D17 latch), `"zones": [{name, note, rgb, ramp, state ∈
   active|staged|inactive, corrected: bool}]` (rgb/ramp from the ACTIVE TRACK's dressing for the
   active zone, zone-core ramps otherwise), `"manual": [{name, note, rgb, state}]`,
-  `"max_energy": {note, state ∈ armed|inactive}`, `"engine_pads": {"v1": {note, state},
-  "v2": {note, state}}` (D18). Keep every existing field exactly as today in both modes (the
-  deck's v1 branch must keep working against a v2-mode payload).
+  `"max_energy": {note, state ∈ armed|inactive}`. (No `engine_pads` — the switch is
+  menubar-only, D18; the `engine` field alone drives the deck's layout branch.) Keep every
+  existing field exactly as today in both modes (the deck's v1 branch must keep working against
+  a v2-mode payload).
 
 ### Task 8 — `streamdeck/streamdeck_midi.py`: v2 layout + shift layer (D12)
 
 - `compose_layout` v2 branch keyed on `feedback.get("engine") == "v2"` and presence of `zones`:
   primary layer per D12; deck-local `shift` boolean flipped by key 14 (`interaction: "press"` row
   rendered with a distinct glyph; shift state resets when feedback goes stale or engine flips).
-  Shift layer rows per D12 (manual pads, max-energy with `armed` pulse, rainbow control row,
-  the `→ v1` engine pad). With `engine == "v1"` AND `engine_pads` present in feedback: key 6 =
-  the `→ v2` engine pad; everything else exactly today's layout. No feedback / no `engine`
-  field ⇒ today's layout code path, untouched.
+  Shift layer rows per D12 (manual pads, max-energy with `armed` pulse, rainbow control row).
+  With `engine == "v1"` (or no `engine` field at all): today's layout code path, untouched —
+  the deck changes only when v2 is actually rendering.
 - Zone pad rendering: reuse the palette-pad renderer (ramp gradient + state grammar per
   `palette_control_authority.md` rules 21-24: bright=engaged, dim=available); `corrected: true`
   reuses the `locked_current` padlock glyph; `staged` renders like `queued` today. All row
@@ -674,8 +678,13 @@ handful (Task 9) so the path is testable.
   EMBERCORE base (120,0,10)/(200,0,30)/(120,0,120), accent (255,30,30)/(255,200,180);
   NEUTRAL base (0,80,200)/(0,160,230)/(0,220,255), accent (0,255,255)/(140,220,255).
   `palette_control` additions: `zone_notes` {GLACIER:62, DEEP_POOL:63, TWILIGHT:64, ION:65,
-  VOLT:66, EMBERCORE:67}, `manual_notes` {red:68, green:69, blue:70}, `max_energy_note`: 71,
-  `engine_v1_note`: 72, `engine_v2_note`: 73. Tag 2-3 example looks with `motion_style`/`travel`.
+  VOLT:66, EMBERCORE:67}, `manual_notes` {red:68, green:69, blue:70}, `max_energy_note`: 71.
+  Tag 2-3 example looks with `motion_style`/`travel`.
+- `scripts/bridge_menubar.py`: the temporary "LED Engine v2" checkbox menu item (D18) —
+  appends `{"command": "led_engine", "mode": "v1"|"v2"}` via `append_command` (`:291`), checked
+  state from the status snapshot's `engine` field, `TEMPORARY (v2 rollout)` comment. This file
+  is covered by the `bridge_menubar` change contract (`change_contracts.yml:505-512`) — honor
+  its docs_update and run `python3 -m unittest tests.test_bridge_menubar`.
 - Docs (the union of both contracts' `docs_update`, all mandatory): `docs/subsystems/led_govee.md`,
   `docs/subsystems/runtime_commands.md` (new commands — check_docs_drift enforces this),
   `docs/architecture/palette_control_authority.md` (add a "v2 engine mode" rules section covering
@@ -791,12 +800,13 @@ operator-owned; example only).
    (`led_engine`, `led_manual_override`, `led_max_energy_toggle`, v2-aware `led_palette_*`) —
    extend `tests/test_led_palette_control.py`, `tests/test_soundswitch_midi_input.py`,
    `tests/test_runtime_status.py`.
-8. **Deck script:** v2 layout composition (primary + shift layers, D12 exactly); v1 payload ⇒
-   today's layout unchanged (regression); `→ v2` pad at key 6 when v1-latched + `engine_pads`
-   present; corrected padlock + staged/armed states; stale/absent feedback resets shift — extend
-   `tests/test_streamdeck_midi.py`. Feedback payload identity: with the v2 config block ABSENT,
-   the published payload is byte-identical to today's (extend
-   `tests/test_led_palette_control.py`).
+8. **Deck script:** v2 layout composition (primary + shift layers, D12 exactly); v1-latched or
+   v1 payload ⇒ today's layout unchanged (regression); corrected padlock + staged/armed states;
+   stale/absent feedback resets shift — extend `tests/test_streamdeck_midi.py`. Feedback payload
+   identity: with the v2 config block ABSENT, the published payload is byte-identical to today's
+   (extend `tests/test_led_palette_control.py`). Menubar: the engine menu item appends the exact
+   absolute command JSON and reflects the status `engine` field (extend
+   `tests/test_bridge_menubar.py`).
 9. **Config:** v2 block parse round-trip; each validation failure fails closed with LED config
    still loading v1; a v2-note collision is fatal for the v2 block while a pre-existing v1↔v1
    collision stays tolerated; look tag validation — extend
@@ -812,7 +822,7 @@ operator-owned; example only).
   `python3 -m unittest tests.test_led_palette_control tests.test_led_color_engine
   tests.test_color_engine_config tests.test_led_config tests.test_runtime_status
   tests.test_soundswitch_midi_input tests.test_streamdeck_midi tests.test_state_manager_pack_driver
-  tests.test_led_identity_v2`.
+  tests.test_led_identity_v2` and `python3 -m unittest tests.test_bridge_menubar`.
 - [ ] Hard doc checks green: `python3 tools/check_docs_metadata.py`,
   `python3 tools/check_agent_contracts.py`, `python3 tools/check_docs_drift.py`.
 - [ ] Byte-identity demonstrated, not asserted: the golden test (D-5) plus the full existing LED
@@ -834,8 +844,9 @@ Cancelled plan items with reasons. Then a plain-language operator summary coveri
   neutral dip on hard vibe pivots) — and what does NOT change (drops still v1 cues, blackout/mutes/
   static overrides identical, scripted tracks identical, lasers only follow color as before).
 - What changes when v2 is OFF: nothing — and where that's proven (golden test + suite).
-- The Stream Deck layout (D12) with the note that it's feedback-driven and cheap to re-map at the
-  live gate; the max-energy pad arms but renders nothing new until F2 (D10).
+- The Stream Deck layout (D12: deck untouched until v2 is actually rendering) with the note that
+  it's feedback-driven and cheap to re-map at the live gate; the engine switch is the temporary
+  menubar checkbox (D18); the max-energy pad arms but renders nothing new until F2 (D10).
 - Watchpoints for the first live pass: zone ramp taste (all TUNE-LIVE), bass-anchor calibration
   numbers, soft-flip length, palate-reset feel, bloom visibility, correction store surviving a
   restart.
