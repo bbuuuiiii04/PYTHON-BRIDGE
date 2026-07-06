@@ -961,6 +961,71 @@ centroid-series extension stays deferred); the two Appendix-F class limitations
 (sidechained kick-prominence, thick-wall sustained-synth — scrub-gated, not retuned
 here); busy-pulse breadth (seasoning only). Nothing in §2–§12 reads any of them.
 
+### 15.6 Gap-closing decisions — F1–F4 operator session (2026-07-05)
+
+Operator decisions from the F1–F4 gap-closing pass (Brandon, this session), verified read-only
+against HEAD 20c6ea5. These resolve the open items each feature's spec is authored against. Labels:
+**decided** (operator call this session), **delegated** (handed to the spec author with the stated
+rule), **live-gated / toggle** (his eyes or a runtime switch).
+
+**F1 (identity + Stream Deck surface):** see §2.4 (decided — correction surface; manual R/G/B
+backable today via `fixed_rgb`/`set_mode_override`, green is a default stop; layout operator-veto).
+
+**F2 (landing / drops):**
+- **NEUTRAL drops → a small generic hit** (decided): a neutral marker fires a modest accent — not a
+  full WALL/COMET/HOUSE cue, and **no pre-drop blackout, no snap flick**. Marker not invisible, but
+  no faked slam. Refines §3.1's "invisible miss" for NEUTRAL: a *small* hit, not nothing.
+- **Repeat/dense drop markers → family-driven** (decided; F2 spec target): replace the hardcoded
+  `LED_MAX_DROP_IMPACTS = 2` (`led_dispatch_policy.py:41`; predecessor set `:37`; gate
+  `_led_drop_impact_allowed:1350-1370`) with a family-driven count — **WALL/COMET stay full-energy
+  across the whole chorus** (every marker re-fires), **HOUSE keeps ~2 impactful then settles to
+  `post_drop` groove**, NEUTRAL gets the small hit. Signal/family-driven, **never a genre string**.
+  Operator ground truth: v1 today is a fixed 2-then-`post_drop` (confirmed).
+- **Pre-drop blackout is NOT new; follows the active deck** (correction, confirmed): v1 already
+  blacks the LEDs 4 beats before drops (`led_predark_beats: 4`, `config/led_look_director.json:1212`;
+  `pre_dark` phase `drop_presentation.py:724-730`). v2 makes that predark *dynamic* (§4) — it adds no
+  blackout. It keys off the active-deck resolver like all room behavior; **no special live-mix
+  carve-out** (operator: "depends on the active deck").
+- **Stingers + standalone dips → signal-driven per track** (decided): not a global on/off — they
+  fire when the track's own structure calls (phrase-ends, measured mix-ducks), so they vary by track.
+
+**F3 (blend / mixing layer):**
+- **Zones are the groups** (decided — foundational, shapes F1): color holds loosely across a
+  same-vibe (same-zone) run — driven by the music, not v1's `palette_dwell_tracks: 3` counter — so
+  same-vibe mixes stay smooth and only a **cross-zone mix** is a real color change. The v1 group-feel
+  made musical; leans same-zone tracks toward *similar* rather than visibly distinct (softens §2.3's
+  OLC-3 "neighbors differ visibly" goal — mediated by the hold-tightness toggle).
+- **Mix tracking = channel faders + low-EQ, never the crossfader** (confirmed): Brandon mixes with
+  channel (up)faders + EQ; no crossfader (no offset exists). The A→B signal is the two decks'
+  upfader + low-EQ norms (`MixerDeckReading`, models.py; rb_offsets MIXER_D1/D2).
+- **Transition mode (blend vs handover) → runtime toggle** (delegated): Fable designs both a
+  two-track color *blend* and a clean *handover*, picks the default; Brandon flips live.
+- **Within-vibe hold-tightness → toggle/tunable** (delegated): how subtle per-track variation is
+  within a zone; Fable owns the knob.
+- **Blend painter is entirely NEW** (confirmed): today the room hard-cuts to the single active
+  deck's palette; no two-track blend exists. Fade primitives (`resolve_fade`/`advance_fade`,
+  `govee_frame_renderer.py:74-97`, `led_color_engine.py:811-834`) + per-deck fader/EQ reads are
+  reusable; the dual-track blend state is new.
+
+**F4 (texture / seasoning):**
+- **Signal trust → delegated to Fable applying the operator signal-grading rule** (reliable signals
+  decorate, unreliable get cut). Measured grades: **backbone** = bottom-gone/darkness (operator-
+  verified); **corpus-calibrated (use)** = kick-prominence, thick/thin, tilt, stab/sustain, euphoric
+  (`sustained_synth`), bass-forward; **weak/experimental** = `lowmid_pulse` busy-pulse (fires on
+  wobble/rolls/chugs/sirens indiscriminately — blunt "busy/aggressive" seasoning only, or cut) and
+  `section_map` energy-tier (top-heavy on brickwalled masters — cautious). Fable makes the final cut.
+- **Seasoning density → delegated** (subtle default; live-tune knob).
+- **Texture decoration is entirely NEW** (confirmed): no runtime consumer reads any texture flag
+  today; the containment seam is the `params`/look-name selection point
+  (`led_look_director.py:335-363`) — selection-only, never scheduling (arbiter rank 8).
+- **Blind spots accepted** (§15.5): chorus softness, growl-*intensity* ranking, slow wobble,
+  sidechained kick-prominence, thick-wall sustained-synth are not reliably computed; texture does
+  not react to them.
+
+**Runtime toggles this session adds** (kill matrix / control surface): v1↔v2 master (live-switchable,
+v2-off ⇒ v1 byte-identical); F3 transition-mode (blend/handover); F3 within-vibe hold-tightness; F4
+seasoning density.
+
 ---
 
 ## 16. Provenance and claim labels

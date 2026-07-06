@@ -6,7 +6,7 @@ last_verified_date: 2026-07-05
 validation_scope: Claude Fable 5 prompt text only; no bridge behavior, runtime action, or hardware validation. Seams cited were verified read-only against HEAD 20c6ea5 this session.
 ---
 
-# Fable 5 Prompt — LIGHTING ENGINE v2 · Feature 1 (identity + Stream Deck correction surface)
+# Fable 5 Prompt — LIGHTING ENGINE v2 · full build-out (F1 → F2 → F3 → F4, sequential & live-gated)
 
 **Paste-to-Fable kickstart:** *"Read `docs/prompts/lighting_engine_v2_f1_fable_prompt.md` and execute it. Effort: high."*
 
@@ -18,27 +18,28 @@ validation_scope: Claude Fable 5 prompt text only; no bridge behavior, runtime a
 
 ## Mission
 
-Own **Feature 1** of LIGHTING ENGINE v2 end-to-end: author the Codex implementation spec, drive Codex (via tmux) to implement it, and review Codex's implementation to acceptance. F1 is the **per-track color identity engine** plus the **Stream Deck correction surface** — the foundation the whole v2 experience stands on.
+Own the **entire LIGHTING ENGINE v2 build-out** as one sequential, live-gated workstream — **F1 → F2 → F3 → F4**. For each feature: author the Codex spec, drive Codex (via tmux) to implement it, review to acceptance, and hand it to Brandon to gate live before starting the next. **Start with F1** — the per-track color identity engine + the Stream Deck correction surface, the foundation everything else dresses. F2 = drops/landing, F3 = blend, F4 = texture. Every later spec is authored against the *now-real* prior code, not intentions.
 
 ## Why it matters / who it's for
 
 This is the most important build in the bridge — what the bridge exists for. It runs live, in front of a crowd, while Brandon mixes. Act as a **senior engineer for EDM performance light shows**: reason about the room and the live mix, not just the code. Brandon (the operator) is the only real acceptance gate — his eyes on the room decide. Your spec feeds Codex; your checkpoint and review feed Brandon.
 
-## The pipeline you own — three phases, one autonomous run
+## The loop you run per feature — F1 first, then F2 → F3 → F4
 
-1. **Author the F1 Codex spec.** Part A–E per `.claude/skills/codex-spec/SKILL.md`; satisfy its 9-point pre-handoff checklist; close every gap in the list below. Reason, do not implement.
+1. **Author the feature's Codex spec.** Part A–E per `.claude/skills/codex-spec/SKILL.md`; satisfy its 9-point pre-handoff checklist; close every gap in the list below (F1) or in §15.6 (F2/F3/F4). Reason, do not implement.
 2. **Checkpoint for Brandon.** Present the finished spec — a readiness verdict plus the plan in plain operator language — and get his go before driving Codex. This is live-critical; plan-first is his standing rule, and only he can green-light live implementation.
 3. **Drive Codex, then review.** Hand the spec to Codex over tmux (repo convention: `/clear` the Codex session before each new task; Codex implements, you do not). Then review Codex's implementation — findings first, ordered by severity, each with file:line — verified against the spec, the live-safety invariants, and the v1↔v2 toggle. Iterate with Codex until it passes.
 
+**Sequencing & budget.** Do the features **in order, one at a time — never build ahead.** Each feature's build waits for Brandon to gate the *prior* one live (his eyes are the real acceptance gate, and that live gate is your natural checkpoint between features). All F2/F3/F4 operator decisions are already resolved in **`LIGHTING_ENGINE_V2_DESIGN.md` §15.6** — apply them when you reach each feature; do not re-open them. Budget: **F1 (spec → build → review) is the committed first milestone**; carry on to F2/F3/F4 as budget allows, and a fresh run resumes cleanly from the last live-gated feature.
+
 ## Deliverables
 
-- The spec at `docs/plans/active/lighting_engine_v2_f1_spec.md` (repo frontmatter; registered per the codex-spec skill).
-- A driven-to-acceptance F1 implementation (by Codex) plus your review verdict — `PASS` / `PASS WITH REQUIRED FIXES` / `FAIL` — with evidence: the test suite, the change-contract's checks, and a demonstration that v2-OFF is byte-identical to v1.
+Per feature (F1 first): a spec at `docs/plans/active/lighting_engine_v2_f<N>_spec.md` (repo frontmatter; registered per the codex-spec skill), then a driven-to-acceptance implementation (by Codex) plus your review verdict — `PASS` / `PASS WITH REQUIRED FIXES` / `FAIL` — with evidence: the test suite, the change-contract's checks, and a demonstration that **v2-OFF is byte-identical to v1** for that feature's switch.
 
 ## Evidence packet — source-of-truth order: code > tests > this packet > docs
 
 **Authoritative design (locked — implement, do not re-litigate):**
-`docs/architecture/LIGHTING_ENGINE_V2_DESIGN.md`. F1 scope = §2 (zones / hash / depth / dynamics / permanence), §2.4 (Stream Deck correction surface), §7 kill-matrix F1 rows, §8 color-slot contract. Operator contract: `docs/architecture/lighting_engine_v2_authority.md`.
+`docs/architecture/LIGHTING_ENGINE_V2_DESIGN.md`. F1 scope = §2 (zones / hash / depth / dynamics / permanence), §2.4 (Stream Deck correction surface), §7 kill-matrix F1 rows, §8 color-slot contract. F2 = §3/§4/§5/§9; F3 = §7 blend row + §8; F4 = §5 / §6 rank 8. **All F1–F4 gap-closing decisions are consolidated in §15.6** — the manifest to author each spec from. Operator contract: `docs/architecture/lighting_engine_v2_authority.md`.
 
 **Verified seams (read-only against HEAD 20c6ea5 this session — treat as confirmed; re-verify any you build on):**
 - Stream Deck `streamdeck_midi.py` (single file, no package): renders per-key PIL images `:527-565` (dynamic feedback IS possible), each key also emits MIDI note ch3 `:35-36,83-92`; 15 keys, live layout keys 0–5 = palette/white_sand selectors, 7 LED-mute, 8 laser-mute, 9 laser-solo, 10–13 static-look bindings, 14 rainbow `:209-247`; **only ~5 keys genuinely free — the 6 zones + white/sand + R/G/B must repurpose keys 0–5.**
@@ -65,10 +66,7 @@ This is the most important build in the bridge — what the bridge exists for. I
 - Correction granularity: does a zone pad set zone-only (hash picks the variant) or zone+variant — decide and justify.
 - The permanence store: content_id-keyed, file-backed, holds derived identity + corrections; never silently repaints on analysis upgrade.
 
-**Resolve as design and mark for the future F2 spec — do NOT implement in F1:**
-- **Repeat/dense drop markers → family-driven.** The hardcoded `LED_MAX_DROP_IMPACTS = 2` (`led_dispatch_policy.py:41`, predecessor set `:37`, gate `_led_drop_impact_allowed:1350-1370`) must become family-driven: WALL/COMET stay full-energy across the whole chorus (every marker impactful); HOUSE keeps ~2 impactful drops then settles to `post_drop` groove. **Signal/family-driven, never a genre string** — the classifier never sees genre labels. Operator ground truth: v1 today is a fixed 2-then-post_drop (confirmed this session).
-- **Live-mix edges:** blend + pre-drop blackout + correction colliding during a transition. **Mark every live-mix decision operator-veto** — this is Brandon's top live-safety concern.
-- Scripted + non-scripted decks mixing into shared fixtures.
+**F2 / F3 / F4 — decisions already resolved (do NOT re-open; apply when you author each feature's spec, grounded in the real prior code):** all in `LIGHTING_ENGINE_V2_DESIGN.md` §15.6 — the NEUTRAL small-hit; the family-driven repeat-marker count replacing `LED_MAX_DROP_IMPACTS = 2` (`led_dispatch_policy.py:41`); signal-driven stingers/dips; **zones-are-groups**; channel-fader+EQ mix tracking (never crossfader — no crossfader offset exists); the blend/handover and within-vibe hold-tightness **runtime toggles** (you design both, pick defaults); and the texture signal-grading delegation. Still genuinely open, and yours to design: the toggle *behaviors* themselves, and any live-mix edge — **mark live-mix decisions operator-veto** (Brandon's top safety concern).
 
 ## Hard requirements — live safety
 
@@ -79,7 +77,7 @@ This is the most important build in the bridge — what the bridge exists for. I
 
 - **You may:** author the spec; drive Codex via tmux; run the test suite and repo checks read-only to verify; write the spec + your review under `docs/plans/active/`.
 - **You may not:** edit bridge code yourself (Codex implements); touch the running bridge or hardware; create branches/worktrees; force-push or rewrite history. Work on `main`.
-- Scope: **F1 only is implemented.** F2/F3-owned gaps are resolved-as-design and parked, not built. Do not add features, refactors, or abstractions beyond what F1 needs; only validate at real boundaries; no compatibility shims — v2 is a clean toggle, not a migration.
+- Scope: **build one feature at a time, F1 first; never build ahead of Brandon's live gate.** Do not add features, refactors, or abstractions beyond what the *current* feature needs; only validate at real boundaries; no compatibility shims — v2 is a clean toggle, not a migration.
 
 ## Claim discipline
 
@@ -87,7 +85,7 @@ Label every claim **confirmed / assumed / unknown / rejected**, tied to a file:l
 
 ## Success criteria (falsifiable) / stop conditions
 
-- Spec closes every F1 gap above, satisfies the codex-spec 9-point checklist, and encodes every F1 decision from LIGHTING_ENGINE_V2_DESIGN.md §2/§2.4/§7/§8.
+- Each feature's spec closes its gaps (F1 from the list above + §2/§2.4/§7/§8; F2/F3/F4 from §15.6 + their design sections), satisfies the codex-spec 9-point checklist, and re-opens no locked decision.
 - Codex's F1 implementation: full `python3 -m unittest discover tests` green; the matching change-contract's checks green; **v2-OFF proven byte-identical to v1**; manual-override and push-loop invariants intact.
 - Your review verdict is explicit and evidence-tied; layout and live-mix decisions are flagged operator-veto for Brandon's live gate.
 - **Stop and ask Brandon** at the phase-2 checkpoint, and only if you hit a genuine scope change, an irreversible action, or a decision only he can make. Otherwise proceed autonomously through the pipeline. Lead your checkpoint and final messages with the outcome in plain language — Brandon reads them cold.
