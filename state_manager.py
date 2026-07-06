@@ -2389,22 +2389,25 @@ class StateManager(LEDDispatchPolicyMixin):
             if loaded_anlz is not None:
                 anlz_path, anlz_gen = loaded_anlz
                 if anlz_gen == d.load_gen:
-                    identity_key = ""
+                    worker_kwargs = {
+                        "audio_filepath": meta.filepath,
+                        "spectral_enabled": self._spectral_enable,
+                        "wide_window": self._wide_window_enable,
+                    }
                     if self._v2_identity_enabled:
-                        identity_key = led_identity_content_key(
-                            str(meta.content_id or ""),
-                            str(meta.filepath or ""),
+                        worker_kwargs.update(
+                            identity_enabled=True,
+                            identity_key=led_identity_content_key(
+                                str(meta.content_id or ""),
+                                str(meta.filepath or ""),
+                            ),
+                            identity_config=self._v2_identity_cfg,
                         )
                     self._start_anlz_worker(
                         anlz_path,
                         deck,
                         d.load_gen,
-                        audio_filepath=meta.filepath,
-                        spectral_enabled=self._spectral_enable,
-                        identity_enabled=self._v2_identity_enabled,
-                        identity_key=identity_key,
-                        identity_config=self._v2_identity_cfg,
-                        wide_window=self._wide_window_enable,
+                        **worker_kwargs,
                     )
         if _os.environ.get("RBSS_SCRIPTED_DIRECT") != "0":
             ssid = meta.soundswitch_id
