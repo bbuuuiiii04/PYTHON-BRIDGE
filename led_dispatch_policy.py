@@ -1310,6 +1310,14 @@ class LEDDispatchPolicyMixin:
                     diy_eligible=self._led_diy_eligible_predicate(),
                     look_preference=self._led_look_preference_predicate(),
                 )
+            except TypeError:
+                try:
+                    decision = commit_role(
+                        "drop",
+                        diy_eligible=self._led_diy_eligible_predicate(),
+                    )
+                except Exception:
+                    decision = None
             except Exception:
                 decision = None
         if decision is None:
