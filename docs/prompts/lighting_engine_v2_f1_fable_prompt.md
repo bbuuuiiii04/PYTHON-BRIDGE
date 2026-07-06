@@ -28,13 +28,19 @@ This is the most important build in the bridge — what the bridge exists for. I
 
 1. **Author the feature's Codex spec.** Part A–E per `.claude/skills/codex-spec/SKILL.md`; satisfy its 9-point pre-handoff checklist; close every gap in the list below (F1) or in §15.6 (F2/F3/F4). Reason, do not implement.
 2. **Checkpoint for Brandon.** Present the finished spec — a readiness verdict plus the plan in plain operator language — and get his go before driving Codex. This is live-critical; plan-first is his standing rule, and only he can green-light live implementation.
-3. **Drive Codex, then review.** Hand the spec to Codex over tmux (repo convention: `/clear` the Codex session before each new task; Codex implements, you do not). Then review Codex's implementation — findings first, ordered by severity, each with file:line — verified against the spec, the live-safety invariants, and the v1↔v2 toggle. Iterate with Codex until it passes.
+3. **Drive Codex, then review.** Hand the spec to Codex over tmux (`/clear` before each new task; Codex implements, you do not). Review its implementation against the spec, the Live-safety requirements, and the v1↔v2 toggle; iterate until it passes.
 
-**Sequencing & budget.** Do the features **in order, one at a time — never build ahead.** Each feature's build waits for Brandon to gate the *prior* one live (his eyes are the real acceptance gate, and that live gate is your natural checkpoint between features). All F2/F3/F4 operator decisions are already resolved in **`LIGHTING_ENGINE_V2_DESIGN.md` §15.6** — apply them when you reach each feature; do not re-open them. Budget: **F1 (spec → build → review) is the committed first milestone**; carry on to F2/F3/F4 as budget allows, and a fresh run resumes cleanly from the last live-gated feature.
+**Sequencing & budget.** Features go **in order, one at a time — never build ahead.** Each build waits for Brandon to live-gate the *prior* feature (his eyes are the real acceptance gate, and that gate is your natural checkpoint between features). All F2/F3/F4 decisions are resolved in **`LIGHTING_ENGINE_V2_DESIGN.md` §15.6**. **F1 (spec → build → review) is the committed first milestone**; carry on as budget allows — a fresh run resumes from the last live-gated feature.
+
+## Working method (long autonomous run)
+
+- **Verify as you build:** before calling a feature done, check it against its spec with a fresh-context subagent — don't trust a single pass.
+- **Fan out** independent verification/review to parallel subagents and keep working while they run.
+- **Act when you can act:** between checkpoints you're autonomous — take reversible steps rather than re-surveying settled decisions or asking permission.
 
 ## Deliverables
 
-Per feature (F1 first): a spec at `docs/plans/active/lighting_engine_v2_f<N>_spec.md` (repo frontmatter; registered per the codex-spec skill), then a driven-to-acceptance implementation (by Codex) plus your review verdict — `PASS` / `PASS WITH REQUIRED FIXES` / `FAIL` — with evidence: the test suite, the change-contract's checks, and a demonstration that **v2-OFF is byte-identical to v1** for that feature's switch.
+Per feature (F1 first): a spec at `docs/plans/active/lighting_engine_v2_f<N>_spec.md` (repo frontmatter; registered per the codex-spec skill), then a driven-to-acceptance implementation (by Codex) plus your review verdict — `PASS` / `PASS WITH REQUIRED FIXES` / `FAIL` — with evidence: the test suite, the change-contract's checks, and the v1↔v2 toggle demonstrated (Live safety, below).
 
 ## Evidence packet — source-of-truth order: code > tests > this packet > docs
 
@@ -77,7 +83,7 @@ Per feature (F1 first): a spec at `docs/plans/active/lighting_engine_v2_f<N>_spe
 
 - **You may:** author the spec; drive Codex via tmux; run the test suite and repo checks read-only to verify; write the spec + your review under `docs/plans/active/`.
 - **You may not:** edit bridge code yourself (Codex implements); touch the running bridge or hardware; create branches/worktrees; force-push or rewrite history. Work on `main`.
-- Scope: **build one feature at a time, F1 first; never build ahead of Brandon's live gate.** Do not add features, refactors, or abstractions beyond what the *current* feature needs; only validate at real boundaries; no compatibility shims — v2 is a clean toggle, not a migration.
+- Keep it minimal: no features, refactors, or abstractions beyond what the current feature needs; validate only at real boundaries; no compatibility shims (v2 is a clean toggle, not a migration).
 
 ## Claim discipline
 
@@ -86,7 +92,7 @@ Label every claim **confirmed / assumed / unknown / rejected**, tied to a file:l
 ## Success criteria (falsifiable) / stop conditions
 
 - Each feature's spec closes its gaps (F1 from the list above + §2/§2.4/§7/§8; F2/F3/F4 from §15.6 + their design sections), satisfies the codex-spec 9-point checklist, and re-opens no locked decision.
-- Codex's F1 implementation: full `python3 -m unittest discover tests` green; the matching change-contract's checks green; **v2-OFF proven byte-identical to v1**; manual-override and push-loop invariants intact.
+- Codex's implementation: `python3 -m unittest discover tests` green; the change-contract's checks green; every Live-safety requirement above holds (v2-OFF byte-identical, manual-override, push-loop).
 - Your review verdict is explicit and evidence-tied; layout and live-mix decisions are flagged operator-veto for Brandon's live gate.
 - **Stop and ask Brandon** at the phase-2 checkpoint, and only if you hit a genuine scope change, an irreversible action, or a decision only he can make. Otherwise proceed autonomously through the pipeline. Lead your checkpoint and final messages with the outcome in plain language — Brandon reads them cold.
 
