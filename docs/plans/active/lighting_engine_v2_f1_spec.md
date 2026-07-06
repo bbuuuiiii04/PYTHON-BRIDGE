@@ -73,16 +73,25 @@ Every file:line below was re-verified read-only at HEAD `a3de9dd` (2026-07-06). 
   a 0..1 beat fraction, `:91-101`), scalars `brightness_med`/`attack_low_p90`/`onset_mh_p90`/
   `growl_timbre_p90` in `v4.scalars` (`audio_spectral_features.py:118-121,410-414`), and per-beat
   `sustained_synth_flags(v4)` (`spectral_profile.py:245-255`; **no rate helper exists** — the
-  consumer computes `mean(flags)`). Cache: `spectral_cache.get_cached_v4/put_cached_v4`
-  (`spectral_cache.py:214-223`), keyed on file content+beatgrid, threshold-retune-safe.
+  consumer computes `mean(flags)`). Cache: `spectral_cache.get_cached_v4` (`spectral_cache.py:142`)
+  / `put_cached_v4` (`:158`), keyed on file content + beatgrid, threshold-retune-safe. The cache
+  key MUST use the worker's `ctx.beatgrid_times_ms` verbatim (as `state_manager.py:224` does) —
+  a re-derived grid silently misses the cache and triggers a full extraction per load.
 - **[confirmed] Root cause of the runtime gap:** the at-load spectral path is **dark in the live
   launch**. `_spectral_enable` requires BOTH `RBSS_SMART_REARM_EXPERIMENT=1` AND
   `RBSS_SPECTRAL_ENABLE=1` (`state_manager.py:594-597`); the watcher sets only the former
   (`scripts/ss_bridge_watcher.sh:150-170`). The spectral ANLZ worker call site
   (`state_manager.py:2116-2127`, inside the FILEPATH_RESOLVED handler where `content_id` lands at
   `:2089`) therefore never fires live, and even when it does, the worker **discards the v4 object**
-  — only `energy_shadow` survives onto `TrackMetadata` (`state_manager.py:227-241`). No in-memory
-  per-deck axes handle exists anywhere. F1 must add its own worker-side identity hook, gated on its
+  — only the energy shadow survives (`TrackAnlzData.energy_shadow` built at
+  `state_manager.py:227-241` → `TrackMetadata.smart_drop_energy_shadow`, `models.py:51`). No
+  in-memory per-deck axes handle exists anywhere. Two structural traps for the hook
+  (verified): `_read_runtime_anlz_data` early-returns at `state_manager.py:218-219`
+  (`if not spectral_enabled`) and `:221-222` (`if ctx is None or not data.drop_beat_indices`) —
+  identity derivation must run past BOTH (a dropless track still needs a zone), and
+  `_loaded_anlz_path[deck]`, the input the FILEPATH_RESOLVED worker pops, is populated only under
+  `if self._smart_rearm_experiment:` (`state_manager.py:1863-1865`) — the identity path must not
+  inherit that gate. F1 must add its own worker-side identity hook, gated on its
   own config, NOT on the smart-rearm experiment flags (rejected alternative: adding
   `RBSS_SPECTRAL_ENABLE=1` to the watcher — that would also flip today's gated smart-rearm spectral
   consumers, a behavior change outside F1's scope).
@@ -148,6 +157,13 @@ blackout (out of F1).
   identity applies **at the next phrase boundary of that same first play**; the store freezes from
   the real derivation. (No-repaint protects across-plays permanence; a one-time upgrade at a phrase
   boundary during the very first play reads as a normal look change, not a repaint.) *Operator-veto.*
+  Store mechanics that make this safe: every record carries `"base": "measured" | "provisional"`.
+  Records derived from real v4 measurements freeze as `measured` (first-write-wins between
+  measured records). A correction pressed before any derivation exists freezes a `provisional`
+  NEUTRAL base carrying the correction; a later **measured** derivation upgrades the base fields
+  of a `provisional` record in place while never touching its correction. This closes the trap
+  where an early correction + first-write-wins would strand the track on a NEUTRAL base forever
+  after an unlock. NEUTRAL-for-missing-analysis is never frozen otherwise.
 - **D6 — Palate-reset trigger = aggression-side flip** between outgoing and incoming identities on
   an active-deck/track flip (smooth half {GLACIER, DEEP_POOL, TWILIGHT, NEUTRAL} ↔ aggressive half
   {ION, VOLT, EMBERCORE}). Window: `palate_reset_beats` = 4.0 beats of NEUTRAL ramp dimmed by
@@ -184,11 +200,12 @@ blackout (out of F1).
 - **D12 — Key layout (operator-veto, feedback-file-driven so cheap to change):**
   - v2 config absent → deck byte-identical to today (no code path change).
   - Config on + **v1 latched**: today's exact layout, plus key 6 (dark today when `lock_note` is
-    absent — [confirmed] AWR-121) becomes the `→ v2` engine-toggle pad.
+    absent — [confirmed] AWR-121) becomes the `→ v2` pad (sends `engine_v2_note`, absolute, D18).
   - Config on + **v2 latched**: keys 0-5 = GLACIER, DEEP_POOL, TWILIGHT, ION, VOLT, EMBERCORE;
     key 6 = white/sand (manual); keys 7/8/9 mutes/solo unchanged; 10-13 static looks unchanged;
     key 14 = **shift layer toggle** (deck-local). Shift layer: 0=RED, 1=GREEN, 2=BLUE,
-    3=MAX-ENERGY arm, 4=RAINBOW, 5=`→ v1` engine toggle; 6 dark; 7-13 unchanged; 14 exits.
+    3=MAX-ENERGY arm, 4=RAINBOW, 5=`→ v1` pad (sends `engine_v1_note`, absolute); 6 dark;
+    7-13 unchanged; 14 exits.
 - **D13 — Runtime commands:** reuse `led_palette_queue/override/lock/unlock` with v2 semantics when
   v2 is latched (zone names accepted; lock/unlock = store/clear correction); add `led_engine
   <v1|v2>`, `led_manual_override <white_sand|red|green|blue>`, `led_manual_clear`,
@@ -196,6 +213,27 @@ blackout (out of F1).
 - **D14 — The moment arbiter ships now as a small pure function** with the full §6 rank table
   (0-9) as constants; F1 registers only ranks 0 (manual), 5 (palate reset), 6 (bloom). F2/F3 add
   their rows without reshaping it.
+- **D16 — Identity-pending default:** between v2 new-track detection and the async
+  `LED_TRACK_IDENTITY` arrival, the deck renders a **NEUTRAL default dressing** derived on the
+  spot (pure in-memory math, hot-path-safe: content key = `content_id or filepath` verbatim, no
+  realpath; pinned default norm inputs bass=0.5, drama=0.5, punch=0.0; computed once at new-track
+  detection, cached per `(deck, load_gen)`), never the previous track's dressing and never
+  undefined colors. When the authoritative record lands it replaces the default (a normal
+  look-boundary color change; for a cached track this window is a few ticks).
+- **D17 — Single latch authority:** StateManager's `_led_v2_latch` is the ONE source of truth for
+  v1/v2. The engine's `_v2_active` is a mirror written only by the latch consumer; the feedback
+  `engine` field and status read the latch; the worker's identity gate is config-static
+  (`v2` block enabled), independent of the latch (D4).
+- **D18 — Engine-switch pads use absolute targets, not a toggle** (idempotent under the ≤10 s
+  stale-feedback window): config binds `engine_v1_note` and `engine_v2_note`; the v1-latched
+  layout's key 6 sends `engine_v2_note` ("→ v2"), the v2 shift layer's key 5 sends
+  `engine_v1_note` ("→ v1"). A double-press is harmless. There is no relative toggle anywhere.
+- **D19 — Staging is per-track by design:** a staged zone not yet committed is dropped by any
+  new-track/deck flip (intended — the stage belonged to the outgoing track). Tap on the active
+  zone with no stored correction is a no-op (DEBUG log).
+- **D20 — v2 resolution ignores `locked_palette_by_look`** (a v1 journey concept superseded by
+  identity); `exempt_looks` and `color_source: baked` are honored byte-for-byte as v1's early
+  returns.
 
 ### Knowns / unknowns
 
@@ -337,13 +375,15 @@ palate_reset / bloom only.
 **1g. `IdentityStore`** — mirror `LearnedStore` (`drop_presentation.py:483-537`) exactly in shape:
 `load(path) -> IdentityStore` (classmethod; missing file → empty; corrupt → empty + `degraded=True`
 + one WARNING), `to_dict()`, `get(key) -> record|None`,
-`freeze(key, record) -> bool` (first-write-wins: returns False and changes nothing if the key
-exists — **analysis upgrades can never repaint**), `set_correction(key, zone)`,
-`clear_correction(key)`. Record schema (JSON):
+`freeze(key, record) -> bool` (first-write-wins between `measured` bases: returns False and
+changes nothing if a `measured` record exists — **analysis upgrades can never repaint**; a
+`measured` freeze onto an existing `provisional` record upgrades the base fields in place and
+preserves the correction, per D5), `set_correction(key, zone)` (freezes a `provisional` NEUTRAL
+base first if no record exists), `clear_correction(key)`. Record schema (JSON):
 
 ```json
 {"zone": "GLACIER", "hue_slot": 7, "depth_variant": 1, "sat_floor": 0.62, "span": 0.55,
- "budget": 0.41, "style": "flowing",
+ "budget": 0.41, "style": "flowing", "base": "measured",
  "scores": {"aggression": 0.268, "luminance": 0.436, "distortion": 0.12},
  "analysis_rev": "v4", "correction": null}
 ```
@@ -381,20 +421,24 @@ frozen hash/axis inputs recorded at freeze time (store the three norm inputs in 
   Fail closed: any v2 validation error rejects the v2 block with an error string surfaced through
   the existing `LEDConfigResult.errors` path; the rest of the LED config still loads (bridge runs
   v1-only) — do not take the whole LED subsystem down for a v2 typo.
-- Extend `_build_palette_control_bindings` (`:1347-1399`) with new optional keys inside
+- Extend `_build_palette_control_bindings` (`:1347-1399`; validation helper
+  `_validate_color_engine` is at `led_config.py:938`) with new optional keys inside
   `palette_control`: `zone_notes` (dict zone→note; validate zone names), `manual_notes` (dict over
   `red/green/blue`; `white_sand_note` stays the manual white in v2), `max_energy_note`,
-  `engine_toggle_note`. **Any note collision across ALL bound notes (old + new) is a fatal config
-  error** (fail closed at parse). Each binding carries a distinct `target_kind`: `"zone_pad"`,
-  `"manual_pad"`, `"max_energy_pad"`, `"engine_toggle_pad"` (follow the existing binding tuple
-  shape the builder emits for palette/control pads).
+  `engine_v1_note`, `engine_v2_note` (D18 — absolute targets, no toggle key exists). **A note
+  collision is fatal only when it involves a v2-introduced note** (v1↔v1 collisions keep today's
+  silent tolerance — no duplicate-note check exists at HEAD, and a live config with a
+  pre-existing tolerated collision must not start failing because v2 was enabled); a v2-note
+  collision rejects the v2 block only. Each binding carries a distinct `target_kind`:
+  `"zone_pad"`, `"manual_pad"`, `"max_energy_pad"`, `"engine_v1_pad"`, `"engine_v2_pad"` (follow
+  the existing binding tuple shape the builder emits for palette/control pads).
 
 ### Task 4 — `models.py`: new event kinds
 
 Add to `Ev`: `LED_ZONE_PAD` (payload `{"name", "phase": "down"|"up"}`), `LED_MANUAL_PAD`
-(`{"name"}`), `LED_MAX_ENERGY_PAD` (`{}`), `LED_ENGINE_MODE` (`{"mode": "v1"|"v2"}`),
-`LED_TRACK_IDENTITY` (`{"deck", "load_gen", "key", "record"}` — record = the store-schema dict).
-Events stay immutable after creation (AGENTS.md §6).
+(`{"name"}`), `LED_MAX_ENERGY_PAD` (`{}`), `LED_ENGINE_MODE` (`{"mode": "v1"|"v2"}` — absolute
+only, D18), `LED_TRACK_IDENTITY` (`{"deck", "load_gen", "key", "record"}` — record = the
+store-schema dict). Events stay immutable after creation (AGENTS.md §6).
 
 ### Task 5 — `led_color_engine.py` + `state_manager.py`/`led_dispatch_policy.py`: the v2 brain and its wiring
 
@@ -414,10 +458,17 @@ textually untouched:
   place while v2 renders and resumes untouched on flip-back.
 - `set_track_identity(deck, load_gen, key, record)` — store-schema dict → `Dressing` (pure
   reconstruction; corrected zone wins via re-derivation from `norm_inputs`); in-memory only.
-- `begin_dispatch(...)`: `if self._v2_active: return self._v2_begin_dispatch(...)`. The v2 path
+- `begin_dispatch(...)` gains an optional keyword `moments_blocked: bool = False` — the v1 body
+  never reads it; the dispatch policy supplies it from the SAME blackout/manual/predark gate
+  state that already drives `reset_fade_memory` (`led_dispatch_policy.py:1071-1072`) plus the
+  `pre_dark` phase. While True, no bloom may arm or fire and no palate reset may start (pending
+  windows still expire — this is the data path that makes D7's "never brightens into a blackout"
+  implementable). Then: `if self._v2_active: return self._v2_begin_dispatch(...)`. The v2 path
   does its own `(active_deck, load_gen)` new-track detection against `_v2_track_key_by_deck` (do
   NOT touch `_recent_keys` — that deque is v1 journey state). On new audible track: clear manual +
-  staged + bloom-pending; set `_v2_flip_fade` from the **previously active dressing's** slot vector — whichever deck it
+  staged + bloom-pending; if no identity is held for this `(deck, load_gen)`, install the D16
+  NEUTRAL default dressing (computed once, here — never render the previous track's dressing);
+  set `_v2_flip_fade` from the **previously active dressing's** slot vector — whichever deck it
   lived on, covering both deck flips and same-deck track swaps — over
   `soft_flip_beats` (identity handover soft flip, F-10); if `palate_reset_enabled` and
   `is_hard_pivot(outgoing.zone, incoming.zone)` and `claim_allowed(reset_claim, active)`:
@@ -428,7 +479,7 @@ textually untouched:
   `content_id or filepath` verbatim as the session-bloom key, no realpath call on the hot path).
 - `resolve_color` / `resolve_slot_colors`: first-line v2 guard. v2 resolution order:
   1. same early returns as v1 (engine disabled / `color_source != "engine"` / exempt look) —
-     byte-for-byte the same guard set;
+     byte-for-byte the same guard set; `locked_palette_by_look` is NOT consulted in v2 (D20);
   2. manual override active → fixed output: `white_sand` uses the configured white_sand palette
      rgb ([confirmed] live ships `fixed_rgb` 255,235,200; Task 3 validates a fixed_rgb
      `white_sand` palette exists whenever v2 is enabled); `red/green/blue` use literals
@@ -470,37 +521,62 @@ textually untouched:
   alongside the engine; construct a second `PaletteFeedbackWriter(store_path, debounce_s=0.5)`
   exactly like the learned-store writer (`state_manager.py:517-519`); verify the store path is
   gitignored (`local/` — extend `.gitignore` if the existing patterns don't already cover it).
-- Identity worker hook: in the FILEPATH_RESOLVED handler (`state_manager.py:2116-2127`), change
-  the gate to `if self._spectral_enable or self._v2_identity_enabled:` and pass a new
-  `identity_enabled` flag into `_start_anlz_worker`. Inside the worker (`:1880-1927` +
-  `_read_runtime_anlz_data`): obtain v4 ONCE (existing `get_cached_v4` → `extract…v4` under the
-  existing `_V4_AT_LOAD_MAX_S` guard → `put_cached_v4`); run today's spectral consumers ONLY when
-  `spectral_enabled` (exactly today's behavior — `energy_shadow` etc. must NOT start populating
-  because of v2); when `identity_enabled`: store hit? → publish `Ev.LED_TRACK_IDENTITY` with the
-  stored record; miss → `identity_axes(v4)` + `v4.scalars` + `mean(sustained_synth_flags(v4))` →
-  scores → zone → `derive_dressing` → publish the event with the fresh record. No v4 (uncached +
-  span guard fails, or extraction error) → publish a NEUTRAL record (hash spread still applies;
-  do NOT freeze NEUTRAL-for-missing-analysis into the store — freezing happens only for records
-  derived from real measurements OR for explicit operator corrections; D5 depends on the store
-  staying empty for not-yet-analyzed tracks).
-- Event consumption (StateManager thread, near `:1431-1439`): `LED_TRACK_IDENTITY` →
-  `engine.set_track_identity(...)`; if the record is fresh (not from store) and derived from real
-  measurements → `store.freeze(key, record)`; if freeze returned True → `writer.submit(
-  store.to_dict())`. `LED_ENGINE_MODE` → flip a StateManager-owned `_led_v2_latch` (mirror
-  `led_dispatch_policy.py:395-396`) + `engine.set_v2_active(...)` + one INFO log. `LED_ZONE_PAD` /
-  `LED_MANUAL_PAD` / `LED_MAX_ENERGY_PAD` → route to `LedPaletteControl.handle_event` (extend the
-  routing table).
-- Correction writes (from Task 7 handlers): `store.set_correction(key, zone)` /
-  `clear_correction(key)` where `key` is the **active deck's** content key at press time
-  ([ground truth] a stored correction always stamps the active deck) → `writer.submit(...)` →
-  `engine.set_track_identity` refresh. If the track has no frozen record yet (correction before
-  first derivation lands), freeze the current record first (NEUTRAL-with-correction is valid: the
-  operator's call beats a missing analysis — and D5's no-freeze rule yields to an explicit
-  operator act).
+- Identity worker hook — exact restructuring (the current shape fights a naive hook; see Part A):
+  1. `state_manager.py:1863-1865`: populate `_loaded_anlz_path[deck]` when
+     `self._smart_rearm_experiment or self._v2_identity_enabled` (today it's smart-rearm-only —
+     leaving that gate would make the identity path silently all-NEUTRAL whenever smart-rearm is
+     off, with no error surface).
+  2. FILEPATH_RESOLVED handler (`state_manager.py:2116-2127`): gate becomes
+     `if self._spectral_enable or self._v2_identity_enabled:`; pass `identity_enabled=
+     self._v2_identity_enabled` into `_start_anlz_worker` → `_read_runtime_anlz_data`.
+  3. `_read_runtime_anlz_data` (`state_manager.py:210-242`): hoist v4 acquisition ABOVE both
+     early returns (`:218-219` spectral-off, `:221-222` no-ctx/no-drops — a dropless track still
+     needs a zone). Shape: after `read_anlz_drops`, `ctx = data.waveform_context`; when
+     `(spectral_enabled or identity_enabled) and audio_filepath and ctx is not None`:
+     `v4 = spectral_cache.get_cached_v4(audio_filepath, list(ctx.beatgrid_times_ms))`; on miss,
+     extract + `put_cached_v4` under the existing `_V4_AT_LOAD_MAX_S` guard (grid from
+     `ctx.beatgrid_times_ms` VERBATIM — same values `:224` uses today; a re-derived grid misses
+     the cache and re-extracts every load). Thread the single v4 object into
+     `_runtime_spectral_features` (add an optional `v4=` parameter so it never double-fetches)
+     and into the identity step. Spectral consumers (`energy_shadow` etc.) stay gated EXACTLY on
+     `spectral_enabled and ctx and data.drop_beat_indices` — byte-identical today's behavior;
+     nothing spectral starts populating because of v2.
+  4. Identity step (when `identity_enabled`): with v4 → `identity_axes(v4)` + `v4.scalars` +
+     `mean(sustained_synth_flags(v4))` → scores → zone → `derive_dressing` → attach the record to
+     the returned `TrackAnlzData` (new optional field); without v4 (no ctx, uncached + span-guard
+     fail, or extraction error) → a NEUTRAL record (hash spread still applies), marked so the
+     consumer does NOT freeze it (D5: the store stays empty for not-yet-analyzed tracks; only
+     `measured` records and explicit corrections freeze).
+  5. The worker publishes `Ev.LED_TRACK_IDENTITY` `{deck, load_gen, key, record}`. Store
+     lookup happens in the StateManager consumer (the store lives there), not in the worker:
+     store hit → the stored record wins over the worker's derivation (permanence).
+- Event consumption (StateManager thread, near `:1431-1439`): `LED_TRACK_IDENTITY` — **first
+  drop the event if `payload["load_gen"] != self._deck[deck].load_gen`** (stale-repaint guard:
+  a rapid reload otherwise paints track B with track A's late-arriving identity), then: store
+  hit for `key` → `engine.set_track_identity` with the STORED record; else use the event's
+  record, and if it is `measured` → `store.freeze(key, record)`; on any store mutation →
+  `writer.submit(store.to_dict())`. `LED_ENGINE_MODE` → flip the StateManager-owned
+  `_led_v2_latch` (the single latch authority, D17; mirror `led_dispatch_policy.py:395-396`) +
+  `engine.set_v2_active(...)` + one INFO log. `LED_ZONE_PAD` / `LED_MANUAL_PAD` /
+  `LED_MAX_ENERGY_PAD` → route to `LedPaletteControl.handle_event` (extend the routing table).
+- Correction writes — the seam is two StateManager-owned callables injected into
+  `LedPaletteControl` (Task 7): `apply_zone_correction(zone: str)` and `clear_zone_correction()`.
+  StateManager implements them (it owns the store, the writer, the engine, and the active deck):
+  resolve `key` = the **active deck's** content key at call time (`d.meta.content_id` /
+  `filepath`, realpath fallback fine here — StateManager thread, not the push loop; [ground
+  truth] a stored correction always stamps the active deck) → `store.set_correction(key, zone)`
+  / `clear_correction(key)` → `writer.submit(store.to_dict())` → `engine.set_track_identity`
+  refresh. Correction before first derivation lands: `set_correction` freezes a `provisional`
+  NEUTRAL base carrying the correction (D5 — the later measured derivation upgrades the base in
+  place; the operator's call beats a missing analysis, and a later unlock returns the track to
+  its real measured identity, never a stranded NEUTRAL).
 - Max-energy arm: `_led_max_energy_armed` flag on the dispatch-policy mixin; toggled by
-  `LED_MAX_ENERGY_PAD`/command; consumed one-shot inside `_led_arm_drop_lifecycle`'s caller at
-  `led_dispatch_policy.py:1345-1348` (log + clear, D10); cleared on new audible track and on
-  latch flip to v1; surfaced in feedback + status.
+  `LED_MAX_ENERGY_PAD`/command; consumed one-shot at the `_led_arm_drop_lifecycle(drop_anchor)`
+  call (`led_dispatch_policy.py:1347`) **inside the `if mutate:` branch only** — a
+  `mutate=False` preview pass must never consume the arm; cleared in
+  `_clear_led_drop_lifecycle` (`led_dispatch_policy.py:1460`, which already fires on
+  track/deck-change teardown — this is the "clear on new audible track" seam) and on latch flip
+  to v1; surfaced in feedback + status.
 - Identity INFO log at load (authority §14): one line per track load when v2 configured:
   `[LED] identity deck=N zone=GLACIER slot=7 depth=1 corrected=no key=…` (INFO = outcome; no
   per-tick logging).
@@ -525,18 +601,23 @@ handful (Task 9) so the path is testable.
 
 - `soundswitch_midi_input.py`: emit the new event kinds for the new binding target kinds —
   `zone_pad` gets down/up phases exactly like `palette_pad` (`:260-346` note-on/off paths);
-  `manual_pad`, `max_energy_pad`, `engine_toggle_pad` are press-only (`phase` omitted).
-  `engine_toggle_pad` emits `Ev.LED_ENGINE_MODE` with the OPPOSITE of the current latch — the
-  adapter doesn't know the latch, so emit a dedicated payload `{"mode": "toggle"}` and let the
-  StateManager consumer resolve it.
-- `LedPaletteControl` gains the latch view via a `get_engine_mode: Callable[[], str]` constructor
-  callable (pull pattern, like `get_laser_blackout`). New handlers:
+  `manual_pad`, `max_energy_pad`, `engine_v1_pad`, `engine_v2_pad` are press-only (`phase`
+  omitted). The engine pads emit `Ev.LED_ENGINE_MODE` with their ABSOLUTE target
+  (`{"mode": "v1"}` / `{"mode": "v2"}`, D18) — idempotent under stale feedback; no toggle
+  resolution anywhere.
+- `LedPaletteControl` gains three constructor callables (pull/push pattern, like
+  `get_laser_blackout`): `get_engine_mode: Callable[[], str]` (reads the D17 latch),
+  `apply_zone_correction: Callable[[str], None]`, `clear_zone_correction: Callable[[], None]`
+  (both implemented by StateManager — Task 5's correction seam; the handler never touches the
+  store or the active-deck key itself). New handlers:
   - `LED_ZONE_PAD` (v2 latched): tap on inactive zone = stage (engine.stage_zone at the next
     phrase anchor via the existing `_get_phrase_anchor` beat math — reuse `_override_palette_now`'s
     grid logic for the commit beat, but WITHOUT starting a fade: staging commits as a snap at the
     boundary); tap on the staged zone = unstage; tap on the active zone when a stored correction
-    exists = **clear correction** (store + engine refresh); hold = `apply_zone_override` now
-    (FADE_GRID fade) + `set_correction` (store, permanent — "hold/lock stores it"). v1 latched:
+    exists = **clear correction** (`clear_zone_correction()`); tap on the active zone with no
+    stored correction = no-op, DEBUG log (D19); hold = `apply_zone_override` now
+    (FADE_GRID fade) + `apply_zone_correction(zone)` (store, permanent — "hold/lock stores it").
+    v1 latched:
     one DEBUG log, no-op (stale-layout presses inside the ≤10 s feedback window are expected and
     harmless).
   - `LED_PALETTE_LOCK_PAD` (v2 latched): `lock` intent = store the currently active zone override
@@ -550,12 +631,15 @@ handful (Task 9) so the path is testable.
   - `LED_MAX_ENERGY_PAD` (v2): forward to the sink (StateManager owns the flag).
   - In v2, `white_sand` arriving via the existing v1 palette binding (note 56) reroutes to
     `set_manual("white_sand")` — same physical pad, mode-correct meaning.
-- Feedback payload (extend `_publish_feedback` body — pass-through-safe on the deck): add
-  `"engine": "v1"|"v2"`, `"zones": [{name, note, rgb, ramp, state ∈ active|staged|inactive,
-  corrected: bool}]` (rgb/ramp from the ACTIVE TRACK's dressing for the active zone, zone-core
-  ramps otherwise), `"manual": [{name, note, rgb, state}]`, `"max_energy": {note, state ∈
-  armed|inactive}`, `"engine_toggle": {note, state}`. Keep every existing field exactly as
-  today in both modes (the deck's v1 branch must keep working against a v2-mode payload).
+- Feedback payload (extend `_publish_feedback` body — pass-through-safe on the deck): **only
+  when the v2 config block is present** (any latch — the deck needs the engine pads to reach v2;
+  with the block absent the payload stays byte-identical to today, per Part C invariant 2), add
+  `"engine": "v1"|"v2"` (read from the D17 latch), `"zones": [{name, note, rgb, ramp, state ∈
+  active|staged|inactive, corrected: bool}]` (rgb/ramp from the ACTIVE TRACK's dressing for the
+  active zone, zone-core ramps otherwise), `"manual": [{name, note, rgb, state}]`,
+  `"max_energy": {note, state ∈ armed|inactive}`, `"engine_pads": {"v1": {note, state},
+  "v2": {note, state}}` (D18). Keep every existing field exactly as today in both modes (the
+  deck's v1 branch must keep working against a v2-mode payload).
 
 ### Task 8 — `streamdeck/streamdeck_midi.py`: v2 layout + shift layer (D12)
 
@@ -563,9 +647,9 @@ handful (Task 9) so the path is testable.
   primary layer per D12; deck-local `shift` boolean flipped by key 14 (`interaction: "press"` row
   rendered with a distinct glyph; shift state resets when feedback goes stale or engine flips).
   Shift layer rows per D12 (manual pads, max-energy with `armed` pulse, rainbow control row,
-  engine-toggle row). With `engine == "v1"` AND an `engine_toggle` row present in feedback: key 6
-  = engine-toggle; everything else exactly today's layout. No feedback / no engine field ⇒
-  today's layout code path, untouched.
+  the `→ v1` engine pad). With `engine == "v1"` AND `engine_pads` present in feedback: key 6 =
+  the `→ v2` engine pad; everything else exactly today's layout. No feedback / no `engine`
+  field ⇒ today's layout code path, untouched.
 - Zone pad rendering: reuse the palette-pad renderer (ramp gradient + state grammar per
   `palette_control_authority.md` rules 21-24: bright=engaged, dim=available); `corrected: true`
   reuses the `locked_current` padlock glyph; `staged` renders like `queued` today. All row
@@ -591,7 +675,7 @@ handful (Task 9) so the path is testable.
   NEUTRAL base (0,80,200)/(0,160,230)/(0,220,255), accent (0,255,255)/(140,220,255).
   `palette_control` additions: `zone_notes` {GLACIER:62, DEEP_POOL:63, TWILIGHT:64, ION:65,
   VOLT:66, EMBERCORE:67}, `manual_notes` {red:68, green:69, blue:70}, `max_energy_note`: 71,
-  `engine_toggle_note`: 72. Tag 2-3 example looks with `motion_style`/`travel`.
+  `engine_v1_note`: 72, `engine_v2_note`: 73. Tag 2-3 example looks with `motion_style`/`travel`.
 - Docs (the union of both contracts' `docs_update`, all mandatory): `docs/subsystems/led_govee.md`,
   `docs/subsystems/runtime_commands.md` (new commands — check_docs_drift enforces this),
   `docs/architecture/palette_control_authority.md` (add a "v2 engine mode" rules section covering
@@ -624,9 +708,12 @@ operator-owned; example only).
 1. **200 Hz push loop gains zero blocking I/O** (AGENTS.md §6): dispatch-time identity access is a
    dict read; `os.path.realpath` only on worker/load paths; store writes only via the debounced
    writer thread; derivation/extraction only on the ANLZ worker thread.
-2. **v2 config absent ⇒ nothing anywhere changes** — code paths, RNG draws, payloads, deck layout,
-   test outcomes. **v2 off/latched-v1 ⇒ v1 light output byte-identical**, including RNG sequences
-   (no v2 draw touches `_journey_rng`; no v1 field is written by any v2 path).
+2. **v2 config absent ⇒ nothing anywhere changes** — code paths, RNG draws, feedback payload
+   bytes, deck layout, test outcomes. **v2 config present + latched v1 ⇒ v1 LIGHT OUTPUT
+   byte-identical**, including RNG sequences (no v2 draw touches `_journey_rng`; no v1 field is
+   written by any v2 path) — with exactly two declared non-output deltas: the feedback payload
+   gains the v2 fields (the deck must show the `→ v2` pad), and the identity worker does warm
+   derivation off-thread (D4). Nothing else may differ.
 3. **Manual always wins:** emergency blackout, LED mute, static overrides, and the layered
    blackout ownership rules are untouched; v2 manual pads are rank 0 *within* v2 but sit BELOW
    blackout/mute exactly like v1 palettes (they recolor looks; they never override a blackout).
@@ -669,8 +756,13 @@ operator-owned; example only).
 5. **Engine v2:** byte-identity golden — with v2 config PRESENT but latched v1, a scripted
    sequence of `begin_dispatch`/`resolve_color`/`resolve_slot_colors`/`advance_fade` calls (fixed
    `set_seed`) produces output equal to an engine built WITHOUT the v2 block, and `_journey_rng`
-   state (`getstate()`) is identical afterward; flip v2→v1 mid-sequence resumes the same
-   downstream v1 outputs as never-flipped (same seed, same calls); v2 resolution: manual override
+   state (`getstate()`) is identical afterward; flip-resume semantics pinned as
+   **paused-and-resumed**: after a v2 excursion, flipping back yields the outputs of a v1 engine
+   whose journey state was FROZEN during the excursion (v1 never "saw" the interim tracks), and
+   the test asserts `_journey_rng.getstate()` + journey fields are bit-equal to their pre-flip
+   values at the flip-back instant; identity-pending default: a v2 resolve BEFORE any
+   `set_track_identity` renders the D16 NEUTRAL default, never the previous track's dressing;
+   v2 resolution: manual override
    short-circuit + evaporation on track change; staged zone commits at the anchor beat, unstage
    works; correction re-derives in the corrected zone with unchanged slot/variant; soft-flip
    `*_from`/`fade_beats` injection on deck flip; palate reset fires on side-flip pairs only, dims
@@ -678,11 +770,19 @@ operator-owned; example only).
    a rank-0 claim, never during blackout (simulate via the reset/blackout path the policy uses);
    exempt looks / `color_source: baked` return `{}` in v2 exactly as v1.
 6. **Wiring:** `LED_TRACK_IDENTITY` consumption sets identity + freezes + submits store payload
-   exactly once (fresh) / zero times (store-hit); NEUTRAL-for-missing-analysis does NOT freeze;
-   `LED_ENGINE_MODE` toggle resolves "toggle" correctly and flips the latch + engine; max-energy
-   arm → consumed exactly once at the drop-marker seam with the log line, cleared on track change
-   and on flip-to-v1; identity worker hook: with `identity_enabled` and spectral disabled,
-   `energy_shadow` stays unpopulated (guard against the smart-rearm leak) — extend
+   exactly once (fresh `measured`) / zero times (store-hit); a **stale event
+   (`load_gen` mismatch after a rapid reload) is dropped** — track B never wears track A's
+   identity; NEUTRAL-for-missing-analysis does NOT freeze; a `measured` freeze onto a
+   `provisional` record upgrades the base and keeps the correction (the D5/F-6 unlock sequence:
+   correct-early → derive → unlock → track wears its MEASURED identity); `LED_ENGINE_MODE` is
+   absolute and idempotent (v1 twice = v1); max-energy arm → consumed exactly once at the
+   drop-marker seam under `mutate=True` only (a preview pass must not consume it), with the log
+   line, cleared via `_clear_led_drop_lifecycle` and on flip-to-v1; `moments_blocked=True`
+   suppresses bloom arming/firing (a bloom pending across a simulated predark expires unfired,
+   never fires late); identity worker hook: with `identity_enabled` and spectral disabled,
+   `energy_shadow` stays unpopulated (guard against the smart-rearm leak), and a known cached
+   fixture reaches the store through the REAL worker path with a cache HIT (guards the
+   beatgrid-key drift that would silently re-extract every load) — extend
    `tests/test_led_state_manager.py` / the pack-driver harness as the existing integration tests do.
 7. **Pads/commands:** zone tap stage/unstage/clear-correction branches; hold = override + stored
    correction (stamps the ACTIVE deck's key); lock/unlock v2 semantics; manual pads set/clear;
@@ -692,11 +792,14 @@ operator-owned; example only).
    extend `tests/test_led_palette_control.py`, `tests/test_soundswitch_midi_input.py`,
    `tests/test_runtime_status.py`.
 8. **Deck script:** v2 layout composition (primary + shift layers, D12 exactly); v1 payload ⇒
-   today's layout unchanged (regression); engine-toggle-at-key-6 when v1+toggle-row; corrected
-   padlock + staged/armed states; stale/absent feedback resets shift — extend
-   `tests/test_streamdeck_midi.py`.
+   today's layout unchanged (regression); `→ v2` pad at key 6 when v1-latched + `engine_pads`
+   present; corrected padlock + staged/armed states; stale/absent feedback resets shift — extend
+   `tests/test_streamdeck_midi.py`. Feedback payload identity: with the v2 config block ABSENT,
+   the published payload is byte-identical to today's (extend
+   `tests/test_led_palette_control.py`).
 9. **Config:** v2 block parse round-trip; each validation failure fails closed with LED config
-   still loading v1; note-collision fatal; look tag validation — extend
+   still loading v1; a v2-note collision is fatal for the v2 block while a pre-existing v1↔v1
+   collision stays tolerated; look tag validation — extend
    `tests/test_led_config.py` / `tests/test_color_engine_config.py`.
 
 ---
