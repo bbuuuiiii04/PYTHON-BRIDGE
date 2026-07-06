@@ -562,6 +562,11 @@ class StateManager(LEDDispatchPolicyMixin):
             if led_color_engine is not None
             else None
         )
+        # Cheap change-signature of the color engine's palette state, compared
+        # every playing tick so the deck feedback is republished when the engine
+        # changes palette on its own (fade commit, dwell drift) — not only on
+        # operator pad presses (2026-07-05 stale-pad fix).
+        self._palette_feedback_sig: tuple | None = None
         # Constant-time connectivity check; must not build a dict or call status().
         self._os2l_connected_provider = os2l_connected_provider
         self._live_bpm_follow = (
@@ -3840,6 +3845,11 @@ class StateManager(LEDDispatchPolicyMixin):
         if d.playing:
             led_sp_state = self._led_sp_state_for_next_backend(sp_state, bpm)
             led_trigger_count = self._led_automation_trigger_count
+            # Advance any override-fade and mirror engine-driven palette changes
+            # to the deck BEFORE the gated automation dispatch, so a stable
+            # role-key / hold / pre-drop blackout can't freeze the fade or the
+            # pad (2026-07-05).
+            self._advance_palette_fade_and_publish(led_sp_state)
             self._dispatch_led_automation(
                 active=active,
                 d=d,

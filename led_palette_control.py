@@ -18,6 +18,15 @@ from .runtime_status import atomic_write_json
 
 log = logging.getLogger("rbss.palette_control")
 
+# An override-fade completes on this beat grid measured from the last phrase
+# marker (operator rule 2026-07-05: "finish by the next phrase or at a 32-beat
+# boundary from the last phrase marker"). PHRASE_ANCHOR_BEATS is 64, so the
+# in-phrase grid points are the phrase marker, its midpoint (+32), and the next
+# phrase (+64) — i.e. a fade never runs longer than 32 beats and always lands
+# on a phrase-relative boundary, never a fixed 32 beats from where the press
+# happened to land.
+FADE_GRID_BEATS = 32.0
+
 # The real operator-facing feedback path the Stream Deck DECK script
 # (streamdeck/streamdeck_midi.py) reads. Ownership contract: only the real
 # bridge process pins this into RBSS_PALETTE_STATE_PATH -- __main__.main(),
@@ -303,9 +312,18 @@ class LedPaletteControl:
             return
         start_beat = float(start)
         anchor = self._get_phrase_anchor(start_beat)
-        end_beat = min(anchor, start_beat + 32.0) if anchor is not None else start_beat + 32.0
+        if anchor is not None and anchor > start_beat:
+            # Land on the phrase grid: the next phrase anchor is one grid step
+            # (the phrase marker + 64); its midpoint (anchor - 32 = marker + 32)
+            # is the other. Finish at the midpoint if the press is in the first
+            # half of the phrase, else at the next phrase — never press + 32.
+            midpoint = anchor - FADE_GRID_BEATS
+            end_beat = midpoint if start_beat < midpoint else anchor
+        else:
+            # No phrase authority: fall back to a plain grid-length fade.
+            end_beat = start_beat + FADE_GRID_BEATS
         if end_beat <= start_beat:
-            end_beat = start_beat + 32.0
+            end_beat = start_beat + FADE_GRID_BEATS
         self._engine.override_palette(name, start_beat=start_beat, end_beat=end_beat)
 
     def _handle_lock(self, intent: str) -> None:

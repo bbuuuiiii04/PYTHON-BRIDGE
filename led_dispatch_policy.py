@@ -651,6 +651,45 @@ class LEDDispatchPolicyMixin:
             active,
         )
 
+    def _advance_palette_fade_and_publish(self, sp_state: SmartPhrasingState) -> None:
+        """Advance the color engine's override-fade every playing tick, then
+        mirror any engine-driven palette change onto the deck feedback file.
+
+        Deliberately decoupled from _dispatch_led_automation: that method
+        early-returns on a stable role-key, an LED hold, or a pre-drop blackout,
+        so keeping fade advancement there froze operator override-fades
+        mid-slide — they only committed when a section boundary happened to fire
+        (2026-07-05). And the feedback file is otherwise republished only on
+        operator pad events, so the pad stayed frozen on the last press even
+        after the engine committed the fade. Both are cheap: advance_fade is a
+        no-op when no fade is active, and maybe_publish only builds+writes a
+        frame when the change-signature actually moves.
+        """
+        engine = self._led_color_engine
+        if engine is None or not engine.enabled:
+            return
+        abs_beat = self._led_abs_beat(sp_state)
+        if abs_beat is not None:
+            try:
+                engine.advance_fade(abs_beat)
+            except Exception as exc:
+                # Fade math must never crash the 200 Hz push loop.
+                self._led_last_error = f"color_engine_error:{type(exc).__name__}"
+        control = self._led_palette_control
+        if control is None:
+            return
+        snap = engine.snapshot()
+        sig = (
+            snap.get("current_palette"),
+            snap.get("fade_target"),
+            snap.get("fading"),
+            snap.get("lock"),
+            snap.get("queued_palette"),
+        )
+        if sig != self._palette_feedback_sig:
+            self._palette_feedback_sig = sig
+            control.maybe_publish()
+
     def _dispatch_led_automation(
         self,
         *,
@@ -745,9 +784,11 @@ class LEDDispatchPolicyMixin:
         engine = self._led_color_engine
         if engine is not None and engine.enabled:
             try:
-                abs_beat = self._led_abs_beat(sp_state)
-                if abs_beat is not None:
-                    engine.advance_fade(abs_beat)
+                # NOTE: advance_fade is NOT called here. Fade advancement moved
+                # to StateManager._advance_palette_fade_and_publish (per playing
+                # tick) because this method early-returns on a stable role-key,
+                # LED hold, or pre-drop blackout — any of which would otherwise
+                # freeze an operator's override-fade mid-slide (2026-07-05).
                 engine.begin_dispatch(
                     active_deck=active,
                     load_gen=d.load_gen,

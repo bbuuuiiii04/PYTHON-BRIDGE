@@ -12,7 +12,10 @@ from unittest import mock
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from types import SimpleNamespace
+
 from rb_ss_bridge_v2.led_color_engine import LedColorEngine
+from rb_ss_bridge_v2.led_dispatch_policy import LEDDispatchPolicyMixin
 from rb_ss_bridge_v2.led_models import ColorEngineConfig, Palette
 from rb_ss_bridge_v2.led_palette_control import LedPaletteControl, PaletteFeedbackWriter
 from rb_ss_bridge_v2.models import BridgeEvent, Ev
@@ -213,6 +216,29 @@ class LedPaletteControlTests(unittest.TestCase):
         self.assertTrue(snap["lock"])
         self.assertEqual(snap["current_palette"], "violet")
         self.assertEqual(snap["fade_target"], "")
+
+    def test_override_fade_ends_on_phrase_grid_not_press_plus_32(self) -> None:
+        # Operator rule 2026-07-05: the override-fade must finish on the 32-beat
+        # grid measured from the last phrase marker (phrase midpoint or next
+        # phrase), NOT a fixed 32 beats from wherever the press landed.
+        # PHRASE_ANCHOR_BEATS=64, so next phrase anchor 64 => midpoint 32.
+        captured: dict[str, float] = {}
+
+        def spy(_name, *, start_beat, end_beat):
+            captured["start"], captured["end"] = start_beat, end_beat
+
+        with mock.patch.object(self.engine, "override_palette", side_effect=spy):
+            # Press in the FIRST half of the phrase -> finish at the midpoint
+            # (32), not press+32 (10+32=42).
+            self.control._get_abs_beat = lambda: 10.0
+            self.control._get_phrase_anchor = lambda _b: 64.0
+            self.control._override_palette_now("violet")
+            self.assertEqual(captured["end"], 32.0)
+
+            # Press in the SECOND half -> finish at the next phrase (64), not 72.
+            self.control._get_abs_beat = lambda: 40.0
+            self.control._override_palette_now("violet")
+            self.assertEqual(captured["end"], 64.0)
 
     def test_phase_long_press_same_locked_palette_noops(self) -> None:
         self.engine.set_palette("violet")
@@ -671,6 +697,62 @@ class StreamDeckPaletteLayoutTests(unittest.TestCase):
         self.assertIsNone(layout[0])
         self.assertEqual([sd.note_for(k, layout) for k in range(10, 14)], [36, 37, 38, 39])
         self.assertIsNone(sd.note_for(14, layout))
+
+
+class AdvancePaletteFadeAndPublishTests(unittest.TestCase):
+    """Fix 1/2 (2026-07-05): the per-tick fade advance + feedback republish that
+    replaced the role-key-gated advance_fade inside _dispatch_led_automation."""
+
+    def _harness(self, snap: dict, *, abs_beat=32.0, enabled=True):
+        engine = SimpleNamespace(enabled=enabled, advance_calls=[], _snap=snap)
+        engine.advance_fade = lambda b: engine.advance_calls.append(b)
+        engine.snapshot = lambda: engine._snap
+        control = SimpleNamespace(publishes=0)
+        control.maybe_publish = lambda: setattr(control, "publishes", control.publishes + 1)
+        sm = SimpleNamespace(
+            _led_color_engine=engine,
+            _led_palette_control=control,
+            _palette_feedback_sig=None,
+            _led_last_error="",
+            _led_abs_beat=lambda _sp: abs_beat,
+        )
+        return sm, engine, control
+
+    def _run(self, sm):
+        LEDDispatchPolicyMixin._advance_palette_fade_and_publish(sm, sp_state=None)
+
+    def test_advances_every_tick_and_publishes_only_on_change(self):
+        sm, engine, control = self._harness(
+            {"current_palette": "blue_cyan", "fade_target": "crimson",
+             "fading": True, "lock": True, "queued_palette": ""})
+
+        self._run(sm)
+        self.assertEqual(engine.advance_calls, [32.0])   # advanced this tick
+        self.assertEqual(control.publishes, 1)           # None -> set: republish
+
+        self._run(sm)                                    # same palette state
+        self.assertEqual(engine.advance_calls, [32.0, 32.0])  # still advances
+        self.assertEqual(control.publishes, 1)           # unchanged: no republish
+
+        # Fade commits inside the engine (snapshot flips to crimson, no fade).
+        engine._snap = {"current_palette": "crimson", "fade_target": "",
+                        "fading": False, "lock": True, "queued_palette": ""}
+        self._run(sm)
+        self.assertEqual(control.publishes, 2)           # commit mirrored to deck
+
+    def test_disabled_or_missing_engine_is_noop(self):
+        sm, engine, control = self._harness({"current_palette": "x"}, enabled=False)
+        self._run(sm)
+        self.assertEqual(engine.advance_calls, [])
+        self.assertEqual(control.publishes, 0)
+
+    def test_no_abs_beat_skips_advance_but_still_mirrors_state(self):
+        sm, engine, control = self._harness(
+            {"current_palette": "crimson", "fade_target": "", "fading": False,
+             "lock": False, "queued_palette": ""}, abs_beat=None)
+        self._run(sm)
+        self.assertEqual(engine.advance_calls, [])       # no beat: no advance
+        self.assertEqual(control.publishes, 1)           # but deck still synced
 
 
 if __name__ == "__main__":
