@@ -939,3 +939,14 @@ unconsumed).
 Full suite + both contracts' test lists + `tests.test_bridge_menubar` + the three hard doc
 checks green; every FR item ticked; commit per logical group; push; report per "When You
 Finish" including which FR items changed operator-visible behavior.
+
+### Part F outcome (2026-07-06, Fable acceptance)
+
+All ten FR items implemented and verified at the code (fix round landed via auto-sync commit
+`e0817c0` after Codex's context window exhausted mid-closeout; Fable ran the closeout:
+full suite 3307 OK, both contracts' test lists + `tests.test_bridge_menubar` OK, 3 hard doc
+checks green, docs finished). Review verdict for F1 as a whole: **PASS WITH REQUIRED FIXES
+APPLIED** — see the AWR-128 registry row for the acceptance record and the accepted
+`getattr`-defaults tolerance in the scripted-mode probe. Remaining gates are operator-only
+(live-config mirror, menubar-watcher restart, live pass). F2 spec authoring is gated on the
+operator's F1 live gate per the workstream sequencing rule.
