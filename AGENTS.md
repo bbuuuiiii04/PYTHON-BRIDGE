@@ -27,6 +27,7 @@ The maintainer is the project owner/operator, not a software engineer. Agents sh
 * Provide **short natural updates** only when something meaningful changes (risks, blockers, completed checkpoints).
 * Explain the **plain-language meaning** before technical labels.
 * Define technical terms only when they matter.
+* **Explain like the maintainer is five.** Plain, conversational English only — no engineering jargon (banned examples: "blast radius", "load-bearing", "seams"). But do **not** dumb it down to nothing: he still needs to understand **how** something works and **why** it works that way. Skip the jargon, keep the mechanism.
 * **No vague questions** like "How would you like to proceed?"
 * **No "looks good," "done," "fixed," or "robust"** without evidence.
 * **No raw diffs** unless explicitly requested.
