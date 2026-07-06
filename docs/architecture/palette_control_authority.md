@@ -180,8 +180,13 @@ beyond 4 are dropped with a visible log line, never silently.
     the bridge's own measurement decides the action).
 23. Color is rationed to meanings: **red only ever means "a fixture is
     muted"; amber only ever means solo.** Palette pads wear their own colors;
-    the lock glyph is drawn over the currently-active palette's color so the
-    operator sees what is locked.
+    the lock glyph is drawn over the **held** palette's own pad — the
+    take-and-hold target while an override-fade is in flight (`fade_target`),
+    otherwise the currently-active palette — so the operator sees what is
+    locked and never the palette a fade is leaving. (During a fade the engine
+    keeps `current_palette` on the outgoing palette until the blend completes,
+    so a glyph keyed off `current_palette` alone would sit on the wrong pad;
+    the deck keys it off `fade_target or current_palette`.)
 24. A pulsing Laser Solo pad always means "a solo is pending — press to
     cancel," regardless of which tier armed it.
 25. Feedback-file failure is cosmetic only: if the file is missing, stale, or

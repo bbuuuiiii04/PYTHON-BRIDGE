@@ -203,6 +203,14 @@ def compose_layout(feedback: dict | None, sidecar: list[dict], key_count: int = 
     layout: list[dict | None] = [None] * key_count
     if feedback is not None:
         current_palette = str(feedback.get("current_palette") or "")
+        # The padlock rides the take-and-hold TARGET, not current_palette.
+        # During an override-fade the engine keeps current_palette on the
+        # outgoing palette until the blend completes (led_color_engine
+        # .override_palette / advance_fade), so a lock keyed off current_palette
+        # draws on the pad you just left. fade_target is the pad you held.
+        # Authority rule 22 ("the locked palette wears a padlock on its own
+        # pad"); resolves the rule-23 "currently-active" wording for the fade.
+        locked_palette = str(feedback.get("fade_target") or "") or current_palette
         locked = bool(feedback.get("lock", False))
         gesture_skew = _warn_once_if_gesture_skew(feedback)
         long_press_s = _feedback_long_press_s(feedback)
@@ -217,7 +225,7 @@ def compose_layout(feedback: dict | None, sidecar: list[dict], key_count: int = 
             if not gesture_skew:
                 out["gesture"] = 2
                 out["long_press_s"] = long_press_s
-            if locked and out["name"] == current_palette:
+            if locked and out["name"] == locked_palette:
                 out["locked_current"] = True
             layout[key] = out
         white_sand = _feedback_palette(feedback, "white_sand")
@@ -226,7 +234,7 @@ def compose_layout(feedback: dict | None, sidecar: list[dict], key_count: int = 
             if not gesture_skew:
                 out["gesture"] = 2
                 out["long_press_s"] = long_press_s
-            if locked and out["name"] == current_palette:
+            if locked and out["name"] == locked_palette:
                 out["locked_current"] = True
             layout[5] = out
         controls = [

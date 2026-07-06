@@ -471,6 +471,25 @@ class PaletteGestureV2LayoutTests(unittest.TestCase):
         self.assertNotEqual(unlocked_image.getpixel((24, 44)), (255, 255, 255))
         self.assertEqual(locked_image.getpixel((24, 44)), (255, 255, 255))
 
+    def test_padlock_follows_fade_target_during_override(self):
+        # Long-press take-and-hold fades A->B: the engine keeps current_palette
+        # on the OUTGOING palette until the blend completes (led_color_engine
+        # .override_palette), so the padlock must ride fade_target (the pad you
+        # held), not current_palette (the one you left). Authority rule 22;
+        # regression for the 2026-07-05 lock-on-previous-pad report.
+        fading = _feedback()
+        fading["lock"] = True
+        fading["current_palette"] = "blue_cyan"   # key 0, still active mid-fade
+        fading["fade_target"] = "violet"          # key 1, the held target
+        for row in fading["palettes"]:
+            if row["name"] == "violet":
+                row["state"] = "fading"
+
+        layout = sd.compose_layout(fading, STATIC_ROWS, key_count=15)
+
+        self.assertTrue(layout[1]["locked_current"])       # padlock on held pad
+        self.assertNotIn("locked_current", layout[0])      # not the one you left
+
     def test_hsv_dim_preserves_palette_hue_order(self):
         swatches = [(0, 255, 0), (0, 255, 255), (0, 0, 255), (160, 0, 255), (255, 0, 160)]
         hues = [sd.colorsys.rgb_to_hsv(*(part / 255.0 for part in rgb))[0] for rgb in swatches]
