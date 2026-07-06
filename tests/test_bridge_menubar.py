@@ -80,9 +80,11 @@ class BridgeMenubarTests(unittest.TestCase):
     def test_led_engine_v2_command_tracks_snapshot_mode(self) -> None:
         bridge_menubar = self._import_module()
 
-        v1 = {"led_color_engine": {"engine": "v1"}}
-        v2 = {"led_color_engine": {"engine": "v2"}}
-        missing = {"led_color_engine": {"available": True}}
+        # Real status shape: the engine snapshot is nested under state_manager.
+        v1 = {"state_manager": {"led_color_engine": {"engine": "v1"}}}
+        v2 = {"state_manager": {"led_color_engine": {"engine": "v2"}}}
+        missing = {"state_manager": {"led_color_engine": {"available": True}}}
+        unconfigured = {"state_manager": {}}
 
         self.assertTrue(bridge_menubar.led_engine_v2_available(v1))
         self.assertFalse(bridge_menubar.led_engine_v2_enabled(v1))
@@ -90,13 +92,16 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertTrue(bridge_menubar.led_engine_v2_enabled(v2))
         self.assertEqual(bridge_menubar.led_engine_v2_command(v2), {"cmd": "led_engine", "mode": "v1"})
         self.assertFalse(bridge_menubar.led_engine_v2_available(missing))
+        self.assertFalse(bridge_menubar.led_engine_v2_available(unconfigured))
+        # Legacy top-level shape still resolves (back-compat fallback).
+        self.assertTrue(bridge_menubar.led_engine_v2_available({"led_color_engine": {"engine": "v2"}}))
 
     def test_toggle_led_engine_v2_appends_runtime_command(self) -> None:
         bridge_menubar = self._import_module()
 
         handler = bridge_menubar.BridgeMenuBar.toggleLedEngineV2_
         with (
-            patch.object(bridge_menubar, "read_status", return_value={"led_color_engine": {"engine": "v1"}}),
+            patch.object(bridge_menubar, "read_status", return_value={"state_manager": {"led_color_engine": {"engine": "v1"}}}),
             patch.object(bridge_menubar, "append_command") as append_command,
         ):
             handler.callable(None, None)

@@ -414,18 +414,25 @@ def pack_auto_command(status: dict, *, bridge_status: str | None = None) -> dict
     return {"cmd": "set_soundswitch_pack", "action": "enable", "enabled": desired}
 
 
-def led_engine_v2_available(status: dict) -> bool:
+def _led_color_engine_status(status: dict) -> dict:
+    # The status file nests the engine snapshot under state_manager (that is where
+    # runtime_status writes it); older shapes carried it at the top level. Read the
+    # real nested path first, fall back to top level so both shapes resolve.
     if not isinstance(status, dict):
-        return False
-    color = status.get("led_color_engine", {})
-    return isinstance(color, dict) and "engine" in color
+        return {}
+    sm = status.get("state_manager")
+    if isinstance(sm, dict) and isinstance(sm.get("led_color_engine"), dict):
+        return sm["led_color_engine"]
+    color = status.get("led_color_engine")
+    return color if isinstance(color, dict) else {}
+
+
+def led_engine_v2_available(status: dict) -> bool:
+    return "engine" in _led_color_engine_status(status)
 
 
 def led_engine_v2_enabled(status: dict) -> bool:
-    if not led_engine_v2_available(status):
-        return False
-    color = status.get("led_color_engine", {})
-    return isinstance(color, dict) and color.get("engine") == "v2"
+    return _led_color_engine_status(status).get("engine") == "v2"
 
 
 def led_engine_v2_command(status: dict) -> dict:
