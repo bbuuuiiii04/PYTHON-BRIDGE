@@ -35,7 +35,7 @@ This is the most important build in the bridge — what the bridge exists for. I
 ## Working method (long autonomous run)
 
 - **Verify as you build:** before calling a feature done, check it against its spec with a fresh-context subagent — don't trust a single pass.
-- **Fan out** independent verification/review to parallel subagents and keep working while they run.
+- **Fan out** independent verification/review to parallel subagents and keep working while they run — but spawn **every** subagent on a **cheaper, non-Fable model (e.g. Opus/Sonnet)**. There is exactly **ONE Fable agent in this entire workstream: you.** **Never spawn a Fable subagent** — Fable quota is scarce (~5%), and parallel Fable instances would burn it instantly.
 - **Act when you can act:** between checkpoints you're autonomous — take reversible steps rather than re-surveying settled decisions or asking permission.
 
 ## Deliverables
