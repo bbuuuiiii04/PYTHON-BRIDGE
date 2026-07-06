@@ -550,6 +550,21 @@ class IdentityV2LayoutTests(unittest.TestCase):
         self.assertIsNone(shifted[5])
         self.assertEqual(shifted[14]["target_kind"], "shift_layer")
 
+    def test_shift_layer_max_energy_and_rainbow_icons_render(self):
+        # The max-energy pad draws a strobe glyph (not a flat swatch) and the
+        # rainbow pad draws the rainbow arc (not a flat magenta swatch); both
+        # must render through the real path without falling back or crashing.
+        shifted = sd.compose_layout(_v2_feedback(), STATIC_ROWS, key_count=15, shift=True)
+        deck = FakeDeck()
+        strobe = sd.render_key(deck, 3, False, shifted)
+        rainbow = sd.render_key(deck, 4, False, shifted)
+        red_swatch = sd.render_key(deck, 0, False, shifted)  # plain manual_pad
+        for img in (strobe, rainbow, red_swatch):
+            self.assertIsInstance(img, (bytes, bytearray))
+            self.assertTrue(img)
+        # rainbow is no longer the flat-swatch rendering a plain manual pad gets
+        self.assertNotEqual(rainbow, red_swatch)
+
 
 class WatchdogTests(unittest.TestCase):
     def _run_watchdog(self, stop, tick):

@@ -592,6 +592,21 @@ def _draw_rainbow_arc(draw, w, h, vivid: bool):
         draw.arc([cx - r, base - r, cx + r, base + r], 180, 360, fill=c, width=4)
 
 
+def _draw_strobe(draw, w, h, vivid: bool):
+    """Full-strip strobe flash: a bright core throwing rays — the max-energy burst."""
+    ray = (255, 210, 70) if vivid else (108, 95, 55)      # amber energy rays
+    core = (255, 255, 255) if vivid else (140, 140, 148)  # white flash core
+    cx, cy = w / 2, h / 2 - 5
+    for i in range(12):
+        ang = math.pi * i / 6.0
+        draw.line(
+            [cx + 9 * math.cos(ang), cy + 9 * math.sin(ang),
+             cx + 27 * math.cos(ang), cy + 27 * math.sin(ang)],
+            fill=ray, width=3,
+        )
+    draw.ellipse([cx - 10, cy - 10, cx + 10, cy + 10], fill=core)
+
+
 def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
                latched: bool = False, hold_cue: bool = False):
     """pressed = PHYSICAL key-down only (renders the ~150ms white ack flash).
@@ -623,7 +638,20 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
         draw.rectangle([0, 0, w, h], fill=(245, 245, 245))
         return PILHelper.to_native_format(deck, image)
 
-    if kind in ("palette_pad", "zone_pad", "manual_pad", "max_energy_pad"):
+    if kind == "max_energy_pad":
+        # Max-energy arm: a full-strip strobe burst, not a color swatch.
+        armed = state == "armed"
+        draw.rectangle([0, 0, w, h], fill=_BG)
+        _draw_strobe(draw, w, h, vivid=armed)
+        _fit_text(draw, "MAX", (w / 2, h - 11), w - 8, size=14,
+                  fill=(255, 220, 90) if armed else (150, 140, 95))
+        return PILHelper.to_native_format(deck, image)
+    if kind == "manual_pad" and str(row.get("name") or "") == "rainbow":
+        # Rainbow override renders the actual rainbow arc (matches the v1 rainbow pad).
+        draw.rectangle([0, 0, w, h], fill=_BG)
+        _draw_rainbow_arc(draw, w, h, vivid=active)
+        return PILHelper.to_native_format(deck, image)
+    if kind in ("palette_pad", "zone_pad", "manual_pad"):
         # The color IS the label — no text. The pad shows the palette's RANGE
         # as a left-to-right gradient (bridge ships an 8-sample ramp; flat rgb
         # fallback for older feedback payloads). dim = available, bright +
