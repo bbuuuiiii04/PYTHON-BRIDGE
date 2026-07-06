@@ -529,6 +529,20 @@ class StopFailOpenReleaseTests(unittest.TestCase):
         self.assertNotIn("drop_spotlight", sm._led_blackout_owners)
         self.assertFalse(sm._drop_presentation_led_dark_held)
 
+    def test_enabled_release_without_a_held_hold_emits_no_led_event(self):
+        # The common case: a normal stop with no solo window active must not
+        # emit a spurious LED_CLEAR or churn owners -- the release only clears
+        # when a dark hold is actually held (_drop_presentation_led_dark_held).
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        sm._deck = {1: _deck_state(playing=True), 2: _deck_state(playing=False)}
+        self.assertFalse(sm._drop_presentation_led_dark_held)
+        emitted = []
+        sm._handle_led_event = lambda ev: emitted.append(ev.kind)
+        sm._drop_presentation_release_on_stop()
+        self.assertEqual(emitted, [])
+        self.assertFalse(sm._drop_presentation_led_dark_held)
+
     def test_disabled_release_is_a_noop(self):
         # enabled:false byte-identity gate: the helper returns before building
         # any WindowInputs or touching an owner.
