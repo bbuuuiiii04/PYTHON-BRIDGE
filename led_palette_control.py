@@ -22,9 +22,11 @@ log = logging.getLogger("rbss.palette_control")
 # marker (operator rule 2026-07-05: "finish by the next phrase or at a 32-beat
 # boundary from the last phrase marker"). PHRASE_ANCHOR_BEATS is 64, so the
 # in-phrase grid points are the phrase marker, its midpoint (+32), and the next
-# phrase (+64) — i.e. a fade never runs longer than 32 beats and always lands
-# on a phrase-relative boundary, never a fixed 32 beats from where the press
-# happened to land.
+# phrase (+64): the fade completes within 32 beats of the marker and always
+# lands on a phrase-relative boundary, never a fixed 32 beats from where the
+# press landed. (It can run slightly past 32 beats from the *press* when the
+# phrase marker sits a few beats ahead of the playhead at a rearm — still a real
+# phrase boundary, still self-correcting.)
 FADE_GRID_BEATS = 32.0
 
 # The real operator-facing feedback path the Stream Deck DECK script

@@ -92,8 +92,16 @@ beyond 4 are dropped with a visible log line, never silently.
    take-and-hold, then tap the same pad to unlock — the color stays for this
    track and automatic selection resumes at the next boundary (rule 10).
 5. **Fade contract:** an override fades from the current color position to the
-   target, beat-synced, completing at the next phrase anchor or 32 beats,
-   whichever is sooner (unknown anchor → the 32-beat cap alone). The blend must
+   target, beat-synced, completing on the 32-beat grid measured from the last
+   phrase marker — the phrase midpoint (marker + 32) if the press lands in the
+   first half of the phrase, else the next phrase (marker + 64, PHRASE_ANCHOR
+   =64); unknown phrase anchor → a plain 32-beat fade. It finishes on a
+   phrase-relative boundary, never a fixed 32 beats from wherever the press
+   landed (operator rule 2026-07-05). The fade advances every playing tick,
+   independent of LED role dispatch, so a stable role-key or pre-drop blackout
+   cannot freeze it mid-slide; each engine-driven palette change (fade commit,
+   dwell drift) is mirrored to the deck feedback the same tick, so the pad never
+   freezes on the operator's last press. The blend must
    travel inside the engine's allowed hue space — it must never transit the
    excluded yellow/orange band. A track boundary arriving mid-fade cancels the
    fade; boundary logic proceeds normally.
@@ -241,8 +249,11 @@ display state and a monotonic sequence number.
 1. Tap queues → boundary applies it; tap the queued pad again → unqueued,
    nothing applies at the boundary; tap-queue replaces any other queued
    palette.
-2. Fade completes at the phrase anchor; caps at 32 beats without an anchor;
-   never leaves the allowed hue space; cancels cleanly at a track boundary.
+2. Fade completes on the 32-beat grid from the last phrase marker (midpoint or
+   next phrase); plain 32-beat fade without a phrase anchor; advances every
+   playing tick (never frozen by role dispatch) and mirrors each commit to the
+   deck the same tick; never leaves the allowed hue space; cancels cleanly at a
+   track boundary.
 3. Queue while locked: applies at the boundary, lock transfers, stays locked.
 4. Long-press = take-and-hold: fades now, consumes the queue, locks the
    target (mid-fade lock pins on completion); long-press another palette

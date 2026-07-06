@@ -678,17 +678,21 @@ class LEDDispatchPolicyMixin:
         control = self._led_palette_control
         if control is None:
             return
-        snap = engine.snapshot()
-        sig = (
-            snap.get("current_palette"),
-            snap.get("fade_target"),
-            snap.get("fading"),
-            snap.get("lock"),
-            snap.get("queued_palette"),
-        )
-        if sig != self._palette_feedback_sig:
-            self._palette_feedback_sig = sig
-            control.maybe_publish()
+        try:
+            snap = engine.snapshot()
+            sig = (
+                snap.get("current_palette"),
+                snap.get("fade_target"),
+                snap.get("fading"),
+                snap.get("lock"),
+                snap.get("queued_palette"),
+            )
+            if sig != self._palette_feedback_sig:
+                self._palette_feedback_sig = sig
+                control.maybe_publish()
+        except Exception as exc:
+            # Deck-feedback mirroring must never crash the 200 Hz push loop.
+            self._led_last_error = f"palette_feedback_error:{type(exc).__name__}"
 
     def _dispatch_led_automation(
         self,
