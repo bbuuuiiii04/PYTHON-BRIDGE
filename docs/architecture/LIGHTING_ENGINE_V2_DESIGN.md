@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: operator-authoritative intended behavior (design) + measured library audit (read-only)
-last_verified_commit: 6bf2474
+last_verified_commit: 20c6ea5
 last_verified_date: 2026-07-05
 validation_scope: design intent + read-only measurement only — the complete LIGHTING ENGINE v2 experience design, calibrated and dry-run-audited against the shipped v4 spectral cache (666 tracks), the Rekordbox DB, and ANLZ markers; no behavior change, no code change, no hardware validation
 ---
@@ -140,7 +140,8 @@ RGB ramps are Template-Lab/live work):
 
 True red is EMBERCORE-only — "rare and earned" is structural: only distortion ≥ 0.75
 (the corpus's top quarter) can wear it. Warm stops (orange/amber/gold) are **added to
-`scale_stops`** (today six cool-only stops, `led_models.py:72-79` — confirmed) so amber
+`scale_stops`** (today six stops span green→red: green/cyan/blue/purple/magenta/red,
+`led_models.py:72-79`, verified this session — NOT cool-only; no orange/amber/gold yet) so amber
 accents and laser pairing exist; they are accents, never zone families (lock honored).
 
 **Audit result (confirmed, all 666 tracks):** GLACIER 119 · DEEP_POOL 133 · TWILIGHT 81 ·
@@ -193,6 +194,42 @@ than CSN — and the zone map above reproduces both calls from the correct file'
   file). First load of a new purchase pays the one-time ~12 s analysis and has full
   identity from that load onward (seam confirmed, `state_manager.py:263-268` per the
   strict review).
+
+### 2.4 The Stream Deck correction surface (decided this session)
+
+**What the room does.** The physical Stream Deck becomes your hands on v2's colors. Six pads
+are the six zones — GLACIER, DEEP POOL, TWILIGHT, ION, VOLT, EMBERCORE — and pressing one
+tells the room "this track lives here." A few more are raw manual colors — white/sand and full
+red / green / blue — for when you want a color *now*, regardless of the track. The pads show
+what the engine chose, and your hands always win.
+
+**Exact rules (decided; F1-owned — F1 off ⇒ pads keep their v1 palette-override meaning, §7).**
+- **Two pad classes, different behavior:**
+  - **Six zone pads → per-track identity correction.** Selecting a zone overrides the current
+    track's zone; **hold/lock while the override is active writes it to the permanence store
+    (§2.3) as a permanent correction; unlock while that track plays clears it.** A stored
+    correction always stamps the **active deck** (never a fading-out deck).
+  - **Manual pads (white/sand, R/G/B) → live-only override**, arbiter rank 0 (always wins),
+    **never stored** — they evaporate on track change (white/sand is the sanctioned manual
+    white, white-is-a-burst lock, §8).
+- **Backable today (confirmed this session):** the engine already emits arbitrary RGB via
+  `fixed_rgb` palettes + `set_mode_override` (`led_color_engine.py:567-573,845-850`), and pure
+  green is a default stop `(0,255,0)` (`led_models.py:73`); live config already ships white_sand
+  as `fixed_rgb` (`config/led_look_director.json:168-179`). **No new RGB path is needed.**
+- **Gesture model (carried from v1 `led_palette_control.py`, re-pointed at zones):** tap stages;
+  **hold applies now, fading to the next phrase boundary (`_override_palette_now`), and writes
+  the correction.** In v2 "lock" means *store the correction* — it drops v1's
+  freeze-auto-rotation meaning (no dwell rotation exists in v2; the exact residual freeze
+  behavior is a spec-author call).
+- **Queue = apply to the *current* track at the next phrase boundary** (the existing
+  hold/phrase-anchor path), NOT v1's next-*track* `queue_palette` (`led_color_engine.py:801-804`).
+- **Feedback:** the active track's zone pad indicates "current" — the deck renders per-key
+  images (`streamdeck_midi.py:527-565`), so this is feasible.
+- **Layout is a spec-author + operator-veto item:** the 15-key deck has only ~5 genuinely free
+  keys today (keys 0–5 are already palette/white_sand selectors, 7–14 are
+  mute/solo/lock/static-look/rainbow — `streamdeck_midi.py:209-247`), so the 6 zones +
+  white/sand + R/G/B must **repurpose** existing keys (the 0–5 palette selectors are the natural
+  home). Exact layout is operator-veto.
 
 ---
 
@@ -739,6 +776,10 @@ exact beam vocabulary waits for one working session with the hardware.
   drops; the top ~40% ranked drops earn lasers; Laser Solo stays operator-traceable-only;
   damper/finale/fail-open rules untouched (confirmed at
   `drop_presentation.py:100,293-311,326-377,628-745` by this session's inventory).
+  Lasers fire *at* drops, so they ride dark through §4's pre-drop LED blackout with **no
+  LED↔laser coordination** — the laser personality's own `pre_drop_blackout_beats` stays
+  independent of the §4 darkness pack (decided this session: an earlier "lasers follow the
+  LED blackout" idea was dropped as redundant — lasers are already off before the drop).
 
 ---
 
