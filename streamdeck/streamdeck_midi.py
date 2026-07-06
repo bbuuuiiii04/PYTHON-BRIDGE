@@ -199,9 +199,69 @@ def _control_row(feedback: dict | None, key: str, fallback_name: str) -> dict | 
     return out
 
 
-def compose_layout(feedback: dict | None, sidecar: list[dict], key_count: int = 15) -> list[dict | None]:
+def _v2_pad_row(row: dict, kind: str) -> dict | None:
+    if not isinstance(row, dict) or type(row.get("note")) is not int:
+        return None
+    out = dict(row)
+    out.update({
+        "channel": CHANNEL,
+        "note": int(row["note"]),
+        "target_kind": kind,
+        "interaction": "press",
+        "name": str(row.get("name") or ""),
+        "state": str(row.get("state") or "inactive"),
+    })
+    if kind == "zone_pad" and row.get("corrected"):
+        out["locked_current"] = True
+    return out
+
+
+def _manual_row(feedback: dict | None, name: str) -> dict | None:
+    for row in (feedback or {}).get("manual", []):
+        if isinstance(row, dict) and row.get("name") == name:
+            return _v2_pad_row(row, "manual_pad")
+    return None
+
+
+def compose_layout(
+    feedback: dict | None,
+    sidecar: list[dict],
+    key_count: int = 15,
+    *,
+    shift: bool = False,
+) -> list[dict | None]:
     layout: list[dict | None] = [None] * key_count
-    if feedback is not None:
+    if feedback is not None and feedback.get("engine") == "v2" and isinstance(feedback.get("zones"), list):
+        zones = [row for row in feedback.get("zones", []) if isinstance(row, dict) and type(row.get("note")) is int]
+        if not shift:
+            for key, row in enumerate(zones[:6]):
+                layout[key] = _v2_pad_row(row, "zone_pad")
+            if key_count > 6:
+                layout[6] = _manual_row(feedback, "white_sand")
+        else:
+            for key, name in enumerate(("red", "green", "blue")):
+                layout[key] = _manual_row(feedback, name)
+            max_energy = feedback.get("max_energy", {})
+            if isinstance(max_energy, dict) and type(max_energy.get("note")) is int and key_count > 3:
+                layout[3] = _v2_pad_row({
+                    "name": "max_energy",
+                    "note": max_energy["note"],
+                    "state": max_energy.get("state", "inactive"),
+                    "rgb": (255, 180, 40),
+                }, "max_energy_pad")
+            if key_count > 4:
+                layout[4] = _manual_row(feedback, "rainbow")
+        controls = [
+            (7, "led_mute", "LED Mute"),
+            (8, "laser_mute", "Laser Mute"),
+            (9, "laser_solo", "Laser Solo"),
+        ]
+        for key, control, label in controls:
+            if key < key_count:
+                layout[key] = _control_row(feedback, control, label)
+        if key_count > 14:
+            layout[14] = {"target_kind": "shift_layer", "name": "Shift", "state": "active" if shift else "inactive"}
+    elif feedback is not None:
         current_palette = str(feedback.get("current_palette") or "")
         # The padlock rides the take-and-hold TARGET, not current_palette.
         # During an override-fade the engine keeps current_palette on the
@@ -308,7 +368,7 @@ class FeedbackWatch:
 def _pulse_keys(layout) -> set[int]:
     """Keys whose rendering depends on the 0.5s pulse phase."""
     return {key for key, row in enumerate(layout)
-            if isinstance(row, dict) and str(row.get("state")) in ("queued", "fading")}
+            if isinstance(row, dict) and str(row.get("state")) in ("queued", "fading", "staged")}
 
 
 def _changed_keys(prev_layout, next_layout) -> set[int]:
@@ -452,7 +512,7 @@ def _row_active(row: dict | None, pressed: bool, pulse: bool = False) -> bool:
     state = str((row or {}).get("state") or "")
     if state in ("active", "fading"):
         return True
-    if state == "queued":
+    if state in ("queued", "staged"):
         return pulse
     return False
 
@@ -563,7 +623,7 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
         draw.rectangle([0, 0, w, h], fill=(245, 245, 245))
         return PILHelper.to_native_format(deck, image)
 
-    if kind == "palette_pad":
+    if kind in ("palette_pad", "zone_pad", "manual_pad", "max_energy_pad"):
         # The color IS the label — no text. The pad shows the palette's RANGE
         # as a left-to-right gradient (bridge ships an 8-sample ramp; flat rgb
         # fallback for older feedback payloads). dim = available, bright +
@@ -586,10 +646,13 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
             draw.line([x, 0, x, h], fill=col)
         if state == "active":
             draw.rectangle([3, 3, w - 4, h - 4], outline=(255, 255, 255), width=4)
-        elif state in ("queued", "fading") and pulse:
+        elif state in ("queued", "staged", "fading") and pulse:
             draw.rectangle([3, 3, w - 4, h - 4], outline=(255, 255, 255), width=5)
         if row.get("locked_current") or hold_cue:
             _draw_padlock(draw, w, h, True)
+    elif kind == "shift_layer":
+        draw.rectangle([0, 0, w, h], fill=(40, 40, 44) if state != "active" else (0, 120, 210))
+        _fit_text(draw, "SHIFT", (w / 2, h / 2), w - 12, size=20, fill=(255, 255, 255))
     elif kind == "led_mute":
         muted = active
         draw.rectangle([0, 0, w, h], fill=_MUTE_RED if muted else _BG)
@@ -653,6 +716,7 @@ def acquire_deck(log_errors: bool = True):
 def make_on_key(
     deck, port, sidecar_ref, active_keys: set[tuple[int, int]],
     recent_local: dict[tuple[int, int], float] | None = None,
+    on_shift_toggle=None,
 ):
     # Physical press/release only — independent of interaction type. active_keys
     # is the toggle LATCH (on's toggle branch flips it on press only; release
@@ -697,6 +761,10 @@ def make_on_key(
             sidecar = sidecar_ref() if callable(sidecar_ref) else sidecar_ref
             row = _row_for_key(key, sidecar)
             if row is None:
+                return
+            if row.get("target_kind") == "shift_layer":
+                if pressed and callable(on_shift_toggle):
+                    on_shift_toggle()
                 return
             pad_key = (CHANNEL, row["note"])
             if pressed:
@@ -750,7 +818,11 @@ def make_on_key(
 def _render_frame(deck, layout, keys, active_keys: set[tuple[int, int]], pulse: bool) -> None:
     for key in sorted(keys):
         row = _row_for_key(key, layout)
-        latched = row is not None and (CHANNEL, row["note"]) in active_keys
+        latched = (
+            row is not None
+            and type(row.get("note")) is int
+            and (CHANNEL, row["note"]) in active_keys
+        )
         deck.set_key_image(key, render_key(deck, key, False, layout, pulse=pulse,
                                            latched=latched))
 
@@ -794,7 +866,15 @@ def main():
             if len(static_rows) > 4:
                 log(f"streamdeck_midi: dropping {len(static_rows) - 4} static-look binding(s) beyond key 13")
             feedback = load_feedback_state()
-            sidecar = compose_layout(feedback, static_rows, key_count=deck.key_count())
+            shift_state = {"active": False}
+            if not isinstance(feedback, dict) or feedback.get("engine") != "v2":
+                shift_state["active"] = False
+            sidecar = compose_layout(
+                feedback,
+                static_rows,
+                key_count=deck.key_count(),
+                shift=shift_state["active"],
+            )
             boot_messages, clear_latches = watch.observe(feedback, sidecar)
             if clear_latches and active_keys:
                 boot_messages.append(f"cleared {len(active_keys)} deck-local pad latch(es)")
@@ -805,11 +885,30 @@ def main():
                 with layout_lock:
                     return list(sidecar)
 
+            def toggle_shift():
+                nonlocal sidecar, feedback
+                shift_state["active"] = not shift_state["active"]
+                with layout_lock:
+                    sidecar = compose_layout(
+                        feedback,
+                        static_rows,
+                        key_count=deck.key_count(),
+                        shift=shift_state["active"],
+                    )
+                _render_frame(deck, sidecar, range(deck.key_count()), active_keys, pulse)
+
             port = mido.open_output(PORT_NAME, virtual=True)
             pulse = False
             _render_frame(deck, sidecar, range(deck.key_count()), active_keys, pulse)
             deck.set_key_callback(
-                make_on_key(deck, port, current_layout, active_keys, recent_local))
+                make_on_key(
+                    deck,
+                    port,
+                    current_layout,
+                    active_keys,
+                    recent_local,
+                    on_shift_toggle=toggle_shift,
+                ))
             notes = [row["note"] for row in sidecar if isinstance(row, dict) and "note" in row]
             if notes:
                 log(f'"{PORT_NAME}" live - notes {min(notes)}-{max(notes)}, '
@@ -833,7 +932,14 @@ def main():
                 tick[0] = time.monotonic()
                 pulse = not pulse
                 feedback = load_feedback_state()
-                next_layout = compose_layout(feedback, static_rows, key_count=deck.key_count())
+                if not isinstance(feedback, dict) or feedback.get("engine") != "v2":
+                    shift_state["active"] = False
+                next_layout = compose_layout(
+                    feedback,
+                    static_rows,
+                    key_count=deck.key_count(),
+                    shift=shift_state["active"],
+                )
                 messages, clear_latches = watch.observe(feedback, next_layout)
                 for message in messages:
                     log(message)

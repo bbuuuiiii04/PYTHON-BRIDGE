@@ -87,6 +87,7 @@ from .soundswitch_pack_player_config import (
 from .led_config import LEDConfigResult, load_led_look_director_config
 from .led_look_director import LEDLookDirector, LED_AUTOMATION_ROLE_ORDER
 from .led_color_engine import LedColorEngine
+from .led_identity_v2 import IdentityStore
 from .led_palette_control import LIVE_PALETTE_STATE_PATH
 from .govee_scene_adapter import GoveeSceneAdapter
 from .govee_runtime_sender import GoveeRuntimeSender
@@ -149,6 +150,7 @@ class LEDStartupBundle:
     status_provider: Optional[Callable[[], dict]]
     realtime_runner: Optional[GoveeRealtimeRunner] = None
     led_color_engine: Optional[Any] = None
+    led_identity_store: Optional[IdentityStore] = None
 
 
 def _build_personality_resolver(cfg: LaserConfig) -> PersonalityResolver:
@@ -500,6 +502,13 @@ def _build_led_startup_wiring(
             if cfg.color_engine is not None
             else None
         )
+        identity_store = (
+            IdentityStore.load(cfg.color_engine.v2.store_path)
+            if cfg.color_engine is not None
+            and cfg.color_engine.v2 is not None
+            and cfg.color_engine.v2.enabled
+            else None
+        )
         govee_sender = None
         if not cfg.dry_run:
             govee_sender = GoveeRuntimeSender(cfg)
@@ -586,7 +595,7 @@ def _build_led_startup_wiring(
         return payload
 
     return LEDStartupBundle(
-        led_director, led_adapter, _status, realtime_runner, engine
+        led_director, led_adapter, _status, realtime_runner, engine, identity_store
     )
 
 _LOCK_FD = None
@@ -1135,6 +1144,7 @@ def main() -> None:
         led_look_director=led_look_director,
         led_scene_adapter=led_scene_adapter,
         led_color_engine=led_bundle.led_color_engine,
+        led_identity_store=led_bundle.led_identity_store,
         led_palette_control_config=palette_control_config,
         os2l_connected_provider=conn.is_connected,
         soundswitch_pack_runtime=soundswitch_pack_runtime,

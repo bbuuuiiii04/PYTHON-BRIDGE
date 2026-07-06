@@ -33,7 +33,7 @@ from rb_ss_bridge_v2.led_color_engine import (  # noqa: E402
     _blend_white,
     _scale_stop_positions,
 )
-from rb_ss_bridge_v2.led_models import ColorEngineConfig, Palette  # noqa: E402
+from rb_ss_bridge_v2.led_models import ColorEngineConfig, IdentityV2Config, Palette, ZoneRampConfig  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +131,17 @@ def _make_config(**overrides: Any) -> ColorEngineConfig:
 def _engine(seed: int = 42, **overrides: Any) -> LedColorEngine:
     """Create a deterministic engine with set_seed=seed."""
     return LedColorEngine(_make_config(**overrides), set_seed=seed)
+
+
+def _v2_config() -> IdentityV2Config:
+    zones = {
+        name: ZoneRampConfig(
+            base_ramp=((10, 40, 120), (0, 120, 255), (0, 220, 255)),
+            accent_ramp=((120, 240, 255), (210, 250, 255)),
+        )
+        for name in ("GLACIER", "DEEP_POOL", "TWILIGHT", "ION", "VOLT", "EMBERCORE", "NEUTRAL")
+    }
+    return IdentityV2Config(enabled=True, zones=zones)
 
 
 def _dispatch(
@@ -1035,6 +1046,80 @@ class TestLiveControlStubs(unittest.TestCase):
         state = e.color_state()
         self.assertTrue(state["white_sand_active"])
         self.assertTrue(state["rainbow_active"])
+
+    def test_v2_config_latched_v1_matches_plain_v1_and_rng(self) -> None:
+        plain = _engine(seed=19)
+        v2 = _engine(seed=19, v2=_v2_config())
+        v2.set_v2_active(False)
+
+        def drive(engine: LedColorEngine) -> tuple[dict, dict, dict]:
+            engine.begin_dispatch(
+                active_deck=1,
+                load_gen=1,
+                content_id="track-a",
+                filepath="/tmp/a.mp3",
+                role="groove",
+                section_id="s1",
+                cycle=1,
+            )
+            color = engine.resolve_color(
+                role="groove",
+                section_id="s1",
+                cycle=1,
+                look_name="look",
+                color_source="engine",
+            )
+            slots = engine.resolve_slot_colors(
+                role="groove",
+                section_id="s1",
+                cycle=1,
+                look_name="look",
+                color_source="engine",
+            )
+            snap = engine.snapshot()
+            v1_snap = {
+                key: snap[key]
+                for key in (
+                    "current_palette", "anchor_p", "dwell_remaining",
+                    "drop_section_index", "lock", "queued_palette",
+                    "hold_track", "fading", "fade_target", "rainbow",
+                )
+            }
+            return color, slots, v1_snap
+
+        self.assertEqual(drive(v2), drive(plain))
+        self.assertEqual(v2._journey_rng.getstate(), plain._journey_rng.getstate())
+
+    def test_v2_manual_and_default_identity_resolve(self) -> None:
+        e = _engine(seed=4, v2=_v2_config())
+        e.begin_dispatch(
+            active_deck=1,
+            load_gen=1,
+            content_id="track-a",
+            filepath="/tmp/a.mp3",
+            role="groove",
+            section_id="s1",
+            cycle=1,
+        )
+        self.assertEqual(e.snapshot()["engine"], "v2")
+        self.assertEqual(e.snapshot()["zone"], "NEUTRAL")
+        slots = e.resolve_slot_colors(
+            role="groove",
+            section_id="s1",
+            cycle=1,
+            look_name="look",
+            color_source="engine",
+        )
+        self.assertEqual(len(slots["slot_colors"]), 6)
+        e.set_manual("red")
+        color = e.resolve_color(
+            role="groove",
+            section_id="s1",
+            cycle=1,
+            look_name="look",
+            color_source="engine",
+        )
+        self.assertEqual(color["color"], (255, 0, 0))
 
     def test_lock_suppresses_dwell_decrement(self) -> None:
         """When locked, dwell_remaining does NOT decrease on track changes."""

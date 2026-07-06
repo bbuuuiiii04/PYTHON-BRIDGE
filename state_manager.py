@@ -67,6 +67,18 @@ from . import led_dispatch_policy as _led_dispatch_policy
 from .led_dispatch_policy import LEDDispatchPolicyMixin
 from .led_palette_control import LedPaletteControl, PaletteFeedbackWriter
 from .led_config import load_drop_presentation_config
+from .led_identity_v2 import (
+    IdentityStore,
+    NORM_ANCHORS as LED_IDENTITY_NORM_ANCHORS,
+    assign_zone as assign_led_identity_zone,
+    content_key as led_identity_content_key,
+    content_hash as led_identity_content_hash,
+    derive_dressing as derive_led_identity_dressing,
+    identity_scores as led_identity_scores,
+    norm as led_identity_norm,
+    record_from_dressing as led_identity_record_from_dressing,
+)
+from .led_models import IdentityV2Config
 from .drop_presentation import (
     AUDIBLE_DAMPER_BEATS,
     LEDS_ONLY,
@@ -212,33 +224,60 @@ def _read_runtime_anlz_data(
     *,
     audio_filepath: str = "",
     spectral_enabled: bool = False,
+    identity_enabled: bool = False,
+    identity_key: str = "",
+    identity_config: IdentityV2Config | None = None,
     wide_window: bool = False,
 ) -> TrackAnlzData:
     data = read_anlz_drops(anlz_path)
-    if not spectral_enabled:
-        return data
     ctx = data.waveform_context
-    if ctx is None or not data.drop_beat_indices:
-        return data
 
-    beatgrid_times_ms = list(ctx.beatgrid_times_ms)
-    features = _runtime_spectral_features(audio_filepath, beatgrid_times_ms)
-    phrases = list(data.buildup_beat_indices) + list(data.breakdown_beat_indices)
-    data.energy_shadow = _calculate_smart_drop_energy_shadow(
-        list(ctx.heights),
-        _duration_from_beatgrid(beatgrid_times_ms),
-        beatgrid_times_ms,
-        data.drop_beat_indices,
-        # TODO(M4): hoist the v2 runtime scorer if this path becomes hot enough.
-        scorer=_make_multi_feature_scorer(
-            MULTI_FEATURE_WEIGHTS_V2,
+    v4 = None
+    beatgrid_times_ms: list[float] = []
+    if (spectral_enabled or identity_enabled) and audio_filepath and ctx is not None:
+        beatgrid_times_ms = list(ctx.beatgrid_times_ms)
+        try:
+            v4 = spectral_cache.get_cached_v4(audio_filepath, beatgrid_times_ms)
+            if v4 is None:
+                grid_span_s = 0.0
+                if len(beatgrid_times_ms) >= 2:
+                    grid_span_s = (float(beatgrid_times_ms[-1]) - float(beatgrid_times_ms[0])) / 1000.0
+                if grid_span_s <= _V4_AT_LOAD_MAX_S:
+                    v4 = extract_spectral_features_v4(audio_filepath, beatgrid_times_ms)
+                    if v4 is not None:
+                        spectral_cache.put_cached_v4(audio_filepath, beatgrid_times_ms, v4)
+                        log.info("[SM] spectral-path  source=v4-extract  file=%s", bf.short(audio_filepath))
+        except Exception as exc:
+            log.warning("[LED] identity-derive-failed file=%s err=%s", bf.short(audio_filepath), type(exc).__name__)
+            v4 = None
+
+    if identity_enabled and identity_config is not None and identity_key:
+        data.led_identity = _derive_led_identity_record(
+            v4,
+            key=identity_key,
+            cfg=identity_config,
+        )
+
+    if spectral_enabled and ctx is not None and data.drop_beat_indices:
+        if not beatgrid_times_ms:
+            beatgrid_times_ms = list(ctx.beatgrid_times_ms)
+        features = _runtime_spectral_features(audio_filepath, beatgrid_times_ms, v4=v4)
+        phrases = list(data.buildup_beat_indices) + list(data.breakdown_beat_indices)
+        data.energy_shadow = _calculate_smart_drop_energy_shadow(
+            list(ctx.heights),
+            _duration_from_beatgrid(beatgrid_times_ms),
+            beatgrid_times_ms,
+            data.drop_beat_indices,
+            # TODO(M4): hoist the v2 runtime scorer if this path becomes hot enough.
+            scorer=_make_multi_feature_scorer(
+                MULTI_FEATURE_WEIGHTS_V2,
+                wide_window=wide_window,
+                phrases=phrases,
+            ),
+            spectral_features=features,
             wide_window=wide_window,
             phrases=phrases,
-        ),
-        spectral_features=features,
-        wide_window=wide_window,
-        phrases=phrases,
-    )
+        )
     return data
 
 
@@ -247,9 +286,11 @@ def _read_runtime_anlz_data(
 _V4_AT_LOAD_MAX_S = 900.0
 
 
-def _runtime_spectral_features(audio_filepath: str, beatgrid_times_ms: list[float]):
+def _runtime_spectral_features(audio_filepath: str, beatgrid_times_ms: list[float], *, v4=None):
     if not audio_filepath:
         return None
+    if v4 is not None:
+        return spectral_profile.compat_features(v4)
     v4 = spectral_cache.get_cached_v4(audio_filepath, beatgrid_times_ms)
     if v4 is not None:
         return spectral_profile.compat_features(v4)
@@ -271,6 +312,53 @@ def _runtime_spectral_features(audio_filepath: str, beatgrid_times_ms: list[floa
         spectral_cache.put_cached(audio_filepath, beatgrid_times_ms, features)
         log.info("[SM] spectral-path  source=v3-extract  file=%s", bf.short(audio_filepath))
     return features
+
+
+def _derive_led_identity_record(v4, *, key: str, cfg: IdentityV2Config) -> dict[str, Any]:
+    key_hash = led_identity_content_hash(key)
+    if v4 is None:
+        dressing = derive_led_identity_dressing(
+            "NEUTRAL",
+            cfg.zones["NEUTRAL"],
+            key_hash,
+            0.5,
+            0.5,
+            0.0,
+        )
+        return led_identity_record_from_dressing(
+            dressing,
+            key_hash=key_hash,
+            base="provisional",
+            scores={},
+            norm_inputs={"bass": 0.5, "drama": 0.5, "punch": 0.0},
+        )
+    axes = spectral_profile.identity_axes(v4)
+    scalars = dict(v4.scalars)
+    flags = spectral_profile.sustained_synth_flags(v4)
+    synth_rate = (sum(1 for flag in flags if flag) / len(flags)) if flags else 0.0
+    scores = led_identity_scores(axes, scalars, synth_rate)
+    zone = assign_led_identity_zone(scores)
+    bass_lo, bass_hi = cfg.bass_norm
+    norm_inputs = {
+        "bass": led_identity_norm(float(axes.get("bass", 0.5)), bass_lo, bass_hi),
+        "drama": led_identity_norm(float(axes.get("drama", 0.0)), *LED_IDENTITY_NORM_ANCHORS["drama"]),
+        "punch": led_identity_norm(float(axes.get("punch", 0.0)), *LED_IDENTITY_NORM_ANCHORS["punch"]),
+    }
+    dressing = derive_led_identity_dressing(
+        zone,
+        cfg.zones[zone],
+        key_hash,
+        norm_inputs["bass"],
+        norm_inputs["drama"],
+        norm_inputs["punch"],
+    )
+    return led_identity_record_from_dressing(
+        dressing,
+        key_hash=key_hash,
+        base="measured",
+        scores=scores,
+        norm_inputs=norm_inputs,
+    )
 
 
 def _energy_shadow_priority(shadows: list[SmartDropEnergyShadow]) -> int:
@@ -391,6 +479,7 @@ class StateManager(LEDDispatchPolicyMixin):
         led_look_director=None,
         led_scene_adapter=None,
         led_color_engine=None,
+        led_identity_store: Optional[IdentityStore] = None,
         led_palette_control_config: Optional[dict[str, Any]] = None,
         os2l_connected_provider=None,
         recorder: Optional[SessionRecorder] = None,
@@ -520,6 +609,30 @@ class StateManager(LEDDispatchPolicyMixin):
         self._drop_presentation_learned_writer.start()
 
         self._init_led_dispatch_state(led_look_director, led_scene_adapter, led_color_engine)
+        self._v2_identity_cfg: IdentityV2Config | None = None
+        if led_color_engine is not None:
+            engine_config = getattr(led_color_engine, "_config", None)
+            self._v2_identity_cfg = getattr(engine_config, "v2", None)
+        self._v2_identity_enabled = bool(
+            self._v2_identity_cfg is not None and self._v2_identity_cfg.enabled
+        )
+        self._led_v2_latch = bool(self._v2_identity_enabled)
+        self._led_identity_store = led_identity_store or IdentityStore()
+        self._led_identity_writer = None
+        if self._v2_identity_enabled and self._v2_identity_cfg is not None:
+            try:
+                _os.makedirs(_os.path.dirname(self._v2_identity_cfg.store_path) or ".", exist_ok=True)
+            except OSError as exc:
+                log.warning("[LED] identity-state-dir-failed err=%s", type(exc).__name__)
+            if self._led_identity_store.write_allowed:
+                self._led_identity_writer = PaletteFeedbackWriter(
+                    self._v2_identity_cfg.store_path,
+                    debounce_s=0.5,
+                )
+                self._led_identity_writer.start()
+            set_v2_active = getattr(led_color_engine, "set_v2_active", None)
+            if callable(set_v2_active):
+                set_v2_active(self._led_v2_latch)
         palette_control_config = led_palette_control_config or {}
         raw_palette_notes = palette_control_config.get("palette_notes", {})
         palette_notes = dict(raw_palette_notes) if isinstance(raw_palette_notes, dict) else {}
@@ -546,6 +659,19 @@ class StateManager(LEDDispatchPolicyMixin):
             for key, note in control_notes.items()
             if type(note) is int and 0 <= note <= 127
         }
+        raw_zone_notes = palette_control_config.get("zone_notes", {})
+        zone_notes = {
+            str(name): int(note)
+            for name, note in (raw_zone_notes.items() if isinstance(raw_zone_notes, dict) else ())
+            if type(note) is int and 0 <= note <= 127
+        }
+        raw_manual_notes = palette_control_config.get("manual_notes", {})
+        manual_notes = {
+            str(name): int(note)
+            for name, note in (raw_manual_notes.items() if isinstance(raw_manual_notes, dict) else ())
+            if type(note) is int and 0 <= note <= 127
+        }
+        max_energy_note = palette_control_config.get("max_energy_note")
         self._led_palette_control = (
             LedPaletteControl(
                 engine=led_color_engine,
@@ -555,7 +681,15 @@ class StateManager(LEDDispatchPolicyMixin):
                 get_laser_blackout=lambda: bool(self._pack_status_snapshot.get("blackout", False)),
                 get_laser_solo=lambda: self._drop_presentation_solo_feedback,
                 get_static_held=self._palette_static_held,
+                get_engine_mode=lambda: "v2" if self._led_v2_latch else "v1",
+                apply_zone_correction=self._apply_led_zone_correction,
+                clear_zone_correction=self._clear_led_zone_correction,
+                toggle_max_energy=self._toggle_led_max_energy,
+                get_max_energy_armed=lambda: bool(getattr(self, "_led_max_energy_armed", False)),
                 palette_notes=palette_notes,
+                zone_notes=zone_notes,
+                manual_notes=manual_notes,
+                max_energy_note=max_energy_note if type(max_energy_note) is int else None,
                 control_notes=control_notes,
                 long_press_s=long_press_s,
             )
@@ -755,6 +889,8 @@ class StateManager(LEDDispatchPolicyMixin):
         self._stop.set()
         if self._led_palette_control is not None:
             self._led_palette_control.stop()
+        if self._led_identity_writer is not None:
+            self._led_identity_writer.stop()
         self._drop_presentation_learned_writer.stop()
 
     def get_active_deck(self) -> int:
@@ -1428,11 +1564,19 @@ class StateManager(LEDDispatchPolicyMixin):
             Ev.LED_CLEAR_SCENE_OVERRIDE,
         }:
             self._handle_led_event(ev)
+        elif ev.kind == Ev.LED_TRACK_IDENTITY:
+            self._handle_led_track_identity(ev)
+        elif ev.kind == Ev.LED_ENGINE_MODE:
+            self._set_led_engine_mode(str(ev.payload.get("mode", "v1")))
+        elif ev.kind == Ev.LED_MAX_ENERGY_PAD:
+            self._toggle_led_max_energy()
         elif ev.kind in {
             Ev.LED_PALETTE_PAD,
             Ev.LED_PALETTE_LOCK_PAD,
             Ev.LED_MUTE_PAD,
             Ev.LED_RAINBOW_PAD,
+            Ev.LED_ZONE_PAD,
+            Ev.LED_MANUAL_PAD,
         }:
             coordinator = getattr(self, "_led_palette_control", None)
             if coordinator is not None:
@@ -1560,6 +1704,111 @@ class StateManager(LEDDispatchPolicyMixin):
                             "personality": personality_name,
                         },
                     )
+
+    def _handle_led_track_identity(self, ev: BridgeEvent) -> None:
+        deck = int(ev.payload.get("deck", ev.deck))
+        if deck not in (1, 2):
+            return
+        d = self._deck[deck]
+        load_gen = int(ev.payload.get("load_gen", -1))
+        if load_gen != d.load_gen:
+            log.debug("[LED] identity-stale deck=%d gen=%d current=%d", deck, load_gen, d.load_gen)
+            return
+        key = str(ev.payload.get("key") or "")
+        record = ev.payload.get("record")
+        if not key or not isinstance(record, dict):
+            return
+        store_record = self._led_identity_store.get(key)
+        mutated = False
+        if store_record is None:
+            if record.get("base") == "measured":
+                mutated = self._led_identity_store.freeze(key, record)
+                store_record = self._led_identity_store.get(key)
+            else:
+                store_record = dict(record)
+        final_record = store_record or dict(record)
+        engine = self._led_color_engine
+        set_identity = getattr(engine, "set_track_identity", None)
+        if callable(set_identity):
+            set_identity(deck, load_gen, key, final_record)
+        if mutated and self._led_identity_writer is not None:
+            self._led_identity_writer.submit(self._led_identity_store.to_dict())
+        zone = str((final_record.get("correction") or {}).get("zone") or final_record.get("zone") or "NEUTRAL")
+        log.info(
+            "[LED] identity deck=%d zone=%s slot=%s depth=%s corrected=%s key=%s",
+            deck,
+            zone,
+            final_record.get("hue_slot", "-"),
+            final_record.get("depth_variant", "-"),
+            "yes" if final_record.get("correction") else "no",
+            bf.short(key),
+        )
+
+    def _set_led_engine_mode(self, mode: str) -> None:
+        if mode not in {"v1", "v2"}:
+            return
+        if mode == "v2" and not self._v2_identity_enabled:
+            log.info("[LED] engine v2 ignored reason=not_configured")
+            mode = "v1"
+        next_latch = mode == "v2"
+        if self._led_v2_latch == next_latch:
+            return
+        self._led_v2_latch = next_latch
+        if not next_latch:
+            self._led_max_energy_armed = False
+        engine = self._led_color_engine
+        set_v2_active = getattr(engine, "set_v2_active", None)
+        if callable(set_v2_active):
+            set_v2_active(next_latch)
+        log.info("[LED] engine mode=%s", "v2" if next_latch else "v1")
+        control = getattr(self, "_led_palette_control", None)
+        if control is not None:
+            control.publish_feedback()
+
+    def _toggle_led_max_energy(self) -> None:
+        if not self._led_v2_latch:
+            return
+        self._led_max_energy_armed = not bool(getattr(self, "_led_max_energy_armed", False))
+        log.info("[LED] max_energy %s", "armed" if self._led_max_energy_armed else "disarmed")
+        control = getattr(self, "_led_palette_control", None)
+        if control is not None:
+            control.publish_feedback()
+
+    def _active_led_identity_key(self) -> tuple[int, str]:
+        deck = self._os.active_deck
+        if deck not in (1, 2):
+            return (0, "")
+        meta = self._deck[deck].meta
+        if not meta.content_id and not meta.filepath:
+            return (deck, "")
+        return (deck, led_identity_content_key(str(meta.content_id or ""), str(meta.filepath or "")))
+
+    def _apply_led_zone_correction(self, zone: str) -> None:
+        deck, key = self._active_led_identity_key()
+        if deck not in (1, 2) or not key:
+            return
+        mutated = self._led_identity_store.set_correction(key, zone)
+        record = self._led_identity_store.get(key)
+        if record is None:
+            return
+        set_identity = getattr(self._led_color_engine, "set_track_identity", None)
+        if callable(set_identity):
+            set_identity(deck, self._deck[deck].load_gen, key, record)
+        if mutated and self._led_identity_writer is not None:
+            self._led_identity_writer.submit(self._led_identity_store.to_dict())
+
+    def _clear_led_zone_correction(self) -> None:
+        deck, key = self._active_led_identity_key()
+        if deck not in (1, 2) or not key:
+            return
+        mutated = self._led_identity_store.clear_correction(key)
+        record = self._led_identity_store.get(key)
+        if record is not None:
+            set_identity = getattr(self._led_color_engine, "set_track_identity", None)
+            if callable(set_identity):
+                set_identity(deck, self._deck[deck].load_gen, key, record)
+        if mutated and self._led_identity_writer is not None:
+            self._led_identity_writer.submit(self._led_identity_store.to_dict())
 
     def _mixer_valid_fresh(self, now: float) -> bool:
         if not self._mixer_authority_enabled:
@@ -1860,8 +2109,9 @@ class StateManager(LEDDispatchPolicyMixin):
         if anlz_path:
             log.debug("track load: deck %d using ANLZ path for resolution", deck)
             self._resolver.resolve_by_anlz(deck, d.load_gen, anlz_path, trace_id=trace_id)
-            if self._smart_rearm_experiment:
+            if self._smart_rearm_experiment or self._v2_identity_enabled:
                 self._loaded_anlz_path[deck] = (anlz_path, d.load_gen)
+            if self._smart_rearm_experiment:
                 self._start_anlz_worker(
                     anlz_path,
                     deck,
@@ -1885,10 +2135,13 @@ class StateManager(LEDDispatchPolicyMixin):
         *,
         audio_filepath: str = "",
         spectral_enabled: bool = False,
+        identity_enabled: bool = False,
+        identity_key: str = "",
+        identity_config: IdentityV2Config | None = None,
         wide_window: bool = False,
     ) -> None:
         eq = self._eq
-        source = "anlz_spectral" if spectral_enabled else "anlz"
+        source = "anlz_spectral" if spectral_enabled else ("anlz_identity" if identity_enabled else "anlz")
 
         def _anlz_worker(path: str, bridge_deck: int, gen: int) -> None:
             try:
@@ -1896,6 +2149,9 @@ class StateManager(LEDDispatchPolicyMixin):
                     path,
                     audio_filepath=audio_filepath,
                     spectral_enabled=spectral_enabled,
+                    identity_enabled=identity_enabled,
+                    identity_key=identity_key,
+                    identity_config=identity_config,
                     wide_window=wide_window,
                 )
             except Exception:
@@ -1918,6 +2174,21 @@ class StateManager(LEDDispatchPolicyMixin):
                 ))
             except queue.Full:
                 log.warning("[SM] queue-full  event=anlz-data  deck=%d", bridge_deck)
+            if result.led_identity is not None:
+                try:
+                    eq.put_nowait(BridgeEvent(
+                        kind=Ev.LED_TRACK_IDENTITY,
+                        deck=bridge_deck,
+                        payload={
+                            "deck": bridge_deck,
+                            "load_gen": gen,
+                            "key": identity_key,
+                            "record": result.led_identity,
+                        },
+                        source=source,
+                    ))
+                except queue.Full:
+                    log.warning("[SM] queue-full  event=led-track-identity  deck=%d", bridge_deck)
 
         threading.Thread(
             target=_anlz_worker,
@@ -2113,17 +2384,26 @@ class StateManager(LEDDispatchPolicyMixin):
         log.info("[SM] resolve  deck=%d  file=%s  bpm=%.1f  ssid=%s  latency_ms=%d",
                  deck, bf.short(payload["filepath"]), meta.bpm,
                  meta.soundswitch_id or "none", int(load_delta_ms))
-        if self._spectral_enable:
+        if self._spectral_enable or self._v2_identity_enabled:
             loaded_anlz = self._loaded_anlz_path.pop(deck, None)
             if loaded_anlz is not None:
                 anlz_path, anlz_gen = loaded_anlz
                 if anlz_gen == d.load_gen:
+                    identity_key = ""
+                    if self._v2_identity_enabled:
+                        identity_key = led_identity_content_key(
+                            str(meta.content_id or ""),
+                            str(meta.filepath or ""),
+                        )
                     self._start_anlz_worker(
                         anlz_path,
                         deck,
                         d.load_gen,
                         audio_filepath=meta.filepath,
-                        spectral_enabled=True,
+                        spectral_enabled=self._spectral_enable,
+                        identity_enabled=self._v2_identity_enabled,
+                        identity_key=identity_key,
+                        identity_config=self._v2_identity_cfg,
                         wide_window=self._wide_window_enable,
                     )
         if _os.environ.get("RBSS_SCRIPTED_DIRECT") != "0":

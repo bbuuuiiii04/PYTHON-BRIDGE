@@ -476,12 +476,27 @@ class TestPadEvents(unittest.TestCase):
             channel_zero_based=2, data_byte=60,
             target_kind="laser_solo_pad",
         )
+        zone = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=62,
+            target_kind="zone_pad", target_name="GLACIER",
+        )
+        manual = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=68,
+            target_kind="manual_pad", target_name="red",
+        )
+        max_energy = PackMidiBinding(
+            device_name="Stream Deck", message_type="note",
+            channel_zero_based=2, data_byte=71,
+            target_kind="max_energy_pad",
+        )
         a = SoundSwitchMidiInputAdapter(
-            [palette, lock, mute, rainbow, laser_solo],
+            [palette, lock, mute, rainbow, laser_solo, zone, manual, max_energy],
             event_sink=seen.append,
         )
 
-        for binding in (palette, lock, mute, rainbow, laser_solo):
+        for binding in (palette, lock, mute, rainbow, laser_solo, zone, manual, max_energy):
             _note_on(a, binding)
             _note_off(a, binding)
 
@@ -491,11 +506,16 @@ class TestPadEvents(unittest.TestCase):
                 Ev.LED_PALETTE_PAD, Ev.LED_PALETTE_PAD,
                 Ev.LED_PALETTE_LOCK_PAD, Ev.LED_MUTE_PAD,
                 Ev.LED_RAINBOW_PAD, Ev.LASER_SOLO_PAD,
+                Ev.LED_ZONE_PAD, Ev.LED_ZONE_PAD,
+                Ev.LED_MANUAL_PAD, Ev.LED_MAX_ENERGY_PAD,
             ],
         )
         self.assertEqual(seen[0].payload["name"], "blue_cyan")
         self.assertEqual(seen[0].payload["phase"], "down")
         self.assertEqual(seen[1].payload["phase"], "up")
+        self.assertEqual(seen[6].payload, {"name": "GLACIER", "phase": "down"})
+        self.assertEqual(seen[7].payload, {"name": "GLACIER", "phase": "up"})
+        self.assertEqual(seen[8].payload, {"name": "red"})
 
 
 # ---------------------------------------------------------------------------

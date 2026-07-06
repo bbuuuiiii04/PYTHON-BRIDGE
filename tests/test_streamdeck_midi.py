@@ -100,6 +100,36 @@ def _feedback(seq: int = 5, current: str = "blue_cyan") -> dict:
     }
 
 
+def _v2_feedback() -> dict:
+    return {
+        "schema": 1,
+        "gesture": 2,
+        "seq": 9,
+        "engine": "v2",
+        "zones": [
+            {"name": "GLACIER", "note": 62, "rgb": [0, 220, 255], "ramp": [[10, 40, 120], [0, 220, 255]], "state": "active", "corrected": True},
+            {"name": "DEEP_POOL", "note": 63, "rgb": [0, 90, 140], "ramp": [[5, 10, 60], [0, 90, 140]], "state": "inactive", "corrected": False},
+            {"name": "TWILIGHT", "note": 64, "rgb": [140, 0, 220], "ramp": [[40, 0, 90], [140, 0, 220]], "state": "staged", "corrected": False},
+            {"name": "ION", "note": 65, "rgb": [60, 255, 220], "ramp": [[0, 60, 255], [60, 255, 220]], "state": "inactive", "corrected": False},
+            {"name": "VOLT", "note": 66, "rgb": [200, 0, 255], "ramp": [[180, 0, 120], [200, 0, 255]], "state": "inactive", "corrected": False},
+            {"name": "EMBERCORE", "note": 67, "rgb": [120, 0, 120], "ramp": [[120, 0, 10], [120, 0, 120]], "state": "inactive", "corrected": False},
+        ],
+        "manual": [
+            {"name": "white_sand", "note": 56, "rgb": [255, 235, 200], "state": "inactive"},
+            {"name": "red", "note": 68, "rgb": [255, 0, 0], "state": "inactive"},
+            {"name": "green", "note": 69, "rgb": [0, 255, 0], "state": "inactive"},
+            {"name": "blue", "note": 70, "rgb": [0, 0, 255], "state": "inactive"},
+            {"name": "rainbow", "note": 61, "rgb": [255, 0, 255], "state": "inactive"},
+        ],
+        "max_energy": {"note": 71, "state": "armed"},
+        "controls": {
+            "led_mute": {"name": "LED Mute", "note": 58, "state": "inactive"},
+            "laser_mute": {"name": "Laser Mute", "note": 59, "state": "active"},
+            "laser_solo": {"name": "Laser Solo", "note": 60, "state": "queued"},
+        },
+    }
+
+
 class StreamDeckPartialSidecarTests(unittest.TestCase):
     def test_load_sidecar_keeps_partial_rows_partial(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -499,6 +529,26 @@ class PaletteGestureV2LayoutTests(unittest.TestCase):
         self.assertEqual(dim_hues, sorted(dim_hues))
         for before, after in zip(hues, dim_hues):
             self.assertAlmostEqual(after, before, places=2)
+
+
+class IdentityV2LayoutTests(unittest.TestCase):
+    def test_primary_and_shift_layouts(self):
+        primary = sd.compose_layout(_v2_feedback(), STATIC_ROWS, key_count=15)
+        self.assertEqual(primary[0]["target_kind"], "zone_pad")
+        self.assertEqual(primary[0]["note"], 62)
+        self.assertTrue(primary[0]["locked_current"])
+        self.assertEqual(primary[6]["name"], "white_sand")
+        self.assertEqual(primary[14]["target_kind"], "shift_layer")
+        self.assertEqual(primary[10]["target_kind"], "static_look")
+
+        shifted = sd.compose_layout(_v2_feedback(), STATIC_ROWS, key_count=15, shift=True)
+        self.assertEqual(shifted[0]["name"], "red")
+        self.assertEqual(shifted[0]["target_kind"], "manual_pad")
+        self.assertEqual(shifted[3]["target_kind"], "max_energy_pad")
+        self.assertEqual(shifted[3]["state"], "armed")
+        self.assertEqual(shifted[4]["name"], "rainbow")
+        self.assertIsNone(shifted[5])
+        self.assertEqual(shifted[14]["target_kind"], "shift_layer")
 
 
 class WatchdogTests(unittest.TestCase):

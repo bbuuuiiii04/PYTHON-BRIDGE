@@ -304,7 +304,8 @@ class SoundSwitchMidiInputAdapter:
                 self._refresh_snapshot_locked()
                 log.debug("[SS-MIDI] blackout held")
             elif kind in {
-                "palette_pad", "palette_lock_pad", "led_mute_pad", "rainbow_pad", "laser_solo_pad",
+                "palette_pad", "palette_lock_pad", "led_mute_pad", "rainbow_pad",
+                "laser_solo_pad", "zone_pad", "manual_pad", "max_energy_pad",
             }:
                 self._emit_pad_event(binding, phase="down")
             # pack_selection / bridge_owned_safety / no_project_target /
@@ -340,7 +341,7 @@ class SoundSwitchMidiInputAdapter:
                     self._blackout_held = True
                 self._refresh_snapshot_locked()
                 log.debug("[SS-MIDI] blackout released")
-            elif kind == "palette_pad":
+            elif kind in {"palette_pad", "zone_pad"}:
                 self._emit_pad_event(binding, phase="up")
             else:
                 log.debug("[SS-MIDI] note-off for non-render kind=%s (no-op)", kind)
@@ -359,12 +360,26 @@ class SoundSwitchMidiInputAdapter:
                 payload=payload,
                 source="midi_input",
             )
+        elif kind == "zone_pad":
+            payload = {"name": binding.target_name or binding.target_identity or ""}
+            if phase in ("down", "up"):
+                payload["phase"] = phase
+            ev = BridgeEvent(kind=Ev.LED_ZONE_PAD, deck=0, payload=payload, source="midi_input")
         elif kind == "palette_lock_pad":
             ev = BridgeEvent(kind=Ev.LED_PALETTE_LOCK_PAD, deck=0, source="midi_input")
         elif kind == "led_mute_pad":
             ev = BridgeEvent(kind=Ev.LED_MUTE_PAD, deck=0, source="midi_input")
         elif kind == "rainbow_pad":
             ev = BridgeEvent(kind=Ev.LED_RAINBOW_PAD, deck=0, source="midi_input")
+        elif kind == "manual_pad":
+            ev = BridgeEvent(
+                kind=Ev.LED_MANUAL_PAD,
+                deck=0,
+                payload={"name": binding.target_name or binding.target_identity or ""},
+                source="midi_input",
+            )
+        elif kind == "max_energy_pad":
+            ev = BridgeEvent(kind=Ev.LED_MAX_ENERGY_PAD, deck=0, source="midi_input")
         elif kind == "laser_solo_pad":
             ev = BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="midi_input")
         else:

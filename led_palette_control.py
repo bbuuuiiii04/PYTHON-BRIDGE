@@ -147,7 +147,15 @@ class LedPaletteControl:
         get_laser_blackout: Callable[[], bool],
         get_laser_solo: Callable[[], str] | None = None,
         get_static_held: Callable[[], tuple] | None = None,
+        get_engine_mode: Callable[[], str] | None = None,
+        apply_zone_correction: Callable[[str], None] | None = None,
+        clear_zone_correction: Callable[[], None] | None = None,
+        toggle_max_energy: Callable[[], None] | None = None,
+        get_max_energy_armed: Callable[[], bool] | None = None,
         palette_notes: Mapping[str, int] | None = None,
+        zone_notes: Mapping[str, int] | None = None,
+        manual_notes: Mapping[str, int] | None = None,
+        max_energy_note: int | None = None,
         control_notes: Mapping[str, int] | None = None,
         feedback_path: str | None = None,
         long_press_s: float = 0.5,
@@ -163,10 +171,19 @@ class LedPaletteControl:
         # tick without a dedicated setter call to remember to make.
         self._get_laser_solo = get_laser_solo
         self._get_static_held = get_static_held
+        self._get_engine_mode = get_engine_mode or (lambda: "v1")
+        self._apply_zone_correction = apply_zone_correction
+        self._clear_zone_correction = clear_zone_correction
+        self._toggle_max_energy = toggle_max_energy
+        self._get_max_energy_armed = get_max_energy_armed or (lambda: False)
         self._palette_notes = dict(palette_notes or {})
+        self._zone_notes = dict(zone_notes or {})
+        self._manual_notes = dict(manual_notes or {})
+        self._max_energy_note = max_energy_note if type(max_energy_note) is int else None
         self._control_notes = dict(control_notes or {})
         self._long_press_s = float(long_press_s)
         self._pad_down: dict[str, float] = {}
+        self._zone_down: dict[str, float] = {}
         self._led_muted = False
         self._rainbow = False
         self._seq = 0
@@ -189,6 +206,14 @@ class LedPaletteControl:
 
     def handle_event(self, ev: BridgeEvent) -> None:
         if ev.kind == Ev.LED_PALETTE_PAD:
+            if self._engine_mode() == "v2":
+                name = str(ev.payload.get("name") or "")
+                if name == "white_sand":
+                    self._handle_manual("white_sand")
+                else:
+                    log.debug("[PALETTE] v1-palette-pad-ignored-in-v2 name=%s", name)
+                self.publish_feedback()
+                return
             raw_intent = ev.payload.get("intent")
             raw_phase = ev.payload.get("phase")
             self._handle_palette(
@@ -197,11 +222,27 @@ class LedPaletteControl:
                 raw_phase if raw_phase in ("down", "up") else None,
             )
         elif ev.kind == Ev.LED_PALETTE_LOCK_PAD:
-            self._handle_lock(str(ev.payload.get("intent") or ""))
+            if self._engine_mode() == "v2":
+                self._handle_v2_lock(str(ev.payload.get("intent") or ""))
+            else:
+                self._handle_lock(str(ev.payload.get("intent") or ""))
         elif ev.kind == Ev.LED_MUTE_PAD:
             self._set_led_mute(not self._led_muted)
         elif ev.kind == Ev.LED_RAINBOW_PAD:
-            self._set_rainbow(not self._rainbow)
+            if self._engine_mode() == "v2":
+                self._handle_manual("rainbow")
+            else:
+                self._set_rainbow(not self._rainbow)
+        elif ev.kind == Ev.LED_ZONE_PAD:
+            self._handle_zone(
+                str(ev.payload.get("name") or ""),
+                str(ev.payload.get("phase") or ""),
+            )
+        elif ev.kind == Ev.LED_MANUAL_PAD:
+            self._handle_manual(str(ev.payload.get("name") or ""))
+        elif ev.kind == Ev.LED_MAX_ENERGY_PAD:
+            if self._toggle_max_energy is not None:
+                self._toggle_max_energy()
         self.publish_feedback()
 
     def on_input_health(self, healthy: bool) -> None:
@@ -213,7 +254,7 @@ class LedPaletteControl:
 
     def snapshot(self) -> dict[str, Any]:
         snap = self._engine_snapshot()
-        return {
+        result = {
             "led_blackout": self._led_muted,
             "laser_blackout": bool(self._get_laser_blackout()),
             "laser_solo": str(self._get_laser_solo()) if self._get_laser_solo is not None else "off",
@@ -224,6 +265,15 @@ class LedPaletteControl:
             "fading": bool(snap.get("fading", False)),
             "fade_target": str(snap.get("fade_target", "")),
         }
+        if "engine" in snap:
+            result.update({
+                "engine": str(snap.get("engine", self._engine_mode())),
+                "zone": str(snap.get("zone", "")),
+                "corrected": bool(snap.get("corrected", False)),
+                "staged_zone": str(snap.get("staged_zone", "")),
+                "manual": str(snap.get("manual", "")),
+            })
+        return result
 
     def publish_feedback(self) -> None:
         self._publish_feedback(force=True)
@@ -247,6 +297,17 @@ class LedPaletteControl:
                 key=lambda row: (row["channel"], row["note"]),
             ),
         }
+        snap = self._engine_snapshot()
+        if "engine" in snap:
+            body.update({
+                "engine": str(snap.get("engine", self._engine_mode())),
+                "zones": self._zone_payload(snap),
+                "manual": self._manual_payload(snap),
+                "max_energy": {
+                    "note": self._max_energy_note,
+                    "state": "armed" if self._get_max_energy_armed() else "inactive",
+                },
+            })
         if not force and body == self._last_feedback_body:
             return
         self._last_feedback_body = body
@@ -255,6 +316,9 @@ class LedPaletteControl:
         self._writer.submit(payload)
 
     def _handle_palette(self, name: str, intent: str, phase: str | None = None) -> None:
+        if self._engine_mode() == "v2":
+            log.debug("[PALETTE] palette-pad-ignored engine=v2 name=%s", name)
+            return
         if intent:
             self._handle_palette_intent(name, intent)
             return
@@ -340,6 +404,83 @@ class LedPaletteControl:
         else:
             self._engine.lock()
 
+    def _handle_zone(self, zone: str, phase: str) -> None:
+        if self._engine_mode() != "v2":
+            log.debug("[PALETTE] zone-pad-ignored engine=v1 zone=%s", zone)
+            return
+        if not zone:
+            return
+        if phase == "down":
+            self._zone_down[zone] = time.monotonic()
+            return
+        if phase == "up":
+            now = time.monotonic()
+            held_s = now - self._zone_down.pop(zone, now)
+            if held_s >= self._long_press_s:
+                self._handle_zone_hold(zone)
+            else:
+                self._handle_zone_tap(zone)
+
+    def _handle_zone_tap(self, zone: str) -> None:
+        snap = self._engine_snapshot()
+        active = str(snap.get("zone", ""))
+        staged = str(snap.get("staged_zone", ""))
+        if staged == zone:
+            unstage = getattr(self._engine, "unstage_zone", None)
+            if callable(unstage):
+                unstage(zone)
+            return
+        if active == zone:
+            if snap.get("corrected") and self._clear_zone_correction is not None:
+                self._clear_zone_correction()
+            else:
+                log.debug("[PALETTE] zone-tap-noop zone=%s", zone)
+            return
+        commit = self._zone_commit_beat()
+        stage = getattr(self._engine, "stage_zone", None)
+        if callable(stage):
+            stage(zone, commit)
+
+    def _handle_zone_hold(self, zone: str) -> None:
+        start = self._get_abs_beat()
+        start_beat = float(start) if start is not None else 0.0
+        end_beat = self._zone_commit_beat(default=start_beat + FADE_GRID_BEATS)
+        apply_override = getattr(self._engine, "apply_zone_override", None)
+        if callable(apply_override):
+            apply_override(zone, start_beat=start_beat, end_beat=end_beat)
+        if self._apply_zone_correction is not None:
+            self._apply_zone_correction(zone)
+
+    def _handle_v2_lock(self, intent: str) -> None:
+        snap = self._engine_snapshot()
+        zone = str(snap.get("zone", ""))
+        if intent == "unlock":
+            if self._clear_zone_correction is not None:
+                self._clear_zone_correction()
+            return
+        if intent == "lock" or not snap.get("corrected"):
+            if zone and self._apply_zone_correction is not None:
+                self._apply_zone_correction(zone)
+        elif self._clear_zone_correction is not None:
+            self._clear_zone_correction()
+
+    def _handle_manual(self, name: str) -> None:
+        if self._engine_mode() != "v2" or not name:
+            return
+        set_manual = getattr(self._engine, "set_manual", None)
+        if callable(set_manual):
+            set_manual(name)
+
+    def _zone_commit_beat(self, *, default: float | None = None) -> float:
+        start = self._get_abs_beat()
+        if start is None:
+            return float(default if default is not None else 0.0)
+        start_beat = float(start)
+        anchor = self._get_phrase_anchor(start_beat)
+        if anchor is not None and anchor > start_beat:
+            return float(anchor)
+        return float(default if default is not None else start_beat + FADE_GRID_BEATS)
+
     def _set_led_mute(self, enabled: bool) -> None:
         if self._led_muted == bool(enabled):
             return
@@ -388,6 +529,59 @@ class LedPaletteControl:
                 "state": state,
             })
         return result
+
+    def _zone_payload(self, snap: dict[str, Any]) -> list[dict[str, Any]]:
+        config = getattr(self._engine, "_config", None)
+        v2 = getattr(config, "v2", None) if config is not None else None
+        zones = getattr(v2, "zones", {}) if v2 is not None else {}
+        active = str(snap.get("zone", ""))
+        staged = str(snap.get("staged_zone", ""))
+        corrected = bool(snap.get("corrected", False))
+        result: list[dict[str, Any]] = []
+        active_dressing = None
+        get_dressing = getattr(self._engine, "_v2_active_dressing", None)
+        if callable(get_dressing):
+            active_dressing = get_dressing()
+        for name, cfg in zones.items():
+            note = self._zone_notes.get(name)
+            state = "inactive"
+            if name == active:
+                state = "active"
+            if name == staged:
+                state = "staged"
+            ramp = list(getattr(cfg, "base_ramp", ())) + list(getattr(cfg, "accent_ramp", ()))
+            rgb = tuple(getattr(cfg, "base_ramp", ((0, 0, 0), (0, 0, 0), (0, 220, 255)))[-1])
+            if active_dressing is not None and name == active:
+                rgb = tuple(active_dressing.slot_rgbs[2])
+                ramp = list(active_dressing.slot_rgbs[:5])
+            result.append({
+                "name": name,
+                "note": note,
+                "rgb": rgb,
+                "ramp": ramp,
+                "state": state,
+                "corrected": bool(corrected and name == active),
+            })
+        return result
+
+    def _manual_payload(self, snap: dict[str, Any]) -> list[dict[str, Any]]:
+        manual = str(snap.get("manual", ""))
+        entries = [
+            ("white_sand", self._palette_notes.get("white_sand"), (255, 235, 200)),
+            ("red", self._manual_notes.get("red"), (255, 0, 0)),
+            ("green", self._manual_notes.get("green"), (0, 255, 0)),
+            ("blue", self._manual_notes.get("blue"), (0, 0, 255)),
+            ("rainbow", self._control_notes.get("rainbow"), (255, 0, 255)),
+        ]
+        return [
+            {"name": name, "note": note, "rgb": rgb, "state": "active" if manual == name else "inactive"}
+            for name, note, rgb in entries
+            if note is not None
+        ]
+
+    def _engine_mode(self) -> str:
+        mode = str(self._get_engine_mode() or "v1")
+        return "v2" if mode == "v2" else "v1"
 
     def _engine_snapshot(self) -> dict[str, Any]:
         if self._engine is None:

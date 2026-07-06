@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 from rb_ss_bridge_v2.led_color_engine import LedColorEngine
 from rb_ss_bridge_v2.led_dispatch_policy import LEDDispatchPolicyMixin
-from rb_ss_bridge_v2.led_models import ColorEngineConfig, Palette
+from rb_ss_bridge_v2.led_models import ColorEngineConfig, IdentityV2Config, Palette, ZoneRampConfig
 from rb_ss_bridge_v2.led_palette_control import LedPaletteControl, PaletteFeedbackWriter
 from rb_ss_bridge_v2.models import BridgeEvent, Ev
 from rb_ss_bridge_v2.streamdeck import streamdeck_midi as sd
@@ -38,6 +38,22 @@ def _config() -> ColorEngineConfig:
             "white_sand": Palette(type="fixed_rgb", weight=0.0, rgb=(255, 235, 200)),
             "rainbow": Palette(type="rainbow", weight=0.0),
         },
+    )
+
+
+def _v2_config() -> ColorEngineConfig:
+    zones = {
+        name: ZoneRampConfig(
+            base_ramp=((10, 40, 120), (0, 120, 255), (0, 220, 255)),
+            accent_ramp=((120, 240, 255), (210, 250, 255)),
+        )
+        for name in ("GLACIER", "DEEP_POOL", "TWILIGHT", "ION", "VOLT", "EMBERCORE", "NEUTRAL")
+    }
+    return ColorEngineConfig(
+        enabled=True,
+        scale_stops=_config().scale_stops,
+        palettes=_config().palettes,
+        v2=IdentityV2Config(enabled=True, zones=zones),
     )
 
 
@@ -101,6 +117,57 @@ class LedPaletteControlTests(unittest.TestCase):
                 payload={"name": name, "phase": phase},
                 source="test",
             ))
+
+    def test_v2_zone_manual_and_max_energy_controls(self) -> None:
+        engine = LedColorEngine(_v2_config(), set_seed=7)
+        engine.begin_dispatch(
+            active_deck=1,
+            load_gen=1,
+            content_id="track-a",
+            filepath="/tmp/a.mp3",
+            role="groove",
+            section_id="s1",
+            cycle=1,
+        )
+        applied: list[str] = []
+        cleared: list[bool] = []
+        max_energy: list[bool] = []
+        control = LedPaletteControl(
+            engine=engine,
+            led_event_sink=self.events.append,
+            get_abs_beat=lambda: 8.0,
+            get_phrase_anchor=lambda _beat: 16.0,
+            get_laser_blackout=lambda: False,
+            get_engine_mode=lambda: "v2",
+            apply_zone_correction=applied.append,
+            clear_zone_correction=lambda: cleared.append(True),
+            toggle_max_energy=lambda: max_energy.append(True),
+            palette_notes={"white_sand": 56},
+            zone_notes={"GLACIER": 62, "ION": 65},
+            manual_notes={"red": 68},
+            max_energy_note=71,
+        )
+        self.addCleanup(control.stop)
+
+        with mock.patch("rb_ss_bridge_v2.led_palette_control.time.monotonic", return_value=1.0):
+            control.handle_event(BridgeEvent(kind=Ev.LED_ZONE_PAD, deck=0, payload={"name": "GLACIER", "phase": "down"}))
+        with mock.patch("rb_ss_bridge_v2.led_palette_control.time.monotonic", return_value=1.1):
+            control.handle_event(BridgeEvent(kind=Ev.LED_ZONE_PAD, deck=0, payload={"name": "GLACIER", "phase": "up"}))
+        self.assertEqual(engine.snapshot()["staged_zone"], "GLACIER")
+
+        with mock.patch("rb_ss_bridge_v2.led_palette_control.time.monotonic", return_value=2.0):
+            control.handle_event(BridgeEvent(kind=Ev.LED_ZONE_PAD, deck=0, payload={"name": "ION", "phase": "down"}))
+        with mock.patch("rb_ss_bridge_v2.led_palette_control.time.monotonic", return_value=3.0):
+            control.handle_event(BridgeEvent(kind=Ev.LED_ZONE_PAD, deck=0, payload={"name": "ION", "phase": "up"}))
+        self.assertEqual(applied, ["ION"])
+
+        control.handle_event(BridgeEvent(kind=Ev.LED_MANUAL_PAD, deck=0, payload={"name": "red"}))
+        self.assertEqual(engine.snapshot()["manual"], "red")
+        control.handle_event(BridgeEvent(kind=Ev.LED_MANUAL_PAD, deck=0, payload={"name": "red"}))
+        self.assertEqual(engine.snapshot()["manual"], "")
+
+        control.handle_event(BridgeEvent(kind=Ev.LED_MAX_ENERGY_PAD, deck=0))
+        self.assertEqual(max_energy, [True])
 
     def _tap_v2(self, name: str, *, down: float = 10.0, up: float = 10.1) -> None:
         self._pad_phase(name, "down", down)

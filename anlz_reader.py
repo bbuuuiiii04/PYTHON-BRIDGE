@@ -147,6 +147,7 @@ class TrackAnlzData:
     mood: int = 0
     energy_shadow: list[SmartDropEnergyShadow] = field(default_factory=list)
     waveform_context: Optional[WaveformContext] = None
+    led_identity: Optional[dict[str, Any]] = None
 
 
 def read_smart_drop_energy_shadow(

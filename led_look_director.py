@@ -136,6 +136,7 @@ class LEDLookDirector:
             decision = self._automation_decision_for_role(
                 role,
                 diy_eligible=(context.diy_eligible if context is not None else None),
+                look_preference=(context.look_preference if context is not None else None),
             )
             if decision is None:
                 self._last_decision = None
@@ -232,11 +233,16 @@ class LEDLookDirector:
         role: str,
         *,
         diy_eligible: Optional[Callable[[str], bool]] = None,
+        look_preference: Optional[Callable[[str], bool]] = None,
     ) -> LEDLookDecision | None:
         """Select the next automation look for a role and advance once."""
         if not self._config.enabled or not self._config.automation_enabled:
             return None
-        return self._automation_decision_for_role(role, diy_eligible=diy_eligible)
+        return self._automation_decision_for_role(
+            role,
+            diy_eligible=diy_eligible,
+            look_preference=look_preference,
+        )
 
     def clear_queued_post_drop(self) -> None:
         """Drop any pending paired post_drop look.
@@ -267,6 +273,7 @@ class LEDLookDirector:
         role: str,
         *,
         diy_eligible: Optional[Callable[[str], bool]] = None,
+        look_preference: Optional[Callable[[str], bool]] = None,
     ) -> LEDLookDecision | None:
         if role not in _AUTOMATION_ROLES:
             return None
@@ -299,6 +306,10 @@ class LEDLookDirector:
             eligible = tuple(n for n in look_names if diy_eligible(n))
             if eligible:
                 look_names = eligible
+        if look_preference is not None:
+            preferred = tuple(n for n in look_names if look_preference(n))
+            if preferred:
+                look_names = preferred
         cursor = self._role_cursors.get(normalized_role, 0)
         # WI-7 transport-sticky: when flag is ON, prefer looks whose backend
         # matches the last dispatched backend for this role.

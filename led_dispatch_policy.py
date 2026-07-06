@@ -98,6 +98,7 @@ class LEDDispatchPolicyMixin:
         self._led_drop_impact_until_beat: float | None = None
         self._led_drop_impact_count = 0
         self._led_active_drop_look = ""
+        self._led_max_energy_armed = False
         self._led_committed_drop_anchor_beat: float | None = None
         self._led_committed_drop_decision: Any | None = None
         self._led_drop_look_fired_anchor: float | None = None
@@ -206,7 +207,23 @@ class LEDDispatchPolicyMixin:
             # WI-8 observability
             "phrase_latch_seq": int(self._led_phrase_seq),
             "phrase_latch_reset_count": int(self._led_phrase_latch_reset_count),
+            "max_energy_armed": bool(getattr(self, "_led_max_energy_armed", False)),
+            "identity_store": (
+                "degraded"
+                if bool(getattr(getattr(self, "_led_identity_store", None), "degraded", False))
+                else "ok"
+            ),
         }
+        engine = getattr(self, "_led_color_engine", None)
+        if engine is not None:
+            try:
+                snap = engine.snapshot()
+                if isinstance(snap, dict):
+                    for key in ("engine", "zone", "corrected", "staged_zone", "manual"):
+                        if key in snap:
+                            payload[key] = snap[key]
+            except Exception:
+                pass
 
         if self._led_look_director is not None:
             try:
@@ -801,6 +818,7 @@ class LEDDispatchPolicyMixin:
                     role=role,
                     section_id=section_id,
                     cycle=cycle,
+                    moments_blocked=False,
                 )
             except Exception as exc:
                 self._led_last_error = f"color_engine_error:{type(exc).__name__}"
@@ -814,6 +832,7 @@ class LEDDispatchPolicyMixin:
             lighting_mode=self._os.lighting_mode,
             scripted_id=d.scripted_id,
             diy_eligible=self._led_diy_eligible_predicate(),
+            look_preference=self._led_look_preference_predicate(),
         )
         decision = None
         if role == "drop":
@@ -1286,7 +1305,11 @@ class LEDDispatchPolicyMixin:
         decision = None
         if callable(commit_role):
             try:
-                decision = commit_role("drop", diy_eligible=self._led_diy_eligible_predicate())
+                decision = commit_role(
+                    "drop",
+                    diy_eligible=self._led_diy_eligible_predicate(),
+                    look_preference=self._led_look_preference_predicate(),
+                )
             except Exception:
                 decision = None
         if decision is None:
@@ -1299,6 +1322,39 @@ class LEDDispatchPolicyMixin:
     def _led_diy_eligible_predicate(self) -> Any:
         engine = self._led_color_engine
         return engine.diy_eligible if (engine is not None and engine.enabled) else None
+
+    def _led_look_preference_predicate(self) -> Any:
+        if not bool(getattr(self, "_led_v2_latch", False)):
+            return None
+        engine = self._led_color_engine
+        director = self._led_look_director
+        if engine is None or director is None:
+            return None
+        active_dressing = getattr(engine, "_v2_active_dressing", None)
+        cfg = getattr(engine, "_v2_cfg", None)
+        if not callable(active_dressing) or cfg is None:
+            return None
+        dressing = active_dressing()
+        if dressing is None:
+            return None
+        looks = getattr(getattr(director, "_config", None), "looks", {})
+        threshold = float(getattr(cfg, "budget_wide_threshold", 0.5))
+
+        def _passes(name: str) -> bool:
+            look = looks.get(name)
+            if look is None:
+                return True
+            motion_style = str(getattr(look, "motion_style", ""))
+            travel = str(getattr(look, "travel", ""))
+            if motion_style and motion_style != dressing.style:
+                return False
+            if travel == "wide":
+                return dressing.budget >= threshold
+            if travel == "calm":
+                return dressing.budget < threshold
+            return True
+
+        return _passes
 
     def _consume_led_committed_drop_decision(
         self,
@@ -1422,6 +1478,9 @@ class LEDDispatchPolicyMixin:
         return self._led_first_drop_anchor_beat is not None
 
     def _led_arm_drop_lifecycle(self, anchor_beat: float) -> None:
+        if getattr(self, "_led_max_energy_armed", False):
+            self._led_max_energy_armed = False
+            log.info("[LED] max_energy consumed (render unchanged until F2)")
         if self._led_first_drop_anchor_beat is None:
             self._led_first_drop_anchor_beat = float(anchor_beat)
         self._led_drop_impact_until_beat = (
@@ -1462,6 +1521,7 @@ class LEDDispatchPolicyMixin:
         self._led_drop_impact_until_beat = None
         self._led_drop_impact_count = 0
         self._led_active_drop_look = ""
+        self._led_max_energy_armed = False
         self._led_committed_drop_anchor_beat = None
         self._led_committed_drop_decision = None
         self._led_drop_look_fired_anchor = None
