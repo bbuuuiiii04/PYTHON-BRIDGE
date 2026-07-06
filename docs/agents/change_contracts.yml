@@ -115,6 +115,8 @@ contracts:
       - govee_owner_state.py
       - govee_lan_discovery.py
       - beat_sync_engine.py
+      - led_identity_v2.py
+      - tools/calibrate_identity_v2.py
       - config/led_look_director.example.json
       - streamdeck/streamdeck_midi.py
     key_symbols:
@@ -132,6 +134,8 @@ contracts:
       - GoveeRealtimeTransport
       - GoveeFrameRenderer
       - BeatSyncEngine
+      - LedIdentityV2
+      - IdentityStore
     inspect:
       - docs/subsystems/led_govee.md
       - docs/status/feature_status_matrix.md
@@ -139,6 +143,7 @@ contracts:
       - docs/status/validation_matrix.md
     tests:
       - python3 -m unittest tests.test_led_state_manager
+      - python3 -m unittest tests.test_led_identity_v2
       - python3 -m unittest discover tests
       - python3 tools/check_docs_metadata.py
       - python3 tools/check_agent_contracts.py
@@ -171,6 +176,7 @@ contracts:
       - led_config.py
       - config/led_look_director.example.json
       - led_palette_control.py
+      - led_identity_v2.py
       - streamdeck/streamdeck_midi.py
     key_symbols:
       - LedColorEngine
@@ -190,6 +196,7 @@ contracts:
       - docs/status/active_work_registry.md
     tests:
       - python3 -m unittest tests.test_led_palette_control
+      - python3 -m unittest tests.test_led_identity_v2
       - python3 -m unittest tests.test_led_color_engine tests.test_color_engine_config tests.test_led_config tests.test_runtime_status tests.test_soundswitch_midi_input tests.test_streamdeck_midi tests.test_state_manager_pack_driver
       - python3 -m unittest discover tests
       - python3 tools/check_docs_metadata.py
