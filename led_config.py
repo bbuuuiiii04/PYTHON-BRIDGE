@@ -19,6 +19,7 @@ from .govee_frame_renderer import (
 )
 from .led_models import (
     ColorEngineConfig,
+    IdentityV2Config,
     LEDAutomation,
     LEDBank,
     LEDConfig,
@@ -31,8 +32,10 @@ from .led_models import (
     LEDScriptedModePolicy,
     LEDTarget,
     Palette,
+    ZoneRampConfig,
     _DEFAULT_SCALE_STOPS,
 )
+from .led_identity_v2 import ALL_ZONES, ZONES
 from .soundswitch_pack_loader import PackMidiBinding
 from .drop_presentation import (
     DropPresentationConfig,
@@ -449,6 +452,13 @@ def _validate_look(
     allow_strobe = look.get("allow_strobe", False)
     if not isinstance(allow_strobe, bool):
         errors.append(f"{prefix} field 'allow_strobe' must be a boolean")
+
+    motion_style = look.get("motion_style", "")
+    if not isinstance(motion_style, str) or motion_style not in ("", "sharp", "flowing"):
+        errors.append(f"{prefix} field 'motion_style' must be '', 'sharp', or 'flowing'")
+    travel = look.get("travel", "")
+    if not isinstance(travel, str) or travel not in ("", "calm", "wide"):
+        errors.append(f"{prefix} field 'travel' must be '', 'calm', or 'wide'")
 
 
 def _validate_bank(
@@ -1229,6 +1239,177 @@ def _validate_color_engine(data: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _is_rgb_seq(value: Any) -> bool:
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) == 3
+        and all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255 for v in value)
+    )
+
+
+def _validate_identity_v2_block(data: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    raw = data.get("v2")
+    if raw is None:
+        return errors
+    if not isinstance(raw, dict):
+        return ["color_engine.v2 must be an object"]
+    enabled = raw.get("enabled", False)
+    if not isinstance(enabled, bool):
+        errors.append("color_engine.v2.enabled must be a boolean")
+        enabled = False
+
+    def _number(name: str, default: float, *, lo: float | None = None, hi: float | None = None) -> None:
+        value = raw.get(name, default)
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
+            errors.append(f"color_engine.v2.{name} must be a finite number")
+            return
+        if lo is not None and float(value) < lo:
+            errors.append(f"color_engine.v2.{name} must be >= {lo}")
+        if hi is not None and float(value) > hi:
+            errors.append(f"color_engine.v2.{name} must be <= {hi}")
+
+    _number("soft_flip_beats", 8.0, lo=0.0)
+    _number("palate_reset_beats", 4.0, lo=0.0)
+    _number("palate_reset_dim", 0.35, lo=0.0, hi=1.0)
+    _number("bloom_hold_beats", 8.0, lo=0.0)
+    _number("bloom_beats", 8.0, lo=0.0)
+    _number("bloom_dim", 0.3, lo=0.0, hi=1.0)
+    _number("punch_sharp_threshold", 0.6, lo=0.0, hi=1.0)
+    _number("budget_wide_threshold", 0.5, lo=0.0, hi=1.0)
+    for key in ("palate_reset_enabled", "bloom_enabled"):
+        value = raw.get(key, True)
+        if not isinstance(value, bool):
+            errors.append(f"color_engine.v2.{key} must be a boolean")
+    store_path = raw.get("store_path", "local/state/led_identity_v2.json")
+    if not isinstance(store_path, str) or not store_path.strip():
+        errors.append("color_engine.v2.store_path must be a non-empty string")
+    bass_norm = raw.get("bass_norm", [0.15, 0.90])
+    if (
+        not isinstance(bass_norm, (list, tuple))
+        or len(bass_norm) != 2
+        or any(not isinstance(v, (int, float)) or isinstance(v, bool) for v in bass_norm)
+        or float(bass_norm[0]) >= float(bass_norm[1])
+    ):
+        errors.append("color_engine.v2.bass_norm must be two increasing numbers")
+
+    zones_raw = raw.get("zones", {})
+    if enabled:
+        if not isinstance(zones_raw, dict):
+            errors.append("color_engine.v2.zones must be an object")
+            zones_raw = {}
+        missing = [zone for zone in ALL_ZONES if zone not in zones_raw]
+        if missing:
+            errors.append(f"color_engine.v2.zones missing {', '.join(missing)}")
+        palettes = data.get("palettes", {})
+        white_sand = palettes.get("white_sand") if isinstance(palettes, dict) else None
+        if not isinstance(white_sand, dict) or white_sand.get("type") != "fixed_rgb" or not _is_rgb_seq(white_sand.get("rgb")):
+            errors.append("color_engine.v2 requires palettes.white_sand fixed_rgb")
+    elif zones_raw and not isinstance(zones_raw, dict):
+        errors.append("color_engine.v2.zones must be an object")
+        zones_raw = {}
+
+    if isinstance(zones_raw, dict):
+        for zone_name, zone_data in zones_raw.items():
+            if zone_name not in ALL_ZONES:
+                errors.append(f"color_engine.v2.zones.{zone_name} is not a known zone")
+                continue
+            if not isinstance(zone_data, dict):
+                errors.append(f"color_engine.v2.zones.{zone_name} must be an object")
+                continue
+            base = zone_data.get("base_ramp")
+            accent = zone_data.get("accent_ramp")
+            if not isinstance(base, list) or len(base) != 3:
+                errors.append(f"color_engine.v2.zones.{zone_name}.base_ramp must contain 3 RGB anchors")
+            else:
+                for index, rgb in enumerate(base):
+                    if not _is_rgb_seq(rgb) or tuple(rgb) == (0, 0, 0):
+                        errors.append(f"color_engine.v2.zones.{zone_name}.base_ramp[{index}] must be a non-black RGB")
+            if not isinstance(accent, list) or len(accent) != 2:
+                errors.append(f"color_engine.v2.zones.{zone_name}.accent_ramp must contain 2 RGB anchors")
+            else:
+                for index, rgb in enumerate(accent):
+                    if not _is_rgb_seq(rgb) or tuple(rgb) == (0, 0, 0):
+                        errors.append(f"color_engine.v2.zones.{zone_name}.accent_ramp[{index}] must be a non-black RGB")
+            hue_span = zone_data.get("hue_span", 0.06)
+            if not isinstance(hue_span, (int, float)) or isinstance(hue_span, bool) or float(hue_span) < 0.0:
+                errors.append(f"color_engine.v2.zones.{zone_name}.hue_span must be >= 0")
+
+    palette_control = data.get("palette_control", {})
+    if enabled and isinstance(palette_control, dict):
+        v1_notes: list[int] = []
+        for note in (palette_control.get("palette_notes", {}) or {}).values():
+            if isinstance(note, int) and not isinstance(note, bool):
+                v1_notes.append(note)
+        for key in (
+            "white_sand_note", "lock_note", "led_mute_note", "laser_mute_note",
+            "laser_solo_note", "rainbow_note",
+        ):
+            note = palette_control.get(key)
+            if isinstance(note, int) and not isinstance(note, bool):
+                v1_notes.append(note)
+
+        v2_notes: list[tuple[str, Any]] = []
+        zone_notes = palette_control.get("zone_notes", {}) or {}
+        if not isinstance(zone_notes, dict):
+            errors.append("color_engine.palette_control.zone_notes must be an object")
+        else:
+            for zone, note in zone_notes.items():
+                if zone not in ZONES:
+                    errors.append(f"color_engine.palette_control.zone_notes.{zone} must name a v2 zone")
+                v2_notes.append((f"zone_notes.{zone}", note))
+        manual_notes = palette_control.get("manual_notes", {}) or {}
+        if not isinstance(manual_notes, dict):
+            errors.append("color_engine.palette_control.manual_notes must be an object")
+        else:
+            for name, note in manual_notes.items():
+                if name not in {"red", "green", "blue"}:
+                    errors.append(f"color_engine.palette_control.manual_notes.{name} must be red, green, or blue")
+                v2_notes.append((f"manual_notes.{name}", note))
+        if "max_energy_note" in palette_control:
+            v2_notes.append(("max_energy_note", palette_control.get("max_energy_note")))
+        seen_v2: dict[int, str] = {}
+        for label, note in v2_notes:
+            if not isinstance(note, int) or isinstance(note, bool) or not 0 <= note <= 127:
+                errors.append(f"color_engine.palette_control.{label} must be a MIDI note 0..127")
+                continue
+            if note in v1_notes:
+                errors.append(f"color_engine.palette_control.{label} collides with an existing v1 note {note}")
+            if note in seen_v2:
+                errors.append(f"color_engine.palette_control.{label} collides with {seen_v2[note]} on note {note}")
+            seen_v2[note] = label
+
+    return errors
+
+
+def _build_identity_v2_config(raw: dict[str, Any]) -> IdentityV2Config:
+    zones: dict[str, ZoneRampConfig] = {}
+    for zone, data in (raw.get("zones", {}) or {}).items():
+        zones[str(zone)] = ZoneRampConfig(
+            base_ramp=tuple(tuple(int(v) for v in rgb) for rgb in data["base_ramp"]),  # type: ignore[arg-type]
+            accent_ramp=tuple(tuple(int(v) for v in rgb) for rgb in data["accent_ramp"]),  # type: ignore[arg-type]
+            white=float(data.get("white", 0.0)),
+            hue_span=float(data.get("hue_span", 0.06)),
+        )
+    bass_norm = raw.get("bass_norm", [0.15, 0.90])
+    return IdentityV2Config(
+        enabled=bool(raw.get("enabled", False)),
+        zones=zones,
+        bass_norm=(float(bass_norm[0]), float(bass_norm[1])),
+        store_path=str(raw.get("store_path", "local/state/led_identity_v2.json")),
+        soft_flip_beats=float(raw.get("soft_flip_beats", 8.0)),
+        palate_reset_enabled=bool(raw.get("palate_reset_enabled", True)),
+        palate_reset_beats=float(raw.get("palate_reset_beats", 4.0)),
+        palate_reset_dim=float(raw.get("palate_reset_dim", 0.35)),
+        bloom_enabled=bool(raw.get("bloom_enabled", True)),
+        bloom_hold_beats=float(raw.get("bloom_hold_beats", 8.0)),
+        bloom_beats=float(raw.get("bloom_beats", 8.0)),
+        bloom_dim=float(raw.get("bloom_dim", 0.3)),
+        punch_sharp_threshold=float(raw.get("punch_sharp_threshold", 0.6)),
+        budget_wide_threshold=float(raw.get("budget_wide_threshold", 0.5)),
+    )
+
+
 def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
     """Parse and return a ColorEngineConfig, or None if absent or invalid.
 
@@ -1248,6 +1429,15 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
             "; ".join(errs),
         )
         return None
+    v2_errors = _validate_identity_v2_block(raw)
+    v2_raw = raw.get("v2") if isinstance(raw.get("v2"), dict) else None
+    if v2_errors:
+        _log.warning(
+            "[RGB] color_engine.v2 config invalid — v2 disabled. Errors: %s",
+            "; ".join(v2_errors),
+        )
+        v2_raw = None
+    v2_cfg = _build_identity_v2_config(v2_raw) if v2_raw is not None else None
 
     # Build scale_stops
     scale_stops_raw = raw.get("scale_stops", dict(_DEFAULT_SCALE_STOPS))
@@ -1307,7 +1497,10 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
     locked_palette_raw = raw.get("locked_palette_by_look", {})
     locked_palette_by_look: dict[str, str] = {k: str(v) for k, v in locked_palette_raw.items()}
     palette_control = dict(raw.get("palette_control", {}) or {})
-    palette_control_bindings = _build_palette_control_bindings(palette_control)
+    palette_control_bindings = _build_palette_control_bindings(
+        palette_control,
+        include_v2=bool(v2_cfg and v2_cfg.enabled),
+    )
 
     # Build fade_beats_by_role
     fade_raw = raw.get(
@@ -1341,10 +1534,15 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
         diy_color_tags=diy_color_tags,
         set_seed_mode=str(raw.get("set_seed_mode", "random")),
         palettes=palettes,
+        v2=v2_cfg,
     )
 
 
-def _build_palette_control_bindings(raw: dict[str, Any]) -> tuple[PackMidiBinding, ...]:
+def _build_palette_control_bindings(
+    raw: dict[str, Any],
+    *,
+    include_v2: bool = False,
+) -> tuple[PackMidiBinding, ...]:
     if not raw or not bool(raw.get("enabled", False)):
         return ()
     device = str(raw.get("device", "Stream Deck"))
@@ -1383,6 +1581,34 @@ def _build_palette_control_bindings(raw: dict[str, Any]) -> tuple[PackMidiBindin
             data_byte=int(lock_note),
             target_kind="palette_lock_pad",
         ))
+    if include_v2:
+        for zone, note in (raw.get("zone_notes", {}) or {}).items():
+            bindings.append(PackMidiBinding(
+                device_name=device,
+                message_type="note",
+                channel_zero_based=channel,
+                data_byte=int(note),
+                target_kind="zone_pad",
+                target_name=str(zone),
+            ))
+        for name, note in (raw.get("manual_notes", {}) or {}).items():
+            bindings.append(PackMidiBinding(
+                device_name=device,
+                message_type="note",
+                channel_zero_based=channel,
+                data_byte=int(note),
+                target_kind="manual_pad",
+                target_name=str(name),
+            ))
+        max_energy_note = raw.get("max_energy_note")
+        if max_energy_note is not None:
+            bindings.append(PackMidiBinding(
+                device_name=device,
+                message_type="note",
+                channel_zero_based=channel,
+                data_byte=int(max_energy_note),
+                target_kind="max_energy_pad",
+            ))
     for key, kind in fixed:
         bindings.append(PackMidiBinding(
             device_name=device,
@@ -1468,6 +1694,8 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
             params=MappingProxyType(_build_look_params(look, param_profiles_raw)),
             color_source=str(look.get("color_source", "engine")),
             diy_color=str(look.get("diy_color", "")),
+            motion_style=str(look.get("motion_style", "")),
+            travel=str(look.get("travel", "")),
         )
 
     banks: dict[str, LEDBank] = {}

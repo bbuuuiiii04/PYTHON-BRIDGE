@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional, Dict, Tuple
 
+RGB = Tuple[int, int, int]
+
 
 @dataclass(frozen=True)
 class LEDRealtimeConfig:
@@ -53,6 +55,8 @@ class LEDLook:
     params: Mapping[str, Any] = field(default_factory=dict, compare=False)
     color_source: str = "engine"
     diy_color: str = ""
+    motion_style: str = ""
+    travel: str = ""
 
 
 @dataclass(frozen=True)
@@ -66,6 +70,32 @@ class Palette:
     focus_modes: Dict[str, float] = field(default_factory=dict)  # empty → full-range roam
     type: str = "journey"
     rgb: Optional[Tuple[int, int, int]] = None
+
+
+@dataclass(frozen=True)
+class ZoneRampConfig:
+    base_ramp: tuple[RGB, RGB, RGB]
+    accent_ramp: tuple[RGB, RGB]
+    white: float = 0.0
+    hue_span: float = 0.06
+
+
+@dataclass(frozen=True)
+class IdentityV2Config:
+    enabled: bool = False
+    zones: Dict[str, ZoneRampConfig] = field(default_factory=dict)
+    bass_norm: tuple[float, float] = (0.15, 0.90)
+    store_path: str = "local/state/led_identity_v2.json"
+    soft_flip_beats: float = 8.0
+    palate_reset_enabled: bool = True
+    palate_reset_beats: float = 4.0
+    palate_reset_dim: float = 0.35
+    bloom_enabled: bool = True
+    bloom_hold_beats: float = 8.0
+    bloom_beats: float = 8.0
+    bloom_dim: float = 0.3
+    punch_sharp_threshold: float = 0.6
+    budget_wide_threshold: float = 0.5
 
 
 # Canonical default scale stops (6 stops from §7/§15.5).
@@ -120,6 +150,7 @@ class ColorEngineConfig:
     diy_color_tags: Dict[str, str] = field(default_factory=dict)
     set_seed_mode: str = "random"
     palettes: Dict[str, Palette] = field(default_factory=dict)
+    v2: Optional[IdentityV2Config] = None
 
 
 @dataclass(frozen=True)
@@ -223,6 +254,7 @@ class LEDContext:
     # M1b WI-3: optional DIY-eligibility predicate supplied by the color engine.
     # When None (engine off), the director applies no palette filtering.
     diy_eligible: Optional[Callable[[str], bool]] = field(default=None, compare=False)
+    look_preference: Optional[Callable[[str], bool]] = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)

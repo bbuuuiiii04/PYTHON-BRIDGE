@@ -272,5 +272,10 @@ class Ev:
     LED_PALETTE_LOCK_PAD       = "led_palette_lock_pad"       # payload={intent?: lock|unlock}
     LED_MUTE_PAD               = "led_mute_pad"               # toggle LED mute owner
     LED_RAINBOW_PAD            = "led_rainbow_pad"            # toggle Rainbow mode
+    LED_ZONE_PAD               = "led_zone_pad"               # payload={name: str, phase: "down"|"up"}
+    LED_MANUAL_PAD             = "led_manual_pad"             # payload={name: str}
+    LED_MAX_ENERGY_PAD         = "led_max_energy_pad"         # payload={}
+    LED_ENGINE_MODE            = "led_engine_mode"            # payload={mode: "v1"|"v2"}
+    LED_TRACK_IDENTITY         = "led_track_identity"         # payload={deck, load_gen, key, record}
     # Drop presentation policy (Package 3, AWR-119) — global (deck=0).
     LASER_SOLO_PAD             = "laser_solo_pad"             # arm/disarm/veto the pending Laser Solo

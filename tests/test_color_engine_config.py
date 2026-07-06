@@ -21,7 +21,13 @@ from rb_ss_bridge_v2.led_config import (  # noqa: E402
     load_led_look_director_config,
     load_led_look_director_config_from_dict,
 )
-from rb_ss_bridge_v2.led_models import ColorEngineConfig, LEDLook, Palette  # noqa: E402
+from rb_ss_bridge_v2.led_models import (  # noqa: E402
+    ColorEngineConfig,
+    IdentityV2Config,
+    LEDLook,
+    Palette,
+    ZoneRampConfig,
+)
 
 _EXAMPLE_PATH = Path(__file__).resolve().parents[1] / "config" / "led_look_director.example.json"
 
@@ -143,6 +149,45 @@ def _valid_color_engine_block() -> dict:
     }
 
 
+def _valid_v2_block() -> dict:
+    zones = {
+        "GLACIER": {
+            "base_ramp": [[10, 40, 120], [0, 120, 255], [0, 220, 255]],
+            "accent_ramp": [[120, 240, 255], [210, 250, 255]],
+        },
+        "DEEP_POOL": {
+            "base_ramp": [[5, 10, 60], [0, 40, 140], [0, 90, 140]],
+            "accent_ramp": [[40, 0, 160], [0, 60, 200]],
+        },
+        "TWILIGHT": {
+            "base_ramp": [[40, 0, 90], [90, 0, 180], [140, 0, 220]],
+            "accent_ramp": [[180, 0, 220], [230, 0, 180]],
+        },
+        "ION": {
+            "base_ramp": [[0, 60, 255], [0, 180, 255], [60, 255, 220]],
+            "accent_ramp": [[140, 255, 60], [240, 255, 220]],
+        },
+        "VOLT": {
+            "base_ramp": [[180, 0, 120], [255, 0, 160], [200, 0, 255]],
+            "accent_ramp": [[0, 220, 255], [120, 255, 240]],
+        },
+        "EMBERCORE": {
+            "base_ramp": [[120, 0, 10], [200, 0, 30], [120, 0, 120]],
+            "accent_ramp": [[255, 30, 30], [255, 200, 180]],
+        },
+        "NEUTRAL": {
+            "base_ramp": [[0, 80, 200], [0, 160, 230], [0, 220, 255]],
+            "accent_ramp": [[0, 255, 255], [140, 220, 255]],
+        },
+    }
+    return {
+        "enabled": True,
+        "zones": zones,
+        "bass_norm": [0.15, 0.90],
+        "store_path": "local/state/led_identity_v2.json",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Tests for ColorEngineConfig / Palette dataclasses
 # ---------------------------------------------------------------------------
@@ -201,6 +246,20 @@ class TestColorEngineConfigDataclass(unittest.TestCase):
         with self.assertRaises(Exception):
             cfg.enabled = False  # type: ignore[misc]
 
+    def test_identity_v2_defaults(self) -> None:
+        cfg = IdentityV2Config()
+        self.assertFalse(cfg.enabled)
+        self.assertEqual(cfg.bass_norm, (0.15, 0.90))
+        self.assertEqual(cfg.store_path, "local/state/led_identity_v2.json")
+
+    def test_zone_ramp_is_frozen(self) -> None:
+        ramp = ZoneRampConfig(
+            base_ramp=((1, 2, 3), (4, 5, 6), (7, 8, 9)),
+            accent_ramp=((10, 11, 12), (13, 14, 15)),
+        )
+        with self.assertRaises(Exception):
+            ramp.hue_span = 0.1  # type: ignore[misc]
+
 
 # ---------------------------------------------------------------------------
 # Tests for LEDLook.color_source / diy_color fields
@@ -212,6 +271,8 @@ class TestLEDLookColorFields(unittest.TestCase):
         look = LEDLook(name="test", target="t", action="off")
         self.assertEqual(look.color_source, "engine")
         self.assertEqual(look.diy_color, "")
+        self.assertEqual(look.motion_style, "")
+        self.assertEqual(look.travel, "")
 
     def test_ledlook_explicit_values(self) -> None:
         look = LEDLook(
@@ -220,20 +281,28 @@ class TestLEDLookColorFields(unittest.TestCase):
             action="off",
             color_source="baked",
             diy_color="red",
+            motion_style="sharp",
+            travel="wide",
         )
         self.assertEqual(look.color_source, "baked")
         self.assertEqual(look.diy_color, "red")
+        self.assertEqual(look.motion_style, "sharp")
+        self.assertEqual(look.travel, "wide")
 
     def test_color_source_carried_through_config(self) -> None:
         """color_source and diy_color flow from JSON look → LEDLook via _build_config."""
         cfg_data = _base_config()
         cfg_data["looks"]["room_safe_default"]["color_source"] = "baked"
         cfg_data["looks"]["room_safe_default"]["diy_color"] = "blue"
+        cfg_data["looks"]["room_safe_default"]["motion_style"] = "flowing"
+        cfg_data["looks"]["room_safe_default"]["travel"] = "calm"
         result = load_led_look_director_config_from_dict(cfg_data)
         self.assertTrue(result.available, msg=result.errors)
         look = result.config.looks["room_safe_default"]
         self.assertEqual(look.color_source, "baked")
         self.assertEqual(look.diy_color, "blue")
+        self.assertEqual(look.motion_style, "flowing")
+        self.assertEqual(look.travel, "calm")
 
     def test_color_source_default_when_omitted(self) -> None:
         """Omitting color_source in JSON yields default 'engine'."""
@@ -483,6 +552,116 @@ class TestColorEngineValid(unittest.TestCase):
             "color_engine.palette_control.long_press_s must be a number in 0.15..2.0",
             "\n".join(logs.output),
         )
+
+    def test_identity_v2_valid_block_parses_and_adds_bindings(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["palettes"]["white_sand"] = {
+            "type": "fixed_rgb",
+            "weight": 0,
+            "rgb": [255, 235, 200],
+        }
+        block["palettes"]["rainbow"] = {"type": "rainbow", "weight": 0}
+        block["v2"] = _valid_v2_block()
+        block["palette_control"] = {
+            "enabled": True,
+            "device": "Stream Deck",
+            "channel": 2,
+            "palette_notes": {"blue_cyan": 51, "red": 52},
+            "white_sand_note": 56,
+            "lock_note": 57,
+            "led_mute_note": 58,
+            "laser_mute_note": 59,
+            "laser_solo_note": 60,
+            "rainbow_note": 61,
+            "zone_notes": {
+                "GLACIER": 62,
+                "DEEP_POOL": 63,
+                "TWILIGHT": 64,
+                "ION": 65,
+                "VOLT": 66,
+                "EMBERCORE": 67,
+            },
+            "manual_notes": {"red": 68, "green": 69, "blue": 70},
+            "max_energy_note": 71,
+        }
+        cfg_data["color_engine"] = block
+
+        result = load_led_look_director_config_from_dict(cfg_data)
+
+        self.assertTrue(result.available, msg=result.errors)
+        ce = result.config.color_engine
+        self.assertIsNotNone(ce)
+        self.assertIsNotNone(ce.v2)
+        self.assertTrue(ce.v2.enabled)
+        self.assertEqual(ce.v2.bass_norm, (0.15, 0.90))
+        self.assertEqual(ce.v2.zones["GLACIER"].base_ramp[1], (0, 120, 255))
+        kinds = [(b.target_kind, b.data_byte, b.target_name) for b in ce.palette_control_bindings]
+        self.assertIn(("zone_pad", 62, "GLACIER"), kinds)
+        self.assertIn(("manual_pad", 68, "red"), kinds)
+        self.assertIn(("max_energy_pad", 71, None), kinds)
+
+    def test_identity_v2_error_keeps_v1_engine(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["palettes"]["white_sand"] = {
+            "type": "fixed_rgb",
+            "weight": 0,
+            "rgb": [255, 235, 200],
+        }
+        block["v2"] = _valid_v2_block()
+        block["v2"]["zones"]["GLACIER"]["base_ramp"][0] = [0, 0, 0]
+        cfg_data["color_engine"] = block
+
+        with self.assertLogs("rb_ss_bridge_v2.led_config", level="WARNING") as logs:
+            result = load_led_look_director_config_from_dict(cfg_data)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertIsNotNone(result.config.color_engine)
+        self.assertIsNone(result.config.color_engine.v2)
+        self.assertIn("color_engine.v2 config invalid", "\n".join(logs.output))
+
+    def test_identity_v2_note_collision_keeps_v1_engine(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["palettes"]["white_sand"] = {
+            "type": "fixed_rgb",
+            "weight": 0,
+            "rgb": [255, 235, 200],
+        }
+        block["palettes"]["rainbow"] = {"type": "rainbow", "weight": 0}
+        block["v2"] = _valid_v2_block()
+        block["palette_control"] = {
+            "enabled": True,
+            "device": "Stream Deck",
+            "channel": 2,
+            "palette_notes": {"blue_cyan": 51, "red": 52},
+            "white_sand_note": 56,
+            "led_mute_note": 58,
+            "laser_mute_note": 59,
+            "laser_solo_note": 60,
+            "rainbow_note": 61,
+            "zone_notes": {"GLACIER": 51},
+        }
+        cfg_data["color_engine"] = block
+
+        result = load_led_look_director_config_from_dict(cfg_data)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertIsNotNone(result.config.color_engine)
+        self.assertIsNone(result.config.color_engine.v2)
+
+    def test_identity_v2_disabled_block_does_not_require_zones(self) -> None:
+        cfg_data = _base_config()
+        block = _valid_color_engine_block()
+        block["v2"] = {"enabled": False}
+        cfg_data["color_engine"] = block
+
+        result = load_led_look_director_config_from_dict(cfg_data)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertIsNotNone(result.config.color_engine.v2)
+        self.assertFalse(result.config.color_engine.v2.enabled)
 
 
 # ---------------------------------------------------------------------------
