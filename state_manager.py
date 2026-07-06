@@ -1720,12 +1720,11 @@ class StateManager(LEDDispatchPolicyMixin):
             return
         store_record = self._led_identity_store.get(key)
         mutated = False
-        if store_record is None:
-            if record.get("base") == "measured":
-                mutated = self._led_identity_store.freeze(key, record)
-                store_record = self._led_identity_store.get(key)
-            else:
-                store_record = dict(record)
+        if record.get("base") == "measured":
+            mutated = self._led_identity_store.freeze(key, record)
+            store_record = self._led_identity_store.get(key)
+        elif store_record is None:
+            store_record = dict(record)
         final_record = store_record or dict(record)
         engine = self._led_color_engine
         set_identity = getattr(engine, "set_track_identity", None)

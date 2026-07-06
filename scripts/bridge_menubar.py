@@ -827,6 +827,7 @@ class BridgeMenuBar(NSObject):
         self.record_session_item = self._add_action("Record Session: Off", "toggleRecordSession:")
         self.map_lasers_item = self._add_action("Laser Pad…", "mapLasers:")
         self.led_pad_item = self._add_action("LED Pad…", "openLedPad:")
+        # TEMPORARY (v2 rollout): remove after v2 color identity is the default operator surface.
         self.led_engine_v2_item = self._add_action("LED Engine v2", "toggleLedEngineV2:")
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.quit_item = self._add_action("Quit Menu", "quit:")

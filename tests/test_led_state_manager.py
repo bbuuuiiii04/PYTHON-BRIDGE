@@ -5,11 +5,24 @@ import time
 import unittest
 from pathlib import Path
 from typing import Callable
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2.led_models import LEDContext, LEDLookDecision  # noqa: E402
+from rb_ss_bridge_v2 import state_manager as state_manager_mod  # noqa: E402
+from rb_ss_bridge_v2.anlz_reader import TrackAnlzData, WaveformContext  # noqa: E402
+from rb_ss_bridge_v2.audio_spectral_features import SpectralFeaturesV4, V4_SERIES_KEYS  # noqa: E402
+from rb_ss_bridge_v2.led_identity_v2 import (  # noqa: E402
+    IdentityStore,
+    content_hash as led_identity_content_hash,
+    content_key as led_identity_content_key,
+)
+from rb_ss_bridge_v2.led_models import (  # noqa: E402
+    IdentityV2Config,
+    LEDContext,
+    LEDLookDecision,
+    ZoneRampConfig,
+)
 from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot  # noqa: E402
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
 from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState  # noqa: E402
@@ -302,6 +315,7 @@ class _AutomationLEDLookDirector:
         role: str,
         *,
         diy_eligible: Callable[[str], bool] | None = None,
+        look_preference: Callable[[str], bool] | None = None,
     ) -> LEDLookDecision | None:
         self.commit_calls.append(role)
         if role == "drop" and self.preview_decision is not None:
@@ -327,13 +341,121 @@ class _AutomationLEDLookDirector:
         pass
 
 
-def _make_sm(*, director=None, adapter=None) -> StateManager:
+class _IdentityColorEngine:
+    enabled = True
+
+    def __init__(self) -> None:
+        self.identity_calls: list[tuple[int, int, str, dict]] = []
+        self.begin_calls: list[dict] = []
+        self.reset_calls = 0
+        self.advance_calls: list[float] = []
+        self.stand_down_calls: list[bool] = []
+
+    def set_track_identity(self, deck: int, load_gen: int, key: str, record: dict) -> None:
+        self.identity_calls.append((deck, load_gen, key, dict(record)))
+
+    def diy_eligible(self, _look_name: str) -> bool:
+        return True
+
+    def begin_dispatch(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        self.begin_calls.append(dict(kwargs))
+
+    def resolve_color(self, **_kwargs) -> dict:  # type: ignore[no-untyped-def]
+        return {}
+
+    def resolve_slot_colors(self, **_kwargs) -> dict:  # type: ignore[no-untyped-def]
+        return {}
+
+    def reset_fade_memory(self) -> None:
+        self.reset_calls += 1
+
+    def advance_fade(self, abs_beat: float) -> None:
+        self.advance_calls.append(float(abs_beat))
+
+    def set_scripted_stand_down(self, scripted: bool) -> None:
+        self.stand_down_calls.append(bool(scripted))
+
+    def snapshot(self) -> dict:
+        return {"engine": "v2"}
+
+
+def _make_sm(*, director=None, adapter=None, led_color_engine=None, led_identity_store=None) -> StateManager:
     return StateManager(
         queue.Queue(maxsize=64),
         PositionCache(),
         Mock(),
         led_look_director=director,
         led_scene_adapter=adapter,
+        led_color_engine=led_color_engine,
+        led_identity_store=led_identity_store,
+    )
+
+
+def _identity_record(key: str, zone: str = "GLACIER", *, base: str = "measured") -> dict:
+    return {
+        "zone": zone,
+        "hue_slot": 0,
+        "depth_variant": 0,
+        "sat_floor": 0.7,
+        "span": 0.5,
+        "budget": 0.65,
+        "style": "flowing",
+        "base": base,
+        "scores": {},
+        "analysis_rev": "v4",
+        "correction": None,
+        "norm_inputs": {"bass": 0.5, "drama": 0.5, "punch": 0.0},
+        "key_hash": led_identity_content_hash(key),
+    }
+
+
+def _identity_v2_config() -> IdentityV2Config:
+    zone = ZoneRampConfig(
+        base_ramp=((0, 80, 200), (0, 160, 230), (0, 220, 255)),
+        accent_ramp=((0, 255, 255), (140, 220, 255)),
+    )
+    return IdentityV2Config(
+        enabled=True,
+        zones={
+            name: zone
+            for name in ("GLACIER", "DEEP_POOL", "TWILIGHT", "ION", "VOLT", "EMBERCORE", "NEUTRAL")
+        },
+    )
+
+
+def _spectral_v4_fixture() -> SpectralFeaturesV4:
+    n = 4
+    series = {name: tuple(0.0 for _ in range(n)) for name in V4_SERIES_KEYS}
+    series["sub_db"] = (-20.0, -19.0, -18.0, -17.0)
+    series["bass_db"] = (-18.0, -17.0, -16.0, -15.0)
+    series["sustain_mid_db"] = (20.0, 20.0, 20.0, 20.0)
+    series["growl_flatness"] = (0.1, 0.1, 0.1, 0.1)
+    return SpectralFeaturesV4(
+        sr=22050,
+        schema_version=4,
+        n_beats=n,
+        duration_s=2.0,
+        frame_hop_s=0.01,
+        sub_bass_envelope=tuple(0.0 for _ in range(n)),
+        kick_envelope=tuple(0.0 for _ in range(n)),
+        low_mid_envelope=tuple(0.0 for _ in range(n)),
+        high_mid_envelope=tuple(0.0 for _ in range(n)),
+        high_band_envelope=tuple(0.0 for _ in range(n)),
+        kick_max_envelope=tuple(0.0 for _ in range(n)),
+        onset_strength_envelope=tuple(0.0 for _ in range(n)),
+        spectral_flatness_envelope=tuple(0.0 for _ in range(n)),
+        series=series,
+        sub4={},
+        growl_band_frames=(),
+        scalars={
+            "grit": 0.2,
+            "punch": 0.7,
+            "drama": 0.4,
+            "attack_low_p90": 0.5,
+            "onset_mh_p90": 0.5,
+            "brightness_med": 0.5,
+            "growl_timbre_p90": 0.2,
+        },
     )
 
 
@@ -2069,6 +2191,156 @@ class LEDStateManagerTests(unittest.TestCase):
                 current_phrase_start_beat=s, beats_into_phrase=112.0 - s))(start)
             sm._push_tick()
         self.assertGreaterEqual(len([c for c in adapter.trigger_calls if c.role == "groove"]), 2)
+
+    def test_led_track_identity_measured_freezes_once_store_hit_does_not_write(self) -> None:
+        key = "identity:fresh"
+        store = IdentityStore()
+        engine = _IdentityColorEngine()
+        sm = _make_sm(led_identity_store=store, led_color_engine=engine)
+        sm._led_identity_writer = Mock()
+        sm._deck[1].load_gen = 12
+        record = _identity_record(key, "GLACIER")
+        event = BridgeEvent(
+            kind=Ev.LED_TRACK_IDENTITY,
+            deck=1,
+            payload={"deck": 1, "load_gen": 12, "key": key, "record": record},
+            source="test",
+        )
+
+        sm._handle_event(event)
+
+        self.assertEqual(store.get(key)["base"], "measured")
+        self.assertEqual(len(engine.identity_calls), 1)
+        self.assertEqual(engine.identity_calls[-1][3]["base"], "measured")
+        sm._led_identity_writer.submit.assert_called_once()
+
+        sm._led_identity_writer.submit.reset_mock()
+        sm._handle_event(event)
+
+        self.assertEqual(len(engine.identity_calls), 2)
+        sm._led_identity_writer.submit.assert_not_called()
+
+    def test_led_track_identity_stale_load_gen_is_dropped(self) -> None:
+        key = "identity:stale"
+        store = IdentityStore()
+        engine = _IdentityColorEngine()
+        sm = _make_sm(led_identity_store=store, led_color_engine=engine)
+        sm._led_identity_writer = Mock()
+        sm._deck[1].load_gen = 8
+
+        sm._handle_event(
+            BridgeEvent(
+                kind=Ev.LED_TRACK_IDENTITY,
+                deck=1,
+                payload={"deck": 1, "load_gen": 7, "key": key, "record": _identity_record(key)},
+                source="test",
+            )
+        )
+
+        self.assertIsNone(store.get(key))
+        self.assertEqual(engine.identity_calls, [])
+        sm._led_identity_writer.submit.assert_not_called()
+
+    def test_led_identity_correct_early_then_measured_then_clear_keeps_measured_base(self) -> None:
+        store = IdentityStore()
+        engine = _IdentityColorEngine()
+        sm = _make_sm(led_identity_store=store, led_color_engine=engine)
+        sm._led_identity_writer = Mock()
+        sm._os.active_deck = 1
+        sm._deck[1].load_gen = 22
+        sm._deck[1].meta.content_id = "cid-22"
+        sm._deck[1].meta.filepath = "/tracks/cid-22.wav"
+        key = led_identity_content_key("cid-22", "/tracks/cid-22.wav")
+
+        sm._apply_led_zone_correction("VOLT")
+        self.assertEqual(store.get(key)["base"], "provisional")
+        self.assertEqual(store.get(key)["correction"], {"zone": "VOLT"})
+
+        sm._handle_event(
+            BridgeEvent(
+                kind=Ev.LED_TRACK_IDENTITY,
+                deck=1,
+                payload={"deck": 1, "load_gen": 22, "key": key, "record": _identity_record(key, "GLACIER")},
+                source="test",
+            )
+        )
+
+        upgraded = store.get(key)
+        self.assertEqual(upgraded["base"], "measured")
+        self.assertEqual(upgraded["zone"], "GLACIER")
+        self.assertEqual(upgraded["correction"], {"zone": "VOLT"})
+
+        sm._clear_led_zone_correction()
+
+        final = store.get(key)
+        self.assertEqual(final["base"], "measured")
+        self.assertEqual(final["zone"], "GLACIER")
+        self.assertIsNone(final["correction"])
+        self.assertEqual(engine.identity_calls[-1][3]["base"], "measured")
+
+    def test_led_max_energy_consumes_only_when_role_mapping_mutates(self) -> None:
+        sm = _make_sm()
+        sm._led_v2_latch = True
+        sm._led_max_energy_armed = True
+        sp_state = SmartPhrasingState(
+            abs_beat=64.0,
+            current_phrase_label="chorus",
+            current_phrase_is_chorus=True,
+            current_phrase_start_beat=64.0,
+            phrase_start_crossing=True,
+            previous_phrase_label="up",
+            beats_into_phrase=0.0,
+        )
+
+        self.assertEqual(sm._led_role_from_smart_phrasing(sp_state, mutate=False), "drop")
+        self.assertTrue(sm._led_max_energy_armed)
+
+        self.assertEqual(sm._led_role_from_smart_phrasing(sp_state, mutate=True), "drop")
+        self.assertFalse(sm._led_max_energy_armed)
+
+    def test_moments_blocked_reaches_engine_during_active_predark(self) -> None:
+        engine = _IdentityColorEngine()
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter, led_color_engine=engine)
+        _ready_led_active_deck(sm, 1)
+        sm._deck[1].load_gen = 33
+        sm._led_smart_drop_blackout_key = "1:33:smart_drop_blackout:pre_dark:96.0"
+
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_groove_sp(2.0))
+
+        self.assertEqual(len(engine.begin_calls), 1)
+        self.assertTrue(engine.begin_calls[0]["moments_blocked"])
+
+    def test_read_runtime_anlz_data_uses_v4_cache_for_identity(self) -> None:
+        data = TrackAnlzData(
+            [4],
+            waveform_context=WaveformContext(
+                heights=(1, 2, 3, 4),
+                ms_per_entry=50.0,
+                beatgrid_times_ms=(0.0, 500.0, 1000.0, 1500.0),
+            ),
+        )
+        cached_v4 = _spectral_v4_fixture()
+
+        with (
+            patch.object(state_manager_mod, "read_anlz_drops", return_value=data) as read_mock,
+            patch.object(state_manager_mod.spectral_cache, "get_cached_v4", return_value=cached_v4) as cache_mock,
+            patch.object(state_manager_mod, "extract_spectral_features_v4") as extract_mock,
+        ):
+            result = state_manager_mod._read_runtime_anlz_data(
+                "/tmp/test.DAT",
+                audio_filepath="/tmp/audio.wav",
+                identity_enabled=True,
+                identity_key="identity:cache",
+                identity_config=_identity_v2_config(),
+            )
+
+        read_mock.assert_called_once_with("/tmp/test.DAT")
+        cache_mock.assert_called_once_with("/tmp/audio.wav", [0.0, 500.0, 1000.0, 1500.0])
+        extract_mock.assert_not_called()
+        self.assertIsNotNone(result.led_identity)
+        self.assertEqual(result.led_identity["base"], "measured")
 
     # ── AWR-125 W3b: perf("led.look") emit assertions ─────────────────────
 

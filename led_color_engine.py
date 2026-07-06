@@ -12,7 +12,8 @@ Public API (exactly as M1b integration expects):
         @property
         def enabled(self) -> bool
         def begin_dispatch(self, *, active_deck: int, load_gen: int, content_id: str,
-                           filepath: str, role: str, section_id: str, cycle: int) -> None
+                           filepath: str, role: str, section_id: str, cycle: int,
+                           moments_blocked: bool = False, scripted: bool = False) -> None
         def diy_eligible(self, look_name: str) -> bool
         def resolve_color(self, *, role: str, section_id: str, cycle: int, look_name: str,
                           color_source: str, multi: bool = False) -> dict[str, Any]
@@ -351,13 +352,18 @@ class LedColorEngine:
         self._v2_manual: str = ""
         self._v2_staged: tuple[str, float] | None = None
         self._v2_flip_fade: tuple[tuple[tuple[int, int, int], ...], float] | None = None
+        self._v2_pending_flip_fade: tuple[tuple[tuple[int, int, int], ...], float] | None = None
         self._v2_reset_until: float | None = None
+        self._v2_pending_reset_beats: float | None = None
         self._v2_bloomed: set[str] = set()
         self._v2_bloom_pending: tuple[tuple[tuple[int, int, int], ...], float] | None = None
         self._v2_bloom_until: float | None = None
         self._v2_claims: list[Claim] = []
         self._v2_first_seen_beat: float | None = None
         self._v2_now: float = 0.0
+        self._v2_current_identity_key: str = ""
+        self._v2_moments_blocked: bool = False
+        self._v2_stand_down: bool = False
 
     # ------------------------------------------------------------------
     # Public properties
@@ -372,8 +378,12 @@ class LedColorEngine:
         self._prev_color.clear()
         if self._v2_active:
             self._v2_flip_fade = None
+            self._v2_pending_flip_fade = None
             self._v2_bloom_pending = None
             self._v2_bloom_until = None
+            self._v2_pending_reset_beats = None
+            self._v2_reset_until = None
+            self._v2_first_seen_beat = None
 
     # ------------------------------------------------------------------
     # Dispatch-driven track + drop detection (§15.2)
@@ -390,13 +400,15 @@ class LedColorEngine:
         section_id: str,
         cycle: int,
         moments_blocked: bool = False,
+        scripted: bool = False,
     ) -> None:
         """Called at the start of each automation dispatch (injection seam).
 
         Detects new audible track (via (active_deck, load_gen) key deque)
         and new drop sections.  Advances journey state accordingly.
         """
-        if self._v2_active:
+        self._v2_stand_down = bool(scripted and self._v2_active)
+        if self._v2_active and not self._v2_stand_down:
             self._v2_begin_dispatch(
                 active_deck=active_deck,
                 load_gen=load_gen,
@@ -597,7 +609,7 @@ class LedColorEngine:
         also {"color_a": (r, g, b), "color_b": (r, g, b)}.
         "color" is always present when injecting.
         """
-        if self._v2_active:
+        if self._v2_active and not self._v2_stand_down:
             return self._v2_resolve_color(
                 role=role,
                 section_id=section_id,
@@ -714,7 +726,7 @@ class LedColorEngine:
           - `step_index` is derived from `cycle` only when `step_within_section[role]`
             is true, otherwise 0.
         """
-        if self._v2_active:
+        if self._v2_active and not self._v2_stand_down:
             return self._v2_resolve_slot_colors(
                 role=role,
                 section_id=section_id,
@@ -887,7 +899,7 @@ class LedColorEngine:
         self._fade_end_beat = max(float(end_beat), self._fade_start_beat)
 
     def advance_fade(self, abs_beat: float) -> None:
-        if self._v2_active:
+        if self._v2_active and not self._v2_stand_down:
             self._v2_advance(abs_beat)
             return
         if self._fade_from_p is None or not self._fade_target:
@@ -968,7 +980,6 @@ class LedColorEngine:
                 "corrected": bool(record.get("correction")),
                 "staged_zone": self._v2_staged[0] if self._v2_staged else "",
                 "manual": self._v2_manual,
-                "store_degraded": False,
             })
         return snap
 
@@ -985,11 +996,19 @@ class LedColorEngine:
         self._v2_manual = ""
         self._v2_staged = None
         self._v2_flip_fade = None
+        self._v2_pending_flip_fade = None
         self._v2_reset_until = None
+        self._v2_pending_reset_beats = None
         self._v2_bloom_pending = None
         self._v2_bloom_until = None
         self._v2_claims.clear()
         self._v2_first_seen_beat = None
+        self._v2_current_identity_key = ""
+        self._v2_moments_blocked = False
+        self._v2_stand_down = False
+
+    def set_scripted_stand_down(self, scripted: bool) -> None:
+        self._v2_stand_down = bool(scripted and self._v2_active)
 
     def set_track_identity(self, deck: int, load_gen: int, key: str, record: dict[str, Any]) -> None:
         if self._v2_cfg is None:
@@ -1044,8 +1063,9 @@ class LedColorEngine:
             return
         track_key = (active_deck, load_gen)
         key = content_id or filepath or str(load_gen)
-        now = float(cycle)
-        self._v2_now = now
+        now = self._v2_now
+        self._v2_current_identity_key = str(key)
+        self._v2_moments_blocked = bool(moments_blocked)
         if track_key != self._v2_current_track_key:
             outgoing = self._v2_active_dressing()
             self._v2_current_track_key = track_key
@@ -1054,36 +1074,30 @@ class LedColorEngine:
             self._v2_staged = None
             self._v2_bloom_pending = None
             self._v2_bloom_until = None
-            self._v2_first_seen_beat = now
+            self._v2_first_seen_beat = None
             if self._v2_load_gen_by_deck.get(active_deck) != load_gen:
                 self._v2_install_default(active_deck, load_gen, key)
             incoming = self._v2_active_dressing()
             if outgoing is not None and incoming is not None:
-                self._v2_flip_fade = (
+                self._v2_pending_flip_fade = (
                     outgoing.slot_rgbs,
-                    now + max(0.0, self._v2_cfg.soft_flip_beats),
+                    max(0.0, self._v2_cfg.soft_flip_beats),
                 )
                 if (
                     not moments_blocked
                     and self._v2_cfg.palate_reset_enabled
                     and is_hard_pivot(outgoing.zone, incoming.zone)
                 ):
-                    claim = Claim(
-                        RANKS["palate_reset"],
-                        now,
-                        now + self._v2_cfg.palate_reset_beats,
-                        "palate_reset",
-                    )
-                    if claim_allowed(claim, self._v2_claims):
-                        self._v2_reset_until = claim.end_beat
-                        self._v2_claims.append(claim)
+                    self._v2_pending_reset_beats = max(0.0, self._v2_cfg.palate_reset_beats)
+                else:
+                    self._v2_pending_reset_beats = None
         self._v2_current_deck = active_deck
         if self._v2_manual:
             self._v2_claims = [Claim(RANKS["manual"], now, float("inf"), "manual")]
         else:
             self._v2_claims = [c for c in self._v2_claims if c.end_beat > now and c.tag != "manual"]
-        if not moments_blocked:
-            self._v2_maybe_arm_bloom(key, now)
+        if moments_blocked:
+            self._v2_pending_reset_beats = None
 
     def _v2_resolve_color(
         self,
@@ -1107,8 +1121,12 @@ class LedColorEngine:
         dressing = self._v2_active_dressing()
         if dressing is None:
             return {}
-        if self._v2_reset_until is not None and float(cycle) < self._v2_reset_until:
-            rgb = self._scale_rgb(dressing.slot_rgbs[2], self._v2_cfg.palate_reset_dim if self._v2_cfg else 1.0)
+        multi_slots = dressing.slot_rgbs
+        if self._v2_reset_until is not None and self._v2_now < self._v2_reset_until:
+            neutral = self._v2_neutral_dressing() or dressing
+            dim = self._v2_cfg.palate_reset_dim if self._v2_cfg else 1.0
+            multi_slots = tuple(self._scale_rgb(slot_rgb, dim) for slot_rgb in neutral.slot_rgbs)
+            rgb = multi_slots[2]
         else:
             use_step = self._config.step_within_section.get(role, False)
             step_index = cycle if use_step else 0
@@ -1118,8 +1136,8 @@ class LedColorEngine:
             rgb = self._v2_base_pick(dressing, p)
         result = {"color": rgb}
         if multi:
-            result["color_a"] = dressing.slot_rgbs[0]
-            result["color_b"] = dressing.slot_rgbs[2]
+            result["color_a"] = multi_slots[0]
+            result["color_b"] = multi_slots[2]
         self._v2_apply_fade_fields(result, role, multi=multi)
         return result
 
@@ -1146,9 +1164,10 @@ class LedColorEngine:
         if dressing is None:
             return {}
         slots = list(dressing.slot_rgbs)
-        if self._v2_reset_until is not None and float(cycle) < self._v2_reset_until:
+        if self._v2_reset_until is not None and self._v2_now < self._v2_reset_until:
             dim = self._v2_cfg.palate_reset_dim if self._v2_cfg else 1.0
-            slots = [self._scale_rgb(rgb, dim) for rgb in slots[:5]] + [(255, 255, 255)]
+            neutral = self._v2_neutral_dressing() or dressing
+            slots = [self._scale_rgb(rgb, dim) for rgb in neutral.slot_rgbs[:5]] + [(255, 255, 255)]
         result: dict[str, Any] = {"slot_colors": slots}
         self._v2_apply_fade_fields(result, role, slots=True)
         return result
@@ -1156,6 +1175,22 @@ class LedColorEngine:
     def _v2_advance(self, abs_beat: float) -> None:
         now = float(abs_beat)
         self._v2_now = now
+        if self._v2_pending_flip_fade is not None:
+            slots, duration = self._v2_pending_flip_fade
+            self._v2_flip_fade = (slots, now + duration)
+            self._v2_pending_flip_fade = None
+        if self._v2_pending_reset_beats is not None:
+            if not self._v2_moments_blocked:
+                claim = Claim(
+                    RANKS["palate_reset"],
+                    now,
+                    now + self._v2_pending_reset_beats,
+                    "palate_reset",
+                )
+                if claim_allowed(claim, self._v2_claims):
+                    self._v2_reset_until = claim.end_beat
+                    self._v2_claims.append(claim)
+            self._v2_pending_reset_beats = None
         if self._v2_staged is not None and now >= self._v2_staged[1]:
             self._v2_apply_zone(self._v2_staged[0])
             self._v2_staged = None
@@ -1166,6 +1201,12 @@ class LedColorEngine:
         if self._v2_bloom_until is not None and now >= self._v2_bloom_until:
             self._v2_bloom_pending = None
             self._v2_bloom_until = None
+        self._v2_claims = [c for c in self._v2_claims if c.end_beat > now]
+        if self._v2_moments_blocked:
+            if self._v2_bloom_pending is None and self._v2_bloom_until is None:
+                self._v2_first_seen_beat = None
+            return
+        self._v2_maybe_arm_bloom(self._v2_current_identity_key, now)
 
     def _v2_maybe_arm_bloom(self, key: str, now: float) -> None:
         if self._v2_cfg is None or not self._v2_cfg.bloom_enabled or self._v2_manual:
@@ -1216,6 +1257,20 @@ class LedColorEngine:
             result["color_b_from"] = fade_from[2]
             result["color_b_to"] = result["color_b"]
         result["fade_beats"] = fade_beats
+
+    def _v2_neutral_dressing(self) -> Dressing | None:
+        if self._v2_cfg is None or "NEUTRAL" not in self._v2_cfg.zones:
+            return None
+        record = self._v2_record.get(self._v2_current_deck, {})
+        key_hash = int(record.get("key_hash", content_hash(self._v2_current_identity_key)))
+        return derive_dressing(
+            "NEUTRAL",
+            self._v2_cfg.zones["NEUTRAL"],
+            key_hash,
+            0.5,
+            0.5,
+            0.0,
+        )
 
     def _v2_active_dressing(self) -> Dressing | None:
         if self._v2_current_deck:

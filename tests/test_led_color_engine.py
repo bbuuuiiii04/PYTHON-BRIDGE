@@ -33,6 +33,7 @@ from rb_ss_bridge_v2.led_color_engine import (  # noqa: E402
     _blend_white,
     _scale_stop_positions,
 )
+from rb_ss_bridge_v2.led_identity_v2 import content_hash  # noqa: E402
 from rb_ss_bridge_v2.led_models import ColorEngineConfig, IdentityV2Config, Palette, ZoneRampConfig  # noqa: E402
 
 
@@ -134,14 +135,56 @@ def _engine(seed: int = 42, **overrides: Any) -> LedColorEngine:
 
 
 def _v2_config() -> IdentityV2Config:
+    ramps = {
+        "GLACIER": (((10, 40, 120), (0, 120, 255), (0, 220, 255)), ((120, 240, 255), (210, 250, 255))),
+        "DEEP_POOL": (((5, 10, 60), (0, 40, 140), (0, 90, 140)), ((40, 0, 160), (0, 60, 200))),
+        "TWILIGHT": (((40, 0, 90), (90, 0, 180), (140, 0, 220)), ((180, 0, 220), (230, 0, 180))),
+        "ION": (((0, 60, 255), (0, 180, 255), (60, 255, 220)), ((140, 255, 60), (240, 255, 220))),
+        "VOLT": (((180, 0, 120), (255, 0, 160), (200, 0, 255)), ((0, 220, 255), (120, 255, 240))),
+        "EMBERCORE": (((120, 0, 10), (200, 0, 30), (120, 0, 120)), ((255, 30, 30), (255, 200, 180))),
+        "NEUTRAL": (((0, 80, 200), (0, 160, 230), (0, 220, 255)), ((0, 255, 255), (140, 220, 255))),
+    }
     zones = {
-        name: ZoneRampConfig(
-            base_ramp=((10, 40, 120), (0, 120, 255), (0, 220, 255)),
-            accent_ramp=((120, 240, 255), (210, 250, 255)),
-        )
-        for name in ("GLACIER", "DEEP_POOL", "TWILIGHT", "ION", "VOLT", "EMBERCORE", "NEUTRAL")
+        name: ZoneRampConfig(base_ramp=base, accent_ramp=accent)
+        for name, (base, accent) in ramps.items()
     }
     return IdentityV2Config(enabled=True, zones=zones)
+
+
+def _v2_record(key: str, zone: str) -> dict[str, Any]:
+    key_hash = content_hash(key)
+    return {
+        "zone": zone,
+        "hue_slot": 0,
+        "depth_variant": 0,
+        "sat_floor": 0.7,
+        "span": 0.5,
+        "budget": 0.65,
+        "style": "flowing",
+        "base": "measured",
+        "scores": {},
+        "analysis_rev": "v4",
+        "correction": None,
+        "norm_inputs": {"bass": 0.5, "drama": 0.5, "punch": 0.0},
+        "key_hash": key_hash,
+    }
+
+
+def _journey_state(engine: LedColorEngine) -> tuple[Any, ...]:
+    return (
+        engine._journey_rng.getstate(),
+        engine._current_track_key,
+        tuple(engine._recent_keys),
+        engine._current_track_seed,
+        engine._focus_fc,
+        engine._focus_fw,
+        engine._dwell_remaining,
+        engine._current_palette,
+        engine._anchor_p,
+        engine._drop_section_index,
+        engine._last_drop_section_id,
+        engine._hold_track,
+    )
 
 
 def _dispatch(
@@ -154,6 +197,8 @@ def _dispatch(
     role: str = "groove",
     section_id: str = "s1",
     cycle: int = 0,
+    moments_blocked: bool = False,
+    scripted: bool = False,
 ) -> None:
     engine.begin_dispatch(
         active_deck=deck,
@@ -163,6 +208,8 @@ def _dispatch(
         role=role,
         section_id=section_id,
         cycle=cycle,
+        moments_blocked=moments_blocked,
+        scripted=scripted,
     )
 
 
@@ -1141,6 +1188,174 @@ class TestLiveControlStubs(unittest.TestCase):
         # Dwell should be unchanged (locked)
         snap_after = e.snapshot()
         self.assertEqual(snap_after["dwell_remaining"], initial_dwell)
+
+
+class TestIdentityV2Timing(unittest.TestCase):
+    def _drive_v1_phase(self, engine: LedColorEngine, *, load_gen: int, cycle: int) -> tuple[dict, dict]:
+        _dispatch(
+            engine,
+            load_gen=load_gen,
+            content_id=f"track-{load_gen}",
+            filepath=f"/tmp/{load_gen}.mp3",
+            role="groove",
+            section_id=f"s{load_gen}",
+            cycle=cycle,
+        )
+        color = engine.resolve_color(
+            role="groove",
+            section_id=f"s{load_gen}",
+            cycle=cycle,
+            look_name="look",
+            color_source="engine",
+        )
+        slots = engine.resolve_slot_colors(
+            role="groove",
+            section_id=f"s{load_gen}",
+            cycle=cycle,
+            look_name="look",
+            color_source="engine",
+        )
+        return color, slots
+
+    def test_v2_flip_back_preserves_v1_journey_state_bit_equal(self) -> None:
+        plain = _engine(seed=88)
+        subject = _engine(seed=88, v2=_v2_config())
+        subject.set_v2_active(False)
+
+        self.assertEqual(
+            self._drive_v1_phase(subject, load_gen=1, cycle=1),
+            self._drive_v1_phase(plain, load_gen=1, cycle=1),
+        )
+        frozen = _journey_state(subject)
+
+        subject.set_v2_active(True)
+        key = "v2-track"
+        subject.set_track_identity(1, 2, key, _v2_record(key, "GLACIER"))
+        _dispatch(subject, load_gen=2, content_id=key, cycle=2)
+        subject.advance_fade(0.0)
+        subject.resolve_slot_colors(
+            role="groove",
+            section_id="v2",
+            cycle=2,
+            look_name="look",
+            color_source="engine",
+        )
+        subject.advance_fade(4.0)
+        subject.set_v2_active(False)
+
+        self.assertEqual(_journey_state(subject), frozen)
+        self.assertEqual(
+            self._drive_v1_phase(subject, load_gen=3, cycle=3),
+            self._drive_v1_phase(plain, load_gen=3, cycle=3),
+        )
+        self.assertEqual(subject._journey_rng.getstate(), plain._journey_rng.getstate())
+
+    def test_bloom_uses_abs_beat_hold_and_duration(self) -> None:
+        e = _engine(seed=5, v2=_v2_config())
+        key = "bloom-track"
+        e.set_track_identity(1, 1, key, _v2_record(key, "GLACIER"))
+        _dispatch(e, load_gen=1, content_id=key)
+
+        e.advance_fade(0.0)
+        e.advance_fade(7.99)
+        self.assertIsNone(e._v2_bloom_until)
+
+        e.advance_fade(8.0)
+        self.assertEqual(e._v2_bloom_until, 16.0)
+        slots = e.resolve_slot_colors(
+            role="groove",
+            section_id="s1",
+            cycle=999,
+            look_name="look",
+            color_source="engine",
+        )
+        self.assertIn("slot_colors_from", slots)
+
+        e.advance_fade(15.99)
+        self.assertEqual(e._v2_bloom_until, 16.0)
+        e.advance_fade(16.0)
+        self.assertIsNone(e._v2_bloom_until)
+        self.assertIsNone(e._v2_bloom_pending)
+
+    def test_palate_reset_uses_abs_beats_and_dimmed_neutral(self) -> None:
+        e = _engine(seed=6, v2=_v2_config())
+        key_a = "reset-a"
+        key_b = "reset-b"
+        e.set_track_identity(1, 1, key_a, _v2_record(key_a, "GLACIER"))
+        _dispatch(e, deck=1, load_gen=1, content_id=key_a)
+        e.advance_fade(96.0)
+        e.set_track_identity(2, 1, key_b, _v2_record(key_b, "EMBERCORE"))
+        _dispatch(e, deck=2, load_gen=1, content_id=key_b)
+
+        self.assertIsNone(e._v2_reset_until)
+        e.advance_fade(100.0)
+        self.assertEqual(e._v2_reset_until, 104.0)
+
+        neutral = e._v2_neutral_dressing()
+        self.assertIsNotNone(neutral)
+        expected = [
+            e._scale_rgb(rgb, e._v2_cfg.palate_reset_dim)
+            for rgb in neutral.slot_rgbs[:5]
+        ] + [(255, 255, 255)]
+        active_dimmed = [
+            e._scale_rgb(rgb, e._v2_cfg.palate_reset_dim)
+            for rgb in e._v2_active_dressing().slot_rgbs[:5]
+        ] + [(255, 255, 255)]
+        slots = e.resolve_slot_colors(
+            role="groove",
+            section_id="s1",
+            cycle=999,
+            look_name="look",
+            color_source="engine",
+        )
+        self.assertEqual(slots["slot_colors"], expected)
+        self.assertNotEqual(slots["slot_colors"], active_dimmed)
+
+        e.advance_fade(103.99)
+        self.assertEqual(e._v2_reset_until, 104.0)
+        e.advance_fade(104.0)
+        self.assertIsNone(e._v2_reset_until)
+
+    def test_moments_blocked_prevents_bloom_hold(self) -> None:
+        e = _engine(seed=7, v2=_v2_config())
+        key = "blocked-track"
+        e.set_track_identity(1, 1, key, _v2_record(key, "GLACIER"))
+        _dispatch(e, load_gen=1, content_id=key, moments_blocked=True)
+
+        e.advance_fade(0.0)
+        e.advance_fade(20.0)
+
+        self.assertEqual(e._v2_bloomed, set())
+        self.assertIsNone(e._v2_bloom_until)
+        self.assertIsNone(e._v2_first_seen_beat)
+
+    def test_scripted_dispatch_under_v2_uses_v1_path_and_does_not_consume_bloom(self) -> None:
+        plain = _engine(seed=33)
+        v2 = _engine(seed=33, v2=_v2_config())
+
+        plain_out = self._drive_v1_phase(plain, load_gen=1, cycle=1)
+        _dispatch(v2, load_gen=1, cycle=1, scripted=True)
+        v2_out = (
+            v2.resolve_color(
+                role="groove",
+                section_id="s1",
+                cycle=1,
+                look_name="look",
+                color_source="engine",
+            ),
+            v2.resolve_slot_colors(
+                role="groove",
+                section_id="s1",
+                cycle=1,
+                look_name="look",
+                color_source="engine",
+            ),
+        )
+        v2.advance_fade(20.0)
+
+        self.assertEqual(v2_out, plain_out)
+        self.assertEqual(v2._v2_bloomed, set())
+        self.assertIsNone(v2._v2_bloom_until)
 
 
 # ---------------------------------------------------------------------------

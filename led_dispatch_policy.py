@@ -218,12 +218,13 @@ class LEDDispatchPolicyMixin:
         if engine is not None:
             try:
                 snap = engine.snapshot()
+            except AttributeError as exc:
+                payload["engine_snapshot_error"] = type(exc).__name__
+            else:
                 if isinstance(snap, dict):
                     for key in ("engine", "zone", "corrected", "staged_zone", "manual"):
                         if key in snap:
                             payload[key] = snap[key]
-            except Exception:
-                pass
 
         if self._led_look_director is not None:
             try:
@@ -685,6 +686,19 @@ class LEDDispatchPolicyMixin:
         engine = self._led_color_engine
         if engine is None or not engine.enabled:
             return
+        os_state = getattr(self, "_os", None)
+        decks = getattr(self, "_deck", {})
+        active = int(getattr(os_state, "active_deck", 0) or 0)
+        d = decks.get(active) if active and hasattr(decks, "get") else None
+        scripted_led_mode = bool(
+            d is not None
+            and d.scripted_id
+            and getattr(os_state, "lighting_mode", "") == "scripted"
+            and self._led_scripted_mode_automation_latch
+        )
+        set_stand_down = getattr(engine, "set_scripted_stand_down", None)
+        if callable(set_stand_down):
+            set_stand_down(scripted_led_mode)
         abs_beat = self._led_abs_beat(sp_state)
         if abs_beat is not None:
             try:
@@ -810,6 +824,11 @@ class LEDDispatchPolicyMixin:
                 # tick) because this method early-returns on a stable role-key,
                 # LED hold, or pre-drop blackout — any of which would otherwise
                 # freeze an operator's override-fade mid-slide (2026-07-05).
+                moments_blocked = bool(
+                    self._led_blackout_active()
+                    or self._led_manual_override
+                    or self._led_smart_drop_blackout_key
+                )
                 engine.begin_dispatch(
                     active_deck=active,
                     load_gen=d.load_gen,
@@ -818,7 +837,8 @@ class LEDDispatchPolicyMixin:
                     role=role,
                     section_id=section_id,
                     cycle=cycle,
-                    moments_blocked=False,
+                    moments_blocked=moments_blocked,
+                    scripted=scripted_led_mode,
                 )
             except Exception as exc:
                 self._led_last_error = f"color_engine_error:{type(exc).__name__}"
@@ -1310,14 +1330,6 @@ class LEDDispatchPolicyMixin:
                     diy_eligible=self._led_diy_eligible_predicate(),
                     look_preference=self._led_look_preference_predicate(),
                 )
-            except TypeError:
-                try:
-                    decision = commit_role(
-                        "drop",
-                        diy_eligible=self._led_diy_eligible_predicate(),
-                    )
-                except Exception:
-                    decision = None
             except Exception:
                 decision = None
         if decision is None:
