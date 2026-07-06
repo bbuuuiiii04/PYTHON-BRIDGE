@@ -249,7 +249,7 @@ class TestColorEngineConfigDataclass(unittest.TestCase):
     def test_identity_v2_defaults(self) -> None:
         cfg = IdentityV2Config()
         self.assertFalse(cfg.enabled)
-        self.assertEqual(cfg.bass_norm, (0.15, 0.90))
+        self.assertEqual(cfg.bass_norm, (0.5856, 0.9688))
         self.assertEqual(cfg.store_path, "local/state/led_identity_v2.json")
 
     def test_zone_ramp_is_frozen(self) -> None:

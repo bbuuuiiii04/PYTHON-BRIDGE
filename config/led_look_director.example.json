@@ -42,8 +42,8 @@
       "enabled": false,
       "store_path": "local/state/led_identity_v2.json",
       "bass_norm": [
-        0.15,
-        0.9
+        0.5856,
+        0.9688
       ],
       "soft_flip_beats": 8.0,
       "palate_reset_enabled": true,

@@ -146,6 +146,7 @@ Authoritative code:
 - `tools/led_pad_web.py` local LED Pad web service
 - `tools/led_pad_lab.py` Template Lab draft registry and pad-only renderer overlay
 - `tools/led_pad_assets/` vanilla LED Pad UI assets
+- `tools/calibrate_identity_v2.py` read-only local spectral-cache calibration summary for v2 identity anchors
 - `scripts/led_pad.py` LED Pad launcher
 - `streamdeck/streamdeck_midi.py` Stream Deck palette/control renderer and MIDI sender
 
@@ -182,7 +183,10 @@ Config:
 - `color_engine.locked_palette_by_look` is an optional object mapping look names to existing palette names. Locked looks resolve color and slot-color injection from that palette's full p-interval and white value without changing the color-engine journey palette, dwell, focus, or RNG state.
 - `color_engine.v2` is optional and default-off. When present and valid it defines v2 zone ramps,
   bass normalization anchors, the local identity store path, soft-flip, palate-reset, bloom, and
-  motion/travel thresholds. Invalid v2 config disables only v2; the v1 color engine can still load.
+  motion/travel thresholds. The current tracked example/default `bass_norm` anchors are
+  `0.5856`/`0.9688`, produced by `python3 tools/calibrate_identity_v2.py` over 666 valid local v4
+  cache entries on 2026-07-06. Invalid v2 config disables only v2; the v1 color engine can still
+  load.
 - `color_engine.palette_control.zone_notes`, `manual_notes`, and `max_energy_note` are emitted only
   when valid v2 config is enabled. They must not collide with existing v1 palette/control notes.
 - `LEDLook.motion_style` and `LEDLook.travel` are optional per-look hints consumed only by the v2
