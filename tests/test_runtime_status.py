@@ -260,6 +260,29 @@ class LEDCommandParseTests(unittest.TestCase):
         for cmd in ("led_palette_lock", "led_palette_unlock", "led_rainbow_toggle"):
             self.assertEqual(parse_command(json.dumps({"cmd": cmd}))["cmd"], cmd)
 
+    def test_parse_command_accepts_led_engine_v2_commands(self) -> None:
+        self.assertEqual(parse_command('{"cmd":"led_engine","mode":"v2"}')["mode"], "v2")
+        self.assertEqual(
+            parse_command('{"cmd":"led_manual_override","name":"white_sand"}')["name"],
+            "white_sand",
+        )
+        self.assertEqual(parse_command('{"cmd":"led_manual_clear"}')["cmd"], "led_manual_clear")
+        self.assertEqual(
+            parse_command('{"cmd":"led_max_energy_toggle"}')["cmd"],
+            "led_max_energy_toggle",
+        )
+
+    def test_parse_command_rejects_bad_led_engine_v2_commands(self) -> None:
+        bad = (
+            '{"cmd":"led_engine","mode":"v3"}',
+            '{"cmd":"led_manual_override","name":"orange"}',
+            '{"cmd":"led_manual_clear","name":"red"}',
+            '{"cmd":"led_max_energy_toggle","enabled":true}',
+        )
+        for line in bad:
+            with self.subTest(line=line), self.assertRaises(ValueError):
+                parse_command(line)
+
 
 class LaserCommandCallbackTests(unittest.TestCase):
     def test_toggle_laser_director_callback_failure_sets_last_error(self) -> None:
@@ -363,9 +386,17 @@ class LEDCommandCallbackTests(unittest.TestCase):
 
         reader.handle_command({"cmd": "led_palette_queue", "name": "blue_cyan"})
         reader.handle_command({"cmd": "led_palette_lock"})
+        reader.handle_command({"cmd": "led_engine", "mode": "v2"})
+        reader.handle_command({"cmd": "led_manual_override", "name": "red"})
+        reader.handle_command({"cmd": "led_manual_clear"})
+        reader.handle_command({"cmd": "led_max_energy_toggle"})
 
         callback.assert_any_call("led_palette_queue", "blue_cyan")
         callback.assert_any_call("led_palette_lock", None)
+        callback.assert_any_call("led_engine", "v2")
+        callback.assert_any_call("led_manual_override", "red")
+        callback.assert_any_call("led_manual_clear", None)
+        callback.assert_any_call("led_max_energy_toggle", None)
 
 
 class RuntimeStatusWriterTests(unittest.TestCase):

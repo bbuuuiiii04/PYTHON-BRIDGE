@@ -31,6 +31,12 @@ Stream Deck palette control (Package 2, 2026-07-04):
   `led_palette_override` still performs the one-track override path, `led_palette_lock` and
   `led_palette_unlock` stay separate commands, and the no-beat fallback for runtime override does
   not implicitly lock.
+- LIGHTING ENGINE v2 F1 adds explicit command rails for the live engine latch and correction
+  helpers: `led_engine`, `led_manual_override`, `led_manual_clear`, and
+  `led_max_energy_toggle`. `led_palette_queue` / `led_palette_override` can also carry a v2 zone
+  name (`GLACIER`, `DEEP_POOL`, `TWILIGHT`, `ION`, `VOLT`, `EMBERCORE`, or `NEUTRAL`) when the
+  bridge is latched to v2. These are software control surfaces only; they do not prove Stream Deck
+  hardware, Govee output, or room-visible behavior.
 - `ValidationRunner._check_singleton()` derives the singleton result from one process count.
 
 SoundSwitch pack-player boundary (T7c/T7e):
@@ -121,6 +127,10 @@ Accepted commands:
 - `led_palette_lock`
 - `led_palette_unlock`
 - `led_rainbow_toggle`
+- `led_engine`
+- `led_manual_override`
+- `led_manual_clear`
+- `led_max_energy_toggle`
 - `set_soundswitch_pack`
 
 Detailed command table:
@@ -129,7 +139,8 @@ Detailed command table:
 Tests:
 - inspect `tests/` for runtime command parser/handler coverage
 - `tests/test_runtime_status.py` covers the heartbeat payload, throttled log line, and fail-soft
-  color-engine provider handling, including show-deck versus Rekordbox-master separation.
+  color-engine provider handling, including show-deck versus Rekordbox-master separation and the
+  LIGHTING ENGINE v2 runtime command parser/callback rail.
 - run `python -m unittest discover tests`
 - run `python tools/check_docs_drift.py` after command changes
 

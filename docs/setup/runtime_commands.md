@@ -95,6 +95,10 @@ echo '{"cmd":"run_validation"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
 | `led_palette_lock` | none | none | Rejects all payload fields except `cmd`. | Locks the current LED palette through the palette-control event rail when wired. |
 | `led_palette_unlock` | none | none | Rejects all payload fields except `cmd`. | Unlocks LED palette automation through the palette-control event rail when wired. |
 | `led_rainbow_toggle` | none | none | Rejects all payload fields except `cmd`. | Toggles Rainbow mode through the palette-control event rail when wired. |
+| `led_engine` | `mode` | none | `mode` must be `v1` or `v2`. | Sets the LED color-engine latch through the StateManager event rail when wired. `v2` is ignored at runtime if v2 is not configured. |
+| `led_manual_override` | `name` | none | `name` must be `white_sand`, `red`, `green`, or `blue`. | Sets/toggles a v2 manual LED color through the palette-control event rail when wired. |
+| `led_manual_clear` | none | none | Rejects all payload fields except `cmd`. | Clears the v2 manual LED color through the palette-control event rail when wired. |
+| `led_max_energy_toggle` | none | none | Rejects all payload fields except `cmd`. | Arms/disarms the v2 max-energy marker. F1 records the arm state only; rendering remains unchanged until the later F2 work. |
 | `set_soundswitch_pack` | `action` | `backend`, `enabled` | Rejects unknown fields. `action` must be `reload`\|`backend`\|`enable`. `backend` action requires `backend` ∈ `pack`\|`none`\|`midi`. `enable` action requires boolean `enabled`. | Validate-first pack reload/backend/enable via `SoundSwitchPackController` (command thread). Runtime `backend=midi` is deferred (sanitized `unsupported_action`). No implicit hot-enable; pack failure falls back to disabled/none, never MIDI. Status/errors are sanitized. |
 
 ## Parser behavior
@@ -123,6 +127,16 @@ echo '{"cmd":"led_scene","look":"rt_groove_center_chase","ttl_s":30.0}' >> /tmp/
 
 # LED blackout with operator reason
 echo '{"cmd":"led_blackout","reason":"operator_test"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
+
+# Temporarily latch LIGHTING ENGINE v2, then roll back to v1
+echo '{"cmd":"led_engine","mode":"v2"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
+echo '{"cmd":"led_engine","mode":"v1"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
+
+# v2 manual color and zone correction/debug rails
+echo '{"cmd":"led_manual_override","name":"white_sand"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
+echo '{"cmd":"led_manual_clear"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
+echo '{"cmd":"led_palette_override","name":"EMBERCORE"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
+echo '{"cmd":"led_max_energy_toggle"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
 ```
 
 ## Current limitation

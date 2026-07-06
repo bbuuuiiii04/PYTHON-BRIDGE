@@ -49,6 +49,9 @@ Implementation notes:
 - For color-engine slot behavior, verify `resolve_slot_colors()` invariants and slot strategy config validation before updating setup/status docs.
 - For M2.5 slotized cues, keep `SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED` language until operator hardware visual sign-off covers sparkle hue stability, center-burst band split, strobe gating, drop snap behavior, Patch E visual balance, Patch S probabilistic solid-color outcomes, and Patch F generic-default bank rotation.
 - `drop_lifecycle.py` is a pure flat-window parity seam used by laser policy. The live LED resolver remains in `StateManager`; do not redirect LED runtime through the shared resolver without a separate approved change.
+- For LIGHTING ENGINE v2 identity work, preserve the v1-off compatibility gate, keep identity-store
+  disk writes on writer/helper threads (never the 200 Hz push loop), route Stream Deck/runtime
+  mutations through `BridgeEvent`s, and update the palette authority/design docs plus AWR-128.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.
@@ -56,6 +59,11 @@ Required tests:
 - Run `python -m unittest discover tests` when practical for cross-subsystem changes.
 - Run docs checks for docs changes.
 - For M2.5 slot-cue work, include every existing `tests/test_led_color_engine_m2_patch_*.py` file, including the newest Patch F file when present.
+- For LIGHTING ENGINE v2 identity work, include `tests/test_led_identity_v2.py`,
+  `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`,
+  `tests/test_led_palette_control.py`, `tests/test_soundswitch_midi_input.py`,
+  `tests/test_streamdeck_midi.py`, `tests/test_runtime_status.py`, and the relevant
+  StateManager LED tests.
 - When changing the shared drop resolver, run `tests.test_drop_lifecycle` and the existing LED state-manager tests; pure parity does not prove live per-look-duration or offset parity.
 
 Required docs updates:

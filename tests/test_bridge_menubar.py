@@ -77,6 +77,32 @@ class BridgeMenubarTests(unittest.TestCase):
             }
         )
 
+    def test_led_engine_v2_command_tracks_snapshot_mode(self) -> None:
+        bridge_menubar = self._import_module()
+
+        v1 = {"led_color_engine": {"engine": "v1"}}
+        v2 = {"led_color_engine": {"engine": "v2"}}
+        missing = {"led_color_engine": {"available": True}}
+
+        self.assertTrue(bridge_menubar.led_engine_v2_available(v1))
+        self.assertFalse(bridge_menubar.led_engine_v2_enabled(v1))
+        self.assertEqual(bridge_menubar.led_engine_v2_command(v1), {"cmd": "led_engine", "mode": "v2"})
+        self.assertTrue(bridge_menubar.led_engine_v2_enabled(v2))
+        self.assertEqual(bridge_menubar.led_engine_v2_command(v2), {"cmd": "led_engine", "mode": "v1"})
+        self.assertFalse(bridge_menubar.led_engine_v2_available(missing))
+
+    def test_toggle_led_engine_v2_appends_runtime_command(self) -> None:
+        bridge_menubar = self._import_module()
+
+        handler = bridge_menubar.BridgeMenuBar.toggleLedEngineV2_
+        with (
+            patch.object(bridge_menubar, "read_status", return_value={"led_color_engine": {"engine": "v1"}}),
+            patch.object(bridge_menubar, "append_command") as append_command,
+        ):
+            handler.callable(None, None)
+
+        append_command.assert_called_once_with({"cmd": "led_engine", "mode": "v2"})
+
     def test_pack_auto_command_follows_soundswitch_connection(self) -> None:
         bridge_menubar = self._import_module()
         self.assertEqual(

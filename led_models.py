@@ -84,7 +84,7 @@ class ZoneRampConfig:
 class IdentityV2Config:
     enabled: bool = False
     zones: Dict[str, ZoneRampConfig] = field(default_factory=dict)
-    bass_norm: tuple[float, float] = (0.15, 0.90)
+    bass_norm: tuple[float, float] = (0.5856, 0.9688)
     store_path: str = "local/state/led_identity_v2.json"
     soft_flip_beats: float = 8.0
     palate_reset_enabled: bool = True

@@ -47,6 +47,8 @@ automation.
 | Laser Solo | The one-shot "next true drop is lasers-only" pad (contract in `drop_presentation_authority.md`). |
 | Rainbow mode | The toggled section-mapped color scheme (white breakdowns, rainbow drops). |
 | feedback file | The bridge-written state file the deck script renders pads from. |
+| v2 zone | A LIGHTING ENGINE v2 identity family (`GLACIER`, `DEEP_POOL`, `TWILIGHT`, `ION`, `VOLT`, `EMBERCORE`). |
+| correction | A content-keyed v2 zone override written to the local identity store. |
 
 ## The Deck Surface
 
@@ -62,6 +64,48 @@ stay outside the 36-50 range SoundSwitch-learned static looks use.
 The layout is **pinned**. Pads never auto-rearrange when new SoundSwitch
 bindings are authored (the old "waterfall" fill is retired). Static looks
 beyond 4 are dropped with a visible log line, never silently.
+
+## LIGHTING ENGINE v2 F1 Surface
+
+When the bridge is latched to v2, the same 15 keys are reinterpreted for
+per-track color identity. This is F1 only: correction and manual color control
+exist; the later max-energy renderer does not.
+
+| Row | Keys | Pads |
+| --- | --- | --- |
+| Top | 0-5 | Zone pads: `GLACIER`, `DEEP_POOL`, `TWILIGHT`, `ION`, `VOLT`, `EMBERCORE`. |
+| Middle | 6-9 | `white_sand` manual, LED mute, Laser mute, Laser Solo. |
+| Bottom | 10-13, 14 | Static looks filling left→right by note; key 14 switches to the v2 shift layer. |
+| Shift | 0-4 | Red, green, blue, max-energy arm, Rainbow manual. |
+| Shift | 5-6 | Dark/reserved. |
+| Shift | 7-13, 14 | LED mute, Laser mute, Laser Solo, static looks, shift toggle. |
+
+Zone-pad behavior:
+
+1. Tap a different zone stages that zone for the next phrase boundary; tapping
+   the already-staged zone clears the stage.
+2. Long-press a zone applies that zone now with the v2 soft-fade and writes a
+   content-keyed correction through `IdentityStore`.
+3. Tap the active corrected zone clears the correction. Tap the active measured
+   zone with no correction is a no-op.
+4. Corrections are zone-only. Hue slot, depth variant, dynamics budget, and
+   future max-energy metadata remain derived from the frozen measured/provisional
+   identity record.
+
+Manual-pad behavior:
+
+5. `white_sand`, red, green, blue, and Rainbow are manual v2 overrides and outrank
+   automated identity color until cleared or toggled off. Runtime command
+   `led_manual_clear` clears the manual override.
+6. The max-energy pad only arms/disarms an operator marker in F1. It is consumed
+   at a drop and logged, but the rendered LEDs remain unchanged until the later
+   F2 max-energy renderer exists.
+7. The temporary menubar checkbox and runtime command `led_engine v1|v2` are the
+   only engine-switch controls. There are no deck engine-switch pads in F1.
+8. With v2 disabled or unconfigured, the deck uses the existing palette surface
+   and v1 color journey. With v2 enabled but not yet measured for a track, the
+   engine uses a deterministic neutral provisional identity until the async
+   analysis event arrives.
 
 ## Palette Selection Rules
 
@@ -241,8 +285,10 @@ beyond 4 are dropped with a visible log line, never silently.
 
 Runtime status must expose: current palette, queued palette, lock state,
 fade-in-progress, LED mute, laser mute, solo arm state (with arming source),
-and rainbow mode. The feedback file carries the same facts plus per-pad
-display state and a monotonic sequence number.
+rainbow mode, and, when v2 is configured, engine mode, active zone, correction
+state, staged zone, manual override, identity-store degradation, and max-energy
+arm state. The feedback file carries the same facts plus per-pad display state
+and a monotonic sequence number.
 
 ## Required Behavior Tests
 
@@ -279,3 +325,9 @@ types) in `led_color_engine.py`; events in `models.py`; commands in
 `runtime_status.py`; pad bindings via bridge config into the existing MIDI
 input group; deck rendering in `streamdeck/streamdeck_midi.py`. Laser Solo and
 drop-presentation learning remain later-package design intent.
+
+F1 v2 implementation homes: identity helpers/store in `led_identity_v2.py`;
+engine v2 branch in `led_color_engine.py`; async identity derivation, store
+writer ownership, and engine latch in `state_manager.py`; temporary menubar
+switch in `scripts/bridge_menubar.py`; v2 bindings in `led_config.py`,
+`soundswitch_midi_input.py`, and `streamdeck/streamdeck_midi.py`.

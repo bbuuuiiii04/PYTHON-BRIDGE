@@ -414,6 +414,27 @@ def pack_auto_command(status: dict, *, bridge_status: str | None = None) -> dict
     return {"cmd": "set_soundswitch_pack", "action": "enable", "enabled": desired}
 
 
+def led_engine_v2_available(status: dict) -> bool:
+    if not isinstance(status, dict):
+        return False
+    color = status.get("led_color_engine", {})
+    return isinstance(color, dict) and "engine" in color
+
+
+def led_engine_v2_enabled(status: dict) -> bool:
+    if not led_engine_v2_available(status):
+        return False
+    color = status.get("led_color_engine", {})
+    return isinstance(color, dict) and color.get("engine") == "v2"
+
+
+def led_engine_v2_command(status: dict) -> dict:
+    return {
+        "cmd": "led_engine",
+        "mode": "v1" if led_engine_v2_enabled(status) else "v2",
+    }
+
+
 def export_result_line(state: str, result: dict | None = None) -> str:
     result = result or {}
     return {
@@ -806,6 +827,7 @@ class BridgeMenuBar(NSObject):
         self.record_session_item = self._add_action("Record Session: Off", "toggleRecordSession:")
         self.map_lasers_item = self._add_action("Laser Pad…", "mapLasers:")
         self.led_pad_item = self._add_action("LED Pad…", "openLedPad:")
+        self.led_engine_v2_item = self._add_action("LED Engine v2", "toggleLedEngineV2:")
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.quit_item = self._add_action("Quit Menu", "quit:")
         self.status_item.setMenu_(self.menu)
@@ -897,6 +919,12 @@ class BridgeMenuBar(NSObject):
                 self.record_session_item.setTitle_(f"Record Session: On ({rec_path})")
             else:
                 self.record_session_item.setTitle_("Record Session: Off")
+        v2_available = led_engine_v2_available(self._snapshot)
+        self.led_engine_v2_item.setEnabled_(status == "on" and v2_available)
+        self.led_engine_v2_item.setTitle_(
+            "LED Engine v2" if v2_available else "LED Engine v2: not configured"
+        )
+        self.led_engine_v2_item.setState_(1 if led_engine_v2_enabled(self._snapshot) else 0)
         self._adapt_timer(status)
 
     def _render_export_state(self):
@@ -1148,6 +1176,11 @@ class BridgeMenuBar(NSObject):
 
     def openLedPad_(self, _sender):
         open_browser_url(LED_PAD_URL)
+
+    def toggleLedEngineV2_(self, _sender):
+        append_command(led_engine_v2_command(read_status()))
+        if self is not None:
+            self.refresh_(None)
 
     def toggleSmartDrop_(self, _sender):
         append_command({"cmd": "toggle_smart_drop"})

@@ -61,6 +61,32 @@ Stream Deck palette control (Package 2, 2026-07-04):
   D.3). F-B2 (retry log spam) remains open in
   `docs/plans/active/streamdeck_surface_hardening_findings_2026_07_04.md`.
 
+LIGHTING ENGINE v2 F1 identity surface (AWR-128, 2026-07-06):
+- F1 adds a default-off v2 branch inside `LedColorEngine` for per-track color identity. The v1
+  journey engine remains present and the live master latch (`led_engine v1|v2` or the temporary
+  menubar checkbox) decides which branch renders. With v2 off, the v1 render path remains the
+  compatibility path.
+- `led_identity_v2.py` owns the pure identity helpers, deterministic content key/hash, zone
+  assignment, dressing derivation, and the first-write-wins `IdentityStore`. The store path is
+  `local/state/led_identity_v2.json` by default; malformed/corrupt store data degrades to
+  read-only behavior for that boot and must not stop v1 color output.
+- `StateManager` derives `Ev.LED_TRACK_IDENTITY` off the existing ANLZ/spectral worker seam, guards
+  identity events by deck `load_gen`, freezes measured records into the store, and forwards only
+  serial event mutations to the engine. The 200 Hz push loop does not gain file, socket, MIDI,
+  network, or subprocess I/O.
+- Stream Deck v2 feedback and input are additive: zone pads stage or correct zones, manual pads set
+  `white_sand`/red/green/blue/rainbow, the max-energy pad only arms a future F2 hint, and static
+  looks/mutes/Solo remain on the existing rows. The bridge also exposes runtime commands:
+  `led_engine`, `led_manual_override`, `led_manual_clear`, `led_max_energy_toggle`, and zone names
+  through `led_palette_queue` / `led_palette_override`.
+- Look selection may bias toward `LEDLook.motion_style` (`sharp`/`flowing`) and `LEDLook.travel`
+  (`calm`/`wide`) when v2 dressing is active. This is a filter over existing eligible looks, not a
+  new effect renderer.
+- Software validation covers model/config parsing, v1/v2 engine behavior, Stream Deck layout and
+  command/control rails, MIDI bindings, runtime commands, and focused state-manager wiring. No
+  bridge restart, live Rekordbox, SoundSwitch, laser, LED/Govee, MIDI-device, DMX, Enttec, or
+  hardware-visible output validation was performed.
+
 Drop presentation policy (Package 3, AWR-119, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/drop_presentation_authority.md`; the
   `drop_presentation` change contract covers it. The pure ladder/session/learned-store/window-machine
@@ -98,6 +124,7 @@ Authoritative code:
 - `led_models.py`
 - `led_look_director.py`
 - `led_color_engine.py`
+- `led_identity_v2.py`
 - `led_dispatch_policy.py`
 - `led_dispatch_coordinator.py`
 - `led_palette_control.py`
@@ -128,6 +155,8 @@ Key symbols:
 - `LEDConfig`
 - `LEDLookDirector`
 - `LedColorEngine`
+- `LedIdentityV2`
+- `IdentityStore`
 - `LEDDispatchCoordinator`
 - `LedPaletteControl`
 - `GoveeSceneAdapter`
@@ -151,6 +180,13 @@ Config:
 - `color_engine.slot_fill_strategy_by_look` and `color_engine.slot_fill_strategy_by_role` are optional objects; values must be `gradient_even`, `random_with_replacement`, or `random_with_mono_chance`.
 - `color_engine.slot_mono_chance_by_look` is an optional object mapping look names to numeric probabilities in `[0, 1]`; it defaults to `{}` and only affects looks using `random_with_mono_chance`.
 - `color_engine.locked_palette_by_look` is an optional object mapping look names to existing palette names. Locked looks resolve color and slot-color injection from that palette's full p-interval and white value without changing the color-engine journey palette, dwell, focus, or RNG state.
+- `color_engine.v2` is optional and default-off. When present and valid it defines v2 zone ramps,
+  bass normalization anchors, the local identity store path, soft-flip, palate-reset, bloom, and
+  motion/travel thresholds. Invalid v2 config disables only v2; the v1 color engine can still load.
+- `color_engine.palette_control.zone_notes`, `manual_notes`, and `max_energy_note` are emitted only
+  when valid v2 config is enabled. They must not collide with existing v1 palette/control notes.
+- `LEDLook.motion_style` and `LEDLook.travel` are optional per-look hints consumed only by the v2
+  look-selection bias.
 - `LedColorEngine.resolve_slot_colors()` returns exactly six slot colors for slot effects; caller `slot_count` is ignored and slot index 5 is reserved as pure white.
 - Solid palette slots remain possible for every slot cue: a point/mono palette can collapse slots 0-4 to one RGB while slot 5 remains pure white, and `random_with_mono_chance` can opt individual looks into probabilistic solid slots 0-4 without changing the white slot.
 - Patch F collapses the tracked example `default` bank onto generic engine-colored slot looks and moves legacy color-suffix realtime looks into the storage-only `legacy_color_suffix` bank. `LEDLookDirector` still selects only `banks.default`, so the legacy bank preserves definitions without runtime rotation.
@@ -183,6 +219,11 @@ Tests:
   queue/override/lock rail behavior, AWR-121 tap/long-press gesture behavior, LED mute owner
   release, feedback writer/thread behavior, pinned deck layout composition, MIDI pad event
   bindings, and runtime command parsing without hardware.
+- LIGHTING ENGINE v2 F1 coverage lives in `tests/test_led_identity_v2.py`,
+  `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`,
+  `tests/test_led_palette_control.py`, `tests/test_soundswitch_midi_input.py`,
+  `tests/test_streamdeck_midi.py`, `tests/test_runtime_status.py`, and focused StateManager LED
+  tests. It is SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 - The shared `tools/pad_access.py` LAN-access payload (used by both pads' `GET /api/access`) is covered by `tests/test_pad_access.py` (pure-function, loopback/specific-IP/`0.0.0.0` detection cases), plus one HTTP smoke test each in `tests/test_led_pad_service.py` and `tests/test_laser_pad_web.py`.
 - Drop presentation policy Package 3 coverage lives in `tests/test_drop_presentation.py` (pure
   planner/ladder/session/learned-store/window-machine logic; the authority doc's Required Behavior
@@ -203,6 +244,10 @@ Change contract:
 - If changing cloud output, inspect scene adapter and runtime sender.
 - If changing the shared drop resolver, prove parity against the existing StateManager LED resolver and do not assume that pure-resolver parity changes live LED output.
 - If changing LED Pad, follow the `led_pad` contract in `docs/agents/change_contracts.yml` and update `docs/guides/led_pad.md`, this card, `docs/architecture/doc_index.md`, and `docs/status/active_work_registry.md`.
+- If changing LIGHTING ENGINE v2 identity behavior, follow the `led_govee` and
+  `streamdeck_palette` contracts in `docs/agents/change_contracts.yml`; keep v1-off behavior
+  byte-compatible, keep store writes off the push loop, and update this card, runtime command docs,
+  palette authority/design docs, status matrices, validation inventory, and AWR-128.
 - If changing drop presentation, inspect `docs/architecture/drop_presentation_authority.md` first (the acceptance oracle), then `drop_presentation.py` and its `state_manager.py` wiring. Follow the `drop_presentation` change contract in `docs/agents/change_contracts.yml`; the master regression gate (`enabled: false` byte-identical) must stay green.
 - Update this card, feature matrix, validation matrix, active work registry, and config docs.
 

@@ -1,8 +1,9 @@
 """Pure identity helpers for LIGHTING ENGINE v2 Feature 1.
 
 No runtime I/O happens here except ``IdentityStore.load``. Bass normalization is
-configured live; the starting p5/p95 anchors are 0.15/0.90 until the local cache
-calibration tool pins better values.
+configured live; the default p5/p95 anchors are 0.5856/0.9688 from
+``python3 tools/calibrate_identity_v2.py`` over 666 valid local spectral v4
+cache entries on 2026-07-06.
 """
 from __future__ import annotations
 

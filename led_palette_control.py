@@ -237,9 +237,13 @@ class LedPaletteControl:
             self._handle_zone(
                 str(ev.payload.get("name") or ""),
                 str(ev.payload.get("phase") or ""),
+                str(ev.payload.get("intent") or ""),
             )
         elif ev.kind == Ev.LED_MANUAL_PAD:
-            self._handle_manual(str(ev.payload.get("name") or ""))
+            if ev.payload.get("clear"):
+                self._clear_manual()
+            else:
+                self._handle_manual(str(ev.payload.get("name") or ""))
         elif ev.kind == Ev.LED_MAX_ENERGY_PAD:
             if self._toggle_max_energy is not None:
                 self._toggle_max_energy()
@@ -404,11 +408,17 @@ class LedPaletteControl:
         else:
             self._engine.lock()
 
-    def _handle_zone(self, zone: str, phase: str) -> None:
+    def _handle_zone(self, zone: str, phase: str, intent: str = "") -> None:
         if self._engine_mode() != "v2":
             log.debug("[PALETTE] zone-pad-ignored engine=v1 zone=%s", zone)
             return
         if not zone:
+            return
+        if intent == "queue":
+            self._handle_zone_tap(zone)
+            return
+        if intent == "override":
+            self._handle_zone_hold(zone)
             return
         if phase == "down":
             self._zone_down[zone] = time.monotonic()
@@ -470,6 +480,13 @@ class LedPaletteControl:
         set_manual = getattr(self._engine, "set_manual", None)
         if callable(set_manual):
             set_manual(name)
+
+    def _clear_manual(self) -> None:
+        if self._engine_mode() != "v2":
+            return
+        clear_manual = getattr(self._engine, "clear_manual", None)
+        if callable(clear_manual):
+            clear_manual()
 
     def _zone_commit_beat(self, *, default: float | None = None) -> float:
         start = self._get_abs_beat()

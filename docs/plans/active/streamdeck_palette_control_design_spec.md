@@ -545,6 +545,29 @@ Software-tested; suite 2954 OK. What changed:
   (pure helper `_reconcile_static_latches`, 2.0 s local-echo grace, old-payload no-op).
   Authority rule 28.
 
+## Part D.4 — LIGHTING ENGINE v2 F1 overlay (AWR-128, 2026-07-06)
+
+`docs/plans/active/lighting_engine_v2_f1_spec.md` supersedes this doc only for the v2-latched
+Stream Deck color surface. Package 2/AWR-121 remains the v1 palette-control behavior.
+
+F1 implemented surface:
+
+- v2 engine latch is a temporary menubar checkbox plus runtime command `led_engine v1|v2`;
+  there are no deck engine-switch pads.
+- When v2 is active, keys 0-5 are zone pads (`GLACIER`, `DEEP_POOL`, `TWILIGHT`, `ION`, `VOLT`,
+  `EMBERCORE`); key 6 is `white_sand`; keys 7-9 remain LED mute / Laser mute / Laser Solo; keys
+  10-13 remain static looks; key 14 is the shift layer.
+- Shift layer keys 0-2 are red/green/blue manual overrides, key 3 is max-energy arm, key 4 is
+  Rainbow manual, keys 5-6 are dark, and keys 7-13 keep the existing control/static functions.
+- Zone tap stages/unstages a phrase-boundary correction, long-press applies/corrects immediately,
+  and tapping the active corrected zone clears the correction. Corrections are zone-only and
+  content-keyed in `local/state/led_identity_v2.json`.
+- `led_palette_queue` / `led_palette_override` keep v1 palette semantics for palette names, but
+  may carry v2 zone names while the bridge is latched to v2. New runtime commands:
+  `led_manual_override`, `led_manual_clear`, and `led_max_energy_toggle`.
+- Max-energy is arm/consume/log only in F1; it intentionally does not change rendered frames until
+  F2. All behavior remains SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
 ## Part E — Evidence (file:line, HEAD `bd96b32`)
 
 - LED live-control stubs + state + routing note: `led_color_engine.py:724-768`; non-test caller

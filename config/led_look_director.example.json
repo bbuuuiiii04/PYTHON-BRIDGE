@@ -38,6 +38,117 @@
       "rt_groove_chase": "random_with_replacement"
     },
     "slot_mono_chance_by_look": {},
+    "v2": {
+      "enabled": false,
+      "store_path": "local/state/led_identity_v2.json",
+      "bass_norm": [
+        0.15,
+        0.9
+      ],
+      "soft_flip_beats": 8.0,
+      "palate_reset_enabled": true,
+      "palate_reset_beats": 4.0,
+      "palate_reset_dim": 0.35,
+      "bloom_enabled": true,
+      "bloom_hold_beats": 8.0,
+      "bloom_beats": 8.0,
+      "bloom_dim": 0.3,
+      "punch_sharp_threshold": 0.6,
+      "budget_wide_threshold": 0.5,
+      "zones": {
+        "GLACIER": {
+          "base_ramp": [
+            [8, 46, 92],
+            [22, 125, 172],
+            [132, 230, 255]
+          ],
+          "accent_ramp": [
+            [190, 248, 255],
+            [245, 255, 255]
+          ],
+          "white": 0.08,
+          "hue_span": 0.05
+        },
+        "DEEP_POOL": {
+          "base_ramp": [
+            [4, 18, 72],
+            [0, 52, 138],
+            [0, 148, 210]
+          ],
+          "accent_ramp": [
+            [0, 210, 240],
+            [120, 240, 255]
+          ],
+          "white": 0.0,
+          "hue_span": 0.06
+        },
+        "TWILIGHT": {
+          "base_ramp": [
+            [22, 12, 78],
+            [72, 32, 170],
+            [148, 70, 230]
+          ],
+          "accent_ramp": [
+            [210, 120, 255],
+            [255, 205, 255]
+          ],
+          "white": 0.04,
+          "hue_span": 0.08
+        },
+        "ION": {
+          "base_ramp": [
+            [0, 88, 46],
+            [0, 190, 120],
+            [132, 255, 168]
+          ],
+          "accent_ramp": [
+            [190, 255, 60],
+            [238, 255, 175]
+          ],
+          "white": 0.04,
+          "hue_span": 0.07
+        },
+        "VOLT": {
+          "base_ramp": [
+            [95, 55, 0],
+            [215, 150, 0],
+            [255, 235, 70]
+          ],
+          "accent_ramp": [
+            [255, 255, 170],
+            [255, 245, 220]
+          ],
+          "white": 0.06,
+          "hue_span": 0.05
+        },
+        "EMBERCORE": {
+          "base_ramp": [
+            [80, 0, 18],
+            [210, 20, 38],
+            [255, 70, 116]
+          ],
+          "accent_ramp": [
+            [255, 130, 60],
+            [255, 210, 190]
+          ],
+          "white": 0.03,
+          "hue_span": 0.05
+        },
+        "NEUTRAL": {
+          "base_ramp": [
+            [16, 44, 72],
+            [44, 92, 128],
+            [130, 190, 220]
+          ],
+          "accent_ramp": [
+            [205, 230, 245],
+            [255, 255, 255]
+          ],
+          "white": 0.08,
+          "hue_span": 0.04
+        }
+      }
+    },
     "exempt_looks": [
       "room_blackout",
       "rt_blackout",
@@ -126,7 +237,21 @@
       "led_mute_note": 58,
       "laser_mute_note": 59,
       "laser_solo_note": 60,
-      "rainbow_note": 61
+      "rainbow_note": 61,
+      "zone_notes": {
+        "GLACIER": 62,
+        "DEEP_POOL": 63,
+        "TWILIGHT": 64,
+        "ION": 65,
+        "VOLT": 66,
+        "EMBERCORE": 67
+      },
+      "manual_notes": {
+        "red": 68,
+        "green": 69,
+        "blue": 70
+      },
+      "max_energy_note": 71
     },
     "palettes": {
       "blue_cyan": {
@@ -723,6 +848,8 @@
       "allow_strobe": false,
       "backend": "realtime_razer",
       "color_source": "engine",
+      "motion_style": "flowing",
+      "travel": "wide",
       "params": {}
     },
     "rt_groove_freestyle_nebula": {
@@ -803,6 +930,8 @@
       "allow_strobe": true,
       "backend": "realtime_razer",
       "color_source": "engine",
+      "motion_style": "sharp",
+      "travel": "wide",
       "params": {}
     },
     "rt_drop_chase_freestyle_nebula": {
@@ -892,6 +1021,8 @@
       "allow_strobe": true,
       "backend": "realtime_razer",
       "color_source": "engine",
+      "motion_style": "flowing",
+      "travel": "calm",
       "params": {}
     },
     "rt_post_drop_freestyle_nebula": {

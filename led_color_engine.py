@@ -357,6 +357,7 @@ class LedColorEngine:
         self._v2_bloom_until: float | None = None
         self._v2_claims: list[Claim] = []
         self._v2_first_seen_beat: float | None = None
+        self._v2_now: float = 0.0
 
     # ------------------------------------------------------------------
     # Public properties
@@ -1011,10 +1012,10 @@ class LedColorEngine:
     def apply_zone_override(self, zone: str, *, start_beat: float, end_beat: float) -> None:
         if self._v2_cfg is None or zone not in self._v2_cfg.zones:
             return
+        outgoing = self._v2_active_dressing()
         self._v2_apply_zone(zone)
-        dressing = self._v2_active_dressing()
-        if dressing is not None:
-            self._v2_flip_fade = (dressing.slot_rgbs, max(float(end_beat), float(start_beat)))
+        if outgoing is not None:
+            self._v2_flip_fade = (outgoing.slot_rgbs, max(float(end_beat), float(start_beat)))
 
     def clear_zone_override(self) -> None:
         self._v2_staged = None
@@ -1044,6 +1045,7 @@ class LedColorEngine:
         track_key = (active_deck, load_gen)
         key = content_id or filepath or str(load_gen)
         now = float(cycle)
+        self._v2_now = now
         if track_key != self._v2_current_track_key:
             outgoing = self._v2_active_dressing()
             self._v2_current_track_key = track_key
@@ -1153,6 +1155,7 @@ class LedColorEngine:
 
     def _v2_advance(self, abs_beat: float) -> None:
         now = float(abs_beat)
+        self._v2_now = now
         if self._v2_staged is not None and now >= self._v2_staged[1]:
             self._v2_apply_zone(self._v2_staged[0])
             self._v2_staged = None
@@ -1198,7 +1201,7 @@ class LedColorEngine:
             fade_from, fade_until = self._v2_bloom_pending
         if fade_from is None or fade_until is None:
             return
-        remaining = max(0.0, fade_until - float(len(self._prev_color)))
+        remaining = max(0.0, fade_until - self._v2_now)
         fade_beats = remaining or float(self._config.fade_beats_by_role.get(role, 0.0))
         if slots:
             result["slot_colors_from"] = list(fade_from)

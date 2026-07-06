@@ -87,7 +87,7 @@ from .soundswitch_pack_player_config import (
 from .led_config import LEDConfigResult, load_led_look_director_config
 from .led_look_director import LEDLookDirector, LED_AUTOMATION_ROLE_ORDER
 from .led_color_engine import LedColorEngine
-from .led_identity_v2 import IdentityStore
+from .led_identity_v2 import ALL_ZONES, IdentityStore
 from .led_palette_control import LIVE_PALETTE_STATE_PATH
 from .govee_scene_adapter import GoveeSceneAdapter
 from .govee_runtime_sender import GoveeRuntimeSender
@@ -1354,16 +1354,32 @@ def main() -> None:
 
     def _led_palette_command(cmd: str, name: str | None = None) -> bool:
         if cmd in ("led_palette_queue", "led_palette_override"):
-            kind = Ev.LED_PALETTE_PAD
-            payload = {
-                "name": str(name or ""),
-                "intent": "queue" if cmd == "led_palette_queue" else "override",
-            }
+            raw_name = str(name or "").strip()
+            zone = raw_name.upper()
+            intent = "queue" if cmd == "led_palette_queue" else "override"
+            if zone in ALL_ZONES:
+                kind = Ev.LED_ZONE_PAD
+                payload = {"name": zone, "intent": intent}
+            else:
+                kind = Ev.LED_PALETTE_PAD
+                payload = {"name": raw_name, "intent": intent}
         elif cmd in ("led_palette_lock", "led_palette_unlock"):
             kind = Ev.LED_PALETTE_LOCK_PAD
             payload = {"intent": "lock" if cmd == "led_palette_lock" else "unlock"}
         elif cmd == "led_rainbow_toggle":
             kind = Ev.LED_RAINBOW_PAD
+            payload = {}
+        elif cmd == "led_engine":
+            kind = Ev.LED_ENGINE_MODE
+            payload = {"mode": str(name or "v1")}
+        elif cmd == "led_manual_override":
+            kind = Ev.LED_MANUAL_PAD
+            payload = {"name": str(name or "")}
+        elif cmd == "led_manual_clear":
+            kind = Ev.LED_MANUAL_PAD
+            payload = {"clear": True}
+        elif cmd == "led_max_energy_toggle":
+            kind = Ev.LED_MAX_ENERGY_PAD
             payload = {}
         else:
             return False

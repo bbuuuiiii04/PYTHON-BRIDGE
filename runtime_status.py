@@ -452,9 +452,13 @@ class CommandReader(threading.Thread):
             "led_palette_lock",
             "led_palette_unlock",
             "led_rainbow_toggle",
+            "led_engine",
+            "led_manual_override",
+            "led_manual_clear",
+            "led_max_energy_toggle",
         }:
             if self._led_palette_callback:
-                name_raw = command.get("name")
+                name_raw = command.get("mode") if cmd == "led_engine" else command.get("name")
                 name = str(name_raw) if name_raw is not None else None
                 ok, detail = _invoke_callback(
                     lambda: self._led_palette_callback(cmd, name)
@@ -523,6 +527,10 @@ def parse_command(line: str) -> dict[str, Any]:
         "led_palette_lock",
         "led_palette_unlock",
         "led_rainbow_toggle",
+        "led_engine",
+        "led_manual_override",
+        "led_manual_clear",
+        "led_max_energy_toggle",
         "set_soundswitch_pack",
     }
     if cmd not in allowed:
@@ -629,6 +637,24 @@ def parse_command(line: str) -> dict[str, Any]:
         obj = dict(obj)
         obj["name"] = name.strip()
     if cmd in {"led_palette_lock", "led_palette_unlock", "led_rainbow_toggle"}:
+        extra = set(obj.keys()) - {"cmd"}
+        if extra:
+            raise ValueError(f"{cmd} does not accept payload fields")
+    if cmd == "led_engine":
+        extra = set(obj.keys()) - {"cmd", "mode"}
+        if extra:
+            raise ValueError("led_engine has unknown fields")
+        mode = obj.get("mode")
+        if mode not in {"v1", "v2"}:
+            raise ValueError("led_engine mode must be v1|v2")
+    if cmd == "led_manual_override":
+        extra = set(obj.keys()) - {"cmd", "name"}
+        if extra:
+            raise ValueError("led_manual_override has unknown fields")
+        name = obj.get("name")
+        if name not in {"white_sand", "red", "green", "blue"}:
+            raise ValueError("led_manual_override name must be white_sand|red|green|blue")
+    if cmd in {"led_manual_clear", "led_max_energy_toggle"}:
         extra = set(obj.keys()) - {"cmd"}
         if extra:
             raise ValueError(f"{cmd} does not accept payload fields")
