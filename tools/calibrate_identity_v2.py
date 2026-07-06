@@ -27,6 +27,17 @@ from rb_ss_bridge_v2.led_identity_v2 import (  # noqa: E402
     identity_scores,
 )
 
+ANCHOR_CHECKS: dict[str, dict[str, str]] = {
+    "starsound_pt3": {
+        "label": "STARsound (pt3)",
+        "expected_zone": "GLACIER",
+    },
+    "cant_say_nah": {
+        "label": "Can't Say Nah",
+        "expected_zone": "DEEP_POOL",
+    },
+}
+
 
 def _percentile(values: list[float], pct: float) -> float:
     if not values:
@@ -82,15 +93,31 @@ def _is_stale(payload: dict[str, Any]) -> bool:
     )
 
 
-def _feature_from_path(path: Path, *, include_stale: bool) -> tuple[str, Any | None]:
+def _feature_from_path(path: Path, *, include_stale: bool) -> tuple[str, Any | None, str]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return ("corrupt", None)
+        return ("corrupt", None, "")
     if not include_stale and _is_stale(payload):
-        return ("stale", None)
+        return ("stale", None, "")
     feature = spectral_cache._features_v4_from_payload(payload)  # type: ignore[attr-defined]
-    return ("ok", feature) if feature is not None else ("invalid", None)
+    audio_filepath = payload.get("audio_filepath")
+    path_text = audio_filepath if isinstance(audio_filepath, str) else ""
+    return ("ok", feature, path_text) if feature is not None else ("invalid", None, path_text)
+
+
+def _anchor_key(audio_filepath: str) -> str:
+    text = (
+        audio_filepath.lower()
+        .replace("’", "'")
+        .replace("_", " ")
+        .replace("-", " ")
+    )
+    if "starsound" in text and ("pt3" in text or "pt 3" in text or "part 3" in text):
+        return "starsound_pt3"
+    if "can't say nah" in text or "cant say nah" in text:
+        return "cant_say_nah"
+    return ""
 
 
 def build_summary(cache_dir: Path, *, limit: int | None, include_stale: bool) -> dict[str, Any]:
@@ -111,9 +138,10 @@ def build_summary(cache_dir: Path, *, limit: int | None, include_stale: bool) ->
         for key in ("aggression", "luminance", "distortion")
     }
     synth_rates: list[float] = []
+    anchor_results: dict[str, dict[str, Any]] = {}
 
     for path in _iter_paths(cache_dir, limit):
-        status, v4 = _feature_from_path(path, include_stale=include_stale)
+        status, v4, audio_filepath = _feature_from_path(path, include_stale=include_stale)
         counts[status] += 1
         if v4 is None:
             continue
@@ -121,7 +149,18 @@ def build_summary(cache_dir: Path, *, limit: int | None, include_stale: bool) ->
         flags = spectral_profile.sustained_synth_flags(v4)
         synth_rate = (sum(1 for flag in flags if flag) / len(flags)) if flags else 0.0
         scores = identity_scores(axes, dict(v4.scalars), synth_rate)
-        zones[assign_zone(scores)] += 1
+        zone = assign_zone(scores)
+        zones[zone] += 1
+        anchor_key = _anchor_key(audio_filepath)
+        if anchor_key and anchor_key not in anchor_results:
+            expected = ANCHOR_CHECKS[anchor_key]["expected_zone"]
+            anchor_results[anchor_key] = {
+                "label": ANCHOR_CHECKS[anchor_key]["label"],
+                "status": "pass" if zone == expected else "fail",
+                "expected_zone": expected,
+                "actual_zone": zone,
+                "audio_filepath": audio_filepath,
+            }
         for key, value in axes.items():
             if key in axes_values:
                 axes_values[key].append(float(value))
@@ -134,10 +173,22 @@ def build_summary(cache_dir: Path, *, limit: int | None, include_stale: bool) ->
     valid = counts["ok"]
     total = sum(counts.values())
     bass = axes_values["bass"]
+    anchor_checks = {
+        key: anchor_results.get(
+            key,
+            {
+                "label": target["label"],
+                "status": "not_found",
+                "expected_zone": target["expected_zone"],
+            },
+        )
+        for key, target in ANCHOR_CHECKS.items()
+    }
     return {
         "cache_dir": str(cache_dir),
         "entries_seen": total,
         "valid_entries": valid,
+        "anchor_checks": anchor_checks,
         "skipped": {
             "stale": counts["stale"],
             "corrupt": counts["corrupt"],
