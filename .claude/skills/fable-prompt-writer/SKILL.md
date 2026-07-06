@@ -32,6 +32,7 @@ Do not spend Fable on routine edits, small bugfixes, summaries, lookups, or anyt
 - **Prompts and skills written for prior models are usually too prescriptive for Fable 5.** When revising an old prompt, cut instructions before adding any.
 - **Never ask it to reproduce its reasoning.** Echo/transcribe/explain-your-thinking instructions can trigger a `reasoning_extraction` refusal. Ask for evidence-tied findings, claim labels, and verdicts instead.
 - **Long runs benefit from parallel subagents, memory, and fresh-context verifiers** — say so explicitly when the task warrants them.
+- **Fan-out subagents must be cheaper-tier — never Fable.** Only one Fable-tier agent runs (Fable itself). When a Fable prompt fans out, its subagents go to cheaper models; Fable never spawns further Fable-tier subagents (quota protection); nested spawns are announced, not silent. *(retro 2026-07-06, from operator corrections 00880420:654 + 69a81f74:889.)*
 
 ## Prompt skeleton
 

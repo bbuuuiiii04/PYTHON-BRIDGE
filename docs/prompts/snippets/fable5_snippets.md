@@ -42,7 +42,7 @@ Canonical drop-in blocks for prompts targeting Claude Fable 5. Verbatim blocks a
 
 ## `parallel-subagents` — fan-out work on long runs
 
-> Delegate independent subtasks to subagents and keep working while they run. Intervene if a subagent goes off track or is missing relevant context.
+> Delegate independent subtasks to subagents and keep working while they run. Send those subagents to cheaper models — you are the only Fable-tier agent and must not spawn further Fable-tier subagents. Intervene if a subagent goes off track or is missing relevant context, and announce nested spawns rather than running them silently.
 
 ## `memory-system` — agents with a persistent memory directory
 
