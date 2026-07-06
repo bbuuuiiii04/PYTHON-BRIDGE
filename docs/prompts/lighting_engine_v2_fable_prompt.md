@@ -8,7 +8,7 @@ validation_scope: Claude Fable 5 prompt text only; no bridge behavior, runtime a
 
 # Fable 5 Prompt — LIGHTING ENGINE v2 · full build-out (F1 → F2 → F3 → F4, sequential & live-gated)
 
-**Paste-to-Fable kickstart:** *"Read `docs/prompts/lighting_engine_v2_f1_fable_prompt.md` and execute it. Effort: high."*
+**Paste-to-Fable kickstart:** *"Read `docs/prompts/lighting_engine_v2_fable_prompt.md` and execute it. Effort: high."*
 
 ---
 
