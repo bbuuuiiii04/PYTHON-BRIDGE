@@ -27,7 +27,7 @@ from rb_ss_bridge_v2.drop_presentation import (  # noqa: E402
     DropPresentationConfig,
 )
 from rb_ss_bridge_v2.models import BridgeEvent, Ev  # noqa: E402
-from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState  # noqa: E402
+from rb_ss_bridge_v2.smart_phrasing import PhraseSegment, SmartPhrasingState  # noqa: E402
 from rb_ss_bridge_v2.soundswitch_laser_player import LaserPackPlayer  # noqa: E402
 from rb_ss_bridge_v2.soundswitch_pack_runtime import PackRuntime  # noqa: E402
 
@@ -188,7 +188,10 @@ class DamperAudibleLatchIntegrationTests(unittest.TestCase):
 
 
 class PlanAndTickIntegrationTests(unittest.TestCase):
-    def _sm_with_plan(self, *, drops=(64.0,), tags=(), learned=(), with_player=False):
+    def _sm_with_plan(
+        self, *, drops=(64.0,), tags=(), learned=(), with_player=False,
+        phrase_segments=None,
+    ):
         if with_player:
             backend = _FakeBackend()
             sm = _make_sm(player=LaserPackPlayer(_pack()), backend=backend)
@@ -203,9 +206,134 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
         sm._drop_presentation_tags_ready[1] = 3
         sm._drop_presentation_tag_beats[1] = tuple(tags)
         sm._drop_presentation_learned_store._entries["content-1"] = list(learned)
-        sm._build_phrase_segments = lambda _d: ()
+        if phrase_segments is None:
+            phrase_segments = tuple(
+                PhraseSegment(float(beat) - 16.0, float(beat), "up") for beat in drops
+            )
+        sm._build_phrase_segments = lambda _d: tuple(phrase_segments)
         sm._maybe_build_drop_plan(1)
         return sm, d
+
+    def test_runway_less_drop_from_idle_does_not_open_window(self) -> None:
+        sm, d = self._sm_with_plan(
+            drops=(64.0,),
+            phrase_segments=(PhraseSegment(0.0, 16.0, "up"),),
+        )
+        self.assertEqual(sm._drop_presentation_plan.decision_for(64.0).runway, 0.0)
+        sm._drop_presentation_session.opening_tracks_counted = 3
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=64.0, active_drop_beat=64.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+
+        self.assertIsNone(sm._drop_presentation_last_actions.presentation)
+        self.assertFalse(sm._drop_presentation_last_actions.base_suppressed)
+        self.assertEqual(sm._led_blackout_owners, set())
+
+    def test_runway_less_marker_inside_leds_only_window_does_not_reenter(self) -> None:
+        sm, d = self._sm_with_plan(
+            drops=(32.0, 96.0),
+            with_player=True,
+            phrase_segments=(PhraseSegment(16.0, 32.0, "up"),),
+        )
+        self.assertGreater(sm._drop_presentation_plan.decision_for(32.0).runway, 0.0)
+        self.assertEqual(sm._drop_presentation_plan.decision_for(96.0).runway, 0.0)
+        sm._drop_presentation_session.opening_tracks_counted = 3
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        original_end = sm._drop_presentation_window._window_end_beat
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=96.0, active_drop_beat=96.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_ONLY)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "leds_only_personality")
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+        self.assertEqual(sm._drop_presentation_window._window_end_beat, original_end)
+
+    def test_true_drop_inside_open_window_reenters_with_own_presentation(self) -> None:
+        sm, d = self._sm_with_plan(drops=(32.0, 96.0))
+        sm._drop_presentation_session.opening_tracks_counted = 3
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_ONLY)
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=96.0, active_drop_beat=96.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_PLUS_LASERS)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "both_finale")
+        self.assertEqual(sm._drop_presentation_window._window_end_beat, 288.0)
+
+    def test_runway_less_hotcue_tag_still_opens_window(self) -> None:
+        sm, d = self._sm_with_plan(
+            drops=(64.0,),
+            tags=(64.5,),
+            phrase_segments=(PhraseSegment(0.0, 16.0, "up"),),
+        )
+        sm._drop_presentation_base_live = True
+        sm._laser_director = mock.Mock()
+        sm._laser_director.is_enabled.return_value = True
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=64.0, active_drop_beat=64.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LASERS_ONLY)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "solo_hotcue")
+        self.assertIn("drop_spotlight", sm._led_blackout_owners)
+
+    def test_manual_armed_runway_less_drop_still_fires_lasers_only(self) -> None:
+        sm, d = self._sm_with_plan(
+            drops=(64.0,),
+            phrase_segments=(PhraseSegment(0.0, 16.0, "up"),),
+        )
+        sm._drop_presentation_armed_key = (1, 3)
+        sm._drop_presentation_base_live = True
+        sm._laser_director = mock.Mock()
+        sm._laser_director.is_enabled.return_value = True
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=64.0, active_drop_beat=64.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LASERS_ONLY)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "solo_manual")
+        self.assertIsNone(sm._drop_presentation_armed_key)
+
+    def test_runway_less_raw_impact_still_updates_session_bookkeeping(self) -> None:
+        sm, d = self._sm_with_plan(
+            drops=(64.0,),
+            phrase_segments=(PhraseSegment(0.0, 16.0, "up"),),
+        )
+        self.assertEqual(sm._drop_presentation_session.observed_drop_count, 0)
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=64.0, active_drop_beat=64.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+
+        self.assertEqual(sm._drop_presentation_session.observed_drop_count, 1)
+        self.assertEqual(sm._drop_presentation_session.runway_record, 0.0)
 
     def test_leds_only_drop_suppresses_base_without_touching_blackout(self) -> None:
         # Single drop track -> personality gives it lasers (ceil(0.4*1)=1) AND
@@ -308,7 +436,7 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
         self.assertEqual(sm._drop_presentation_last_actions.reason, "guard_fallback_both")
         self.assertEqual(sm._led_blackout_owners, set())
 
-    def test_plan_unavailable_at_impact_fails_open_to_both(self) -> None:
+    def test_plan_unavailable_at_impact_fails_open_without_suppression(self) -> None:
         sm = _make_sm()
         _enable_drop_presentation(sm)
         d = _deck_state(load_gen=9)
@@ -318,8 +446,10 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
         sm._drop_presentation_tick(
             active=1, d=d, sp_state=_sp_state(), impact_now=True,
         )
-        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_PLUS_LASERS)
-        self.assertEqual(sm._drop_presentation_last_actions.reason, "plan_unavailable")
+        self.assertIsNone(sm._drop_presentation_last_actions.presentation)
+        self.assertFalse(sm._drop_presentation_last_actions.base_suppressed)
+        self.assertEqual(sm._led_blackout_owners, set())
+        self.assertEqual(sm._drop_presentation_last_pending[:2], (LEDS_PLUS_LASERS, "plan_unavailable"))
 
 
 class SoloPadIntegrationTests(unittest.TestCase):

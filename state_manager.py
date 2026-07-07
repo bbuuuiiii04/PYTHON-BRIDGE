@@ -2612,6 +2612,11 @@ class StateManager(LEDDispatchPolicyMixin):
         pending_reason = ""
         auto_solo_fired = False
         armed = self._drop_presentation_armed_key == track_key
+        presentation_impact = bool(
+            impact_now
+            and decision is not None
+            and (decision.runway > 0.0 or decision.tagged or armed)
+        )
         if decision is not None:
             gearshift_pending = session.gearshift_pending_for(track_key)
             record_breaking = session.is_record_breaking(decision.runway, cfg.record_min_drops)
@@ -2656,7 +2661,7 @@ class StateManager(LEDDispatchPolicyMixin):
             beats_to_next_drop=sp_state.beats_to_next_drop,
             next_drop_beat=sp_state.next_smart_drop_beat,
             drop_role=role,
-            impact_now=impact_now,
+            impact_now=presentation_impact,
             laser_visible=laser_visible,
             stopped=not d.playing,
             track_changed=track_changed,

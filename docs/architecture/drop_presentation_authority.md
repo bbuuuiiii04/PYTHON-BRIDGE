@@ -1,14 +1,14 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 8e5ba91
-last_verified_date: 2026-07-04
+last_verified_commit: de4bcec
+last_verified_date: 2026-07-07
 validation_scope: behavior contract, implemented and software-tested against it; no live or hardware validation implied
 ---
 
 # Drop Presentation Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; IMPLEMENTED / SOFTWARE-TESTED (Package 3 of AWR-119, landed 2026-07-04; AWR-135 section-length hold update and AWR-138 impact re-entry update landed 2026-07-07). SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED — the operator's live pass is the only remaining gate. Implementation: `drop_presentation.py` (planner/ladder/session/learned-store/window machine), base suppression in `soundswitch_laser_player.py`, wiring in `state_manager.py`, hot-cue tag reading in `filepath_resolver.py`, config in `led_config.py` / `config/led_look_director.example.json`. Three known limitations vs. this document, deliberate and reported: (1) true-drop impact detection reuses the Laser Director's own `drop_crossing` decision rather than a second parallel drop-lifecycle instance, so the policy is inert if the Laser Director is ever unconfigured (matches the operator's actual setup); (2) the "manual interaction" fail-open trigger is implemented and tested at the window-machine level but has no wired state_manager-level detector yet (no sufficiently precise, low-risk signal was identified this pass); (3) a `lasers_only` solo that re-enters from inside an already-open window fires at impact without the LED pre-dark countdown because pre-dark only runs from idle.
+Status: AUTHORITATIVE TARGET BEHAVIOR; IMPLEMENTED / SOFTWARE-TESTED (Package 3 of AWR-119, landed 2026-07-04; AWR-135 section-length hold update, AWR-138 impact re-entry update, and AWR-139 true-drop section gate landed 2026-07-07). SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED — the operator's live pass is the only remaining gate. Implementation: `drop_presentation.py` (planner/ladder/session/learned-store/window machine), base suppression in `soundswitch_laser_player.py`, wiring in `state_manager.py`, hot-cue tag reading in `filepath_resolver.py`, config in `led_config.py` / `config/led_look_director.example.json`. Three known limitations vs. this document, deliberate and reported: (1) impact detection reuses the Laser Director's own `drop_crossing` decision rather than a second parallel drop-lifecycle instance, so the policy is inert if the Laser Director is ever unconfigured (matches the operator's actual setup); (2) the "manual interaction" fail-open trigger is implemented and tested at the window-machine level but has no wired state_manager-level detector yet (no sufficiently precise, low-risk signal was identified this pass); (3) a `lasers_only` solo that re-enters from inside an already-open window fires at impact without the LED pre-dark countdown because pre-dark only runs from idle.
 
 This document defines which fixtures fire on which drops. Behavior that
 differs from this document is a regression unless this document is
@@ -22,8 +22,8 @@ Sibling authorities: `palette_control_authority.md` (the deck surface),
 ## Meaning
 
 Since the Govee LEDs took over ambient duty, **lasers are drop-only
-punctuation — and most drops don't even get them.** Every true drop is dealt
-exactly one of three presentations:
+punctuation — and most drops don't even get them.** Every drop section is dealt
+exactly one of three presentations by the true drop that starts the section:
 
 | Presentation | Frequency intent | What the room sees |
 | --- | --- | --- |
@@ -41,9 +41,9 @@ zero randomness anywhere in this policy.**
 
 | Term | Meaning |
 | --- | --- |
-| true drop | A drop per the bridge's existing qualification: Smart-Drop selection (intro/outro filtered) landing with a tension predecessor per the drop-lifecycle gate. This policy invents no new drop detection. |
+| true drop | For presentation windows, a drop decision whose runway is greater than 0.0 beats: contiguous breakdown (`low`) or buildup (`up`) immediately before the impact. Breakdown-only runways count. A runway-less marker can still drive laser/LED look bursts, but it cannot open or re-enter the section's presentation unless the operator explicitly overrides it with a Solo arm or hot-cue tag. |
 | runway | Consecutive beats immediately before an impact whose phrase role is breakdown or buildup, walking backward, stopping at the first beat that is anything else. A groove between breakdown and buildup resets it (tension released = clock restarts). |
-| drop window | Impact → end of the smart-phrasing drop role. A newer true-drop impact can re-enter the window with its own planned presentation and re-stamp the cap. `drop_window_cap_beats` is a 192-beat stuck-role backstop, not the expected release. The shared phrase authority — never an LED- or laser-private timer. |
+| drop window | Impact → end of the smart-phrasing drop role. A newer true-drop impact can re-enter the window with its own planned presentation and re-stamp the cap; a runway-less marker inside the same section leaves the existing presentation alone. `drop_window_cap_beats` is a 192-beat stuck-role backstop, not the expected release. The shared phrase authority — never an LED- or laser-private timer. |
 | pre-dark | Govees joining the lasers' existing pre-drop blackout for the final `led_predark_beats` (default 4) before a solo's impact: total darkness into the hit. |
 | session | One bridge process lifetime. Damper counters and the runway record reset with it; the learned store persists across sessions. |
 | learned store | The persistent per-track memory of the operator's manual solos (`local/state/laser_solo_learned.json`), keyed by `content_id` + the drop's **beat position** (±2-beat lookup tolerance — survives Rekordbox re-analysis reindexing; operator 2026-07-04). |
@@ -74,18 +74,20 @@ First match wins, evaluated per true drop. Auto-solo tiers (4-6) fire at most
 
 ## Solo Source Contracts
 
-**Manual arm (tier 2).** Pressing the Solo pad arms the *next* true drop on
+**Manual arm (tier 2).** Pressing the Solo pad arms the *next* drop impact on
 the active deck — not the current beat, and a press during an already-playing
-drop arms the following one. Arming auto-clears on track change (an armed solo
-never carries into a track the operator didn't aim it at). Pressing while
-armed disarms. The pad pulses whenever ANY tier has a solo pending, and that
-press-to-cancel is the single veto gesture for all of them.
+drop arms the following one. Manual arm is an explicit operator override, so it
+can fire even when that marker has no runway. Arming auto-clears on track
+change (an armed solo never carries into a track the operator didn't aim it
+at). Pressing while armed disarms. The pad pulses whenever ANY tier has a solo
+pending, and that press-to-cancel is the single veto gesture for all of them.
 
 **Hot-cue tag (tier 3).** A hot cue whose name contains the marker
 (case-insensitive), matched to the nearest smart drop within ±2 beats, makes
-that drop a solo. No budget: tagging is deliberate — two tagged anthems
-back-to-back fire back-to-back. A marker cue that matches no smart drop is
-ignored and surfaced in status (never a crash, never a guess). Tags on
+that drop a solo. This is the other explicit operator override, so a tagged
+marker can fire even with no runway. No budget: tagging is deliberate — two
+tagged anthems back-to-back fire back-to-back. A marker cue that matches no
+smart drop is ignored and surfaced in status (never a crash, never a guess). Tags on
 scripted tracks are ignored (see Scripted Exemption). Cue names are read from
 Rekordbox's database once per track load, off the hot path (the on-disk ANLZ
 cue cache is stale by construction and must not be used); a cue edited
@@ -127,9 +129,11 @@ suppressed (damper), and tracks without phrase data are invisible to this tier.
 - **`lasers_only` choreography:** pre-dark for the final `led_predark_beats` →
   impact with Govees dark, lasers alone → automatic restore at window end.
 - A true-drop impact that lands while a window is already open asserts its own
-  planned presentation and restarts the backstop from that impact beat. Known
-  limit: a `lasers_only` solo reached this way skips the LED pre-dark countdown
-  and fires at impact, because pre-dark only arms from idle.
+  planned presentation and restarts the backstop from that impact beat. A
+  runway-less marker inside the open window keeps the current section's
+  presentation, while laser drop/post-drop look cycling still runs normally.
+  Known limit: a `lasers_only` solo reached this way skips the LED pre-dark
+  countdown and fires at impact, because pre-dark only arms from idle.
 - **Darkness guard (all solo sources):** before the Govees are cut — checked
   at pre-dark start AND at impact — the bridge must verify lasers will
   actually be visible: laser output live and rendering a drop autoloop, no

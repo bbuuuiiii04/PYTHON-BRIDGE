@@ -173,11 +173,13 @@ Drop presentation policy (Package 3, AWR-119, 2026-07-04):
   `Ev.LASER_SOLO_PAD`, note-off no-ops, same as the other three Stream Deck pad kinds), built from
   Package 2's already-reserved `laser_solo_note` config key. `enabled: false` in the new
   `/drop_presentation` config block is the master regression gate: every drop renders
-  `leds_plus_lasers` exactly as today, byte-identical. AWR-135/AWR-138 updates LED-only drop
-  windows so laser base suppression follows the real drop/post-drop role end, and later true-drop
-  impacts inside an open window assert their own presentation and re-stamp the cap. The 192-beat
-  `drop_window_cap_beats` default is only a stuck-role backstop. A `lasers_only` solo that
-  re-enters mid-window skips the LED pre-dark countdown and fires at impact. SOFTWARE-VALIDATED
+  `leds_plus_lasers` exactly as today, byte-identical. AWR-135/AWR-138/AWR-139 updates LED-only
+  drop windows so laser base suppression follows the real drop/post-drop role end, and only later
+  true-drop impacts (runway > 0.0, or manual Solo / hot-cue override) inside an open window assert
+  their own presentation and re-stamp the cap. Runway-less markers keep laser/LED look cycling but
+  cannot re-roll the section's fixture split. The 192-beat `drop_window_cap_beats` default is only
+  a stuck-role backstop. A `lasers_only` solo that re-enters mid-window skips the LED pre-dark
+  countdown and fires at impact. SOFTWARE-VALIDATED
   ONLY / HARDWARE-UNVALIDATED.
 
 Drop presentation stop fail-open (v1 foundation audit fix DD1, 2026-07-06):
