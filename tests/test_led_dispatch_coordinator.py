@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -51,6 +52,7 @@ class _Adapter:
 class _Runner:
     def __init__(self) -> None:
         self.desired = []
+        self.fire_count = 0
         self.emergency_count = 0
         self.stop_called = False
         self.cloud_dispatch_notes: list[float] = []
@@ -59,7 +61,7 @@ class _Runner:
         self.desired.append(spec)
 
     def fire_trigger(self) -> None:
-        pass
+        self.fire_count += 1
 
     def emergency_stop(self) -> None:
         self.emergency_count += 1
@@ -146,6 +148,33 @@ class LEDDispatchCoordinatorTests(unittest.TestCase):
         self.assertEqual(adapter.trigger_calls, [])
         self.assertEqual(owner.current(), OwnerState.REALTIME_RAZER)
         self.assertEqual(runner.desired[-1].effect_name, "groove_chase_blue")
+        self.assertEqual(runner.fire_count, 1)
+
+    def test_realtime_color_refresh_updates_desired_without_trigger(self) -> None:
+        coordinator, adapter, runner, owner = self._coordinator()
+        self.assertTrue(coordinator.trigger(_decision()))
+
+        refreshed = replace(
+            _decision(look="rt_groove", scene_ref="groove_chase_blue"),
+            params={"color": (255, 0, 0)},
+        )
+
+        self.assertTrue(coordinator.refresh_realtime_colors(refreshed))
+
+        self.assertEqual(adapter.trigger_calls, [])
+        self.assertEqual(owner.current(), OwnerState.REALTIME_RAZER)
+        self.assertEqual(runner.fire_count, 1)
+        self.assertEqual(runner.desired[-1].params["color"], (255, 0, 0))
+
+    def test_realtime_color_refresh_ignores_cloud_owner(self) -> None:
+        coordinator, adapter, runner, owner = self._coordinator()
+        owner.acquire(OwnerState.CLOUD_DIY)
+
+        self.assertFalse(coordinator.refresh_realtime_colors(_decision()))
+
+        self.assertEqual(runner.desired, [])
+        self.assertEqual(adapter.trigger_calls, [])
+        self.assertEqual(owner.current(), OwnerState.CLOUD_DIY)
 
     def test_realtime_white_template_sets_white_moment_flag(self) -> None:
         coordinator, adapter, runner, owner = self._coordinator(min_dwell_env="0")

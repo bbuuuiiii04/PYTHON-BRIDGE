@@ -1594,6 +1594,8 @@ class StateManager(LEDDispatchPolicyMixin):
             coordinator = getattr(self, "_led_palette_control", None)
             if coordinator is not None:
                 coordinator.handle_event(ev)
+                if ev.kind in {Ev.LED_MANUAL_PAD, Ev.LED_RAINBOW_PAD, Ev.LED_PALETTE_PAD}:
+                    self._led_refresh_manual_color()
 
         elif ev.kind == Ev.LASER_SOLO_PAD:
             self._drop_presentation_solo_pad_pressed()
@@ -2048,6 +2050,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._led_rt_permitted = False
         self._led_rt_beat = None
         self._led_last_auto_role_key = ""
+        self._led_live_rt_auto = None
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
         self._led_hold_active = False

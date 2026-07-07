@@ -12,16 +12,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2 import state_manager as state_manager_mod  # noqa: E402
 from rb_ss_bridge_v2.anlz_reader import TrackAnlzData, WaveformContext  # noqa: E402
 from rb_ss_bridge_v2.audio_spectral_features import SpectralFeaturesV4, V4_SERIES_KEYS  # noqa: E402
+from rb_ss_bridge_v2.govee_owner_state import GoveeOwnerStateMachine, OwnerState  # noqa: E402
 from rb_ss_bridge_v2.led_identity_v2 import (  # noqa: E402
     IdentityStore,
     content_hash as led_identity_content_hash,
     content_key as led_identity_content_key,
 )
+from rb_ss_bridge_v2.led_dispatch_coordinator import LEDDispatchCoordinator  # noqa: E402
 from rb_ss_bridge_v2.led_dispatch_policy import LED_IDLE_FREEWHEEL_BPM  # noqa: E402
 from rb_ss_bridge_v2.led_models import (  # noqa: E402
     IdentityV2Config,
     LEDContext,
     LEDLookDecision,
+    LEDRateLimits,
     ZoneRampConfig,
 )
 from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot  # noqa: E402
@@ -142,6 +145,40 @@ class _StubLEDAdapter:
             "last_error": self.last_error if not self.accept else "",
             "provider": {"device_ref": "hidden-raw-id"},
         }
+
+
+class _CoordinatorConfig:
+    blackout = "room_blackout"
+    rate_limits = LEDRateLimits(min_look_dwell_s=0.0)
+
+
+class _RecordingRealtimeRunner:
+    def __init__(self) -> None:
+        self.desired = []
+        self.fire_count = 0
+        self.emergency_count = 0
+        self.cloud_dispatch_notes: list[float] = []
+
+    def set_desired(self, spec) -> None:  # type: ignore[no-untyped-def]
+        self.desired.append(spec)
+
+    def fire_trigger(self) -> None:
+        self.fire_count += 1
+
+    def emergency_stop(self) -> None:
+        self.emergency_count += 1
+
+    def force_deactivate(self) -> None:
+        self.desired.append(None)
+
+    def note_cloud_dispatch(self, now: float, **_kwargs) -> None:  # type: ignore[no-untyped-def]
+        self.cloud_dispatch_notes.append(now)
+
+    def status(self) -> dict:
+        return {"active": bool(self.desired), "last_error": ""}
+
+    def stop(self) -> bool:
+        return True
 
 
 class _TacticalLEDAdapter(_StubLEDAdapter):
@@ -384,6 +421,61 @@ class _IdentityColorEngine:
         return {"engine": "v2"}
 
 
+class _ManualColorEngine:
+    enabled = True
+
+    def __init__(self) -> None:
+        self._manual = ""
+        self._config = type(
+            "ManualColorConfig",
+            (),
+            {"palettes": {}, "v2": IdentityV2Config(enabled=False)},
+        )()
+        self.begin_calls: list[dict] = []
+
+    def set_v2_active(self, _active: bool) -> None:
+        pass
+
+    def diy_eligible(self, _look_name: str) -> bool:
+        return True
+
+    def begin_dispatch(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        self.begin_calls.append(dict(kwargs))
+
+    def resolve_color(self, **_kwargs) -> dict:  # type: ignore[no-untyped-def]
+        colors = {
+            "": (1, 2, 3),
+            "red": (255, 0, 0),
+            "green": (0, 255, 0),
+            "blue": (0, 0, 255),
+            "white_sand": (255, 235, 200),
+            "rainbow": (255, 0, 255),
+        }
+        return {"color": colors.get(self._manual, (1, 2, 3))}
+
+    def resolve_slot_colors(self, **_kwargs) -> dict:  # type: ignore[no-untyped-def]
+        return {}
+
+    def set_manual(self, name: str) -> None:
+        self._manual = name
+
+    def clear_manual(self) -> None:
+        self._manual = ""
+
+    def reset_fade_memory(self) -> None:
+        pass
+
+    def advance_fade(self, _abs_beat: float) -> None:
+        pass
+
+    def snapshot(self) -> dict:
+        return {
+            "engine": "v2",
+            "manual": self._manual,
+            "current_palette": self._manual or "neutral",
+        }
+
+
 def _make_sm(*, director=None, adapter=None, led_color_engine=None, led_identity_store=None) -> StateManager:
     return StateManager(
         queue.Queue(maxsize=64),
@@ -485,6 +577,21 @@ def _drop_decision(
     )
 
 
+def _rt_decision(look: str = "rt_groove") -> LEDLookDecision:
+    return LEDLookDecision(
+        look=look,
+        target="room_perimeter",
+        action="realtime",
+        scene_ref="groove_chase_blue",
+        reason="role_entry:groove",
+        source="automation",
+        priority=2,
+        role="groove",
+        backend="realtime_razer",
+        params={},
+    )
+
+
 def _prepare_playing_push_tick(
     sm: StateManager,
     sp_state: SmartPhrasingState,
@@ -549,6 +656,27 @@ def _ready_led_active_deck(sm: StateManager, deck: int, *, filepath: str = "/tra
     sm._os.lighting_mode = "autoloop"
     sm._led_manual_override = False
     sm._led_emergency_blackout = False
+
+
+def _make_realtime_color_sm():
+    engine = _ManualColorEngine()
+    director = _AutomationLEDLookDirector()
+    director.role_decisions["groove"] = _rt_decision()
+    runner = _RecordingRealtimeRunner()
+    owner = GoveeOwnerStateMachine()
+    coordinator = LEDDispatchCoordinator(
+        _StubLEDAdapter(),
+        runner,
+        owner,
+        _CoordinatorConfig(),
+        time_fn=lambda: 1000.0,
+    )
+    sm = _make_sm(director=director, adapter=coordinator, led_color_engine=engine)
+    sm._led_v2_latch = True
+    _ready_led_active_deck(sm, 1)
+    sm._deck[1].load_gen = 33
+    sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_groove_sp(2.0))
+    return sm, engine, runner, owner
 
 
 def _groove_sp(beats_into_phrase: float) -> SmartPhrasingState:
@@ -1843,6 +1971,60 @@ class LEDStateManagerTests(unittest.TestCase):
         assert anchor is not None
         self.assertEqual(anchor.deck, 1)
         self.assertEqual(anchor.bpm, 128.0)
+
+    def test_manual_pad_refreshes_cached_realtime_colors_without_refire(self) -> None:
+        sm, engine, runner, owner = _make_realtime_color_sm()
+
+        self.assertIsNotNone(sm._led_live_rt_auto)
+        self.assertEqual(owner.current(), OwnerState.REALTIME_RAZER)
+        self.assertEqual(len(runner.desired), 1)
+        self.assertEqual(runner.desired[-1].params["color"], (1, 2, 3))
+        self.assertEqual(runner.fire_count, 1)
+
+        sm._handle_event(
+            BridgeEvent(
+                kind=Ev.LED_MANUAL_PAD,
+                deck=0,
+                payload={"name": "red"},
+                source="test",
+            )
+        )
+
+        self.assertEqual(engine.snapshot()["manual"], "red")
+        self.assertEqual(len(runner.desired), 2)
+        self.assertEqual(runner.desired[-1].params["color"], (255, 0, 0))
+        self.assertEqual(runner.desired[-1].effect_name, "groove_chase_blue")
+        self.assertEqual(runner.fire_count, 1)
+        self.assertEqual(owner.current(), OwnerState.REALTIME_RAZER)
+
+    def test_manual_color_refresh_noops_under_blackout_and_clears_cache(self) -> None:
+        sm, _engine, runner, _owner = _make_realtime_color_sm()
+
+        sm._handle_event(
+            BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={"reason": "operator"}, source="test")
+        )
+        self.assertIsNone(sm._led_live_rt_auto)
+        desired_count = len(runner.desired)
+
+        sm._handle_event(
+            BridgeEvent(
+                kind=Ev.LED_MANUAL_PAD,
+                deck=0,
+                payload={"name": "blue"},
+                source="test",
+            )
+        )
+
+        self.assertEqual(len(runner.desired), desired_count)
+
+    def test_idle_entry_clears_cached_realtime_color_refresh(self) -> None:
+        sm, _engine, _runner, _owner = _make_realtime_color_sm()
+
+        self.assertIsNotNone(sm._led_live_rt_auto)
+
+        sm._enter_idle_no_audible(reason="test")
+
+        self.assertIsNone(sm._led_live_rt_auto)
 
     def test_gate_clears_realtime_permission(self) -> None:
         sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
