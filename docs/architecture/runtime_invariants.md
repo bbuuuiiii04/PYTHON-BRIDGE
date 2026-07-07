@@ -69,14 +69,19 @@ push loop.
 
 - `SmartPhrasingEngine` is a pure musical phrasing engine. It emits
   `SmartPhrasingState` intents and does not send OS2L or write `OutputState`.
+- Selected smart-drop markers collapse clustered ANLZ candidates after
+  intro/outro trimming; `meta.anlz_drops` stays raw for phrase labels, while
+  `meta.smart_drops` keeps the first marker of each drop section.
 - On the first live tick after a reset, an exact Smart Drop beat landing fires once with a small exactness epsilon; near-misses must not round forward into a false drop.
 - `LaserDirector` is scene policy only; it does not send OS2L and does not emit
   MIDI side effects directly.
 - `LaserSceneExecutor` owns laser MIDI trigger execution, blackout/cooldown,
   and transition-mask cleanup for laser output.
-- `DropLifecycle` is a pure resolver. Default-on laser impacts must pass the
-  LED-equivalent phrase-context gate; sustained drop/post-drop cycles may fire
-  only on autoloop ticks and may select only usable autoloop scenes.
+- `DropLifecycle` is a pure resolver. Default-on laser impacts must stay
+  structurally identical to the LED impact gate: predecessor labels and real
+  smart-drop crossings fire, label-only chorus-to-chorus boundaries do not.
+  Sustained drop/post-drop cycles may fire only on autoloop ticks and may
+  select only usable autoloop scenes.
 - An initial laser drop impact may fall back to the configured static drop
   scene when no usable cyclable entry exists; this prevents a silent dark hit.
 - Setting `drop_lifecycle_mirror` false must retain the pre-mirror director and

@@ -36,6 +36,14 @@ Audit P5 (2026-07-03):
   `StateManager`. The `_led_*` fields remain on the `StateManager` instance, and the backend-routing
   adapter remains `led_dispatch_coordinator.py`; this is a pure code-layout/bookkeeping refactor.
 
+Smart-drop marker collapse (2026-07-07):
+- LED drop-impact gating still lives in `StateManager` through
+  `led_dispatch_policy.py`, not through `drop_lifecycle.py`. It now mirrors the
+  laser pure resolver: predecessor labels and real smart-drop crossings fire
+  drop impacts, while label-only chorus-to-chorus boundaries settle into
+  `post_drop`. Collapsed smart-drop markers mean the pre-drop blackout arms once
+  per selected drop section instead of every 32-beat raw ANLZ marker.
+
 Stream Deck palette control (Package 2, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/palette_control_authority.md`.
 - The `streamdeck_palette` change contract implements palette queue/override-fade/lock, `white_sand`,
@@ -170,7 +178,10 @@ Runtime flow:
 - inputs: phrase/role state, runtime LED commands, LED config, color engine state, beat/BPM state
 - decisions: manual override, blackout, role-entry look selection, color/slot-color resolution, cloud/realtime ownership, beat sync instances. LED dispatch policy is mixed into `StateManager` from `led_dispatch_policy.py`; it runs on the StateManager thread and owns no backend threads, locks, or blocking I/O.
 - outputs: cloud scene commands or realtime UDP frame packets
-- The live LED drop/post-drop resolver remains in `StateManager` and is unchanged. `drop_lifecycle.py` reproduces its flat-window drop-region state machine for laser use; `tests/test_drop_lifecycle.py` parity-checks that seam without routing LED output through the new module.
+- The live LED drop/post-drop resolver remains in `StateManager`.
+  `drop_lifecycle.py` reproduces its flat-window drop-region state machine for
+  laser use; `tests/test_drop_lifecycle.py` parity-checks that seam without
+  routing LED output through the new module.
 - Active content changes now arm a phrase-aware LED hold in `StateManager`: a nonzero active-deck switch or active-deck track replacement keeps the previously shown look if the incoming track is more than `1.0` beat into its current phrase, then releases at the next phrase crossing. If the incoming track is already within the first beat of a phrase, it changes immediately. Missing phrase segments can keep the prior look for the whole track; this is software-tested only and still needs operator visual sign-off.
 
 Config:

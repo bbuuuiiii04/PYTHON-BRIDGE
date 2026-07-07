@@ -10,6 +10,7 @@ contracts:
       - __main__.py
       - state_manager.py
       - active_deck_resolver.py
+      - smart_phrasing.py
       - models.py
       - config.py
     key_symbols:
@@ -271,6 +272,7 @@ contracts:
       - laser_models.py
       - laser_director.py
       - laser_executor.py
+      - drop_lifecycle.py
       - laser_decision_log.py
       - midi_output.py
       - personality_resolver.py

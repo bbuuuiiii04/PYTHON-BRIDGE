@@ -172,6 +172,10 @@ path was previously available.
 
 - `SmartPhrasingEngine` computes smart-drop, smart-breakdown, and phrase-anchor
   intents from `SmartPhrasingSnapshot` each tick.
+- Smart-drop selection keeps raw ANLZ marker data for phrase labels but stores
+  a collapsed `meta.smart_drops` list for runtime crossings: after intro/outro
+  trimming, markers less than 64 beats after the previous filtered raw marker
+  are treated as the same drop section, and the first marker is kept.
 - `StateManager` consumes those intents in `_smart_drop_tick`,
   `_smart_breakdown_tick`, and `_phrase_anchor_tick`; suppression gates remain
   in `StateManager`, which also owns `OutputState` writes and transition logs.
@@ -180,9 +184,10 @@ path was previously available.
 - `SoundSwitchEngine` performs canonical OS2L/SoundSwitch deck-route fanout for
   the sends requested by `StateManager`.
 - `LaserDirector` consumes `SmartPhrasingState` through `LaserContext` to make
-  scene policy decisions only. Its default-on drop lifecycle uses the LED
-  phrase-context gate, a configurable flat impact window, and a capped
-  chorus-to-chorus impact count.
+  scene policy decisions only. Its default-on drop lifecycle mirrors the LED
+  impact gate: predecessor labels (`up`/`low`/`buildup`/`breakdown`) and real
+  smart-drop crossings fire impacts, while label-only chorus-to-chorus
+  boundaries settle into `post_drop`.
 - `LaserSceneExecutor` consumes those decisions and handles laser MIDI output,
   role cooldown/rotation, blackout latching, and transition-mask cleanup.
   Drop/post-drop cycles use usable-only shuffle bags and autoloop-tick cadence;

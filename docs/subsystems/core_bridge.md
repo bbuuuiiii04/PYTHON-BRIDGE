@@ -86,6 +86,9 @@ Runtime flow:
 - inputs: Rekordbox reader events, MTC fallback, runtime command events, position snapshots, config bundles
 - decisions: resolved show deck, Rekordbox master state, phrase/role state, lighting dispatch timing
 - outputs: OS2L sends, laser decisions, LED decisions, copied status snapshots
+- `ANLZ_DATA` stores raw drop markers on `meta.anlz_drops` and selected,
+  section-collapsed markers on `meta.smart_drops`; phrase-segment labeling
+  still uses the raw list.
 - scripted-track LED automation is still StateManager-gated: `safety.scripted_mode_automation` must be true, `lighting_mode` must be `scripted`, and the smart-phrasing role is remapped through the latched LED `scripted_mode` policy before dispatch
 - laser drop-lifecycle state is reset alongside existing lifecycle teardown on master change, active track load, full stop, and resume; director-only resets also run on scripted and idle lighting transitions
 - while mixer authority is enabled, legacy OSC active-deck events, playing-only

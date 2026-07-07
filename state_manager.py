@@ -534,8 +534,6 @@ class StateManager(LEDDispatchPolicyMixin):
         self._native_abs_beat_pos: float | None = None
         self._native_log_key: tuple[Any, ...] = ()
         self._laser_color_engine = LaserColorMapper(load_laser_color_map())
-        self._laser_color_updated_this_tick = False
-        self._laser_color_snapshot_for_tick = None
         self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
 
         # ── Drop presentation policy (Package 3, AWR-119) ─────────────────────
@@ -3047,7 +3045,6 @@ class StateManager(LEDDispatchPolicyMixin):
         state) so a crash can never retain non-zero DMX, then re-raise.
         """
         rt = self._pack_runtime
-        self._reset_laser_color_tick()
         try:
             self._push_tick_inner()
         except BaseException:
@@ -3063,10 +3060,6 @@ class StateManager(LEDDispatchPolicyMixin):
                 rt.backend.submit_frame(_PACK_ZERO_FRAME)
             except Exception:
                 pass
-
-    def _reset_laser_color_tick(self) -> None:
-        self._laser_color_updated_this_tick = False
-        self._laser_color_snapshot_for_tick = None
 
     def _update_laser_color_from_led(
         self,
@@ -3087,11 +3080,9 @@ class StateManager(LEDDispatchPolicyMixin):
                 drop_phase=drop_phase,
                 post_drop_progress=post_drop_progress,
             )
-            self._laser_color_snapshot_for_tick = laser_engine.snapshot()
-            self._laser_color_updated_this_tick = True
         except Exception:
-            self._laser_color_snapshot_for_tick = None
-            self._laser_color_updated_this_tick = True
+            # Keep the previous held color if the LED color read fails.
+            pass
 
     def _laser_color_last_led_role(self) -> str | None:
         event = str(getattr(self, "_led_last_event", "") or "")
@@ -3387,13 +3378,10 @@ class StateManager(LEDDispatchPolicyMixin):
         # selection, unsupported layout) leaves lasers "not visible".
         self._drop_presentation_base_live = False
         player, backend, midi_input = rt.player, rt.backend, rt.midi_input
-        color_snapshot = (
-            self._laser_color_snapshot_for_tick
-            if self._laser_color_updated_this_tick
-            else None
+        laser_color_engine = self._laser_color_engine
+        player.set_color_snapshot(
+            laser_color_engine.snapshot() if laser_color_engine is not None else None
         )
-        player.set_color_snapshot(color_snapshot)
-        self._reset_laser_color_tick()
         truth_sink = getattr(rt, "truth_sink", None)
         input_healthy = True
         input_degraded = False

@@ -118,8 +118,6 @@ class TestArmedThisTick(unittest.TestCase):
         self.assertEqual(r1.role, "drop")
         self.assertEqual(r2.role, "drop")
         self.assertTrue(r1.armed_this_tick)
-        # mutate=False after arm: the anchor is now set so chorus→chorus path
-        # might allow another arm, but we did NOT mutate, so count must not grow
         self.assertEqual(lc._impact_count, count_after_arm,
                          "second call with mutate=False must not increment _impact_count")
 

@@ -1,8 +1,9 @@
 """Pure, renderer-agnostic drop / post_drop lifecycle resolver.
 
-Mirrors the LED drop-region resolver in state_manager.py (_led_role_from_smart_phrasing and its
-helpers). Pure: no I/O, no bridge imports. `sp` is any object exposing the SmartPhrasing attributes
-read below (the live laser passes a SmartPhrasingState; tests pass a types.SimpleNamespace).
+Mirrors the LED drop-region resolver in led_dispatch_policy.py (_led_role_from_smart_phrasing and
+its helpers). Pure: no I/O, no bridge imports. `sp` is any object exposing the SmartPhrasing
+attributes read below (the live laser passes a SmartPhrasingState; tests pass a
+types.SimpleNamespace).
 """
 from __future__ import annotations
 
@@ -60,15 +61,7 @@ class DropLifecycle:
         if previous in self._config.impact_predecessors:
             return True
         if sp.smart_drop_crossing:
-            current = str(sp.current_phrase_label or "other")
-            if current in self._config.impact_predecessors:
-                return True
-        if previous == "chorus":
-            if (
-                self._first_drop_anchor_beat is not None
-                and self._impact_count < self._config.max_drops_in_a_row
-            ):
-                return True
+            return True
         return False
 
     def should_clear(self, sp) -> bool:

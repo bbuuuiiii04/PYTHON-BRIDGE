@@ -41,7 +41,11 @@ Implementation notes:
   and startup port-missing degradations stay fail-closed.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
-- For drop lifecycle work, keep the phrase-context gate in `DropLifecycle`, cycle selection in `LaserSceneExecutor`, and blackout ownership in the existing executor/StateManager paths. Preserve static one-shot impact fallback and the default-true `drop_lifecycle_mirror` kill switch.
+- For drop lifecycle work, keep the real-crossing/predecessor-label gate in
+  `DropLifecycle`, cycle selection in `LaserSceneExecutor`, and blackout
+  ownership in the existing executor/StateManager paths. Preserve static
+  one-shot impact fallback and the default-true `drop_lifecycle_mirror` kill
+  switch.
 - When changing executor bank selection, preserve the split between policy and execution: skip
   unusable bank entries only inside `LaserSceneExecutor`, and restore cursor/active-scene state on
   gated missing/high-impact selections so the next tick is not stuck dark.

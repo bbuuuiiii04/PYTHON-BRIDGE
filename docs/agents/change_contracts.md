@@ -239,6 +239,7 @@ Triggered by changes to:
 - `laser_models.py`
 - `laser_director.py`
 - `laser_executor.py`
+- `drop_lifecycle.py`
 - `midi_output.py`
 - `personality_resolver.py`
 - laser config examples

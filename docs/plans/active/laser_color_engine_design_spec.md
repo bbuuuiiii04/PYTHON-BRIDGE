@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: design-intent plus code-verified Package 4 plumbing
-last_verified_commit: 26d357f
-last_verified_date: 2026-07-04
-validation_scope: software-only
+last_verified_commit: d5cdcd4
+last_verified_date: 2026-07-06
+validation_scope: software-only; held-snapshot CH8 forwarding verified, hardware-unvalidated
 ---
 
 # Laser Color — Design Spec (pre-handoff)
@@ -23,10 +23,16 @@ of the color mapper's value table only** — the operator will produce its input
 parts (merge seam, blackout re-wire, sampling plumbing) are implementable without it.
 
 **Implementation note (2026-07-04):** Package 4 landed the sampling, white-moment flag,
-pure mapper, same-tick snapshot wiring, Autoloop CH8/CH9 merge seam, disabled/all-null
+pure mapper, held snapshot forwarding, Autoloop CH8/CH9 merge seam, disabled/all-null
 config, and acceptance tests. With the shipped config, laser output remains authored
 pass-through. The operator CH8/CH9 chart still lands later as config-only data before
 enabling the feature.
+
+**Implementation note (2026-07-06):** StateManager now forwards the color engine's held
+snapshot on every pack drive, not only on the LED automation trigger tick. A trigger
+updates the engine; every later healthy native Autoloop frame reads that held snapshot
+until another trigger updates it or the engine has no snapshot. With the current live
+map, CH8 holds the palette color and CH9 remains authored pass-through.
 
 ---
 
@@ -119,8 +125,10 @@ pack render (position/movement/intensity + AUTHORED CH8/CH9)
   `led_dispatch_policy.py:637` / `state_manager.py:3029` — *confirmed*); the invariant bans
   blocking I/O there, not pure compute. So the **color computation** (sampling, RGB→CH8/CH9
   mapping, white-moment edges) is pure math computed at dispatch time into an **immutable
-  (CH8, CH9) snapshot** that `render()` reads at merge time — same thread, no locks, no I/O,
-  no allocation storms on the loop.
+  (CH8, CH9) snapshot** held by `LaserColorEngine`. `StateManager._drive_pack_output`
+  reads that held snapshot every pack drive, so `render()` receives color on every healthy
+  Autoloop frame, not only on the LED trigger tick — same thread, no locks, no I/O, no
+  allocation storms on the loop.
 - **Color source accessor (new, small).** There is **no** "current RGB now" API on the LED
   engine today — `resolve_color` (`led_color_engine.py:507`) needs full per-cue context, and
   `snapshot()` returns a palette *name* (corrects the earlier Part F citation to
@@ -219,12 +227,13 @@ for its whole window.)
 
 ## Part D — Fail-open & live safety
 
-- **Fail-open = authored color passes through; pack keeps rendering.** If the color producer
-  errors, stalls, or hits an unmapped color, it publishes no snapshot (or a stale one is
-  ignored via its seq/age field) and the merge **leaves the pack's authored CH8/CH9
-  untouched** — exactly today's output. Lasers keep moving with authored color; never "no
-  lasers." The merge must **never block** on the color engine. (Corrected from "write
-  nothing/neutral": per Part B the channels are authored, so pass-through IS the neutral.)
+- **Fail-open = pack keeps rendering.** If the color producer has no snapshot, is disabled,
+  or hits an unmapped/all-null value, the merge **leaves the pack's authored CH8/CH9
+  untouched**. If a later LED color read fails after a valid snapshot exists, the engine keeps
+  the previous held color instead of force-clearing it. Lasers keep moving; never "no lasers."
+  The merge must **never block** on the color engine. (Corrected from "write nothing/neutral":
+  per Part B the channels are authored, so pass-through IS the neutral when there is no
+  snapshot.)
 - Blackout is the absolute override above everything (Part B seam); injected color can never
   defeat it by construction.
 - Color computation is pure at LED dispatch time on the state-manager thread; merge is pure

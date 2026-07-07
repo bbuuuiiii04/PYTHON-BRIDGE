@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 26d357f
-last_verified_date: 2026-07-04
-validation_scope: behavior contract plus software-tested Package 4 plumbing; shipped config disabled/all-null for pass-through; no live or hardware validation; CH8/CH9 value chart pending operator inputs
+last_verified_commit: d5cdcd4
+last_verified_date: 2026-07-06
+validation_scope: behavior contract plus software-tested Package 4 plumbing; held CH8 forwarding verified in software; no live or hardware validation
 ---
 
 # Laser Color Authority
@@ -94,12 +94,12 @@ explicitly enabled.
 11. The color computation must never block or add I/O to the render path. It
     is pure in-memory math; since LED dispatch and the pack render share the
     state-manager thread (verified 2026-07-04), computing at dispatch time
-    and reading an immutable snapshot at render time needs no cross-thread
-    machinery. The merge must never wait on the color engine.
-12. **Fail-open = authored color passes through.** If the color producer
-    errors, stalls, or its snapshot is stale, the frame ships with the pack's
-    authored CH8/CH9 — exactly today's output. Lasers keep moving; only the
-    follow-the-LEDs behavior is lost. Never "no lasers."
+    and reading the engine's held immutable snapshot on every pack drive needs
+    no cross-thread machinery. The merge must never wait on the color engine.
+12. **Fail-open = lasers keep rendering.** Missing, disabled, or all-null
+    snapshots pass authored CH8/CH9 through. If a later LED color read fails,
+    the engine keeps its previous held color instead of force-clearing it.
+    Never "no lasers."
 
 ## Chart Gating
 
@@ -143,8 +143,9 @@ explicitly enabled.
    ZERO regardless of injected values).
 4. White moment: flag asserted → CH8 white for the moment's duration, then
    reverts to quantized palette color.
-5. Fail-open: producer dead/stale snapshot → authored CH8/CH9 pass through
-   unchanged; no blocking of the render path.
+5. Fail-open: missing/disabled/all-null snapshot → authored CH8/CH9 pass
+   through unchanged; a read failure with an existing snapshot keeps the held
+   color; no blocking of the render path.
 6. Post-drop settle: CH9 monotonically eases across the post-drop window.
 7. CH11 byte-identical everywhere with the color engine present vs absent.
 
@@ -152,8 +153,8 @@ explicitly enabled.
 
 Implemented home: sampler/quantizer/producer in `laser_color_engine.py`, the
 merge seam in `soundswitch_laser_player.py`'s Autoloop success path, the
-white-moment flag in `led_dispatch_coordinator.py`, same-tick wiring in
-`state_manager.py`, and the chart at `config/laser_color_map.json`.
+white-moment flag in `led_dispatch_coordinator.py`, held-snapshot forwarding
+in `state_manager.py`, and the chart at `config/laser_color_map.json`.
 `led_color_engine.py` now exposes `color_state()` for the current anchor RGB
 without advancing RNG or mutating journey state. Design detail:
 `docs/plans/active/laser_color_engine_design_spec.md` Parts B, D, E.

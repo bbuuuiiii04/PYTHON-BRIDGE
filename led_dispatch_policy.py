@@ -1473,21 +1473,7 @@ class LEDDispatchPolicyMixin:
         if previous in _LED_DROP_IMPACT_PREDECESSORS:
             return True
         if sp_state.smart_drop_crossing:
-            # Fallback smart-drop tracks may not have an explicit chorus marker;
-            # keep the impact when the current phrase context is already Up/Low.
-            current = str(sp_state.current_phrase_label or "other")
-            if current in _LED_DROP_IMPACT_PREDECESSORS:
-                return True
-        if previous == "chorus":
-            # Once a chorus/drop lifecycle exists, allow up to two
-            # Chorus->Chorus impacts before settling into post_drop. This also
-            # covers tracks whose first chorus marker only anchored post_drop
-            # and did not itself fire an impact.
-            if (
-                self._led_first_drop_anchor_beat is not None
-                and self._led_drop_impact_count < LED_MAX_DROP_IMPACTS
-            ):
-                return True
+            return True
         return False
 
     def _led_drop_lifecycle_should_clear(self, sp_state: SmartPhrasingState) -> bool:

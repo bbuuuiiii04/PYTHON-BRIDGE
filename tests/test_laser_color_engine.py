@@ -134,7 +134,7 @@ class _FakeLaserExecutor:
         return LaserResolvedScene("drop", "test", "house_drop", 1, 96, "static")
 
     def mask_owners_active(self) -> bool:
-        return False
+        return bool(getattr(self, "masked", False))
 
     def smart_drop_blackout_enabled(self) -> bool:
         return False
@@ -401,7 +401,7 @@ class LaserColorPackMergeTests(unittest.TestCase):
         self.assertEqual(player.select_autoloop("SSAutoLoop8.ssfile", 0).frame[7:9], (201, 202))
 
 
-class LaserColorStateManagerStalenessTests(unittest.TestCase):
+class LaserColorStateManagerHoldTests(unittest.TestCase):
     def _make_state_manager(self) -> tuple[StateManager, _FakeBackend]:
         backend = _FakeBackend()
         runtime = PackRuntime(
@@ -423,7 +423,7 @@ class LaserColorStateManagerStalenessTests(unittest.TestCase):
             soundswitch_pack_runtime=runtime,
         )
         sm._led_palette_control = None
-        sm._laser_color_engine = LaserColorEngine(_color_map())
+        sm._laser_color_engine = LaserColorEngine(_color_map(fixed_ch9=None))
         sm._rerun_active_deck_resolver = lambda *_args, **_kwargs: None
         sm._check_pending_arm = lambda: None
         sm._update_lighting = lambda *_args, **_kwargs: None
@@ -451,9 +451,8 @@ class LaserColorStateManagerStalenessTests(unittest.TestCase):
         ))
         return sm, backend
 
-    def test_manual_override_tick_clears_stale_snapshot_and_resume_reinjects(self) -> None:
-        sm, backend = self._make_state_manager()
-        sp_states = [
+    def _first_trigger_then_hold_states(self) -> list[SmartPhrasingState]:
+        return [
             SmartPhrasingState(
                 abs_beat=64.0,
                 current_phrase_label="chorus",
@@ -482,18 +481,56 @@ class LaserColorStateManagerStalenessTests(unittest.TestCase):
                 active_drop_beat=96.0,
             ),
         ]
+
+    def test_led_trigger_color_is_held_across_later_autoloop_drives(self) -> None:
+        sm, backend = self._make_state_manager()
+        sp_states = self._first_trigger_then_hold_states()
         sm._update_smart_phrasing_state = lambda *_args, **_kwargs: sp_states.pop(0)
 
         sm._push_tick()
-        self.assertEqual(backend.frames[-1][7:9], (10, 0))
+        self.assertEqual(backend.frames[-1][7:9], (10, 92))
 
         sm._led_manual_override = "room_manual"
         sm._push_tick()
-        self.assertEqual(backend.frames[-1][7:9], (82, 92))
+        self.assertEqual(backend.frames[-1][7:9], (10, 92))
 
         sm._led_manual_override = ""
+        for _ in range(3):
+            sm._native_captured_scene = None
+            sm._drive_pack_output()
+            self.assertEqual(backend.frames[-1][7:9], (10, 92))
+
+    def test_blackout_zeroes_held_color_then_release_returns_to_hold(self) -> None:
+        sm, backend = self._make_state_manager()
+        sp_states = self._first_trigger_then_hold_states()
+        sm._update_smart_phrasing_state = lambda *_args, **_kwargs: sp_states.pop(0)
+
         sm._push_tick()
-        self.assertEqual(backend.frames[-1][7:9], (10, 0))
+        self.assertEqual(backend.frames[-1][7:9], (10, 92))
+
+        sm._laser_executor.masked = True
+        sm._drive_pack_output()
+        self.assertEqual(backend.frames[-1], ZERO_FRAME)
+
+        sm._laser_executor.masked = False
+        sm._drive_pack_output()
+        self.assertEqual(backend.frames[-1][7:9], (10, 92))
+
+    def test_disabled_or_missing_engine_keeps_baked_color_across_drives(self) -> None:
+        for engine in (LaserColorEngine(_color_map(enabled=False)), None):
+            with self.subTest(engine=type(engine).__name__ if engine else "None"):
+                sm, backend = self._make_state_manager()
+                sm._laser_color_engine = engine
+                sp_states = self._first_trigger_then_hold_states()
+                sm._update_smart_phrasing_state = lambda *_args, **_kwargs: sp_states.pop(0)
+
+                sm._push_tick()
+                self.assertEqual(backend.frames[-1][7:9], (82, 92))
+
+                for _ in range(3):
+                    sm._native_captured_scene = None
+                    sm._drive_pack_output()
+                    self.assertEqual(backend.frames[-1][7:9], (82, 92))
 
 
 class LedColorStateAccessorTests(unittest.TestCase):
