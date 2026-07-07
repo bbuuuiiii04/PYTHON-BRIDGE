@@ -178,6 +178,9 @@ class _FakeLEDColorEngine:
     enabled = True
     diy_eligible = staticmethod(lambda _scene_ref: True)
 
+    def __init__(self) -> None:
+        self.rgb = (255, 0, 0)
+
     def advance_fade(self, _abs_beat: float) -> None:
         pass
 
@@ -192,7 +195,7 @@ class _FakeLEDColorEngine:
 
     def color_state(self) -> dict:
         return {
-            "rgb": (255, 0, 0),
+            "rgb": self.rgb,
             "palette": "blue_cyan",
             "white_sand_active": False,
             "rainbow_active": False,
@@ -489,6 +492,20 @@ class LaserColorStateManagerHoldTests(unittest.TestCase):
         snap = sm._laser_color_engine.snapshot()
         self.assertIsNotNone(snap)
         self.assertEqual(snap.ch8, 10)
+
+    def test_laser_color_tracks_led_color_state_without_new_look(self) -> None:
+        sm, backend = self._make_state_manager()
+        sp_states = self._first_trigger_then_hold_states()
+        sm._update_smart_phrasing_state = lambda *_args, **_kwargs: sp_states.pop(0)
+
+        sm._push_tick()
+        self.assertEqual(backend.frames[-1][7], 10)
+
+        assert isinstance(sm._led_color_engine, _FakeLEDColorEngine)
+        sm._led_color_engine.rgb = (0, 255, 0)
+        sm._advance_palette_fade_and_publish(SmartPhrasingState())
+        sm._drive_pack_output()
+        self.assertEqual(backend.frames[-1][7], 20)
 
     def test_led_trigger_color_is_held_across_later_autoloop_drives(self) -> None:
         sm, backend = self._make_state_manager()

@@ -706,6 +706,9 @@ class LEDDispatchPolicyMixin:
             except Exception as exc:
                 # Fade math must never crash the 200 Hz push loop.
                 self._led_last_error = f"color_engine_error:{type(exc).__name__}"
+        sync_laser_color = getattr(self, "_sync_laser_color_if_needed", None)
+        if callable(sync_laser_color):
+            sync_laser_color(sp_state)
         control = self._led_palette_control
         if control is None:
             return

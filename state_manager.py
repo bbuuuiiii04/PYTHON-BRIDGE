@@ -534,6 +534,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._native_abs_beat_pos: float | None = None
         self._native_log_key: tuple[Any, ...] = ()
         self._laser_color_engine = LaserColorMapper(load_laser_color_map())
+        self._laser_color_led_sig: tuple[Any, ...] | None = None
         self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
 
         # ── Drop presentation policy (Package 3, AWR-119) ─────────────────────
@@ -3115,6 +3116,44 @@ class StateManager(LEDDispatchPolicyMixin):
         except Exception:
             # Keep the previous held color if the LED color read fails.
             pass
+
+    def _sync_laser_color_if_needed(self, sp_state: SmartPhrasingState) -> None:
+        """Recompute the held laser snapshot when LED color_state moves.
+
+        Fable's per-frame hold only helps once a snapshot exists; the snapshot
+        was still computed solely on accepted automation look fires, so manual
+        pads, v2 zone/manual dressing, and override-fades could leave lasers on
+        a stale CH8 until the next section look.
+        """
+        laser_engine = self._laser_color_engine
+        led_engine = self._led_color_engine
+        if laser_engine is None or led_engine is None:
+            return
+        try:
+            color_state = led_engine.color_state()
+        except Exception:
+            return
+        rgb = color_state.get("rgb")
+        sig = (
+            tuple(rgb) if isinstance(rgb, (list, tuple)) and len(rgb) == 3 else (),
+            color_state.get("palette"),
+            bool(color_state.get("white_sand_active")),
+            bool(color_state.get("rainbow_active")),
+        )
+        if sig == self._laser_color_led_sig:
+            return
+        self._laser_color_led_sig = sig
+        role = self._laser_color_last_led_role()
+        post_drop = (
+            self._laser_color_post_drop_progress(role, sp_state)
+            if role is not None
+            else None
+        )
+        self._update_laser_color_from_led(
+            white_moment=self._laser_color_white_moment(),
+            drop_phase=role,
+            post_drop_progress=post_drop,
+        )
 
     def _bootstrap_laser_color_if_needed(self) -> None:
         """Seed the held laser snapshot from current LED color when none exists yet.
