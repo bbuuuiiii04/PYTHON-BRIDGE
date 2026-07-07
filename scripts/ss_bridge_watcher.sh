@@ -159,7 +159,7 @@ start_bridge() {
             RBSS_SMART_REARM_EXPERIMENT=1 \
             RBSS_SMART_DROP=1 \
             RBSS_SMART_BREAKDOWN=1 \
-            RBSS_LED_PHRASE_MONOTONIC=0 \
+            RBSS_LED_PHRASE_MONOTONIC=1 \
             RBSS_LED_MIN_DWELL=1 \
             RBSS_LED_CANCEL_PENDING=1 \
             RBSS_LED_RT_RECONCILE=1 \
