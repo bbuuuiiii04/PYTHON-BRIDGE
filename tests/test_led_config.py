@@ -163,7 +163,7 @@ class DropPresentationConfigLoaderTests(unittest.TestCase):
         self.assertEqual(cfg.laser_ratio, 0.4)
         self.assertEqual(cfg.opening_tracks, 3)
         self.assertEqual(cfg.led_predark_beats, 4)
-        self.assertEqual(cfg.drop_window_cap_beats, 32)
+        self.assertEqual(cfg.drop_window_cap_beats, 96)
         self.assertEqual(cfg.hotcue_marker, "LASER")
         self.assertEqual(cfg.gearshift_bpm_jump, 10)
         self.assertEqual(cfg.record_min_drops, 5)

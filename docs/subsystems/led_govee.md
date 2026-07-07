@@ -163,7 +163,10 @@ Drop presentation policy (Package 3, AWR-119, 2026-07-04):
   `Ev.LASER_SOLO_PAD`, note-off no-ops, same as the other three Stream Deck pad kinds), built from
   Package 2's already-reserved `laser_solo_note` config key. `enabled: false` in the new
   `/drop_presentation` config block is the master regression gate: every drop renders
-  `leds_plus_lasers` exactly as today, byte-identical. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+  `leds_plus_lasers` exactly as today, byte-identical. AWR-135 updates LED-only drop windows so
+  laser base suppression follows the real drop/post-drop role end; the 96-beat
+  `drop_window_cap_beats` default is only a stuck-role backstop. SOFTWARE-VALIDATED ONLY /
+  HARDWARE-UNVALIDATED.
 
 Drop presentation stop fail-open (v1 foundation audit fix DD1, 2026-07-06):
 - The `drop_spotlight` LED dark-hold (and laser base suppression) is now released on EVERY stop

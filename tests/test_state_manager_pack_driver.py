@@ -225,6 +225,7 @@ class PackOperationalStateTests(unittest.TestCase):
             ({"static_held": True, "scripted_active": True}, "static_held"),
             ({"parity_live_blocked": True, "scripted_active": True}, "unverified_parity"),
             ({"scripted_active": True, "autoloop_phase_blocked": True}, "scripted_active"),
+            ({"native_autoloop_status": "base_suppressed", "autoloop_phase_blocked": True}, "base_suppressed"),
             ({"autoloop_phase_blocked": True}, "autoloop_phase_blocked"),
             ({}, "software_zero_frame"),
             ({"input_degraded": True, "scripted_active": True}, "input_degraded"),

@@ -3344,7 +3344,7 @@ class StateManager(LEDDispatchPolicyMixin):
             mode = "static"
         elif scripted_active:
             mode = "scripted"
-        elif native_status in ("rendering_active", "empty_dark_look"):
+        elif native_status in ("rendering_active", "empty_dark_look", "base_suppressed"):
             mode = "autoloop"
         return {
             "mode": mode,
@@ -3904,7 +3904,7 @@ class StateManager(LEDDispatchPolicyMixin):
                     rt.active
                     and self._os.lighting_mode == "autoloop"
                     and transport is None
-                    and native_status not in ("rendering_active", "empty_dark_look")
+                    and native_status not in ("rendering_active", "empty_dark_look", "base_suppressed")
                 ),
                 software_zero_frame=frame == _PACK_ZERO_FRAME,
                 native_autoloop=native_decision,

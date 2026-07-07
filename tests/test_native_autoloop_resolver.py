@@ -379,6 +379,13 @@ class NativeAutoloopResolverTests(unittest.TestCase):
             "unverified_parity",
         )
         self.assertEqual(
+            finalize_native_autoloop_render(
+                decision,
+                PlayerResult(ZERO_FRAME, PlayerDiagnostic("base_suppressed", "intentional")),
+            ).status,
+            "base_suppressed",
+        )
+        self.assertEqual(
             finalize_native_autoloop_render(decision, PlayerResult(ZERO_FRAME)).status,
             "empty_dark_look",
         )

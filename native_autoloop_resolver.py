@@ -14,6 +14,7 @@ AUTOLOOP_TICKS_PER_BEAT = AUTOLOOP_CYCLE_TICKS // AUTOLOOP_ARM_PHRASE_BEATS
 NATIVE_AUTOLOOP_STATUSES = frozenset((
     "rendering_active",
     "empty_dark_look",
+    "base_suppressed",
     "missing_binding",
     "missing_autoloop_file",
     "unsupported_layout",
@@ -141,6 +142,8 @@ def finalize_native_autoloop_render(
         return replace(decision, status="unsupported_layout", diagnostic=diagnostic)
     if diagnostic == "unverified_parity":
         return replace(decision, status="unverified_parity", diagnostic=diagnostic)
+    if diagnostic == "base_suppressed":
+        return replace(decision, status="base_suppressed", diagnostic=diagnostic)
     if diagnostic:
         return replace(decision, status="unsupported_layout", diagnostic=diagnostic)
     if result.frame == ZERO_FRAME:

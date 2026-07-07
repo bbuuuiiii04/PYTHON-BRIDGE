@@ -8,7 +8,7 @@ validation_scope: behavior contract, implemented and software-tested against it;
 
 # Drop Presentation Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; IMPLEMENTED / SOFTWARE-TESTED (Package 3 of AWR-119, landed 2026-07-04). SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED — the operator's live pass is the only remaining gate. Implementation: `drop_presentation.py` (planner/ladder/session/learned-store/window machine), base suppression in `soundswitch_laser_player.py`, wiring in `state_manager.py`, hot-cue tag reading in `filepath_resolver.py`, config in `led_config.py` / `config/led_look_director.example.json`. Two known limitations vs. this document, both deliberate and reported: (1) true-drop impact detection reuses the Laser Director's own `drop_crossing` decision rather than a second parallel drop-lifecycle instance, so the policy is inert if the Laser Director is ever unconfigured (matches the operator's actual setup); (2) the "manual interaction" fail-open trigger is implemented and tested at the window-machine level but has no wired state_manager-level detector yet (no sufficiently precise, low-risk signal was identified this pass).
+Status: AUTHORITATIVE TARGET BEHAVIOR; IMPLEMENTED / SOFTWARE-TESTED (Package 3 of AWR-119, landed 2026-07-04; AWR-135 section-length hold update landed 2026-07-07). SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED — the operator's live pass is the only remaining gate. Implementation: `drop_presentation.py` (planner/ladder/session/learned-store/window machine), base suppression in `soundswitch_laser_player.py`, wiring in `state_manager.py`, hot-cue tag reading in `filepath_resolver.py`, config in `led_config.py` / `config/led_look_director.example.json`. Two known limitations vs. this document, both deliberate and reported: (1) true-drop impact detection reuses the Laser Director's own `drop_crossing` decision rather than a second parallel drop-lifecycle instance, so the policy is inert if the Laser Director is ever unconfigured (matches the operator's actual setup); (2) the "manual interaction" fail-open trigger is implemented and tested at the window-machine level but has no wired state_manager-level detector yet (no sufficiently precise, low-risk signal was identified this pass).
 
 This document defines which fixtures fire on which drops. Behavior that
 differs from this document is a regression unless this document is
@@ -43,7 +43,7 @@ zero randomness anywhere in this policy.**
 | --- | --- |
 | true drop | A drop per the bridge's existing qualification: Smart-Drop selection (intro/outro filtered) landing with a tension predecessor per the drop-lifecycle gate. This policy invents no new drop detection. |
 | runway | Consecutive beats immediately before an impact whose phrase role is breakdown or buildup, walking backward, stopping at the first beat that is anything else. A groove between breakdown and buildup resets it (tension released = clock restarts). |
-| drop window | Impact → end of the smart-phrasing drop role, capped at `drop_window_cap_beats` (default 32). The shared phrase authority — never an LED- or laser-private timer. |
+| drop window | Impact → end of the smart-phrasing drop role. `drop_window_cap_beats` is a 96-beat stuck-role backstop, not the expected release. The shared phrase authority — never an LED- or laser-private timer. |
 | pre-dark | Govees joining the lasers' existing pre-drop blackout for the final `led_predark_beats` (default 4) before a solo's impact: total darkness into the hit. |
 | session | One bridge process lifetime. Damper counters and the runway record reset with it; the learned store persists across sessions. |
 | learned store | The persistent per-track memory of the operator's manual solos (`local/state/laser_solo_learned.json`), keyed by `content_id` + the drop's **beat position** (±2-beat lookup tolerance — survives Rekordbox re-analysis reindexing; operator 2026-07-04). |
@@ -135,7 +135,8 @@ suppressed (damper), and tracks without phrase data are invisible to this tier.
 - **Fail-open, always:** LEDs restore and suppression releases on ANY of:
   window end, drop role change, track change, active-deck change, stop,
   manual interaction, laser-output loss mid-window, or a predicted impact
-  passing without a confirmed drop. The policy can never latch a fixture dark.
+  passing without a confirmed drop. A stuck drop/post-drop role is bounded by
+  the 96-beat cap. The policy can never latch a fixture dark.
 - `enabled: false` restores pre-policy behavior exactly (every drop
   `leds_plus_lasers`); the mute and Solo pads keep working regardless.
 

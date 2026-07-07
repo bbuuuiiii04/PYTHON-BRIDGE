@@ -562,6 +562,7 @@ class BridgeMenubarTests(unittest.TestCase):
             "scripted_active": "scripted active",
             "rendering_active": "native autoloop",
             "empty_dark_look": "native dark",
+            "base_suppressed": "native dark",
             "missing_binding": "autoloop missing binding",
             "missing_autoloop_file": "autoloop file missing",
             "unsupported_layout": "autoloop unsupported",
