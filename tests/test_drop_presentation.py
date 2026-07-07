@@ -42,7 +42,7 @@ def _seg(start: float, end: float, label: str) -> PhraseSegment:
 def _cfg(**overrides) -> DropPresentationConfig:
     defaults = dict(
         enabled=True, laser_ratio=0.4, opening_tracks=3, led_predark_beats=4,
-        drop_window_cap_beats=96, hotcue_marker="LASER", solo_learn_threshold=1,
+        drop_window_cap_beats=192, hotcue_marker="LASER", solo_learn_threshold=1,
         gearshift_bpm_jump=10.0, record_min_drops=5, ws_handoff_enabled=False,
     )
     defaults.update(overrides)
@@ -536,16 +536,51 @@ class RequiredTest8FailOpen(unittest.TestCase):
         self.assertTrue(actions.base_suppressed)
         self.assertEqual(actions.presentation, LEDS_ONLY)
 
-    def test_leds_only_window_stays_dark_while_post_drop_past_old_cap(self) -> None:
-        machine = WindowMachine(_cfg())
-        machine.tick(_impact(100.0), pending_presentation=LEDS_ONLY, pending_reason="leds_only_personality")
+    def test_laser_drop_fires_inside_leds_only_shadow(self) -> None:
+        cfg = _cfg()
+        machine = WindowMachine(cfg)
+        machine.tick(_impact(0.0), pending_presentation=LEDS_ONLY, pending_reason="leds_only_personality")
         actions = machine.tick(
-            WindowInputs(abs_beat=140.0, beats_to_next_drop=None, next_drop_beat=None,
+            WindowInputs(abs_beat=64.0, beats_to_next_drop=0.0, next_drop_beat=64.0,
+                         drop_role="post_drop", impact_now=True, laser_visible=True),
+            pending_presentation=LEDS_PLUS_LASERS, pending_reason="both_personality",
+        )
+        self.assertFalse(actions.base_suppressed)
+        self.assertFalse(actions.led_dark_hold)
+        self.assertEqual(actions.presentation, LEDS_PLUS_LASERS)
+        self.assertEqual(actions.reason, "both_personality")
+        self.assertEqual(machine._window_end_beat, 64.0 + cfg.drop_window_cap_beats)
+
+    def test_leds_only_followup_drop_restamps_window(self) -> None:
+        cfg = _cfg()
+        machine = WindowMachine(cfg)
+        machine.tick(_impact(0.0), pending_presentation=LEDS_ONLY, pending_reason="leds_only_personality")
+        actions = machine.tick(
+            WindowInputs(abs_beat=64.0, beats_to_next_drop=0.0, next_drop_beat=64.0,
+                         drop_role="post_drop", impact_now=True, laser_visible=True),
+            pending_presentation=LEDS_ONLY, pending_reason="leds_only_followup",
+        )
+        self.assertTrue(actions.base_suppressed)
+        self.assertEqual(actions.presentation, LEDS_ONLY)
+        self.assertEqual(actions.reason, "leds_only_followup")
+        self.assertEqual(machine._window_end_beat, 64.0 + cfg.drop_window_cap_beats)
+
+    def test_128_beat_section_stays_suppressed_until_role_exit(self) -> None:
+        machine = WindowMachine(_cfg())
+        machine.tick(_impact(0.0), pending_presentation=LEDS_ONLY, pending_reason="leds_only_personality")
+        actions = machine.tick(
+            WindowInputs(abs_beat=127.0, beats_to_next_drop=None, next_drop_beat=None,
                          drop_role="post_drop", impact_now=False, laser_visible=True),
             pending_presentation=None, pending_reason="",
         )
         self.assertTrue(actions.base_suppressed)
         self.assertEqual(actions.presentation, LEDS_ONLY)
+        actions = machine.tick(
+            WindowInputs(abs_beat=128.0, beats_to_next_drop=None, next_drop_beat=None,
+                         drop_role="none", impact_now=False, laser_visible=True),
+            pending_presentation=None, pending_reason="",
+        )
+        self.assertEqual(actions, WindowActions(led_dark_hold=False, base_suppressed=False, presentation=None, reason=""))
 
     def test_leds_only_window_releases_when_role_leaves_before_backstop(self) -> None:
         machine = WindowMachine(_cfg())
@@ -559,13 +594,31 @@ class RequiredTest8FailOpen(unittest.TestCase):
 
     def test_leds_only_window_releases_at_backstop_if_role_sticks(self) -> None:
         machine = WindowMachine(_cfg())
-        machine.tick(_impact(100.0), pending_presentation=LEDS_ONLY, pending_reason="leds_only_personality")
+        machine.tick(_impact(0.0), pending_presentation=LEDS_ONLY, pending_reason="leds_only_personality")
         actions = machine.tick(
-            WindowInputs(abs_beat=196.0, beats_to_next_drop=None, next_drop_beat=None,
+            WindowInputs(abs_beat=191.0, beats_to_next_drop=None, next_drop_beat=None,
+                         drop_role="post_drop", impact_now=False, laser_visible=True),
+            pending_presentation=None, pending_reason="",
+        )
+        self.assertTrue(actions.base_suppressed)
+        actions = machine.tick(
+            WindowInputs(abs_beat=192.0, beats_to_next_drop=None, next_drop_beat=None,
                          drop_role="post_drop", impact_now=False, laser_visible=True),
             pending_presentation=None, pending_reason="",
         )
         self.assertEqual(actions, WindowActions(led_dark_hold=False, base_suppressed=False, presentation=None, reason=""))
+
+    def test_impact_without_pending_presentation_keeps_old_window(self) -> None:
+        machine = WindowMachine(_cfg())
+        machine.tick(_impact(0.0), pending_presentation=LEDS_ONLY, pending_reason="leds_only_personality")
+        actions = machine.tick(
+            WindowInputs(abs_beat=64.0, beats_to_next_drop=0.0, next_drop_beat=64.0,
+                         drop_role="post_drop", impact_now=True, laser_visible=True),
+            pending_presentation=None, pending_reason="",
+        )
+        self.assertTrue(actions.base_suppressed)
+        self.assertEqual((actions.presentation, actions.reason), (LEDS_ONLY, "leds_only_personality"))
+        self.assertEqual(machine._window_end_beat, 192.0)
 
     def test_predicted_impact_passing_without_a_confirmed_drop(self) -> None:
         machine = WindowMachine(_cfg(led_predark_beats=4))
@@ -670,7 +723,7 @@ class DropPresentationConfigTests(unittest.TestCase):
         self.assertEqual(cfg.laser_ratio, 0.4)
         self.assertEqual(cfg.opening_tracks, 3)
         self.assertEqual(cfg.led_predark_beats, 4)
-        self.assertEqual(cfg.drop_window_cap_beats, 96)
+        self.assertEqual(cfg.drop_window_cap_beats, 192)
         self.assertEqual(cfg.hotcue_marker, "LASER")
         self.assertEqual(cfg.solo_learn_threshold, 1)
         self.assertEqual(cfg.gearshift_bpm_jump, 10.0)

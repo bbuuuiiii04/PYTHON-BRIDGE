@@ -89,7 +89,9 @@ class DropPresentationConfig:
         laser_ratio: float = 0.4,
         opening_tracks: int = 3,
         led_predark_beats: int = 4,
-        drop_window_cap_beats: int = 96,  # hang-guard; normal release comes from role change
+        # Hang guard only: role exit or a newer impact releases normally. 192
+        # stays above operator-reported 128-beat drops while bounding stuck roles.
+        drop_window_cap_beats: int = 192,
         hotcue_marker: str = "LASER",
         solo_learn_threshold: int = 1,
         gearshift_bpm_jump: float = 10.0,
@@ -115,7 +117,7 @@ class DropPresentationConfig:
             laser_ratio=_float_or_default(src.get("laser_ratio"), 0.4),
             opening_tracks=_int_or_default(src.get("opening_tracks"), 3),
             led_predark_beats=_int_or_default(src.get("led_predark_beats"), 4),
-            drop_window_cap_beats=_int_or_default(src.get("drop_window_cap_beats"), 96),
+            drop_window_cap_beats=_int_or_default(src.get("drop_window_cap_beats"), 192),
             hotcue_marker=str(src.get("hotcue_marker") or "LASER"),
             solo_learn_threshold=_int_or_default(src.get("solo_learn_threshold"), 1),
             gearshift_bpm_jump=_float_or_default(src.get("gearshift_bpm_jump"), 10.0),
@@ -697,6 +699,11 @@ class WindowMachine:
             )
 
         if self._phase == "in_window":
+            if inputs.impact_now and pending_presentation is not None:
+                presentation, reason = self._guarded(pending_presentation, pending_reason, inputs)
+                self._enter_window(presentation, reason, inputs.abs_beat)
+                return self._window_actions()
+
             window_ended = (
                 inputs.drop_role not in _WINDOW_ACTIVE_ROLES
                 or (

@@ -68,7 +68,7 @@ def _sp_state(**overrides):
 def _enable_drop_presentation(sm, **overrides) -> None:
     sm._drop_presentation_config = DropPresentationConfig(**{
         "enabled": True, "laser_ratio": 0.4, "opening_tracks": 3,
-        "led_predark_beats": 4, "drop_window_cap_beats": 96,
+        "led_predark_beats": 4, "drop_window_cap_beats": 192,
         "hotcue_marker": "LASER", "solo_learn_threshold": 1,
         "gearshift_bpm_jump": 10.0, "record_min_drops": 5,
         "ws_handoff_enabled": False, **overrides,
