@@ -61,15 +61,7 @@ class DropLifecycle:
         if previous in self._config.impact_predecessors:
             return True
         if sp.smart_drop_crossing:
-            current = str(sp.current_phrase_label or "other")
-            if current in self._config.impact_predecessors:
-                return True
-        if previous == "chorus":
-            if (
-                self._first_drop_anchor_beat is not None
-                and self._impact_count < self._config.max_drops_in_a_row
-            ):
-                return True
+            return True
         return False
 
     def should_clear(self, sp) -> bool:

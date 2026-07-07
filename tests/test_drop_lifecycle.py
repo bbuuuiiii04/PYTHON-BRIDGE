@@ -1,8 +1,8 @@
 """Tests for drop_lifecycle.py — the pure, renderer-agnostic drop/post_drop resolver.
 
-Covers: drop held for drop_impact_beats then post_drop; ≤max_drops_in_a_row then
-post_drop; predecessor gate (up/low/buildup/breakdown → drop; groove/other → NOT
-drop); chorus→chorus cap; lifecycle clear when chorus/post-drop ends; flat-vs-flat
+Covers: drop held for drop_impact_beats then post_drop; predecessor gate
+(up/low/buildup/breakdown → drop; groove/other label-only anchors → NOT drop);
+real smart-drop crossings always fire; lifecycle clear when chorus/post-drop ends; flat-vs-flat
 LED parity (WITHOUT _led_note_drop_decision_accepted rewrite).
 
 NOTE: This proves FLAT-WINDOW parity only. The live LED window is per-look-duration
@@ -98,38 +98,32 @@ class TestImpactAllowed(unittest.TestCase):
             sp = _sp(previous_phrase_label=pred)
             self.assertFalse(lc.impact_allowed(sp), f"predecessor={pred}")
 
-    def test_smart_drop_crossing_current_label_fallback(self) -> None:
+    def test_smart_drop_crossing_allows_after_groove(self) -> None:
         lc = DropLifecycle(_cfg())
         sp = _sp(
-            previous_phrase_label="other",
+            previous_phrase_label="groove",
             smart_drop_crossing=True,
-            current_phrase_label="up",
+            current_phrase_label="other",
         )
         self.assertTrue(lc.impact_allowed(sp))
 
-    def test_chorus_to_chorus_capped(self) -> None:
-        """After max_drops_in_a_row chorus→chorus impacts, further ones are disallowed."""
+    def test_label_only_chorus_to_chorus_disallowed_after_anchor(self) -> None:
         lc = DropLifecycle(_cfg(max_drops=2))
-        # First: need first_drop_anchor_beat set
         lc._first_drop_anchor_beat = 64.0
-        lc._impact_count = 0
         sp = _sp(previous_phrase_label="chorus")
-        self.assertTrue(lc.impact_allowed(sp))  # count=0 < 2
-        lc._impact_count = 1
-        self.assertTrue(lc.impact_allowed(sp))  # count=1 < 2
-        lc._impact_count = 2
-        self.assertFalse(lc.impact_allowed(sp))  # count=2 >= 2, capped
+        self.assertFalse(lc.impact_allowed(sp))
 
     def test_chorus_to_chorus_requires_first_anchor(self) -> None:
-        """chorus→chorus is only allowed when first_drop_anchor_beat is set."""
+        """chorus→chorus label-only re-arm is disallowed even after an anchor."""
         lc = DropLifecycle(_cfg(max_drops=2))
+        lc._first_drop_anchor_beat = 64.0
         sp = _sp(previous_phrase_label="chorus")
-        self.assertFalse(lc.impact_allowed(sp))  # no anchor → disallowed
+        self.assertFalse(lc.impact_allowed(sp))
 
 
 class TestResolve(unittest.TestCase):
     def test_baseline_lifecycle(self) -> None:
-        """Cover impact_allowed preventing early armed_this_tick."""
+        """A real crossing fires even when the previous label is not a predecessor."""
         lifecycle = DropLifecycle(_cfg(impact_beats=8.0))
         sp = _sp(
             smart_drop_crossing=True,
@@ -139,8 +133,7 @@ class TestResolve(unittest.TestCase):
             previous_phrase_label="groove",
             abs_beat=60.0,
         )
-        # (The anchor is ~2 beats early, but only chorus has impact_allowed)
-        self.assertEqual(lifecycle.resolve(sp, mutate=True).role, "post_drop")
+        self.assertEqual(lifecycle.resolve(sp, mutate=True).role, "drop")
         self.assertFalse(lifecycle._first_drop_anchor_beat is None)
 
     def test_resolve_no_mutate(self) -> None:
@@ -203,8 +196,8 @@ class TestResolve(unittest.TestCase):
         self.assertEqual(res.role, "post_drop")
         self.assertFalse(res.armed_this_tick)
 
-    def test_disallowed_predecessor_yields_post_drop(self) -> None:
-        """A smart_drop_crossing with predecessor=groove → post_drop, NOT drop."""
+    def test_smart_drop_crossing_after_groove_yields_drop(self) -> None:
+        """A smart_drop_crossing with predecessor=groove yields drop."""
         lc = DropLifecycle(_cfg())
         sp = _sp(
             smart_drop_crossing=True,
@@ -213,8 +206,8 @@ class TestResolve(unittest.TestCase):
             abs_beat=128.0,
         )
         res = lc.resolve(sp, mutate=True)
-        self.assertEqual(res.role, "post_drop")
-        self.assertFalse(res.armed_this_tick)
+        self.assertEqual(res.role, "drop")
+        self.assertTrue(res.armed_this_tick)
 
     def test_lifecycle_clears_when_chorus_ends(self) -> None:
         """After leaving chorus/post_drop, lifecycle state resets."""
@@ -361,13 +354,13 @@ class TestParity(unittest.TestCase):
         sp3 = _sp(current_phrase_is_chorus=True, smart_post_drop_active=True, abs_beat=80.0)
         self.assertParity(sp3, "Post drop")
 
-    def test_parity_disallowed_predecessor_flow(self) -> None:
-        """Disallowed-predecessor -> post_drop"""
+    def test_parity_real_crossing_after_groove_flow(self) -> None:
+        """Real smart-drop crossing after groove -> drop"""
         sp1 = _sp(smart_drop_crossing=True, active_drop_beat=300.0, previous_phrase_label="groove", abs_beat=300.0, current_phrase_is_chorus=True)
-        self.assertParity(sp1, "Disallowed cross")
+        self.assertParity(sp1, "Groove-to-crossing drop")
 
-    def test_parity_chorus_cap(self) -> None:
-        """chorus -> chorus cap at max=2"""
+    def test_parity_repeated_real_crossings_after_chorus_still_fire(self) -> None:
+        """Real crossings still fire after a long chorus stretch."""
         sp1 = _sp(smart_drop_crossing=True, active_drop_beat=500.0, previous_phrase_label="up", abs_beat=500.0, current_phrase_is_chorus=True)
         self.assertParity(sp1, "Chorus 1")
 
@@ -375,7 +368,7 @@ class TestParity(unittest.TestCase):
         self.assertParity(sp2, "Chorus 2")
 
         sp3 = _sp(smart_drop_crossing=True, active_drop_beat=700.0, previous_phrase_label="chorus", abs_beat=700.0, current_phrase_is_chorus=True)
-        self.assertParity(sp3, "Chorus 3 (capped)")
+        self.assertParity(sp3, "Chorus 3")
 
     def test_parity_lifecycle_clear(self) -> None:
         """Lifecycle clears when leaving chorus/post_drop"""
