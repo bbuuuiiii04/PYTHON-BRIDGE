@@ -533,7 +533,13 @@ class StateManager(LEDDispatchPolicyMixin):
         self._native_captured_scene: LaserResolvedScene | None = None
         self._native_abs_beat_pos: float | None = None
         self._native_log_key: tuple[Any, ...] = ()
-        self._laser_color_engine = LaserColorMapper(load_laser_color_map())
+        _laser_color_map = load_laser_color_map()
+        self._laser_color_engine = LaserColorMapper(_laser_color_map)
+        log.info(
+            "[SM] laser-color-map  enabled=%s  fixed_colors=%d",
+            _laser_color_map.enabled,
+            sum(1 for v in (_laser_color_map.fixed or {}).values() if v is not None),
+        )
         self._laser_color_led_sig: tuple[Any, ...] | None = None
         self._last_sp_snapshot: Optional[SmartPhrasingSnapshot] = None
 
