@@ -119,15 +119,17 @@ def _make_director(*, mirror: bool = True, **personality_kw) -> LaserDirector:
 
 
 class TestA3RegressionGatedDrop(unittest.TestCase):
-    """A3: real smart_drop_crossing wins when the mirror is ON."""
+    """A3: smart_drop_crossing with a groove/other predecessor must NOT produce
+    role=drop or reason=drop_crossing when the mirror is ON."""
 
-    def test_real_crossing_after_other_fires_drop(self) -> None:
+    def test_disallowed_predecessor_no_drop(self) -> None:
         d = _make_director(mirror=True)
         now = time.monotonic()
         # Prime with one non-crossing tick so _last_smart_abs_beat is set
         sp_prime = _sp(abs_beat=60.0, current_phrase_label="other")
         d.tick(_ctx(abs_beat=60.0, smart_phrasing=sp_prime), now=now)
 
+        # Crossing with disallowed predecessor
         sp_cross = _sp(
             abs_beat=64.0,
             smart_drop_crossing=True,
@@ -137,8 +139,10 @@ class TestA3RegressionGatedDrop(unittest.TestCase):
             current_phrase_is_chorus=True,
         )
         dec = d.tick(_ctx(abs_beat=64.0, smart_phrasing=sp_cross), now=now + 0.01)
-        self.assertEqual(dec.role, "drop")
-        self.assertEqual(dec.reason, "drop_crossing")
+        # Must NOT be drop or drop_cycle
+        self.assertNotEqual(dec.role, "drop")
+        self.assertNotEqual(dec.reason, "drop_crossing")
+        self.assertNotEqual(dec.reason, "drop_cycle")
 
     def test_allowed_predecessor_fires_drop(self) -> None:
         d = _make_director(mirror=True)
@@ -159,7 +163,7 @@ class TestA3RegressionGatedDrop(unittest.TestCase):
         self.assertEqual(dec.reason, "drop_crossing")
 
     def test_flag_off_ungated_crossing(self) -> None:
-        """Flag OFF preserves ungated crossing behavior."""
+        """Flag OFF: crossing fires drop regardless of predecessor (today's behavior)."""
         d = _make_director(mirror=False)
         now = time.monotonic()
         sp_prime = _sp(abs_beat=60.0)
