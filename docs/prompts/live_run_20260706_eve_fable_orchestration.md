@@ -18,7 +18,11 @@ Brandon (the operator — a DJ, not a software engineer) played a ~65-minute liv
 
 ## Roles (hard boundary)
 
-You **reason, verify, decide fixes, write Codex specs, orchestrate Codex, and review its output. You do not implement bridge code yourself — Codex does.** When you fan out investigation, send those subagents to **cheaper models**; you are the only Fable-tier agent and must not spawn another. Announce nested spawns rather than running them silently.
+You **reason, verify, decide fixes, write Codex specs, orchestrate Codex, and review its output. You do not implement bridge code yourself — Codex does.** When you fan out, send those subagents to **cheaper models**; you are the only Fable-tier agent and must not spawn another. Announce nested spawns rather than running them silently.
+
+## Usage discipline — your Fable-tier turns are expensive; spend them only on the hard part
+
+Be conscious of your own cost and **default to delegating.** Reserve Fable-tier reasoning for the calls only you should make: re-verifying each root cause against code, deciding the minimal live-safe fix, every live-safety judgment, and the final review of what Codex produced. Push everything else down to **cheaper-tier subagents** — correlating the log timestamps, reading and grepping files to confirm the file:line leads, drafting the first pass of each Codex spec, running the test suite and the hard checks, and condensing results. Route read-only grinding (log correlation, file reads, grep) to the cheapest tier that can do it (Haiku/Sonnet) and moderate code reasoning (draft specs, confirm a mechanism) to a mid tier (Sonnet/Opus); keep only safety-critical judgment on yourself. **Batch independent investigations into one parallel fan-out** rather than a chain of serial Fable turns. A good pass has you reading a handful of subagent conclusions and making decisions — not grinding files yourself. If a subtask doesn't need Fable-level judgment, it shouldn't run on Fable.
 
 ## Source of truth
 
