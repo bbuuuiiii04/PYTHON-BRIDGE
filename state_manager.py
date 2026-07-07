@@ -3116,6 +3116,34 @@ class StateManager(LEDDispatchPolicyMixin):
             # Keep the previous held color if the LED color read fails.
             pass
 
+    def _bootstrap_laser_color_if_needed(self) -> None:
+        """Seed the held laser snapshot from current LED color when none exists yet.
+
+        The per-frame hold forwards ``laser_engine.snapshot()`` onto every autoloop
+        frame, but the snapshot is normally computed only when an LED look fires.
+        v2 identity/manual color can be live before that first trigger, leaving CH8
+        on baked pack color indefinitely.
+        """
+        laser_engine = self._laser_color_engine
+        led_engine = self._led_color_engine
+        if laser_engine is None or led_engine is None or laser_engine.snapshot() is not None:
+            return
+        active = self._os.active_deck
+        if active not in (1, 2) or not self._deck[active].playing:
+            return
+        sp_state = self._last_sp_state
+        role = self._laser_color_last_led_role()
+        post_drop = (
+            self._laser_color_post_drop_progress(role, sp_state)
+            if role is not None and sp_state is not None
+            else None
+        )
+        self._update_laser_color_from_led(
+            white_moment=self._laser_color_white_moment(),
+            drop_phase=role,
+            post_drop_progress=post_drop,
+        )
+
     def _laser_color_last_led_role(self) -> str | None:
         event = str(getattr(self, "_led_last_event", "") or "")
         if not event.startswith("automation:"):
@@ -3410,6 +3438,7 @@ class StateManager(LEDDispatchPolicyMixin):
         # selection, unsupported layout) leaves lasers "not visible".
         self._drop_presentation_base_live = False
         player, backend, midi_input = rt.player, rt.backend, rt.midi_input
+        self._bootstrap_laser_color_if_needed()
         laser_color_engine = self._laser_color_engine
         player.set_color_snapshot(
             laser_color_engine.snapshot() if laser_color_engine is not None else None

@@ -695,22 +695,22 @@ class SmartRearmResetTests(unittest.TestCase):
 
 
 class SmartDropTests(unittest.TestCase):
-    def test_selector_collapses_clustered_drop_markers(self) -> None:
+    def test_selector_keeps_clustered_drop_markers(self) -> None:
         selected = select_smart_drops(
             [64, 80, 96, 196, 372, 404],
             total_beats=597,
         )
-        self.assertEqual(selected, [64, 196, 372])
+        self.assertEqual(selected, [64, 80, 96, 196, 372, 404])
 
-    def test_selector_keeps_first_drop_per_section(self) -> None:
-        self.assertEqual(select_smart_drops([128, 160, 192]), [128])
-        self.assertEqual(select_smart_drops([128, 160, 288, 320]), [128, 288])
+    def test_selector_keeps_all_drop_candidates(self) -> None:
+        self.assertEqual(select_smart_drops([128, 160, 192]), [128, 160, 192])
+        self.assertEqual(select_smart_drops([128, 160, 288, 320]), [128, 160, 288, 320])
         self.assertEqual(select_smart_drops([128, 192]), [128, 192])
         self.assertEqual(select_smart_drops([128]), [128])
 
     def test_selector_filters_intro_drops(self) -> None:
         selected = select_smart_drops([8, 16, 32, 64], total_beats=160)
-        self.assertEqual(selected, [32])
+        self.assertEqual(selected, [32, 64])
 
     def test_selector_filters_outro_when_total_beats_known(self) -> None:
         selected = select_smart_drops([64, 560, 580], total_beats=597)
@@ -722,7 +722,7 @@ class SmartDropTests(unittest.TestCase):
 
     def test_selector_sorts_and_dedupes(self) -> None:
         selected = select_smart_drops([96, 64, 64, 80], total_beats=160)
-        self.assertEqual(selected, [64])
+        self.assertEqual(selected, [64, 80, 96])
 
     def test_breakdown_selector_keeps_clustered_markers(self) -> None:
         self.assertEqual(select_smart_breakdowns([32, 64, 96], total_beats=200), [32, 64, 96])
@@ -749,10 +749,10 @@ class SmartDropTests(unittest.TestCase):
         ))
 
         self.assertEqual(sm._deck[1].meta.anlz_drops, [8, 32, 64, 96])
-        self.assertEqual(sm._deck[1].meta.smart_drops, [32])
+        self.assertEqual(sm._deck[1].meta.smart_drops, [32, 64])
         self.assertEqual(
             [item.anlz_beat for item in sm._deck[1].meta.smart_drop_energy_shadow],
-            [32],
+            [32, 64],
         )
 
     def test_late_v1_shadow_does_not_replace_v2_spectral_shadow(self) -> None:

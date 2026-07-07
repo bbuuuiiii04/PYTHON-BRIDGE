@@ -424,7 +424,8 @@ class LaserPackPlayer:
                 kind="scripted",
             )
         try:
-            return PlayerResult(render_scripted_frame(document, selection.elapsed_ms))
+            frame = render_scripted_frame(document, selection.elapsed_ms)
+            return PlayerResult(_merge_color_snapshot(frame, self._color_snapshot))
         except (TypeError, ValueError) as exc:
             return _diagnostic("player_error", type(exc).__name__)
 

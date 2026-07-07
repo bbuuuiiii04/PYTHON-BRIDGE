@@ -482,6 +482,14 @@ class LaserColorStateManagerHoldTests(unittest.TestCase):
             ),
         ]
 
+    def test_bootstrap_laser_color_without_led_look_trigger(self) -> None:
+        sm, backend = self._make_state_manager()
+        self.assertIsNone(sm._laser_color_engine.snapshot())
+        sm._bootstrap_laser_color_if_needed()
+        snap = sm._laser_color_engine.snapshot()
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap.ch8, 10)
+
     def test_led_trigger_color_is_held_across_later_autoloop_drives(self) -> None:
         sm, backend = self._make_state_manager()
         sp_states = self._first_trigger_then_hold_states()

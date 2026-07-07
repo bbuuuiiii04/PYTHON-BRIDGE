@@ -10,8 +10,6 @@ from .config import (
 )
 
 _EXACT_DROP_EPSILON = 1e-6
-# ANLZ marks each 32-beat phrase in a drop section; keep the section entry only.
-SMART_DROP_MIN_GAP_BEATS = 64
 
 
 PhraseLabel = Literal["up", "chorus", "low", "other"]
@@ -606,22 +604,16 @@ def select_smart_drops(
     total_beats: int = 0,
     ignore_intro_beats: int = SMART_DROP_IGNORE_INTRO_BEATS,
     ignore_outro_beats: int = SMART_DROP_IGNORE_OUTRO_BEATS,
-    min_gap_beats: int = SMART_DROP_MIN_GAP_BEATS,
 ) -> list[int]:
     """Return Smart Drop candidates after conservative intro/outro filtering."""
     selected: list[int] = []
-    previous_drop_beat: Optional[int] = None
     outro_start = total_beats - ignore_outro_beats if total_beats > 0 else 0
     for drop_beat in sorted(set(raw_drops)):
         if drop_beat < ignore_intro_beats:
             continue
         if outro_start > 0 and drop_beat >= outro_start:
             continue
-        if previous_drop_beat is not None and drop_beat - previous_drop_beat < min_gap_beats:
-            previous_drop_beat = drop_beat
-            continue
         selected.append(drop_beat)
-        previous_drop_beat = drop_beat
     return selected
 
 
@@ -635,7 +627,6 @@ def select_smart_breakdowns(
         total_beats=total_beats,
         ignore_intro_beats=SMART_BREAKDOWN_IGNORE_INTRO_BEATS,
         ignore_outro_beats=SMART_BREAKDOWN_IGNORE_OUTRO_BEATS,
-        min_gap_beats=0,
     )
 
 
