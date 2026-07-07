@@ -1,0 +1,67 @@
+---
+doc_status: current
+truth_level: operator-symptom-report + Opus code/log leads (re-verify each)
+validation_scope: Fable 5 deep-diagnosis prompt for the LED subsystem's compound breakage, 2026-07-07 night; prompt text only; changes no bridge behavior
+---
+
+# Fable 5 — Deep-diagnose the LED subsystem: it is broken across many fronts
+
+**Target model:** Claude Fable 5 · **effort: xhigh** · large max-output budget.
+
+> Benign scope: this is normal local software diagnosis for Brandon's DJ lighting bridge. "LED", "laser", "strobe", "blackout" are stage-lighting effects; "pad" is a Stream Deck / control-surface button. Nothing here is cybersecurity, exploit, malware, biology/chemistry, or model-internals work. Review only ordinary software correctness, timing, state management, and operator behavior inside the named scope.
+
+## Mission and why it matters
+
+The LED subsystem of the v2 lighting bridge is currently **unusable** — the operator (Brandon, a DJ, not an engineer) hit a wall of independent LED failures in one live session. **Deeply diagnose the whole LED subsystem: find the real root cause of each symptom below, decide which symptoms share one underlying cause, and produce Codex-executable fix specs.** The LEDs are the centerpiece of the rig; correctness under live mixing (scrubbing, pausing, deck loads, pad presses, drops) matters more than speed. Output is for Brandon (plain-language findings) and Codex (the fix specs).
+
+Earlier tonight I (Opus) chased one of these (the "stuck look") and **got it wrong** — I blamed a beat-clamp flag, had Brandon disable it, and the freezing got *worse*. Treat my leads below as leads to **re-verify against current code and logs**, not as settled fact. Look for yourself.
+
+## The symptoms (operator report, 2026-07-07 night)
+
+1. **Stuck looks / no rotation.** LEDs freeze on one look for 20–320s while the track plays; **especially** `rt_post_drop_nebula` and `groove_diy_bright_white_chase`. Just clearing all decks and loading one track on deck 1 leaves the LEDs stuck.
+2. **Scrubbing a track completely breaks the LEDs.**
+3. **LED blackout does not work.**
+4. **Pausing playback does not return the LEDs to an idle/ambient state — it ALWAYS defaults to `groove_diy_bright_white_chase`.**
+5. **LEDs are slow to respond to pad presses.**
+6. **Pad color changes are QUEUED for the LEDs but applied IMMEDIATELY to the lasers** — same pad, two different latencies.
+7. **Drop presentation must gate the lasers for the ENTIRE drop section** (operator decision — see below), not the current fixed window.
+8. Operator expects "probably a million more" — hunt for LED issues beyond this list.
+
+## Leads I established tonight — RE-VERIFY, do not inherit
+
+**Confirmed by me (recheck against code/logs):**
+- The LED automation look only dispatches when its `role_key` changes (`_dispatch_led_automation` early-returns on unchanged key, `led_dispatch_policy.py:~810`). `role_key` embeds an intra-section rotation cycle `int((abs_beat - anchor) // cycle_beats)` per role (`_led_automation_role_key`, `led_dispatch_policy.py:~1631-1734`); `post_drop_cycle_beats=32.0` and groove `LED_DEFAULT_GROOVE_CYCLE_BEATS=32.0`.
+- On the stuck looks, the LED's rotation **beat freezes while playback keeps advancing**: in the logs the laser-side beat marched +75 and +180 (from `midi-refire`/`[LASER] buildup-gate beat=` lines) while the `[LED] look=` line held one look for the whole span. So the LED's rotation beat feed is stalling, upstream of the look logic. The LED reads `_led_abs_beat(sp_state)` = `sp_state.abs_beat` with a fallback chain to `current_phrase_start_beat + beats_into_phrase` then `active_drop_beat` (`led_dispatch_policy.py:~1546`).
+- Laser dark-at-drop + "pop back mid-section" (a separate, already-proven issue that feeds symptom #7): ~60% of drops are LED-only by config (`laser_ratio=0.4`), which sets `base_suppressed` (`state_manager.py:~2694`, `drop_presentation.py` WindowMachine `presentation==LEDS_ONLY`). That is mislabeled `status=unsupported_layout` by the finalize catch-all (`native_autoloop_resolver.py:~144`). Suppression is released by a fixed `drop_window_cap_beats=32` cap that expires mid-section → the laser pops back on. The pack render itself is innocent (every drop autoloop renders lit at every phase — I proved this offline).
+- LED "flash before a laser solo": `cloud_offset_s=0.6` vs `realtime_offset_s=0.0` (`config/led_look_director.json`) — the cloud Govee look is dispatched 0.6s early but the solo dark-hold fires at the crossing, so cloud strips show a ~600ms bright flash; realtime strips don't. This asymmetry (cloud looks time-shifted, realtime/laser not) may be related to symptoms #5/#6.
+- Pause → `groove_diy_bright_white_chase` (symptom #4): an idle/ambient LED path exists (`_dispatch_led_idle_ambient`, `led_dispatch_policy.py:~1012`), but I found it wired only for the `RB_RESTARTED` event (`state_manager.py:~1535`), **not** a normal user pause. On a normal pause the automation appears to fall through to the `groove` catch-all role (`_led_automation_role` final `return "groove"`, `led_dispatch_policy.py:~1450`) and land on one groove look. It is always the SAME groove look (`bright_white_chase`) — likely because the frozen rotation cursor (crux above) pins the groove pool there. Re-verify: find the normal-pause/stop LED code path and why it never reaches idle/ambient; and whether the always-same look is the frozen cursor or a reset-to-fixed-index.
+
+**Rejected (do NOT re-chase):** the `RBSS_LED_PHRASE_MONOTONIC` beat-clamp (`_clamp_led_beat`, `state_manager.py:4121`, `LED_BACKSTEP_SEEK_BEATS=1.0`) is **not** the cause of the stuck looks. I disabled it live and the stalls got *longer* (81s+ vs 25–32s), so it was mitigating, not causing. It is reverted to `=1` in `scripts/ss_bridge_watcher.sh:162`.
+
+**The crux unknown:** *why* the LED's rotation beat (`sp_state.abs_beat` / the `_led_abs_beat` fallback) freezes while the laser's beat advances, and whether the stuck-look, scrub-break, pause-no-idle-return, and blackout-broken symptoms share **one** underlying cause (a stale/frozen LED beat-or-phrase feed and/or a stuck role/state) or are distinct. The LED's own beat value is **not printed to the log** at INFO — this is likely why it can't be settled from existing logs alone.
+
+## Evidence packet
+
+- **Code (source of truth; code > tests > config > logs > docs):** `led_dispatch_policy.py` (LED dispatch, `role_key`, cycle, clamp, phrase latch, pad/queue handling), `led_look_director.py` (look pool + per-role cursor), `led_color_engine.py` + `led_dispatch_coordinator.py` (color, cloud/realtime split, pad color path), `govee_realtime_runner.py` / `govee_scene_adapter.py` / `govee_runtime_sender.py` / `govee_frame_renderer.py` (LED output backends), `state_manager.py` (`_update_lighting`, `_drive_pack_output`, `_drop_presentation_tick`, `_clamp_led_beat`, blackout/idle paths), `drop_presentation.py` (WindowMachine, `base_suppressed`, `_WINDOW_ACTIVE_ROLES={drop,post_drop}`, `drop_window_cap_beats`), `smart_phrasing.py` (`sp_state`, `abs_beat`, phrase/chorus/post-drop detection, scrub/seek handling), `led_config.py` + `config/led_look_director.json` (`cloud_offset_s`, `realtime_offset_s`, `laser_ratio`, `drop_window_cap_beats`, `post_drop_cycle_beats`, `led_predark_beats`, blackout config). Card: `docs/subsystems/led_govee.md`.
+- **Logs:** `~/Library/Logs/rb_ss_bridge/current.jsonl` and rotated `bridge-*.jsonl` siblings (persist across restarts; `ts`=epoch seconds). Correlate any operator wall-clock symptom time to these. Useful lines: `[SM] pos deck=… bpm=… live_bpm=… mode=… file=…` (transport; watch for `live_bpm` ≠ tag `bpm`, and elapsed advancing vs frozen), `[LED] look=… role=… via=cloud|realtime` (dispatches — only on `role_key` change), `[RGB] …` (Govee output frames), `[SM] native-autoloop status=… diag=…` (laser render; `diag=base_suppressed` = LED-only drop), `midi-refire`/`[LASER] buildup-gate beat=` (the laser-side beat, which advances while LEDs freeze). Fresh sessions on the CURRENT build carry the `diag=` field.
+- **Read-only harnesses already written (reuse/extend; they parse the JSONL, find LED-look stalls, and track beat progression):** `/private/tmp/claude-501/-Users-bbui-rb-ss-bridge-v2/43b620dd-460f-4b8d-b836-d9ffe4f040cc/scratchpad/led_stall.py`, `led_stall2.py`, plus `repro_*.py` for the laser/render path.
+- **Runtime:** a bridge is running (Enttec DMX + Govee, pack enabled). DEBUG logging (`[RGB] beat-clamp`, `[RGB] phrase-latch advance`) exists in code but is OFF at INFO level — enabling it, or adding a minimal INFO line that prints the LED's `abs_beat`/anchor/cycle, would surface the frozen value.
+- **Known-stale / low-trust:** my leads above; old prompts/plans/history; any doc without current status. Fable's own 2026-07-06 evening fixes touched laser color/misfire/rotation/blackout/solo but **not** `drop_presentation.py`, `native_autoloop_resolver.py`, or the LED config.
+
+## Boundaries
+
+- **Fable diagnoses, decides root cause, and writes Codex-executable fix specs. Fable does NOT implement bridge code — Codex does.** Every fix ships as a spec in the repo Part A–E format (`.claude/skills/codex-spec/SKILL.md`).
+- **Subagents: Sonnet only.** Every fan-out/verifier subagent must run on **Sonnet — not Opus, not Haiku, not any other model.** Fable is the only Fable-tier agent and never spawns a Fable subagent. Announce nested spawns rather than running them silently. Route the read-only grinding (log correlation, file reads, harness runs) to Sonnet subagents; keep root-cause judgment and live-safety calls on Fable.
+- **Allowed:** read any repo file/test/config/log; build and run read-only harnesses; run `python3 -m unittest discover tests` and the `AGENTS.md §8` checks. **Temporary DEBUG instrumentation is allowed only if the root cause cannot be settled from code + logs + a read-only harness** — add a minimal diagnostic log, run the bridge to observe, then **revert it**. If running the bridge: launch via the watcher in manual mode (`RBSS_BRIDGE_MANUAL=1 bash scripts/ss_bridge_watcher.sh`), confirm exactly one bridge process (`pgrep -f '\-m[[:space:]]rb_ss_bridge_v2$' | wc -l` == 1), leave no watcher fighting the menubar, and ask Brandon to drive playback/scrub/pause/pads if live reproduction is needed (Brandon does the DJ actions — no tool here controls Rekordbox). Note: the FTDI DMX port needs a few seconds to release between bridge restarts.
+- **Forbidden:** implementing behavior fixes in bridge code; leaving temporary instrumentation in the tree; using any non-Sonnet subagent; `git clean`; committing (auto-sync handles commits); breaking live-safety invariants (`StateManager` sole `DeckState` writer, 200 Hz push loop, no blocking I/O on that loop).
+
+## Operator decision already made (do not re-litigate)
+
+Symptom #7: an **LED-only drop must keep the laser dark for the WHOLE drop section**, not a fixed 32-beat window. Spec the fix as: suppression rides the phrasing's real section-end (role leaves `drop`/`post_drop`), with a long backstop (~96 beats) purely as insurance against a stuck phrasing flag — Brandon's point is that no real track has an infinite drop, so the backstop only exists to catch a software hang, not to cap normal drops.
+
+## Claim discipline, deliverable, success criteria
+
+- Label every load-bearing claim **confirmed / assumed / unknown / rejected**, tied to a `file:line` or a quoted log/harness line. No hidden reasoning — evidence-tied findings, labels, and verdicts only; never transcribe or explain private thinking.
+- **Deliverable:** (a) a per-symptom diagnosis — reproduction (log correlation or harness), exact mechanism at `file:line`, evidence, claim label — written plainly enough for Brandon to read cold; (b) an explicit **root-cause map**: which symptoms collapse to one underlying cause (e.g. a frozen/stale LED beat or a stuck role/phrase state) versus distinct bugs, proven not asserted; (c) a **Codex-executable fix spec per root cause**, ordered by impact, including the symptom-#7 laser-gating change above.
+- **Done means:** each symptom has a re-verified root cause or an explicit `unknown` with the exact run/debug line that would settle it; the shared-cause question is answered with evidence; the fix specs are Codex-ready; live-safety invariants are respected; and no temporary instrumentation or stray watcher is left behind.
+- **Stop conditions:** if a mechanism genuinely cannot be proven from code + logs + harness without live instrumentation, say so and name the precise instrumentation/replay that would settle it — do not manufacture a conclusion. If code contradicts a lead in this packet, follow the code and report the contradiction.
