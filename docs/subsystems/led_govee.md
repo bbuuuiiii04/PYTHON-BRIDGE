@@ -97,6 +97,17 @@ LED pad color immediacy (AWR-134, 2026-07-07):
   automation dispatch. Watch `[RGB] manual-color-refresh` on realtime pad
   presses. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
+Govee health reporting (AWR-136, 2026-07-07):
+- Cloud mirror sends now report health transitions instead of failing silently:
+  a mirror target logs one `[RGB] mirror-send-degraded target=... err=...`
+  warning when it first fails, and one `[RGB] mirror-send-recovered target=...`
+  info line when it heals. `GoveeRuntimeSender.status()` includes
+  `mirror_send_ok` for the last observed mirror send outcome.
+- The cloud adapter's `degraded_reason="circuit_open"` now clears after a
+  successful send, matching the already self-healing `circuit_open` boolean.
+  Light output, send ordering, queueing, rate limits, blackout bypass, and the
+  push loop are unchanged. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
 Stream Deck palette control (Package 2, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/palette_control_authority.md`.
 - The `streamdeck_palette` change contract implements palette queue/override-fade/lock, `white_sand`,
@@ -293,6 +304,11 @@ Tests:
   ambient decision from the last audible deck, accepted realtime ambient
   decisions freewheel a synthetic beat anchor, blackout/playing automation
   clear the freewheel, and idle-grace teardown blackouts before deactivate.
+  This is software validation only.
+- Govee health reporting coverage lives in `tests/test_govee_runtime_sender.py`
+  and `tests/test_govee_scene_adapter.py`: mirror target failure/recovery logs
+  emit only on transitions while primary return semantics stay unchanged, and
+  a successful send clears a previously latched `circuit_open` degraded reason.
   This is software validation only.
 - LED pad color-immediacy coverage lives in `tests/test_led_state_manager.py`
   and `tests/test_led_dispatch_coordinator.py`: cached realtime automation

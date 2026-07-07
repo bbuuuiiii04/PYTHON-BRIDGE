@@ -603,3 +603,9 @@ and `streamdeck_palette`. Keep `docs/subsystems/led_govee.md`,
 `docs/architecture/palette_control_authority.md`, and
 `docs/status/active_work_registry.md` aligned with code before claiming more than
 SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
+AWR-136 (2026-07-07) is a `led_govee` reporting-only update adjacent to this
+surface: mirror-strip cloud send failures/recoveries now log once per transition,
+and stale `circuit_open` degraded status clears after a successful send. It does
+not change palette input, feedback-file semantics, mutes, Solo, Rainbow, or light
+output.

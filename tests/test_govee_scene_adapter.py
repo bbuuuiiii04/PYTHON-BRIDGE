@@ -386,6 +386,19 @@ class GoveeSceneAdapterHealthTransitionTests(unittest.TestCase):
         while time.monotonic() < deadline and not predicate():
             time.sleep(0.01)
 
+    @staticmethod
+    def _blackout_decision() -> LEDLookDecision:
+        return LEDLookDecision(
+            look="room_blackout",
+            target="room_perimeter",
+            action="diy_scene",
+            scene_ref="23259999",
+            reason="emergency_blackout",
+            source="emergency",
+            priority=0,
+            role="emergency",
+        )
+
     def test_send_failure_streak_emits_health_govee_cloud_once(self) -> None:
         def _fail(_command, _timeout_s):
             raise RuntimeError("boom")
@@ -435,6 +448,33 @@ class GoveeSceneAdapterHealthTransitionTests(unittest.TestCase):
         self.assertEqual(records[0].levelname, "WARNING")
         self.assertEqual(records[1].levelname, "INFO")
         self.assertIn("recovered", records[1].getMessage())
+
+    def test_circuit_open_degraded_reason_clears_after_successful_send(self) -> None:
+        calls = {"n": 0}
+
+        def _fails_then_recovers(_command, _timeout_s):
+            calls["n"] += 1
+            if calls["n"] <= 3:
+                return {"ok": False, "error": "cloud_blip"}
+            return {"ok": True}
+
+        adapter = self._build_live_adapter(_fails_then_recovers)
+        try:
+            self.assertTrue(adapter.trigger(_decision()))
+            self._wait(lambda: adapter.status()["send_error_count"] >= 1)
+            self.assertTrue(adapter.trigger(_decision(look="room_safe_alt", scene_ref="Release-B")))
+            self._wait(lambda: adapter.status()["send_error_count"] >= 2)
+            self.assertTrue(adapter.trigger(self._blackout_decision()))
+            self._wait(lambda: adapter.status()["degraded_reason"] == "circuit_open")
+
+            self.assertTrue(adapter.trigger(self._blackout_decision()))
+            self._wait(lambda: adapter.status()["send_count"] >= 1)
+        finally:
+            adapter.shutdown()
+
+        status = adapter.status()
+        self.assertEqual(status["degraded_reason"], "")
+        self.assertFalse(status["degraded"])
 
 
 if __name__ == "__main__":

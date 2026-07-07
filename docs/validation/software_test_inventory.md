@@ -33,7 +33,7 @@ python -m pytest tests
 | Rekordbox readers | reader, offset, live BPM, active-deck resolver, StateManager authority, startup wiring, runtime status tests | cannot prove all app versions or hardware-visible behavior. Audit P3 adds ANLZ read-failure cache recovery coverage. |
 | SoundSwitch | OS2L/output helpers; project/pack/player/native-Autoloop-resolver/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/Art-Net truth-check/T7d/parity-lane tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status, native Autoloop rendering, U1 truth-check packets, and passive U0 parity fixtures are software/wire evidence and tests do not prove physical fixtures. Audit P2 adds software coverage for SoundSwitch-connected `overlay_suppressed` status. Audit P3 adds explicit scripted elapsed threading coverage. AWR-135 adds `base_suppressed` status coverage for intentional LED-only drop darkness. |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety. `tests/test_drop_lifecycle.py` covers true smart-drop crossings, label-only chorus boundaries, and LED flat-window parity. Audit P4 adds send-error reopen recovery, bank-gate restore, config fallback/cooldown validation, deprecated `pre_drop_scene` tolerance, blackout-mask refcount, and Laser Pad live-toggle command append coverage. |
-| LED/Govee | LED config/director/color/realtime/renderer tests plus StateManager LED automation tests | cannot prove device compatibility or room-visible behavior. `tests/test_led_state_manager.py` covers the mirrored real-crossing drop-impact gate, 32-beat intra-section role-key rotation for long buildup/pre-drop/breakdown/monotonic ambient sections, the bounded active-content hold with hold/reset observability, and no-audible idle ambient dispatch/freewheel cleanup. `tests/test_govee_realtime_runner.py` covers idle-grace blackout-before-deactivate ordering. `tests/test_led_color_engine_integration.py` covers stable section/cycle publication, unchanged drop/groove/post_drop key strings, and a dispatch-path second look across a buildup cycle boundary. Audit P2 adds committed-drop DIY eligibility coverage. Audit P3 adds runner-thread realtime handoff teardown coverage. Audit P5 keeps existing LED state-manager coverage as the behavior oracle for dispatch bookkeeping extraction. |
+| LED/Govee | LED config/director/color/realtime/renderer tests plus StateManager LED automation tests | cannot prove device compatibility or room-visible behavior. `tests/test_led_state_manager.py` covers the mirrored real-crossing drop-impact gate, 32-beat intra-section role-key rotation for long buildup/pre-drop/breakdown/monotonic ambient sections, the bounded active-content hold with hold/reset observability, and no-audible idle ambient dispatch/freewheel cleanup. `tests/test_govee_realtime_runner.py` covers idle-grace blackout-before-deactivate ordering. `tests/test_govee_runtime_sender.py` covers mirror-send health transition logging and status; `tests/test_govee_scene_adapter.py` covers circuit-open degraded-state healing. `tests/test_led_color_engine_integration.py` covers stable section/cycle publication, unchanged drop/groove/post_drop key strings, and a dispatch-path second look across a buildup cycle boundary. Audit P2 adds committed-drop DIY eligibility coverage. Audit P3 adds runner-thread realtime handoff teardown coverage. Audit P5 keeps existing LED state-manager coverage as the behavior oracle for dispatch bookkeeping extraction. |
 | Replay/session tooling | replay format and smoke tests | software-only |
 | Frontend tools | syntax and smoke tests | does not prove live safety |
 | Docs/agent workflow | docs metadata, agent contract, drift, and staleness checkers | docs-only validation |
@@ -188,6 +188,18 @@ and playing automation returning to the normal realtime beat branch.
 
 This is software validation only. It does not prove the Govee firmware fallback
 explanation or the room-visible pause behavior.
+
+## Govee Health Reporting
+
+`tests/test_govee_runtime_sender.py` covers mirror target failure and recovery
+as edge-triggered log transitions, keeps the sender's primary return value
+unchanged, and asserts `mirror_send_ok` in sender status. `tests/test_govee_scene_adapter.py`
+covers a three-failure circuit-breaker trip followed by a successful emergency
+send clearing `degraded_reason="circuit_open"` and returning status to
+non-degraded when no other fault exists.
+
+This is software validation only. It does not prove cloud API behavior,
+physical strip behavior, or room-visible output.
 
 ## M2.5 LED slot-color workstream test files
 

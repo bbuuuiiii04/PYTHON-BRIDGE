@@ -337,7 +337,10 @@ class GoveeSceneAdapter:
                         self._send_count += 1
                         was_failing = self._consecutive_send_failures > 0
                         self._consecutive_send_failures = 0
-                        if self._degraded_reason.startswith("send_") or self._degraded_reason == "malformed_response":
+                        if (
+                            self._degraded_reason.startswith("send_")
+                            or self._degraded_reason in ("malformed_response", "circuit_open")
+                        ):
                             self._degraded_reason = ""
                         if was_failing and bf.log_changed("govee_cloud_ok", True):
                             bridge_log.health("govee.cloud", "recovered", lvl=logging.INFO)

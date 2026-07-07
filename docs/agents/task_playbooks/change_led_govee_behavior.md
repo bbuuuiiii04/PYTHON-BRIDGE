@@ -46,6 +46,10 @@ Implementation notes:
 - For realtime-to-cloud handoff changes, `force_deactivate()` must not perform transport socket
   calls on the caller/push-loop thread; prove teardown on the runner thread in
   `tests/test_govee_realtime_runner.py`.
+- For Govee cloud health-reporting changes, keep fixes reporting-only: log
+  mirror send failure/recovery on state changes only, do not alter send order or
+  queue/rate-limit behavior, and prove status healing in the sender/adapter
+  tests.
 - For color-engine slot behavior, verify `resolve_slot_colors()` invariants and slot strategy config validation before updating setup/status docs.
 - For M2.5 slotized cues, keep `SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED` language until operator hardware visual sign-off covers sparkle hue stability, center-burst band split, strobe gating, drop snap behavior, Patch E visual balance, Patch S probabilistic solid-color outcomes, and Patch F generic-default bank rotation.
 - `drop_lifecycle.py` is a pure flat-window parity seam used by laser policy. The live LED resolver remains in `StateManager`; do not redirect LED runtime through the shared resolver without a separate approved change.
@@ -58,6 +62,7 @@ Required tests:
 - For active-content LED hold or role-gate changes in `StateManager`, run `python3 -m unittest tests.test_led_state_manager`.
 - Run `python -m unittest discover tests` when practical for cross-subsystem changes.
 - Run docs checks for docs changes.
+- For Govee cloud health-reporting changes, run `python3 -m unittest tests.test_govee_runtime_sender tests.test_govee_scene_adapter`.
 - For M2.5 slot-cue work, include every existing `tests/test_led_color_engine_m2_patch_*.py` file, including the newest Patch F file when present.
 - For LIGHTING ENGINE v2 identity work, include `tests/test_led_identity_v2.py`,
   `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`,

@@ -7,6 +7,7 @@ Govee responses are reduced to bounded success/error strings.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from dataclasses import replace
@@ -16,6 +17,8 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from .led_models import LEDAdapterCommand, LEDConfig
+
+log = logging.getLogger("govee_runtime_sender")
 
 BASE_URL = "https://openapi.api.govee.com"
 API_KEY_HEADER = "Govee-API-Key"
@@ -248,6 +251,7 @@ class GoveeRuntimeSender:
         self._target_meta: dict[str, dict[str, Any]] = {}
         self._devices_by_target: dict[str, dict[str, Any]] = {}
         self._scene_indexes: dict[str, dict[str, Mapping[str, Any]]] = {}
+        self._mirror_last_ok: dict[str, bool] = {}
 
         rows = _load_device_rows(
             devices_path=devices_path,
@@ -294,6 +298,7 @@ class GoveeRuntimeSender:
             "api_key_present": bool(str(self._api_key).strip()),
             "target_count": len(self._target_meta),
             "mirror_count": mirror_count,
+            "mirror_send_ok": dict(self._mirror_last_ok),
             "scene_count": sum(len(index) for index in self._scene_indexes.values()),
         }
 
@@ -356,7 +361,18 @@ class GoveeRuntimeSender:
             return primary
         for mirror_name in target_cfg.mirror_targets:
             mirror_cmd = replace(command, target=mirror_name)
-            self._send_to_target(mirror_cmd, timeout_s=timeout_s)
+            mirror = self._send_to_target(mirror_cmd, timeout_s=timeout_s)
+            mirror_ok = bool(mirror.get("ok"))
+            was_ok = self._mirror_last_ok.get(mirror_name, True)
+            self._mirror_last_ok[mirror_name] = mirror_ok
+            if was_ok and not mirror_ok:
+                log.warning(
+                    "[RGB] mirror-send-degraded target=%s err=%s",
+                    mirror_name,
+                    mirror.get("error", ""),
+                )
+            elif not was_ok and mirror_ok:
+                log.info("[RGB] mirror-send-recovered target=%s", mirror_name)
         return primary
 
     def _send_to_target(self, command: LEDAdapterCommand, *, timeout_s: float) -> dict[str, Any]:
