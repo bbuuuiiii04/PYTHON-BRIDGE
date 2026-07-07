@@ -174,6 +174,13 @@ string, e.g.: `solo_manual`, `solo_hotcue`, `solo_learned`, `solo_gearshift`,
 learned-store size, tonight's runway record, damper tracks remaining, and any
 unmatched hot-cue markers seen.
 
+The bridge log must also leave an operator-visible trail for Solo pad handling:
+DEBUG records mark each pad event when the bridge receives it, `perf.override`
+records mark Solo feedback transitions (`off`/`armed`/`active`), and a separate
+`perf.override` record marks veto presses, including whether a learned solo was
+actually unlearned. These records are observability only; they must not change
+presentation, learned-store, or feedback behavior.
+
 ## Required Behavior Tests
 
 1. Personality: rank/ratio correctness across 1-, 2-, and 4-drop tracks;

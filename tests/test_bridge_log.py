@@ -23,14 +23,38 @@ class RedactTest(unittest.TestCase):
     def test_masks_secret_key_names(self) -> None:
         data = {
             "token": "abc", "secret": "s3cr3t", "password": "hunter2",
-            "api_key": "k123", "safe": "ok",
+            "api_key": "k123", "foo_key": "not-allowlisted", "safe": "ok",
         }
         redacted = bridge_log._redact(data)
         self.assertEqual(redacted["token"], "<redacted>")
         self.assertEqual(redacted["secret"], "<redacted>")
         self.assertEqual(redacted["password"], "<redacted>")
         self.assertEqual(redacted["api_key"], "<redacted>")
+        self.assertEqual(redacted["foo_key"], "<redacted>")
         self.assertEqual(redacted["safe"], "ok")
+
+    def test_allowlisted_structural_key_names_pass_through(self) -> None:
+        data = {
+            "role_key": "role:drop:1",
+            "track_key": "deck1:gen7",
+            "armed_key": "manual",
+            "section_key": "chorus:2",
+            "cache_key": "digest",
+            "automation_last_role_key": "ambient:4",
+            "nested": {"role_key": "nested-role", "api_key": "secret"},
+            "items": [{"section_key": "drop:1"}, {"foo_key": "masked"}],
+        }
+        redacted = bridge_log._redact(data)
+        self.assertEqual(redacted["role_key"], "role:drop:1")
+        self.assertEqual(redacted["track_key"], "deck1:gen7")
+        self.assertEqual(redacted["armed_key"], "manual")
+        self.assertEqual(redacted["section_key"], "chorus:2")
+        self.assertEqual(redacted["cache_key"], "digest")
+        self.assertEqual(redacted["automation_last_role_key"], "ambient:4")
+        self.assertEqual(redacted["nested"]["role_key"], "nested-role")
+        self.assertEqual(redacted["nested"]["api_key"], "<redacted>")
+        self.assertEqual(redacted["items"][0]["section_key"], "drop:1")
+        self.assertEqual(redacted["items"][1]["foo_key"], "<redacted>")
 
     def test_recurses_into_nested_dicts_and_lists(self) -> None:
         data = {"outer": {"token": "x"}, "items": [{"secret": "y"}, "plain"]}

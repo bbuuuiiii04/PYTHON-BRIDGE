@@ -2722,7 +2722,22 @@ class StateManager(LEDDispatchPolicyMixin):
         else:
             state = "armed" if self._drop_presentation_last_pending[0] == LASERS_ONLY else "off"
         if state != self._drop_presentation_solo_feedback:
+            prev = self._drop_presentation_solo_feedback
             self._drop_presentation_solo_feedback = state
+            bridge_log.perf(
+                "override",
+                "laser solo %s (was %s)",
+                state,
+                prev,
+                data={
+                    "surface": "laser",
+                    "action": "solo_feedback",
+                    "state": state,
+                    "prev": prev,
+                    "pending_reason": self._drop_presentation_last_pending[1] or "",
+                    "armed_manual": self._drop_presentation_armed_key is not None,
+                },
+            )
             if self._led_palette_control is not None:
                 self._led_palette_control.maybe_publish()
 
@@ -2755,12 +2770,29 @@ class StateManager(LEDDispatchPolicyMixin):
             # gear-shift's one-shot flag still clears normally at that drop's
             # own impact, vetoed or not).
             session.veto_beat(track_key, pending_beat)
+            unlearned = False
             if pending_reason == "solo_learned":
                 content_id = self._drop_presentation_plan_content_id
-                if content_id and self._drop_presentation_learned_store.remove(content_id, pending_beat):
+                unlearned = bool(
+                    content_id
+                    and self._drop_presentation_learned_store.remove(content_id, pending_beat)
+                )
+                if unlearned:
                     self._drop_presentation_learned_writer.submit(
                         self._drop_presentation_learned_store.to_dict()
                     )
+            bridge_log.perf(
+                "override",
+                "laser solo veto (%s)",
+                pending_reason,
+                data={
+                    "surface": "laser",
+                    "action": "solo_veto",
+                    "pending_reason": pending_reason,
+                    "pending_beat": pending_beat,
+                    "unlearned": unlearned,
+                },
+            )
             self._drop_presentation_update_solo_feedback()
             return
 

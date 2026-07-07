@@ -32,6 +32,14 @@ from typing import Any, Callable, Iterator, Mapping, Optional
 
 _DECK = contextvars.ContextVar("deck", default=0)
 _TRACE = contextvars.ContextVar("trace", default="")
+_REDACT_ALLOWED_KEYS = frozenset({
+    "automation_last_role_key",
+    "armed_key",
+    "cache_key",
+    "role_key",
+    "section_key",
+    "track_key",
+})
 
 
 def _new_trace_id() -> str:
@@ -44,6 +52,9 @@ def _redact(value: Any) -> Any:
         redacted = {}
         for key, item in value.items():
             key_l = str(key).lower()
+            if key_l in _REDACT_ALLOWED_KEYS:
+                redacted[key] = _redact(item)
+                continue
             if any(token in key_l for token in ("token", "secret", "password", "key")):
                 redacted[key] = "<redacted>"
             else:

@@ -496,9 +496,14 @@ class TestPadEvents(unittest.TestCase):
             event_sink=seen.append,
         )
 
-        for binding in (palette, lock, mute, rainbow, laser_solo, zone, manual, max_energy):
-            _note_on(a, binding)
-            _note_off(a, binding)
+        with self.assertLogs("soundswitch_midi_input", level="DEBUG") as logs:
+            for binding in (palette, lock, mute, rainbow, laser_solo, zone, manual, max_energy):
+                _note_on(a, binding)
+                _note_off(a, binding)
+
+        messages = [record.getMessage() for record in logs.records]
+        self.assertIn("[SS-MIDI] pad event kind=laser_solo_pad phase=down", messages)
+        self.assertIn("[SS-MIDI] pad event kind=palette_pad phase=up", messages)
 
         self.assertEqual(
             [event.kind for event in seen],

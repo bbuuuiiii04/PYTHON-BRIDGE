@@ -323,6 +323,37 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
 
 
 class SoloPadIntegrationTests(unittest.TestCase):
+    def test_solo_arm_then_disarm_logs_feedback_transitions(self) -> None:
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        sm._deck = {1: _deck_state(load_gen=5)}
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+
+        with self.assertLogs("perf.override", level="INFO") as logs:
+            sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+            sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+
+        records = [
+            record for record in logs.records
+            if (getattr(record, "data", None) or {}).get("action") == "solo_feedback"
+        ]
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0].getMessage(), "laser solo armed (was off)")
+        self.assertEqual(records[0].data["state"], "armed")
+        self.assertEqual(records[0].data["prev"], "off")
+        self.assertTrue(records[0].data["armed_manual"])
+        self.assertEqual(records[1].getMessage(), "laser solo off (was armed)")
+        self.assertEqual(records[1].data["state"], "off")
+        self.assertEqual(records[1].data["prev"], "armed")
+        self.assertFalse(records[1].data["armed_manual"])
+
+    def test_solo_feedback_does_not_log_when_state_is_unchanged(self) -> None:
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+
+        with self.assertNoLogs("perf.override", level="INFO"):
+            sm._drop_presentation_update_solo_feedback()
+
     def test_arm_fire_learn_disarm_round_trip_via_real_event_dispatch(self) -> None:
         sm = _make_sm()
         _enable_drop_presentation(sm)
@@ -384,9 +415,20 @@ class SoloPadIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(sm._drop_presentation_last_pending[:2], (LASERS_ONLY, "solo_learned"))
 
-        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        with self.assertLogs("perf.override", level="INFO") as logs:
+            sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        veto_records = [
+            record for record in logs.records
+            if (getattr(record, "data", None) or {}).get("action") == "solo_veto"
+        ]
+        self.assertEqual(len(veto_records), 1)
+        self.assertEqual(veto_records[0].getMessage(), "laser solo veto (solo_learned)")
+        self.assertEqual(veto_records[0].data["pending_reason"], "solo_learned")
+        self.assertEqual(veto_records[0].data["pending_beat"], 64.0)
+        self.assertTrue(veto_records[0].data["unlearned"])
         self.assertEqual(sm._drop_presentation_learned_store.beats_for_track("content-1"), ())
         self.assertTrue(sm._drop_presentation_session.is_vetoed((1, 11), 64.0))
+        self.assertIsNone(sm._drop_presentation_armed_key)
 
         # The vetoed drop now falls through to personality/finale at impact.
         sm._drop_presentation_tick(

@@ -347,6 +347,7 @@ class SoundSwitchMidiInputAdapter:
                 log.debug("[SS-MIDI] note-off for non-render kind=%s (no-op)", kind)
 
     def _emit_pad_event(self, binding: PackMidiBinding, *, phase: str | None = None) -> None:
+        log.debug("[SS-MIDI] pad event kind=%s phase=%s", binding.target_kind, phase)
         if self._event_sink is None:
             return
         kind = binding.target_kind

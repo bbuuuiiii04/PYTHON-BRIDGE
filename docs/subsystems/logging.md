@@ -107,7 +107,7 @@ One JSON object per line, built by `bridge_log.build_record()` — a pure functi
 | `deck` | optional | explicit `deck=` kwarg, else the ambient deck contextvar when nonzero |
 | `beat` | optional | explicit `beat=` kwarg |
 | `trace` | optional | the ambient trace-id contextvar, when set |
-| `data` | optional | structured payload dict, passed through `_redact()` (masks `token`/`secret`/`password`/`key`-named entries) |
+| `data` | optional | structured payload dict, passed through `_redact()` (masks `token`/`secret`/`password`/unknown `*key*` fields; exact allowlisted structural keys such as `role_key` pass through) |
 | `exc` | optional | formatted traceback, when the call carried `exc_info` |
 
 A run opens with a header record (`cat="sys.boot"`, schema version + pid) and closes cleanly with a
