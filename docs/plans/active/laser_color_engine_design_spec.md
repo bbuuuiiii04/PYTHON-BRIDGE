@@ -1,9 +1,9 @@
 ---
 doc_status: current
-truth_level: design-intent plus code-verified Package 4 plumbing
-last_verified_commit: d5cdcd4
-last_verified_date: 2026-07-06
-validation_scope: software-only; held-snapshot CH8 forwarding verified, hardware-unvalidated
+truth_level: design-intent plus code-verified Package 4 plumbing and 2026-07-07 menu/follow-LED layer
+last_verified_commit: b16792a
+last_verified_date: 2026-07-07
+validation_scope: software-only; held-snapshot CH8/CH9 forwarding and menu/follow-LED/brightness-floor/CH9=90 layer verified in tests, hardware-unvalidated
 ---
 
 # Laser Color — Design Spec (pre-handoff)
@@ -364,3 +364,29 @@ for its whole window.)
 Design-only; changes no runtime behavior, so no `change_contracts.yml` entry yet. Per AGENTS.md
 §7, **before** implementation begins, add/extend the `laser` contract (and likely a new
 `laser_color` entry) with its `docs_update` list, then edit code.
+
+## Addendum — menu/follow-LED layer (2026-07-07, IMPLEMENTED/software-tested)
+
+The single-center-solid mapper described above was extended (not replaced) by
+`docs/plans/active/laser_color_menu_spec.md`, implemented under the `laser` change contract.
+Summary of what shipped:
+
+- **Config:** `config/laser_color_map.json` gains `fixed_ch9: 90` and a per-mood `menus` block.
+  Each menu entry is a solid color name (CH8 from `fixed`) or a chase `{"chase": <ch8>, "colors":
+  [a, b]}`. Menus exist only for moods that reach the pick — no `rainbow`/`white_sand` menu.
+- **`LaserColorMap`:** new frozen `menus` field parsed by `from_dict` into nested tuples
+  (`("solid", name)` / `("chase", ch8, (names...))`); malformed entries dropped, empty menu → mood
+  treated as "no menu" (legacy).
+- **`_target()` pick:** after the unchanged white / white_sand / rainbow early returns, it reads
+  the LEDs' actual last-emitted color (`live_rgb`), applies a 3-tier brightness floor (`_BRIGHTNESS`)
+  so the laser is never dimmer than the LEDs, fires the mood's eligible chase on drops (else tracks
+  the matching solid), never goes dark (empty eligible → brightest), and drives CH9 from `fixed_ch9`
+  through the existing settle. Unresolved CH8 / invalid / disabled → `None` (fail-open). No-menu
+  moods keep the legacy single-solid nearest-fixed path.
+- **`led_color_engine.py`:** stashes `_last_emitted_rgb` on the color-returning paths of BOTH
+  `resolve_color` and the active-engine `_v2_resolve_color`, clears it on v1↔v2 switch, and adds
+  `live_rgb` to both `color_state()` return dicts (pure read).
+- **`state_manager.py`:** `_sync_laser_color_if_needed` adds the QUANTIZED `live_rgb` bucket to the
+  re-sync signature (raw RGB would flap it at 200 Hz).
+- **CH3/CH4 are never read or written** — chase effects are authored at CH3=0/CH4=10 in the pack.
+- Tests: `tests/test_laser_color_engine.py::LaserColorMenuTests` (10 Part D cases).

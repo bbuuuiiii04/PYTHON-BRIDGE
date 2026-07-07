@@ -95,7 +95,11 @@ from .drop_presentation import (
     plan_track,
     resolve_presentation,
 )
-from .laser_color_engine import LaserColorEngine as LaserColorMapper, load_laser_color_map
+from .laser_color_engine import (
+    LaserColorEngine as LaserColorMapper,
+    _nearest_fixed_color as _laser_nearest_fixed_color,
+    load_laser_color_map,
+)
 from .laser_models import LaserContext, LaserPersonality, LaserResolvedScene
 from .soundswitch_laser_player import (
     ZERO_FRAME as _PACK_ZERO_FRAME,
@@ -3140,11 +3144,25 @@ class StateManager(LEDDispatchPolicyMixin):
         except Exception:
             return
         rgb = color_state.get("rgb")
+        # Quantize live_rgb to its laser color bucket (not raw RGB): the LEDs'
+        # last-emitted color is last-writer-wins across roles and can differ every
+        # 200 Hz tick, so a raw-RGB signature element would flap the sig every tick
+        # and force a per-tick _target + color_state recompute (CPU-starvation
+        # history). The laser only cares which of the 6 fixed buckets it lands in,
+        # so the sig changes at cue cadence, not tick cadence.
+        live = color_state.get("live_rgb")
+        live_bucket = (
+            _laser_nearest_fixed_color(tuple(int(v) for v in live))
+            if isinstance(live, (list, tuple)) and len(live) == 3
+            and all(isinstance(v, int) and not isinstance(v, bool) for v in live)
+            else None
+        )
         sig = (
             tuple(rgb) if isinstance(rgb, (list, tuple)) and len(rgb) == 3 else (),
             color_state.get("palette"),
             bool(color_state.get("white_sand_active")),
             bool(color_state.get("rainbow_active")),
+            live_bucket,
         )
         if sig == self._laser_color_led_sig:
             return

@@ -17,7 +17,14 @@ from rb_ss_bridge_v2.laser_color_engine import (  # noqa: E402
     load_laser_color_map,
 )
 from rb_ss_bridge_v2.led_color_engine import LedColorEngine  # noqa: E402
-from rb_ss_bridge_v2.led_models import ColorEngineConfig, LEDLookDecision, Palette  # noqa: E402
+from rb_ss_bridge_v2.led_identity_v2 import content_hash  # noqa: E402
+from rb_ss_bridge_v2.led_models import (  # noqa: E402
+    ColorEngineConfig,
+    IdentityV2Config,
+    LEDLookDecision,
+    Palette,
+    ZoneRampConfig,
+)
 from rb_ss_bridge_v2.laser_models import LaserResolvedScene  # noqa: E402
 from rb_ss_bridge_v2.models import PositionSnapshot  # noqa: E402
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
@@ -290,13 +297,14 @@ class LaserColorMapperTests(unittest.TestCase):
         self.assertEqual(values, sorted(values, reverse=True))
         self.assertEqual(values[-1], 0)
 
-    def test_loader_ships_disabled_with_calibrated_fixed_band_values(self) -> None:
+    def test_loader_ships_calibrated_fixed_band_and_menu_ch9(self) -> None:
         # The shipped chart carries the operator-calibrated FIXED half
         # (2026-07-04: virtuallasernode camera calibration — CH8 4-31 in
         # 4-value bands, order W,R,Y,G,C,B,M), ENABLED by operator decision
-        # 2026-07-04 (supervised first visual pass still pending). CH9 and
-        # the effect families are still pending operator data and must
-        # remain null.
+        # 2026-07-04 (supervised first visual pass still pending). fixed_ch9
+        # is now 90 (operator design 2026-07-07, laser_color_menu_spec.md —
+        # chase speed driven, not passthrough). The rainbow effect family is
+        # still pending operator data and remains null.
         loaded = load_laser_color_map("config/laser_color_map.json")
         self.assertTrue(loaded.enabled)
         fixed = loaded.fixed or {}
@@ -307,10 +315,21 @@ class LaserColorMapperTests(unittest.TestCase):
             self.assertTrue(4 <= value <= 31, f"{name}={value}")
         self.assertEqual(fixed.get("red"), 10)     # pack-proven in-band values
         self.assertEqual(fixed.get("purple"), 28)  # fixture magenta band
-        self.assertIsNone(loaded.fixed_ch9)
+        self.assertEqual(loaded.fixed_ch9, 90)     # operator CH9 (menu chase speed)
         rainbow = (loaded.effects or {}).get("rainbow_family", {})
         self.assertIsNone(rainbow.get("ch8"))
         self.assertIsNone(rainbow.get("ch9"))
+        # Menus parsed for every mood that reaches the pick (no rainbow/white_sand).
+        menus = loaded.menus or {}
+        self.assertIn("blue_cyan", menus)
+        self.assertIn("v2:GLACIER", menus)
+        self.assertNotIn("rainbow", menus)
+        self.assertNotIn("white_sand", menus)
+        # blue_cyan menu = 2 solids + 1 chase, stored as nested tuples.
+        self.assertEqual(
+            menus["blue_cyan"],
+            (("solid", "blue"), ("solid", "cyan"), ("chase", 172, ("blue", "cyan"))),
+        )
 
     def test_default_color_map_path_is_cwd_independent(self) -> None:
         # ROOT CAUSE (2026-07-07): the live bridge runs `python3 -m rb_ss_bridge_v2`
@@ -602,6 +621,199 @@ class LedColorStateAccessorTests(unittest.TestCase):
         self.assertEqual(after, before)
         self.assertIn("rgb", state)
         self.assertFalse(state["rainbow_active"])
+
+
+_TEST_MENUS = {
+    "blue_cyan": ["blue", "cyan", {"chase": 172, "colors": ["blue", "cyan"]}],
+    "violet": ["purple", "white", {"chase": 72, "colors": ["purple", "white"]}],
+    "v2:ION": ["green", "cyan"],
+}
+
+
+def _menu_map(**overrides) -> LaserColorMap:
+    data = {
+        "enabled": True,
+        "fixed": {
+            "red": 10,
+            "green": 20,
+            "blue": 30,
+            "cyan": 40,
+            "yellow": 50,
+            "purple": 60,
+            "white": 70,
+        },
+        "fixed_ch9": 90,
+        "menus": dict(_TEST_MENUS),
+        "effects": {"rainbow_family": {"ch8": 80, "ch9": 100}},
+        "settle": {"ease_beats": 8},
+    }
+    data.update(overrides)
+    return LaserColorMap.from_dict(data)
+
+
+def _menu_snap(color_map, state, *, white_moment=False, drop_phase=None, post_drop_progress=None):
+    engine = LaserColorEngine(color_map)
+    engine.update(
+        state,
+        white_moment=white_moment,
+        drop_phase=drop_phase,
+        post_drop_progress=post_drop_progress,
+    )
+    return engine.snapshot()
+
+
+def _v2_ion_config() -> IdentityV2Config:
+    # ION ramp mirrors tests/test_led_color_engine.py::_v2_config for parity.
+    return IdentityV2Config(
+        enabled=True,
+        zones={
+            "ION": ZoneRampConfig(
+                base_ramp=((0, 60, 255), (0, 180, 255), (60, 255, 220)),
+                accent_ramp=((140, 255, 60), (240, 255, 220)),
+            ),
+        },
+    )
+
+
+def _v2_ion_record(key: str) -> dict:
+    return {
+        "zone": "ION",
+        "correction": None,
+        "norm_inputs": {"bass": 0.5, "drama": 0.5, "punch": 0.0},
+        "key_hash": content_hash(key),
+    }
+
+
+class LaserColorMenuTests(unittest.TestCase):
+    """Part D of laser_color_menu_spec.md — follow-LED + chase + brightness floor."""
+
+    def test_1_non_drop_cyan_picks_cyan_solid(self) -> None:
+        snap = _menu_snap(_menu_map(), {"palette": "blue_cyan", "live_rgb": (0, 250, 250)})
+        self.assertEqual((snap.ch8, snap.ch9), (40, 90))  # cyan solid, CH9=90
+
+    def test_2_non_drop_blue_picks_blue_solid(self) -> None:
+        snap = _menu_snap(_menu_map(), {"palette": "blue_cyan", "live_rgb": (0, 0, 250)})
+        self.assertEqual((snap.ch8, snap.ch9), (30, 90))  # blue solid
+
+    def test_3_drop_dark_fires_chase(self) -> None:
+        snap = _menu_snap(
+            _menu_map(),
+            {"palette": "blue_cyan", "live_rgb": (0, 0, 30)},
+            drop_phase="drop",
+        )
+        self.assertEqual((snap.ch8, snap.ch9), (172, 90))  # chase 172
+
+    def test_4_white_moment_early_return_not_menu(self) -> None:
+        # White is the EARLY path — the menu/chase/floor are never reached.
+        snap = _menu_snap(
+            _menu_map(),
+            {"palette": "blue_cyan", "live_rgb": (0, 0, 250)},
+            white_moment=True,
+        )
+        self.assertEqual(snap.ch8, 70)  # fixed white
+        self.assertIsNone(snap.ch9)  # white leaves authored CH9 alone
+
+    def test_5_brightness_floor_filters_rank1(self) -> None:
+        # violet menu: purple(rank1) filtered when LEDs sit at cyan(rank2); never purple.
+        snap = _menu_snap(_menu_map(), {"palette": "violet", "live_rgb": (0, 250, 250)})
+        self.assertNotEqual(snap.ch8, 60)  # never purple (rank 1)
+        self.assertEqual(snap.ch8, 70)  # brightest eligible solid = white
+
+    def test_6_ch9_passthrough_and_post_drop_ease(self) -> None:
+        # fixed_ch9=None -> CH9 passthrough None on solids.
+        snap = _menu_snap(
+            _menu_map(fixed_ch9=None),
+            {"palette": "blue_cyan", "live_rgb": (0, 250, 250)},
+        )
+        self.assertEqual(snap.ch8, 40)
+        self.assertIsNone(snap.ch9)
+        # fixed_ch9=90 + post_drop progress=1.0 -> CH9 eased toward 0.
+        snap = _menu_snap(
+            _menu_map(),
+            {"palette": "blue_cyan", "live_rgb": (0, 250, 250)},
+            drop_phase="post_drop",
+            post_drop_progress=1.0,
+        )
+        self.assertEqual(snap.ch8, 40)
+        self.assertEqual(snap.ch9, 0)
+
+    def test_7_fail_open_paths(self) -> None:
+        # Missing menu for palette -> legacy nearest-fixed solid.
+        snap = _menu_snap(_menu_map(), {"palette": "no_such_mood", "live_rgb": (250, 0, 0)})
+        self.assertEqual((snap.ch8, snap.ch9), (10, 90))  # legacy red solid
+        # Invalid live_rgb (and no valid rgb fallback) -> None snapshot.
+        self.assertIsNone(_menu_snap(_menu_map(), {"palette": "blue_cyan"}))
+        # Disabled map -> None.
+        self.assertIsNone(
+            _menu_snap(_menu_map(enabled=False), {"palette": "blue_cyan", "live_rgb": (0, 250, 250)})
+        )
+
+    def test_8_color_state_purity_and_live_rgb(self) -> None:
+        engine = LedColorEngine(
+            ColorEngineConfig(
+                palettes={"blue_cyan": Palette(range=("cyan", "blue"), weight=1.0)},
+                set_seed_mode="fixed:9",
+            ),
+            set_seed=9,
+        )
+        emitted = engine.resolve_color(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="look",
+            color_source="engine",
+        )["color"]
+
+        before = (engine._focus_fc, engine._anchor_p, engine._journey_rng.getstate())
+        state_a = engine.color_state()
+        state_b = engine.color_state()
+        after = (engine._focus_fc, engine._anchor_p, engine._journey_rng.getstate())
+
+        self.assertEqual(after, before)  # color_state mutates nothing
+        self.assertEqual(state_a["live_rgb"], state_b["live_rgb"])
+        self.assertEqual(state_a["live_rgb"], tuple(int(v) for v in emitted))
+
+    def test_9_v2_ion_solid(self) -> None:
+        snap = _menu_snap(_menu_map(), {"palette": "v2:ION", "live_rgb": (0, 250, 0)})
+        self.assertEqual((snap.ch8, snap.ch9), (20, 90))  # green solid (ION has no chase)
+
+    def test_10_v2_follow_and_engine_switch_clear(self) -> None:
+        engine = LedColorEngine(
+            ColorEngineConfig(
+                palettes={"blue_cyan": Palette(range=("cyan", "blue"), weight=1.0)},
+                set_seed_mode="fixed:5",
+                v2=_v2_ion_config(),
+            ),
+            set_seed=5,
+        )
+        key = "follow-track"
+        engine.set_track_identity(1, 1, key, _v2_ion_record(key))
+        engine.begin_dispatch(
+            active_deck=1,
+            load_gen=1,
+            content_id=key,
+            filepath="/music/track.mp3",
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            moments_blocked=False,
+            scripted=False,
+        )
+        emitted = engine.resolve_color(
+            role="groove",
+            section_id="s1",
+            cycle=0,
+            look_name="look",
+            color_source="engine",
+        )["color"]
+        state = engine.color_state()
+        self.assertEqual(state["live_rgb"], tuple(int(v) for v in emitted))
+        self.assertNotEqual(state["live_rgb"], state["rgb"])  # follows wander, not center
+
+        # Engine switch clears the stale color: live_rgb falls back to the dict rgb.
+        engine.set_v2_active(False)
+        switched = engine.color_state()
+        self.assertEqual(switched["live_rgb"], switched["rgb"])
 
 
 if __name__ == "__main__":

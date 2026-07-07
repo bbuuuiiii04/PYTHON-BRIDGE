@@ -9,7 +9,21 @@
     "purple": 28,
     "white": 6
   },
-  "fixed_ch9": null,
+  "fixed_ch9": 90,
+  "menus": {
+    "blue_cyan":  ["blue", "cyan", {"chase": 172, "colors": ["blue", "cyan"]}],
+    "deep_ocean": ["blue", "cyan", "green", {"chase": 172, "colors": ["blue", "cyan"]}],
+    "indigo":     ["blue", "purple", {"chase": 164, "colors": ["blue", "purple"]}],
+    "violet":     ["purple", "white", {"chase": 72, "colors": ["purple", "white"]}],
+    "crimson":    ["red", "white", {"chase": 100, "colors": ["red", "white"]}],
+    "v2:GLACIER":   ["blue", "cyan", "white", {"chase": 172, "colors": ["blue", "cyan"]}, {"chase": 68, "colors": ["cyan", "white"]}],
+    "v2:DEEP_POOL": ["blue", "cyan", {"chase": 172, "colors": ["blue", "cyan"]}, {"chase": 164, "colors": ["blue", "purple"]}],
+    "v2:TWILIGHT":  ["blue", "purple", {"chase": 164, "colors": ["blue", "purple"]}],
+    "v2:ION":       ["green", "cyan"],
+    "v2:VOLT":      ["purple", {"chase": 68, "colors": ["cyan", "white"]}],
+    "v2:EMBERCORE": ["red", "white", {"chase": 100, "colors": ["red", "white"]}],
+    "v2:NEUTRAL":   ["blue", "cyan", {"chase": 172, "colors": ["blue", "cyan"]}, {"chase": 68, "colors": ["cyan", "white"]}]
+  },
   "effects": {
     "rainbow_family": {
       "ch8": null,

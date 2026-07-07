@@ -340,6 +340,11 @@ class LedColorEngine:
         # Phase 3: previous color tracking for fades
         self._prev_color: dict[tuple[Any, ...], dict[str, Any]] = {}
 
+        # Laser follow: the LEDs' actual last-emitted RGB (per-cue wander), stashed
+        # by the resolvers so the laser color engine can read it as a pure read via
+        # color_state()["live_rgb"]. Cleared on v1<->v2 engine switch.
+        self._last_emitted_rgb: tuple[int, int, int] | None = None
+
         # LIGHTING ENGINE v2 state. Kept fully separate from v1 journey state.
         self._v2_cfg = config.v2 if config.v2 is not None and config.v2.enabled else None
         self._v2_active = bool(self._v2_cfg)
@@ -638,6 +643,7 @@ class LedColorEngine:
             if multi:
                 result["color_a"] = rgb
                 result["color_b"] = rgb
+            self._last_emitted_rgb = tuple(int(v) for v in rgb)
             return result
         if palette.type == "rainbow":
             p = ((cycle % 64) / 64.0 + (_blake2b_int(f"{section_id}:{role}") % 997) / 997.0) % 1.0
@@ -646,6 +652,7 @@ class LedColorEngine:
             if multi:
                 result["color_a"] = _hue_to_rgb(p + 0.33)
                 result["color_b"] = _hue_to_rgb(p + 0.66)
+            self._last_emitted_rgb = tuple(int(v) for v in rgb)
             return result
 
         if look_name in self._config.locked_palette_by_look or self._mode_override is not None:
@@ -669,6 +676,7 @@ class LedColorEngine:
         rgb = _blend_white(rgb, palette.white)
 
         result: dict[str, Any] = {"color": rgb}
+        self._last_emitted_rgb = tuple(int(v) for v in rgb)
 
         if multi:
             # Two-color effects: p_low = low end of focus window, p_high = high end
@@ -928,13 +936,16 @@ class LedColorEngine:
                 "palette": palette,
                 "white_sand_active": self._v2_manual == "white_sand",
                 "rainbow_active": self._v2_manual == "rainbow",
+                "live_rgb": self._last_emitted_rgb or rgb,
             }
         mapped = tuple((self._mode_override or {}).values())
+        center_rgb = _p_to_rgb(self._anchor_p, self._config.scale_stops, self._stop_positions)
         return {
-            "rgb": _p_to_rgb(self._anchor_p, self._config.scale_stops, self._stop_positions),
+            "rgb": center_rgb,
             "palette": self._current_palette,
             "white_sand_active": self._current_palette == "white_sand" or "white_sand" in mapped,
             "rainbow_active": self._mode_override is not None,
+            "live_rgb": self._last_emitted_rgb or center_rgb,
         }
 
     def set_mode_override(self, mapping: dict[str, str]) -> None:
@@ -993,6 +1004,8 @@ class LedColorEngine:
             return
         self.reset_fade_memory()
         self._v2_active = next_active
+        # A stale v1 color must not leak into a fresh v2 zone (or vice-versa).
+        self._last_emitted_rgb = None
         self._v2_manual = ""
         self._v2_staged = None
         self._v2_flip_fade = None
@@ -1117,6 +1130,7 @@ class LedColorEngine:
             if multi:
                 result["color_a"] = manual
                 result["color_b"] = manual
+            self._last_emitted_rgb = tuple(int(v) for v in manual)
             return result
         dressing = self._v2_active_dressing()
         if dressing is None:
@@ -1135,6 +1149,7 @@ class LedColorEngine:
             p = _rng_from_seed(cue_seed).uniform(0.0, 1.0)
             rgb = self._v2_base_pick(dressing, p)
         result = {"color": rgb}
+        self._last_emitted_rgb = tuple(int(v) for v in rgb)
         if multi:
             result["color_a"] = multi_slots[0]
             result["color_b"] = multi_slots[2]

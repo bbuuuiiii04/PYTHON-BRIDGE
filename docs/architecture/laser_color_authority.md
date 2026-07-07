@@ -1,14 +1,14 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: d5cdcd4
-last_verified_date: 2026-07-06
-validation_scope: behavior contract plus software-tested Package 4 plumbing; held CH8 forwarding verified in software; no live or hardware validation
+last_verified_commit: b16792a
+last_verified_date: 2026-07-07
+validation_scope: behavior contract plus software-tested Package 4 plumbing and the 2026-07-07 menu/follow-LED/brightness-floor/CH9=90 layer; held CH8/CH9 forwarding verified in software; menu chase CH8 values (172/68/100/164/72) are NOT hardware-validated (CH3/CH4 stay authored); no live or hardware validation
 ---
 
 # Laser Color Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; PACKAGE 4 PLUMBING IMPLEMENTED/SOFTWARE-TESTED (design approved by operator 2026-07-04)
+Status: AUTHORITATIVE TARGET BEHAVIOR; PACKAGE 4 PLUMBING + MENU/FOLLOW-LED LAYER IMPLEMENTED/SOFTWARE-TESTED (design approved by operator 2026-07-04; menu layer 2026-07-07)
 
 This document defines how laser color is expected to behave now that the bridge
 has the Package 4 color plumbing. Behavior that differs from this document is a
@@ -28,10 +28,25 @@ pack's authored CH8/CH9 on those frames. On **scripted tracks, the authored
 show is sovereign**: lasers play exactly the cue colors baked into the pack,
 and the color engine stands down completely.
 
-Package 4 ships this behavior disabled by config: `config/laser_color_map.json`
-has `enabled: false` and all CH8/CH9 values are `null`, so the software-tested
-runtime path is authored pass-through until the operator chart is filled and
-explicitly enabled.
+Package 4's plumbing shipped disabled; it is now **enabled** (operator decision
+2026-07-04, fixed-color chart) and the **menu/follow-LED layer** (2026-07-07)
+sits on top of it. `config/laser_color_map.json` now has `enabled: true`, a
+calibrated fixed-color CH8 table, `fixed_ch9: 90`, and a per-mood `menus` block.
+Fail-open is unchanged: any disabled/missing-menu/invalid state passes authored
+CH8/CH9 through.
+
+**What the menu layer changed (2026-07-07):** instead of quantizing the LED
+color to one solid CH8 per mood, each mood now has a small **menu** of options
+(some solid colors, some two-color **chase** effects). The laser **follows the
+LEDs' actual last-emitted color** (their real per-section wander, exposed as a
+pure read `color_state()["live_rgb"]`), applies a **brightness floor** (the
+laser is never picked dimmer than the LEDs), and on a **drop** fires the mood's
+eligible **chase** instead of a flat solid. CH9 is now driven at `90` (chase
+speed) instead of passthrough. Moods with no menu keep the legacy single-solid
+nearest-fixed behavior. **CH3/CH4 are never read or written** — the chase
+effects are authored at CH3=0/CH4=10 in the pack, so some chase CH8 values may
+render slightly differently live; that is an accepted operator eyeball risk, not
+a bug to "fix" by driving CH3/CH4.
 
 ## Vocabulary
 
@@ -48,10 +63,20 @@ explicitly enabled.
 ## Color Source Rules
 
 1. On autoloop frames where lasers are firing (per the drop presentation
-   ladder), laser color = **nearest fixed color to the LED engine's current
-   color**, sampled at phrase anchors and per drop section. Because the LED
-   engine already varies color per drop section, per-drop laser variation
-   emerges automatically — it is not a separate feature.
+   ladder), laser color is **menu-picked to follow the LEDs' last-emitted
+   color** (2026-07-07). The pick reads `color_state()["live_rgb"]` (the LEDs'
+   real per-section wander, quantized to the nearest fixed color), then within
+   the mood's menu: non-drops track the eligible **solid** that matches the LED
+   color; **drops fire the eligible chase** (two-color effect). A **brightness
+   floor** removes any menu option dimmer than the LEDs (3-tier rank:
+   white=3; cyan/green/yellow=2; blue/purple/red=1), and if everything is
+   filtered it keeps the brightest option (never dark). Moods with no menu fall
+   back to the legacy single-solid nearest-fixed pick. Because the LED engine
+   already varies color per drop section, per-drop laser variation still emerges
+   automatically. **"LEDs white → laser white" is delivered by the early white
+   return (rule 6), NOT by the brightness floor** — at the menu-pick point white
+   has already early-returned, so the floor only ever separates rank 1 from rank
+   2 within a menu.
 2. The quantizer's tie-breaks are deterministic (fixed preference order).
    Same inputs, same color, every time.
 3. **White is reserved.** The quantizer never outputs White from
@@ -75,10 +100,10 @@ explicitly enabled.
 ## Motion Rules
 
 8. **Post-drop settle:** the drop fires at full palette color and speed;
-   across the post-drop autoloop, CH9 speed eases down so the moment decays
-   instead of hard-stopping. Once the chart lands, the settle texture may
-   optionally use the gradient/flowing-water families — an operator taste
-   call, not a default.
+   across the post-drop autoloop, CH9 (now driven at `90`) eases down so the
+   moment decays instead of hard-stopping. Once the chart lands, the settle
+   texture may optionally use the gradient/flowing-water families — an operator
+   taste call, not a default.
 9. **Rainbow mode (laser tier):** while Rainbow mode is on, wherever lasers
    fire, CH8 carries a color-change/RGB-change effect-family value at a CH9
    speed instead of a quantized fixed color. Until the chart lands, Rainbow
@@ -155,6 +180,19 @@ Implemented home: sampler/quantizer/producer in `laser_color_engine.py`, the
 merge seam in `soundswitch_laser_player.py`'s Autoloop success path, the
 white-moment flag in `led_dispatch_coordinator.py`, held-snapshot forwarding
 in `state_manager.py`, and the chart at `config/laser_color_map.json`.
-`led_color_engine.py` now exposes `color_state()` for the current anchor RGB
-without advancing RNG or mutating journey state. Design detail:
-`docs/plans/active/laser_color_engine_design_spec.md` Parts B, D, E.
+`led_color_engine.py` exposes `color_state()` for the current anchor RGB
+without advancing RNG or mutating journey state.
+
+**Menu/follow-LED layer (2026-07-07, `laser_color_menu_spec.md`):**
+`LaserColorMap` parses a `menus` block into nested tuples; `_target()` picks
+from the mood's menu using `_entry_brightness`/`_led_brightness` (module-level
+`_BRIGHTNESS` 3-tier rank) and `_pick_menu_entry` (deterministic, no RNG).
+`led_color_engine.py` stashes the LEDs' actual last-emitted color in
+`self._last_emitted_rgb` inside **both** resolvers (`resolve_color` and the
+active-engine `_v2_resolve_color`), clears it on v1↔v2 engine switch, and
+surfaces it as `color_state()["live_rgb"]` (still a pure read — the write is in
+the resolvers, which already mutate). `state_manager._sync_laser_color_if_needed`
+adds the **quantized** `live_rgb` bucket to the re-sync signature (raw RGB would
+flap the sig every 200 Hz tick). CH3/CH4 are never touched. Design detail:
+`docs/plans/active/laser_color_engine_design_spec.md` Parts B, D, E and
+`docs/plans/active/laser_color_menu_spec.md`.

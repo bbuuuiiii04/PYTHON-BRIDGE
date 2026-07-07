@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: 12ffb09
-last_verified_date: 2026-07-04
-validation_scope: Package 1 re-wire implemented and software-tested in current worktree; no live or hardware validation implied
+last_verified_commit: b16792a
+last_verified_date: 2026-07-07
+validation_scope: Package 1 re-wire implemented and software-tested in current worktree; no live or hardware validation implied. Reconfirmed unchanged by the 2026-07-07 laser-color menu/follow-LED layer — that feature only sets CH8/CH9 on the injected snapshot and still loses to blackout/emergency downstream.
 ---
 
 # Laser Blackout Authority
@@ -21,7 +21,10 @@ live-critical contract on this feature set: hold it to the highest scrutiny.
 
 Blackout is the absolute override on the laser frame: when any blackout is
 held, the frame is all-zero regardless of what any renderer, color engine, or
-static look wants. There are exactly **two blackout owner systems**, and the
+static look wants. The 2026-07-07 laser-color menu/follow-LED layer does not
+change this — it only writes CH8/CH9 onto the injected color snapshot, which
+still sits beneath the blackout/emergency gate and static-override layering.
+There are exactly **two blackout owner systems**, and the
 old SoundSwitch "release-everything undoes someone else's blackout" bug must
 remain structurally impossible:
 

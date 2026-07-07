@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 9918dd4
-last_verified_date: 2026-06-22
+last_verified_commit: b16792a
+last_verified_date: 2026-07-07
 validation_scope: software-only
 ---
 
@@ -49,6 +49,15 @@ Implementation notes:
 - When changing executor bank selection, preserve the split between policy and execution: skip
   unusable bank entries only inside `LaserSceneExecutor`, and restore cursor/active-scene state on
   gated missing/high-impact selections so the next tick is not stuck dark.
+- **Laser color (menu/follow-LED):** color lives in `laser_color_engine.py` (`LaserColorMap`,
+  `_target()`, `_BRIGHTNESS`, `_pick_menu_entry`), the LEDs' followed color in
+  `led_color_engine.py` (`_last_emitted_rgb`, `color_state()["live_rgb"]`), the re-sync signature in
+  `state_manager._sync_laser_color_if_needed`, and the chart/menus in `config/laser_color_map.json`.
+  **Never read or write CH3/CH4 anywhere** (chase effects stay authored). Keep `color_state()` a
+  pure read (no RNG/journey mutation) and keep `_target()` fail-open (any invalid/missing/disabled
+  state → `None` → authored CH8/CH9 pass through). Do not touch the `soundswitch_laser_player.py`
+  merge seam or `resolve_slot_colors` for color-follow work. Tests:
+  `tests.test_laser_color_engine`.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

@@ -29,6 +29,10 @@ DEFAULT_WHITE_TEMPLATES = (
     "buildup_white_half_strobe",
 )
 
+# ponytail: 3-tier rank, per-fixture luminance if it ever looks wrong.
+# Hardcoded brightness rank for the "laser never dimmer than the LEDs" floor.
+_BRIGHTNESS = {"white": 3, "cyan": 2, "green": 2, "yellow": 2, "blue": 1, "purple": 1, "red": 1}
+
 
 @dataclass(frozen=True)
 class LaserColorSnapshot:
@@ -45,6 +49,9 @@ class LaserColorMap:
     effects: Mapping[str, Mapping[str, int | None]] | None = None
     settle: Mapping[str, int] | None = None
     white_templates: tuple[str, ...] = DEFAULT_WHITE_TEMPLATES
+    # Per-mood menus: {mood: ((\"solid\", name) | (\"chase\", ch8, (name, ...)), ...)}
+    # Stored as nested tuples so the frozen dataclass stays immutable.
+    menus: Mapping[str, tuple] | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any] | None) -> "LaserColorMap":
@@ -75,6 +82,7 @@ class LaserColorMap:
             },
             settle={"ease_beats": max(0, _int_or_default(settle_src.get("ease_beats"), 8))},
             white_templates=templates or DEFAULT_WHITE_TEMPLATES,
+            menus=_parse_menus(src.get("menus")),
         )
 
 
@@ -137,14 +145,39 @@ class LaserColorEngine:
             if ch8 is None or ch9 is None:
                 return None
             return (ch8, self._settled_ch9(ch9, drop_phase, post_drop_progress))
-        rgb = state.get("rgb")
-        if not _valid_rgb(rgb):
+
+        # Follow the LEDs' actual last-emitted color if it is available; fall
+        # back to the palette-center rgb otherwise. Either way, fail closed
+        # (return None -> authored CH8/CH9 pass through) on an invalid rgb.
+        live_raw = state.get("live_rgb")
+        live = live_raw if _valid_rgb(live_raw) else state.get("rgb")
+        if not _valid_rgb(live):
             return None
-        name = _nearest_fixed_color(tuple(int(v) for v in rgb))
-        ch8 = fixed.get(name)
+        live = tuple(int(v) for v in live)
+
+        fixed_ch9 = self._map.fixed_ch9
+        menu = (self._map.menus or {}).get(state.get("palette"))
+        if not menu:
+            # Legacy: mood with no menu keeps the single-solid nearest-fixed path.
+            name = _nearest_fixed_color(live)
+            ch8 = fixed.get(name)
+            if ch8 is None:
+                return None
+            ch9 = None if fixed_ch9 is None else self._settled_ch9(fixed_ch9, drop_phase, post_drop_progress)
+            return (ch8, ch9)
+
+        led_color = _nearest_fixed_color(live)
+        led_b = _led_brightness(live, state, white_moment)
+        eligible = [e for e in menu if _entry_brightness(e) >= led_b]
+        if not eligible:
+            # Never go dark: keep the brightest allowed entry.
+            eligible = [max(menu, key=_entry_brightness)]
+
+        is_drop = drop_phase == "drop"
+        entry = _pick_menu_entry(eligible, led_color, is_drop)
+        ch8 = fixed.get(entry[1]) if entry[0] == "solid" else entry[1]
         if ch8 is None:
             return None
-        fixed_ch9 = self._map.fixed_ch9
         ch9 = None if fixed_ch9 is None else self._settled_ch9(fixed_ch9, drop_phase, post_drop_progress)
         return (ch8, ch9)
 
@@ -185,6 +218,91 @@ def _nearest_fixed_color(rgb: tuple[int, int, int]) -> str:
         return sum((rgb[i] - target[i]) ** 2 for i in range(3))
 
     return min(FIXED_COLOR_ORDER, key=dist)
+
+
+def _parse_menus(raw: Any) -> Mapping[str, tuple] | None:
+    """Parse the config `menus` block into nested tuples (frozen-safe).
+
+    Each mood's list becomes a tuple of normalized entries:
+      - a str name -> ("solid", name)
+      - {"chase": <ch8>, "colors": [a] or [a, b]} -> ("chase", ch8, (a, ...))
+    Malformed entries are dropped silently; a mood that ends up empty is
+    omitted entirely (so the mood falls back to the legacy nearest-fixed path).
+    """
+    if not isinstance(raw, Mapping):
+        return None
+    menus: dict[str, tuple] = {}
+    for mood, entries_src in raw.items():
+        if not isinstance(entries_src, list):
+            continue
+        entries: list[tuple] = []
+        for item in entries_src:
+            if isinstance(item, str):
+                name = item.strip()
+                if name:
+                    entries.append(("solid", name))
+            elif isinstance(item, Mapping):
+                ch8 = _byte_or_none(item.get("chase"))
+                colors_src = item.get("colors")
+                if ch8 is None or not isinstance(colors_src, list):
+                    continue
+                names = tuple(
+                    c.strip() for c in colors_src if isinstance(c, str) and c.strip()
+                )
+                if 1 <= len(names) <= 2:
+                    entries.append(("chase", ch8, names))
+        if entries:
+            menus[str(mood)] = tuple(entries)
+    return menus or None
+
+
+def _entry_brightness(entry: tuple) -> int:
+    """Brightness rank of a menu entry (solid name, or chase's brightest color)."""
+    if entry[0] == "solid":
+        return _BRIGHTNESS.get(entry[1], 1)
+    # chase: rank of the brightest of its colors; unknown names default to 2.
+    return max(_BRIGHTNESS.get(c, 2) for c in entry[2])
+
+
+def _led_brightness(live_rgb: tuple[int, int, int], state: Mapping[str, Any], white_moment: bool) -> int:
+    """Brightness rank the laser must not fall below.
+
+    Takes the already-resolved live rgb (never re-reads state blindly — a
+    None/invalid rgb would throw and silently kill the feature via update()'s
+    catch-all). In practice at the menu-pick point white_moment/white_sand are
+    already false (they early-return to white), so this only ever separates
+    rank 1 from rank 2 within a menu.
+    """
+    if white_moment or bool(state.get("white_sand_active")):
+        return 3
+    return _BRIGHTNESS.get(_nearest_fixed_color(live_rgb), 1)
+
+
+def _pick_menu_entry(eligible: list[tuple], led_color: str, is_drop: bool) -> tuple:
+    """Deterministic (no RNG) menu pick from the already-filtered eligible list.
+
+    Drops prefer a chase (fires the two-color effect); non-drops track the
+    matching solid. `eligible` is guaranteed non-empty by the caller.
+    """
+    chases = [e for e in eligible if e[0] == "chase"]
+    solids = [e for e in eligible if e[0] == "solid"]
+    if is_drop:
+        for e in chases:
+            if led_color in e[2]:
+                return e
+        if chases:
+            return chases[0]
+        for e in solids:
+            if e[1] == led_color:
+                return e
+        return max(eligible, key=_entry_brightness)
+    # non-drop: track the solid
+    for e in solids:
+        if e[1] == led_color:
+            return e
+    if solids:
+        return max(solids, key=_entry_brightness)
+    return max(chases, key=_entry_brightness)
 
 
 def _valid_rgb(value: Any) -> bool:
