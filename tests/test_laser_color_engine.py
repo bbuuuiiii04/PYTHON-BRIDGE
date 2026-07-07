@@ -312,6 +312,30 @@ class LaserColorMapperTests(unittest.TestCase):
         self.assertIsNone(rainbow.get("ch8"))
         self.assertIsNone(rainbow.get("ch9"))
 
+    def test_default_color_map_path_is_cwd_independent(self) -> None:
+        # ROOT CAUSE (2026-07-07): the live bridge runs `python3 -m rb_ss_bridge_v2`
+        # from the repo PARENT (ss_bridge_watcher.sh sets BRIDGE_DIR=dirname(REPO_ROOT)
+        # and cd's there), so load_laser_color_map()'s bare relative default
+        # "config/laser_color_map.json" resolved to a nonexistent path -> except {}
+        # -> enabled=False -> the laser color engine was silently disabled -> lasers
+        # played the baked autoloop CH8 instead of the LED palette color. The default
+        # MUST resolve to the repo's config regardless of the process cwd.
+        import os
+        import tempfile
+
+        original = os.getcwd()
+        with tempfile.TemporaryDirectory() as td:
+            try:
+                os.chdir(td)
+                loaded = load_laser_color_map()  # NO arg -> default path
+            finally:
+                os.chdir(original)
+        self.assertTrue(
+            loaded.enabled,
+            "default laser color map must load (enabled) from any cwd, not only "
+            "when cwd == repo root; the bridge runs from the repo parent",
+        )
+
     def test_white_path_ch9_always_none_preserves_authored_speed(self) -> None:
         # White (moment or white_sand) takes CH8 only; CH9 is left for whatever
         # speed the pack already authored, regardless of fixed_ch9 configuration.

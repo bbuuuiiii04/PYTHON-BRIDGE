@@ -153,7 +153,15 @@ class LaserColorEngine:
         return max(0, int(round(ch9 * (1.0 - t))))
 
 
-def load_laser_color_map(path: str | Path = "config/laser_color_map.json") -> LaserColorMap:
+# Resolve the default relative to THIS module (repo root), not the process cwd.
+# The live bridge runs `python3 -m rb_ss_bridge_v2` from the repo PARENT
+# (ss_bridge_watcher.sh cd's to dirname(REPO_ROOT)), so a bare "config/..." default
+# resolved to a nonexistent path and silently loaded an all-null/disabled map —
+# which disabled the whole laser-color-from-LED-palette feature at runtime.
+_DEFAULT_COLOR_MAP_PATH = Path(__file__).resolve().parent / "config" / "laser_color_map.json"
+
+
+def load_laser_color_map(path: str | Path = _DEFAULT_COLOR_MAP_PATH) -> LaserColorMap:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception:
