@@ -3,7 +3,7 @@ doc_status: current
 truth_level: code-verified
 last_verified_commit: d5cdcd4
 last_verified_date: 2026-07-06
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; Stream Deck palette control Package 2 plus AWR-121 gesture v2 and drop presentation policy Package 3 software-tested; Template Lab Rounds 1-3 (AWR-126) software-tested; laser color held-snapshot CH8 forwarding and LED pad queued-color restore software-tested; hardware-output unvalidated
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing for Deck 1/2 upfader, LOW/BASS EQ, CFX FILTER, Deck 1 mid fader, relaunch reacquire, and mixer-chain readability after operator-labeled master-button actions; Stream Deck palette control Package 2 plus AWR-121 gesture v2 and drop presentation policy Package 3/AWR-138 software-tested; Template Lab Rounds 1-3 (AWR-126) software-tested; laser color held-snapshot CH8 forwarding and LED pad queued-color restore software-tested; hardware-output unvalidated
 ---
 
 # Active Work Registry
