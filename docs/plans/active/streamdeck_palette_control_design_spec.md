@@ -375,8 +375,10 @@ the bridge already maps); stop at the first beat that is anything else. 32-beat 
   for the final `led_predark_beats` (default 4) → impact: Govees dark, lasers alone →
   auto-restore at window end.
 - **Drop window** = drop impact → end of the smart-phrasing drop role (the shared phrase
-  authority, neither side's private timer). `drop_window_cap_beats` defaults to 96 and is a
-  stuck-role backstop only, not the expected release.
+  authority, neither side's private timer). A later true-drop impact inside an open window asserts
+  its own planned presentation and re-stamps the cap from that impact. `drop_window_cap_beats`
+  defaults to 192 and is a stuck-role backstop only, not the expected release. Known limit: a
+  `lasers_only` solo that re-enters mid-window skips the LED pre-dark countdown and fires at impact.
 - **Darkness guard (`lasers_only`, ALL solo sources — manual, tagged, learned, gear-shift,
   record):** before cutting the Govees at impact,
   verify lasers will actually be visible — pack player live and rendering a drop autoloop, no
@@ -387,7 +389,7 @@ the bridge already maps); stop at the first beat that is anything else. 32-beat 
   can never latch either fixture dark.
 - **Config block** (proposed home `config/led_look_director.json` `/drop_presentation`):
   `{enabled: true, laser_ratio: 0.4, opening_tracks: 3, led_predark_beats: 4,
-  drop_window_cap_beats: 96, hotcue_marker: "LASER", solo_learn_threshold: 1,
+  drop_window_cap_beats: 192, hotcue_marker: "LASER", solo_learn_threshold: 1,
   gearshift_bpm_jump: 10, record_min_drops: 5, ws_handoff_enabled: false}`. All deterministic;
   `enabled: false` restores today's behavior exactly (every drop `leds_plus_lasers`; mute/solo
   pads still work). First live set validates the defaults.
