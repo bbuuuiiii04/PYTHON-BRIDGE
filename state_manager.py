@@ -3801,8 +3801,9 @@ class StateManager(LEDDispatchPolicyMixin):
             if native_log_key != self._native_log_key:
                 self._native_log_key = native_log_key
                 log.info(
-                    "[SM] native-autoloop  status=%s  role=%s  scene=%s  note=%s  target=%s  name=%s  reason=%s",
+                    "[SM] native-autoloop  status=%s  diag=%s  role=%s  scene=%s  note=%s  target=%s  name=%s  reason=%s",
                     native_decision.status,
+                    native_decision.diagnostic or "-",  # DIAG: the real reason the 'unsupported_layout' catch-all hides
                     native_decision.role or "-",
                     native_decision.scene or "-",
                     native_decision.note if native_decision.note is not None else "-",
