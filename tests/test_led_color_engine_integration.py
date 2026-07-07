@@ -220,10 +220,12 @@ class RoleKeyByteIdentityTests(unittest.TestCase):
             d = self._deck(sm)
 
             # drop (no :c cycle → section_id == marker, cycle 0)
+            sm._led_first_drop_anchor_beat = 64.0
             key, sid, cyc = self._role_key_and_struct(
                 sm, d, SmartPhrasingState(active_drop_beat=64.0), "drop"
             )
             marker = key.split(":", 3)[3]
+            self.assertEqual(key, "1:11:drop:64.000")
             self.assertEqual(cyc, 0)
             self.assertEqual(sid, marker)
             self.assertTrue(marker.startswith(sid) or sid == marker)
@@ -237,6 +239,12 @@ class RoleKeyByteIdentityTests(unittest.TestCase):
             )
             key, sid, cyc = self._role_key_and_struct(sm, d, sp, "groove")
             marker = key.split(":", 3)[3]
+            expected_groove = (
+                "1:11:groove:other:seq0:c0"
+                if monotonic
+                else "1:11:groove:other:64.000:c0"
+            )
+            self.assertEqual(key, expected_groove)
             self.assertTrue(
                 marker.startswith(sid),
                 msg=f"groove section_id={sid!r} not prefix of marker={marker!r}",
@@ -253,14 +261,26 @@ class RoleKeyByteIdentityTests(unittest.TestCase):
             )
             key, sid, cyc = self._role_key_and_struct(sm, d, sp, "post_drop")
             marker = key.split(":", 3)[3]
+            expected_post = (
+                "1:11:post_drop:seq0:c0"
+                if monotonic
+                else "1:11:post_drop:64.000:c0"
+            )
+            self.assertEqual(key, expected_post)
             self.assertEqual(marker, f"{sid}:c{cyc}")
 
-            # ambient (no :c cycle → section_id == marker)
+            # ambient: monotonic path rotates inside the section; legacy does not.
             sp = SmartPhrasingState(current_phrase_label="intro")
             key, sid, cyc = self._role_key_and_struct(sm, d, sp, "ambient")
             marker = key.split(":", 3)[3]
             self.assertEqual(cyc, 0)
-            self.assertEqual(sid, marker)
+            if monotonic:
+                self.assertEqual(key, "1:11:ambient:intro:seq0:c0")
+                self.assertEqual(sid, "intro:seq0")
+                self.assertEqual(marker, f"{sid}:c{cyc}")
+            else:
+                self.assertEqual(key, "1:11:ambient:intro")
+                self.assertEqual(sid, marker)
 
     def test_groove_holds_within_cycle_and_steps_across(self) -> None:
         # Same section across the 32-beat cycle → same cycle int; new cycle
@@ -298,7 +318,59 @@ class RoleKeyByteIdentityTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — Renderer prefer params["color"]
+# Test 3 — dispatch-path intra-section rotation
+# ---------------------------------------------------------------------------
+
+class IntraSectionDispatchRotationTests(unittest.TestCase):
+    def _director(self) -> LEDLookDirector:
+        cfg = copy.deepcopy(_diy_director_config())
+        cfg["banks"]["default"]["buildup"] = ["diy_red", "diy_blue"]
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        director = LEDLookDirector(result.config)
+        director._role_cursors["buildup"] = 0
+        return director
+
+    def test_buildup_cycle_boundary_dispatches_next_director_look(self) -> None:
+        director = self._director()
+        adapter = _RecordingAdapter()
+        sm = _make_sm(director=director, adapter=adapter, engine=None)
+        _arm_automation(sm)
+        sm._sp_phrase_lookahead = 128.0
+        d = _playing_deck(sm)
+
+        sm._dispatch_led_automation(
+            active=1,
+            d=d,
+            sp_state=SmartPhrasingState(
+                abs_beat=64.0,
+                current_phrase_label="up",
+                current_phrase_is_up=True,
+                next_smart_drop_beat=164.0,
+                beats_to_next_drop=100.0,
+            ),
+        )
+        sm._dispatch_led_automation(
+            active=1,
+            d=d,
+            sp_state=SmartPhrasingState(
+                abs_beat=104.0,
+                current_phrase_label="up",
+                current_phrase_is_up=True,
+                next_smart_drop_beat=164.0,
+                beats_to_next_drop=60.0,
+            ),
+        )
+
+        self.assertEqual(
+            [call.look for call in adapter.trigger_calls],
+            ["diy_red", "diy_blue"],
+        )
+        self.assertEqual(director._role_cursors["buildup"], 2)
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — Renderer prefer params["color"]
 # ---------------------------------------------------------------------------
 
 class RendererPreferParamsTests(unittest.TestCase):
@@ -370,7 +442,7 @@ class RendererPreferParamsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Test 4 — Director DIY-eligibility filter
+# Test 5 — Director DIY-eligibility filter
 # ---------------------------------------------------------------------------
 
 def _diy_director_config() -> dict:
@@ -482,7 +554,7 @@ class DirectorDIYFilterTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Test 5 — Injection merge
+# Test 6 — Injection merge
 # ---------------------------------------------------------------------------
 
 class InjectionMergeTests(unittest.TestCase):

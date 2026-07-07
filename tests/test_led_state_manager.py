@@ -1002,6 +1002,173 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(post_20, post_28)
         self.assertNotEqual(post_20, post_36)
 
+    def test_led_role_key_cycles_buildup_by_remaining_drop_distance(self) -> None:
+        sm = _make_sm()
+        deck = sm._deck[1]
+        deck.load_gen = 11
+
+        observed = []
+        for remaining in (100.0, 64.0, 63.999, 32.0, 31.999, 0.0):
+            key = sm._led_automation_role_key(
+                1,
+                deck,
+                SmartPhrasingState(
+                    next_smart_drop_beat=128.0,
+                    beats_to_next_drop=remaining,
+                ),
+                "buildup",
+            )
+            observed.append((key, sm._led_last_section_cycle))
+
+        self.assertEqual(
+            observed,
+            [
+                ("1:11:buildup:128.000:c3", ("128.000", 3)),
+                ("1:11:buildup:128.000:c2", ("128.000", 2)),
+                ("1:11:buildup:128.000:c1", ("128.000", 1)),
+                ("1:11:buildup:128.000:c1", ("128.000", 1)),
+                ("1:11:buildup:128.000:c0", ("128.000", 0)),
+                ("1:11:buildup:128.000:c0", ("128.000", 0)),
+            ],
+        )
+
+        missing_distance = sm._led_automation_role_key(
+            1,
+            deck,
+            SmartPhrasingState(next_smart_drop_beat=128.0),
+            "buildup",
+        )
+        self.assertEqual(missing_distance, "1:11:buildup:128.000:c0")
+        self.assertEqual(sm._led_last_section_cycle, ("128.000", 0))
+
+    def test_led_role_key_cycles_pre_drop_with_same_marker_shape(self) -> None:
+        sm = _make_sm()
+        deck = sm._deck[1]
+        deck.load_gen = 11
+
+        before = sm._led_automation_role_key(
+            1,
+            deck,
+            SmartPhrasingState(next_smart_drop_beat=128.0, beats_to_next_drop=64.0),
+            "pre_drop",
+        )
+        after = sm._led_automation_role_key(
+            1,
+            deck,
+            SmartPhrasingState(next_smart_drop_beat=128.0, beats_to_next_drop=31.999),
+            "pre_drop",
+        )
+
+        self.assertEqual(before, "1:11:pre_drop:128.000:c2")
+        self.assertEqual(after, "1:11:pre_drop:128.000:c0")
+        self.assertEqual(sm._led_last_section_cycle, ("128.000", 0))
+
+    def test_led_role_key_cycles_breakdown_by_restore_distance(self) -> None:
+        sm = _make_sm()
+        deck = sm._deck[1]
+        deck.load_gen = 11
+
+        observed = []
+        for abs_beat in (60.0, 96.0, 96.001, 128.0, 128.001, 160.0):
+            key = sm._led_automation_role_key(
+                1,
+                deck,
+                SmartPhrasingState(
+                    abs_beat=abs_beat,
+                    breakdown_restore_beat=160.0,
+                ),
+                "breakdown",
+            )
+            observed.append((key, sm._led_last_section_cycle))
+
+        self.assertEqual(
+            observed,
+            [
+                ("1:11:breakdown:160.000:c3", ("160.000", 3)),
+                ("1:11:breakdown:160.000:c2", ("160.000", 2)),
+                ("1:11:breakdown:160.000:c1", ("160.000", 1)),
+                ("1:11:breakdown:160.000:c1", ("160.000", 1)),
+                ("1:11:breakdown:160.000:c0", ("160.000", 0)),
+                ("1:11:breakdown:160.000:c0", ("160.000", 0)),
+            ],
+        )
+
+        missing_abs_beat = sm._led_automation_role_key(
+            1,
+            deck,
+            SmartPhrasingState(breakdown_restore_beat=160.0),
+            "breakdown",
+        )
+        self.assertEqual(missing_abs_beat, "1:11:breakdown:160.000:c0")
+        self.assertEqual(sm._led_last_section_cycle, ("160.000", 0))
+
+    def test_led_role_key_cycles_monotonic_ambient_by_phrase_elapsed(self) -> None:
+        sm = _make_sm()
+        sm._phrase_monotonic_enabled = True
+        sm._led_phrase_seq = 5
+        sm._led_phrase_committed_start = 64.0
+        deck = sm._deck[1]
+        deck.load_gen = 11
+
+        ambient_31 = sm._led_automation_role_key(
+            1,
+            deck,
+            SmartPhrasingState(
+                abs_beat=95.0,
+                current_phrase_label="intro",
+                current_phrase_start_beat=64.0,
+            ),
+            "ambient",
+        )
+        ambient_32 = sm._led_automation_role_key(
+            1,
+            deck,
+            SmartPhrasingState(
+                abs_beat=96.0,
+                current_phrase_label="intro",
+                current_phrase_start_beat=64.0,
+            ),
+            "ambient",
+        )
+        self.assertEqual(ambient_31, "1:11:ambient:intro:seq5:c0")
+        self.assertEqual(ambient_32, "1:11:ambient:intro:seq5:c1")
+        self.assertEqual(sm._led_last_section_cycle, ("intro:seq5", 1))
+
+        sm._led_phrase_seq = 6
+        sm._led_phrase_committed_start = 96.0
+        next_seq = sm._led_automation_role_key(
+            1,
+            deck,
+            SmartPhrasingState(
+                abs_beat=96.0,
+                current_phrase_label="intro",
+                current_phrase_start_beat=96.0,
+            ),
+            "ambient",
+        )
+        self.assertEqual(next_seq, "1:11:ambient:intro:seq6:c0")
+        self.assertNotEqual(ambient_32, next_seq)
+
+    def test_led_role_key_keeps_legacy_ambient_without_monotonic_cycle(self) -> None:
+        sm = _make_sm()
+        sm._phrase_monotonic_enabled = False
+        deck = sm._deck[1]
+        deck.load_gen = 11
+
+        key = sm._led_automation_role_key(
+            1,
+            deck,
+            SmartPhrasingState(
+                abs_beat=96.0,
+                current_phrase_label="intro",
+                current_phrase_start_beat=64.0,
+            ),
+            "ambient",
+        )
+
+        self.assertEqual(key, "1:11:ambient:intro")
+        self.assertEqual(sm._led_last_section_cycle, ("intro", 0))
+
     def test_led_role_key_cycles_groove_every_32_from_phrase_marker(self) -> None:
         sm = _make_sm()
         deck = sm._deck[1]

@@ -44,6 +44,16 @@ Smart-drop marker collapse (2026-07-07):
   `post_drop`. Collapsed smart-drop markers mean the pre-drop blackout arms once
   per selected drop section instead of every 32-beat raw ANLZ marker.
 
+Intra-section look rotation (2026-07-07):
+- Long `buildup`, `pre_drop`, `breakdown`, and monotonic `ambient` LED role
+  keys now carry a 32-beat cycle term from `LED_DEFAULT_GROOVE_CYCLE_BEATS`, so
+  the look director can pick a fresh look inside one long section instead of
+  holding the first look until the role changes. The stable section id stays the
+  drop/restore/phrase marker without the cycle suffix, so the color engine keeps
+  one color journey for the section while only the room shape/pattern rotates.
+  `drop`, `groove`, `post_drop`, blackout, hold, scripted, and manual-override
+  semantics are unchanged. This is software-tested and hardware-unvalidated.
+
 Stream Deck palette control (Package 2, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/palette_control_authority.md`.
 - The `streamdeck_palette` change contract implements palette queue/override-fade/lock, `white_sand`,
@@ -225,6 +235,12 @@ Tests:
 - inspect `tests/` for LED color engine, Govee realtime runner, frame renderer, state manager LED integration, and config tests
 - slot-color coverage lives in `tests/test_led_color_engine.py`, `tests/test_led_color_engine_m2_phase1.py`, `tests/test_led_color_engine_m2_patch_b.py`, `tests/test_led_color_engine_m2_patch_c.py`, `tests/test_led_color_engine_m2_patch_d.py`, `tests/test_led_color_engine_m2_patch_e1.py`, `tests/test_led_color_engine_m2_patch_e2.py`, `tests/test_led_color_engine_m2_patch_e3.py`, `tests/test_led_color_engine_m2_patch_s.py`, `tests/test_led_color_engine_m2_patch_f.py`, and config validation coverage in `tests/test_color_engine_config.py`
 - scripted-mode LED policy coverage lives in `tests/test_led_config.py` and `tests/test_led_state_manager.py`, including blackout mapping for groove/drop/post-drop; this is software validation only and does not prove room-visible Govee behavior during scripted SoundSwitch tracks.
+- intra-section rotation coverage lives in `tests/test_led_state_manager.py` and
+  `tests/test_led_color_engine_integration.py`: role-key cycle math for long
+  buildup/pre-drop/breakdown/monotonic ambient sections, legacy ambient
+  behavior with phrase monotonic off, unchanged drop/groove/post_drop key
+  strings, stable section/cycle publication, and a dispatch-path second look
+  across a buildup cycle boundary. This is software validation only.
 - phrase-aware active-content hold coverage lives in `tests/test_led_state_manager.py`, including active deck switch, active-deck track load, the inclusive `1.0` beat release boundary, hold-until-next-marker behavior, missing-phrase-data indefinite hold until a crossing, idle/stop cleanup, inactive-deck load exclusion, and laser/SoundSwitch path confinement. This is software validation only.
 - shared flat-window lifecycle parity coverage lives in `tests/test_drop_lifecycle.py`; live LED per-look duration rewriting and backend latency offsets remain separate by design.
 - LED Pad Phase 1/3 coverage lives in `tests/test_led_pad_controls.py`, `tests/test_led_pad_playback.py`, and `tests/test_led_pad_service.py`. It validates metadata coverage, synthetic playback clock/ownership/strobe gates, draft mutation, commit blocking, color injection, Locked Palette playback, ownership-required replies, and one HTTP smoke path. Template Lab Phase 2 coverage lives in `tests/test_led_pad_lab.py` and validates registry persistence, name-collision rejection, hot reload, broken-module errors, lab rendering, and shared playback-slot preemption. Template Lab Round 1 coverage (same file) validates `render_preview_frames` determinism/frame-count clamping, `lab_preview` (frames returned, unknown draft/unregistered fn raise `ValueError`, broken module returns structured failure, zero playback side effects), `lab_update` (applies only when the exact draft is playing, payload params overlay saved params, live code-swap reflects in the live `LabRenderer`), and `lab_switch` (seamless swap between lab drafts, refusal when nothing or a pad look is playing, unknown draft raises). It uses fakes or dry-run paths only. Phase 3 color-engine and renderer regressions live in `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`, and `tests/test_govee_frame_renderer.py`.

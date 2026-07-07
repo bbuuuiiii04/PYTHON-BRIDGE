@@ -1656,9 +1656,20 @@ class LEDDispatchPolicyMixin:
                 marker = str(sp_state.current_phrase_label)
                 section_id = marker
         elif role in {"buildup", "pre_drop"} and sp_state.next_smart_drop_beat is not None:
-            marker = f"{sp_state.next_smart_drop_beat:.3f}"
+            section_id = f"{sp_state.next_smart_drop_beat:.3f}"
+            if sp_state.beats_to_next_drop is not None:
+                cycle = int(
+                    max(0.0, float(sp_state.beats_to_next_drop))
+                    // LED_DEFAULT_GROOVE_CYCLE_BEATS
+                )
+            marker = f"{section_id}:c{cycle}"
         elif role == "breakdown" and sp_state.breakdown_restore_beat is not None:
-            marker = f"{sp_state.breakdown_restore_beat:.3f}"
+            section_id = f"{sp_state.breakdown_restore_beat:.3f}"
+            abs_beat = self._led_abs_beat(sp_state)
+            if abs_beat is not None:
+                remaining = max(0.0, float(sp_state.breakdown_restore_beat) - float(abs_beat))
+                cycle = int(remaining // LED_DEFAULT_GROOVE_CYCLE_BEATS)
+            marker = f"{section_id}:c{cycle}"
         elif role == "groove":
             abs_beat = self._led_abs_beat(sp_state)
             if self._phrase_monotonic_enabled:
@@ -1710,12 +1721,20 @@ class LEDDispatchPolicyMixin:
         elif role == "ambient":
             if self._phrase_monotonic_enabled:
                 # WI-2: use phrase_seq for ambient too — same class of oscillation risk
-                marker = f"{sp_state.current_phrase_label}:seq{self._led_phrase_seq}"
+                abs_beat = self._led_abs_beat(sp_state)
+                section_id = f"{sp_state.current_phrase_label}:seq{self._led_phrase_seq}"
+                if abs_beat is not None:
+                    committed = self._led_phrase_committed_start
+                    if committed is None:
+                        committed = sp_state.current_phrase_start_beat
+                    elapsed = max(0.0, float(abs_beat) - float(committed or 0.0))
+                    cycle = int(elapsed // LED_DEFAULT_GROOVE_CYCLE_BEATS)
+                marker = f"{section_id}:c{cycle}"
             else:
                 marker = str(sp_state.current_phrase_label)
         # M1b WI-2: publish structured section/cycle for the color engine.
-        # `section_id or marker` keeps the unlisted branches (drop, buildup,
-        # pre_drop, breakdown, ambient) on section_id = marker / cycle = 0.
+        # `section_id or marker` keeps drop and legacy fallback branches on
+        # section_id = marker / cycle = 0.
         self._led_last_section_cycle = (section_id or marker, cycle)
         return f"{active}:{d.load_gen}:{role}:{marker}"
 
