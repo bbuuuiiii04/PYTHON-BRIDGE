@@ -17,6 +17,7 @@ from rb_ss_bridge_v2.led_identity_v2 import (  # noqa: E402
     content_hash as led_identity_content_hash,
     content_key as led_identity_content_key,
 )
+from rb_ss_bridge_v2.led_dispatch_policy import LED_IDLE_FREEWHEEL_BPM  # noqa: E402
 from rb_ss_bridge_v2.led_models import (  # noqa: E402
     IdentityV2Config,
     LEDContext,
@@ -1775,6 +1776,74 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(anchor.abs_beat_pos, 64.5)
         self.assertEqual(anchor.bpm, 128.0)
 
+    def test_realtime_idle_ambient_freewheels_beat_anchor(self) -> None:
+        now = 100.0
+
+        def fake_monotonic() -> float:
+            return now
+
+        director = _AutomationLEDLookDirector()
+        director.role_decisions["ambient"] = LEDLookDecision(
+            look="rt_twinkle",
+            target="room_perimeter",
+            action="realtime",
+            scene_ref="rt_twinkle",
+            reason="role_entry:ambient",
+            source="automation",
+            priority=2,
+            role="ambient",
+            backend="realtime_razer",
+            params={},
+        )
+        sm = _make_sm(director=director, adapter=_StubLEDAdapter())
+        d = sm._deck[1]
+        d.load_gen = 11
+        d.meta.filepath = "/tracks/current.wav"
+
+        with patch("rb_ss_bridge_v2.led_dispatch_policy.time.monotonic", fake_monotonic):
+            sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+            now = 100.25
+            first = sm.get_active_beat_anchor()
+            now = 100.75
+            second = sm.get_active_beat_anchor()
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        assert first is not None
+        assert second is not None
+        self.assertEqual(first.deck, 0)
+        self.assertEqual(first.bpm, LED_IDLE_FREEWHEEL_BPM)
+        self.assertTrue(first.playing)
+        self.assertTrue(first.permitted)
+        self.assertGreater(second.abs_beat_pos, first.abs_beat_pos)
+
+    def test_idle_freewheel_clears_on_blackout(self) -> None:
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
+        sm._led_idle_freewheel_since = 100.0
+
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={}, source="test"))
+
+        self.assertIsNone(sm.get_active_beat_anchor())
+
+    def test_playing_automation_clears_idle_freewheel(self) -> None:
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
+        d = sm._deck[1]
+        d.playing = True
+        d.load_gen = 11
+        d.meta.filepath = "/tracks/current.wav"
+        sm._os.lighting_mode = "autoloop"
+        sm._led_idle_freewheel_since = 100.0
+        sm._led_rt_beat = (1, 64.5, 128.0, 1000.0, True)
+
+        sm._dispatch_led_automation(active=1, d=d, sp_state=_groove_sp(0.0))
+        anchor = sm.get_active_beat_anchor()
+
+        self.assertIsNone(sm._led_idle_freewheel_since)
+        self.assertIsNotNone(anchor)
+        assert anchor is not None
+        self.assertEqual(anchor.deck, 1)
+        self.assertEqual(anchor.bpm, 128.0)
+
     def test_gate_clears_realtime_permission(self) -> None:
         sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
         sm._led_rt_permitted = True
@@ -1868,6 +1937,27 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(adapter.trigger_calls[0].look, "room_ambient")
         self.assertFalse(director.tick_calls[0].playing)
         self.assertEqual(sm.led_status_provider()["automation_gate_reason"], "")
+
+    def test_no_audible_idle_entry_dispatches_ambient_once_from_last_audible_deck(self) -> None:
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        sm._rerun_active_deck_resolver = lambda _reason: None
+        sm._last_audible_deck = 2
+        sm._deck[2].load_gen = 22
+        sm._deck[2].meta.filepath = "/tracks/last.wav"
+        sm._os.active_deck = 0
+        sm._os.was_playing = True
+        sm._os.lighting_mode = "autoloop"
+
+        sm._push_tick()
+        sm._push_tick()
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(adapter.trigger_calls[0].role, "ambient")
+        self.assertEqual(director.tick_calls[0].active_deck, 2)
+        self.assertEqual(sm._led_last_event, "automation:idle_ambient:idle_no_audible")
+        self.assertEqual(sm._led_last_idle_role_key, "2:22:idle_ambient:True")
 
     def test_resume_after_idle_ambient_waits_for_playing_tick(self) -> None:
         director = _AutomationLEDLookDirector()

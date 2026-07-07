@@ -618,6 +618,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._drop_presentation_learned_writer.start()
 
         self._init_led_dispatch_state(led_look_director, led_scene_adapter, led_color_engine)
+        self._last_audible_deck: int = 1
         self._v2_identity_cfg: IdentityV2Config | None = None
         if led_color_engine is not None:
             engine_config = getattr(led_color_engine, "_config", None)
@@ -879,6 +880,8 @@ class StateManager(LEDDispatchPolicyMixin):
         if active_deck not in (0, 1, 2):
             return
         self._os.active_deck = active_deck
+        if active_deck in (1, 2):
+            self._last_audible_deck = active_deck
         self._os.active_deck_authority_reason = (
             "startup_idle" if active_deck == 0 else "startup_fallback"
         )
@@ -1931,6 +1934,7 @@ class StateManager(LEDDispatchPolicyMixin):
             self._enter_idle_no_audible(reason=reason)
             return
         self._os.active_deck = new_deck
+        self._last_audible_deck = new_deck
         self._reset_for_active_deck_entry(new_deck, source)
 
     def _apply_nonzero_active_deck_switch(self, old_deck: int, new_deck: int, source: str) -> None:
@@ -1951,6 +1955,7 @@ class StateManager(LEDDispatchPolicyMixin):
             old_d.scripted_id = 0
         self._drop_presentation_gearshift_check(old_deck, new_deck)
         self._os.active_deck = new_deck
+        self._last_audible_deck = new_deck
         self._led_hold_active = True
         self._led_hold_started_mono = 0.0
         self._led_hold_started_beat = None
@@ -2061,6 +2066,12 @@ class StateManager(LEDDispatchPolicyMixin):
         if self._laser_director is not None:
             self._laser_director.reset_runtime_state(reason=reason)
         self._reset_native_autoloop()
+        deck = self._last_audible_deck if self._last_audible_deck in (1, 2) else 1
+        self._dispatch_led_idle_ambient(
+            active=deck,
+            d=self._deck[deck],
+            reason="idle_no_audible",
+        )
 
     # ── Track load → lsof trigger ─────────────────────────────────────────────
 
@@ -4859,6 +4870,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 data={"old": deck, "new": mirror, "src": "auto", "reason": "empty-deck"},
             )
             self._os.active_deck = mirror
+            self._last_audible_deck = mirror
             deck, mirror = mirror, deck
             d, m = m, d
         elif self._mixer_authority_enabled and not d.meta.filepath and m.meta.filepath:

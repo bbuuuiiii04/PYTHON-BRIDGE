@@ -3,7 +3,7 @@ doc_status: current
 truth_level: code-verified
 last_verified_commit: dd48a3c
 last_verified_date: 2026-07-04
-validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, and drop presentation policy Package 3 software-tested, hardware-unvalidated
+validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, and LED idle/pause ambient fix software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem
@@ -64,6 +64,22 @@ LED hold starvation fix (2026-07-07):
   Accepted automation `perf.led.look` rows now include beat/phrase context.
   Root cause remains likely, not confirmed, until a live session shows whether
   freezes line up with those hold/reset log lines. SOFTWARE-VALIDATED ONLY /
+  HARDWARE-UNVALIDATED.
+
+LED idle/pause ambient fix (2026-07-07):
+- No-audible idle entry now dispatches one `ambient` LED decision using the
+  last audible deck's state, so a mixer-authority pause/fade-to-silence can
+  land on the idle ambient look instead of returning before LED dispatch.
+- Accepted realtime ambient looks now get a 120 BPM synthetic idle beat anchor
+  (`[RGB] idle-freewheel-start`) so the realtime runner keeps rendering while
+  playback is paused. Blackout, manual commands, and playing automation clear
+  that freewheel before normal playback resumes.
+- If the realtime runner still reaches idle-grace teardown, it now sends a
+  blackout frame before deactivating and logs
+  `[RGB] deactivate reason=idle_grace blackout_sent=1`, so the failure mode is
+  dark instead of leaving a previous cloud DIY scene on the strip. The
+  firmware-revert explanation remains hardware-assumed until an operator live
+  pause validates the room-visible behavior. SOFTWARE-VALIDATED ONLY /
   HARDWARE-UNVALIDATED.
 
 Stream Deck palette control (Package 2, 2026-07-04):
@@ -254,6 +270,12 @@ Tests:
   strings, stable section/cycle publication, and a dispatch-path second look
   across a buildup cycle boundary. This is software validation only.
 - phrase-aware active-content hold coverage lives in `tests/test_led_state_manager.py`, including active deck switch, active-deck track load, the inclusive `1.0` beat release boundary, hold-until-next-marker behavior, missing-phrase-data release by 16-beat backstop, 8-second no-beat fallback, hold stamp cleanup, SmartPhrasing reset-reason change logging, `perf.led.look` beat/phrase enrichment for automation only, inactive-deck load exclusion, idle/stop cleanup, and laser/SoundSwitch path confinement. This is software validation only.
+- idle/pause ambient coverage lives in `tests/test_led_state_manager.py` and
+  `tests/test_govee_realtime_runner.py`: no-audible idle entry dispatches one
+  ambient decision from the last audible deck, accepted realtime ambient
+  decisions freewheel a synthetic beat anchor, blackout/playing automation
+  clear the freewheel, and idle-grace teardown blackouts before deactivate.
+  This is software validation only.
 - shared flat-window lifecycle parity coverage lives in `tests/test_drop_lifecycle.py`; live LED per-look duration rewriting and backend latency offsets remain separate by design.
 - LED Pad Phase 1/3 coverage lives in `tests/test_led_pad_controls.py`, `tests/test_led_pad_playback.py`, and `tests/test_led_pad_service.py`. It validates metadata coverage, synthetic playback clock/ownership/strobe gates, draft mutation, commit blocking, color injection, Locked Palette playback, ownership-required replies, and one HTTP smoke path. Template Lab Phase 2 coverage lives in `tests/test_led_pad_lab.py` and validates registry persistence, name-collision rejection, hot reload, broken-module errors, lab rendering, and shared playback-slot preemption. Template Lab Round 1 coverage (same file) validates `render_preview_frames` determinism/frame-count clamping, `lab_preview` (frames returned, unknown draft/unregistered fn raise `ValueError`, broken module returns structured failure, zero playback side effects), `lab_update` (applies only when the exact draft is playing, payload params overlay saved params, live code-swap reflects in the live `LabRenderer`), and `lab_switch` (seamless swap between lab drafts, refusal when nothing or a pad look is playing, unknown draft raises). It uses fakes or dry-run paths only. Phase 3 color-engine and renderer regressions live in `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`, and `tests/test_govee_frame_renderer.py`.
 - Stream Deck palette control Package 2 coverage lives in `tests/test_led_palette_control.py`,

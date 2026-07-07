@@ -145,7 +145,7 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         runner._tick_once(_anchor(permitted=False), 100.4)
 
         self.assertIn("send_frame", transport.calls)
-        self.assertEqual(transport.calls[-1], "deactivate")
+        self.assertEqual(transport.calls[-2:], ["blackout", "deactivate"])
 
     def test_zero_bpm_anchor_stays_idle(self) -> None:
         transport = _FakeTransport()
@@ -286,7 +286,7 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
 
         runner._tick_once(_anchor(start, playing=False, abs_beat_pos=64.0, bpm=120.0), start + 0.71)
         self.assertFalse(runner.status()["active"])
-        self.assertEqual(transport.calls[-1], "deactivate")
+        self.assertEqual(transport.calls[-2:], ["blackout", "deactivate"])
 
     def test_pause_with_no_in_flight_comet_idles_without_animate(self) -> None:
         transport = _FakeTransport()
@@ -315,7 +315,7 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
 
         self.assertFalse(runner.status()["active"])
         self.assertEqual(runner.status()["frame_index"], frame_index)
-        self.assertEqual(transport.calls[-1], "deactivate")
+        self.assertEqual(transport.calls[-2:], ["blackout", "deactivate"])
 
     def test_emergency_during_pause_blackouts_and_clears_engine(self) -> None:
         transport = _FakeTransport()

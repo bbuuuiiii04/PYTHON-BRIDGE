@@ -408,6 +408,7 @@ class GoveeRealtimeRunner:
             with self._lock:
                 self._idle_since = now
         if now - self._idle_since >= self._grace_s:
+            self._transport.blackout()
             self._transport.deactivate()
             with self._lock:
                 self._active = False
@@ -418,7 +419,7 @@ class GoveeRealtimeRunner:
                 self._pending_manual = 0
             self._engine.reset()
             self._publish_engine_status(cleared=True)
-            self._log.info("[RGB] deactivate reason=idle_grace")
+            self._log.info("[RGB] deactivate reason=idle_grace blackout_sent=1")
             return
         if self._last_frame is not None:
             self._transport.send_frame(self._last_frame)

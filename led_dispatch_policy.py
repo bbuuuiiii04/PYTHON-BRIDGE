@@ -35,6 +35,7 @@ LED_DEFAULT_POST_DROP_CYCLE_BEATS = 32.0
 # After an active content change, allow the incoming look immediately only near
 # the current phrase entry; otherwise hold the previous look until a crossing.
 LED_HOLD_RELEASE_BEATS = 1.0
+LED_IDLE_FREEWHEEL_BPM = 120.0
 LED_HOLD_BACKSTOP_BEATS = 16.0
 LED_HOLD_BACKSTOP_S = 8.0
 _LED_DROP_IMPACT_PREDECESSORS = frozenset({"up", "low", "buildup", "breakdown"})
@@ -115,6 +116,7 @@ class LEDDispatchPolicyMixin:
         self._led_hold_started_beat: Optional[float] = None
         self._led_rt_permitted = False
         self._led_rt_beat: tuple[int, float, float, float, bool] | None = None
+        self._led_idle_freewheel_since: Optional[float] = None
         self._led_color_engine_status: dict[str, Any] = {
             "available": bool(led_color_engine is not None),
             "enabled": bool(getattr(led_color_engine, "enabled", False)),
@@ -282,6 +284,17 @@ class LEDDispatchPolicyMixin:
 
     def get_active_beat_anchor(self) -> Optional[BeatAnchor]:
         """Return the LED realtime beat snapshot when automation is permitted."""
+        if self._led_idle_freewheel_since is not None:
+            now = time.monotonic()
+            elapsed = now - self._led_idle_freewheel_since
+            return BeatAnchor(
+                deck=0,
+                abs_beat_pos=elapsed * (LED_IDLE_FREEWHEEL_BPM / 60.0),
+                bpm=LED_IDLE_FREEWHEEL_BPM,
+                captured_monotonic=now,
+                playing=True,
+                permitted=True,
+            )
         if not self._led_rt_permitted or self._led_rt_beat is None:
             return None
         deck, abs_beat_pos, bpm, captured_monotonic, playing = self._led_rt_beat
@@ -442,6 +455,7 @@ class LEDDispatchPolicyMixin:
             return
 
         if ev.kind == Ev.LED_BLACKOUT:
+            self._led_idle_freewheel_since = None
             if "target" in ev.payload:
                 target = str(ev.payload.get("target", "")).strip()
                 if target and not self._led_target_exists(target):
@@ -480,6 +494,7 @@ class LEDDispatchPolicyMixin:
         return target_name in targets
 
     def _dispatch_led_manual_command(self, *, reason: str) -> None:
+        self._led_idle_freewheel_since = None
         if self._led_color_engine is not None and reason in ("blackout", "manual_scene"):
             self._led_color_engine.reset_fade_memory()
         self._led_last_event = reason
@@ -782,6 +797,7 @@ class LEDDispatchPolicyMixin:
         # The laser director keeps its own autoloop_ready coupling separately.
 
         self._led_rt_permitted = True
+        self._led_idle_freewheel_since = None
         self._led_last_idle_role_key = ""
         if self._led_hold_active:
             # Keep rendering the previous look; do not dispatch a new one until
@@ -1061,6 +1077,7 @@ class LEDDispatchPolicyMixin:
         reason: str,
     ) -> None:
         self._led_rt_permitted = False
+        self._led_idle_freewheel_since = None
         self._led_smart_drop_blackout_key = ""
 
         role_key = f"{active}:{d.load_gen}:idle_ambient:{bool(d.meta.filepath)}"
@@ -1139,6 +1156,11 @@ class LEDDispatchPolicyMixin:
             return
 
         if outcome == "accepted":
+            if getattr(decision, "backend", "") == "realtime_razer":
+                self._led_idle_freewheel_since = time.monotonic()
+                log.info("[RGB] idle-freewheel-start look=%s", look)
+            else:
+                self._led_idle_freewheel_since = None
             return
 
 
@@ -1152,6 +1174,7 @@ class LEDDispatchPolicyMixin:
         rt_permitted: bool = False,
     ) -> None:
         self._led_rt_permitted = rt_permitted
+        self._led_idle_freewheel_since = None
         if reason != self._led_automation_gate_reason:
             self._led_automation_gated_count += 1
             if self._led_color_engine is not None and reason in ("emergency_blackout", "manual_override"):
