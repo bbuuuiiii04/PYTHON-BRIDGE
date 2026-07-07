@@ -25,7 +25,11 @@ from rb_ss_bridge_v2.led_models import (  # noqa: E402
 )
 from rb_ss_bridge_v2.models import BridgeEvent, Ev, PositionSnapshot  # noqa: E402
 from rb_ss_bridge_v2.rb_memory import PositionCache  # noqa: E402
-from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState  # noqa: E402
+from rb_ss_bridge_v2.smart_phrasing import (  # noqa: E402
+    SmartPhrasingDiagnostic,
+    SmartPhrasingResult,
+    SmartPhrasingState,
+)
 from rb_ss_bridge_v2.state_manager import StateManager  # noqa: E402
 
 
@@ -785,7 +789,7 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(len(adapter.trigger_calls), 2)
         self.assertFalse(sm._led_hold_active)
 
-    def test_missing_phrase_data_holds_previous_look_until_crossing(self) -> None:
+    def test_missing_phrase_data_hold_releases_on_beat_backstop(self) -> None:
         adapter = _StubLEDAdapter()
         sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=adapter)
         _ready_led_active_deck(sm, 1)
@@ -793,23 +797,47 @@ class LEDStateManagerTests(unittest.TestCase):
         sm._apply_nonzero_active_deck_switch(1, 2, "test")
         _ready_led_active_deck(sm, 2, filepath="/tracks/next.wav")
 
-        # Incoming track has no phrase segments: beats_into_phrase is None and
-        # there is no phrase_start_crossing, so the hold must persist (do not
-        # invent timing) instead of releasing on the grace window.
-        no_phrase = SmartPhrasingState(current_phrase_label="other")
+        no_phrase = SmartPhrasingState(abs_beat=64.0, current_phrase_label="other")
         sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=no_phrase)
         self.assertEqual(len(adapter.trigger_calls), 0)
         self.assertTrue(sm._led_hold_active)
 
-        # A later tick still lacking phrase data keeps holding indefinitely.
-        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=no_phrase)
+        before_bound = SmartPhrasingState(
+            abs_beat=64.0 + state_manager_mod.LED_HOLD_BACKSTOP_BEATS - 0.1,
+            current_phrase_label="other",
+        )
+        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=before_bound)
         self.assertEqual(len(adapter.trigger_calls), 0)
         self.assertTrue(sm._led_hold_active)
 
-        # Only an observed phrase crossing releases the hold.
-        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=_groove_cross_sp())
+        at_bound = SmartPhrasingState(
+            abs_beat=64.0 + state_manager_mod.LED_HOLD_BACKSTOP_BEATS,
+            current_phrase_label="other",
+        )
+        sm._dispatch_led_automation(active=2, d=sm._deck[2], sp_state=at_bound)
         self.assertEqual(len(adapter.trigger_calls), 1)
         self.assertFalse(sm._led_hold_active)
+        self.assertEqual(sm._led_hold_started_mono, 0.0)
+        self.assertIsNone(sm._led_hold_started_beat)
+
+    def test_missing_phrase_data_hold_releases_on_time_backstop_without_beat(self) -> None:
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=adapter)
+        _ready_led_active_deck(sm, 1)
+        sm._led_hold_active = True
+
+        no_beat = SmartPhrasingState(current_phrase_label="other")
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=no_beat)
+        self.assertEqual(len(adapter.trigger_calls), 0)
+        self.assertTrue(sm._led_hold_active)
+
+        sm._led_hold_started_mono -= state_manager_mod.LED_HOLD_BACKSTOP_S
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=no_beat)
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertFalse(sm._led_hold_active)
+        self.assertEqual(sm._led_hold_started_mono, 0.0)
+        self.assertIsNone(sm._led_hold_started_beat)
 
     def test_hold_does_not_touch_laser_or_soundswitch_paths(self) -> None:
         director = _AutomationLEDLookDirector()
@@ -829,17 +857,25 @@ class LEDStateManagerTests(unittest.TestCase):
     def test_active_deck_switch_arms_led_hold(self) -> None:
         sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
         _ready_led_active_deck(sm, 1)
+        sm._led_hold_started_mono = 123.0
+        sm._led_hold_started_beat = 456.0
 
         sm._apply_nonzero_active_deck_switch(1, 2, "test")
 
         self.assertTrue(sm._led_hold_active)
+        self.assertEqual(sm._led_hold_started_mono, 0.0)
+        self.assertIsNone(sm._led_hold_started_beat)
 
     def test_active_deck_track_load_arms_hold_inactive_does_not(self) -> None:
         sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
         _ready_led_active_deck(sm, 1)
+        sm._led_hold_started_mono = 123.0
+        sm._led_hold_started_beat = 456.0
 
         sm._on_track_loaded(1, "active", BridgeEvent(Ev.TRACK_LOADED, 1, {}, "test"))
         self.assertTrue(sm._led_hold_active)
+        self.assertEqual(sm._led_hold_started_mono, 0.0)
+        self.assertIsNone(sm._led_hold_started_beat)
 
         sm._led_hold_active = False
         sm._on_track_loaded(2, "inactive", BridgeEvent(Ev.TRACK_LOADED, 2, {}, "test"))
@@ -849,14 +885,22 @@ class LEDStateManagerTests(unittest.TestCase):
     def test_idle_and_stop_clear_led_hold(self) -> None:
         sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
         sm._led_hold_active = True
+        sm._led_hold_started_mono = 123.0
+        sm._led_hold_started_beat = 456.0
 
         sm._enter_idle_no_audible(reason="test")
         self.assertFalse(sm._led_hold_active)
+        self.assertEqual(sm._led_hold_started_mono, 0.0)
+        self.assertIsNone(sm._led_hold_started_beat)
 
         sm._led_hold_active = True
+        sm._led_hold_started_mono = 123.0
+        sm._led_hold_started_beat = 456.0
         sm._do_stop(1, 1000)
 
         self.assertFalse(sm._led_hold_active)
+        self.assertEqual(sm._led_hold_started_mono, 0.0)
+        self.assertIsNone(sm._led_hold_started_beat)
 
     def test_led_role_mapping_uses_up_to_chorus_for_drop_impact(self) -> None:
         sm = _make_sm()
@@ -1946,8 +1990,12 @@ class LEDStateManagerTests(unittest.TestCase):
         _prepare_playing_push_tick(
             sm,
             SmartPhrasingState(
+                abs_beat=80.5,
                 smart_buildup_active=True,
+                current_phrase_label="up",
+                current_phrase_start_beat=64.0,
                 current_phrase_is_up=True,
+                beats_into_phrase=16.5,
                 next_smart_drop_beat=96.0,
                 beats_to_next_drop=16.0,
             ),
@@ -2283,6 +2331,52 @@ class LEDStateManagerTests(unittest.TestCase):
         ]
         self.assertEqual(len(gate_logs), 2)
 
+    def test_smart_phrasing_reset_reason_logs_only_on_change(self) -> None:
+        def diag(reason: str, abs_beat: float | None) -> SmartPhrasingDiagnostic:
+            return SmartPhrasingDiagnostic(
+                event="smart_phrasing_reset",
+                level="info",
+                reason=reason,
+                deck_id="1",
+                track_id="/tracks/current.wav",
+                abs_beat=abs_beat,
+                previous_abs_beat=None,
+            )
+
+        class _FakeSmartPhrasingEngine:
+            def __init__(self) -> None:
+                self.results = [
+                    SmartPhrasingResult(SmartPhrasingState(), (diag("no_beat", None),)),
+                    SmartPhrasingResult(SmartPhrasingState(), (diag("no_beat", None),)),
+                    SmartPhrasingResult(SmartPhrasingState(), (diag("track_change", 12.0),)),
+                    SmartPhrasingResult(SmartPhrasingState(abs_beat=13.0), ()),
+                ]
+
+            def update(self, _snapshot):  # type: ignore[no-untyped-def]
+                return self.results.pop(0)
+
+        sm = _make_sm()
+        sm._smart_phrasing_engine = _FakeSmartPhrasingEngine()
+        d = sm._deck[1]
+        d.playing = True
+        d.meta.filepath = "/tracks/current.wav"
+
+        with self.assertLogs("state_manager", level="INFO") as captured:
+            sm._update_smart_phrasing_state(1, d, 10.0, 120.0)
+            sm._update_smart_phrasing_state(1, d, 11.0, 120.0)
+            sm._update_smart_phrasing_state(1, d, 12.0, 120.0)
+            sm._update_smart_phrasing_state(1, d, 13.0, 120.0)
+
+        reset_logs = [
+            line
+            for line in captured.output
+            if "[SP] reset-reason-change" in line
+        ]
+        self.assertEqual(len(reset_logs), 3)
+        self.assertIn("reason=no_beat prev=-", reset_logs[0])
+        self.assertIn("reason=track_change prev=no_beat", reset_logs[1])
+        self.assertIn("reason=- prev=track_change", reset_logs[2])
+
     def test_led_scene_ref_log_sanitizer_redacts_device_like_values(self) -> None:
         sm = _make_sm(director=None, adapter=None)
 
@@ -2526,8 +2620,12 @@ class LEDStateManagerTests(unittest.TestCase):
         _prepare_playing_push_tick(
             sm,
             SmartPhrasingState(
+                abs_beat=80.5,
                 smart_buildup_active=True,
+                current_phrase_label="up",
+                current_phrase_start_beat=64.0,
                 current_phrase_is_up=True,
+                beats_into_phrase=16.5,
                 next_smart_drop_beat=96.0,
                 beats_to_next_drop=16.0,
             ),
@@ -2547,6 +2645,10 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(data["reason"], "role_entry:buildup")
         self.assertEqual(data["backend"], "cloud_diy")
         self.assertEqual(data["active_deck"], 1)
+        self.assertEqual(data["abs_beat"], 80.5)
+        self.assertEqual(data["bip"], 16.5)
+        self.assertEqual(data["phrase_label"], "up")
+        self.assertEqual(data["seq"], sm._led_phrase_seq)
         self.assertTrue(data["role_key"])
         self.assertNotIn("phase", data)
 
@@ -2565,6 +2667,10 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(records[0].cat, "perf.led.look")
         self.assertEqual(records[0].data["role"], "ambient")
         self.assertEqual(records[0].data["look"], "room_ambient")
+        self.assertNotIn("abs_beat", records[0].data)
+        self.assertNotIn("bip", records[0].data)
+        self.assertNotIn("phrase_label", records[0].data)
+        self.assertNotIn("seq", records[0].data)
 
     def test_smart_drop_blackout_accepted_emits_perf_led_look_with_phase(self) -> None:
         records = _capture_perf(self, "perf.led.look")
@@ -2591,6 +2697,10 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(data["phase"], "pre_drop")
         # scene_ref "23259999" is digits-only → sanitizer parity with old lines
         self.assertEqual(data["scene_ref"], "<redacted>")
+        self.assertNotIn("abs_beat", data)
+        self.assertNotIn("bip", data)
+        self.assertNotIn("phrase_label", data)
+        self.assertNotIn("seq", data)
 
     def test_rejected_dispatch_emits_no_perf_led_look(self) -> None:
         records = _capture_perf(self, "perf.led.look")

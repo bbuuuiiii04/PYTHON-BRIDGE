@@ -54,6 +54,18 @@ Intra-section look rotation (2026-07-07):
   `drop`, `groove`, `post_drop`, blackout, hold, scripted, and manual-override
   semantics are unchanged. This is software-tested and hardware-unvalidated.
 
+LED hold starvation fix (2026-07-07):
+- Active-deck switches and active-deck track loads still protect against an
+  instant mid-phrase LED repaint, but the hold can no longer wait forever when
+  phrase data is missing or stale: it releases at the normal phrase entry first,
+  then at a 16-beat backstop, or after 8 seconds if no beat is readable. Hold
+  engage/release is logged as `[RGB] hold-engaged` / `[RGB] hold-released`, and
+  SmartPhrasing reset transitions are logged as `[SP] reset-reason-change`.
+  Accepted automation `perf.led.look` rows now include beat/phrase context.
+  Root cause remains likely, not confirmed, until a live session shows whether
+  freezes line up with those hold/reset log lines. SOFTWARE-VALIDATED ONLY /
+  HARDWARE-UNVALIDATED.
+
 Stream Deck palette control (Package 2, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/palette_control_authority.md`.
 - The `streamdeck_palette` change contract implements palette queue/override-fade/lock, `white_sand`,
@@ -192,7 +204,7 @@ Runtime flow:
   `drop_lifecycle.py` reproduces its flat-window drop-region state machine for
   laser use; `tests/test_drop_lifecycle.py` parity-checks that seam without
   routing LED output through the new module.
-- Active content changes now arm a phrase-aware LED hold in `StateManager`: a nonzero active-deck switch or active-deck track replacement keeps the previously shown look if the incoming track is more than `1.0` beat into its current phrase, then releases at the next phrase crossing. If the incoming track is already within the first beat of a phrase, it changes immediately. Missing phrase segments can keep the prior look for the whole track; this is software-tested only and still needs operator visual sign-off.
+- Active content changes now arm a phrase-aware LED hold in `StateManager`: a nonzero active-deck switch or active-deck track replacement keeps the previously shown look if the incoming track is more than `1.0` beat into its current phrase, then releases at the next phrase crossing. If the incoming track is already within the first beat of a phrase, it changes immediately. Missing phrase segments are bounded by the same hold's 16-beat / 8-second backstop; this is software-tested only and still needs operator visual sign-off.
 
 Config:
 - `config/led_look_director.example.json`
@@ -241,7 +253,7 @@ Tests:
   behavior with phrase monotonic off, unchanged drop/groove/post_drop key
   strings, stable section/cycle publication, and a dispatch-path second look
   across a buildup cycle boundary. This is software validation only.
-- phrase-aware active-content hold coverage lives in `tests/test_led_state_manager.py`, including active deck switch, active-deck track load, the inclusive `1.0` beat release boundary, hold-until-next-marker behavior, missing-phrase-data indefinite hold until a crossing, idle/stop cleanup, inactive-deck load exclusion, and laser/SoundSwitch path confinement. This is software validation only.
+- phrase-aware active-content hold coverage lives in `tests/test_led_state_manager.py`, including active deck switch, active-deck track load, the inclusive `1.0` beat release boundary, hold-until-next-marker behavior, missing-phrase-data release by 16-beat backstop, 8-second no-beat fallback, hold stamp cleanup, SmartPhrasing reset-reason change logging, `perf.led.look` beat/phrase enrichment for automation only, inactive-deck load exclusion, idle/stop cleanup, and laser/SoundSwitch path confinement. This is software validation only.
 - shared flat-window lifecycle parity coverage lives in `tests/test_drop_lifecycle.py`; live LED per-look duration rewriting and backend latency offsets remain separate by design.
 - LED Pad Phase 1/3 coverage lives in `tests/test_led_pad_controls.py`, `tests/test_led_pad_playback.py`, and `tests/test_led_pad_service.py`. It validates metadata coverage, synthetic playback clock/ownership/strobe gates, draft mutation, commit blocking, color injection, Locked Palette playback, ownership-required replies, and one HTTP smoke path. Template Lab Phase 2 coverage lives in `tests/test_led_pad_lab.py` and validates registry persistence, name-collision rejection, hot reload, broken-module errors, lab rendering, and shared playback-slot preemption. Template Lab Round 1 coverage (same file) validates `render_preview_frames` determinism/frame-count clamping, `lab_preview` (frames returned, unknown draft/unregistered fn raise `ValueError`, broken module returns structured failure, zero playback side effects), `lab_update` (applies only when the exact draft is playing, payload params overlay saved params, live code-swap reflects in the live `LabRenderer`), and `lab_switch` (seamless swap between lab drafts, refusal when nothing or a pad look is playing, unknown draft raises). It uses fakes or dry-run paths only. Phase 3 color-engine and renderer regressions live in `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`, and `tests/test_govee_frame_renderer.py`.
 - Stream Deck palette control Package 2 coverage lives in `tests/test_led_palette_control.py`,
@@ -315,4 +327,4 @@ Known risks:
 - confusing local H612D behavior with all Govee devices
 - beat-synced motion smoothness issues
 - config schema drift
-- un-analyzed tracks with no phrase segments can hold the previous LED look after an active content change until stop/idle or another content change
+- un-analyzed tracks with no phrase segments can still hold the previous LED look after an active content change, but only until the 16-beat / 8-second backstop; live visual comfort is still hardware-unvalidated

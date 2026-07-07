@@ -33,7 +33,7 @@ python -m pytest tests
 | Rekordbox readers | reader, offset, live BPM, active-deck resolver, StateManager authority, startup wiring, runtime status tests | cannot prove all app versions or hardware-visible behavior. Audit P3 adds ANLZ read-failure cache recovery coverage. |
 | SoundSwitch | OS2L/output helpers; project/pack/player/native-Autoloop-resolver/MIDI/backend/Enttec/config/startup/controller/commands/StateManager/status/menubar/shadow/Art-Net truth-check/T7d/parity-lane tests | pack coverage is pinned to SoundSwitch 2.10.3 canonical UUID/RAVE; copied status, native Autoloop rendering, U1 truth-check packets, and passive U0 parity fixtures are software/wire evidence and tests do not prove physical fixtures. Audit P2 adds software coverage for SoundSwitch-connected `overlay_suppressed` status. Audit P3 adds explicit scripted elapsed threading coverage. |
 | Laser | laser config/director/executor/MIDI dry-run tests | cannot prove physical safety. `tests/test_drop_lifecycle.py` covers true smart-drop crossings, label-only chorus boundaries, and LED flat-window parity. Audit P4 adds send-error reopen recovery, bank-gate restore, config fallback/cooldown validation, deprecated `pre_drop_scene` tolerance, blackout-mask refcount, and Laser Pad live-toggle command append coverage. |
-| LED/Govee | LED config/director/color/realtime/renderer tests plus StateManager LED automation tests | cannot prove device compatibility or room-visible behavior. `tests/test_led_state_manager.py` covers the mirrored real-crossing drop-impact gate plus 32-beat intra-section role-key rotation for long buildup/pre-drop/breakdown/monotonic ambient sections. `tests/test_led_color_engine_integration.py` covers stable section/cycle publication, unchanged drop/groove/post_drop key strings, and a dispatch-path second look across a buildup cycle boundary. Audit P2 adds committed-drop DIY eligibility coverage. Audit P3 adds runner-thread realtime handoff teardown coverage. Audit P5 keeps existing LED state-manager coverage as the behavior oracle for dispatch bookkeeping extraction. |
+| LED/Govee | LED config/director/color/realtime/renderer tests plus StateManager LED automation tests | cannot prove device compatibility or room-visible behavior. `tests/test_led_state_manager.py` covers the mirrored real-crossing drop-impact gate, 32-beat intra-section role-key rotation for long buildup/pre-drop/breakdown/monotonic ambient sections, and the bounded active-content hold with hold/reset observability. `tests/test_led_color_engine_integration.py` covers stable section/cycle publication, unchanged drop/groove/post_drop key strings, and a dispatch-path second look across a buildup cycle boundary. Audit P2 adds committed-drop DIY eligibility coverage. Audit P3 adds runner-thread realtime handoff teardown coverage. Audit P5 keeps existing LED state-manager coverage as the behavior oracle for dispatch bookkeeping extraction. |
 | Replay/session tooling | replay format and smoke tests | software-only |
 | Frontend tools | syntax and smoke tests | does not prove live safety |
 | Docs/agent workflow | docs metadata, agent contract, drift, and staleness checkers | docs-only validation |
@@ -168,9 +168,11 @@ Enttec, or hardware-visible output.
 armed by nonzero active-deck switches and active-deck track loads. The focused
 tests cover immediate release within `0.5` and `1.0` beats of the incoming
 phrase entry, hold at `1.1` beats until the next phrase marker, same-active-deck
-track replacement, missing-phrase-data indefinite hold until a crossing,
-inactive-deck load exclusion, idle/stop cleanup, and no director/adapter or
-laser/SoundSwitch calls during the hold return.
+track replacement, missing-phrase-data release at the 16-beat backstop,
+8-second release when no beat is readable, inactive-deck load exclusion,
+idle/stop cleanup, hold stamp cleanup, SmartPhrasing reset-reason change
+logging, automation-only `perf.led.look` beat/phrase enrichment, and no
+director/adapter or laser/SoundSwitch calls during the hold return.
 
 This is software validation only. It does not prove Govee device behavior or
 the room-visible absence of a mid-phrase pop.

@@ -1691,8 +1691,24 @@ class StateManagerLiveBPMTests(unittest.TestCase):
         sm._last_pos_log[1] = time.monotonic()
 
         cache.update(PositionSnapshot(1, elapsed_ms=15500, playing=False, updated_at=time.monotonic()))
-        with self.assertNoLogs("state_manager", level="INFO"):
+        logger = logging.getLogger("state_manager")
+        records: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handler = _Capture()
+        prior_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        try:
             sm._push_tick()
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(prior_level)
+
+        self.assertFalse(any("[SS][AUTOLOOP-TICK]" in r.getMessage() for r in records))
 
         cache.update(PositionSnapshot(1, elapsed_ms=16000, playing=False, updated_at=time.monotonic()))
         # Rich tick diagnostics are demoted INFO -> DEBUG (kept for MAX DEBUG);

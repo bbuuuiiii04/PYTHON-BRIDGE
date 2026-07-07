@@ -805,6 +805,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._snapshot_lock = threading.Lock()
         self._published_snapshot: dict = {}
         self._last_sp_state: Optional[SmartPhrasingState] = None
+        self._last_sp_reset_reason: str = ""
         # Latches sp.phrase_anchor_requested (one 200 Hz tick) until the next
         # beat boundary consumes it, so a marker crossing can never be dropped.
         self._pending_phrase_marker: bool = False
@@ -1951,6 +1952,8 @@ class StateManager(LEDDispatchPolicyMixin):
         self._drop_presentation_gearshift_check(old_deck, new_deck)
         self._os.active_deck = new_deck
         self._led_hold_active = True
+        self._led_hold_started_mono = 0.0
+        self._led_hold_started_beat = None
         self._reset_for_active_deck_entry(new_deck, source)
 
     def _drop_presentation_gearshift_check(self, old_deck: int, new_deck: int) -> None:
@@ -2043,6 +2046,8 @@ class StateManager(LEDDispatchPolicyMixin):
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
         self._led_hold_active = False
+        self._led_hold_started_mono = 0.0
+        self._led_hold_started_beat = None
         self._clear_led_drop_lifecycle()
         self._clear_smart_rearm_state()
         self._autoloop.clear_arm_phrase_lock()
@@ -2087,6 +2092,8 @@ class StateManager(LEDDispatchPolicyMixin):
         self._loaded_anlz_path.pop(deck, None)
         if deck == self._os.active_deck:
             self._led_hold_active = True
+            self._led_hold_started_mono = 0.0
+            self._led_hold_started_beat = None
             self._clear_led_drop_lifecycle()
             self._clear_smart_rearm_state()
             self._autoloop.clear_arm_phrase_lock()
@@ -4670,6 +4677,21 @@ class StateManager(LEDDispatchPolicyMixin):
             phrase_anchor_period_beats=PHRASE_ANCHOR_BEATS,
         )
         _sp_result = self._smart_phrasing_engine.update(_sp_snapshot)
+        _sp_diag = _sp_result.diagnostics[0] if _sp_result.diagnostics else None
+        _sp_reset_reason = _sp_diag.reason if _sp_diag is not None else ""
+        if _sp_reset_reason != self._last_sp_reset_reason:
+            _sp_deck = _sp_diag.deck_id if _sp_diag is not None else _sp_snapshot.deck_id
+            _sp_track = _sp_diag.track_id if _sp_diag is not None else _sp_snapshot.track_id
+            _sp_abs_beat = _sp_diag.abs_beat if _sp_diag is not None else _sp_snapshot.abs_beat
+            log.info(
+                "[SP] reset-reason-change reason=%s prev=%s deck=%s track=%s abs_beat=%s",
+                _sp_reset_reason or "-",
+                self._last_sp_reset_reason or "-",
+                _sp_deck or "-",
+                _sp_track or "-",
+                _sp_abs_beat if _sp_abs_beat is not None else "-",
+            )
+            self._last_sp_reset_reason = _sp_reset_reason
         sp_state = _sp_result.state
         self._last_sp_state = sp_state
         self._last_sp_snapshot = _sp_snapshot
@@ -4797,6 +4819,8 @@ class StateManager(LEDDispatchPolicyMixin):
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
         self._led_hold_active = False
+        self._led_hold_started_mono = 0.0
+        self._led_hold_started_beat = None
         self._clear_led_drop_lifecycle()
         self._clear_smart_rearm_state()
         self._autoloop.clear_arm_phrase_lock()

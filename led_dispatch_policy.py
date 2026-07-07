@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os as _os
 import re
+import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -34,6 +35,8 @@ LED_DEFAULT_POST_DROP_CYCLE_BEATS = 32.0
 # After an active content change, allow the incoming look immediately only near
 # the current phrase entry; otherwise hold the previous look until a crossing.
 LED_HOLD_RELEASE_BEATS = 1.0
+LED_HOLD_BACKSTOP_BEATS = 16.0
+LED_HOLD_BACKSTOP_S = 8.0
 _LED_DROP_IMPACT_PREDECESSORS = frozenset({"up", "low", "buildup", "breakdown"})
 # Max drop impacts per drop lifecycle. The first fires off an Up/Low buildup;
 # this allows one extra back-to-back Chorus->Chorus drop before settling into
@@ -108,6 +111,8 @@ class LEDDispatchPolicyMixin:
         self._led_last_idle_role_key = ""
         # Armed on active deck switch or active-deck track load; released by LED phrase timing.
         self._led_hold_active: bool = False
+        self._led_hold_started_mono: float = 0.0
+        self._led_hold_started_beat: Optional[float] = None
         self._led_rt_permitted = False
         self._led_rt_beat: tuple[int, float, float, float, bool] | None = None
         self._led_color_engine_status: dict[str, Any] = {
@@ -780,11 +785,49 @@ class LEDDispatchPolicyMixin:
         self._led_last_idle_role_key = ""
         if self._led_hold_active:
             # Keep rendering the previous look; do not dispatch a new one until
-            # the incoming track is at or crossing a phrase entry.
+            # the incoming track is at/crossing a phrase entry, with a bounded
+            # backstop for phrase-less stretches.
+            now = time.monotonic()
             bip = sp_state.beats_into_phrase
+            if self._led_hold_started_mono == 0.0:
+                self._led_hold_started_mono = now
+                self._led_hold_started_beat = self._led_abs_beat(sp_state)
+                log.info(
+                    "[RGB] hold-engaged deck=%d bip=%s crossing=%s abs_beat=%s",
+                    active,
+                    bip if bip is not None else "-",
+                    sp_state.phrase_start_crossing,
+                    self._led_hold_started_beat if self._led_hold_started_beat is not None else "-",
+                )
             at_phrase_entry = bip is not None and bip <= LED_HOLD_RELEASE_BEATS
-            if at_phrase_entry or sp_state.phrase_start_crossing:
+            current_beat = self._led_abs_beat(sp_state)
+            beat_backstop = (
+                current_beat is not None
+                and self._led_hold_started_beat is not None
+                and current_beat - self._led_hold_started_beat >= LED_HOLD_BACKSTOP_BEATS
+            )
+            time_backstop = now - self._led_hold_started_mono >= LED_HOLD_BACKSTOP_S
+            release_reason = ""
+            if at_phrase_entry:
+                release_reason = "phrase_entry"
+            elif sp_state.phrase_start_crossing:
+                release_reason = "crossing"
+            elif beat_backstop:
+                release_reason = "beat_backstop"
+            elif time_backstop:
+                release_reason = "time_backstop"
+
+            if release_reason:
+                held_s = now - self._led_hold_started_mono
                 self._led_hold_active = False
+                self._led_hold_started_mono = 0.0
+                self._led_hold_started_beat = None
+                log.info(
+                    "[RGB] hold-released deck=%d reason=%s held_s=%.1f",
+                    active,
+                    release_reason,
+                    held_s,
+                )
             else:
                 return
         if sp_state.smart_drop_crossing:
@@ -979,6 +1022,7 @@ class LEDDispatchPolicyMixin:
             role_key=role_key,
             automation=True,
             active_deck=active,
+            sp_state=sp_state,
         )
         if outcome == "error":
             log.warning(
@@ -1179,6 +1223,7 @@ class LEDDispatchPolicyMixin:
         active_deck: Optional[int] = None,
         trigger_fn: Any = None,
         phase: str = "",
+        sp_state: SmartPhrasingState | None = None,
     ) -> str:
         """Single adapter trigger/accept/reject bookkeeping ritual.
 
@@ -1241,6 +1286,14 @@ class LEDDispatchPolicyMixin:
                     pass
             if active_deck is not None:
                 data["active_deck"] = active_deck
+            if sp_state is not None:
+                abs_beat = self._led_abs_beat(sp_state)
+                if abs_beat is not None:
+                    data["abs_beat"] = abs_beat
+                if sp_state.beats_into_phrase is not None:
+                    data["bip"] = sp_state.beats_into_phrase
+                data["phrase_label"] = sp_state.current_phrase_label
+                data["seq"] = self._led_phrase_seq
             bridge_log.perf(
                 "led.look",
                 "look %s role=%s (%s)",
