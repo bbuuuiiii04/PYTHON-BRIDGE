@@ -5,9 +5,12 @@ The state-manager thread calls update() and snapshot(); no locks are needed.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
+
+log = logging.getLogger("rb_ss_bridge_v2.laser_color")
 
 
 FIXED_COLOR_ORDER = ("red", "green", "blue", "cyan", "yellow", "purple")
@@ -164,7 +167,14 @@ _DEFAULT_COLOR_MAP_PATH = Path(__file__).resolve().parent / "config" / "laser_co
 def load_laser_color_map(path: str | Path = _DEFAULT_COLOR_MAP_PATH) -> LaserColorMap:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        # Loud, not silent: an unreadable map disables the whole laser-color
+        # feature (authored CH8/CH9 pass through). That silent-disable once hid
+        # a cwd/relative-path bug for weeks. Surface it so it can't hide again.
+        log.warning(
+            "[laser-color] map not loaded path=%s err=%s -> DISABLED "
+            "(lasers keep baked pack color)", path, type(exc).__name__,
+        )
         data = {}
     return LaserColorMap.from_dict(data)
 

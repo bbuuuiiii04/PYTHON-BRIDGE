@@ -424,8 +424,14 @@ class LaserPackPlayer:
                 kind="scripted",
             )
         try:
+            # Scripted tracks are authored-sovereign: the LED color engine stands
+            # down completely so lasers play exactly the baked cue colors
+            # (laser_color_authority.md Rule 5 / Meaning; laser.md: "scripted
+            # tracks ... fall back to authored pack output"; Required Behavior
+            # Test #2 — scripted frames byte-identical with the engine present or
+            # absent). Color injection lives ONLY on the Autoloop path below.
             frame = render_scripted_frame(document, selection.elapsed_ms)
-            return PlayerResult(_merge_color_snapshot(frame, self._color_snapshot))
+            return PlayerResult(frame)
         except (TypeError, ValueError) as exc:
             return _diagnostic("player_error", type(exc).__name__)
 
