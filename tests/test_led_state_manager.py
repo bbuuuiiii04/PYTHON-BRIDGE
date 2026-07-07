@@ -671,6 +671,7 @@ def _make_realtime_color_sm():
         _CoordinatorConfig(),
         time_fn=lambda: 1000.0,
     )
+    coordinator._min_dwell_enabled = False
     sm = _make_sm(director=director, adapter=coordinator, led_color_engine=engine)
     sm._led_v2_latch = True
     _ready_led_active_deck(sm, 1)
@@ -1972,11 +1973,11 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(anchor.deck, 1)
         self.assertEqual(anchor.bpm, 128.0)
 
-    def test_manual_pad_refreshes_cached_realtime_colors_without_refire(self) -> None:
+    def test_manual_pad_color_queues_until_next_realtime_automation_dispatch(self) -> None:
         sm, engine, runner, owner = _make_realtime_color_sm()
 
-        self.assertIsNotNone(sm._led_live_rt_auto)
         self.assertEqual(owner.current(), OwnerState.REALTIME_RAZER)
+        initial_desired_count = len(runner.desired)
         self.assertEqual(len(runner.desired), 1)
         self.assertEqual(runner.desired[-1].params["color"], (1, 2, 3))
         self.assertEqual(runner.fire_count, 1)
@@ -1991,40 +1992,17 @@ class LEDStateManagerTests(unittest.TestCase):
         )
 
         self.assertEqual(engine.snapshot()["manual"], "red")
-        self.assertEqual(len(runner.desired), 2)
+        self.assertEqual(len(runner.desired), initial_desired_count)
+        self.assertEqual(runner.fire_count, 1)
+        self.assertEqual(runner.desired[-1].params["color"], (1, 2, 3))
+
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_groove_cross_sp())
+
+        self.assertEqual(len(runner.desired), initial_desired_count + 1)
         self.assertEqual(runner.desired[-1].params["color"], (255, 0, 0))
         self.assertEqual(runner.desired[-1].effect_name, "groove_chase_blue")
-        self.assertEqual(runner.fire_count, 1)
+        self.assertEqual(runner.fire_count, 2)
         self.assertEqual(owner.current(), OwnerState.REALTIME_RAZER)
-
-    def test_manual_color_refresh_noops_under_blackout_and_clears_cache(self) -> None:
-        sm, _engine, runner, _owner = _make_realtime_color_sm()
-
-        sm._handle_event(
-            BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={"reason": "operator"}, source="test")
-        )
-        self.assertIsNone(sm._led_live_rt_auto)
-        desired_count = len(runner.desired)
-
-        sm._handle_event(
-            BridgeEvent(
-                kind=Ev.LED_MANUAL_PAD,
-                deck=0,
-                payload={"name": "blue"},
-                source="test",
-            )
-        )
-
-        self.assertEqual(len(runner.desired), desired_count)
-
-    def test_idle_entry_clears_cached_realtime_color_refresh(self) -> None:
-        sm, _engine, _runner, _owner = _make_realtime_color_sm()
-
-        self.assertIsNotNone(sm._led_live_rt_auto)
-
-        sm._enter_idle_no_audible(reason="test")
-
-        self.assertIsNone(sm._led_live_rt_auto)
 
     def test_gate_clears_realtime_permission(self) -> None:
         sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())

@@ -90,7 +90,6 @@ class LEDDispatchPolicyMixin:
         self._led_scripted_default_role = "breakdown"
         self._led_scripted_role_map: dict[str, str] = {}
         self._led_last_auto_role_key = ""
-        self._led_live_rt_auto: Optional[tuple] = None
         # M1b WI-2: structured (section_id, cycle) published alongside the
         # string role_key so the color engine seeds on stable fields without
         # parsing the marker text.
@@ -457,7 +456,6 @@ class LEDDispatchPolicyMixin:
 
         if ev.kind == Ev.LED_BLACKOUT:
             self._led_idle_freewheel_since = None
-            self._led_live_rt_auto = None
             if "target" in ev.payload:
                 target = str(ev.payload.get("target", "")).strip()
                 if target and not self._led_target_exists(target):
@@ -832,25 +830,6 @@ class LEDDispatchPolicyMixin:
                 self._led_last_error = f"color_engine_error:{type(exc).__name__}"
         return decision
 
-    def _led_refresh_manual_color(self) -> None:
-        cached = self._led_live_rt_auto
-        if cached is None or self._led_blackout_active() or self._led_manual_override:
-            return
-        decision, role, section_id, cycle, role_key = cached
-        decision = self._led_inject_engine_colors(
-            decision,
-            role=role,
-            section_id=section_id,
-            cycle=cycle,
-            role_key=role_key,
-        )
-        coordinator = self._led_scene_adapter
-        if coordinator is None:
-            return
-        refresh = getattr(coordinator, "refresh_realtime_colors", None)
-        if callable(refresh) and refresh(decision):
-            log.info("[RGB] manual-color-refresh look=%s", getattr(decision, "look", "-"))
-
     def _dispatch_led_automation(
         self,
         *,
@@ -1060,7 +1039,6 @@ class LEDDispatchPolicyMixin:
             )
             return
 
-        pre_inject_decision = decision
         decision = self._led_inject_engine_colors(
             decision,
             role=role,
@@ -1096,16 +1074,6 @@ class LEDDispatchPolicyMixin:
 
         if outcome == "accepted":
             self._led_smart_drop_blackout_key = ""
-            if getattr(decision, "backend", "") == "realtime_razer":
-                self._led_live_rt_auto = (
-                    pre_inject_decision,
-                    role,
-                    section_id,
-                    cycle,
-                    role_key,
-                )
-            else:
-                self._led_live_rt_auto = None
             if role == "drop":
                 self._led_note_drop_decision_accepted(decision, sp_state)
             return

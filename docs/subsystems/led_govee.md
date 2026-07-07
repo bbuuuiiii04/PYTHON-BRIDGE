@@ -3,7 +3,7 @@ doc_status: current
 truth_level: code-verified
 last_verified_commit: dd48a3c
 last_verified_date: 2026-07-04
-validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, and LED pad color-immediacy refresh software-tested, hardware-unvalidated
+validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, and LED pad queued-color restore software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem
@@ -82,20 +82,19 @@ LED idle/pause ambient fix (2026-07-07):
   pause validates the room-visible behavior. SOFTWARE-VALIDATED ONLY /
   HARDWARE-UNVALIDATED.
 
-LED pad color immediacy (AWR-134, 2026-07-07):
-- Accepted realtime automation looks now cache the pre-color-injection decision
-  plus role/section/cycle context. Manual color pad events (`red`, `green`,
-  `blue`, `rainbow`, and `white_sand`) re-inject the current color-engine state
-  into that same look and call a coordinator refresh that only updates the
-  realtime runner's desired spec.
-- The refresh does not call `fire_trigger`, does not change owner state, and
-  does not run normal role-key/dwell/cooldown look selection. Blackout and
-  manual scene override still win, and idle entry or LED blackout clears the
-  cached realtime decision.
+LED pad queued-color restore (AWR-137, 2026-07-07):
+- AWR-134 instant realtime recolor is superseded by operator decision: color
+  pad changes queue again. Manual color pad events (`red`, `green`, `blue`,
+  `rainbow`, and `white_sand`) mutate color-engine state only; there is no
+  realtime runner refresh path on the pad press.
+- The next accepted LED automation dispatch injects the current color-engine
+  state through `_led_inject_engine_colors(...)`, so the new color lands at the
+  next look/role-key boundary. The AWR-132 hold fix and 32-beat look-cycle
+  terms keep those boundaries bounded instead of late/never.
 - Cloud DIY scenes still cannot be recolored in place because they are fixed
-  scene commands without RGB params; those looks still wait for the next normal
-  automation dispatch. Watch `[RGB] manual-color-refresh` on realtime pad
-  presses. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+  scene commands without RGB params; those looks also wait for the next normal
+  automation dispatch. Laser color follow remains separate and instant by
+  design. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
 Govee health reporting (AWR-136, 2026-07-07):
 - Cloud mirror sends now report health transitions instead of failing silently:
@@ -310,12 +309,10 @@ Tests:
   emit only on transitions while primary return semantics stay unchanged, and
   a successful send clears a previously latched `circuit_open` degraded reason.
   This is software validation only.
-- LED pad color-immediacy coverage lives in `tests/test_led_state_manager.py`
-  and `tests/test_led_dispatch_coordinator.py`: cached realtime automation
-  decisions refresh on manual color pad events with one extra `set_desired`,
-  no extra `fire_trigger`, unchanged realtime owner, cloud-owner no-op, and
-  cache clearing on idle entry and LED blackout. This is software validation
-  only.
+- LED pad queued-color restore coverage lives in `tests/test_led_state_manager.py`:
+  a manual color pad event updates the color engine without sending another
+  realtime runner `set_desired`, and the next automation dispatch with a new
+  role key carries the updated engine color. This is software validation only.
 - shared flat-window lifecycle parity coverage lives in `tests/test_drop_lifecycle.py`; live LED per-look duration rewriting and backend latency offsets remain separate by design.
 - LED Pad Phase 1/3 coverage lives in `tests/test_led_pad_controls.py`, `tests/test_led_pad_playback.py`, and `tests/test_led_pad_service.py`. It validates metadata coverage, synthetic playback clock/ownership/strobe gates, draft mutation, commit blocking, color injection, Locked Palette playback, ownership-required replies, and one HTTP smoke path. Template Lab Phase 2 coverage lives in `tests/test_led_pad_lab.py` and validates registry persistence, name-collision rejection, hot reload, broken-module errors, lab rendering, and shared playback-slot preemption. Template Lab Round 1 coverage (same file) validates `render_preview_frames` determinism/frame-count clamping, `lab_preview` (frames returned, unknown draft/unregistered fn raise `ValueError`, broken module returns structured failure, zero playback side effects), `lab_update` (applies only when the exact draft is playing, payload params overlay saved params, live code-swap reflects in the live `LabRenderer`), and `lab_switch` (seamless swap between lab drafts, refusal when nothing or a pad look is playing, unknown draft raises). It uses fakes or dry-run paths only. Phase 3 color-engine and renderer regressions live in `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`, and `tests/test_govee_frame_renderer.py`.
 - Stream Deck palette control Package 2 coverage lives in `tests/test_led_palette_control.py`,

@@ -1,5 +1,5 @@
 ---
-doc_status: active-spec
+doc_status: superseded
 truth_level: implementation-spec, code-grounded (diagnosis 2026-07-07, Fable 5)
 last_verified_commit: 35e0a90
 last_verified_date: 2026-07-07

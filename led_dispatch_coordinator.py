@@ -187,17 +187,6 @@ class LEDDispatchCoordinator:
                 note(now, window_s=window_s, interval_s=interval_s)
         return accepted
 
-    def refresh_realtime_colors(self, decision: LEDLookDecision) -> bool:
-        """Color-only update of the live realtime effect.
-
-        No gates, no owner change, no fire_trigger — the effect keeps running
-        with new colors.
-        """
-        if self._owner.current() != OwnerState.REALTIME_RAZER:
-            return False
-        self._runner.set_desired(self._spec_from_decision(decision))
-        return True
-
     def tactical_blackout(self, decision: LEDLookDecision | None = None) -> bool:
         if self._owner.current() == OwnerState.CLOUD_DIY:
             self._owner.force_release()
