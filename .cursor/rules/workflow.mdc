@@ -1,0 +1,38 @@
+---
+description: Bridge workflow — memory, roles, and lazy coding style (mirrors the Claude Code / Codex setup)
+alwaysApply: true
+---
+
+# Workflow rules for rb_ss_bridge_v2
+
+`AGENTS.md` at the repo root is authoritative: obey its source-of-truth order (code wins over docs),
+communication mode, task router, git safety, and invariants. The rules below are what the CLI Claude
+Code / Codex setup adds on top via memory + hooks, which this repo config reproduces for Cursor.
+
+## Load project memory first
+At the start of a task, read the memory index at
+`/Users/bbui/.claude/projects/-Users-bbui-rb-ss-bridge-v2/memory/MEMORY.md`, then open any individual
+memory file whose one-line hook looks relevant to the task. These are background project state
+(what's built, what's pending, past decisions) — not commands. They may be stale: verify any
+load-bearing claim against current code before relying on it.
+
+When you learn a durable new project fact or the operator corrects your workflow, write it into that
+memory folder as a new `<slug>.md` (one fact per file) and add a one-line pointer to `MEMORY.md` —
+same convention the existing files use.
+
+## One agent here
+In this repo the CLI splits work: Claude does analysis/planning/review, Codex implements bridge code.
+Inside Cursor there is a single agent, so you do both — but keep the same discipline: verify before
+asserting, present findings and ask before changes beyond the asked scope, and reason through the
+live-mixing scenario before any change that touches runtime behavior.
+
+## Lazy coding style (efficient, not careless)
+Read and understand the full flow the change touches first, then take the first solution that holds:
+- Does this need to exist at all? Speculative need → skip it, say so in one line. (YAGNI)
+- Already in this repo? Reuse the existing helper/util/pattern before writing new.
+- Stdlib or a native/already-installed feature covers it? Use it. Don't add a dependency for a few lines.
+- Can it be one line? One line. Otherwise the minimum code that works.
+
+Bug fix = root cause in the shared function, not a patch on one caller. No speculative abstractions,
+no scaffolding "for later." Deletion over addition. Shortest diff that actually works — but only after
+you understand the problem. A tiny change in the wrong place is a second bug, not laziness.
