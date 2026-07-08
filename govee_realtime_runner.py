@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os as _os
 import threading
 import time
 from dataclasses import dataclass
@@ -30,6 +29,10 @@ _COLOR_SIG_KEYS = frozenset({
 })
 
 RGB = tuple[int, int, int]
+
+# A cloud DIY scene silently knocks the strip out of razer mode; while streaming,
+# re-assert razer this often so a knockout (or a single lost activate) heals in <=2 s.
+RAZER_KEEPALIVE_S = 2.0
 
 
 @dataclass(frozen=True)
@@ -88,13 +91,14 @@ class GoveeRealtimeRunner:
         self._frame_index = 0
         self._last_error = ""
 
-        # WI-6 reconcile: track when a cloud DIY dispatch may have displaced razer mode
-        self._reconcile_enabled: bool = _os.environ.get("RBSS_LED_RT_RECONCILE", "1") != "0"
-        self._reconcile_window_s: float = 5.0  # overridden by note_cloud_dispatch caller
-        self._reconcile_interval_s: float = 1.0  # overridden by note_cloud_dispatch caller
-        self._cloud_suspect_until: float = 0.0
+        # Razer keepalive + on-demand asserts (replaces WI-6 reconcile). Flags are
+        # set by other threads and consumed on the runner thread so no transport I/O
+        # ever runs on the caller's thread.
+        self._assert_pending = False
+        self._brightness_request: int | None = None
+        self._brightness_repeat = 0
         self._last_activate_mono: float = 0.0
-        self._rt_reconcile_count: int = 0
+        self._razer_assert_count = 0
         self._log = logging.getLogger("govee_realtime_runner")
 
     def set_beat_provider(self, provider: Callable[[], Optional[BeatAnchor]] | None) -> None:
