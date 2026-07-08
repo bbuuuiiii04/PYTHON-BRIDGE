@@ -205,6 +205,35 @@ Ten more labeled moments (5 blackout-length probes spanning window lift −12.0�
 
 **F2-spec input (replaces §6b's level-term ask):** pre-drop blackout = quantized {1,2,4,8,16}, chosen by incoming-drop family/tier and a pre-window "true stop" class (percussion gone + vocals/effects only — derivable from cached `perc_full`/band series), capped by the measured gap, defaulting SHORT; drop markers de-duplicated per section (continuation markers) and damped near track start. These 11 labels are the calibration set; gather more only if the spec author needs a specific boundary.
 
+## 6d. Operator listening pass, round 3 — full-profile reads, 8 tracks (2026-07-08; all measurements confirmed this session)
+
+Round 3 presented complete per-track analysis stories (axes, zone, chapters, textures, per-drop reads). Verdicts:
+
+| Track | Analysis said | Operator said |
+|---|---|---|
+| You & Me (YDG FLIP) @1:19 | WALL **T3**, GLACIER (icy), 3-dark | wall "could be", **NOT T3**; drop is "literally straight wobbly bass"; **darker tones**; **1-beat** blackout |
+| ONE CHANCE (drops 1:04-1:29 / 2:36) | NEUTRAL/COMET **T1** everywhere | early drops = "**speed house** drops"; 2:36 = "**intense strobe trap drop**" — tier+family UNDER-read; fixed another marker (1:29 chorus→breakdown) |
+| u make me feel @0:50+ | bright 2076Hz, **GLACIER**, WALL, grit 0.13 | **"very bright" ✓, "would be GLACIER" ✓**, wall ✓ but **cyan, not white** ("could even pass hot pink"); calls it "very synth" (analysis synth 0.14 — see semantics note) |
+| GNARLY @0:51 | drama 117 (silence-inflated), EMBERCORE max-aggression, 6-dark | "maximally distorted ✓ but NOT most aggressive — **mid-high**"; "very synth heavy bass house" (analysis synth 0.06); **4-beat** blackout |
+| Stereo Love (ISOxo) | darkest tone 514Hz, 27-beat roll into 0:42, snap (no black) | "very dark ✓ — **would say it's red**"; roll "**dead on**"; buildup = **balloon: strips SHRINK as build progresses, room darkens, then explodes** (no hard black) |
+| Feel Good (Punctual) | synth 0.93 (max in library), 4 identical HOUSE T1 drops | "not really synth heavy but **very clean euphoric uplifting** ✓, groovy uplifting house"; (identical-drops question deferred — asked what "hit live" meant, see runtime note) |
+| Errday @1:31 (busy) / @3:22 (16-dark) | snap / 16-dark | **4-beat** blackout @1:31 (over the busy build); **8-beat (2-bar)** @3:22 |
+| Tremor @1:15, 2:00 (10-dark), 3:22 (busy) | **TWILIGHT, aggression 0.34, T1 drops** | "**Definitely a wrong read** — classic big-room anthem, warrants a **full light-strip strobe**"; **4-beat** blackouts at 1:15, 2:00 AND 3:22 |
+
+**Blackout label set is now n=19.** Distribution of his lengths: 1-beat ×4, 2 ×1, 4 ×6 (the workhorse), 8 ×3, 16 ×1 (kidstopbreathing only), 0 ×1 (balloon-swell), plus the two approved design anchors (ILL 12, CSN 16-cap). **Refined model: 4 beats is the default emphasis unit; 8 for intense trap drops/true stops; 16 nearly extinct; busy builds get 4 (×2 labels) or the balloon-shrink treatment (×2), never nothing-by-rule.**
+
+**Tier formula is formally on notice: 4 misses / 13 graded (~30%), in BOTH directions** — over-reads: WHICH ONE intro T3, You&Me T3; under-reads: ONE CHANCE 2:36 T1 (a trap monster), Tremor T1 (classic big-room; older/quieter master suppresses corpus-absolute level terms). Family classifier held better (ONE CHANCE trap read = its one clear miss). The violence formula needs family-/era-aware revision in the F2 spec, not threshold nudges.
+
+**Wobble detector: named false negative (confirmed, measured).** You&Me drop = operator's "straight wobbly bass"; `lowmid_pulse` fires 0/32 window beats — duty passes (0.79-0.94) but the dominant modulation rate measures 0.5-1.9 cyc/beat, under the 2.5 cyc/beat gate. The class catches fast flutter only; slow beat-locked wub (the classic kind) is invisible to it. Grade stays weak/experimental; any future rework must solve the kick-confound below 2.5 cyc/beat that motivated the gate (design doc App. E).
+
+**Semantics note for consumers:** operator "synth heavy" ≠ `sustained_synth` in BOTH directions (calls gritty-synth tracks synth-heavy where class reads ~0; calls the 0.93 pad-wall track "not really synth heavy"). The class remains a valid *clean-euphoric* proxy (Feel Good verdict confirms) — never surface it as "synth."
+
+**Color/zone labels (for the LED identity lane — `led_identity_v2.py`, another lane's file, nothing changed):** GLACIER validated on u-make-me-feel (+ "cyan wall / hot pink" flavor), rejected on You&Me (wants darker); Stereo Love = "red"; GNARLY EMBERCORE = aggression should read mid-high, not max. n=4, mixed — worth a dedicated color-anchor pass in that lane.
+
+**Creative anchors (verbatim in substance):** balloon buildup = *LED strips shrink as the buildup progresses, room darkens, then explodes into the drop* — this independently matches the F2 design's squeeze-into-black landing arc; Tremor-class big-room = *full light-strip strobe*; Can I = glitter-with-a-groove (§6c).
+
+**Runtime-truth note (operator asked; verified at HEAD):** today the bridge consumes this analysis in exactly two places — LED color identity (`state_manager.py:339-341`) and the smart-drop energy-shadow scorer (`state_manager.py:268-283`, via the v3-compat envelopes). Families/tiers/blackouts/seasoning are design-only reads; nothing else renders from v4 yet.
+
 ## 7. Re-run
 
 ```bash
