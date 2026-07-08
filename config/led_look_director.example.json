@@ -66,7 +66,7 @@
             [120, 240, 255],
             [210, 250, 255]
           ],
-          "white": 0.08,
+          "slot5_white": [200, 235, 255],
           "hue_span": 0.05
         },
         "DEEP_POOL": {
@@ -261,7 +261,6 @@
         ],
         "weight": 10,
         "spread": 0.1,
-        "white": 0.0,
         "focus_modes": {
           "full": 2,
           "lean": 2,
@@ -274,8 +273,7 @@
           "blue"
         ],
         "weight": 4,
-        "spread": 0.1,
-        "white": 0.0
+        "spread": 0.1
       },
       "indigo": {
         "range": [
@@ -284,7 +282,6 @@
         ],
         "weight": 6,
         "spread": 0.1,
-        "white": 0.0,
         "focus_modes": {
           "full": 2,
           "lean": 2,
@@ -297,8 +294,7 @@
           "magenta"
         ],
         "weight": 3,
-        "spread": 0.1,
-        "white": 0.0
+        "spread": 0.1
       },
       "crimson": {
         "range": [
@@ -306,8 +302,7 @@
           "red"
         ],
         "weight": 2,
-        "spread": 0.08,
-        "white": 0.0
+        "spread": 0.08
       },
       "white_sand": {
         "type": "fixed_rgb",
@@ -1238,7 +1233,6 @@
         "groove_diy_groove_5",
         "groove_diy_red_chasing",
         "groove_diy_blue_sparkle",
-        "groove_diy_bright_white_chase",
         "rt_groove_chase",
         "rt_groove_nebula",
         "rt_groove_freestyle_nebula",
@@ -1246,6 +1240,7 @@
         "rt_groove_center_burst_retract"
       ],
       "buildup": [
+        "groove_diy_bright_white_chase",
         "buildup_diy_white_sparse",
         "buildup_diy_2",
         "buildup_diy_3_white_chase",
