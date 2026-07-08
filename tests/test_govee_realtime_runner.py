@@ -696,6 +696,66 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         self.assertNotIn("rt_reconcile_count", runner.status())
         self.assertEqual(runner.status()["razer_assert_count"], 0)
 
+    # AWR-150: keepalive yield -------------------------------------------------
+    def _active_yield_runner(self):
+        """A streaming, active runner on a settable clock, ready for yield tests."""
+        clock = [1000.0]
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(
+            transport, GoveeFrameRenderer(), segments=4, fps=30,
+            time_fn=lambda: clock[0],
+        )
+        runner.set_desired(EffectSpec("solid", {"color": [1, 2, 3]}, 1, 1000.0))
+        runner._tick_once(_anchor(1000.0), 1000.0)  # active, activate #1
+        self.assertEqual(transport.calls.count("activate"), 1)
+        return clock, transport, runner
+
+    def test_keepalive_yield_suppresses_keepalive_then_cap_restores(self) -> None:
+        clock, transport, runner = self._active_yield_runner()
+        clock[0] = 1000.0
+        runner.request_keepalive_yield()  # yield_until = 1030
+        # A tick well past 2 s that WOULD keepalive is suppressed inside the window.
+        runner._tick_once(_anchor(1005.0), 1005.0)
+        self.assertEqual(transport.calls.count("activate"), 1)
+        self.assertEqual(runner.status()["razer_assert_count"], 0)
+        # Past the 30 s cap the keepalive resumes on its own.
+        runner._tick_once(_anchor(1031.0), 1031.0)
+        self.assertEqual(transport.calls.count("activate"), 2)
+
+    def test_keepalive_yield_cancelled_by_each_intent(self) -> None:
+        spec = EffectSpec("solid", {"color": [1, 2, 3]}, 1, 1000.0)
+        cancels = [
+            ("set_desired", lambda r: r.set_desired(spec)),
+            ("set_desired_none", lambda r: r.set_desired(None)),
+            ("fire_trigger", lambda r: r.fire_trigger()),
+            ("request_activate_assert", lambda r: r.request_activate_assert()),
+            ("emergency_stop", lambda r: r.emergency_stop()),
+            ("force_deactivate", lambda r: r.force_deactivate()),
+        ]
+        for name, cancel in cancels:
+            with self.subTest(cancel=name):
+                _clock, _transport, runner = self._active_yield_runner()
+                runner.request_keepalive_yield()
+                self.assertGreater(runner._keepalive_yield_until, 0.0)
+                cancel(runner)
+                self.assertEqual(runner._keepalive_yield_until, 0.0)
+
+    def test_keepalive_yield_cancel_lets_keepalive_fire_again(self) -> None:
+        clock, transport, runner = self._active_yield_runner()
+        runner.request_keepalive_yield()
+        runner.fire_trigger()  # cancels the yield
+        runner._tick_once(_anchor(1003.0), 1003.0)  # >2 s, yield gone -> keepalive fires
+        self.assertEqual(transport.calls.count("activate"), 2)
+
+    def test_keepalive_yield_does_not_block_brightness_drain(self) -> None:
+        clock, transport, runner = self._active_yield_runner()
+        runner.request_keepalive_yield()
+        runner.request_brightness(0)  # brightness is not an intent that cancels the yield
+        self.assertGreater(runner._keepalive_yield_until, 0.0)  # still yielding
+        runner._tick_once(_anchor(1001.0), 1001.0)
+        runner._tick_once(_anchor(1001.1), 1001.1)
+        self.assertEqual(transport.calls.count("brightness:0"), 2)
+
 
 class _FailableTransport(_FakeTransport):
     """_FakeTransport with a togglable send_frame() failure for health-transition tests."""

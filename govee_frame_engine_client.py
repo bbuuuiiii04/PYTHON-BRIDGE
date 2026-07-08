@@ -121,6 +121,13 @@ class GoveeFrameEngineClient:
             self._enqueue({"t": "activate_assert"})
         self._wake.set()
 
+    def request_keepalive_yield(self) -> None:
+        # AWR-150: forward the yield to the child runner. Intentionally NOT mirrored
+        # into replay state — a fresh child re-asserting razer is the safe direction.
+        with self._lock:
+            self._enqueue({"t": "keepalive_yield"})
+        self._wake.set()
+
     def request_brightness(self, value: int) -> None:
         with self._lock:
             self._brightness_pending = int(value)

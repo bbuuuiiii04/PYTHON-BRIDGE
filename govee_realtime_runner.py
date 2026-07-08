@@ -302,6 +302,7 @@ class GoveeRealtimeRunner:
             assert_now = self._assert_pending
             self._assert_pending = False
             desired = self._desired_spec
+            yield_until = self._keepalive_yield_until
         if assert_now:
             self._transport.activate()
             self._last_activate_mono = now
@@ -310,6 +311,7 @@ class GoveeRealtimeRunner:
             self._log.debug("[RGB] razer-assert reason=on_demand now=%.3f", now)
         elif (
             self._active and desired is not None
+            and now >= yield_until  # AWR-150: keepalive paused while a staged cloud scene owns the strip
             and (now - self._last_activate_mono) >= RAZER_KEEPALIVE_S
         ):
             self._transport.activate()

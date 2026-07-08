@@ -256,6 +256,9 @@ class FrameEngineHost:
         if t == "activate_assert":
             self._runner.request_activate_assert()
             return True
+        if t == "keepalive_yield":
+            self._runner.request_keepalive_yield()
+            return True
         if t == "brightness":
             self._runner.request_brightness(int(msg["value"]))
             return True
