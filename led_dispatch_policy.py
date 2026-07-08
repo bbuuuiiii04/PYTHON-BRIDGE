@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from . import bridge_log
 from .config import LED_BACKSTEP_SEEK_BEATS
+from .drop_presentation import LASERS_ONLY
 from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS, MAX_SLOTS
 from .led_models import BeatAnchor, LEDContext
 from .models import Ev
@@ -1000,6 +1001,17 @@ class LEDDispatchPolicyMixin:
             except Exception as exc:
                 self._led_last_error = f"color_engine_error:{type(exc).__name__}"
 
+        if role == "drop" and self._led_upcoming_drop_is_lasers_only():
+            # RC4: the room-split plan says this drop is a Laser Solo (LEDs dark). The LED drop anchor
+            # fires ~0.6 s before the smart-drop marker (chorus phrase-start), so without this the LEDs
+            # flash a drop look before the marker sets the solo blackout owner. Hold the current look
+            # through the gap; the marker's drop_spotlight blackout then owns the darkness. Does NOT
+            # change solo length or the blackout itself; lasers still fire the solo.
+            self._gate_led_automation(
+                "solo_predark_hold", active_deck=active, role=role, role_key=role_key,
+            )
+            return
+
         context = LEDContext(
             role=role,
             manual_look=None,
@@ -1380,6 +1392,13 @@ class LEDDispatchPolicyMixin:
             or sp_state.transition_mask_should_arm
             or sp_state.transition_window_active
         )
+
+    def _led_upcoming_drop_is_lasers_only(self) -> bool:
+        """True when the drop-presentation plan's pending verdict is a Laser Solo (LEDs dark).
+        Used to suppress the early LED drop-look flash before the solo blackout owner is set.
+        Safe/no-op when drop-presentation is off: pending is (None, "", None)."""
+        pending = getattr(self, "_drop_presentation_last_pending", None)
+        return bool(pending is not None and pending[0] == LASERS_ONLY)
 
     def _preview_led_drop_decision(
         self,
