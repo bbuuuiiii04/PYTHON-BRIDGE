@@ -622,6 +622,36 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         self.assertEqual(transport.calls.count("brightness:0"), 2)
         self.assertNotIn("activate", transport.calls)  # never activated
 
+    def test_brightness0_drains_even_with_emergency_latched(self) -> None:
+        """Task 2b (a): a never-active runner with the emergency Event latched still
+        sends set_brightness(0) on 2 consecutive ticks — the brightness drain now
+        precedes the emergency short-circuit, so an operator blackout darkens the
+        strip over LAN even while emergency is held."""
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        runner.emergency_stop()        # latch emergency (runner never active)
+        runner.request_brightness(0)   # operator-blackout LAN backstop
+        runner._tick_once(None, 100.0)
+        runner._tick_once(None, 100.1)
+        self.assertEqual(transport.calls.count("brightness:0"), 2)
+        runner._tick_once(None, 100.2)  # repeat exhausted — no further sends
+        self.assertEqual(transport.calls.count("brightness:0"), 2)
+        # Emergency still short-circuits the frame path: no frames while latched.
+        self.assertNotIn("send_frame", transport.calls)
+
+    def test_handoff_teardown_never_dims_after_2b(self) -> None:
+        """Task 2b (c): moving the brightness drain above the emergency guard must
+        not make the handoff (cloud) teardown dim — it has no pending brightness."""
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        runner.set_desired(EffectSpec("solid", {"color": [1, 2, 3]}, 1, 100.0))
+        runner._tick_once(_anchor(100.0), 100.0)  # active
+        transport.calls.clear()
+        runner.force_deactivate()  # handoff to cloud
+        runner._tick_once(_anchor(100.01), 100.01)
+        self.assertNotIn("brightness:0", transport.calls)  # cloud look must not dim
+        self.assertIn("deactivate", transport.calls)
+
     def test_on_thread_start_called_once_before_loop(self) -> None:
         """AWR-146 Task 2: the on_thread_start hook runs exactly once as the frame
         thread's first statement (the child uses it to set frame-thread QoS)."""

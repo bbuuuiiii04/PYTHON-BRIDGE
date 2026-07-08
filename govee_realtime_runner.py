@@ -244,6 +244,22 @@ class GoveeRealtimeRunner:
             bridge_log.health("govee.rt", "send failing — can't reach the led strip; retrying")
 
     def _tick_once(self, anchor: BeatAnchor | None, now: float) -> None:
+        # Drain any pending LAN brightness request FIRST — before the emergency
+        # short-circuit below (Task 2b). set_brightness works in any device mode,
+        # so an operator blackout must darken the strip even with the runner
+        # inactive (a cloud look showing) and the emergency Event latched — which
+        # would otherwise skip this send for the whole held blackout. Same
+        # 2-consecutive-tick resend semantics; the repeat counter is what bounds
+        # the send, so this never spams the device while emergency stays latched.
+        with self._lock:
+            brightness = self._brightness_request
+            if brightness is not None:
+                self._brightness_repeat -= 1
+                if self._brightness_repeat <= 0:
+                    self._brightness_request = None
+        if brightness is not None:
+            self._transport.set_brightness(brightness)
+
         if self._emergency.is_set():
             self._emergency_teardown()
             return
@@ -252,17 +268,11 @@ class GoveeRealtimeRunner:
         # DIY scene silently knocks the strip out of razer mode, after which realtime
         # frames — including blackout — are ignored. Re-assert activate() on demand
         # (takeover/blackout) and, while streaming, unconditionally every
-        # RAZER_KEEPALIVE_S so a knockout or a lost activate heals in <=2 s. Any-mode
-        # brightness requests (backstop blackout / restore) are drained here too.
+        # RAZER_KEEPALIVE_S so a knockout or a lost activate heals in <=2 s.
         with self._lock:
             assert_now = self._assert_pending
             self._assert_pending = False
             desired = self._desired_spec
-            brightness = self._brightness_request
-            if brightness is not None:
-                self._brightness_repeat -= 1
-                if self._brightness_repeat <= 0:
-                    self._brightness_request = None
         if assert_now:
             self._transport.activate()
             self._last_activate_mono = now
@@ -278,8 +288,6 @@ class GoveeRealtimeRunner:
             with self._lock:
                 self._razer_assert_count += 1
             self._log.debug("[RGB] razer-assert reason=keepalive now=%.3f", now)
-        if brightness is not None:
-            self._transport.set_brightness(brightness)
 
         with self._lock:
             spec = self._desired_spec

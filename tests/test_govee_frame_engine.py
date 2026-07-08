@@ -254,6 +254,20 @@ class FrameEngineHostTests(unittest.TestCase):
         self.assertEqual(transport.calls.count("brightness:0"), 2)
         self.assertNotIn("send_frame", transport.calls)  # never activated
 
+    def test_5d_emergency_then_brightness0_darkens_through_boundary(self) -> None:
+        """Task 2b (b): an emergency_stop message followed by a brightness 0 message
+        still reaches the transport as set_brightness(0) through the host + runner,
+        even though the runner is never active (cloud look showing)."""
+        clk = [100.0]
+        transport = RecordingTransport()
+        host = self._real_runner_host(transport, clk)
+        runner = host._runner
+        host.handle_message({"t": "emergency_stop"})
+        host.handle_message({"t": "brightness", "value": 0})
+        runner._tick_once(None, clk[0]); clk[0] += 0.02
+        runner._tick_once(None, clk[0])
+        self.assertEqual(transport.calls.count("brightness:0"), 2)
+
     def test_5b_activate_assert_through_boundary(self) -> None:
         clk = [100.0]
         transport = RecordingTransport()
