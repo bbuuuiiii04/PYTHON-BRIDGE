@@ -212,6 +212,19 @@ class _TacticalLEDAdapter(_StubLEDAdapter):
         return payload
 
 
+class _StageCapableLEDAdapter(_TacticalLEDAdapter):
+    """A tactical adapter that also supports AWR-150 cloud staging."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stage_calls: list[LEDLookDecision] = []
+        self.stage_accept = True
+
+    def stage_cloud_takeover(self, decision: LEDLookDecision) -> bool:
+        self.stage_calls.append(decision)
+        return self.stage_accept
+
+
 class _ExplodingAdapter:
     def __init__(self) -> None:
         self.trigger_called = 0
@@ -255,6 +268,8 @@ class _AutomationLEDLookDirector:
             }
         self._scripted_role_map = dict(scripted_role_map)
         self.preview_decision: LEDLookDecision | None = None
+        self.substitute_decision: LEDLookDecision | None = None
+        self.substitute_calls = 0
         self.preview_decisions: dict[str, LEDLookDecision] = {}
         self.role_decisions: dict[str, LEDLookDecision] = {}
         self.commit_calls: list[str] = []
@@ -374,6 +389,15 @@ class _AutomationLEDLookDirector:
         if role in self.mapped_roles:
             return self._default_automation_decision(role)
         return None
+
+    def substitute_realtime_drop(
+        self,
+        *,
+        diy_eligible: Callable[[str], bool] | None = None,
+        look_preference: Callable[[str], bool] | None = None,
+    ) -> LEDLookDecision | None:
+        self.substitute_calls += 1
+        return self.substitute_decision
 
     def has_role_look(self, role: str) -> bool:
         return role in self.mapped_roles

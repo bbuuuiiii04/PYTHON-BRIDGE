@@ -111,6 +111,11 @@ class LEDDispatchPolicyMixin:
         self._led_committed_drop_anchor_beat: float | None = None
         self._led_committed_drop_decision: Any | None = None
         self._led_drop_look_fired_anchor: float | None = None
+        # AWR-150: while a realtime substitute is in flight for a cloud-picked
+        # drop, this holds the COMMITTED cloud decision so the accepted path (or
+        # its retry) can stage that cloud scene and record the drop under its
+        # identity. None whenever no substitute is pending.
+        self._led_drop_cloud_stage_pending: Any | None = None
         self._led_automation_offset_s = 0.0
         self._led_cloud_automation_offset_s = 0.0
         self._led_realtime_automation_offset_s = 0.0
@@ -319,15 +324,40 @@ class LEDDispatchPolicyMixin:
             self._led_auto_retry = None
             self._led_smart_drop_blackout_key = ""
             if r_role == "drop":
-                self._led_note_drop_decision_accepted(r_decision, sp_state)
+                committed = self._led_drop_cloud_stage_pending
+                self._led_drop_cloud_stage_pending = None
+                if committed is not None:
+                    # AWR-150: same stage-then-note as the first-try accept.
+                    self._led_stage_cloud_drop_takeover(committed)
+                    self._led_note_drop_decision_accepted(committed, sp_state)
+                else:
+                    self._led_note_drop_decision_accepted(r_decision, sp_state)
         elif outcome == "error":
             self._led_auto_retry = None
+            self._led_drop_cloud_stage_pending = None
         else:  # rejected — schedule the next attempt or give up
             r_attempts += 1
             self._led_auto_retry_at = time.monotonic() + LED_DISPATCH_RETRY_S
             self._led_auto_retry = (
                 None if r_attempts > LED_DISPATCH_RETRY_MAX
                 else (role_key, r_role, r_decision, r_attempts)
+            )
+            if self._led_auto_retry is None:  # gave up — don't leak the committed cloud stage
+                self._led_drop_cloud_stage_pending = None
+
+    def _led_stage_cloud_drop_takeover(self, committed: Any) -> None:
+        """AWR-150: stage the committed cloud drop scene alongside the realtime
+        substitute already lit on the beat. A stage failure never fails the
+        impact — the room is already lit and on-beat — so log and continue."""
+        stage_fn = getattr(self._led_scene_adapter, "stage_cloud_takeover", None)
+        if not callable(stage_fn):
+            return
+        try:
+            stage_fn(committed)
+        except Exception as exc:
+            log.warning(
+                "[RGB] cloud-stage-error look=%s err=%s",
+                str(getattr(committed, "look", "")) or "-", type(exc).__name__,
             )
 
     def _led_retry_idle_dispatch(self, *, role_key: str, active: int) -> None:
@@ -1148,8 +1178,27 @@ class LEDDispatchPolicyMixin:
             look_preference=self._led_look_preference_predicate(),
         )
         decision = None
+        self._led_drop_cloud_stage_pending = None
         if role == "drop":
             decision = self._consume_led_committed_drop_decision(sp_state)
+            # AWR-150: a cloud-picked drop can't own the impact beat (internet
+            # latency). Render a realtime substitute ON the beat and stage the
+            # cloud scene to take over whenever it lands. Only when the adapter
+            # can stage (duck-check: stage_cloud_takeover present) AND the drop
+            # bank has a realtime look; otherwise keep today's cloud dispatch.
+            if (
+                decision is not None
+                and str(getattr(decision, "backend", "")) == "cloud_diy"
+                and self._led_look_director is not None
+                and callable(getattr(self._led_scene_adapter, "stage_cloud_takeover", None))
+            ):
+                substitute = self._led_look_director.substitute_realtime_drop(
+                    diy_eligible=context.diy_eligible,
+                    look_preference=context.look_preference,
+                )
+                if substitute is not None:
+                    self._led_drop_cloud_stage_pending = decision  # stage/note the committed cloud pick
+                    decision = substitute
         if decision is None:
             decision, ok = self._led_tick_director(
                 context,
@@ -1224,7 +1273,16 @@ class LEDDispatchPolicyMixin:
         if outcome == "accepted":
             self._led_smart_drop_blackout_key = ""
             if role == "drop":
-                self._led_note_drop_decision_accepted(decision, sp_state)
+                committed = self._led_drop_cloud_stage_pending
+                self._led_drop_cloud_stage_pending = None
+                if committed is not None:
+                    # AWR-150: the realtime substitute is lit on the beat; stage the
+                    # committed cloud scene to take over mid-drop, and record the
+                    # drop under the committed cloud identity (pairing/presentation).
+                    self._led_stage_cloud_drop_takeover(committed)
+                    self._led_note_drop_decision_accepted(committed, sp_state)
+                else:
+                    self._led_note_drop_decision_accepted(decision, sp_state)
             return
 
         log.warning(
@@ -1805,6 +1863,7 @@ class LEDDispatchPolicyMixin:
         self._led_committed_drop_anchor_beat = None
         self._led_committed_drop_decision = None
         self._led_drop_look_fired_anchor = None
+        self._led_drop_cloud_stage_pending = None
         clear_queued = getattr(
             self._led_look_director, "clear_queued_post_drop", None
         )
