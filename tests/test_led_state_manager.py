@@ -18,6 +18,7 @@ from rb_ss_bridge_v2.led_identity_v2 import (  # noqa: E402
     content_hash as led_identity_content_hash,
     content_key as led_identity_content_key,
 )
+from rb_ss_bridge_v2.drop_presentation import LASERS_ONLY, LEDS_PLUS_LASERS  # noqa: E402
 from rb_ss_bridge_v2.led_dispatch_coordinator import LEDDispatchCoordinator  # noqa: E402
 from rb_ss_bridge_v2.led_dispatch_policy import LED_IDLE_FREEWHEEL_BPM  # noqa: E402
 from rb_ss_bridge_v2.led_models import (  # noqa: E402
