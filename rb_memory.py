@@ -261,6 +261,205 @@ def _quick_plausible_inner(task: int, ptr: int) -> bool:
         return False
 
 
+# ── vectorized candidate pre-filters ─────────────────────────────────────────
+# The deck-2 scans compare two memory snapshots int32-by-int32. Done in a pure
+# Python loop that holds the GIL, a 4 MB heap chunk takes ~427 ms and a full
+# scan can freeze the whole bridge for seconds. numpy does the same arithmetic
+# in a few ms; when numpy is absent the pure fallback still runs but yields the
+# GIL every _SLICE_INTS so the 200 Hz push loop and LED runner keep breathing.
+# Both paths return byte-identical candidate lists (proven by the old-loop
+# oracle in tests/test_rb_memory_scans.py, including the int32-overflow edge).
+
+_SLICE_INTS = 16384
+
+_np = None
+_np_checked = False
+
+
+def _numpy():
+    """Lazy optional numpy import (repo pattern: never a hard dependency)."""
+    global _np, _np_checked
+    if not _np_checked:
+        _np_checked = True
+        try:
+            import numpy as _np_mod  # type: ignore
+            _np = _np_mod
+        except Exception:
+            _np = None
+            log.debug("[RBMEM] numpy unavailable; scan filters use the pure fallback")
+    return _np
+
+
+def _moving_numpy(
+    np, chunk0, chunk1, actual_dt, rate_lo, rate_hi, scale, max_ms,
+    target_ms, target_tol_ms, clamp_ms_zero,
+):
+    n = min(len(chunk0), len(chunk1)) // 4
+    if n == 0:
+        return []
+    # Cast to int64 BEFORE subtracting: int32 wraparound would flip the sign of
+    # a large delta and manufacture a false candidate the big-int loop rejects.
+    r0 = np.frombuffer(chunk0, dtype="<i4", count=n).astype(np.int64)
+    r1 = np.frombuffer(chunk1, dtype="<i4", count=n).astype(np.int64)
+    d = r1 - r0
+    mask = d > 0
+    rate = d / actual_dt
+    mask &= (rate >= rate_lo) & (rate <= rate_hi)
+    ms_f = np.trunc(r1 * scale)  # trunc toward zero == int(); matches the loop
+    if clamp_ms_zero:
+        ms = np.maximum(0, ms_f).astype(np.int64)
+    else:
+        ms = ms_f.astype(np.int64)
+        mask &= ms >= 0
+    mask &= ms <= max_ms
+    if target_ms is not None:
+        mask &= np.abs(ms - target_ms) <= target_tol_ms
+    out = []
+    for j in np.nonzero(mask)[0]:
+        jj = int(j)
+        out.append((jj, float(rate[jj]), int(ms[jj])))
+    return out
+
+
+def _moving_fallback(
+    chunk0, chunk1, actual_dt, *, rate_lo, rate_hi, scale, max_ms,
+    target_ms, target_tol_ms, clamp_ms_zero, yield_fn,
+):
+    n = min(len(chunk0), len(chunk1)) // 4
+    out = []
+    i = 0
+    while i < n:
+        end = min(i + _SLICE_INTS, n)
+        for j in range(i, end):
+            r0 = struct.unpack_from("<i", chunk0, j * 4)[0]
+            r1 = struct.unpack_from("<i", chunk1, j * 4)[0]
+            d = r1 - r0
+            if d <= 0:
+                continue
+            rate = d / actual_dt
+            if not (rate_lo <= rate <= rate_hi):
+                continue
+            if clamp_ms_zero:
+                ms = max(0, int(r1 * scale))
+            else:
+                ms = int(r1 * scale)
+                if ms < 0:
+                    continue
+            if ms > max_ms:
+                continue
+            if target_ms is not None and abs(ms - target_ms) > target_tol_ms:
+                continue
+            out.append((j, rate, ms))
+        i = end
+        yield_fn(0)  # release the GIL between slices
+    return out
+
+
+def _i32_moving_candidates(
+    chunk0: bytes,
+    chunk1: bytes,
+    actual_dt: float,
+    *,
+    rate_lo: float,
+    rate_hi: float,
+    scale: float,
+    max_ms: int,
+    target_ms: "int | None" = None,
+    target_tol_ms: "int | None" = None,
+    clamp_ms_zero: bool = False,
+    yield_fn=time.sleep,
+) -> "list[tuple[int, float, int]]":
+    """Numeric pre-filter shared by the zone and heap moving scans.
+
+    Returns (index, rate, ms) ascending by index for every int32 slot that
+    advanced at a plausible playback rate. numpy fast path with a yielding pure
+    fallback; any numpy error falls back for that call (fail toward correctness).
+
+    clamp_ms_zero=True reproduces the zone loop's ``max(0, int(r1*scale))``;
+    False reproduces the heap loop's ``int(r1*scale)`` + ``ms < 0`` reject.
+    """
+    np = _numpy()
+    if np is not None:
+        try:
+            return _moving_numpy(
+                np, chunk0, chunk1, actual_dt, rate_lo, rate_hi, scale,
+                max_ms, target_ms, target_tol_ms, clamp_ms_zero,
+            )
+        except Exception:
+            log.debug("[RBMEM] numpy moving-scan failed; using pure fallback", exc_info=True)
+    return _moving_fallback(
+        chunk0, chunk1, actual_dt, rate_lo=rate_lo, rate_hi=rate_hi, scale=scale,
+        max_ms=max_ms, target_ms=target_ms, target_tol_ms=target_tol_ms,
+        clamp_ms_zero=clamp_ms_zero, yield_fn=yield_fn,
+    )
+
+
+def _static_numpy(np, chunk, scale, max_ms, target_ms, tolerance_ms):
+    n = len(chunk) // 4
+    if n == 0:
+        return []
+    raw = np.frombuffer(chunk, dtype="<i4", count=n)
+    mask = raw >= 0
+    ms = np.trunc(raw * scale).astype(np.int64)
+    mask &= ms <= max_ms
+    delta = np.abs(ms - target_ms)
+    mask &= delta <= tolerance_ms
+    out = []
+    for j in np.nonzero(mask)[0]:
+        jj = int(j)
+        out.append((jj, int(ms[jj]), int(delta[jj])))
+    return out
+
+
+def _static_fallback(chunk, *, scale, max_ms, target_ms, tolerance_ms, yield_fn):
+    n = len(chunk) // 4
+    out = []
+    i = 0
+    while i < n:
+        end = min(i + _SLICE_INTS, n)
+        for j in range(i, end):
+            raw = struct.unpack_from("<i", chunk, j * 4)[0]
+            if raw < 0:
+                continue
+            ms = int(raw * scale)
+            if ms > max_ms:
+                continue
+            delta_ms = abs(ms - target_ms)
+            if delta_ms > tolerance_ms:
+                continue
+            out.append((j, ms, delta_ms))
+        i = end
+        yield_fn(0)  # release the GIL between slices
+    return out
+
+
+def _i32_static_candidates(
+    chunk: bytes,
+    *,
+    scale: float,
+    max_ms: int,
+    target_ms: int,
+    tolerance_ms: int,
+    yield_fn=time.sleep,
+) -> "list[tuple[int, int, int]]":
+    """Numeric pre-filter for the static elapsed scan.
+
+    Returns (index, ms, delta_ms) ascending by index for every non-negative
+    int32 slot whose elapsed ms is within tolerance of target_ms. numpy fast
+    path with a yielding pure fallback; any numpy error falls back for that call.
+    """
+    np = _numpy()
+    if np is not None:
+        try:
+            return _static_numpy(np, chunk, scale, max_ms, target_ms, tolerance_ms)
+        except Exception:
+            log.debug("[RBMEM] numpy static-scan failed; using pure fallback", exc_info=True)
+    return _static_fallback(
+        chunk, scale=scale, max_ms=max_ms, target_ms=target_ms,
+        tolerance_ms=tolerance_ms, yield_fn=yield_fn,
+    )
+
+
 def _scan_objc_zone(
     task: int, inner1: int, window: int = 0x10000, dt: float = 0.5
 ) -> list[int]:
