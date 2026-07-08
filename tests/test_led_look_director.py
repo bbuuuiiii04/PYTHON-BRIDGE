@@ -720,6 +720,59 @@ class LEDLookDirectorPlanRotationTests(unittest.TestCase):
                 self.assertEqual((p1.look, p1.backend), (committed.look, committed.backend))
                 self.assertEqual(director._role_cursors["groove"], 1)
 
+    # AWR-150: realtime substitute for a cloud drop pick ------------------
+    def _mixed_drop_director(self, *, seed: int = 0) -> LEDLookDirector:
+        """A director whose drop bank has 1 realtime + 1 cloud look."""
+        cfg = copy.deepcopy(_mixed_config())
+        cfg["looks"]["rt_drop"] = {
+            "target": "room_perimeter",
+            "action": "realtime",
+            "scene_ref": "drop_chase_blue",
+            "fallback": "",
+            "safety_class": "drop",
+            "brightness": 100,
+            "allow_strobe": True,
+            "backend": "realtime_razer",
+            "params": {},
+        }
+        cfg["banks"]["default"]["drop"] = ["rt_drop", "cloud_drop"]
+        cfg["drop_pairs"] = {
+            "rt_drop": {"post_drop": "cloud_post", "duration_beats": 8.0},
+            "cloud_drop": {"post_drop": "cloud_post", "duration_beats": 8.0},
+        }
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        return LEDLookDirector(
+            result.config, rng=random.Random(seed),
+            shuffled_roles=LED_AUTOMATION_ROLE_ORDER,
+        )
+
+    def test_substitute_realtime_drop_picks_rt_and_leaves_plan_cursor(self) -> None:
+        director = self._mixed_drop_director(seed=0)
+        # What the plan WOULD pick for the drop role, on a pristine director.
+        planned = self._mixed_drop_director(seed=0).commit_role("drop")
+
+        backend_before = director._role_backend_cursors.get(("drop", RT), 0)
+        sub = director.substitute_realtime_drop()
+
+        self.assertIsNotNone(sub)
+        self.assertEqual(sub.backend, RT)
+        self.assertEqual(sub.reason, "role_entry:drop:rt_substitute")
+        self.assertEqual(sub.role, "drop")
+        # Only the (drop, realtime_razer) cursor advanced; the plan cursor did not.
+        self.assertEqual(director._role_cursors["drop"], 0)
+        self.assertEqual(director._role_backend_cursors[("drop", RT)], backend_before + 1)
+        # No paired post_drop queued (the committed cloud pick owns pairing).
+        self.assertEqual(director._queued_post_drop_look, "")
+        # Plan cursor untouched => the next real drop commit is exactly what it
+        # would have been without the substitute.
+        self.assertEqual(director.commit_role("drop").look, planned.look)
+
+    def test_substitute_realtime_drop_returns_none_on_cloud_only_bank(self) -> None:
+        # _mixed_config's drop bank is ["cloud_drop"] -- no realtime look.
+        director = self._director(seed=0)
+        self.assertIsNone(director.substitute_realtime_drop())
+
     # Part D.7 -----------------------------------------------------------
     def test_paired_post_drop_bypasses_plan_and_advances_no_cursor(self) -> None:
         director = self._director(seed=0)

@@ -314,6 +314,67 @@ class LEDLookDirector:
             look_preference=look_preference,
         )
 
+    def substitute_realtime_drop(
+        self,
+        *,
+        diy_eligible: Optional[Callable[[str], bool]] = None,
+        look_preference: Optional[Callable[[str], bool]] = None,
+    ) -> LEDLookDecision | None:
+        """AWR-150: pick a realtime drop look to render on the beat when the
+        committed drop pick is cloud (which can't own the impact -- internet
+        latency). Selects from the drop bank's ``realtime_razer`` subset after
+        the same eligibility/preference/known-name filters as
+        ``_automation_decision_for_role``, using the existing
+        (role="drop", "realtime_razer") shuffle bag and backend cursor, and
+        advances ONLY that backend cursor -- NEVER ``_role_cursors["drop"]`` (the
+        plan slot was already consumed by the committed cloud pick) -- and
+        queues NO paired post_drop (the committed pick already queued its pair).
+
+        Returns None when the drop bank has no realtime looks: a cloud-only drop
+        bank is the operator's explicit config, and the caller then keeps today's
+        cloud dispatch.
+        """
+        if not self._config.enabled or not self._config.automation_enabled:
+            return None
+        role = "drop"
+        bank = self._config.banks.get("default")
+        if bank is None:
+            return None
+        look_names = getattr(bank, role, ())
+        if not look_names:
+            return None
+        if diy_eligible is not None:
+            eligible = tuple(n for n in look_names if diy_eligible(n))
+            if eligible:
+                look_names = eligible
+        if look_preference is not None:
+            preferred = tuple(n for n in look_names if look_preference(n))
+            if preferred:
+                look_names = preferred
+        known = tuple(n for n in look_names if n in self._config.looks)
+        subset = tuple(
+            n for n in known if self._config.looks[n].backend == "realtime_razer"
+        )
+        if not subset:
+            return None
+        backend_cursor = self._role_backend_cursors.get((role, "realtime_razer"), 0)
+        look_name = self._look_name_for_backend(
+            role, "realtime_razer", subset, backend_cursor
+        )
+        if look_name not in self._config.looks:
+            return None
+        decision = self._decision_for_look(
+            look_name,
+            reason="role_entry:drop:rt_substitute",
+            source="automation",
+            priority=2,
+            role=role,
+        )
+        # Advance ONLY the (drop, realtime_razer) cursor -- not the plan cursor,
+        # and queue no pair.
+        self._role_backend_cursors[(role, "realtime_razer")] = backend_cursor + 1
+        return decision
+
     def clear_queued_post_drop(self) -> None:
         """Drop any pending paired post_drop look.
 
