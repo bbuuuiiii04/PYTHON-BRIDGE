@@ -91,7 +91,7 @@ Note his mental model is ~5 vibe FAMILIES, not a single energy ladder — may re
 Chosen mechanism: rekordbox **MyTag**, NOT color codes. Why not color: rekordbox 7 can't rename colors,
 so color→family would be memorized = willpower (rejected). MyTag values are named text = external structure.
 Verified rekordbox 7 facts: MyTag panel via tag icon (right of browser) or View→Show My Tag; 4 category
-slots (Genre/Components/Situation/blank), renameable, up to 50 tags each, no 5th category; add tag via "+" ;
+slots (Genre/Components/Situation/blank), renameable, up to 50 tags each, no 5th category; add tag via RIGHT-CLICK in the My Tag area → "Create My Tag" (the "+" instruction was wrong, corrected live);
 tag = select track + click tag; filter = click a tag in the panel → library narrows to it; multi-tags in a
 row = OR. Tags save to rekordbox DB (NOT the audio file) and travel to USB/CDJ on export.
 Starter tag set proposed (his words shortened, editable): **Banger, Chill, Euphoric, Mainstage, Tech House**.
