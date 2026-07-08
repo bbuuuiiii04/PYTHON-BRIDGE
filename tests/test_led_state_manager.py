@@ -2062,6 +2062,126 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(adapter.trigger_calls[-1].backend, "cloud_diy")
         self.assertEqual([call.role for call in director.tick_calls], ["pre_drop"])
 
+    def test_awr150_cloud_drop_stages_and_substitutes_realtime(self) -> None:
+        """AWR-150: a cloud-picked drop on a stage-capable adapter fires a
+        realtime substitute ON the beat and stages the committed cloud scene to
+        take over mid-drop; the drop is recorded under the committed identity."""
+        director = _AutomationLEDLookDirector()
+        director.preview_decision = _drop_decision("cloud_drop")  # committed pick is cloud
+        director.substitute_decision = _drop_decision(
+            "rt_sub", backend="realtime_razer", action="realtime", scene_ref="drop_chase_blue",
+        )
+        adapter = _StageCapableLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(
+            sm,
+            SmartPhrasingState(
+                transition_mask_arm_latched=True,
+                transition_window_active=True,
+                next_smart_drop_beat=64.0,
+            ),
+        )
+
+        sm._push_tick()  # pre-drop blackout -> realtime tactical (never cloud)
+        self.assertEqual(len(adapter.tactical_calls), 1)
+        self.assertEqual(len(adapter.trigger_calls), 0)
+
+        sm._update_smart_phrasing_state = lambda *_a, **_k: SmartPhrasingState(
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            current_phrase_label="up",
+            current_phrase_is_up=True,
+        )
+        sm._push_tick()  # impact -> RT substitute on the beat + stage committed cloud
+
+        # The realtime substitute was dispatched through the normal trigger path.
+        self.assertEqual([c.look for c in adapter.trigger_calls], ["rt_sub"])
+        self.assertEqual(adapter.trigger_calls[-1].backend, "realtime_razer")
+        # The committed cloud scene was staged exactly once (no realtime teardown).
+        self.assertEqual([c.look for c in adapter.stage_calls], ["cloud_drop"])
+        self.assertEqual(adapter.stage_calls[-1].backend, "cloud_diy")
+        # Drop lifecycle recorded under the COMMITTED cloud identity, pending cleared.
+        self.assertEqual(sm._led_active_drop_look, "cloud_drop")
+        self.assertIsNone(sm._led_drop_cloud_stage_pending)
+
+    def test_awr150_cloud_only_adapter_keeps_cloud_dispatch(self) -> None:
+        """A cloud-only adapter (no stage_cloud_takeover) fires the cloud drop
+        directly and never consults the substitute, even when one is available."""
+        director = _AutomationLEDLookDirector()
+        director.preview_decision = _drop_decision("cloud_drop")
+        director.substitute_decision = _drop_decision(
+            "rt_sub", backend="realtime_razer", action="realtime", scene_ref="drop_chase_blue",
+        )
+        adapter = _StubLEDAdapter()  # no stage_cloud_takeover, no tactical_blackout
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(
+            sm,
+            SmartPhrasingState(
+                transition_mask_arm_latched=True,
+                transition_window_active=True,
+                next_smart_drop_beat=64.0,
+            ),
+        )
+
+        sm._push_tick()
+        sm._update_smart_phrasing_state = lambda *_a, **_k: SmartPhrasingState(
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            current_phrase_label="up",
+            current_phrase_is_up=True,
+        )
+        sm._push_tick()
+
+        self.assertEqual([c.look for c in adapter.trigger_calls], ["room_blackout", "cloud_drop"])
+        self.assertEqual(adapter.trigger_calls[-1].backend, "cloud_diy")
+        self.assertEqual(director.substitute_calls, 0)  # substitute never consulted
+
+    def test_awr150_substitute_retry_then_accept_stages_once(self) -> None:
+        """A coordinator-rejected substitute retries the SAME substitute; the
+        committed cloud scene is staged only on the accepted retry, exactly once."""
+        clock = [1000.0]
+        director = _AutomationLEDLookDirector()
+        director.preview_decision = _drop_decision("cloud_drop")
+        director.substitute_decision = _drop_decision(
+            "rt_sub", backend="realtime_razer", action="realtime", scene_ref="drop_chase_blue",
+        )
+
+        class _RejectSubOnce(_StageCapableLEDAdapter):
+            def trigger(self, decision: LEDLookDecision) -> bool:
+                self.trigger_calls.append(decision)
+                return len(self.trigger_calls) > 1  # reject 1st substitute, accept the retry
+
+        adapter = _RejectSubOnce()
+        sm = _make_sm(director=director, adapter=adapter)
+        crossing = SmartPhrasingState(
+            smart_drop_crossing=True,
+            active_drop_beat=64.0,
+            current_phrase_label="up",
+            current_phrase_is_up=True,
+        )
+
+        with patch("rb_ss_bridge_v2.led_dispatch_policy.time.monotonic", lambda: clock[0]):
+            _prepare_playing_push_tick(
+                sm,
+                SmartPhrasingState(
+                    transition_mask_arm_latched=True,
+                    transition_window_active=True,
+                    next_smart_drop_beat=64.0,
+                ),
+            )
+            sm._push_tick()  # blackout tactical + commit cloud_drop
+            sm._update_smart_phrasing_state = lambda *_a, **_k: crossing
+            sm._push_tick()  # impact: substitute rejected -> retry cached, nothing staged
+            self.assertEqual(len(adapter.stage_calls), 0)
+            self.assertIsNotNone(sm._led_auto_retry)
+            clock[0] = 1000.4  # retry now due
+            sm._push_tick()  # retry: substitute accepted -> stage committed once
+
+        self.assertEqual([c.look for c in adapter.trigger_calls], ["rt_sub", "rt_sub"])
+        self.assertEqual([c.look for c in adapter.stage_calls], ["cloud_drop"])
+        self.assertEqual(sm._led_active_drop_look, "cloud_drop")
+        self.assertIsNone(sm._led_drop_cloud_stage_pending)
+
     def test_drop_fired_anchor_suppresses_redundant_pre_drop_blackout(self) -> None:
         director = _AutomationLEDLookDirector()
         director.preview_decision = _drop_decision("cloud_drop")
