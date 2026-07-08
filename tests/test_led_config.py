@@ -823,5 +823,43 @@ class RealtimeConfigTests(unittest.TestCase):
         )
 
 
+class SlotFiveWhiteKnobTests(unittest.TestCase):
+    """AWR-152 T2: slot5_white replaces the dead per-zone/per-palette white knobs."""
+
+    def test_slot5_white_parses_valid_rgb(self) -> None:
+        cfg = _example_config()
+        cfg["color_engine"]["v2"]["zones"]["GLACIER"]["slot5_white"] = [200, 235, 255]
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(
+            result.config.color_engine.v2.zones["GLACIER"].slot5_white,
+            (200, 235, 255),
+        )
+
+    def test_slot5_white_defaults_when_absent(self) -> None:
+        cfg = _example_config()
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(
+            result.config.color_engine.v2.zones["GLACIER"].slot5_white,
+            (255, 255, 255),
+        )
+
+    def test_slot5_white_malformed_fails_closed_disables_v2_only(self) -> None:
+        cfg = _example_config()
+        cfg["color_engine"]["v2"]["zones"]["GLACIER"]["slot5_white"] = "not-an-rgb"
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertIsNone(result.config.color_engine.v2)
+
+    def test_legacy_white_keys_ignored_in_zones_and_palettes(self) -> None:
+        cfg = _example_config()
+        self.assertIn("white", cfg["color_engine"]["v2"]["zones"]["GLACIER"])
+        self.assertIn("white", cfg["color_engine"]["palettes"]["blue_cyan"])
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.errors, ())
+
+
 if __name__ == "__main__":
     unittest.main()
