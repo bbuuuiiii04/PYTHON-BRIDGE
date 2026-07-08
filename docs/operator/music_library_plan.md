@@ -28,18 +28,28 @@ Then design the "what track goes where in a set" system on top.
 - Uncertain / to confirm on his screen: exact Date Added operators (does it support a rolling
   "older than N months", or only a fixed calendar date?), and whether the dialog has a match ALL/ANY toggle.
 
-## Current step (in progress)
-Build ONE intelligent playlist with a single rule: **DJ play count is 0** (never played out).
-Purpose is double: it's the truest "forgotten" signal, AND the match count tells us whether DJ play
-count is even populated in his library.
-- **Open question / gate:** how many of the ~800 tracks land in it?
-  - A sane fraction (roughly a few hundred) → play count is a real signal, build on it.
-  - ~all 800 or ~0 → play count isn't tracked in his workflow; pivot to a Date Added–based rule.
+## Forgotten list — DONE (step 1)
+Built "Forgotten" intelligent playlist, rule: **DJ play count = 0**. Result: **131 tracks** of ~800.
+→ Confirmed: DJ play count IS populated in his library, so it's a usable signal. List self-maintains
+(a track leaves it once he plays it out). Refinements (older-than-N-months, loosen to ≤1) deferred.
 
-## Next steps (not started)
-- Depending on the count, refine the forgotten rule (add "older than ~2 months", loosen to play count ≤ 1, etc.).
-- Then the set-position / energy system (measured audio character per track is or will be available
-  from the repo's spectral pipeline — organization by measured vibe/energy is a real option).
+## The REAL problem (surfaced 2026-07-08, his words)
+Finding the next track mid-mix eats ~**80% of his live time**. Genre organization actively hurts:
+the tracks that mix well together cross genres. He named dubstep, trap, bass house, "in-between",
+jersey club, ISOXO/Juelz-type trap, tech house — and good transitions jump between these (bass house →
+jersey → ISOXO trap → tech house). Genre folders never answer the only live question: "what goes next?"
+
+## Proposed direction (PENDING his veto)
+Stop sorting by genre. Make **energy level the primary axis** — one label per track for how hard it hits
+(e.g. 1–5, chill→peak). Rationale: mid-mix the real question is hold / lift / drop the energy, and energy
+is the one axis that crosses all his genres (a bass house, jersey, and trap track can all be "a 4", any
+works next). He filters to "show me my 4s" → every fitting track across genres, one glance.
+- Mechanism (default, not yet his choice): rekordbox **MyTag** (multi-tag, native, nothing to install;
+  scales to a second "feel" axis later).
+- Anti-mountain: he does NOT hand-rate 800 tracks. Bridge already measures per-track energy → auto-fill
+  is a real option → write up for the executive-manager chat (`docs/plans/active/music_library_automation_ideas.md`),
+  don't build here. Today only: agree the energy labels.
+- Next tiny step if he says yes: propose what the energy levels mean, he vetoes/adjusts.
 
 ## Boundaries
 - No rekordbox DB writes; Brandon clicks in the UI, guided step by tiny step.

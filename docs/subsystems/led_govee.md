@@ -61,6 +61,46 @@ Razer keepalive + blackout backstop + dispatch retry + pad mutual exclusion (AWR
   auto-stops a playing pad that is not in a deliberate `pad_owned` takeover when a fresh bridge
   status reports `bridge_owned`; `pad_owned` and `free`/stale/absent bridge status both keep playing.
 
+Frame engine child process (AWR-146, 2026-07-08; implemented, software-tested, hardware-unvalidated):
+- The realtime frame trio (`GoveeRealtimeRunner` → `GoveeFrameRenderer` → `GoveeRealtimeTransport`)
+  now runs in a bridge-owned child process, `python3 -m rb_ss_bridge_v2.govee_frame_engine`, so the
+  bridge's GIL contention (628 ms RBMEM scans, two-deck loads) can no longer starve LED frame timing.
+  Measured this machine: 60.9 fps in the child vs ~28-29 decaying to ~16.5 in-bridge. No AWR-145 logic
+  is rewritten — the runner moves in wholesale.
+- Architecture. `__main__` builds a `GoveeFrameEngineClient` (`govee_frame_engine_client.py`) in place
+  of the in-process runner; it is a drop-in from the coordinator's point of view (same duck-typed
+  methods, same `stop() -> bool`). The client spawns/supervises the child (`FrameEngineHost` in
+  `govee_frame_engine.py`) over an `AF_UNIX` `SOCK_STREAM` socketpair.
+- IPC protocol. Newline-framed JSON (`encode_msg`/`decode_buffer`). Parent→child: `init`, `anchor`
+  (explicit `null` propagates pause/unpermitted), `set_desired`, `fire_trigger`, `activate_assert`,
+  `brightness`, `emergency_stop`, `force_deactivate`, `shutdown`. Child→parent: a `hb` heartbeat every
+  `HEARTBEAT_S = 1.0` s carrying `achieved_fps`, `streaming`, `fps_degraded`, and the full
+  `runner.status()`. Beat anchors stream at 50 Hz on the client thread; `time.monotonic()` is
+  cross-process comparable on this machine so the runner's extrapolation math is unchanged. The child's
+  provider reads an anchor older than `ANCHOR_STALE_S = 0.5` s as "not playing" (hung-parent guard).
+- Supervision / fail-dark. The kernel closes the socketpair on ANY process death (including SIGKILL),
+  so each side gets EOF — no heartbeat protocol is needed for death detection. Bridge death → child
+  sees EOF → `runner.stop()` (blackout + deactivate + close, never brightness-0 so a cloud look
+  survives a restart) → `os._exit`. Child death/hang (EOF, no heartbeat >5 s, or a command stuck >2 s)
+  → the client kills and respawns with intent replay: a mid-look child resumes the look (set_desired +
+  activate_assert), a mid-emergency child goes dark again (emergency_stop + an UNCONDITIONAL
+  brightness-0, because a fresh runner is never `_active` and its teardown would send nothing). Every
+  coordinator-facing client method is lock-and-flag with zero I/O on the caller's thread — the 200 Hz
+  push loop and StateManager threads gain no socket/blocking I/O; all IPC, spawning, and IP
+  re-resolution run on the client's own thread.
+- Scheduling band + fps self-report. The child raises its macOS scheduling band on startup
+  (`setpriority` clear-darwin-bg + an `NSActivity` latency-critical assertion + frame-thread
+  `QOS_CLASS_USER_INTERACTIVE` via the runner's new `on_thread_start` hook); which lever actually
+  defeats the faceless-process demotion is unknown, so the child self-measures `achieved_fps` every
+  heartbeat instead of assuming. `engine_alive`, `achieved_fps`, `respawn_count`, and `fps_degraded`
+  are exposed through the runtime status surface (`led_dispatch_policy._sanitize_led_adapter_status`).
+- Operator-blackout LAN dim backstop (AWR-146 Task 6). Independent of the child move: the runner's
+  `_emergency_teardown` only sends transport commands when it was active, so a pure operator blackout
+  while the runner is INACTIVE (cloud look showing) never sent the LAN brightness-0 backstop. The
+  policy `LED_BLACKOUT` handler now calls the coordinator's new `blackout_brightness()` →
+  `request_brightness(0)` after the blackout is accepted (the unknown-target early-return does not
+  dim), duck-typed so a cloud-only adapter no-ops. Tactical (pre-drop) blackout still never dims.
+
 Audit P5 (2026-07-03):
 - LED dispatch policy now lives in `led_dispatch_policy.py` as `LEDDispatchPolicyMixin`, mixed into
   `StateManager`. The `_led_*` fields remain on the `StateManager` instance, and the backend-routing
