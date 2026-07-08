@@ -58,6 +58,7 @@ class GoveeRealtimeRunner:
         grace_s: float = 0.25,
         time_fn: Callable[[], float] | None = None,
         sleep_fn: Callable[[float], None] | None = None,
+        on_thread_start: Callable[[], None] | None = None,
     ) -> None:
         self._transport = transport
         self._renderer = renderer
@@ -72,6 +73,9 @@ class GoveeRealtimeRunner:
         self._grace_s = max(0.0, float(grace_s))
         self._time_fn = time_fn or time.monotonic
         self._sleep_fn = sleep_fn or time.sleep
+        # Optional per-thread hook (child process sets frame-thread QoS here,
+        # AWR-146). Default None = today's behavior exactly.
+        self._on_thread_start = on_thread_start
         self._lock = threading.Lock()
         self._desired_spec: EffectSpec | None = None
         self._beat_provider: Callable[[], Optional[BeatAnchor]] | None = None
@@ -213,6 +217,8 @@ class GoveeRealtimeRunner:
         }
 
     def _loop(self) -> None:
+        if self._on_thread_start is not None:
+            self._on_thread_start()
         interval = 1.0 / float(self._fps)
         next_at = self._time_fn()
         with bridge_log.thread_guard("GoveeRealtimeRunner"):
