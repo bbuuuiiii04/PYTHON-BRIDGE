@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: fce1169
-last_verified_date: 2026-07-04
+last_verified_commit: b660dcb
+last_verified_date: 2026-07-08
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; Stream Deck palette control Package 2 software-tested; hardware-unvalidated in repo evidence
 ---
 

@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 56c5f90
-last_verified_date: 2026-07-03
+last_verified_commit: b660dcb
+last_verified_date: 2026-07-08
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
 
@@ -67,6 +67,7 @@ Trusted publication is software-gated green; physical validation remains open.
 | LED/Govee idle/pause ambient | implemented | `tests/test_led_state_manager.py`; `tests/test_govee_realtime_runner.py` | No-audible idle entry sends one ambient decision from the last audible deck; realtime ambient can freewheel on a synthetic idle beat; idle-grace teardown blackouts before deactivate. Device support and room-visible behavior are not generalized or hardware-validated. |
 | LED/Govee cloud scene | implemented | `tests/test_govee_runtime_sender.py`; `tests/test_govee_scene_adapter.py`; LED scripted-policy tests | Cloud health reporting is software-tested: mirror target failures/recoveries log only on transitions, `mirror_send_ok` reports the last mirror outcome, and successful sends clear stale `circuit_open` degraded status. Scripted groove/drop/post-drop blackout mapping is also software-tested and the shipped example config enables the master switch (`true`) with the conservative blackout policy. Device support and room-visible behavior are not generalized or hardware-validated. |
 | LED/Govee realtime | implemented/experimental | code path exists | Slot-color strategy behavior, locked-palette resolution, Patch S `random_with_mono_chance`, generic M2.5 groove/post_drop/drop/Patch E1 nebula/Patch E2 center-comet/Patch E3 twinkle cues, Phase 3 renderer param unlocks, Patch F default-bank cleanup, runner-thread handoff teardown, and idle-grace blackout teardown are software-tested only; current H612D setup must be validated through hardware log before broad claims. |
+| LED razer keepalive + blackout backstop + dispatch retry + pad mutual exclusion (AWR-145) | implemented | `tests/test_govee_realtime_runner.py`; `tests/test_led_dispatch_coordinator.py`; `tests/test_led_state_manager.py`; `tests/test_led_pad_playback.py` | Razer re-assert on demand + unconditional 2 s keepalive (replaces WI-6 reconcile), any-mode LAN brightness backstop (pure-emergency hard-dim; cloud handoff never dims), latch-on-accept dispatch retry (same decision, no director re-tick, bounded, cleared on transitions), and pad auto-stop when the bridge owns the strip are software-tested only. No bridge restart or room-visible hardware validation; the ~2 s recovery and any-mode dim depend on the operator's device firmware behavior observed 2026-07-08, not a repeatable instrumented record. |
 | LIGHTING ENGINE v2 F1 identity + correction surface | implemented, default-off | `tests/test_led_identity_v2.py`, `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`, `tests/test_led_palette_control.py`, `tests/test_runtime_status.py`, `tests/test_soundswitch_midi_input.py`, `tests/test_streamdeck_midi.py` | Per-track identity, local correction store, Stream Deck v2 zone/manual surface, temporary menubar latch, and runtime commands are software-tested only. v1 remains the compatibility path when v2 is off or unconfigured. No bridge restart, deck-in-hand pass, live Govee output, or visual hardware validation was performed. |
 | LED Pad + Template Lab | implemented/partial | `tests/test_led_pad_*.py`, `tests/test_led_color_engine.py`, `tests/test_govee_frame_renderer.py` | Local browser editor/playback tool. Phases 1-3 and Template Lab Phase 2 are software-tested; hardware-visible behavior, bridge restart effects, and strip restore behavior are not generalized or logged. |
 
