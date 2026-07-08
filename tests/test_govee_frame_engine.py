@@ -385,6 +385,55 @@ class FrameEngineHostTests(unittest.TestCase):
         finally:
             eng.ctypes.CDLL = orig
 
+    def test_17_heartbeat_carries_band_scalars(self) -> None:
+        # AWR-151 Task 1: every heartbeat carries the three scheduling-band
+        # scalars, and re-reads getpriority + re-asserts setpriority once per
+        # heartbeat so a post-start demotion both self-heals and shows up as a
+        # changing number. Live semantics recorded 2026-07-08 on THIS machine:
+        # getpriority(PRIO_DARWIN_PROCESS=4, 0) returns 0 with errno 0 when the
+        # process is NOT in the darwin background band. The libc seam is faked
+        # here so the test is hermetic (and green on non-macOS CI).
+        import rb_ss_bridge_v2.govee_frame_engine as eng
+
+        calls = {"get": 0, "set": 0}
+        reads = iter([7, 3])  # value CHANGES between heartbeats → edge-log path
+
+        def fake_get():
+            calls["get"] += 1
+            return next(reads)
+
+        def fake_set():
+            calls["set"] += 1
+            return True
+
+        orig_get, orig_set = eng._get_darwin_prio, eng._set_darwin_prio_normal
+        eng._get_darwin_prio, eng._set_darwin_prio_normal = fake_get, fake_set
+        try:
+            clk = [100.0]
+            conn = HostFakeConn()
+            runner = RecordingRunner()
+            host = FrameEngineHost(
+                conn, transport_factory=lambda i: None, time_fn=lambda: clk[0])
+            host._runner = runner
+            host._fps = 60
+            host.set_band_report(
+                {"setpriority": True, "nsactivity": True, "darwin_prio": 7})
+            runner.status_dict = {"frame_index": 0, "active": True}
+            host._send_heartbeat(clk[0])
+            hb = conn.messages()[-1]
+            self.assertTrue(hb["band_setpriority"])       # setpriority re-asserted OK
+            self.assertTrue(hb["band_nsactivity"])        # from the startup report
+            self.assertEqual(hb["band_darwin_prio"], 7)   # first live read
+            self.assertEqual((calls["get"], calls["set"]), (1, 1))  # once per hb
+            self.assertNotIn("sleep_mode", hb)            # Task 3 dropped, no bandage
+            clk[0] += 1.0
+            runner.status_dict = {"frame_index": 60, "active": True}
+            host._send_heartbeat(clk[0])
+            self.assertEqual((calls["get"], calls["set"]), (2, 2))
+            self.assertEqual(conn.messages()[-1]["band_darwin_prio"], 3)  # value moved
+        finally:
+            eng._get_darwin_prio, eng._set_darwin_prio_normal = orig_get, orig_set
+
 
 # ── Client fakes ────────────────────────────────────────────────────────────────
 
@@ -655,6 +704,106 @@ class GoveeFrameEngineClientTests(unittest.TestCase):
         c._tick(clk[0])
         self.assertTrue(c.stop())
         self.assertEqual(sp.procs[0].poll(), -15)  # SIGTERM, not SIGKILL
+
+    def test_18_status_carries_band_scalars(self) -> None:
+        # AWR-151 Task 2: the band scalars pass through status() with safe
+        # defaults before any heartbeat, then the child's live values after.
+        clk = [100.0]
+        sp = Spawner()
+        c = _make_client(sp, clk)
+        s0 = c.status()  # pre-heartbeat safe defaults
+        self.assertEqual(s0["band_setpriority"], False)
+        self.assertEqual(s0["band_nsactivity"], False)
+        self.assertIsNone(s0["band_darwin_prio"])
+        c._tick(clk[0])  # spawn #0
+        sp.conns[0].push(encode_msg({
+            "t": "hb", "pid": 1, "achieved_fps": 33.0, "streaming": True,
+            "fps_degraded": True, "band_setpriority": True, "band_nsactivity": True,
+            "band_darwin_prio": 0, "status": {"active": True}}))
+        c._tick(clk[0])
+        s = c.status()
+        self.assertEqual(s["band_setpriority"], True)
+        self.assertEqual(s["band_nsactivity"], True)
+        self.assertEqual(s["band_darwin_prio"], 0)
+
+    def test_19_band_report_logged_once_per_spawn(self) -> None:
+        # AWR-151 Task 2: the band report reaches the jsonl (INFO) exactly once
+        # per (re)spawn — not every heartbeat — and a failed raise surfaces an
+        # edge-triggered health warning the operator can see in the log.
+        import rb_ss_bridge_v2.govee_frame_engine_client as engc
+
+        class _RecLog:
+            def __init__(self) -> None:
+                self.perf_calls: list = []
+                self.health_calls: list = []
+
+            def perf(self, sub, msg, *a, **k) -> None:
+                self.perf_calls.append((sub, msg))
+
+            def health(self, sub, msg, *a, **k) -> None:
+                self.health_calls.append((sub, (msg % a) if a else msg))
+
+        rec = _RecLog()
+        orig_bl, orig_lc = engc.bridge_log, engc.log_changed
+        engc.bridge_log = rec
+        engc.log_changed = lambda key, val: True  # always fire the edge, deterministic
+        try:
+            clk = [100.0]
+            sp = Spawner()
+            c = _make_client(sp, clk)
+            c._tick(clk[0])  # spawn #0
+            healthy_hb = encode_msg({
+                "t": "hb", "pid": 1, "achieved_fps": 60.0, "streaming": True,
+                "fps_degraded": False, "band_setpriority": True,
+                "band_nsactivity": True, "band_darwin_prio": 0,
+                "status": {"active": True}})
+            sp.conns[0].push(healthy_hb)
+            c._tick(clk[0])
+            band = [m for s, m in rec.perf_calls if s == "govee.frame_engine"]
+            self.assertEqual(len(band), 1)  # once per spawn
+            sp.conns[0].push(healthy_hb)
+            c._tick(clk[0])
+            band = [m for s, m in rec.perf_calls if s == "govee.frame_engine"]
+            self.assertEqual(len(band), 1)  # NOT repeated on later heartbeats
+            # A failed raise on a fresh spawn surfaces a health warning.
+            rec.health_calls.clear()
+            sp.procs[0].rc = 1
+            c._tick(clk[0])   # detect dead → schedule respawn
+            clk[0] += 1.0
+            c._tick(clk[0])   # respawn #1
+            sp.conns[1].push(encode_msg({
+                "t": "hb", "pid": 2, "achieved_fps": 33.0, "streaming": True,
+                "fps_degraded": True, "band_setpriority": False,
+                "band_nsactivity": True, "band_darwin_prio": 0,
+                "status": {"active": True}}))
+            c._tick(clk[0])
+            band = [m for s, m in rec.perf_calls if s == "govee.frame_engine"]
+            self.assertEqual(len(band), 2)  # logged again for the new spawn
+            self.assertTrue(any("raise failed" in m for _, m in rec.health_calls))
+        finally:
+            engc.bridge_log, engc.log_changed = orig_bl, orig_lc
+
+
+class LEDDispatchPolicyWhitelistTests(unittest.TestCase):
+    def test_20_sanitize_passes_band_scalars(self) -> None:
+        # AWR-151 Task 2: the status-sanitize realtime whitelist lets the three
+        # band scalars through and still drops anything not explicitly listed.
+        from rb_ss_bridge_v2.led_dispatch_policy import LEDDispatchPolicyMixin
+
+        class _P(LEDDispatchPolicyMixin):
+            pass
+
+        raw = {"realtime": {
+            "engine_alive": True,
+            "band_setpriority": True, "band_nsactivity": False,
+            "band_darwin_prio": 0,
+            "secret_ip": "10.0.0.9",  # not whitelisted → dropped
+        }}
+        rt = _P()._sanitize_led_adapter_status(raw)["realtime"]
+        self.assertEqual(rt["band_setpriority"], True)
+        self.assertEqual(rt["band_nsactivity"], False)
+        self.assertEqual(rt["band_darwin_prio"], 0)
+        self.assertNotIn("secret_ip", rt)
 
 
 if __name__ == "__main__":

@@ -75,6 +75,39 @@ class FrameEngineIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(fps, 55.0, f"achieved_fps={fps}")
         self.assertTrue(stopped)
 
+    def test_17_first_heartbeat_reports_band(self) -> None:
+        """AWR-151 Task 1: the real child's first heartbeat carries
+        band_setpriority True and a concrete band_darwin_prio on this machine
+        (getpriority(PRIO_DARWIN_PROCESS) == 0 = not in the darwin background
+        band)."""
+        proc, parent_sock = _spawn_child(_init())
+        try:
+            deadline = time.monotonic() + 3.0
+            buf, hb = b"", None
+            while time.monotonic() < deadline and hb is None:
+                try:
+                    chunk = parent_sock.recv(65536)
+                except BlockingIOError:
+                    time.sleep(0.02)
+                    continue
+                if chunk == b"":
+                    break
+                buf += chunk
+                msgs, buf = decode_buffer(buf)
+                for m in msgs:
+                    if m.get("t") == "hb":
+                        hb = m
+                        break
+            self.assertIsNotNone(hb, "no heartbeat within 3 s")
+            self.assertTrue(hb.get("band_setpriority"), hb)
+            self.assertIsNotNone(hb.get("band_darwin_prio"), hb)
+        finally:
+            parent_sock.close()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
     def test_16_orphan_eof_exits_clean(self) -> None:
         proc, parent_sock = _spawn_child(_init())
         # Give the child a moment to finish setup, then orphan it.
