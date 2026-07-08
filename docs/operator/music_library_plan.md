@@ -51,6 +51,21 @@ works next). He filters to "show me my 4s" → every fitting track across genres
   don't build here. Today only: agree the energy labels.
 - Next tiny step if he says yes: propose what the energy levels mean, he vetoes/adjusts.
 
+## Trust gate: verify bridge energy on a labeled sample BEFORE auto-tagging (in progress)
+Agreed principle: don't auto-tag 800 on faith. Test the bridge's energy read against Brandon's own
+ear-labels on ~17 tracks he grouped himself, THEN decide whether to trust it. His labeled sample:
+
+- **Bangers (expect high):** YTIGAF_2347457927 – Allenora; SPACE LACES – FORCE MAJEURE (Jackknife rec);
+  smoke [4ura]; ISOXO – Fuck The Speakerz Up (Rayvolpe remix); Control Live Intro
+- **Chill (expect low):** Utopia; Stay With Me (Extended); Prospa – Don't Stop (Script remix)
+- **Euphoric hard hitters (expect high, euphoric feel):** TITANIUM (Twinsick remix);
+  Rock Ur World x Lights (Dabin / Aura / Park); We Could Be Love (Odd Mob Extended remix)
+- **Mainstage crowd rippers (expect high):** Tremor (Sensational 2014 Anthem); Animals (Botnek edit)
+- **Tech House slappers (expect mid-high groove):** Shinyy Disco Balls (Extended); Turn Up The Bass
+  (Extended remix); Lose Control (original mix); Walker & Royce / Odd Mob / Benni / Ola – Can't Say Nah
+
+Pass = chill trio reads clearly lower than the bangers/rippers. If scrambled, don't use the auto-tagger.
+
 ## Boundaries
 - No rekordbox DB writes; Brandon clicks in the UI, guided step by tiny step.
 - Automation ideas (auto-tagging from spectral profiles, forgotten-gems surfacing tool) → write to
