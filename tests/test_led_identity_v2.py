@@ -79,6 +79,15 @@ class IdentityMathTests(unittest.TestCase):
         self.assertTrue(all(rgb != (0, 0, 0) for rgb in a.slot_rgbs))
         self.assertEqual(a.style, "sharp")
 
+    def test_slot5_white_uses_configured_tint_verbatim(self) -> None:
+        tinted_zone = ZoneRampConfig(
+            base_ramp=ZONE.base_ramp,
+            accent_ramp=ZONE.accent_ramp,
+            slot5_white=(200, 235, 255),
+        )
+        dressing = derive_dressing("GLACIER", tinted_zone, content_hash("track-1"), 0.5, 0.25, 0.7)
+        self.assertEqual(dressing.slot_rgbs[5], (200, 235, 255))
+
     def test_hard_pivot(self) -> None:
         self.assertTrue(is_hard_pivot("GLACIER", "ION"))
         self.assertFalse(is_hard_pivot("GLACIER", "TWILIGHT"))

@@ -40,7 +40,6 @@ ALL_ZONES = ZONES + ("NEUTRAL",)
 SMOOTH_ZONES = frozenset({"GLACIER", "DEEP_POOL", "TWILIGHT", "NEUTRAL"})
 HUE_SLOTS = 16
 DEPTH_VARIANTS = 3
-WHITE = (255, 255, 255)
 
 
 class Claim(NamedTuple):
@@ -195,7 +194,7 @@ def derive_dressing(
         span=span,
         budget=lerp(0.3, 1.0, norm_drama),
         style="sharp" if norm_punch >= 0.6 else "flowing",
-        slot_rgbs=base_slots + accent_slots + (WHITE,),
+        slot_rgbs=base_slots + accent_slots + (tuple(zone_cfg.slot5_white),),
     )
 
 
