@@ -97,6 +97,22 @@ Frame engine child process (AWR-146, 2026-07-08; implemented, software-tested, h
   defeats the faceless-process demotion is unknown, so the child self-measures `achieved_fps` every
   heartbeat instead of assuming. `engine_alive`, `achieved_fps`, `respawn_count`, and `fps_degraded`
   are exposed through the runtime status surface (`led_dispatch_policy._sanitize_led_adapter_status`).
+- Scheduling-band self-report (AWR-151 Tasks 1-2, 2026-07-08; implemented, software-tested,
+  hardware-unvalidated). Which lever actually takes hold in production was invisible — the startup band
+  line went only to child stderr (the watcher terminal), never the jsonl or status surface. Now
+  `raise_scheduling_band()` reads the live darwin band back via `getpriority(PRIO_DARWIN_PROCESS)`
+  (verified 0 = not backgrounded on this machine, errno 0), and every heartbeat re-asserts
+  `setpriority(PRIO_DARWIN_PROCESS, 0, 0)` (cheap, idempotent — heals a post-start demotion) and
+  re-reads the band, carrying `band_setpriority`, `band_nsactivity`, `band_darwin_prio` on every `hb`
+  (edge-triggered INFO in the child only when the read value moves). The client logs the band report
+  once per (re)spawn into the jsonl (`bridge_log.perf` at INFO) with an edge-triggered health warning
+  when a raise fails, and passes the three scalars through `status()` (whitelisted in
+  `_sanitize_led_adapter_status`). Instrumentation only — no timing behavior changes, the runner is
+  byte-identical. The `sleep_fn`-injected adaptive precision-sleep backstop originally specced as Task 3
+  was DROPPED per the operator's root-cause doctrine (a bandage masks the demotion at a permanent CPU
+  tax). Naming the actual demotion mechanism is the separate Phase B investigation (offline throwaway
+  children only); the true fix is Phase C, executive-gated on Phase B findings. What fps the child
+  holds during a real mix is answered only by the operator's next mix.
 - Operator-blackout LAN dim backstop (AWR-146 Task 6). Independent of the child move: the runner's
   `_emergency_teardown` only sends transport commands when it was active, so a pure operator blackout
   while the runner is INACTIVE (cloud look showing) never sent the LAN brightness-0 backstop. The
