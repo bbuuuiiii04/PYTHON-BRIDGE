@@ -1,6 +1,6 @@
 # Implementation Spec - Frame Engine Scheduling-Band Follow-up (verify the raise, self-heal the timing)
 
-status: approved for implementation (executive review 2026-07-08; two amendments folded: wall-clock spin cap, named time-constraint escalation)
+status: approved for implementation — RESHAPED by operator doctrine 2026-07-08 (root-cause fixes only): Tasks 1-2 proceed (instrumentation = root-cause enablement); Task 3 precision-sleep DROPPED as a declared bandage; Phase B root-cause investigation is the core deliverable, Phase C true fix gated on executive review of findings
 last_verified_commit: e707199
 owner: operator (Brandon) via Claude Fable 5 orchestration session 2026-07-08
 registry: AWR-151
