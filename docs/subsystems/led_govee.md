@@ -126,6 +126,37 @@ Intra-section look rotation (2026-07-07):
   `drop`, `groove`, `post_drop`, blackout, hold, scripted, and manual-override
   semantics are unchanged. This is software-tested and hardware-unvalidated.
 
+Deterministic mixed-transport look rotation (AWR-149, 2026-07-08):
+- Which transport (cloud DIY vs realtime razer) carries a role's next look is no
+  longer a per-session coin flip. The old WI-7 transport-sticky latch — prefer
+  the role's last-dispatched backend until `reset_for_track()` — is removed and
+  replaced by a pure plan: `plan_backend_sequence()` in `led_look_director.py`
+  interleaves the role's (already-filtered) bank by an even Bresenham spacing
+  and returns one backend label per future pick. Realtime leads on a size tie
+  (F2-forward); a single-backend bank returns that backend uniformly. The
+  per-role cursor advances the plan (which transport comes next); a per-`(role,
+  backend)` cursor advances only for the transport actually picked and drives
+  that transport's shuffle bag, so RNG decides only WHICH look within a
+  transport, never WHICH transport.
+- Operator contract (taste decision 2026-07-08, do not re-litigate): both cloud
+  DIY looks and realtime looks stay reachable in every role whose bank has both.
+  Pinning a role exclusively to one transport is rejected. No code path filters
+  cloud looks out of a bank; the C4 empty-eligibility invariant (a predicate
+  that empties the bank keeps the full bank) is unchanged, and the plan is
+  computed on whatever survives eligibility/preference filtering.
+- Session phase is deterministic: every role starts at plan index 0
+  (realtime-leading), so a bridge relaunch reproduces the same transport phase
+  from pick 0 regardless of RNG seed. `reset_for_track()` is now a documented
+  no-op — the plan/backend cursors deliberately persist across tracks so a track
+  load does not re-flatten the rotation.
+- The `RBSS_LED_TRANSPORT_STICKY` env flag is deleted (it gated the removed
+  latch); the watcher no longer sets it. Frequent transport transitions are safe
+  because of the AWR-145 keepalive/assert/retry chain and the AWR-146
+  frame-engine child process — this rotation touches no transport, runner, or
+  blackout path. Emergency-blackout, manual-override, safe-default, and
+  target-override decisions are byte-identical to before. Software-tested,
+  hardware-unvalidated; the live gate is the operator's next mix.
+
 LED hold starvation fix (2026-07-07):
 - Active-deck switches and active-deck track loads still protect against an
   instant mid-phrase LED repaint, but the hold can no longer wait forever when
