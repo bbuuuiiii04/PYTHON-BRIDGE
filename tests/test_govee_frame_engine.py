@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.govee_frame_engine import (  # noqa: E402
-    ANCHOR_STALE_S,
+    ANCHOR_DEAD_S,
     FrameEngineHost,
     decode_buffer,
     encode_msg,
@@ -173,7 +173,7 @@ class FrameEngineHostTests(unittest.TestCase):
         host._setup(_init(dry_run=True))
         self.assertEqual(host._transport.calls, [])
 
-    def test_2_anchor_provider_null_and_stale(self) -> None:
+    def test_2_anchor_provider_null_and_starved_feed(self) -> None:
         clk = [100.0]
         host = FrameEngineHost(
             HostFakeConn(), transport_factory=lambda i: None,
@@ -182,10 +182,19 @@ class FrameEngineHostTests(unittest.TestCase):
         self.assertEqual(
             host.beat_provider(),
             BeatAnchor(1, 64.0, 128.0, 100.0, True, True))
+        # Explicit null = pause/unpermitted: propagates IMMEDIATELY.
         host.handle_message({"t": "anchor", "a": None})
         self.assertIsNone(host.beat_provider())
+        # Starved feed (bridge GIL stall, e.g. a 0.7 s rb_memory scan): the last
+        # anchor keeps flowing so the runner extrapolates through the stall —
+        # a sub-second staleness gate here blacked out the room live 2026-07-08.
         host.handle_message({"t": "anchor", "a": _anchor_wire(100.0)})
-        clk[0] = 100.0 + ANCHOR_STALE_S + 0.01
+        clk[0] = 100.0 + 1.0
+        self.assertEqual(
+            host.beat_provider(),
+            BeatAnchor(1, 64.0, 128.0, 100.0, True, True))
+        # True feed death (generous cutoff): provider goes None -> idle.
+        clk[0] = 100.0 + ANCHOR_DEAD_S + 0.01
         self.assertIsNone(host.beat_provider())
 
     def test_3_params_list_roundtrip_renders_equal(self) -> None:

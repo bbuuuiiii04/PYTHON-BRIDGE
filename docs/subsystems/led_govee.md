@@ -77,7 +77,10 @@ Frame engine child process (AWR-146, 2026-07-08; implemented, software-tested, h
   `HEARTBEAT_S = 1.0` s carrying `achieved_fps`, `streaming`, `fps_degraded`, and the full
   `runner.status()`. Beat anchors stream at 50 Hz on the client thread; `time.monotonic()` is
   cross-process comparable on this machine so the runner's extrapolation math is unchanged. The child's
-  provider reads an anchor older than `ANCHOR_STALE_S = 0.5` s as "not playing" (hung-parent guard).
+  provider keeps returning the last anchor through feed starvation (bridge GIL stalls, e.g.
+  rb_memory deck-2 scans) so the runner extrapolates through them; only a feed dead past
+  `ANCHOR_DEAD_S = 5.0` s reads as gone. Pause/unpermitted always arrives as an explicit null
+  anchor, never via staleness (live 2026-07-08: a 0.5 s gate here blacked out the room every scan).
 - Supervision / fail-dark. The kernel closes the socketpair on ANY process death (including SIGKILL),
   so each side gets EOF — no heartbeat protocol is needed for death detection. Bridge death → child
   sees EOF → `runner.stop()` (blackout + deactivate + close, never brightness-0 so a cloud look

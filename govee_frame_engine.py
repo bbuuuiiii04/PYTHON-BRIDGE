@@ -38,7 +38,15 @@ from .govee_realtime_transport import (
 from .led_models import BeatAnchor
 
 HEARTBEAT_S = 1.0
-ANCHOR_STALE_S = 0.5
+# Feed-death cutoff, NOT a freshness gate. Pause/unpermitted always arrives as
+# an EXPLICIT null anchor from the client, so a stale-but-present anchor only
+# ever means the feed is starved (bridge GIL stalls: rb_memory deck-2 scans run
+# 0.57-0.73 s and fire ~every 5 s all session). The runner must keep
+# extrapolating the last anchor through such stalls — the old in-process
+# provider did exactly that — and treat only a generously-dead feed as gone.
+# A 0.5 s gate here caused the live 2026-07-08 hiccup: every scan starved the
+# feed -> unpermitted -> comets expired -> idle-grace BLACKOUT -> reactivate.
+ANCHOR_DEAD_S = 5.0
 SELECT_TIMEOUT_S = 0.25
 
 _LOG = logging.getLogger("govee_frame_engine")
@@ -160,7 +168,7 @@ class FrameEngineHost:
             anchor = self._anchor
         if anchor is None:
             return None
-        if self._time_fn() - anchor.captured_monotonic > ANCHOR_STALE_S:
+        if self._time_fn() - anchor.captured_monotonic > ANCHOR_DEAD_S:
             return None
         return anchor
 
