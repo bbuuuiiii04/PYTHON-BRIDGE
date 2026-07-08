@@ -87,6 +87,17 @@ Note his mental model is ~5 vibe FAMILIES, not a single energy ladder — may re
   to match his ear? Run it, validate against these 17 labels, report. If it works, it backfills the rest.
   → goes in `docs/plans/active/music_library_automation_ideas.md`.
 
+## Step 2 setup — MyTag vibe families (in progress, he said yes 2026-07-08)
+Chosen mechanism: rekordbox **MyTag**, NOT color codes. Why not color: rekordbox 7 can't rename colors,
+so color→family would be memorized = willpower (rejected). MyTag values are named text = external structure.
+Verified rekordbox 7 facts: MyTag panel via tag icon (right of browser) or View→Show My Tag; 4 category
+slots (Genre/Components/Situation/blank), renameable, up to 50 tags each, no 5th category; add tag via "+" ;
+tag = select track + click tag; filter = click a tag in the panel → library narrows to it; multi-tags in a
+row = OR. Tags save to rekordbox DB (NOT the audio file) and travel to USB/CDJ on export.
+Starter tag set proposed (his words shortened, editable): **Banger, Chill, Euphoric, Mainstage, Tech House**.
+First tiny step handed to him: open panel → make a "Vibe" category → add the 5 tags → tag 3–4 known tracks →
+click a tag to watch the list filter. Stopping point: confirm the filter works + flag any weird step.
+
 ## Boundaries
 - No rekordbox DB writes; Brandon clicks in the UI, guided step by tiny step.
 - Automation ideas (auto-tagging from spectral profiles, forgotten-gems surfacing tool) → write to
