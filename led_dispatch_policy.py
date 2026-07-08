@@ -473,6 +473,14 @@ class LEDDispatchPolicyMixin:
         if ev.kind == Ev.LED_CLEAR_BLACKOUT:
             self._led_blackout_owners.discard(str(ev.payload.get("reason") or "legacy"))
             self._led_emergency_blackout = bool(self._led_blackout_owners)
+            if not self._led_blackout_active():
+                # Operator blackout hard-dims the strip via a LAN brightness command
+                # (Task 1). Restore it here: the next look may take the cloud path,
+                # whose scenes may not reset device brightness. Duck-typed so a
+                # cloud-only adapter (no runner) is a safe no-op.
+                restore = getattr(self._led_scene_adapter, "restore_brightness", None)
+                if callable(restore):
+                    restore()
             self._dispatch_led_manual_command(reason="clear_blackout")
             return
 
