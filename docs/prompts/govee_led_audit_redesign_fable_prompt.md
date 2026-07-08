@@ -30,6 +30,19 @@ Brandon runs `rb_ss_bridge_v2`, a Python bridge that reads his Rekordbox/DJ runt
 
 Reconcile these operator statements with the code. Where the code disagrees with his mental model (for example: the realtime transport's configured segment count vs. the "60 sections" ceiling; whether cloud and realtime truly run simultaneously vs. being arbitrated by an owner/handoff so only one drives the strip at a time; whether cloud "mirror" means cloud→realtime or cloud→multiple-cloud-targets), say so plainly and explain the real mechanism. His framing being imprecise is expected and useful — it tells you where the design is confusing.
 
+## What the redesign must achieve (the north star — no assumed compromises)
+
+Brandon's instruction is explicit: **do not treat these as competing tradeoffs to balance. Find the architecture that delivers all of them at once.** The standalone LED Pad already plays the same realtime looks smoothly on the same hardware and network — so smoothness over realtime is *proven possible*, not a limit to accept. Treat today's lag, stutter, and flicker as defects to engineer out, not as a hardware ceiling.
+
+The recommended design must hit all four of these together:
+
+1. **As smooth as the LED Pad.** The Pad is the proof-of-possible and the bar. Bridge-driven realtime should look identical to the Pad driving the same look — no stutter or flicker the eye can catch during a normal mix.
+2. **Full custom control without losing cloud's smooth looks.** Keep both paths for what each does best — cloud for its smooth app-made scenes, realtime for arbitrary custom frames — and rebuild the switching between them so the strip is always cleanly owned by exactly one path and never latches on the wrong one.
+3. **Blackout is absolutely reliable.** Going dark/off when it should must never fail. On any failure — network stall, unresponsive device, cloud rate-limit — the strip goes dark, never frozen on a stale cloud scene.
+4. **Tight to the beat and smooth at the same time.** Lighting tracks the music closely, crisp on drops and hits where timing matters, and may relax slightly on ambient/breakdown sections where it doesn't — while staying buttery throughout. Do not buy smoothness with latency the operator can feel on a drop.
+
+**On tradeoffs:** do not silently accept one. If — and only if — you can *prove with evidence* that two of these genuinely cannot coexist on this hardware (a real, demonstrated physical or protocol limit, not an assumption or a convenience), surface it to Brandon as an explicit decision with the evidence attached, and default to this priority order: **reliable blackout is never sacrificed; then beauty; then timing.** But your starting assumption — backed by the Pad already doing it — is that no such compromise is necessary and the current problems are fixable design defects. A redesign that quietly picks one of these to give up, without proving it had to, fails this task.
+
 ## Deliverable
 
 A single written report, structured exactly as the five parts below. Lead with a plain-language TL;DR (a few sentences: what the subsystem actually does, the most likely cause of the stuck/stutter bug, and your headline redesign recommendation) before Part A. Write the whole thing so Brandon can understand *how* things work and *why* they behave as they do — plain English, real mechanism, no engineering jargon (avoid "blast radius", "load-bearing", "seams"; if you must use a term, define it once in ordinary words).
